@@ -1,0 +1,2 @@
+# Every path is handled by the app itself, so deep links must still serve index.html.
+/*    /index.html   200
