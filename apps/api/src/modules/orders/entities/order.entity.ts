@@ -103,6 +103,15 @@ export class Order {
   @Column({ name: 'payment_status', type: 'enum', enum: OrderPaymentStatus, enumName: 'order_payment_status', default: OrderPaymentStatus.UNPAID })
   paymentStatus: OrderPaymentStatus;
 
+  @Column({ name: 'platform_commission_cents', type: 'integer', default: 0 })
+  platformCommissionCents: number;
+
+  @Column({ name: 'technician_earning_cents', type: 'integer', default: 0 })
+  technicianEarningCents: number;
+
+  @Column({ name: 'commission_rate_applied', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  commissionRateApplied: string | null;
+
   @Column({ name: 'placed_at', type: 'timestamptz', nullable: true })
   placedAt: Date | null;
 
@@ -123,6 +132,12 @@ export class Order {
 
   @Column({ name: 'work_completed_at', type: 'timestamptz', nullable: true })
   workCompletedAt: Date | null;
+
+  @Column({ name: 'paid_at', type: 'timestamptz', nullable: true })
+  paidAt: Date | null;
+
+  @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
+  closedAt: Date | null;
 
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;

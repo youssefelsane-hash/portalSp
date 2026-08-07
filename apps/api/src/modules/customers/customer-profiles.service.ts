@@ -15,4 +15,12 @@ export class CustomerProfilesService {
     }
     return profile;
   }
+
+  async findByProfileIdOrThrow(profileId: string): Promise<CustomerProfile> {
+    const profile = await this.customerProfiles.findOne({ where: { id: profileId } });
+    if (!profile) {
+      throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return profile;
+  }
 }

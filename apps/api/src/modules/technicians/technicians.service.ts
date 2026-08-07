@@ -18,6 +18,14 @@ export class TechniciansService {
     return profile;
   }
 
+  async findByProfileIdOrThrow(profileId: string): Promise<TechnicianProfile> {
+    const profile = await this.technicianProfiles.findOne({ where: { id: profileId } });
+    if (!profile) {
+      throw new ApiException(ErrorCode.VAL_001, 'بروفايل الفني غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return profile;
+  }
+
   async updateAvailability(userId: string, dto: UpdateAvailabilityDto): Promise<TechnicianProfile> {
     const profile = await this.findByUserIdOrThrow(userId);
     if (dto.is_available !== undefined) profile.isAvailable = dto.is_available;

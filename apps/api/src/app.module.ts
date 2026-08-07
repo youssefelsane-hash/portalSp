@@ -19,6 +19,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { MatchingModule } from './modules/matching/matching.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/common/health/health.module';
 
 @Module({
@@ -40,6 +41,7 @@ import { HealthModule } from './modules/common/health/health.module';
     OrdersModule,
     MatchingModule,
     ChatModule,
+    PaymentsModule,
     HealthModule,
   ],
   providers: [
