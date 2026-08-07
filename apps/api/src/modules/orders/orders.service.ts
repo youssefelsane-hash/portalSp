@@ -8,6 +8,7 @@ import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { GeoService } from '../geo/geo.service';
+import { TechniciansService } from '../technicians/technicians.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
@@ -22,6 +23,7 @@ export class OrdersService {
     private readonly addressesService: AddressesService,
     private readonly catalogService: CatalogService,
     private readonly geoService: GeoService,
+    private readonly techniciansService: TechniciansService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -135,6 +137,80 @@ export class OrdersService {
       );
 
       return order;
+    });
+  }
+
+  // ── دورة عمل الفني: قبل → في الطريق → وصل → بدأ → خلص ───────────────────
+
+  private async findOwnedByTechnicianOrThrow(userId: string, orderId: string): Promise<Order> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const order = await this.orders.findOne({ where: { id: orderId, technicianId: profile.id } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+    }
+    return order;
+  }
+
+  /** مصدر واحد لكل انتقالات الفني — بتحترم الـ state machine وبتسجل التاريخ زي أي انتقال تاني. */
+  private async transitionAsTechnician(
+    userId: string,
+    orderId: string,
+    to: OrderStatus,
+    applyTimestamp: (order: Order, now: Date) => void,
+  ): Promise<Order> {
+    const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
+
+    if (!canTransition(order.orderStatus, to)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تنتقل من ${order.orderStatus} لـ ${to}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const previousStatus = order.orderStatus;
+      const now = new Date();
+      order.orderStatus = to;
+      applyTimestamp(order, now);
+      await manager.save(order);
+
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: to,
+          changedByUserId: userId,
+          changedByRole: 'technician',
+          changeSource: OrderChangeSource.TECHNICIAN,
+        }),
+      );
+
+      return order;
+    });
+  }
+
+  depart(userId: string, orderId: string): Promise<Order> {
+    return this.transitionAsTechnician(userId, orderId, OrderStatus.TECHNICIAN_ON_WAY, (order, now) => {
+      order.technicianDepartedAt = now;
+    });
+  }
+
+  arrive(userId: string, orderId: string): Promise<Order> {
+    return this.transitionAsTechnician(userId, orderId, OrderStatus.TECHNICIAN_ARRIVED, (order, now) => {
+      order.technicianArrivedAt = now;
+    });
+  }
+
+  start(userId: string, orderId: string): Promise<Order> {
+    return this.transitionAsTechnician(userId, orderId, OrderStatus.IN_PROGRESS, (order, now) => {
+      order.workStartedAt = now;
+    });
+  }
+
+  complete(userId: string, orderId: string): Promise<Order> {
+    return this.transitionAsTechnician(userId, orderId, OrderStatus.WORK_COMPLETED, (order, now) => {
+      order.workCompletedAt = now;
     });
   }
 }

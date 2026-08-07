@@ -18,4 +18,9 @@ export default () => ({
     expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES ?? '5', 10),
     maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS ?? '5', 10),
   },
+
+  storage: {
+    // محلي بس في التطوير — الإنتاج يبدّلها لـ S3-compatible (§2.2 في الماستر بلان)
+    localDir: process.env.STORAGE_LOCAL_DIR ?? './uploads',
+  },
 });

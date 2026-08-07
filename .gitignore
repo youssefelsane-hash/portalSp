@@ -18,3 +18,5 @@ npm-debug.log*
 .idea/
 
 infra/docker/.env
+
+apps/api/uploads/

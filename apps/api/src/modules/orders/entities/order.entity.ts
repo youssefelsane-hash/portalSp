@@ -112,6 +112,18 @@ export class Order {
   @Column({ name: 'accepted_at', type: 'timestamptz', nullable: true })
   acceptedAt: Date | null;
 
+  @Column({ name: 'technician_departed_at', type: 'timestamptz', nullable: true })
+  technicianDepartedAt: Date | null;
+
+  @Column({ name: 'technician_arrived_at', type: 'timestamptz', nullable: true })
+  technicianArrivedAt: Date | null;
+
+  @Column({ name: 'work_started_at', type: 'timestamptz', nullable: true })
+  workStartedAt: Date | null;
+
+  @Column({ name: 'work_completed_at', type: 'timestamptz', nullable: true })
+  workCompletedAt: Date | null;
+
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
 
