@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrdersModule } from '../orders/orders.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
+import { MatchingRoundExpiryProcessor } from './matching-round-expiry.processor';
+import { MATCHING_ROUNDS_QUEUE } from './matching-rounds.queue';
 import { MatchingService } from './matching.service';
 import { OrderDispatchListener } from './order-dispatch.listener';
 import { TechnicianOrdersController } from './technician-orders.controller';
@@ -12,9 +16,18 @@ import { OrderAssignment } from './entities/order-assignment.entity';
   // Order مضاف هنا كمان (بجانب OrdersModule) عشان matching محتاج transaction واحدة تلمس
   // order_assignments و orders و order_status_history مع بعض ذرّياً — تنسيقها عبر خدمتين
   // منفصلتين كان هيكسر الذرّية اللي بتمنع التعيين المزدوج.
-  imports: [TypeOrmModule.forFeature([OrderAssignment, Order]), OrdersModule, TechniciansModule],
+  imports: [
+    TypeOrmModule.forFeature([OrderAssignment, Order]),
+    OrdersModule,
+    TechniciansModule,
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({ connection: { url: config.get<string>('redis.url') } }),
+    }),
+    BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }),
+  ],
   controllers: [TechnicianOrdersController],
-  providers: [MatchingService, OrderDispatchListener],
+  providers: [MatchingService, OrderDispatchListener, MatchingRoundExpiryProcessor],
   exports: [MatchingService],
 })
 export class MatchingModule {}

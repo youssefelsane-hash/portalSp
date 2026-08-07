@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Queue } from 'bullmq';
 import { DataSource, In, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
@@ -10,6 +12,7 @@ import { canTransition } from '../orders/order-state-machine';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
+import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس).
 // لما لوحة الإدارة تتبني (S9) هتتقرأ من جدول settings بدل ما تكون ثابتة هنا.
@@ -45,6 +48,7 @@ export class MatchingService {
     private readonly techniciansService: TechniciansService,
     private readonly technicianLevelsService: TechnicianLevelsService,
     private readonly events: EventEmitter2,
+    @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue<RoundExpiredJobData>,
   ) {}
 
   /**
@@ -117,6 +121,16 @@ export class MatchingService {
     );
     await this.assignments.save(rows);
     this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
+
+    // مهلة حقيقية مجدولة (مش انتظار سلبي) — لو محدش رد (لا قبول ولا رفض صريح) خلال
+    // RESPONSE_TIMEOUT_SECONDS، الـ processor بيقفل الجولة دي ويبعت التالية أوتوماتيك.
+    // jobId ثابت (orderId:round) يمنع أي تكرار لو dispatchNextRound اتنادى مرتين بالغلط لنفس الجولة.
+    await this.roundsQueue.add(
+      ROUND_EXPIRED_JOB,
+      { orderId: order.id, round: nextRound },
+      { delay: RESPONSE_TIMEOUT_SECONDS * 1000, jobId: roundExpiredJobId(order.id, nextRound) },
+    );
+
     return { dispatched: rows.length };
   }
 
