@@ -1,7 +1,9 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, In, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
@@ -40,6 +42,7 @@ export class MatchingService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -153,7 +156,7 @@ export class MatchingService {
   async accept(userId: string, orderId: string): Promise<Order> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
 
-    return this.dataSource.transaction(async (manager) => {
+    const order = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -219,6 +222,11 @@ export class MatchingService {
 
       return order;
     });
+
+    // بره الـ transaction عمداً — زي order.created، مفيش داعي حد يسمع بيانات مش مؤكّدة
+    this.events.emit(ORDER_ACCEPTED_EVENT, new OrderAcceptedEvent(order.id, order.customerId, profile.id));
+
+    return order;
   }
 
   async reject(userId: string, orderId: string, reasonCode: string | undefined): Promise<void> {
