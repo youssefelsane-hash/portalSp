@@ -3,6 +3,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { AdminReportsService } from './admin-reports.service';
 import { RevenueReportQueryDto } from './dto/revenue-report-query.dto';
+import { TechniciansReportQueryDto } from './dto/technicians-report-query.dto';
 
 @Controller('admin')
 @Roles(UserType.ADMIN)
@@ -17,5 +18,10 @@ export class AdminReportsController {
   @Get('reports/revenue')
   revenueReport(@Query() query: RevenueReportQueryDto) {
     return this.adminReportsService.revenueByPeriod(query);
+  }
+
+  @Get('reports/technicians')
+  techniciansReport(@Query() query: TechniciansReportQueryDto) {
+    return this.adminReportsService.techniciansReport(query);
   }
 }

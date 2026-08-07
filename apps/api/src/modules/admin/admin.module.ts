@@ -4,6 +4,7 @@ import { AuditModule } from '../audit/audit.module';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User } from '../auth/entities/user.entity';
 import { Order } from '../orders/entities/order.entity';
+import { Payout } from '../payments/entities/payout.entity';
 import { Rating } from '../ratings/entities/rating.entity';
 import { SettingsModule } from '../settings/settings.module';
 import { Complaint } from '../support/entities/complaint.entity';
@@ -36,6 +37,7 @@ import { PermissionsService } from './permissions.service';
       User,
       EmployeeProfile,
       RefreshToken,
+      Payout,
     ]),
     AuditModule,
     SettingsModule,
