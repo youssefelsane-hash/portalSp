@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
 import { GeoModule } from '../geo/geo.module';
+import { PromotionsModule } from '../promotions/promotions.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { STORAGE_SERVICE } from '../../common/storage/storage.service';
 import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
@@ -25,6 +26,7 @@ import { OrderMedia } from './entities/order-media.entity';
     CatalogModule,
     GeoModule,
     TechniciansModule,
+    PromotionsModule,
     JwtModule.register({}),
   ],
   controllers: [OrdersController, TechnicianOrderExecutionController, AdminOrdersController],

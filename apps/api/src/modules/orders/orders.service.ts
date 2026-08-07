@@ -14,6 +14,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
+import { PromoCodesService } from '../promotions/promo-codes.service';
 
 @Injectable()
 export class OrdersService {
@@ -25,6 +26,7 @@ export class OrdersService {
     private readonly catalogService: CatalogService,
     private readonly geoService: GeoService,
     private readonly techniciansService: TechniciansService,
+    private readonly promoCodesService: PromoCodesService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -94,6 +96,29 @@ export class OrdersService {
           changeSource: OrderChangeSource.CUSTOMER,
         }),
       );
+
+      // كود الخصم لازم يتحقق ويتسجّل جوّه نفس الـ transaction دي — order.id لازم يكون موجود
+      // الأول (order_id NOT NULL في promo_code_usages)، والقفل الذرّي على صف الكود بيحمي من
+      // سباق طلبين بيستخدموا نفس الكود في نفس اللحظة يتجاوزوا الحد الأقصى/الميزانية سوا.
+      if (dto.promo_code) {
+        const { promoCode, discountCents } = await this.promoCodesService.validateAndApply(
+          manager,
+          dto.promo_code,
+          userId,
+          order.id,
+          {
+            serviceId: service.id,
+            zoneId: zone.id,
+            totalBeforeDiscountCents: order.totalAmountCents,
+            inspectionFeeCents: order.inspectionFeeCents,
+            isNewCustomer: customerProfile.totalOrdersCount === 0,
+          },
+        );
+        order.promoCodeId = promoCode.id;
+        order.discountAmountCents = discountCents;
+        order.totalAmountCents -= discountCents;
+        await manager.save(order);
+      }
 
       return order;
     });

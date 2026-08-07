@@ -23,6 +23,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { HealthModule } from './modules/common/health/health.module';
 
@@ -49,6 +50,7 @@ import { HealthModule } from './modules/common/health/health.module';
     RatingsModule,
     SupportModule,
     NotificationsModule,
+    PromotionsModule,
     AdminModule,
     HealthModule,
   ],
