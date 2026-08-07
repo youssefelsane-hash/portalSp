@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
+import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -117,8 +118,8 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      const previousStatus = order.orderStatus;
+    const previousStatus = order.orderStatus;
+    await this.dataSource.transaction(async (manager) => {
       order.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
       order.cancelledAt = new Date();
       order.cancelledByUserId = userId;
@@ -135,9 +136,21 @@ export class OrdersService {
           reason: reason ?? null,
         }),
       );
-
-      return order;
     });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(
+        order.id,
+        order.orderNumber,
+        previousStatus,
+        OrderStatus.CANCELLED_BY_CUSTOMER,
+        order.customerId,
+        order.technicianId,
+      ),
+    );
+
+    return order;
   }
 
   // ── دورة عمل الفني: قبل → في الطريق → وصل → بدأ → خلص ───────────────────
@@ -168,8 +181,8 @@ export class OrdersService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
-      const previousStatus = order.orderStatus;
+    const previousStatus = order.orderStatus;
+    await this.dataSource.transaction(async (manager) => {
       const now = new Date();
       order.orderStatus = to;
       applyTimestamp(order, now);
@@ -185,9 +198,14 @@ export class OrdersService {
           changeSource: OrderChangeSource.TECHNICIAN,
         }),
       );
-
-      return order;
     });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, to, order.customerId, order.technicianId),
+    );
+
+    return order;
   }
 
   depart(userId: string, orderId: string): Promise<Order> {

@@ -22,6 +22,7 @@ import { ChatModule } from './modules/chat/chat.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { SupportModule } from './modules/support/support.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { HealthModule } from './modules/common/health/health.module';
 
 @Module({
@@ -46,6 +47,7 @@ import { HealthModule } from './modules/common/health/health.module';
     PaymentsModule,
     RatingsModule,
     SupportModule,
+    NotificationsModule,
     HealthModule,
   ],
   providers: [
