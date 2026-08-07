@@ -1,0 +1,59 @@
+name: baytak
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: baytak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-baytak}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-baytak}
+      POSTGRES_DB: ${POSTGRES_DB:-baytak}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - baytak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-baytak}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: baytak-redis
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - baytak_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # S3-compatible للتطوير المحلي — بديل لـ AWS S3 / DigitalOcean Spaces (§2.2 في الماستر بلان)
+  minio:
+    image: minio/minio:latest
+    container_name: baytak-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-baytak}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-baytak12345}
+    ports:
+      - '${MINIO_API_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - baytak_minio_data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  baytak_db_data:
+  baytak_redis_data:
+  baytak_minio_data:
