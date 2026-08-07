@@ -9,9 +9,11 @@ import {
 } from '../../common/events/technician-verification-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
+import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { DocumentReviewStatus, TechnicianDocument } from './entities/technician-document.entity';
+import { TechnicianLevelChangeType, TechnicianLevelHistory } from './entities/technician-level-history.entity';
 import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import { canTransitionVerification } from './technician-verification-state-machine';
 
@@ -25,6 +27,7 @@ export class AdminTechniciansService {
   constructor(
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     @InjectRepository(TechnicianDocument) private readonly documents: Repository<TechnicianDocument>,
+    @InjectRepository(TechnicianLevelHistory) private readonly levelHistory: Repository<TechnicianLevelHistory>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
@@ -191,5 +194,55 @@ export class AdminTechniciansService {
     });
 
     return document;
+  }
+
+  /** ترقية/تخفيض يدوي لمستوى الفني — بيتسجّل في technician_level_history (جدول موجود من 0005 بس مش مستخدم لحد دلوقتي). */
+  async changeLevel(
+    adminUserId: string,
+    technicianProfileId: string,
+    dto: ChangeTechnicianLevelDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianWithUser> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (profile.currentLevel === dto.level) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني أصلاً على المستوى ده', HttpStatus.CONFLICT);
+    }
+
+    const previousLevel = profile.currentLevel;
+    const levelOrder = ['new', 'verified', 'professional', 'premium', 'team_leader'];
+    const changeType =
+      levelOrder.indexOf(dto.level) > levelOrder.indexOf(previousLevel)
+        ? TechnicianLevelChangeType.PROMOTION
+        : TechnicianLevelChangeType.DEMOTION;
+
+    profile.currentLevel = dto.level;
+    await this.technicianProfiles.save(profile);
+
+    await this.levelHistory.save(
+      this.levelHistory.create({
+        technicianId: profile.id,
+        previousLevel,
+        newLevel: dto.level,
+        changeType: TechnicianLevelChangeType.MANUAL_OVERRIDE,
+        qualityScoreAtChange: profile.qualityScore,
+        reason: dto.reason ?? null,
+        changedByUserId: adminUserId,
+        effectiveFrom: new Date(),
+      }),
+    );
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: `technician.level_${changeType}`,
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { current_level: previousLevel },
+      newValues: { current_level: profile.currentLevel, reason: dto.reason ?? null },
+      meta,
+    });
+
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
   }
 }

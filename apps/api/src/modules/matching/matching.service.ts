@@ -8,6 +8,7 @@ import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس).
@@ -42,12 +43,15 @@ export class MatchingService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
+    private readonly technicianLevelsService: TechnicianLevelsService,
     private readonly events: EventEmitter2,
   ) {}
 
   /**
    * أقرب فنيين مؤهلين (خدمة + منطقة + متاح + معتمد) لعنوان الطلب، من غير اللي اتبعتلهم قبل كده
-   * على نفس الطلب. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight) الأول،
+   * وبعدين المسافة — مش بديل عن المسافة، فني أعلى مستوى بياخد أولوية جوّه نفس دائرة المؤهلين مش
+   * إنه يتجاهل المسافة تماماً. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
    */
   private findEligibleTechnicians(order: Order): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
@@ -58,13 +62,14 @@ export class MatchingService {
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
+      LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
       WHERE tp.verification_status = 'approved'
         AND tp.is_available = true
         AND tp.is_on_duty = true
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
-      ORDER BY distance_km ASC
+      ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
       [order.serviceId, order.serviceZoneId, order.addressId, order.id, BATCH_SIZE],
@@ -155,6 +160,7 @@ export class MatchingService {
    */
   async accept(userId: string, orderId: string): Promise<Order> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const levelConfig = await this.technicianLevelsService.getOrThrow(profile.currentLevel);
 
     const order = await this.dataSource.transaction(async (manager) => {
       const order = await manager
@@ -168,6 +174,15 @@ export class MatchingService {
       }
       if (order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتاخد من فني تاني أو مبقاش متاح', HttpStatus.CONFLICT);
+      }
+      // حد قرار المستوى (technician_level_config.decision_limit_cents) — طلب أكبر من حد الفني
+      // محتاج مستوى أعلى يقبله؛ NULL = بلا حد (المستويات العليا)
+      if (levelConfig.decisionLimitCents !== null && order.totalAmountCents > levelConfig.decisionLimitCents) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `قيمة الطلب أعلى من حد القبول المسموح لمستواك (${levelConfig.decisionLimitCents / 100} جنيه) — لازم ترقية مستوى`,
+          HttpStatus.FORBIDDEN,
+        );
       }
 
       const assignment = await manager.findOne(OrderAssignment, {

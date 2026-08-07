@@ -45,10 +45,14 @@
 - **اتعمله اختبار end-to-end فعلي شامل**: إنشاء `ops_manager` بمنح دور مباشر وقت الإنشاء، ثبت الدور فعلاً في `GET /admin/users/:id/roles`، إنشاء موظف تاني تحته كـ`manager_user_id` وظهر صح في فلترة `manager_user_id`/`department`؛ الموظف الجديد سجّل دخول فعلي بنفس رقم الهاتف من غير أي تدخل إضافي (إثبات إن حساب اتضاف يدوياً بيشتغل بنفس مسار OTP العادي)؛ `GET /admin/employees/:id` رجّع الدور الحقيقي + IP دخول حقيقي (`127.0.0.1`) + نشاط فاضي (مفيش أفعال بعد)؛ تعديل قسم/مسمى نجح واتسجّل في سجل التدقيق قبل/بعد بالظبط؛ الحظر سحب الدور وألغى الـ refresh token فعلياً في القاعدة (اتأكد بـ`psql` مباشر)، ومحاولة فعل محتاج صلاحية بنفس التوكن القديم اترفضت 403 فوراً، ومحاولة دخول جديدة اترفضت بالسبب بالظبط؛ فك الحظر رجّع الحساب طبيعي؛ رقم هاتف مكرر، موظف كمديره المباشر لنفسه، ومدير مباشر مش حساب أدمن (عميل) اترفضوا كلهم بوضوح؛ عميل اترفض تماماً من كل `/admin/employees/*` (403)؛ أدمن من غير أي دور قدر **يشوف** القائمة والتفاصيل لكن اترفض من الإنشاء (403، `employees.manage`)؛ `super_admin` اترفض من حظر حسابه هو نفسه، ومن حظر id مش موجود (404)؛ فلترة `is_active=true/false` اتأكد إنها بترجع النتيجة الصح بعد إصلاح باگ حقيقي (تحت).
 - **باگ حقيقي اتلقط واتصلح وقت الاختبار الحي**: فلتر `is_active` كان بيستخدم `@Type(() => Boolean)` من `class-transformer`، واللي بيحوّل أي قيمة query string (زي `"false"`) لـ `Boolean("false")` = `true` لأنها string غير فاضية — يعني `?is_active=false` كانت بترجع نفس نتيجة `?is_active=true` غلط. اتصلحت باستخدام نفس الـ pattern الموجود فعلاً في `promotions/dto/list-promo-codes-query.dto.ts` (`@Transform(({ value }) => value === true || value === 'true')`)، واتأكد الإصلاح حياً: `is_active=true` رجّعت الموظف النشط بس، و`is_active=false` رجّعت الموظف المعطّل بس.
 
+## مستويات الفنيين وترقية يدوية (`PATCH /admin/technicians/:id/level`, `/admin/technician-levels`)
+
+فجوة كانت هنا في القائمة تحت اتقفلت: ترقية/تخفيض مستوى الفني بقت فعل حقيقي (`technicians.approve`)، وسياسة كل مستوى (عمولة/أولوية/حد قرار/أهلية قيادة فريق) بقت قابلة للتعديل بالكامل عبر `technician_levels.manage`. التفاصيل الكاملة والاختبار في `../technicians/README.md`.
+
 **لسه من غير من §13.7** (فجوة موثّقة، مش سهو):
 - `GET /admin/customers` + `/:id/block`
 - `PATCH /admin/orders/:id/adjust-price`
-- `POST /admin/technicians/:id/suspend`, `PATCH /admin/technicians/:id/level`
+- `POST /admin/technicians/:id/suspend`
 - `GET /admin/reports/technicians`, `GET /admin/reports/zones`.
 - حذف حساب موظف (soft-delete) — دلوقتي الأداة الوحيدة هي `block` (تعطيل)، مفيش `DELETE` endpoint حقيقي.
 

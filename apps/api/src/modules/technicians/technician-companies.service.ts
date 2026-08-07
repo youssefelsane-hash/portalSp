@@ -13,6 +13,7 @@ import { UpdateStaffDto } from './dto/update-staff.dto';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianProfile, TechnicianTeamRole } from './entities/technician-profile.entity';
+import { TechnicianLevelsService } from './technician-levels.service';
 
 export interface CompanyDetail {
   company: TechnicianCompany;
@@ -31,6 +32,7 @@ export class TechnicianCompaniesService {
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly auditLog: AuditLogService,
+    private readonly technicianLevelsService: TechnicianLevelsService,
   ) {}
 
   private async findProfileOrThrow(userId: string): Promise<TechnicianProfile> {
@@ -71,6 +73,14 @@ export class TechnicianCompaniesService {
     const profile = await this.findProfileOrThrow(userId);
     if (profile.companyId) {
       throw new ApiException(ErrorCode.VAL_001, 'انت عضو في شركة بالفعل — مينفعش تنشئ واحدة تانية', HttpStatus.CONFLICT);
+    }
+    const levelConfig = await this.technicianLevelsService.getOrThrow(profile.currentLevel);
+    if (!levelConfig.canLeadTeam) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `مستواك الحالي (${levelConfig.displayNameAr}) مش مؤهل لقيادة فريق — لازم ترقية لمستوى بريميوم أو قائد فريق`,
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     const company = await this.dataSource.transaction(async (manager) => {

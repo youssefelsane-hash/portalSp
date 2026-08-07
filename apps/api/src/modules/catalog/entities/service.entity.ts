@@ -72,7 +72,7 @@ export class Service {
     type: 'enum',
     enum: TechnicianLevel,
     enumName: 'technician_level',
-    default: TechnicianLevel.BRONZE,
+    default: TechnicianLevel.NEW,
   })
   minTechnicianLevel: TechnicianLevel;
 

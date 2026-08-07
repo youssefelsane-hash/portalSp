@@ -1,11 +1,14 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 import { GeoJsonPoint } from '../../../common/types/geo-json';
 
+// مطابق لـ infra/migrations/0027_technician_level_tiers.sql (rename من bronze/silver/gold/platinum
+// + إضافة team_leader) — إعدادات كل مستوى (عمولة/أولوية/حد قرار) في technician_level_config.
 export enum TechnicianLevel {
-  BRONZE = 'bronze',
-  SILVER = 'silver',
-  GOLD = 'gold',
-  PLATINUM = 'platinum',
+  NEW = 'new',
+  VERIFIED = 'verified',
+  PROFESSIONAL = 'professional',
+  PREMIUM = 'premium',
+  TEAM_LEADER = 'team_leader',
 }
 
 export enum TechnicianVerificationStatus {
@@ -52,7 +55,7 @@ export class TechnicianProfile {
     type: 'enum',
     enum: TechnicianLevel,
     enumName: 'technician_level',
-    default: TechnicianLevel.BRONZE,
+    default: TechnicianLevel.NEW,
   })
   currentLevel: TechnicianLevel;
 

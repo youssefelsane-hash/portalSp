@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -7,6 +7,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminTechniciansService } from './admin-technicians.service';
 import { toAdminTechnicianDetailResponseDto, toAdminTechnicianResponseDto } from './dto/admin-technician-response.dto';
+import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -51,6 +52,18 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const { profile, user } = await this.adminTechniciansService.reject(admin.sub, id, dto.reason, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  @Patch(':id/level')
+  @RequirePermission('technicians.approve')
+  async changeLevel(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ChangeTechnicianLevelDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.changeLevel(admin.sub, id, dto, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 

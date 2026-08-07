@@ -130,6 +130,13 @@
 - ذاتية الإدارة بالكامل: فني بينشئ شركة (`POST /technician/company`) ويبقى owner، هو أو أي manager يضيف فروع وأعضاء بـ`technician_code`. إشراف الأدمن (`/admin/technician-companies`) read-only بالكامل عمداً.
 - اتعمله اختبار حقيقي بـ3 فنيين مسجّلين فعلياً: owner أنشأ شركة وفرع، ضاف manager، والـ**manager نفسه** (مش الـowner) ضاف worker — إثبات إن السلطة المفوّضة شغالة. worker اترفض من الإدارة لكن قدر يشوف، حماية الـowner من الحذف/التعديل اتأكدت، وكل عملية اتسجّلت في سجل التدقيق. التفاصيل الكاملة في `technicians/README.md`.
 
+**مستويات الفنيين (`technician_level_config`) — من enum ساكن لسياسة حقيقية قابلة للتعديل:**
+
+- 4 مستويات (`bronze/silver/gold/platinum`) اتحوّلوا (`ALTER TYPE ... RENAME VALUE`, بيانات قديمة اتحفظت تلقائياً) لـ `new/verified/professional/premium` + مستوى خامس جديد `team_leader`.
+- `technician_level_config` (`super_admin`/`ops_manager` عبر `technician_levels.manage`) بيتحكم في 3 مستهلكين حقيقيين: **عمولة المنصة** (`payments`, فرق يُضاف على عمولة الخدمة)، **أولوية الإرسال** (`matching`, إضافة على المسافة مش بديل عنها)، **حد قرار الفني** (`matching.accept()`, طلب أكبر من الحد بيترفض لحد الترقية)، وكمان **أهلية قيادة فريق** (`can_lead_team` — بس `premium`/`team_leader` يقدروا ينشئوا شركة فنيين، مربوط مباشرة بميزة الشركات فوق).
+- `PATCH /admin/technicians/:id/level` (فجوة كانت في القائمة اتقفلت) بيسجّل كل تغيير في `technician_level_history` — جدول كان موجود من أول يوم بس مش مستخدم.
+- اتعمله اختبار حاسم مطابق لنفس منهج `settings`: تغيير فرق العمولة عبر الـ API غيّر النسبة الفعلية المطبّقة على الطلب التالي فوراً من غير أي restart (18% ثم 15% بالظبط). التفاصيل الكاملة في `technicians/README.md`.
+
 **باقي الموديولات لسه هياكل فاضية (README بس) — الخطوة الجاية.**
 
 ## التشغيل محلياً
