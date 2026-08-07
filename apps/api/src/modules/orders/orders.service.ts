@@ -1,7 +1,9 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -20,6 +22,7 @@ export class OrdersService {
     private readonly addressesService: AddressesService,
     private readonly catalogService: CatalogService,
     private readonly geoService: GeoService,
+    private readonly events: EventEmitter2,
   ) {}
 
   findAllForCustomerUser(userId: string): Promise<Order[]> {
@@ -52,7 +55,7 @@ export class OrdersService {
 
     const estimate = await this.catalogService.estimate(service.id, zone.id);
 
-    return this.dataSource.transaction(async (manager) => {
+    const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
       >("SELECT next_human_readable_number('ORD')");
@@ -91,6 +94,11 @@ export class OrdersService {
 
       return order;
     });
+
+    // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس
+    this.events.emit(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+
+    return order;
   }
 
   async cancel(userId: string, orderId: string, reason: string | undefined): Promise<Order> {

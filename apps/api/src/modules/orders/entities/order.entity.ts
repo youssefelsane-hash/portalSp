@@ -106,6 +106,12 @@ export class Order {
   @Column({ name: 'placed_at', type: 'timestamptz', nullable: true })
   placedAt: Date | null;
 
+  @Column({ name: 'assigned_at', type: 'timestamptz', nullable: true })
+  assignedAt: Date | null;
+
+  @Column({ name: 'accepted_at', type: 'timestamptz', nullable: true })
+  acceptedAt: Date | null;
+
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
 

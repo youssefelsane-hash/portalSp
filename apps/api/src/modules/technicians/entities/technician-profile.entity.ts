@@ -85,6 +85,9 @@ export class TechnicianProfile {
   })
   currentLocation: GeoJsonPoint | null;
 
+  @Column({ name: 'current_location_updated_at', type: 'timestamptz', nullable: true })
+  currentLocationUpdatedAt: Date | null;
+
   @Column({ name: 'home_area_id', type: 'uuid', nullable: true })
   homeAreaId: string | null;
 

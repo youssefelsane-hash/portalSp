@@ -17,6 +17,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { TechniciansModule } from './modules/technicians/technicians.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { MatchingModule } from './modules/matching/matching.module';
 import { HealthModule } from './modules/common/health/health.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { HealthModule } from './modules/common/health/health.module';
     TechniciansModule,
     CatalogModule,
     OrdersModule,
+    MatchingModule,
     HealthModule,
   ],
   providers: [
