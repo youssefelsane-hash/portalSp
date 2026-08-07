@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -25,8 +26,9 @@ export class AdminSupportController {
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolveComplaintDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toComplaintResponseDto(await this.supportService.resolve(user.sub, id, dto));
+    return toComplaintResponseDto(await this.supportService.resolve(user.sub, id, dto, audit));
   }
 
   @Post(':id/reject')
@@ -35,13 +37,18 @@ export class AdminSupportController {
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectComplaintDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toComplaintResponseDto(await this.supportService.reject(user.sub, id, dto));
+    return toComplaintResponseDto(await this.supportService.reject(user.sub, id, dto, audit));
   }
 
   @Post(':id/close')
   @RequirePermission('complaints.resolve')
-  async close(@Param('id', ParseUUIDPipe) id: string) {
-    return toComplaintResponseDto(await this.supportService.close(id));
+  async close(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toComplaintResponseDto(await this.supportService.close(user.sub, id, audit));
   }
 }

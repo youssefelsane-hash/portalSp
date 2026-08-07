@@ -1,4 +1,5 @@
 import { Body, Controller, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -25,14 +26,19 @@ export class AdminPaymentsController {
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RefundOrderDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toRefundResponseDto(await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes));
+    return toRefundResponseDto(await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, audit));
   }
 
   @Post('payouts/:id/approve')
   @RequirePermission('payouts.approve')
-  async approvePayout(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toPayoutResponseDto(await this.payoutsService.adminApprove(user.sub, id));
+  async approvePayout(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toPayoutResponseDto(await this.payoutsService.adminApprove(user.sub, id, audit));
   }
 
   @Post('payouts/:id/reject')
@@ -41,13 +47,18 @@ export class AdminPaymentsController {
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectPayoutDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toPayoutResponseDto(await this.payoutsService.adminReject(user.sub, id, dto.reason));
+    return toPayoutResponseDto(await this.payoutsService.adminReject(user.sub, id, dto.reason, audit));
   }
 
   @Post('payouts/:id/complete')
   @RequirePermission('payouts.approve')
-  async completePayout(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toPayoutResponseDto(await this.payoutsService.adminComplete(user.sub, id));
+  async completePayout(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toPayoutResponseDto(await this.payoutsService.adminComplete(user.sub, id, audit));
   }
 }

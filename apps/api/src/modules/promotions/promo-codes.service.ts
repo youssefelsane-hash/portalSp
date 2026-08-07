@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CreatePromoCodeDto } from './dto/create-promo-code.dto';
 import { ListPromoCodesQueryDto } from './dto/list-promo-codes-query.dto';
 import { DiscountType, PromoCode } from './entities/promo-code.entity';
@@ -25,6 +26,7 @@ export class PromoCodesService {
   constructor(
     @InjectRepository(PromoCode) private readonly promoCodes: Repository<PromoCode>,
     @InjectRepository(PromoCodeUsage) private readonly usages: Repository<PromoCodeUsage>,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private computeDiscount(promoCode: PromoCode, ctx: PromoApplicationContext): number {
@@ -139,7 +141,7 @@ export class PromoCodesService {
 
   // ── إدارة الأدمن ─────────────────────────────────────────────────────
 
-  async create(adminUserId: string, dto: CreatePromoCodeDto): Promise<PromoCode> {
+  async create(adminUserId: string, dto: CreatePromoCodeDto, meta?: AuditActorMeta): Promise<PromoCode> {
     const code = dto.code.toUpperCase();
     const existing = await this.promoCodes.findOne({ where: { code } });
     if (existing) {
@@ -168,7 +170,18 @@ export class PromoCodesService {
       createdByUserId: adminUserId,
       budgetCents: dto.budget_cents ?? null,
     });
-    return this.promoCodes.save(promoCode);
+    await this.promoCodes.save(promoCode);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'promo_code.created',
+      entityType: 'promo_code',
+      entityId: promoCode.id,
+      newValues: { code: promoCode.code, discount_type: promoCode.discountType, discount_value: promoCode.discountValue },
+      meta,
+    });
+    return promoCode;
   }
 
   async list(query: ListPromoCodesQueryDto): Promise<{ items: PromoCode[]; meta: { page: number; per_page: number; total: number } }> {
@@ -183,12 +196,23 @@ export class PromoCodesService {
     return { items, meta: { page, per_page: perPage, total } };
   }
 
-  async deactivate(id: string): Promise<PromoCode> {
+  async deactivate(id: string, adminUserId: string, meta?: AuditActorMeta): Promise<PromoCode> {
     const promoCode = await this.promoCodes.findOne({ where: { id } });
     if (!promoCode) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم غير موجود', HttpStatus.NOT_FOUND);
     }
     promoCode.isActive = false;
-    return this.promoCodes.save(promoCode);
+    await this.promoCodes.save(promoCode);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'promo_code.deactivated',
+      entityType: 'promo_code',
+      entityId: promoCode.id,
+      newValues: { code: promoCode.code, is_active: false },
+      meta,
+    });
+    return promoCode;
   }
 }

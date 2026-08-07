@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
 import { STORAGE_SERVICE } from '../../common/storage/storage.service';
+import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { AdminTechniciansController } from './admin-technicians.controller';
 import { AdminTechniciansService } from './admin-technicians.service';
@@ -13,7 +14,7 @@ import { TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TechnicianProfile, TechnicianDocument, User])],
+  imports: [TypeOrmModule.forFeature([TechnicianProfile, TechnicianDocument, User]), AuditModule],
   controllers: [TechniciansController, AdminTechniciansController],
   providers: [
     TechniciansService,

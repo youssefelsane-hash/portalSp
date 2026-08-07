@@ -7,6 +7,7 @@ import {
   TECHNICIAN_VERIFICATION_CHANGED_EVENT,
   TechnicianVerificationChangedEvent,
 } from '../../common/events/technician-verification-changed.event';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -26,6 +27,7 @@ export class AdminTechniciansService {
     @InjectRepository(TechnicianDocument) private readonly documents: Repository<TechnicianDocument>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly events: EventEmitter2,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private async attachUsers(profiles: TechnicianProfile[]): Promise<TechnicianWithUser[]> {
@@ -86,6 +88,7 @@ export class AdminTechniciansService {
     adminUserId: string,
     to: TechnicianVerificationStatus,
     notes: string | null,
+    meta?: AuditActorMeta,
   ): Promise<TechnicianProfile> {
     const profile = await this.findProfileOrThrow(technicianProfileId);
     if (!canTransitionVerification(profile.verificationStatus, to)) {
@@ -111,26 +114,44 @@ export class AdminTechniciansService {
       new TechnicianVerificationChangedEvent(profile.id, profile.userId, previousStatus, to, notes),
     );
 
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: `technician.verification_${to}`,
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { verification_status: previousStatus },
+      newValues: { verification_status: to, notes },
+      meta,
+    });
+
     return profile;
   }
 
-  async approve(adminUserId: string, technicianProfileId: string): Promise<TechnicianWithUser> {
+  async approve(adminUserId: string, technicianProfileId: string, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
     const profile = await this.transitionVerification(
       technicianProfileId,
       adminUserId,
       TechnicianVerificationStatus.APPROVED,
       null,
+      meta,
     );
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
   }
 
-  async reject(adminUserId: string, technicianProfileId: string, reason: string): Promise<TechnicianWithUser> {
+  async reject(
+    adminUserId: string,
+    technicianProfileId: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianWithUser> {
     const profile = await this.transitionVerification(
       technicianProfileId,
       adminUserId,
       TechnicianVerificationStatus.REJECTED,
       reason,
+      meta,
     );
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
@@ -141,6 +162,7 @@ export class AdminTechniciansService {
     technicianProfileId: string,
     documentId: string,
     dto: ReviewDocumentDto,
+    meta?: AuditActorMeta,
   ): Promise<TechnicianDocument> {
     const document = await this.documents.findOne({ where: { id: documentId, technicianId: technicianProfileId } });
     if (!document) {
@@ -150,10 +172,24 @@ export class AdminTechniciansService {
       throw new ApiException(ErrorCode.VAL_001, 'المستند ده اترجع عليه قبل كده', HttpStatus.CONFLICT);
     }
 
+    const previousStatus = document.reviewStatus;
     document.reviewStatus = dto.review_status;
     document.rejectionReason = dto.review_status === DocumentReviewStatus.REJECTED ? (dto.rejection_reason ?? null) : null;
     document.reviewedByUserId = adminUserId;
     document.reviewedAt = new Date();
-    return this.documents.save(document);
+    await this.documents.save(document);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician.document_reviewed',
+      entityType: 'technician_document',
+      entityId: document.id,
+      oldValues: { review_status: previousStatus },
+      newValues: { review_status: document.reviewStatus, rejection_reason: document.rejectionReason },
+      meta,
+    });
+
+    return document;
   }
 }

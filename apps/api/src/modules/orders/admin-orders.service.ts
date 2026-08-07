@@ -5,6 +5,7 @@ import { Between, DataSource, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
@@ -28,6 +29,7 @@ export class AdminOrdersService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
     private readonly events: EventEmitter2,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   async list(
@@ -69,7 +71,7 @@ export class AdminOrdersService {
     return { order, history };
   }
 
-  async cancel(adminUserId: string, orderId: string, reason: string): Promise<Order> {
+  async cancel(adminUserId: string, orderId: string, reason: string, meta?: AuditActorMeta): Promise<Order> {
     const order = await this.findOrThrow(orderId);
     if (!canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_SYSTEM)) {
       throw new ApiException(
@@ -112,10 +114,26 @@ export class AdminOrdersService {
       ),
     );
 
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.cancelled_by_admin',
+      entityType: 'order',
+      entityId: order.id,
+      oldValues: { order_status: previousStatus },
+      newValues: { order_status: OrderStatus.CANCELLED_BY_SYSTEM, reason },
+      meta,
+    });
+
     return order;
   }
 
-  async reassign(adminUserId: string, orderId: string, newTechnicianProfileId: string): Promise<Order> {
+  async reassign(
+    adminUserId: string,
+    orderId: string,
+    newTechnicianProfileId: string,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
     const order = await this.findOrThrow(orderId);
     if (!REASSIGNABLE_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
@@ -176,6 +194,17 @@ export class AdminOrdersService {
     });
 
     this.events.emit(ORDER_REASSIGNED_EVENT, new OrderReassignedEvent(order.id, order.orderNumber, technician.id));
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.reassigned_by_admin',
+      entityType: 'order',
+      entityId: order.id,
+      oldValues: { order_status: previousStatus, technician_id: null },
+      newValues: { order_status: order.orderStatus, technician_id: technician.id },
+      meta,
+    });
 
     return order;
   }

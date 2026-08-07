@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
@@ -20,6 +21,7 @@ import { PromotionsService } from './promotions.service';
     CustomersModule,
     CatalogModule,
     GeoModule,
+    AuditModule,
   ],
   controllers: [PromotionsController, AdminPromotionsController],
   providers: [PromoCodesService, LoyaltyService, PromotionsService],

@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { UserType } from '../auth/entities/user.entity';
@@ -32,6 +33,7 @@ export class SupportService {
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly walletsService: WalletsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private async nextComplaintNumber(manager: EntityManager): Promise<string> {
@@ -163,8 +165,13 @@ export class SupportService {
    * بتقفل الشكوى، عشان "الشكوى اتقفلت والتعويض ماتحولش" ميحصلش. الـ state machine بمنع حل شكوى
    * اتحلت قبل كده أصلاً (RESOLVED مالهاش انتقال لـ RESOLVED تاني) — دي حماية مزدوجة ضد تعويض مكرر.
    */
-  async resolve(adminUserId: string, complaintId: string, dto: ResolveComplaintDto): Promise<Complaint> {
-    return this.dataSource.transaction(async (manager) => {
+  async resolve(
+    adminUserId: string,
+    complaintId: string,
+    dto: ResolveComplaintDto,
+    meta?: AuditActorMeta,
+  ): Promise<Complaint> {
+    const result = await this.dataSource.transaction(async (manager) => {
       const complaint = await manager.findOne(Complaint, { where: { id: complaintId } });
       if (!complaint) {
         throw new ApiException(ErrorCode.VAL_001, 'الشكوى غير موجودة', HttpStatus.NOT_FOUND);
@@ -176,6 +183,7 @@ export class SupportService {
           HttpStatus.CONFLICT,
         );
       }
+      const previousStatus = complaint.complaintStatus;
 
       const compensationCents = dto.compensation_cents ?? 0;
       if (compensationCents > 0) {
@@ -207,11 +215,33 @@ export class SupportService {
       complaint.compensationCents = compensationCents;
       complaint.resolvedAt = new Date();
       complaint.resolvedByUserId = adminUserId;
-      return manager.save(complaint);
+      await manager.save(complaint);
+      return { complaint, previousStatus };
     });
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'complaint.resolved',
+      entityType: 'complaint',
+      entityId: result.complaint.id,
+      oldValues: { complaint_status: result.previousStatus },
+      newValues: {
+        complaint_status: result.complaint.complaintStatus,
+        resolution_type: result.complaint.resolutionType,
+        compensation_cents: result.complaint.compensationCents,
+      },
+      meta,
+    });
+    return result.complaint;
   }
 
-  async reject(adminUserId: string, complaintId: string, dto: RejectComplaintDto): Promise<Complaint> {
+  async reject(
+    adminUserId: string,
+    complaintId: string,
+    dto: RejectComplaintDto,
+    meta?: AuditActorMeta,
+  ): Promise<Complaint> {
     const complaint = await this.findOrThrow(complaintId);
     if (!canTransitionComplaint(complaint.complaintStatus, ComplaintStatus.REJECTED)) {
       throw new ApiException(
@@ -220,14 +250,27 @@ export class SupportService {
         HttpStatus.CONFLICT,
       );
     }
+    const previousStatus = complaint.complaintStatus;
     complaint.complaintStatus = ComplaintStatus.REJECTED;
     complaint.resolutionNotes = dto.resolution_notes;
     complaint.resolvedAt = new Date();
     complaint.resolvedByUserId = adminUserId;
-    return this.complaints.save(complaint);
+    await this.complaints.save(complaint);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'complaint.rejected',
+      entityType: 'complaint',
+      entityId: complaint.id,
+      oldValues: { complaint_status: previousStatus },
+      newValues: { complaint_status: complaint.complaintStatus, resolution_notes: complaint.resolutionNotes },
+      meta,
+    });
+    return complaint;
   }
 
-  async close(complaintId: string): Promise<Complaint> {
+  async close(adminUserId: string, complaintId: string, meta?: AuditActorMeta): Promise<Complaint> {
     const complaint = await this.findOrThrow(complaintId);
     if (!canTransitionComplaint(complaint.complaintStatus, ComplaintStatus.CLOSED)) {
       throw new ApiException(
@@ -236,8 +279,21 @@ export class SupportService {
         HttpStatus.CONFLICT,
       );
     }
+    const previousStatus = complaint.complaintStatus;
     complaint.complaintStatus = ComplaintStatus.CLOSED;
-    return this.complaints.save(complaint);
+    await this.complaints.save(complaint);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'complaint.closed',
+      entityType: 'complaint',
+      entityId: complaint.id,
+      oldValues: { complaint_status: previousStatus },
+      newValues: { complaint_status: complaint.complaintStatus },
+      meta,
+    });
+    return complaint;
   }
 
   private async resolveUserTypeOf(userId: string): Promise<UserType> {

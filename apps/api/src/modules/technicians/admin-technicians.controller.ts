@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -31,8 +32,12 @@ export class AdminTechniciansController {
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('technicians.approve')
-  async approve(@CurrentUser() admin: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id);
+  async approve(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 
@@ -43,8 +48,9 @@ export class AdminTechniciansController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectTechnicianDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    const { profile, user } = await this.adminTechniciansService.reject(admin.sub, id, dto.reason);
+    const { profile, user } = await this.adminTechniciansService.reject(admin.sub, id, dto.reason, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 
@@ -56,8 +62,9 @@ export class AdminTechniciansController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('documentId', ParseUUIDPipe) documentId: string,
     @Body() dto: ReviewDocumentDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto);
+    const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto, audit);
     return toTechnicianDocumentResponseDto(document);
   }
 }

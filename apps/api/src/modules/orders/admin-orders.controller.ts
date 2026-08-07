@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -35,8 +36,9 @@ export class AdminOrdersController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AdminCancelOrderDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(await this.adminOrdersService.cancel(admin.sub, id, dto.reason));
+    return toOrderResponseDto(await this.adminOrdersService.cancel(admin.sub, id, dto.reason, audit));
   }
 
   @Post(':id/reassign')
@@ -46,7 +48,8 @@ export class AdminOrdersController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReassignOrderDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id));
+    return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
   }
 }

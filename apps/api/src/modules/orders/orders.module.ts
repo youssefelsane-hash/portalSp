@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
 import { GeoModule } from '../geo/geo.module';
@@ -27,6 +28,7 @@ import { OrderMedia } from './entities/order-media.entity';
     GeoModule,
     TechniciansModule,
     PromotionsModule,
+    AuditModule,
     JwtModule.register({}),
   ],
   controllers: [OrdersController, TechnicianOrderExecutionController, AdminOrdersController],
