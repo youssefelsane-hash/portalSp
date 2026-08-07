@@ -1,7 +1,9 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { COMPLAINT_FILED_EVENT, ComplaintFiledEvent } from '../../common/events/complaint-filed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -34,6 +36,7 @@ export class SupportService {
     private readonly techniciansService: TechniciansService,
     private readonly walletsService: WalletsService,
     private readonly auditLog: AuditLogService,
+    private readonly events: EventEmitter2,
   ) {}
 
   private async nextComplaintNumber(manager: EntityManager): Promise<string> {
@@ -72,7 +75,7 @@ export class SupportService {
       }
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const complaint = await this.dataSource.transaction(async (manager) => {
       const complaintNumber = await this.nextComplaintNumber(manager);
       const severity = ComplaintSeverity.MEDIUM; // التصنيف الدقيق مسؤولية فريق الدعم وقت المراجعة
       const complaint = manager.create(Complaint, {
@@ -96,6 +99,10 @@ export class SupportService {
 
       return complaint;
     });
+
+    // بره الـ transaction عمداً — نفس فلسفة order.created، مفيش داعي أي مستمع يشتغل على بيانات مش مؤكّدة
+    this.events.emit(COMPLAINT_FILED_EVENT, new ComplaintFiledEvent(complaint.id, complaint.complaintNumber, complaint.title));
+    return complaint;
   }
 
   private async findOrThrow(complaintId: string): Promise<Complaint> {
