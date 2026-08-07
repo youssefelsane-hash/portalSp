@@ -1,0 +1,20 @@
+# baytak — إعدادات متجاهلة على مستوى المشروع كله
+
+node_modules/
+dist/
+build/
+coverage/
+
+.env
+.env.local
+*.env
+!.env.example
+
+*.log
+npm-debug.log*
+
+.DS_Store
+.vscode/
+.idea/
+
+infra/docker/.env
