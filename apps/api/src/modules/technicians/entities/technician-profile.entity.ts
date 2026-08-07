@@ -19,6 +19,16 @@ export enum TechnicianVerificationStatus {
   SUSPENDED = 'suspended',
 }
 
+// فني مستقل، أو عضو جوّه شركة/فريق (infra/migrations/0026) — owner/manager عندهم سلطة
+// إدارة الفريق، supervisor/worker أعضاء عاديين. منفصل تماماً عن roles/permissions الإدارية.
+export enum TechnicianTeamRole {
+  INDEPENDENT = 'independent',
+  OWNER = 'owner',
+  MANAGER = 'manager',
+  SUPERVISOR = 'supervisor',
+  WORKER = 'worker',
+}
+
 // مطابق لـ infra/migrations/0005_customers_technicians.sql
 @Entity('technician_profiles')
 export class TechnicianProfile {
@@ -111,6 +121,15 @@ export class TechnicianProfile {
 
   @Column({ name: 'emergency_available', type: 'boolean', default: false })
   emergencyAvailable: boolean;
+
+  @Column({ name: 'company_id', type: 'uuid', nullable: true })
+  companyId: string | null;
+
+  @Column({ name: 'branch_id', type: 'uuid', nullable: true })
+  branchId: string | null;
+
+  @Column({ name: 'team_role', type: 'varchar', length: 20, default: TechnicianTeamRole.INDEPENDENT })
+  teamRole: TechnicianTeamRole;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
