@@ -13,5 +13,6 @@ export class OrderStatusChangedEvent {
     public readonly newStatus: OrderStatus,
     public readonly customerId: string,
     public readonly technicianId: string | null,
+    public readonly reason: string | null = null,
   ) {}
 }

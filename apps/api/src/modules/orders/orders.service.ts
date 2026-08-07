@@ -147,6 +147,7 @@ export class OrdersService {
         OrderStatus.CANCELLED_BY_CUSTOMER,
         order.customerId,
         order.technicianId,
+        reason ?? null,
       ),
     );
 

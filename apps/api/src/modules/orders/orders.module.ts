@@ -7,6 +7,8 @@ import { GeoModule } from '../geo/geo.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { STORAGE_SERVICE } from '../../common/storage/storage.service';
 import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
+import { AdminOrdersController } from './admin-orders.controller';
+import { AdminOrdersService } from './admin-orders.service';
 import { OrdersController } from './orders.controller';
 import { TechnicianOrderExecutionController } from './technician-order-execution.controller';
 import { OrdersService } from './orders.service';
@@ -25,11 +27,12 @@ import { OrderMedia } from './entities/order-media.entity';
     TechniciansModule,
     JwtModule.register({}),
   ],
-  controllers: [OrdersController, TechnicianOrderExecutionController],
+  controllers: [OrdersController, TechnicianOrderExecutionController, AdminOrdersController],
   providers: [
     OrdersService,
     OrderMediaService,
     OrderTrackingGateway,
+    AdminOrdersService,
     { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService },
   ],
   exports: [OrdersService],

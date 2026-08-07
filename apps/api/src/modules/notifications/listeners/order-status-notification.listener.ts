@@ -54,6 +54,34 @@ export class OrderStatusNotificationListener {
           deepLink: `/technician/orders/${event.orderId}`,
         });
       }
+
+      // إلغاء إداري (من لوحة الأدمن) بيوصل للطرفين مع سبب الإلغاء نفسه — مختلف عن
+      // إلغاء العميل اللي بيوصل للفني بس، لأن هنا القرار جه من برّه الطرفين الاتنين.
+      if (event.newStatus === OrderStatus.CANCELLED_BY_SYSTEM) {
+        const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
+        await this.notificationsService.notify({
+          userId: customer.userId,
+          notificationType: 'order_cancelled_by_admin',
+          titleAr: 'طلبك اتلغى من الإدارة',
+          bodyAr: event.reason ? `السبب: ${event.reason}` : 'تواصل مع الدعم لمزيد من التفاصيل.',
+          referenceType: 'order',
+          referenceId: event.orderId,
+          deepLink: `/orders/${event.orderId}`,
+        });
+
+        if (event.technicianId) {
+          const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianId);
+          await this.notificationsService.notify({
+            userId: technician.userId,
+            notificationType: 'order_cancelled_by_admin',
+            titleAr: 'طلب اتلغى من الإدارة',
+            bodyAr: `طلب رقم ${event.orderNumber} اتلغى من الإدارة.`,
+            referenceType: 'order',
+            referenceId: event.orderId,
+            deepLink: `/technician/orders/${event.orderId}`,
+          });
+        }
+      }
     } catch (err) {
       this.logger.error(`فشل إشعار تغيير حالة الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
