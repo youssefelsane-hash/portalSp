@@ -70,6 +70,15 @@ export class TechnicianProfile {
   })
   verificationStatus: TechnicianVerificationStatus;
 
+  @Column({ name: 'verification_notes', type: 'text', nullable: true })
+  verificationNotes: string | null;
+
+  @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
+  approvedAt: Date | null;
+
+  @Column({ name: 'approved_by_user_id', type: 'uuid', nullable: true })
+  approvedByUserId: string | null;
+
   @Column({ name: 'is_available', type: 'boolean', default: false })
   isAvailable: boolean;
 

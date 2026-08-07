@@ -11,6 +11,7 @@ import { UserDevice } from './entities/user-device.entity';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
 import { OrderCreatedNotificationListener } from './listeners/order-created-notification.listener';
 import { OrderStatusNotificationListener } from './listeners/order-status-notification.listener';
+import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -29,6 +30,7 @@ import { NotificationsService } from './notifications.service';
     OrderCreatedNotificationListener,
     OrderAcceptedNotificationListener,
     OrderStatusNotificationListener,
+    TechnicianVerificationNotificationListener,
   ],
   exports: [NotificationsService],
 })
