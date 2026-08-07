@@ -23,4 +23,8 @@ export default () => ({
     // محلي بس في التطوير — الإنتاج يبدّلها لـ S3-compatible (§2.2 في الماستر بلان)
     localDir: process.env.STORAGE_LOCAL_DIR ?? './uploads',
   },
+
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+  },
 });

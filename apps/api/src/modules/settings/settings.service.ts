@@ -1,16 +1,45 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Setting } from './entities/setting.entity';
+
+// TTL دفاعي بس — الإبطال الفعلي فوري في update() تحت، الـ TTL ده شبكة أمان لو حصل تعديل
+// مباشر في القاعدة (SQL) من غير ما يعدّي من update() هنا.
+const CACHE_TTL_SECONDS = 60;
 
 @Injectable()
 export class SettingsService {
   constructor(
     @InjectRepository(Setting) private readonly settings: Repository<Setting>,
     private readonly auditLog: AuditLogService,
+    private readonly cache: RedisCacheService,
   ) {}
+
+  private cacheKey(key: string): string {
+    return `settings:${key}`;
+  }
+
+  /** قراءة القيمة الخام (value + valueType بس) — كاش-أول، مصدر الحقيقة القاعدة دايماً لو فشل الكاش أو مفيش. */
+  private async readRaw(key: string): Promise<{ value: unknown; valueType: string } | null> {
+    const cached = await this.cache.get(this.cacheKey(key));
+    if (cached !== null) {
+      try {
+        return JSON.parse(cached) as { value: unknown; valueType: string };
+      } catch {
+        // كاش فاسد (تنسيق قديم مثلاً) — تجاهله وارجع للقاعدة، متكسرش الطلب
+      }
+    }
+
+    const setting = await this.settings.findOne({ where: { key } });
+    if (!setting) return null;
+
+    const raw = { value: setting.value, valueType: setting.valueType };
+    await this.cache.set(this.cacheKey(key), JSON.stringify(raw), CACHE_TTL_SECONDS);
+    return raw;
+  }
 
   list(groupName?: string): Promise<Setting[]> {
     return this.settings.find({
@@ -27,23 +56,23 @@ export class SettingsService {
     return setting;
   }
 
-  /** بيستخدمها أي موديول تاني (payments, matching, ...) بدل الثوابت المكتوبة في الكود — قيمة افتراضية لو مفيش الإعداد أصلاً (أول تشغيل قبل الـ seed مثلاً). */
+  /** بيستخدمها أي موديول تاني (payments, matching, ...) بدل الثوابت المكتوبة في الكود — قيمة افتراضية لو مفيش الإعداد أصلاً (أول تشغيل قبل الـ seed مثلاً). قراءة مكشوشة (Redis) بدل ما تروح للقاعدة في كل نداء. */
   async getNumber(key: string, fallback: number): Promise<number> {
-    const setting = await this.settings.findOne({ where: { key } });
-    if (!setting || typeof setting.value !== 'number') return fallback;
-    return setting.value;
+    const raw = await this.readRaw(key);
+    if (!raw || typeof raw.value !== 'number') return fallback;
+    return raw.value;
   }
 
   async getBoolean(key: string, fallback: boolean): Promise<boolean> {
-    const setting = await this.settings.findOne({ where: { key } });
-    if (!setting || typeof setting.value !== 'boolean') return fallback;
-    return setting.value;
+    const raw = await this.readRaw(key);
+    if (!raw || typeof raw.value !== 'boolean') return fallback;
+    return raw.value;
   }
 
   async getString(key: string, fallback: string): Promise<string> {
-    const setting = await this.settings.findOne({ where: { key } });
-    if (!setting || typeof setting.value !== 'string') return fallback;
-    return setting.value;
+    const raw = await this.readRaw(key);
+    if (!raw || typeof raw.value !== 'string') return fallback;
+    return raw.value;
   }
 
   private assertValueMatchesType(setting: Setting, value: unknown): void {
@@ -72,6 +101,8 @@ export class SettingsService {
     setting.value = value;
     setting.updatedByUserId = adminUserId;
     await this.settings.save(setting);
+    // إبطال فوري — مش مستنيين انتهاء الـ TTL، القراءة الجاية لازم تشوف القيمة الجديدة على طول
+    await this.cache.del(this.cacheKey(key));
 
     await this.auditLog.record({
       actorUserId: adminUserId,

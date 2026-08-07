@@ -12,6 +12,7 @@ coverage/
 
 *.log
 npm-debug.log*
+*.rdb
 
 .DS_Store
 .vscode/
