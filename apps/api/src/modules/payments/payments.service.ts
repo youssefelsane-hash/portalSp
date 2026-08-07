@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -27,6 +28,7 @@ export class PaymentsService {
     private readonly catalogService: CatalogService,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   private async computeSettlement(order: Order): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number }> {
@@ -259,8 +261,9 @@ export class PaymentsService {
     performedByUserId: string,
     orderId: string,
     reasonNotes: string,
+    meta?: AuditActorMeta,
   ): Promise<Refund> {
-    return this.dataSource.transaction(async (manager) => {
+    const refund = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -380,5 +383,16 @@ export class PaymentsService {
 
       return refund;
     });
+
+    await this.auditLog.record({
+      actorUserId: performedByUserId,
+      actorRole: 'admin',
+      action: 'order.refunded',
+      entityType: 'order',
+      entityId: orderId,
+      newValues: { refund_id: refund.id, amount_cents: refund.amountCents, reason_notes: reasonNotes },
+      meta,
+    });
+    return refund;
   }
 }

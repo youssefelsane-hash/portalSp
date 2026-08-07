@@ -1,5 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -29,21 +31,25 @@ export class AdminOrdersController {
 
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.cancel')
   async cancel(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AdminCancelOrderDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(await this.adminOrdersService.cancel(admin.sub, id, dto.reason));
+    return toOrderResponseDto(await this.adminOrdersService.cancel(admin.sub, id, dto.reason, audit));
   }
 
   @Post(':id/reassign')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.reassign')
   async reassign(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReassignOrderDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id));
+    return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
   }
 }

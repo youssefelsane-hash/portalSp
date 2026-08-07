@@ -25,4 +25,9 @@ export class CreateOrderDto {
   @IsOptional()
   @IsDateString()
   scheduled_at?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  promo_code?: string;
 }

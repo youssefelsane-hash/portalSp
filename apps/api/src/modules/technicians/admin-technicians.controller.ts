@@ -1,5 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -29,31 +31,40 @@ export class AdminTechniciansController {
 
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
-  async approve(@CurrentUser() admin: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id);
+  @RequirePermission('technicians.approve')
+  async approve(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 
   @Post(':id/reject')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
   async reject(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectTechnicianDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    const { profile, user } = await this.adminTechniciansService.reject(admin.sub, id, dto.reason);
+    const { profile, user } = await this.adminTechniciansService.reject(admin.sub, id, dto.reason, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 
   @Post(':id/documents/:documentId/review')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.review_documents')
   async reviewDocument(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('documentId', ParseUUIDPipe) documentId: string,
     @Body() dto: ReviewDocumentDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto);
+    const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto, audit);
     return toTechnicianDocumentResponseDto(document);
   }
 }

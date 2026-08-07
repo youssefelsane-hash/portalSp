@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
+import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
@@ -25,6 +27,8 @@ import { WalletTransaction } from './entities/wallet-transaction.entity';
     CustomersModule,
     TechniciansModule,
     CatalogModule,
+    AuditModule,
+    SettingsModule,
   ],
   controllers: [WalletController, PaymentsController, TechnicianPaymentsController, AdminPaymentsController],
   providers: [WalletsService, PaymentsService, PayoutsService, WalletProvisioningListener],

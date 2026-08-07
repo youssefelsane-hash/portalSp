@@ -1,5 +1,7 @@
 import { Body, Controller, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -19,30 +21,44 @@ export class AdminPaymentsController {
   ) {}
 
   @Post('orders/:id/refund')
+  @RequirePermission('refunds.issue')
   async refundOrder(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RefundOrderDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toRefundResponseDto(await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes));
+    return toRefundResponseDto(await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, audit));
   }
 
   @Post('payouts/:id/approve')
-  async approvePayout(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toPayoutResponseDto(await this.payoutsService.adminApprove(user.sub, id));
+  @RequirePermission('payouts.approve')
+  async approvePayout(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toPayoutResponseDto(await this.payoutsService.adminApprove(user.sub, id, audit));
   }
 
   @Post('payouts/:id/reject')
+  @RequirePermission('payouts.approve')
   async rejectPayout(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectPayoutDto,
+    @AuditContext() audit: AuditMeta,
   ) {
-    return toPayoutResponseDto(await this.payoutsService.adminReject(user.sub, id, dto.reason));
+    return toPayoutResponseDto(await this.payoutsService.adminReject(user.sub, id, dto.reason, audit));
   }
 
   @Post('payouts/:id/complete')
-  async completePayout(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toPayoutResponseDto(await this.payoutsService.adminComplete(user.sub, id));
+  @RequirePermission('payouts.approve')
+  async completePayout(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toPayoutResponseDto(await this.payoutsService.adminComplete(user.sub, id, audit));
   }
 }

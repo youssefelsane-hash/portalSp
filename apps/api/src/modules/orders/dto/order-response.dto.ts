@@ -13,6 +13,8 @@ export interface OrderResponseDto {
   scheduled_at: string | null;
   estimated_price_cents: number | null;
   inspection_fee_cents: number;
+  discount_amount_cents: number;
+  promo_code_id: string | null;
   total_amount_cents: number;
   payment_status: string;
   placed_at: string | null;
@@ -34,6 +36,8 @@ export function toOrderResponseDto(order: Order): OrderResponseDto {
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     estimated_price_cents: order.estimatedPriceCents,
     inspection_fee_cents: order.inspectionFeeCents,
+    discount_amount_cents: order.discountAmountCents,
+    promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,
     payment_status: order.paymentStatus,
     placed_at: order.placedAt ? order.placedAt.toISOString() : null,

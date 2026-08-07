@@ -94,6 +94,9 @@ export class Order {
   @Column({ name: 'surge_amount_cents', type: 'integer', default: 0 })
   surgeAmountCents: number;
 
+  @Column({ name: 'discount_amount_cents', type: 'integer', default: 0 })
+  discountAmountCents: number;
+
   @Column({ name: 'total_amount_cents', type: 'integer', default: 0 })
   totalAmountCents: number;
 
@@ -102,6 +105,9 @@ export class Order {
 
   @Column({ name: 'payment_status', type: 'enum', enum: OrderPaymentStatus, enumName: 'order_payment_status', default: OrderPaymentStatus.UNPAID })
   paymentStatus: OrderPaymentStatus;
+
+  @Column({ name: 'promo_code_id', type: 'uuid', nullable: true })
+  promoCodeId: string | null;
 
   @Column({ name: 'platform_commission_cents', type: 'integer', default: 0 })
   platformCommissionCents: number;
