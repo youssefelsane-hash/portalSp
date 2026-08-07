@@ -2,11 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { parseDurationToMs } from '../../common/utils/duration';
+import { USER_REGISTERED_EVENT, UserRegisteredEvent } from '../../common/events/user-registered.event';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
@@ -32,6 +34,7 @@ export class AuthService {
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────
@@ -111,6 +114,12 @@ export class AuthService {
       isBlocked: false,
     });
     await this.users.save(user);
+
+    // async مقصودة: مفيش استنى — لو listener فشل في إنشاء البروفايل، ميقفلش تسجيل المستخدم نفسه
+    this.events.emit(
+      USER_REGISTERED_EVENT,
+      new UserRegisteredEvent(user.id, user.userType, user.phoneNumber, user.fullName),
+    );
 
     return this.issueTokenPair(user, ip);
   }

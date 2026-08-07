@@ -15,6 +15,15 @@
 - عقد استجابة موحّد `{success, data, meta, error, request_id}` عبر `ResponseInterceptor` + `AllExceptionsFilter`، وأكواد الأخطاء مطابقة لـ `docs/02-data-dictionary.md` §13.9
 - اختبار end-to-end فعلي تم على قاعدة بيانات PostgreSQL+PostGIS حقيقية (مش mock) — كل الـ endpoints شغالة ومطابقة للعقد المُوثّق
 
+**موديولات `geo`, `customers`, `technicians`, `catalog` شغالة جزئياً (S2):**
+
+- `geo`: `GET /cities`, `GET /cities/:id/areas` (قراءة بس)
+- `customers`: `customer_profiles` بتتعمل تلقائياً وقت التسجيل (حدث `user.registered` — لا استدعاء مباشر من `auth`)، و CRUD كامل على `/addresses` مع التحقق من تغطية المنطقة
+- `technicians`: `technician_profiles` بتتعمل تلقائياً برضه، مع `technician_code` مولّد من DB sequence، و`GET /technician/me`, `GET /technician/level` محميين بـ RBAC
+- `catalog`: `GET /service-categories`, `GET /services`, `GET /services/:id`, `POST /services/:id/estimate`
+
+كل ده اتعمله اختبار end-to-end فعلي: تسجيل عميل/فني حقيقي → إنشاء بروفايل تلقائي → عنوان في منطقة مُطلقة (نجح) وفي منطقة مش مُطلقة (اترفض بالكود الصح ORDR_001) → تسعير تقديري لخدمة حقيقية → RBAC بيمنع عميل من مسارات الفني (403).
+
 **باقي الموديولات (`orders`, `matching`, `payments`, ...) لسه هياكل فاضية (README بس) — الخطوة الجاية.**
 
 ## التشغيل محلياً

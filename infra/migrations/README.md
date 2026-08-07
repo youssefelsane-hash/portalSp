@@ -4,7 +4,7 @@ SQL migrations لقاعدة البيانات — مصدر الحقيقة الو�
 
 ## الحالة
 
-الـ schema الكامل (المرحلة 1 MVP + كل جداول المراحل المتقدمة 3-8 من القاموس) مكتوب ومرتب في 16 ملف، كل ملف = مجال منفصل بيتقرا لوحده:
+الـ schema الكامل (المرحلة 1 MVP + كل جداول المراحل المتقدمة 3-8 من القاموس) مكتوب ومرتب في 18 ملف، كل ملف = مجال منفصل بيتقرا لوحده:
 
 | الملف | المحتوى |
 |---|---|
@@ -24,6 +24,8 @@ SQL migrations لقاعدة البيانات — مصدر الحقيقة الو�
 | `0014_phase5_ai.sql` | ai_diagnoses (مرحلة 5) |
 | `0015_phase7_subscriptions.sql` | subscription_plans, subscriptions (مرحلة 7) |
 | `0016_phase8_home_management.sql` | home_profiles, home_appliances, maintenance_schedules, home_documents (مرحلة 8) |
+| `0017_technician_code_sequence.sql` | sequence + دالة `next_technician_code()` — صيغة `TECH-000123` (من غير سنة، عكس باقي الأرقام المسلسلة) |
+| `0018_technician_national_id_nullable.sql` | تصحيح: `technician_profiles.national_id_encrypted` بقى NULLable لأن البروفايل بيتعمل تلقائياً وقت التسجيل قبل ما الفني يدخل رقمه القومي |
 
 **ملاحظة:** الجداول المتقدمة (0012-0016) موجودة كاملة في الـ schema من اليوم الأول عشان مفيش تضارب أسماء بعدين، لكن مفيش أي كود في `apps/api` بيستخدمها قبل ما نوصل فعلياً لبوابة المرحلة المعنية (راجع §4 في الماستر بلان).
 

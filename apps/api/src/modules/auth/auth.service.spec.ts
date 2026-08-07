@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
@@ -70,6 +71,7 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         JwtService,
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
           provide: ConfigService,
           useValue: {
