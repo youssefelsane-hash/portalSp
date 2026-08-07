@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Queue } from 'bullmq';
 import { DataSource, In, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
@@ -8,7 +10,9 @@ import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
+import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس).
 // لما لوحة الإدارة تتبني (S9) هتتقرأ من جدول settings بدل ما تكون ثابتة هنا.
@@ -42,12 +46,16 @@ export class MatchingService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
+    private readonly technicianLevelsService: TechnicianLevelsService,
     private readonly events: EventEmitter2,
+    @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue<RoundExpiredJobData>,
   ) {}
 
   /**
    * أقرب فنيين مؤهلين (خدمة + منطقة + متاح + معتمد) لعنوان الطلب، من غير اللي اتبعتلهم قبل كده
-   * على نفس الطلب. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight) الأول،
+   * وبعدين المسافة — مش بديل عن المسافة، فني أعلى مستوى بياخد أولوية جوّه نفس دائرة المؤهلين مش
+   * إنه يتجاهل المسافة تماماً. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
    */
   private findEligibleTechnicians(order: Order): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
@@ -58,13 +66,14 @@ export class MatchingService {
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
+      LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
       WHERE tp.verification_status = 'approved'
         AND tp.is_available = true
         AND tp.is_on_duty = true
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
-      ORDER BY distance_km ASC
+      ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
       [order.serviceId, order.serviceZoneId, order.addressId, order.id, BATCH_SIZE],
@@ -112,6 +121,16 @@ export class MatchingService {
     );
     await this.assignments.save(rows);
     this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
+
+    // مهلة حقيقية مجدولة (مش انتظار سلبي) — لو محدش رد (لا قبول ولا رفض صريح) خلال
+    // RESPONSE_TIMEOUT_SECONDS، الـ processor بيقفل الجولة دي ويبعت التالية أوتوماتيك.
+    // jobId ثابت (orderId:round) يمنع أي تكرار لو dispatchNextRound اتنادى مرتين بالغلط لنفس الجولة.
+    await this.roundsQueue.add(
+      ROUND_EXPIRED_JOB,
+      { orderId: order.id, round: nextRound },
+      { delay: RESPONSE_TIMEOUT_SECONDS * 1000, jobId: roundExpiredJobId(order.id, nextRound) },
+    );
+
     return { dispatched: rows.length };
   }
 
@@ -155,6 +174,7 @@ export class MatchingService {
    */
   async accept(userId: string, orderId: string): Promise<Order> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const levelConfig = await this.technicianLevelsService.getOrThrow(profile.currentLevel);
 
     const order = await this.dataSource.transaction(async (manager) => {
       const order = await manager
@@ -168,6 +188,15 @@ export class MatchingService {
       }
       if (order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتاخد من فني تاني أو مبقاش متاح', HttpStatus.CONFLICT);
+      }
+      // حد قرار المستوى (technician_level_config.decision_limit_cents) — طلب أكبر من حد الفني
+      // محتاج مستوى أعلى يقبله؛ NULL = بلا حد (المستويات العليا)
+      if (levelConfig.decisionLimitCents !== null && order.totalAmountCents > levelConfig.decisionLimitCents) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `قيمة الطلب أعلى من حد القبول المسموح لمستواك (${levelConfig.decisionLimitCents / 100} جنيه) — لازم ترقية مستوى`,
+          HttpStatus.FORBIDDEN,
+        );
       }
 
       const assignment = await manager.findOne(OrderAssignment, {

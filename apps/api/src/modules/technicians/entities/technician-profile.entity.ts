@@ -1,11 +1,14 @@
 import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 import { GeoJsonPoint } from '../../../common/types/geo-json';
 
+// مطابق لـ infra/migrations/0027_technician_level_tiers.sql (rename من bronze/silver/gold/platinum
+// + إضافة team_leader) — إعدادات كل مستوى (عمولة/أولوية/حد قرار) في technician_level_config.
 export enum TechnicianLevel {
-  BRONZE = 'bronze',
-  SILVER = 'silver',
-  GOLD = 'gold',
-  PLATINUM = 'platinum',
+  NEW = 'new',
+  VERIFIED = 'verified',
+  PROFESSIONAL = 'professional',
+  PREMIUM = 'premium',
+  TEAM_LEADER = 'team_leader',
 }
 
 export enum TechnicianVerificationStatus {
@@ -17,6 +20,16 @@ export enum TechnicianVerificationStatus {
   APPROVED = 'approved',
   REJECTED = 'rejected',
   SUSPENDED = 'suspended',
+}
+
+// فني مستقل، أو عضو جوّه شركة/فريق (infra/migrations/0026) — owner/manager عندهم سلطة
+// إدارة الفريق، supervisor/worker أعضاء عاديين. منفصل تماماً عن roles/permissions الإدارية.
+export enum TechnicianTeamRole {
+  INDEPENDENT = 'independent',
+  OWNER = 'owner',
+  MANAGER = 'manager',
+  SUPERVISOR = 'supervisor',
+  WORKER = 'worker',
 }
 
 // مطابق لـ infra/migrations/0005_customers_technicians.sql
@@ -42,7 +55,7 @@ export class TechnicianProfile {
     type: 'enum',
     enum: TechnicianLevel,
     enumName: 'technician_level',
-    default: TechnicianLevel.BRONZE,
+    default: TechnicianLevel.NEW,
   })
   currentLevel: TechnicianLevel;
 
@@ -111,6 +124,15 @@ export class TechnicianProfile {
 
   @Column({ name: 'emergency_available', type: 'boolean', default: false })
   emergencyAvailable: boolean;
+
+  @Column({ name: 'company_id', type: 'uuid', nullable: true })
+  companyId: string | null;
+
+  @Column({ name: 'branch_id', type: 'uuid', nullable: true })
+  branchId: string | null;
+
+  @Column({ name: 'team_role', type: 'varchar', length: 20, default: TechnicianTeamRole.INDEPENDENT })
+  teamRole: TechnicianTeamRole;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

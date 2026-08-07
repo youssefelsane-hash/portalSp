@@ -6,6 +6,7 @@ import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
@@ -28,12 +29,25 @@ export class PaymentsService {
     private readonly catalogService: CatalogService,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
+    private readonly technicianLevelsService: TechnicianLevelsService,
     private readonly auditLog: AuditLogService,
   ) {}
 
+  /**
+   * عمولة المنصة = عمولة الخدمة الأساسية + فرق مستوى الفني (سالب عادةً — مستوى أعلى يعني عمولة
+   * منصة أقل، حافز جودة حقيقي). المجموع محدود بين 0 و100% دفاعياً حتى لو إعدادات المستوى غلط.
+   */
   private async computeSettlement(order: Order): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number }> {
     const service = await this.catalogService.findServiceOrThrow(order.serviceId);
-    const commissionRateApplied = Number(service.commissionPercentage);
+    let commissionRateApplied = Number(service.commissionPercentage);
+
+    if (order.technicianId) {
+      const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
+      const levelConfig = await this.technicianLevelsService.getOrThrow(technicianProfile.currentLevel);
+      commissionRateApplied += Number(levelConfig.commissionAdjustmentPercentage);
+      commissionRateApplied = Math.min(100, Math.max(0, commissionRateApplied));
+    }
+
     const platformCommissionCents = Math.round((order.totalAmountCents * commissionRateApplied) / 100);
     const technicianEarningCents = order.totalAmountCents - platformCommissionCents;
     return { platformCommissionCents, technicianEarningCents, commissionRateApplied };

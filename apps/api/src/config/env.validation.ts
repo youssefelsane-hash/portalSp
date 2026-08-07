@@ -14,4 +14,6 @@ export const envValidationSchema = Joi.object({
 
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
+
+  REDIS_URL: Joi.string().uri().default('redis://localhost:6379'),
 });

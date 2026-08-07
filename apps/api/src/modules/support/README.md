@@ -5,7 +5,7 @@
 **الحالة: شغال (S8) — complaints بالكامل، support_tickets/complaint_attachments لسه.**
 
 - `complaint-state-machine.ts`: نفس فلسفة `orders/order-state-machine.ts` — انتقالات مقفولة (`open→under_investigation→resolved/rejected→closed`)، أي انتقال مش معرّف يترفض.
-- **`POST /complaints`**: العميل أو الفني يفتح شكوى، اختيارياً مربوطة بطلب — لو مربوطة، بيتحقق إن الفاتح فعلاً طرف في الطلب، وبيحدد الطرف التاني المُشتكى منه أوتوماتيك.
+- **`POST /complaints`**: العميل أو الفني يفتح شكوى، اختيارياً مربوطة بطلب — لو مربوطة، بيتحقق إن الفاتح فعلاً طرف في الطلب، وبيحدد الطرف التاني المُشتكى منه أوتوماتيك. بيصدر حدث `complaint.filed` (بره الـ transaction) — `notifications` بيوجّهه لدور `support_agent` عبر `notification_routing_rules` (تفاصيل في `../notifications/README.md`).
 - **الرسائل**: كل طرف (عميل/فني/أدمن) يقدر يرد، بس الأدمن بس يقدر يكتب `is_internal_note` — لو عميل/فني حاول يبعتها، بتتحول لرسالة عادية تلقائياً (مش بترفض الطلب، بس بتتجاهل العلم). العميل والفني ميشوفوش الملاحظات الداخلية خالص.
 - **`POST /admin/complaints/:id/resolve`**: لو فيه `compensation_cents`، التعويض بيتحوّل فعلياً لمحفظة صاحب الشكوى (عميل أو فني) جوّه نفس الـ transaction اللي بتقفل الشكوى — و الـ state machine بيمنع حل شكوى اتحلت قبل كده أصلاً، فده حماية مزدوجة ضد تعويض مكرر.
 - **بَقّة حقيقية اتكشفت واتصلحت أثناء الاختبار**: مسارات `GET /complaints/:id`، `GET/POST /complaints/:id/messages` كانت مقفولة على الأدمن بالـ RBAC (`@Roles(CUSTOMER, TECHNICIAN)` بس على مستوى الكلاس)، رغم إن منطق الـ service كان أصلاً بيتعامل مع الأدمن كـ participant دايماً. يعني فريق الدعم كان مش هيقدر يقرا ولا يرد على أي شكوى. اتصلحت بـ `@Roles` على مستوى الـ method لكل endpoint، مش بس الكلاس.

@@ -1,7 +1,9 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { PAYOUT_REQUIRES_REVIEW_EVENT, PayoutRequiresReviewEvent } from '../../common/events/payout-requires-review.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -23,6 +25,7 @@ export class PayoutsService {
     private readonly walletsService: WalletsService,
     private readonly auditLog: AuditLogService,
     private readonly settingsService: SettingsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   private async nextPayoutNumber(manager: EntityManager): Promise<string> {
@@ -74,6 +77,12 @@ export class PayoutsService {
         reviewedAt: isAutoApproved ? new Date() : null,
       });
       await manager.save(payout);
+      return payout;
+    }).then((payout) => {
+      // بره الـ transaction عمداً — نفس فلسفة كل حدث تاني في الكود ده
+      if (payout.payoutStatus === PayoutStatus.UNDER_REVIEW) {
+        this.events.emit(PAYOUT_REQUIRES_REVIEW_EVENT, new PayoutRequiresReviewEvent(payout.id, payout.payoutNumber, payout.amountCents));
+      }
       return payout;
     });
   }
