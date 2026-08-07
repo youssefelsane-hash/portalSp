@@ -16,6 +16,7 @@ import { GeoModule } from './modules/geo/geo.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { TechniciansModule } from './modules/technicians/technicians.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { OrdersModule } from './modules/orders/orders.module';
 import { HealthModule } from './modules/common/health/health.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { HealthModule } from './modules/common/health/health.module';
     CustomersModule,
     TechniciansModule,
     CatalogModule,
+    OrdersModule,
     HealthModule,
   ],
   providers: [

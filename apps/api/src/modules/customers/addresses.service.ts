@@ -20,7 +20,7 @@ export class AddressesService {
     return this.addresses.find({ where: { userId }, order: { isDefault: 'DESC', createdAt: 'DESC' } });
   }
 
-  private async findOwnedOrThrow(userId: string, addressId: string): Promise<Address> {
+  async findOwnedOrThrow(userId: string, addressId: string): Promise<Address> {
     const address = await this.addresses.findOne({ where: { id: addressId, userId } });
     if (!address) {
       throw new ApiException(ErrorCode.VAL_001, 'العنوان غير موجود', HttpStatus.NOT_FOUND);
