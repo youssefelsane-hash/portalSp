@@ -1,0 +1,12 @@
+{
+  "name": "@baytak/migrations",
+  "version": "1.0.0",
+  "private": true,
+  "description": "مُشغّل الـ SQL migrations لقاعدة بيانات baytak — مصدر الحقيقة الوحيد لبنية الجداول",
+  "scripts": {
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "pg": "^8.11.5"
+  }
+}
