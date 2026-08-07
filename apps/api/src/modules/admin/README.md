@@ -30,11 +30,14 @@
 
 اتقفلت فجوة تانية كانت هنا: مفيش endpoint ولا كتابة تلقائية للأحداث الإدارية. دلوقتي موصولة فعلياً — 10 أفعال إدارية حساسة عبر 5 موديولات بتسجّل مين عمل إيه وإمتى وقبل/بعد التعديل، مقصورة على `super_admin` بس (`audit.view`). التفاصيل الكاملة والاختبار في `../audit/README.md`.
 
+## إعدادات النظام (`GET/PATCH /admin/settings`)
+
+فجوة تالتة اتقفلت: `GET/PATCH /admin/settings` بقت شغالة فعلياً وموصولة بمستهلك حقيقي (`PayoutsService`) مش مجرد CRUD شكلي — تغيير حد أدنى الصرف عبر الـ API أثّر فوراً على قرار حقيقي من غير أي تعديل كود. التفاصيل الكاملة والاختبار في `../settings/README.md`.
+
 **لسه من غير من §13.7** (فجوة موثّقة، مش سهو):
 - `GET /admin/customers` + `/:id/block`
 - `PATCH /admin/orders/:id/adjust-price`
 - `POST /admin/technicians/:id/suspend`, `PATCH /admin/technicians/:id/level`
-- `GET/PATCH /admin/settings` — جدول `settings` موجود من `infra/migrations/0011` بس مفيش endpoints.
 - `GET /admin/reports/technicians`, `GET /admin/reports/zones`.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §13.7 و `../../../../docs/01-master-plan.md` §2.4.

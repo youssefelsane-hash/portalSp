@@ -3,15 +3,16 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { RequestPayoutDto } from './dto/request-payout.dto';
 import { Payout, PayoutStatus } from './entities/payout.entity';
 import { WalletsService } from './wallets.service';
 
-// مطابق للقيم الافتراضية في infra/migrations/0011_system.sql (settings.payouts.*) —
-// لما لوحة الإدارة تتبني هتتقرأ من جدول settings بدل ما تكون ثابتة هنا (نفس ملاحظة matching).
-const MIN_PAYOUT_AMOUNT_CENTS = 20_000;
-const AUTO_APPROVE_LIMIT_CENTS = 100_000;
+// نفس القيم اللي كانت مزروعة في infra/migrations/0011_system.sql — دلوقتي بتتقرا فعلياً من
+// settings مش ثابتة، والقيم هنا مجرد fallback لو الإعداد مش موجود لأي سبب (مش المصدر الحقيقي).
+const MIN_PAYOUT_AMOUNT_CENTS_FALLBACK = 20_000;
+const AUTO_APPROVE_LIMIT_CENTS_FALLBACK = 100_000;
 
 @Injectable()
 export class PayoutsService {
@@ -21,6 +22,7 @@ export class PayoutsService {
     private readonly techniciansService: TechniciansService,
     private readonly walletsService: WalletsService,
     private readonly auditLog: AuditLogService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   private async nextPayoutNumber(manager: EntityManager): Promise<string> {
@@ -31,16 +33,24 @@ export class PayoutsService {
   }
 
   async requestPayout(technicianUserId: string, dto: RequestPayoutDto): Promise<Payout> {
-    if (dto.amount_cents < MIN_PAYOUT_AMOUNT_CENTS) {
+    const minPayoutAmountCents = await this.settingsService.getNumber(
+      'payouts.min_amount_cents',
+      MIN_PAYOUT_AMOUNT_CENTS_FALLBACK,
+    );
+    if (dto.amount_cents < minPayoutAmountCents) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        `أقل مبلغ صرف مسموح ${MIN_PAYOUT_AMOUNT_CENTS / 100} جنيه`,
+        `أقل مبلغ صرف مسموح ${minPayoutAmountCents / 100} جنيه`,
         HttpStatus.BAD_REQUEST,
       );
     }
 
     const technicianProfile = await this.techniciansService.findByUserIdOrThrow(technicianUserId);
     const wallet = await this.walletsService.findByUserIdOrThrow(technicianUserId);
+    const autoApproveLimitCents = await this.settingsService.getNumber(
+      'payouts.auto_approve_limit_cents',
+      AUTO_APPROVE_LIMIT_CENTS_FALLBACK,
+    );
 
     return this.dataSource.transaction(async (manager) => {
       // reserveForPayout بيقفل الصف ويرفض لو الرصيد مش كافي — ده اللي بيمنع صرفين متزامنين
@@ -48,7 +58,7 @@ export class PayoutsService {
       await this.walletsService.reserveForPayout(wallet.id, dto.amount_cents, manager);
 
       const payoutNumber = await this.nextPayoutNumber(manager);
-      const isAutoApproved = dto.amount_cents <= AUTO_APPROVE_LIMIT_CENTS;
+      const isAutoApproved = dto.amount_cents <= autoApproveLimitCents;
 
       const payout = manager.create(Payout, {
         payoutNumber,
