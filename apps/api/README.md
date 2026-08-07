@@ -124,6 +124,12 @@
 - الحظر (`POST /admin/employees/:userId/block`) بيستخدم آلية `users.is_blocked` الموجودة أصلاً، وبيسحب كل الأدوار وبيلغي كل الـ refresh tokens فوراً — تعطيل فعلي مقدر، مع توثيق صريح للفجوة المعمارية الموجودة أصلاً (لا يوجد فحص قاعدة بيانات لكل طلب في `JwtStrategy`، فـ access token قديم لسه ساري لحد 15 دقيقة يقدر يستخدم أي فعل مفتوح، لكن أي فعل محتاج صلاحية بيترفض فوراً عبر `PermissionsGuard`).
 - **باگ حقيقي اتلقط واتصلح وقت الاختبار الحي**: فلتر `is_active` في القائمة كان بيستخدم `@Type(() => Boolean)` اللي بيحوّل أي string غير فاضي (حتى `"false"`) لـ `true` — اتصلح بنفس الـ pattern الموجود في `promotions`. التفاصيل الكاملة والاختبار في `admin/README.md`.
 
+**شركات/فرق الفنيين (`/technician/company`) — فني مستقل أو عضو في فريق/شركة بفروع:**
+
+- مفهوم واحد (`technician_companies` + `technician_company_branches`, `infra/migrations/0026`) يغطي "الفريق" و"الشركة" سوا — فريق صغير هو ببساطة شركة من غير سجل تجاري رسمي. `team_role` (`owner`/`manager`/`supervisor`/`worker`) على `technician_profiles`، منفصل تماماً عن roles/permissions الإدارية.
+- ذاتية الإدارة بالكامل: فني بينشئ شركة (`POST /technician/company`) ويبقى owner، هو أو أي manager يضيف فروع وأعضاء بـ`technician_code`. إشراف الأدمن (`/admin/technician-companies`) read-only بالكامل عمداً.
+- اتعمله اختبار حقيقي بـ3 فنيين مسجّلين فعلياً: owner أنشأ شركة وفرع، ضاف manager، والـ**manager نفسه** (مش الـowner) ضاف worker — إثبات إن السلطة المفوّضة شغالة. worker اترفض من الإدارة لكن قدر يشوف، حماية الـowner من الحذف/التعديل اتأكدت، وكل عملية اتسجّلت في سجل التدقيق. التفاصيل الكاملة في `technicians/README.md`.
+
 **باقي الموديولات لسه هياكل فاضية (README بس) — الخطوة الجاية.**
 
 ## التشغيل محلياً
