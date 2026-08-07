@@ -28,6 +28,9 @@ export class Service {
   @Column({ name: 'short_description_ar', type: 'varchar', length: 255, nullable: true })
   shortDescriptionAr: string | null;
 
+  @Column({ name: 'full_description_ar', type: 'text', nullable: true })
+  fullDescriptionAr: string | null;
+
   @Column({ name: 'icon_url', type: 'text', nullable: true })
   iconUrl: string | null;
 

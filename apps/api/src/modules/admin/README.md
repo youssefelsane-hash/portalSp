@@ -34,7 +34,6 @@
 - `GET /admin/customers` + `/:id/block`
 - `PATCH /admin/orders/:id/adjust-price`
 - `POST /admin/technicians/:id/suspend`, `PATCH /admin/technicians/:id/level`
-- `GET/POST /admin/services` (CRUD)
 - `GET/PATCH /admin/settings` — جدول `settings` موجود من `infra/migrations/0011` بس مفيش endpoints.
 - `GET /admin/reports/technicians`, `GET /admin/reports/zones`.
 
