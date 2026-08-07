@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { User, UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -24,6 +25,7 @@ export class AdminPromotionsController {
   ) {}
 
   @Post('promo-codes')
+  @RequirePermission('promotions.manage')
   async create(@CurrentUser() admin: JwtPayload, @Body() dto: CreatePromoCodeDto) {
     return toPromoCodeResponseDto(await this.promoCodesService.create(admin.sub, dto));
   }
@@ -36,6 +38,7 @@ export class AdminPromotionsController {
 
   @Post('promo-codes/:id/deactivate')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('promotions.manage')
   async deactivate(@Param('id', ParseUUIDPipe) id: string) {
     return toPromoCodeResponseDto(await this.promoCodesService.deactivate(id));
   }
@@ -43,6 +46,7 @@ export class AdminPromotionsController {
   // نقاط ولاء يدوية (تعويض، هدية عيد ميلاد، ...) — مسار إداري بس، مفيش قاعدة تلقائية موصّلة لسه
   @Post('customers/:userId/loyalty/credit')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('loyalty.manage')
   async creditLoyalty(@Param('userId', ParseUUIDPipe) userId: string, @Body() dto: ManualLoyaltyCreditDto) {
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) {

@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -19,6 +20,7 @@ export class AdminSupportController {
   }
 
   @Post(':id/resolve')
+  @RequirePermission('complaints.resolve')
   async resolve(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -28,6 +30,7 @@ export class AdminSupportController {
   }
 
   @Post(':id/reject')
+  @RequirePermission('complaints.resolve')
   async reject(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -37,6 +40,7 @@ export class AdminSupportController {
   }
 
   @Post(':id/close')
+  @RequirePermission('complaints.resolve')
   async close(@Param('id', ParseUUIDPipe) id: string) {
     return toComplaintResponseDto(await this.supportService.close(id));
   }

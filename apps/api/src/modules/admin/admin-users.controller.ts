@@ -1,0 +1,44 @@
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { UserType } from '../auth/entities/user.entity';
+import { JwtPayload } from '../auth/types/authenticated-request';
+import { AssignRoleDto } from './dto/assign-role.dto';
+import { PermissionsService } from './permissions.service';
+
+// إدارة الأدوار الإدارية الدقيقة — super_admin بس (roles.manage) يقدر يمنح/يسحب دور من أدمن تاني.
+@Controller('admin')
+@Roles(UserType.ADMIN)
+export class AdminUsersController {
+  constructor(private readonly permissionsService: PermissionsService) {}
+
+  @Get('roles')
+  listRoles() {
+    return this.permissionsService.listRoles();
+  }
+
+  @Get('users/:userId/roles')
+  listUserRoles(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.permissionsService.listUserRoles(userId);
+  }
+
+  @Post('users/:userId/roles')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('roles.manage')
+  async assignRole(
+    @CurrentUser() admin: JwtPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: AssignRoleDto,
+  ) {
+    await this.permissionsService.assignRole(admin.sub, userId, dto.role_name);
+    return this.permissionsService.listUserRoles(userId);
+  }
+
+  @Delete('users/:userId/roles/:roleName')
+  @RequirePermission('roles.manage')
+  async revokeRole(@Param('userId', ParseUUIDPipe) userId: string, @Param('roleName') roleName: string) {
+    await this.permissionsService.revokeRole(userId, roleName);
+    return this.permissionsService.listUserRoles(userId);
+  }
+}

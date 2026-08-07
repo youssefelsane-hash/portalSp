@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -29,6 +30,7 @@ export class AdminTechniciansController {
 
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
   async approve(@CurrentUser() admin: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const { profile, user } = await this.adminTechniciansService.approve(admin.sub, id);
     return toAdminTechnicianResponseDto(profile, user);
@@ -36,6 +38,7 @@ export class AdminTechniciansController {
 
   @Post(':id/reject')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
   async reject(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -47,6 +50,7 @@ export class AdminTechniciansController {
 
   @Post(':id/documents/:documentId/review')
   @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.review_documents')
   async reviewDocument(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

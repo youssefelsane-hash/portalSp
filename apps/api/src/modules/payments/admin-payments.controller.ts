@@ -1,5 +1,6 @@
 import { Body, Controller, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -19,6 +20,7 @@ export class AdminPaymentsController {
   ) {}
 
   @Post('orders/:id/refund')
+  @RequirePermission('refunds.issue')
   async refundOrder(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -28,11 +30,13 @@ export class AdminPaymentsController {
   }
 
   @Post('payouts/:id/approve')
+  @RequirePermission('payouts.approve')
   async approvePayout(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return toPayoutResponseDto(await this.payoutsService.adminApprove(user.sub, id));
   }
 
   @Post('payouts/:id/reject')
+  @RequirePermission('payouts.approve')
   async rejectPayout(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -42,6 +46,7 @@ export class AdminPaymentsController {
   }
 
   @Post('payouts/:id/complete')
+  @RequirePermission('payouts.approve')
   async completePayout(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return toPayoutResponseDto(await this.payoutsService.adminComplete(user.sub, id));
   }

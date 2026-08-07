@@ -11,6 +11,7 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AuthModule } from './modules/auth/auth.module';
 import { GeoModule } from './modules/geo/geo.module';
 import { CustomersModule } from './modules/customers/customers.module';
@@ -60,6 +61,7 @@ import { HealthModule } from './modules/common/health/health.module';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule implements NestModule {
