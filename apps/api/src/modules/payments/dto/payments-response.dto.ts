@@ -74,6 +74,11 @@ export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
   };
 }
 
+export interface CardPaymentResponseDto {
+  payment: PaymentResponseDto;
+  redirect_url: string;
+}
+
 export interface PayoutResponseDto {
   id: string;
   payout_number: string;

@@ -91,6 +91,42 @@ export interface UpdateServiceBody extends Partial<CreateServiceBody> {
   is_active?: boolean;
 }
 
+export interface ServiceZonePricingResponseDto {
+  id: string;
+  service_id: string;
+  service_zone_id: string;
+  price_cents: number;
+  inspection_fee_cents: number;
+  surge_multiplier: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UpsertZonePricingBody {
+  service_zone_id: string;
+  price_cents: number;
+  inspection_fee_cents?: number;
+  surge_multiplier?: number;
+}
+
+export type SkillLevel = 'beginner' | 'standard' | 'expert';
+
+export interface EligibleTechnicianResponseDto {
+  id: string;
+  service_id: string;
+  technician_id: string;
+  skill_level: SkillLevel;
+  is_active: boolean;
+  completed_count: number;
+  average_rating: number | null;
+  created_at: string;
+}
+
+export interface AssignTechnicianServiceBody {
+  technician_id: string;
+  skill_level?: SkillLevel;
+}
+
 export interface ServiceLevelPricingResponseDto {
   id: string;
   service_id: string;

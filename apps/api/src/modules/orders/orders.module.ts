@@ -9,8 +9,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
-import { STORAGE_SERVICE } from '../../common/storage/storage.service';
-import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
+import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AdminCancellationReasonsController } from './admin-cancellation-reasons.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { AdminOrdersService } from './admin-orders.service';
@@ -54,7 +53,7 @@ import { OrderMedia } from './entities/order-media.entity';
     OrderTrackingGateway,
     AdminOrdersService,
     CancellationReasonsService,
-    { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService },
+    storageServiceProvider,
   ],
   exports: [OrdersService],
 })

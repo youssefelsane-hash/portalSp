@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
-import { STORAGE_SERVICE } from '../../common/storage/storage.service';
+import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { AdminTechnicianCompaniesController } from './admin-technician-companies.controller';
@@ -56,7 +55,7 @@ import { TechnicianProfile } from './entities/technician-profile.entity';
     TechnicianLevelsService,
     TechnicianStatsService,
     TechnicianStatsProcessor,
-    { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService },
+    storageServiceProvider,
   ],
   exports: [TechniciansService, TechnicianLevelsService, TechnicianStatsService],
 })

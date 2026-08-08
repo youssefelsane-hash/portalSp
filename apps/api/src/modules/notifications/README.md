@@ -5,7 +5,17 @@
 **الحالة: شغال (دعم بنية تحتية عبر الموديولات).**
 
 - **الأجهزة**: `POST /devices` بيسجّل/يحدّث جهاز بـ `device_id` فريد — لو الجهاز ده كان مسجّل قبل كده لمستخدم تاني (خروج وتسجيل دخول بحساب مختلف على نفس الموبايل)، بتتنقل ملكيته للمستخدم الحالي أوتوماتيك (اتعمله اختبار فعلي). `DELETE /devices/:deviceId` بيلغي تفعيل جهاز بتاعك بس — جهاز مش موجود أو مش بتاعك بيرجّع نفس رسالة "غير موجود" (مفيش تسريب معلومة إن الجهاز موجود لمستخدم تاني).
-- **بوابة الإرسال قابلة للتبديل**: `NotificationDispatcher` (`common/notifications/`) نفس فلسفة `StorageService` — التنفيذ الحالي `LogOnlyNotificationDispatcher` بيسجّل في اللوج بس ويعتبر الإرسال ناجح فوراً لقناة `in_app`، وبيفحص فعلياً وجود target (فحص FCM token / رقم / بريد) قبل ما يعتبر أي قناة تانية "sent". مفيش بوابة FCM/SMS/SMTP/WhatsApp حقيقية لسه (زي التعامل مع OTP في `auth` بالظبط — مسجّل في اللوج للتطوير المحلي، موثّق صراحة، مش وهمي بصمت).
+- **بوابة الإرسال قابلة للتبديل**: `NotificationDispatcher` (`common/notifications/`) نفس فلسفة `StorageService`/`PaymentGateway`. `CompositeNotificationDispatcher` (الافتراضي دلوقتي) بيوجّه كل قناة لبوابتها الحقيقية المستقلة — `in_app` لسه دايماً عبر `LogOnlyNotificationDispatcher` (مفيش بوابة خارجية أصلاً، بيتخزن في القاعدة نفسها)، والباقي:
+
+  | القناة | البوابة الحقيقية | env vars |
+  |---|---|---|
+  | `push` | `FcmPushDispatcher` (Firebase Cloud Messaging، `firebase-admin`) | `FIREBASE_SERVICE_ACCOUNT_JSON` |
+  | `sms` | `TwilioSmsDispatcher` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM_NUMBER` |
+  | `whatsapp` | `TwilioWhatsAppDispatcher` (نفس حساب Twilio، رقم WhatsApp منفصل) | + `TWILIO_WHATSAPP_FROM_NUMBER` |
+  | `email` | `SmtpEmailDispatcher` (`nodemailer`، أي بوابة SMTP — SendGrid/Mailgun/SES/Gmail) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` |
+
+  كل قناة `isConfigured` مستقلة عن الباقي — لو ناقص أي env var لقناة معيّنة، `CompositeNotificationDispatcher` بيرجّعها تلقائياً لـ`LogOnlyNotificationDispatcher` (نفس السلوك القديم بالظبط: تسجيل في اللوج، "delivered" لو فيه target فعلاً، فشل واضح لو مفيش) — تفعيل قناة واحدة (push مثلاً) من غير الباقي شغال عادي، مفيش تبعية بين القنوات. تفاصيل الحصول على كل قيمة ومكانها بالظبط: `docs/03-external-integrations.md`.
+  - **اتأكد حياً**: `in_app` لسه شغال زي ما هو (صفر رجعة، اتأكد بطلب حقيقي ولّد 3 إشعارات in_app متتالية بنجاح). مسار `complaint.filed → ops_manager` (بقناتين `in_app`+`email` عبر `notification_routing_rules`) اتأكد إنه لسه بيعدّي صح عبر `CompositeNotificationDispatcher` الجديد من غير أي كسر — شكوى حقيقية اتفتحت وولّدت الإشعارين المتوقعين بالضبط.
 - **`notify()`**: بيسجّل صف `notifications` دايماً حتى لو فشل الإرسال الفعلي — أي استثناء من البوابة بيتلقّف ويتسجّل كـ `delivery_status=failed` مع `failure_reason` واضح، ومبيفشلش العملية اللي استدعته (طلب اتقبل، مثلاً، لازم ينجح حتى لو الإشعار فشل).
 - **`notifyMultiChannel()`**: بيبعت نفس الحدث على أكتر من قناة، كل قناة صف مستقل بمصير مستقل.
 - **الاستماع للأحداث** (`listeners/`): بدون أي استدعاء مباشر من الموديولات التانية — كل حاجة عبر `EventEmitter2`:
@@ -18,7 +28,7 @@
   - `rating.submitted` (حدث جديد، `ratings.service.ts createRating()` — كانت فجوة موثّقة، اتقفلت) → إشعار مباشر للطرف اللي اتقيّم (عميل أو فني، أي اتجاه) بعدد النجوم، مستقل تماماً عن `rating.low_rating_submitted` تحت (ده بيتوجّه لـ`support_agent` بس لو التقييم منخفض).
 - **`GET /notifications`**: صفحات + فلتر `unread_only`. `GET /notifications/unread-count`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`.
 - **اتعمله اختبار end-to-end فعلي شامل** على قاعدة بيانات حقيقية وسيرفر شغال: تسجيل عميل → إشعار ترحيب اتسجّل تلقائي وظهر في القايمة. تسجيل جهاز بـ fcm_token وجهاز من غير token (الحالة الواقعية إن الكلاينت لسه ملحقش ياخد التوكن). دورة طلب كاملة (إنشاء → قبول → في الطريق → وصل → بدأ → خلص) وكل خطوة ولّدت إشعار العميل الصح بالترتيب الصح، وقبول الطلب ولّد إشعار للفني كمان. إلغاء العميل لطلب مقبول ولّد إشعار "العميل لغى الطلب" للفني. `mark-all-read` رجّع العدد الصح وصفّر `unread_count`. جهاز مش موجود ومحاولة إلغاء جهاز مستخدم تاني الاتنين رجّعوا نفس رسالة "غير موجود". تسجيل نفس `device_id` تحت مستخدم تاني نقل الملكية فعلياً (اتأكد من `user_id` في القاعدة). قناة `push` من غير أي جهاز فعّال برجع `failed` مع سبب واضح، ومع جهاز عنده `fcm_token` برجع `sent` — الاتنين اتأكد منهم مباشرة عبر `NotificationsService.notify()` (مش بس عبر endpoint، عشان مفيش مسار HTTP بيبعت push مباشرة دلوقتي).
-- **لسه من غير**: قنوات `sms`/`whatsapp` بترجع targets فعلية (رقم المستخدم) بس من غير بوابة إرسال حقيقية — هتفشل بأمان لحد ما تتوصل ببوابة حقيقية.
+- ~~لسه من غير: قنوات sms/whatsapp بترجع targets فعلية بس من غير بوابة إرسال حقيقية~~ — **اتقفلت**، تفاصيل فوق.
 
 ## توجيه الإشعارات الداخلية حسب الدور (`notification_routing_rules`) — جديد (S10، نقطة 10)
 

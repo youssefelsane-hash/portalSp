@@ -1,7 +1,9 @@
 import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
 import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
+import { ServiceZonePricing } from '../entities/service-zone-pricing.entity';
 import { Service } from '../entities/service.entity';
+import { TechnicianService } from '../entities/technician-service.entity';
 
 export interface AdminServiceCategoryResponseDto {
   id: string;
@@ -90,6 +92,58 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     is_active: service.isActive,
     launch_phase: service.launchPhase,
     created_at: service.createdAt.toISOString(),
+  };
+}
+
+// كانت بترجع entity خام (camelCase: serviceZoneId, priceCents, ...) بدل DTO زي كل حاجة تانية في
+// المشروع — بَقّة حقيقية اتلقطت واتصلحت وقت بناء شاشة تفاصيل الخدمة في apps/admin (تفاصيل في
+// catalog/README.md). الاستجابة القديمة اتأكدت حياً بـ curl مباشر قبل الإصلاح.
+export interface ServiceZonePricingResponseDto {
+  id: string;
+  service_id: string;
+  service_zone_id: string;
+  price_cents: number;
+  inspection_fee_cents: number;
+  surge_multiplier: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export function toServiceZonePricingResponseDto(pricing: ServiceZonePricing): ServiceZonePricingResponseDto {
+  return {
+    id: pricing.id,
+    service_id: pricing.serviceId,
+    service_zone_id: pricing.serviceZoneId,
+    price_cents: pricing.priceCents,
+    inspection_fee_cents: pricing.inspectionFeeCents,
+    surge_multiplier: Number(pricing.surgeMultiplier),
+    is_active: pricing.isActive,
+    created_at: pricing.createdAt.toISOString(),
+  };
+}
+
+// نفس البَقّة بالظبط (entity خام camelCase) — تفاصيل فوق.
+export interface EligibleTechnicianResponseDto {
+  id: string;
+  service_id: string;
+  technician_id: string;
+  skill_level: string;
+  is_active: boolean;
+  completed_count: number;
+  average_rating: number | null;
+  created_at: string;
+}
+
+export function toEligibleTechnicianResponseDto(row: TechnicianService): EligibleTechnicianResponseDto {
+  return {
+    id: row.id,
+    service_id: row.serviceId,
+    technician_id: row.technicianId,
+    skill_level: row.skillLevel,
+    is_active: row.isActive,
+    completed_count: row.completedCount,
+    average_rating: row.averageRating === null ? null : Number(row.averageRating),
+    created_at: row.createdAt.toISOString(),
   };
 }
 

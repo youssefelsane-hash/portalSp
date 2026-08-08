@@ -37,6 +37,15 @@ export function isOrderCancellable(status: OrderStatus): boolean {
   return CANCELLABLE_STATUSES.includes(status);
 }
 
+// مطابق حرفياً لـ REASSIGNABLE_STATUSES في apps/api/src/modules/orders/admin-orders.service.ts —
+// التعيين اليدوي متاح بس قبل ما أي فني يقبل الطلب (searching_technician/technician_assigned).
+// بعد accepted الباك-إند بيرفض (409) — الاستبدال بعد القبول لازم يعدّي من مسار الشكوى.
+const REASSIGNABLE_STATUSES: OrderStatus[] = ['searching_technician', 'technician_assigned'];
+
+export function isOrderReassignable(status: OrderStatus): boolean {
+  return REASSIGNABLE_STATUSES.includes(status);
+}
+
 const CANCELLED_STATUSES: OrderStatus[] = [
   'cancelled_by_customer',
   'cancelled_by_technician',

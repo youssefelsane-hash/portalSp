@@ -5,8 +5,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { Order } from '../orders/entities/order.entity';
-import { STORAGE_SERVICE } from '../../common/storage/storage.service';
-import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
+import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AdminSupportController } from './admin-support.controller';
 import { AdminSupportTicketsController } from './admin-support-tickets.controller';
 import { SupportController } from './support.controller';
@@ -30,7 +29,7 @@ import { SupportTicket } from './entities/support-ticket.entity';
   providers: [
     SupportService,
     SupportTicketsService,
-    { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService },
+    storageServiceProvider,
   ],
   exports: [SupportService, SupportTicketsService],
 })
