@@ -130,8 +130,8 @@ export class PaymentsService {
 
     // عمولة المنصة والفني بتتسوّى دايماً عبر محفظة المنصة، حتى في الكاش — الفني فعلياً
     // ماسك الكاش من العميل، فده تسوية محاسبية داخلية مش تحويل فلوس حقيقي (موثّق في README).
-    if (technicianEarningCents > 0) {
-      const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId!);
+    if (technicianEarningCents > 0 && order.technicianId) {
+      const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
       const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
       const technicianWallet = await this.walletsService.getOrCreateWallet(
         technicianProfile.userId,

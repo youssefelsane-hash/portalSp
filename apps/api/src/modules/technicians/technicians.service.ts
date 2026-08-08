@@ -18,7 +18,16 @@ export class TechniciansService {
     return profile;
   }
 
-  async findByProfileIdOrThrow(profileId: string): Promise<TechnicianProfile> {
+  // بَقّة حقيقية اتلقطت واتصلحت: TypeORM بيسقط أي خاصية قيمتها JS null من findOne({where})
+  // بدل ما يولّد "id IS NULL" — يعني findOne({where:{id: null}}) كان بيرجّع صف عشوائي (أول
+  // صف بترتيب فحص الفهرس، مش الأقدم إنشاءً) بدل ما يرجع فاضي. الفحص الصريح ده بيمنع أي استدعاء
+  // بقيمة null/undefined (حتى لو TypeScript مقتنع إنها string بسبب `!` غير موثوق) من يوصل
+  // للـ query أصلاً. اتلقطت وقت اختبار حي لدفع طلب اتعمله بـ raw SQL بتقنية "أعمى" (technician_id
+  // فاضي) — العمولة اترحّلت فعلياً لمحفظة فني عشوائي غير مرتبط بالطلب. راجع payments/README.md.
+  async findByProfileIdOrThrow(profileId: string | null | undefined): Promise<TechnicianProfile> {
+    if (!profileId) {
+      throw new ApiException(ErrorCode.VAL_001, 'بروفايل الفني غير موجود', HttpStatus.NOT_FOUND);
+    }
     const profile = await this.technicianProfiles.findOne({ where: { id: profileId } });
     if (!profile) {
       throw new ApiException(ErrorCode.VAL_001, 'بروفايل الفني غير موجود', HttpStatus.NOT_FOUND);
