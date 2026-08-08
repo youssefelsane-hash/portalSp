@@ -14,6 +14,7 @@ import type {
   ServiceZonePricingResponseDto,
   SkillLevel,
   TechnicianLevel,
+  UpdateServiceBody,
   UpsertLevelPricingBody,
   UpsertZonePricingBody,
 } from '@baytak/shared-types';
@@ -211,6 +212,38 @@ export default function ServiceDetailPage() {
     }
   }
 
+  async function handleUpdateServiceDetails(e: FormEvent) {
+    e.preventDefault();
+    const form = new FormData(e.target as HTMLFormElement);
+    const minPrice = form.get('min_price') as string;
+    const maxPrice = form.get('max_price') as string;
+    const body: UpdateServiceBody = {
+      short_description_ar: (form.get('short_description_ar') as string) || undefined,
+      min_price_cents: minPrice ? Math.round(Number(minPrice) * 100) : undefined,
+      max_price_cents: maxPrice ? Math.round(Number(maxPrice) * 100) : undefined,
+      warranty_days: Number(form.get('warranty_days')),
+      estimated_duration_minutes: form.get('estimated_duration_minutes')
+        ? Number(form.get('estimated_duration_minutes'))
+        : undefined,
+      requires_photos: form.get('requires_photos') === 'on',
+      allows_scheduling: form.get('allows_scheduling') === 'on',
+      allows_emergency: form.get('allows_emergency') === 'on',
+    };
+    setIsSaving(true);
+    setError(null);
+    try {
+      const updated = await authedFetch<AdminServiceResponseDto>(`/admin/services/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      setService(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   if (!service) {
     return (
       <AppShell>
@@ -228,6 +261,73 @@ export default function ServiceDetailPage() {
         </Button>
       </div>
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">تفاصيل الخدمة</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleUpdateServiceDetails} className="flex flex-col gap-3">
+            <Label htmlFor="svc_desc">وصف مختصر</Label>
+            <Input id="svc_desc" name="short_description_ar" defaultValue={service.short_description_ar ?? ''} />
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_min_price">أقل سعر (جنيه)</Label>
+                <Input
+                  id="svc_min_price"
+                  name="min_price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={service.min_price_cents !== null ? service.min_price_cents / 100 : ''}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_max_price">أعلى سعر (جنيه)</Label>
+                <Input
+                  id="svc_max_price"
+                  name="max_price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={service.max_price_cents !== null ? service.max_price_cents / 100 : ''}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_warranty">أيام الضمان</Label>
+                <Input id="svc_warranty" name="warranty_days" type="number" min="0" defaultValue={service.warranty_days} required />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_duration">المدة المتوقعة (دقيقة)</Label>
+                <Input
+                  id="svc_duration"
+                  name="estimated_duration_minutes"
+                  type="number"
+                  min="1"
+                  defaultValue={service.estimated_duration_minutes ?? ''}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="requires_photos" defaultChecked={service.requires_photos} />
+                محتاجة صور قبل/بعد
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="allows_scheduling" defaultChecked={service.allows_scheduling} />
+                يسمح بالحجز المجدول
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="allows_emergency" defaultChecked={service.allows_emergency} />
+                يسمح بطلب طارئ
+              </label>
+            </div>
+            <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
+              حفظ تفاصيل الخدمة
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card>
