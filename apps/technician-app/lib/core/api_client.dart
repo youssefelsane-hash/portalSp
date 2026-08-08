@@ -1,7 +1,18 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'api_config.dart';
 import 'api_exception.dart';
+
+// الباك-إند بيرفض أي ملف Content-Type مش image/jpeg|png|webp صراحة (TechnicianOrderExecutionController
+// ALLOWED_MIME_TYPES) — MultipartFile.fromBytes من غير contentType بيبعت application/octet-stream
+// افتراضياً فبيترفض. بنحدده يدوياً من امتداد الملف بدل ما نعتمد على تخمين http package.
+MediaType _mediaTypeForFilename(String filename) {
+  final lower = filename.toLowerCase();
+  if (lower.endsWith('.png')) return MediaType('image', 'png');
+  if (lower.endsWith('.webp')) return MediaType('image', 'webp');
+  return MediaType('image', 'jpeg');
+}
 
 Future<http.Response> _send(
   String method,
@@ -70,4 +81,42 @@ Future<List<Map<String, dynamic>>> apiRequestList(
 }) async {
   final data = await _apiRequestRaw('GET', path, accessToken: accessToken);
   return (data as List<dynamic>).cast<Map<String, dynamic>>();
+}
+
+// رفع ملف (multipart/form-data) — مستقل عن apiRequest عادي لأن الـ body مش JSON هنا.
+// مطابق لعقد POST /technician/orders/:id/media (حقل 'file' + fields زي 'media_type'/'caption').
+Future<Map<String, dynamic>?> apiUpload(
+  String path, {
+  required List<int> fileBytes,
+  required String filename,
+  required Map<String, String> fields,
+  String? accessToken,
+}) async {
+  final uri = Uri.parse('$apiBaseUrl$path');
+  final request = http.MultipartRequest('POST', uri)
+    ..fields.addAll(fields)
+    ..files.add(http.MultipartFile.fromBytes(
+      'file',
+      fileBytes,
+      filename: filename,
+      contentType: _mediaTypeForFilename(filename),
+    ));
+  if (accessToken != null) {
+    request.headers['Authorization'] = 'Bearer $accessToken';
+  }
+  final streamedResponse = await request.send();
+  final response = await http.Response.fromStream(streamedResponse);
+  final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+  final success = decoded['success'] as bool? ?? false;
+
+  if (!success) {
+    final error = decoded['error'] as Map<String, dynamic>?;
+    throw ApiException(
+      code: error?['code'] as String? ?? 'UNKNOWN',
+      message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+      statusCode: response.statusCode,
+    );
+  }
+
+  return decoded['data'] as Map<String, dynamic>?;
 }

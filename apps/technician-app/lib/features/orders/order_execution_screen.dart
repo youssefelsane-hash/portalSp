@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../media/media_repository.dart';
 import 'order.dart';
 import 'orders_repository.dart';
+
+// قبل/بعد الشغل — عتبة بسيطة على الحالة بدل قايمة صور فعلية (مفيش GET /technician/orders/:id
+// لاسترجاع صور اترفعت قبل كده لو التطبيق اتقفل وفتح تاني، نفس فجوة الاستمرارية الموثّقة فوق).
+const Set<String> _beforePhotoStatuses = {'accepted', 'technician_on_way', 'technician_arrived'};
+const Set<String> _afterPhotoStatuses = {'in_progress', 'work_completed'};
 
 class OrderExecutionScreen extends StatefulWidget {
   final Order initialOrder;
@@ -16,15 +23,46 @@ class OrderExecutionScreen extends StatefulWidget {
 
 class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   late final OrdersRepository _repository;
+  late final MediaRepository _mediaRepository;
   late Order _order;
   bool _acting = false;
+  bool _uploadingPhoto = false;
   String? _error;
+  String? _photoMessage;
 
   @override
   void initState() {
     super.initState();
-    _repository = OrdersRepository(context.read<AuthRepository>());
+    final auth = context.read<AuthRepository>();
+    _repository = OrdersRepository(auth);
+    _mediaRepository = MediaRepository(auth);
     _order = widget.initialOrder;
+  }
+
+  Future<void> _uploadPhoto(String mediaType, String labelAr) async {
+    final picker = ImagePicker();
+    final XFile? picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+    if (picked == null) return;
+
+    setState(() {
+      _uploadingPhoto = true;
+      _error = null;
+      _photoMessage = null;
+    });
+    try {
+      final bytes = await picked.readAsBytes();
+      await _mediaRepository.upload(
+        orderId: _order.id,
+        fileBytes: bytes,
+        filename: picked.name,
+        mediaType: mediaType,
+      );
+      if (mounted) setState(() => _photoMessage = 'صورة $labelAr اترفعت ✅');
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
   }
 
   Future<void> _runAction(String action) async {
@@ -100,6 +138,26 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
+            if (_photoMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(_photoMessage!, style: const TextStyle(color: Colors.green)),
+            ],
+            if (_beforePhotoStatuses.contains(_order.orderStatus) ||
+                _afterPhotoStatuses.contains(_order.orderStatus)) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _uploadingPhoto
+                    ? null
+                    : () => _uploadPhoto(
+                          _beforePhotoStatuses.contains(_order.orderStatus) ? 'before_photo' : 'after_photo',
+                          _beforePhotoStatuses.contains(_order.orderStatus) ? 'قبل الشغل' : 'بعد الشغل',
+                        ),
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: _uploadingPhoto
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(_beforePhotoStatuses.contains(_order.orderStatus) ? 'صوّر قبل الشغل' : 'صوّر بعد الشغل'),
+              ),
             ],
             const SizedBox(height: 24),
             if (isDone)

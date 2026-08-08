@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>محتاجين نوصل للكاميرا عشان تصوّر الشغل قبل/بعد الصيانة.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>محتاجين نوصل لمكتبة الصور لو حبيت ترفع صورة محفوظة بدل ما تصوّر واحدة جديدة.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
