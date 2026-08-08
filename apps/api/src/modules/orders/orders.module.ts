@@ -6,6 +6,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
 import { GeoModule } from '../geo/geo.module';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { STORAGE_SERVICE } from '../../common/storage/storage.service';
 import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
@@ -14,6 +15,7 @@ import { AdminOrdersService } from './admin-orders.service';
 import { OrdersController } from './orders.controller';
 import { TechnicianOrderExecutionController } from './technician-order-execution.controller';
 import { OrdersService } from './orders.service';
+import { OrderAutoCancelService } from './order-auto-cancel.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTrackingGateway } from './order-tracking.gateway';
 import { Order } from './entities/order.entity';
@@ -28,12 +30,14 @@ import { OrderMedia } from './entities/order-media.entity';
     GeoModule,
     TechniciansModule,
     PromotionsModule,
+    SettingsModule,
     AuditModule,
     JwtModule.register({}),
   ],
   controllers: [OrdersController, TechnicianOrderExecutionController, AdminOrdersController],
   providers: [
     OrdersService,
+    OrderAutoCancelService,
     OrderMediaService,
     OrderTrackingGateway,
     AdminOrdersService,

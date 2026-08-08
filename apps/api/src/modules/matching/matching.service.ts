@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { DataSource, In, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
+import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
@@ -144,7 +145,12 @@ export class MatchingService {
     return { dispatched: rows.length };
   }
 
+  // بَقّة حقيقية اتلقطت واتصلحت وقت بناء order-auto-cancel.service.ts (تفاصيل في orders/README.md):
+  // الدالة دي كانت بتلغي الطلب فعلياً بس من غير ما تصدّر order.status_changed خالص — يعني العميل
+  // (والفني لو موجود) محدش كان بيوصله أي إشعار "مفيش فني قبل طلبك" رغم إن `OrderStatusNotificationListener`
+  // أصلاً بيعالج `CANCELLED_BY_SYSTEM` وكان جاهز يستقبل الحدث ده من زمان.
   private async cancelForNoTechnicians(order: Order): Promise<void> {
+    const reason = 'ORDR_002: لا يوجد فنيون متاحون حالياً';
     await this.dataSource.transaction(async (manager) => {
       order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
       order.cancelledAt = new Date();
@@ -155,10 +161,23 @@ export class MatchingService {
           previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
           newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
           changeSource: OrderChangeSource.SYSTEM,
-          reason: 'ORDR_002: لا يوجد فنيون متاحون حالياً',
+          reason,
         }),
       );
     });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(
+        order.id,
+        order.orderNumber,
+        OrderStatus.SEARCHING_TECHNICIAN,
+        OrderStatus.CANCELLED_BY_SYSTEM,
+        order.customerId,
+        order.technicianId,
+        reason,
+      ),
+    );
   }
 
   async listAvailableForTechnician(userId: string): Promise<AvailableOrderRow[]> {
