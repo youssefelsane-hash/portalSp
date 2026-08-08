@@ -51,10 +51,20 @@
 فجوة كانت هنا في القائمة تحت اتقفلت: ترقية/تخفيض مستوى الفني بقت فعل حقيقي (`technicians.approve`)، وسياسة كل مستوى (عمولة/أولوية/حد قرار/أهلية قيادة فريق) بقت قابلة للتعديل بالكامل عبر `technician_levels.manage`. التفاصيل الكاملة والاختبار في `../technicians/README.md`.
 
 **لسه من غير من §13.7** (فجوة موثّقة، مش سهو):
-- `GET /admin/customers` + `/:id/block`
-- `PATCH /admin/orders/:id/adjust-price`
-- `POST /admin/technicians/:id/suspend`
-- `GET /admin/reports/technicians`, `GET /admin/reports/zones`.
+- `GET /admin/reports/zones` (ملحوظة: `GET /admin/reports/technicians` كانت موثّقة هنا كناقصة بالغلط — موجودة فعلاً، راجع "لوحة التحكم الموسّعة" تحت).
 - حذف حساب موظف (soft-delete) — دلوقتي الأداة الوحيدة هي `block` (تعطيل)، مفيش `DELETE` endpoint حقيقي.
+
+~~`POST /admin/technicians/:id/suspend`~~ — كانت فجوة موثّقة هنا، اتقفلت. التفاصيل الكاملة والاختبار الحي في `../technicians/README.md`.
+
+~~`PATCH /admin/orders/:id/adjust-price`~~ — كانت فجوة موثّقة هنا، اتقفلت. التفاصيل الكاملة والاختبار الحي في `../orders/README.md`.
+
+## إدارة العملاء (`GET /admin/customers`, `/:userId`, `/:userId/block`, `/:userId/unblock`) — كانت فجوة موثّقة، اتقفلت
+
+كانت §13.7 موثّقة إن مفيش أي endpoint إداري لعرض/حظر العملاء رغم إن `customer_profiles` (إحصائيات طلبات/إنفاق/نقاط ولاء/تصنيف/high-risk، من `0016_phase8_home_management.sql` أو قبلها) كانت موجودة أصلاً بس مش معروضة لحد. اتضافت صلاحية جديدة `customers.manage` (`infra/migrations/0033_customers_manage_permission.sql`، `super_admin` بس حالياً — بالظبط نفس نمط `0025_employees_manage_permission.sql`) وبنية `AdminCustomersController`/`AdminCustomersService` بتتبع نفس نمط `AdminEmployeesController`:
+
+- **`GET /admin/customers?customer_tier=&is_high_risk=&is_blocked=&phone_number=`** + **`GET /admin/customers/:userId`**: مفتوحة لأي أدمن (قراءة مش حساسة زي باقي كنترولرز الإدارة). بترجّع بروفايل العميل كامل (المستوى، عدد الطلبات الكلي/المكتمل/الملغي، إجمالي الإنفاق، رصيد نقاط الولاء، متوسط التقييم اللي العميل ديه، علم high-risk، تواريخ أول/آخر طلب).
+- **`POST /admin/customers/:userId/block`** / **`.../unblock`** (`customers.manage`): بيستخدم نفس آلية `users.is_blocked`/`blocked_reason` الموجودة أصلاً — نفس الحقول اللي `auth.service.ts` بيتحقق منها وقت الدخول وتدوير الـ refresh token. **فرق مقصود عن حظر الموظفين**: العملاء مالهمش أي صف في `user_roles` أصلاً (RBAC للأدمن بس)، فالحظر هنا بيلغي `refresh_tokens` النشطة فقط (`revoked_reason='admin_block'`) من غير أي محاولة حذف أدوار مش موجودة. بيرفض حظر عميل محظور بالفعل (409).
+- **اتعمله اختبار حي فعلي كامل بعد التشغيل الحقيقي**: `GET /admin/customers` رجّع العميل التجريبي الحقيقي؛ حظر بسبب قصير (أقل من 3 حروف) اترفض بالتحقق (`VAL_001`)؛ حظر بسبب صحيح نجح وظهر `is_blocked=true`/`blocked_reason` صح فوراً في الرد وفي `psql` مباشرة؛ محاولة حظر تاني لنفس العميل اترفضت 409؛ فلتر `?is_blocked=true` رجّع نفس العميل بس؛ `audit_logs` سجّلت `customer.blocked` بالسبب الصح؛ فك الحظر رجّع الحساب لحالته الأصلية (اتأكد بـ`psql`)؛ وأهم اختبار — أدمن `ops_manager` (عنده أدوار تانية بس مش `customers.manage`) حاول يحظر عميل فاترفض 403 (`AUTH_001`، "دورك الإداري مش مديك صلاحية العملية دي") — يثبت إن `PermissionsGuard` شغالة صح على الكنترولر الجديد.
+- **حاجات لسه ناقصة عمداً**: مفيش `PATCH /admin/customers/:userId` لتعديل البيانات (مفيش حقل واضح المفروض الأدمن يعدله غير الحظر نفسه — الاسم/الهاتف بييجوا من مسار OTP الذاتي)، ومفيش `DELETE`/soft-delete (نفس فجوة الموظفين بالظبط). حظر العميل هنا بيمنعه يدخل بس **مش** بيلغي طلباته الحالية (السلوك ده متعمد — لو فيه طلب شغال، الإلغاء له مسار تاني `admin-orders.service.ts`).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §13.7 و `../../../../docs/01-master-plan.md` §2.4.

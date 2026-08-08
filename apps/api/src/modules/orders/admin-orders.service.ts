@@ -1,17 +1,31 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Between, DataSource, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, DataSource, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
+import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { Order, OrderStatus } from './entities/order.entity';
+import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
+
+// حالات مايصحش نعدّل السعر فيها: بعد الدفع (لازم يعدّي من استرداد/تحصيل إضافي حقيقي، مش
+// تعديل رقم خام) أو في أي حالة نهائية (اتلغى/انتهت صلاحيته/اتردله فلوسه) — التعديل هنا
+// أداة تشغيلية لتصحيح السعر *قبل* التسوية المالية بس.
+const PRICE_LOCKED_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.COMPLETED,
+  OrderStatus.CANCELLED_BY_CUSTOMER,
+  OrderStatus.CANCELLED_BY_TECHNICIAN,
+  OrderStatus.CANCELLED_BY_SYSTEM,
+  OrderStatus.EXPIRED,
+  OrderStatus.REFUNDED,
+  OrderStatus.DISPUTED,
+]);
 
 // الحالات اللي التعيين اليدوي مسموح فيها — قبل ما أي فني يقبل الطلب. بعد القبول
 // (accepted فما بعده) الإلغاء/الاستبدال لازم يعدّي من مسار الشكوى، مش تعيين مباشر،
@@ -156,6 +170,17 @@ export class AdminOrdersService {
     await this.dataSource.transaction(async (manager) => {
       order.technicianId = technician.id;
 
+      // كانت فجوة موثّقة: التعيين اليدوي مكانش بيلغي عروض الجولة الأصلية (sent/viewed) لباقي
+      // الفنيين المرشحين — فني تاني كان يفضل شايف الطلب في GET /technician/orders/available
+      // لحد ما يحاول يقبله فيترفض بأمان وقتها (الحالة بقت مش searching_technician)، مش تعيين
+      // مزدوج حقيقي، بس تجربة استخدام مش نضيفة. نفس النمط بالظبط المُستخدم في
+      // matching.service.ts's accept() — إلغاء صريح بدل ما نستنى الرفض وقت المحاولة.
+      await manager.update(
+        OrderAssignment,
+        { orderId, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
+        { assignmentStatus: AssignmentStatus.CANCELLED, respondedAt: now },
+      );
+
       // لازم نعدّي بنفس المسارين المعرّفين في order-state-machine.ts بالظبط
       // (searching_technician→technician_assigned→accepted)، مش قفزة مباشرة —
       // التعيين اليدوي معناه إن الأدمن أكّد مع الفني تليفونياً بالفعل، فمفيش
@@ -203,6 +228,50 @@ export class AdminOrdersService {
       entityId: order.id,
       oldValues: { order_status: previousStatus, technician_id: null },
       newValues: { order_status: order.orderStatus, technician_id: technician.id },
+      meta,
+    });
+
+    return order;
+  }
+
+  async adjustPrice(
+    adminUserId: string,
+    orderId: string,
+    newTotalAmountCents: number,
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
+    const order = await this.findOrThrow(orderId);
+    if (order.paymentStatus === OrderPaymentStatus.PAID) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        'الطلب اتدفع بالفعل — مينفعش تعدّل السعر مباشرة، لازم يعدّي من مسار استرداد/تحصيل إضافي',
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (PRICE_LOCKED_STATUSES.has(order.orderStatus)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تعدّل سعر الطلب وهو في حالة ${order.orderStatus}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (newTotalAmountCents === order.totalAmountCents) {
+      throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد نفس السعر الحالي', HttpStatus.CONFLICT);
+    }
+
+    const previousTotal = order.totalAmountCents;
+    order.totalAmountCents = newTotalAmountCents;
+    await this.orders.save(order);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.price_adjusted_by_admin',
+      entityType: 'order',
+      entityId: order.id,
+      oldValues: { total_amount_cents: previousTotal },
+      newValues: { total_amount_cents: newTotalAmountCents, reason },
       meta,
     });
 

@@ -1,4 +1,4 @@
-import type { ApiEnvelope } from '@baytak/shared-types';
+import type { ApiEnvelope, ApiMeta } from '@baytak/shared-types';
 
 export class ApiError extends Error {
   code: string;
@@ -41,4 +41,33 @@ export async function apiFetch<T>(
   }
 
   return envelope.data as T;
+}
+
+// زي apiFetch بس بيرجّع meta (page/per_page/total) كمان — للـ endpoints اللي بترجع قايمة
+// مُقسّمة صفحات (ResponseInterceptor في apps/api بيكتشف شكل {items, meta} تلقائي ويفكّه).
+export async function apiFetchPaginated<T>(
+  path: string,
+  accessToken: string | null,
+  options: RequestInit = {},
+): Promise<{ items: T[]; meta: ApiMeta }> {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  const envelope = (await res.json()) as ApiEnvelope<T[]>;
+
+  if (!res.ok || !envelope.success) {
+    throw new ApiError(
+      envelope.error?.code ?? 'UNKNOWN',
+      envelope.error?.message ?? 'حصل خطأ غير متوقع',
+      res.status,
+    );
+  }
+
+  return { items: envelope.data ?? [], meta: envelope.meta ?? {} };
 }

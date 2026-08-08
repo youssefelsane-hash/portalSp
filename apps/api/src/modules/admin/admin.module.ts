@@ -8,8 +8,11 @@ import { Payout } from '../payments/entities/payout.entity';
 import { Rating } from '../ratings/entities/rating.entity';
 import { SettingsModule } from '../settings/settings.module';
 import { Complaint } from '../support/entities/complaint.entity';
+import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AdminAuditController } from './admin-audit.controller';
+import { AdminCustomersController } from './admin-customers.controller';
+import { AdminCustomersService } from './admin-customers.service';
 import { AdminEmployeesController } from './admin-employees.controller';
 import { AdminEmployeesService } from './admin-employees.service';
 import { AdminReportsController } from './admin-reports.controller';
@@ -36,14 +39,22 @@ import { PermissionsService } from './permissions.service';
       UserRole,
       User,
       EmployeeProfile,
+      CustomerProfile,
       RefreshToken,
       Payout,
     ]),
     AuditModule,
     SettingsModule,
   ],
-  controllers: [AdminReportsController, AdminUsersController, AdminAuditController, AdminSettingsController, AdminEmployeesController],
-  providers: [AdminReportsService, PermissionsService, AdminEmployeesService],
+  controllers: [
+    AdminReportsController,
+    AdminUsersController,
+    AdminAuditController,
+    AdminSettingsController,
+    AdminEmployeesController,
+    AdminCustomersController,
+  ],
+  providers: [AdminReportsService, PermissionsService, AdminEmployeesService, AdminCustomersService],
   exports: [PermissionsService],
 })
 export class AdminModule {}

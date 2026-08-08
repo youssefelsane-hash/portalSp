@@ -160,6 +160,23 @@ export class AdminTechniciansService {
     return withUser;
   }
 
+  // كانت فجوة موثّقة (§13.7): مفيش endpoint لتعليق فني معتمد. الـ state machine
+  // (technician-verification-state-machine.ts) كانت أصلاً بتسمح بـ APPROVED→SUSPENDED
+  // وSUSPENDED→APPROVED/REJECTED من زمان — بس مفيش method/route كانت بتستخدمها. الفني
+  // المُعلَّق بيتشال أوتوماتيك من الـ matching (matching.service.ts بيفلتر
+  // verification_status='approved' بس)، فمفيش داعي نلمس is_available/is_on_duty يدوياً هنا.
+  async suspend(adminUserId: string, technicianProfileId: string, reason: string, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
+    const profile = await this.transitionVerification(
+      technicianProfileId,
+      adminUserId,
+      TechnicianVerificationStatus.SUSPENDED,
+      reason,
+      meta,
+    );
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
   async reviewDocument(
     adminUserId: string,
     technicianProfileId: string,
