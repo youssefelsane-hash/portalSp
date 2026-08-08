@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../chat/chat_screen.dart';
 import '../media/media_repository.dart';
 import '../tracking/tracking_client.dart';
 import 'order.dart';
@@ -209,6 +210,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),
             ],
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChatScreen(orderId: _order.id)),
+              ),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('الشات مع العميل'),
+            ),
             if (_photoMessage != null) ...[
               const SizedBox(height: 12),
               Text(_photoMessage!, style: const TextStyle(color: Colors.green)),

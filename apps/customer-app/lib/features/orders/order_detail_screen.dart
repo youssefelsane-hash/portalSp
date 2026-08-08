@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../chat/chat_screen.dart';
 import '../payments/payments_repository.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
@@ -139,6 +140,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
+                      if (order.technicianId != null) ...[
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => ChatScreen(orderId: order.id)),
+                          ),
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          label: const Text('الشات مع الفني'),
+                        ),
+                      ],
                       if (_activeTrackingStatuses.contains(order.orderStatus)) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(

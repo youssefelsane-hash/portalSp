@@ -21,7 +21,9 @@
 
 - **التتبع اللحظي (`lib/features/tracking/`)**: `OrderTrackingClient` (Socket.IO عبر `socket_io_client`، namespace `/tracking` مطابق تماماً لـ`order-tracking.gateway.ts`) + `TrackingScreen` — زرار "تتبّع الفني لحظياً" في `OrderDetailScreen` بيظهر لما الطلب في حالة نشطة (`accepted`/`technician_on_way`/`technician_arrived`/`in_progress`، مطابق `ACTIVE_TRACKING_STATUSES`). بيتصل، ينضم لـ`tracking:join`، وبيعرض آخر إحداثيات مستلمة من `order:location_updated` كنص (خط عرض/طول + وقت) — **مفيش خريطة فعلية**، قرار نطاق متعمد زي قرار الـ GPS اليدوي (مفيش package خرائط ولا API key، ومفيش جهاز حقيقي أصلاً لعرضها بصرياً). **باگ حقيقي اتلقط واتصلح وقت الاختبار الحي**: `socket_io_client` بيشارك/يعيد استخدام نفس الـ `Manager` لنفس الـ URI افتراضياً — لما الاختبار احتاج اتصالين متوازيين (عميل+فني) في نفس الـ process، التاني كان بيقفل الأول بصمت (`io client disconnect`). الحل: `.enableForceNew()` على كل اتصال — اتطبّق في الكود الحقيقي (`tracking_client.dart`) مش بس الاختبار، لأن نفس الفخ ممكن يحصل لو المستخدم فتح `TrackingScreen` مرتين بسرعة. **اتعمله اختبار حي حقيقي كامل** (`test_live/order_tracking_live_test.dart`): طلب حقيقي، فني حقيقي قبله، عميل اتصل وانضم فعلاً (`tracking:joined`)، الفني بعت موقع حقيقي عبر `technician:location`، والعميل استلمه فعلاً عبر `order:location_updated` بنفس الإحداثيات بالظبط.
 
-**لسه من غير**: خريطة فعلية للتتبع (نص بس دلوقتي، تفاصيل فوق)، دفع من غير محفظة (بطاقة/فوري)، شات.
+- **الشات مع الفني (`lib/features/chat/`)**: `ChatClient` (Socket.IO namespace `/chat`، مطابق `ChatGateway`) + `ChatScreen` — زرار "الشات مع الفني" بيظهر في `OrderDetailScreen` لما `technician_id` يبقى موجود (يعني الفني قبل). الشاشة بتجيب `thread_id` أولاً عبر endpoint جديد اتضاف في الباك-إند خصيصاً لده (`GET /chat/orders/:orderId/thread` — كانت فجوة حقيقية: الخيط بيتعمل تلقائياً وقت القبول بس مفيش كان طريقة للكلاينت يكتشف الـ `thread_id`، تفاصيل كاملة في `../api/src/modules/chat/README.md`)، بعدين تاريخ الرسائل عبر REST، وبعدين تتصل لحظياً. **اتعمله اختبار حي حقيقي كامل** (`test_live/chat_live_test.dart`): طلب حقيقي قبل القبول رجّع `404` صريح على endpoint الخيط الجديد، بعد ما فني حقيقي قبله رجّع الخيط الصح، عميل وفني حقيقيين اتصلوا بـ WebSocket وتبادلوا رسالتين حقيقيتين لحظياً (كل طرف استقبل رسالة التاني فوراً عبر `chat:message_received`)، وتاريخ الرسائل عبر REST طابق الترتيب والمحتوى بالظبط.
+
+**لسه من غير**: خريطة فعلية للتتبع (نص بس دلوقتي، تفاصيل فوق)، دفع من غير محفظة (بطاقة/فوري).
 
 ## اختبار حي حقيقي — اكتشاف مهم غيّر إستراتيجية الاختبار هنا
 
@@ -34,6 +36,7 @@
 - `test_live/rating_live_test.dart` — تقييم طلب مكتمل + رفض المحاولة التانية (تفاصيل فوق).
 - `test_live/wallet_payment_live_test.dart` — دفع طلب من المحفظة (تفاصيل فوق).
 - `test_live/order_tracking_live_test.dart` — تتبع لحظي حقيقي عبر Socket.IO بين عميل وفني (تفاصيل فوق).
+- `test_live/chat_live_test.dart` — شات لحظي حقيقي بين عميل وفني (تفاصيل فوق).
 
 تشغيلهم: `flutter test test_live/ --dart-define=API_BASE_URL=http://localhost:3000/api/v1` (محتاج `apps/api` شغال فعلاً).
 

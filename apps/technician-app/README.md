@@ -18,6 +18,8 @@
 
 **مشاركة الموقع اللحظي (`lib/features/tracking/`)**: `TechnicianTrackingClient` (Socket.IO namespace `/tracking`، مطابق `customer-app`'s tracking client بالظبط — نفس `.enableForceNew()` الدفاعي) بيتصل أوتوماتيك لما `OrderExecutionScreen` يفتح على طلب في حالة نشطة (`accepted`/`technician_on_way`/`technician_arrived`/`in_progress`). زرار "شارك موقعك مع العميل" بيفتح Dialog لإدخال خط عرض/طول يدوي (نفس قرار GPS اليدوي الموثّق فوق — مفيش `geolocator`) ويبعتهم عبر `technician:location`. ده الجانب المكمّل لتتبع `customer-app` اللي اتعمله اختبار حي كامل بينهم الاتنين (`customer-app/test_live/order_tracking_live_test.dart` بيستخدم نفس آلية `technician:location` مباشرة عبر socket خام، بيثبت المسار كامل — فني حقيقي بعت، عميل حقيقي استقبل).
 
+**الشات مع العميل (`lib/features/chat/`)**: نفس بنية `customer-app` بالظبط (نفس `ChatClient`/`ChatScreen` تقريباً حرفياً) — زرار "الشات مع العميل" ظاهر دايماً في `OrderExecutionScreen` (الشاشة دي أصلاً مبتفتحش غير بعد قبول حقيقي، فالـ thread مضمون موجود). اتعمله اختبار حي كامل من جوّه `customer-app` (`test_live/chat_live_test.dart`) بيثبت نفس المسار اللي التطبيق ده بيستخدمه بالظبط — فني حقيقي وعميل حقيقي بادلوا رسائل لحظية عبر نفس `ChatGateway`.
+
 ## لسه من غير — مهم إنها موثّقة صراحة قبل أي اعتماد إنتاجي
 
 - **باقي الميزات الفعلية**: ملاحة (توجيه فعلي بالخريطة — التتبع نفسه موصّل فوق، الملاحة/الاتجاهات لسه لأ).
