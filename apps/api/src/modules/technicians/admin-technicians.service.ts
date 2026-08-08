@@ -9,12 +9,15 @@ import {
 } from '../../common/events/technician-verification-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
+import { GeoService } from '../geo/geo.service';
+import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { DocumentReviewStatus, TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianLevelChangeType, TechnicianLevelHistory } from './entities/technician-level-history.entity';
 import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { TechnicianZone } from './entities/technician-zone.entity';
 import { canTransitionVerification } from './technician-verification-state-machine';
 
 export interface TechnicianWithUser {
@@ -28,9 +31,11 @@ export class AdminTechniciansService {
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     @InjectRepository(TechnicianDocument) private readonly documents: Repository<TechnicianDocument>,
     @InjectRepository(TechnicianLevelHistory) private readonly levelHistory: Repository<TechnicianLevelHistory>,
+    @InjectRepository(TechnicianZone) private readonly technicianZones: Repository<TechnicianZone>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
+    private readonly geoService: GeoService,
   ) {}
 
   private async attachUsers(profiles: TechnicianProfile[]): Promise<TechnicianWithUser[]> {
@@ -261,5 +266,78 @@ export class AdminTechniciansService {
 
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
+  }
+
+  // ── مناطق العمل ──────────────────────────────────────────────────────
+  // كانت فجوة موثّقة صراحة: technician_zones (اللي matching.service.ts's findEligibleTechnicians
+  // بيفلتر عليها فعلياً) كان تعيينها يدوي عبر SQL مباشر تماماً — مفيش أي endpoint. نفس نمط
+  // technician_services (catalog/admin-catalog.service.ts) بالظبط.
+
+  listZones(technicianProfileId: string): Promise<TechnicianZone[]> {
+    return this.technicianZones.find({ where: { technicianId: technicianProfileId }, order: { createdAt: 'DESC' } });
+  }
+
+  async assignZone(
+    adminUserId: string,
+    technicianProfileId: string,
+    dto: AssignTechnicianZoneDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianZone> {
+    await this.findProfileOrThrow(technicianProfileId);
+    await this.geoService.findServiceZoneOrThrow(dto.service_zone_id);
+
+    const existing = await this.technicianZones.findOne({
+      where: { technicianId: technicianProfileId, serviceZoneId: dto.service_zone_id },
+    });
+    if (existing) {
+      throw new ApiException(ErrorCode.VAL_001, 'المنطقة دي متعيّنة للفني ده بالفعل', HttpStatus.CONFLICT);
+    }
+
+    const zone = this.technicianZones.create({
+      technicianId: technicianProfileId,
+      serviceZoneId: dto.service_zone_id,
+      isPrimary: dto.is_primary ?? false,
+    });
+    await this.technicianZones.save(zone);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_zone.assigned',
+      entityType: 'technician_profile',
+      entityId: technicianProfileId,
+      newValues: { service_zone_id: dto.service_zone_id, is_primary: zone.isPrimary },
+      meta,
+    });
+
+    return zone;
+  }
+
+  /** serviceZoneId هنا هو id نطاق الخدمة نفسه (مش id صف التعيين) — نفس نمط removeTechnician
+   * في technician_services (بيتعامل معاها كمفتاح مركّب technician+zone، مش صف مستقل).
+   *
+   * **بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي**: `repository.softDelete(criteria)` بيبني
+   * `UPDATE ... WHERE <criteria>` من غير `AND deleted_at IS NULL` تلقائي (الاستبعاد التلقائي ده
+   * بس لـ `find`/`findOne`، مش لعمليات الكتابة). يعني نداء `softDelete()` مرتين بنفس المعايير
+   * كان بيطابق نفس الصف الاتنين المرتين ويرجّع `affected: 1` في الاتنين — إزالة مكرّرة كانت
+   * بترجع نجاح (`{removed: true}`) بدل 404 المتوقع. الإصلاح: `findOne` الأول (ده بيستبعد
+   * soft-deleted تلقائياً)، وبعدين `softDelete` بـ `id` الصف الفعلي لو لقيناه.
+   */
+  async removeZone(adminUserId: string, technicianProfileId: string, serviceZoneId: string, meta?: AuditActorMeta): Promise<void> {
+    const existing = await this.technicianZones.findOne({ where: { technicianId: technicianProfileId, serviceZoneId } });
+    if (!existing) {
+      throw new ApiException(ErrorCode.VAL_001, 'المنطقة دي مش متعيّنة للفني ده أصلاً', HttpStatus.NOT_FOUND);
+    }
+    await this.technicianZones.softDelete(existing.id);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_zone.removed',
+      entityType: 'technician_profile',
+      entityId: technicianProfileId,
+      oldValues: { service_zone_id: serviceZoneId },
+      meta,
+    });
   }
 }

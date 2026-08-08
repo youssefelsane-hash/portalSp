@@ -1,3 +1,26 @@
+// مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts (OrderAddressResponseDto) —
+// لزرار "افتح الملاحة" في شاشة تنفيذ الطلب.
+class OrderAddress {
+  final String streetName;
+  final String? landmark;
+  final double latitude;
+  final double longitude;
+
+  OrderAddress({
+    required this.streetName,
+    required this.landmark,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  factory OrderAddress.fromJson(Map<String, dynamic> json) => OrderAddress(
+        streetName: json['street_name'] as String,
+        landmark: json['landmark'] as String?,
+        latitude: (json['latitude'] as num).toDouble(),
+        longitude: (json['longitude'] as num).toDouble(),
+      );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts — نسخة الفني (منفصلة عن
 // AvailableOrder اللي بيرجعها /technician/orders/available، ده الشكل الكامل اللي كل فعل
 // (accept/depart/arrive/start/complete) بيرجّعه بعد تنفيذه).
@@ -8,6 +31,7 @@ class Order {
   final String? problemDescription;
   final int totalAmountCents;
   final String paymentStatus;
+  final OrderAddress? address;
 
   Order({
     required this.id,
@@ -16,6 +40,7 @@ class Order {
     required this.problemDescription,
     required this.totalAmountCents,
     required this.paymentStatus,
+    this.address,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -25,6 +50,9 @@ class Order {
         problemDescription: json['problem_description'] as String?,
         totalAmountCents: json['total_amount_cents'] as int,
         paymentStatus: json['payment_status'] as String,
+        address: json['address'] != null
+            ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
+            : null,
       );
 }
 

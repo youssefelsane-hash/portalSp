@@ -9,7 +9,7 @@ import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/or
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
-import { canTransition } from '../orders/order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianLevelsService } from '../technicians/technician-levels.service';
@@ -61,6 +61,16 @@ export class MatchingService {
    * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight) الأول،
    * وبعدين المسافة — مش بديل عن المسافة، فني أعلى مستوى بياخد أولوية جوّه نفس دائرة المؤهلين مش
    * إنه يتجاهل المسافة تماماً. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   *
+   * **بَقّة حقيقية اتلقطت واتصلحت وقت اختبار حي لميزة تانية (خرائط/ملاحة apps/technician-app)**:
+   * الاستعلام مكانش بيستبعد فني عنده أصلاً طلب نشط (accepted/technician_on_way/...) — يعني نفس
+   * الفني ممكن يتعرض عليه ويقبل أكتر من طلب نشط في نفس الوقت، رغم إن order-tracking.gateway.ts
+   * و`GET /technician/orders/active` الاتنين بيفترضوا ضمنياً (`findOne` مش `find`) إن الفني عنده
+   * طلب نشط واحد بس. اتأكدت البَقّة حياً: نفس الفني قَبِل 4 طلبات "accepted" متزامنة فعلياً في
+   * الـ DB، وده خلّى بث الموقع اللحظي (`technician:location`) يوصل لغرفة الطلب الغلط (أقدم طلب
+   * نشط عشوائياً، مش الطلب اللي العميل بيتابعه فعلياً) — عميل واحد استنى تحديث الموقع ومكانش
+   * هيوصله أبداً. الإصلاح: استبعاد أي فني عنده طلب في `ACTIVE_TECHNICIAN_ORDER_STATUSES` بالفعل
+   * من قائمة المؤهلين من الأساس — نفس مصدر الحقيقة الوحيد المستخدم في order-state-machine.ts.
    */
   private findEligibleTechnicians(order: Order, batchSize: number): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
@@ -78,10 +88,14 @@ export class MatchingService {
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
+        AND tp.id NOT IN (
+          SELECT technician_id FROM orders
+          WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[])
+        )
       ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
-      [order.serviceId, order.serviceZoneId, order.addressId, order.id, batchSize],
+      [order.serviceId, order.serviceZoneId, order.addressId, order.id, batchSize, ACTIVE_TECHNICIAN_ORDER_STATUSES],
     );
   }
 
@@ -225,6 +239,22 @@ export class MatchingService {
           ErrorCode.VAL_001,
           `قيمة الطلب أعلى من حد القبول المسموح لمستواك (${levelConfig.decisionLimitCents / 100} جنيه) — لازم ترقية مستوى`,
           HttpStatus.FORBIDDEN,
+        );
+      }
+
+      // دفاع تاني بعد استبعاد findEligibleTechnicians في dispatchNextRound — بيغطي حالات مش
+      // مغطّاة هناك (تعيين يدوي من الأدمن، أو سباق فني بيقبل عرضين اتبعتوا قبل ما أي حد يتقفل).
+      // بَقّة حقيقية اتلقطت واتصلحت (تفاصيل كاملة في findEligibleTechnicians فوق): فني عنده طلب
+      // نشط بالفعل كان يقدر يقبل طلب تاني، وده كان بيكسر افتراض "طلب نشط واحد بس" في
+      // order-tracking.gateway.ts و`GET /technician/orders/active`.
+      const existingActiveOrder = await manager.findOne(Order, {
+        where: { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES) },
+      });
+      if (existingActiveOrder) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'عندك طلب نشط بالفعل — لازم تخلّصه الأول قبل ما تقبل طلب جديد',
+          HttpStatus.CONFLICT,
         );
       }
 

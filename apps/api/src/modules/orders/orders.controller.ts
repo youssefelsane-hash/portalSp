@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -11,17 +12,23 @@ import { OrdersService } from './orders.service';
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly addressesService: AddressesService,
+  ) {}
 
   @Get()
   async list(@CurrentUser() user: JwtPayload) {
     const orders = await this.ordersService.findAllForCustomerUser(user.sub);
-    return orders.map(toOrderResponseDto);
+    return orders.map((order) => toOrderResponseDto(order));
   }
 
   @Get(':id')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.findOneOwnedOrThrow(user.sub, id));
+    const order = await this.ordersService.findOneOwnedOrThrow(user.sub, id);
+    // العنوان بتاع العميل نفسه — findOwnedOrThrow بيتحقق من الملكية برضه (دفاع مزدوج رخيص)
+    const address = await this.addressesService.findOwnedOrThrow(user.sub, order.addressId);
+    return toOrderResponseDto(order, address);
   }
 
   @Post()

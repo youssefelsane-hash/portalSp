@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -7,12 +7,14 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminTechniciansService } from './admin-technicians.service';
 import { toAdminTechnicianDetailResponseDto, toAdminTechnicianResponseDto } from './dto/admin-technician-response.dto';
+import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { SuspendTechnicianDto } from './dto/suspend-technician.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
+import { toTechnicianZoneResponseDto } from './dto/technician-zone-response.dto';
 
 @Controller('admin/technicians')
 @Roles(UserType.ADMIN)
@@ -93,5 +95,36 @@ export class AdminTechniciansController {
   ) {
     const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto, audit);
     return toTechnicianDocumentResponseDto(document);
+  }
+
+  // كانت فجوة موثّقة صراحة: تعيين مناطق عمل الفني كان يدوي عبر SQL مباشر تماماً.
+  @Get(':id/zones')
+  async listZones(@Param('id', ParseUUIDPipe) id: string) {
+    const zones = await this.adminTechniciansService.listZones(id);
+    return zones.map(toTechnicianZoneResponseDto);
+  }
+
+  @Post(':id/zones')
+  @RequirePermission('technicians.manage_zones')
+  async assignZone(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignTechnicianZoneDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toTechnicianZoneResponseDto(await this.adminTechniciansService.assignZone(admin.sub, id, dto, audit));
+  }
+
+  @Delete(':id/zones/:zoneId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.manage_zones')
+  async removeZone(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('zoneId', ParseUUIDPipe) zoneId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    await this.adminTechniciansService.removeZone(admin.sub, id, zoneId, audit);
+    return { service_zone_id: zoneId, removed: true };
   }
 }

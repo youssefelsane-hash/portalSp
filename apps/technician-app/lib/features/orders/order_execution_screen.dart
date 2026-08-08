@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
@@ -101,6 +102,23 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _trackingClient.sendLocation(latitude: lat, longitude: lng);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتبعت موقعك للعميل')));
+    }
+  }
+
+  // كانت فجوة موثّقة صراحة ("ملاحة فعلية — لسه لأ"): بدل ما نبني خريطة توجيه كاملة جوّه
+  // التطبيق (تعقيد وتكلفة صيانة كبيرين لميزة تطبيقات الخرائط بتعملها أحسن بكتير)، بنفتح تطبيق
+  // خرائط حقيقي (Google Maps مثبّت، وإلا المتصفح) بمسار اتجاهات جاهز لعنوان الطلب مباشرة —
+  // نمط شائع ومعتمد في تطبيقات التوصيل المشابهة. رابط Google Maps العام (`/maps/dir/?api=1`)
+  // بيشتغل عبر المنصات كلها من غير أي مفتاح API أو إعداد إضافي.
+  Future<void> _openNavigation() async {
+    final address = _order.address;
+    if (address == null) return;
+    final uri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=${address.latitude},${address.longitude}',
+    );
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مقدرناش نفتح تطبيق الخرائط')));
     }
   }
 
@@ -229,6 +247,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 icon: const Icon(Icons.share_location_outlined),
                 label: const Text('شارك موقعك مع العميل'),
               ),
+              if (_order.address != null) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _openNavigation,
+                  icon: const Icon(Icons.navigation_outlined),
+                  label: const Text('افتح الملاحة للعنوان'),
+                ),
+              ],
             ],
             if (_beforePhotoStatuses.contains(_order.orderStatus) ||
                 _afterPhotoStatuses.contains(_order.orderStatus)) ...[

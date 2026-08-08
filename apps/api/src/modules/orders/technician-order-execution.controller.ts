@@ -3,11 +3,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
+import { Order } from './entities/order.entity';
 import { OrderMediaService } from './order-media.service';
 import { OrdersService } from './orders.service';
 
@@ -21,7 +23,17 @@ export class TechnicianOrderExecutionController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
+    private readonly addressesService: AddressesService,
   ) {}
+
+  // findByIdOrThrow من غير فحص ملكية عمداً — أي طلب بيوصل هنا أصلاً اتحقق إنه بتاع الفني الحالي
+  // (findOwnedByTechnicianOrThrow/findActiveForTechnician/depart/arrive/... كلهم بيضمنوا كده)،
+  // فالعنوان بتاعه مضمون الوصول ليه. بيتنادى بعد كل فعل تنفيذي عشان زرار "افتح الملاحة" في
+  // apps/technician-app يفضل شغال طول دورة التنفيذ، مش بس أول تحميل للشاشة.
+  private async toDto(order: Order) {
+    const address = await this.addressesService.findByIdOrThrow(order.addressId);
+    return toOrderResponseDto(order, address);
+  }
 
   // مسار حرفي (`active`) لازم يتسجّل قبل `:id` — وإلا NestJS هيحاول يفسّرها كـ UUID ويرفضها
   // (ParseUUIDPipe) قبل ما توصل هنا خالص. كانت فجوة موثّقة صراحة في apps/technician-app/README.md:
@@ -30,33 +42,33 @@ export class TechnicianOrderExecutionController {
   @Get('active')
   async getActive(@CurrentUser() user: JwtPayload) {
     const order = await this.ordersService.findActiveForTechnician(user.sub);
-    return order ? toOrderResponseDto(order) : null;
+    return order ? this.toDto(order) : null;
   }
 
   // نفس الفجوة القديمة (قراءة طلب واحد بالـ id) — كانت موثّقة صراحة، اتقفلت.
   @Get(':id')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
+    return this.toDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
   }
 
   @Post(':id/depart')
   async depart(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.depart(user.sub, id));
+    return this.toDto(await this.ordersService.depart(user.sub, id));
   }
 
   @Post(':id/arrive')
   async arrive(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.arrive(user.sub, id));
+    return this.toDto(await this.ordersService.arrive(user.sub, id));
   }
 
   @Post(':id/start')
   async start(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.start(user.sub, id));
+    return this.toDto(await this.ordersService.start(user.sub, id));
   }
 
   @Post(':id/complete')
   async complete(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.complete(user.sub, id));
+    return this.toDto(await this.ordersService.complete(user.sub, id));
   }
 
   @Post(':id/media')

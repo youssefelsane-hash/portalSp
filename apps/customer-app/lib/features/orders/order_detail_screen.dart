@@ -237,7 +237,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         OutlinedButton.icon(
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => TrackingScreen(orderId: order.id, orderNumber: order.orderNumber),
+                              builder: (_) => TrackingScreen(
+                                orderId: order.id,
+                                orderNumber: order.orderNumber,
+                                destination: order.address,
+                              ),
                             ),
                           ),
                           icon: const Icon(Icons.location_on_outlined),

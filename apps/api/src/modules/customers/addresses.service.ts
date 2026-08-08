@@ -28,6 +28,20 @@ export class AddressesService {
     return address;
   }
 
+  /**
+   * من غير فحص ملكية — للفني اللي معيّن على طلب معيّن (مش صاحب العنوان نفسه)، عشان يشوف
+   * إحداثيات الوصول/الملاحة. الاستدعاء الآمن هنا معتمد على إن الـ caller أصلاً تحقق من إن
+   * الفني معيّن على الطلب ده (نفس حدود الثقة اللي findOwnedByTechnicianOrThrow بيضمنها في
+   * orders.service.ts) — مش endpoint عام يقدر أي حد يجيب بيه أي عنوان بس الـ id.
+   */
+  async findByIdOrThrow(addressId: string): Promise<Address> {
+    const address = await this.addresses.findOne({ where: { id: addressId } });
+    if (!address) {
+      throw new ApiException(ErrorCode.VAL_001, 'العنوان غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return address;
+  }
+
   async create(userId: string, dto: CreateAddressDto): Promise<Address> {
     // التغطية: الخدمة متاحة بس في المناطق اللي فعلاً مُطلقة — docs/01-master-plan.md §6 (S2)
     const isLaunched = await this.geoService.isAreaLaunched(dto.area_id);

@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { Area } from './entities/area.entity';
 import { City } from './entities/city.entity';
 import { ServiceZone } from './entities/service-zone.entity';
@@ -16,6 +17,15 @@ export class GeoService {
 
   findActiveCities(): Promise<City[]> {
     return this.cities.find({ where: { isActive: true }, order: { nameAr: 'ASC' } });
+  }
+
+  /** استخدام عام عبر الموديولات (مش بس geo) — للتحقق إن نطاق خدمة موجود قبل ربطه بحاجة تانية. */
+  async findServiceZoneOrThrow(id: string): Promise<ServiceZone> {
+    const zone = await this.serviceZones.findOne({ where: { id } });
+    if (!zone) {
+      throw new ApiException(ErrorCode.VAL_001, 'نطاق الخدمة غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return zone;
   }
 
   findLaunchedAreas(cityId: string): Promise<Area[]> {
