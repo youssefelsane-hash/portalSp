@@ -7,6 +7,7 @@ import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { OrderChatThreadListener } from './order-chat-thread.listener';
+import { OrderCompletedChatCloseListener } from './order-completed-chat-close.listener';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatThread } from './entities/chat-thread.entity';
 
@@ -16,7 +17,7 @@ import { ChatThread } from './entities/chat-thread.entity';
     JwtModule.register({}),
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway, OrderChatThreadListener],
+  providers: [ChatService, ChatGateway, OrderChatThreadListener, OrderCompletedChatCloseListener],
   exports: [ChatService],
 })
 export class ChatModule {}

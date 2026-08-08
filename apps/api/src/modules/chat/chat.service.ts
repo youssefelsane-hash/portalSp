@@ -85,6 +85,20 @@ export class ChatService {
     return this.messages.find({ where: { threadId }, order: { createdAt: 'ASC' } });
   }
 
+  /**
+   * كانت فجوة موثّقة: `closes_at` كان عمود موجود ومُستخدم فعلاً في فحص `sendMessage()` تحت
+   * (`thread.closesAt.getTime() < Date.now()`)، بس مفيش حاجة كانت بتحطه أصلاً — أي خيط كان
+   * فاضل مفتوح للأبد. بتتنادى من `OrderCompletedChatCloseListener` على `order.status_changed`
+   * لما `newStatus=completed`. Idempotent — استدعاء تاني لنفس الطلب (نادر، بس ممكن لو الحدث
+   * اتصدر مرتين لأي سبب) بيمدّد المهلة بدل ما يكسر حاجة.
+   */
+  async scheduleCloseForOrder(orderId: string): Promise<void> {
+    const thread = await this.threads.findOne({ where: { orderId } });
+    if (!thread) return; // الطلب ممكن يخلص من غير ما فني يقبل أصلاً (نادر) — مفيش خيط يتقفل
+    thread.closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await this.threads.save(thread);
+  }
+
   async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {
     const thread = await this.getThreadForParticipant(userId, threadId);
 
