@@ -113,4 +113,17 @@ class AuthRepository extends ChangeNotifier {
       rethrow;
     }
   }
+
+  // زي authedRequest بس لـ endpoints بترجع قايمة (GET بس، مفيش داعي لـ body).
+  Future<List<Map<String, dynamic>>> authedRequestList(String path) async {
+    try {
+      return await apiRequestList(path, accessToken: _accessToken);
+    } on ApiException catch (err) {
+      if (err.statusCode == 401) {
+        final newToken = await _refresh();
+        return apiRequestList(path, accessToken: newToken);
+      }
+      rethrow;
+    }
+  }
 }

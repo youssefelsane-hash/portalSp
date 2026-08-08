@@ -6,11 +6,13 @@
 
 نفس أساس `apps/customer-app` بالظبط (كود auth منسوخ حرفياً منه، مش معاد اختراعه) — تسجيل دخول OTP كامل ضد `apps/api` الحقيقي، بنفس معمارية الأمان (`access_token` في الذاكرة، `refresh_token` في `flutter_secure_storage`، وحماية single-flight من بَقّة تدوير الـ refresh token — التفاصيل الكاملة في `apps/admin/README.md` و`apps/customer-app/README.md`).
 
-نفس فجوة الاختبار موثّقة هنا: `flutter analyze` نضيف + `flutter test` (widget test بيتأكد من ظهور شاشة الدخول) بس **مفيش اختبار E2E تفاعلي حقيقي على جهاز/محاكي** — مفيش Android/iOS toolchain متاح في بيئة البناء دي (تفاصيل كاملة عن ليه ومحاولة البديل بـ Linux desktop في `apps/customer-app/README.md`).
+**استقبال الطلبات** (`lib/features/orders/`): شاشة رئيسية بعد تسجيل الدخول بتعرض الطلبات المتاحة للفني (`GET /technician/orders/available`) مع مسافة كل طلب والعنوان، وأزرار قبول/رفض حقيقية (`POST /technician/orders/:id/accept|reject`).
+
+نفس اكتشاف اختبار apps/customer-app بالظبط بينطبق هنا (تفاصيل كاملة في `apps/customer-app/README.md`): `test_live/technician_orders_live_test.dart` بيتحقق حياً من تسجيل دخول فني حقيقي (`user_type: technician` بالفعل) وإن `/technician/orders/available` شغال ضد الباك-إند الحقيقي. الجزء اللي لسه مش قابل للاختبار في البيئة دي هو تحديداً رندر الـ UI والتفاعل معاه (نفس السبب: `TestWidgetsFlutterBinding`) — مش منطق الشبكة/الـ auth.
 
 ## لسه من غير — مهم إنها موثّقة صراحة قبل أي اعتماد إنتاجي
 
-- **كل الميزات الفعلية**: استقبال الطلب، قبول/رفض، ملاحة، رفع صور، الأرباح، طلب الصرف.
+- **باقي الميزات الفعلية**: ملاحة، رفع صور قبل/بعد، الأرباح، طلب الصرف.
 - **متطلبات الأمان الإلزامية من `docs/01-master-plan.md` §7.3 — لسه صفر، مش اختيارية**:
   - **SSL pinning** — التطبيق ده بيتعامل مع بيانات مالية حساسة (أرباح، صرف)، فمينفعش يعتمد على التحقق الافتراضي من الشهادة بس.
   - **كشف الأجهزة المكسورة (root/jailbreak)** — لازم قبل السماح بأي عملية مالية.
