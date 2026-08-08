@@ -27,6 +27,7 @@ import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { HealthModule } from './modules/common/health/health.module';
 
 @Module({
@@ -79,6 +80,7 @@ import { HealthModule } from './modules/common/health/health.module';
     NotificationsModule,
     PromotionsModule,
     AdminModule,
+    FeatureFlagsModule,
     HealthModule,
   ],
   providers: [
