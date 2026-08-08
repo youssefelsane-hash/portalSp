@@ -36,6 +36,11 @@ export class OrderStatusHistory {
   @Column({ type: 'text', nullable: true })
   reason: string | null;
 
+  // العمود موجود في القاعدة من migration 0007 الأصلية بس ماكانش متعمّد mapping — أول استخدام
+  // حقيقي هنا (order-items.service.ts بيسجّل لقطة من البنود المرفوضة وقت تراجع العميل عن عرض السعر).
+  @Column({ type: 'jsonb', default: {} })
+  metadata: Record<string, unknown>;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }
