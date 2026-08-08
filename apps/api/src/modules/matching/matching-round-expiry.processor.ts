@@ -1,8 +1,9 @@
 import { Logger } from '@nestjs/common';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bullmq';
 import { In, Repository } from 'typeorm';
+import { getRedisUrl } from '../../config/redis-url.util';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, RoundExpiredJobData } from './matching-rounds.queue';
@@ -13,11 +14,24 @@ import { MatchingService } from './matching.service';
  * ده أول وآخر آلية بتحرّك الطلب في السيناريو ده (موبايل مقفول، تطبيق مقفول، ...). قبل كده
  * الطلب كان بيفضل عالق في searching_technician للأبد لو الفنيين تجاهلوا العرض من غير رفض صريح.
  */
-// skipStalledCheck: true — enableOfflineQueue:false (AppModule) بيخلي فحص الـ stalled jobs
-// الدوري بتاع الـ Worker يرمي أخطاء غير ملتقطة وهو بيحاول ياخد قفل من Redis وقت انقطاعه (ضجيج
-// في اللوج بس، مش عطل حقيقي). آمن نعطّله هنا لأن الجوب بسيط وسريع (إرسال جولة توزيع) ومفيش
-// خطورة حقيقية من job "عالق" — لو حصل نادراً، الطلب هيتحل عادي بأي رفض/قبول تاني يجي.
-@Processor(MATCHING_ROUNDS_QUEUE, { skipStalledCheck: true })
+// اتصال Redis منفصل عن اتصال الـ Queue (producer)، ممرَّر مباشرة (مش عن طريق configKey) — تفاصيل
+// كاملة في technician-stats.processor.ts وREADME: @nestjs/bullmq بيتجاهل configKey تماماً لو فيه
+// Queue متسجّل بنفس الاسم بالفعل (وهو موجود، في MatchingModule)، فالطريقة المضمونة الوحيدة هي
+// override مباشر لـ connection هنا. enableOfflineQueue: false هنا مقصودة (مش نسيان) — راجع الشرح
+// الكامل في technician-stats.processor.ts: enableOfflineQueue الافتراضي (true) بيخلي أوامر زي
+// EVALSHA تتحجز صامتة للأبد لو الاتصال لسه مش ready فعلياً بعد انقطاع، بدل ما تترفض وتدخل مسار
+// إعادة المحاولة بتاع BullMQ.
+@Processor(
+  { name: MATCHING_ROUNDS_QUEUE },
+  {
+    connection: {
+      url: getRedisUrl(),
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: null,
+      retryStrategy: (times: number) => Math.min(times * 200, 5000),
+    },
+  },
+)
 export class MatchingRoundExpiryProcessor extends WorkerHost {
   private readonly logger = new Logger(MatchingRoundExpiryProcessor.name);
 
@@ -27,6 +41,13 @@ export class MatchingRoundExpiryProcessor extends WorkerHost {
     private readonly matchingService: MatchingService,
   ) {
     super();
+  }
+
+  // نفس سبب technician-stats.processor.ts بالظبط — لازم مستمع لـ 'error' وإلا Node بيرمي
+  // الخطأ ده لما محدش مستمع، وده بيوقف mainLoop الداخلي بتاع BullMQ Worker بصمت للأبد.
+  @OnWorkerEvent('error')
+  handleWorkerError(error: Error): void {
+    this.logger.warn(`Worker error (matching-rounds): ${error.message}`);
   }
 
   async process(job: Job<RoundExpiredJobData>): Promise<void> {
