@@ -28,6 +28,7 @@ class OrdersRepository {
     required String addressId,
     String? problemDescription,
     String? promoCode,
+    List<String>? addonIds,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
@@ -35,6 +36,7 @@ class OrdersRepository {
       if (problemDescription != null && problemDescription.isNotEmpty)
         'problem_description': problemDescription,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+      if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
     });
     return Order.fromJson(data!);
   }

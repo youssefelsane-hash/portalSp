@@ -13,4 +13,9 @@ class CatalogRepository {
     final items = await apiRequestList('/services$query');
     return items.map(CatalogService.fromJson).toList();
   }
+
+  Future<List<ServiceAddon>> fetchAddons(String serviceId) async {
+    final items = await apiRequestList('/services/$serviceId/addons');
+    return items.map(ServiceAddon.fromJson).toList();
+  }
 }

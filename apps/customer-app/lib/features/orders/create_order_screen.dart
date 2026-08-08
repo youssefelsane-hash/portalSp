@@ -4,6 +4,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
+import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
@@ -19,6 +20,7 @@ class CreateOrderScreen extends StatefulWidget {
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
+  final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
   final _promoController = TextEditingController();
   Address? _selectedAddress;
@@ -27,11 +29,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   int? _promoDiscountCents;
   String? _promoError;
   String? _error;
+  List<ServiceAddon> _addons = [];
+  final Set<String> _selectedAddonIds = {};
 
   @override
   void initState() {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
+    _loadAddons();
+  }
+
+  // كانت فجوة موثّقة صراحة في catalog/README.md — الباك-إند (POST /orders بياخد addon_ids[])
+  // كان جاهز ومختبر من غير أي UI يستخدمه. فشل تحميل الإضافات مش لازم يمنع إنشاء الطلب نفسه.
+  Future<void> _loadAddons() async {
+    try {
+      final addons = await _catalogRepository.fetchAddons(widget.service.id);
+      if (mounted) setState(() => _addons = addons);
+    } on ApiException {
+      // تجاهل — الإضافات اختيارية بحتة، العميل لسه يقدر يكمل الطلب من غيرها
+    }
   }
 
   Future<void> _pickAddress() async {
@@ -89,6 +105,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         addressId: _selectedAddress!.id,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
+        addonIds: _selectedAddonIds.toList(),
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -130,6 +147,31 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 onTap: _pickAddress,
               ),
             ),
+            if (_addons.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('إضافات اختيارية', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Card(
+                child: Column(
+                  children: _addons
+                      .map(
+                        (addon) => CheckboxListTile(
+                          value: _selectedAddonIds.contains(addon.id),
+                          onChanged: (checked) => setState(() {
+                            if (checked == true) {
+                              _selectedAddonIds.add(addon.id);
+                            } else {
+                              _selectedAddonIds.remove(addon.id);
+                            }
+                          }),
+                          title: Text(addon.nameAr),
+                          secondary: Text('+${_formatEgp(addon.priceCents)}'),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
