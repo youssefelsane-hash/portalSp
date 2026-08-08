@@ -35,4 +35,15 @@ class PaymentsRepository {
     );
     return data!;
   }
+
+  // بيرجّع {payment, redirect_url} — الكولر مسؤول يفتح redirect_url في WebView (نفس نمط
+  // "الباك-إند جاهز، مفيش ولا مسؤولية تسوية هنا" — القفل النهائي بيحصل عبر webhook مش رد الـ endpoint ده).
+  Future<String> payWithCard(String orderId) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/pay-with-card',
+      extraHeaders: {'Idempotency-Key': _generateIdempotencyKey()},
+    );
+    return data!['redirect_url'] as String;
+  }
 }

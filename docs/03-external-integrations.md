@@ -54,8 +54,7 @@ PAYMOB_HMAC_SECRET=<من الخطوة 5>
 
 ### ملاحظة UI
 
-الباك-إند جاهز بالكامل. `apps/customer-app` لسه محتاج شاشة/WebView تفتح الـ `redirect_url`
-وترجع لما الدفع يخلص — فجوة UI موثّقة في `apps/customer-app/README.md`.
+الباك-إند والـ UI جاهزين بالكامل دلوقتي. `apps/customer-app` فيه `CardPaymentScreen` (زرار "ادفع بالبطاقة" في تفاصيل الطلب) بتفتح `redirect_url` في WebView — تفاصيل كاملة في `apps/customer-app/README.md`.
 
 ---
 
@@ -284,7 +283,7 @@ apps/customer-app/ios/Runner/AppDelegate.swift               → GMSServices.pro
   Flutter جديد، مش بس env var — تفاصيل كاملة فوق.
 - **بوابة WhatsApp Business المعتمدة**: Sandbox شغال فوراً بعد ملء القيم، لكن رقم إنتاج حقيقي
   محتاج مراجعة واعتماد من Meta عبر Twilio (أيام لحد أسابيع، خارج تحكمنا).
-- **دفع البطاقة في `apps/customer-app`**: الباك-إند جاهز (§1)، الـ UI (شاشة WebView) لسه لأ.
-- **اختبار بصري حقيقي للخريطة/الإشعارات**: البيئة دي مفيهاش جهاز/إيموليتور Android أو iOS حقيقي
+- ~~دفع البطاقة في `apps/customer-app`: الباك-إند جاهز (§1)، الـ UI (شاشة WebView) لسه لأ~~ — **اتقفلت**: `CardPaymentScreen` جديدة (`webview_flutter`) + زرار "ادفع بالبطاقة"، تفاصيل كاملة في `apps/customer-app/README.md`.
+- **اختبار بصري حقيقي للخريطة/الإشعارات/شاشة الدفع بالبطاقة**: البيئة دي مفيهاش جهاز/إيموليتور Android أو iOS حقيقي
   — كل حاجة اتأكدت منطقياً وحياً على مستوى الـ API/الكود، مش بصرياً على تطبيق شغال فعلي. أول
   حاجة تعملها بعد ما تحط المفاتيح الحقيقية: تشغيل التطبيقين على جهاز حقيقي والتأكد بصرياً.
