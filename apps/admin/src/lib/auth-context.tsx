@@ -1,8 +1,8 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { ApiEnvelope, OtpPurpose, UserResponseDto } from '@baytak/shared-types';
-import { apiFetch, ApiError } from './api-client';
+import type { ApiEnvelope, ApiMeta, OtpPurpose, UserResponseDto } from '@baytak/shared-types';
+import { apiFetch, apiFetchPaginated, ApiError } from './api-client';
 
 interface AuthState {
   accessToken: string | null;
@@ -15,6 +15,7 @@ interface AuthContextValue extends AuthState {
   verifyOtp: (phoneNumber: string, otpCode: string) => Promise<void>;
   logout: () => Promise<void>;
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
+  authedFetchPaginated: <T>(path: string, options?: RequestInit) => Promise<{ items: T[]; meta: ApiMeta }>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -123,9 +124,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [accessToken, doRefresh],
   );
 
+  const authedFetchPaginated = useCallback(
+    async <T,>(path: string, options: RequestInit = {}): Promise<{ items: T[]; meta: ApiMeta }> => {
+      try {
+        return await apiFetchPaginated<T>(path, accessToken, options);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          const result = await doRefresh();
+          setAccessToken(result.access_token);
+          return apiFetchPaginated<T>(path, result.access_token, options);
+        }
+        throw err;
+      }
+    },
+    [accessToken, doRefresh],
+  );
+
   const value = useMemo(
-    () => ({ accessToken, user, isLoading, requestOtp, verifyOtp, logout, authedFetch }),
-    [accessToken, user, isLoading, requestOtp, verifyOtp, logout, authedFetch],
+    () => ({ accessToken, user, isLoading, requestOtp, verifyOtp, logout, authedFetch, authedFetchPaginated }),
+    [accessToken, user, isLoading, requestOtp, verifyOtp, logout, authedFetch, authedFetchPaginated],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
