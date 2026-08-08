@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import 'models.dart';
+import 'order_execution_screen.dart';
 import 'orders_repository.dart';
 
 class AvailableOrdersScreen extends StatefulWidget {
@@ -37,9 +38,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Future<void> _accept(AvailableOrder order) async {
     setState(() => _isActing = true);
     try {
-      await _repository.accept(order.orderId);
+      final acceptedOrder = await _repository.accept(order.orderId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('اتقبل الطلب ${order.orderNumber}')));
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder)),
+        );
       }
       await _load();
     } on ApiException catch (err) {
