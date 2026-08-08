@@ -15,6 +15,7 @@ import { ReviewDocumentDto } from './dto/review-document.dto';
 import { SuspendTechnicianDto } from './dto/suspend-technician.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 import { toTechnicianZoneResponseDto } from './dto/technician-zone-response.dto';
+import { VerificationNoteDto } from './dto/verification-note.dto';
 
 @Controller('admin/technicians')
 @Roles(UserType.ADMIN)
@@ -68,6 +69,60 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const { profile, user } = await this.adminTechniciansService.suspend(admin.sub, id, dto.reason, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  // كانت فجوة موثّقة صراحة: الحالات الوسيطة (documents_submitted/under_review/
+  // interview_scheduled/test_passed) معرّفة في القاموس بس مفيش endpoints تحرّك الفني بينهم.
+  @Post(':id/mark-documents-submitted')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async markDocumentsSubmitted(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerificationNoteDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.markDocumentsSubmitted(admin.sub, id, dto.notes, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  @Post(':id/mark-under-review')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async markUnderReview(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerificationNoteDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.markUnderReview(admin.sub, id, dto.notes, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  @Post(':id/schedule-interview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async scheduleInterview(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerificationNoteDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.scheduleInterview(admin.sub, id, dto.notes, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  @Post(':id/mark-test-passed')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async markTestPassed(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerificationNoteDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.markTestPassed(admin.sub, id, dto.notes, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 

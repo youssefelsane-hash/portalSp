@@ -13,7 +13,26 @@
 - حدث `technician.verification_changed` بيتصدر بعد كل قرار approve/reject — `notifications` بيسمعه ويبعت للفني نفسه (تهنئة أو سبب الرفض).
 - اتعمله اختبار end-to-end فعلي شامل: فني رفع مستندين حقيقيين (وترفض نوع ملف غير مسموح)، أدمن راجع واحد approved وواحد rejected بسبب، حاول يراجع المُوافَق عليه تاني فاترفض (409)، وافق على الفني (`pending→approved` نجح بعد التصحيح) والإشعار وصله فوراً بمحتوى صحيح، حاول يوافق تاني فاترفض (مفيش self-loop)، رفض فني تاني بسبب ووصله إشعار فيه نص السبب بالظبط، عميل حاول يوصل لمسارات الأدمن فاترفض 403، وفلترة/صفحات القائمة اتأكد منها.
 - **`POST /admin/technicians/:id/suspend`** (`technicians.approve`، كانت فجوة موثّقة اتقفلت): تعليق فني معتمد — `technician-verification-state-machine.ts` كان أصلاً بيسمح بـ `APPROVED→SUSPENDED` ورجوع `SUSPENDED→APPROVED`/`REJECTED` من زمان، بس مفيش method/route كانت بتستخدمه. الفني المُعلَّق بيتشال أوتوماتيك من الـ matching (`matching.service.ts` بيفلتر `verification_status='approved'` بس)، فمفيش حاجة تانية لازم تتلمس يدوياً. اتعمله اختبار حي: فني معتمد اتعلّق بسبب، اترفض تعليق تاني بسبب قصير من 5 أحرف (تحقق DTO)، اترجّع للاعتماد تاني بنجاح، وسجل التدقيق سجّل الانتقالين بالظبط (`technician.verification_suspended` ثم `technician.verification_approved`).
-- **فجوة موثّقة متبقية**: مفيش endpoints للحالات الوسيطة (`documents_submitted`/`under_review`/`interview_scheduled`/`test_passed`) — القرارين المتاحين دلوقتي approve/reject/suspend بس. ~~تعيين technician_services/technician_zones لسه يدوي عبر SQL~~ — `technician_services` كان اتقفل قبل كده (`/admin/services/:id/technicians` في `catalog`)، و`technician_zones` اتقفل هنا (تفاصيل تحت). باقي S9 (متابعة الطلبات لحظياً + تدخل يدوي، والتقارير) لسه الخطوة الجاية.
+- ~~فجوة موثّقة متبقية: مفيش endpoints للحالات الوسيطة~~ — **اتقفلت** (تفاصيل تحت). ~~تعيين technician_services/technician_zones لسه يدوي عبر SQL~~ — `technician_services` كان اتقفل قبل كده (`/admin/services/:id/technicians` في `catalog`)، و`technician_zones` اتقفل هنا. باقي S9 (متابعة الطلبات لحظياً + تدخل يدوي، والتقارير) لسه الخطوة الجاية.
+
+### الحالات الوسيطة لاعتماد الفني — كانت فجوة موثّقة، اتقفلت
+
+`POST /admin/technicians/:id/mark-documents-submitted` / `mark-under-review` / `schedule-interview` /
+`mark-test-passed` — كل واحدة بتاخد `{notes?: string}` اختياري (بيتخزن في `verification_notes`
+الموجود بالفعل، مفيش عمود جديد). المسار الخطي `pending→documents_submitted→under_review→
+interview_scheduled→test_passed→approved` موثّق بالتفصيل في `technician-verification-state-machine.ts`
+— **قرار تصميم صريح**: القاموس مالوش أي عمود لتاريخ مقابلة أو درجة اختبار، فمفيش أي أتمتة هنا —
+كل انتقال قرار أدمن يدوي بالكامل، بالظبط زي `approve`/`reject`/`suspend` الموجودين أصلاً. الاختصارات
+القديمة (أي حالة → `approved`/`rejected` مباشرة) اتحفظت بالكامل من غير كسر توافق — الأدمن يقدر
+يقفز أو يمشي بالتسلسل حسب الحاجة.
+
+**اتعمله اختبار حي كامل**: فني حقيقي جديد اتسجّل (`pending`)، اتحرّك بالتسلسل الخطي الكامل الخمس
+خطوات لحد `approved` — كل خطوة اتأكد `verification_status` الراجع مطابق تماماً، و`audit_logs`
+سجّل الخمس انتقالات بقيم `old_values`/`new_values` صحيحة (بما فيها الـ`notes`). فني تاني اتسجّل
+واتعمله `approve` مباشر من `pending` (الاختصار القديم) — نجح عادي. محاولة `mark-documents-submitted`
+على فني **بالفعل approved** (الاتنين) اترفضت بوضوح ("مينفعش تنقل حالة اعتماد الفني من approved
+لـ documents_submitted") — يثبت إن الـ state machine بتمنع الرجوع للخلف مش بس بتسمح بالتقدّم.
+عميل حاول ينفّذ أي خطوة اترفض 403 قبل حتى يوصل لمنطق النقل.
 
 ### مناطق عمل الفني (`technician_zones`) — كانت فجوة موثّقة ("يدوي عبر SQL")، اتقفلت
 
