@@ -2,9 +2,22 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { OrderDetailResponseDto } from '@baytak/shared-types';
+import type { OrderDetailResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+
+// /uploads/... راجعة من LocalDiskStorageService بره الـ globalPrefix (/api/v1) عمداً — لازم
+// أصل السيرفر بس من غير الـ prefix، مش نفس NEXT_PUBLIC_API_URL المستخدم في apiFetch.
+const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/api\/v1\/?$/, '');
+
+const MEDIA_TYPE_LABELS: Record<string, string> = {
+  before_photo: 'قبل الشغل',
+  after_photo: 'بعد الشغل',
+  problem_photo: 'صورة المشكلة',
+  receipt: 'إيصال',
+  signature: 'توقيع',
+  video: 'فيديو',
+};
 import { AppShell } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +34,7 @@ export default function OrderDetailPage() {
   const router = useRouter();
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
+  const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
@@ -32,6 +46,10 @@ export default function OrderDetailPage() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
       .then(setOrder)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الطلب'));
+    // مسار منفصل عمداً — فشل تحميل الصور (نادر) ميمنعش عرض باقي تفاصيل الطلب
+    authedFetch<OrderMediaResponseDto[]>(`/admin/orders/${id}/media`)
+      .then(setMedia)
+      .catch(() => setMedia([]));
   }
 
   useEffect(() => {
@@ -196,6 +214,40 @@ export default function OrderDetailPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">صور الطلب</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {media.length === 0 ? (
+              <p className="text-sm text-muted-foreground">مفيش صور اترفعت للطلب ده لسه</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+                {media.map((item) => (
+                  <a
+                    key={item.id}
+                    href={`${API_ORIGIN}${item.file_url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex flex-col gap-1"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- ملف من سيرفر الباك-إند نفسه، مش next/image محتاجة config لأصل خارجي */}
+                    <img
+                      src={`${API_ORIGIN}${item.file_url}`}
+                      alt={MEDIA_TYPE_LABELS[item.media_type] ?? item.media_type}
+                      className="aspect-square w-full rounded-md border object-cover"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {MEDIA_TYPE_LABELS[item.media_type] ?? item.media_type}
+                    </span>
+                    {item.caption && <span className="text-xs">{item.caption}</span>}
+                  </a>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
