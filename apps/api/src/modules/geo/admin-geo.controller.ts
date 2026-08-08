@@ -121,6 +121,13 @@ export class AdminGeoController {
     return null;
   }
 
+  // بيرجّع النقط الخام لو المضلّع مرسوم (عشان لوحة الرسم في apps/admin تحمّل الحالة الحالية
+  // للتعديل)، أو null لو لسه مفيش. قراءة بس — مفتوحة لأي أدمن زي باقي الـ GET هنا.
+  @Get('service-zones/:id/boundary')
+  async getServiceZoneBoundary(@Param('id', ParseUUIDPipe) id: string) {
+    return { points: await this.adminGeoService.getServiceZoneBoundary(id) };
+  }
+
   // مضلّع النطاق الجغرافي (boundary) — كان فجوة موثّقة، اتقفلت. مسار منفصل عن PATCH العادي
   // عمداً لأن البيانات شكلها مختلف تماماً (مصفوفة نقط، مش حقول scalar).
   @Put('service-zones/:id/boundary')

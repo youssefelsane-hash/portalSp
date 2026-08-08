@@ -28,6 +28,7 @@ class OrdersRepository {
     required String addressId,
     String? problemDescription,
     String? promoCode,
+    List<String>? addonIds,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
@@ -35,6 +36,7 @@ class OrdersRepository {
       if (problemDescription != null && problemDescription.isNotEmpty)
         'problem_description': problemDescription,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+      if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
     });
     return Order.fromJson(data!);
   }
@@ -63,6 +65,24 @@ class OrdersRepository {
       '/orders/$orderId/cancel',
       body: body.isEmpty ? null : body,
     );
+    return Order.fromJson(data!);
+  }
+
+  // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (order-items.service.ts)،
+  // العميل هنا بيوافق/يرفض. approve/decline بيرجعوا الطلب بحالته الجديدة (in_progress دايماً).
+  Future<List<OrderItem>> listQuoteItems(String orderId) async {
+    final items = await auth.authedRequestList('/orders/$orderId/quote-items');
+    return items.map(OrderItem.fromJson).toList();
+  }
+
+  Future<Order> approveQuote(String orderId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/approve');
+    final orderJson = data!['order'] as Map<String, dynamic>;
+    return Order.fromJson(orderJson);
+  }
+
+  Future<Order> declineQuote(String orderId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/decline');
     return Order.fromJson(data!);
   }
 }

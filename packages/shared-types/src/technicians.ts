@@ -46,3 +46,18 @@ export interface TechnicianDocumentResponseDto {
 export interface AdminTechnicianDetailResponseDto extends AdminTechnicianResponseDto {
   documents: TechnicianDocumentResponseDto[];
 }
+
+// مطابق لـ apps/api/src/modules/technicians/dto/technician-zone-response.dto.ts
+export interface TechnicianZoneResponseDto {
+  id: string;
+  technician_id: string;
+  service_zone_id: string;
+  is_primary: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AssignTechnicianZoneBody {
+  service_zone_id: string;
+  is_primary?: boolean;
+}

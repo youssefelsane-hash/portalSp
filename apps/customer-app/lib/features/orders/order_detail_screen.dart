@@ -34,6 +34,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _cancelling = false;
   bool _rated = false;
   bool _paying = false;
+  List<OrderItem> _quoteItems = [];
+  bool _decidingQuote = false;
 
   @override
   void initState() {
@@ -49,8 +51,57 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     try {
       final order = await _repository.getOne(widget.orderId);
       if (mounted) setState(() => _order = order);
+      if (order.orderStatus == 'awaiting_quote_approval') {
+        await _loadQuoteItems();
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
+    }
+  }
+
+  Future<void> _loadQuoteItems() async {
+    try {
+      final items = await _repository.listQuoteItems(widget.orderId);
+      if (mounted) setState(() => _quoteItems = items.where((i) => !i.isCustomerApproved).toList());
+    } on ApiException {
+      // فشل تحميل البنود مش لازم يمنع عرض باقي تفاصيل الطلب — العميل لسه يقدر يلغي الطلب كله
+    }
+  }
+
+  Future<void> _approveQuote() async {
+    setState(() => _decidingQuote = true);
+    try {
+      final order = await _repository.approveQuote(widget.orderId);
+      if (mounted) {
+        setState(() {
+          _order = order;
+          _quoteItems = [];
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت الموافقة — الفني هيكمل الشغل')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _decidingQuote = false);
+    }
+  }
+
+  Future<void> _declineQuote() async {
+    setState(() => _decidingQuote = true);
+    try {
+      final order = await _repository.declineQuote(widget.orderId);
+      if (mounted) {
+        setState(() {
+          _order = order;
+          _quoteItems = [];
+        });
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تم الرفض — الشغل هيكمل بالنطاق الأساسي بس')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _decidingQuote = false);
     }
   }
 
@@ -246,6 +297,69 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                           icon: const Icon(Icons.location_on_outlined),
                           label: const Text('تتبّع الفني لحظياً'),
+                        ),
+                      ],
+                      if (order.orderStatus == 'awaiting_quote_approval' && _quoteItems.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('عرض سعر جديد يستنى موافقتك', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 8),
+                                for (final item in _quoteItems)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            '${item.nameAr} (${orderItemTypeLabelsAr[item.itemType] ?? item.itemType})',
+                                          ),
+                                        ),
+                                        Text(_formatEgp(item.totalPriceCents)),
+                                      ],
+                                    ),
+                                  ),
+                                const Divider(),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('إجمالي الإضافي', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    Text(
+                                      _formatEgp(_quoteItems.fold<int>(0, (sum, i) => sum + i.totalPriceCents)),
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: _decidingQuote ? null : _declineQuote,
+                                        child: const Text('رفض'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: FilledButton(
+                                        onPressed: _decidingQuote ? null : _approveQuote,
+                                        child: _decidingQuote
+                                            ? const SizedBox(
+                                                width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                            : const Text('موافقة'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                       if (_payableOrderStatuses.contains(order.orderStatus) && order.paymentStatus != 'paid') ...[

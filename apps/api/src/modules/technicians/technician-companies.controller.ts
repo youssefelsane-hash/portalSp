@@ -16,6 +16,7 @@ import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { CompanyDetail, TechnicianCompaniesService } from './technician-companies.service';
 
 function toDetailResponseDto(detail: CompanyDetail): CompanyDetailResponseDto {
@@ -91,5 +92,17 @@ export class TechnicianCompaniesController {
   ) {
     await this.companiesService.removeStaff(user.sub, targetUserId, audit);
     return null;
+  }
+
+  // كانت فجوة موثّقة صراحة ("نقل الملكية خارج النطاق دلوقتي") — المالك بس (مش manager) يقدر يستخدمها.
+  @Post('transfer-ownership')
+  @HttpCode(HttpStatus.OK)
+  async transferOwnership(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: TransferOwnershipDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user: targetUser } = await this.companiesService.transferOwnership(user.sub, dto, audit);
+    return toStaffMemberResponseDto(profile, targetUser.fullName);
   }
 }

@@ -61,3 +61,19 @@ class CatalogService {
         allowsEmergency: json['allows_emergency'] as bool,
       );
 }
+
+// مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts (ServiceAddonResponseDto)
+// — نفس الشكل يرجع من GET /services/:id/addons العامة.
+class ServiceAddon {
+  final String id;
+  final String nameAr;
+  final int priceCents;
+
+  ServiceAddon({required this.id, required this.nameAr, required this.priceCents});
+
+  factory ServiceAddon.fromJson(Map<String, dynamic> json) => ServiceAddon(
+        id: json['id'] as String,
+        nameAr: json['name_ar'] as String,
+        priceCents: json['price_cents'] as int,
+      );
+}

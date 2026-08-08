@@ -154,6 +154,40 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  // كانت فجوة موثّقة صراحة (S7): مفيش UI لمسار عرض السعر أثناء التنفيذ — الباك-إند
+  // (order-items.service.ts) والـ endpoint جاهزين ومختبرين حي، هنا أول استهلاك فعلي من التطبيق.
+  Future<void> _proposeQuoteItems() async {
+    final drafts = await showDialog<List<_QuoteItemDraft>>(
+      context: context,
+      builder: (context) => const _ProposeQuoteDialog(),
+    );
+    if (drafts == null || drafts.isEmpty) return;
+
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      final items = drafts
+          .map((d) => {
+                'item_type': d.itemType,
+                'name_ar': d.nameAr,
+                'quantity': d.quantity,
+                'unit_price_cents': d.unitPriceCents,
+              })
+          .toList();
+      _order = await _repository.proposeQuoteItems(_order.id, items);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('اتبعت عرض السعر للعميل — مستني رده')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _runAction(String action) async {
     setState(() {
       _acting = true;
@@ -272,6 +306,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                     : Text(_beforePhotoStatuses.contains(_order.orderStatus) ? 'صوّر قبل الشغل' : 'صوّر بعد الشغل'),
               ),
             ],
+            if (_order.orderStatus == 'in_progress') ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _acting ? null : _proposeQuoteItems,
+                icon: const Icon(Icons.receipt_long_outlined),
+                label: const Text('اقترح عرض سعر (قطع غيار/أجرة إضافية)'),
+              ),
+            ],
             const SizedBox(height: 24),
             if (isDone)
               const Center(child: Text('الطلب اتقفل — شكراً على شغلك 👍'))
@@ -284,6 +326,161 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _QuoteItemDraft {
+  String itemType;
+  String nameAr;
+  double quantity;
+  int unitPriceCents;
+
+  _QuoteItemDraft({this.itemType = 'spare_part', this.nameAr = '', this.quantity = 1, this.unitPriceCents = 0});
+}
+
+const Map<String, String> _quoteItemTypeLabelsAr = {
+  'spare_part': 'قطعة غيار',
+  'extra_labor': 'أجرة إضافية',
+  'addon': 'إضافة',
+};
+
+// Dialog بسيط لإضافة بند أو أكتر لعرض السعر — كل بند: النوع، الاسم، الكمية، سعر الوحدة بالجنيه
+// (بيتحول لقروش وقت الإرسال، مطابق لباقي التطبيق كله بالقرش).
+class _ProposeQuoteDialog extends StatefulWidget {
+  const _ProposeQuoteDialog();
+
+  @override
+  State<_ProposeQuoteDialog> createState() => _ProposeQuoteDialogState();
+}
+
+class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
+  final List<_QuoteItemDraft> _drafts = [_QuoteItemDraft()];
+  final List<TextEditingController> _nameControllers = [TextEditingController()];
+  final List<TextEditingController> _qtyControllers = [TextEditingController(text: '1')];
+  final List<TextEditingController> _priceControllers = [TextEditingController()];
+
+  @override
+  void dispose() {
+    for (final c in [..._nameControllers, ..._qtyControllers, ..._priceControllers]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addRow() {
+    setState(() {
+      _drafts.add(_QuoteItemDraft());
+      _nameControllers.add(TextEditingController());
+      _qtyControllers.add(TextEditingController(text: '1'));
+      _priceControllers.add(TextEditingController());
+    });
+  }
+
+  void _removeRow(int index) {
+    setState(() {
+      _drafts.removeAt(index);
+      _nameControllers.removeAt(index).dispose();
+      _qtyControllers.removeAt(index).dispose();
+      _priceControllers.removeAt(index).dispose();
+    });
+  }
+
+  void _submit() {
+    final result = <_QuoteItemDraft>[];
+    for (var i = 0; i < _drafts.length; i++) {
+      final name = _nameControllers[i].text.trim();
+      final qty = double.tryParse(_qtyControllers[i].text.trim());
+      final priceEgp = double.tryParse(_priceControllers[i].text.trim());
+      if (name.isEmpty || qty == null || qty <= 0 || priceEgp == null || priceEgp < 0) continue;
+      result.add(_QuoteItemDraft(
+        itemType: _drafts[i].itemType,
+        nameAr: name,
+        quantity: qty,
+        unitPriceCents: (priceEgp * 100).round(),
+      ));
+    }
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('اقترح عرض سعر'),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < _drafts.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _drafts[i].itemType,
+                                decoration: const InputDecoration(labelText: 'النوع'),
+                                items: _quoteItemTypeLabelsAr.entries
+                                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                                    .toList(),
+                                onChanged: (v) => setState(() => _drafts[i].itemType = v ?? 'spare_part'),
+                              ),
+                            ),
+                            if (_drafts.length > 1)
+                              IconButton(
+                                onPressed: () => _removeRow(i),
+                                icon: const Icon(Icons.delete_outline),
+                              ),
+                          ],
+                        ),
+                        TextField(
+                          controller: _nameControllers[i],
+                          decoration: const InputDecoration(labelText: 'اسم البند'),
+                        ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _qtyControllers[i],
+                                decoration: const InputDecoration(labelText: 'الكمية'),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: _priceControllers[i],
+                                decoration: const InputDecoration(labelText: 'سعر الوحدة (ج.م.)'),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (i < _drafts.length - 1) const Divider(),
+                      ],
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: _addRow,
+                  icon: const Icon(Icons.add),
+                  label: const Text('بند تاني'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
+          FilledButton(onPressed: _submit, child: const Text('ابعت العرض')),
+        ],
       ),
     );
   }

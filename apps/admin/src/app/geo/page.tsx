@@ -9,6 +9,8 @@ import type {
   CreateAreaBody,
   CreateCityBody,
   CreateServiceZoneBody,
+  LngLatPoint,
+  ServiceZoneBoundaryResponseDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -20,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { ZoneBoundaryMap } from '@/components/zone-boundary-map';
 
 export default function GeoPage() {
   const { isLoading, authedFetch } = useAuth();
@@ -33,6 +36,10 @@ export default function GeoPage() {
   const [showNewArea, setShowNewArea] = useState(false);
   const [showNewZone, setShowNewZone] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // النطاق اللي لوحة رسم المضلّع بتاعته مفتوحة دلوقتي (null = مقفولة)
+  const [boundaryZone, setBoundaryZone] = useState<AdminServiceZoneResponseDto | null>(null);
+  const [boundaryPoints, setBoundaryPoints] = useState<LngLatPoint[] | null>(null);
+  const [boundaryLoading, setBoundaryLoading] = useState(false);
 
   function loadCountries() {
     authedFetch<AdminCountryResponseDto[]>('/admin/countries')
@@ -193,6 +200,42 @@ export default function GeoPage() {
       setIsSaving(false);
     }
   }
+
+  async function openBoundaryEditor(zone: AdminServiceZoneResponseDto) {
+    setBoundaryZone(zone);
+    setBoundaryPoints(null);
+    setBoundaryLoading(true);
+    try {
+      const res = await authedFetch<ServiceZoneBoundaryResponseDto>(`/admin/service-zones/${zone.id}/boundary`);
+      setBoundaryPoints(res.points);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المضلّع الحالي');
+      setBoundaryZone(null);
+    } finally {
+      setBoundaryLoading(false);
+    }
+  }
+
+  async function saveBoundary(points: LngLatPoint[]) {
+    if (!boundaryZone || !selectedCityId) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/service-zones/${boundaryZone.id}/boundary`, {
+        method: 'PUT',
+        body: JSON.stringify({ points }),
+      });
+      setBoundaryZone(null);
+      setBoundaryPoints(null);
+      loadZones(selectedCityId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في حفظ المضلّع، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const selectedCity = cities?.find((c) => c.id === selectedCityId) ?? null;
 
   return (
     <AppShell>
@@ -373,6 +416,7 @@ export default function GeoPage() {
                       <TableHead>مضاعف الذروة</TableHead>
                       <TableHead>مضلّع مرسوم؟</TableHead>
                       <TableHead>الحالة</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -393,18 +437,49 @@ export default function GeoPage() {
                             </Badge>
                           </button>
                         </TableCell>
+                        <TableCell>
+                          <Button size="sm" variant="outline" disabled={isSaving} onClick={() => openBoundaryEditor(zone)}>
+                            {zone.has_boundary ? 'تعديل المضلّع' : 'رسم مضلّع'}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               )}
               <p className="mt-2 text-xs text-muted-foreground">
-                رسم مضلّع تغطية النطاق (`PUT /admin/service-zones/:id/boundary`) لسه محتاج
-                إحداثيات خام عبر الـ API — مفيش لوحة رسم خرائط تفاعلية هنا، فجوة موثّقة.
+                دوس "رسم مضلّع" لأي نطاق عشان تفتح خريطة تفاعلية (OpenStreetMap، مجانية بالكامل
+                من غير API key) وترسم/تعدّل حدود تغطيته بالنقر مباشرة.
               </p>
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {boundaryZone && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-base">رسم مضلّع تغطية: {boundaryZone.name_ar}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {boundaryLoading ? (
+              <p className="text-sm text-muted-foreground">جاري تحميل المضلّع الحالي…</p>
+            ) : (
+              <ZoneBoundaryMap
+                center={selectedCity && selectedCity.latitude !== null && selectedCity.longitude !== null
+                  ? { lat: selectedCity.latitude, lng: selectedCity.longitude }
+                  : null}
+                initialPoints={boundaryPoints}
+                isSaving={isSaving}
+                onSave={saveBoundary}
+                onCancel={() => {
+                  setBoundaryZone(null);
+                  setBoundaryPoints(null);
+                }}
+              />
+            )}
+          </CardContent>
+        </Card>
       )}
     </AppShell>
   );

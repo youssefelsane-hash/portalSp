@@ -129,6 +129,9 @@ const Map<String, String> orderStatusLabelsAr = {
   'refunded': 'اترد',
 };
 
+// مطابق لـ CUSTOMER_CANCELLABLE_STATUSES في order-state-machine.ts بالظبط — awaiting_quote_approval
+// اتضافت مع مسار عرض السعر (order-items.service.ts): العميل يقدر يلغي الطلب كله بدل ما يوافق/يرفض
+// البنود المقترحة، لو مش عايز يكمل خالص بسبب السعر الإضافي.
 const Set<String> customerCancellableStatuses = {
   'draft',
   'pending_payment',
@@ -136,4 +139,47 @@ const Set<String> customerCancellableStatuses = {
   'technician_assigned',
   'accepted',
   'technician_on_way',
+  'awaiting_quote_approval',
+};
+
+// مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts — بنود عرض السعر
+// أثناء التنفيذ (قطع غيار/أجرة إضافية بيقترحها الفني، أو إضافات كتالوج اختارها العميل وقت الحجز).
+class OrderItem {
+  final String id;
+  final String itemType;
+  final String nameAr;
+  final double quantity;
+  final String? unitName;
+  final int unitPriceCents;
+  final int totalPriceCents;
+  final bool isCustomerApproved;
+
+  OrderItem({
+    required this.id,
+    required this.itemType,
+    required this.nameAr,
+    required this.quantity,
+    required this.unitName,
+    required this.unitPriceCents,
+    required this.totalPriceCents,
+    required this.isCustomerApproved,
+  });
+
+  factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
+        id: json['id'] as String,
+        itemType: json['item_type'] as String,
+        nameAr: json['name_ar'] as String,
+        quantity: (json['quantity'] as num).toDouble(),
+        unitName: json['unit_name'] as String?,
+        unitPriceCents: json['unit_price_cents'] as int,
+        totalPriceCents: json['total_price_cents'] as int,
+        isCustomerApproved: json['is_customer_approved'] as bool,
+      );
+}
+
+const Map<String, String> orderItemTypeLabelsAr = {
+  'service': 'خدمة',
+  'addon': 'إضافة',
+  'spare_part': 'قطعة غيار',
+  'extra_labor': 'أجرة إضافية',
 };

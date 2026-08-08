@@ -60,4 +60,16 @@ class OrdersRepository {
   Future<void> collectCash(String orderId) async {
     await authRepository.authedRequest('POST', '/technician/orders/$orderId/collect-cash');
   }
+
+  // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (قطعة غيار/أجرة إضافية)، الطلب
+  // بيتحول awaiting_quote_approval لحد ما العميل يوافق/يرفض من apps/customer-app.
+  Future<Order> proposeQuoteItems(String orderId, List<Map<String, dynamic>> items) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/quote-items',
+      body: {'items': items},
+    );
+    final orderJson = data!['order'] as Map<String, dynamic>;
+    return Order.fromJson(orderJson);
+  }
 }

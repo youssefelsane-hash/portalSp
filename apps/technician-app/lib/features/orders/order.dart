@@ -63,12 +63,14 @@ const Map<String, String> technicianOrderStatusLabelsAr = {
   'technician_on_way': 'في الطريق',
   'technician_arrived': 'وصلت',
   'in_progress': 'الشغل شغّال',
+  'awaiting_quote_approval': 'في انتظار موافقة العميل على عرض السعر',
   'work_completed': 'الشغل خلص — محتاج تحصيل',
   'awaiting_payment': 'في انتظار الدفع',
   'completed': 'اتقفل',
 };
 
-// الفعل الجاي المتاح لكل حالة — null يعني مفيش فعل تنفيذي جاي (لازم تحصيل كاش أو دفع العميل).
+// الفعل الجاي المتاح لكل حالة — null يعني مفيش فعل تنفيذي جاي (لازم تحصيل كاش أو دفع العميل،
+// أو استنى رد العميل على عرض السعر).
 const Map<String, String?> nextTechnicianAction = {
   'accepted': 'depart',
   'technician_on_way': 'arrive',
@@ -76,6 +78,31 @@ const Map<String, String?> nextTechnicianAction = {
   'in_progress': 'complete',
   'work_completed': 'collect_cash',
 };
+
+// مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts
+class OrderItem {
+  final String id;
+  final String itemType;
+  final String nameAr;
+  final int totalPriceCents;
+  final bool isCustomerApproved;
+
+  OrderItem({
+    required this.id,
+    required this.itemType,
+    required this.nameAr,
+    required this.totalPriceCents,
+    required this.isCustomerApproved,
+  });
+
+  factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
+        id: json['id'] as String,
+        itemType: json['item_type'] as String,
+        nameAr: json['name_ar'] as String,
+        totalPriceCents: json['total_price_cents'] as int,
+        isCustomerApproved: json['is_customer_approved'] as bool,
+      );
+}
 
 const Map<String, String> technicianActionLabelsAr = {
   'depart': 'انطلقت للعنوان',

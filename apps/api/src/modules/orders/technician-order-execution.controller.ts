@@ -8,8 +8,11 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
+import { toOrderItemResponseDto } from './dto/order-item-response.dto';
+import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
 import { Order } from './entities/order.entity';
+import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrdersService } from './orders.service';
 
@@ -23,6 +26,7 @@ export class TechnicianOrderExecutionController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
+    private readonly orderItemsService: OrderItemsService,
     private readonly addressesService: AddressesService,
   ) {}
 
@@ -99,5 +103,23 @@ export class TechnicianOrderExecutionController {
   async listMedia(@Param('id', ParseUUIDPipe) id: string) {
     const media = await this.orderMediaService.listForOrder(id);
     return media.map(toOrderMediaResponseDto);
+  }
+
+  // كانت فجوة موثّقة صراحة (S7): مفيش مسار لاقتراح قطع غيار/أجرة إضافية بموافقة العميل —
+  // تفاصيل كاملة في order-items.service.ts.
+  @Post(':id/quote-items')
+  async proposeQuoteItems(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ProposeQuoteItemsDto,
+  ) {
+    const { order, items } = await this.orderItemsService.propose(user.sub, id, dto.items);
+    return { order: await this.toDto(order), items: items.map(toOrderItemResponseDto) };
+  }
+
+  @Get(':id/quote-items')
+  async listQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const items = await this.orderItemsService.listForTechnician(user.sub, id);
+    return items.map(toOrderItemResponseDto);
   }
 }

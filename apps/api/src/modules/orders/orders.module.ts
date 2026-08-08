@@ -19,16 +19,18 @@ import { OrdersController } from './orders.controller';
 import { TechnicianOrderExecutionController } from './technician-order-execution.controller';
 import { OrdersService } from './orders.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
+import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTrackingGateway } from './order-tracking.gateway';
 import { CancellationReason } from './entities/cancellation-reason.entity';
 import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
+import { OrderItem } from './entities/order-item.entity';
 import { OrderMedia } from './entities/order-media.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderStatusHistory, OrderMedia, CancellationReason]),
+    TypeOrmModule.forFeature([Order, OrderStatusHistory, OrderMedia, OrderItem, CancellationReason]),
     CustomersModule,
     CatalogModule,
     GeoModule,
@@ -49,6 +51,7 @@ import { OrderMedia } from './entities/order-media.entity';
   providers: [
     OrdersService,
     OrderAutoCancelService,
+    OrderItemsService,
     OrderMediaService,
     OrderTrackingGateway,
     AdminOrdersService,

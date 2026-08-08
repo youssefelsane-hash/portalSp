@@ -12,6 +12,10 @@ const CUSTOMER_MESSAGES: Partial<Record<OrderStatus, { title: string; body: stri
   [OrderStatus.TECHNICIAN_ON_WAY]: { title: 'الفني في الطريق', body: 'الفني بدأ يتحرّك ناحيتك دلوقتي.' },
   [OrderStatus.TECHNICIAN_ARRIVED]: { title: 'الفني وصل', body: 'الفني وصل لعنوانك.' },
   [OrderStatus.IN_PROGRESS]: { title: 'الشغل بدأ', body: 'الفني بدأ الشغل على طلبك.' },
+  [OrderStatus.AWAITING_QUOTE_APPROVAL]: {
+    title: 'عرض سعر جديد يستنى موافقتك',
+    body: 'الفني اقترح بنود إضافية (قطع غيار/أجرة إضافية) — راجع التفاصيل ووافق أو ارفض.',
+  },
   [OrderStatus.WORK_COMPLETED]: { title: 'الشغل خلص', body: 'الفني خلّص الشغل — راجع الفاتورة واختار طريقة الدفع.' },
 };
 
@@ -49,6 +53,25 @@ export class OrderStatusNotificationListener {
           notificationType: 'order_cancelled_by_customer',
           titleAr: 'العميل لغى الطلب',
           bodyAr: `طلب رقم ${event.orderNumber} اتلغى من العميل.`,
+          referenceType: 'order',
+          referenceId: event.orderId,
+          deepLink: `/technician/orders/${event.orderId}`,
+        });
+      }
+
+      // العميل رد على عرض السعر (وافق أو رفض) — order-items.service.ts بيبعت الفرق في event.reason.
+      // الفني محتاج يعرف يكمل الشغل بأي نطاق، فمفيش رسالة IN_PROGRESS عامة كفاية هنا.
+      if (
+        event.previousStatus === OrderStatus.AWAITING_QUOTE_APPROVAL &&
+        event.newStatus === OrderStatus.IN_PROGRESS &&
+        event.technicianId
+      ) {
+        const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianId);
+        await this.notificationsService.notify({
+          userId: technician.userId,
+          notificationType: 'order_quote_decision',
+          titleAr: 'العميل رد على عرض السعر',
+          bodyAr: event.reason ?? `طلب رقم ${event.orderNumber} — راجع تفاصيل عرض السعر.`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,

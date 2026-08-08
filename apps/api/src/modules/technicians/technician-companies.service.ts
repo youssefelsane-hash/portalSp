@@ -10,6 +10,7 @@ import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianProfile, TechnicianTeamRole } from './entities/technician-profile.entity';
@@ -65,6 +66,15 @@ export class TechnicianCompaniesService {
     const profile = await this.requireMembership(userId);
     if (!MANAGING_ROLES.has(profile.teamRole)) {
       throw new ApiException(ErrorCode.VAL_001, 'لازم تكون مالك أو مدير الشركة عشان تعمل العملية دي', HttpStatus.FORBIDDEN);
+    }
+    return profile;
+  }
+
+  /** المالك بس (مش manager) يقدر ينقل الملكية — قرار أكبر من إدارة يومية عادية */
+  private async requireOwner(userId: string): Promise<TechnicianProfile> {
+    const profile = await this.requireMembership(userId);
+    if (profile.teamRole !== TechnicianTeamRole.OWNER) {
+      throw new ApiException(ErrorCode.VAL_001, 'لازم تكون مالك الشركة عشان تنقل الملكية', HttpStatus.FORBIDDEN);
     }
     return profile;
   }
@@ -346,5 +356,41 @@ export class TechnicianCompaniesService {
       oldValues: { technician_user_id: target.userId },
       meta,
     });
+  }
+
+  // كانت فجوة موثّقة صراحة ("نقل الملكية خارج النطاق دلوقتي") — المالك بس (مش manager) يقدر
+  // ينقل الملكية لعضو موجود بالفعل في نفس الشركة. المالك القديم بيتحوّل manager تلقائياً (يفضل
+  // عضو فعّال في الشركة، مش بيتشال) بدل ما يبقى بلا دور فجأة.
+  async transferOwnership(
+    userId: string,
+    dto: TransferOwnershipDto,
+    meta?: AuditActorMeta,
+  ): Promise<{ profile: TechnicianProfile; user: User }> {
+    const ownerProfile = await this.requireOwner(userId);
+    const company = await this.findCompanyOrThrow(ownerProfile.companyId!);
+    const newOwner = await this.findOwnStaffOrThrow(ownerProfile.companyId!, dto.new_owner_user_id);
+
+    await this.dataSource.transaction(async (manager) => {
+      company.ownerUserId = newOwner.userId;
+      await manager.save(company);
+
+      newOwner.teamRole = TechnicianTeamRole.OWNER;
+      await manager.save(newOwner);
+
+      ownerProfile.teamRole = TechnicianTeamRole.MANAGER;
+      await manager.save(ownerProfile);
+    });
+
+    await this.auditLog.record({
+      actorUserId: userId,
+      actorRole: 'technician',
+      action: 'technician_company.ownership_transferred',
+      entityType: 'technician_company',
+      entityId: company.id,
+      oldValues: { owner_user_id: userId },
+      newValues: { owner_user_id: newOwner.userId },
+      meta,
+    });
+    return this.attachUser(newOwner);
   }
 }

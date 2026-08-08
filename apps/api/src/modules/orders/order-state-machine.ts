@@ -54,7 +54,10 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.REFUNDED]: [],
 };
 
-// الحالات اللي العميل لسه يقدر يلغي فيها بنفسه — بعد ما الفني يوصل ويبدأ الشغل، الإلغاء يبقى شكوى مش cancel
+// الحالات اللي العميل لسه يقدر يلغي فيها بنفسه — بعد ما الفني يوصل ويبدأ الشغل، الإلغاء يبقى شكوى مش cancel.
+// استثناء واحد متعمّد: awaiting_quote_approval — لو العميل رافض عرض السعر تماماً وعايز يلغي
+// الطلب كله (مش بس البنود الإضافية)، ده مختلف عن "الإلغاء بعد الوصول" العادي لأن الشغل الفعلي
+// (غير التشخيص) لسه ما بدأش فعلياً. الـ state machine بتسمح بالانتقال ده صراحة (order-items.service.ts).
 export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.DRAFT,
   OrderStatus.PENDING_PAYMENT,
@@ -62,6 +65,7 @@ export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.TECHNICIAN_ASSIGNED,
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
 ]);
 
 // الحالات اللي الطلب "نشط" فيها من ناحية الفني — مُستخدمة في order-tracking.gateway.ts (تحديد

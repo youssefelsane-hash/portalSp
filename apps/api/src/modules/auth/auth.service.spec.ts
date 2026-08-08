@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
 import { AuthService } from './auth.service';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
@@ -71,6 +72,7 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         JwtService,
+        TwilioSmsDispatcher,
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
           provide: ConfigService,

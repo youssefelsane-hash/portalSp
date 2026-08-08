@@ -182,6 +182,59 @@ export class AdminTechniciansService {
     return withUser;
   }
 
+  // ── الحالات الوسيطة (كانت فجوة موثّقة صراحة، اتقفلت) ────────────────
+  // مسار خطي pending→documents_submitted→under_review→interview_scheduled→test_passed،
+  // كل خطوة قرار أدمن يدوي بالكامل (زي approve/reject/suspend بالظبط) — راجع الشرح الكامل
+  // في technician-verification-state-machine.ts ليه ده مش قاعدة عمل مُخترَعة.
+
+  async markDocumentsSubmitted(adminUserId: string, technicianProfileId: string, notes: string | undefined, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
+    const profile = await this.transitionVerification(
+      technicianProfileId,
+      adminUserId,
+      TechnicianVerificationStatus.DOCUMENTS_SUBMITTED,
+      notes ?? null,
+      meta,
+    );
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
+  async markUnderReview(adminUserId: string, technicianProfileId: string, notes: string | undefined, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
+    const profile = await this.transitionVerification(
+      technicianProfileId,
+      adminUserId,
+      TechnicianVerificationStatus.UNDER_REVIEW,
+      notes ?? null,
+      meta,
+    );
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
+  async scheduleInterview(adminUserId: string, technicianProfileId: string, notes: string | undefined, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
+    const profile = await this.transitionVerification(
+      technicianProfileId,
+      adminUserId,
+      TechnicianVerificationStatus.INTERVIEW_SCHEDULED,
+      notes ?? null,
+      meta,
+    );
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
+  async markTestPassed(adminUserId: string, technicianProfileId: string, notes: string | undefined, meta?: AuditActorMeta): Promise<TechnicianWithUser> {
+    const profile = await this.transitionVerification(
+      technicianProfileId,
+      adminUserId,
+      TechnicianVerificationStatus.TEST_PASSED,
+      notes ?? null,
+      meta,
+    );
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
   async reviewDocument(
     adminUserId: string,
     technicianProfileId: string,

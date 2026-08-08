@@ -9,9 +9,11 @@ import { AdminOrdersService } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
+import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
 
@@ -21,6 +23,7 @@ export class AdminOrdersController {
   constructor(
     private readonly adminOrdersService: AdminOrdersService,
     private readonly orderMediaService: OrderMediaService,
+    private readonly orderItemsService: OrderItemsService,
   ) {}
 
   @Get()
@@ -42,6 +45,14 @@ export class AdminOrdersController {
   async listMedia(@Param('id', ParseUUIDPipe) id: string) {
     const media = await this.orderMediaService.listForOrder(id);
     return media.map(toOrderMediaResponseDto);
+  }
+
+  // نفس نمط listMedia فوق — الأدمن محتاج يشوف بنود عرض السعر (مقترحة/معتمدة) وقت مراجعة شكوى
+  // أو دعم فني، تفاصيل كاملة في order-items.service.ts.
+  @Get(':id/quote-items')
+  async listQuoteItems(@Param('id', ParseUUIDPipe) id: string) {
+    const items = await this.orderItemsService.listForOrder(id);
+    return items.map(toOrderItemResponseDto);
   }
 
   @Post(':id/cancel')
