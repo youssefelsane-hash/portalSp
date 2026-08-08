@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { ChatController } from './chat.controller';
@@ -17,7 +18,7 @@ import { ChatThread } from './entities/chat-thread.entity';
     JwtModule.register({}),
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway, OrderChatThreadListener, OrderCompletedChatCloseListener],
+  providers: [ChatService, ChatGateway, OrderChatThreadListener, OrderCompletedChatCloseListener, storageServiceProvider],
   exports: [ChatService],
 })
 export class ChatModule {}
