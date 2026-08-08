@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS } from '@/lib/technician-labels';
+import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS, NEXT_VERIFICATION_STEP } from '@/lib/technician-labels';
 
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -74,6 +74,18 @@ export default function TechnicianDetailPage() {
 
   async function handleApprove() {
     await runAction(() => authedFetch(`/admin/technicians/${id}/approve`, { method: 'POST' }));
+  }
+
+  async function handleNextStep(endpoint: string) {
+    // null = المستخدم دوس "إلغاء" في الـ prompt — يعني عايز يلغي الخطوة كلها، مش يكمل بملاحظات فاضية
+    const notes = window.prompt('ملاحظات (اختياري)؟');
+    if (notes === null) return;
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/${endpoint}`, {
+        method: 'POST',
+        body: JSON.stringify({ notes: notes || undefined }),
+      }),
+    );
   }
 
   async function handleReject(e: FormEvent) {
@@ -191,6 +203,15 @@ export default function TechnicianDetailPage() {
           {detail.verification_status !== 'approved' && detail.verification_status !== 'rejected' && (
             <CardFooter className="flex-col items-stretch gap-3">
               <div className="flex gap-2">
+                {NEXT_VERIFICATION_STEP[detail.verification_status] && (
+                  <Button
+                    variant="secondary"
+                    disabled={isSaving}
+                    onClick={() => handleNextStep(NEXT_VERIFICATION_STEP[detail.verification_status]!.endpoint)}
+                  >
+                    {NEXT_VERIFICATION_STEP[detail.verification_status]!.label}
+                  </Button>
+                )}
                 <Button disabled={isSaving} onClick={handleApprove}>
                   اعتماد
                 </Button>
