@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
+import { GeoModule } from '../geo/geo.module';
 import { AdminTechnicianCompaniesController } from './admin-technician-companies.controller';
 import { AdminTechnicianLevelsController } from './admin-technician-levels.controller';
 import { AdminTechniciansController } from './admin-technicians.controller';
@@ -24,6 +25,7 @@ import { TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianLevelConfig } from './entities/technician-level-config.entity';
 import { TechnicianLevelHistory } from './entities/technician-level-history.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
+import { TechnicianZone } from './entities/technician-zone.entity';
 
 @Module({
   imports: [
@@ -34,9 +36,11 @@ import { TechnicianProfile } from './entities/technician-profile.entity';
       TechnicianCompanyBranch,
       TechnicianLevelConfig,
       TechnicianLevelHistory,
+      TechnicianZone,
       User,
     ]),
     AuditModule,
+    GeoModule,
     BullModule.registerQueue({ name: TECHNICIAN_STATS_QUEUE }),
   ],
   controllers: [
