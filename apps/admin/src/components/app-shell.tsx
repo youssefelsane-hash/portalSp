@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 const NAV_ITEMS = [
   { href: '/', label: 'نظرة عامة' },
   { href: '/employees', label: 'الموظفين' },
+  { href: '/technicians', label: 'الفنيين' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
