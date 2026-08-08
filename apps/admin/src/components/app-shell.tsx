@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/orders', label: 'الطلبات' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/settings', label: 'الإعدادات' },
+  { href: '/feature-flags', label: 'Feature Flags' },
   { href: '/audit-log', label: 'سجل النشاط' },
 ];
 

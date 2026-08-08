@@ -7,3 +7,4 @@ export * from './orders';
 export * from './catalog';
 export * from './settings';
 export * from './audit';
+export * from './feature-flags';
