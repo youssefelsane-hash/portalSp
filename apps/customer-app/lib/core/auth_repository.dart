@@ -131,4 +131,22 @@ class AuthRepository extends ChangeNotifier {
       rethrow;
     }
   }
+
+  // زي authedRequest بس لرفع ملف (multipart) — نفس نمط 401→refresh→إعادة محاولة مرة واحدة.
+  Future<Map<String, dynamic>?> authedUpload(
+    String path, {
+    required List<int> fileBytes,
+    required String filename,
+    Map<String, String> fields = const {},
+  }) async {
+    try {
+      return await apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: _accessToken);
+    } on ApiException catch (err) {
+      if (err.statusCode == 401) {
+        final newToken = await _refresh();
+        return apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: newToken);
+      }
+      rethrow;
+    }
+  }
 }

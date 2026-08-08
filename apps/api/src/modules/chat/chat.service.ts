@@ -1,13 +1,22 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { containsLikelyContactInfo } from './contact-info-detector';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChatMessage, ChatMessageType } from './entities/chat-message.entity';
 import { ChatThread, ChatThreadType } from './entities/chat-thread.entity';
+
+export interface IncomingChatFile {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+}
 
 @Injectable()
 export class ChatService {
@@ -18,6 +27,7 @@ export class ChatService {
     @InjectRepository(ChatMessage) private readonly messages: Repository<ChatMessage>,
     @InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>,
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   /** بيتصل بيها لما فني يقبل طلب — idempotent، مش هتعمل تريد لو الخيط موجود قبل كده. */
@@ -99,12 +109,15 @@ export class ChatService {
     await this.threads.save(thread);
   }
 
-  async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {
-    const thread = await this.getThreadForParticipant(userId, threadId);
-
+  private assertThreadOpen(thread: ChatThread): void {
     if (!thread.isActive || (thread.closesAt && thread.closesAt.getTime() < Date.now())) {
       throw new ApiException(ErrorCode.VAL_001, 'المحادثة دي مقفولة', HttpStatus.CONFLICT);
     }
+  }
+
+  async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {
+    const thread = await this.getThreadForParticipant(userId, threadId);
+    this.assertThreadOpen(thread);
 
     const message = this.messages.create({
       threadId,
@@ -113,6 +126,35 @@ export class ChatService {
       content: dto.content,
       isRead: false,
       isFlagged: containsLikelyContactInfo(dto.content),
+    });
+    await this.messages.save(message);
+
+    thread.lastMessageAt = message.createdAt;
+    await this.threads.save(thread);
+
+    return message;
+  }
+
+  /**
+   * كانت فجوة موثّقة: `chat_messages.file_url`/`message_type=image` موجودين في الـ schema
+   * من أول يوم بس مفيش endpoint كان بيستخدمهم — كل رسالة كانت نص إجباري. نفس نمط رفع
+   * `OrderMediaService` بالظبط (multipart مباشر لـ S3، مش presigned URL).
+   */
+  async sendImageMessage(userId: string, threadId: string, file: IncomingChatFile): Promise<ChatMessage> {
+    const thread = await this.getThreadForParticipant(userId, threadId);
+    this.assertThreadOpen(thread);
+
+    const key = `chat/${threadId}/${randomUUID()}${extname(file.originalname)}`;
+    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
+
+    const message = this.messages.create({
+      threadId,
+      senderUserId: userId,
+      messageType: ChatMessageType.IMAGE,
+      content: null,
+      fileUrl,
+      isRead: false,
+      isFlagged: false,
     });
     await this.messages.save(message);
 
