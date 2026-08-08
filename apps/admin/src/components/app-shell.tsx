@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: '/promotions', label: 'أكواد الخصم' },
   { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
   { href: '/notification-routing', label: 'توجيه الإشعارات' },
+  { href: '/technician-companies', label: 'شركات/فرق الفنيين' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/geo', label: 'المدن والمناطق' },
   { href: '/settings', label: 'الإعدادات' },
