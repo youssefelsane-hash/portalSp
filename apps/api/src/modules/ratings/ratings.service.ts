@@ -1,7 +1,9 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { LOW_RATING_SUBMITTED_EVENT, LowRatingSubmittedEvent } from '../../common/events/low-rating-submitted.event';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
@@ -17,7 +19,12 @@ export class RatingsService {
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly technicianStatsService: TechnicianStatsService,
+    private readonly events: EventEmitter2,
   ) {}
+
+  // عتبة "تقييم منخفض" — قرار تشغيلي معقول (1-2 من 5 = سلبي، مش قيمة من القاموس نفسه لأنه
+  // مالوش رقم محدد لده) — مختلف عن سعر صرف نقاط الولاء اللي فعلاً قرار مالي محتاج اعتماد رسمي.
+  private static readonly LOW_RATING_THRESHOLD = 2;
 
   /**
    * ملاحظة على تصميم القاموس: `ratings.order_id` UNIQUE — يعني تقييم واحد بس لكل طلب،
@@ -39,6 +46,14 @@ export class RatingsService {
     const rating = await this.createRating(order.id, userId, technicianUserId, RatingType.CUSTOMER_TO_TECHNICIAN, dto);
     // مهمة خلفية (§14.4) — average_rating/total_ratings_count بتتحدّث هنا مش جوّه معاملة التقييم
     await this.technicianStatsService.enqueueRecalculation(order.technicianId);
+
+    if (rating.overallRating <= RatingsService.LOW_RATING_THRESHOLD) {
+      this.events.emit(
+        LOW_RATING_SUBMITTED_EVENT,
+        new LowRatingSubmittedEvent(rating.id, order.id, rating.overallRating, technicianUserId, rating.comment),
+      );
+    }
+
     return rating;
   }
 

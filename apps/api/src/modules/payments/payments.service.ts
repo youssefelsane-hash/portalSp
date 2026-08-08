@@ -1,7 +1,9 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -33,6 +35,7 @@ export class PaymentsService {
     private readonly technicianLevelsService: TechnicianLevelsService,
     private readonly technicianStatsService: TechnicianStatsService,
     private readonly auditLog: AuditLogService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -188,10 +191,14 @@ export class PaymentsService {
 
       await this.settleAndComplete(manager, order, PaymentMethod.CASH, technicianUserId, 'technician');
 
-      return payment;
-    }).then(async (payment) => {
+      return { payment, order };
+    }).then(async ({ payment, order }) => {
       // بره الـ transaction عمداً — إعادة حساب الإحصائيات مهمة خلفية (§14.4)، مش جزء من قفل الطلب
       await this.technicianStatsService.enqueueRecalculation(technicianProfile.id);
+      this.events.emit(
+        CASH_COLLECTED_EVENT,
+        new CashCollectedEvent(payment.id, order.id, order.orderNumber, payment.amountCents, technicianUserId),
+      );
       return payment;
     });
   }
