@@ -53,8 +53,9 @@
 **لسه من غير من §13.7** (فجوة موثّقة، مش سهو):
 - `GET /admin/customers` + `/:id/block`
 - `PATCH /admin/orders/:id/adjust-price`
-- `POST /admin/technicians/:id/suspend`
-- `GET /admin/reports/technicians`, `GET /admin/reports/zones`.
+- `GET /admin/reports/zones` (ملحوظة: `GET /admin/reports/technicians` كانت موثّقة هنا كناقصة بالغلط — موجودة فعلاً، راجع "لوحة التحكم الموسّعة" تحت).
 - حذف حساب موظف (soft-delete) — دلوقتي الأداة الوحيدة هي `block` (تعطيل)، مفيش `DELETE` endpoint حقيقي.
+
+~~`POST /admin/technicians/:id/suspend`~~ — كانت فجوة موثّقة هنا، اتقفلت. التفاصيل الكاملة والاختبار الحي في `../technicians/README.md`.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §13.7 و `../../../../docs/01-master-plan.md` §2.4.

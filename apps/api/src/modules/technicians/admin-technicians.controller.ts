@@ -11,6 +11,7 @@ import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
+import { SuspendTechnicianDto } from './dto/suspend-technician.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 
 @Controller('admin/technicians')
@@ -52,6 +53,19 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const { profile, user } = await this.adminTechniciansService.reject(admin.sub, id, dto.reason, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  @Post(':id/suspend')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async suspend(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SuspendTechnicianDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.suspend(admin.sub, id, dto.reason, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 
