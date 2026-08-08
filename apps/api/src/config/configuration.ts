@@ -43,6 +43,29 @@ export default () => ({
     url: getRedisUrl(),
   },
 
+  notifications: {
+    // كل قيم الأقسام التلاتة دي اختيارية عمداً — قناة مش مُعدّة بترجع لـ LogOnlyNotificationDispatcher
+    // (تسجيل في اللوج بس)، مش بتفشّل أو توقف باقي القنوات. تفاصيل كل قيمة: docs/03-external-integrations.md
+    fcm: {
+      // محتوى ملف مفتاح خدمة Firebase الكامل كـJSON (سطر واحد) — مش مسار ملف
+      serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    },
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+      authToken: process.env.TWILIO_AUTH_TOKEN,
+      smsFromNumber: process.env.TWILIO_SMS_FROM_NUMBER,
+      whatsappFromNumber: process.env.TWILIO_WHATSAPP_FROM_NUMBER,
+    },
+    smtp: {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined,
+      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : undefined,
+      user: process.env.SMTP_USER,
+      password: process.env.SMTP_PASSWORD,
+      fromEmail: process.env.SMTP_FROM_EMAIL,
+    },
+  },
+
   payments: {
     paymob: {
       // كل القيم دي اختيارية عمداً — لو ناقصة، PaymobGatewayService.isConfigured بيبقى false

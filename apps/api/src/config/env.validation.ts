@@ -35,4 +35,18 @@ export const envValidationSchema = Joi.object({
   S3_SECRET_ACCESS_KEY: Joi.string().optional(),
   S3_FORCE_PATH_STYLE: Joi.string().valid('true', 'false').default('true'),
   STORAGE_S3_URL_EXPIRY_SECONDS: Joi.number().default(60 * 60 * 24 * 7),
+
+  // قنوات الإشعارات الخارجية — كل واحدة اختيارية بالكامل ومستقلة عن الباقي (قناة مش مُعدّة
+  // بترجع log-only، مش بتفشّل). تفاصيل كل قيمة: docs/03-external-integrations.md
+  FIREBASE_SERVICE_ACCOUNT_JSON: Joi.string().optional(),
+  TWILIO_ACCOUNT_SID: Joi.string().optional(),
+  TWILIO_AUTH_TOKEN: Joi.string().optional(),
+  TWILIO_SMS_FROM_NUMBER: Joi.string().optional(),
+  TWILIO_WHATSAPP_FROM_NUMBER: Joi.string().optional(),
+  SMTP_HOST: Joi.string().optional(),
+  SMTP_PORT: Joi.number().optional(),
+  SMTP_SECURE: Joi.string().valid('true', 'false').optional(),
+  SMTP_USER: Joi.string().optional(),
+  SMTP_PASSWORD: Joi.string().optional(),
+  SMTP_FROM_EMAIL: Joi.string().optional(),
 });

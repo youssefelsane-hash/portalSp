@@ -1,7 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CompositeNotificationDispatcher } from '../../common/notifications/composite-notification-dispatcher.service';
+import { FcmPushDispatcher } from '../../common/notifications/fcm-push-dispatcher.service';
 import { LogOnlyNotificationDispatcher } from '../../common/notifications/log-only-notification-dispatcher';
 import { NOTIFICATION_DISPATCHER } from '../../common/notifications/notification-dispatcher';
+import { SmtpEmailDispatcher } from '../../common/notifications/smtp-email-dispatcher.service';
+import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
+import { TwilioWhatsAppDispatcher } from '../../common/notifications/twilio-whatsapp-dispatcher.service';
 import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { CustomersModule } from '../customers/customers.module';
@@ -38,7 +43,12 @@ import { NotificationsService } from './notifications.service';
   providers: [
     NotificationsService,
     NotificationRoutingService,
-    { provide: NOTIFICATION_DISPATCHER, useClass: LogOnlyNotificationDispatcher },
+    LogOnlyNotificationDispatcher,
+    FcmPushDispatcher,
+    TwilioSmsDispatcher,
+    TwilioWhatsAppDispatcher,
+    SmtpEmailDispatcher,
+    { provide: NOTIFICATION_DISPATCHER, useClass: CompositeNotificationDispatcher },
     WelcomeNotificationListener,
     OrderCreatedNotificationListener,
     OrderAcceptedNotificationListener,
