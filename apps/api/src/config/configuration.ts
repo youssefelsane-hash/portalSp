@@ -29,4 +29,17 @@ export default () => ({
   redis: {
     url: getRedisUrl(),
   },
+
+  payments: {
+    paymob: {
+      // كل القيم دي اختيارية عمداً — لو ناقصة، PaymobGatewayService.isConfigured بيبقى false
+      // والدفع بالبطاقة بيرفض بوضوح (DisabledPaymentGateway/PaymobGatewayService غير مُعدّة)
+      // من غير ما يمنع الكاش/المحفظة. تفاصيل الحصول على كل قيمة في docs/03-external-integrations.md.
+      baseUrl: process.env.PAYMOB_BASE_URL ?? 'https://accept.paymob.com',
+      apiKey: process.env.PAYMOB_API_KEY,
+      integrationIdCard: process.env.PAYMOB_INTEGRATION_ID_CARD,
+      iframeId: process.env.PAYMOB_IFRAME_ID,
+      hmacSecret: process.env.PAYMOB_HMAC_SECRET,
+    },
+  },
 });

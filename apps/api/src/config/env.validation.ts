@@ -16,4 +16,12 @@ export const envValidationSchema = Joi.object({
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 
   REDIS_URL: Joi.string().uri().default('redis://localhost:6379'),
+
+  // بوابة الدفع بالبطاقة (Paymob) — اختيارية عمداً، الكاش والمحفظة بيشتغلوا من غيرها.
+  // تفاصيل الحصول على كل قيمة: docs/03-external-integrations.md
+  PAYMOB_BASE_URL: Joi.string().uri().default('https://accept.paymob.com'),
+  PAYMOB_API_KEY: Joi.string().optional(),
+  PAYMOB_INTEGRATION_ID_CARD: Joi.string().optional(),
+  PAYMOB_IFRAME_ID: Joi.string().optional(),
+  PAYMOB_HMAC_SECRET: Joi.string().optional(),
 });

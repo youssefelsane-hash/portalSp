@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
@@ -11,11 +11,14 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
+import { User } from '../auth/entities/user.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
+import { PAYMENT_GATEWAY, PaymentGateway } from './gateways/payment-gateway.interface';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
+import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
 import { WalletOwnerType } from './entities/wallet.entity';
 import { WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletsService } from './wallets.service';
@@ -25,9 +28,13 @@ const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(Payment) private readonly payments: Repository<Payment>,
+    @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(WebhookEvent) private readonly webhookEvents: Repository<WebhookEvent>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly walletsService: WalletsService,
     private readonly catalogService: CatalogService,
@@ -37,6 +44,7 @@ export class PaymentsService {
     private readonly technicianStatsService: TechnicianStatsService,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
+    @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
   ) {}
 
   /**
@@ -293,6 +301,249 @@ export class PaymentsService {
       );
       return payment;
     });
+  }
+
+  /**
+   * العميل بيبدأ دفع بالبطاقة — بيرجّع رابط iframe مستضاف عند بوابة الدفع (Paymob افتراضياً،
+   * راجع gateways/paymob-gateway.service.ts) عشان الكلاينت يفتحه في WebView. الدفعة بتتسجّل
+   * `pending` فوراً؛ التأكيد الفعلي (نجاح/فشل) بييجي بعد كده عبر `POST /webhooks/paymob` —
+   * مفيش أي تسوية (settleAndComplete) بتحصل هنا، القفل النهائي بس لما البوابة تأكّد.
+   */
+  async payWithCard(userId: string, orderId: string, idempotencyKey: string): Promise<{ payment: Payment; redirectUrl: string }> {
+    const existing = await this.payments.findOne({ where: { idempotencyKey } });
+    if (existing) {
+      if (existing.orderId !== orderId) {
+        throw new ApiException(ErrorCode.PAY_003, 'مفتاح idempotency ده مستخدم قبل كده لطلب مختلف', HttpStatus.CONFLICT);
+      }
+      const existingRedirectUrl = (existing.gatewayResponse as { redirect_url?: string } | null)?.redirect_url;
+      if (existingRedirectUrl) {
+        // نفس المفتاح ورابط دفع سابق لسه موجود — إعادة استخدامه (retry حقيقي idempotent)
+        return { payment: existing, redirectUrl: existingRedirectUrl };
+      }
+      if (existing.paymentStatus !== PaymentGatewayStatus.PENDING && existing.paymentStatus !== PaymentGatewayStatus.FAILED) {
+        // نجحت/اترفضت نهائياً بطريقة تانية (مستحيل عملياً هنا، لكن دفاع رخيص) — مش قابلة لإعادة المحاولة
+        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي في حالة نهائية بالفعل', HttpStatus.CONFLICT);
+      }
+      // وصل هنا يعني: محاولة سابقة اتسجّلت بس نداء البوابة فشل قبل ما ياخد رابط (شبكة/بوابة واقعة) —
+      // بنعيد المحاولة بنفس صف الدفعة (مش بنعمل صف جديد)، عشان مايتضاعفش payment_number لكل retry.
+      return this.initiateGatewayCharge(existing);
+    }
+
+    // فحص الإعداد الأول قبل ما نلمس الـ DB خالص — لو البوابة مش مُعدّة، أفضل نرفض فوراً بدل ما
+    // نسيب صف payment بحالة pending معلّق من غير redirect_url.
+    if (!this.paymentGateway.isConfigured) {
+      throw new ApiException(
+        ErrorCode.PAY_001,
+        'الدفع بالبطاقة مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const order = await this.loadPayableOrderForCustomer(userId, orderId);
+    this.assertPayable(order);
+
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+
+    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
+    const payment = this.payments.create({
+      paymentNumber,
+      orderId: order.id,
+      customerId: customerProfile.id,
+      amountCents: order.totalAmountCents,
+      paymentMethod: PaymentMethod.CARD,
+      paymentGateway: this.paymentGateway.providerName,
+      paymentStatus: PaymentGatewayStatus.PENDING,
+      idempotencyKey,
+    });
+    await this.payments.save(payment);
+
+    return this.initiateGatewayCharge(payment);
+  }
+
+  /**
+   * بيتنادى (1) أول مرة فوراً بعد إنشاء صف الدفعة، و(2) لو retry بنفس Idempotency-Key لصف
+   * pending/failed قديم (نداء البوابة فشل قبل كده — شبكة/API واقعة، مش رفض دفع فعلي). بيعيد
+   * استخدام نفس صف الدفعة دايماً — أبداً مبيعملش صف تاني لنفس المفتاح، عشان الـ retry يبقى
+   * idempotent فعلاً مش مجرد تسمية. `payment.customerId` هو id بتاع customer_profiles (مش
+   * users) — لازم findByProfileIdOrThrow عشان نوصل لـ userId ونجيب بيانات الفوترة.
+   */
+  private async initiateGatewayCharge(payment: Payment): Promise<{ payment: Payment; redirectUrl: string }> {
+    if (!this.paymentGateway.isConfigured) {
+      throw new ApiException(
+        ErrorCode.PAY_001,
+        'الدفع بالبطاقة مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
+    const user = await this.users.findOne({ where: { id: customerProfile.userId } });
+    const order = await this.orders.findOne({ where: { id: payment.orderId } });
+    if (!user || !order) {
+      throw new ApiException(ErrorCode.VAL_001, 'بيانات الدفعة غير مكتملة لإعادة المحاولة', HttpStatus.CONFLICT);
+    }
+
+    const [firstName, ...rest] = user.fullName.trim().split(/\s+/);
+    try {
+      const gatewayResult = await this.paymentGateway.createCardPayment({
+        paymentId: payment.id,
+        orderNumber: order.orderNumber,
+        amountCents: payment.amountCents,
+        currencyCode: 'EGP',
+        customerFirstName: firstName || 'NA',
+        customerLastName: rest.join(' ') || 'NA',
+        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerPhone: user.phoneNumber,
+      });
+
+      payment.gatewayResponse = { redirect_url: gatewayResult.redirectUrl, gateway_order_id: gatewayResult.gatewayOrderId };
+      payment.paymentStatus = PaymentGatewayStatus.PENDING;
+      await this.payments.save(payment);
+      return { payment, redirectUrl: gatewayResult.redirectUrl };
+    } catch (err) {
+      // نداء البوابة فشل (شبكة/API واقعة، مش رفض دفع من عميل حقيقي) — الدفعة بتفضل قابلة
+      // لإعادة المحاولة بنفس idempotency key (الفرع فوق في payWithCard بيتعامل معاها).
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'GATEWAY_REGISTRATION_FAILED';
+      payment.failureMessage = err instanceof Error ? err.message : String(err);
+      await this.payments.save(payment);
+      throw err;
+    }
+  }
+
+  /**
+   * بيتنادى من WebhooksController بعد ما يتحقق التوقيع مسبقاً. بيسجّل الحدث في webhook_events
+   * (حماية من معالجة مكررة عبر external_event_id UNIQUE)، وبعدين لو نجحت العملية بيعدّي بنفس
+   * مسار settleAndComplete اللي collectCash/payWithWallet بيستخدموه — نفس نقطة التسوية الوحيدة
+   * للنظام كله، الدفع بالبطاقة مش استثناء.
+   */
+  async finalizeGatewayWebhook(
+    externalEventId: string,
+    eventType: string,
+    provider: string,
+    rawPayload: Record<string, unknown>,
+    signatureValid: boolean,
+    paymentId: string | null,
+    succeeded: boolean,
+    failureReason: string | null,
+    gatewayTransactionId: string,
+  ): Promise<void> {
+    const alreadyProcessed = await this.webhookEvents.findOne({ where: { externalEventId } });
+    if (alreadyProcessed) {
+      // نفس الحدث اتبعت تاني (retry شائع من كل بوابات الدفع) — رجّع نجاح من غير أي معالجة تانية.
+      this.logger.log(`webhook مكرر اتجاهل: ${externalEventId} (اتعالج قبل كده)`);
+      return;
+    }
+
+    const webhookEvent = this.webhookEvents.create({
+      provider,
+      eventType,
+      externalEventId,
+      payload: rawPayload,
+      signatureValid,
+      processingStatus: WebhookProcessingStatus.RECEIVED,
+    });
+    await this.webhookEvents.save(webhookEvent);
+
+    if (!signatureValid) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+      webhookEvent.errorMessage = 'توقيع غير صحيح — الحدث اتجاهل';
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      this.logger.warn(`webhook برد توقيع غلط اترفض: ${externalEventId}`);
+      return;
+    }
+
+    if (!paymentId) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
+      webhookEvent.errorMessage = 'مفيش payment_id في الحمولة';
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      return;
+    }
+
+    const payment = await this.payments.findOne({ where: { id: paymentId } });
+    if (!payment) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+      webhookEvent.errorMessage = `دفعة غير موجودة: ${paymentId}`;
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      return;
+    }
+
+    if (payment.paymentStatus !== PaymentGatewayStatus.PENDING) {
+      // اتعالجت قبل كده (idempotency على مستوى الدفعة نفسها، مش بس external_event_id) —
+      // ممكن يحصل لو نفس البوابة بعتت حدثين بمعرّفين مختلفين لنفس العملية.
+      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
+      webhookEvent.errorMessage = `الدفعة already في حالة ${payment.paymentStatus}`;
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      return;
+    }
+
+    try {
+      if (succeeded) {
+        payment.gatewayTransactionId = gatewayTransactionId;
+        payment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
+        payment.completedAt = new Date();
+
+        // settleAndComplete's changedByUserId لازم يكون users.id (FK على order_status_history)،
+        // بينما payment.customerId هو customer_profiles.id — نفس فخ الـ id المختلط اللي
+        // اتصلح قبل كده في payWithCard/initiateGatewayCharge، هنا في مكان تاني في نفس الفلو.
+        const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
+
+        const { orderId, orderNumber, customerId, technicianId, previousStatus } = await this.dataSource.transaction(
+          async (manager) => {
+            await manager.save(payment);
+            const lockedOrder = await manager
+              .createQueryBuilder(Order, 'o')
+              .setLock('pessimistic_write')
+              .where('o.id = :orderId', { orderId: payment.orderId })
+              .getOne();
+            if (!lockedOrder) {
+              throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+            }
+            this.assertPayable(lockedOrder);
+            const previousStatus = lockedOrder.orderStatus;
+            await this.settleAndComplete(manager, lockedOrder, PaymentMethod.CARD, customerProfile.userId, 'customer');
+            return {
+              orderId: lockedOrder.id,
+              orderNumber: lockedOrder.orderNumber,
+              customerId: lockedOrder.customerId,
+              technicianId: lockedOrder.technicianId,
+              previousStatus,
+            };
+          },
+        );
+
+        if (technicianId) {
+          await this.technicianStatsService.enqueueRecalculation(technicianId);
+        }
+        this.events.emit(
+          ORDER_STATUS_CHANGED_EVENT,
+          new OrderStatusChangedEvent(orderId, orderNumber, previousStatus, OrderStatus.COMPLETED, customerId, technicianId),
+        );
+      } else {
+        payment.gatewayTransactionId = gatewayTransactionId;
+        payment.paymentStatus = PaymentGatewayStatus.FAILED;
+        payment.failureCode = 'GATEWAY_DECLINED';
+        payment.failureMessage = failureReason;
+        payment.failedAt = new Date();
+        await this.payments.save(payment);
+        // مفيش تغيير في حالة الطلب — العميل يقدر يعيد المحاولة (بطاقة تانية، محفظة، كاش)
+      }
+
+      webhookEvent.processingStatus = WebhookProcessingStatus.PROCESSED;
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+    } catch (err) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+      webhookEvent.errorMessage = err instanceof Error ? err.message : String(err);
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      this.logger.error(`فشل معالجة webhook ${externalEventId}`, err instanceof Error ? err.stack : err);
+      throw err;
+    }
   }
 
   private async nextPaymentNumber(manager: EntityManager): Promise<string> {
