@@ -2,7 +2,13 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { AdminTechnicianDetailResponseDto, TechnicianLevel } from '@baytak/shared-types';
+import type {
+  AdminServiceZoneResponseDto,
+  AdminTechnicianDetailResponseDto,
+  AssignTechnicianZoneBody,
+  TechnicianLevel,
+  TechnicianZoneResponseDto,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -10,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS } from '@/lib/technician-labels';
@@ -26,6 +33,11 @@ export default function TechnicianDetailPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<TechnicianLevel | ''>('');
 
+  const [zones, setZones] = useState<TechnicianZoneResponseDto[] | null>(null);
+  const [allZones, setAllZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
+  const [newZoneId, setNewZoneId] = useState('');
+  const [newZoneIsPrimary, setNewZoneIsPrimary] = useState(false);
+
   function load() {
     authedFetch<AdminTechnicianDetailResponseDto>(`/admin/technicians/${id}`)
       .then((data) => {
@@ -35,9 +47,15 @@ export default function TechnicianDetailPage() {
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل بيانات الفني'));
   }
 
+  function loadZones() {
+    authedFetch<TechnicianZoneResponseDto[]>(`/admin/technicians/${id}/zones`).then(setZones);
+  }
+
   useEffect(() => {
     if (isLoading) return;
     load();
+    loadZones();
+    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 
@@ -90,6 +108,41 @@ export default function TechnicianDetailPage() {
         body: JSON.stringify({ review_status: reviewStatus, rejection_reason }),
       }),
     );
+  }
+
+  async function handleAssignZone(e: FormEvent) {
+    e.preventDefault();
+    if (!newZoneId) return;
+    const body: AssignTechnicianZoneBody = { service_zone_id: newZoneId, is_primary: newZoneIsPrimary };
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/technicians/${id}/zones`, { method: 'POST', body: JSON.stringify(body) });
+      setNewZoneId('');
+      setNewZoneIsPrimary(false);
+      loadZones();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRemoveZone(serviceZoneId: string) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/technicians/${id}/zones/${serviceZoneId}`, { method: 'DELETE' });
+      loadZones();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function zoneName(serviceZoneId: string): string {
+    return allZones?.find((z) => z.id === serviceZoneId)?.name_ar ?? serviceZoneId;
   }
 
   if (error && !detail) {
@@ -255,6 +308,83 @@ export default function TechnicianDetailPage() {
                             </Button>
                           </div>
                         )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">مناطق العمل</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <form onSubmit={handleAssignZone} className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="zone_select">المنطقة</Label>
+                <SelectNative
+                  id="zone_select"
+                  value={newZoneId}
+                  onChange={(e) => setNewZoneId(e.target.value)}
+                  className="min-w-48"
+                >
+                  <option value="">اختار منطقة</option>
+                  {allZones?.map((zone) => (
+                    <option key={zone.id} value={zone.id}>
+                      {zone.name_ar}
+                    </option>
+                  ))}
+                </SelectNative>
+              </div>
+              <label className="flex items-center gap-2 pb-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={newZoneIsPrimary}
+                  onChange={(e) => setNewZoneIsPrimary(e.target.checked)}
+                />
+                منطقة أساسية
+              </label>
+              <Button type="submit" size="sm" disabled={isSaving || !newZoneId}>
+                إضافة منطقة
+              </Button>
+            </form>
+
+            {!zones ? (
+              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+            ) : zones.length === 0 ? (
+              <p className="text-sm text-muted-foreground">مفيش مناطق عمل معيّنة لسه</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>المنطقة</TableHead>
+                    <TableHead>أساسية؟</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {zones.map((zone) => (
+                    <TableRow key={zone.id}>
+                      <TableCell>{zoneName(zone.service_zone_id)}</TableCell>
+                      <TableCell>{zone.is_primary ? 'أيوة' : '—'}</TableCell>
+                      <TableCell>
+                        <Badge variant={zone.is_active ? 'secondary' : 'outline'}>
+                          {zone.is_active ? 'نشطة' : 'معطّلة'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={isSaving}
+                          onClick={() => handleRemoveZone(zone.service_zone_id)}
+                        >
+                          إزالة
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
