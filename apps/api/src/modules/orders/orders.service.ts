@@ -184,7 +184,7 @@ export class OrdersService {
 
   // ── دورة عمل الفني: قبل → في الطريق → وصل → بدأ → خلص ───────────────────
 
-  private async findOwnedByTechnicianOrThrow(userId: string, orderId: string): Promise<Order> {
+  async findOwnedByTechnicianOrThrow(userId: string, orderId: string): Promise<Order> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     const order = await this.orders.findOne({ where: { id: orderId, technicianId: profile.id } });
     if (!order) {

@@ -23,6 +23,14 @@ export class TechnicianOrderExecutionController {
     private readonly orderMediaService: OrderMediaService,
   ) {}
 
+  // كانت فجوة موثّقة صراحة في apps/technician-app/README.md: مفيش endpoint يرجّع تفاصيل طلب
+  // واحد للفني — لو التطبيق اتقفل في نص دورة التنفيذ، مفيش طريقة يسترجع حالة الطلب الحالية
+  // (order_status) عشان يعرف يكمل من فين. القراءة بس، مفيش منطق جديد.
+  @Get(':id')
+  async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return toOrderResponseDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
+  }
+
   @Post(':id/depart')
   async depart(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return toOrderResponseDto(await this.ordersService.depart(user.sub, id));
