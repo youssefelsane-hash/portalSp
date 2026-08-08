@@ -102,13 +102,18 @@ class AuthRepository extends ChangeNotifier {
   }
 
   // نداء API موثّق — لو access_token منتهي (401)، يجرّب refresh (single-flight) مرة واحدة ويعيد المحاولة.
-  Future<Map<String, dynamic>?> authedRequest(String method, String path, {Map<String, dynamic>? body}) async {
+  Future<Map<String, dynamic>?> authedRequest(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+  }) async {
     try {
-      return await apiRequest(method, path, body: body, accessToken: _accessToken);
+      return await apiRequest(method, path, body: body, accessToken: _accessToken, extraHeaders: extraHeaders);
     } on ApiException catch (err) {
       if (err.statusCode == 401) {
         final newToken = await _refresh();
-        return apiRequest(method, path, body: body, accessToken: newToken);
+        return apiRequest(method, path, body: body, accessToken: newToken, extraHeaders: extraHeaders);
       }
       rethrow;
     }

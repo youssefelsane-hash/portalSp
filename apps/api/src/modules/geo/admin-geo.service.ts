@@ -2,11 +2,12 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { GeoJsonPoint } from '../../common/types/geo-json';
+import { GeoJsonPoint, GeoJsonPolygon } from '../../common/types/geo-json';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CreateAreaDto } from './dto/create-area.dto';
 import { CreateCityDto } from './dto/create-city.dto';
 import { CreateServiceZoneDto } from './dto/create-service-zone.dto';
+import { SetServiceZoneBoundaryDto } from './dto/set-service-zone-boundary.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { UpdateServiceZoneDto } from './dto/update-service-zone.dto';
@@ -17,6 +18,26 @@ import { ServiceZone } from './entities/service-zone.entity';
 function toPoint(latitude?: number, longitude?: number): GeoJsonPoint | undefined {
   if (latitude === undefined || longitude === undefined) return undefined;
   return { type: 'Point', coordinates: [longitude, latitude] };
+}
+
+// حلقة مضلّع GeoJSON لازم تكون مقفولة (أول نقطة == آخر نقطة) — لو الأدمن مبعتش النقطة الأخيرة
+// مطابقة للأولى، بنقفلها تلقائياً بدل ما نرفض الطلب بتعقيد إضافي على العميل (لوحة رسم بسيطة
+// عادةً مش بتضمن الإغلاق الصريح).
+function toPolygon(dto: SetServiceZoneBoundaryDto): GeoJsonPolygon {
+  const ring = dto.points.map((p): [number, number] => [p.lng, p.lat]);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    ring.push(first);
+  }
+  if (ring.length < 4) {
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      'المضلّع لازم يكون فيه 3 نقط مختلفة على الأقل',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+  return { type: 'Polygon', coordinates: [ring] };
 }
 
 @Injectable()
@@ -279,6 +300,29 @@ export class AdminGeoService {
       entityId: zone.id,
       oldValues,
       newValues: { surge_multiplier: zone.surgeMultiplier, is_active: zone.isActive },
+      meta,
+    });
+    return zone;
+  }
+
+  async setServiceZoneBoundary(
+    adminUserId: string,
+    id: string,
+    dto: SetServiceZoneBoundaryDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceZone> {
+    const zone = await this.findServiceZoneOrThrow(id);
+    const hadBoundaryBefore = zone.boundary !== null;
+    zone.boundary = toPolygon(dto);
+    await this.serviceZones.save(zone);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: hadBoundaryBefore ? 'geo.service_zone_boundary_updated' : 'geo.service_zone_boundary_set',
+      entityType: 'service_zone',
+      entityId: zone.id,
+      newValues: { points_count: dto.points.length },
       meta,
     });
     return zone;

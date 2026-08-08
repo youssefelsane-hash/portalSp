@@ -20,8 +20,12 @@ class CreateOrderScreen extends StatefulWidget {
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
   final _descriptionController = TextEditingController();
+  final _promoController = TextEditingController();
   Address? _selectedAddress;
   bool _submitting = false;
+  bool _validatingPromo = false;
+  int? _promoDiscountCents;
+  String? _promoError;
   String? _error;
 
   @override
@@ -34,7 +38,40 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     final address = await Navigator.of(context).push<Address>(
       MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
     );
-    if (address != null) setState(() => _selectedAddress = address);
+    if (address != null) {
+      setState(() {
+        _selectedAddress = address;
+        // العنوان اتغيّر — أي معاينة خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
+        _promoDiscountCents = null;
+        _promoError = null;
+      });
+    }
+  }
+
+  Future<void> _validatePromo() async {
+    final code = _promoController.text.trim();
+    if (code.isEmpty) return;
+    if (_selectedAddress == null) {
+      setState(() => _promoError = 'اختار عنوان الأول');
+      return;
+    }
+    setState(() {
+      _validatingPromo = true;
+      _promoError = null;
+      _promoDiscountCents = null;
+    });
+    try {
+      final result = await _repository.validatePromoCode(
+        code: code,
+        serviceId: widget.service.id,
+        addressId: _selectedAddress!.id,
+      );
+      if (mounted) setState(() => _promoDiscountCents = result['discount_cents'] as int);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _promoError = err.message);
+    } finally {
+      if (mounted) setState(() => _validatingPromo = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -51,6 +88,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
         problemDescription: _descriptionController.text.trim(),
+        promoCode: _promoController.text.trim(),
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -92,6 +130,40 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 onTap: _pickAddress,
               ),
             ),
+            const SizedBox(height: 16),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _promoController,
+                    decoration: const InputDecoration(
+                      labelText: 'كود خصم (اختياري)',
+                      border: OutlineInputBorder(),
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: _validatingPromo ? null : _validatePromo,
+                  child: _validatingPromo
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('تحقق'),
+                ),
+              ],
+            ),
+            if (_promoError != null) ...[
+              const SizedBox(height: 4),
+              Text(_promoError!, style: const TextStyle(color: Colors.red)),
+            ],
+            if (_promoDiscountCents != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'هيتخصم ${(_promoDiscountCents! / 100).toStringAsFixed(0)} ج.م. من السعر',
+                style: const TextStyle(color: Colors.green),
+              ),
+            ],
             const SizedBox(height: 16),
             TextField(
               controller: _descriptionController,

@@ -57,6 +57,21 @@ export class ChatService {
     return thread;
   }
 
+  // كانت فجوة موثّقة: مفيش endpoint يربط order_id بـ thread_id بتاعه — الخيط بيتعمل
+  // أوتوماتيك (createThreadForOrder) وقت قبول الفني، بس مفيش طريقة للعميل/الفني يكتشفوا
+  // الـ thread_id من غير ما يعرفوه مسبقاً. بترمي 404 صريح لو الطلب لسه معندوش خيط
+  // (الفني لسه ما قبلش، مثلاً) بدل ما ترجع null بصمت.
+  async getThreadForOrder(userId: string, orderId: string): Promise<ChatThread> {
+    const thread = await this.threads.findOne({ where: { orderId } });
+    if (!thread) {
+      throw new ApiException(ErrorCode.VAL_001, 'مفيش محادثة للطلب ده لسه', HttpStatus.NOT_FOUND);
+    }
+    if (!(await this.resolveParticipant(userId, thread))) {
+      throw new ApiException(ErrorCode.AUTH_001, 'المحادثة دي مش بتاعتك', HttpStatus.FORBIDDEN);
+    }
+    return thread;
+  }
+
   async getThreadForParticipant(userId: string, threadId: string): Promise<ChatThread> {
     const thread = await this.findThreadOrThrow(threadId);
     if (!(await this.resolveParticipant(userId, thread))) {
@@ -68,6 +83,20 @@ export class ChatService {
   async listMessages(userId: string, threadId: string): Promise<ChatMessage[]> {
     await this.getThreadForParticipant(userId, threadId);
     return this.messages.find({ where: { threadId }, order: { createdAt: 'ASC' } });
+  }
+
+  /**
+   * كانت فجوة موثّقة: `closes_at` كان عمود موجود ومُستخدم فعلاً في فحص `sendMessage()` تحت
+   * (`thread.closesAt.getTime() < Date.now()`)، بس مفيش حاجة كانت بتحطه أصلاً — أي خيط كان
+   * فاضل مفتوح للأبد. بتتنادى من `OrderCompletedChatCloseListener` على `order.status_changed`
+   * لما `newStatus=completed`. Idempotent — استدعاء تاني لنفس الطلب (نادر، بس ممكن لو الحدث
+   * اتصدر مرتين لأي سبب) بيمدّد المهلة بدل ما يكسر حاجة.
+   */
+  async scheduleCloseForOrder(orderId: string): Promise<void> {
+    const thread = await this.threads.findOne({ where: { orderId } });
+    if (!thread) return; // الطلب ممكن يخلص من غير ما فني يقبل أصلاً (نادر) — مفيش خيط يتقفل
+    thread.closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await this.threads.save(thread);
   }
 
   async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {

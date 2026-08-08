@@ -13,6 +13,8 @@ class Order {
   final String paymentStatus;
   final String? placedAt;
   final String? cancelledAt;
+  final String? cancellationReasonId;
+  final int cancellationFeeCents;
   final String createdAt;
 
   Order({
@@ -29,6 +31,8 @@ class Order {
     required this.paymentStatus,
     required this.placedAt,
     required this.cancelledAt,
+    required this.cancellationReasonId,
+    required this.cancellationFeeCents,
     required this.createdAt,
   });
 
@@ -46,7 +50,31 @@ class Order {
         paymentStatus: json['payment_status'] as String,
         placedAt: json['placed_at'] as String?,
         cancelledAt: json['cancelled_at'] as String?,
+        cancellationReasonId: json['cancellation_reason_id'] as String?,
+        cancellationFeeCents: json['cancellation_fee_cents'] as int? ?? 0,
         createdAt: json['created_at'] as String,
+      );
+}
+
+// مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts
+class CancellationReason {
+  final String id;
+  final String reasonAr;
+  final bool chargesFee;
+  final double feePercentage;
+
+  CancellationReason({
+    required this.id,
+    required this.reasonAr,
+    required this.chargesFee,
+    required this.feePercentage,
+  });
+
+  factory CancellationReason.fromJson(Map<String, dynamic> json) => CancellationReason(
+        id: json['id'] as String,
+        reasonAr: json['reason_ar'] as String,
+        chargesFee: json['charges_fee'] as bool,
+        feePercentage: (json['fee_percentage'] as num).toDouble(),
       );
 }
 

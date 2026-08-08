@@ -16,7 +16,12 @@ export class CustomerProfilesService {
     return profile;
   }
 
-  async findByProfileIdOrThrow(profileId: string): Promise<CustomerProfile> {
+  // نفس حماية findByProfileIdOrThrow في technicians.service.ts بالظبط — راجع التعليق هناك
+  // للتفاصيل الكاملة عن بَقّة TypeORM (findOne({where:{id: null}}) بيرجّع صف عشوائي مش فاضي).
+  async findByProfileIdOrThrow(profileId: string | null | undefined): Promise<CustomerProfile> {
+    if (!profileId) {
+      throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
     const profile = await this.customerProfiles.findOne({ where: { id: profileId } });
     if (!profile) {
       throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);

@@ -4,18 +4,24 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { toMessageResponseDto } from './dto/message-response.dto';
+import { toThreadResponseDto } from './dto/thread-response.dto';
 
-@Controller('chat/threads')
+@Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
-  @Get(':id/messages')
+  @Get('orders/:orderId/thread')
+  async getThreadForOrder(@CurrentUser() user: JwtPayload, @Param('orderId', ParseUUIDPipe) orderId: string) {
+    return toThreadResponseDto(await this.chatService.getThreadForOrder(user.sub, orderId));
+  }
+
+  @Get('threads/:id/messages')
   async listMessages(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const messages = await this.chatService.listMessages(user.sub, id);
     return messages.map(toMessageResponseDto);
   }
 
-  @Post(':id/messages')
+  @Post('threads/:id/messages')
   async sendMessage(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

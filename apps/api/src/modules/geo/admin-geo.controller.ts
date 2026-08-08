@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -10,6 +10,7 @@ import { toAdminAreaResponseDto, toAdminCityResponseDto, toAdminServiceZoneRespo
 import { CreateAreaDto } from './dto/create-area.dto';
 import { CreateCityDto } from './dto/create-city.dto';
 import { CreateServiceZoneDto } from './dto/create-service-zone.dto';
+import { SetServiceZoneBoundaryDto } from './dto/set-service-zone-boundary.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { UpdateCityDto } from './dto/update-city.dto';
 import { UpdateServiceZoneDto } from './dto/update-service-zone.dto';
@@ -108,5 +109,18 @@ export class AdminGeoController {
   async deleteServiceZone(@CurrentUser() admin: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @AuditContext() audit: AuditMeta) {
     await this.adminGeoService.deleteServiceZone(admin.sub, id, audit);
     return null;
+  }
+
+  // مضلّع النطاق الجغرافي (boundary) — كان فجوة موثّقة، اتقفلت. مسار منفصل عن PATCH العادي
+  // عمداً لأن البيانات شكلها مختلف تماماً (مصفوفة نقط، مش حقول scalar).
+  @Put('service-zones/:id/boundary')
+  @RequirePermission('geo.manage')
+  async setServiceZoneBoundary(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetServiceZoneBoundaryDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toAdminServiceZoneResponseDto(await this.adminGeoService.setServiceZoneBoundary(admin.sub, id, dto, audit));
   }
 }

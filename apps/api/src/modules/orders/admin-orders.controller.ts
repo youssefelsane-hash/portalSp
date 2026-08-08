@@ -9,14 +9,19 @@ import { AdminOrdersService } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
+import { OrderMediaService } from './order-media.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
 export class AdminOrdersController {
-  constructor(private readonly adminOrdersService: AdminOrdersService) {}
+  constructor(
+    private readonly adminOrdersService: AdminOrdersService,
+    private readonly orderMediaService: OrderMediaService,
+  ) {}
 
   @Get()
   async list(@Query() query: ListOrdersQueryDto) {
@@ -28,6 +33,15 @@ export class AdminOrdersController {
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { order, history } = await this.adminOrdersService.getDetail(id);
     return { ...toOrderResponseDto(order), status_history: history.map(toOrderStatusHistoryResponseDto) };
+  }
+
+  // كانت فجوة موثّقة: GET /technician/orders/:id/media مقصور على @Roles(TECHNICIAN) بس —
+  // الأدمن مالوش أي طريقة يشوف صور قبل/بعد لمراجعة جودة أو حل شكوى. نفس OrderMediaService،
+  // مسار مختلف بصلاحية مختلفة، مفيش تكرار منطق.
+  @Get(':id/media')
+  async listMedia(@Param('id', ParseUUIDPipe) id: string) {
+    const media = await this.orderMediaService.listForOrder(id);
+    return media.map(toOrderMediaResponseDto);
   }
 
   @Post(':id/cancel')

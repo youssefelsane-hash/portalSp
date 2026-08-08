@@ -23,6 +23,22 @@ export class TechnicianOrderExecutionController {
     private readonly orderMediaService: OrderMediaService,
   ) {}
 
+  // مسار حرفي (`active`) لازم يتسجّل قبل `:id` — وإلا NestJS هيحاول يفسّرها كـ UUID ويرفضها
+  // (ParseUUIDPipe) قبل ما توصل هنا خالص. كانت فجوة موثّقة صراحة في apps/technician-app/README.md:
+  // مفيش endpoint يرجّع "الطلب النشط الحالي" من غير ما التطبيق يعرف الـ id مقدماً — يعني لو
+  // التطبيق اتقفل في نص دورة التنفيذ ورجع اتفتح تاني، مفيش طريقة يسترجع الشاشة تلقائياً.
+  @Get('active')
+  async getActive(@CurrentUser() user: JwtPayload) {
+    const order = await this.ordersService.findActiveForTechnician(user.sub);
+    return order ? toOrderResponseDto(order) : null;
+  }
+
+  // نفس الفجوة القديمة (قراءة طلب واحد بالـ id) — كانت موثّقة صراحة، اتقفلت.
+  @Get(':id')
+  async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return toOrderResponseDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
+  }
+
   @Post(':id/depart')
   async depart(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return toOrderResponseDto(await this.ordersService.depart(user.sub, id));

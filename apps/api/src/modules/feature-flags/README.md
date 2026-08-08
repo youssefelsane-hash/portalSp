@@ -1,0 +1,15 @@
+# modules/feature-flags
+
+فلاجات الميزات لتفعيل/تعطيل تدريجي. جدول: feature_flags (قاموس §11.4).
+
+**الحالة: شغال — كانت الجدول موجود من `infra/migrations/0011_system.sql` من أول يوم من غير أي entity/service/endpoint، اتقفلت الفجوة دي هنا.**
+
+- **`AdminFeatureFlagsController`** (`/admin/feature-flags`, `@RequirePermission('feature_flags.manage')` للكتابة، `super_admin`/`ops_manager` — `infra/migrations/0038`): `GET` (قايمة + واحد بالـ`key`) مفتوحة لأي أدمن، `POST`/`PATCH`/`DELETE` محتاجين الصلاحية. `key` ثابت بعد الإنشاء (زي `slug` في catalog) — أي كود بيستخدم `FeatureFlagsService.isEnabled(key)` مضمون إنه مش هينكسر بتغيير اسم لاحق.
+- **`GET /feature-flags/:key/check`** — مفتوح لأي مستخدم مسجّل دخول (عميل/فني/أدمن، مفيش `@Roles()`)، بيرجّع `{key, enabled}` للمستخدم الحالي. فلاج مش موجود أصلاً = `false` مش 404 — الكلاينت مش المفروض يتعامل مع خطأ لميزة لسه معملهاش فلاج، الافتراضي الآمن هو الإخفاء.
+- **`FeatureFlagsService.isEnabledForUser(key, userId?, zoneId?)`** — منطق التقييم بالترتيب: (1) `is_enabled=false` = kill switch فوري، بيقفل كل حاجة بغض النظر عن أي حقل تاني. (2) `enabled_for_user_ids`/`enabled_for_zone_ids` — استهداف صريح، بيتخطّى نسبة التوزيع (لو المستخدم/المنطقة في القائمة، الميزة شغالة بغض النظر عن `rollout_percentage`). (3) `rollout_percentage` — توزيع **ديترمينستيك** مش عشوائي: `md5(key:userId)` أول 4 بايت `mod 100 < percentage`، عشان نفس المستخدم يفضل شايف نفس النتيجة دايماً (مش هيشوف الميزة تظهر وتختفي بين الطلبات المختلفة).
+- **كل عملية بتتسجّل في سجل التدقيق** (`feature_flag.created`/`updated`/`deleted`).
+- اتعمله اختبار حي كامل: فلاج جديد اتنشأ `is_enabled=false` افتراضياً → `check` رجّع `false`. `key` مكرر اترفض `409`. تفعيل الفلاج بس `rollout_percentage=0` → لسه `false` (مفعّل بس محدش متضمّن). `rollout_percentage=100` → `true` لأي مستخدم. رجوع لـ`0%` مع إضافة `user_id` العميل التجريبي لـ`enabled_for_user_ids` صراحة → `true` رغم الـ`0%` (الاستهداف الصريح بيتخطّى التوزيع). تعطيل `is_enabled=false` مع فضل الاستهداف الصريح موجود → `false` (kill switch بيغلب كل حاجة). فلاج مش موجود أصلاً → `false` بدون أي 404. عميل عادي حاول ينشئ فلاج اترفض 403. حذف الفلاج نجح واختفى فوراً (404 من `GET` الأدمن)، وكل خطوة (إنشاء/تعديل مرتين/حذف) ظهرت في `audit_logs` بالقيم القديمة/الجديدة الصح.
+- **بَقّة صلاحيات يوم-صفر اتلقطت واتصلحت *قبل* أي commit** (تكرار لنفس الفخ اللي اتعلّمناه في `support/README.md` §`support_tickets.manage`): كتبت الـ migration الأول ونسيت المنح الصريح لـ`super_admin` معتمد على الـ `CROSS JOIN` القديم في `0020` — راجعتها بنفسي هذه المرة قبل التطبيق واتأكدت إن `super_admin` فعلاً عنده الصلاحية (`psql` مباشر) قبل ما أكمل الاختبار الحي، فمكانتش فجوة حقيقية اتلقطت متأخر زي المرة اللي فاتت.
+- **لسه من غير**: مفيش أي موديول تاني في الباك-إند بيستهلك `FeatureFlagsService.isEnabledForUser()` فعلياً لحد دلوقتي (البنية التحتية بس جاهزة، زي `SettingsService` قبل ما `matching` يستخدمها) — ومفيش استهلاك من `apps/admin`/`apps/customer-app`/`apps/technician-app` لسه.
+
+مرجع كامل: `../../../../docs/02-data-dictionary.md` §11.4 و `../../../../docs/01-master-plan.md` §2.4.

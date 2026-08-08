@@ -27,6 +27,7 @@ import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { HealthModule } from './modules/common/health/health.module';
 
 @Module({
@@ -70,8 +71,12 @@ import { HealthModule } from './modules/common/health/health.module';
     CustomersModule,
     TechniciansModule,
     CatalogModule,
-    OrdersModule,
+    // MatchingModule قبل OrdersModule عمداً — تفاصيل كاملة في matching/matching.module.ts.
+    // NestJS بيسجّل مسارات الـ controllers بترتيب تحميل الموديولات، ومسارات حرفية زي
+    // GET /technician/orders/available (في MatchingModule) لازم تتسجّل قبل GET
+    // /technician/orders/:id (في OrdersModule) وإلا الـ ParseUUIDPipe بترفض "available" كـ id غلط.
     MatchingModule,
+    OrdersModule,
     ChatModule,
     PaymentsModule,
     RatingsModule,
@@ -79,6 +84,7 @@ import { HealthModule } from './modules/common/health/health.module';
     NotificationsModule,
     PromotionsModule,
     AdminModule,
+    FeatureFlagsModule,
     HealthModule,
   ],
   providers: [

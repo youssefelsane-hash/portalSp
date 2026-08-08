@@ -151,6 +151,9 @@ export class Order {
   @Column({ name: 'cancelled_by_user_id', type: 'uuid', nullable: true })
   cancelledByUserId: string | null;
 
+  @Column({ name: 'cancellation_reason_id', type: 'uuid', nullable: true })
+  cancellationReasonId: string | null;
+
   @Column({ name: 'cancellation_fee_cents', type: 'integer', default: 0 })
   cancellationFeeCents: number;
 

@@ -20,6 +20,7 @@ import { OrderReassignedNotificationListener } from './listeners/order-reassigne
 import { OrderStatusNotificationListener } from './listeners/order-status-notification.listener';
 import { PayoutCompletedRoutingListener } from './listeners/payout-completed-routing.listener';
 import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires-review-routing.listener';
+import { RatingSubmittedNotificationListener } from './listeners/rating-submitted-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
@@ -49,6 +50,7 @@ import { NotificationsService } from './notifications.service';
     CashCollectedRoutingListener,
     PayoutCompletedRoutingListener,
     LowRatingRoutingListener,
+    RatingSubmittedNotificationListener,
   ],
   exports: [NotificationsService],
 })

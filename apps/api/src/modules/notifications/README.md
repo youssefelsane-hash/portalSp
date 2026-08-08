@@ -15,9 +15,10 @@
   - `order.status_changed` (حدث جديد اتضاف في `orders.service.ts` لكل انتقال حالة فني أو إلغاء عميل، وبقى بيتصدر كمان من `admin-orders.service.ts` عند إلغاء إداري) → إشعار العميل عند `technician_on_way`/`technician_arrived`/`in_progress`/`work_completed`، إشعار الفني عند `cancelled_by_customer`، وإشعار الطرفين الاتنين مع سبب الإلغاء عند `cancelled_by_system` (إلغاء من الأدمن).
   - `order.reassigned` (حدث جديد، `admin-orders.service.ts`) → إشعار الفني اللي الأدمن عيّنله الطلب مباشرة.
   - `technician.verification_changed` (حدث جديد، `admin-technicians.service.ts`) → إشعار الفني بقرار الاعتماد/الرفض (وسبب الرفض بالظبط لو اترفض).
+  - `rating.submitted` (حدث جديد، `ratings.service.ts createRating()` — كانت فجوة موثّقة، اتقفلت) → إشعار مباشر للطرف اللي اتقيّم (عميل أو فني، أي اتجاه) بعدد النجوم، مستقل تماماً عن `rating.low_rating_submitted` تحت (ده بيتوجّه لـ`support_agent` بس لو التقييم منخفض).
 - **`GET /notifications`**: صفحات + فلتر `unread_only`. `GET /notifications/unread-count`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`.
 - **اتعمله اختبار end-to-end فعلي شامل** على قاعدة بيانات حقيقية وسيرفر شغال: تسجيل عميل → إشعار ترحيب اتسجّل تلقائي وظهر في القايمة. تسجيل جهاز بـ fcm_token وجهاز من غير token (الحالة الواقعية إن الكلاينت لسه ملحقش ياخد التوكن). دورة طلب كاملة (إنشاء → قبول → في الطريق → وصل → بدأ → خلص) وكل خطوة ولّدت إشعار العميل الصح بالترتيب الصح، وقبول الطلب ولّد إشعار للفني كمان. إلغاء العميل لطلب مقبول ولّد إشعار "العميل لغى الطلب" للفني. `mark-all-read` رجّع العدد الصح وصفّر `unread_count`. جهاز مش موجود ومحاولة إلغاء جهاز مستخدم تاني الاتنين رجّعوا نفس رسالة "غير موجود". تسجيل نفس `device_id` تحت مستخدم تاني نقل الملكية فعلياً (اتأكد من `user_id` في القاعدة). قناة `push` من غير أي جهاز فعّال برجع `failed` مع سبب واضح، ومع جهاز عنده `fcm_token` برجع `sent` — الاتنين اتأكد منهم مباشرة عبر `NotificationsService.notify()` (مش بس عبر endpoint، عشان مفيش مسار HTTP بيبعت push مباشرة دلوقتي).
-- **لسه من غير**: قنوات `sms`/`whatsapp` بترجع targets فعلية (رقم المستخدم) بس من غير بوابة إرسال حقيقية — هتفشل بأمان لحد ما تتوصل ببوابة حقيقية. إشعارات التقييمات لسه مش متغطية.
+- **لسه من غير**: قنوات `sms`/`whatsapp` بترجع targets فعلية (رقم المستخدم) بس من غير بوابة إرسال حقيقية — هتفشل بأمان لحد ما تتوصل ببوابة حقيقية.
 
 ## توجيه الإشعارات الداخلية حسب الدور (`notification_routing_rules`) — جديد (S10، نقطة 10)
 
@@ -30,6 +31,16 @@
   - `complaint.filed` (`support/support.service.ts fileComplaint()`) → مزروعة على `support_agent`.
   - `payout.requires_review` (`payments/payouts.service.ts requestPayout()`, بس لو الصرف مش auto-approved) → مزروعة على `finance`.
 - **اتعمله اختبار end-to-end فعلي شامل**: عميل فتح شكوى → `support_agent` استلم إشعار `in_app` فوراً بعنوان ووصف الشكوى بالظبط، و`super_admin` (مالوش الدور ده) ما استلمش حاجة. فني طلب صرف 1500 جنيه (فوق حد الموافقة التلقائية 1000) → `finance` استلم إشعار بالمبلغ والرابط الصح. تعطيل قاعدة `complaint.filed→support_agent` عبر الـ API **من غير أي restart** أوقف الإشعارات فوراً (شكوى تانية اتفتحت وعدد إشعارات support_agent فضل زي ما هو)، وإعادة تفعيلها رجّعت الشغل. إضافة قاعدة تانية لنفس الحدث لدور تاني (`ops_manager`) بقناتين (`in_app`+`email`) اشتغلت بالتوازي مع القاعدة الأولى — `ops_manager` استلم صفين مستقلين، واحد `sent` (`in_app`) وواحد `failed` بسبب واضح (`email`، مفيش بوابة حقيقية لسه — نفس صراحة باقي القنوات مش المُوصّلة). `finance` (مالوش `notifications.manage`) اترفض من إنشاء قاعدة لكن قدر يشوف القائمة. قاعدة مكرّرة ودور غير موجود وقناة غير صحيحة (`carrier_pigeon`) اترفضوا كلهم بوضوح.
+
+## `rating.submitted` — إشعار مباشر لصاحب التقييم — كانت فجوة موثّقة، اتقفلت
+
+خلاف كل الأمثلة فوق (توجيه لدور إداري)، ده إشعار **مباشر لشخص محدد** — مش عبر `notification_routing_rules`، بنفس نمط `order.accepted`/`order.status_changed` (استدعاء `NotificationsService.notify()` مباشر من الـ listener).
+
+- بيتصدر من `ratings.service.ts createRating()` — نقطة الدخول الوحيدة لأي تقييم (عميل←فني أو فني←عميل)، فمفيش تكرار كود بين الاتجاهين.
+- `RatingSubmittedNotificationListener` بيحدد `deepLink` حسب `ratingType`: `/technician/orders/:id` لو الفني هو اللي اتقيّم، `/orders/:id` لو العميل.
+- اتعمله اختبار حي على 3 طلبات حقيقية `completed` من غير تقييم سابق: عميل قيّم فني 5 نجوم → الفني استلم إشعار `rating_received` فوراً بالنص والرابط الصح. عميل قيّم فني تاني 1 نجمة → الفني استلم `rating_received` **و** `support_agent` استلم `low_rating_submitted` بالتوازي (الحدثين مستقلين، مش بديل عن بعض). فني قيّم عميل 5 نجوم → العميل استلم إشعار بالرابط الصح (`/orders/:id` مش `/technician/...`).
+
+مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
 - **3 أحداث حساسة إضافية اتوصّلوا (`infra/migrations/0036`) — كانت فجوة موثّقة، اتقفلت جزئياً**:
   - `payment.cash_collected` (`payments.service.ts collectCash()`، حدث جديد) → مزروعة على `finance`. اتعمله اختبار حي: طلب تجريبي `work_completed`، فني حصّل كاش عليه (250 جنيه)، الاتنين مستخدمين عندهم دور `finance` استلموا إشعار مستقل بالمبلغ الصح ورقم الطلب.
   - `payout.completed` (`payouts.service.ts adminComplete()`، حدث جديد) → مزروعة على `super_admin` (مش `finance` — الأدمن اللي بيقفل الصرف أصلاً من `finance` عادةً، فده إشعار رقابي لإدارة أعلى مش تكرار). اتعمله اختبار حي: فني طلب صرف 200 جنيه (اتوافق عليه أوتوماتيك تحت الحد)، أدمن قفله، الاتنين `super_admin` استلموا إشعار بالمبلغ الصافي.

@@ -19,6 +19,8 @@ export interface OrderResponseDto {
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;
+  cancellation_reason_id: string | null;
+  cancellation_fee_cents: number;
   created_at: string;
 }
 
@@ -42,6 +44,8 @@ export function toOrderResponseDto(order: Order): OrderResponseDto {
     payment_status: order.paymentStatus,
     placed_at: order.placedAt ? order.placedAt.toISOString() : null,
     cancelled_at: order.cancelledAt ? order.cancelledAt.toISOString() : null,
+    cancellation_reason_id: order.cancellationReasonId,
+    cancellation_fee_cents: order.cancellationFeeCents,
     created_at: order.createdAt.toISOString(),
   };
 }

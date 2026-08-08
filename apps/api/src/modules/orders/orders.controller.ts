@@ -35,6 +35,6 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelOrderDto,
   ) {
-    return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto.reason));
+    return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto));
   }
 }

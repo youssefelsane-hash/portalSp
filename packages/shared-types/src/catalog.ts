@@ -1,4 +1,6 @@
 // مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts وentities
+import type { TechnicianLevel } from './technicians';
+
 export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote';
 
 export interface AdminServiceCategoryResponseDto {
@@ -86,5 +88,43 @@ export interface CreateServiceBody {
 }
 
 export interface UpdateServiceBody extends Partial<CreateServiceBody> {
+  is_active?: boolean;
+}
+
+export interface ServiceLevelPricingResponseDto {
+  id: string;
+  service_id: string;
+  technician_level: TechnicianLevel;
+  price_multiplier: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UpsertLevelPricingBody {
+  technician_level: TechnicianLevel;
+  price_multiplier: number;
+}
+
+export interface ServiceAddonResponseDto {
+  id: string;
+  service_id: string;
+  name_ar: string;
+  name_en: string | null;
+  price_cents: number;
+  duration_minutes: number | null;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export interface CreateServiceAddonBody {
+  name_ar: string;
+  name_en?: string;
+  price_cents: number;
+  duration_minutes?: number;
+  display_order?: number;
+}
+
+export interface UpdateServiceAddonBody extends Partial<CreateServiceAddonBody> {
   is_active?: boolean;
 }

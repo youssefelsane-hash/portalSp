@@ -6,14 +6,23 @@ import { AdminCatalogController } from './admin-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
+import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
+import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 import { TechnicianService } from './entities/technician-service.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ServiceCategory, Service, ServiceZonePricing, TechnicianService]),
+    TypeOrmModule.forFeature([
+      ServiceCategory,
+      Service,
+      ServiceZonePricing,
+      ServiceLevelPricing,
+      ServiceAddon,
+      TechnicianService,
+    ]),
     TechniciansModule,
     AuditModule,
   ],

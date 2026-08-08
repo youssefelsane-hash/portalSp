@@ -1,6 +1,7 @@
 import { Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
 import { CatalogService } from './catalog.service';
+import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateQueryDto, ListServicesDto } from './dto/list-services.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
 
@@ -31,6 +32,13 @@ export class CatalogController {
   @Public()
   @Post('services/:id/estimate')
   async estimate(@Param('id', ParseUUIDPipe) id: string, @Query() query: EstimateQueryDto) {
-    return this.catalogService.estimate(id, query.zone_id);
+    return this.catalogService.estimate(id, query.zone_id, query.technician_level);
+  }
+
+  @Public()
+  @Get('services/:id/addons')
+  async listAddons(@Param('id', ParseUUIDPipe) id: string) {
+    const addons = await this.catalogService.findAddons(id);
+    return addons.map(toServiceAddonResponseDto);
   }
 }

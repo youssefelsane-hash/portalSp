@@ -8,11 +8,13 @@ Future<http.Response> _send(
   String path, {
   Map<String, dynamic>? body,
   String? accessToken,
+  Map<String, String>? extraHeaders,
 }) async {
   final uri = Uri.parse('$apiBaseUrl$path');
   final headers = {
     'Content-Type': 'application/json',
     if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+    if (extraHeaders != null) ...extraHeaders,
   };
 
   switch (method) {
@@ -36,8 +38,9 @@ Future<dynamic> _apiRequestRaw(
   String path, {
   Map<String, dynamic>? body,
   String? accessToken,
+  Map<String, String>? extraHeaders,
 }) async {
-  final response = await _send(method, path, body: body, accessToken: accessToken);
+  final response = await _send(method, path, body: body, accessToken: accessToken, extraHeaders: extraHeaders);
   final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
   final success = decoded['success'] as bool? ?? false;
 
@@ -59,8 +62,9 @@ Future<Map<String, dynamic>?> apiRequest(
   String path, {
   Map<String, dynamic>? body,
   String? accessToken,
+  Map<String, String>? extraHeaders,
 }) async {
-  final data = await _apiRequestRaw(method, path, body: body, accessToken: accessToken);
+  final data = await _apiRequestRaw(method, path, body: body, accessToken: accessToken, extraHeaders: extraHeaders);
   return data as Map<String, dynamic>?;
 }
 

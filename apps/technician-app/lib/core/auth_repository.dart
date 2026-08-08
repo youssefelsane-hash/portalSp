@@ -114,6 +114,24 @@ class AuthRepository extends ChangeNotifier {
     }
   }
 
+  // زي authedRequest بس لرفع ملف multipart (نفس منطق retry الـ 401 بالظبط).
+  Future<Map<String, dynamic>?> authedUpload(
+    String path, {
+    required List<int> fileBytes,
+    required String filename,
+    required Map<String, String> fields,
+  }) async {
+    try {
+      return await apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: _accessToken);
+    } on ApiException catch (err) {
+      if (err.statusCode == 401) {
+        final newToken = await _refresh();
+        return apiUpload(path, fileBytes: fileBytes, filename: filename, fields: fields, accessToken: newToken);
+      }
+      rethrow;
+    }
+  }
+
   // زي authedRequest بس لـ endpoints بترجع قايمة (GET بس، مفيش داعي لـ body).
   Future<List<Map<String, dynamic>>> authedRequestList(String path) async {
     try {

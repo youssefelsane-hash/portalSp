@@ -68,6 +68,7 @@ export interface AdminServiceZoneResponseDto {
   surge_multiplier: number;
   min_order_amount_cents: number | null;
   is_active: boolean;
+  has_boundary: boolean;
   created_at: string;
 }
 
@@ -80,6 +81,7 @@ export function toAdminServiceZoneResponseDto(zone: ServiceZone): AdminServiceZo
     surge_multiplier: Number(zone.surgeMultiplier),
     min_order_amount_cents: zone.minOrderAmountCents,
     is_active: zone.isActive,
+    has_boundary: zone.boundary !== null,
     created_at: zone.createdAt.toISOString(),
   };
 }

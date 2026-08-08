@@ -25,9 +25,16 @@ class OrdersRepository {
     );
   }
 
+  // كانت فجوة موثّقة: مفيش طريقة تسترجع "الطلب النشط الحالي" من غير ما تعرف الـ id مقدماً —
+  // بتتنادى وقت فتح الشاشة الرئيسية عشان لو التطبيق اتقفل في نص دورة التنفيذ، نرجّع الفني
+  // لشاشة التنفيذ تلقائياً بدل شاشة الطلبات المتاحة. null لو مفيش طلب نشط دلوقتي.
+  Future<Order?> getActive() async {
+    final data = await authRepository.authedRequest('GET', '/technician/orders/active');
+    return data == null ? null : Order.fromJson(data);
+  }
+
   // دورة تنفيذ الطلب بعد القبول — كل فعل بيرجّع نسخة محدّثة من الطلب، الشاشة بتستخدمها
-  // تحدد الفعل الجاي (nextTechnicianAction في order.dart) من غير حاجة لـ endpoint تفاصيل منفصل
-  // (مفيش GET /technician/orders/:id في الباك-إند حالياً — موثّق كفجوة في README).
+  // تحدد الفعل الجاي (nextTechnicianAction في order.dart) من غير حاجة لـ endpoint تفاصيل منفصل.
   Future<Order> depart(String orderId) async {
     final data = await authRepository.authedRequest('POST', '/technician/orders/$orderId/depart');
     return Order.fromJson(data!);

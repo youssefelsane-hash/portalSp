@@ -1,9 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../chat/chat_screen.dart';
+import '../media/media_repository.dart';
+import '../tracking/tracking_client.dart';
 import 'order.dart';
 import 'orders_repository.dart';
+
+// قبل/بعد الشغل — عتبة بسيطة على الحالة بدل قايمة صور فعلية (مفيش GET /technician/orders/:id
+// لاسترجاع صور اترفعت قبل كده لو التطبيق اتقفل وفتح تاني، نفس فجوة الاستمرارية الموثّقة فوق).
+const Set<String> _beforePhotoStatuses = {'accepted', 'technician_on_way', 'technician_arrived'};
+const Set<String> _afterPhotoStatuses = {'in_progress', 'work_completed'};
+
+// نفس ACTIVE_TRACKING_STATUSES في order-tracking.gateway.ts بالظبط.
+const Set<String> _activeTrackingStatuses = {'accepted', 'technician_on_way', 'technician_arrived', 'in_progress'};
 
 class OrderExecutionScreen extends StatefulWidget {
   final Order initialOrder;
@@ -16,15 +28,112 @@ class OrderExecutionScreen extends StatefulWidget {
 
 class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   late final OrdersRepository _repository;
+  late final MediaRepository _mediaRepository;
+  late final String _accessToken;
+  final _trackingClient = TechnicianTrackingClient();
   late Order _order;
   bool _acting = false;
+  bool _uploadingPhoto = false;
+  bool _trackingConnected = false;
   String? _error;
+  String? _photoMessage;
 
   @override
   void initState() {
     super.initState();
-    _repository = OrdersRepository(context.read<AuthRepository>());
+    final auth = context.read<AuthRepository>();
+    _repository = OrdersRepository(auth);
+    _mediaRepository = MediaRepository(auth);
+    _accessToken = auth.accessToken!;
     _order = widget.initialOrder;
+    _connectTrackingIfActive();
+  }
+
+  void _connectTrackingIfActive() {
+    if (_trackingConnected || !_activeTrackingStatuses.contains(_order.orderStatus)) return;
+    _trackingClient.connect(
+      accessToken: _accessToken,
+      onError: (message) {
+        if (mounted) setState(() => _error = message);
+      },
+    );
+    _trackingConnected = true;
+  }
+
+  Future<void> _shareLocation() async {
+    final latController = TextEditingController();
+    final lngController = TextEditingController();
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('شارك موقعك'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: latController,
+                decoration: const InputDecoration(labelText: 'خط العرض (latitude)'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+              ),
+              TextField(
+                controller: lngController,
+                decoration: const InputDecoration(labelText: 'خط الطول (longitude)'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('إرسال')),
+          ],
+        ),
+      ),
+    );
+    if (result != true) return;
+    final lat = double.tryParse(latController.text.trim());
+    final lng = double.tryParse(lngController.text.trim());
+    if (lat == null || lng == null) {
+      if (mounted) setState(() => _error = 'الإحداثيات لازم تكون أرقام صحيحة');
+      return;
+    }
+    _trackingClient.sendLocation(latitude: lat, longitude: lng);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتبعت موقعك للعميل')));
+    }
+  }
+
+  @override
+  void dispose() {
+    _trackingClient.dispose();
+    super.dispose();
+  }
+
+  Future<void> _uploadPhoto(String mediaType, String labelAr) async {
+    final picker = ImagePicker();
+    final XFile? picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+    if (picked == null) return;
+
+    setState(() {
+      _uploadingPhoto = true;
+      _error = null;
+      _photoMessage = null;
+    });
+    try {
+      final bytes = await picked.readAsBytes();
+      await _mediaRepository.upload(
+        orderId: _order.id,
+        fileBytes: bytes,
+        filename: picked.name,
+        mediaType: mediaType,
+      );
+      if (mounted) setState(() => _photoMessage = 'صورة $labelAr اترفعت ✅');
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
   }
 
   Future<void> _runAction(String action) async {
@@ -100,6 +209,42 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChatScreen(orderId: _order.id)),
+              ),
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('الشات مع العميل'),
+            ),
+            if (_photoMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(_photoMessage!, style: const TextStyle(color: Colors.green)),
+            ],
+            if (_activeTrackingStatuses.contains(_order.orderStatus)) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _shareLocation,
+                icon: const Icon(Icons.share_location_outlined),
+                label: const Text('شارك موقعك مع العميل'),
+              ),
+            ],
+            if (_beforePhotoStatuses.contains(_order.orderStatus) ||
+                _afterPhotoStatuses.contains(_order.orderStatus)) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _uploadingPhoto
+                    ? null
+                    : () => _uploadPhoto(
+                          _beforePhotoStatuses.contains(_order.orderStatus) ? 'before_photo' : 'after_photo',
+                          _beforePhotoStatuses.contains(_order.orderStatus) ? 'قبل الشغل' : 'بعد الشغل',
+                        ),
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: _uploadingPhoto
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(_beforePhotoStatuses.contains(_order.orderStatus) ? 'صوّر قبل الشغل' : 'صوّر بعد الشغل'),
+              ),
             ],
             const SizedBox(height: 24),
             if (isDone)

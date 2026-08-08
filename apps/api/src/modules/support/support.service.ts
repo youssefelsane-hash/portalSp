@@ -1,9 +1,12 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { COMPLAINT_FILED_EVENT, ComplaintFiledEvent } from '../../common/events/complaint-filed.event';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -15,8 +18,15 @@ import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { AddComplaintMessageDto, FileComplaintDto, RejectComplaintDto, ResolveComplaintDto } from './dto/file-complaint.dto';
 import { Complaint, COMPLAINT_DEFAULT_SLA_HOURS, ComplaintSeverity, ComplaintStatus } from './entities/complaint.entity';
+import { ComplaintAttachment } from './entities/complaint-attachment.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
 import { canTransitionComplaint } from './complaint-state-machine';
+
+export interface IncomingComplaintFile {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+}
 
 const SLA_HOURS_BY_SEVERITY: Record<ComplaintSeverity, number> = {
   [ComplaintSeverity.CRITICAL]: 4,
@@ -30,6 +40,7 @@ export class SupportService {
   constructor(
     @InjectRepository(Complaint) private readonly complaints: Repository<Complaint>,
     @InjectRepository(ComplaintMessage) private readonly messages: Repository<ComplaintMessage>,
+    @InjectRepository(ComplaintAttachment) private readonly attachments: Repository<ComplaintAttachment>,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly customerProfiles: CustomerProfilesService,
@@ -37,6 +48,7 @@ export class SupportService {
     private readonly walletsService: WalletsService,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   private async nextComplaintNumber(manager: EntityManager): Promise<string> {
@@ -306,5 +318,31 @@ export class SupportService {
   private async resolveUserTypeOf(userId: string): Promise<UserType> {
     const isTechnician = await this.techniciansService.findByUserIdOrThrow(userId).catch(() => null);
     return isTechnician ? UserType.TECHNICIAN : UserType.CUSTOMER;
+  }
+
+  // نفس نمط OrderMediaService.upload تماماً — التخزين وراه نفس واجهة StorageService.
+  async uploadAttachment(
+    user: JwtPayload,
+    complaintId: string,
+    file: IncomingComplaintFile,
+  ): Promise<ComplaintAttachment> {
+    const complaint = await this.getForUser(user, complaintId);
+
+    const key = `complaints/${complaint.id}/${randomUUID()}${extname(file.originalname)}`;
+    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
+
+    const attachment = this.attachments.create({
+      complaintId: complaint.id,
+      fileUrl,
+      fileType: file.mimetype,
+      uploadedByUserId: user.sub,
+    });
+    await this.attachments.save(attachment);
+    return attachment;
+  }
+
+  async listAttachments(user: JwtPayload, complaintId: string): Promise<ComplaintAttachment[]> {
+    const complaint = await this.getForUser(user, complaintId);
+    return this.attachments.find({ where: { complaintId: complaint.id }, order: { createdAt: 'ASC' } });
   }
 }

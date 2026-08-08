@@ -55,3 +55,12 @@ export interface OrderStatusHistoryResponseDto {
 export interface OrderDetailResponseDto extends OrderResponseDto {
   status_history: OrderStatusHistoryResponseDto[];
 }
+
+// مطابق لـ apps/api/src/modules/orders/dto/order-media-response.dto.ts
+export interface OrderMediaResponseDto {
+  id: string;
+  media_type: string;
+  file_url: string;
+  caption: string | null;
+  taken_at: string;
+}

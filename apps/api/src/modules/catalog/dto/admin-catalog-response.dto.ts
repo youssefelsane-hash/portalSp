@@ -1,4 +1,6 @@
+import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
+import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
 import { Service } from '../entities/service.entity';
 
 export interface AdminServiceCategoryResponseDto {
@@ -88,5 +90,51 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     is_active: service.isActive,
     launch_phase: service.launchPhase,
     created_at: service.createdAt.toISOString(),
+  };
+}
+
+export interface ServiceLevelPricingResponseDto {
+  id: string;
+  service_id: string;
+  technician_level: string;
+  price_multiplier: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export function toServiceLevelPricingResponseDto(pricing: ServiceLevelPricing): ServiceLevelPricingResponseDto {
+  return {
+    id: pricing.id,
+    service_id: pricing.serviceId,
+    technician_level: pricing.technicianLevel,
+    price_multiplier: Number(pricing.priceMultiplier),
+    is_active: pricing.isActive,
+    created_at: pricing.createdAt.toISOString(),
+  };
+}
+
+export interface ServiceAddonResponseDto {
+  id: string;
+  service_id: string;
+  name_ar: string;
+  name_en: string | null;
+  price_cents: number;
+  duration_minutes: number | null;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export function toServiceAddonResponseDto(addon: ServiceAddon): ServiceAddonResponseDto {
+  return {
+    id: addon.id,
+    service_id: addon.serviceId,
+    name_ar: addon.nameAr,
+    name_en: addon.nameEn,
+    price_cents: addon.priceCents,
+    duration_minutes: addon.durationMinutes,
+    is_active: addon.isActive,
+    display_order: addon.displayOrder,
+    created_at: addon.createdAt.toISOString(),
   };
 }
