@@ -22,6 +22,12 @@ export interface RejectPayoutBody {
   reason: string;
 }
 
+export interface PayoutOrderItemResponseDto {
+  order_id: string;
+  earning_cents: number;
+  commission_cents: number;
+}
+
 export interface RefundOrderBody {
   reason_notes: string;
 }

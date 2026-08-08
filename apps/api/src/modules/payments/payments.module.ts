@@ -22,6 +22,7 @@ import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymobGatewayService } from './gateways/paymob-gateway.service';
 import { Payment } from './entities/payment.entity';
 import { Payout } from './entities/payout.entity';
+import { PayoutOrderItem } from './entities/payout-order-item.entity';
 import { Refund } from './entities/refund.entity';
 import { Wallet } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
@@ -29,7 +30,19 @@ import { WebhookEvent } from './entities/webhook-event.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, WalletTransaction, Payment, Refund, Payout, Order, OrderStatusHistory, User, WebhookEvent, TechnicianProfile]),
+    TypeOrmModule.forFeature([
+      Wallet,
+      WalletTransaction,
+      Payment,
+      Refund,
+      Payout,
+      PayoutOrderItem,
+      Order,
+      OrderStatusHistory,
+      User,
+      WebhookEvent,
+      TechnicianProfile,
+    ]),
     CustomersModule,
     TechniciansModule,
     CatalogModule,

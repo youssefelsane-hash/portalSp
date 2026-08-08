@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { AdminPayoutResponseDto, PayoutStatus } from '@baytak/shared-types';
+import { Fragment, useEffect, useState } from 'react';
+import type { AdminPayoutResponseDto, PayoutOrderItemResponseDto, PayoutStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -25,6 +25,9 @@ export default function PayoutsPage() {
   const [statusFilter, setStatusFilter] = useState<PayoutStatus | 'all'>('under_review');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [orderItems, setOrderItems] = useState<PayoutOrderItemResponseDto[] | null>(null);
+  const [orderItemsLoading, setOrderItemsLoading] = useState(false);
 
   function load() {
     const query = statusFilter === 'all' ? '' : `?status=${statusFilter}`;
@@ -70,6 +73,25 @@ export default function PayoutsPage() {
     await runAction(() => authedFetch(`/admin/payouts/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }));
   }
 
+  async function toggleOrderItems(id: string) {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setOrderItems(null);
+      return;
+    }
+    setExpandedId(id);
+    setOrderItems(null);
+    setOrderItemsLoading(true);
+    try {
+      const items = await authedFetch<PayoutOrderItemResponseDto[]>(`/admin/payouts/${id}/order-items`);
+      setOrderItems(items);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل تفاصيل الطلبات');
+    } finally {
+      setOrderItemsLoading(false);
+    }
+  }
+
   return (
     <AppShell>
       <h1 className="mb-6 text-xl font-semibold">طلبات الصرف</h1>
@@ -106,48 +128,87 @@ export default function PayoutsPage() {
           </TableHeader>
           <TableBody>
             {payouts.map((payout) => (
-              <TableRow key={payout.id}>
-                <TableCell dir="ltr">{payout.payout_number}</TableCell>
-                <TableCell>
-                  {payout.technician_name}
-                  <span className="block text-xs text-muted-foreground" dir="ltr">
-                    {payout.technician_code}
-                  </span>
-                </TableCell>
-                <TableCell>{formatEgp(payout.net_amount_cents)}</TableCell>
-                <TableCell>{PAYOUT_METHOD_LABELS[payout.payout_method]}</TableCell>
-                <TableCell>
-                  <Badge variant={payoutStatusBadgeVariant(payout.payout_status)}>
-                    {PAYOUT_STATUS_LABELS[payout.payout_status]}
-                  </Badge>
-                  {payout.payout_status === 'rejected' && payout.rejection_reason && (
-                    <span className="block text-xs text-muted-foreground">{payout.rejection_reason}</span>
-                  )}
-                </TableCell>
-                <TableCell>{new Date(payout.requested_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
-                <TableCell>
-                  <div className="flex gap-2">
-                    {payout.payout_status === 'under_review' && (
-                      <Button size="sm" disabled={isSaving} onClick={() => handleApprove(payout.id)}>
-                        موافقة
-                      </Button>
+              <Fragment key={payout.id}>
+                <TableRow>
+                  <TableCell dir="ltr">{payout.payout_number}</TableCell>
+                  <TableCell>
+                    {payout.technician_name}
+                    <span className="block text-xs text-muted-foreground" dir="ltr">
+                      {payout.technician_code}
+                    </span>
+                  </TableCell>
+                  <TableCell>{formatEgp(payout.net_amount_cents)}</TableCell>
+                  <TableCell>{PAYOUT_METHOD_LABELS[payout.payout_method]}</TableCell>
+                  <TableCell>
+                    <Badge variant={payoutStatusBadgeVariant(payout.payout_status)}>
+                      {PAYOUT_STATUS_LABELS[payout.payout_status]}
+                    </Badge>
+                    {payout.payout_status === 'rejected' && payout.rejection_reason && (
+                      <span className="block text-xs text-muted-foreground">{payout.rejection_reason}</span>
                     )}
-                    {payout.payout_status === 'approved' && (
-                      <Button size="sm" disabled={isSaving} onClick={() => handleComplete(payout.id)}>
-                        تأكيد التحويل
+                  </TableCell>
+                  <TableCell>{new Date(payout.requested_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" disabled={isSaving} onClick={() => toggleOrderItems(payout.id)}>
+                        {expandedId === payout.id ? 'إخفاء الطلبات' : 'تفاصيل الطلبات'}
                       </Button>
-                    )}
-                    {(payout.payout_status === 'requested' ||
-                      payout.payout_status === 'under_review' ||
-                      payout.payout_status === 'approved' ||
-                      payout.payout_status === 'processing') && (
-                      <Button size="sm" variant="destructive" disabled={isSaving} onClick={() => handleReject(payout.id)}>
-                        رفض
-                      </Button>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
+                      {payout.payout_status === 'under_review' && (
+                        <Button size="sm" disabled={isSaving} onClick={() => handleApprove(payout.id)}>
+                          موافقة
+                        </Button>
+                      )}
+                      {payout.payout_status === 'approved' && (
+                        <Button size="sm" disabled={isSaving} onClick={() => handleComplete(payout.id)}>
+                          تأكيد التحويل
+                        </Button>
+                      )}
+                      {(payout.payout_status === 'requested' ||
+                        payout.payout_status === 'under_review' ||
+                        payout.payout_status === 'approved' ||
+                        payout.payout_status === 'processing') && (
+                        <Button size="sm" variant="destructive" disabled={isSaving} onClick={() => handleReject(payout.id)}>
+                          رفض
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+                {expandedId === payout.id && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="bg-muted/30">
+                      {orderItemsLoading && <p className="text-sm text-muted-foreground">جاري التحميل…</p>}
+                      {!orderItemsLoading && orderItems && orderItems.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          مفيش طلبات مرتبطة بالصرف ده (المبلغ من رصيد مش مرتبط بأرباح طلبات معيّنة — بونص/تعديل يدوي مثلاً).
+                        </p>
+                      )}
+                      {!orderItemsLoading && orderItems && orderItems.length > 0 && (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-start text-muted-foreground">
+                              <th className="p-1 text-start font-normal">رقم الطلب</th>
+                              <th className="p-1 text-start font-normal">أرباح الفني</th>
+                              <th className="p-1 text-start font-normal">عمولة المنصة</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {orderItems.map((item) => (
+                              <tr key={item.order_id}>
+                                <td className="p-1 font-mono text-xs" dir="ltr">
+                                  {item.order_id}
+                                </td>
+                                <td className="p-1">{formatEgp(item.earning_cents)}</td>
+                                <td className="p-1">{formatEgp(item.commission_cents)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             ))}
           </TableBody>
         </Table>

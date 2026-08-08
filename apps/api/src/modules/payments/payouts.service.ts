@@ -12,6 +12,7 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { TechniciansService } from '../technicians/technicians.service';
 import { RequestPayoutDto } from './dto/request-payout.dto';
 import { Payout, PayoutStatus } from './entities/payout.entity';
+import { PayoutOrderItem } from './entities/payout-order-item.entity';
 import { WalletsService } from './wallets.service';
 
 export interface PayoutWithTechnician {
@@ -30,6 +31,7 @@ const AUTO_APPROVE_LIMIT_CENTS_FALLBACK = 100_000;
 export class PayoutsService {
   constructor(
     @InjectRepository(Payout) private readonly payouts: Repository<Payout>,
+    @InjectRepository(PayoutOrderItem) private readonly payoutOrderItems: Repository<PayoutOrderItem>,
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -39,6 +41,62 @@ export class PayoutsService {
     private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
   ) {}
+
+  /**
+   * كانت فجوة موثّقة: `payout_order_items` موجود في الـ schema من أول يوم بس مفيش حد كان بيملاه —
+   * الصرف كان مبلغ إجمالي بس من غير ربط بطلبات معينة. دلوقتي بنختار أرباح الطلبات (`order_earning`
+   * credit مش معكوسة) اللي لسه معلقة (مش مرتبطة بأي صرف سابق غير مرفوض) بترتيب الأقدم الأول
+   * (FIFO)، وبنجمعهم لحد ما نوصل للمبلغ المطلوب أو نخلّص الطلبات المعلقة — نطاق متعمّد:
+   * تجميع بالطلب الكامل (مش تقسيم أرباح طلب واحد على صرفين)، فمجموع `earning_cents` هنا ممكن
+   * يزيد شوية عن `payout.amount_cents` (آخر طلب بيكمّل المبلغ) أو يقل عنه لو الرصيد فيه أرباح
+   * مش من طلبات (بونص/إحالة/تعديل يدوي) — تفصيل توضيحي للأدمن، مش قيد محاسبي بديل عن `amount_cents`.
+   */
+  private async linkOrderItemsForPayout(manager: EntityManager, payout: Payout): Promise<void> {
+    const eligible = await manager.query<
+      { order_id: string; earning_cents: number; commission_cents: number }[]
+    >(
+      `SELECT wt.reference_id AS order_id, wt.amount_cents AS earning_cents, COALESCE(o.platform_commission_cents, 0) AS commission_cents
+       FROM wallet_transactions wt
+       JOIN orders o ON o.id = wt.reference_id
+       WHERE wt.wallet_id = $1
+         AND wt.transaction_type = 'order_earning'
+         AND wt.direction = 'credit'
+         AND wt.is_reversed = false
+         AND NOT EXISTS (
+           SELECT 1 FROM payout_order_items poi
+           JOIN payouts p ON p.id = poi.payout_id
+           WHERE poi.order_id = wt.reference_id AND p.payout_status != 'rejected'
+         )
+       ORDER BY wt.created_at ASC`,
+      [payout.walletId],
+    );
+
+    let accumulated = 0;
+    for (const row of eligible) {
+      if (accumulated >= payout.amountCents) break;
+      const item = manager.create(PayoutOrderItem, {
+        payoutId: payout.id,
+        orderId: row.order_id,
+        earningCents: row.earning_cents,
+        commissionCents: row.commission_cents,
+      });
+      await manager.save(item);
+      accumulated += row.earning_cents;
+    }
+  }
+
+  async listOrderItems(payoutId: string): Promise<PayoutOrderItem[]> {
+    return this.payoutOrderItems.find({ where: { payoutId } });
+  }
+
+  async listOrderItemsForTechnician(userId: string, payoutId: string): Promise<PayoutOrderItem[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const payout = await this.findOrThrow(payoutId);
+    if (payout.technicianId !== profile.id) {
+      throw new ApiException(ErrorCode.AUTH_001, 'طلب الصرف ده مش بتاعك', HttpStatus.FORBIDDEN);
+    }
+    return this.listOrderItems(payoutId);
+  }
 
   private async nextPayoutNumber(manager: EntityManager): Promise<string> {
     const [{ next_human_readable_number: number }] = await manager.query<
@@ -89,6 +147,7 @@ export class PayoutsService {
         reviewedAt: isAutoApproved ? new Date() : null,
       });
       await manager.save(payout);
+      await this.linkOrderItemsForPayout(manager, payout);
       return payout;
     }).then((payout) => {
       // بره الـ transaction عمداً — نفس فلسفة كل حدث تاني في الكود ده
