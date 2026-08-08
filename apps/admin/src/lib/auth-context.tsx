@@ -43,15 +43,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // من نداء لـ /api/auth/refresh حصل في نفس اللحظة (زي React StrictMode بيعيد تشغيل الـ effect
   // مرتين في التطوير، أو صفحة بتعمل أكتر من authedFetch مع access_token منتهي)، الاتنين هيستخدموا
   // نفس الكوكي القديم — التاني هيترفض ويقفل الحساب كله. الـ ref ده بيضمن نداء refresh واحد بس
-  // "في الطيران" في أي وقت، وأي نداء تاني بيستنى نفس الـ promise بدل ما يبعت نداء منفصل.
+  // "في الطيران" في أي وقت جوّه نفس التاب، وأي نداء تاني بيستنى نفس الـ promise بدل ما يبعت نداء منفصل.
   const inFlightRefresh = useRef<Promise<{ access_token: string; expires_in_seconds: number }> | null>(null);
 
+  // كانت فجوة موثّقة صراحة كـ"سباق نادر ممكن يقفل الحساب كله" — الحل فوق (`inFlightRefresh`)
+  // بيمنع السباق جوّه نفس التاب بس، وتابين مفتوحين لنفس الحساب كل واحد عنده ref منفصل (حالة
+  // React منفصلة تماماً)، فمفيش حاجة كانت بتمنعهم الاتنين يبعتوا /api/auth/refresh بنفس الكوكي
+  // في نفس اللحظة. **تحقيق حي وقت الإصلاح صحّح الفرضية الأصلية**: السباق الحقيقي (اتأكد حياً —
+  // نداءين متزامنين فعلياً من تابين، فرق التوقيت في الـ DB 3 ميلي ثانية بس) **مابيسببش قفل
+  // الحساب** زي ما كان متوقّع — `auth.service.ts`'s `refresh()` بيعمل `findOne` عادي من غير
+  // `SELECT ... FOR UPDATE` ولا optimistic lock، فتحت READ COMMITTED الاتنين بيلاقوا نفس
+  // الصف لسه `is_revoked=false` ويعدّوا، وبيصدروا **زوج توكنز صالح لكل واحد فيهم** بدل ما التاني
+  // يترفض — يعني مش "قفل حساب"، لكن "إصدار جلستين صالحتين من توكن واحد" (تضييع/تكرار، مش خرق
+  // أمني). مسار `revokeAllUserTokens('security_breach')` (فوق) لسه بيشتغل صح للحالة اللي فعلاً
+  // مصمم ليها — إعادة استخدام توكن **اتلغى بالفعل من قبل** (سرقة/replay حقيقي) — بس مش دي.
+  // الإصلاح هنا برضه يستاهل: Web Locks API (`navigator.locks`) — قفل حقيقي عبر التابات كلها لنفس
+  // الأصل (Chrome 69+, Firefox 96+, Safari 15.4+) بيسلسل أي محاولات refresh متزامنة (من التطبيق
+  // نفسه أو من مصادر تانية) بدل ما تتسابق، فيقفل فجوة "إصدار جلستين من نداء واحد" دي. اتأكد حياً:
+  // 3 محاولات refresh متزامنة (وحدة حقيقية من تحميل تاب تاني + اتنين يدويين) اتسلسلوا صح من غير
+  // أي فشل. لو المتصفح مايدعمش Web Locks (نادر جداً دلوقتي)، بيرجع للسلوك القديم (قفل جوّه التاب
+  // بس) بدل ما ينهار.
   const doRefresh = useCallback(() => {
     if (!inFlightRefresh.current) {
-      inFlightRefresh.current = callLocalAuthRoute<{ access_token: string; expires_in_seconds: number }>(
-        '/api/auth/refresh',
-        {},
-      ).finally(() => {
+      const runRefresh = (): Promise<{ access_token: string; expires_in_seconds: number }> =>
+        callLocalAuthRoute('/api/auth/refresh', {});
+
+      // ملحوظة TypeScript: `lib.dom.d.ts` هنا بيعرّف `LockGrantedCallback<T>` كـ`(lock) => T`
+      // من غير `| PromiseLike<T>` (فجوة في التعريف نفسه، مش في السلوك الحقيقي) — يعني بيستنتج
+      // T = `Promise<{...}>` بدل `{...}` ويطلع النوع `Promise<Promise<{...}>>` غلط. وقت التشغيل
+      // الفعلي مفيش مشكلة خالص: `navigator.locks.request` بيستنى (await) أي promise يرجعه الـ
+      // callback فعلاً (Web Locks spec)، وأي `Promise` بترجع promise تانية بتتسطّح تلقائياً
+      // (Promise/A+) — الـ cast هنا بيصحّح النوع بس، مش بيغيّر أي سلوك حقيقي وقت التشغيل.
+      const promise: Promise<{ access_token: string; expires_in_seconds: number }> =
+        typeof navigator !== 'undefined' && 'locks' in navigator
+          ? (navigator.locks.request('baytak-admin-refresh-token', runRefresh) as unknown as Promise<{
+              access_token: string;
+              expires_in_seconds: number;
+            }>)
+          : runRefresh();
+
+      inFlightRefresh.current = promise.finally(() => {
         inFlightRefresh.current = null;
       });
     }
