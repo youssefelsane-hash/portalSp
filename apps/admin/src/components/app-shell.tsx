@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/technicians', label: 'الفنيين' },
   { href: '/customers', label: 'العملاء' },
   { href: '/orders', label: 'الطلبات' },
+  { href: '/reports', label: 'التقارير' },
   { href: '/support', label: 'الشكاوى' },
   { href: '/payouts', label: 'طلبات الصرف' },
   { href: '/promotions', label: 'أكواد الخصم' },
