@@ -13,6 +13,7 @@ import { UpdateCityDto } from './dto/update-city.dto';
 import { UpdateServiceZoneDto } from './dto/update-service-zone.dto';
 import { Area } from './entities/area.entity';
 import { City } from './entities/city.entity';
+import { Country } from './entities/country.entity';
 import { ServiceZone } from './entities/service-zone.entity';
 
 function toPoint(latitude?: number, longitude?: number): GeoJsonPoint | undefined {
@@ -46,8 +47,18 @@ export class AdminGeoService {
     @InjectRepository(City) private readonly cities: Repository<City>,
     @InjectRepository(Area) private readonly areas: Repository<Area>,
     @InjectRepository(ServiceZone) private readonly serviceZones: Repository<ServiceZone>,
+    @InjectRepository(Country) private readonly countries: Repository<Country>,
     private readonly auditLog: AuditLogService,
   ) {}
+
+  // ── الدول ────────────────────────────────────────────────────────────
+  // قراءة بس — مفيش CRUD للدول لسه (كانت فجوة موثّقة: مفيش endpoint خالص، حتى قراءة، فمكانش
+  // ممكن تعمل مدينة جديدة من apps/admin من غير ما تعرف country_id يدوياً من الـ DB مباشرة).
+  // إنشاء/تعديل دولة جديدة لسه مش موجود عمداً — المنصة دولة واحدة (مصر) دلوقتي، إضافة دولة تانية
+  // قرار عمل أكبر من مجرد صف DB (ISO code, عملة, بادئة هاتف... إلخ لازم تتراجع فعلياً).
+  listCountries(): Promise<Country[]> {
+    return this.countries.find({ order: { nameAr: 'ASC' } });
+  }
 
   // ── المدن ────────────────────────────────────────────────────────────
 

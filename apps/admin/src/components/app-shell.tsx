@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/technicians', label: 'الفنيين' },
   { href: '/orders', label: 'الطلبات' },
   { href: '/catalog', label: 'الكتالوج' },
+  { href: '/geo', label: 'المدن والمناطق' },
   { href: '/settings', label: 'الإعدادات' },
   { href: '/feature-flags', label: 'Feature Flags' },
   { href: '/audit-log', label: 'سجل النشاط' },

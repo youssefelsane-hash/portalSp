@@ -1,6 +1,25 @@
 import { Area } from '../entities/area.entity';
 import { City } from '../entities/city.entity';
+import { Country } from '../entities/country.entity';
 import { ServiceZone } from '../entities/service-zone.entity';
+
+export interface AdminCountryResponseDto {
+  id: string;
+  name_ar: string;
+  name_en: string;
+  iso_code: string;
+  is_active: boolean;
+}
+
+export function toAdminCountryResponseDto(country: Country): AdminCountryResponseDto {
+  return {
+    id: country.id,
+    name_ar: country.nameAr,
+    name_en: country.nameEn,
+    iso_code: country.isoCode,
+    is_active: country.isActive,
+  };
+}
 
 export interface AdminCityResponseDto {
   id: string;

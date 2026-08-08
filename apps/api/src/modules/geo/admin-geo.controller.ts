@@ -6,7 +6,12 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminGeoService } from './admin-geo.service';
-import { toAdminAreaResponseDto, toAdminCityResponseDto, toAdminServiceZoneResponseDto } from './dto/admin-geo-response.dto';
+import {
+  toAdminAreaResponseDto,
+  toAdminCityResponseDto,
+  toAdminCountryResponseDto,
+  toAdminServiceZoneResponseDto,
+} from './dto/admin-geo-response.dto';
 import { CreateAreaDto } from './dto/create-area.dto';
 import { CreateCityDto } from './dto/create-city.dto';
 import { CreateServiceZoneDto } from './dto/create-service-zone.dto';
@@ -20,6 +25,11 @@ import { UpdateServiceZoneDto } from './dto/update-service-zone.dto';
 @Roles(UserType.ADMIN)
 export class AdminGeoController {
   constructor(private readonly adminGeoService: AdminGeoService) {}
+
+  @Get('countries')
+  async listCountries() {
+    return (await this.adminGeoService.listCountries()).map(toAdminCountryResponseDto);
+  }
 
   @Get('cities')
   async listCities() {
