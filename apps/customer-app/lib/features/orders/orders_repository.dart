@@ -20,14 +20,30 @@ class OrdersRepository {
     required String serviceId,
     required String addressId,
     String? problemDescription,
+    String? promoCode,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
       'address_id': addressId,
       if (problemDescription != null && problemDescription.isNotEmpty)
         'problem_description': problemDescription,
+      if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
     });
     return Order.fromJson(data!);
+  }
+
+  // معاينة خصم كود قبل الحجز — /promo-codes/:code/validate عامة بس محتاجة توكن عادي
+  // (مش Public()، أي مستخدم مسجّل). بترجع الكود والخصم بالقرش لو الكود صالح.
+  Future<Map<String, dynamic>> validatePromoCode({
+    required String code,
+    required String serviceId,
+    required String addressId,
+  }) async {
+    final data = await auth.authedRequest(
+      'GET',
+      '/promo-codes/$code/validate?service_id=$serviceId&address_id=$addressId',
+    );
+    return data!;
   }
 
   Future<Order> cancel(String orderId, {String? reason}) async {

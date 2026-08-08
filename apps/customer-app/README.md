@@ -23,6 +23,8 @@
 
 - **الشات مع الفني (`lib/features/chat/`)**: `ChatClient` (Socket.IO namespace `/chat`، مطابق `ChatGateway`) + `ChatScreen` — زرار "الشات مع الفني" بيظهر في `OrderDetailScreen` لما `technician_id` يبقى موجود (يعني الفني قبل). الشاشة بتجيب `thread_id` أولاً عبر endpoint جديد اتضاف في الباك-إند خصيصاً لده (`GET /chat/orders/:orderId/thread` — كانت فجوة حقيقية: الخيط بيتعمل تلقائياً وقت القبول بس مفيش كان طريقة للكلاينت يكتشف الـ `thread_id`، تفاصيل كاملة في `../api/src/modules/chat/README.md`)، بعدين تاريخ الرسائل عبر REST، وبعدين تتصل لحظياً. **اتعمله اختبار حي حقيقي كامل** (`test_live/chat_live_test.dart`): طلب حقيقي قبل القبول رجّع `404` صريح على endpoint الخيط الجديد، بعد ما فني حقيقي قبله رجّع الخيط الصح، عميل وفني حقيقيين اتصلوا بـ WebSocket وتبادلوا رسالتين حقيقيتين لحظياً (كل طرف استقبل رسالة التاني فوراً عبر `chat:message_received`)، وتاريخ الرسائل عبر REST طابق الترتيب والمحتوى بالظبط.
 
+- **كود خصم وقت الحجز**: `CreateOrderScreen` بقى فيه حقل كود + زرار "تحقق" بينادي `GET /promo-codes/:code/validate` ويعرض قيمة الخصم قبل التأكيد، والكود بيتبعت فعلياً مع `POST /orders` (`promo_code`). **اتعمله اختبار حي حقيقي** (`test_live/promo_code_order_live_test.dart`): كود خصم تجريبي حقيقي اتعمل عبر مسار الأدمن، عميل حقيقي تحقق منه (رجّع خصم 5000 قرش بالظبط)، أنشأ طلب بيه (`discount_amount_cents`/`promo_code_id`/`total_amount_cents` كلهم طابقوا الحساب الصح)، محاولة تانية بنفس الكود اترفضت (حد استخدام لكل مستخدم)، والكود التجريبي اتعطّل بعد الاختبار.
+
 **لسه من غير**: خريطة فعلية للتتبع (نص بس دلوقتي، تفاصيل فوق)، دفع من غير محفظة (بطاقة/فوري).
 
 ## اختبار حي حقيقي — اكتشاف مهم غيّر إستراتيجية الاختبار هنا
@@ -37,6 +39,7 @@
 - `test_live/wallet_payment_live_test.dart` — دفع طلب من المحفظة (تفاصيل فوق).
 - `test_live/order_tracking_live_test.dart` — تتبع لحظي حقيقي عبر Socket.IO بين عميل وفني (تفاصيل فوق).
 - `test_live/chat_live_test.dart` — شات لحظي حقيقي بين عميل وفني (تفاصيل فوق).
+- `test_live/promo_code_order_live_test.dart` — تحقق وتطبيق كود خصم حقيقي وقت إنشاء طلب (تفاصيل فوق).
 
 تشغيلهم: `flutter test test_live/ --dart-define=API_BASE_URL=http://localhost:3000/api/v1` (محتاج `apps/api` شغال فعلاً).
 
