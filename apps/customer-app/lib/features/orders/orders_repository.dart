@@ -1,3 +1,4 @@
+import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
 import 'models.dart';
 
@@ -5,6 +6,12 @@ class OrdersRepository {
   final AuthRepository auth;
 
   OrdersRepository(this.auth);
+
+  // عامة تماماً (@Public() في الباك-إند) — مفيش داعي توكن، نفس نمط الكتالوج.
+  Future<List<CancellationReason>> listCancellationReasons() async {
+    final items = await api_client.apiRequestList('/cancellation-reasons?applies_to=customer');
+    return items.map(CancellationReason.fromJson).toList();
+  }
 
   Future<List<Order>> list() async {
     final items = await auth.authedRequestList('/orders');
@@ -46,11 +53,15 @@ class OrdersRepository {
     return data!;
   }
 
-  Future<Order> cancel(String orderId, {String? reason}) async {
+  Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
+    final body = <String, dynamic>{
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+      if (cancellationReasonId != null) 'cancellation_reason_id': cancellationReasonId,
+    };
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/cancel',
-      body: reason != null && reason.isNotEmpty ? {'reason': reason} : null,
+      body: body.isEmpty ? null : body,
     );
     return Order.fromJson(data!);
   }

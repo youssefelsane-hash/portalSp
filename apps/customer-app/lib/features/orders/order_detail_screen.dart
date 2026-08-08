@@ -55,10 +55,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Future<void> _cancel() async {
+    final result = await _showCancelDialog();
+    if (result == null) return; // العميل قفل الـ dialog من غير ما يأكّد
+
     setState(() => _cancelling = true);
     try {
-      final order = await _repository.cancel(widget.orderId);
-      if (mounted) setState(() => _order = order);
+      final order = await _repository.cancel(
+        widget.orderId,
+        reason: result.freeText,
+        cancellationReasonId: result.reasonId,
+      );
+      if (mounted) {
+        setState(() => _order = order);
+        final feeMessage = order.cancellationFeeCents > 0
+            ? ' — اترصدت عليك رسوم إلغاء ${_formatEgp(order.cancellationFeeCents)}'
+            : '';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('اتلغى الطلب$feeMessage')));
+      }
     } on ApiException catch (err) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
@@ -66,6 +80,74 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     } finally {
       if (mounted) setState(() => _cancelling = false);
     }
+  }
+
+  // كانت فجوة موثّقة: الإلغاء مكانش بياخد سبب خالص من الواجهة رغم إن الباك-إند بيدعمه
+  // (GET /cancellation-reasons + احتساب رسوم حسب النافذة الزمنية) — اتقفلت هنا.
+  Future<_CancelChoice?> _showCancelDialog() async {
+    List<CancellationReason> reasons = [];
+    try {
+      reasons = await _repository.listCancellationReasons();
+    } on ApiException {
+      // فشل تحميل الأسباب مش لازم يمنع الإلغاء نفسه — العميل لسه يقدر يلغي بسبب حر
+    }
+
+    String? selectedReasonId;
+    final freeTextController = TextEditingController();
+
+    if (!mounted) return null;
+    return showDialog<_CancelChoice>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('إلغاء الطلب'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (reasons.isNotEmpty) ...[
+                    const Text('اختار سبب الإلغاء:'),
+                    ...reasons.map(
+                      (r) => RadioListTile<String>(
+                        value: r.id,
+                        groupValue: selectedReasonId,
+                        onChanged: (v) => setDialogState(() => selectedReasonId = v),
+                        title: Text(r.reasonAr),
+                        subtitle: r.chargesFee
+                            ? Text('ممكن يترتب عليه رسوم ${r.feePercentage.toStringAsFixed(0)}%')
+                            : null,
+                        dense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  TextField(
+                    controller: freeTextController,
+                    decoration: const InputDecoration(labelText: 'تفاصيل إضافية (اختياري)'),
+                    maxLines: 2,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('تراجع'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(
+                  _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
+                ),
+                child: const Text('تأكيد الإلغاء'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _rate() async {
@@ -194,4 +276,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       ),
     );
   }
+}
+
+class _CancelChoice {
+  final String? reasonId;
+  final String freeText;
+
+  _CancelChoice({required this.reasonId, required this.freeText});
 }
