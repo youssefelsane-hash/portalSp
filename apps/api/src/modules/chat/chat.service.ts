@@ -57,6 +57,21 @@ export class ChatService {
     return thread;
   }
 
+  // كانت فجوة موثّقة: مفيش endpoint يربط order_id بـ thread_id بتاعه — الخيط بيتعمل
+  // أوتوماتيك (createThreadForOrder) وقت قبول الفني، بس مفيش طريقة للعميل/الفني يكتشفوا
+  // الـ thread_id من غير ما يعرفوه مسبقاً. بترمي 404 صريح لو الطلب لسه معندوش خيط
+  // (الفني لسه ما قبلش، مثلاً) بدل ما ترجع null بصمت.
+  async getThreadForOrder(userId: string, orderId: string): Promise<ChatThread> {
+    const thread = await this.threads.findOne({ where: { orderId } });
+    if (!thread) {
+      throw new ApiException(ErrorCode.VAL_001, 'مفيش محادثة للطلب ده لسه', HttpStatus.NOT_FOUND);
+    }
+    if (!(await this.resolveParticipant(userId, thread))) {
+      throw new ApiException(ErrorCode.AUTH_001, 'المحادثة دي مش بتاعتك', HttpStatus.FORBIDDEN);
+    }
+    return thread;
+  }
+
   async getThreadForParticipant(userId: string, threadId: string): Promise<ChatThread> {
     const thread = await this.findThreadOrThrow(threadId);
     if (!(await this.resolveParticipant(userId, thread))) {
