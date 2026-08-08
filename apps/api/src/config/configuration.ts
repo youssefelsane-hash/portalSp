@@ -1,3 +1,5 @@
+import { getRedisUrl } from './redis-url.util';
+
 export default () => ({
   nodeEnv: process.env.NODE_ENV,
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -25,6 +27,6 @@ export default () => ({
   },
 
   redis: {
-    url: process.env.REDIS_URL ?? 'redis://localhost:6379',
+    url: getRedisUrl(),
   },
 });

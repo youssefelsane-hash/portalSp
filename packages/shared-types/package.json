@@ -1,0 +1,15 @@
+{
+  "name": "@baytak/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "baytak — أنواع TypeScript مشتركة بين apps/api و apps/admin",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2"
+  }
+}

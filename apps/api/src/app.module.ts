@@ -40,23 +40,25 @@ import { HealthModule } from './modules/common/health/health.module';
     // 60 طلب/دقيقة لكل مستخدم افتراضياً — docs/01-master-plan.md §7.3
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
     // اتسجّل هنا مرة واحدة (مش في كل موديول محتاج طابور) — أي موديول يقدر يستخدم
-    // BullModule.registerQueue() بعد كده من غير ما يعيد ضبط الاتصال بـ Redis.
+    // BullModule.registerQueue() بعد كده من غير ما يعيد ضبط الاتصال بـ Redis. الاتصال ده
+    // بيتستخدم من الـ Queue (producer, .add()) — الـ Workers (consumers) ليهم اتصال منفصل
+    // بيتحدد مباشرة جوّه كل @Processor() (راجع technician-stats.processor.ts للتفاصيل
+    // الكاملة ليه؛ باختصار: BullModule.forRootAsync(configKey, ...) + @Processor({configKey})
+    // بيتجاهله @nestjs/bullmq تماماً لو فيه Queue متسجّل بنفس الاسم بالفعل — بيرجع لاتصال الـ
+    // Queue الافتراضي عادي، فمفيش طريقة تانية غير override مباشر لـ connection في الـ Worker).
     //
-    // enableOfflineQueue: false ضروري — ioredis افتراضياً بيحجز أي أمر (زي queue.add()) في طابور
-    // داخلي لحد ما يرجع يتصل، يعني queue.add() هيفضل معلّق (await من غير reject ولا resolve) للأبد
-    // لو Redis واقع، وده كان بيعلّق الطلب الحقيقي كله (تقييم، دفع) مش بس فشل التوزيع الخلفي —
-    // اتلقطت البَقّة دي فعلياً وقت اختبار حي (طلب rating علّق أكتر من دقيقتين). بالإعداد ده، أي أمر
-    // بيتبعت والاتصال مقطوع بيترفض فوراً بدل ما يستنى، فالـ try/catch في enqueueRecalculation()
-    // (وأي مكان تاني بيستخدم طابور) يقدر يتلقّطه ويكمّل بدون ما يعلّق المستخدم.
+    // enableOfflineQueue: false ضروري هنا — ioredis افتراضياً بيحجز أي أمر (زي queue.add()) في
+    // طابور داخلي لحد ما يرجع يتصل، يعني queue.add() هيفضل معلّق (await من غير reject ولا
+    // resolve) للأبد لو Redis واقع، وده كان بيعلّق الطلب الحقيقي كله (تقييم، دفع) مش بس فشل
+    // التوزيع الخلفي — اتلقطت البَقّة دي فعلياً وقت اختبار حي (طلب rating علّق أكتر من دقيقتين).
+    // بالإعداد ده، أي أمر بيتبعت والاتصال مقطوع بيترفض فوراً بدل ما يستنى، فالـ try/catch في
+    // enqueueRecalculation() (وأي مكان تاني بيستخدم طابور) يقدر يتلقّطه ويكمّل بدون ما يعلّق المستخدم.
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         connection: {
           url: config.get<string>('redis.url'),
           enableOfflineQueue: false,
-          // موثّق في BullMQ نفسه كإلزامي (مش اختياري) للاتصالات اللي بتستخدمها Queue/Worker —
-          // من غيرها لاحظنا حياً إن الاتصال بيفشل يعيد الاتصال لوحده تاني بعد انقطاع Redis
-          // (عكس RedisCacheService اللي بيرجع لوحده عادي) لحد ما البروسيس يعاد تشغيله.
           maxRetriesPerRequest: null,
           retryStrategy: (times: number) => Math.min(times * 200, 5000),
         },

@@ -1,8 +1,9 @@
 import { Logger } from '@nestjs/common';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Job } from 'bullmq';
 import { DataSource } from 'typeorm';
+import { getRedisUrl } from '../../config/redis-url.util';
 import { RECALCULATE_STATS_JOB, RecalculateStatsJobData, TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
 
 /**
@@ -11,16 +12,45 @@ import { RECALCULATE_STATS_JOB, RecalculateStatsJobData, TECHNICIAN_STATS_QUEUE 
  * في التحديث. الاستعلامات بتستخدم raw SQL (مش TypeORM entities) عشان الموديول ده منفصل عن
  * orders/ratings ومحتاجش يعتمد عليهم كموديولات كاملة عشان استعلام قراءة بسيط.
  */
-// skipStalledCheck: true — نفس سبب matching-round-expiry.processor.ts بالظبط (enableOfflineQueue:false
-// في AppModule بيخلي فحص الـ stalled jobs الدوري يرمي أخطاء غير ملتقطة وقت انقطاع Redis). آمن
-// نعطّله هنا لأن الجوب idempotent بالكامل (بيعيد حساب من الأصل، مش increment) — أي محاولة تالية
-// (تقييم جديد، طلب اكتمل) هتصحح أي رقم فات، مفيش خطورة من job "عالق".
-@Processor(TECHNICIAN_STATS_QUEUE, { skipStalledCheck: true })
+// اتصال Redis منفصل عن اتصال الـ Queue (producer) بتاع AppModule، ممرَّر مباشرة هنا (مش عن طريق
+// configKey) — @nestjs/bullmq بيحل اتصال الـ Worker عن طريق البحث عن Queue متسجّل بنفس الاسم أولاً
+// (getQueueOptions في bull.explorer.js)، ولو لقاه (وهو موجود فعلاً، متسجّل في TechniciansModule)
+// بيستخدم اتصاله على طول ويتجاهل configKey تماماً — override مباشر لـ connection هنا هو الطريقة
+// المضمونة الوحيدة (تفاصيل كاملة عن التحقيق في README).
+//
+// enableOfflineQueue: false هنا زي اتصال الـ Queue بالظبط — جُرِّب الاتنين (true وfalse) حياً في
+// اختبار انقطاع Redis كامل، والفرق بينهم في نتيجة "هل الـ Worker بيرجع يعالج وظايف بعد رجوع
+// Redis من غير إعادة تشغيل الـ process" كان **معدوم**: في الحالتين الاتنين، الـ Worker يفضل
+// isRunning()=true (مش متوقف/معلّق ظاهرياً) لكن بيوقف عن جلب وظايف جديدة تماماً بعد أي انقطاع
+// Redis يعدّي شوية، وده متطابق مع بَقّة موثّقة معروفة في BullMQ نفسه (#4479: اتصال blocking
+// بيتعطل بعد إعادة اتصال ومايرجعش يشتغل صح حتى مع الـ watchdog اللي BullMQ ضايفه في v6 بالذات
+// لكده). بما إن مفيش فرق فعلي، اتسابت false هنا عشان تتفق مع اتصال الـ Queue ومع سلوك fail-fast
+// الموثّق أصلاً، مش لأنها بتحل المشكلة.
+@Processor(
+  { name: TECHNICIAN_STATS_QUEUE },
+  {
+    connection: {
+      url: getRedisUrl(),
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: null,
+      retryStrategy: (times: number) => Math.min(times * 200, 5000),
+    },
+  },
+)
 export class TechnicianStatsProcessor extends WorkerHost {
   private readonly logger = new Logger(TechnicianStatsProcessor.name);
 
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {
     super();
+  }
+
+  // لازم نستمع لـ 'error' — Node's EventEmitter بيرمي الخطأ نفسه (throw) لو 'error' اتبعت
+  // وماحدش مستمع ليه، وده كان بيسبب crash فعلي لـ setInterval بتاع الـ stalled-check timer
+  // (شفنا stack trace خام في اللوج مش عن طريق الـ logger) وقت انقطاع Redis. دلوقتي بيتسجّل
+  // نضيف بأمان بدل ما يوقع بصمت.
+  @OnWorkerEvent('error')
+  handleWorkerError(error: Error): void {
+    this.logger.warn(`Worker error (technician-stats): ${error.message}`);
   }
 
   async process(job: Job<RecalculateStatsJobData>): Promise<void> {
