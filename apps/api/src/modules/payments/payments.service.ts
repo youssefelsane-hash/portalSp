@@ -7,6 +7,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianLevelsService } from '../technicians/technician-levels.service';
+import { TechnicianStatsService } from '../technicians/technician-stats.service';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
@@ -30,6 +31,7 @@ export class PaymentsService {
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly technicianLevelsService: TechnicianLevelsService,
+    private readonly technicianStatsService: TechnicianStatsService,
     private readonly auditLog: AuditLogService,
   ) {}
 
@@ -187,6 +189,10 @@ export class PaymentsService {
       await this.settleAndComplete(manager, order, PaymentMethod.CASH, technicianUserId, 'technician');
 
       return payment;
+    }).then(async (payment) => {
+      // بره الـ transaction عمداً — إعادة حساب الإحصائيات مهمة خلفية (§14.4)، مش جزء من قفل الطلب
+      await this.technicianStatsService.enqueueRecalculation(technicianProfile.id);
+      return payment;
     });
   }
 
@@ -249,6 +255,12 @@ export class PaymentsService {
 
       await this.settleAndComplete(manager, lockedOrder, PaymentMethod.WALLET, userId, 'customer');
 
+      return { payment, technicianId: lockedOrder.technicianId };
+    }).then(async ({ payment, technicianId }) => {
+      // بره الـ transaction عمداً — نفس سبب collectCash فوق
+      if (technicianId) {
+        await this.technicianStatsService.enqueueRecalculation(technicianId);
+      }
       return payment;
     });
   }
