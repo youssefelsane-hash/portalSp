@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../earnings/wallet_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
@@ -73,6 +74,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         appBar: AppBar(
           title: const Text('baytak — الفني'),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              tooltip: 'أرباحي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const WalletScreen()),
+              ),
+            ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),
           ],
         ),
