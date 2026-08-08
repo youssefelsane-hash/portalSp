@@ -112,6 +112,32 @@ export default function OrderDetailPage() {
     }
   }
 
+  // كانت فجوة موثّقة صراحة: POST /admin/orders/:id/refund موجود ومختبر من زمان (payments/README.md)
+  // بس مفيش زرار ليه في أي شاشة — نفس فئة فجوة "endpoint إداري من غير واجهة" اللي ظهرت في
+  // /customers, /support, /payouts. مطابق تماماً لشروط payments.service.ts's refundOrder():
+  // payment_status=paid + order_status في completed/disputed بس (canTransition(..., REFUNDED)).
+  async function handleRefund() {
+    const reason = window.prompt('سبب الاسترجاع (حرفين على الأقل)؟');
+    if (reason === null) return;
+    if (reason.trim().length < 2) {
+      window.alert('سبب الاسترجاع قصير جداً');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/refund`, {
+        method: 'POST',
+        body: JSON.stringify({ reason_notes: reason }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   if (error && !order) {
     return (
       <AppShell>
@@ -226,6 +252,14 @@ export default function OrderDetailPage() {
               )}
             </CardFooter>
           )}
+          {order.payment_status === 'paid' &&
+            (order.order_status === 'completed' || order.order_status === 'disputed') && (
+              <CardFooter>
+                <Button variant="destructive" disabled={isSaving} onClick={handleRefund}>
+                  استرجاع المبلغ
+                </Button>
+              </CardFooter>
+            )}
         </Card>
 
         <Card>

@@ -8,6 +8,7 @@ import { TechniciansModule } from '../technicians/technicians.module';
 import { User } from '../auth/entities/user.entity';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AdminPaymentsController } from './admin-payments.controller';
 import { PaymentsController } from './payments.controller';
 import { TechnicianPaymentsController } from './technician-payments.controller';
@@ -28,7 +29,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, WalletTransaction, Payment, Refund, Payout, Order, OrderStatusHistory, User, WebhookEvent]),
+    TypeOrmModule.forFeature([Wallet, WalletTransaction, Payment, Refund, Payout, Order, OrderStatusHistory, User, WebhookEvent, TechnicianProfile]),
     CustomersModule,
     TechniciansModule,
     CatalogModule,

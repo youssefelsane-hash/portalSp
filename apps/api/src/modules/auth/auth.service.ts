@@ -81,7 +81,12 @@ export class AuthService {
       targets: [dto.phone_number],
     });
     if (!result.delivered) {
-      this.logger.warn(`فشل إرسال OTP بـ SMS لـ ${dto.phone_number}: ${result.failureReason}`);
+      // ملحوظة: النص ده متعمّد ميحتويش على الحرفين "OTP" (الإنجليزية) — أدوات/سكريبتات الاختبار
+      // الحي في المشروع كله بتدوّر على أقرب سطر فيه "OTP" ورقم الموبايل عشان تلاقط الكود من اللوج
+      // فوق؛ لو السطر ده احتوى على "OTP" برضه هيتطابق بالغلط بدل السطر الصح (مفيش "→" فيه أصلاً)
+      // ويرجّع كود فاضي. بَقّة حقيقية اتلقطت واتصلحت أثناء بناء شاشة الشكاوى (اختبار bash فشل
+      // فجأة في استخراج الكود من اللوج بعد ما الميزة دي اتضافت).
+      this.logger.warn(`فشل إرسال كود التحقق بـ SMS لـ ${dto.phone_number}: ${result.failureReason}`);
     }
 
     return { expires_in_seconds: expiryMinutes * 60 };
