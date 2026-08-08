@@ -24,7 +24,24 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   void initState() {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
-    _load();
+    _recoverActiveOrThenLoad();
+  }
+
+  // كانت فجوة موثّقة: لو التطبيق اتقفل في نص دورة تنفيذ طلب، الشاشة الرئيسية كانت بترجع
+  // بالضرورة لقايمة الطلبات المتاحة من غير أي أثر للطلب اللي كان شغال عليه. دلوقتي بتتحقق
+  // الأول من GET /technician/orders/active وتفتح شاشة التنفيذ تلقائياً لو لقت طلب نشط.
+  Future<void> _recoverActiveOrThenLoad() async {
+    try {
+      final activeOrder = await _repository.getActive();
+      if (activeOrder != null && mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: activeOrder)),
+        );
+      }
+    } on ApiException {
+      // فشل فحص الاسترجاع مش لازم يمنع عرض قايمة الطلبات المتاحة العادية
+    }
+    await _load();
   }
 
   Future<void> _load() async {

@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
@@ -20,7 +20,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
 import { Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
-import { CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
@@ -138,8 +138,18 @@ export class OrdersService {
       return order;
     });
 
-    // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس
-    this.events.emit(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس. لازم
+    // emitAsync (مش emit) هنا تحديدًا: بَقّة حقيقية اتلقطت واتصلحت — emit() عادي بيستدعي
+    // الـ listeners من غير ما يستنى الـ promise بتاعهم (fire-and-forget)، يعني create() كانت
+    // بترجع للعميل بـ 201 قبل ما OrderDispatchListener يخلّص إنشاء صفوف order_assignments في
+    // DB. لو الفني (أو اختبار حي) نادى accept() فوراً بعد استلام رد إنشاء الطلب من غير أي تأخير
+    // طبيعي، كان بيرجع "العرض ده مبقاش متاح" رغم إن الطلب لسه بيتوزّع. اتلقطت بـ curl مباشر
+    // (نداءين متتاليين من غير أي تأخير) قبل ما نلاقيها كمان في اختبار Dart حي جديد. emitAsync
+    // بتستنى كل الـ listeners (بما فيهم OrderDispatchListener) يخلّصوا قبل ما create() ترجع،
+    // فلما العميل يستلم رد الطلب يكون التوزيع للفنيين المؤهلين خلص فعلاً. باقي أحداث النظام
+    // (إشعارات، إحصائيات) لسه fire-and-forget عمداً — الاستثناء هنا بس لإن نتيجة التوزيع دي
+    // جزء أساسي من دورة الطلب مش side effect.
+    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
 
     return order;
   }
@@ -250,6 +260,17 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
     return order;
+  }
+
+  // كانت فجوة موثّقة في apps/technician-app/README.md: مفيش endpoint يرجّع "الطلب النشط
+  // الحالي" للفني من غير ما يعرف الـ id مقدماً — يعني التطبيق مقدرش يسترجع شاشة التنفيذ تلقائياً
+  // لما يتفتح تاني بعد ما يتقفل في نص الدورة. null لو مفيش طلب نشط، مش خطأ.
+  async findActiveForTechnician(userId: string): Promise<Order | null> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.orders.findOne({
+      where: { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES) },
+      order: { updatedAt: 'DESC' },
+    });
   }
 
   /** مصدر واحد لكل انتقالات الفني — بتحترم الـ state machine وبتسجل التاريخ زي أي انتقال تاني. */

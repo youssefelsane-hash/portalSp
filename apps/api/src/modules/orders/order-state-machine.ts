@@ -64,6 +64,17 @@ export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.TECHNICIAN_ON_WAY,
 ]);
 
+// الحالات اللي الطلب "نشط" فيها من ناحية الفني — مُستخدمة في order-tracking.gateway.ts (تحديد
+// آخر طلب نشط للفني وقت بث الموقع) وGET /technician/orders/active (استرجاع حالة التنفيذ بعد
+// إعادة فتح التطبيق). بتفترض ضمنياً فني واحد بياخد طلب نشط واحد بس في نفس الوقت — نفس الافتراض
+// اللي order-tracking.gateway.ts أصلاً بيعتمد عليه (findOne مش find) قبل ما الملف ده يتلمس.
+export const ACTIVE_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.ACCEPTED,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+];
+
 export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   return ORDER_TRANSITIONS[from].includes(to);
 }

@@ -28,4 +28,14 @@
 
 اتلقطت وقت بناء `OrderAutoCancelService` (`../orders/README.md`) — نفس التفكير في نفس الـ event. `cancelForNoTechnicians()` (بتتنادى لما مفيش فنيين مؤهلين أصلاً، أو الجولات خلصت من غير رد) كانت بتنقل الطلب لـ`cancelled_by_system` فعلياً وتسجّل `order_status_history` صح، **بس من غير ما تصدّر `order.status_changed` خالص** — يعني `OrderStatusNotificationListener` (اللي أصلاً بيعالج `CANCELLED_BY_SYSTEM` من زمان) محدش كان بيوصله أي حدث يشتغل عليه، فالعميل (والفني لو موجود) محدش كان بيوصله أي إشعار "مفيش فني قبل طلبك" خالص. اتصلحت بإضافة `this.events.emit(ORDER_STATUS_CHANGED_EVENT, ...)` بعد الـ transaction — نفس النمط بالظبط المُستخدم في كل انتقال تاني بالموديول ده. اتعمله اختبار حي: طلب لخدمة اختبارية بصفر فنيين مؤهلين اتلغى فوراً والعميل استلم إشعار حقيقي `order_cancelled_by_admin` بالسبب `ORDR_002` بالظبط.
 
+## بَقّة routing خطيرة — استيراد `OrdersModule` زيادة كان بيشيل ترتيب تسجيل المسارات
+
+اتلقطت وقت بناء `GET /technician/orders/active` (`../orders/README.md`). `MatchingModule` كان بيستورد `OrdersModule` بالكامل رغم إن مفيش أي كود هنا بيحقن `OrdersService` فعلياً — الاستخدام الوحيد لـ `Order`/`OrderStatusHistory` هو `manager.create()` جوّه transaction (بيشتغل عالمياً عبر `DataSource` مش محتاج Repository مُحقن ولا الموديول كله). NestJS بيسجّل مسارات الـ controllers بترتيب تحميل الموديولات (بيتبع شجرة الاعتماديات — موديول بيستورد موديول تاني بيفرض الموديول المستورَد يتسجّل الأول)، ومسارات Express بتتطابق بترتيب التسجيل مش بالتحديد (specificity) — يعني مسار حرفي زي `GET /technician/orders/available` (هنا) لو اتسجّل **بعد** `GET /technician/orders/:id` (في `orders`)، الـ `:id` بيطابق الأول ويرفض `"available"` كـ UUID غلط عبر `ParseUUIDPipe`.
+
+الاستيراد الزايد ده كان بيفرض `OrdersModule` يتحمّل قبل `MatchingModule` دايماً، وده كان شغال بأمان لحد ما `GET /technician/orders/:id` اتضاف لـ`orders` في كوميت سابق في نفس الجلسة دي — من ساعتها **كل الفنيين مكانوش قادرين يشوفوا أي طلب متاح خالص** (بَقّة إنتاجية حقيقية، مش نظرية، اتقدّمت بنفسي وبَقيت تحتها لحد ما اختبار حي جديد فشل بـ"العرض ده مبقاش متاح" رغم الطلب سليم ومتاح فعلاً).
+
+اتصلحت بـ: (1) شيل `import { OrdersModule }` من `matching.module.ts`، استبداله بـ `TypeOrmModule.forFeature([OrderAssignment, Order])` مباشرة (كان موجود بالفعل، مش محتاج إضافة)، (2) ترتيب `MatchingModule` قبل `OrdersModule` في `imports` بتاع `app.module.ts` مع تعليق يوضّح السبب لأي حد يلمس الترتيب ده تاني. اتأكد الإصلاح حياً: `server.log` أظهر `available` بيتسجّل قبل `:id` دلوقتي، `curl` مباشر لـ`GET /technician/orders/available` رجّع `200` بدل خطأ UUID، ومسار قبول طلب كامل (`create`→`available`→`accept`) نجح من غير أي تأخير صناعي.
+
+**الدرس العام**: أي استيراد موديول لموديول تاني في NestJS مش بس اعتماد DI — هو كمان قرار ترتيب تسجيل مسارات ضمني. استيراد موديول كامل "للاحتياط" أو لأنه "كان موجود من الأول" من غير التحقق إن فيه فعلاً حقن حقيقي بيستحق مراجعة دورية.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
