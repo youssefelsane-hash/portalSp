@@ -3,6 +3,7 @@ export * from './auth';
 export * from './dashboard';
 export * from './employees';
 export * from './technicians';
+export * from './customers';
 export * from './orders';
 export * from './catalog';
 export * from './settings';

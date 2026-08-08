@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/', label: 'نظرة عامة' },
   { href: '/employees', label: 'الموظفين' },
   { href: '/technicians', label: 'الفنيين' },
+  { href: '/customers', label: 'العملاء' },
   { href: '/orders', label: 'الطلبات' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/geo', label: 'المدن والمناطق' },
