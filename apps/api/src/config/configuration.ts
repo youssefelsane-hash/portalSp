@@ -22,8 +22,21 @@ export default () => ({
   },
 
   storage: {
-    // محلي بس في التطوير — الإنتاج يبدّلها لـ S3-compatible (§2.2 في الماستر بلان)
+    // 'local' (افتراضي، للتطوير) أو 's3' — راجع common/storage/storage.provider.ts
+    provider: process.env.STORAGE_PROVIDER ?? 'local',
     localDir: process.env.STORAGE_LOCAL_DIR ?? './uploads',
+    s3: {
+      // كل القيم دي مطلوبة فعلياً بس لو STORAGE_PROVIDER=s3 — تفاصيل الحصول عليها:
+      // docs/03-external-integrations.md → قسم S3-compatible storage
+      endpoint: process.env.S3_ENDPOINT, // اسيبه فاضي لـ AWS S3 نفسه؛ لازم لأي بديل تاني (Spaces/R2/MinIO)
+      region: process.env.S3_REGION ?? 'us-east-1',
+      bucket: process.env.S3_BUCKET,
+      accessKeyId: process.env.S3_ACCESS_KEY_ID,
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+      forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
+      // أقصى مدة صلاحية مسموحة لروابط SigV4 presigned فعلياً — راجع الشرح الكامل في s3-storage.service.ts
+      urlExpirySeconds: parseInt(process.env.STORAGE_S3_URL_EXPIRY_SECONDS ?? String(60 * 60 * 24 * 7), 10),
+    },
   },
 
   redis: {
