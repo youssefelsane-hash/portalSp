@@ -8,22 +8,30 @@ import { Order } from '../orders/entities/order.entity';
 import { STORAGE_SERVICE } from '../../common/storage/storage.service';
 import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
 import { AdminSupportController } from './admin-support.controller';
+import { AdminSupportTicketsController } from './admin-support-tickets.controller';
 import { SupportController } from './support.controller';
+import { SupportTicketsController } from './support-tickets.controller';
 import { SupportService } from './support.service';
+import { SupportTicketsService } from './support-tickets.service';
 import { Complaint } from './entities/complaint.entity';
 import { ComplaintAttachment } from './entities/complaint-attachment.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
+import { SupportTicket } from './entities/support-ticket.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Complaint, ComplaintMessage, ComplaintAttachment, Order]),
+    TypeOrmModule.forFeature([Complaint, ComplaintMessage, ComplaintAttachment, SupportTicket, Order]),
     CustomersModule,
     TechniciansModule,
     PaymentsModule,
     AuditModule,
   ],
-  controllers: [SupportController, AdminSupportController],
-  providers: [SupportService, { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService }],
-  exports: [SupportService],
+  controllers: [SupportController, AdminSupportController, SupportTicketsController, AdminSupportTicketsController],
+  providers: [
+    SupportService,
+    SupportTicketsService,
+    { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService },
+  ],
+  exports: [SupportService, SupportTicketsService],
 })
 export class SupportModule {}

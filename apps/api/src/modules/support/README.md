@@ -2,7 +2,7 @@
 
 الشكاوى وتذاكر الدعم. جداول: complaints, complaint_messages, complaint_attachments, support_tickets (قاموس §8.2-8.4).
 
-**الحالة: شغال (S8) — complaints بالكامل + complaint_attachments، support_tickets لسه.**
+**الحالة: شغال (S8) — complaints بالكامل + complaint_attachments + support_tickets.**
 
 - `complaint-state-machine.ts`: نفس فلسفة `orders/order-state-machine.ts` — انتقالات مقفولة (`open→under_investigation→resolved/rejected→closed`)، أي انتقال مش معرّف يترفض.
 - **`POST /complaints`**: العميل أو الفني يفتح شكوى، اختيارياً مربوطة بطلب — لو مربوطة، بيتحقق إن الفاتح فعلاً طرف في الطلب، وبيحدد الطرف التاني المُشتكى منه أوتوماتيك. بيصدر حدث `complaint.filed` (بره الـ transaction) — `notifications` بيوجّهه لدور `support_agent` عبر `notification_routing_rules` (تفاصيل في `../notifications/README.md`).
@@ -10,7 +10,7 @@
 - **`POST /admin/complaints/:id/resolve`**: لو فيه `compensation_cents`، التعويض بيتحوّل فعلياً لمحفظة صاحب الشكوى (عميل أو فني) جوّه نفس الـ transaction اللي بتقفل الشكوى — و الـ state machine بيمنع حل شكوى اتحلت قبل كده أصلاً، فده حماية مزدوجة ضد تعويض مكرر.
 - **بَقّة حقيقية اتكشفت واتصلحت أثناء الاختبار**: مسارات `GET /complaints/:id`، `GET/POST /complaints/:id/messages` كانت مقفولة على الأدمن بالـ RBAC (`@Roles(CUSTOMER, TECHNICIAN)` بس على مستوى الكلاس)، رغم إن منطق الـ service كان أصلاً بيتعامل مع الأدمن كـ participant دايماً. يعني فريق الدعم كان مش هيقدر يقرا ولا يرد على أي شكوى. اتصلحت بـ `@Roles` على مستوى الـ method لكل endpoint، مش بس الكلاس.
 - **اتعمله اختبار end-to-end فعلي شامل**: شكوى اتفتحت وربطت أوتوماتيك بالطرف التاني، الطرف المتّهم قدر يرد، طرف تالت غريب اترفض بـ 403، تعويض 20 جنيه اتحوّل فعلياً لمحفظة العميل (اتأكد من رصيده قبل وبعد)، محاولة حل الشكوى مرتين اترفضت، ملاحظة داخلية اتخبت عن العميل وظهرت للأدمن، وقفل شكوى قبل ما تتحل اترفض.
-- لسه من غير: `support_tickets` (تذاكر الدعم العامة، مش مرتبطة بشكوى/طلب)، وتصنيف `severity`/التصعيد الأوتوماتيكي — دلوقتي كله `medium` ثابت، والتصنيف الدقيق مسؤولية فريق الدعم يدوياً وقت المراجعة.
+- لسه من غير: تصنيف `severity`/التصعيد الأوتوماتيكي — دلوقتي كله `medium` ثابت، والتصنيف الدقيق مسؤولية فريق الدعم يدوياً وقت المراجعة.
 
 ## `complaint_attachments` — كانت فجوة موثّقة، اتقفلت
 
@@ -21,5 +21,17 @@
 - اتعمله اختبار حي كامل: عميل فتح شكوى (من غير طلب مربوط)، رفع صورة PNG حقيقية 1×1 (نفس fixture مستخدم في اختبارات `apps/technician-app`) — اتكتبت فعلاً على القرص، الرابط الراجع اتأكد منه بـ `curl` مباشر: `200 image/png` والبايتات طابقت الأصل بالظبط (`diff`). الأدمن قدر يشوف ويرفع مرفق كمان (participant دايماً). فني مش طرف في الشكوى اترفض 403 من `GET` و`POST` الاتنين. ملف نص عادي (`text/plain`) اترفض 400 بوضوح قبل حتى ما يوصل للتخزين.
 
 **الصلاحيات الدقيقة اتفعّلت**: `resolve`/`reject`/`close` محتاجين صلاحية `complaints.resolve` بالتحديد الآن (`support_agent` عنده، `finance`/`recruiter` لأ) عبر `PermissionsGuard` — التفاصيل الكاملة والاختبار في `../admin/README.md`.
+
+## `support_tickets` — كانت فجوة موثّقة، اتقفلت
+
+تذاكر دعم عامة، مش لازم تكون مرتبطة بشكوى أو طلب (مثلاً: سؤال عن فاتورة، مشكلة تقنية في التطبيق). الجدول كان موجود فعلاً في `0009_support_chat_notifications.sql` من أول يوم (فاضي). ملف جديد `support-tickets.service.ts` منفصل عن `support.service.ts` عمداً (نفس فلسفة فصل `AdminCatalogService` عن `CatalogService`) لأن الاتنين مجالين مختلفين حتى لو نفس الموديول.
+
+- **`POST /support-tickets`**: العميل/الفني بيفتح تذكرة (`subject`, `category`, `channel`, `priority?` — افتراضي `medium`). رقم التذكرة `TKT-YYYY-NNNNNN` عبر نفس `next_human_readable_number()` المستخدمة في كل مكان تاني.
+- **ملحوظة مهمة عن الـ schema**: جدول `support_tickets` في القاموس (§8.4) **معندوش عمود نص/وصف** — بس `subject` (VARCHAR 200). مش اخترعنا عمود جديد (كان محتاج migration مش موجودة في القاموس المعتمد) — أي تفاصيل إضافية المفروض تتقال عبر `chat_threads` (`thread_type=support_chat`) بعد فتح التذكرة، وده لسه مش متوصّل (فجوة تانية، مختلفة عن دي).
+- **انتقالات الحالة**: مفيش state machine كامل زي orders/complaints لأن القاموس مايوصفش دورة حياة صارمة للتذكرة العامة — بس منطق بسيط في `support-tickets.service.ts` (`ALLOWED_TRANSITIONS`): `open→{in_progress, resolved, closed}`, `in_progress→{resolved, closed}`, `resolved→{in_progress (reopen), closed}`, `closed` نهائية تماماً.
+- **`PATCH /admin/support-tickets/:id/assign`** و **`PATCH /admin/support-tickets/:id/status`**: صلاحية جديدة `support_tickets.manage` (`infra/migrations/0037_support_tickets_manage_permission.sql`، `super_admin`/`support_agent`). `assign` بيسجّل `first_response_at` أول مرة بس. `status→resolved` بيسجّل `resolved_at`، والرجوع لـ `in_progress` من `resolved` (reopen) بيصفّره تاني.
+- **`POST /support-tickets/:id/satisfaction`**: صاحب التذكرة بس يقدر يقيّم (1-5)، وبس لو `resolved`/`closed`، وبس مرة واحدة — محاولة تانية اترفضت `VAL_001` 409.
+- **بَقّة حقيقية اتكشفت واتصلحت وقت الاختبار — نفس فخ صلاحيات جديدة يوم-صفر تاني**: كتبت أول نسخة من migration 0037 بتعليق "super_admin أصلاً بياخد كل الصلاحيات أوتوماتيك (CROSS JOIN في 0020)" — ده غلط. الـ `CROSS JOIN` في `0020_permissions_seed.sql` كان snapshot لحظي وقت التنفيذ بس؛ أي صلاحية جديدة اتضافت بعد كده (زي `catalog.manage` في 0022 وكل صلاحية بعدها) لازم تتمنح لـ `super_admin` **صراحة** في نفس migration الصلاحية الجديدة — وده فعلاً النمط المتّبع في كل migration سابقة (0022 بالظبط بتعمل كده). اتكشفت البَقّة حياً لما حساب `super_admin` الحقيقي اترفض 403 من `assign`/`status` رغم إنه المفروض عنده كل شيء. اتصلحت في الملف (`WHERE r.name IN ('super_admin', 'support_agent')`) قبل حتى ما تتعمل commit، وطُبّقت تصحيحاً مباشراً على الداتابيز الحية (`INSERT ... WHERE NOT EXISTS`) عشان الـ migration runner بيتتبّع بالاسم بس ومش هيعيد تنفيذ ملف اتعلّم إنه اتطبّق قبل كده.
+- اتعمله اختبار حي كامل: عميل فتح تذكرة (`TKT-2026-000001`)، أدمن `super_admin` عيّنها لنفسه (`first_response_at` اتسجّل)، نقلها `in_progress`، محاولة رجوعها لـ `open` اترفضت 409 بوضوح، نقلها `resolved` (`resolved_at` اتسجّل)، العميل قيّمها 4/5 بنجاح، محاولة يقيّم تاني اترفضت 409، فني مش صاحبها اترفض 403 من `GET`، أدمن `support_agent` (عنده `support_tickets.manage`) قفلها بنجاح، أدمن `finance` (مالوش الصلاحية) اترفض 403، ومحاولة نقل تذكرة `closed` لأي حالة اترفضت 409 (نهائية فعلاً).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
