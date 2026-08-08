@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
@@ -7,6 +7,8 @@ import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { NotificationChannel } from '../notifications/entities/notification.entity';
+import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
 import { parseDurationToMs } from '../../common/utils/duration';
 import { USER_REGISTERED_EVENT, UserRegisteredEvent } from '../../common/events/user-registered.event';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
@@ -28,6 +30,8 @@ const BCRYPT_SALT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(OtpCode) private readonly otpCodes: Repository<OtpCode>,
@@ -35,6 +39,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
+    private readonly smsDispatcher: TwilioSmsDispatcher,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────
@@ -57,9 +62,27 @@ export class AuthService {
     });
     await this.otpCodes.save(otp);
 
-    // TODO(BYT-###): وصل مزوّد SMS حقيقي (Victory Link / SMSMisr) — دلوقتي بيتسجل بس في اللوج للتطوير المحلي.
+    // اللوج ده بيتسجل دايماً (حتى لو بوابة SMS حقيقية متظبطة) — نفس فلسفة استمرار التطوير/الاختبار
+    // المحلي المتّبعة في كل تكامل خارجي تاني في المشروع (Paymob/S3/إلخ)، مش استبدال كامل له.
     // eslint-disable-next-line no-console
     console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+
+    // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة Twilio SMS حقيقية اتبنت
+    // معمارياً في common/notifications/ بـ isConfigured (تفعيلها = env vars، تفاصيل في
+    // docs/03-external-integrations.md)، هنا أول استهلاك حقيقي ليها. فشل الإرسال (بوابة مش
+    // مظبوطة أو خطأ شبكة) ميرمّيش الطلب — نفس فلسفة "فشل تقني مايكسرش تجربة المستخدم الحقيقي"
+    // المتّبعة في كل مكان تاني، وخصوصاً هنا: العميل المحلي بيقدر يكمل التسجيل من اللوج فوق.
+    const result = await this.smsDispatcher.send({
+      userId: '', // مش موجود بعد (OTP ممكن يكون لتسجيل جديد) — TwilioSmsDispatcher.send() مبيقراش الحقل ده أصلاً
+      channel: NotificationChannel.SMS,
+      titleAr: 'كود التحقق — baytak',
+      bodyAr: `كودك: ${code} — صالح لمدة ${expiryMinutes} دقيقة. متشاركوش الكود ده مع حد.`,
+      deepLink: null,
+      targets: [dto.phone_number],
+    });
+    if (!result.delivered) {
+      this.logger.warn(`فشل إرسال OTP بـ SMS لـ ${dto.phone_number}: ${result.failureReason}`);
+    }
 
     return { expires_in_seconds: expiryMinutes * 60 };
   }
