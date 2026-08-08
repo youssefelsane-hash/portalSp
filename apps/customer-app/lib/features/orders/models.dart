@@ -1,3 +1,26 @@
+// مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts (OrderAddressResponseDto)
+// موجود بس في ردود تفاصيل الطلب الفردي (GET /orders/:id)، مش في قوائم الطلبات — لخرائط التتبع.
+class OrderAddress {
+  final String streetName;
+  final String? landmark;
+  final double latitude;
+  final double longitude;
+
+  OrderAddress({
+    required this.streetName,
+    required this.landmark,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  factory OrderAddress.fromJson(Map<String, dynamic> json) => OrderAddress(
+        streetName: json['street_name'] as String,
+        landmark: json['landmark'] as String?,
+        latitude: (json['latitude'] as num).toDouble(),
+        longitude: (json['longitude'] as num).toDouble(),
+      );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts
 class Order {
   final String id;
@@ -16,6 +39,7 @@ class Order {
   final String? cancellationReasonId;
   final int cancellationFeeCents;
   final String createdAt;
+  final OrderAddress? address;
 
   Order({
     required this.id,
@@ -34,6 +58,7 @@ class Order {
     required this.cancellationReasonId,
     required this.cancellationFeeCents,
     required this.createdAt,
+    this.address,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -53,6 +78,9 @@ class Order {
         cancellationReasonId: json['cancellation_reason_id'] as String?,
         cancellationFeeCents: json['cancellation_fee_cents'] as int? ?? 0,
         createdAt: json['created_at'] as String,
+        address: json['address'] != null
+            ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
+            : null,
       );
 }
 

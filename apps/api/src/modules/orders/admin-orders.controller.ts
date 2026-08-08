@@ -26,7 +26,7 @@ export class AdminOrdersController {
   @Get()
   async list(@Query() query: ListOrdersQueryDto) {
     const { items, meta } = await this.adminOrdersService.list(query);
-    return { items: items.map(toOrderResponseDto), meta };
+    return { items: items.map((order) => toOrderResponseDto(order)), meta };
   }
 
   @Get(':id')
