@@ -53,7 +53,10 @@ export class OrdersService {
     if (!address.cityId) {
       throw new ApiException(ErrorCode.ORDR_001, 'العنوان مش مربوط بمدينة', HttpStatus.BAD_REQUEST);
     }
-    const zone = await this.geoService.findZoneForCity(address.cityId);
+    // point-in-polygon حقيقي لو فيه نطاقات في المدينة عندها boundary مرسوم، وإلا fallback
+    // لأول نطاق نشط في المدينة (نفس السلوك القديم) — تفاصيل في geo/README.md.
+    const [longitude, latitude] = address.location.coordinates;
+    const zone = await this.geoService.findZoneForPoint(address.cityId, latitude, longitude);
     if (!zone) {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Area } from './entities/area.entity';
 import { City } from './entities/city.entity';
 import { ServiceZone } from './entities/service-zone.entity';
@@ -11,6 +11,7 @@ export class GeoService {
     @InjectRepository(City) private readonly cities: Repository<City>,
     @InjectRepository(Area) private readonly areas: Repository<Area>,
     @InjectRepository(ServiceZone) private readonly serviceZones: Repository<ServiceZone>,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   findActiveCities(): Promise<City[]> {
@@ -29,9 +30,47 @@ export class GeoService {
   /**
    * تبسيط متعمّد لمرحلة MVP: بترجع أول نطاق نشط في المدينة بدل بحث جغرافي (ST_Contains) حقيقي
    * ضد boundary المنطقة — مقبول لما المدينة عندها نطاق واحد أو اتنين بس (§0.2.5 في الماستر بلان:
-   * "اطلق على حيّين فقط"). لازم يتحول لـ point-in-polygon حقيقي قبل ما نضيف نطاقات أكتر.
+   * "اطلق على حيّين فقط"). لسه مستخدمة كـ fallback في findZoneForPoint لما مفيش نطاق في المدينة
+   * عنده boundary مرسوم أصلاً (زي كل المدن الحالية في بيانات الاختبار).
    */
   findZoneForCity(cityId: string): Promise<ServiceZone | null> {
     return this.serviceZones.findOne({ where: { cityId, isActive: true }, order: { createdAt: 'ASC' } });
+  }
+
+  /**
+   * بحث جغرافي حقيقي بالـ point-in-polygon — كان فجوة موثّقة، اتقفلت.
+   *
+   * **قرار مهم عن سلوك الـ fallback**: لو المدينة **معندهاش ولا نطاق واحد** عنده `boundary`
+   * مرسوم لسه (الحالة الافتراضية — كل نطاق بيتنشئ من غير مضلّع)، بنرجع لـ `findZoneForCity`
+   * القديمة (أول نطاق نشط) عشان مانكسرش إنشاء الطلبات في كل المدن الحالية اللي لسه معندهاش
+   * مضلّعات. **لكن لو المدينة عندها نطاق واحد على الأقل عنده مضلّع**، بقى ده معناه المدينة دي
+   * "فعّلت" التغطية الدقيقة، فأي إحداثية برّه كل المضلّعات المرسومة بترجع `null` فعلاً (رفض حقيقي
+   * "الخدمة غير متاحة") — مش fallback عشوائي لأول نطاق، لأن ده كان هيلغي فايدة الميزة كلها.
+   */
+  async findZoneForPoint(cityId: string, latitude: number, longitude: number): Promise<ServiceZone | null> {
+    const [{ count }] = await this.dataSource.query<{ count: string }[]>(
+      `SELECT COUNT(*)::int AS count FROM service_zones
+       WHERE city_id = $1 AND is_active = true AND deleted_at IS NULL AND boundary IS NOT NULL`,
+      [cityId],
+    );
+    const cityHasAnyBoundary = Number(count) > 0;
+    if (!cityHasAnyBoundary) {
+      return this.findZoneForCity(cityId);
+    }
+
+    const rows = await this.dataSource.query<{ id: string }[]>(
+      `
+      SELECT id FROM service_zones
+      WHERE city_id = $1 AND is_active = true AND deleted_at IS NULL
+        AND boundary IS NOT NULL
+        AND ST_Contains(boundary::geometry, ST_SetSRID(ST_MakePoint($2, $3), 4326))
+      ORDER BY created_at ASC
+      LIMIT 1
+      `,
+      [cityId, longitude, latitude],
+    );
+
+    if (rows.length === 0) return null;
+    return this.serviceZones.findOne({ where: { id: rows[0].id } });
   }
 }
