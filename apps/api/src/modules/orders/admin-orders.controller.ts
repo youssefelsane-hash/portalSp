@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminOrdersService } from './admin-orders.service';
+import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
@@ -51,5 +52,18 @@ export class AdminOrdersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
+  }
+
+  @Patch(':id/adjust-price')
+  @RequirePermission('orders.adjust_price')
+  async adjustPrice(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdjustOrderPriceDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.adminOrdersService.adjustPrice(admin.sub, id, dto.new_total_amount_cents, dto.reason, audit),
+    );
   }
 }

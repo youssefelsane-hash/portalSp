@@ -51,11 +51,12 @@
 فجوة كانت هنا في القائمة تحت اتقفلت: ترقية/تخفيض مستوى الفني بقت فعل حقيقي (`technicians.approve`)، وسياسة كل مستوى (عمولة/أولوية/حد قرار/أهلية قيادة فريق) بقت قابلة للتعديل بالكامل عبر `technician_levels.manage`. التفاصيل الكاملة والاختبار في `../technicians/README.md`.
 
 **لسه من غير من §13.7** (فجوة موثّقة، مش سهو):
-- `PATCH /admin/orders/:id/adjust-price`
 - `GET /admin/reports/zones` (ملحوظة: `GET /admin/reports/technicians` كانت موثّقة هنا كناقصة بالغلط — موجودة فعلاً، راجع "لوحة التحكم الموسّعة" تحت).
 - حذف حساب موظف (soft-delete) — دلوقتي الأداة الوحيدة هي `block` (تعطيل)، مفيش `DELETE` endpoint حقيقي.
 
 ~~`POST /admin/technicians/:id/suspend`~~ — كانت فجوة موثّقة هنا، اتقفلت. التفاصيل الكاملة والاختبار الحي في `../technicians/README.md`.
+
+~~`PATCH /admin/orders/:id/adjust-price`~~ — كانت فجوة موثّقة هنا، اتقفلت. التفاصيل الكاملة والاختبار الحي في `../orders/README.md`.
 
 ## إدارة العملاء (`GET /admin/customers`, `/:userId`, `/:userId/block`, `/:userId/unblock`) — كانت فجوة موثّقة، اتقفلت
 
