@@ -9,8 +9,10 @@ import { AdminCatalogService } from './admin-catalog.service';
 import {
   toAdminServiceCategoryResponseDto,
   toAdminServiceResponseDto,
+  toEligibleTechnicianResponseDto,
   toServiceAddonResponseDto,
   toServiceLevelPricingResponseDto,
+  toServiceZonePricingResponseDto,
 } from './dto/admin-catalog-response.dto';
 import { AssignTechnicianServiceDto } from './dto/assign-technician-service.dto';
 import { CreateServiceAddonDto } from './dto/create-service-addon.dto';
@@ -108,19 +110,20 @@ export class AdminCatalogController {
   // ── تسعير حسب المنطقة ───────────────────────────────────────────────
 
   @Get('services/:id/zone-pricing')
-  listZonePricing(@Param('id', ParseUUIDPipe) id: string) {
-    return this.adminCatalogService.listZonePricing(id);
+  async listZonePricing(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.adminCatalogService.listZonePricing(id);
+    return rows.map(toServiceZonePricingResponseDto);
   }
 
   @Put('services/:id/zone-pricing')
   @RequirePermission('catalog.manage')
-  upsertZonePricing(
+  async upsertZonePricing(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpsertZonePricingDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return this.adminCatalogService.upsertZonePricing(admin.sub, id, dto, audit);
+    return toServiceZonePricingResponseDto(await this.adminCatalogService.upsertZonePricing(admin.sub, id, dto, audit));
   }
 
   @Delete('services/zone-pricing/:pricingId')
@@ -138,19 +141,20 @@ export class AdminCatalogController {
   // ── الفنيين المؤهلين ─────────────────────────────────────────────────
 
   @Get('services/:id/technicians')
-  listEligibleTechnicians(@Param('id', ParseUUIDPipe) id: string) {
-    return this.adminCatalogService.listEligibleTechnicians(id);
+  async listEligibleTechnicians(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.adminCatalogService.listEligibleTechnicians(id);
+    return rows.map(toEligibleTechnicianResponseDto);
   }
 
   @Post('services/:id/technicians')
   @RequirePermission('catalog.manage')
-  assignTechnician(
+  async assignTechnician(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AssignTechnicianServiceDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return this.adminCatalogService.assignTechnician(admin.sub, id, dto, audit);
+    return toEligibleTechnicianResponseDto(await this.adminCatalogService.assignTechnician(admin.sub, id, dto, audit));
   }
 
   @Delete('services/:id/technicians/:technicianId')

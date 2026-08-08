@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import type {
   AdminServiceCategoryResponseDto,
   AdminServiceResponseDto,
@@ -267,7 +268,11 @@ export default function CatalogPage() {
                 <TableBody>
                   {services.map((service) => (
                     <TableRow key={service.id}>
-                      <TableCell>{service.name_ar}</TableCell>
+                      <TableCell>
+                        <Link href={`/catalog/services/${service.id}`} className="hover:underline">
+                          {service.name_ar}
+                        </Link>
+                      </TableCell>
                       <TableCell>{PRICING_MODEL_LABELS[service.pricing_model]}</TableCell>
                       <TableCell>{formatEgp(service.base_price_cents)}</TableCell>
                       <TableCell>
@@ -292,8 +297,9 @@ export default function CatalogPage() {
       </div>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        دوس على شارة الحالة عشان تفعّل/تعطّل. تعديل باقي حقول الخدمة (التسعير التفصيلي، الحد
-        الأدنى/الأقصى، الضمان، ...) وتسعير المناطق والفنيين المؤهلين لسه مش متاحين من هنا — فجوة موثّقة.
+        دوس على شارة الحالة عشان تفعّل/تعطّل. دوس على اسم الخدمة عشان تدير تسعير المناطق،
+        الفنيين المؤهلين، تسعير المستويات، والإضافات الاختيارية. تعديل باقي حقول الخدمة التفصيلية
+        (الحد الأدنى/الأقصى، الضمان، ...) لسه مش متاح من هنا — فجوة موثّقة.
       </p>
     </AppShell>
   );
