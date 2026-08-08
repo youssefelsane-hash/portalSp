@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
   { href: '/notification-routing', label: 'توجيه الإشعارات' },
   { href: '/technician-companies', label: 'شركات/فرق الفنيين' },
+  { href: '/technician-levels', label: 'سياسة مستويات الفنيين' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/geo', label: 'المدن والمناطق' },
   { href: '/settings', label: 'الإعدادات' },
