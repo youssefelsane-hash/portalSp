@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { LOW_RATING_SUBMITTED_EVENT, LowRatingSubmittedEvent } from '../../common/events/low-rating-submitted.event';
+import { RATING_SUBMITTED_EVENT, RatingSubmittedEvent } from '../../common/events/rating-submitted.event';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
@@ -121,6 +122,13 @@ export class RatingsService {
       }
       throw err;
     }
+
+    // إشعار مباشر للطرف اللي اتقيّم — مستقل عن rating.low_rating_submitted (ده بيتصدر بس لو التقييم
+    // منخفض، ومُوجّه لدور support_agent مش للطرف نفسه). بيتصدر لكل تقييم، مش بس تقييمات العميل للفني.
+    this.events.emit(
+      RATING_SUBMITTED_EVENT,
+      new RatingSubmittedEvent(rating.id, orderId, ratingType, rating.overallRating, ratedUserId),
+    );
 
     return rating;
   }
