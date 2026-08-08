@@ -232,6 +232,14 @@ export class AdminEmployeesService {
     if (!user) {
       throw new ApiException(ErrorCode.VAL_001, 'الموظف غير موجود', HttpStatus.NOT_FOUND);
     }
+    // الحظر بيسحب كل أدوار الموظف (تحت) — لو ده آخر super_admin، النتيجة قفل كامل للنظام
+    if (await this.permissionsService.isLastSuperAdmin(userId)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مينفعش توقف آخر حساب super_admin في النظام — النظام هيتقفل تماماً',
+        HttpStatus.CONFLICT,
+      );
+    }
 
     await this.dataSource.transaction(async (manager) => {
       user.isBlocked = true;

@@ -14,6 +14,8 @@ export interface RoleAssignment {
   assigned_at: string;
 }
 
+const SUPER_ADMIN_ROLE_NAME = 'super_admin';
+
 @Injectable()
 export class PermissionsService {
   constructor(
@@ -91,10 +93,27 @@ export class PermissionsService {
     });
   }
 
+  /** بيتحقق إن المستخدم ده آخر super_admin في النظام — لازم يتنادى قبل أي عملية ممكن تشيل الدور ده منه (سحب دور، حظر حساب). */
+  async isLastSuperAdmin(userId: string): Promise<boolean> {
+    const rows = await this.dataSource.query<{ user_id: string }[]>(
+      `SELECT ur.user_id
+       FROM user_roles ur JOIN roles r ON r.id = ur.role_id AND r.name = $1 AND r.deleted_at IS NULL`,
+      [SUPER_ADMIN_ROLE_NAME],
+    );
+    return rows.length === 1 && rows[0].user_id === userId;
+  }
+
   async revokeRole(revokedByUserId: string, userId: string, roleName: string, meta?: AuditActorMeta): Promise<void> {
     const role = await this.roles.findOne({ where: { name: roleName } });
     if (!role) {
       throw new ApiException(ErrorCode.VAL_001, 'الدور غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (roleName === SUPER_ADMIN_ROLE_NAME && (await this.isLastSuperAdmin(userId))) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مينفعش تسحب دور super_admin من آخر حساب عنده — النظام هيتقفل تماماً',
+        HttpStatus.CONFLICT,
+      );
     }
     const result = await this.userRoles.delete({ userId, roleId: role.id });
     if (!result.affected) {
