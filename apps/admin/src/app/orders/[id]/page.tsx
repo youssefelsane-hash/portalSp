@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { AdminTechnicianResponseDto, OrderDetailResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
+import type { AdminTechnicianResponseDto, OrderDetailResponseDto, OrderItemResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 
@@ -17,6 +17,13 @@ const MEDIA_TYPE_LABELS: Record<string, string> = {
   receipt: 'إيصال',
   signature: 'توقيع',
   video: 'فيديو',
+};
+
+const ITEM_TYPE_LABELS: Record<string, string> = {
+  service: 'خدمة',
+  addon: 'إضافة',
+  spare_part: 'قطعة غيار',
+  extra_labor: 'أجرة إضافية',
 };
 import { AppShell } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
@@ -36,6 +43,7 @@ export default function OrderDetailPage() {
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
+  const [quoteItems, setQuoteItems] = useState<OrderItemResponseDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
@@ -52,6 +60,9 @@ export default function OrderDetailPage() {
     authedFetch<OrderMediaResponseDto[]>(`/admin/orders/${id}/media`)
       .then(setMedia)
       .catch(() => setMedia([]));
+    authedFetch<OrderItemResponseDto[]>(`/admin/orders/${id}/quote-items`)
+      .then(setQuoteItems)
+      .catch(() => setQuoteItems([]));
   }
 
   useEffect(() => {
@@ -239,6 +250,47 @@ export default function OrderDetailPage() {
                       <TableCell>{entry.previous_status ? ORDER_STATUS_LABELS[entry.previous_status] : '—'}</TableCell>
                       <TableCell>{ORDER_STATUS_LABELS[entry.new_status]}</TableCell>
                       <TableCell>{new Date(entry.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">بنود عرض السعر</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {quoteItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">مفيش بنود إضافية اتقترحت على الطلب ده</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>البند</TableHead>
+                    <TableHead>النوع</TableHead>
+                    <TableHead>السعر</TableHead>
+                    <TableHead>الحالة</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {quoteItems.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        {item.name_ar}
+                        <span className="block text-xs text-muted-foreground">
+                          {item.quantity} {item.unit_name ?? ''} × {formatEgp(item.unit_price_cents)}
+                        </span>
+                      </TableCell>
+                      <TableCell>{ITEM_TYPE_LABELS[item.item_type] ?? item.item_type}</TableCell>
+                      <TableCell>{formatEgp(item.total_price_cents)}</TableCell>
+                      <TableCell>
+                        <Badge variant={item.is_customer_approved ? 'secondary' : 'outline'}>
+                          {item.is_customer_approved ? 'موافَق عليه' : 'معلّق'}
+                        </Badge>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

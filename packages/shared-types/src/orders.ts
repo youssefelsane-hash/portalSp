@@ -64,3 +64,19 @@ export interface OrderMediaResponseDto {
   caption: string | null;
   taken_at: string;
 }
+
+// مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts — بنود عرض السعر
+// أثناء التنفيذ (spare_part/extra_labor/addon)، مسار awaiting_quote_approval.
+export interface OrderItemResponseDto {
+  id: string;
+  item_type: string;
+  name_ar: string;
+  description: string | null;
+  quantity: number;
+  unit_name: string | null;
+  unit_price_cents: number;
+  total_price_cents: number;
+  is_customer_approved: boolean;
+  approved_at: string | null;
+  created_at: string;
+}
