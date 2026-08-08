@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/auth_repository.dart';
 import 'features/auth/login_screen.dart';
-import 'features/home/home_screen.dart';
+import 'features/catalog/categories_screen.dart';
 
 void main() {
   runApp(const BaytakApp());
@@ -35,6 +35,6 @@ class _AuthGate extends StatelessWidget {
     if (auth.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return auth.isAuthenticated ? const HomeScreen() : const LoginScreen();
+    return auth.isAuthenticated ? const CategoriesScreen() : const LoginScreen();
   }
 }

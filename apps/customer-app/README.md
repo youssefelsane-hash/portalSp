@@ -4,22 +4,30 @@
 
 ## الحالة الحالية — بداية حقيقية، مش كل الميزات لسه
 
-اللي موجود: تسجيل دخول OTP كامل (طلب كود → تحقق → جلسة) ضد `apps/api` الحقيقي، مطابق تماماً لنفس معمارية الأمان المُستخدمة في `apps/admin` (راجع `apps/admin/README.md` للتفاصيل الكاملة):
+اللي موجود:
+- تسجيل دخول OTP كامل (طلب كود → تحقق → جلسة) ضد `apps/api` الحقيقي، مطابق تماماً لنفس معمارية الأمان المُستخدمة في `apps/admin` (راجع `apps/admin/README.md` للتفاصيل الكاملة):
+  - `access_token`: في الذاكرة بس (state جوّه `AuthRepository`)، مش أي تخزين دائم.
+  - `refresh_token`: في `flutter_secure_storage` (Keychain على iOS، Keystore على Android) — مش `SharedPreferences`.
+  - **نفس بَقّة الـ single-flight refresh اللي اتلقطت في `apps/admin` اتصلحت هنا من الأول** — `lib/core/auth_repository.dart` فيه نفس حل الـ `_inFlightRefresh`.
+- تصفح الكتالوج (`lib/features/catalog/`): فئات الخدمات (شاشة رئيسية بعد تسجيل الدخول) → خدمات كل فئة، ضد `/service-categories` و`/services` الحقيقيين (مسارات عامة، Public()).
 
-- `access_token`: في الذاكرة بس (state جوّه `AuthRepository`)، مش أي تخزين دائم.
-- `refresh_token`: في `flutter_secure_storage` (Keychain على iOS، Keystore على Android) — مش `SharedPreferences`.
-- **نفس بَقّة الـ single-flight refresh اللي اتلقطت في `apps/admin` اتصلحت هنا من الأول** — الباك-إند بيدوّر `refresh_token` على كل استخدام وبيقفل كل جلسات المستخدم لو توكن اتلغى استُخدم تاني، فأي نداءين `refresh` متزامنين (زي `init()` بيتنادى مرتين لأي سبب) لازم يشاركوا نفس الـ request بدل ما يتسابقوا. `lib/core/auth_repository.dart` فيه نفس الحل (`_inFlightRefresh`).
+**لسه من غير**: GPS، طلب خدمة فعلي، تتبع الفني لحظياً، دفع، تقييم، شات.
 
-**لسه من غير**: كل الميزات الفعلية (GPS، طلب خدمة، تتبع الفني، دفع، تقييم، شات) — دي المرحلة الجاية.
+## اختبار حي حقيقي — اكتشاف مهم غيّر إستراتيجية الاختبار هنا
 
-## فجوة اختبار موثّقة صراحة — مفيش E2E تفاعلي حقيقي في البيئة دي
+كنا موثّقين إن مفيش طريقة نتحقق بيها حياً من كود Flutter في البيئة دي (مفيش Android/iOS emulator، ومحاولة بديل Linux desktop فشلت — تفاصيل تحت). ده لسه صحيح **بس للـ widgets نفسها**. اكتشفنا إن قيد "أي HTTP request في اختبار Flutter بيرجع 400" مرتبط تحديداً بـ `TestWidgetsFlutterBinding` (اللي `testWidgets()` بيستخدمه) — مش بكل اختبارات Flutter. اختبار `test()` العادي (Dart VM خام، من غير widget tree) **معندوش القيد ده خالص**.
 
-خلافاً لـ `apps/admin` (اتعمله اختبار حي كامل عبر Playwright في متصفح حقيقي)، تطبيق Flutter ده **متتحققش بصرياً/تفاعلياً بشكل كامل** في بيئة البناء دي، لسببين حقيقيين لا علاقة لهم بصحة الكود:
+النتيجة: `test_live/` (مجلد منفصل عن `test/` عمداً — `flutter test` من غير مسار بيدوّر على كل الملفات جوّه `test/` بس، فمعزول عن التشغيل الافتراضي) فيه اختبارات بتكلم `apps/api` الحقيقي فعلياً:
+- `test_live/otp_flow_live_test.dart` — تدفق OTP كامل (طلب → تحقق → `access_token`/`refresh_token` حقيقيين → `/auth/me` بيرجّع نفس رقم الموبايل). بيتحقق بشكل حاسم من الجزء الأمني الأهم (تدوير التوكنات) اللي فيه بَقّة apps/admin اتلقطت.
+- `test_live/catalog_repository_live_test.dart` — `CatalogRepository` بيجيب فئات وخدمات حقيقية من القاعدة.
 
-1. **مفيش Android/iOS emulator أو device متاح** في البيئة (`flutter doctor` بيأكد كده — مفيش Android SDK ولا Xcode).
-2. **بُني كتطبيق Linux desktop كبديل للاختبار البصري** (بعد تثبيت `libgtk-3-dev` و`libsecret-1-dev` يدوياً — مكانوش موجودين) — الـ compile نجح فعلاً (`flutter build linux` رجّع "Built"), لكن اكتشفنا إن خطوة "تجميع الـ bundle" في نسخة Flutter/CMake/Ninja دي بتفشل بصمت: الملف التنفيذي بيتحط في `build/linux/.../intermediates_do_not_run/` بس **من غير** ملفات الـ AOT/ELF data المفروض تتحط جنبه في `bundle/` — تشغيله مباشرة بيدي خطأ `FlutterEngineCreateAOTData: Invalid ELF path specified`. ده تعارض في أدوات البناء نفسها، مش بَقّة في كود التطبيق (الـ `flutter analyze` نضيف تماماً، `flutter build linux` بيرجع "Built" بنجاح ظاهري).
+تشغيلهم: `flutter test test_live/ --dart-define=API_BASE_URL=http://localhost:3000/api/v1` (محتاج `apps/api` شغال فعلاً).
 
-**اللي اتعمل فعلياً بدل كده**: `flutter analyze` (تحليل ثابت، صفر مشاكل) + `flutter test` (اختبار widget حقيقي بيتأكد إن شاشة تسجيل الدخول بتظهر صح لما مفيش جلسة محفوظة، مع mock لـ `flutter_secure_storage`'s platform channel لأنه مش موجود في بيئة الاختبار) + مراجعة كود دقيقة إن منطق الـ HTTP/auth طبق الأصل من نفس النمط المُثبَت شغال 100% في `apps/admin` ضد نفس الباك-إند. **الاختبار البصري/التفاعلي الحقيقي على جهاز فعلي أو محاكي لسه فجوة موثّقة صراحة** — أول حاجة لازم تتعمل قبل أي اعتماد على التطبيق ده في الإنتاج.
+**الفجوة المتبقية بصراحة**: الجزء اللي لسه مش قابل للاختبار في البيئة دي هو تحديداً اللي محتاج `TestWidgetsFlutterBinding` (رندر الـ UI الفعلي، تفاعل المستخدم زي الضغط/الكتابة) — لأن ده بالذات بيفعّل قيد الـ HTTP. يعني: منطق الشبكة والـ auth مُتحقق منه حياً وبثقة عالية، لكن "هل الشاشة بتتعرض صح فعلياً وبتستجيب للمس؟" لسه معتمد على `flutter analyze` + `flutter test` (widget tests بـ mocks) + مراجعة كود بس، مش رؤية بصرية حقيقية أو تفاعل حقيقي.
+
+### محاولة Linux desktop (فشلت — تفاصيل للسجل)
+
+بعد تثبيت `libgtk-3-dev` و`libsecret-1-dev` يدوياً (مكانوش موجودين)، الـ compile نجح (`flutter build linux` رجّع "Built")، لكن خطوة "تجميع الـ bundle" في نسخة Flutter/CMake/Ninja دي بتفشل بصمت: الملف التنفيذي بيتحط في `build/linux/.../intermediates_do_not_run/` من غير ملفات الـ AOT/ELF data المفروض تتحط جنبه — تشغيله مباشرة بيدي `FlutterEngineCreateAOTData: Invalid ELF path specified`. تعارض في أدوات البناء نفسها، مش بَقّة في كود التطبيق.
 
 ## التشغيل محلياً (على جهاز فيه Android/iOS toolchain حقيقي)
 
