@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../orders/orders_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 import 'services_screen.dart';
@@ -41,6 +42,13 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         appBar: AppBar(
           title: const Text('baytak'),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.receipt_long),
+              tooltip: 'طلباتي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const OrdersScreen()),
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.logout),
               onPressed: () => context.read<AuthRepository>().logout(),

@@ -9,6 +9,7 @@ import { Rating } from '../ratings/entities/rating.entity';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { RevenueReportQueryDto } from './dto/revenue-report-query.dto';
 import { TechniciansReportQueryDto, TechniciansReportSortBy } from './dto/technicians-report-query.dto';
+import { ZonesReportQueryDto } from './dto/zones-report-query.dto';
 
 const OPEN_COMPLAINT_STATUSES = [
   ComplaintStatus.OPEN,
@@ -43,6 +44,21 @@ export interface RevenuePeriodRow {
   total_amount_cents: number;
   platform_commission_cents: number;
   technician_earnings_cents: number;
+}
+
+export interface ZoneReportRow {
+  zone_id: string;
+  name_ar: string;
+  name_en: string;
+  city_id: string;
+  city_name_ar: string;
+  is_active: boolean;
+  surge_multiplier: string;
+  orders_count: number;
+  completed_orders_count: number;
+  revenue_cents: number;
+  platform_commission_cents: number;
+  active_technicians_count: number;
 }
 
 export interface TechnicianReportRow {
@@ -279,5 +295,70 @@ export class AdminReportsService {
       })),
       meta: { page, per_page: perPage, total: Number(total) },
     };
+  }
+
+  /**
+   * أداء كل نطاق خدمة (service_zone) — طلبات/إيرادات (اختياري بفترة `from`/`to`، من غيرهم
+   * كل الوقت) + عدد الفنيين النشطين المتاحين فيه فعلياً (technician_zones.is_active=true
+   * + verification_status='approved'، مش مجرد وجود صف). عدد النطاقات صغير عادةً (عشرات
+   * مش آلاف)، فمفيش صفحات هنا عكس تقرير الفنيين.
+   */
+  async zonesReport(query: ZonesReportQueryDto): Promise<ZoneReportRow[]> {
+    const rows = await this.dataSource.query<
+      {
+        zone_id: string;
+        name_ar: string;
+        name_en: string;
+        city_id: string;
+        city_name_ar: string;
+        is_active: boolean;
+        surge_multiplier: string;
+        orders_count: string;
+        completed_orders_count: string;
+        revenue_cents: string;
+        platform_commission_cents: string;
+        active_technicians_count: string;
+      }[]
+    >(
+      `SELECT sz.id AS zone_id,
+              sz.name_ar,
+              sz.name_en,
+              sz.city_id,
+              c.name_ar AS city_name_ar,
+              sz.is_active,
+              sz.surge_multiplier,
+              COUNT(o.id) AS orders_count,
+              COUNT(o.id) FILTER (WHERE o.order_status = 'completed') AS completed_orders_count,
+              COALESCE(SUM(o.total_amount_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS revenue_cents,
+              COALESCE(SUM(o.platform_commission_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS platform_commission_cents,
+              (SELECT COUNT(*) FROM technician_zones tz
+                 JOIN technician_profiles tp ON tp.id = tz.technician_id
+                WHERE tz.service_zone_id = sz.id AND tz.is_active = true AND tz.deleted_at IS NULL
+                  AND tp.verification_status = 'approved') AS active_technicians_count
+       FROM service_zones sz
+       JOIN cities c ON c.id = sz.city_id
+       LEFT JOIN orders o ON o.service_zone_id = sz.id
+         AND ($1::timestamptz IS NULL OR o.placed_at >= $1)
+         AND ($2::timestamptz IS NULL OR o.placed_at <= $2)
+       WHERE sz.deleted_at IS NULL
+       GROUP BY sz.id, c.name_ar
+       ORDER BY sz.name_ar ASC`,
+      [query.from ?? null, query.to ?? null],
+    );
+
+    return rows.map((row) => ({
+      zone_id: row.zone_id,
+      name_ar: row.name_ar,
+      name_en: row.name_en,
+      city_id: row.city_id,
+      city_name_ar: row.city_name_ar,
+      is_active: row.is_active,
+      surge_multiplier: row.surge_multiplier,
+      orders_count: Number(row.orders_count),
+      completed_orders_count: Number(row.completed_orders_count),
+      revenue_cents: Number(row.revenue_cents),
+      platform_commission_cents: Number(row.platform_commission_cents),
+      active_technicians_count: Number(row.active_technicians_count),
+    }));
   }
 }

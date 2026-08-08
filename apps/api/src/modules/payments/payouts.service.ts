@@ -3,6 +3,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { PAYOUT_COMPLETED_EVENT, PayoutCompletedEvent } from '../../common/events/payout-completed.event';
 import { PAYOUT_REQUIRES_REVIEW_EVENT, PayoutRequiresReviewEvent } from '../../common/events/payout-requires-review.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { SettingsService } from '../settings/settings.service';
@@ -202,6 +203,12 @@ export class PayoutsService {
       newValues: { payout_status: result.payout.payoutStatus, net_amount_cents: result.payout.netAmountCents },
       meta,
     });
+
+    this.events.emit(
+      PAYOUT_COMPLETED_EVENT,
+      new PayoutCompletedEvent(result.payout.id, result.payout.payoutNumber, result.payout.netAmountCents),
+    );
+
     return result.payout;
   }
 }

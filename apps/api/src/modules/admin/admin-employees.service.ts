@@ -290,4 +290,44 @@ export class AdminEmployeesService {
 
     return toEmployeeResponseDto(profile, user);
   }
+
+  // كانت فجوة موثّقة (§13.7): مفيش soft-delete حقيقي لحساب موظف — الأداة الوحيدة كانت block
+  // (تعطيل قابل للرجوع). ده دائم ومقصود يكون كده (نفس نمط catalog/geo — مفيش restore endpoint)،
+  // عكس block اللي ليه unblock. بيتبع نفس نمط AuthService.deleteMe بالظبط: إلغاء التوكنات، تعطيل
+  // is_active، بعدين softDelete — بس هنا كمان بيسحب أدوار RBAC (الموظف عنده أدوار، عكس العميل).
+  async delete(adminUserId: string, userId: string, meta?: AuditActorMeta): Promise<void> {
+    if (userId === adminUserId) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تمسح حسابك انت', HttpStatus.BAD_REQUEST);
+    }
+    const profile = await this.findProfileOrThrow(userId);
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new ApiException(ErrorCode.VAL_001, 'الموظف غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (await this.permissionsService.isLastSuperAdmin(userId)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مينفعش تمسح آخر حساب super_admin في النظام — النظام هيتقفل تماماً',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(UserRole, { userId });
+      await manager.update(RefreshToken, { userId, isRevoked: false }, { isRevoked: true, revokedAt: new Date(), revokedReason: 'admin_delete' });
+      await manager.update(User, { id: userId }, { isActive: false });
+      await manager.softDelete(EmployeeProfile, { id: profile.id });
+      await manager.softDelete(User, { id: userId });
+    });
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'employee.deleted',
+      entityType: 'user',
+      entityId: userId,
+      oldValues: { phone_number: user.phoneNumber, full_name: user.fullName, employee_code: profile.employeeCode },
+      meta,
+    });
+  }
 }

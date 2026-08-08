@@ -9,16 +9,19 @@ import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/or
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
+import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 
-// القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس).
-// لما لوحة الإدارة تتبني (S9) هتتقرأ من جدول settings بدل ما تكون ثابتة هنا.
-const BATCH_SIZE = 5;
-const RESPONSE_TIMEOUT_SECONDS = 30;
-const MAX_ROUNDS = 4;
+// القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
+// — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
+// settings/README.md). كانت فجوة موثّقة صراحة في تعليق قديم هنا يقول "لما لوحة الإدارة تتبني هتتقرأ
+// من جدول settings" — اللوحة اتبنت، اتقفلت.
+const BATCH_SIZE_FALLBACK = 5;
+const RESPONSE_TIMEOUT_SECONDS_FALLBACK = 30;
+const MAX_ROUNDS_FALLBACK = 4;
 
 interface EligibleTechnicianRow {
   technician_id: string;
@@ -47,6 +50,7 @@ export class MatchingService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
     private readonly technicianLevelsService: TechnicianLevelsService,
+    private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
     @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue<RoundExpiredJobData>,
   ) {}
@@ -57,7 +61,7 @@ export class MatchingService {
    * وبعدين المسافة — مش بديل عن المسافة، فني أعلى مستوى بياخد أولوية جوّه نفس دائرة المؤهلين مش
    * إنه يتجاهل المسافة تماماً. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
    */
-  private findEligibleTechnicians(order: Order): Promise<EligibleTechnicianRow[]> {
+  private findEligibleTechnicians(order: Order, batchSize: number): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
@@ -76,7 +80,7 @@ export class MatchingService {
       ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
-      [order.serviceId, order.serviceZoneId, order.addressId, order.id, BATCH_SIZE],
+      [order.serviceId, order.serviceZoneId, order.addressId, order.id, batchSize],
     );
   }
 
@@ -94,20 +98,26 @@ export class MatchingService {
       .getRawOne<{ max: number | null }>()) ?? { max: null };
     const nextRound = (max ?? 0) + 1;
 
-    if (nextRound > MAX_ROUNDS) {
+    const maxRounds = await this.settingsService.getNumber('matching.max_rounds', MAX_ROUNDS_FALLBACK);
+    if (nextRound > maxRounds) {
       await this.cancelForNoTechnicians(order);
       return { dispatched: 0 };
     }
 
+    const batchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
     // مفيش فنيين متاحين (سواء أول جولة أو بعد ما الكل رفض) = مفيش داعي نستنى — نلغي فوراً
-    const candidates = await this.findEligibleTechnicians(order);
+    const candidates = await this.findEligibleTechnicians(order, batchSize);
     if (candidates.length === 0) {
       await this.cancelForNoTechnicians(order);
       return { dispatched: 0 };
     }
 
+    const responseTimeoutSeconds = await this.settingsService.getNumber(
+      'matching.response_timeout_seconds',
+      RESPONSE_TIMEOUT_SECONDS_FALLBACK,
+    );
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + RESPONSE_TIMEOUT_SECONDS * 1000);
+    const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
     const rows = candidates.map((c) =>
       this.assignments.create({
         orderId: order.id,
@@ -123,12 +133,12 @@ export class MatchingService {
     this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
 
     // مهلة حقيقية مجدولة (مش انتظار سلبي) — لو محدش رد (لا قبول ولا رفض صريح) خلال
-    // RESPONSE_TIMEOUT_SECONDS، الـ processor بيقفل الجولة دي ويبعت التالية أوتوماتيك.
+    // responseTimeoutSeconds، الـ processor بيقفل الجولة دي ويبعت التالية أوتوماتيك.
     // jobId ثابت (orderId:round) يمنع أي تكرار لو dispatchNextRound اتنادى مرتين بالغلط لنفس الجولة.
     await this.roundsQueue.add(
       ROUND_EXPIRED_JOB,
       { orderId: order.id, round: nextRound },
-      { delay: RESPONSE_TIMEOUT_SECONDS * 1000, jobId: roundExpiredJobId(order.id, nextRound) },
+      { delay: responseTimeoutSeconds * 1000, jobId: roundExpiredJobId(order.id, nextRound) },
     );
 
     return { dispatched: rows.length };

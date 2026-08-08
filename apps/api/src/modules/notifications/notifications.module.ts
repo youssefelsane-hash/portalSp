@@ -11,11 +11,14 @@ import { AdminNotificationRoutingController } from './admin-notification-routing
 import { NotificationRoutingRule } from './entities/notification-routing-rule.entity';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
+import { CashCollectedRoutingListener } from './listeners/cash-collected-routing.listener';
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
+import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
 import { OrderCreatedNotificationListener } from './listeners/order-created-notification.listener';
 import { OrderReassignedNotificationListener } from './listeners/order-reassigned-notification.listener';
 import { OrderStatusNotificationListener } from './listeners/order-status-notification.listener';
+import { PayoutCompletedRoutingListener } from './listeners/payout-completed-routing.listener';
 import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires-review-routing.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
@@ -43,6 +46,9 @@ import { NotificationsService } from './notifications.service';
     TechnicianVerificationNotificationListener,
     ComplaintFiledRoutingListener,
     PayoutRequiresReviewRoutingListener,
+    CashCollectedRoutingListener,
+    PayoutCompletedRoutingListener,
+    LowRatingRoutingListener,
   ],
   exports: [NotificationsService],
 })

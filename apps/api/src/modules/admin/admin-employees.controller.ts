@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -68,5 +68,16 @@ export class AdminEmployeesController {
     @AuditContext() audit: AuditMeta,
   ) {
     return this.employeesService.unblock(admin.sub, userId, audit);
+  }
+
+  @Delete(':userId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('employees.manage')
+  delete(
+    @CurrentUser() admin: JwtPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.employeesService.delete(admin.sub, userId, audit);
   }
 }
