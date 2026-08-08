@@ -103,6 +103,25 @@ export function toPayoutResponseDto(payout: Payout): PayoutResponseDto {
   };
 }
 
+// مطابق لـ PayoutWithTechnician في payouts.service.ts — لقايمة الأدمن بس (GET /admin/payouts)،
+// محتاجة تعرف مين الفني طالب الصرف عشان تكون قابلة للتصرف عليها فعلياً.
+export interface AdminPayoutResponseDto extends PayoutResponseDto {
+  technician_code: string;
+  technician_name: string;
+  technician_user_id: string;
+  rejection_reason: string | null;
+}
+
+export function toAdminPayoutResponseDto(row: { payout: Payout; technicianCode: string; technicianName: string; technicianUserId: string }): AdminPayoutResponseDto {
+  return {
+    ...toPayoutResponseDto(row.payout),
+    technician_code: row.technicianCode,
+    technician_name: row.technicianName,
+    technician_user_id: row.technicianUserId,
+    rejection_reason: row.payout.rejectionReason,
+  };
+}
+
 export interface RefundResponseDto {
   id: string;
   refund_number: string;

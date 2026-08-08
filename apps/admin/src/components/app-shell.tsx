@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/customers', label: 'العملاء' },
   { href: '/orders', label: 'الطلبات' },
   { href: '/support', label: 'الشكاوى' },
+  { href: '/payouts', label: 'طلبات الصرف' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/geo', label: 'المدن والمناطق' },
   { href: '/settings', label: 'الإعدادات' },

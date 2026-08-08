@@ -6,11 +6,20 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PAYOUT_COMPLETED_EVENT, PayoutCompletedEvent } from '../../common/events/payout-completed.event';
 import { PAYOUT_REQUIRES_REVIEW_EVENT, PayoutRequiresReviewEvent } from '../../common/events/payout-requires-review.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { User } from '../auth/entities/user.entity';
 import { SettingsService } from '../settings/settings.service';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { RequestPayoutDto } from './dto/request-payout.dto';
 import { Payout, PayoutStatus } from './entities/payout.entity';
 import { WalletsService } from './wallets.service';
+
+export interface PayoutWithTechnician {
+  payout: Payout;
+  technicianCode: string;
+  technicianName: string;
+  technicianUserId: string;
+}
 
 // نفس القيم اللي كانت مزروعة في infra/migrations/0011_system.sql — دلوقتي بتتقرا فعلياً من
 // settings مش ثابتة، والقيم هنا مجرد fallback لو الإعداد مش موجود لأي سبب (مش المصدر الحقيقي).
@@ -21,6 +30,8 @@ const AUTO_APPROVE_LIMIT_CENTS_FALLBACK = 100_000;
 export class PayoutsService {
   constructor(
     @InjectRepository(Payout) private readonly payouts: Repository<Payout>,
+    @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
+    @InjectRepository(User) private readonly users: Repository<User>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
     private readonly walletsService: WalletsService,
@@ -91,6 +102,37 @@ export class PayoutsService {
   async listForTechnician(userId: string): Promise<Payout[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     return this.payouts.find({ where: { technicianId: profile.id }, order: { requestedAt: 'DESC' } });
+  }
+
+  // كانت فجوة موثّقة صراحة — admin-payments.controller.ts عنده approve/reject/complete بس
+  // مفيش endpoint يرجّع قايمة طلبات الصرف أصلاً، يعني مفيش طريقة عملية تعرف الـ id تتصرف عليه.
+  // بيرجّع بيانات الفني (كود + اسم) مع كل صف لأن الشاشة الإدارية محتاجاها تعرض مين طالب الصرف —
+  // نفس نمط الـ join في admin-customers.service.ts.
+  async listForAdmin(status?: PayoutStatus): Promise<PayoutWithTechnician[]> {
+    const payouts = await this.payouts.find({
+      where: status ? { payoutStatus: status } : {},
+      order: { requestedAt: 'DESC' },
+    });
+    if (payouts.length === 0) return [];
+
+    const technicianIds = [...new Set(payouts.map((p) => p.technicianId))];
+    const profiles = await this.technicianProfiles.find({ where: technicianIds.map((id) => ({ id })) });
+    const userIds = [...new Set(profiles.map((p) => p.userId))];
+    const users = await this.users.find({ where: userIds.map((id) => ({ id })) });
+
+    const profileById = new Map(profiles.map((p) => [p.id, p]));
+    const userById = new Map(users.map((u) => [u.id, u]));
+
+    return payouts.map((payout) => {
+      const profile = profileById.get(payout.technicianId);
+      const user = profile ? userById.get(profile.userId) : undefined;
+      return {
+        payout,
+        technicianCode: profile?.technicianCode ?? '—',
+        technicianName: user?.fullName ?? '—',
+        technicianUserId: profile?.userId ?? '',
+      };
+    });
   }
 
   private async findOrThrow(payoutId: string, manager?: EntityManager): Promise<Payout> {
