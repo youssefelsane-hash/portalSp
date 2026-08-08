@@ -14,6 +14,8 @@ const NAV_ITEMS = [
   { href: '/orders', label: 'الطلبات' },
   { href: '/support', label: 'الشكاوى' },
   { href: '/payouts', label: 'طلبات الصرف' },
+  { href: '/promotions', label: 'أكواد الخصم' },
+  { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/geo', label: 'المدن والمناطق' },
   { href: '/settings', label: 'الإعدادات' },

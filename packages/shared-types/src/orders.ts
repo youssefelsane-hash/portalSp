@@ -65,6 +65,33 @@ export interface OrderMediaResponseDto {
   taken_at: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts وentities/cancellation-reason.entity.ts
+export type CancellationAppliesTo = 'customer' | 'technician' | 'admin';
+
+export interface CancellationReasonResponseDto {
+  id: string;
+  reason_ar: string;
+  reason_en: string;
+  applies_to: CancellationAppliesTo;
+  charges_fee: boolean;
+  fee_percentage: number;
+  affects_technician_score: boolean;
+  display_order: number;
+  is_active: boolean;
+}
+
+export interface CreateCancellationReasonBody {
+  reason_ar: string;
+  reason_en: string;
+  applies_to: CancellationAppliesTo;
+  charges_fee?: boolean;
+  fee_percentage?: number;
+  affects_technician_score?: boolean;
+  display_order?: number;
+}
+
+export type UpdateCancellationReasonBody = Partial<CreateCancellationReasonBody> & { is_active?: boolean };
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts — بنود عرض السعر
 // أثناء التنفيذ (spare_part/extra_labor/addon)، مسار awaiting_quote_approval.
 export interface OrderItemResponseDto {
