@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianStatsService } from '../technicians/technician-stats.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { Rating, RatingType } from './entities/rating.entity';
@@ -15,6 +16,7 @@ export class RatingsService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
+    private readonly technicianStatsService: TechnicianStatsService,
   ) {}
 
   /**
@@ -34,7 +36,10 @@ export class RatingsService {
     this.assertRatable(order);
 
     const technicianUserId = await this.technicianUserId(order.technicianId);
-    return this.createRating(order.id, userId, technicianUserId, RatingType.CUSTOMER_TO_TECHNICIAN, dto);
+    const rating = await this.createRating(order.id, userId, technicianUserId, RatingType.CUSTOMER_TO_TECHNICIAN, dto);
+    // مهمة خلفية (§14.4) — average_rating/total_ratings_count بتتحدّث هنا مش جوّه معاملة التقييم
+    await this.technicianStatsService.enqueueRecalculation(order.technicianId);
+    return rating;
   }
 
   async rateAsTechnician(userId: string, orderId: string, dto: CreateRatingDto): Promise<Rating> {

@@ -13,7 +13,11 @@ import { MatchingService } from './matching.service';
  * ده أول وآخر آلية بتحرّك الطلب في السيناريو ده (موبايل مقفول، تطبيق مقفول، ...). قبل كده
  * الطلب كان بيفضل عالق في searching_technician للأبد لو الفنيين تجاهلوا العرض من غير رفض صريح.
  */
-@Processor(MATCHING_ROUNDS_QUEUE)
+// skipStalledCheck: true — enableOfflineQueue:false (AppModule) بيخلي فحص الـ stalled jobs
+// الدوري بتاع الـ Worker يرمي أخطاء غير ملتقطة وهو بيحاول ياخد قفل من Redis وقت انقطاعه (ضجيج
+// في اللوج بس، مش عطل حقيقي). آمن نعطّله هنا لأن الجوب بسيط وسريع (إرسال جولة توزيع) ومفيش
+// خطورة حقيقية من job "عالق" — لو حصل نادراً، الطلب هيتحل عادي بأي رفض/قبول تاني يجي.
+@Processor(MATCHING_ROUNDS_QUEUE, { skipStalledCheck: true })
 export class MatchingRoundExpiryProcessor extends WorkerHost {
   private readonly logger = new Logger(MatchingRoundExpiryProcessor.name);
 

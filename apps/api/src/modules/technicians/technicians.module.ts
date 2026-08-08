@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LocalDiskStorageService } from '../../common/storage/local-disk-storage.service';
 import { STORAGE_SERVICE } from '../../common/storage/storage.service';
@@ -15,6 +16,9 @@ import { TechniciansController } from './technicians.controller';
 import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
 import { TechnicianProfileListener } from './technician-profile.listener';
+import { TechnicianStatsProcessor } from './technician-stats.processor';
+import { TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
+import { TechnicianStatsService } from './technician-stats.service';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianDocument } from './entities/technician-document.entity';
@@ -34,6 +38,7 @@ import { TechnicianProfile } from './entities/technician-profile.entity';
       User,
     ]),
     AuditModule,
+    BullModule.registerQueue({ name: TECHNICIAN_STATS_QUEUE }),
   ],
   controllers: [
     TechniciansController,
@@ -49,8 +54,10 @@ import { TechnicianProfile } from './entities/technician-profile.entity';
     AdminTechniciansService,
     TechnicianCompaniesService,
     TechnicianLevelsService,
+    TechnicianStatsService,
+    TechnicianStatsProcessor,
     { provide: STORAGE_SERVICE, useClass: LocalDiskStorageService },
   ],
-  exports: [TechniciansService, TechnicianLevelsService],
+  exports: [TechniciansService, TechnicianLevelsService, TechnicianStatsService],
 })
 export class TechniciansModule {}

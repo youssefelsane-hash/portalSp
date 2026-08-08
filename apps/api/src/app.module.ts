@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
@@ -38,6 +39,29 @@ import { HealthModule } from './modules/common/health/health.module';
     EventEmitterModule.forRoot(),
     // 60 طلب/دقيقة لكل مستخدم افتراضياً — docs/01-master-plan.md §7.3
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 60 }]),
+    // اتسجّل هنا مرة واحدة (مش في كل موديول محتاج طابور) — أي موديول يقدر يستخدم
+    // BullModule.registerQueue() بعد كده من غير ما يعيد ضبط الاتصال بـ Redis.
+    //
+    // enableOfflineQueue: false ضروري — ioredis افتراضياً بيحجز أي أمر (زي queue.add()) في طابور
+    // داخلي لحد ما يرجع يتصل، يعني queue.add() هيفضل معلّق (await من غير reject ولا resolve) للأبد
+    // لو Redis واقع، وده كان بيعلّق الطلب الحقيقي كله (تقييم، دفع) مش بس فشل التوزيع الخلفي —
+    // اتلقطت البَقّة دي فعلياً وقت اختبار حي (طلب rating علّق أكتر من دقيقتين). بالإعداد ده، أي أمر
+    // بيتبعت والاتصال مقطوع بيترفض فوراً بدل ما يستنى، فالـ try/catch في enqueueRecalculation()
+    // (وأي مكان تاني بيستخدم طابور) يقدر يتلقّطه ويكمّل بدون ما يعلّق المستخدم.
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          url: config.get<string>('redis.url'),
+          enableOfflineQueue: false,
+          // موثّق في BullMQ نفسه كإلزامي (مش اختياري) للاتصالات اللي بتستخدمها Queue/Worker —
+          // من غيرها لاحظنا حياً إن الاتصال بيفشل يعيد الاتصال لوحده تاني بعد انقطاع Redis
+          // (عكس RedisCacheService اللي بيرجع لوحده عادي) لحد ما البروسيس يعاد تشغيله.
+          maxRetriesPerRequest: null,
+          retryStrategy: (times: number) => Math.min(times * 200, 5000),
+        },
+      }),
+    }),
     DatabaseModule,
     AuthModule,
     GeoModule,
