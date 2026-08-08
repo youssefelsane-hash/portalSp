@@ -5,11 +5,15 @@ import '../../core/auth_repository.dart';
 import '../payments/payments_repository.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
+import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
 
 // نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط.
 const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment'};
+
+// نفس ACTIVE_TRACKING_STATUSES في order-tracking.gateway.ts بالظبط.
+const Set<String> _activeTrackingStatuses = {'accepted', 'technician_on_way', 'technician_arrived', 'in_progress'};
 
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
@@ -135,6 +139,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
+                      if (_activeTrackingStatuses.contains(order.orderStatus)) ...[
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => TrackingScreen(orderId: order.id, orderNumber: order.orderNumber),
+                            ),
+                          ),
+                          icon: const Icon(Icons.location_on_outlined),
+                          label: const Text('تتبّع الفني لحظياً'),
+                        ),
+                      ],
                       if (_payableOrderStatuses.contains(order.orderStatus) && order.paymentStatus != 'paid') ...[
                         const SizedBox(height: 16),
                         FilledButton.icon(

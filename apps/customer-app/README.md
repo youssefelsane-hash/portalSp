@@ -19,7 +19,9 @@
 - **بَقّة مالية حقيقية اتلقطت واتصلحت وقت بناء الميزة دي** (تفاصيل كاملة في `../api/src/modules/payments/README.md`): اختبار الدفع الحي كشف إن الباك-إند كان بيحوّل عمولة الفني لمحفظة **فني عشوائي غير مرتبط بالطلب** لو الطلب وصل للتسوية بـ`technician_id` فاضي (`TypeORM` بيسقط شرط `null` بدل ما يرجّع نتيجة فاضية). السيناريو مش قابل للوصول عبر مسارات التطبيق الحقيقية (الفني دايماً بيتعيّن قبل أي حالة قابلة للدفع)، بس اتكشفت لأن الاختبار الحي احتاج طلب تجريبي جاهز بحالة `work_completed` من غير ما يعدّي دورة الفني الكاملة. اتصلحت في الباك-إند (`payments.service.ts`, `technicians.service.ts`, `customer-profiles.service.ts`)، واتأكد الإصلاح حياً قبل ما ميزة الدفع دي تتوثّق كمكتملة.
 - **اتعمله اختبار حي حقيقي** (`test_live/wallet_payment_live_test.dart`): عميل حقيقي برصيد محفظة كافي دفع طلب `work_completed` حقيقي من رصيده، اتأكد `payment_method=wallet`/`payment_status=succeeded`/المبلغ مطابق تماماً لسعر الطلب، الطلب بقى `completed`/`paid` فعلاً، والرصيد اتخصم بالظبط بقيمة الطلب. **ملحوظة صراحة**: محتاج رصيد محفظة وطلب `work_completed` مُجهّزين مسبقاً بـ`psql` مباشر (مفيش مسار API لشحن محفظة عميل تجريبي أو لإنشاء طلب في الحالة دي مباشرة من غير دورة فني كاملة) — موثّق في تعليقات الاختبار نفسه.
 
-**لسه من غير**: تتبع الفني لحظياً (WebSocket `/tracking` الباك-إند شغال فعلاً — راجع `../api/src/modules/orders/README.md` — بس التطبيق لسه مش موصّله)، شات، صور قبل/بعد.
+- **التتبع اللحظي (`lib/features/tracking/`)**: `OrderTrackingClient` (Socket.IO عبر `socket_io_client`، namespace `/tracking` مطابق تماماً لـ`order-tracking.gateway.ts`) + `TrackingScreen` — زرار "تتبّع الفني لحظياً" في `OrderDetailScreen` بيظهر لما الطلب في حالة نشطة (`accepted`/`technician_on_way`/`technician_arrived`/`in_progress`، مطابق `ACTIVE_TRACKING_STATUSES`). بيتصل، ينضم لـ`tracking:join`، وبيعرض آخر إحداثيات مستلمة من `order:location_updated` كنص (خط عرض/طول + وقت) — **مفيش خريطة فعلية**، قرار نطاق متعمد زي قرار الـ GPS اليدوي (مفيش package خرائط ولا API key، ومفيش جهاز حقيقي أصلاً لعرضها بصرياً). **باگ حقيقي اتلقط واتصلح وقت الاختبار الحي**: `socket_io_client` بيشارك/يعيد استخدام نفس الـ `Manager` لنفس الـ URI افتراضياً — لما الاختبار احتاج اتصالين متوازيين (عميل+فني) في نفس الـ process، التاني كان بيقفل الأول بصمت (`io client disconnect`). الحل: `.enableForceNew()` على كل اتصال — اتطبّق في الكود الحقيقي (`tracking_client.dart`) مش بس الاختبار، لأن نفس الفخ ممكن يحصل لو المستخدم فتح `TrackingScreen` مرتين بسرعة. **اتعمله اختبار حي حقيقي كامل** (`test_live/order_tracking_live_test.dart`): طلب حقيقي، فني حقيقي قبله، عميل اتصل وانضم فعلاً (`tracking:joined`)، الفني بعت موقع حقيقي عبر `technician:location`، والعميل استلمه فعلاً عبر `order:location_updated` بنفس الإحداثيات بالظبط.
+
+**لسه من غير**: خريطة فعلية للتتبع (نص بس دلوقتي، تفاصيل فوق)، دفع من غير محفظة (بطاقة/فوري)، شات.
 
 ## اختبار حي حقيقي — اكتشاف مهم غيّر إستراتيجية الاختبار هنا
 
@@ -31,6 +33,7 @@
 - `test_live/order_creation_live_test.dart` — دورة عنوان+طلب كاملة (تفاصيل فوق).
 - `test_live/rating_live_test.dart` — تقييم طلب مكتمل + رفض المحاولة التانية (تفاصيل فوق).
 - `test_live/wallet_payment_live_test.dart` — دفع طلب من المحفظة (تفاصيل فوق).
+- `test_live/order_tracking_live_test.dart` — تتبع لحظي حقيقي عبر Socket.IO بين عميل وفني (تفاصيل فوق).
 
 تشغيلهم: `flutter test test_live/ --dart-define=API_BASE_URL=http://localhost:3000/api/v1` (محتاج `apps/api` شغال فعلاً).
 
