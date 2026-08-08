@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/auth_repository.dart';
+import 'core/compromised_device_screen.dart';
+import 'core/device_security.dart';
 import 'features/auth/login_screen.dart';
 import 'features/orders/available_orders_screen.dart';
 
@@ -20,8 +22,31 @@ class BaytakTechnicianApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal), useMaterial3: true),
         locale: const Locale('ar', 'EG'),
-        home: const _AuthGate(),
+        home: const _DeviceSecurityGate(),
       ),
+    );
+  }
+}
+
+// أول بوابة قبل أي حاجة تانية — فحص سلامة الجهاز (root/jailbreak) قبل حتى شاشة الدخول، عشان
+// فني على جهاز مخترق ميقدرش يوصل لأي بيانات مالية حتى لو مسجّل دخول بالفعل (توكن محفوظ محلياً).
+class _DeviceSecurityGate extends StatelessWidget {
+  const _DeviceSecurityGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DeviceSecurityResult>(
+      future: DeviceSecurityService().check(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        final result = snapshot.data!;
+        if (result.isCompromised) {
+          return CompromisedDeviceScreen(reasonAr: result.reasonAr ?? 'الجهاز ده مش آمن.');
+        }
+        return const _AuthGate();
+      },
     );
   }
 }
