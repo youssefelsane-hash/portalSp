@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { OrderDetailResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
+import type { AdminTechnicianResponseDto, OrderDetailResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 
@@ -24,13 +24,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { ORDER_STATUS_LABELS, orderStatusBadgeVariant, isOrderCancellable } from '@/lib/order-labels';
+import { ORDER_STATUS_LABELS, orderStatusBadgeVariant, isOrderCancellable, isOrderReassignable } from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const router = useRouter();
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
@@ -41,6 +42,7 @@ export default function OrderDetailPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [showReassignForm, setShowReassignForm] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
+  const [approvedTechnicians, setApprovedTechnicians] = useState<AdminTechnicianResponseDto[] | null>(null);
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -72,6 +74,12 @@ export default function OrderDetailPage() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function loadApprovedTechnicians() {
+    authedFetchPaginated<AdminTechnicianResponseDto>('/admin/technicians?verification_status=approved&per_page=100')
+      .then(({ items }) => setApprovedTechnicians(items))
+      .catch(() => setApprovedTechnicians([]));
   }
 
   async function handleReassign(e: FormEvent) {
@@ -148,9 +156,16 @@ export default function OrderDetailPage() {
                 <Button variant="destructive" disabled={isSaving} onClick={() => setShowCancelForm((s) => !s)}>
                   إلغاء الطلب
                 </Button>
-                {order.technician_id && (
-                  <Button variant="outline" disabled={isSaving} onClick={() => setShowReassignForm((s) => !s)}>
-                    إعادة تعيين فني
+                {isOrderReassignable(order.order_status) && (
+                  <Button
+                    variant="outline"
+                    disabled={isSaving}
+                    onClick={() => {
+                      setShowReassignForm((s) => !s);
+                      if (!approvedTechnicians) loadApprovedTechnicians();
+                    }}
+                  >
+                    {order.technician_id ? 'استبدال الفني المعيّن' : 'تعيين فني يدوي'}
                   </Button>
                 )}
               </div>
@@ -171,15 +186,29 @@ export default function OrderDetailPage() {
               )}
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
-                  <Label htmlFor="technician_id">معرّف الفني الجديد (UUID)</Label>
-                  <Input
-                    id="technician_id"
-                    dir="ltr"
-                    value={technicianId}
-                    onChange={(e) => setTechnicianId(e.target.value)}
-                    required
-                  />
-                  <Button type="submit" size="sm" disabled={isSaving}>
+                  <Label htmlFor="technician_id">الفني الجديد</Label>
+                  {!approvedTechnicians ? (
+                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المعتمدين…</p>
+                  ) : approvedTechnicians.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">مفيش فنيين معتمدين متاحين</p>
+                  ) : (
+                    <SelectNative
+                      id="technician_id"
+                      value={technicianId}
+                      onChange={(e) => setTechnicianId(e.target.value)}
+                      required
+                    >
+                      <option value="" disabled>
+                        اختار فني
+                      </option>
+                      {approvedTechnicians.map((tech) => (
+                        <option key={tech.id} value={tech.id}>
+                          {tech.full_name} ({tech.technician_code})
+                        </option>
+                      ))}
+                    </SelectNative>
+                  )}
+                  <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
                     تأكيد إعادة التعيين
                   </Button>
                 </form>
