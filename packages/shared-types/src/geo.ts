@@ -72,3 +72,16 @@ export interface CreateServiceZoneBody {
   surge_multiplier?: number;
   min_order_amount_cents?: number;
 }
+
+export interface LngLatPoint {
+  lng: number;
+  lat: number;
+}
+
+export interface ServiceZoneBoundaryResponseDto {
+  points: LngLatPoint[] | null;
+}
+
+export interface SetServiceZoneBoundaryBody {
+  points: LngLatPoint[];
+}

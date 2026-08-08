@@ -316,6 +316,14 @@ export class AdminGeoService {
     return zone;
   }
 
+  // بيرجّع النقط الخام (`{lng, lat}`) مش الـ GeoJSON الخام، عشان أي لوحة رسم في apps/admin
+  // تقدر تحمّل المضلّع الحالي وتعرضه للتعديل من غير ما تفكّ شكل GeoJSON بنفسها.
+  async getServiceZoneBoundary(id: string): Promise<{ lng: number; lat: number }[] | null> {
+    const zone = await this.findServiceZoneOrThrow(id);
+    if (!zone.boundary) return null;
+    return zone.boundary.coordinates[0].map(([lng, lat]) => ({ lng, lat }));
+  }
+
   async setServiceZoneBoundary(
     adminUserId: string,
     id: string,
