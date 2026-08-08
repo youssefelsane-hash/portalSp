@@ -6,3 +6,4 @@ export * from './technicians';
 export * from './orders';
 export * from './catalog';
 export * from './settings';
+export * from './audit';
