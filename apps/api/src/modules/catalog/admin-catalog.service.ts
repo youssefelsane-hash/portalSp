@@ -5,12 +5,17 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignTechnicianServiceDto } from './dto/assign-technician-service.dto';
+import { CreateServiceAddonDto } from './dto/create-service-addon.dto';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
+import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
+import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 import { TechnicianService } from './entities/technician-service.entity';
@@ -21,6 +26,8 @@ export class AdminCatalogService {
     @InjectRepository(ServiceCategory) private readonly categories: Repository<ServiceCategory>,
     @InjectRepository(Service) private readonly services: Repository<Service>,
     @InjectRepository(ServiceZonePricing) private readonly zonePricing: Repository<ServiceZonePricing>,
+    @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
+    @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
     @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
     private readonly techniciansService: TechniciansService,
     private readonly auditLog: AuditLogService,
@@ -369,6 +376,150 @@ export class AdminCatalogService {
       entityType: 'service',
       entityId: serviceId,
       oldValues: { technician_id: technicianId },
+      meta,
+    });
+  }
+
+  // ── تسعير حسب مستوى الفني ────────────────────────────────────────────
+
+  listLevelPricing(serviceId: string): Promise<ServiceLevelPricing[]> {
+    return this.levelPricing.find({ where: { serviceId }, order: { technicianLevel: 'ASC' } });
+  }
+
+  async upsertLevelPricing(
+    adminUserId: string,
+    serviceId: string,
+    dto: UpsertLevelPricingDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceLevelPricing> {
+    await this.findServiceOrThrow(serviceId);
+
+    let pricing = await this.levelPricing.findOne({
+      where: { serviceId, technicianLevel: dto.technician_level },
+    });
+    const isNew = !pricing;
+    if (!pricing) {
+      pricing = this.levelPricing.create({ serviceId, technicianLevel: dto.technician_level });
+    }
+    pricing.priceMultiplier = String(dto.price_multiplier);
+    pricing.isActive = true;
+    await this.levelPricing.save(pricing);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: isNew ? 'service_level_pricing.created' : 'service_level_pricing.updated',
+      entityType: 'service_level_pricing',
+      entityId: pricing.id,
+      newValues: { technician_level: pricing.technicianLevel, price_multiplier: pricing.priceMultiplier },
+      meta,
+    });
+    return pricing;
+  }
+
+  async deactivateLevelPricing(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
+    const pricing = await this.levelPricing.findOne({ where: { id } });
+    if (!pricing) {
+      throw new ApiException(ErrorCode.VAL_001, 'تسعير المستوى غير موجود', HttpStatus.NOT_FOUND);
+    }
+    pricing.isActive = false;
+    await this.levelPricing.save(pricing);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_level_pricing.deactivated',
+      entityType: 'service_level_pricing',
+      entityId: pricing.id,
+      meta,
+    });
+  }
+
+  // ── الإضافات الاختيارية ──────────────────────────────────────────────
+
+  listAddons(serviceId: string): Promise<ServiceAddon[]> {
+    return this.addons.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
+  }
+
+  async createAddon(
+    adminUserId: string,
+    serviceId: string,
+    dto: CreateServiceAddonDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceAddon> {
+    await this.findServiceOrThrow(serviceId);
+
+    const addon = this.addons.create({
+      serviceId,
+      nameAr: dto.name_ar,
+      nameEn: dto.name_en ?? null,
+      priceCents: dto.price_cents,
+      durationMinutes: dto.duration_minutes ?? null,
+      displayOrder: dto.display_order ?? 0,
+    });
+    await this.addons.save(addon);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_addon.created',
+      entityType: 'service_addon',
+      entityId: addon.id,
+      newValues: { name_ar: addon.nameAr, price_cents: addon.priceCents },
+      meta,
+    });
+    return addon;
+  }
+
+  private async findAddonOrThrow(id: string): Promise<ServiceAddon> {
+    const addon = await this.addons.findOne({ where: { id } });
+    if (!addon) {
+      throw new ApiException(ErrorCode.VAL_001, 'الإضافة غير موجودة', HttpStatus.NOT_FOUND);
+    }
+    return addon;
+  }
+
+  async updateAddon(
+    adminUserId: string,
+    id: string,
+    dto: UpdateServiceAddonDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceAddon> {
+    const addon = await this.findAddonOrThrow(id);
+    const oldValues = { name_ar: addon.nameAr, price_cents: addon.priceCents, is_active: addon.isActive };
+
+    if (dto.name_ar !== undefined) addon.nameAr = dto.name_ar;
+    if (dto.name_en !== undefined) addon.nameEn = dto.name_en;
+    if (dto.price_cents !== undefined) addon.priceCents = dto.price_cents;
+    if (dto.duration_minutes !== undefined) addon.durationMinutes = dto.duration_minutes;
+    if (dto.display_order !== undefined) addon.displayOrder = dto.display_order;
+    if (dto.is_active !== undefined) addon.isActive = dto.is_active;
+    await this.addons.save(addon);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_addon.updated',
+      entityType: 'service_addon',
+      entityId: addon.id,
+      oldValues,
+      newValues: { name_ar: addon.nameAr, price_cents: addon.priceCents, is_active: addon.isActive },
+      meta,
+    });
+    return addon;
+  }
+
+  async deleteAddon(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
+    const addon = await this.findAddonOrThrow(id);
+    await this.addons.softDelete(id);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_addon.deleted',
+      entityType: 'service_addon',
+      entityId: addon.id,
+      oldValues: { name_ar: addon.nameAr },
       meta,
     });
   }
