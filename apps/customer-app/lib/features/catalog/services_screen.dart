@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../orders/create_order_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 
@@ -61,6 +62,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
                               trailing: Text(
                                 _formatEgp(service.basePriceCents),
                                 style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => CreateOrderScreen(service: service)),
                               ),
                             ),
                           );
