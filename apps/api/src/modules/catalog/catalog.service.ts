@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
@@ -29,6 +29,18 @@ export class CatalogService {
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {
     return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC' } });
+  }
+
+  // مُستخدمة وقت إنشاء الطلب (orders.service.ts) — العميل بيختار إضافات جاهزة من كتالوج الخدمة
+  // نفسها. بترمي واضح لو أي id مش موجود/مش نشط/بتاع خدمة تانية، بدل ما تتجاهله بصمت — إضافة
+  // بسعرها متجاهلة بصمت معناها العميل مدفوعش عن حاجة طلبها فعلاً.
+  async findAddonsByIds(serviceId: string, addonIds: string[]): Promise<ServiceAddon[]> {
+    if (addonIds.length === 0) return [];
+    const found = await this.addons.find({ where: { id: In(addonIds), serviceId, isActive: true } });
+    if (found.length !== addonIds.length) {
+      throw new ApiException(ErrorCode.VAL_001, 'إضافة واحدة أو أكتر مش متاحة لهذه الخدمة', HttpStatus.BAD_REQUEST);
+    }
+    return found;
   }
 
   findActiveCategories(): Promise<ServiceCategory[]> {

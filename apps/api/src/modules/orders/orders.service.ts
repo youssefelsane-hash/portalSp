@@ -19,6 +19,7 @@ import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
 import { Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
+import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -74,6 +75,8 @@ export class OrdersService {
     }
 
     const estimate = await this.catalogService.estimate(service.id, zone.id);
+    const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
+    const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
 
     const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
@@ -94,7 +97,7 @@ export class OrdersService {
         scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
         estimatedPriceCents: estimate.estimated_total_cents,
         inspectionFeeCents: estimate.inspection_fee_cents,
-        totalAmountCents: estimate.estimated_total_cents + estimate.inspection_fee_cents,
+        totalAmountCents: estimate.estimated_total_cents + estimate.inspection_fee_cents + addonsTotalCents,
         paymentStatus: OrderPaymentStatus.UNPAID,
         placedAt: now,
         sourceChannel: OrderSourceChannel.CUSTOMER_APP,
@@ -111,6 +114,28 @@ export class OrdersService {
           changeSource: OrderChangeSource.CUSTOMER,
         }),
       );
+
+      // إضافات الكتالوج اللي العميل اختارها بنفسه وقت الحجز — is_customer_approved=true فوراً
+      // (مختلف عن مسار awaiting_quote_approval في order-items.service.ts اللي الفني بيقترحه
+      // أثناء الشغل ومحتاج موافقة لاحقة).
+      if (addons.length > 0) {
+        await manager.save(
+          addons.map((addon) =>
+            manager.create(OrderItem, {
+              orderId: order.id,
+              itemType: OrderItemType.ADDON,
+              referenceId: addon.id,
+              nameAr: addon.nameAr,
+              quantity: '1',
+              unitPriceCents: addon.priceCents,
+              totalPriceCents: addon.priceCents,
+              isCustomerApproved: true,
+              approvedAt: now,
+              addedByUserId: userId,
+            }),
+          ),
+        );
+      }
 
       // كود الخصم لازم يتحقق ويتسجّل جوّه نفس الـ transaction دي — order.id لازم يكون موجود
       // الأول (order_id NOT NULL في promo_code_usages)، والقفل الذرّي على صف الكود بيحمي من
