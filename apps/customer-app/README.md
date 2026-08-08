@@ -15,7 +15,11 @@
 - **اتعمله اختبار حي حقيقي كامل** (`test_live/order_creation_live_test.dart`): عميل حقيقي سجّل دخول، جاب مدن/مناطق حقيقية، ضاف عنوان حقيقي (`POST /addresses` نجح واترجعت بياناته بالظبط)، لقى أول خدمة فعلية عندها كتالوج مربوط (بعض الفئات في القاعدة التطويرية فاضية من اختبارات تانية، فالاختبار بيدوّر مش بيفترض أول فئة)، أنشأ طلب حقيقي (`order_status` رجع `searching_technician` صح)، جابه بـ`GET /orders/:id` وبـ`GET /orders`، ألغاه (`cancelled_by_customer`)، ومسح العنوان التجريبي.
 - **التقييم (`lib/features/ratings/`)**: `RatingsRepository.rate()` + `showRatingDialog()` (1-5 نجوم + تعليق اختياري) — زرار "قيّم الطلب" بيظهر في `OrderDetailScreen` لما `order_status == completed`. **ملحوظة صراحة**: مفيش endpoint تحقق مسبق ("هل الطلب ده اتقيّم قبل؟") في الباك-إند، فالتطبيق بيحاول ويتعامل مع رفض `409` ("الطلب ده اتقيّم قبل كده") كنتيجة "متقيّم بالفعل" مش خطأ حقيقي — تجربة استخدام كويسة بس معتمدة على state محلي (لو العميل قفل الشاشة ورجعلها، الزرار هيظهر تاني لحد ما يحاول يقيّم فعلياً ويترفض). **اتعمله اختبار حي حقيقي** (`test_live/rating_live_test.dart`): عميل حقيقي دوّر على أول طلب `completed` بتاعه لسه مش مُقيَّم من قايمة `GET /orders` الحقيقية، قيّمه 5/5 بتعليق ونجح، وحاول يقيّمه تاني فاترفض `409` بالظبط زي ما متوقع.
 
-**لسه من غير**: تتبع الفني لحظياً (WebSocket `/tracking` الباك-إند شغال فعلاً — راجع `../api/src/modules/orders/README.md` — بس التطبيق لسه مش موصّله)، دفع، شات، صور قبل/بعد.
+- **الدفع من المحفظة (`lib/features/payments/`)**: `PaymentsRepository.payWithWallet()` — زرار "ادفع من المحفظة" في `OrderDetailScreen` لما `order_status` يكون `work_completed`/`awaiting_payment` و`payment_status` لسه مش `paid`. `Idempotency-Key` إجباري في الباك-إند لكل عملية دفع — بيتولّد محلياً (timestamp + رقم عشوائي، مش UUID package كامل لسطر واحد). ده استلزم إضافة دعم `extraHeaders` عبر `api_client.dart`/`auth_repository.dart` (مكانش موجود قبل كده — بس `Content-Type`/`Authorization`).
+- **بَقّة مالية حقيقية اتلقطت واتصلحت وقت بناء الميزة دي** (تفاصيل كاملة في `../api/src/modules/payments/README.md`): اختبار الدفع الحي كشف إن الباك-إند كان بيحوّل عمولة الفني لمحفظة **فني عشوائي غير مرتبط بالطلب** لو الطلب وصل للتسوية بـ`technician_id` فاضي (`TypeORM` بيسقط شرط `null` بدل ما يرجّع نتيجة فاضية). السيناريو مش قابل للوصول عبر مسارات التطبيق الحقيقية (الفني دايماً بيتعيّن قبل أي حالة قابلة للدفع)، بس اتكشفت لأن الاختبار الحي احتاج طلب تجريبي جاهز بحالة `work_completed` من غير ما يعدّي دورة الفني الكاملة. اتصلحت في الباك-إند (`payments.service.ts`, `technicians.service.ts`, `customer-profiles.service.ts`)، واتأكد الإصلاح حياً قبل ما ميزة الدفع دي تتوثّق كمكتملة.
+- **اتعمله اختبار حي حقيقي** (`test_live/wallet_payment_live_test.dart`): عميل حقيقي برصيد محفظة كافي دفع طلب `work_completed` حقيقي من رصيده، اتأكد `payment_method=wallet`/`payment_status=succeeded`/المبلغ مطابق تماماً لسعر الطلب، الطلب بقى `completed`/`paid` فعلاً، والرصيد اتخصم بالظبط بقيمة الطلب. **ملحوظة صراحة**: محتاج رصيد محفظة وطلب `work_completed` مُجهّزين مسبقاً بـ`psql` مباشر (مفيش مسار API لشحن محفظة عميل تجريبي أو لإنشاء طلب في الحالة دي مباشرة من غير دورة فني كاملة) — موثّق في تعليقات الاختبار نفسه.
+
+**لسه من غير**: تتبع الفني لحظياً (WebSocket `/tracking` الباك-إند شغال فعلاً — راجع `../api/src/modules/orders/README.md` — بس التطبيق لسه مش موصّله)، شات، صور قبل/بعد.
 
 ## اختبار حي حقيقي — اكتشاف مهم غيّر إستراتيجية الاختبار هنا
 
@@ -26,6 +30,7 @@
 - `test_live/catalog_repository_live_test.dart` — `CatalogRepository` بيجيب فئات وخدمات حقيقية من القاعدة.
 - `test_live/order_creation_live_test.dart` — دورة عنوان+طلب كاملة (تفاصيل فوق).
 - `test_live/rating_live_test.dart` — تقييم طلب مكتمل + رفض المحاولة التانية (تفاصيل فوق).
+- `test_live/wallet_payment_live_test.dart` — دفع طلب من المحفظة (تفاصيل فوق).
 
 تشغيلهم: `flutter test test_live/ --dart-define=API_BASE_URL=http://localhost:3000/api/v1` (محتاج `apps/api` شغال فعلاً).
 

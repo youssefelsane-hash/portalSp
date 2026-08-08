@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../payments/payments_repository.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import 'models.dart';
 import 'orders_repository.dart';
+
+// نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط.
+const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment'};
 
 class OrderDetailScreen extends StatefulWidget {
   final String orderId;
@@ -19,10 +23,12 @@ class OrderDetailScreen extends StatefulWidget {
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
   late final OrdersRepository _repository;
   late final RatingsRepository _ratingsRepository;
+  late final PaymentsRepository _paymentsRepository;
   Order? _order;
   String? _error;
   bool _cancelling = false;
   bool _rated = false;
+  bool _paying = false;
 
   @override
   void initState() {
@@ -30,6 +36,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final auth = context.read<AuthRepository>();
     _repository = OrdersRepository(auth);
     _ratingsRepository = RatingsRepository(auth);
+    _paymentsRepository = PaymentsRepository(auth);
     _load();
   }
 
@@ -77,6 +84,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  Future<void> _payWithWallet() async {
+    setState(() => _paying = true);
+    try {
+      await _paymentsRepository.payWithWallet(widget.orderId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع من المحفظة بنجاح ✅')));
+      }
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   @override
@@ -113,6 +135,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
+                      if (_payableOrderStatuses.contains(order.orderStatus) && order.paymentStatus != 'paid') ...[
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          onPressed: _paying ? null : _payWithWallet,
+                          icon: const Icon(Icons.account_balance_wallet_outlined),
+                          label: _paying
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('ادفع من المحفظة'),
+                        ),
+                      ],
                       if (customerCancellableStatuses.contains(order.orderStatus)) ...[
                         const SizedBox(height: 16),
                         OutlinedButton(
