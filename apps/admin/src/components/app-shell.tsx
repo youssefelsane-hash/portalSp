@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/employees', label: 'الموظفين' },
   { href: '/technicians', label: 'الفنيين' },
   { href: '/orders', label: 'الطلبات' },
+  { href: '/catalog', label: 'الكتالوج' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
