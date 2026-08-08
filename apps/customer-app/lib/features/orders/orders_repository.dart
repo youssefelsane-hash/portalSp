@@ -65,4 +65,22 @@ class OrdersRepository {
     );
     return Order.fromJson(data!);
   }
+
+  // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (order-items.service.ts)،
+  // العميل هنا بيوافق/يرفض. approve/decline بيرجعوا الطلب بحالته الجديدة (in_progress دايماً).
+  Future<List<OrderItem>> listQuoteItems(String orderId) async {
+    final items = await auth.authedRequestList('/orders/$orderId/quote-items');
+    return items.map(OrderItem.fromJson).toList();
+  }
+
+  Future<Order> approveQuote(String orderId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/approve');
+    final orderJson = data!['order'] as Map<String, dynamic>;
+    return Order.fromJson(orderJson);
+  }
+
+  Future<Order> declineQuote(String orderId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/decline');
+    return Order.fromJson(data!);
+  }
 }
