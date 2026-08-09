@@ -36,4 +36,6 @@ export interface CreatePromoCodeBody {
   valid_from: string;
   valid_until: string;
   budget_cents?: number;
+  applies_to_service_ids?: string[];
+  applies_to_zone_ids?: string[];
 }

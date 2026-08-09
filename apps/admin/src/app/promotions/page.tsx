@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import type { CreatePromoCodeBody, DiscountType, PromoCodeResponseDto } from '@baytak/shared-types';
+import type {
+  AdminServiceResponseDto,
+  AdminServiceZoneResponseDto,
+  CreatePromoCodeBody,
+  DiscountType,
+  PromoCodeResponseDto,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -36,6 +42,10 @@ export default function PromotionsPage() {
   const [showNew, setShowNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [services, setServices] = useState<AdminServiceResponseDto[]>([]);
+  const [zones, setZones] = useState<AdminServiceZoneResponseDto[]>([]);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
 
   function load() {
     authedFetchPaginated<PromoCodeResponseDto>(`/admin/promo-codes?page=${page}&per_page=${PER_PAGE}`)
@@ -51,6 +61,13 @@ export default function PromotionsPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, page]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    authedFetch<AdminServiceResponseDto[]>('/admin/services').then(setServices).catch(() => setServices([]));
+    authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones).catch(() => setZones([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -73,12 +90,16 @@ export default function PromotionsPage() {
     if (usageLimitPerUser) body.usage_limit_per_user = Number(usageLimitPerUser);
     const budget = form.get('budget_cents') as string;
     if (budget) body.budget_cents = Math.round(Number(budget) * 100);
+    if (selectedServiceIds.length > 0) body.applies_to_service_ids = selectedServiceIds;
+    if (selectedZoneIds.length > 0) body.applies_to_zone_ids = selectedZoneIds;
 
     setIsSaving(true);
     setError(null);
     try {
       await authedFetch('/admin/promo-codes', { method: 'POST', body: JSON.stringify(body) });
       setShowNew(false);
+      setSelectedServiceIds([]);
+      setSelectedZoneIds([]);
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -168,6 +189,49 @@ export default function PromotionsPage() {
                 <input type="checkbox" name="new_customers_only" />
                 عملاء جداد بس
               </label>
+
+              <div className="sm:col-span-2">
+                <Label>مقصور على خدمات معيّنة (اختياري، فاضي = كل الخدمات)</Label>
+                <div className="mt-1 max-h-40 overflow-y-auto rounded-md border p-2">
+                  {services.length === 0 && <p className="text-sm text-muted-foreground">جاري التحميل…</p>}
+                  {services.map((service) => (
+                    <label key={service.id} className="flex items-center gap-2 py-1 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selectedServiceIds.includes(service.id)}
+                        onChange={(e) =>
+                          setSelectedServiceIds((prev) =>
+                            e.target.checked ? [...prev, service.id] : prev.filter((id) => id !== service.id),
+                          )
+                        }
+                      />
+                      {service.name_ar}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="sm:col-span-2">
+                <Label>مقصور على مناطق خدمة معيّنة (اختياري، فاضي = كل المناطق)</Label>
+                <div className="mt-1 max-h-40 overflow-y-auto rounded-md border p-2">
+                  {zones.length === 0 && <p className="text-sm text-muted-foreground">جاري التحميل…</p>}
+                  {zones.map((zone) => (
+                    <label key={zone.id} className="flex items-center gap-2 py-1 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selectedZoneIds.includes(zone.id)}
+                        onChange={(e) =>
+                          setSelectedZoneIds((prev) =>
+                            e.target.checked ? [...prev, zone.id] : prev.filter((id) => id !== zone.id),
+                          )
+                        }
+                      />
+                      {zone.name_ar}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit sm:col-span-2">
                 حفظ الكود
               </Button>
