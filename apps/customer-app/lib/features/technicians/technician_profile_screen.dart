@@ -5,7 +5,15 @@ import '../../core/auth_repository.dart';
 import '../catalog/catalog_repository.dart';
 import '../orders/create_order_screen.dart';
 import 'models.dart';
+import 'portfolio_link_viewer_screen.dart';
 import 'technicians_repository.dart';
+
+const Map<String, IconData> _platformIcons = {
+  'tiktok': Icons.music_note,
+  'youtube': Icons.smart_display_outlined,
+  'instagram': Icons.camera_alt_outlined,
+  'facebook': Icons.facebook,
+};
 
 class TechnicianProfileScreen extends StatefulWidget {
   final String technicianId;
@@ -188,6 +196,53 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                             title: Text(s.nameAr),
                             trailing: Text(_formatEgp(s.basePriceCents)),
                           ),
+                      ],
+                      if (profile.portfolioLinks.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text('معرض الأعمال', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 120,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: profile.portfolioLinks.length,
+                            separatorBuilder: (_, _) => const SizedBox(width: 8),
+                            itemBuilder: (context, index) {
+                              final link = profile.portfolioLinks[index];
+                              return InkWell(
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (_) => PortfolioLinkViewerScreen(link: link)),
+                                ),
+                                child: Container(
+                                  width: 90,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                    image: link.thumbnailUrl != null
+                                        ? DecorationImage(image: NetworkImage(link.thumbnailUrl!), fit: BoxFit.cover)
+                                        : null,
+                                  ),
+                                  child: link.thumbnailUrl == null
+                                      ? Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              _platformIcons[link.platform] ?? Icons.play_circle_outline,
+                                              size: 32,
+                                            ),
+                                            const SizedBox(height: 4),
+                                            const Icon(Icons.play_arrow, size: 20),
+                                          ],
+                                        )
+                                      : const Align(
+                                          alignment: Alignment.center,
+                                          child: Icon(Icons.play_circle_fill, color: Colors.white, size: 32),
+                                        ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
                       ],
                       if (profile.recentReviews.isNotEmpty) ...[
                         const SizedBox(height: 16),

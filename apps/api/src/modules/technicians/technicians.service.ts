@@ -6,10 +6,15 @@ import { TechnicianProfile } from './entities/technician-profile.entity';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
+import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.entity';
+import { PortfolioLinksService } from './portfolio-links.service';
 
 @Injectable()
 export class TechniciansService {
-  constructor(@InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>) {}
+  constructor(
+    @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
+    private readonly portfolioLinksService: PortfolioLinksService,
+  ) {}
 
   async findByUserIdOrThrow(userId: string): Promise<TechnicianProfile> {
     const profile = await this.technicianProfiles.findOne({ where: { userId } });
@@ -64,6 +69,7 @@ export class TechniciansService {
     services: { id: string; nameAr: string; basePriceCents: number }[];
     recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
     onTimeRate: number | null;
+    portfolioLinks: TechnicianPortfolioLink[];
   }> {
     const profile = await this.findByProfileIdOrThrow(technicianProfileId);
 
@@ -128,12 +134,15 @@ export class TechniciansService {
     const onTimeTotal = Number(onTimeRow.total);
     const onTimeRate = onTimeTotal > 0 ? Math.round((Number(onTimeRow.on_time) / onTimeTotal) * 100) : null;
 
+    const portfolioLinks = await this.portfolioLinksService.listForTechnician(technicianProfileId);
+
     return {
       profile,
       fullName: user.full_name,
       avatarUrl: user.avatar_url,
       zones: zones.map((z) => ({ id: z.id, nameAr: z.name_ar })),
       services: services.map((s) => ({ id: s.id, nameAr: s.name_ar, basePriceCents: s.base_price_cents })),
+      portfolioLinks,
       recentReviews: recentReviews.map((r) => ({
         overallRating: r.overall_rating,
         comment: r.comment,

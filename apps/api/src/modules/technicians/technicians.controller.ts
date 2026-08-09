@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   UploadedFile,
@@ -18,8 +21,11 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
+import { PortfolioLinksService } from './portfolio-links.service';
 import { toTechnicianProfileResponseDto } from './dto/technician-profile-response.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
+import { toPortfolioLinkResponseDto } from './dto/portfolio-link-response.dto';
+import { AddPortfolioLinkDto } from './dto/add-portfolio-link.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
@@ -34,6 +40,7 @@ export class TechniciansController {
   constructor(
     private readonly techniciansService: TechniciansService,
     private readonly technicianDocumentsService: TechnicianDocumentsService,
+    private readonly portfolioLinksService: PortfolioLinksService,
   ) {}
 
   @Get('me')
@@ -93,5 +100,27 @@ export class TechniciansController {
   async listDocuments(@CurrentUser() user: JwtPayload) {
     const documents = await this.technicianDocumentsService.listMine(user.sub);
     return documents.map(toTechnicianDocumentResponseDto);
+  }
+
+  // معرض أعمال الفني عبر لينكات السوشيال ميديا — تفاصيل كاملة في technicians/README.md.
+  @Get('portfolio-links')
+  async listPortfolioLinks(@CurrentUser() user: JwtPayload) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const links = await this.portfolioLinksService.listForTechnician(profile.id);
+    return links.map(toPortfolioLinkResponseDto);
+  }
+
+  @Post('portfolio-links')
+  async addPortfolioLink(@CurrentUser() user: JwtPayload, @Body() dto: AddPortfolioLinkDto) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    return toPortfolioLinkResponseDto(await this.portfolioLinksService.addLink(profile.id, dto));
+  }
+
+  @Delete('portfolio-links/:id')
+  @HttpCode(HttpStatus.OK)
+  async removePortfolioLink(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    await this.portfolioLinksService.remove(profile.id, id);
+    return null;
   }
 }

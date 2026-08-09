@@ -22,6 +22,24 @@ class TechnicianServiceInfo {
       );
 }
 
+class PortfolioLink {
+  final String id;
+  final String platform;
+  final String url;
+  final String? title;
+  final String? thumbnailUrl;
+
+  PortfolioLink({required this.id, required this.platform, required this.url, required this.title, required this.thumbnailUrl});
+
+  factory PortfolioLink.fromJson(Map<String, dynamic> json) => PortfolioLink(
+        id: json['id'] as String,
+        platform: json['platform'] as String,
+        url: json['url'] as String,
+        title: json['title'] as String?,
+        thumbnailUrl: json['thumbnail_url'] as String?,
+      );
+}
+
 class TechnicianReview {
   final int overallRating;
   final String? comment;
@@ -52,6 +70,7 @@ class TechnicianPublicProfile {
   final List<TechnicianZoneInfo> zones;
   final List<TechnicianServiceInfo> services;
   final List<TechnicianReview> recentReviews;
+  final List<PortfolioLink> portfolioLinks;
 
   TechnicianPublicProfile({
     required this.id,
@@ -69,6 +88,7 @@ class TechnicianPublicProfile {
     required this.zones,
     required this.services,
     required this.recentReviews,
+    required this.portfolioLinks,
   });
 
   bool get isVerified => verificationStatus == 'approved';
@@ -92,6 +112,9 @@ class TechnicianPublicProfile {
             .toList(),
         recentReviews: (json['recent_reviews'] as List)
             .map((r) => TechnicianReview.fromJson(r as Map<String, dynamic>))
+            .toList(),
+        portfolioLinks: (json['portfolio_links'] as List)
+            .map((p) => PortfolioLink.fromJson(p as Map<String, dynamic>))
             .toList(),
       );
 }

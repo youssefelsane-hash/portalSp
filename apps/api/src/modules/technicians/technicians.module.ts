@@ -5,6 +5,7 @@ import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { GeoModule } from '../geo/geo.module';
+import { SettingsModule } from '../settings/settings.module';
 import { AdminTechnicianCompaniesController } from './admin-technician-companies.controller';
 import { AdminTechnicianLevelsController } from './admin-technician-levels.controller';
 import { AdminTechniciansController } from './admin-technicians.controller';
@@ -16,6 +17,7 @@ import { TechnicianLevelsService } from './technician-levels.service';
 import { TechniciansController } from './technicians.controller';
 import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
+import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianProfileListener } from './technician-profile.listener';
 import { TechnicianStatsProcessor } from './technician-stats.processor';
 import { TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
@@ -25,6 +27,7 @@ import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianLevelConfig } from './entities/technician-level-config.entity';
 import { TechnicianLevelHistory } from './entities/technician-level-history.entity';
+import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
 
@@ -38,10 +41,12 @@ import { TechnicianZone } from './entities/technician-zone.entity';
       TechnicianLevelConfig,
       TechnicianLevelHistory,
       TechnicianZone,
+      TechnicianPortfolioLink,
       User,
     ]),
     AuditModule,
     GeoModule,
+    SettingsModule,
     BullModule.registerQueue({ name: TECHNICIAN_STATS_QUEUE }),
   ],
   controllers: [
@@ -56,6 +61,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechniciansService,
     TechnicianProfileListener,
     TechnicianDocumentsService,
+    PortfolioLinksService,
     AdminTechniciansService,
     TechnicianCompaniesService,
     TechnicianLevelsService,

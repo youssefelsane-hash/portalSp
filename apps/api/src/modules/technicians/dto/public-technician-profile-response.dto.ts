@@ -1,4 +1,6 @@
 import { TechnicianProfile } from '../entities/technician-profile.entity';
+import { TechnicianPortfolioLink } from '../entities/technician-portfolio-link.entity';
+import { toPortfolioLinkResponseDto, PortfolioLinkResponseDto } from './portfolio-link-response.dto';
 
 export interface PublicTechnicianProfileResponseDto {
   id: string;
@@ -18,6 +20,7 @@ export interface PublicTechnicianProfileResponseDto {
   zones: { id: string; name_ar: string }[];
   services: { id: string; name_ar: string; base_price_cents: number }[];
   recent_reviews: { overall_rating: number; comment: string | null; created_at: string }[];
+  portfolio_links: PortfolioLinkResponseDto[];
 }
 
 export function toPublicTechnicianProfileResponseDto(data: {
@@ -28,6 +31,7 @@ export function toPublicTechnicianProfileResponseDto(data: {
   services: { id: string; nameAr: string; basePriceCents: number }[];
   recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
   onTimeRate: number | null;
+  portfolioLinks: TechnicianPortfolioLink[];
 }): PublicTechnicianProfileResponseDto {
   const { profile } = data;
   const totalDecided = profile.completedOrdersCount + profile.cancelledOrdersCount;
@@ -53,5 +57,6 @@ export function toPublicTechnicianProfileResponseDto(data: {
       comment: r.comment,
       created_at: r.createdAt.toISOString(),
     })),
+    portfolio_links: data.portfolioLinks.map(toPortfolioLinkResponseDto),
   };
 }

@@ -33,6 +33,8 @@ Future<http.Response> _send(
       return http.post(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
     case 'PATCH':
       return http.patch(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
+    case 'DELETE':
+      return http.delete(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
     default:
       throw ArgumentError('HTTP method غير مدعوم: $method');
   }
