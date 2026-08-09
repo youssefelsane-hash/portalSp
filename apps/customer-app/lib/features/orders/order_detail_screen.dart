@@ -4,6 +4,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../payments/card_payment_screen.dart';
+import '../payments/fawry_reference_screen.dart';
 import '../payments/payments_repository.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
@@ -257,6 +258,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  Future<void> _payWithFawryReference() async {
+    setState(() => _paying = true);
+    try {
+      final reference = await _paymentsRepository.payWithFawryReference(widget.orderId);
+      if (!mounted) return;
+      final confirmedPaid = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => FawryReferenceScreen(orderId: widget.orderId, reference: reference)),
+      );
+      if (confirmedPaid == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع بنجاح ✅')));
+      }
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   @override
@@ -396,6 +416,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           onPressed: _paying ? null : _payWithCard,
                           icon: const Icon(Icons.credit_card_outlined),
                           label: const Text('ادفع بالبطاقة'),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _paying ? null : _payWithFawryReference,
+                          icon: const Icon(Icons.storefront_outlined),
+                          label: const Text('ادفع في أقرب فوري'),
                         ),
                       ],
                       if (customerCancellableStatuses.contains(order.orderStatus)) ...[

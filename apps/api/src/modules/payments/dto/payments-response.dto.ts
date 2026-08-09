@@ -80,6 +80,12 @@ export interface CardPaymentResponseDto {
   redirect_url: string;
 }
 
+export interface FawryReferenceResponseDto {
+  payment: PaymentResponseDto;
+  reference_number: string;
+  expires_at: string;
+}
+
 export interface PayoutResponseDto {
   id: string;
   payout_number: string;

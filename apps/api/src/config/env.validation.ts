@@ -25,6 +25,13 @@ export const envValidationSchema = Joi.object({
   PAYMOB_IFRAME_ID: Joi.string().optional(),
   PAYMOB_HMAC_SECRET: Joi.string().optional(),
 
+  // بوابة تانية جنب Paymob (كود مرجعي "ادفع في أقرب فوري") — اختيارية بالكامل برضه.
+  // تفاصيل الحصول على كل قيمة، وتحذير مهم عن التحقق من توقيع HMAC قبل الإنتاج: docs/03-external-integrations.md
+  FAWRY_BASE_URL: Joi.string().uri().default('https://atfawry.fawrystaging.com'),
+  FAWRY_MERCHANT_CODE: Joi.string().optional(),
+  FAWRY_SECURE_KEY: Joi.string().optional(),
+  FAWRY_REFERENCE_EXPIRY_HOURS: Joi.number().default(72),
+
   // تخزين الملفات — 'local' افتراضي (تطوير)، 'S3' للإنتاج. تفاصيل كل قيمة: docs/03-external-integrations.md
   STORAGE_PROVIDER: Joi.string().valid('local', 's3').default('local'),
   STORAGE_LOCAL_DIR: Joi.string().default('./uploads'),

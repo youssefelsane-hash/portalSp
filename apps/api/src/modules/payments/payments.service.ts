@@ -16,6 +16,7 @@ import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
 import { PAYMENT_GATEWAY, PaymentGateway } from './gateways/payment-gateway.interface';
+import { FAWRY_GATEWAY, FawryGateway } from './gateways/fawry-gateway.interface';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
 import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
@@ -45,6 +46,7 @@ export class PaymentsService {
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
     @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
+    @Inject(FAWRY_GATEWAY) private readonly fawryGateway: FawryGateway,
   ) {}
 
   /**
@@ -412,10 +414,109 @@ export class PaymentsService {
   }
 
   /**
+   * العميل بيطلب كود مرجعي FawryPay ("ادفع في أقرب فوري") — بيرجّع referenceNumber العميل
+   * بياخده لمنفذ فوري ويدفعه كاش فعلياً هناك. نفس فلسفة payWithCard بالظبط (idempotency retry،
+   * مفيش تسوية هنا خالص، التأكيد بعدين عبر POST /webhooks/fawry بس).
+   */
+  async payWithFawryReference(
+    userId: string,
+    orderId: string,
+    idempotencyKey: string,
+  ): Promise<{ payment: Payment; referenceNumber: string; expiresAt: Date }> {
+    const existing = await this.payments.findOne({ where: { idempotencyKey } });
+    if (existing) {
+      if (existing.orderId !== orderId) {
+        throw new ApiException(ErrorCode.PAY_003, 'مفتاح idempotency ده مستخدم قبل كده لطلب مختلف', HttpStatus.CONFLICT);
+      }
+      const existingRef = (existing.gatewayResponse as { reference_number?: string; expires_at?: string } | null);
+      if (existingRef?.reference_number) {
+        return { payment: existing, referenceNumber: existingRef.reference_number, expiresAt: new Date(existingRef.expires_at!) };
+      }
+      if (existing.paymentStatus !== PaymentGatewayStatus.PENDING && existing.paymentStatus !== PaymentGatewayStatus.FAILED) {
+        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي في حالة نهائية بالفعل', HttpStatus.CONFLICT);
+      }
+      return this.initiateFawryCharge(existing);
+    }
+
+    if (!this.fawryGateway.isConfigured) {
+      throw new ApiException(
+        ErrorCode.PAY_001,
+        'الدفع بكود فوري مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش أو الكارت',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const order = await this.loadPayableOrderForCustomer(userId, orderId);
+    this.assertPayable(order);
+
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+
+    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
+    const payment = this.payments.create({
+      paymentNumber,
+      orderId: order.id,
+      customerId: customerProfile.id,
+      amountCents: order.totalAmountCents,
+      paymentMethod: PaymentMethod.FAWRY_REFERENCE,
+      paymentGateway: this.fawryGateway.providerName,
+      paymentStatus: PaymentGatewayStatus.PENDING,
+      idempotencyKey,
+    });
+    await this.payments.save(payment);
+
+    return this.initiateFawryCharge(payment);
+  }
+
+  private async initiateFawryCharge(payment: Payment): Promise<{ payment: Payment; referenceNumber: string; expiresAt: Date }> {
+    if (!this.fawryGateway.isConfigured) {
+      throw new ApiException(
+        ErrorCode.PAY_001,
+        'الدفع بكود فوري مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش أو الكارت',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
+    const user = await this.users.findOne({ where: { id: customerProfile.userId } });
+    const order = await this.orders.findOne({ where: { id: payment.orderId } });
+    if (!user || !order) {
+      throw new ApiException(ErrorCode.VAL_001, 'بيانات الدفعة غير مكتملة لإعادة المحاولة', HttpStatus.CONFLICT);
+    }
+
+    try {
+      const gatewayResult = await this.fawryGateway.createReference({
+        paymentId: payment.id,
+        orderNumber: order.orderNumber,
+        amountCents: payment.amountCents,
+        customerName: user.fullName,
+        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerMobile: user.phoneNumber,
+      });
+
+      payment.gatewayReference = gatewayResult.referenceNumber;
+      payment.gatewayResponse = {
+        reference_number: gatewayResult.referenceNumber,
+        expires_at: gatewayResult.expiresAt.toISOString(),
+        gateway_order_id: gatewayResult.gatewayOrderId,
+      };
+      payment.paymentStatus = PaymentGatewayStatus.PENDING;
+      await this.payments.save(payment);
+      return { payment, referenceNumber: gatewayResult.referenceNumber, expiresAt: gatewayResult.expiresAt };
+    } catch (err) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'GATEWAY_REGISTRATION_FAILED';
+      payment.failureMessage = err instanceof Error ? err.message : String(err);
+      await this.payments.save(payment);
+      throw err;
+    }
+  }
+
+  /**
    * بيتنادى من WebhooksController بعد ما يتحقق التوقيع مسبقاً. بيسجّل الحدث في webhook_events
    * (حماية من معالجة مكررة عبر external_event_id UNIQUE)، وبعدين لو نجحت العملية بيعدّي بنفس
    * مسار settleAndComplete اللي collectCash/payWithWallet بيستخدموه — نفس نقطة التسوية الوحيدة
-   * للنظام كله، الدفع بالبطاقة مش استثناء.
+   * للنظام كله، الدفع بالبطاقة/الكود المرجعي مش استثناء. `paymentMethod` بيتحدد حسب البوابة
+   * المستدعية (CARD لـ Paymob، FAWRY_REFERENCE لـ Fawry) عشان يتسجّل صح في order_status_history/audit.
    */
   async finalizeGatewayWebhook(
     externalEventId: string,
@@ -427,6 +528,7 @@ export class PaymentsService {
     succeeded: boolean,
     failureReason: string | null,
     gatewayTransactionId: string,
+    paymentMethod: PaymentMethod = PaymentMethod.CARD,
   ): Promise<void> {
     const alreadyProcessed = await this.webhookEvents.findOne({ where: { externalEventId } });
     if (alreadyProcessed) {
@@ -505,7 +607,7 @@ export class PaymentsService {
             }
             this.assertPayable(lockedOrder);
             const previousStatus = lockedOrder.orderStatus;
-            await this.settleAndComplete(manager, lockedOrder, PaymentMethod.CARD, customerProfile.userId, 'customer');
+            await this.settleAndComplete(manager, lockedOrder, paymentMethod, customerProfile.userId, 'customer');
             return {
               orderId: lockedOrder.id,
               orderNumber: lockedOrder.orderNumber,

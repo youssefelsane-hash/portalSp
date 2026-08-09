@@ -58,7 +58,70 @@ PAYMOB_HMAC_SECRET=<من الخطوة 5>
 
 ---
 
-## 2. تخزين الملفات — S3-compatible
+## 2. بوابة الدفع بكود مرجعي — FawryPay ("ادفع في أقرب فوري")
+
+**ليه FawryPay بالذات**: أوسع شبكة دفع كاش في مصر (منافذ فوري منتشرة في كل حتة) — طريقة دفع
+حقيقية جداً لعملاء من غير كارت بنكي، بالإضافة لـ Paymob مش بديلة ليها. العميل بياخد كود مرجعي
+ويدفعه كاش فعلي في أي منفذ، والتأكيد بييجي عبر webhook async زي الدفع بالبطاقة بالظبط.
+
+**الكود**: `apps/api/src/modules/payments/gateways/fawry-gateway.service.ts` — تفاصيل معمارية
+كاملة في `apps/api/src/modules/payments/README.md`.
+
+### ⚠️ تحذير مهم قبل الاستخدام الإنتاجي — لازم تتحقق منه
+
+الكود ده مبني على أفضل فهم موثّق لعقد "FawryPay Server-to-Server Charge API" (مسار الـ endpoint،
+أسماء الحقول الأساسية، ومنطق SHA-256 للتوقيع) — **لسه محتاج تحقق فعلي ضد sandbox حقيقي قبل أي
+استخدام إنتاجي حقيقي بفلوس حقيقية**. الجزء الأكثر عرضة للخطأ تحديداً هو *ترتيب* الحقول في حساب
+التوقيع (دالتين في `fawry-gateway.service.ts`: `computeChargeSignature` و`computeWebhookSignature`،
+كل واحدة فيها تعليق يوضّح الترتيب المفترض بالظبط). لو رجع رد "توقيع غير صحيح" من FawryPay، أو
+webhook اترفض بتوقيع خاطئ رغم إن البيانات صحيحة، **أول حاجة تتأكد منها هي الترتيب ده مقابل
+التوثيق الرسمي الحالي من FawryPay** (Merchant Dashboard → Integration → API Docs عند لحظة
+قرايتك للملف ده — التوثيق ممكن يتغيّر)، مش أي حاجة تانية في الكود. باقي المنطق (idempotency، تسوية
+الطلب، قيود المحفظة المزدوجة، رفض التوقيع الخاطئ، تجاهل التكرار) **اتأكد حياً بالكامل** عبر محاكاة
+webhook موقّع يدوياً بالخوارزمية المفترضة نفسها — تفاصيل الاختبار الكامل في
+`apps/api/src/modules/payments/README.md`.
+
+### الخطوات
+
+1. اعمل حساب تاجر على [FawryPay](https://www.fawrypay.com) (أو من خلال أي شريك معتمد في مصر).
+2. من لوحة تحكم التاجر: هتلاقي **Merchant Code** — ده `FAWRY_MERCHANT_CODE`.
+3. من نفس اللوحة (قسم Integration/API Keys): **Secure Key** (أو "Secret Key" حسب تسمية اللوحة
+   وقت قرايتك) — ده `FAWRY_SECURE_KEY`، مستخدم في حساب توقيع كل طلب/رد.
+4. لو عندك بيئة Sandbox تجريبية منفصلة، URL بتاعها غالباً `https://atfawry.fawrystaging.com`
+   (القيمة الافتراضية بالفعل) — للإنتاج غيّرها لـ `https://atfawry.com` (أو القيمة اللي لوحة
+   التحكم بتاعتك بتحددها بالظبط).
+5. من قسم Webhooks/Callbacks في اللوحة: ضيف
+   `https://YOUR_DOMAIN/api/v1/webhooks/fawry` كـ server notification URL.
+
+### مكان القيم
+
+في `apps/api/.env`:
+```
+FAWRY_BASE_URL=https://atfawry.fawrystaging.com
+FAWRY_MERCHANT_CODE=<من الخطوة 2>
+FAWRY_SECURE_KEY=<من الخطوة 3>
+FAWRY_REFERENCE_EXPIRY_HOURS=72
+```
+
+### التأكد إنها اشتغلت
+
+بعد ملء القيم وإعادة تشغيل `apps/api`، جرّب `POST /orders/:id/pay-with-fawry-reference` على طلب
+حقيقي بحالة `work_completed`/`awaiting_payment` — المفروض ترجع `reference_number` حقيقي. **أول
+حاجة تتأكد منها هنا بالتحديد**: لو الرد رجع رفض غريب (statusCode مش 200 من FawryPay نفسها، أو
+رسالة عن توقيع)، ده يأكد إن ترتيب حقول `computeChargeSignature` محتاج تصحيح حسب توثيق FawryPay
+الحالي (راجع التحذير فوق) — مش بَقّة تانية في الكود. لو نجح، جرّب دفع الكود فعلياً في منفذ فوري
+حقيقي (أو محاكاة من Sandbox لو متاحة)، وتأكد إن `POST /webhooks/fawry` استقبل الرد وقفل الطلب
+`completed`/`paid` فعلاً (`GET /orders/:id`).
+
+### ملاحظة UI
+
+الباك-إند والـ UI جاهزين بالكامل دلوقتي. `apps/customer-app` فيه `FawryReferenceScreen` (زرار
+"ادفع في أقرب فوري" في تفاصيل الطلب) بتعرض الكود المرجعي مع تاريخ انتهاءه وزرار نسخ — تفاصيل
+كاملة في `apps/customer-app/README.md`.
+
+---
+
+## 3. تخزين الملفات — S3-compatible
 
 **اختر واحد من الأربعة** (الكود بيشتغل مع أي منهم من غير أي تعديل، بس `S3_ENDPOINT`):
 
@@ -104,7 +167,7 @@ S3_FORCE_PATH_STYLE=true
 
 ---
 
-## 3. الإشعارات — FCM / Twilio / SMTP
+## 4. الإشعارات — FCM / Twilio / SMTP
 
 الثلاثة مستقلين تماماً عن بعض — فعّل أي واحد فيهم لوحده، الباقي بيفضل log-only من غير أي تأثير.
 
@@ -113,7 +176,7 @@ S3_FORCE_PATH_STYLE=true
 `smtp-email-dispatcher.service.ts`) — تفاصيل معمارية كاملة في
 `apps/api/src/modules/notifications/README.md`.
 
-### 3.1 Push — Firebase Cloud Messaging
+### 4.1 Push — Firebase Cloud Messaging
 
 1. اعمل مشروع على [console.firebase.google.com](https://console.firebase.google.com).
 2. **Project Settings (⚙️) → Service Accounts → Generate new private key** — ده بيحمّلّك ملف
@@ -138,7 +201,7 @@ Firebase Console بعد ما تضيف تطبيقاتك (Android package: راج�
 (`FirebaseMessaging.instance.requestPermission()`)، خد التوكن
 (`FirebaseMessaging.instance.getToken()`)، وابعته لـ `POST /devices` (`fcm_token`, `platform`).
 
-### 3.2 SMS / WhatsApp — Twilio
+### 4.2 SMS / WhatsApp — Twilio
 
 1. اعمل حساب على [twilio.com](https://www.twilio.com).
 2. من الـ Console الرئيسية: **Account SID** (`TWILIO_ACCOUNT_SID`) و**Auth Token**
@@ -158,7 +221,7 @@ TWILIO_SMS_FROM_NUMBER=<من الخطوة 3>
 TWILIO_WHATSAPP_FROM_NUMBER=<من الخطوة 4>
 ```
 
-### 3.3 Email — SMTP
+### 4.3 Email — SMTP
 
 يشتغل مع أي بوابة SMTP قياسية — مش مربوط بـ SDK معيّن. أمثلة شائعة:
 
@@ -187,7 +250,7 @@ SMTP_FROM_EMAIL=<بريد المرسل، لازم يكون verified عند أغ�
 
 ---
 
-## 4. الخرائط — Google Maps
+## 5. الخرائط — Google Maps
 
 **الكود**: `apps/customer-app` (`google_maps_flutter` — خريطة تتبع حقيقية) و`apps/technician-app`
 (`url_launcher` — فتح تطبيق خرائط خارجي، **مش محتاج API key خالص**، راجع تحت).
@@ -248,7 +311,11 @@ PAYMOB_INTEGRATION_ID_CARD=
 PAYMOB_IFRAME_ID=
 PAYMOB_HMAC_SECRET=
 
-# S3 storage (§2)
+# FawryPay (§2) — تحذير: راجع "تحذير مهم قبل الاستخدام الإنتاجي" في القسم ده قبل الاعتماد عليها
+FAWRY_MERCHANT_CODE=
+FAWRY_SECURE_KEY=
+
+# S3 storage (§3)
 STORAGE_PROVIDER=local   # غيّرها لـ s3 لما تملأ الباقي
 S3_ENDPOINT=
 S3_REGION=us-east-1
@@ -256,7 +323,7 @@ S3_BUCKET=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 
-# Notifications (§3)
+# Notifications (§4)
 FIREBASE_SERVICE_ACCOUNT_JSON=
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
@@ -271,19 +338,26 @@ SMTP_FROM_EMAIL=
 وملفين تانيين (مش env vars، إعداد ملفات مباشر):
 
 ```
-apps/customer-app/android/app/src/main/AndroidManifest.xml  → com.google.android.geo.API_KEY (§4)
-apps/customer-app/ios/Runner/AppDelegate.swift               → GMSServices.provideAPIKey (§4)
+apps/customer-app/android/app/src/main/AndroidManifest.xml  → com.google.android.geo.API_KEY (§5)
+apps/customer-app/ios/Runner/AppDelegate.swift               → GMSServices.provideAPIKey (§5)
 ```
 
 ---
 
 ## فجوات متبقية صراحة (مش هتتقفل بمجرد ملء قيم فوق)
 
-- **FCM client-side** (§3.1): محتاج `google-services.json`/`GoogleService-Info.plist` + كود
+- **FCM client-side** (§4.1): محتاج `google-services.json`/`GoogleService-Info.plist` + كود
   Flutter جديد، مش بس env var — تفاصيل كاملة فوق.
 - **بوابة WhatsApp Business المعتمدة**: Sandbox شغال فوراً بعد ملء القيم، لكن رقم إنتاج حقيقي
   محتاج مراجعة واعتماد من Meta عبر Twilio (أيام لحد أسابيع، خارج تحكمنا).
 - ~~دفع البطاقة في `apps/customer-app`: الباك-إند جاهز (§1)، الـ UI (شاشة WebView) لسه لأ~~ — **اتقفلت**: `CardPaymentScreen` جديدة (`webview_flutter`) + زرار "ادفع بالبطاقة"، تفاصيل كاملة في `apps/customer-app/README.md`.
-- **اختبار بصري حقيقي للخريطة/الإشعارات/شاشة الدفع بالبطاقة**: البيئة دي مفيهاش جهاز/إيموليتور Android أو iOS حقيقي
+- **بوابة FawryPay (§2) — تحقق التوقيع محتاج مراجعة قبل الإنتاج**: الكود جاهز بالكامل (مسار الـ
+  endpoints، تسجيل الدفعة، التسوية، الـ UI) واتأكد حياً إن كل حاجة **غير** مرتبطة مباشرة بشكل رد
+  FawryPay الحقيقي شغالة صح (idempotency، قيود المحفظة، رفض التوقيع الخاطئ، تجاهل webhook مكرر —
+  عبر محاكاة webhook موقّع يدوياً). **اللي لازم تتأكد منه قبل أي استخدام حقيقي بفلوس حقيقية**:
+  ترتيب حقول حساب التوقيع (`computeChargeSignature`/`computeWebhookSignature` في
+  `fawry-gateway.service.ts`) مقابل التوثيق الرسمي الحالي من FawryPay — راجع "⚠️ تحذير مهم" في
+  §2 فوق لتفاصيل كاملة عن ليه ده تحديداً مش قابل للتأكيد من غير sandbox حقيقي.
+- **اختبار بصري حقيقي للخريطة/الإشعارات/شاشات الدفع (بطاقة وكود فوري)**: البيئة دي مفيهاش جهاز/إيموليتور Android أو iOS حقيقي
   — كل حاجة اتأكدت منطقياً وحياً على مستوى الـ API/الكود، مش بصرياً على تطبيق شغال فعلي. أول
   حاجة تعملها بعد ما تحط المفاتيح الحقيقية: تشغيل التطبيقين على جهاز حقيقي والتأكد بصرياً.

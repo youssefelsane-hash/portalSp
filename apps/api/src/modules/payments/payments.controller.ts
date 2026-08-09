@@ -4,7 +4,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { PaymentsService } from './payments.service';
-import { CardPaymentResponseDto, toPaymentResponseDto } from './dto/payments-response.dto';
+import { CardPaymentResponseDto, FawryReferenceResponseDto, toPaymentResponseDto } from './dto/payments-response.dto';
 
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
@@ -39,5 +39,23 @@ export class PaymentsController {
 
     const { payment, redirectUrl } = await this.paymentsService.payWithCard(user.sub, id, idempotencyKey.trim());
     return { payment: toPaymentResponseDto(payment), redirect_url: redirectUrl };
+  }
+
+  @Post(':id/pay-with-fawry-reference')
+  async payWithFawryReference(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ): Promise<FawryReferenceResponseDto> {
+    if (!idempotencyKey || idempotencyKey.trim().length === 0) {
+      throw new BadRequestException('Idempotency-Key header مطلوب');
+    }
+
+    const { payment, referenceNumber, expiresAt } = await this.paymentsService.payWithFawryReference(
+      user.sub,
+      id,
+      idempotencyKey.trim(),
+    );
+    return { payment: toPaymentResponseDto(payment), reference_number: referenceNumber, expires_at: expiresAt.toISOString() };
   }
 }

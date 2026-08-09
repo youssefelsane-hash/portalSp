@@ -6,6 +6,10 @@ export enum PaymentMethod {
   WALLET = 'wallet',
   BANK_TRANSFER = 'bank_transfer',
   CORPORATE_CREDIT = 'corporate_credit',
+  // كود مرجعي FawryPay ("ادفع في أقرب فوري") — دفع فعلي كاش في نقطة بيع حقيقية، بس بدأ أونلاين
+  // ومتابَع عبر webhook زي الدفع بالبطاقة، عكس `cash` (اللي بيتحصّل يدوياً من الفني مباشرة).
+  // مضافة في infra/migrations/0042_fawry_payment_method.sql.
+  FAWRY_REFERENCE = 'fawry_reference',
 }
 
 export enum PaymentGatewayStatus {
@@ -46,6 +50,11 @@ export class Payment {
 
   @Column({ name: 'gateway_transaction_id', type: 'varchar', length: 120, nullable: true })
   gatewayTransactionId: string | null;
+
+  // كان عمود موجود في 0008_finance.sql من أول يوم بس غير مربوط بالـ entity — أول استخدام حقيقي
+  // ليه هنا لتخزين كود Fawry المرجعي (مختلف عن gateway_transaction_id اللي هو رقم عملية البوابة).
+  @Column({ name: 'gateway_reference', type: 'varchar', length: 120, nullable: true })
+  gatewayReference: string | null;
 
   @Column({ name: 'gateway_response', type: 'jsonb', nullable: true })
   gatewayResponse: Record<string, unknown> | null;

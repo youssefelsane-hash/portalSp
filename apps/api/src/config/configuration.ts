@@ -77,5 +77,17 @@ export default () => ({
       iframeId: process.env.PAYMOB_IFRAME_ID,
       hmacSecret: process.env.PAYMOB_HMAC_SECRET,
     },
+    // بوابة تانية جنب Paymob، مش بديلة — "ادفع في أقرب فوري" (كود مرجعي، دفع كاش فعلي في نقطة
+    // بيع). نفس فلسفة الإعداد الاختياري: ناقص = FawryGatewayService.isConfigured=false والدفع
+    // بالكود المرجعي بيرفض بوضوح، من غير ما يأثر على أي طريقة دفع تانية. تفاصيل كاملة (بما فيها
+    // تحذير مهم عن دقة توقيع HMAC المفترض) في docs/03-external-integrations.md.
+    fawry: {
+      baseUrl: process.env.FAWRY_BASE_URL ?? 'https://atfawry.fawrystaging.com',
+      merchantCode: process.env.FAWRY_MERCHANT_CODE,
+      secureKey: process.env.FAWRY_SECURE_KEY,
+      referenceExpiryHours: process.env.FAWRY_REFERENCE_EXPIRY_HOURS
+        ? parseInt(process.env.FAWRY_REFERENCE_EXPIRY_HOURS, 10)
+        : 72,
+    },
   },
 });
