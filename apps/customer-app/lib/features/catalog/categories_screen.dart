@@ -4,6 +4,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../orders/orders_screen.dart';
+import '../referrals/referrals_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 import 'services_screen.dart';
@@ -55,6 +56,13 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
               tooltip: 'الدعم',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ChatScreen.support()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.card_giftcard_outlined),
+              tooltip: 'رشّح صحابك',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ReferralsScreen()),
               ),
             ),
             IconButton(

@@ -58,4 +58,6 @@
   - `rating.low_rating_submitted` (`ratings.service.ts rateAsCustomer()`، حدث جديد، بس لما `overall_rating <= 2` من 5) → مزروعة على `support_agent`. **عتبة 2/5 قرار تشغيلي معقول مني، مش رقم من القاموس** (القاموس مالوش عتبة محددة لـ"تقييم منخفض") — موثّق صراحة كقرار، مش مُختلَق كحقيقة. اتعمله اختبار حي: تقييم 1/5 مع تعليق ولّد إشعار لـ`support_agent` بالتعليق بالظبط، تقييم 4/5 بعده **ماولّدش** أي إشعار (اتأكد بعدّ الصفوف قبل/بعد) — العتبة شغالة صح.
   - الثلاثة بيتبعوا بالظبط نفس نمط `complaint.filed`/`payout.requires_review` (`try/catch` حوالين `routeToRole()`، فشل التوجيه مايكسرش العملية الحقيقية).
 
+- **`referral.reward_earned`**: `ReferralRewardNotificationListener` (نفس نمط `welcome-notification.listener.ts` — إشعار مباشر لشخص، مش عبر `notification_routing_rules`) بيبعت للمُرشِّح لما يصدره `ReferralsService.issueReward()` (موديول `referrals`، تفاصيل كاملة `../referrals/README.md`). اتعمله اختبار حي: مُرشِّح وصل لـ10 ترشيحات مكتملة → استلم إشعار `in_app` فعلي بنص الكود والقيمة، ظهر في `GET /notifications` بتاعه فوراً.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
