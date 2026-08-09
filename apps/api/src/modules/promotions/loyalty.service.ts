@@ -38,22 +38,28 @@ export class LoyaltyService {
     return profile;
   }
 
+  /**
+   * `manager` اختياري — لو اتبعت (زي `settleAndComplete` في payments.service.ts)، الكسب بيحصل
+   * جوّه نفس transaction التسوية بدل ما يفتح transaction منفصلة، عشان "الطلب اتقفل بس النقاط
+   * محصلتش صح" ميحصلش أبداً — نفس مبدأ الذرّية المتّبع في تحويل أرباح الفني (WalletsService.doubleEntry).
+   */
   async earn(
     userId: string,
     points: number,
     source: LoyaltySource,
     referenceId: string | null = null,
     expiresAt: Date | null = null,
+    manager?: EntityManager,
   ): Promise<LoyaltyTransaction> {
     if (points <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'عدد النقاط لازم يكون أكبر من صفر', HttpStatus.BAD_REQUEST);
     }
-    return this.dataSource.transaction(async (manager) => {
-      const profile = await this.lockProfile(userId, manager);
+    const run = async (txManager: EntityManager) => {
+      const profile = await this.lockProfile(userId, txManager);
       const balanceAfter = profile.loyaltyPointsBalance + points;
-      await manager.update(CustomerProfile, { id: profile.id }, { loyaltyPointsBalance: balanceAfter });
-      return manager.save(
-        manager.create(LoyaltyTransaction, {
+      await txManager.update(CustomerProfile, { id: profile.id }, { loyaltyPointsBalance: balanceAfter });
+      return txManager.save(
+        txManager.create(LoyaltyTransaction, {
           userId,
           pointsAmount: points,
           direction: LoyaltyDirection.EARN,
@@ -63,7 +69,8 @@ export class LoyaltyService {
           expiresAt,
         }),
       );
-    });
+    };
+    return manager ? run(manager) : this.dataSource.transaction(run);
   }
 
   async redeem(userId: string, points: number, source: LoyaltySource, referenceId: string | null = null): Promise<LoyaltyTransaction> {

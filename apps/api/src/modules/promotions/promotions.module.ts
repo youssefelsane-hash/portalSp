@@ -25,6 +25,6 @@ import { PromotionsService } from './promotions.service';
   ],
   controllers: [PromotionsController, AdminPromotionsController],
   providers: [PromoCodesService, LoyaltyService, PromotionsService],
-  exports: [PromoCodesService],
+  exports: [PromoCodesService, LoyaltyService],
 })
 export class PromotionsModule {}

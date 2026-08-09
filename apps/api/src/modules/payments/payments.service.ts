@@ -8,6 +8,9 @@ import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../commo
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
+import { LoyaltySource } from '../promotions/entities/loyalty-transaction.entity';
+import { LoyaltyService } from '../promotions/loyalty.service';
+import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
@@ -43,6 +46,8 @@ export class PaymentsService {
     private readonly techniciansService: TechniciansService,
     private readonly technicianLevelsService: TechnicianLevelsService,
     private readonly technicianStatsService: TechnicianStatsService,
+    private readonly loyaltyService: LoyaltyService,
+    private readonly settingsService: SettingsService,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
     @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
@@ -162,6 +167,18 @@ export class PaymentsService {
         },
         manager,
       );
+    }
+
+    // كسب نقاط ولاء تلقائي — كانت فجوة موثّقة صراحة ("معدل الكسب مالوش رقم في القاموس، مش
+    // هنخترعه") لحد ما اتضاف إعداد قابل للتعديل من /settings (loyalty.earn_points_per_100_egp_spent
+    // — راجع migration 0043). بيحصل جوّه نفس transaction التسوية (manager مُمرّر لـ earn())
+    // عشان الذرّية، نفس مبدأ تحويل أرباح الفني فوق. طلبات أقل من 100ج (بمعدل 1 نقطة/100ج
+    // الافتراضي) مبتكسبش نقاط — سلوك متوقع، مش فشل.
+    const earnRatePer100Egp = await this.settingsService.getNumber('loyalty.earn_points_per_100_egp_spent', 1);
+    const pointsEarned = Math.floor(order.totalAmountCents / 10000) * earnRatePer100Egp;
+    if (pointsEarned > 0) {
+      const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+      await this.loyaltyService.earn(customerProfile.userId, pointsEarned, LoyaltySource.ORDER, order.id, null, manager);
     }
 
     return order;

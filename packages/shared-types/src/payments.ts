@@ -31,3 +31,30 @@ export interface PayoutOrderItemResponseDto {
 export interface RefundOrderBody {
   reason_notes: string;
 }
+
+export interface WalletResponseDto {
+  balance_cents: number;
+  pending_balance_cents: number;
+  reserved_balance_cents: number;
+  total_earned_cents: number;
+  total_withdrawn_cents: number;
+  currency_code: string;
+  is_frozen: boolean;
+}
+
+export interface WalletTransactionResponseDto {
+  id: string;
+  transaction_number: string;
+  direction: string;
+  transaction_type: string;
+  amount_cents: number;
+  balance_after_cents: number;
+  description_ar: string | null;
+  is_reversed: boolean;
+  created_at: string;
+}
+
+export interface AdminWalletDetailResponseDto {
+  wallet: WalletResponseDto;
+  transactions: WalletTransactionResponseDto[];
+}
