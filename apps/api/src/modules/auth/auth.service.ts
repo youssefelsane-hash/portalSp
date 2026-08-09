@@ -11,6 +11,7 @@ import { NotificationChannel } from '../notifications/entities/notification.enti
 import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
 import { parseDurationToMs } from '../../common/utils/duration';
 import { USER_REGISTERED_EVENT, UserRegisteredEvent } from '../../common/events/user-registered.event';
+import { REFERRAL_REGISTERED_EVENT, ReferralRegisteredEvent } from '../../common/events/referral-registered.event';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
@@ -27,6 +28,13 @@ export interface TokenPair {
 
 const OTP_CODE_LENGTH = 6;
 const BCRYPT_SALT_ROUNDS = 10;
+
+// أحرف واضحة بصريًا بس — استبعاد 0/O و1/I لتقليل غلطات النسخ اليدوي لكود الترشيح. مكرّرة عمداً هنا
+// (وفي ReferralsService.generateUniqueReferralCode لإعادة توليد كود لمستخدمين قدامى) بدل ما auth
+// يعتمد على referrals module — auth بيتحكم في عمود users.referral_code نفسه بس (حدود الموديولات).
+const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const REFERRAL_CODE_LENGTH = 6;
+const MAX_REFERRAL_CODE_ATTEMPTS = 10;
 
 @Injectable()
 export class AuthService {
@@ -122,6 +130,19 @@ export class AuthService {
 
   // ── تسجيل / دخول ─────────────────────────────────────────────────────
 
+  private async generateUniqueReferralCode(): Promise<string> {
+    for (let attempt = 0; attempt < MAX_REFERRAL_CODE_ATTEMPTS; attempt++) {
+      let code = '';
+      const bytes = randomBytes(REFERRAL_CODE_LENGTH);
+      for (let i = 0; i < REFERRAL_CODE_LENGTH; i++) {
+        code += REFERRAL_CODE_ALPHABET[bytes[i] % REFERRAL_CODE_ALPHABET.length];
+      }
+      const existing = await this.users.findOne({ where: { referralCode: code } });
+      if (!existing) return code;
+    }
+    throw new Error('فشل توليد كود ترشيح فريد بعد عدة محاولات');
+  }
+
   async register(dto: RegisterDto, ip: string | null): Promise<TokenPair> {
     await this.consumeOtp(dto.phone_number, dto.otp_code, OtpPurpose.REGISTER);
 
@@ -129,6 +150,17 @@ export class AuthService {
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مسجل قبل كده، سجّل دخول بدل كده', HttpStatus.CONFLICT);
     }
+
+    // نظام الترشيحات: كود الترشيح عمود على users نفسها فبنتعامل معاه هنا مباشرة (حدود الموديولات)،
+    // إنشاء صف referrals المعلّق بيحصل في referrals module لما يستقبل REFERRAL_REGISTERED_EVENT تحت.
+    let referrer: User | null = null;
+    if (dto.referral_code) {
+      referrer = await this.users.findOne({ where: { referralCode: dto.referral_code.toUpperCase() } });
+      if (!referrer) {
+        throw new ApiException(ErrorCode.VAL_001, 'كود الترشيح غير صحيح', HttpStatus.BAD_REQUEST);
+      }
+    }
+    const referralCode = await this.generateUniqueReferralCode();
 
     // ملاحظة حدود الموديول: auth بيتحكم في users بس. إنشاء customer_profiles/technician_profiles
     // مسؤولية موديولات customers/technicians (بيتعملوا على حدث "user.registered" لما يتبنوا).
@@ -140,6 +172,8 @@ export class AuthService {
       preferredLanguage: 'ar',
       isActive: true,
       isBlocked: false,
+      referralCode,
+      referredByUserId: referrer?.id ?? null,
     });
     await this.users.save(user);
 
@@ -148,6 +182,9 @@ export class AuthService {
       USER_REGISTERED_EVENT,
       new UserRegisteredEvent(user.id, user.userType, user.phoneNumber, user.fullName),
     );
+    if (referrer) {
+      this.events.emit(REFERRAL_REGISTERED_EVENT, new ReferralRegisteredEvent(referrer.id, user.id));
+    }
 
     return this.issueTokenPair(user, ip);
   }
