@@ -2,6 +2,8 @@ import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post,
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
@@ -22,6 +24,14 @@ export class ChatController {
   @Get('orders/:orderId/thread')
   async getThreadForOrder(@CurrentUser() user: JwtPayload, @Param('orderId', ParseUUIDPipe) orderId: string) {
     return toThreadResponseDto(await this.chatService.getThreadForOrder(user.sub, orderId));
+  }
+
+  // كانت فجوة موثّقة صراحة ("support_chat موجود في الـ schema بس مش متوصّل") — get-or-create،
+  // عميل بس (customer_id إجباري في الـ schema، تفاصيل القرار كاملة في chat/README.md).
+  @Get('support-thread')
+  @Roles(UserType.CUSTOMER)
+  async getSupportThread(@CurrentUser() user: JwtPayload) {
+    return toThreadResponseDto(await this.chatService.getOrCreateSupportThread(user.sub));
   }
 
   @Get('threads/:id/messages')

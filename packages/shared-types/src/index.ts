@@ -17,3 +17,4 @@ export * from './notification-routing';
 export * from './technician-companies';
 export * from './technician-levels';
 export * from './support-tickets';
+export * from './chat';

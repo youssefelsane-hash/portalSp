@@ -5,6 +5,8 @@ import { extname } from 'path';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { PermissionsService } from '../admin/permissions.service';
+import { User, UserType } from '../auth/entities/user.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { containsLikelyContactInfo } from './contact-info-detector';
@@ -18,6 +20,10 @@ export interface IncomingChatFile {
   originalname: string;
 }
 
+// نفس الصلاحية اللي تذاكر الدعم العامة بتستخدمها (support_tickets.manage، migration 0037 —
+// super_admin + support_agent) — إعادة استخدام مقصودة، مش صلاحية جديدة لمفهوم فرعي.
+const SUPPORT_CHAT_PERMISSION = 'support_tickets.manage';
+
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
@@ -27,7 +33,9 @@ export class ChatService {
     @InjectRepository(ChatMessage) private readonly messages: Repository<ChatMessage>,
     @InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>,
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
+    @InjectRepository(User) private readonly users: Repository<User>,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   /** بيتصل بيها لما فني يقبل طلب — idempotent، مش هتعمل تريد لو الخيط موجود قبل كده. */
@@ -47,16 +55,101 @@ export class ChatService {
     return thread;
   }
 
-  /** بيرجّع (userId, isParticipant) — مش بيرمي، عشان يتستخدم في guard الـ WebSocket كمان. */
+  /**
+   * بيرجّع (userId, isParticipant) — مش بيرمي، عشان يتستخدم في guard الـ WebSocket كمان.
+   * لخيوط الدعم العام (`support_chat`) بس: أي أدمن عنده `support_tickets.manage` يعتبر طرف
+   * صالح في **أي** خيط دعم (مش بس اللي مُعيّن له) — نفس منطق تذاكر الدعم العامة بالظبط، عكس
+   * `order_chat` اللي مقصور على العميل/الفني بتاعت الطلب نفسه فقط، أدمن محدش بيدخله.
+   */
   async resolveParticipant(userId: string, thread: ChatThread): Promise<boolean> {
     const [customerProfile, technicianProfile] = await Promise.all([
       this.customerProfiles.findOne({ where: { userId } }),
       this.technicianProfiles.findOne({ where: { userId } }),
     ]);
-    return (
+    if (
       (customerProfile !== null && thread.customerId === customerProfile.id) ||
       (technicianProfile !== null && thread.technicianId === technicianProfile.id)
+    ) {
+      return true;
+    }
+
+    if (thread.threadType === ChatThreadType.SUPPORT_CHAT) {
+      const user = await this.users.findOne({ where: { id: userId } });
+      if (user?.userType === UserType.ADMIN) {
+        return this.permissionsService.hasPermission(userId, SUPPORT_CHAT_PERMISSION);
+      }
+    }
+    return false;
+  }
+
+  /** get-or-create — عميل بس، خيط واحد دايم لكل عميل لكل استفسارات الدعم العامة (مش لكل طلب). */
+  async getOrCreateSupportThread(userId: string): Promise<ChatThread> {
+    const customerProfile = await this.customerProfiles.findOne({ where: { userId } });
+    if (!customerProfile) {
+      throw new ApiException(ErrorCode.VAL_001, 'حساب العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const existing = await this.threads.findOne({
+      where: { customerId: customerProfile.id, threadType: ChatThreadType.SUPPORT_CHAT },
+    });
+    if (existing) return existing;
+
+    const thread = this.threads.create({
+      orderId: null,
+      threadType: ChatThreadType.SUPPORT_CHAT,
+      customerId: customerProfile.id,
+      technicianId: null,
+      isActive: true,
+    });
+    await this.threads.save(thread);
+    this.logger.log(`support chat thread اتعمل للعميل ${customerProfile.id}`);
+    return thread;
+  }
+
+  /**
+   * لواجهة الأدمن (`/admin/support-chat-threads`) — كل خيوط الدعم العام، الأحدث نشاطاً الأول،
+   * مع اسم/رقم العميل (join يدوي زي نفس نمط PayoutsService.listForAdmin/AdminCustomersService).
+   */
+  async listSupportThreadsForAdmin(): Promise<
+    { thread: ChatThread; customerName: string; customerPhone: string }[]
+  > {
+    interface SupportThreadRow {
+      id: string;
+      order_id: string | null;
+      customer_id: string;
+      technician_id: string | null;
+      is_active: boolean;
+      last_message_at: Date | null;
+      closes_at: Date | null;
+      created_at: Date;
+      updated_at: Date;
+      full_name: string;
+      phone_number: string;
+    }
+
+    const rows = await this.threads.manager.query<SupportThreadRow[]>(
+      `SELECT ct.*, u.full_name, u.phone_number
+       FROM chat_threads ct
+       JOIN customer_profiles cp ON cp.id = ct.customer_id
+       JOIN users u ON u.id = cp.user_id
+       WHERE ct.thread_type = 'support_chat'
+       ORDER BY ct.last_message_at DESC NULLS LAST, ct.created_at DESC`,
     );
+    return rows.map((row) => ({
+      thread: this.threads.create({
+        id: row.id,
+        orderId: row.order_id,
+        threadType: ChatThreadType.SUPPORT_CHAT,
+        customerId: row.customer_id,
+        technicianId: row.technician_id,
+        isActive: row.is_active,
+        lastMessageAt: row.last_message_at,
+        closesAt: row.closes_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }),
+      customerName: row.full_name,
+      customerPhone: row.phone_number,
+    }));
   }
 
   async findThreadOrThrow(threadId: string): Promise<ChatThread> {
