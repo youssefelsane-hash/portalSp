@@ -187,19 +187,40 @@ S3_FORCE_PATH_STYLE=true
 FIREBASE_SERVICE_ACCOUNT_JSON=<محتوى الملف كامل كسطر واحد>
 ```
 
-**فجوة موثّقة صراحة — مهمة**: ده بس نص الطريق. السيرفر دلوقتي جاهز *يبعت* push، بس
-`apps/customer-app`/`apps/technician-app` **لسه من غير أي تكامل عميل لـ FCM خالص** — مفيش
-`firebase_messaging` package، مفيش طلب إذن إشعارات، ومفيش نداء لـ `POST /devices` (اللي أصلاً
-موجود وشغال في الباك-إند) لتسجيل الـ FCM token. السبب: تفعيل `firebase_messaging` عملياً محتاج
-`google-services.json` (Android) و`GoogleService-Info.plist` (iOS) — دول مش env vars بتتحط،
-دول ملفات إعداد محدّدة بالظبط لمشروع Firebase + package name/bundle id بتاعك، لازم تتحمّل من
-Firebase Console بعد ما تضيف تطبيقاتك (Android package: راجع `applicationId` في
-`android/app/build.gradle.kts`؛ iOS bundle id: راجع `PRODUCT_BUNDLE_IDENTIFIER` في
-`ios/Runner.xcodeproj`) وتتحط في مكانها الصح جوّه كل مشروع Flutter. لما تعمل كده، خطوات الربط
-هي: (1) حمّل الملفين وحطهم في `android/app/` و`ios/Runner/`، (2) ضيف `firebase_core` +
-`firebase_messaging` لـ `pubspec.yaml` الاتنين، (3) بعد تسجيل الدخول اطلب إذن الإشعارات
-(`FirebaseMessaging.instance.requestPermission()`)، خد التوكن
-(`FirebaseMessaging.instance.getToken()`)، وابعته لـ `POST /devices` (`fcm_token`, `platform`).
+**كانت فجوة موثّقة صراحة، اتقفلت جزئياً (كل حاجة كود، لسه محتاجة ملفات إعداد حقيقية منك)**: السيرفر
+جاهز *يبعت* push من زمان، والكود بقى جاهز *يستقبل* توكنات ويسجّلها — الجزء الوحيد الناقص فعلياً
+دلوقتي هو ملفي الإعداد الحقيقيين اللي محتاجين مشروع Firebase فعلي:
+
+- `firebase_core`/`firebase_messaging` مضافين لـ `pubspec.yaml` في التطبيقين، وفيه
+  `lib/core/push_notification_service.dart` جديد فيهم (نفس الكود بالظبط في الاتنين): بعد تسجيل
+  الدخول (`AuthRepository.init()`/`verifyOtp()`، fire-and-forget من غير ما يأخّر أو يفشّل تسجيل
+  الدخول نفسه) بيعمل `Firebase.initializeApp()`، يطلب إذن الإشعارات، ياخد توكن FCM، ويبعته لـ
+  `POST /devices` مع `device_id` ثابت لكل تثبيت (UUID عشوائي متولّد مرة واحدة ومخزّن في
+  `flutter_secure_storage` — مش توكن FCM نفسه، لأنه بيتغيّر من وقت للتاني وكان هيعمل صفوف مكررة).
+  **فشل صامت ومقصود في كل خطوة**: لو مفيش ملفات Firebase حقيقية لسه، `Firebase.initializeApp()`
+  هترمي `PlatformException` وبتتلقّط وتتسجّل في اللوج بس — نفس مبدأ "فشل خدمة خارجية ميوقفش عملية
+  حقيقية للمستخدم" المتّبع في كل مكان تاني بالمشروع. اتأكد حياً: `flutter analyze` نضيف في
+  التطبيقين، والاختبارات الحية الموجودة (`test_live/otp_flow_live_test.dart`,
+  `test_live/order_creation_live_test.dart`) لسه بتعدّي عادي رغم إن `AuthRepository.init()`/
+  `verifyOtp()` بقى بيحاول يسجّل جهاز push في الخلفية.
+- **Android**: بلجن `com.google.gms.google-services` مُعلَن (`apply false`) في
+  `android/settings.gradle.kts`، وتفعيله الفعلي في `android/app/build.gradle.kts` **شرطي**
+  (`if (file("google-services.json").exists())`) — عشان `flutter build`/`flutter run` يفضلوا
+  شغالين عادي من غير ما ينهاروا لأي حد لسه معندوش مشروع Firebase حقيقي. لما تحط
+  `google-services.json` حقيقي في `android/app/`، هيتفعّل تلقائي من غير أي تعديل تاني.
+- **iOS**: `GoogleService-Info.plist` لازم يتضاف لـ `ios/Runner/` **وكمان** لمشروع Xcode نفسه
+  (مش مجرد نسخ ملف — لازم يتضاف كـ resource في `Runner.xcodeproj` عن طريق Xcode) — الخطوة دي
+  مش قابلة للأتمتة من هنا (نفس القيد الموثّق: مفيش macOS/Xcode في البيئة دي)، فسايبنها خطوة يدوية
+  صريحة.
+- الملفين الاتنين (`android/app/google-services.json`, `ios/Runner/GoogleService-Info.plist`)
+  مُضافين لـ `.gitignore` في التطبيقين — نفس منطق `.env`: قيم بيئة حقيقية متتحطش في git.
+
+**الخطوات المتبقية عليك (محتاجة مشروع Firebase حقيقي)**: اعمل مشروع على
+[console.firebase.google.com](https://console.firebase.google.com) (لو لسه معملتوش في §الأول)،
+ضيف تطبيق Android بـ `applicationId` من `android/app/build.gradle.kts` (`com.baytak.customer_app`
+أو `com.baytak.technician_app`) ونزّل `google-services.json` وحطه في `android/app/`، وضيف تطبيق
+iOS بـ bundle id من `ios/Runner.xcodeproj` (`PRODUCT_BUNDLE_IDENTIFIER`) ونزّل
+`GoogleService-Info.plist` وضيفه لـ `ios/Runner/` عبر Xcode (Add Files to "Runner").
 
 ### 4.2 SMS / WhatsApp — Twilio
 
@@ -346,8 +367,11 @@ apps/customer-app/ios/Runner/AppDelegate.swift               → GMSServices.pro
 
 ## فجوات متبقية صراحة (مش هتتقفل بمجرد ملء قيم فوق)
 
-- **FCM client-side** (§4.1): محتاج `google-services.json`/`GoogleService-Info.plist` + كود
-  Flutter جديد، مش بس env var — تفاصيل كاملة فوق.
+- ~~FCM client-side: محتاج `google-services.json`/`GoogleService-Info.plist` + كود Flutter جديد~~
+  — **اتقفلت جزئياً**: كل كود Flutter جاهز (`push_notification_service.dart` في التطبيقين،
+  `POST /devices` بيتنادى تلقائي بعد تسجيل الدخول)، وبلجن Android مُعلَن وشرطي (مش هيكسر أي حاجة
+  من غير ملف). لسه محتاج منك فعلياً: `google-services.json`/`GoogleService-Info.plist` من مشروع
+  Firebase حقيقي بتاعك — تفاصيل كاملة في §4.1 فوق.
 - **بوابة WhatsApp Business المعتمدة**: Sandbox شغال فوراً بعد ملء القيم، لكن رقم إنتاج حقيقي
   محتاج مراجعة واعتماد من Meta عبر Twilio (أيام لحد أسابيع، خارج تحكمنا).
 - ~~دفع البطاقة في `apps/customer-app`: الباك-إند جاهز (§1)، الـ UI (شاشة WebView) لسه لأ~~ — **اتقفلت**: `CardPaymentScreen` جديدة (`webview_flutter`) + زرار "ادفع بالبطاقة"، تفاصيل كاملة في `apps/customer-app/README.md`.
