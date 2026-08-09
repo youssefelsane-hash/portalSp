@@ -21,6 +21,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { MatchingModule } from './modules/matching/matching.module';
 import { ChatModule } from './modules/chat/chat.module';
+import { InternalChatModule } from './modules/internal-chat/internal-chat.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { SupportModule } from './modules/support/support.module';
@@ -78,6 +79,7 @@ import { HealthModule } from './modules/common/health/health.module';
     MatchingModule,
     OrdersModule,
     ChatModule,
+    InternalChatModule,
     PaymentsModule,
     RatingsModule,
     SupportModule,

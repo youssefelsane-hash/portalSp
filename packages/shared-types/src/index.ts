@@ -18,3 +18,4 @@ export * from './technician-companies';
 export * from './technician-levels';
 export * from './support-tickets';
 export * from './chat';
+export * from './internal-chat';
