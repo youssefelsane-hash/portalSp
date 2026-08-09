@@ -8,6 +8,7 @@ import '../payments/fawry_reference_screen.dart';
 import '../payments/payments_repository.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
+import '../technicians/technician_profile_screen.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
@@ -321,6 +322,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                           icon: const Icon(Icons.chat_bubble_outline),
                           label: const Text('الشات مع الفني'),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => TechnicianProfileScreen(technicianId: order.technicianId!),
+                            ),
+                          ),
+                          icon: const Icon(Icons.person_outline),
+                          label: const Text('بروفايل الفني'),
                         ),
                       ],
                       if (_activeTrackingStatuses.contains(order.orderStatus)) ...[

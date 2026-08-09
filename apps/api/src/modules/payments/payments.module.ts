@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
+import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { User } from '../auth/entities/user.entity';
@@ -10,6 +11,7 @@ import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AdminPaymentsController } from './admin-payments.controller';
+import { AdminWalletController } from './admin-wallet.controller';
 import { PaymentsController } from './payments.controller';
 import { TechnicianPaymentsController } from './technician-payments.controller';
 import { WalletController } from './wallet.controller';
@@ -50,8 +52,16 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     CatalogModule,
     AuditModule,
     SettingsModule,
+    PromotionsModule,
   ],
-  controllers: [WalletController, PaymentsController, TechnicianPaymentsController, AdminPaymentsController, WebhooksController],
+  controllers: [
+    WalletController,
+    PaymentsController,
+    TechnicianPaymentsController,
+    AdminPaymentsController,
+    AdminWalletController,
+    WebhooksController,
+  ],
   providers: [
     WalletsService,
     PaymentsService,

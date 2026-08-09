@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import type {
   AdminServiceZoneResponseDto,
   AdminTechnicianDetailResponseDto,
+  AdminWalletDetailResponseDto,
   AssignTechnicianZoneBody,
   TechnicianLevel,
   TechnicianZoneResponseDto,
@@ -20,6 +21,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS, NEXT_VERIFICATION_STEP } from '@/lib/technician-labels';
+import { formatEgp } from '@/lib/format';
 
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -38,11 +40,17 @@ export default function TechnicianDetailPage() {
   const [newZoneId, setNewZoneId] = useState('');
   const [newZoneIsPrimary, setNewZoneIsPrimary] = useState(false);
 
+  const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
+
   function load() {
     authedFetch<AdminTechnicianDetailResponseDto>(`/admin/technicians/${id}`)
       .then((data) => {
         setDetail(data);
         setSelectedLevel(data.current_level);
+        authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${data.user_id}`)
+          .then(setWallet)
+          .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل بيانات الفني'));
   }
@@ -411,6 +419,49 @@ export default function TechnicianDetailPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">المحفظة</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            {walletError && <p className="text-destructive">{walletError}</p>}
+            {!wallet && !walletError && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {wallet && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-semibold">{formatEgp(wallet.wallet.balance_cents)}</span>
+                  {wallet.wallet.is_frozen && <Badge variant="destructive">مجمّدة</Badge>}
+                </div>
+                <p className="text-muted-foreground">
+                  محجوز للصرف: {formatEgp(wallet.wallet.reserved_balance_cents)} · إجمالي مكتسب:{' '}
+                  {formatEgp(wallet.wallet.total_earned_cents)} · إجمالي مسحوب:{' '}
+                  {formatEgp(wallet.wallet.total_withdrawn_cents)}
+                </p>
+                <div>
+                  <p className="mb-2 font-medium">آخر الحركات</p>
+                  {wallet.transactions.length === 0 && <p className="text-muted-foreground">مفيش حركات لسه</p>}
+                  <ul className="flex flex-col gap-2">
+                    {wallet.transactions.slice(0, 10).map((tx) => (
+                      <li key={tx.id} className="flex items-center justify-between border-b pb-2 text-xs last:border-0">
+                        <div>
+                          <p>{tx.description_ar ?? tx.transaction_type}</p>
+                          <p className="text-muted-foreground">
+                            {new Date(tx.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                          </p>
+                        </div>
+                        <span className={tx.direction === 'credit' ? 'text-green-600' : 'text-destructive'}>
+                          {tx.direction === 'credit' ? '+' : '-'}
+                          {formatEgp(tx.amount_cents)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

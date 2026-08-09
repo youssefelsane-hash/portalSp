@@ -61,6 +61,11 @@ export class Order {
   @Column({ name: 'technician_id', type: 'uuid', nullable: true })
   technicianId: string | null;
 
+  // تفضيل "إعادة الحجز" بس — مش ضمان، matching.service.ts بيحاول يعرضه عليه في أول جولة
+  // بس بيكمّل بالتوزيع العادي لو مش متاح (تفاصيل في matching/README.md).
+  @Column({ name: 'requested_technician_id', type: 'uuid', nullable: true })
+  requestedTechnicianId: string | null;
+
   @Column({ name: 'service_id', type: 'uuid' })
   serviceId: string;
 

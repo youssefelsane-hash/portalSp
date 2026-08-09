@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../earnings/wallet_screen.dart';
+import '../internal_chat/internal_chat_list_screen.dart';
+import '../portfolio/portfolio_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
@@ -96,6 +98,20 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'أرباحي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const WalletScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.video_library_outlined),
+              tooltip: 'معرض أعمالي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PortfolioScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.support_agent_outlined),
+              tooltip: 'تواصل مع الإدارة',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const InternalChatListScreen()),
               ),
             ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),

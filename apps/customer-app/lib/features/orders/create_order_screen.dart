@@ -11,8 +11,9 @@ import 'orders_repository.dart';
 
 class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
+  final String? requestedTechnicianId;
 
-  const CreateOrderScreen({super.key, required this.service});
+  const CreateOrderScreen({super.key, required this.service, this.requestedTechnicianId});
 
   @override
   State<CreateOrderScreen> createState() => _CreateOrderScreenState();
@@ -106,6 +107,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
         addonIds: _selectedAddonIds.toList(),
+        requestedTechnicianId: widget.requestedTechnicianId,
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(

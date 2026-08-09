@@ -14,6 +14,13 @@ class CatalogRepository {
     return items.map(CatalogService.fromJson).toList();
   }
 
+  // مستخدمة في "إعادة الحجز" — عندنا service_id بس من الطلب القديم، محتاجين الكائن الكامل
+  // عشان نفتح CreateOrderScreen عليه.
+  Future<CatalogService> fetchService(String serviceId) async {
+    final data = await apiRequest('GET', '/services/$serviceId');
+    return CatalogService.fromJson(data!);
+  }
+
   Future<List<ServiceAddon>> fetchAddons(String serviceId) async {
     final items = await apiRequestList('/services/$serviceId/addons');
     return items.map(ServiceAddon.fromJson).toList();

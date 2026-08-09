@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: '/support', label: 'الشكاوى' },
   { href: '/support-tickets', label: 'تذاكر الدعم' },
   { href: '/support-chat', label: 'محادثات الدعم' },
+  { href: '/internal-chat', label: 'المحادثات الداخلية' },
   { href: '/payouts', label: 'طلبات الصرف' },
   { href: '/promotions', label: 'أكواد الخصم' },
   { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
