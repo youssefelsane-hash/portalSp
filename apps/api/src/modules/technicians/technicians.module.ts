@@ -9,6 +9,7 @@ import { AdminTechnicianCompaniesController } from './admin-technician-companies
 import { AdminTechnicianLevelsController } from './admin-technician-levels.controller';
 import { AdminTechniciansController } from './admin-technicians.controller';
 import { AdminTechniciansService } from './admin-technicians.service';
+import { PublicTechniciansController } from './public-technicians.controller';
 import { TechnicianCompaniesController } from './technician-companies.controller';
 import { TechnicianCompaniesService } from './technician-companies.service';
 import { TechnicianLevelsService } from './technician-levels.service';
@@ -45,6 +46,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
   ],
   controllers: [
     TechniciansController,
+    PublicTechniciansController,
     AdminTechniciansController,
     TechnicianCompaniesController,
     AdminTechnicianCompaniesController,

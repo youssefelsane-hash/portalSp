@@ -29,6 +29,7 @@ class OrdersRepository {
     String? problemDescription,
     String? promoCode,
     List<String>? addonIds,
+    String? requestedTechnicianId,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
@@ -37,6 +38,9 @@ class OrdersRepository {
         'problem_description': problemDescription,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
       if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
+      // "إعادة الحجز" — تفضيل بس، الباك-إند بيكمّل بالتوزيع العادي لو الفني مش متاح
+      // (تفاصيل في apps/api/src/modules/matching/README.md).
+      if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
     });
     return Order.fromJson(data!);
   }

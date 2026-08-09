@@ -8,6 +8,9 @@ export interface TechnicianProfileResponseDto {
   average_rating: number;
   total_ratings_count: number;
   completed_orders_count: number;
+  cancelled_orders_count: number;
+  years_of_experience: number;
+  bio: string | null;
   verification_status: string;
   is_available: boolean;
 }
@@ -21,6 +24,9 @@ export function toTechnicianProfileResponseDto(profile: TechnicianProfile): Tech
     average_rating: Number(profile.averageRating),
     total_ratings_count: profile.totalRatingsCount,
     completed_orders_count: profile.completedOrdersCount,
+    cancelled_orders_count: profile.cancelledOrdersCount,
+    years_of_experience: profile.yearsOfExperience,
+    bio: profile.bio,
     verification_status: profile.verificationStatus,
     is_available: profile.isAvailable,
   };

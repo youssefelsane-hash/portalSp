@@ -5,6 +5,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
 
 @Injectable()
 export class TechniciansService {
@@ -41,6 +42,105 @@ export class TechniciansService {
     if (dto.is_on_duty !== undefined) profile.isOnDuty = dto.is_on_duty;
     await this.technicianProfiles.save(profile);
     return profile;
+  }
+
+  async updateProfile(userId: string, dto: UpdateTechnicianProfileDto): Promise<TechnicianProfile> {
+    const profile = await this.findByUserIdOrThrow(userId);
+    if (dto.bio !== undefined) profile.bio = dto.bio;
+    await this.technicianProfiles.save(profile);
+    return profile;
+  }
+
+  /**
+   * بروفايل عام — للعميل يشوفه قبل/بعد الحجز. معدل الالتزام بالمواعيد (`on_time_rate`) بيتحسب
+   * بس من الطلبات اللي عندها `scheduled_at` فعلي (فرق عن ASAP اللي معندهاش وقت متوقّع يتقاس
+   * عليه الالتزام أصلاً) — `null` لو مفيش طلبات مجدولة اتنفّذت لسه، مش صفر مضلّل.
+   */
+  async getPublicProfile(technicianProfileId: string): Promise<{
+    profile: TechnicianProfile;
+    fullName: string;
+    avatarUrl: string | null;
+    zones: { id: string; nameAr: string }[];
+    services: { id: string; nameAr: string; basePriceCents: number }[];
+    recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
+    onTimeRate: number | null;
+  }> {
+    const profile = await this.findByProfileIdOrThrow(technicianProfileId);
+
+    interface UserRow {
+      full_name: string;
+      avatar_url: string | null;
+    }
+    const [user] = await this.technicianProfiles.manager.query<UserRow[]>(
+      `SELECT full_name, avatar_url FROM users u JOIN technician_profiles tp ON tp.user_id = u.id WHERE tp.id = $1`,
+      [technicianProfileId],
+    );
+
+    interface ZoneRow {
+      id: string;
+      name_ar: string;
+    }
+    const zones = await this.technicianProfiles.manager.query<ZoneRow[]>(
+      `SELECT sz.id, sz.name_ar FROM technician_zones tz
+       JOIN service_zones sz ON sz.id = tz.service_zone_id
+       WHERE tz.technician_id = $1 AND tz.is_active = true AND tz.deleted_at IS NULL
+       ORDER BY tz.is_primary DESC, sz.name_ar ASC`,
+      [technicianProfileId],
+    );
+
+    interface ServiceRow {
+      id: string;
+      name_ar: string;
+      base_price_cents: number;
+    }
+    const services = await this.technicianProfiles.manager.query<ServiceRow[]>(
+      `SELECT s.id, s.name_ar, s.base_price_cents FROM technician_services ts
+       JOIN services s ON s.id = ts.service_id
+       WHERE ts.technician_id = $1 AND ts.is_active = true AND s.is_active = true
+       ORDER BY s.name_ar ASC`,
+      [technicianProfileId],
+    );
+
+    interface ReviewRow {
+      overall_rating: number;
+      comment: string | null;
+      created_at: Date;
+    }
+    const recentReviews = await this.technicianProfiles.manager.query<ReviewRow[]>(
+      `SELECT r.overall_rating, r.comment, r.created_at FROM ratings r
+       WHERE r.rated_user_id = $1 AND r.rating_type = 'customer_to_technician' AND r.is_published = true
+       ORDER BY r.created_at DESC LIMIT 5`,
+      [profile.userId],
+    );
+
+    interface OnTimeRow {
+      on_time: string;
+      total: string;
+    }
+    const [onTimeRow] = await this.technicianProfiles.manager.query<OnTimeRow[]>(
+      `SELECT
+         COUNT(*) FILTER (WHERE technician_arrived_at <= scheduled_at + interval '15 minutes') AS on_time,
+         COUNT(*) AS total
+       FROM orders
+       WHERE technician_id = $1 AND scheduled_at IS NOT NULL AND technician_arrived_at IS NOT NULL`,
+      [technicianProfileId],
+    );
+    const onTimeTotal = Number(onTimeRow.total);
+    const onTimeRate = onTimeTotal > 0 ? Math.round((Number(onTimeRow.on_time) / onTimeTotal) * 100) : null;
+
+    return {
+      profile,
+      fullName: user.full_name,
+      avatarUrl: user.avatar_url,
+      zones: zones.map((z) => ({ id: z.id, nameAr: z.name_ar })),
+      services: services.map((s) => ({ id: s.id, nameAr: s.name_ar, basePriceCents: s.base_price_cents })),
+      recentReviews: recentReviews.map((r) => ({
+        overallRating: r.overall_rating,
+        comment: r.comment,
+        createdAt: r.created_at,
+      })),
+      onTimeRate,
+    };
   }
 
   async updateLocation(userId: string, dto: UpdateLocationDto): Promise<void> {

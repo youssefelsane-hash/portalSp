@@ -31,6 +31,11 @@ export class CreateOrderDto {
   @MaxLength(24)
   promo_code?: string;
 
+  // "إعادة الحجز" — تفضيل بس، مش ضمان (تفاصيل في matching/README.md).
+  @IsOptional()
+  @IsUUID()
+  requested_technician_id?: string;
+
   // إضافات جاهزة من كتالوج الخدمة نفسها (service_addons) — بتتحط في order_items بـ
   // is_customer_approved=true فوراً (العميل اختارها بنفسه وقت الحجز، مش عرض سعر مستني موافقة).
   // مختلفة عن مسار awaiting_quote_approval (order-items.service.ts) اللي الفني بيقترحه أثناء الشغل.

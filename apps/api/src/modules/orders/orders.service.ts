@@ -78,6 +78,13 @@ export class OrdersService {
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
 
+    // "إعادة الحجز" — نتأكد إن الـ id فعلاً فني حقيقي بس (404 واضح لو لأ)، مش هل هو متاح/مؤهّل
+    // للخدمة دي تحديداً — ده بيتفحص وقت المطابقة نفسها (matching.service.ts)، فالتفضيل ده
+    // ببساطة بيتجاهَل بأمان لو مش قابل للتطبيق بدل ما يمنع إنشاء الطلب.
+    if (dto.requested_technician_id) {
+      await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
+    }
+
     const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
@@ -95,6 +102,7 @@ export class OrdersService {
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
         scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
+        requestedTechnicianId: dto.requested_technician_id ?? null,
         estimatedPriceCents: estimate.estimated_total_cents,
         inspectionFeeCents: estimate.inspection_fee_cents,
         totalAmountCents: estimate.estimated_total_cents + estimate.inspection_fee_cents + addonsTotalCents,

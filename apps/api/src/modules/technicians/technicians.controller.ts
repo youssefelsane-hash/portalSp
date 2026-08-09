@@ -22,6 +22,7 @@ import { toTechnicianProfileResponseDto } from './dto/technician-profile-respons
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
@@ -49,6 +50,13 @@ export class TechniciansController {
   @Patch('availability')
   async updateAvailability(@CurrentUser() user: JwtPayload, @Body() dto: UpdateAvailabilityDto) {
     return toTechnicianProfileResponseDto(await this.techniciansService.updateAvailability(user.sub, dto));
+  }
+
+  // كانت فجوة موثّقة — عمود bio موجود في الـ schema من أول يوم بس مش متربط في الـ entity ولا
+  // عنده أي endpoint. أول استخدام حقيقي: نبذة الفني في بروفايله العام (راجع technicians/README.md).
+  @Patch('profile')
+  async updateProfile(@CurrentUser() user: JwtPayload, @Body() dto: UpdateTechnicianProfileDto) {
+    return toTechnicianProfileResponseDto(await this.techniciansService.updateProfile(user.sub, dto));
   }
 
   @Post('location')

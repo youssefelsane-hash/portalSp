@@ -72,7 +72,16 @@ export class MatchingService {
    * هيوصله أبداً. الإصلاح: استبعاد أي فني عنده طلب في `ACTIVE_TECHNICIAN_ORDER_STATUSES` بالفعل
    * من قائمة المؤهلين من الأساس — نفس مصدر الحقيقة الوحيد المستخدم في order-state-machine.ts.
    */
-  private findEligibleTechnicians(order: Order, batchSize: number): Promise<EligibleTechnicianRow[]> {
+  /**
+   * `requestedTechnicianId` (اختياري، "إعادة الحجز") — بيقيّد النتيجة لفني واحد بس لو اتبعت،
+   * نفس شروط الأهلية العادية بالظبط (خدمة/منطقة/متاح/معتمد/مش مشغول). لو رجعت فاضية، الكولر
+   * (`dispatchNextRound`) مسؤول يرجع يسأل من غير القيد ده بدل ما يعتبرها "مفيش فنيين خالص".
+   */
+  private findEligibleTechnicians(
+    order: Order,
+    batchSize: number,
+    requestedTechnicianId?: string | null,
+  ): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
@@ -92,10 +101,19 @@ export class MatchingService {
           SELECT technician_id FROM orders
           WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[])
         )
+        AND ($7::uuid IS NULL OR tp.id = $7)
       ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
-      [order.serviceId, order.serviceZoneId, order.addressId, order.id, batchSize, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+      [
+        order.serviceId,
+        order.serviceZoneId,
+        order.addressId,
+        order.id,
+        batchSize,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        requestedTechnicianId ?? null,
+      ],
     );
   }
 
@@ -120,8 +138,17 @@ export class MatchingService {
     }
 
     const batchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+    // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
+    // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
+    // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
+    let candidates =
+      nextRound === 1 && order.requestedTechnicianId
+        ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId)
+        : [];
+    if (candidates.length === 0) {
+      candidates = await this.findEligibleTechnicians(order, batchSize);
+    }
     // مفيش فنيين متاحين (سواء أول جولة أو بعد ما الكل رفض) = مفيش داعي نستنى — نلغي فوراً
-    const candidates = await this.findEligibleTechnicians(order, batchSize);
     if (candidates.length === 0) {
       await this.cancelForNoTechnicians(order);
       return { dispatched: 0 };

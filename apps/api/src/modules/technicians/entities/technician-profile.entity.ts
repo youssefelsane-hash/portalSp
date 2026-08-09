@@ -50,6 +50,11 @@ export class TechnicianProfile {
   @Column({ name: 'years_of_experience', type: 'smallint', default: 0 })
   yearsOfExperience: number;
 
+  // موجود في الـ schema من أول يوم (migration 0005) بس مش متربط في الـ entity قبل كده —
+  // أول استخدام حقيقي هو بروفايل الفني العام (راجع technicians/README.md).
+  @Column({ type: 'text', nullable: true })
+  bio: string | null;
+
   @Column({
     name: 'current_level',
     type: 'enum',
