@@ -20,8 +20,11 @@ import { WalletsService } from './wallets.service';
 import { WalletProvisioningListener } from './wallet-provisioning.listener';
 import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
 import { PaymobGatewayService } from './gateways/paymob-gateway.service';
+import { FAWRY_GATEWAY } from './gateways/fawry-gateway.interface';
+import { FawryGatewayService } from './gateways/fawry-gateway.service';
 import { Payment } from './entities/payment.entity';
 import { Payout } from './entities/payout.entity';
+import { PayoutOrderItem } from './entities/payout-order-item.entity';
 import { Refund } from './entities/refund.entity';
 import { Wallet } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
@@ -29,7 +32,19 @@ import { WebhookEvent } from './entities/webhook-event.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Wallet, WalletTransaction, Payment, Refund, Payout, Order, OrderStatusHistory, User, WebhookEvent, TechnicianProfile]),
+    TypeOrmModule.forFeature([
+      Wallet,
+      WalletTransaction,
+      Payment,
+      Refund,
+      Payout,
+      PayoutOrderItem,
+      Order,
+      OrderStatusHistory,
+      User,
+      WebhookEvent,
+      TechnicianProfile,
+    ]),
     CustomersModule,
     TechniciansModule,
     CatalogModule,
@@ -47,6 +62,8 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     // PaymobGatewayService نفسها بتتصرف كـ"معطّلة" لما تلاقي نفسها من غير مفاتيح — أبسط من
     // provider شرطي في NestJS DI، وبيدي رسالة خطأ أوضح بتقول بالظبط أي env var ناقص).
     { provide: PAYMENT_GATEWAY, useClass: PaymobGatewayService },
+    // بوابة تانية جنب Paymob (كود مرجعي فوري) — provider منفصل بالكامل، مش بديل لـ PAYMENT_GATEWAY.
+    { provide: FAWRY_GATEWAY, useClass: FawryGatewayService },
   ],
   exports: [WalletsService, PaymentsService, PayoutsService],
 })

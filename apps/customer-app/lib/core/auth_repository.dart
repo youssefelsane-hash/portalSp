@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
+import 'push_notification_service.dart';
 
 class BaytakUser {
   final String id;
@@ -60,6 +63,7 @@ class AuthRepository extends ChangeNotifier {
     try {
       await _refresh();
       await _fetchMe();
+      _registerPushDeviceInBackground();
     } catch (_) {
       _accessToken = null;
       _user = null;
@@ -72,6 +76,11 @@ class AuthRepository extends ChangeNotifier {
   Future<void> _fetchMe() async {
     final data = await apiRequest('GET', '/auth/me', accessToken: _accessToken);
     _user = BaytakUser.fromJson(data!);
+  }
+
+  // Fire-and-forget — تسجيل جهاز push مش لازم يأخّر أو يفشّل تسجيل الدخول نفسه.
+  void _registerPushDeviceInBackground() {
+    unawaited(PushNotificationService.registerCurrentDevice(authedRequest));
   }
 
   Future<void> requestOtp(String phoneNumber) async {
@@ -87,6 +96,7 @@ class AuthRepository extends ChangeNotifier {
     _accessToken = data!['access_token'] as String;
     await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);
     await _fetchMe();
+    _registerPushDeviceInBackground();
     notifyListeners();
   }
 

@@ -30,6 +30,8 @@
 
 - **صور في الشات — كانت فجوة موثّقة ("صور/مرفقات في الرسائل")، اتقفلت**: زرار صورة جديد في `ChatScreen` بيستخدم `apiUpload`/`authedUpload` الموجودين بالفعل (نفس دوال رفع صور الطلب `media_upload_live_test.dart`) على `POST /chat/threads/:id/messages/image` (تفاصيل الباك-إند الكاملة في `../api/src/modules/chat/README.md`). فقاعة الرسالة بترسم `Image.network` لو `message_type=image`. **اتعمله اختبار حي كامل** (`test_live/chat_image_live_test.dart`): فني رفع صورة (`test_live/fixtures/test-1x1.png`)، العميل استقبلها لحظياً عبر WebSocket بنفس الـ `file_url` بالظبط.
 
+- **إشعارات push — `lib/core/push_notification_service.dart` جديد — كانت فجوة موثّقة صراحة في `docs/03-external-integrations.md` §4.1، اتقفلت جزئياً (كود، مش ملفات إعداد)**: نفس الكود بالظبط الموجود في `apps/customer-app` (تفاصيل كاملة هناك) — `PushNotificationService.registerCurrentDevice()` بيتنادى fire-and-forget من `AuthRepository.init()`/`verifyOtp()`، `Firebase.initializeApp()` → إذن إشعارات → توكن FCM → `POST /devices` مع `device_id` ثابت. فشل صامت ومقصود من غير ملفات Firebase حقيقية — **اتأكد مباشرة** (مش بس افتراض) بتمرير stub لـ`authedRequest` واستدعاء `registerCurrentDevice` منفرد: رمى خطأ منصة متوقع (`Binding has not yet been initialized` — مفيش platform channel حقيقي في بيئة `flutter test`) واتلقّط وسُجّل بس، مرجعش يفشّل الاستدعاء. Android/iOS: نفس الإعداد الشرطي الموجود في `apps/customer-app` (بلجن `com.google.gms.google-services` شرطي بوجود `google-services.json`).
+
 ## لسه من غير — مهم إنها موثّقة صراحة قبل أي اعتماد إنتاجي
 
 - **باقي الميزات الفعلية**: ~~ملاحة (توجيه فعلي بالخريطة)~~ — فتح تطبيق خرائط خارجي بمسار اتجاهات جاهز اتقفل (تفاصيل فوق). turn-by-turn *جوّه* التطبيق نفسه (خريطة embedded، صوت، إلخ) لسه لأ — قرار نطاق متعمد (التطبيقات الجاهزة بتعملها أحسن).

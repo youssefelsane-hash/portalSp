@@ -2,6 +2,7 @@ import { Wallet } from '../entities/wallet.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
 import { Payment } from '../entities/payment.entity';
 import { Payout } from '../entities/payout.entity';
+import { PayoutOrderItem } from '../entities/payout-order-item.entity';
 import { Refund } from '../entities/refund.entity';
 
 export interface WalletResponseDto {
@@ -79,6 +80,12 @@ export interface CardPaymentResponseDto {
   redirect_url: string;
 }
 
+export interface FawryReferenceResponseDto {
+  payment: PaymentResponseDto;
+  reference_number: string;
+  expires_at: string;
+}
+
 export interface PayoutResponseDto {
   id: string;
   payout_number: string;
@@ -119,6 +126,20 @@ export function toAdminPayoutResponseDto(row: { payout: Payout; technicianCode: 
     technician_name: row.technicianName,
     technician_user_id: row.technicianUserId,
     rejection_reason: row.payout.rejectionReason,
+  };
+}
+
+export interface PayoutOrderItemResponseDto {
+  order_id: string;
+  earning_cents: number;
+  commission_cents: number;
+}
+
+export function toPayoutOrderItemResponseDto(item: PayoutOrderItem): PayoutOrderItemResponseDto {
+  return {
+    order_id: item.orderId,
+    earning_cents: item.earningCents,
+    commission_cents: item.commissionCents,
   };
 }
 

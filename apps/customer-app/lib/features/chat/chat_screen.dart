@@ -17,9 +17,18 @@ String _resolveMediaUrl(String fileUrl) {
 }
 
 class ChatScreen extends StatefulWidget {
-  final String orderId;
+  final String? orderId;
+  final String appBarTitle;
 
-  const ChatScreen({super.key, required this.orderId});
+  const ChatScreen({super.key, required String orderId})
+      : orderId = orderId,
+        appBarTitle = 'الشات مع الفني';
+
+  // خيط الدعم العام (support_chat) — مفيش orderId، الـ thread بيتحل بـ get-or-create
+  // (ChatRepository.getOrCreateSupportThreadId) بدل ChatRepository.getThreadIdForOrder.
+  const ChatScreen.support({super.key})
+      : orderId = null,
+        appBarTitle = 'شات الدعم';
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -48,7 +57,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _load(String accessToken) async {
     try {
-      final threadId = await _repository.getThreadIdForOrder(widget.orderId);
+      final threadId = widget.orderId != null
+          ? await _repository.getThreadIdForOrder(widget.orderId!)
+          : await _repository.getOrCreateSupportThreadId();
       final history = await _repository.listMessages(threadId);
       if (!mounted) return;
       setState(() {
@@ -118,7 +129,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('الشات مع الفني')),
+        appBar: AppBar(title: Text(widget.appBarTitle)),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null && _threadId == null

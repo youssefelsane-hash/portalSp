@@ -35,4 +35,38 @@ class PaymentsRepository {
     );
     return data!;
   }
+
+  // بيرجّع {payment, redirect_url} — الكولر مسؤول يفتح redirect_url في WebView (نفس نمط
+  // "الباك-إند جاهز، مفيش ولا مسؤولية تسوية هنا" — القفل النهائي بيحصل عبر webhook مش رد الـ endpoint ده).
+  Future<String> payWithCard(String orderId) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/pay-with-card',
+      extraHeaders: {'Idempotency-Key': _generateIdempotencyKey()},
+    );
+    return data!['redirect_url'] as String;
+  }
+
+  // بيرجّع كود مرجعي فوري + تاريخ انتهاء — العميل بياخد الكود ويدفعه كاش في أقرب منفذ فوري.
+  // مفيش WebView هنا خالص، القفل النهائي بردو عبر webhook مش رد الـ endpoint ده.
+  Future<FawryReference> payWithFawryReference(String orderId) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/pay-with-fawry-reference',
+      extraHeaders: {'Idempotency-Key': _generateIdempotencyKey()},
+    );
+    return FawryReference.fromJson(data!);
+  }
+}
+
+class FawryReference {
+  final String referenceNumber;
+  final DateTime expiresAt;
+
+  FawryReference({required this.referenceNumber, required this.expiresAt});
+
+  factory FawryReference.fromJson(Map<String, dynamic> json) => FawryReference(
+        referenceNumber: json['reference_number'] as String,
+        expiresAt: DateTime.parse(json['expires_at'] as String),
+      );
 }

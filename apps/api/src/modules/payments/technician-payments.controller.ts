@@ -6,7 +6,7 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 import { RequestPayoutDto } from './dto/request-payout.dto';
-import { toPaymentResponseDto, toPayoutResponseDto } from './dto/payments-response.dto';
+import { toPaymentResponseDto, toPayoutOrderItemResponseDto, toPayoutResponseDto } from './dto/payments-response.dto';
 
 @Controller()
 @Roles(UserType.TECHNICIAN)
@@ -30,5 +30,11 @@ export class TechnicianPaymentsController {
   async listPayouts(@CurrentUser() user: JwtPayload) {
     const payouts = await this.payoutsService.listForTechnician(user.sub);
     return payouts.map(toPayoutResponseDto);
+  }
+
+  @Get('technician/payouts/:id/order-items')
+  async listPayoutOrderItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const items = await this.payoutsService.listOrderItemsForTechnician(user.sub, id);
+    return items.map(toPayoutOrderItemResponseDto);
   }
 }

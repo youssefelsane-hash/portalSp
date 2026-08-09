@@ -7,6 +7,7 @@ import type {
   ComplaintMessageResponseDto,
   ComplaintResolutionType,
   ComplaintResponseDto,
+  ComplaintSeverity,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -39,6 +40,8 @@ const RESOLUTION_TYPES: ComplaintResolutionType[] = [
   'technician_suspended',
   'no_action',
 ];
+
+const SEVERITY_LEVELS: ComplaintSeverity[] = ['low', 'medium', 'high', 'critical'];
 
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -157,6 +160,19 @@ export default function ComplaintDetailPage() {
     }
   }
 
+  async function handleSeverityChange(severity: ComplaintSeverity) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/complaints/${id}/severity`, { method: 'PATCH', body: JSON.stringify({ severity }) });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   if (error && !complaint) {
     return (
       <AppShell>
@@ -190,6 +206,21 @@ export default function ComplaintDetailPage() {
         <Badge variant={complaintSeverityBadgeVariant(complaint.severity)}>
           {COMPLAINT_SEVERITY_LABELS[complaint.severity]}
         </Badge>
+        {complaint.complaint_status !== 'closed' && (
+          <SelectNative
+            aria-label="تعديل التصنيف"
+            className="w-fit"
+            value={complaint.severity}
+            disabled={isSaving}
+            onChange={(e) => handleSeverityChange(e.target.value as ComplaintSeverity)}
+          >
+            {SEVERITY_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {COMPLAINT_SEVERITY_LABELS[level]}
+              </option>
+            ))}
+          </SelectNative>
+        )}
       </div>
 
       {error && <p className="mb-4 text-destructive">{error}</p>}

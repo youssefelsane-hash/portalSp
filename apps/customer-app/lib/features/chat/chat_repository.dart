@@ -13,6 +13,12 @@ class ChatRepository {
     return data!['id'] as String;
   }
 
+  // get-or-create — خيط دعم عام واحد دايم لكل عميل (مش لكل طلب)، نفس الـ id في كل نداء.
+  Future<String> getOrCreateSupportThreadId() async {
+    final data = await auth.authedRequest('GET', '/chat/support-thread');
+    return data!['id'] as String;
+  }
+
   Future<List<ChatMessage>> listMessages(String threadId) async {
     final items = await auth.authedRequestList('/chat/threads/$threadId/messages');
     return items.map(ChatMessage.fromJson).toList();

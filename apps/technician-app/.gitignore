@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase — ملفات إعداد حقيقية لمشروع Firebase معيّن، مش لأنها سرّية بالضرورة، لكن نفس منطق
+# .env في المشروع كله: قيم بيئة حقيقية متحطش في git. راجع docs/03-external-integrations.md §4.1.
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist

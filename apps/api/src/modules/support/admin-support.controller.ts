@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { RejectComplaintDto, ResolveComplaintDto } from './dto/file-complaint.dto';
+import { UpdateComplaintSeverityDto } from './dto/update-complaint-severity.dto';
 import { toComplaintResponseDto } from './dto/complaint-response.dto';
 import { SupportService } from './support.service';
 
@@ -50,5 +51,18 @@ export class AdminSupportController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toComplaintResponseDto(await this.supportService.close(user.sub, id, audit));
+  }
+
+  // التصنيف الأولي وقت الفتح بقى تلقائي حسب الفئة (SEVERITY_BY_CATEGORY في support.service.ts)،
+  // بس القرار النهائي لسه لفريق الدعم — ده بيسمح بتعديله بعد المراجعة.
+  @Patch(':id/severity')
+  @RequirePermission('complaints.resolve')
+  async updateSeverity(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateComplaintSeverityDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toComplaintResponseDto(await this.supportService.updateSeverity(user.sub, id, dto, audit));
   }
 }

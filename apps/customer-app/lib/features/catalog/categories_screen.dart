@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../chat/chat_screen.dart';
 import '../orders/orders_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
@@ -47,6 +48,13 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
               tooltip: 'طلباتي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const OrdersScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.support_agent_outlined),
+              tooltip: 'الدعم',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ChatScreen.support()),
               ),
             ),
             IconButton(

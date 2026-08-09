@@ -17,7 +17,8 @@ import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/w
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { AddComplaintMessageDto, FileComplaintDto, RejectComplaintDto, ResolveComplaintDto } from './dto/file-complaint.dto';
-import { Complaint, COMPLAINT_DEFAULT_SLA_HOURS, ComplaintSeverity, ComplaintStatus } from './entities/complaint.entity';
+import { UpdateComplaintSeverityDto } from './dto/update-complaint-severity.dto';
+import { Complaint, COMPLAINT_DEFAULT_SLA_HOURS, ComplaintCategory, ComplaintSeverity, ComplaintStatus } from './entities/complaint.entity';
 import { ComplaintAttachment } from './entities/complaint-attachment.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
 import { canTransitionComplaint } from './complaint-state-machine';
@@ -33,6 +34,26 @@ const SLA_HOURS_BY_SEVERITY: Record<ComplaintSeverity, number> = {
   [ComplaintSeverity.HIGH]: 8,
   [ComplaintSeverity.MEDIUM]: COMPLAINT_DEFAULT_SLA_HOURS,
   [ComplaintSeverity.LOW]: 48,
+};
+
+/**
+ * كانت فجوة موثّقة صراحة ("كله medium ثابت، التصنيف الدقيق مسؤولية فريق الدعم يدوياً وقت
+ * المراجعة") — التصنيف الأولي دلوقتي بيتحدد حسب الفئة (تصنيف منطقي بديهي: خطر جسدي/مالي حقيقي
+ * = أعلى، جودة خدمة = وسط)، وفريق الدعم لسه قادر يعدّله يدوياً بعد المراجعة عبر
+ * `PATCH /admin/complaints/:id/severity` (تحت) — التصنيف التلقائي نقطة بداية أدق من "medium"
+ * ثابت للكل، مش بديل نهائي عن مراجعة بشرية.
+ */
+const SEVERITY_BY_CATEGORY: Record<ComplaintCategory, ComplaintSeverity> = {
+  [ComplaintCategory.SAFETY_CONCERN]: ComplaintSeverity.CRITICAL,
+  [ComplaintCategory.FRAUD]: ComplaintSeverity.CRITICAL,
+  [ComplaintCategory.DAMAGE_TO_PROPERTY]: ComplaintSeverity.CRITICAL,
+  [ComplaintCategory.NO_SHOW]: ComplaintSeverity.HIGH,
+  [ComplaintCategory.OVERCHARGING]: ComplaintSeverity.HIGH,
+  [ComplaintCategory.RUDE_BEHAVIOR]: ComplaintSeverity.HIGH,
+  [ComplaintCategory.POOR_QUALITY]: ComplaintSeverity.MEDIUM,
+  [ComplaintCategory.INCOMPLETE_WORK]: ComplaintSeverity.MEDIUM,
+  [ComplaintCategory.LATE_ARRIVAL]: ComplaintSeverity.MEDIUM,
+  [ComplaintCategory.OTHER]: ComplaintSeverity.LOW,
 };
 
 @Injectable()
@@ -89,7 +110,7 @@ export class SupportService {
 
     const complaint = await this.dataSource.transaction(async (manager) => {
       const complaintNumber = await this.nextComplaintNumber(manager);
-      const severity = ComplaintSeverity.MEDIUM; // التصنيف الدقيق مسؤولية فريق الدعم وقت المراجعة
+      const severity = SEVERITY_BY_CATEGORY[dto.category];
       const complaint = manager.create(Complaint, {
         complaintNumber,
         orderId: dto.order_id ?? null,
@@ -310,6 +331,43 @@ export class SupportService {
       entityId: complaint.id,
       oldValues: { complaint_status: previousStatus },
       newValues: { complaint_status: complaint.complaintStatus },
+      meta,
+    });
+    return complaint;
+  }
+
+  /**
+   * تعديل يدوي للتصنيف بعد المراجعة — التصنيف الأولي عند الفتح تلقائي حسب الفئة
+   * (SEVERITY_BY_CATEGORY فوق)، بس القرار النهائي لسه لفريق الدعم زي ما كان موثّق دايماً.
+   * بيعيد حساب slaDueAt من نفس لحظة التعديل (مش من وقت الفتح الأصلي) — لو شكوى اتصعّدت
+   * لـ critical بعد ساعتين من فتحها، عندها 4 ساعات جديدة من دلوقتي مش من الأول.
+   */
+  async updateSeverity(
+    adminUserId: string,
+    complaintId: string,
+    dto: UpdateComplaintSeverityDto,
+    meta?: AuditActorMeta,
+  ): Promise<Complaint> {
+    const complaint = await this.findOrThrow(complaintId);
+    if (complaint.complaintStatus === ComplaintStatus.CLOSED) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تعدّل تصنيف شكوى مقفولة', HttpStatus.CONFLICT);
+    }
+    const previousSeverity = complaint.severity;
+    if (previousSeverity === dto.severity) {
+      throw new ApiException(ErrorCode.VAL_001, 'التصنيف ده نفس التصنيف الحالي أصلاً', HttpStatus.CONFLICT);
+    }
+    complaint.severity = dto.severity;
+    complaint.slaDueAt = new Date(Date.now() + SLA_HOURS_BY_SEVERITY[dto.severity] * 60 * 60 * 1000);
+    await this.complaints.save(complaint);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'complaint.severity_updated',
+      entityType: 'complaint',
+      entityId: complaint.id,
+      oldValues: { severity: previousSeverity },
+      newValues: { severity: complaint.severity, sla_due_at: complaint.slaDueAt.toISOString() },
       meta,
     });
     return complaint;

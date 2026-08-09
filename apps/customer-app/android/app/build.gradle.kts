@@ -43,3 +43,11 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// بلجن Firebase بيفشّل الـ build بصمت غريب لو اتفعّل من غير الملف ده موجود — شرطي عشان أي حد
+// يقدر يعمل `flutter build`/`flutter run` عادي من غير مشروع Firebase حقيقي لسه. لما تحط
+// google-services.json حقيقي هنا (راجع docs/03-external-integrations.md §4.1)، هيتفعّل تلقائي
+// من غير أي تعديل تاني.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}

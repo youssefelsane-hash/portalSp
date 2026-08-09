@@ -10,7 +10,12 @@ import { PayoutsService } from './payouts.service';
 import { ListPayoutsQueryDto } from './dto/list-payouts-query.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
-import { toAdminPayoutResponseDto, toPayoutResponseDto, toRefundResponseDto } from './dto/payments-response.dto';
+import {
+  toAdminPayoutResponseDto,
+  toPayoutOrderItemResponseDto,
+  toPayoutResponseDto,
+  toRefundResponseDto,
+} from './dto/payments-response.dto';
 
 // كل المسارات هنا إدارية بحتة — راجع docs/02-data-dictionary.md §13.7
 @Controller('admin')
@@ -27,6 +32,14 @@ export class AdminPaymentsController {
   async listPayouts(@Query() query: ListPayoutsQueryDto) {
     const rows = await this.payoutsService.listForAdmin(query.status);
     return rows.map(toAdminPayoutResponseDto);
+  }
+
+  // كانت فجوة موثّقة: payout_order_items موجود في الـ schema من أول يوم بس مفيش حد كان بيملاه —
+  // تفاصيل كاملة في ../../payouts/README.md.
+  @Get('payouts/:id/order-items')
+  async listPayoutOrderItems(@Param('id', ParseUUIDPipe) id: string) {
+    const items = await this.payoutsService.listOrderItems(id);
+    return items.map(toPayoutOrderItemResponseDto);
   }
 
   @Post('orders/:id/refund')
