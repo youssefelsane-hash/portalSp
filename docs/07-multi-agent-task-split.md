@@ -42,14 +42,14 @@
 - **فجوة موثّقة #2 اتحلّت**: الأسماء المعتمدة "شغلانة سريعة"/"اعتماد"/"طوارئ" (`BookingMode.labelAr` في `apps/customer-app/lib/features/catalog/models.dart`).
 - **بونص خارج النطاق بس كان لازم يتصلح عشان أي اختبار حي يشتغل أصلاً**: `apps/api/.env.example` كان بيكسر تشغيل السيرفر خالص لو اتنسخ زي ما هو (`cp .env.example .env`) — تفاصيل الإصلاح في `docs/03-external-integrations.md`.
 
-**تفاصيل كاملة**: `apps/api/src/modules/orders/README.md` (§هيكل الحجز الجديد)، `apps/api/src/modules/catalog/README.md`، `apps/api/src/modules/technicians/README.md`، `apps/customer-app/README.md`.
+**تفاصيل كاملة**: `apps/api/src/modules/orders/README.md` (§هيكل الحجز الجديد)، `apps/api/src/modules/catalog/README.md`، `apps/api/src/modules/technicians/README.md`، `apps/customer-app/README.md`. **اتدمج فعلياً في `main` عبر PR #18.**
 
 **مُتعمَّد برّه نطاق الجزء ده، مخطط للجزء ج**: `matching.service.ts` لسه ما بيستخدمش `booking_mode=emergency` (بث بموجات، تجاهل `is_available`) ولا `requested_technician_company_id` (تفضيل فنيي الشركة) في خوارزمية التوزيع الفعلية — البنية التحتية والتحقق جاهزين، الاستهلاك في المطابقة نفسها لسه.
 
 **ملحوظة بيئة صادقة**: Flutter SDK مش موجود في الـ container بتاع السيشن دي (`/opt/flutter` غير موجود رغم كلام `CLAUDE.md`) — تغييرات `apps/customer-app`/`apps/technician-app` اتعملها مراجعة يدوية دقيقة بس، **مش** `flutter analyze`/`flutter test` فعلي. أي سيشن جاية عندها SDK حقيقي لازم تشغّلهم على أول حاجة (تفاصيل في `apps/customer-app/README.md`).
 
 ### الجزء ب — صلاحيات الأدمن الموسّعة (عمولة ديناميكية + تعيين قسري)
-**الحالة**: ⬜ لسه ما بدأش
+**الحالة**: 🔄 قيد التنفيذ — بدأ 2026-08-11 (نفس السيشن، بعد ما الجزء أ اتدمج في `main`، فرع `hgotr7`)
 
 يغطي `docs/06` §2 كامل:
 - عمولة/نسبة قابلة للتحكم الكامل من الأدمن **حسب `booking_mode`** (فردي/فريق/طوارئ) — لازم تستنى الجزء أ يخلص أول لإن `booking_mode` نفسه هيتزرع فيه (راجع الجزء أ قبل ما تبدأ، ولو لسه 🔄 اشتغل على حاجة تانية أو استنى).
