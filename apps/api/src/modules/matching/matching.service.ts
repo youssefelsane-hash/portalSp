@@ -7,7 +7,7 @@ import { DataSource, In, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
-import { Order, OrderStatus } from '../orders/entities/order.entity';
+import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
@@ -23,6 +23,9 @@ import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExp
 const BATCH_SIZE_FALLBACK = 5;
 const RESPONSE_TIMEOUT_SECONDS_FALLBACK = 30;
 const MAX_ROUNDS_FALLBACK = 4;
+// هيكل الحجز الجديد (docs/06 §1.7، docs/07 الجزء ج) — "طوارئ": دفعة أكبر ("أول عشرة" بالحرف
+// من كلام المالك) + تجاهل فلتر is_available/is_on_duty في findEligibleTechnicians تحت.
+const EMERGENCY_BATCH_SIZE_FALLBACK = 10;
 
 interface EligibleTechnicianRow {
   technician_id: string;
@@ -76,11 +79,18 @@ export class MatchingService {
    * `requestedTechnicianId` (اختياري، "إعادة الحجز") — بيقيّد النتيجة لفني واحد بس لو اتبعت،
    * نفس شروط الأهلية العادية بالظبط (خدمة/منطقة/متاح/معتمد/مش مشغول). لو رجعت فاضية، الكولر
    * (`dispatchNextRound`) مسؤول يرجع يسأل من غير القيد ده بدل ما يعتبرها "مفيش فنيين خالص".
+   *
+   * `ignoreAvailabilityFilter` (docs/06 §1.7 — بث "طوارئ") — لو `true`، بيتجاهل شرط
+   * `is_available`/`is_on_duty` تمامًا (المالك: "بيوصل لكل الناس القريبة منه بلا استثناء...
+   * طالما فاتح نت والإشعار ممكن يوصله"). باقي شروط الأهلية (معتمد، ليه موقع، مش مشغول بطلب
+   * نشط بالفعل، مؤهّل للخدمة/المنطقة) بتفضل زي ما هي — "بلا استثناء" في كلام المالك بيقصد
+   * حالة التوافر بس، مش قدرة الفني الفعلية إنه يستلم طلب أصلاً.
    */
   private findEligibleTechnicians(
     order: Order,
     batchSize: number,
     requestedTechnicianId?: string | null,
+    ignoreAvailabilityFilter = false,
   ): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
@@ -92,8 +102,7 @@ export class MatchingService {
       JOIN addresses a ON a.id = $3
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
       WHERE tp.verification_status = 'approved'
-        AND tp.is_available = true
-        AND tp.is_on_duty = true
+        AND ($8::boolean OR (tp.is_available = true AND tp.is_on_duty = true))
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
@@ -113,6 +122,7 @@ export class MatchingService {
         batchSize,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         requestedTechnicianId ?? null,
+        ignoreAvailabilityFilter,
       ],
     );
   }
@@ -137,16 +147,21 @@ export class MatchingService {
       return { dispatched: 0 };
     }
 
-    const batchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+    // هيكل الحجز الجديد (docs/06 §1.7) — "طوارئ" بتستخدم دفعة أكبر (افتراضي 10، "أول عشرة"
+    // بالحرف من كلام المالك) وبتتجاهل فلتر التوافر العادي تمامًا (تفاصيل في findEligibleTechnicians).
+    const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
+    const batchSize = isEmergency
+      ? await this.settingsService.getNumber('matching.emergency_batch_size', EMERGENCY_BATCH_SIZE_FALLBACK)
+      : await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
     // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
     // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
     // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
     let candidates =
       nextRound === 1 && order.requestedTechnicianId
-        ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId)
+        ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId, isEmergency)
         : [];
     if (candidates.length === 0) {
-      candidates = await this.findEligibleTechnicians(order, batchSize);
+      candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
     }
     // مفيش فنيين متاحين (سواء أول جولة أو بعد ما الكل رفض) = مفيش داعي نستنى — نلغي فوراً
     if (candidates.length === 0) {
