@@ -85,12 +85,17 @@ export class MatchingService {
    * طالما فاتح نت والإشعار ممكن يوصله"). باقي شروط الأهلية (معتمد، ليه موقع، مش مشغول بطلب
    * نشط بالفعل، مؤهّل للخدمة/المنطقة) بتفضل زي ما هي — "بلا استثناء" في كلام المالك بيقصد
    * حالة التوافر بس، مش قدرة الفني الفعلية إنه يستلم طلب أصلاً.
+   *
+   * `preferredCompanyId` (docs/06 §1.5 — "اعتماد" بشركة محدّدة) — بيقيّد النتيجة لفنيي نفس
+   * الشركة بس لو اتبعت، نفس فلسفة `requestedTechnicianId` بالحرف (تفضيل بس، مش ضمان — لو
+   * الشركة مالهاش حد مؤهّل متاح، `dispatchNextRound` يرجع يسأل من غير القيد).
    */
   private findEligibleTechnicians(
     order: Order,
     batchSize: number,
     requestedTechnicianId?: string | null,
     ignoreAvailabilityFilter = false,
+    preferredCompanyId?: string | null,
   ): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
@@ -111,6 +116,7 @@ export class MatchingService {
           WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[])
         )
         AND ($7::uuid IS NULL OR tp.id = $7)
+        AND ($9::uuid IS NULL OR tp.company_id = $9)
       ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
@@ -123,6 +129,7 @@ export class MatchingService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         requestedTechnicianId ?? null,
         ignoreAvailabilityFilter,
+        preferredCompanyId ?? null,
       ],
     );
   }
@@ -160,6 +167,18 @@ export class MatchingService {
       nextRound === 1 && order.requestedTechnicianId
         ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId, isEmergency)
         : [];
+    // "اعتماد" بشركة محدّدة (docs/06 §1.5، docs/07 الجزء أ — كانت فجوة موثّقة صراحة، اتقفلت):
+    // أول جولة بس بتحاول تعرض حصريًا على فنيي الشركة المطلوبة. لو محدش مؤهّل متاح فيها، بيرجع
+    // فوراً للتوزيع العادي — نفس فلسفة "إعادة الحجز" بالحرف، تفضيل مش ضمان.
+    if (candidates.length === 0 && nextRound === 1 && order.requestedTechnicianCompanyId) {
+      candidates = await this.findEligibleTechnicians(
+        order,
+        batchSize,
+        null,
+        isEmergency,
+        order.requestedTechnicianCompanyId,
+      );
+    }
     if (candidates.length === 0) {
       candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
     }

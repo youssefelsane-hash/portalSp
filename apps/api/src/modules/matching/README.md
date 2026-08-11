@@ -65,4 +65,10 @@
 
 **اتعمله اختبار حي كامل**: فني حقيقي اتحط `is_available=false` (مش قابل شغل) — طلب `booking_mode=team` عادي ميلقاش أي فني ويتلغي أوتوماتيك (`cancelled_by_system`)؛ **نفس الفني بالظبط**، لسه `is_available=false`، طلب `booking_mode=emergency` لقاه فعلاً وظهر في `GET /technician/orders/available`. أدمن بدور `ops_manager` استلم إشعار `order_emergency_created` فوري بمجرد إنشاء الطلب، أدمن `super_admin` (مالوش نفس الدور في قاعدة التوجيه المزروعة) محدش وصله إشعار — يثبت إن التوجيه فعلاً بالدور مش لكل الأدمنز.
 
+## تفضيل شركة محدّدة لطلبات "اعتماد" — `requested_technician_company_id` — كانت فجوة موثّقة، اتقفلت
+
+`findEligibleTechnicians()` بقت تاخد `preferredCompanyId` اختياري (`AND ($9::uuid IS NULL OR tp.company_id = $9)`) — نفس فلسفة `requestedTechnicianId` بالحرف. `dispatchNextRound()` بيجرّب بالترتيب: **أول جولة بس** — (1) فني بعينه لو `requestedTechnicianId` موجود، وإلا (2) فنيي الشركة المطلوبة لو `requestedTechnicianCompanyId` موجود، وإلا (3) التوزيع العادي. أي مرحلة رجّعت فاضية بيكمّل للي بعدها فورًا بدل ما يعتبرها "مفيش فنيين خالص" — **تفضيل بس، مش ضمان**، الطلب مبيتلغيش بسبب إن شركة بعينها مالهاش حد متاح.
+
+**اتعمله اختبار حي حاسم**: فنيّين اتنين مؤهّلين لنفس الخدمة/المنطقة، واحد بس (`TECH`) عضو الشركة المطلوبة — طلب `booking_mode=team` بـ`requested_technician_company_id` وصل لـ`TECH` بس (ظهر في `GET /technician/orders/available` بتاعه)، الفني التاني (مؤهّل بالظبط بس مش عضو الشركة) **محدّش وصله** رغم أهليته الكاملة. لما `TECH` (العضو الوحيد) بقى `is_available=false`، طلب تاني بنفس تفضيل الشركة **رجع للتوزيع العادي فورًا** ووصل للفني التاني — إثبات إن الـfallback شغال ومفيش إلغاء غلط.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
