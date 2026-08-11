@@ -1,7 +1,8 @@
-import { Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
 import { CatalogService } from './catalog.service';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
+import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { EstimateQueryDto, ListServicesDto } from './dto/list-services.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
 
@@ -40,5 +41,27 @@ export class CatalogController {
   async listAddons(@Param('id', ParseUUIDPipe) id: string) {
     const addons = await this.catalogService.findAddons(id);
     return addons.map(toServiceAddonResponseDto);
+  }
+
+  // محرك الإنتاجية (docs/06 §3.3-§3.5) — المدة المتوقعة بس، **من غير أي تكلفة داخلية** (§3.6
+  // صريح إنها مش المفروض تتعرض للعميل). standard_data_id لازم يبقى بتاع نفس الخدمة (:id) —
+  // بيترفض 404 واضح لو مش كده، مش بس افتراض ضمني.
+  @Public()
+  @Post('services/:id/estimate-duration')
+  async estimateDuration(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EstimateDurationDto) {
+    const result = await this.catalogService.estimateDuration(
+      id,
+      dto.standard_data_id,
+      dto.requested_units,
+      dto.assigned_technicians,
+      dto.assigned_assistants,
+    );
+    return {
+      estimated_days: result.estimated_days,
+      unit_ar: result.unit_ar,
+      execution_type_ar: result.execution_type_ar,
+      assigned_technicians: result.assigned_technicians,
+      assigned_assistants: result.assigned_assistants,
+    };
   }
 }
