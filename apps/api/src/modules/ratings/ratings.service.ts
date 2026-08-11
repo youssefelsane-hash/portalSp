@@ -49,7 +49,7 @@ export class RatingsService {
     const rating = await this.createRating(order.id, userId, technicianUserId, RatingType.CUSTOMER_TO_TECHNICIAN, dto);
     // مهمة خلفية (§14.4) — average_rating/total_ratings_count (الفني اللي اتقيّم) وaverage_rating_given
     // (العميل اللي قيّم) بتتحدّثوا هنا مش جوّه معاملة التقييم — الاتنين بره الـtransaction بنفس الفلسفة.
-    await this.technicianStatsService.enqueueRecalculation(order.technicianId);
+    await this.technicianStatsService.enqueueRecalculation(order.technicianId, order.serviceId);
     await this.customerStatsService.enqueueRecalculation(customerProfile.id);
 
     if (rating.overallRating <= RatingsService.LOW_RATING_THRESHOLD) {

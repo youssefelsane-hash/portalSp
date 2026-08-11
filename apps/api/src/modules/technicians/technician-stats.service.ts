@@ -12,9 +12,9 @@ export class TechnicianStatsService {
 
   constructor(@InjectQueue(TECHNICIAN_STATS_QUEUE) private readonly statsQueue: Queue<RecalculateStatsJobData>) {}
 
-  async enqueueRecalculation(technicianProfileId: string): Promise<void> {
+  async enqueueRecalculation(technicianProfileId: string, serviceId?: string): Promise<void> {
     try {
-      await this.statsQueue.add(RECALCULATE_STATS_JOB, { technicianProfileId });
+      await this.statsQueue.add(RECALCULATE_STATS_JOB, { technicianProfileId, serviceId });
     } catch (err) {
       this.logger.warn(`فشل جدولة إعادة حساب إحصائيات الفني ${technicianProfileId}: ${err instanceof Error ? err.message : err}`);
     }

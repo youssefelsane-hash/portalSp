@@ -6,4 +6,9 @@ export const RECALCULATE_STATS_JOB = 'recalculate-stats';
 
 export interface RecalculateStatsJobData {
   technicianProfileId: string;
+  // اختياري — لو موجود، الـ processor بيحدّث كمان completed_count/average_rating على صف
+  // technician_services (technician_id, service_id) ده بالتحديد. technician_services.completed_count/
+  // average_rating كانت فجوة حقيقية من نفس فئة customer_profiles (راجع customers/README.md) — عمود
+  // موجود من migration 0006 من غير أي كود بيكتبله قيمة أبداً.
+  serviceId?: string;
 }
