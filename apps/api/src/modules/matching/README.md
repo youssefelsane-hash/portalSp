@@ -54,4 +54,15 @@
 
 طلب صريح ضمن اقتراحات بروفايل الفني — العميل يقدر يطلب نفس الفني اللي اشتغل معاه قبل كده (`orders.requested_technician_id`, migration `0046`). `findEligibleTechnicians()` بقت تاخد `requestedTechnicianId` اختياري — لو موجود، بتضيف `AND tp.id = $7` لنفس شروط الأهلية العادية بالظبط. `dispatchNextRound()` بيستخدمها **في أول جولة بس** (`nextRound === 1`)؛ لو رجّعت فاضية (الفني المطلوب مشغول/مش أونلاين/إلخ)، بيرجع يسأل فوراً من غير القيد (نفس استعلام أي طلب عادي) — **مش** بيعتبرها "مفيش فنيين خالص" ويلغي الطلب. تفاصيل كاملة في `apps/api/src/modules/technicians/README.md` (القسم اللي بيوصف بروفايل الفني العام).
 
+## بث "طوارئ" — صُنّاع (`docs/06` §1.7، `docs/07` الجزء ج)
+
+`booking_mode=emergency` (docs/06 §1، migration `0051`) بيغيّر سلوك `dispatchNextRound()`/`findEligibleTechnicians()` بنقطتين بس:
+
+1. **تجاهل فلتر `is_available`/`is_on_duty` تمامًا** — المالك طلب صراحة "بيوصل لكل الناس القريبة منه كله بلا استثناء... طالما فاتح نت والإشعار ممكن يوصله". باقي شروط الأهلية (معتمد، ليه موقع حالي، مؤهّل للخدمة/المنطقة، **مش مشغول بطلب نشط بالفعل**) بتفضل زي ما هي — "بلا استثناء" بيقصد حالة التوافر بس، مش قدرة الفني الفعلية إنه يستلم طلب. باراميتر جديد `ignoreAvailabilityFilter` في `findEligibleTechnicians()` بيتحكم في ده عبر شرط SQL واحد (`$8::boolean OR (is_available AND is_on_duty)`).
+2. **دفعة أكبر**: `matching.emergency_batch_size` (إعداد جديد، migration `0053`, افتراضي 10) بدل `matching.batch_size` العادي (5) — "أول عشرة" بالحرف من كلام المالك. `matching.response_timeout_seconds`/`matching.max_rounds` بيتشاركوا مع الوضع العادي عمدًا (مفيش داعي مُوثّق لتوقيت مختلف).
+
+**إشعار فوري للأدمن/المانجر** (docs/06 §2.2): `EmergencyOrderRoutingListener` جديد في `../notifications/` بيسمع نفس `ORDER_CREATED_EVENT` الموجود، وبيستخدم `NotificationRoutingService.routeToRole()` الموجود بالفعل (نفس آلية `complaint.filed`/`payout.completed`) لو `order.bookingMode === 'emergency'` — event_type مخصوص (`order.emergency_created`) بقاعدة توجيه افتراضية لـ`ops_manager` (migration `0053`)، قابلة للتعديل/الإضافة من `/admin/notification-routing-rules` من غير أي كود جديد.
+
+**اتعمله اختبار حي كامل**: فني حقيقي اتحط `is_available=false` (مش قابل شغل) — طلب `booking_mode=team` عادي ميلقاش أي فني ويتلغي أوتوماتيك (`cancelled_by_system`)؛ **نفس الفني بالظبط**، لسه `is_available=false`، طلب `booking_mode=emergency` لقاه فعلاً وظهر في `GET /technician/orders/available`. أدمن بدور `ops_manager` استلم إشعار `order_emergency_created` فوري بمجرد إنشاء الطلب، أدمن `super_admin` (مالوش نفس الدور في قاعدة التوجيه المزروعة) محدش وصله إشعار — يثبت إن التوجيه فعلاً بالدور مش لكل الأدمنز.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

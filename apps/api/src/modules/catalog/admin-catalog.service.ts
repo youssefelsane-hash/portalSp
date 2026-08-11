@@ -8,14 +8,17 @@ import { AssignTechnicianServiceDto } from './dto/assign-technician-service.dto'
 import { CreateServiceAddonDto } from './dto/create-service-addon.dto';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { CreateServiceStandardDataDto } from './dto/create-service-standard-data.dto';
 import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { UpdateServiceStandardDataDto } from './dto/update-service-standard-data.dto';
 import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
+import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 import { TechnicianService } from './entities/technician-service.entity';
@@ -28,6 +31,7 @@ export class AdminCatalogService {
     @InjectRepository(ServiceZonePricing) private readonly zonePricing: Repository<ServiceZonePricing>,
     @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
     @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
+    @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
     @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
     private readonly techniciansService: TechniciansService,
     private readonly auditLog: AuditLogService,
@@ -524,6 +528,101 @@ export class AdminCatalogService {
       entityType: 'service_addon',
       entityId: addon.id,
       oldValues: { name_ar: addon.nameAr },
+      meta,
+    });
+  }
+
+  // ── البيانات القياسية ومحرك الإنتاجية (docs/06 §3.1-§3.6، docs/07 الجزء ج) ───────────
+
+  listStandardData(serviceId: string): Promise<ServiceStandardData[]> {
+    return this.standardData.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
+  }
+
+  async createStandardData(
+    adminUserId: string,
+    serviceId: string,
+    dto: CreateServiceStandardDataDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceStandardData> {
+    await this.findServiceOrThrow(serviceId);
+
+    const row = this.standardData.create({
+      serviceId,
+      executionTypeAr: dto.execution_type_ar ?? 'عام',
+      unitAr: dto.unit_ar,
+      technicianDailyWageCents: dto.technician_daily_wage_cents,
+      assistantDailyWageCents: dto.assistant_daily_wage_cents ?? null,
+      productivityPerDay: String(dto.productivity_per_day),
+      minTechnicians: dto.min_technicians ?? 1,
+      minAssistants: dto.min_assistants ?? 0,
+      displayOrder: dto.display_order ?? 0,
+    });
+    await this.standardData.save(row);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_standard_data.created',
+      entityType: 'service_standard_data',
+      entityId: row.id,
+      newValues: { execution_type_ar: row.executionTypeAr, productivity_per_day: row.productivityPerDay },
+      meta,
+    });
+    return row;
+  }
+
+  private async findStandardDataOrThrow(id: string): Promise<ServiceStandardData> {
+    const row = await this.standardData.findOne({ where: { id } });
+    if (!row) {
+      throw new ApiException(ErrorCode.VAL_001, 'البيانات القياسية غير موجودة', HttpStatus.NOT_FOUND);
+    }
+    return row;
+  }
+
+  async updateStandardData(
+    adminUserId: string,
+    id: string,
+    dto: UpdateServiceStandardDataDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceStandardData> {
+    const row = await this.findStandardDataOrThrow(id);
+    const oldValues = { productivity_per_day: row.productivityPerDay, is_active: row.isActive };
+
+    if (dto.execution_type_ar !== undefined) row.executionTypeAr = dto.execution_type_ar;
+    if (dto.unit_ar !== undefined) row.unitAr = dto.unit_ar;
+    if (dto.technician_daily_wage_cents !== undefined) row.technicianDailyWageCents = dto.technician_daily_wage_cents;
+    if (dto.assistant_daily_wage_cents !== undefined) row.assistantDailyWageCents = dto.assistant_daily_wage_cents;
+    if (dto.productivity_per_day !== undefined) row.productivityPerDay = String(dto.productivity_per_day);
+    if (dto.min_technicians !== undefined) row.minTechnicians = dto.min_technicians;
+    if (dto.min_assistants !== undefined) row.minAssistants = dto.min_assistants;
+    if (dto.display_order !== undefined) row.displayOrder = dto.display_order;
+    if (dto.is_active !== undefined) row.isActive = dto.is_active;
+    await this.standardData.save(row);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_standard_data.updated',
+      entityType: 'service_standard_data',
+      entityId: row.id,
+      oldValues,
+      newValues: { productivity_per_day: row.productivityPerDay, is_active: row.isActive },
+      meta,
+    });
+    return row;
+  }
+
+  async deleteStandardData(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
+    const row = await this.findStandardDataOrThrow(id);
+    await this.standardData.softDelete(id);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_standard_data.deleted',
+      entityType: 'service_standard_data',
+      entityId: row.id,
+      oldValues: { execution_type_ar: row.executionTypeAr },
       meta,
     });
   }

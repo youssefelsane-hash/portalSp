@@ -12,15 +12,18 @@ import {
   toEligibleTechnicianResponseDto,
   toServiceAddonResponseDto,
   toServiceLevelPricingResponseDto,
+  toServiceStandardDataResponseDto,
   toServiceZonePricingResponseDto,
 } from './dto/admin-catalog-response.dto';
 import { AssignTechnicianServiceDto } from './dto/assign-technician-service.dto';
 import { CreateServiceAddonDto } from './dto/create-service-addon.dto';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { CreateServiceStandardDataDto } from './dto/create-service-standard-data.dto';
 import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { UpdateServiceStandardDataDto } from './dto/update-service-standard-data.dto';
 import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 
@@ -241,5 +244,51 @@ export class AdminCatalogController {
   ) {
     await this.adminCatalogService.deleteAddon(admin.sub, addonId, audit);
     return { id: addonId, deleted: true };
+  }
+
+  // ── البيانات القياسية ومحرك الإنتاجية (docs/06 §3.1-§3.6) ────────────────
+
+  @Get('services/:id/standard-data')
+  async listStandardData(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.adminCatalogService.listStandardData(id);
+    return rows.map(toServiceStandardDataResponseDto);
+  }
+
+  @Post('services/:id/standard-data')
+  @RequirePermission('catalog.manage')
+  async createStandardData(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateServiceStandardDataDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toServiceStandardDataResponseDto(
+      await this.adminCatalogService.createStandardData(admin.sub, id, dto, audit),
+    );
+  }
+
+  @Patch('services/standard-data/:standardDataId')
+  @RequirePermission('catalog.manage')
+  async updateStandardData(
+    @CurrentUser() admin: JwtPayload,
+    @Param('standardDataId', ParseUUIDPipe) standardDataId: string,
+    @Body() dto: UpdateServiceStandardDataDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toServiceStandardDataResponseDto(
+      await this.adminCatalogService.updateStandardData(admin.sub, standardDataId, dto, audit),
+    );
+  }
+
+  @Delete('services/standard-data/:standardDataId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('catalog.manage')
+  async deleteStandardData(
+    @CurrentUser() admin: JwtPayload,
+    @Param('standardDataId', ParseUUIDPipe) standardDataId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    await this.adminCatalogService.deleteStandardData(admin.sub, standardDataId, audit);
+    return { id: standardDataId, deleted: true };
   }
 }

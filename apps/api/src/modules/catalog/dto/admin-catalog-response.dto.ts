@@ -1,6 +1,7 @@
 import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
 import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
+import { ServiceStandardData } from '../entities/service-standard-data.entity';
 import { ServiceZonePricing } from '../entities/service-zone-pricing.entity';
 import { Service } from '../entities/service.entity';
 import { TechnicianService } from '../entities/technician-service.entity';
@@ -194,5 +195,39 @@ export function toServiceAddonResponseDto(addon: ServiceAddon): ServiceAddonResp
     is_active: addon.isActive,
     display_order: addon.displayOrder,
     created_at: addon.createdAt.toISOString(),
+  };
+}
+
+// بيانات قياسية للخدمة + محرك الإنتاجية (docs/06 §3.1-§3.6) — إدارة كاملة (admin بس، فيها
+// يومية الصنايعي/المساعد اللي مالهاش داعي تتعرض للعميل — راجع catalog/README.md).
+export interface ServiceStandardDataResponseDto {
+  id: string;
+  service_id: string;
+  execution_type_ar: string;
+  unit_ar: string;
+  technician_daily_wage_cents: number;
+  assistant_daily_wage_cents: number | null;
+  productivity_per_day: number;
+  min_technicians: number;
+  min_assistants: number;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export function toServiceStandardDataResponseDto(row: ServiceStandardData): ServiceStandardDataResponseDto {
+  return {
+    id: row.id,
+    service_id: row.serviceId,
+    execution_type_ar: row.executionTypeAr,
+    unit_ar: row.unitAr,
+    technician_daily_wage_cents: row.technicianDailyWageCents,
+    assistant_daily_wage_cents: row.assistantDailyWageCents,
+    productivity_per_day: Number(row.productivityPerDay),
+    min_technicians: row.minTechnicians,
+    min_assistants: row.minAssistants,
+    is_active: row.isActive,
+    display_order: row.displayOrder,
+    created_at: row.createdAt.toISOString(),
   };
 }

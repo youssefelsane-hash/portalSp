@@ -18,6 +18,7 @@ import { Notification } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { CashCollectedRoutingListener } from './listeners/cash-collected-routing.listener';
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
+import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
 import { OrderCreatedNotificationListener } from './listeners/order-created-notification.listener';
@@ -57,6 +58,7 @@ import { NotificationsService } from './notifications.service';
     OrderReassignedNotificationListener,
     TechnicianVerificationNotificationListener,
     ComplaintFiledRoutingListener,
+    EmergencyOrderRoutingListener,
     PayoutRequiresReviewRoutingListener,
     CashCollectedRoutingListener,
     PayoutCompletedRoutingListener,
