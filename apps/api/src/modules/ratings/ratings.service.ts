@@ -6,6 +6,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { LOW_RATING_SUBMITTED_EVENT, LowRatingSubmittedEvent } from '../../common/events/low-rating-submitted.event';
 import { RATING_SUBMITTED_EVENT, RatingSubmittedEvent } from '../../common/events/rating-submitted.event';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
+import { CustomerStatsService } from '../customers/customer-stats.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
@@ -20,6 +21,7 @@ export class RatingsService {
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly technicianStatsService: TechnicianStatsService,
+    private readonly customerStatsService: CustomerStatsService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -45,8 +47,10 @@ export class RatingsService {
 
     const technicianUserId = await this.technicianUserId(order.technicianId);
     const rating = await this.createRating(order.id, userId, technicianUserId, RatingType.CUSTOMER_TO_TECHNICIAN, dto);
-    // مهمة خلفية (§14.4) — average_rating/total_ratings_count بتتحدّث هنا مش جوّه معاملة التقييم
+    // مهمة خلفية (§14.4) — average_rating/total_ratings_count (الفني اللي اتقيّم) وaverage_rating_given
+    // (العميل اللي قيّم) بتتحدّثوا هنا مش جوّه معاملة التقييم — الاتنين بره الـtransaction بنفس الفلسفة.
     await this.technicianStatsService.enqueueRecalculation(order.technicianId);
+    await this.customerStatsService.enqueueRecalculation(customerProfile.id);
 
     if (rating.overallRating <= RatingsService.LOW_RATING_THRESHOLD) {
       this.events.emit(
@@ -67,6 +71,10 @@ export class RatingsService {
     this.assertRatable(order);
 
     const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+    // مفيش تحديث إحصائيات هنا عمداً — customer_profiles.average_rating_given معناها "متوسط
+    // التقييمات اللي العميل *أعطاها* لفنيين"، مش اللي استقبلها. التقييم ده (technician_to_customer)
+    // مالوش عمود مقابل على customer_profiles أصلاً (زي ما average_rating على technician_profiles
+    // بالظبط بيتحدّث بس من رايتنجات العميل للفني، مش العكس).
     return this.createRating(order.id, userId, customerProfile.userId, RatingType.TECHNICIAN_TO_CUSTOMER, dto);
   }
 
