@@ -56,11 +56,14 @@ export class TechnicianStatsProcessor extends WorkerHost {
   async process(job: Job<RecalculateStatsJobData>): Promise<void> {
     const { technicianProfileId, serviceId } = job.data;
 
-    const [{ completed_orders_count: completedOrdersCount }] = await this.dataSource.query<
-      { completed_orders_count: string }[]
-    >(`SELECT COUNT(*) AS completed_orders_count FROM orders WHERE technician_id = $1 AND order_status = 'completed'`, [
-      technicianProfileId,
-    ]);
+    const [{ completed_orders_count: completedOrdersCount, cancelled_orders_count: cancelledOrdersCount }] =
+      await this.dataSource.query<{ completed_orders_count: string; cancelled_orders_count: string }[]>(
+        `SELECT
+           COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
+           COUNT(*) FILTER (WHERE order_status IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system')) AS cancelled_orders_count
+         FROM orders WHERE technician_id = $1`,
+        [technicianProfileId],
+      );
 
     const [{ average_rating: averageRating, total_ratings_count: totalRatingsCount }] = await this.dataSource.query<
       { average_rating: string | null; total_ratings_count: string }[]
@@ -74,13 +77,13 @@ export class TechnicianStatsProcessor extends WorkerHost {
 
     await this.dataSource.query(
       `UPDATE technician_profiles
-       SET completed_orders_count = $2, average_rating = $3, total_ratings_count = $4
+       SET completed_orders_count = $2, cancelled_orders_count = $3, average_rating = $4, total_ratings_count = $5
        WHERE id = $1`,
-      [technicianProfileId, Number(completedOrdersCount), Number(averageRating), Number(totalRatingsCount)],
+      [technicianProfileId, Number(completedOrdersCount), Number(cancelledOrdersCount), Number(averageRating), Number(totalRatingsCount)],
     );
 
     this.logger.log(
-      `إحصائيات الفني ${technicianProfileId} اتحدّثت: completed=${completedOrdersCount}, avg_rating=${Number(averageRating).toFixed(2)}, ratings=${totalRatingsCount}`,
+      `إحصائيات الفني ${technicianProfileId} اتحدّثت: completed=${completedOrdersCount}, cancelled=${cancelledOrdersCount}, avg_rating=${Number(averageRating).toFixed(2)}, ratings=${totalRatingsCount}`,
     );
 
     if (serviceId) {

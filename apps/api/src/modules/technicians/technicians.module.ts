@@ -22,6 +22,7 @@ import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianProfileListener } from './technician-profile.listener';
 import { TechnicianStatsProcessor } from './technician-stats.processor';
 import { TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
+import { TechnicianStatsRecalculationListener } from './technician-stats-recalculation.listener';
 import { TechnicianStatsService } from './technician-stats.service';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
@@ -69,6 +70,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianLevelsService,
     TechnicianStatsService,
     TechnicianStatsProcessor,
+    TechnicianStatsRecalculationListener,
     storageServiceProvider,
   ],
   exports: [TechniciansService, TechnicianCompaniesService, TechnicianLevelsService, TechnicianStatsService],
