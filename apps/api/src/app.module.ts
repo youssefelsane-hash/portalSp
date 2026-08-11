@@ -31,6 +31,7 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { HealthModule } from './modules/common/health/health.module';
+import { PricingModule } from './modules/pricing/pricing.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { HealthModule } from './modules/common/health/health.module';
     CustomersModule,
     TechniciansModule,
     CatalogModule,
+    PricingModule,
     // MatchingModule قبل OrdersModule عمداً — تفاصيل كاملة في matching/matching.module.ts.
     // NestJS بيسجّل مسارات الـ controllers بترتيب تحميل الموديولات، ومسارات حرفية زي
     // GET /technician/orders/available (في MatchingModule) لازم تتسجّل قبل GET

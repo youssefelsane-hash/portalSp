@@ -6,6 +6,10 @@ export enum PricingModel {
   HOURLY = 'hourly',
   PER_UNIT = 'per_unit',
   INSPECTION_THEN_QUOTE = 'inspection_then_quote',
+  // محرك تسعير ديناميكي (docs/08 §1، ADR-0001) — الخدمة عندها حقول وقواعد تسعير مخصصة
+  // (service_pricing_fields/service_pricing_rules) بدل base_price_cents ثابت. راجع
+  // apps/api/src/modules/pricing/README.md للتفاصيل الكاملة.
+  FORMULA = 'formula',
 }
 
 @Entity('services')
