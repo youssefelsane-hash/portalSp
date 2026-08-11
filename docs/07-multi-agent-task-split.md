@@ -28,15 +28,25 @@
 ## تقسيم رؤية `docs/06` (صُنّاع) لأربع أجزاء
 
 ### الجزء أ — هيكل الحجز (Booking Flow) + البراند
-**الحالة**: 🔄 قيد التنفيذ — بدأ 2026-08-11 (الأكاونت الثاني، فرع `hgotr7`)
+**الحالة**: ✅ خلص (النطاق المحدّد له) — 2026-08-11 (الأكاونت الثاني، فرع `hgotr7`، commit(s) يوم كتابة السطر ده)
 
-يغطي `docs/06` §0 كامل + §1 كامل:
-- براند "صُنّاع"/"الصانع جروب" في النصوص الظاهرة للمستخدم (مش package/bundle id — قرار مؤجل عمدًا لحد ما اللوجو الحقيقي يوصل، تفاصيل في القسم تحت).
-- بنية بيانات `booking_mode` (فرد/فريق-اعتماد/طوارئ) على `services` و`orders`.
-- التلات أزرار الرئيسية في `apps/customer-app` قبل اختيار الخدمة (الحل الأول المفضّل من `docs/06` §1.2).
-- ربط "اعتماد" بموديول `technician_companies` الموجود بالفعل (`apps/api/src/modules/technicians`).
+**اللي خلص فعلاً، مختبر حي (curl ضد Postgres/Redis حقيقيين، مش mocks)**:
+- Migration `0051_booking_mode.sql`: `services.allows_individual`/`allows_team` (زي `allows_emergency` الموجود بالحرف)، `orders.booking_mode` (enum `individual`/`team`/`emergency`)، `orders.requested_technician_company_id` (FK لـ`technician_companies`).
+- `POST /orders` بيتحقق إن الخدمة بتدعم الوضع المختار، وبيزامن `order_type=emergency` تلقائياً لو `booking_mode=emergency`.
+- `GET /services?booking_mode=individual|team|emergency` — فلترة حقيقية، مختبرة.
+- `GET /technician-companies` (جديد، عام للعميل) — تصفّح شركات/فرق نشطة لـ"اعتماد"، مربوط بـ`requested_technician_company_id` وقت إنشاء الطلب.
+- براند "صُنّاع" في النصوص الظاهرة (customer-app، technician-app، شريط admin الجانبي) — **مش** package/bundle id (قرار مؤجل عمدًا لحد ما اللوجو الحقيقي يوصل).
+- `apps/customer-app`: `BookingModeScreen` جديدة (أول شاشة بعد تسجيل الدخول، التلات أزرار) → `CategoriesScreen` → `ServicesScreen` (مفلترة) → `CreateOrderScreen` (بتبعت `booking_mode` + قسم اختياري لاختيار شركة لو "اعتماد"). "إعادة الحجز" اتربطت بـ`booking_mode=individual` دايمًا.
+- Footer placeholder في `apps/admin` (© الصانع جروب + "قواعد الاستخدام (قريبًا)") — من غير نص/لوجو مُخترَع.
+- **فجوة موثّقة #1 اتحلّت**: نفس الكاتيجوريز/الخدمات بفلاجات، مش شجرة منفصلة (التفاصيل والسبب في `apps/api/src/modules/catalog/README.md`).
+- **فجوة موثّقة #2 اتحلّت**: الأسماء المعتمدة "شغلانة سريعة"/"اعتماد"/"طوارئ" (`BookingMode.labelAr` في `apps/customer-app/lib/features/catalog/models.dart`).
+- **بونص خارج النطاق بس كان لازم يتصلح عشان أي اختبار حي يشتغل أصلاً**: `apps/api/.env.example` كان بيكسر تشغيل السيرفر خالص لو اتنسخ زي ما هو (`cp .env.example .env`) — تفاصيل الإصلاح في `docs/03-external-integrations.md`.
 
-**تحديث حالة (2026-08-11)**: تفاصيل الشغل الفعلي هتتحط هنا أول ما يخلص كل جزء منه — راجع `apps/api/src/modules/catalog/README.md` و`apps/api/src/modules/orders/README.md` و`apps/customer-app/README.md` للتفاصيل الحية.
+**تفاصيل كاملة**: `apps/api/src/modules/orders/README.md` (§هيكل الحجز الجديد)، `apps/api/src/modules/catalog/README.md`، `apps/api/src/modules/technicians/README.md`، `apps/customer-app/README.md`.
+
+**مُتعمَّد برّه نطاق الجزء ده، مخطط للجزء ج**: `matching.service.ts` لسه ما بيستخدمش `booking_mode=emergency` (بث بموجات، تجاهل `is_available`) ولا `requested_technician_company_id` (تفضيل فنيي الشركة) في خوارزمية التوزيع الفعلية — البنية التحتية والتحقق جاهزين، الاستهلاك في المطابقة نفسها لسه.
+
+**ملحوظة بيئة صادقة**: Flutter SDK مش موجود في الـ container بتاع السيشن دي (`/opt/flutter` غير موجود رغم كلام `CLAUDE.md`) — تغييرات `apps/customer-app`/`apps/technician-app` اتعملها مراجعة يدوية دقيقة بس، **مش** `flutter analyze`/`flutter test` فعلي. أي سيشن جاية عندها SDK حقيقي لازم تشغّلهم على أول حاجة (تفاصيل في `apps/customer-app/README.md`).
 
 ### الجزء ب — صلاحيات الأدمن الموسّعة (عمولة ديناميكية + تعيين قسري)
 **الحالة**: ⬜ لسه ما بدأش
@@ -70,8 +80,8 @@
 
 | # | الفجوة | الحالة | ملاحظة |
 |---|---|---|---|
-| 1 | كاتيجوريز "اعتماد" منفصلة تمامًا ولا نفس الكاتيجوريز بفلتر؟ | 🔄 قرار تنفيذي مبدئي في الجزء أ | هيتوثّق بالتفصيل مع الـ commit اللي بيحله — الاتجاه المبدئي: نفس الكاتيجوريز/الخدمات بفلاجات `allows_individual`/`allows_team` لكل خدمة (زي `allows_emergency` الموجود بالفعل)، مش شجرة منفصلة، لأن المالك نفسه قال "مش فارق". لو ظهر سبب تقني يمنع ده هيتوثّق هنا. |
-| 2 | الاسم النهائي لزرار "أفراد" | ⬜ لسه مفتوحة | هيتحل مع UI الجزء أ — هيتكتب هنا الاسم اللي اتاختار بالظبط. |
+| 1 | كاتيجوريز "اعتماد" منفصلة تمامًا ولا نفس الكاتيجوريز بفلتر؟ | ✅ اتحلّت (الجزء أ) | نفس الكاتيجوريز/الخدمات بفلاجات `allows_individual`/`allows_team` لكل خدمة (زي `allows_emergency` الموجود بالفعل)، مش شجرة منفصلة — تفاصيل السبب في `apps/api/src/modules/catalog/README.md`. |
+| 2 | الاسم النهائي لزرار "أفراد" | ✅ اتحلّت (الجزء أ) | "شغلانة سريعة" (فرد)، "اعتماد" (فريق/شركة)، "طوارئ". `BookingMode.labelAr` في `apps/customer-app/lib/features/catalog/models.dart`. |
 | 3 | نسبة عمولة "طوارئ" بالظبط | ⬜ لسه مفتوحة | خارج نطاق الجزء أ — الجزء ب هيبنيها كإعداد قابل للتعديل بقيمة افتراضية معقولة (نفس مبدأ نقاط الولاء)، مش رقم مخترع نهائي. |
 | 4 | أرقام الإنتاجية الناقصة (حجر/سباكة/كهرباء/جبس) | ⬜ لسه مفتوحة | الجزء ج هيسيب الحقل فاضي/NULL لحد ما الأدمن يدخله، مش يخترع رقم. |
-| 5 | تفاصيل اللوجو والـ Footer | ⬜ لسه مفتوحة (مؤجلة من المالك نفسه) | الجزء أ هيحط placeholder section في الـ Footer بس، من غير أصول لوجو حقيقية. |
+| 5 | تفاصيل اللوجو والـ Footer | ⬜ لسه مفتوحة (مؤجلة من المالك نفسه) | الجزء أ حط placeholder section في الـ Footer (`apps/admin`) بس، من غير أصول لوجو حقيقية. |
