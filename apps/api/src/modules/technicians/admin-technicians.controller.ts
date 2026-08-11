@@ -182,4 +182,21 @@ export class AdminTechniciansController {
     await this.adminTechniciansService.removeZone(admin.sub, id, zoneId, audit);
     return { service_zone_id: zoneId, removed: true };
   }
+
+  // "معاه مساعد؟" (docs/06 §3.7) — نفس صلاحية اعتماد الفني (technicians.approve)، قرار مشابه بالطبيعة.
+  @Post(':id/assistant/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async approveAssistant(@CurrentUser() admin: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @AuditContext() audit: AuditMeta) {
+    const profile = await this.adminTechniciansService.approveAssistant(admin.sub, id, audit);
+    return { assistant_link_status: profile.assistantLinkStatus, assistant_technician_id: profile.assistantTechnicianId };
+  }
+
+  @Post(':id/assistant/reject')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async rejectAssistant(@CurrentUser() admin: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @AuditContext() audit: AuditMeta) {
+    const profile = await this.adminTechniciansService.rejectAssistant(admin.sub, id, audit);
+    return { assistant_link_status: profile.assistantLinkStatus, assistant_technician_id: profile.assistantTechnicianId };
+  }
 }

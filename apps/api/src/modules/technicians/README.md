@@ -138,4 +138,13 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 
 **اتعمله اختبار حي**: فني اترقّى لـ`premium` (`can_lead_team`) وأنشأ شركة حقيقية، `GET /technician-companies` (عميل) عرضها صح بالحقول المسموحة بس، وربطها بطلب حقيقي عبر `requested_technician_company_id` نجح (تفاصيل الاختبار الكامل في `../orders/README.md`).
 
+## "معاه مساعد؟" + تصنيف نوع الفني الأربعة — صُنّاع (`docs/06` §3.7-§3.8، `docs/07` الجزء د)
+
+`technician_profiles.assistant_technician_id`/`assistant_link_status` (enum `none`/`pending_approval`/`approved`, migration `0055`) — الفني بيطلب ربط مساعد بكود موظفه (`technician_code`, `POST /technician/assistant-request`)، الإدارة توافق/ترفض (`POST /admin/technicians/:id/assistant/approve|reject`, صلاحية `technicians.approve` الموجودة). إزالة الربط ذاتية (`DELETE /technician/assistant`) — مفيش داعي موافقة إدارة لفك ربط، بس لتكوينه من الأول.
+
+- **قرار معماري قبل أي كود**: راجعت الكود القديم قبل ما أبدأ ولقيت "فريق"/"شركة" (docs/06 §3.8، نقطتين 3-4) **متعمَّلين بالفعل** عن طريق `technician_companies` (migration `0026`) — الفرق الوحيد `commercial_registration_number` (موجود=شركة، فاضي=فريق، قرار سابق موثّق في هذا الملف). يعني التصنيف الرباعي (`TechniciansService.classifyType()`, جديد) دالة على بيانات موجودة، مش مفهوم جديد: `company_id`/`team_role` (شركة/فريق) له أولوية، وإلا `assistant_link_status=approved` (فرد+مساعد) وإلا فرد.
+- **`GET /technician/me`** بقى بيرجّع `technician_type` (`individual`/`individual_with_assistant`/`team`/`company`) محسوب لحظياً — مش عمود مخزّن، تفادي احتمال عدم اتساق.
+- **اتعمله اختبار حي كامل**: فني عضو شركة (بدون سجل تجاري) رجع `team`؛ بعد ما أضاف سجل تجاري لشركته رجع `company` فورًا؛ فني تاني (مستقل، بدون شركة) رجع `individual`؛ طلب ربط مساعد بكود حقيقي رجّع `pending_approval` (والنوع فضل زي ما هو لحد الموافقة)، الأدمن وافق ورجّع `approved`، محاولة موافقة تانية على نفس الطلب اترفضت بوضوح (مفيش `pending` تاني).
+- **فجوة موثّقة صراحة**: زرار "طلب مساعد" (المالك: "النظام يدور على مين متاح من المساعدين ويربطهم مع بعض") — auto-matching تلقائي مش موجود هنا؛ محتاج مفهوم "مساعدين متاحين للربط" مش موجود في القاموس، فمش هنخترعه. المسار الحالي: الفني بيحدد المساعد بنفسه بكوده (زي ما المصدر الأصلي وصف "بربط Employee ID" بالحرف).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

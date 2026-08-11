@@ -32,6 +32,13 @@ export enum TechnicianTeamRole {
   WORKER = 'worker',
 }
 
+// "معاه مساعد؟" (docs/06 §3.7) — مسار طلب/موافقة، مش ربط مباشر (مطابق لـ infra/migrations/0055).
+export enum TechnicianAssistantLinkStatus {
+  NONE = 'none',
+  PENDING_APPROVAL = 'pending_approval',
+  APPROVED = 'approved',
+}
+
 // مطابق لـ infra/migrations/0005_customers_technicians.sql
 @Entity('technician_profiles')
 export class TechnicianProfile {
@@ -138,6 +145,20 @@ export class TechnicianProfile {
 
   @Column({ name: 'team_role', type: 'varchar', length: 20, default: TechnicianTeamRole.INDEPENDENT })
   teamRole: TechnicianTeamRole;
+
+  // "معاه مساعد؟" (docs/06 §3.7) — الفني بيطلب ربط مساعد بكود موظفه (technician_code)، الإدارة
+  // توافق قبل ما يبقى رسمي. assistantTechnicianId بيفضل NULL لحد ما assistantLinkStatus=approved.
+  @Column({ name: 'assistant_technician_id', type: 'uuid', nullable: true })
+  assistantTechnicianId: string | null;
+
+  @Column({
+    name: 'assistant_link_status',
+    type: 'enum',
+    enum: TechnicianAssistantLinkStatus,
+    enumName: 'technician_assistant_link_status',
+    default: TechnicianAssistantLinkStatus.NONE,
+  })
+  assistantLinkStatus: TechnicianAssistantLinkStatus;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

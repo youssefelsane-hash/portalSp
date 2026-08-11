@@ -1,6 +1,7 @@
 import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
 import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
+import { ServiceProductivityActual } from '../entities/service-productivity-actual.entity';
 import { ServiceStandardData } from '../entities/service-standard-data.entity';
 import { ServiceZonePricing } from '../entities/service-zone-pricing.entity';
 import { Service } from '../entities/service.entity';
@@ -110,6 +111,8 @@ export interface ServiceZonePricingResponseDto {
   price_cents: number;
   inspection_fee_cents: number;
   surge_multiplier: number;
+  valid_from: string;
+  valid_until: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -122,6 +125,8 @@ export function toServiceZonePricingResponseDto(pricing: ServiceZonePricing): Se
     price_cents: pricing.priceCents,
     inspection_fee_cents: pricing.inspectionFeeCents,
     surge_multiplier: Number(pricing.surgeMultiplier),
+    valid_from: pricing.validFrom.toISOString(),
+    valid_until: pricing.validUntil ? pricing.validUntil.toISOString() : null,
     is_active: pricing.isActive,
     created_at: pricing.createdAt.toISOString(),
   };
@@ -228,6 +233,39 @@ export function toServiceStandardDataResponseDto(row: ServiceStandardData): Serv
     min_assistants: row.minAssistants,
     is_active: row.isActive,
     display_order: row.displayOrder,
+    created_at: row.createdAt.toISOString(),
+  };
+}
+
+// أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بيانات بس.
+export interface ServiceProductivityActualResponseDto {
+  id: string;
+  service_standard_data_id: string;
+  order_id: string | null;
+  actual_units: number;
+  actual_days: number;
+  actual_technicians: number;
+  actual_assistants: number;
+  computed_productivity_per_day: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export function toServiceProductivityActualResponseDto(row: ServiceProductivityActual): ServiceProductivityActualResponseDto {
+  const actualUnits = Number(row.actualUnits);
+  const actualDays = Number(row.actualDays);
+  return {
+    id: row.id,
+    service_standard_data_id: row.serviceStandardDataId,
+    order_id: row.orderId,
+    actual_units: actualUnits,
+    actual_days: actualDays,
+    actual_technicians: row.actualTechnicians,
+    actual_assistants: row.actualAssistants,
+    // الإنتاجية الحقيقية المُحقّقة فعليًا لهذا الصف بس (مش متوسط عام) — الأدمن يقارنها يدويًا
+    // بالرقم القياسي (productivity_per_day) دلوقتي؛ المقارنة/التحديث التلقائي مرحلة لاحقة.
+    computed_productivity_per_day: actualDays > 0 ? Math.round((actualUnits / actualDays) * 100) / 100 : 0,
+    notes: row.notes,
     created_at: row.createdAt.toISOString(),
   };
 }

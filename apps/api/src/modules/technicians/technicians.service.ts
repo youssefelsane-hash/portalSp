@@ -2,18 +2,31 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { TechnicianProfile } from './entities/technician-profile.entity';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import {
+  TechnicianAssistantLinkStatus,
+  TechnicianProfile,
+  TechnicianTeamRole,
+} from './entities/technician-profile.entity';
+import { TechnicianCompany } from './entities/technician-company.entity';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
 import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.entity';
 import { PortfolioLinksService } from './portfolio-links.service';
 
+// تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
+// "فريق"/"شركة" (technician_companies, migration 0026) الفرق الوحيد بينهم commercial_registration_number
+// (موجود=شركة، فاضي=فريق) — قرار سابق موثّق في technicians/README.md، مش اختراع جديد هنا.
+export type TechnicianType = 'individual' | 'individual_with_assistant' | 'team' | 'company';
+
 @Injectable()
 export class TechniciansService {
   constructor(
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
+    @InjectRepository(TechnicianCompany) private readonly technicianCompanies: Repository<TechnicianCompany>,
     private readonly portfolioLinksService: PortfolioLinksService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   async findByUserIdOrThrow(userId: string): Promise<TechnicianProfile> {
@@ -54,6 +67,75 @@ export class TechniciansService {
     if (dto.bio !== undefined) profile.bio = dto.bio;
     await this.technicianProfiles.save(profile);
     return profile;
+  }
+
+  // ── "معاه مساعد؟" (docs/06 §3.7) ────────────────────────────────────
+
+  /** الفني بيطلب ربط مساعد بكود موظفه (technician_code) — يفضل pending_approval لحد ما الإدارة توافق. */
+  async requestAssistant(userId: string, assistantTechnicianCode: string): Promise<TechnicianProfile> {
+    const profile = await this.findByUserIdOrThrow(userId);
+    if (profile.assistantLinkStatus !== TechnicianAssistantLinkStatus.NONE) {
+      throw new ApiException(ErrorCode.VAL_001, 'عندك طلب مساعد قائم بالفعل — شيله الأول لو عايز تطلب واحد جديد', HttpStatus.CONFLICT);
+    }
+
+    const assistant = await this.technicianProfiles.findOne({ where: { technicianCode: assistantTechnicianCode } });
+    if (!assistant) {
+      throw new ApiException(ErrorCode.VAL_001, 'كود الفني غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (assistant.id === profile.id) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تطلب نفسك كمساعد', HttpStatus.BAD_REQUEST);
+    }
+
+    profile.assistantTechnicianId = assistant.id;
+    profile.assistantLinkStatus = TechnicianAssistantLinkStatus.PENDING_APPROVAL;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: userId,
+      actorRole: 'technician',
+      action: 'technician.assistant_requested',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      newValues: { assistant_technician_id: assistant.id, assistant_technician_code: assistantTechnicianCode },
+    });
+    return profile;
+  }
+
+  /** إزالة ذاتية — مفيش داعي موافقة إدارة لفك الربط، بس تكوينه من الأول محتاج موافقة. */
+  async removeAssistant(userId: string): Promise<TechnicianProfile> {
+    const profile = await this.findByUserIdOrThrow(userId);
+    if (profile.assistantLinkStatus === TechnicianAssistantLinkStatus.NONE) {
+      throw new ApiException(ErrorCode.VAL_001, 'مفيش مساعد مرتبط أصلاً', HttpStatus.NOT_FOUND);
+    }
+
+    const oldAssistantId = profile.assistantTechnicianId;
+    profile.assistantTechnicianId = null;
+    profile.assistantLinkStatus = TechnicianAssistantLinkStatus.NONE;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: userId,
+      actorRole: 'technician',
+      action: 'technician.assistant_removed',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { assistant_technician_id: oldAssistantId },
+    });
+    return profile;
+  }
+
+  // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة، مش حالة مخزّنة بشكل منفصل
+  // (تفادي احتمال عدم اتساق بين عمود مخزّن والبيانات الحقيقية).
+  async classifyType(profile: TechnicianProfile): Promise<TechnicianType> {
+    if (profile.teamRole !== TechnicianTeamRole.INDEPENDENT && profile.companyId) {
+      const company = await this.technicianCompanies.findOne({ where: { id: profile.companyId } });
+      if (company?.commercialRegistrationNumber) return 'company';
+      return 'team';
+    }
+    if (profile.assistantLinkStatus === TechnicianAssistantLinkStatus.APPROVED) {
+      return 'individual_with_assistant';
+    }
+    return 'individual';
   }
 
   /**

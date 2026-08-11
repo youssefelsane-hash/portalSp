@@ -12,6 +12,7 @@ import {
   toEligibleTechnicianResponseDto,
   toServiceAddonResponseDto,
   toServiceLevelPricingResponseDto,
+  toServiceProductivityActualResponseDto,
   toServiceStandardDataResponseDto,
   toServiceZonePricingResponseDto,
 } from './dto/admin-catalog-response.dto';
@@ -20,6 +21,7 @@ import { CreateServiceAddonDto } from './dto/create-service-addon.dto';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreateServiceStandardDataDto } from './dto/create-service-standard-data.dto';
+import { RecordProductivityActualDto } from './dto/record-productivity-actual.dto';
 import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -290,5 +292,26 @@ export class AdminCatalogController {
   ) {
     await this.adminCatalogService.deleteStandardData(admin.sub, standardDataId, audit);
     return { id: standardDataId, deleted: true };
+  }
+
+  // ── أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بس ────────
+
+  @Get('services/standard-data/:standardDataId/actuals')
+  async listProductivityActuals(@Param('standardDataId', ParseUUIDPipe) standardDataId: string) {
+    const rows = await this.adminCatalogService.listProductivityActuals(standardDataId);
+    return rows.map(toServiceProductivityActualResponseDto);
+  }
+
+  @Post('services/standard-data/:standardDataId/actuals')
+  @RequirePermission('catalog.manage')
+  async recordProductivityActual(
+    @CurrentUser() admin: JwtPayload,
+    @Param('standardDataId', ParseUUIDPipe) standardDataId: string,
+    @Body() dto: RecordProductivityActualDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toServiceProductivityActualResponseDto(
+      await this.adminCatalogService.recordProductivityActual(admin.sub, standardDataId, dto, audit),
+    );
   }
 }
