@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
-import '../../core/auth_repository.dart';
-import '../chat/chat_screen.dart';
-import '../orders/orders_screen.dart';
-import '../referrals/referrals_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 import 'services_screen.dart';
 
 class CategoriesScreen extends StatefulWidget {
-  const CategoriesScreen({super.key});
+  // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره في BookingModeScreen، بيتمرر
+  // كامل لـ ServicesScreen عشان يفلتر GET /services?booking_mode=...
+  final BookingMode bookingMode;
+
+  const CategoriesScreen({super.key, required this.bookingMode});
 
   @override
   State<CategoriesScreen> createState() => _CategoriesScreenState();
@@ -41,36 +40,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('baytak'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.receipt_long),
-              tooltip: 'طلباتي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const OrdersScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.support_agent_outlined),
-              tooltip: 'الدعم',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ChatScreen.support()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.card_giftcard_outlined),
-              tooltip: 'رشّح صحابك',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReferralsScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () => context.read<AuthRepository>().logout(),
-            ),
-          ],
-        ),
+        appBar: AppBar(title: Text(widget.bookingMode.labelAr)),
         body: _error != null
             ? Center(child: Text(_error!))
             : _categories == null
@@ -91,7 +61,9 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                           return Card(
                             child: InkWell(
                               onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
+                                MaterialPageRoute(
+                                  builder: (_) => ServicesScreen(category: category, bookingMode: widget.bookingMode),
+                                ),
                               ),
                               child: Center(
                                 child: Padding(

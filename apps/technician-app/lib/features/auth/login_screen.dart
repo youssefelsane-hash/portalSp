@@ -66,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('baytak', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
+                  Text('صُنّاع', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
                   Text(
                     _otpSent ? 'اتبعت كود لـ ${_phoneController.text}' : 'ادخل رقم موبايلك عشان تكمل',

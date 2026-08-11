@@ -6,8 +6,9 @@ import 'models.dart';
 
 class ServicesScreen extends StatefulWidget {
   final ServiceCategory category;
+  final BookingMode bookingMode;
 
-  const ServicesScreen({super.key, required this.category});
+  const ServicesScreen({super.key, required this.category, required this.bookingMode});
 
   @override
   State<ServicesScreen> createState() => _ServicesScreenState();
@@ -26,7 +27,10 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
   Future<void> _load() async {
     try {
-      final services = await _repository.fetchServices(categoryId: widget.category.id);
+      final services = await _repository.fetchServices(
+        categoryId: widget.category.id,
+        bookingMode: widget.bookingMode,
+      );
       if (mounted) setState(() => _services = services);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -46,7 +50,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
             : _services == null
                 ? const Center(child: CircularProgressIndicator())
                 : _services!.isEmpty
-                    ? const Center(child: Text('مفيش خدمات في الفئة دي دلوقتي'))
+                    ? Center(child: Text('مفيش خدمات "${widget.bookingMode.labelAr}" في الفئة دي دلوقتي'))
                     : ListView.separated(
                         padding: const EdgeInsets.all(16),
                         itemCount: _services!.length,
@@ -64,7 +68,9 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => CreateOrderScreen(service: service)),
+                                MaterialPageRoute(
+                                  builder: (_) => CreateOrderScreen(service: service, bookingMode: widget.bookingMode),
+                                ),
                               ),
                             ),
                           );

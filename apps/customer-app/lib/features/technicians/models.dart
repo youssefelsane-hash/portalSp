@@ -1,3 +1,26 @@
+// "اعتماد" (docs/06 §1.5) — مطابق لـ apps/api/src/modules/technicians/dto/company-response.dto.ts's
+// PublicCompanyResponseDto. العميل يختار من القايمة دي عشان يحجز شركة/فريق بعينه.
+class TechnicianCompanySummary {
+  final String id;
+  final String name;
+  final int branchCount;
+  final int staffCount;
+
+  TechnicianCompanySummary({
+    required this.id,
+    required this.name,
+    required this.branchCount,
+    required this.staffCount,
+  });
+
+  factory TechnicianCompanySummary.fromJson(Map<String, dynamic> json) => TechnicianCompanySummary(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        branchCount: json['branch_count'] as int,
+        staffCount: json['staff_count'] as int,
+      );
+}
+
 class TechnicianZoneInfo {
   final String id;
   final String nameAr;

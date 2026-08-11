@@ -43,8 +43,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-56 shrink-0 flex-col border-s bg-muted/30">
-        <div className="px-4 py-4 font-semibold">baytak إدارة</div>
-        <nav className="flex flex-col gap-1 px-2">
+        <div className="px-4 py-4 font-semibold">صُنّاع — إدارة</div>
+        <nav className="flex flex-1 flex-col gap-1 px-2">
           {NAV_ITEMS.map((item) => {
             const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
             return (
@@ -61,6 +61,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        {/* placeholder للوجو/قواعد الاستخدام الحقيقية — docs/06-vision-brief-sanaa.md §0،
+            لسه هتتبعت من صاحب المشروع. مفيش نص/لوجو مُخترَع هنا عمدًا. */}
+        <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+          <div>© الصانع جروب</div>
+          <div className="mt-1 text-muted-foreground/60">قواعد الاستخدام (قريبًا)</div>
+        </div>
       </aside>
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b px-6 py-3">

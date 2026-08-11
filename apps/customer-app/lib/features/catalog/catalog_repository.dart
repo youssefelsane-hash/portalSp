@@ -8,8 +8,12 @@ class CatalogRepository {
     return items.map(ServiceCategory.fromJson).toList();
   }
 
-  Future<List<CatalogService>> fetchServices({String? categoryId}) async {
-    final query = categoryId != null ? '?category_id=$categoryId' : '';
+  Future<List<CatalogService>> fetchServices({String? categoryId, BookingMode? bookingMode}) async {
+    final params = <String, String>{
+      if (categoryId != null) 'category_id': categoryId,
+      if (bookingMode != null) 'booking_mode': bookingMode.apiValue,
+    };
+    final query = params.isEmpty ? '' : '?${Uri(queryParameters: params).query}';
     final items = await apiRequestList('/services$query');
     return items.map(CatalogService.fromJson).toList();
   }
