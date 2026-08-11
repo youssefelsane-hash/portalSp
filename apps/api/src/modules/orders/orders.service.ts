@@ -14,11 +14,12 @@ import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
-import { Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
+import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
@@ -36,6 +37,7 @@ export class OrdersService {
     private readonly catalogService: CatalogService,
     private readonly geoService: GeoService,
     private readonly techniciansService: TechniciansService,
+    private readonly technicianCompaniesService: TechnicianCompaniesService,
     private readonly promoCodesService: PromoCodesService,
     private readonly cancellationReasonsService: CancellationReasonsService,
     private readonly walletsService: WalletsService,
@@ -62,6 +64,31 @@ export class OrdersService {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+
+    // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار (فرد/اعتماد/طوارئ) بتترجم مباشرة لتحقق
+    // إن الخدمة المطلوبة أصلاً بتدعم الوضع ده (allows_individual/allows_team/allows_emergency
+    // على service.entity.ts، مضبوطة من الأدمن عبر /admin/services).
+    const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
+    const bookingModeAllowed =
+      bookingMode === BookingMode.INDIVIDUAL
+        ? service.allowsIndividual
+        : bookingMode === BookingMode.TEAM
+          ? service.allowsTeam
+          : service.allowsEmergency;
+    if (!bookingModeAllowed) {
+      throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+    }
+
+    if (dto.requested_technician_company_id) {
+      if (bookingMode !== BookingMode.TEAM) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'اختيار شركة/فريق محدد متاح بس لوضع "اعتماد"',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id);
+    }
 
     if (!address.cityId) {
       throw new ApiException(ErrorCode.ORDR_001, 'العنوان مش مربوط بمدينة', HttpStatus.BAD_REQUEST);
@@ -97,7 +124,11 @@ export class OrdersService {
         serviceId: service.id,
         addressId: address.id,
         serviceZoneId: zone.id,
-        orderType: dto.order_type ?? OrderType.STANDARD,
+        // bookingMode=emergency بيفرض orderType=EMERGENCY دايماً (مهما اتبعت dto.order_type) —
+        // هو المصدر الأوحد للحقيقة هنا، عشان أي كود قديم بيقرا order_type يتصرف صح تلقائيًا.
+        orderType: bookingMode === BookingMode.EMERGENCY ? OrderType.EMERGENCY : (dto.order_type ?? OrderType.STANDARD),
+        bookingMode,
+        requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
         orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,

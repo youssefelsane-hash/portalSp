@@ -39,6 +39,15 @@ export enum OrderPaymentStatus {
   FAILED = 'failed',
 }
 
+// هيكل الحجز الجديد (docs/06 §1، docs/07 الجزء أ) — اختيار العميل الفعلي وقت الحجز: فرد/اعتماد
+// (فريق أو شركة)/طوارئ. محور منفصل عن OrderType فوق (اللي بيغطي standard/scheduled/recurring/b2b/
+// emergency) — orders.service.ts بيزامن orderType=EMERGENCY تلقائياً لو bookingMode=EMERGENCY.
+export enum BookingMode {
+  INDIVIDUAL = 'individual',
+  TEAM = 'team',
+  EMERGENCY = 'emergency',
+}
+
 export enum OrderSourceChannel {
   CUSTOMER_APP = 'customer_app',
   WEB = 'web',
@@ -77,6 +86,14 @@ export class Order {
 
   @Column({ name: 'order_type', type: 'enum', enum: OrderType, enumName: 'order_type', default: OrderType.STANDARD })
   orderType: OrderType;
+
+  @Column({ name: 'booking_mode', type: 'enum', enum: BookingMode, enumName: 'booking_mode', default: BookingMode.INDIVIDUAL })
+  bookingMode: BookingMode;
+
+  // "اعتماد" — تفضيل شركة/فريق بعينه بدل ما تسيب المطابقة تختار. تفضيل بس مش ضمان،
+  // نفس فلسفة requestedTechnicianId تحت.
+  @Column({ name: 'requested_technician_company_id', type: 'uuid', nullable: true })
+  requestedTechnicianCompanyId: string | null;
 
   @Column({ name: 'order_status', type: 'enum', enum: OrderStatus, enumName: 'order_status', default: OrderStatus.DRAFT })
   orderStatus: OrderStatus;

@@ -52,6 +52,54 @@ export class TechnicianCompaniesService {
     return company;
   }
 
+  // مُستخدمة من orders.service.ts وقت إنشاء طلب "اعتماد" بشركة/فريق محدّد — لازم الشركة نشطة
+  // فعلاً (مش بس موجودة)، عكس findCompanyOrThrow الداخلية اللي بتستخدمها مسارات الإدارة الذاتية
+  // (owner/manager بتاعت نفس الشركة بيقدروا يشوفوا شركتهم حتى لو is_active=false).
+  async findActiveCompanyOrThrow(companyId: string): Promise<TechnicianCompany> {
+    const company = await this.companies.findOne({ where: { id: companyId, isActive: true } });
+    if (!company) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة غير موجودة أو غير نشطة', HttpStatus.NOT_FOUND);
+    }
+    return company;
+  }
+
+  private async countBranchesAndStaff(
+    companies: TechnicianCompany[],
+  ): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
+    if (companies.length === 0) return [];
+    const companyIds = companies.map((c) => c.id);
+    const branchCounts = await this.branches
+      .createQueryBuilder('branch')
+      .select('branch.companyId', 'companyId')
+      .addSelect('COUNT(*)', 'count')
+      .where('branch.companyId IN (:...companyIds)', { companyIds })
+      .groupBy('branch.companyId')
+      .getRawMany<{ companyId: string; count: string }>();
+    const staffCounts = await this.technicianProfiles
+      .createQueryBuilder('profile')
+      .select('profile.companyId', 'companyId')
+      .addSelect('COUNT(*)', 'count')
+      .where('profile.companyId IN (:...companyIds)', { companyIds })
+      .groupBy('profile.companyId')
+      .getRawMany<{ companyId: string; count: string }>();
+    const branchCountByCompany = new Map(branchCounts.map((r) => [r.companyId, Number(r.count)]));
+    const staffCountByCompany = new Map(staffCounts.map((r) => [r.companyId, Number(r.count)]));
+
+    return companies.map((company) => ({
+      company,
+      branchCount: branchCountByCompany.get(company.id) ?? 0,
+      staffCount: staffCountByCompany.get(company.id) ?? 0,
+    }));
+  }
+
+  // "اعتماد" (docs/06 §1.5) — العميل يتصفّح الشركات/الفرق النشطة عشان يختار واحدة يحجزها كاملة
+  // بدل ما يسيب المطابقة تختار. عام لأي عميل (@Roles(CUSTOMER) على الـ controller)، مقصور على
+  // الشركات النشطة بس (عكس listForAdmin اللي بيرجّع الكل للإشراف).
+  async listActiveForCustomers(): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
+    const companies = await this.companies.find({ where: { isActive: true }, order: { createdAt: 'DESC' } });
+    return this.countBranchesAndStaff(companies);
+  }
+
   /** بيرجّع بروفايل المستخدم لو عضو (أي دور) في شركة، وإلا بيرمي — دخول أساسي لكل مسارات الشركة */
   private async requireMembership(userId: string): Promise<TechnicianProfile> {
     const profile = await this.findProfileOrThrow(userId);
@@ -147,30 +195,7 @@ export class TechnicianCompaniesService {
 
   async listForAdmin(): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
     const companies = await this.companies.find({ order: { createdAt: 'DESC' } });
-    if (companies.length === 0) return [];
-    const companyIds = companies.map((c) => c.id);
-    const branchCounts = await this.branches
-      .createQueryBuilder('branch')
-      .select('branch.companyId', 'companyId')
-      .addSelect('COUNT(*)', 'count')
-      .where('branch.companyId IN (:...companyIds)', { companyIds })
-      .groupBy('branch.companyId')
-      .getRawMany<{ companyId: string; count: string }>();
-    const staffCounts = await this.technicianProfiles
-      .createQueryBuilder('profile')
-      .select('profile.companyId', 'companyId')
-      .addSelect('COUNT(*)', 'count')
-      .where('profile.companyId IN (:...companyIds)', { companyIds })
-      .groupBy('profile.companyId')
-      .getRawMany<{ companyId: string; count: string }>();
-    const branchCountByCompany = new Map(branchCounts.map((r) => [r.companyId, Number(r.count)]));
-    const staffCountByCompany = new Map(staffCounts.map((r) => [r.companyId, Number(r.count)]));
-
-    return companies.map((company) => ({
-      company,
-      branchCount: branchCountByCompany.get(company.id) ?? 0,
-      staffCount: staffCountByCompany.get(company.id) ?? 0,
-    }));
+    return this.countBranchesAndStaff(companies);
   }
 
   async update(userId: string, dto: UpdateCompanyDto, meta?: AuditActorMeta): Promise<TechnicianCompany> {

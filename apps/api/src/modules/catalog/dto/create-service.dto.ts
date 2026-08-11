@@ -95,6 +95,15 @@ export class CreateServiceDto {
   @IsBoolean()
   allows_emergency?: boolean;
 
+  // هيكل الحجز الجديد (docs/06 §1) — أي أوضاع حجز ("أفراد"/"اعتماد") مسموحة لهذه الخدمة.
+  @IsOptional()
+  @IsBoolean()
+  allows_individual?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allows_team?: boolean;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;

@@ -1,5 +1,5 @@
 import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
-import { OrderType } from '../entities/order.entity';
+import { BookingMode, OrderType } from '../entities/order.entity';
 
 export class CreateOrderDto {
   @IsUUID()
@@ -11,6 +11,18 @@ export class CreateOrderDto {
   @IsOptional()
   @IsEnum(OrderType)
   order_type?: OrderType;
+
+  // هيكل الحجز الجديد (docs/06 §1) — الزرار اللي العميل دوس عليه قبل ما يوصل هنا (فرد/اعتماد/طوارئ).
+  // اختياري وبيرجع لـ"individual" بشكل افتراضي — التطبيقات القديمة (لو فيه) تفضل شغالة زي زمان.
+  @IsOptional()
+  @IsEnum(BookingMode)
+  booking_mode?: BookingMode;
+
+  // "اعتماد" — العميل اختار شركة/فريق بعينه من GET /technician-companies بدل ما يسيب المطابقة
+  // تختار. تفضيل بس مش ضمان (نفس فلسفة requested_technician_id تحت)، ومسموح بس مع booking_mode=team.
+  @IsOptional()
+  @IsUUID()
+  requested_technician_company_id?: string;
 
   @IsOptional()
   @IsString()

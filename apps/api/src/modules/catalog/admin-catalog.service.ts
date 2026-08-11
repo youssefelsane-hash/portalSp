@@ -187,6 +187,8 @@ export class AdminCatalogService {
       requiresPhotos: dto.requires_photos ?? false,
       allowsScheduling: dto.allows_scheduling ?? true,
       allowsEmergency: dto.allows_emergency ?? false,
+      allowsIndividual: dto.allows_individual ?? true,
+      allowsTeam: dto.allows_team ?? false,
       minTechnicianLevel: dto.min_technician_level,
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
@@ -231,6 +233,8 @@ export class AdminCatalogService {
     if (dto.requires_photos !== undefined) service.requiresPhotos = dto.requires_photos;
     if (dto.allows_scheduling !== undefined) service.allowsScheduling = dto.allows_scheduling;
     if (dto.allows_emergency !== undefined) service.allowsEmergency = dto.allows_emergency;
+    if (dto.allows_individual !== undefined) service.allowsIndividual = dto.allows_individual;
+    if (dto.allows_team !== undefined) service.allowsTeam = dto.allows_team;
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

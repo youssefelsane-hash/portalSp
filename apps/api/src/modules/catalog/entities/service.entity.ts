@@ -67,6 +67,15 @@ export class Service {
   @Column({ name: 'allows_emergency', type: 'boolean', default: false })
   allowsEmergency: boolean;
 
+  // هيكل الحجز الجديد (docs/06 §1، docs/07 الجزء أ) — أي أوضاع حجز ("فرد"/"اعتماد") مسموحة
+  // لهذه الخدمة تحديدًا. نفس نمط allows_scheduling/allows_emergency بالظبط: بديل عن قايمة
+  // كاتيجوريز منفصلة لكل نوع (فجوة موثّقة اتحلّت — راجع docs/07 §الفجوات المفتوحة #1).
+  @Column({ name: 'allows_individual', type: 'boolean', default: true })
+  allowsIndividual: boolean;
+
+  @Column({ name: 'allows_team', type: 'boolean', default: false })
+  allowsTeam: boolean;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',
