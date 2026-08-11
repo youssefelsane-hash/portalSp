@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import type {
   AdminServiceResponseDto,
@@ -8,9 +8,13 @@ import type {
   AdminTechnicianResponseDto,
   AssignTechnicianServiceBody,
   CreateServiceAddonBody,
+  CreateServiceStandardDataBody,
   EligibleTechnicianResponseDto,
+  RecordProductivityActualBody,
   ServiceAddonResponseDto,
   ServiceLevelPricingResponseDto,
+  ServiceProductivityActualResponseDto,
+  ServiceStandardDataResponseDto,
   ServiceZonePricingResponseDto,
   SkillLevel,
   TechnicianLevel,
@@ -56,9 +60,13 @@ export default function ServiceDetailPage() {
   const [eligibleTechnicians, setEligibleTechnicians] = useState<EligibleTechnicianResponseDto[] | null>(null);
   const [levelPricing, setLevelPricing] = useState<ServiceLevelPricingResponseDto[] | null>(null);
   const [addons, setAddons] = useState<ServiceAddonResponseDto[] | null>(null);
+  const [standardData, setStandardData] = useState<ServiceStandardDataResponseDto[] | null>(null);
+  const [actualsByStandardData, setActualsByStandardData] = useState<Record<string, ServiceProductivityActualResponseDto[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showNewAddon, setShowNewAddon] = useState(false);
+  const [showNewStandardData, setShowNewStandardData] = useState(false);
+  const [actualsFormOpenFor, setActualsFormOpenFor] = useState<string | null>(null);
 
   function loadAll() {
     // مفيش GET /admin/services/:id مفرد — بنلاقيه جوّه القايمة الكاملة بدل endpoint مخصص
@@ -75,6 +83,13 @@ export default function ServiceDetailPage() {
     authedFetch<EligibleTechnicianResponseDto[]>(`/admin/services/${id}/technicians`).then(setEligibleTechnicians).catch(() => setEligibleTechnicians([]));
     authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing).catch(() => setLevelPricing([]));
     authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons).catch(() => setAddons([]));
+    authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData).catch(() => setStandardData([]));
+  }
+
+  function loadActuals(standardDataId: string) {
+    authedFetch<ServiceProductivityActualResponseDto[]>(`/admin/services/standard-data/${standardDataId}/actuals`)
+      .then((rows) => setActualsByStandardData((prev) => ({ ...prev, [standardDataId]: rows })))
+      .catch(() => setActualsByStandardData((prev) => ({ ...prev, [standardDataId]: [] })));
   }
 
   useEffect(() => {
@@ -96,9 +111,13 @@ export default function ServiceDetailPage() {
   async function handleUpsertZonePricing(e: FormEvent) {
     e.preventDefault();
     const form = new FormData(e.target as HTMLFormElement);
+    const validFrom = form.get('valid_from') as string;
     const body: UpsertZonePricingBody = {
       service_zone_id: form.get('service_zone_id') as string,
       price_cents: Math.round(Number(form.get('price')) * 100),
+      // تاريخ سريان (docs/06 §3.10) — فاضي = فوري (النهاردة). تاريخ مستقبلي = جدولة سعر
+      // جاي من غير ما يأثر على أي حاجة دلوقتي (تفاصيل في catalog/README.md).
+      valid_from: validFrom ? new Date(validFrom).toISOString() : undefined,
     };
     setIsSaving(true);
     setError(null);
@@ -212,6 +231,95 @@ export default function ServiceDetailPage() {
     }
   }
 
+  async function handleCreateStandardData(e: FormEvent) {
+    e.preventDefault();
+    const form = new FormData(e.target as HTMLFormElement);
+    const assistantWage = form.get('assistant_daily_wage_cents') as string;
+    const body: CreateServiceStandardDataBody = {
+      execution_type_ar: (form.get('execution_type_ar') as string) || undefined,
+      unit_ar: form.get('unit_ar') as string,
+      technician_daily_wage_cents: Math.round(Number(form.get('technician_daily_wage')) * 100),
+      assistant_daily_wage_cents: assistantWage ? Math.round(Number(assistantWage) * 100) : undefined,
+      productivity_per_day: Number(form.get('productivity_per_day')),
+      min_technicians: form.get('min_technicians') ? Number(form.get('min_technicians')) : undefined,
+      min_assistants: form.get('min_assistants') ? Number(form.get('min_assistants')) : undefined,
+    };
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/${id}/standard-data`, { method: 'POST', body: JSON.stringify(body) });
+      setShowNewStandardData(false);
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function toggleStandardDataActive(row: ServiceStandardDataResponseDto) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/standard-data/${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: !row.is_active }),
+      });
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteStandardData(standardDataId: string) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/standard-data/${standardDataId}`, { method: 'DELETE' });
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function toggleActualsForm(standardDataId: string) {
+    const opening = actualsFormOpenFor !== standardDataId;
+    setActualsFormOpenFor(opening ? standardDataId : null);
+    if (opening && !actualsByStandardData[standardDataId]) {
+      loadActuals(standardDataId);
+    }
+  }
+
+  async function handleRecordActual(e: FormEvent, standardDataId: string) {
+    e.preventDefault();
+    const form = new FormData(e.target as HTMLFormElement);
+    const body: RecordProductivityActualBody = {
+      actual_units: Number(form.get('actual_units')),
+      actual_days: Number(form.get('actual_days')),
+      actual_technicians: Number(form.get('actual_technicians')),
+      actual_assistants: form.get('actual_assistants') ? Number(form.get('actual_assistants')) : 0,
+      notes: (form.get('notes') as string) || undefined,
+    };
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/standard-data/${standardDataId}/actuals`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      (e.target as HTMLFormElement).reset();
+      loadActuals(standardDataId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function handleUpdateServiceDetails(e: FormEvent) {
     e.preventDefault();
     const form = new FormData(e.target as HTMLFormElement);
@@ -228,6 +336,8 @@ export default function ServiceDetailPage() {
       requires_photos: form.get('requires_photos') === 'on',
       allows_scheduling: form.get('allows_scheduling') === 'on',
       allows_emergency: form.get('allows_emergency') === 'on',
+      allows_individual: form.get('allows_individual') === 'on',
+      allows_team: form.get('allows_team') === 'on',
     };
     setIsSaving(true);
     setError(null);
@@ -321,6 +431,15 @@ export default function ServiceDetailPage() {
                 <input type="checkbox" name="allows_emergency" defaultChecked={service.allows_emergency} />
                 يسمح بطلب طارئ
               </label>
+              {/* هيكل الحجز الجديد — صُنّاع (docs/06 §1) */}
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="allows_individual" defaultChecked={service.allows_individual} />
+                يسمح بوضع &quot;شغلانة سريعة&quot; (فرد)
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
+                يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
+              </label>
             </div>
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
               حفظ تفاصيل الخدمة
@@ -349,6 +468,8 @@ export default function ServiceDetailPage() {
               </SelectNative>
               <Label htmlFor="zp_price">السعر (جنيه)</Label>
               <Input id="zp_price" name="price" type="number" min="0" step="0.01" required />
+              <Label htmlFor="zp_valid_from">تاريخ السريان (فاضي = فوري)</Label>
+              <Input id="zp_valid_from" name="valid_from" type="date" />
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
                 حفظ تسعير المنطقة
               </Button>
@@ -363,6 +484,8 @@ export default function ServiceDetailPage() {
                   <TableRow>
                     <TableHead>المنطقة</TableHead>
                     <TableHead>السعر</TableHead>
+                    <TableHead>ساري من</TableHead>
+                    <TableHead>لحد</TableHead>
                     <TableHead>الحالة</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
@@ -372,6 +495,8 @@ export default function ServiceDetailPage() {
                     <TableRow key={p.id}>
                       <TableCell>{zoneName(p.service_zone_id)}</TableCell>
                       <TableCell>{formatEgp(p.price_cents)}</TableCell>
+                      <TableCell dir="ltr">{new Date(p.valid_from).toLocaleDateString('ar-EG')}</TableCell>
+                      <TableCell dir="ltr">{p.valid_until ? new Date(p.valid_until).toLocaleDateString('ar-EG') : '—'}</TableCell>
                       <TableCell>
                         <Badge variant={p.is_active ? 'secondary' : 'outline'}>{p.is_active ? 'نشط' : 'معطّل'}</Badge>
                       </TableCell>
@@ -545,6 +670,173 @@ export default function ServiceDetailPage() {
                         </button>
                       </TableCell>
                     </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* بيانات قياسية + محرك الإنتاجية — صُنّاع (docs/06 §3.1-§3.6) */}
+        <Card className="xl:col-span-2">
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="text-base">بيانات قياسية (أجور يومية وإنتاجية)</CardTitle>
+            <Button size="sm" variant="outline" onClick={() => setShowNewStandardData((s) => !s)}>
+              + إضافة جديدة
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {showNewStandardData && (
+              <form onSubmit={handleCreateStandardData} className="mb-4 flex flex-col gap-2 rounded-md border p-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_execution_type">نوع التنفيذ (اختياري)</Label>
+                    <Input id="sd_execution_type" name="execution_type_ar" placeholder="مثال: مباشر" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_unit">الوحدة</Label>
+                    <Input id="sd_unit" name="unit_ar" placeholder="مثال: م²" required />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_productivity">الإنتاجية يوميًا</Label>
+                    <Input id="sd_productivity" name="productivity_per_day" type="number" min="0.01" step="0.01" required />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_tech_wage">أجر الفني اليومي (جنيه)</Label>
+                    <Input id="sd_tech_wage" name="technician_daily_wage" type="number" min="0" step="0.01" required />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_assistant_wage">أجر المساعد اليومي (جنيه)</Label>
+                    <Input id="sd_assistant_wage" name="assistant_daily_wage_cents" type="number" min="0" step="0.01" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_min_tech">أقل عدد فنيين</Label>
+                    <Input id="sd_min_tech" name="min_technicians" type="number" min="1" defaultValue={1} />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="sd_min_assist">أقل عدد مساعدين</Label>
+                    <Input id="sd_min_assist" name="min_assistants" type="number" min="0" defaultValue={0} />
+                  </div>
+                </div>
+                <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
+                  حفظ البيانات القياسية
+                </Button>
+              </form>
+            )}
+            {!standardData ? (
+              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+            ) : standardData.length === 0 ? (
+              <p className="text-sm text-muted-foreground">مفيش بيانات قياسية للخدمة دي لسه — محرك تقدير المدة مش هيشتغل من غيرها</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>نوع التنفيذ</TableHead>
+                    <TableHead>الوحدة</TableHead>
+                    <TableHead>الإنتاجية/يوم</TableHead>
+                    <TableHead>أجر الفني</TableHead>
+                    <TableHead>أجر المساعد</TableHead>
+                    <TableHead>أقل طاقم</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {standardData.map((row) => (
+                    <Fragment key={row.id}>
+                      <TableRow>
+                        <TableCell>{row.execution_type_ar || '—'}</TableCell>
+                        <TableCell>{row.unit_ar}</TableCell>
+                        <TableCell dir="ltr">{row.productivity_per_day}</TableCell>
+                        <TableCell>{formatEgp(row.technician_daily_wage_cents)}</TableCell>
+                        <TableCell>{row.assistant_daily_wage_cents !== null ? formatEgp(row.assistant_daily_wage_cents) : '—'}</TableCell>
+                        <TableCell dir="ltr">
+                          {row.min_technicians} فني{row.min_assistants > 0 ? ` + ${row.min_assistants} مساعد` : ''}
+                        </TableCell>
+                        <TableCell>
+                          <button type="button" disabled={isSaving} onClick={() => toggleStandardDataActive(row)} className="cursor-pointer">
+                            <Badge variant={row.is_active ? 'secondary' : 'outline'}>{row.is_active ? 'نشطة' : 'معطّلة'}</Badge>
+                          </button>
+                        </TableCell>
+                        <TableCell className="flex gap-2">
+                          <Button size="sm" variant="ghost" disabled={isSaving} onClick={() => toggleActualsForm(row.id)}>
+                            الإنتاجية الفعلية
+                          </Button>
+                          <Button size="sm" variant="ghost" disabled={isSaving} onClick={() => handleDeleteStandardData(row.id)}>
+                            حذف
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                      {actualsFormOpenFor === row.id && (
+                        <TableRow>
+                          <TableCell colSpan={8}>
+                            <div className="rounded-md border p-3">
+                              <p className="mb-2 text-sm font-medium">
+                                إنتاجية فعلية مسجّلة (مرحلة 1 — تسجيل يدوي فقط، لسه مش مربوطة تلقائيًا بالطلبات)
+                              </p>
+                              <form
+                                onSubmit={(e) => handleRecordActual(e, row.id)}
+                                className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5 sm:items-end"
+                              >
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`ra_units_${row.id}`}>الوحدات الفعلية</Label>
+                                  <Input id={`ra_units_${row.id}`} name="actual_units" type="number" min="0.01" step="0.01" required />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`ra_days_${row.id}`}>الأيام الفعلية</Label>
+                                  <Input id={`ra_days_${row.id}`} name="actual_days" type="number" min="0.01" step="0.01" required />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`ra_tech_${row.id}`}>عدد الفنيين</Label>
+                                  <Input id={`ra_tech_${row.id}`} name="actual_technicians" type="number" min="1" defaultValue={1} required />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`ra_assist_${row.id}`}>عدد المساعدين</Label>
+                                  <Input id={`ra_assist_${row.id}`} name="actual_assistants" type="number" min="0" defaultValue={0} />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`ra_notes_${row.id}`}>ملاحظات</Label>
+                                  <Input id={`ra_notes_${row.id}`} name="notes" />
+                                </div>
+                                <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
+                                  تسجيل
+                                </Button>
+                              </form>
+                              {!actualsByStandardData[row.id] ? (
+                                <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+                              ) : actualsByStandardData[row.id].length === 0 ? (
+                                <p className="text-sm text-muted-foreground">مفيش إنتاجية فعلية متسجّلة لسه</p>
+                              ) : (
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>الوحدات</TableHead>
+                                      <TableHead>الأيام</TableHead>
+                                      <TableHead>الطاقم</TableHead>
+                                      <TableHead>الإنتاجية المحسوبة/يوم</TableHead>
+                                      <TableHead>ملاحظات</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {actualsByStandardData[row.id].map((a) => (
+                                      <TableRow key={a.id}>
+                                        <TableCell dir="ltr">{a.actual_units}</TableCell>
+                                        <TableCell dir="ltr">{a.actual_days}</TableCell>
+                                        <TableCell dir="ltr">
+                                          {a.actual_technicians} فني{a.actual_assistants > 0 ? ` + ${a.actual_assistants} مساعد` : ''}
+                                        </TableCell>
+                                        <TableCell dir="ltr">{a.computed_productivity_per_day.toFixed(2)}</TableCell>
+                                        <TableCell>{a.notes || '—'}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
