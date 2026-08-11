@@ -54,6 +54,8 @@ export interface AdminServiceResponseDto {
   requires_photos: boolean;
   allows_scheduling: boolean;
   allows_emergency: boolean;
+  allows_individual: boolean;
+  allows_team: boolean;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -81,6 +83,8 @@ export interface CreateServiceBody {
   requires_photos?: boolean;
   allows_scheduling?: boolean;
   allows_emergency?: boolean;
+  allows_individual?: boolean;
+  allows_team?: boolean;
   min_technician_level?: string;
   commission_percentage?: number;
   display_order?: number;
@@ -98,6 +102,8 @@ export interface ServiceZonePricingResponseDto {
   price_cents: number;
   inspection_fee_cents: number;
   surge_multiplier: number;
+  valid_from: string;
+  valid_until: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -107,6 +113,7 @@ export interface UpsertZonePricingBody {
   price_cents: number;
   inspection_fee_cents?: number;
   surge_multiplier?: number;
+  valid_from?: string;
 }
 
 export type SkillLevel = 'beginner' | 'standard' | 'expert';
@@ -163,4 +170,74 @@ export interface CreateServiceAddonBody {
 
 export interface UpdateServiceAddonBody extends Partial<CreateServiceAddonBody> {
   is_active?: boolean;
+}
+
+// بيانات قياسية للخدمة + محرك الإنتاجية (docs/06 §3.1-§3.6) — مطابق لـ
+// apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts's ServiceStandardDataResponseDto.
+export interface ServiceStandardDataResponseDto {
+  id: string;
+  service_id: string;
+  execution_type_ar: string;
+  unit_ar: string;
+  technician_daily_wage_cents: number;
+  assistant_daily_wage_cents: number | null;
+  productivity_per_day: number;
+  min_technicians: number;
+  min_assistants: number;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export interface CreateServiceStandardDataBody {
+  execution_type_ar?: string;
+  unit_ar: string;
+  technician_daily_wage_cents: number;
+  assistant_daily_wage_cents?: number;
+  productivity_per_day: number;
+  min_technicians?: number;
+  min_assistants?: number;
+  display_order?: number;
+}
+
+export interface UpdateServiceStandardDataBody extends Partial<CreateServiceStandardDataBody> {
+  is_active?: boolean;
+}
+
+export interface EstimateDurationBody {
+  standard_data_id: string;
+  requested_units: number;
+  assigned_technicians?: number;
+  assigned_assistants?: number;
+}
+
+export interface EstimateDurationResponseDto {
+  estimated_days: number;
+  unit_ar: string;
+  execution_type_ar: string;
+  assigned_technicians: number;
+  assigned_assistants: number;
+}
+
+// أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بس.
+export interface ServiceProductivityActualResponseDto {
+  id: string;
+  service_standard_data_id: string;
+  order_id: string | null;
+  actual_units: number;
+  actual_days: number;
+  actual_technicians: number;
+  actual_assistants: number;
+  computed_productivity_per_day: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface RecordProductivityActualBody {
+  order_id?: string;
+  actual_units: number;
+  actual_days: number;
+  actual_technicians: number;
+  actual_assistants: number;
+  notes?: string;
 }
