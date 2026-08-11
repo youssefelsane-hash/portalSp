@@ -38,8 +38,10 @@
 webhook البطاقة الناجح). لما `newStatus === completed`:
 1. `ReferralsService.handleOrderCompleted()` بيشيك: العميل ده اتترشّح ولسه معلّق؟
 2. لو أيوه، بيتأكد إن ده **أول طلب مكتمل فعلي** ليه (`COUNT(*)` مباشر على `orders` — مش
-   `customer_profiles.completed_orders_count` لأن العمود ده **مش بيتحدّث فعلياً حالياً** في أي
-   مكان بالكود، فجوة موثّقة مسبقاً في موديول `customers`، اكتشفناها أثناء بناء الميزة دي).
+   `customer_profiles.completed_orders_count`، حتى بعد ما العمود ده بقى بيتحدّث فعليًا
+   بمهمة خلفية مجدولة، `customers/README.md`، §"بَقّة حقيقية اتلقطت واتصلحت". السبب: العمود
+   بيتحدّث async بعد commit التسوية (queue job)، فمفيش ضمان إنه اتحدّث لحظة `handleOrderCompleted`
+   بيتنادى — `COUNT(*)` المباشر هنا فعليًا داخل نفس handler الحدث، فمضمون يكون دقيق فورًا).
 3. لو أول طلب فعلاً → الترشيح يتقفل `completed`، وعدّاد المُرشِّح (`COUNT` مباشر على
    `referrals`) بيتحسب.
 4. لو العدّاد وصل لمضاعف `referral.required_referrals_per_reward` → `issueReward()` بتصدر كود
