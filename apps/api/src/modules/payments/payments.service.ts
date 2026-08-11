@@ -232,7 +232,7 @@ export class PaymentsService {
       return { payment, order, previousStatus };
     }).then(async ({ payment, order, previousStatus }) => {
       // بره الـ transaction عمداً — إعادة حساب الإحصائيات مهمة خلفية (§14.4)، مش جزء من قفل الطلب
-      await this.technicianStatsService.enqueueRecalculation(technicianProfile.id);
+      await this.technicianStatsService.enqueueRecalculation(technicianProfile.id, order.serviceId);
       this.events.emit(
         CASH_COLLECTED_EVENT,
         new CashCollectedEvent(payment.id, order.id, order.orderNumber, payment.amountCents, technicianUserId),
@@ -314,12 +314,13 @@ export class PaymentsService {
         orderNumber: lockedOrder.orderNumber,
         customerId: lockedOrder.customerId,
         technicianId: lockedOrder.technicianId,
+        serviceId: lockedOrder.serviceId,
         previousStatus,
       };
-    }).then(async ({ payment, orderId, orderNumber, customerId, technicianId, previousStatus }) => {
+    }).then(async ({ payment, orderId, orderNumber, customerId, technicianId, serviceId, previousStatus }) => {
       // بره الـ transaction عمداً — نفس سبب collectCash فوق
       if (technicianId) {
-        await this.technicianStatsService.enqueueRecalculation(technicianId);
+        await this.technicianStatsService.enqueueRecalculation(technicianId, serviceId);
       }
       // نفس الفجوة اللي اتقفلت في collectCash فوق — الدفع بالمحفظة كان بيقفل الطلب من غير
       // ما يصدّر order.status_changed برضو.
@@ -620,7 +621,7 @@ export class PaymentsService {
         // اتصلح قبل كده في payWithCard/initiateGatewayCharge، هنا في مكان تاني في نفس الفلو.
         const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
 
-        const { orderId, orderNumber, customerId, technicianId, previousStatus } = await this.dataSource.transaction(
+        const { orderId, orderNumber, customerId, technicianId, serviceId, previousStatus } = await this.dataSource.transaction(
           async (manager) => {
             await manager.save(payment);
             const lockedOrder = await manager
@@ -639,13 +640,14 @@ export class PaymentsService {
               orderNumber: lockedOrder.orderNumber,
               customerId: lockedOrder.customerId,
               technicianId: lockedOrder.technicianId,
+              serviceId: lockedOrder.serviceId,
               previousStatus,
             };
           },
         );
 
         if (technicianId) {
-          await this.technicianStatsService.enqueueRecalculation(technicianId);
+          await this.technicianStatsService.enqueueRecalculation(technicianId, serviceId);
         }
         this.events.emit(
           ORDER_STATUS_CHANGED_EVENT,
