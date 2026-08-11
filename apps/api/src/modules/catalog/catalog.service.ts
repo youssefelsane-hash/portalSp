@@ -107,9 +107,20 @@ export class CatalogService {
     }
 
     if (zoneId) {
-      const override = await this.zonePricing.findOne({
-        where: { serviceId, serviceZoneId: zoneId, isActive: true },
-      });
+      // تاريخ سريان (docs/06 §3.10) — ممكن يكون فيه أكتر من صف لنفس (خدمة، منطقة) بمدى سريان
+      // مختلف (تخطيط سعر مستقبلي)؛ الساري فعليًا هو الصف اللي validFrom <= الآن < validUntil
+      // (أو validUntil=NULL). valid_from/valid_until كانت أعمدة خامدة من أول يوم (migration
+      // 0006) — أول استخدام حقيقي هنا.
+      const now = new Date();
+      const override = await this.zonePricing
+        .createQueryBuilder('p')
+        .where('p.service_id = :serviceId', { serviceId })
+        .andWhere('p.service_zone_id = :zoneId', { zoneId })
+        .andWhere('p.is_active = true')
+        .andWhere('p.valid_from <= :now', { now })
+        .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
+        .orderBy('p.valid_from', 'DESC')
+        .getOne();
       if (override) {
         const surge = Number(override.surgeMultiplier);
         return {

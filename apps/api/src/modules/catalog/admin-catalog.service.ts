@@ -9,6 +9,7 @@ import { CreateServiceAddonDto } from './dto/create-service-addon.dto';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreateServiceStandardDataDto } from './dto/create-service-standard-data.dto';
+import { RecordProductivityActualDto } from './dto/record-productivity-actual.dto';
 import { UpdateServiceAddonDto } from './dto/update-service-addon.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -18,6 +19,7 @@ import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
+import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
@@ -32,6 +34,7 @@ export class AdminCatalogService {
     @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
     @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
     @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
+    @InjectRepository(ServiceProductivityActual) private readonly productivityActuals: Repository<ServiceProductivityActual>,
     @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
     private readonly techniciansService: TechniciansService,
     private readonly auditLog: AuditLogService,
@@ -280,6 +283,24 @@ export class AdminCatalogService {
     return this.zonePricing.find({ where: { serviceId }, order: { createdAt: 'DESC' } });
   }
 
+  /** الصف الساري فعليًا دلوقتي (validFrom <= الآن < validUntil أو validUntil=NULL). */
+  private findCurrentZonePricing(serviceId: string, serviceZoneId: string): Promise<ServiceZonePricing | null> {
+    const now = new Date();
+    return this.zonePricing
+      .createQueryBuilder('p')
+      .where('p.service_id = :serviceId', { serviceId })
+      .andWhere('p.service_zone_id = :serviceZoneId', { serviceZoneId })
+      .andWhere('p.is_active = true')
+      .andWhere('p.valid_from <= :now', { now })
+      .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
+      .orderBy('p.valid_from', 'DESC')
+      .getOne();
+  }
+
+  // تاريخ سريان (docs/06 §3.10، docs/07 الجزء د) — تعديل بأثر فوري (valid_from غير مبعوت أو
+  // <= الآن) بيعدّل الصف الساري حالياً في مكانه (upsert زي زمان). جدولة سعر مستقبلي (valid_from
+  // في المستقبل) بتقفل الصف الساري الحالي عند نفس اللحظة (valid_until) وتفتح صف جديد منفصل —
+  // الاتنين يتحفظوا كتاريخ، مش بيتكتب فوق بعضه.
   async upsertZonePricing(
     adminUserId: string,
     serviceId: string,
@@ -287,14 +308,30 @@ export class AdminCatalogService {
     meta?: AuditActorMeta,
   ): Promise<ServiceZonePricing> {
     await this.findServiceOrThrow(serviceId);
+    const now = new Date();
+    const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
+    const isFutureScheduling = validFrom.getTime() > now.getTime();
 
-    let pricing = await this.zonePricing.findOne({
-      where: { serviceId, serviceZoneId: dto.service_zone_id, isActive: true },
-    });
-    const isNew = !pricing;
-    if (!pricing) {
-      pricing = this.zonePricing.create({ serviceId, serviceZoneId: dto.service_zone_id });
+    const current = await this.findCurrentZonePricing(serviceId, dto.service_zone_id);
+
+    let pricing: ServiceZonePricing;
+    let isNew: boolean;
+    if (isFutureScheduling) {
+      // جدولة سعر مستقبلي — الصف الحالي (لو موجود) بيتقفل عند لحظة السريان الجديدة، مش بيتلمس تاني.
+      if (current) {
+        current.validUntil = validFrom;
+        await this.zonePricing.save(current);
+      }
+      pricing = this.zonePricing.create({ serviceId, serviceZoneId: dto.service_zone_id, validFrom, validUntil: null });
+      isNew = true;
+    } else if (current) {
+      pricing = current;
+      isNew = false;
+    } else {
+      pricing = this.zonePricing.create({ serviceId, serviceZoneId: dto.service_zone_id, validFrom, validUntil: null });
+      isNew = true;
     }
+
     pricing.priceCents = dto.price_cents;
     if (dto.inspection_fee_cents !== undefined) pricing.inspectionFeeCents = dto.inspection_fee_cents;
     if (dto.surge_multiplier !== undefined) pricing.surgeMultiplier = String(dto.surge_multiplier);
@@ -306,7 +343,7 @@ export class AdminCatalogService {
       action: isNew ? 'service_zone_pricing.created' : 'service_zone_pricing.updated',
       entityType: 'service_zone_pricing',
       entityId: pricing.id,
-      newValues: { price_cents: pricing.priceCents, service_zone_id: pricing.serviceZoneId },
+      newValues: { price_cents: pricing.priceCents, service_zone_id: pricing.serviceZoneId, valid_from: pricing.validFrom },
       meta,
     });
     return pricing;
@@ -625,5 +662,46 @@ export class AdminCatalogService {
       oldValues: { execution_type_ar: row.executionTypeAr },
       meta,
     });
+  }
+
+  // ── أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، docs/07 الجزء د) — مرحلة 1: تسجيل بس ──
+
+  listProductivityActuals(standardDataId: string): Promise<ServiceProductivityActual[]> {
+    return this.productivityActuals.find({
+      where: { serviceStandardDataId: standardDataId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async recordProductivityActual(
+    adminUserId: string,
+    standardDataId: string,
+    dto: RecordProductivityActualDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServiceProductivityActual> {
+    await this.findStandardDataOrThrow(standardDataId);
+
+    const row = this.productivityActuals.create({
+      serviceStandardDataId: standardDataId,
+      orderId: dto.order_id ?? null,
+      actualUnits: String(dto.actual_units),
+      actualDays: String(dto.actual_days),
+      actualTechnicians: dto.actual_technicians,
+      actualAssistants: dto.actual_assistants,
+      notes: dto.notes ?? null,
+      recordedByUserId: adminUserId,
+    });
+    await this.productivityActuals.save(row);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_productivity_actual.recorded',
+      entityType: 'service_productivity_actual',
+      entityId: row.id,
+      newValues: { actual_units: row.actualUnits, actual_days: row.actualDays },
+      meta,
+    });
+    return row;
   }
 }

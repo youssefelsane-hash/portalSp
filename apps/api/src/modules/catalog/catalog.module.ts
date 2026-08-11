@@ -9,6 +9,7 @@ import { CatalogService } from './catalog.service';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
+import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
@@ -23,6 +24,7 @@ import { TechnicianService } from './entities/technician-service.entity';
       ServiceLevelPricing,
       ServiceAddon,
       ServiceStandardData,
+      ServiceProductivityActual,
       TechnicianService,
     ]),
     TechniciansModule,

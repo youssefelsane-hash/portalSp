@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, IsOptional, IsPositive, IsUUID, Min } from 'class-validator';
+import { IsDateString, IsInt, IsNumber, IsOptional, IsPositive, IsUUID, Min } from 'class-validator';
 
 export class UpsertZonePricingDto {
   @IsUUID()
@@ -17,4 +17,11 @@ export class UpsertZonePricingDto {
   @IsNumber()
   @IsPositive()
   surge_multiplier?: number;
+
+  // تاريخ سريان (docs/06 §3.10) — افتراضي دلوقتي لو مش مبعوت (يعدّل السعر الساري فورًا). تاريخ
+  // مستقبلي = يجدول تغيير سعر جاي من غير ما يأثر على أي حاجة دلوقتي — الصف الساري الحالي
+  // بيتقفل تلقائيًا عند نفس اللحظة دي (valid_until)، وصف جديد بيتفتح من عندها.
+  @IsOptional()
+  @IsDateString()
+  valid_from?: string;
 }
