@@ -42,19 +42,21 @@
 - **فجوة موثّقة #2 اتحلّت**: الأسماء المعتمدة "شغلانة سريعة"/"اعتماد"/"طوارئ" (`BookingMode.labelAr` في `apps/customer-app/lib/features/catalog/models.dart`).
 - **بونص خارج النطاق بس كان لازم يتصلح عشان أي اختبار حي يشتغل أصلاً**: `apps/api/.env.example` كان بيكسر تشغيل السيرفر خالص لو اتنسخ زي ما هو (`cp .env.example .env`) — تفاصيل الإصلاح في `docs/03-external-integrations.md`.
 
-**تفاصيل كاملة**: `apps/api/src/modules/orders/README.md` (§هيكل الحجز الجديد)، `apps/api/src/modules/catalog/README.md`، `apps/api/src/modules/technicians/README.md`، `apps/customer-app/README.md`.
+**تفاصيل كاملة**: `apps/api/src/modules/orders/README.md` (§هيكل الحجز الجديد)، `apps/api/src/modules/catalog/README.md`، `apps/api/src/modules/technicians/README.md`، `apps/customer-app/README.md`. **اتدمج فعلياً في `main` عبر PR #18.**
 
 **مُتعمَّد برّه نطاق الجزء ده، مخطط للجزء ج**: `matching.service.ts` لسه ما بيستخدمش `booking_mode=emergency` (بث بموجات، تجاهل `is_available`) ولا `requested_technician_company_id` (تفضيل فنيي الشركة) في خوارزمية التوزيع الفعلية — البنية التحتية والتحقق جاهزين، الاستهلاك في المطابقة نفسها لسه.
 
 **ملحوظة بيئة صادقة**: Flutter SDK مش موجود في الـ container بتاع السيشن دي (`/opt/flutter` غير موجود رغم كلام `CLAUDE.md`) — تغييرات `apps/customer-app`/`apps/technician-app` اتعملها مراجعة يدوية دقيقة بس، **مش** `flutter analyze`/`flutter test` فعلي. أي سيشن جاية عندها SDK حقيقي لازم تشغّلهم على أول حاجة (تفاصيل في `apps/customer-app/README.md`).
 
 ### الجزء ب — صلاحيات الأدمن الموسّعة (عمولة ديناميكية + تعيين قسري)
-**الحالة**: ⬜ لسه ما بدأش
+**الحالة**: ✅ خلص — 2026-08-11 (نفس السيشن، فرع `hgotr7`)
 
-يغطي `docs/06` §2 كامل:
-- عمولة/نسبة قابلة للتحكم الكامل من الأدمن **حسب `booking_mode`** (فردي/فريق/طوارئ) — لازم تستنى الجزء أ يخلص أول لإن `booking_mode` نفسه هيتزرع فيه (راجع الجزء أ قبل ما تبدأ، ولو لسه 🔄 اشتغل على حاجة تانية أو استنى).
-- `POST /admin/orders/:id/assign` (أو اسم مشابه) — تعيين قسري لطلب لفني معيّن مباشرة من لوحة الأدمن (مش عبر matching التلقائي) + notification فورية للفني.
-- استخدم نمط `settings` module الموجود (زي `loyalty.earn_points_per_100_egp_spent`) كمرجع للنمط المطلوب للعمولة الديناميكية، مش قيمة مكتوبة في الكود.
+**اللي خلص فعلاً، مختبر حي**:
+- **عمولة ديناميكية حسب `booking_mode`**: 3 إعدادات جديدة (`commission.individual_adjustment_percentage`, `commission.team_adjustment_percentage`, `commission.emergency_adjustment_percentage` — migration `0052`) بنفس نمط نقاط الولاء بالحرف (`SettingsService.getNumber()`). `computeSettlement()` في `payments.service.ts` بقت بتجمعها فوق عمولة الخدمة + فرق مستوى الفني. **اتعمله اختبار حي كامل بدفع كاش حقيقي**: طلب `emergency` طبّق `17%` بالظبط (15 خدمة - 3 مستوى premium + 5 طوارئ)، وبعد ما الأدمن غيّر الإعداد لـ`10` عبر `/admin/settings` من غير أي restart، طلب تاني طبّق `22%` بالظبط — إثبات إن الإعداد ديناميكي فعلاً. تفاصيل كاملة في `apps/api/src/modules/payments/README.md`.
+- **تعيين قسري + notification**: **اكتشاف مهم** — `POST /admin/orders/:id/reassign` + `OrderReassignedNotificationListener` الموجودين من قبل الرؤية الجديدة **بيغطوا `docs/06` §2.2 بالكامل من غير أي كود إضافي**. اتحقق من ده حياً (فني اترقّى واتأهّل، طلب `emergency` اتعيّن له، نفّذ الدورة كاملة لغاية `collect-cash`) بدل ما نبني نظام موازي. تفاصيل في `apps/api/src/modules/orders/README.md`.
+- **فجوة موثّقة #3 اتحلّت**: نسبة عمولة "طوارئ" الافتراضية = 5% (تجريبية، قابلة للتعديل الكامل من الأدمن — مش رقم نهائي).
+
+**تفاصيل كاملة**: `apps/api/src/modules/payments/README.md`، `apps/api/src/modules/orders/README.md`.
 
 ### الجزء ج — نظام "طوارئ" (Emergency Dispatch) + البيانات القياسية الأساسية
 **الحالة**: ⬜ لسه ما بدأش
@@ -82,6 +84,6 @@
 |---|---|---|---|
 | 1 | كاتيجوريز "اعتماد" منفصلة تمامًا ولا نفس الكاتيجوريز بفلتر؟ | ✅ اتحلّت (الجزء أ) | نفس الكاتيجوريز/الخدمات بفلاجات `allows_individual`/`allows_team` لكل خدمة (زي `allows_emergency` الموجود بالفعل)، مش شجرة منفصلة — تفاصيل السبب في `apps/api/src/modules/catalog/README.md`. |
 | 2 | الاسم النهائي لزرار "أفراد" | ✅ اتحلّت (الجزء أ) | "شغلانة سريعة" (فرد)، "اعتماد" (فريق/شركة)، "طوارئ". `BookingMode.labelAr` في `apps/customer-app/lib/features/catalog/models.dart`. |
-| 3 | نسبة عمولة "طوارئ" بالظبط | ⬜ لسه مفتوحة | خارج نطاق الجزء أ — الجزء ب هيبنيها كإعداد قابل للتعديل بقيمة افتراضية معقولة (نفس مبدأ نقاط الولاء)، مش رقم مخترع نهائي. |
+| 3 | نسبة عمولة "طوارئ" بالظبط | ✅ اتحلّت (الجزء ب) | `commission.emergency_adjustment_percentage` = 5% افتراضي، إعداد قابل للتعديل الكامل من `/admin/settings` — مش رقم نهائي مخترع. |
 | 4 | أرقام الإنتاجية الناقصة (حجر/سباكة/كهرباء/جبس) | ⬜ لسه مفتوحة | الجزء ج هيسيب الحقل فاضي/NULL لحد ما الأدمن يدخله، مش يخترع رقم. |
 | 5 | تفاصيل اللوجو والـ Footer | ⬜ لسه مفتوحة (مؤجلة من المالك نفسه) | الجزء أ حط placeholder section في الـ Footer (`apps/admin`) بس، من غير أصول لوجو حقيقية. |
