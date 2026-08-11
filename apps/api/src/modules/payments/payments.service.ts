@@ -66,8 +66,17 @@ export class PaymentsService {
       const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
       const levelConfig = await this.technicianLevelsService.getOrThrow(technicianProfile.currentLevel);
       commissionRateApplied += Number(levelConfig.commissionAdjustmentPercentage);
-      commissionRateApplied = Math.min(100, Math.max(0, commissionRateApplied));
     }
+
+    // هيكل الحجز الجديد (docs/06 §2.1، docs/07 الجزء ب) — فرق عمولة إضافي حسب booking_mode
+    // (فرد/اعتماد/طوارئ)، قابل للتحكم الكامل من الأدمن عبر /admin/settings (migration 0052)،
+    // مش قيمة ثابتة في الكود. بيتجمع فوق عمولة الخدمة + فرق مستوى الفني، مش بديل عنهم.
+    const bookingModeAdjustment = await this.settingsService.getNumber(
+      `commission.${order.bookingMode}_adjustment_percentage`,
+      0,
+    );
+    commissionRateApplied += bookingModeAdjustment;
+    commissionRateApplied = Math.min(100, Math.max(0, commissionRateApplied));
 
     const platformCommissionCents = Math.round((order.totalAmountCents * commissionRateApplied) / 100);
     const technicianEarningCents = order.totalAmountCents - platformCommissionCents;
