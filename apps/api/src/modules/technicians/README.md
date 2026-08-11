@@ -130,4 +130,12 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 - **اتعمله اختبار حي كامل**: لينك يوتيوب حقيقي اتضاف — `platform` اتكشف صح، `thumbnail_url` رجع `null` بأمان (البروكسي في بيئة التطوير دي بيمنع الوصول لـ`youtube.com` — نفس القيد الموثّق لباقي التكاملات الخارجية، مش بَقّة في الكود؛ اتأكد السلوك السليم من اللوج: تحذير واضح + `200` نجاح مش `500`)، لينك انستجرام من غير مفتاح Graph API اتحفظ عادي بـ`thumbnail_url=null`، لينك من دومين مش مدعوم اترفض `400`، القايمة والحذف اشتغلوا صح، واللينكات ظهرت في البروفايل العام للعميل.
 - **بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي (مش في الباك-إند — في `apps/technician-app`)**: `core/api_client.dart`'s `_send()` مكانتش بتدعم `DELETE` method خالص (بس `GET`/`POST`/`PATCH`) — أول استخدام لـ`DELETE` في التطبيق ده كان `PortfolioRepository.remove()`، فالبَقّة اتكشفت أول ما اتعمل. اتصلحت بإضافة `case 'DELETE': return http.delete(...)`. `apps/customer-app`'s نسخة كانت أصلاً بتدعم `DELETE` (مستخدمة لحذف العناوين من زمان).
 
+## `GET /technician-companies` — تصفّح "اعتماد" للعميل (صُنّاع، `docs/06` §1.5، `docs/07` الجزء أ)
+
+`PublicTechnicianCompaniesController` (جديد، `@Roles(CUSTOMER)`) — العميل يقدر يشوف الشركات/الفرق **النشطة بس** عشان يختار واحدة يحجزها كاملة لطلب "اعتماد" (بدل ما يسيب المطابقة تختار له). `TechnicianCompaniesService.listActiveCompanies()` (جديدة) بتفلتر `is_active=true` — مختلفة عمداً عن `listForAdmin()` الموجودة (بترجع الكل، نشطة أو لأ، للإشراف). `toPublicCompanyResponseDto()` (جديدة) بترجّع `id`/`name`/`branch_count`/`staff_count` بس — **من غير** `owner_user_id`/`commercial_registration_number` اللي بترجعهم `toCompanyResponseDto()` العادية (بيانات إدارية داخلية مالهاش داعي تتعرض للعميل).
+
+كمان `findActiveCompanyOrThrow()` (جديدة، عامة) — مستخدمة من `orders.service.ts` وقت إنشاء طلب "اعتماد" بشركة محدّدة (`requested_technician_company_id`)، بترمي 404 واضح لو الشركة مش موجودة أو مش نشطة. تفاصيل كاملة لاستهلاك ده في إنشاء الطلب في `../orders/README.md`.
+
+**اتعمله اختبار حي**: فني اترقّى لـ`premium` (`can_lead_team`) وأنشأ شركة حقيقية، `GET /technician-companies` (عميل) عرضها صح بالحقول المسموحة بس، وربطها بطلب حقيقي عبر `requested_technician_company_id` نجح (تفاصيل الاختبار الكامل في `../orders/README.md`).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

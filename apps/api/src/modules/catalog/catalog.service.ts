@@ -8,6 +8,7 @@ import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
+import { BookingModeFilter } from './dto/list-services.dto';
 
 export interface PriceEstimate {
   base_price_cents: number;
@@ -47,9 +48,17 @@ export class CatalogService {
     return this.categories.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });
   }
 
-  findServices(categoryId?: string): Promise<Service[]> {
+  findServices(categoryId?: string, bookingMode?: BookingModeFilter): Promise<Service[]> {
+    const bookingModeFilter =
+      bookingMode === 'individual'
+        ? { allowsIndividual: true }
+        : bookingMode === 'team'
+          ? { allowsTeam: true }
+          : bookingMode === 'emergency'
+            ? { allowsEmergency: true }
+            : {};
     return this.services.find({
-      where: { isActive: true, ...(categoryId ? { categoryId } : {}) },
+      where: { isActive: true, ...(categoryId ? { categoryId } : {}), ...bookingModeFilter },
       order: { displayOrder: 'ASC' },
     });
   }

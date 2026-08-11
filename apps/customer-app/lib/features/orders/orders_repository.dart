@@ -1,5 +1,6 @@
 import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
+import '../catalog/models.dart';
 import 'models.dart';
 
 class OrdersRepository {
@@ -26,14 +27,18 @@ class OrdersRepository {
   Future<Order> create({
     required String serviceId,
     required String addressId,
+    required BookingMode bookingMode,
     String? problemDescription,
     String? promoCode,
     List<String>? addonIds,
     String? requestedTechnicianId,
+    String? requestedTechnicianCompanyId,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
       'address_id': addressId,
+      // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
+      'booking_mode': bookingMode.apiValue,
       if (problemDescription != null && problemDescription.isNotEmpty)
         'problem_description': problemDescription,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
@@ -41,6 +46,8 @@ class OrdersRepository {
       // "إعادة الحجز" — تفضيل بس، الباك-إند بيكمّل بالتوزيع العادي لو الفني مش متاح
       // (تفاصيل في apps/api/src/modules/matching/README.md).
       if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
+      // "اعتماد" — تفضيل شركة/فريق بعينه، متاح بس مع bookingMode=team (الباك-إند بيرفض غير كده).
+      if (requestedTechnicianCompanyId != null) 'requested_technician_company_id': requestedTechnicianCompanyId,
     });
     return Order.fromJson(data!);
   }

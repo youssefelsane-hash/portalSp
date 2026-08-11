@@ -11,6 +11,7 @@ import { AdminTechnicianLevelsController } from './admin-technician-levels.contr
 import { AdminTechniciansController } from './admin-technicians.controller';
 import { AdminTechniciansService } from './admin-technicians.service';
 import { PublicTechniciansController } from './public-technicians.controller';
+import { PublicTechnicianCompaniesController } from './public-technician-companies.controller';
 import { TechnicianCompaniesController } from './technician-companies.controller';
 import { TechnicianCompaniesService } from './technician-companies.service';
 import { TechnicianLevelsService } from './technician-levels.service';
@@ -54,6 +55,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     PublicTechniciansController,
     AdminTechniciansController,
     TechnicianCompaniesController,
+    PublicTechnicianCompaniesController,
     AdminTechnicianCompaniesController,
     AdminTechnicianLevelsController,
   ],
@@ -69,6 +71,6 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianStatsProcessor,
     storageServiceProvider,
   ],
-  exports: [TechniciansService, TechnicianLevelsService, TechnicianStatsService],
+  exports: [TechniciansService, TechnicianCompaniesService, TechnicianLevelsService, TechnicianStatsService],
 })
 export class TechniciansModule {}

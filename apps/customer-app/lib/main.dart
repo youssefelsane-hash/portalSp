@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/auth_repository.dart';
 import 'features/auth/login_screen.dart';
-import 'features/catalog/categories_screen.dart';
+import 'features/catalog/booking_mode_screen.dart';
 
 void main() {
   runApp(const BaytakApp());
@@ -16,7 +16,7 @@ class BaytakApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AuthRepository()..init(),
       child: MaterialApp(
-        title: 'baytak',
+        title: 'صُنّاع',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple), useMaterial3: true),
         locale: const Locale('ar', 'EG'),
@@ -35,6 +35,6 @@ class _AuthGate extends StatelessWidget {
     if (auth.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return auth.isAuthenticated ? const CategoriesScreen() : const LoginScreen();
+    return auth.isAuthenticated ? const BookingModeScreen() : const LoginScreen();
   }
 }

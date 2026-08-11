@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../catalog/catalog_repository.dart';
+import '../catalog/models.dart' show BookingMode;
 import '../orders/create_order_screen.dart';
 import 'models.dart';
 import 'portfolio_link_viewer_screen.dart';
@@ -84,7 +85,12 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
       if (mounted) {
         await Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => CreateOrderScreen(service: service, requestedTechnicianId: profile.id),
+            // "إعادة الحجز" — طلب نفس الفني بعينه دايماً وضع فردي (مش فريق/طوارئ).
+            builder: (_) => CreateOrderScreen(
+              service: service,
+              bookingMode: BookingMode.individual,
+              requestedTechnicianId: profile.id,
+            ),
           ),
         );
       }

@@ -19,7 +19,7 @@ export class CatalogController {
   @Public()
   @Get('services')
   async listServices(@Query() query: ListServicesDto) {
-    const services = await this.catalogService.findServices(query.category_id);
+    const services = await this.catalogService.findServices(query.category_id, query.booking_mode);
     return services.map(toServiceResponseDto);
   }
 

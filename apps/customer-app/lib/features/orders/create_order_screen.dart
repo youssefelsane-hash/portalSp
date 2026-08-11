@@ -6,14 +6,17 @@ import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
+import '../technicians/models.dart';
+import '../technicians/technicians_repository.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
 
 class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
+  final BookingMode bookingMode;
   final String? requestedTechnicianId;
 
-  const CreateOrderScreen({super.key, required this.service, this.requestedTechnicianId});
+  const CreateOrderScreen({super.key, required this.service, required this.bookingMode, this.requestedTechnicianId});
 
   @override
   State<CreateOrderScreen> createState() => _CreateOrderScreenState();
@@ -21,6 +24,7 @@ class CreateOrderScreen extends StatefulWidget {
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
+  late final TechniciansRepository _techniciansRepository;
   final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
   final _promoController = TextEditingController();
@@ -32,12 +36,28 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _error;
   List<ServiceAddon> _addons = [];
   final Set<String> _selectedAddonIds = {};
+  // "اعتماد" (docs/06 §1.5) — اختياري، بس متاح لما bookingMode=team بس.
+  List<TechnicianCompanySummary>? _companies;
+  TechnicianCompanySummary? _selectedCompany;
 
   @override
   void initState() {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
+    _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
     _loadAddons();
+    if (widget.bookingMode == BookingMode.team) _loadCompanies();
+  }
+
+  // فشل تحميل الشركات مش لازم يمنع الحجز نفسه — العميل يقدر يسيب المطابقة تختار له فني/فريق
+  // مؤهّل تلقائيًا (نفس فلسفة _loadAddons تحت).
+  Future<void> _loadCompanies() async {
+    try {
+      final companies = await _techniciansRepository.listActiveCompanies();
+      if (mounted) setState(() => _companies = companies);
+    } on ApiException {
+      // تجاهل — اختيار الشركة اختياري بحتة
+    }
   }
 
   // كانت فجوة موثّقة صراحة في catalog/README.md — الباك-إند (POST /orders بياخد addon_ids[])
@@ -104,10 +124,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       final order = await _repository.create(
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
+        bookingMode: widget.bookingMode,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
         addonIds: _selectedAddonIds.toList(),
         requestedTechnicianId: widget.requestedTechnicianId,
+        requestedTechnicianCompanyId: _selectedCompany?.id,
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -171,6 +193,32 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         ),
                       )
                       .toList(),
+                ),
+              ),
+            ],
+            if (widget.bookingMode == BookingMode.team && (_companies?.isNotEmpty ?? false)) ...[
+              const SizedBox(height: 16),
+              Text('اختار شركة/فريق (اختياري)', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Card(
+                child: Column(
+                  children: [
+                    RadioListTile<TechnicianCompanySummary?>(
+                      value: null,
+                      groupValue: _selectedCompany,
+                      onChanged: (value) => setState(() => _selectedCompany = value),
+                      title: const Text('بدون تفضيل — نختارلك أنسب فريق متاح'),
+                    ),
+                    ..._companies!.map(
+                      (company) => RadioListTile<TechnicianCompanySummary?>(
+                        value: company,
+                        groupValue: _selectedCompany,
+                        onChanged: (value) => setState(() => _selectedCompany = value),
+                        title: Text(company.name),
+                        subtitle: Text('${company.staffCount} فني · ${company.branchCount} فرع'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

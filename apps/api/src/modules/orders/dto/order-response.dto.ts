@@ -15,6 +15,8 @@ export interface OrderResponseDto {
   address_id: string;
   technician_id: string | null;
   order_type: string;
+  booking_mode: string;
+  requested_technician_company_id: string | null;
   order_status: string;
   problem_description: string | null;
   customer_notes: string | null;
@@ -44,6 +46,8 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
     address_id: order.addressId,
     technician_id: order.technicianId,
     order_type: order.orderType,
+    booking_mode: order.bookingMode,
+    requested_technician_company_id: order.requestedTechnicianCompanyId,
     order_status: order.orderStatus,
     problem_description: order.problemDescription,
     customer_notes: order.customerNotes,

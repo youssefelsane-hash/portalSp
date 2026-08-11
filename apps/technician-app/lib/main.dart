@@ -18,7 +18,7 @@ class BaytakTechnicianApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AuthRepository()..init(),
       child: MaterialApp(
-        title: 'baytak — الفني',
+        title: 'صُنّاع — الفني',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal), useMaterial3: true),
         locale: const Locale('ar', 'EG'),

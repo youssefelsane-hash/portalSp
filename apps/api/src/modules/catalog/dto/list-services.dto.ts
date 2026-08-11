@@ -1,5 +1,11 @@
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsUUID } from 'class-validator';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
+
+// هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختار منهم قبل ما يشوف الخدمات.
+// نفس القيم بالحرف زي orders.entity.ts's BookingMode (متعمّد تكرار بسيط بدل import من موديول
+// orders جوّه catalog — الموديولين مستقلين عن بعض عمدًا في المشروع).
+export type BookingModeFilter = 'individual' | 'team' | 'emergency';
+export const BOOKING_MODE_FILTER_VALUES: BookingModeFilter[] = ['individual', 'team', 'emergency'];
 
 export class ListServicesDto {
   @IsOptional()
@@ -9,6 +15,12 @@ export class ListServicesDto {
   @IsOptional()
   @IsUUID()
   zone_id?: string;
+
+  // فلترة الخدمات حسب وضع الحجز اللي اختاره العميل (فرد/اعتماد/طوارئ) — بتترجم لفلترة على
+  // allows_individual/allows_team/allows_emergency على الخدمة (catalog.service.ts findServices).
+  @IsOptional()
+  @IsIn(BOOKING_MODE_FILTER_VALUES)
+  booking_mode?: BookingModeFilter;
 }
 
 export class EstimateQueryDto {

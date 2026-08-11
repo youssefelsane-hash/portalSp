@@ -1,3 +1,22 @@
+// هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختارهم قبل ما يشوف الخدمات.
+// مطابق بالحرف لـ orders.entity.ts's BookingMode في الباك-إند.
+enum BookingMode { individual, team, emergency }
+
+extension BookingModeJson on BookingMode {
+  String get apiValue => switch (this) {
+        BookingMode.individual => 'individual',
+        BookingMode.team => 'team',
+        BookingMode.emergency => 'emergency',
+      };
+
+  // الأسماء المعتمدة (docs/07 §الفجوات المفتوحة #2) — "أفراد" اتجنّبت عمداً كعنوان زرار.
+  String get labelAr => switch (this) {
+        BookingMode.individual => 'شغلانة سريعة',
+        BookingMode.team => 'اعتماد',
+        BookingMode.emergency => 'طوارئ',
+      };
+}
+
 // مطابق لـ apps/api/src/modules/catalog/dto/service-response.dto.ts
 class ServiceCategory {
   final String id;

@@ -22,6 +22,28 @@ export function toCompanyResponseDto(company: TechnicianCompany): CompanyRespons
   };
 }
 
+// "اعتماد" (docs/06 §1.5) — نسخة عامة للعميل، من غير owner_user_id/commercial_registration_number
+// (بيانات إدارية داخلية مالهاش داعي تتعرض للعميل وقت اختيار شركة يحجزها).
+export interface PublicCompanyResponseDto {
+  id: string;
+  name: string;
+  branch_count: number;
+  staff_count: number;
+}
+
+export function toPublicCompanyResponseDto(
+  company: TechnicianCompany,
+  branchCount: number,
+  staffCount: number,
+): PublicCompanyResponseDto {
+  return {
+    id: company.id,
+    name: company.name,
+    branch_count: branchCount,
+    staff_count: staffCount,
+  };
+}
+
 export interface BranchResponseDto {
   id: string;
   company_id: string;

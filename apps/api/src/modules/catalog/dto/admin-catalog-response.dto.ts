@@ -57,6 +57,8 @@ export interface AdminServiceResponseDto {
   requires_photos: boolean;
   allows_scheduling: boolean;
   allows_emergency: boolean;
+  allows_individual: boolean;
+  allows_team: boolean;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -86,6 +88,8 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     requires_photos: service.requiresPhotos,
     allows_scheduling: service.allowsScheduling,
     allows_emergency: service.allowsEmergency,
+    allows_individual: service.allowsIndividual,
+    allows_team: service.allowsTeam,
     min_technician_level: service.minTechnicianLevel,
     commission_percentage: Number(service.commissionPercentage),
     display_order: service.displayOrder,
