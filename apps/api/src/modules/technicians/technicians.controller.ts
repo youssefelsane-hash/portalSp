@@ -26,6 +26,7 @@ import { toTechnicianProfileResponseDto } from './dto/technician-profile-respons
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 import { toPortfolioLinkResponseDto } from './dto/portfolio-link-response.dto';
 import { AddPortfolioLinkDto } from './dto/add-portfolio-link.dto';
+import { RequestAssistantDto } from './dto/request-assistant.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
@@ -45,7 +46,31 @@ export class TechniciansController {
 
   @Get('me')
   async getMe(@CurrentUser() user: JwtPayload) {
-    return toTechnicianProfileResponseDto(await this.techniciansService.findByUserIdOrThrow(user.sub));
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    // تصنيف نوع الفني الأربعة (docs/06 §3.8) — محسوب لحظياً من بيانات موجودة (مش عمود مخزّن)،
+    // راجع technicians/README.md.
+    const technicianType = await this.techniciansService.classifyType(profile);
+    return {
+      ...toTechnicianProfileResponseDto(profile),
+      technician_type: technicianType,
+      assistant_link_status: profile.assistantLinkStatus,
+      assistant_technician_id: profile.assistantTechnicianId,
+    };
+  }
+
+  // "معاه مساعد؟" (docs/06 §3.7) — الفني بيطلب ربط مساعد بكود موظفه، الإدارة توافق قبل ما
+  // يبقى رسمي (POST /admin/technicians/:id/assistant/approve|reject).
+  @Post('assistant-request')
+  async requestAssistant(@CurrentUser() user: JwtPayload, @Body() dto: RequestAssistantDto) {
+    const profile = await this.techniciansService.requestAssistant(user.sub, dto.assistant_technician_code);
+    return { assistant_link_status: profile.assistantLinkStatus, assistant_technician_id: profile.assistantTechnicianId };
+  }
+
+  @Delete('assistant')
+  @HttpCode(HttpStatus.OK)
+  async removeAssistant(@CurrentUser() user: JwtPayload) {
+    const profile = await this.techniciansService.removeAssistant(user.sub);
+    return { assistant_link_status: profile.assistantLinkStatus, assistant_technician_id: profile.assistantTechnicianId };
   }
 
   @Get('level')

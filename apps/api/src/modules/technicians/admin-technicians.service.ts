@@ -16,7 +16,7 @@ import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { DocumentReviewStatus, TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianLevelChangeType, TechnicianLevelHistory } from './entities/technician-level-history.entity';
-import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { TechnicianAssistantLinkStatus, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
 import { canTransitionVerification } from './technician-verification-state-machine';
 
@@ -392,5 +392,51 @@ export class AdminTechniciansService {
       oldValues: { service_zone_id: serviceZoneId },
       meta,
     });
+  }
+
+  // ── "معاه مساعد؟" — موافقة/رفض الإدارة (docs/06 §3.7، docs/07 الجزء د) ────────
+
+  async approveAssistant(adminUserId: string, technicianProfileId: string, meta?: AuditActorMeta): Promise<TechnicianProfile> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (profile.assistantLinkStatus !== TechnicianAssistantLinkStatus.PENDING_APPROVAL) {
+      throw new ApiException(ErrorCode.VAL_001, 'مفيش طلب مساعد مستني موافقة للفني ده', HttpStatus.CONFLICT);
+    }
+
+    profile.assistantLinkStatus = TechnicianAssistantLinkStatus.APPROVED;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician.assistant_approved',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      newValues: { assistant_technician_id: profile.assistantTechnicianId },
+      meta,
+    });
+    return profile;
+  }
+
+  async rejectAssistant(adminUserId: string, technicianProfileId: string, meta?: AuditActorMeta): Promise<TechnicianProfile> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (profile.assistantLinkStatus !== TechnicianAssistantLinkStatus.PENDING_APPROVAL) {
+      throw new ApiException(ErrorCode.VAL_001, 'مفيش طلب مساعد مستني موافقة للفني ده', HttpStatus.CONFLICT);
+    }
+
+    const oldAssistantId = profile.assistantTechnicianId;
+    profile.assistantTechnicianId = null;
+    profile.assistantLinkStatus = TechnicianAssistantLinkStatus.NONE;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician.assistant_rejected',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { assistant_technician_id: oldAssistantId },
+      meta,
+    });
+    return profile;
   }
 }
