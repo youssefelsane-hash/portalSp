@@ -17,6 +17,21 @@ class OnboardingRepository {
     return TechnicianMe.fromJson(data!);
   }
 
+  // "معاه مساعد؟" (docs/06 §3.7) — الفني بيحدد المساعد بنفسه بكوده (technician_code)، الإدارة
+  // بعد كده توافق/ترفض من apps/admin. مفيش auto-matching (فجوة موثّقة صراحة في technicians/README.md).
+  Future<Map<String, dynamic>> requestAssistant(String assistantTechnicianCode) async {
+    final data = await auth.authedRequest('POST', '/technician/assistant-request', body: {
+      'assistant_technician_code': assistantTechnicianCode,
+    });
+    return data!;
+  }
+
+  // إزالة الربط ذاتية (مفيش داعي موافقة إدارة) — بتشتغل سواء كان الطلب pending_approval أو approved.
+  Future<Map<String, dynamic>> removeAssistant() async {
+    final data = await auth.authedRequest('DELETE', '/technician/assistant');
+    return data!;
+  }
+
   Future<List<TechnicianDocument>> listDocuments() async {
     final items = await auth.authedRequestList('/technician/documents');
     return items.map(TechnicianDocument.fromJson).toList();

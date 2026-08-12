@@ -5,6 +5,7 @@ import '../../core/auth_repository.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../portfolio/portfolio_screen.dart';
+import '../profile/profile_screen.dart';
 import '../schedule/schedule_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
@@ -120,6 +121,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'تواصل مع الإدارة',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const InternalChatListScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.person_outline),
+              tooltip: 'بروفايلي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
               ),
             ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),

@@ -5,15 +5,44 @@ class TechnicianMe {
   final String technicianCode;
   final String verificationStatus;
   final bool isAvailable;
+  // "معاه مساعد؟" + تصنيف نوع الفني الأربعة (docs/06 §3.7-§3.8) — محسوبين لحظياً في الباك-إند،
+  // مش أعمدة مخزّنة. كانت فجوة موثّقة صراحة: مفيش شاشة في apps/technician-app كانت بتقرأهم خالص.
+  final String technicianType;
+  final String assistantLinkStatus;
+  final String? assistantTechnicianId;
 
-  TechnicianMe({required this.technicianCode, required this.verificationStatus, required this.isAvailable});
+  TechnicianMe({
+    required this.technicianCode,
+    required this.verificationStatus,
+    required this.isAvailable,
+    required this.technicianType,
+    required this.assistantLinkStatus,
+    required this.assistantTechnicianId,
+  });
 
   factory TechnicianMe.fromJson(Map<String, dynamic> json) => TechnicianMe(
         technicianCode: json['technician_code'] as String,
         verificationStatus: json['verification_status'] as String,
         isAvailable: json['is_available'] as bool,
+        technicianType: json['technician_type'] as String,
+        assistantLinkStatus: json['assistant_link_status'] as String,
+        assistantTechnicianId: json['assistant_technician_id'] as String?,
       );
 }
+
+// مطابق لـ TechniciansService.classifyType() بالحرف — راجع technicians/README.md.
+const Map<String, String> technicianTypeLabelsAr = {
+  'individual': 'فني مستقل',
+  'individual_with_assistant': 'فني مستقل + مساعد',
+  'team': 'عضو فريق',
+  'company': 'عضو شركة',
+};
+
+const Map<String, String> assistantLinkStatusLabelsAr = {
+  'none': 'مفيش مساعد مربوط',
+  'pending_approval': 'طلب الربط قيد مراجعة الإدارة',
+  'approved': 'مساعدك مربوط ومعتمد',
+};
 
 // نفس enum التسلسل الحقيقي (TechnicianVerificationStatus في الباك-إند) بترتيبه — عشان نعرف
 // نعرض للفني هو "لسه بيراجع" ولا "خلاص محتاج يعمل حاجة تانية" ولا "رجع مرفوض".
