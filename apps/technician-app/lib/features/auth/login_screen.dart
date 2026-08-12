@@ -20,6 +20,9 @@ class _LoginScreenState extends State<LoginScreen> {
   // تسجيل فني جديد (كانت فجوة موثّقة صراحة) — نفس الشاشة، مود مختلف بس. الفرق: OTP بـ
   // purpose=register بدل login، وخطوة إضافية للاسم الكامل، ونداء register() بدل verifyOtp().
   bool _isRegisterMode = false;
+  // بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني، فمود التسجيل بقى بيسمح
+  // باختيار نوع الحساب بدل ما يفترض فني دايمًا.
+  String _accountType = 'technician';
   // لو الفني حاول "دخول" برقم مش مسجّل، الباك-إند بيرفض برسالة واضحة — بدل ما نسيبه يعلق،
   // نعرضله اقتراح مباشر يحوّله لمود التسجيل بنفس الرقم من غير ما يكتبه تاني.
   bool _suggestRegister = false;
@@ -68,6 +71,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _phoneController.text.trim(),
           _otpController.text.trim(),
           _fullNameController.text.trim(),
+          userType: _accountType,
         );
       } else {
         await auth.verifyOtp(_phoneController.text.trim(), _otpController.text.trim());
@@ -123,13 +127,25 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text(
                     _otpSent
                         ? 'اتبعت كود لـ ${_phoneController.text}'
-                        : (_isRegisterMode ? 'اعمل حساب فني جديد' : 'ادخل رقم موبايلك عشان تكمل'),
+                        : (_isRegisterMode
+                            ? (_accountType == 'domestic_worker' ? 'اعمل حساب شغالة/مربية جديد' : 'اعمل حساب فني جديد')
+                            : 'ادخل رقم موبايلك عشان تكمل'),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 24),
                   if (!_otpSent) ...[
                     if (_isRegisterMode) ...[
+                      // بروفايل الشغالة/العامل المنزلي (ADR-0005) — اختيار نوع الحساب قبل التسجيل.
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'technician', label: Text('فني صيانة')),
+                          ButtonSegment(value: 'domestic_worker', label: Text('شغالة / مربية')),
+                        ],
+                        selected: {_accountType},
+                        onSelectionChanged: (selection) => setState(() => _accountType = selection.first),
+                      ),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: _fullNameController,
                         textCapitalization: TextCapitalization.words,

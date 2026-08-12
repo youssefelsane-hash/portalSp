@@ -5,6 +5,7 @@ import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
 import 'core/device_security.dart';
 import 'features/auth/login_screen.dart';
+import 'features/domestic_worker/worker_home_screen.dart';
 import 'features/onboarding/onboarding_repository.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/orders/available_orders_screen.dart';
@@ -63,7 +64,12 @@ class _AuthGate extends StatelessWidget {
     if (auth.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return auth.isAuthenticated ? const _VerificationGate() : const LoginScreen();
+    if (!auth.isAuthenticated) return const LoginScreen();
+    // بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني، تفرّع بعد الدخول حسب
+    // نوع الحساب. الشغالة مالهاش مسار تحقق مستندات زي الفني (KYC كامل) — WorkerHomeScreen نفسها
+    // بتعرض حالة الاعتماد وتسمح بتقديم البروفايل للمراجعة، فمفيش داعي لـ_VerificationGate هنا.
+    if (auth.user?.userType == 'domestic_worker') return const WorkerHomeScreen();
+    return const _VerificationGate();
   }
 }
 
