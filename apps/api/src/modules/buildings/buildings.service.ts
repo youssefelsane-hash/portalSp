@@ -69,6 +69,25 @@ export class BuildingsService {
     return Number(count);
   }
 
+  /**
+   * نسخة مجمّعة من getCurrentMonthOrdersCount لقائمة عمائر دفعة واحدة — استعلام واحد
+   * (GROUP BY) بدل ما AdminBuildingsController.list() كان بينادي getCurrentMonthOrdersCount()
+   * مرة منفصلة لكل عمارة (N+1 حقيقي، اتلقط في مراجعة الأداء الشاملة 2026-08-12).
+   * العمائر اللي معندهاش طلبات الشهر ده مش بترجع في نتيجة GROUP BY — بنعوّضها بصفر هنا.
+   */
+  async getCurrentMonthOrdersCountBulk(buildingIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>(buildingIds.map((id) => [id, 0]));
+    if (buildingIds.length === 0) return counts;
+    const rows = await this.buildings.manager.query<{ building_id: string; count: string }[]>(
+      `SELECT building_id, COUNT(*)::int AS count FROM orders
+       WHERE building_id = ANY($1) AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')
+       GROUP BY building_id`,
+      [buildingIds],
+    );
+    for (const row of rows) counts.set(row.building_id, Number(row.count));
+    return counts;
+  }
+
   /** QR محلي بالكامل (مكتبة qrcode، بدون أي تكامل خارجي) — الكود نفسه نص عادي (building.code). */
   async generateQrPngDataUri(building: Building): Promise<string> {
     return QRCode.toDataURL(building.code, { errorCorrectionLevel: 'M', margin: 2, width: 400 });

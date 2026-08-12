@@ -16,11 +16,8 @@ export class AdminBuildingsController {
   @Get()
   async list() {
     const buildings = await this.buildingsService.list();
-    return Promise.all(
-      buildings.map(async (b) =>
-        toBuildingWithSubscriptionStatusDto(b, await this.buildingsService.getCurrentMonthOrdersCount(b.id)),
-      ),
-    );
+    const counts = await this.buildingsService.getCurrentMonthOrdersCountBulk(buildings.map((b) => b.id));
+    return buildings.map((b) => toBuildingWithSubscriptionStatusDto(b, counts.get(b.id) ?? 0));
   }
 
   @Get(':id')
