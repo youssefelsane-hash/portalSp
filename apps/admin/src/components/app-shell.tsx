@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { href: '/payouts', label: 'طلبات الصرف' },
   { href: '/promotions', label: 'أكواد الخصم' },
   { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
+  { href: '/buildings', label: 'العمائر' },
   { href: '/notification-routing', label: 'توجيه الإشعارات' },
   { href: '/technician-companies', label: 'شركات/فرق الفنيين' },
   { href: '/technician-levels', label: 'سياسة مستويات الفنيين' },

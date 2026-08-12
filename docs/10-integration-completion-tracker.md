@@ -57,7 +57,7 @@
 
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
-| 20 | Buildings — Admin + Customer/QR | ⏳ | Customer جزء منها اتعمل (كود يدوي) — QR scan وAdmin UI محتاجين فحص. |
+| 20 | Buildings — Admin + Customer/QR | ✅ خلص | كان API الأدمن الكامل (إنشاء/تعديل/QR) موجود ومختبر من زمان بصفر شاشة، وجانب العميل (`building_code` في `POST /orders`) مكانش مستخدم خالص. `/buildings` admin page جديدة كاملة + حقل "كود عمارة" في `CreateOrderScreen`. مسح QR بالكاميرا مؤجّل عمدًا (نفس قرار GPS اليدوي — مفيش جهاز حقيقي للاختبار)، إدخال يدوي بس. اتأكد حي: عمارة حقيقية بخصم 15%، معاينة/طلب حقيقيين طابقوا الحساب، ورفض واضح لكود غلط أو تضارب مع promo_code. تفاصيل في `apps/admin/README.md` و`apps/customer-app/README.md`. |
 | 21-23 | Domestic Worker — Customer/عامل/Admin | ⏳ | Backend كامل — مفيش UI حقيقي في أي تطبيق. |
 
 ### قايمة Admin UI منفصلة (من نفس القايمة، مرقّمة تانية في رسالة المالك)

@@ -46,10 +46,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
   final _promoController = TextEditingController();
+  final _buildingController = TextEditingController();
   Address? _selectedAddress;
   bool _submitting = false;
   bool _validatingPromo = false;
   String? _promoError;
+  bool _validatingBuilding = false;
+  String? _buildingError;
   String? _error;
   List<ServiceAddon> _addons = [];
   final Set<String> _selectedAddonIds = {};
@@ -191,7 +194,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // يحسب/يعرض بمنطقه الخاص. مفيش سعر حقيقي من غير عنوان (المنطقة عامل أساسي في السعر).
   // promoCode بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validatePromo) — مش أوتوماتيك مع كل
   // تعديل، عشان كود غلط وسط الكتابة ميغطّيش السعر الأساسي الصحيح.
-  Future<void> _refreshPreview({String? promoCode}) async {
+  Future<void> _refreshPreview({String? promoCode, String? buildingCode}) async {
     if (_selectedAddress == null) return;
     if (_isFormulaPricing && !_pricingFieldsComplete) return;
     final generation = ++_previewRequestGeneration;
@@ -204,6 +207,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
         promoCode: promoCode,
+        buildingCode: buildingCode,
       );
       if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
     } on ApiException catch (err) {
@@ -245,6 +249,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         // العنوان اتغيّر — أي معاينة سعر/خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
         _pricePreview = null;
         _promoError = null;
+        _buildingError = null;
       });
       _refreshPreview();
     }
@@ -264,6 +269,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     setState(() {
       _validatingPromo = true;
       _promoError = null;
+      _buildingController.clear();
+      _buildingError = null;
     });
     final generation = ++_previewRequestGeneration;
     try {
@@ -282,6 +289,46 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       if (mounted) setState(() => _promoError = err.message);
     } finally {
       if (mounted) setState(() => _validatingPromo = false);
+    }
+  }
+
+  // نظام العمائر (docs/08 §13, ADR-0003) — كانت فجوة موثّقة صراحة: الباك-إند بيدعم building_code
+  // بديل لـpromo_code في POST /orders و/orders/preview بالظبط من زمان (خصم تلقائي حسب اشتراك
+  // العمارة)، بس مفيش حقل في الشاشة كان بيستخدمه خالص. نفس منطق _validatePromo بالحرف — الاتنين
+  // مش مسموح يتبعتوا مع بعض (الباك-إند بيرفض)، فمسح الكود التاني عند تفعيل واحد بدل ما نسيب
+  // العميل يكتشف الرفض بعد التأكيد.
+  Future<void> _validateBuilding() async {
+    final code = _buildingController.text.trim();
+    if (code.isEmpty) return;
+    if (_selectedAddress == null) {
+      setState(() => _buildingError = 'اختار عنوان الأول');
+      return;
+    }
+    if (_isFormulaPricing && !_pricingFieldsComplete) {
+      setState(() => _buildingError = 'كمّل بيانات السعر الأول');
+      return;
+    }
+    setState(() {
+      _validatingBuilding = true;
+      _buildingError = null;
+      _promoController.clear();
+      _promoError = null;
+    });
+    final generation = ++_previewRequestGeneration;
+    try {
+      final result = await _repository.previewPrice(
+        serviceId: widget.service.id,
+        addressId: _selectedAddress!.id,
+        bookingMode: widget.bookingMode,
+        fieldValues: _isFormulaPricing ? _fieldValues : null,
+        addonIds: _selectedAddonIds.toList(),
+        buildingCode: code,
+      );
+      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _buildingError = err.message);
+    } finally {
+      if (mounted) setState(() => _validatingBuilding = false);
     }
   }
 
@@ -317,6 +364,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         bookingMode: widget.bookingMode,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
+        buildingCode: _buildingController.text.trim(),
         addonIds: _selectedAddonIds.toList(),
         requestedTechnicianId: widget.requestedTechnicianId,
         requestedTechnicianCompanyId: _selectedCompany?.id,
@@ -799,6 +847,40 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             if (_promoError != null) ...[
               const SizedBox(height: 4),
               Text(_promoError!, style: const TextStyle(color: Colors.red)),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _buildingController,
+                    decoration: const InputDecoration(
+                      labelText: 'كود عمارة (اختياري — خصم بدل كود الخصم)',
+                      border: OutlineInputBorder(),
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) {
+                      setState(() {
+                        _buildingError = null;
+                        _pricePreview = null;
+                      });
+                      _refreshPreview();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: _validatingBuilding ? null : _validateBuilding,
+                  child: _validatingBuilding
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('تحقق'),
+                ),
+              ],
+            ),
+            if (_buildingError != null) ...[
+              const SizedBox(height: 4),
+              Text(_buildingError!, style: const TextStyle(color: Colors.red)),
             ],
             const SizedBox(height: 16),
             Text('ملخص السعر', style: Theme.of(context).textTheme.titleMedium),

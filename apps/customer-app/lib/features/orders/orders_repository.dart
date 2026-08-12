@@ -30,6 +30,12 @@ class OrdersRepository {
     required BookingMode bookingMode,
     String? problemDescription,
     String? promoCode,
+    // نظام العمائر (docs/08 §13, ADR-0003) — كود بديل لـpromoCode (مش الاتنين مع بعض، الباك-إند
+    // بيرفض غير كده). الكود ده اللي رمز QR بتاع بوابة العمارة بيرمّزه — إدخال يدوي هنا (مش مسح
+    // كاميرا فعلي) لنفس السبب اللي خلّى إحداثيات GPS إدخال يدوي: مفيش جهاز/إيموليتور حقيقي في
+    // بيئة السيشن دي لاختبار إذن الكاميرا حياً، فإضافة مكتبة مسح QR كانت هتبقى وهم أمان مش ميزة
+    // مختبرة فعليًا.
+    String? buildingCode,
     List<String>? addonIds,
     String? requestedTechnicianId,
     String? requestedTechnicianCompanyId,
@@ -49,6 +55,7 @@ class OrdersRepository {
       if (problemDescription != null && problemDescription.isNotEmpty)
         'problem_description': problemDescription,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+      if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
       if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
       // "إعادة الحجز" — تفضيل بس، الباك-إند بيكمّل بالتوزيع العادي لو الفني مش متاح
       // (تفاصيل في apps/api/src/modules/matching/README.md).
@@ -73,6 +80,7 @@ class OrdersRepository {
     Map<String, dynamic>? fieldValues,
     List<String>? addonIds,
     String? promoCode,
+    String? buildingCode,
   }) async {
     final data = await auth.authedRequest('POST', '/orders/preview', body: {
       'service_id': serviceId,
@@ -81,6 +89,7 @@ class OrdersRepository {
       if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
       if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+      if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
     });
     return OrderPricePreview.fromJson(data!);
   }
