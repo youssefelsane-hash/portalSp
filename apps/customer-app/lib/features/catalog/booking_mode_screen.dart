@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
 import '../account/account_screen.dart';
 import '../chat/chat_screen.dart';
+import '../domestic_workers/domestic_workers_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
@@ -58,6 +59,15 @@ class BookingModeScreen extends StatelessWidget {
               tooltip: 'الدعم',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ChatScreen.support()),
+              ),
+            ),
+            // قطاع الخدمات المنزلية (docs/08 §12, ADR-0004) — كانت فجوة موثّقة صراحة: الباك-إند
+            // كامل ومختبر حي من زمان بصفر شاشة تستخدمه.
+            IconButton(
+              icon: const Icon(Icons.cleaning_services_outlined),
+              tooltip: 'الخدمات المنزلية',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DomesticWorkersScreen()),
               ),
             ),
             // حساب/سجل عميل موحّد (docs/08 §Retention) — كانت فجوة موثّقة صراحة: طلباتي/عناويني/

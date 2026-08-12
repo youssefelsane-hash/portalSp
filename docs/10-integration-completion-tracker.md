@@ -58,7 +58,9 @@
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
 | 20 | Buildings — Admin + Customer/QR | ✅ خلص | كان API الأدمن الكامل (إنشاء/تعديل/QR) موجود ومختبر من زمان بصفر شاشة، وجانب العميل (`building_code` في `POST /orders`) مكانش مستخدم خالص. `/buildings` admin page جديدة كاملة + حقل "كود عمارة" في `CreateOrderScreen`. مسح QR بالكاميرا مؤجّل عمدًا (نفس قرار GPS اليدوي — مفيش جهاز حقيقي للاختبار)، إدخال يدوي بس. اتأكد حي: عمارة حقيقية بخصم 15%، معاينة/طلب حقيقيين طابقوا الحساب، ورفض واضح لكود غلط أو تضارب مع promo_code. تفاصيل في `apps/admin/README.md` و`apps/customer-app/README.md`. |
-| 21-23 | Domestic Worker — Customer/عامل/Admin | ⏳ | Backend كامل — مفيش UI حقيقي في أي تطبيق. |
+| 21 | Domestic Worker — Customer (تصفّح/حجز) | ✅ خلص | `DomesticWorkersScreen`/`WorkerDetailScreen`/`WorkerBookingsScreen` جداد في apps/customer-app. اتأكد حي: تصفّح، حجز حقيقي (سعر مطابق تمامًا لمعادلة الباك-إند)، إلغاء. تفاصيل في `apps/customer-app/README.md`. |
+| 22 | Domestic Worker — عامل (self-service) | ⏳ | مؤجّل — يحتاج قرار معماري صريح (تطبيق Flutter رابع جديد، أو امتداد لـapps/technician-app بدعم UserType.DOMESTIC_WORKER) قبل التنفيذ، بدل اختراع القرار من غير توثيق. Backend كامل (`GET /domestic-worker/me`, بروفايل، موقع، حجوزات، تأكيد/إكمال) جاهز ومختبر. |
+| 23 | Domestic Worker — Admin (مراجعة) | ✅ خلص | `/domestic-workers` admin page جديدة (فلتر حالة + اعتماد/رفض). اتأكد حي عبر Playwright: تسجيل مقدّم خدمة حقيقي، ظهر pending، اعتماده نجح. تفاصيل في `apps/admin/README.md`. |
 
 ### قايمة Admin UI منفصلة (من نفس القايمة، مرقّمة تانية في رسالة المالك)
 
