@@ -250,3 +250,21 @@ const Map<String, String> orderItemTypeLabelsAr = {
   'spare_part': 'قطعة غيار',
   'extra_labor': 'أجرة إضافية',
 };
+
+// تقييم متقدم + صور بعد الخدمة (docs/08 §9) — كانت فجوة موثّقة صراحة: مفيش endpoint للعميل
+// يشوف بيه صور "قبل/بعد" الطلب أصلاً. مطابق لـ apps/api/src/modules/orders/dto/order-media-response.dto.ts.
+class OrderMedia {
+  final String id;
+  final String mediaType;
+  final String fileUrl;
+  final String? caption;
+
+  OrderMedia({required this.id, required this.mediaType, required this.fileUrl, required this.caption});
+
+  factory OrderMedia.fromJson(Map<String, dynamic> json) => OrderMedia(
+        id: json['id'] as String,
+        mediaType: json['media_type'] as String,
+        fileUrl: json['file_url'] as String,
+        caption: json['caption'] as String?,
+      );
+}

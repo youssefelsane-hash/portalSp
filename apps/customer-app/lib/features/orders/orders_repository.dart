@@ -85,6 +85,13 @@ class OrdersRepository {
     return OrderPricePreview.fromJson(data!);
   }
 
+  // تقييم متقدم + صور بعد الخدمة (docs/08 §9) — كانت فجوة موثّقة صراحة: العميل مكانش يقدر
+  // يشوف صور "قبل/بعد" الطلب أصلاً عشان يختار منها وقت التقييم (after_photo_media_ids).
+  Future<List<OrderMedia>> fetchMedia(String orderId) async {
+    final items = await auth.authedRequestList('/orders/$orderId/media');
+    return items.map(OrderMedia.fromJson).toList();
+  }
+
   Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,

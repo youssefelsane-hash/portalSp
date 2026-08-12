@@ -210,10 +210,30 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Future<void> _rate() async {
-    final result = await showRatingDialog(context);
+    // صور "بعد التنفيذ" (docs/08 §9) — بنجيبها الأول عشان العميل يقدر يربطها بالتقييم لو موجودة.
+    // فشل التحميل مش لازم يمنع التقييم نفسه (الدايالوج بيشتغل عادي بقايمة فاضية).
+    List<OrderMedia> afterPhotos = [];
+    try {
+      final media = await _repository.fetchMedia(widget.orderId);
+      afterPhotos = media.where((m) => m.mediaType == 'after_photo').toList();
+    } on ApiException {
+      // تجاهل — راجع التعليق فوق
+    }
+    if (!mounted) return;
+    final result = await showRatingDialog(context, afterPhotos: afterPhotos);
     if (result == null) return;
     try {
-      await _ratingsRepository.rate(widget.orderId, overallRating: result.overallRating, comment: result.comment);
+      await _ratingsRepository.rate(
+        widget.orderId,
+        overallRating: result.overallRating,
+        punctualityRating: result.punctualityRating,
+        qualityRating: result.qualityRating,
+        professionalismRating: result.professionalismRating,
+        priceFairnessRating: result.priceFairnessRating,
+        cleanlinessRating: result.cleanlinessRating,
+        comment: result.comment,
+        afterPhotoMediaIds: result.afterPhotoMediaIds,
+      );
       if (mounted) {
         setState(() => _rated = true);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('شكراً على تقييمك 🙏')));
