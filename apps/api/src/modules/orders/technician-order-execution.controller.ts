@@ -104,8 +104,8 @@ export class TechnicianOrderExecutionController {
   }
 
   @Get(':id/media')
-  async listMedia(@Param('id', ParseUUIDPipe) id: string) {
-    const media = await this.orderMediaService.listForOrder(id);
+  async listMedia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const media = await this.orderMediaService.listForTechnician(user.sub, id);
     return media.map(toOrderMediaResponseDto);
   }
 

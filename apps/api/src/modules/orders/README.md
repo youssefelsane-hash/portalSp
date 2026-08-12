@@ -125,4 +125,16 @@
 **فورًا بعده** (نفس اللحظة تقريبًا) بكود التالت اترفض بوضوح `VAL_001` ("كود الخصم ده للعملاء الجداد
 بس") — الإصلاح بيشتغل صح من غير أي اعتماد على توقيت الـBullMQ job خالص.
 
+## ثغرة أمنية حقيقية اتكتشفت واتصلحت — `GET /technician/orders/:id/media` كان مفتوح لأي فني (مراجعة booking flow الشاملة 2026-08-12)
+
+`TechnicianOrderExecutionController.listMedia()` كان بينادي `OrderMediaService.listForOrder(id)`
+مباشرة من غير أي تحقق ملكية — أي فني عنده توكن صالح يقدر يشوف صور طلب مش بتاعه لو عرف/خمّن
+الـid (Broken Object Level Authorization، OWASP API1). بعكس `listQuoteItems` جنب الميثود دي
+بالظبط في نفس الـcontroller اللي بيتحقق فعليًا (`listForTechnician` في `order-items.service.ts`)
+— نفس النمط اتطبّق دلوقتي على `OrderMediaService.listForTechnician(userId, orderId)` الجديدة.
+
+**اختبار حي كامل بفنيين حقيقيين**: طلب حقيقي عنده صور (`ORD-2026-000019`، بتاع فني معيّن) — فني
+تاني (مش صاحب الطلب) حاول يشوف صوره → اترفض `404` بوضوح ("الطلب غير موجود أو مش بتاعك"). نفس
+الطلب مع صاحبه الحقيقي → نجح ورجّع الصورة صح.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
