@@ -153,6 +153,10 @@ export class OrdersService {
     }
     const building = dto.building_code ? await this.buildingsService.findActiveByCodeOrThrow(dto.building_code) : null;
 
+    // لازم يتحسب قبل الـ transaction (مش جواها بعد ما الطلب الحالي يتحفظ) — وإلا COUNT(*)
+    // هيشوف الطلب الحالي نفسه (نفس الـtransaction) ويحسبه غلط كإنه "مش أول طلب".
+    const isNewCustomer = dto.promo_code ? await this.customerProfiles.isNewCustomer(customerProfile.id) : false;
+
     const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
@@ -249,7 +253,7 @@ export class OrdersService {
             zoneId: zone.id,
             totalBeforeDiscountCents: order.totalAmountCents,
             inspectionFeeCents: order.inspectionFeeCents,
-            isNewCustomer: customerProfile.totalOrdersCount === 0,
+            isNewCustomer,
           },
         );
         order.promoCodeId = promoCode.id;

@@ -104,4 +104,25 @@
 - **`POST/GET/PATCH/DELETE /me/recurring-orders`** (العميل، `@Roles(CUSTOMER)`) — إنشاء (لازم `starts_at` في المستقبل)، قايمة، إيقاف/استئناف (`is_active` بس — تعديل باقي الحقول مش مدعوم عمداً، أبسط للعميل إنه يلغي وينشئ قالب جديد)، حذف ذاتي (soft delete).
 - **اتعمله اختبار حي كامل**: قالب أسبوعي حقيقي اتعمل، الفحص الدوري ولّد طلب حقيقي فعلاً بعد ما الموعد استحق — `order_type=recurring` بالظبط، `next_run_at` اتحرّك +7 أيام بالظبط تلقائيًا. `starts_at` في الماضي اترفض بوضوح. إيقاف/استئناف نجحوا. تجربة تانية اتأكدت إن نفس القالب بيولّد طلب جديد تاني في الموعد التالي (مش بيتكرر نفس الطلب). حذف القالب نجح (soft delete، اختفى من القايمة).
 
+## بَقّة حقيقية اتلقطت واتصلحت — `isNewCustomer` كان بيعتمد على عمود مؤجَّل (مراجعة booking flow الشاملة 2026-08-12)
+
+`OrdersService.create()` (تطبيق كود خصم) و`PromotionsService.previewForOrder()` (المعاينة قبل الحجز)
+كانوا بيحددوا "عميل جديد" (شرط أكواد الخصم `new_customers_only`) بـ`customerProfile.totalOrdersCount === 0`
+— نفس فئة البَقّة الموثّقة بالفعل في `referrals/README.md` لـ`completed_orders_count`: العمود ده بيتحدّث
+**async عبر BullMQ job** (`customer-stats.processor.ts`) بعد `emitAsync(ORDER_CREATED_EVENT)`، مش لحظيًا —
+الـ`emitAsync` بيستنى بس إن الـjob يتجدول (`queue.add()`)، مش إن الـworker يعالجه فعليًا. الأثر: عميل
+لسه لحظات من إنشاء أول طلب ليه ممكن يفضل يتحسب "جديد" غلط لو حاول يستخدم كود `new_customers_only`
+تاني بسرعة قبل ما الـjob يتعالج.
+
+**الإصلاح**: `CustomerProfilesService.isNewCustomer(customerProfileId)` جديدة — `COUNT(*)` مباشر على
+`orders` بدل الاعتماد على العمود المؤجَّل، بنفس فلسفة `referrals.service.ts`'s `handleOrderCompleted()`
+بالحرف. في `orders.service.ts` بيتحسب **قبل** الـtransaction (مش جواها) — لو اتحسب بعد ما الطلب الحالي
+اتحفظ، الـ`COUNT(*)` كان هيشوف الطلب ده نفسه (نفس الـtransaction) ويحسب العميل غلط كـ"مش جديد" حتى
+لأول طلب فعلي ليه.
+
+**اتعمله اختبار حي كامل**: عميل جديد حقيقي اتسجّل، كودين خصم `new_customers_only` مختلفين اتعملوا.
+الطلب الأول بكود التاني نجح وحسب خصم صح (`discount_amount_cents: 5000` من كود 50ج). الطلب التاني
+**فورًا بعده** (نفس اللحظة تقريبًا) بكود التالت اترفض بوضوح `VAL_001` ("كود الخصم ده للعملاء الجداد
+بس") — الإصلاح بيشتغل صح من غير أي اعتماد على توقيت الـBullMQ job خالص.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
