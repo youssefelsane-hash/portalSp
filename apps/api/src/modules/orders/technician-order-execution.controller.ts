@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -9,11 +9,14 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
+import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
+import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
+import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -27,6 +30,7 @@ export class TechnicianOrderExecutionController {
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
+    private readonly orderTeamService: OrderTeamService,
     private readonly addressesService: AddressesService,
   ) {}
 
@@ -121,5 +125,29 @@ export class TechnicianOrderExecutionController {
   async listQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const items = await this.orderItemsService.listForTechnician(user.sub, id);
     return items.map(toOrderItemResponseDto);
+  }
+
+  // توزيع أدوار الفريق داخل الطلب الواحد (docs/08 §5) — فقط لقائد الطلب (orders.technician_id)
+  // على طلبات "اعتماد" (فريق)، وبس لأعضاء من نفس الشركة/الفريق. تفاصيل كاملة في orders/README.md.
+  @Post(':id/team-members')
+  async addTeamMember(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AddTeamMemberDto) {
+    await this.orderTeamService.addMember(user.sub, id, dto);
+    return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
+  }
+
+  @Get(':id/team-members')
+  async listTeamMembers(@Param('id', ParseUUIDPipe) id: string) {
+    return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
+  }
+
+  @Delete(':id/team-members/:memberId')
+  @HttpCode(HttpStatus.OK)
+  async removeTeamMember(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+  ) {
+    await this.orderTeamService.removeMember(user.sub, id, memberId);
+    return null;
   }
 }
