@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
-import { DataSource, In, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
@@ -134,113 +134,145 @@ export class MatchingService {
     );
   }
 
-  /** بيتصل بيها لحظة إنشاء الطلب (أول جولة)، وبعدها لما جولة تفشل بالكامل (كل الفنيين رفضوا/متأخرين). */
+  /**
+   * بيتصل بيها لحظة إنشاء الطلب (أول جولة)، وبعدها لما جولة تفشل بالكامل (كل الفنيين رفضوا/متأخرين).
+   *
+   * **إصلاح سباق حقيقي (مراجعة booking flow الشاملة 2026-08-12)**: قبل كده الدالة دي كانت بتقرأ
+   * الطلب من غير قفل، فلو `reject()` (آخر عرض معلّق بيترفض) و`MatchingRoundExpiryProcessor`
+   * (مهلة الجولة خلصت) نادوا الدالة دي في نفس اللحظة تقريبًا لنفس الطلب، الاتنين كانوا يقدروا
+   * يقروا نفس `MAX(assignment_round)` قبل ما أي واحد يكتب، ويحسبوا نفس `nextRound`، ويضيفوا
+   * صفوف `order_assignments` مكررة لنفس الجولة (فنيين اتبعتلهم عرض مرتين) — موثّقة بالتفصيل في
+   * matching/README.md. الإصلاح: **قفل ذرّي (`pessimistic_write`) على صف الطلب من أول خطوة**،
+   * نفس نمط `accept()` بالظبط — أي نداء تاني لنفس الطلب بيستنى القفل يتفك، وبعدين بيعيد قراءة
+   * الحالة الحقيقية (لو الأول خلّص الجولة، التاني هيشوف الحالة الجديدة مش القديمة). كل القراءة/
+   * الكتابة (حساب الجولة، البحث عن مؤهّلين، إدراج الصفوف) بقت جوّه نفس الـtransaction اللي ماسكة
+   * القفل — `cancelForNoTechnicians` بقت بتاخد نفس الـmanager بدل ما تفتح transaction منفصلة
+   * (كانت هتعمل deadlock: transaction تانية تحاول تقفل نفس صف الطلب اللي الأولى لسه ماسكاه).
+   * الأحداث (إشعار/طابور المهلة) بتتبعت بعد ما الـtransaction تتقفل بنجاح بس، مش من جواها.
+   */
   async dispatchNextRound(orderId: string): Promise<{ dispatched: number }> {
-    const order = await this.orders.findOne({ where: { id: orderId } });
-    if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
-      return { dispatched: 0 };
-    }
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
+        return { kind: 'noop' as const };
+      }
 
-    const { max } = (await this.assignments
-      .createQueryBuilder('a')
-      .select('MAX(a.assignmentRound)', 'max')
-      .where('a.orderId = :orderId', { orderId })
-      .getRawOne<{ max: number | null }>()) ?? { max: null };
-    const nextRound = (max ?? 0) + 1;
+      const { max } = (await manager
+        .createQueryBuilder(OrderAssignment, 'a')
+        .select('MAX(a.assignmentRound)', 'max')
+        .where('a.orderId = :orderId', { orderId })
+        .getRawOne<{ max: number | null }>()) ?? { max: null };
+      const nextRound = (max ?? 0) + 1;
 
-    const maxRounds = await this.settingsService.getNumber('matching.max_rounds', MAX_ROUNDS_FALLBACK);
-    if (nextRound > maxRounds) {
-      await this.cancelForNoTechnicians(order);
-      return { dispatched: 0 };
-    }
+      const maxRounds = await this.settingsService.getNumber('matching.max_rounds', MAX_ROUNDS_FALLBACK);
+      if (nextRound > maxRounds) {
+        await this.cancelForNoTechnicians(order, manager);
+        return { kind: 'cancelled' as const, order };
+      }
 
-    // هيكل الحجز الجديد (docs/06 §1.7) — "طوارئ" بتستخدم دفعة أكبر (افتراضي 10، "أول عشرة"
-    // بالحرف من كلام المالك) وبتتجاهل فلتر التوافر العادي تمامًا (تفاصيل في findEligibleTechnicians).
-    const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
-    const batchSize = isEmergency
-      ? await this.settingsService.getNumber('matching.emergency_batch_size', EMERGENCY_BATCH_SIZE_FALLBACK)
-      : await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
-    // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
-    // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
-    // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
-    let candidates =
-      nextRound === 1 && order.requestedTechnicianId
-        ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId, isEmergency)
-        : [];
-    // "اعتماد" بشركة محدّدة (docs/06 §1.5، docs/07 الجزء أ — كانت فجوة موثّقة صراحة، اتقفلت):
-    // أول جولة بس بتحاول تعرض حصريًا على فنيي الشركة المطلوبة. لو محدش مؤهّل متاح فيها، بيرجع
-    // فوراً للتوزيع العادي — نفس فلسفة "إعادة الحجز" بالحرف، تفضيل مش ضمان.
-    if (candidates.length === 0 && nextRound === 1 && order.requestedTechnicianCompanyId) {
-      candidates = await this.findEligibleTechnicians(
-        order,
-        batchSize,
-        null,
-        isEmergency,
-        order.requestedTechnicianCompanyId,
+      // هيكل الحجز الجديد (docs/06 §1.7) — "طوارئ" بتستخدم دفعة أكبر (افتراضي 10، "أول عشرة"
+      // بالحرف من كلام المالك) وبتتجاهل فلتر التوافر العادي تمامًا (تفاصيل في findEligibleTechnicians).
+      const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
+      const batchSize = isEmergency
+        ? await this.settingsService.getNumber('matching.emergency_batch_size', EMERGENCY_BATCH_SIZE_FALLBACK)
+        : await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+      // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
+      // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
+      // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
+      let candidates =
+        nextRound === 1 && order.requestedTechnicianId
+          ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId, isEmergency)
+          : [];
+      // "اعتماد" بشركة محدّدة (docs/06 §1.5، docs/07 الجزء أ — كانت فجوة موثّقة صراحة، اتقفلت):
+      // أول جولة بس بتحاول تعرض حصريًا على فنيي الشركة المطلوبة. لو محدش مؤهّل متاح فيها، بيرجع
+      // فوراً للتوزيع العادي — نفس فلسفة "إعادة الحجز" بالحرف، تفضيل مش ضمان.
+      if (candidates.length === 0 && nextRound === 1 && order.requestedTechnicianCompanyId) {
+        candidates = await this.findEligibleTechnicians(
+          order,
+          batchSize,
+          null,
+          isEmergency,
+          order.requestedTechnicianCompanyId,
+        );
+      }
+      if (candidates.length === 0) {
+        candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
+      }
+      // مفيش فنيين متاحين (سواء أول جولة أو بعد ما الكل رفض) = مفيش داعي نستنى — نلغي فوراً
+      if (candidates.length === 0) {
+        await this.cancelForNoTechnicians(order, manager);
+        return { kind: 'cancelled' as const, order };
+      }
+
+      const responseTimeoutSeconds = await this.settingsService.getNumber(
+        'matching.response_timeout_seconds',
+        RESPONSE_TIMEOUT_SECONDS_FALLBACK,
       );
-    }
-    if (candidates.length === 0) {
-      candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
-    }
-    // مفيش فنيين متاحين (سواء أول جولة أو بعد ما الكل رفض) = مفيش داعي نستنى — نلغي فوراً
-    if (candidates.length === 0) {
-      await this.cancelForNoTechnicians(order);
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
+      const rows = candidates.map((c) =>
+        manager.create(OrderAssignment, {
+          orderId: order.id,
+          technicianId: c.technician_id,
+          assignmentRound: nextRound,
+          distanceKm: c.distance_km,
+          assignmentStatus: AssignmentStatus.SENT,
+          sentAt: now,
+          expiresAt,
+        }),
+      );
+      await manager.save(rows);
+      this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
+
+      return { kind: 'dispatched' as const, order, nextRound, responseTimeoutSeconds, dispatched: rows.length };
+    });
+
+    if (result.kind === 'noop') {
       return { dispatched: 0 };
     }
-
-    const responseTimeoutSeconds = await this.settingsService.getNumber(
-      'matching.response_timeout_seconds',
-      RESPONSE_TIMEOUT_SECONDS_FALLBACK,
-    );
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
-    const rows = candidates.map((c) =>
-      this.assignments.create({
-        orderId: order.id,
-        technicianId: c.technician_id,
-        assignmentRound: nextRound,
-        distanceKm: c.distance_km,
-        assignmentStatus: AssignmentStatus.SENT,
-        sentAt: now,
-        expiresAt,
-      }),
-    );
-    await this.assignments.save(rows);
-    this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
+    if (result.kind === 'cancelled') {
+      this.emitCancelledForNoTechnicians(result.order);
+      return { dispatched: 0 };
+    }
 
     // مهلة حقيقية مجدولة (مش انتظار سلبي) — لو محدش رد (لا قبول ولا رفض صريح) خلال
     // responseTimeoutSeconds، الـ processor بيقفل الجولة دي ويبعت التالية أوتوماتيك.
     // jobId ثابت (orderId:round) يمنع أي تكرار لو dispatchNextRound اتنادى مرتين بالغلط لنفس الجولة.
     await this.roundsQueue.add(
       ROUND_EXPIRED_JOB,
-      { orderId: order.id, round: nextRound },
-      { delay: responseTimeoutSeconds * 1000, jobId: roundExpiredJobId(order.id, nextRound) },
+      { orderId: result.order.id, round: result.nextRound },
+      { delay: result.responseTimeoutSeconds * 1000, jobId: roundExpiredJobId(result.order.id, result.nextRound) },
     );
 
-    return { dispatched: rows.length };
+    return { dispatched: result.dispatched };
   }
 
   // بَقّة حقيقية اتلقطت واتصلحت وقت بناء order-auto-cancel.service.ts (تفاصيل في orders/README.md):
   // الدالة دي كانت بتلغي الطلب فعلياً بس من غير ما تصدّر order.status_changed خالص — يعني العميل
   // (والفني لو موجود) محدش كان بيوصله أي إشعار "مفيش فني قبل طلبك" رغم إن `OrderStatusNotificationListener`
   // أصلاً بيعالج `CANCELLED_BY_SYSTEM` وكان جاهز يستقبل الحدث ده من زمان.
-  private async cancelForNoTechnicians(order: Order): Promise<void> {
-    const reason = 'ORDR_002: لا يوجد فنيون متاحون حالياً';
-    await this.dataSource.transaction(async (manager) => {
-      order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
-      order.cancelledAt = new Date();
-      await manager.save(order);
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
-          newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
-          changeSource: OrderChangeSource.SYSTEM,
-          reason,
-        }),
-      );
-    });
+  // بتاخد manager بره transaction dispatchNextRound اللي ماسكة القفل بالفعل — فتح transaction
+  // منفصلة هنا كان هيعمل deadlock حقيقي (الاتنين بيحاولوا يقفلوا نفس صف الطلب).
+  private async cancelForNoTechnicians(order: Order, manager: EntityManager): Promise<void> {
+    order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
+    order.cancelledAt = new Date();
+    await manager.save(order);
+    await manager.save(
+      manager.create(OrderStatusHistory, {
+        orderId: order.id,
+        previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
+        changeSource: OrderChangeSource.SYSTEM,
+        reason: 'ORDR_002: لا يوجد فنيون متاحون حالياً',
+      }),
+    );
+  }
 
+  private emitCancelledForNoTechnicians(order: Order): void {
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
       new OrderStatusChangedEvent(
@@ -250,7 +282,7 @@ export class MatchingService {
         OrderStatus.CANCELLED_BY_SYSTEM,
         order.customerId,
         order.technicianId,
-        reason,
+        'ORDR_002: لا يوجد فنيون متاحون حالياً',
       ),
     );
   }
