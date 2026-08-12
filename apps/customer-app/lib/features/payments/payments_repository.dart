@@ -22,38 +22,47 @@ class PaymentsRepository {
 
   // كل عملية دفع لازم Idempotency-Key حقيقي — مش UUID package (تجنّب اعتماد جديد لسطر واحد)،
   // مزيج timestamp + رقم عشوائي كافي كمفتاح فريد على مستوى الجهاز الواحد لعملية دفع واحدة.
-  String _generateIdempotencyKey() {
+  //
+  // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): الدالة دي كانت بتتنادى من
+  // جوّه كل واحدة من الدوال التلاتة تحت، يعني كل نداء (حتى لو retry لنفس الطلب بعد timeout
+  // شبكة) كان بيولّد مفتاح جديد كل مرة — يعني الـIdempotency-Key عمليًا كان بيتلغى تمامًا
+  // (الباك-إند بيدور على مفتاح موجود قبل كده بنفس القيمة، ومفتاح جديد كل مرة يعني الفحص ده
+  // مبيلاقيش حاجة أبداً). الحماية الفعلية من دفع مزدوج فضلت موجودة بس عبر قفل الطلب الذرّي
+  // في الباك-إند نفسه (orders.service.ts's payWithWallet)، مش عبر العقد المصمَّم أصلاً. الإصلاح:
+  // المفتاح بقى بيتولّد مرة واحدة بس ويتبعت من الكولر (order_detail_screen.dart) — retry لنفس
+  // محاولة الدفع بيستخدم نفس المفتاح فعليًا، زي ما العقد مفروض يشتغل بالظبط.
+  String generateIdempotencyKey() {
     final random = Random();
     return '${DateTime.now().microsecondsSinceEpoch}-${random.nextInt(1 << 32)}';
   }
 
-  Future<Map<String, dynamic>> payWithWallet(String orderId) async {
+  Future<Map<String, dynamic>> payWithWallet(String orderId, String idempotencyKey) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/pay-with-wallet',
-      extraHeaders: {'Idempotency-Key': _generateIdempotencyKey()},
+      extraHeaders: {'Idempotency-Key': idempotencyKey},
     );
     return data!;
   }
 
   // بيرجّع {payment, redirect_url} — الكولر مسؤول يفتح redirect_url في WebView (نفس نمط
   // "الباك-إند جاهز، مفيش ولا مسؤولية تسوية هنا" — القفل النهائي بيحصل عبر webhook مش رد الـ endpoint ده).
-  Future<String> payWithCard(String orderId) async {
+  Future<String> payWithCard(String orderId, String idempotencyKey) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/pay-with-card',
-      extraHeaders: {'Idempotency-Key': _generateIdempotencyKey()},
+      extraHeaders: {'Idempotency-Key': idempotencyKey},
     );
     return data!['redirect_url'] as String;
   }
 
   // بيرجّع كود مرجعي فوري + تاريخ انتهاء — العميل بياخد الكود ويدفعه كاش في أقرب منفذ فوري.
   // مفيش WebView هنا خالص، القفل النهائي بردو عبر webhook مش رد الـ endpoint ده.
-  Future<FawryReference> payWithFawryReference(String orderId) async {
+  Future<FawryReference> payWithFawryReference(String orderId, String idempotencyKey) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/pay-with-fawry-reference',
-      extraHeaders: {'Idempotency-Key': _generateIdempotencyKey()},
+      extraHeaders: {'Idempotency-Key': idempotencyKey},
     );
     return FawryReference.fromJson(data!);
   }

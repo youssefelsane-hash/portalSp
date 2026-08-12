@@ -234,6 +234,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       border: OutlineInputBorder(),
                     ),
                     textCapitalization: TextCapitalization.characters,
+                    // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
+                    // عدّل نص الكود بعد ما اتحقق منه، السعر المعروض كان يفضل من الكود القديم —
+                    // ده بيمسحه فورًا لحد ما العميل يضغط "تحقق" تاني، عشان السعر المعروض دايمًا
+                    // يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
+                    onChanged: (_) => setState(() {
+                      _promoDiscountCents = null;
+                      _promoError = null;
+                    }),
                   ),
                 ),
                 const SizedBox(width: 8),

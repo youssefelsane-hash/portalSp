@@ -39,6 +39,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _paying = false;
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
+  // مفتاح مستقر لكل طريقة دفع (يتولّد مرة واحدة بس، يفضل زي ما هو خلال أي retry لنفس المحاولة) —
+  // راجع التعليق الكامل في payments_repository.dart's generateIdempotencyKey().
+  String? _walletIdempotencyKey;
+  String? _cardIdempotencyKey;
+  String? _fawryIdempotencyKey;
 
   @override
   void initState() {
@@ -228,7 +233,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _payWithWallet() async {
     setState(() => _paying = true);
     try {
-      await _paymentsRepository.payWithWallet(widget.orderId);
+      _walletIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
+      await _paymentsRepository.payWithWallet(widget.orderId, _walletIdempotencyKey!);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع من المحفظة بنجاح ✅')));
       }
@@ -243,7 +249,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _payWithCard() async {
     setState(() => _paying = true);
     try {
-      final redirectUrl = await _paymentsRepository.payWithCard(widget.orderId);
+      _cardIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
+      final redirectUrl = await _paymentsRepository.payWithCard(widget.orderId, _cardIdempotencyKey!);
       if (!mounted) return;
       final confirmedPaid = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => CardPaymentScreen(orderId: widget.orderId, redirectUrl: redirectUrl)),
@@ -262,7 +269,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   Future<void> _payWithFawryReference() async {
     setState(() => _paying = true);
     try {
-      final reference = await _paymentsRepository.payWithFawryReference(widget.orderId);
+      _fawryIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
+      final reference = await _paymentsRepository.payWithFawryReference(widget.orderId, _fawryIdempotencyKey!);
       if (!mounted) return;
       final confirmedPaid = await Navigator.of(context).push<bool>(
         MaterialPageRoute(builder: (_) => FawryReferenceScreen(orderId: widget.orderId, reference: reference)),
