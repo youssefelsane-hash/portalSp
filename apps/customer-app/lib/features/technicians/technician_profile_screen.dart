@@ -31,12 +31,17 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
   TechnicianPublicProfile? _profile;
   String? _error;
   bool _rebooking = false;
+  // الجدولة الحقيقية للفني (docs/08 §2-§3) — كانت فجوة موثّقة صراحة: bookSlot() جاهز ومختبر في
+  // الباك-إند بلا أي شاشة تستخدمه. فشل تحميل الجدول مش لازم يمنع باقي البروفايل من الظهور.
+  List<ScheduleSlot> _scheduleSlots = [];
+  bool _bookingSlot = false;
 
   @override
   void initState() {
     super.initState();
     _repository = TechniciansRepository(context.read<AuthRepository>());
     _load();
+    _loadSchedule();
   }
 
   Future<void> _load() async {
@@ -48,36 +53,46 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
     }
   }
 
+  Future<void> _loadSchedule() async {
+    try {
+      final slots = await _repository.fetchSchedule(widget.technicianId);
+      if (mounted) setState(() => _scheduleSlots = slots);
+    } on ApiException {
+      // تجاهل — عرض السلوتات اختياري بحتة، العميل لسه يقدر يستخدم "إعادة الحجز" العادي
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
+
+  Future<TechnicianServiceInfo?> _pickService(List<TechnicianServiceInfo> services) async {
+    if (services.length == 1) return services.first;
+    return showModalBottomSheet<TechnicianServiceInfo>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: services
+                .map(
+                  (s) => ListTile(
+                    title: Text(s.nameAr),
+                    trailing: Text(_formatEgp(s.basePriceCents)),
+                    onTap: () => Navigator.of(context).pop(s),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _rebook() async {
     final profile = _profile;
     if (profile == null || profile.services.isEmpty) return;
-
-    TechnicianServiceInfo? chosen = profile.services.first;
-    if (profile.services.length > 1) {
-      chosen = await showModalBottomSheet<TechnicianServiceInfo>(
-        context: context,
-        builder: (context) => Directionality(
-          textDirection: TextDirection.rtl,
-          child: SafeArea(
-            child: ListView(
-              shrinkWrap: true,
-              children: profile.services
-                  .map(
-                    (s) => ListTile(
-                      title: Text(s.nameAr),
-                      trailing: Text(_formatEgp(s.basePriceCents)),
-                      onTap: () => Navigator.of(context).pop(s),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-        ),
-      );
-      if (chosen == null) return;
-    }
+    final chosen = await _pickService(profile.services);
+    if (chosen == null) return;
 
     setState(() => _rebooking = true);
     try {
@@ -98,6 +113,38 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _rebooking = false);
+    }
+  }
+
+  // الجدولة الحقيقية للفني (docs/08 §2-§3) — العميل بيحجز على سلوت `available` محدد بدل ما يسيب
+  // المطابقة تختار. نفس تدفق _rebook() بالظبط بس scheduleSlotId بدل requestedTechnicianId.
+  Future<void> _bookSlot(ScheduleSlot slot) async {
+    final profile = _profile;
+    if (profile == null || profile.services.isEmpty) return;
+    final chosen = await _pickService(profile.services);
+    if (chosen == null) return;
+
+    setState(() => _bookingSlot = true);
+    try {
+      final service = await _catalogRepository.fetchService(chosen.id);
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => CreateOrderScreen(
+              service: service,
+              bookingMode: BookingMode.individual,
+              scheduleSlotId: slot.id,
+            ),
+          ),
+        );
+        // العميل ممكن يكون حجز السلوت أو رجع من غير ما يكمل — نعيد تحميل الجدول عشان يعكس
+        // الحالة الحقيقية (السلوت بقى محجوز لو كمل، أو لسه فاضي لو رجع).
+        await _loadSchedule();
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _bookingSlot = false);
     }
   }
 
@@ -202,6 +249,29 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                             title: Text(s.nameAr),
                             trailing: Text(_formatEgp(s.basePriceCents)),
                           ),
+                      ],
+                      if (_scheduleSlots.any((s) => s.isAvailable)) ...[
+                        const SizedBox(height: 16),
+                        Text('مواعيد فاضية', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        Card(
+                          child: Column(
+                            children: _scheduleSlots
+                                .where((s) => s.isAvailable)
+                                .map(
+                                  (slot) => ListTile(
+                                    leading: const Icon(Icons.event_available_outlined),
+                                    title: Text(slot.slotDate),
+                                    subtitle: Text('${slot.startTime.substring(0, 5)} - ${slot.endTime.substring(0, 5)}'),
+                                    trailing: _bookingSlot
+                                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Icon(Icons.chevron_left),
+                                    onTap: _bookingSlot ? null : () => _bookSlot(slot),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
                       ],
                       if (profile.portfolioLinks.isNotEmpty) ...[
                         const SizedBox(height: 16),

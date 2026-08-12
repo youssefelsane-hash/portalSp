@@ -17,8 +17,18 @@ class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
   final BookingMode bookingMode;
   final String? requestedTechnicianId;
+  // الجدولة الحقيقية للفني (docs/08 §2-§3) — العميل اختار سلوت محدد من TechnicianProfileScreen.
+  // requestedTechnicianId مش لازم يتبعت معاها (الباك-إند بيستنتجه من السلوت نفسه)، بس لو اتبعت
+  // برضه لازم تكون بتاعة نفس فني السلوت وإلا الطلب هيترفض بوضوح.
+  final String? scheduleSlotId;
 
-  const CreateOrderScreen({super.key, required this.service, required this.bookingMode, this.requestedTechnicianId});
+  const CreateOrderScreen({
+    super.key,
+    required this.service,
+    required this.bookingMode,
+    this.requestedTechnicianId,
+    this.scheduleSlotId,
+  });
 
   @override
   State<CreateOrderScreen> createState() => _CreateOrderScreenState();
@@ -220,6 +230,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         requestedTechnicianId: widget.requestedTechnicianId,
         requestedTechnicianCompanyId: _selectedCompany?.id,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
+        scheduleSlotId: widget.scheduleSlotId,
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -464,6 +475,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 onTap: _pickAddress,
               ),
             ),
+            if (widget.scheduleSlotId != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: const ListTile(
+                  leading: Icon(Icons.event_available_outlined),
+                  title: Text('حجز موعد محدد مع هذا الفني'),
+                  subtitle: Text('الطلب هيتوزّع على الفني ده أول حاجة — لو مش متاح وقتها، هنلاقيلك فني تاني'),
+                ),
+              ),
+            ],
             if (_isFormulaPricing) ..._buildPricingFieldsSection(),
             if (_addons.isNotEmpty) ...[
               const SizedBox(height: 16),
