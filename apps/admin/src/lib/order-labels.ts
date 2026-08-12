@@ -59,3 +59,21 @@ export function orderStatusBadgeVariant(status: OrderStatus): 'default' | 'secon
   if (CANCELLED_STATUSES.includes(status) || status === 'disputed') return 'destructive';
   return 'outline';
 }
+
+// هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة (P2 #32/#34): order_type/booking_mode
+// موجودين في رد الباك-إند من زمان بس ما كانوش بيتعرضوا في apps/admin خالص، فمعلومات الطوارئ/
+// الطلب المتكرر/إعادة الزيارة ماكانتش واضحة لفريق العمليات من غير فتح الداتابيز مباشرة.
+export const ORDER_TYPE_LABELS: Record<string, string> = {
+  standard: 'عادي',
+  scheduled: 'مجدول',
+  recurring: 'متكرر',
+  b2b: 'B2B',
+  emergency: 'طوارئ',
+  revisit: 'إعادة زيارة',
+};
+
+export const BOOKING_MODE_LABELS: Record<string, string> = {
+  individual: 'فرد',
+  team: 'فريق',
+  emergency: 'طوارئ',
+};

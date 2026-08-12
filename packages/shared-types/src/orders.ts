@@ -26,19 +26,33 @@ export interface OrderResponseDto {
   address_id: string;
   technician_id: string | null;
   order_type: string;
+  // هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة (P2 #32/#34): الباك-إند بيرجّع
+  // الحقول دي من زمان (order-response.dto.ts) بس النوع هنا كان ناقصهم، فـapps/admin مكانش
+  // بيعرضهم خالص رغم إنهم موجودين فعليًا في كل رد GET /admin/orders/:id.
+  booking_mode: string;
   order_status: OrderStatus;
   problem_description: string | null;
   customer_notes: string | null;
   scheduled_at: string | null;
   estimated_price_cents: number | null;
   inspection_fee_cents: number;
+  /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
+  surge_amount_cents: number;
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;
+  cancellation_reason_id: string | null;
+  cancellation_fee_cents: number;
   created_at: string;
+  /** null = مفيش ضمان أو الطلب لسه ما اكتملش (docs/08 §7). */
+  warranty_expires_at: string | null;
+  /** موجود بس لو الطلب "إعادة زيارة" — بيشاور على الطلب الأصلي. */
+  original_order_id: string | null;
+  /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
+  building_id: string | null;
 }
 
 export interface OrderStatusHistoryResponseDto {
