@@ -153,11 +153,11 @@
 
 ---
 
-## §9. تقييم متقدم — 🔄 موجود بالكامل تقريبًا
+## §9. تقييم متقدم — ✅ خلص
 
-**موجود بالفعل**: `overall_rating` + `punctuality_rating` + `quality_rating` + `professionalism_rating` + `price_fairness_rating` + تعليق + tags array + صور الطلب (`order_media`, عام مش مربوط بالتقييم مباشرة).
+**موجود بالفعل**: `overall_rating` + `punctuality_rating` + `quality_rating` + `professionalism_rating` + `price_fairness_rating` + تعليق + tags array + صور الطلب (`order_media`).
 
-**الناقص**: بُعد "النظافة" (`cleanliness_rating`) لسه مش موجود كعمود منفصل، وربط صور "بعد التنفيذ" مباشرة بصف التقييم نفسه (دلوقتي `order_media` مستقل تمامًا عن `ratings`).
+**اتقفل**: `cleanliness_rating` عمود جديد (migration 0063)، وربط صور "بعد التنفيذ" مباشرة بصف التقييم عبر `order_media.rating_id` جديد + `after_photo_media_ids` في `POST /orders/:id/rate`. تفاصيل كاملة + دليل الاختبار الحي في `apps/api/src/modules/ratings/README.md`.
 
 ---
 
@@ -202,3 +202,4 @@
 - **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §5 (فرق العمل) — توزيع الأدوار داخل الطلب خلص: `order_team_members` (migration `0060`) إضافي فوق `orders.technician_id`، قائد الطلب بيضيف أعضاء من نفس شركته بدور نصي حر. مقياس الإنتاجية المجمّعة اتأجل عمداً (قرار عمل مش واضح). اختبار حي كامل بشركة/فريق حقيقيين وطلب `team` حقيقي. تفاصيل كاملة في `apps/api/src/modules/orders/README.md`.
 - **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §7 (الضمان وإعادة الزيارة) خلص — `orders.warranty_expires_at`/`parent_order_id` كانوا أعمدة راكدة من migration 0007، اتفعّلوا بدل ما يتعملوا أعمدة جديدة. `warranty_expires_at` بيتحسب وقت الاكتمال، "إعادة زيارة" مجانية بالكامل لنفس الخدمة/العنوان تحت الضمان. بَقّة حقيقية اتلقطت واتصلحت (`doubleEntry` بترفض مبلغ صفر → طلب مجاني كان بيعلق في `work_completed` للأبد). اختبار حي كامل بدورة طلب حقيقية كاملة. تفاصيل كاملة في `apps/api/src/modules/orders/README.md`.
 - **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §8 (الطوارئ) خلص جزئيًا — `orders.surge_amount_cents` عمود راكد تاني من migration 0007، اتفعّل كرسوم طوارئ صريحة (20% افتراضي، إعداد قابل للتعديل)، + SLA معلن (60 دقيقة افتراضي). معروضين في المعاينة قبل التأكيد وفي الطلب الفعلي بنفس القيمة بالظبط. أولوية/staggering داخل الدفعة اتأجلت عمداً (مخاطرة + مفيش قرار عمل واضح). اختبار حي كامل. تفاصيل كاملة في `apps/api/src/modules/catalog/README.md`.
+- **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §9 (تقييم متقدم) خلص — `cleanliness_rating` عمود جديد فعلاً (مش راكد) + `order_media.rating_id` لربط صور "بعد التنفيذ" مباشرة بالتقييم. فحص صريح قبل إنشاء التقييم (fail fast لو صورة من طلب تاني). اختبار حي كامل. تفاصيل كاملة في `apps/api/src/modules/ratings/README.md`.

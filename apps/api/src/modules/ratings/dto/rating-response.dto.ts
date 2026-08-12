@@ -1,5 +1,10 @@
 import { Rating } from '../entities/rating.entity';
 
+export interface RatingAfterPhotoDto {
+  id: string;
+  file_url: string;
+}
+
 export interface RatingResponseDto {
   id: string;
   order_id: string;
@@ -9,12 +14,14 @@ export interface RatingResponseDto {
   quality_rating: number | null;
   professionalism_rating: number | null;
   price_fairness_rating: number | null;
+  cleanliness_rating: number | null;
   comment: string | null;
   tags: string[] | null;
   created_at: string;
+  after_photos: RatingAfterPhotoDto[];
 }
 
-export function toRatingResponseDto(rating: Rating): RatingResponseDto {
+export function toRatingResponseDto(rating: Rating, afterPhotos: { id: string; fileUrl: string }[] = []): RatingResponseDto {
   return {
     id: rating.id,
     order_id: rating.orderId,
@@ -24,8 +31,10 @@ export function toRatingResponseDto(rating: Rating): RatingResponseDto {
     quality_rating: rating.qualityRating,
     professionalism_rating: rating.professionalismRating,
     price_fairness_rating: rating.priceFairnessRating,
+    cleanliness_rating: rating.cleanlinessRating,
     comment: rating.comment,
     tags: rating.tags,
     created_at: rating.createdAt.toISOString(),
+    after_photos: afterPhotos.map((p) => ({ id: p.id, file_url: p.fileUrl })),
   };
 }
