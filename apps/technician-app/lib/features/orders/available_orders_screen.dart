@@ -4,6 +4,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
+import '../company/company_screen.dart';
 import '../portfolio/portfolio_screen.dart';
 import '../profile/profile_screen.dart';
 import '../schedule/schedule_screen.dart';
@@ -128,6 +129,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'بروفايلي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.groups_outlined),
+              tooltip: 'شركتي / فريقي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CompanyScreen()),
               ),
             ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),
