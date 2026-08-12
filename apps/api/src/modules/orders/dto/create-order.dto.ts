@@ -48,6 +48,13 @@ export class CreateOrderDto {
   @IsUUID()
   requested_technician_id?: string;
 
+  // "إعادة زيارة" تحت الضمان (docs/08 §7) — لو العميل عنده مشكلة تانية بنفس الخدمة في نفس
+  // العنوان قبل ما ضمان الطلب الأصلي يخلص. order_type بيتحدد تلقائيًا لـ"revisit" (بيتجاهل
+  // dto.order_type)، والطلب مجاني بالكامل — كل تفاصيل التحقق في orders.service.ts.
+  @IsOptional()
+  @IsUUID()
+  original_order_id?: string;
+
   // إضافات جاهزة من كتالوج الخدمة نفسها (service_addons) — بتتحط في order_items بـ
   // is_customer_approved=true فوراً (العميل اختارها بنفسه وقت الحجز، مش عرض سعر مستني موافقة).
   // مختلفة عن مسار awaiting_quote_approval (order-items.service.ts) اللي الفني بيقترحه أثناء الشغل.

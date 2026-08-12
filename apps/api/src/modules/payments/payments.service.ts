@@ -58,7 +58,9 @@ export class PaymentsService {
    * عمولة المنصة = عمولة الخدمة الأساسية + فرق مستوى الفني (سالب عادةً — مستوى أعلى يعني عمولة
    * منصة أقل، حافز جودة حقيقي). المجموع محدود بين 0 و100% دفاعياً حتى لو إعدادات المستوى غلط.
    */
-  private async computeSettlement(order: Order): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number }> {
+  private async computeSettlement(
+    order: Order,
+  ): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number; warrantyDays: number }> {
     const service = await this.catalogService.findServiceOrThrow(order.serviceId);
     let commissionRateApplied = Number(service.commissionPercentage);
 
@@ -80,7 +82,7 @@ export class PaymentsService {
 
     const platformCommissionCents = Math.round((order.totalAmountCents * commissionRateApplied) / 100);
     const technicianEarningCents = order.totalAmountCents - platformCommissionCents;
-    return { platformCommissionCents, technicianEarningCents, commissionRateApplied };
+    return { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays: service.warrantyDays };
   }
 
   /** بيتأكد إن الطلب فعلاً بتاع العميل ده وفي حالة قابلة للدفع، وبيرجع صف الطلب. */
@@ -118,7 +120,7 @@ export class PaymentsService {
     changedByUserId: string,
     changedByRole: 'customer' | 'technician' | 'system',
   ): Promise<Order> {
-    const { platformCommissionCents, technicianEarningCents, commissionRateApplied } =
+    const { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays } =
       await this.computeSettlement(order);
 
     if (!canTransition(order.orderStatus, OrderStatus.COMPLETED)) {
@@ -135,6 +137,9 @@ export class PaymentsService {
     order.paidAt = now;
     order.orderStatus = OrderStatus.COMPLETED;
     order.closedAt = now;
+    // الضمان (docs/08 §7) — بيتفعّل بس لو الخدمة عندها warranty_days > 0. صفر = مفيش ضمان،
+    // warranty_expires_at بيفضل null (مش تاريخ في الماضي مضلّل).
+    order.warrantyExpiresAt = warrantyDays > 0 ? new Date(now.getTime() + warrantyDays * 24 * 60 * 60 * 1000) : null;
     await manager.save(order);
 
     await manager.save(
@@ -291,19 +296,24 @@ export class PaymentsService {
       });
       await manager.save(payment);
 
-      // العميل بيدفع لمحفظة المنصة كاملة (مش رصيد غير كافٍ مسموح هنا — ده فلوس حقيقية للعميل)
-      await this.walletsService.doubleEntry(
-        {
-          fromWalletId: customerWallet.id,
-          toWalletId: platformWallet.id,
-          amountCents: lockedOrder.totalAmountCents,
-          transactionType: WalletTxType.ADJUSTMENT,
-          referenceType: 'payment',
-          referenceId: payment.id,
-          descriptionAr: `دفع طلب ${lockedOrder.orderNumber}`,
-        },
-        manager,
-      );
+      // العميل بيدفع لمحفظة المنصة كاملة (مش رصيد غير كافٍ مسموح هنا — ده فلوس حقيقية للعميل).
+      // إعادة زيارة تحت الضمان (docs/08 §7) مجانية بالكامل (totalAmountCents=0) — مفيش قيد
+      // محفظة يتعمل خالص هنا (doubleEntry بترفض أي مبلغ صفر أو أقل بتصميمها)، بس لسه بيتسجّل
+      // Payment وبتكمّل settleAndComplete تحت عشان الطلب يقفل صح ويوصل لحالة COMPLETED.
+      if (lockedOrder.totalAmountCents > 0) {
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: customerWallet.id,
+            toWalletId: platformWallet.id,
+            amountCents: lockedOrder.totalAmountCents,
+            transactionType: WalletTxType.ADJUSTMENT,
+            referenceType: 'payment',
+            referenceId: payment.id,
+            descriptionAr: `دفع طلب ${lockedOrder.orderNumber}`,
+          },
+          manager,
+        );
+      }
 
       const previousStatus = lockedOrder.orderStatus;
       await this.settleAndComplete(manager, lockedOrder, PaymentMethod.WALLET, userId, 'customer');

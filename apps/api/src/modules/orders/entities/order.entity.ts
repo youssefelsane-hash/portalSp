@@ -28,6 +28,8 @@ export enum OrderType {
   SCHEDULED = 'scheduled',
   RECURRING = 'recurring',
   B2B = 'b2b',
+  // إعادة زيارة تحت الضمان (docs/08 §7) — مربوطة بـ originalOrderId، مجانية بالكامل وقت الضمان.
+  REVISIT = 'revisit',
 }
 
 export enum OrderPaymentStatus {
@@ -166,6 +168,18 @@ export class Order {
 
   @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
   closedAt: Date | null;
+
+  // الضمان (docs/08 §7) — العمود ده موجود من migration 0007 الأولى بس معمول عليه أي حساب خالص
+  // قبل كده (فجوة موثّقة، نفس فئة أعمدة راكدة اتكشفت قبل كده في السيشن ده). بيتحسب فعليًا دلوقتي
+  // وقت الاكتمال (paymentsService.settleAndComplete) من services.warranty_days.
+  @Column({ name: 'warranty_expires_at', type: 'timestamptz', nullable: true })
+  warrantyExpiresAt: Date | null;
+
+  // إعادة الزيارة (docs/08 §7) — بيعيد استخدام parent_order_id الموجود من migration 0007 (كان
+  // معرّف بس مش مستخدم خالص في أي كود) بدل ما يتعمل عمود جديد بنفس الغرض بالظبط. الاسم في
+  // الـ API/DTOs بره الكلاس ده "original_order_id" (أوضح دلالياً للعميل).
+  @Column({ name: 'parent_order_id', type: 'uuid', nullable: true })
+  parentOrderId: string | null;
 
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;

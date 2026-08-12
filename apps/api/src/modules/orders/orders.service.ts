@@ -112,6 +112,37 @@ export class OrdersService {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
 
+    // إعادة زيارة تحت الضمان (docs/08 §7) — لازم: بتاعة نفس العميل، مكتملة فعلاً، لنفس الخدمة
+    // ونفس العنوان بالظبط (نفس المشكلة المفروض)، وتحت warranty_expires_at الفعلي لسه. تفضيل
+    // (مش ضمان) بيروح لنفس الفني الأصلي — requested_technician_id بتاعه بيتجاهَل ويتحل محله.
+    let originalOrder: Order | null = null;
+    if (dto.original_order_id) {
+      originalOrder = await this.orders.findOne({ where: { id: dto.original_order_id, customerId: customerProfile.id } });
+      if (!originalOrder) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب الأصلي غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (originalOrder.orderStatus !== OrderStatus.COMPLETED) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب الأصلي لازم يكون مكتمل الأول', HttpStatus.BAD_REQUEST);
+      }
+      if (originalOrder.serviceId !== dto.service_id || originalOrder.addressId !== dto.address_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'إعادة الزيارة لازم تكون لنفس الخدمة ونفس العنوان بالظبط',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (!originalOrder.warrantyExpiresAt || originalOrder.warrantyExpiresAt.getTime() < Date.now()) {
+        throw new ApiException(ErrorCode.VAL_001, 'ضمان الطلب الأصلي انتهى', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.promo_code || (dto.addon_ids && dto.addon_ids.length > 0)) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'إعادة الزيارة تحت الضمان مجانية بالكامل — مفيش كود خصم ولا إضافات كتالوج معاها',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+
     const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
@@ -124,19 +155,31 @@ export class OrdersService {
         serviceId: service.id,
         addressId: address.id,
         serviceZoneId: zone.id,
-        // bookingMode=emergency بيفرض orderType=EMERGENCY دايماً (مهما اتبعت dto.order_type) —
-        // هو المصدر الأوحد للحقيقة هنا، عشان أي كود قديم بيقرا order_type يتصرف صح تلقائيًا.
-        orderType: bookingMode === BookingMode.EMERGENCY ? OrderType.EMERGENCY : (dto.order_type ?? OrderType.STANDARD),
+        // bookingMode=emergency بيفرض orderType=EMERGENCY دايماً (مهما اتبعت dto.order_type)،
+        // وإعادة الزيارة بتفرض orderType=REVISIT بنفس المنطق — الاتنين مصدر الحقيقة الوحيد هنا.
+        orderType: originalOrder
+          ? OrderType.REVISIT
+          : bookingMode === BookingMode.EMERGENCY
+            ? OrderType.EMERGENCY
+            : (dto.order_type ?? OrderType.STANDARD),
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
         orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
         scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
-        requestedTechnicianId: dto.requested_technician_id ?? null,
-        estimatedPriceCents: estimate.estimated_total_cents,
-        inspectionFeeCents: estimate.inspection_fee_cents,
-        totalAmountCents: estimate.estimated_total_cents + estimate.inspection_fee_cents + addonsTotalCents,
+        // إعادة الزيارة بتفضّل نفس الفني الأصلي دايماً — requested_technician_id بتاع الـ dto
+        // بيتجاهَل هنا عمداً لو الطلب إعادة زيارة (منطقي أكتر إنه يرجع لنفس اللي عمل الشغلانة).
+        requestedTechnicianId: originalOrder ? originalOrder.technicianId : (dto.requested_technician_id ?? null),
+        parentOrderId: originalOrder ? originalOrder.id : null,
+        // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
+        // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
+        estimatedPriceCents: originalOrder ? 0 : estimate.estimated_total_cents,
+        inspectionFeeCents: originalOrder ? 0 : estimate.inspection_fee_cents,
+        totalAmountCents: originalOrder ? 0 : estimate.estimated_total_cents + estimate.inspection_fee_cents + addonsTotalCents,
+        // لسه UNPAID عمداً حتى لو صفر جنيه — لازم يعدّي بنفس دورة الدفع العادية (collectCash/
+        // payWithWallet → settleAndComplete) عشان الطلب يتقفل صح ويوصل COMPLETED، مش يعلق في
+        // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.
         paymentStatus: OrderPaymentStatus.UNPAID,
         placedAt: now,
         sourceChannel: OrderSourceChannel.CUSTOMER_APP,
