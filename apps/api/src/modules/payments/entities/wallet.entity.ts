@@ -5,6 +5,8 @@ export enum WalletOwnerType {
   TECHNICIAN = 'technician',
   PARTNER = 'partner',
   PLATFORM = 'platform',
+  // قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — شغالة/مربية/مقيمة، تصنيف مستقل عن technician.
+  DOMESTIC_WORKER = 'domestic_worker',
 }
 
 // حساب المنصة الثابت — infra/migrations/0019_platform_system_account.sql

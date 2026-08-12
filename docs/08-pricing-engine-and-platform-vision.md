@@ -173,9 +173,9 @@
 
 ---
 
-## §12. قطاع الخدمات المنزلية (نطاق منتج جديد كامل) — ⬜ فاضي
+## §12. قطاع الخدمات المنزلية (نطاق منتج جديد كامل) — ✅ خلص
 
-شغالة تنظيف بالساعة، Baby sitter، مقيمة بالشهور. مختلف جوهريًا عن نموذج "طلب صيانة" الحالي — محتاج entities جديدة (`domestic_worker_profiles`؟)، حجز بمواعيد/فترات طويلة (شهور)، تجديد تلقائي، وربما تكامل كاميرات مراقبة (تفصيلة أمان/ثقة، مش لازم تظهر في الواجهة). **يتاخد بعد ما §1-§11 تخلص** — نطاق كبير مستقل.
+موديول `domestic-workers` جديد كامل، كيان مستقل تمامًا عن `technicians`/`orders`/`matching` (`docs/adr/0004-domestic-workers-vertical.md`). `UserType.DOMESTIC_WORKER` جديد، `domestic_worker_profiles`+`domestic_worker_bookings` (migration 0066)، دفع حقيقي عبر `WalletsService.doubleEntry`، تجديد شهري تلقائي عبر فحص دوري (نفس فلسفة `OrderAutoCancelService`). بَقّة حقيقية اتلقطت واتصلحت (تحويل أرباح الشغالة محتاج `allowNegativeBalance:true` زي تحويل أرباح الفني بالظبط). تكامل الكاميرات وربط التقييمات بالجدول الأساسي `ratings` اتأجلوا عمداً وموثّقين في الـ ADR. تفاصيل كاملة + دليل الاختبار الحي في `apps/api/src/modules/domestic-workers/README.md`.
 
 ---
 
@@ -205,3 +205,4 @@
 - **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §9 (تقييم متقدم) خلص — `cleanliness_rating` عمود جديد فعلاً (مش راكد) + `order_media.rating_id` لربط صور "بعد التنفيذ" مباشرة بالتقييم. فحص صريح قبل إنشاء التقييم (fail fast لو صورة من طلب تاني). اختبار حي كامل. تفاصيل كاملة في `apps/api/src/modules/ratings/README.md`.
 - **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §11 (الجدولة المستقبلية/المتكررة) خلص — `recurring_order_templates` (migration 0064) جديد، فحص دوري بيولّد طلب حقيقي عبر `OrdersService.create()` نفسها في كل موعد مستحق (تفضيل فني مش قفل سلوت). اختبار حي كامل: قالب أسبوعي حقيقي ولّد طلب فعلي بعد ما الموعد استحق، `next_run_at` اتحرّك +7 أيام بالظبط. تفاصيل كاملة في `apps/api/src/modules/orders/README.md`.
 - **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §13 (نظام العمائر) خلص — موديول `buildings` جديد كامل (`docs/adr/0003-buildings-qr-discount.md`)، كود مولّد تلقائيًا، QR محلي (`qrcode` npm)، خصم متبادل استبعادياً مع `promo_code`. اختبار حي كامل: عمارة حقيقية → كود `BLD-2026-000001` تلقائي → طلب حقيقي بالكود → خصم 15% بالظبط. تفاصيل كاملة في `apps/api/src/modules/buildings/README.md`.
+- **2026-08-12 (لاحقًا نفس اليوم، فرع `hgotr7`)**: §12 (قطاع الخدمات المنزلية) خلص — موديول `domestic-workers` جديد كامل، مستقل تمامًا عن `technicians`/`orders` (`docs/adr/0004-domestic-workers-vertical.md`). دفع حقيقي عبر `WalletsService.doubleEntry`، حجوزات بالساعة وشهرية مقيمة، تجديد تلقائي دوري. بَقّة حقيقية اتلقطت واتصلحت (`allowNegativeBalance` لتحويل أرباح الشغالة). اختبار حي كامل من التسجيل للتجديد التلقائي. تفاصيل كاملة في `apps/api/src/modules/domestic-workers/README.md`. **بكده docs/08 §1-§13 كلهم خلصوا.**
