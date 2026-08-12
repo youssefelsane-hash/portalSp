@@ -37,6 +37,9 @@ export class Rating {
   @Column({ name: 'price_fairness_rating', type: 'smallint', nullable: true })
   priceFairnessRating: number | null;
 
+  @Column({ name: 'cleanliness_rating', type: 'smallint', nullable: true })
+  cleanlinessRating: number | null;
+
   @Column({ type: 'text', nullable: true })
   comment: string | null;
 

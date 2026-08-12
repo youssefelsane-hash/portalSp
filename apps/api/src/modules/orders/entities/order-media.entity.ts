@@ -18,6 +18,11 @@ export class OrderMedia {
   @Column({ name: 'order_id', type: 'uuid' })
   orderId: string;
 
+  // ربط صور "بعد التنفيذ" مباشرة بصف التقييم (docs/08 §9) — null لحد ما العميل يربطها وقت
+  // التقييم (ratings.service.ts). قبل كده order_media كان مستقل تمامًا عن ratings.
+  @Column({ name: 'rating_id', type: 'uuid', nullable: true })
+  ratingId: string | null;
+
   @Column({ name: 'uploaded_by_user_id', type: 'uuid' })
   uploadedByUserId: string;
 
