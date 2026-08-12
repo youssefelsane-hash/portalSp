@@ -36,11 +36,4 @@ class CatalogRepository {
     final items = await apiRequestList('/services/$serviceId/pricing-fields');
     return items.map(PricingField.fromJson).toList();
   }
-
-  // معاينة سعر حية أثناء ما العميل بيملا الفورم — نفس السعر اللي POST /orders هيحسبه بالظبط
-  // لو بعتنا نفس field_values (كلاهما بينادي PricingEngineService.evaluate() في الآخر).
-  Future<PricingEvaluationResult> evaluatePrice(String serviceId, Map<String, dynamic> fieldValues) async {
-    final data = await apiRequest('POST', '/services/$serviceId/evaluate-price', body: {'field_values': fieldValues});
-    return PricingEvaluationResult.fromJson(data!);
-  }
 }

@@ -107,7 +107,8 @@ void main() {
     // 10×140=1400 + 15%=210 + 500 (دور>5) = 2110
     const expectedPriceCents = 2110;
 
-    // evaluate-price (CatalogRepository.evaluatePrice المستخدمة فعليًا في CreateOrderScreen للمعاينة الحية)
+    // evaluate-price — نسخة خام من محرك التسعير (بيتستخدم أثناء ملء فورم الحقول الديناميكية
+    // قبل ما يتحدد عنوان أصلاً، مش فيه رسوم منطقة/طوارئ).
     final evaluation = await apiRequest(
       'POST',
       '/services/$serviceId/evaluate-price',
@@ -127,6 +128,16 @@ void main() {
       'label': 'اختبار Dart حي',
     });
     final addressId = address!['id'] as String;
+
+    // POST /orders/preview (OrdersRepository.previewPrice — تفصيل السعر الكامل قبل التأكيد،
+    // docs/08 §1/§2) — لازم يطابق نفس السعر بالظبط اللي POST /orders هيحسبه لو اتبعتت نفس
+    // field_values (نفس منطق OrdersService.create() بالحرف، مصدر واحد للحساب).
+    final preview = await apiRequest('POST', '/orders/preview', accessToken: customerToken, body: {
+      'service_id': serviceId,
+      'address_id': addressId,
+      'field_values': fieldValues,
+    });
+    expect(preview!['total_amount_cents'], expectedPriceCents, reason: 'معاينة السعر قبل التأكيد لازم تطابق السعر الفعلي اللي هيتحصّل بالظبط');
 
     // POST /orders (OrdersRepository.create مع field_values — الإصلاح الفعلي محل الاختبار)
     final order = await apiRequest('POST', '/orders', accessToken: customerToken, body: {

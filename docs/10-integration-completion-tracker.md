@@ -24,12 +24,12 @@
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
 | 1 | محرك التسعير الديناميكي end-to-end | ✅ خلص | Backend + Customer App من سيشن سابقة (PR #64). **المتمم في السيشن دي (2026-08-12)**: Admin Pricing Builder UI كامل (`pricing-builder.tsx`) + تتبّع snapshot السعر التاريخي (`service_pricing_evaluations.order_id` بيتربط فعليًا بالطلب بعد الإنشاء عبر `linkEvaluationToOrder`). اتأكد حي بالكامل (Playwright + curl + DB): إنشاء حقول/lookup table/معادلة من الواجهة → معاينة صح → طلب حقيقي بنفس السعر بالظبط → صف التدقيق مرتبط بـ`order_id` الصح. تفاصيل كاملة في `apps/api/src/modules/pricing/README.md`. |
-| 2 | معاينة سعر حقيقية + تفصيل قبل التأكيد | ⏳ | جزء من #1 — لازم breakdown واضح (أساسي/منطقة/مستوى/معادلة/إضافات/طوارئ/خصم) مش رقم واحد غامض. |
+| 2 | معاينة سعر حقيقية + تفصيل قبل التأكيد | ✅ خلص | `POST /orders/preview` جديد (read-only، نفس منطق `OrdersService.create()` بالحرف) — `CreateOrderScreen` بقى بيعرض breakdown كامل (أساسي/فحص/طوارئ+SLA/إضافات/خصم/نطاق formula/مدة متوقعة/إجمالي) لكل نماذج التسعير، مش رقم واحد غامض. اتأكد حي: معاينة = طلب حقيقي بالحرف لخدمتين (fixed+formula). تفاصيل في `apps/api/src/modules/orders/README.md`. |
 | 3 | الجدولة (Scheduler) end-to-end | ✅ اتأكد حي | Backend + Customer App + Technician App اتعملوا في سيشن سابقة (PR #65، #66) — اختبار حي كامل شامل سباق حقيقي. |
 | 4 | اختيار الفني قبل الحجز | ⏳ | `GET /services/:id/technicians` موجود ومختبر من سيشن سابقة (docs/08 §3) — محتاج تأكيد إن Customer App فعليًا بتستخدمه في تدفق الحجز الحقيقي (مش بس endpoint موجود). |
 | 5 | تسجيل عميل جديد (مش OTP login بس) | ⏳ | `POST /auth/register` موجود في الباك-إند — Customer App عندها OTP login بس، مفيش تدفق تسجيل حقيقي. |
 | 6 | تسجيل/onboarding فني جديد | ⏳ | محتاج تأكيد نفس الموضوع من ناحية Technician App. |
-| 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | ⏳ | `estimateDuration()` موجود (`POST /services/:id/estimate-duration`) — مش معروض للعميل وقت الحجز. |
+| 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | 🔄 | جزء منه خلص مع #2: `estimated_duration_days` (من معادلة formula) بقى معروض في ملخص السعر. الجزء الباقي (المدة من `service_standard_data`/`estimateDuration()` لخدمات غير formula، وعرضها في شاشات الفني/الأدمن التشغيلية) لسه. |
 
 ### Phase B — الثقة والتنفيذ
 
@@ -143,3 +143,22 @@
   اتربط صح (مش NULL) بعد الطلب بينما صف الـpreview فضل NULL صح. بيانات الاختبار (خدمة+طلب) اتعملها soft-delete
   بعد التأكيد. الفحوصات الثلاثة (`tsc`/`nest build`/`jest`) + `tsc`/`eslint`/`next build` في `apps/admin` كلها
   عدّت. البند #2 (breakdown كامل للسعر في Customer App قبل التأكيد) لسه منفصل وقائم — مش جزء من هذا الإغلاق.
+
+- **2026-08-12 (بند #2 خلص، وجزء من #7)**: `POST /orders/preview` جديد في `orders` module (`OrdersService.previewPrice()`) —
+  read-only بالكامل، بيكرر بالحرف نفس تسلسل تحديد المنطقة/حساب السعر في `create()` (نفس `estimate()`، نفس
+  addons، نفس `promoCodesService.preview()`/خصم العمارة). `CreateOrderScreen` (customer-app) اتعمله rewrite
+  جزئي: مصدر واحد بس (`_refreshPreview()`) لكل نماذج التسعير بدل `evaluatePrice()`/`validatePromoCode()`
+  المنفصلين اللي كل واحد كان بيعرض جزء بس من الصورة — الاتنين اتشالوا من `catalog_repository.dart`/
+  `orders_repository.dart` بعد ما بقوا بلا caller. بطاقة "ملخص السعر" جديدة بتعرض كل بند منفصل (أساسي/فحص/
+  طوارئ+SLA/إضافات/خصم/نطاق formula/مدة متوقعة/إجمالي)، مربوطة بعنوان+إضافات+حقول formula+كود خصم، مع حماية
+  race حقيقية (`_previewRequestGeneration` counter) ضد نتيجة قديمة تكتب فوق نتيجة أحدث. التأكيد (`_submit()`)
+  بقى ممنوع من غير `_pricePreview` محسوب فعلاً — مفيش تأكيد أعمى لأي نموذج تسعير. فجوة تانية أصغر اتقفلت في
+  نفس البناء: `POST /services/:id/estimate` (endpoint أقدم بـ`zone_id`) كان بيتجاهل `field_values` تمامًا.
+  اتأكد حي بالكامل عبر `curl` (معاينة = طلب حقيقي بالحرف لخدمة `fixed` وخدمة `formula` جديدتين، شامل
+  `estimated_duration_days` من معادلة formula) + حالات سلبية (بلا عنوان/توكن/كود خصم وهمي). الفحوصات الثلاثة
+  في `apps/api` عدّت. **ملحوظة صريحة**: Flutter SDK مش متاح في بيئة السيشن دي (خلافًا لما هو موثّق فوق في
+  الملف ده لسيشنز تانية) — الكود اتراجع يدويًا بعناية (توازن أقواس + تتبّع كل import/type) بدل `flutter
+  analyze`/`flutter test`، ومنطق الـHTTP اللي الشاشة بتستخدمه اتأكد حي عبر curl بنفس البيانات بالظبط. رندر
+  الـwidgets الفعلي وتفاعل اللمس **لسه مش مُتحقَّق منه بصريًا** في السيشن دي — لو سيشن تانية عندها Flutter
+  SDK متاح، تشغيل `flutter analyze` + `flutter test test_live/pricing_engine_order_creation_live_test.dart`
+  مطلوب كخطوة تحقق إضافية.

@@ -140,17 +140,6 @@ class PricingField {
       );
 }
 
-// مطابق لـ PricingEvaluationResponseDto — بناخد بس price_cents هنا (المعروض للعميل)، باقي
-// الحقول (المدة/الطاقم المطلوب) مش مستخدمة في شاشة الحجز الحالية.
-class PricingEvaluationResult {
-  final int priceCents;
-
-  PricingEvaluationResult({required this.priceCents});
-
-  factory PricingEvaluationResult.fromJson(Map<String, dynamic> json) =>
-      PricingEvaluationResult(priceCents: json['price_cents'] as int);
-}
-
 // مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts (ServiceAddonResponseDto)
 // — نفس الشكل يرجع من GET /services/:id/addons العامة.
 class ServiceAddon {

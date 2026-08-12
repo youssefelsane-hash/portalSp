@@ -187,6 +187,18 @@
 
 **اختبار حي**: خدمة formula حقيقية (مساحة×سعر_المتر + شروط) — `POST /orders` بـ`field_values` صحيحة أنتج `estimated_price_cents=2110`/`total_amount_cents=2110` مطابق تمامًا لناتج `evaluate-price`. `booking_mode=emergency` بنفس الحقول أنتج `surge_amount_cents=422`/`total_amount_cents=2532` (20% رسوم طوارئ فوق سعر المعادلة، صح). طلب من غير `field_values` أو بقيمة `dropdown` غير صالحة اترفض `400` واضح **قبل** أي كتابة في transaction — صفر صفوف orphan (اتأكد بعدّ `orders` قبل/بعد). `GET /promo-codes/:code/validate` (`PromotionsService.previewForOrder()`) اتصلحت بنفس المنطق بالحرف.
 
+## `POST /orders/preview` — تفصيل السعر الكامل قبل التأكيد — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)
+
+**البَقّة/الفجوة اللي اتلقطت**: `apps/customer-app`'s `CreateOrderScreen` كانت بتعرض للعميل قبل التأكيد إما `service.basePriceCents` الثابت (نماذج `fixed`/`hourly`/`per_unit` — رقم من غير أي تعديل منطقة/مستوى فني/طوارئ، ممكن يختلف جذريًا عن المحصّل فعليًا)، أو (لخدمات `formula`) ناتج `POST /services/:id/evaluate-price` الخام (بلا رسوم فحص/طوارئ ولا إضافات ولا خصم). العميل ميكنش بيشوف رقم حقيقي متطابق مع اللي هيتحصّل قبل ما يضغط "تأكيد الطلب" أبدًا.
+
+**الحل**: `OrdersService.previewPrice()` (وراءه `POST /orders/preview`، عميل مُسجّل، نفس صلاحيات `POST /orders`) — دالة **read-only بالكامل** (مفيش transaction ولا كتابة) بتكرر **بالحرف** نفس تسلسل تحديد المنطقة وحساب السعر في `create()` فوق (نفس `geoService.findZoneForPoint()`، نفس `catalogService.estimate()`، نفس حساب `addonsTotalCents`، نفس `promoCodesService.preview()`/خصم العمارة). أي تعديل مستقبلي في منطق تسعير `create()` **لازم يتعدّل هنا بالتوازي** — نفس الالتزام الموثّق سابقًا لـ`PromotionsService.previewForOrder()` (اللي بيعمل نفس الحاجة لكن لمعاينة كود الخصم بس، مش تفصيل السعر الكامل).
+
+الرد (`PreviewOrderResponseDto`) بيرجّع كل بند سعر منفصل (`base_price_cents`, `inspection_fee_cents`, `min/max_price_cents` لـformula، `emergency_surcharge_cents`+`emergency_sla_minutes`، قايمة `addons` + إجماليها، `subtotal_before_discount_cents`، `discount_cents`+`discount_source`، `total_amount_cents` النهائي، و`estimated_duration_days` — الأخير مصدره الجديد `PriceEstimate.estimated_duration_days` في `catalog.service.ts` (مسحوب من `estimated_duration_days` الاختياري في `FinalPriceFormulaPayload` لخدمات formula بس، `null` لباقي النماذج).
+
+**فجوة تانية أصغر اتقفلت في نفس البناء**: `catalog.controller.ts`'s `POST /services/:id/estimate` (endpoint عام أقدم، بياخد `zone_id` مباشرة بدل `address_id`) كان بيتجاهل `field_values` تمامًا حتى لو اتبعتت — أي معاينة عبره لخدمة formula كانت بترجع صفر. `EstimateQueryDto` بقى فيه `field_values?` (نفس نمط `ValidatePromoCodeQueryDto`: JSON string جوّه query لأن الـendpoint POST بلا body).
+
+**اتأكد حي**: خدمة `fixed` (زون override 400 جنيه) — `POST /orders/preview` بـ`booking_mode=emergency` رجّع `total_amount_cents:48000` (400 + 20% رسوم طوارئ)، وطلب حقيقي بنفس المدخلات رجّع `total_amount_cents:48000` **مطابق تمامًا**. خدمة `formula` جديدة (مساحة×سعر_المتر + `estimated_duration_days` في المعادلة) — المعاينة رجّعت `total_amount_cents:1400`+`estimated_duration_days:2`، وطلب حقيقي بنفس المدخلات رجّع `1400` **مطابق تمامًا**. حالات سلبية: بلا عنوان → `400` واضح؛ بلا توكن → `401`؛ كود خصم وهمي → `400` برسالة "كود الخصم غير موجود" واضحة (مش رقم غامض). بيانات الاختبار (خدمتين + طلبين) اتعملها soft-delete بعد التأكيد.
+
 ## ربط الجدولة الحقيقية للفني بـ`POST /orders` — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)
 
 `TechnicianScheduleService.bookSlot()`/`releaseSlotForOrder()` (`../technicians/README.md`) كانوا primitives ذرّية جاهزة ومختبرة بلا أي caller خالص — العميل مكانش يقدر يحجز سلوت وقت محدد من جدول فني بعينه أصلاً. `CreateOrderDto.schedule_slot_id` اختياري جديد بيتحل داخل `create()`:

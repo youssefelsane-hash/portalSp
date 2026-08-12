@@ -10,6 +10,7 @@ import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import '../technicians/models.dart';
 import '../technicians/technicians_repository.dart';
+import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
 
@@ -43,7 +44,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Address? _selectedAddress;
   bool _submitting = false;
   bool _validatingPromo = false;
-  int? _promoDiscountCents;
   String? _promoError;
   String? _error;
   List<ServiceAddon> _addons = [];
@@ -60,10 +60,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
   final Map<String, dynamic> _fieldValues = {};
-  int? _livePriceCents;
-  bool _pricingLoading = false;
-  String? _pricingError;
+
+  // تفصيل السعر الحقيقي الكامل قبل التأكيد (docs/08 §1/§2) — كانت فجوة موثّقة صراحة: الشاشة
+  // كانت بتعرض إما basePriceCents الثابت (بلا تعديل منطقة/طوارئ) أو سعر formula خام (بلا رسوم
+  // فحص/طوارئ ولا إضافات ولا خصم). دلوقتي مصدر واحد بس (POST /orders/preview) لكل نماذج
+  // التسعير — نفس القيم بالحرف اللي POST /orders هيحسبها فعليًا. مفيش سعر يتعرض قبل ما العنوان
+  // يتحدد (المنطقة جزء أساسي من السعر، عرض تخمين قبلها أخطر من عرض "بيتحسب...").
+  OrderPricePreview? _pricePreview;
+  bool _previewLoading = false;
+  String? _previewError;
   Timer? _priceDebounce;
+  // بيتغيّر مع كل نداء لـ_refreshPreview — لو نداء أقدم رجع بعد نداء أحدث (سباق حقيقي ممكن
+  // يحصل: تعديل عنوان سريع ورا تعديل إضافة)، النتيجة القديمة بتتجاهل بدل ما تكتب فوق الأحدث.
+  int _previewRequestGeneration = 0;
 
   @override
   void initState() {
@@ -109,23 +118,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       } else {
         _fieldValues[fieldKey] = value;
       }
-      _livePriceCents = null;
-      _pricingError = null;
+      _pricePreview = null;
+      _previewError = null;
     });
     _priceDebounce?.cancel();
-    _priceDebounce = Timer(const Duration(milliseconds: 500), _refreshLivePrice);
+    _priceDebounce = Timer(const Duration(milliseconds: 500), () => _refreshPreview());
   }
 
-  Future<void> _refreshLivePrice() async {
-    if (!_isFormulaPricing || !_pricingFieldsComplete) return;
-    setState(() => _pricingLoading = true);
+  // معاينة السعر الكامل — مصدر واحد (POST /orders/preview) لكل نماذج التسعير، بدل ما كل نموذج
+  // يحسب/يعرض بمنطقه الخاص. مفيش سعر حقيقي من غير عنوان (المنطقة عامل أساسي في السعر).
+  // promoCode بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validatePromo) — مش أوتوماتيك مع كل
+  // تعديل، عشان كود غلط وسط الكتابة ميغطّيش السعر الأساسي الصحيح.
+  Future<void> _refreshPreview({String? promoCode}) async {
+    if (_selectedAddress == null) return;
+    if (_isFormulaPricing && !_pricingFieldsComplete) return;
+    final generation = ++_previewRequestGeneration;
+    setState(() => _previewLoading = true);
     try {
-      final result = await _catalogRepository.evaluatePrice(widget.service.id, _fieldValues);
-      if (mounted) setState(() => _livePriceCents = result.priceCents);
+      final result = await _repository.previewPrice(
+        serviceId: widget.service.id,
+        addressId: _selectedAddress!.id,
+        bookingMode: widget.bookingMode,
+        fieldValues: _isFormulaPricing ? _fieldValues : null,
+        addonIds: _selectedAddonIds.toList(),
+        promoCode: promoCode,
+      );
+      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
     } on ApiException catch (err) {
-      if (mounted) setState(() => _pricingError = err.message);
+      if (mounted && generation == _previewRequestGeneration) setState(() => _previewError = err.message);
     } finally {
-      if (mounted) setState(() => _pricingLoading = false);
+      if (mounted && generation == _previewRequestGeneration) setState(() => _previewLoading = false);
     }
   }
 
@@ -158,10 +180,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (address != null) {
       setState(() {
         _selectedAddress = address;
-        // العنوان اتغيّر — أي معاينة خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
-        _promoDiscountCents = null;
+        // العنوان اتغيّر — أي معاينة سعر/خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
+        _pricePreview = null;
         _promoError = null;
       });
+      _refreshPreview();
     }
   }
 
@@ -179,16 +202,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     setState(() {
       _validatingPromo = true;
       _promoError = null;
-      _promoDiscountCents = null;
     });
+    final generation = ++_previewRequestGeneration;
     try {
-      final result = await _repository.validatePromoCode(
-        code: code,
+      final result = await _repository.previewPrice(
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
+        bookingMode: widget.bookingMode,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
+        addonIds: _selectedAddonIds.toList(),
+        promoCode: code,
       );
-      if (mounted) setState(() => _promoDiscountCents = result['discount_cents'] as int);
+      // فشل التحقق بيسيب آخر معاينة صح (من غير خصم) ظاهرة، مش بيمسحها — العميل يشوف
+      // "الكود ده مش موجود" جنب حقل الكود، مش رقم فاضي بدل السعر الصحيح.
+      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
     } on ApiException catch (err) {
       if (mounted) setState(() => _promoError = err.message);
     } finally {
@@ -210,10 +237,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         setState(() => _error = 'كمّل كل بيانات السعر المطلوبة الأول');
         return;
       }
-      if (_livePriceCents == null) {
-        setState(() => _error = 'استنى لحد ما السعر يتحسب');
-        return;
-      }
+    }
+    // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
+    // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
+    if (_pricePreview == null) {
+      setState(() => _error = 'استنى لحد ما السعر يتحسب');
+      return;
     }
     setState(() {
       _submitting = true;
@@ -246,11 +275,84 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
-  String _formulaPriceSubtitle() {
-    if (_livePriceCents != null) return 'السعر: ${_formatEgp(_livePriceCents!)}';
-    if (_pricingLoading) return 'بيتحسب السعر...';
-    if (_pricingError != null) return _pricingError!;
-    return 'كمّل التفاصيل تحت عشان نحسبلك السعر';
+  Widget _buildPriceLine(String label, String value, {bool bold = false, Color? color}) {
+    final style = TextStyle(
+      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+      color: color,
+      fontSize: bold ? 16 : 14,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [Text(label, style: style), Text(value, style: style)],
+      ),
+    );
+  }
+
+  // تفصيل السعر الكامل قبل التأكيد (docs/08 §1/§2، طلب صريح من المالك: "breakdown واضح مش رقم
+  // واحد غامض"). نفس البنود بالحرف اللي POST /orders هيحسبها فعليًا لو اتبعتت نفس المدخلات.
+  Widget _buildPriceBreakdown() {
+    if (_selectedAddress == null) {
+      return const Text('اختار عنوان الأول عشان نعرضلك السعر الحقيقي (السعر بيختلف حسب المنطقة)');
+    }
+    if (_isFormulaPricing && !_pricingFieldsComplete) {
+      return const Text('كمّل بيانات السعر تحت عشان نحسبلك السعر');
+    }
+    if (_previewLoading && _pricePreview == null) {
+      return const Row(
+        children: [
+          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 8),
+          Text('بيتحسب السعر...'),
+        ],
+      );
+    }
+    if (_previewError != null && _pricePreview == null) {
+      return Text(_previewError!, style: const TextStyle(color: Colors.red));
+    }
+    final preview = _pricePreview;
+    if (preview == null) return const Text('كمّل بيانات الحجز عشان نعرضلك السعر');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildPriceLine('السعر الأساسي', _formatEgp(preview.basePriceCents)),
+        if (preview.minPriceCents != null && preview.maxPriceCents != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              'نطاق تقديري: ${_formatEgp(preview.minPriceCents!)} – ${_formatEgp(preview.maxPriceCents!)}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+        if (preview.inspectionFeeCents > 0) _buildPriceLine('رسوم الفحص', _formatEgp(preview.inspectionFeeCents)),
+        if (preview.emergencySurchargeCents > 0)
+          _buildPriceLine('رسوم الطوارئ', '+${_formatEgp(preview.emergencySurchargeCents)}', color: Colors.orange),
+        if (preview.emergencySlaMinutes != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text('هيوصلك خلال ${preview.emergencySlaMinutes} دقيقة تقريبًا', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ),
+        if (preview.addonsTotalCents > 0) _buildPriceLine('الإضافات', '+${_formatEgp(preview.addonsTotalCents)}'),
+        if (preview.discountCents > 0) _buildPriceLine('الخصم', '-${_formatEgp(preview.discountCents)}', color: Colors.green),
+        if (preview.estimatedDurationDays != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
+            child: Text(
+              'المدة المتوقعة: ${preview.estimatedDurationDays! % 1 == 0 ? preview.estimatedDurationDays!.toStringAsFixed(0) : preview.estimatedDurationDays!.toStringAsFixed(1)} يوم',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+        const Divider(height: 12),
+        _buildPriceLine('الإجمالي', _formatEgp(preview.totalAmountCents), bold: true),
+        if (_previewLoading)
+          const Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text('بيتحدّث...', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          ),
+      ],
+    );
   }
 
   List<Widget> _buildPricingFieldsSection() {
@@ -280,10 +382,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         ),
       ),
-      if (_pricingError != null) ...[
-        const SizedBox(height: 4),
-        Text(_pricingError!, style: const TextStyle(color: Colors.red)),
-      ],
     ];
   }
 
@@ -459,10 +557,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             Card(
-              child: ListTile(
-                title: Text(widget.service.nameAr),
-                subtitle: Text(_isFormulaPricing ? _formulaPriceSubtitle() : 'السعر التقريبي: ${_formatEgp(widget.service.basePriceCents)}'),
-              ),
+              child: ListTile(title: Text(widget.service.nameAr)),
             ),
             const SizedBox(height: 16),
             Text('عنوان الطلب', style: Theme.of(context).textTheme.titleMedium),
@@ -497,13 +592,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                       .map(
                         (addon) => CheckboxListTile(
                           value: _selectedAddonIds.contains(addon.id),
-                          onChanged: (checked) => setState(() {
-                            if (checked == true) {
-                              _selectedAddonIds.add(addon.id);
-                            } else {
-                              _selectedAddonIds.remove(addon.id);
-                            }
-                          }),
+                          onChanged: (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selectedAddonIds.add(addon.id);
+                              } else {
+                                _selectedAddonIds.remove(addon.id);
+                              }
+                              _pricePreview = null;
+                            });
+                            _refreshPreview();
+                          },
                           title: Text(addon.nameAr),
                           secondary: Text('+${_formatEgp(addon.priceCents)}'),
                         ),
@@ -552,12 +651,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     textCapitalization: TextCapitalization.characters,
                     // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
                     // عدّل نص الكود بعد ما اتحقق منه، السعر المعروض كان يفضل من الكود القديم —
-                    // ده بيمسحه فورًا لحد ما العميل يضغط "تحقق" تاني، عشان السعر المعروض دايمًا
-                    // يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
-                    onChanged: (_) => setState(() {
-                      _promoDiscountCents = null;
-                      _promoError = null;
-                    }),
+                    // ده بيمسح الخصم فورًا (بمعاينة تانية من غير كود) لحد ما يضغط "تحقق" تاني،
+                    // عشان السعر المعروض دايمًا يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
+                    onChanged: (_) {
+                      setState(() {
+                        _promoError = null;
+                        _pricePreview = null;
+                      });
+                      _refreshPreview();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -573,13 +675,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               const SizedBox(height: 4),
               Text(_promoError!, style: const TextStyle(color: Colors.red)),
             ],
-            if (_promoDiscountCents != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                'هيتخصم ${(_promoDiscountCents! / 100).toStringAsFixed(0)} ج.م. من السعر',
-                style: const TextStyle(color: Colors.green),
+            const SizedBox(height: 16),
+            Text('ملخص السعر', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: _buildPriceBreakdown(),
               ),
-            ],
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _descriptionController,

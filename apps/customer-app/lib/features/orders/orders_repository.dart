@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
 import '../catalog/models.dart';
@@ -63,26 +61,28 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
-  // معاينة خصم كود قبل الحجز — /promo-codes/:code/validate عامة بس محتاجة توكن عادي
-  // (مش Public()، أي مستخدم مسجّل). بترجع الكود والخصم بالقرش لو الكود صالح.
-  // fieldValues لازمة لخدمات pricing_model=formula بس (نفس منطق create()) — من غيرها،
-  // معاينة الخصم لخدمة formula هترفض بخطأ "حقل مطلوب" واضح (نفس اللي POST /orders هيرفضه).
-  Future<Map<String, dynamic>> validatePromoCode({
-    required String code,
+  // تفصيل السعر الكامل قبل تأكيد الحجز (docs/08 §1/§2) — كانت فجوة موثّقة صراحة: الشاشة كانت
+  // بتعرض إما basePriceCents الثابت (نموذج fixed، من غير أي تعديل منطقة/طوارئ) أو سعر formula
+  // خام من غير رسوم الطوارئ/الفحص أصلاً، من غير الإضافات ولا الخصم مجمّعين في رقم واحد واضح.
+  // /orders/preview بيرجّع نفس القيم بالحرف اللي POST /orders هيحسبها فعليًا لو اتبعتت نفس
+  // المدخلات (نفس منطق OrdersService.create() بالظبط، اتأكد حي عبر curl مباشر).
+  Future<OrderPricePreview> previewPrice({
     required String serviceId,
     required String addressId,
+    required BookingMode bookingMode,
     Map<String, dynamic>? fieldValues,
+    List<String>? addonIds,
+    String? promoCode,
   }) async {
-    final query = {
+    final data = await auth.authedRequest('POST', '/orders/preview', body: {
       'service_id': serviceId,
       'address_id': addressId,
-      if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': jsonEncode(fieldValues),
-    };
-    final data = await auth.authedRequest(
-      'GET',
-      '/promo-codes/$code/validate?${Uri(queryParameters: query).query}',
-    );
-    return data!;
+      'booking_mode': bookingMode.apiValue,
+      if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
+      if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
+      if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+    });
+    return OrderPricePreview.fromJson(data!);
   }
 
   Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
