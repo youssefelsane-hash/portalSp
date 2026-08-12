@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OnEvent } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/websockets';
 import { In, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
+import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -110,6 +112,22 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
       order_id: activeOrder.id,
       latitude: body.latitude,
       longitude: body.longitude,
+    });
+  }
+
+  // بث لحظي لأي تغيير حالة طلب (docs/08 §15) — كانت فجوة موثّقة صراحة: العميل بيوافق/يرفض عرض
+  // السعر (order-items.service.ts) وبيوصل للفني إشعار push/in-app بس، شاشة تنفيذ الطلب المفتوحة
+  // فعلاً عند الفني (لو مفتوحة) كانت بتفضل عارضة الحالة القديمة (awaiting_quote_approval) لحد ما
+  // يخرج ويرجع يدوي أو يعمل pull-to-refresh. بنستخدم نفس غرفة `order:${orderId}` بتاعة تتبع
+  // الموقع (namespace /tracking) بدل قناة جديدة — كلا الطرفين (عميل/فني) بينضموا لها أصلاً وقت
+  // أي حالة نشطة، فمفيش بنية تحتية إضافية. حدث عام (مش خاص بعرض السعر بس) عشان أي تغيير حالة
+  // تاني (مثلاً إلغاء الأدمن وهو الفني فاتح الشاشة) يتصلح بنفس الآلية من غير تكرار.
+  @OnEvent(ORDER_STATUS_CHANGED_EVENT)
+  handleOrderStatusChanged(event: OrderStatusChangedEvent): void {
+    this.server.to(`order:${event.orderId}`).emit('order:status_changed', {
+      order_id: event.orderId,
+      previous_status: event.previousStatus,
+      new_status: event.newStatus,
     });
   }
 }
