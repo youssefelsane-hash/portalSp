@@ -130,6 +130,20 @@ export default function TechnicianDetailPage() {
     );
   }
 
+  // كانت فجوة موثّقة صراحة: الشهادات (technician_certificates، تسويقية، منفصلة عن مستندات KYC
+  // فوق) كانت بتتراجع عبر curl/Postman بس — مفيش شاشة أدمن تعرض المعلّقة أصلاً. نفس نمط
+  // handleReviewDocument بالحرف.
+  async function handleReviewCertificate(certificateId: string, reviewStatus: 'approved' | 'rejected') {
+    const rejection_reason = reviewStatus === 'rejected' ? window.prompt('سبب الرفض؟') : undefined;
+    if (reviewStatus === 'rejected' && !rejection_reason) return;
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/certificates/${certificateId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ review_status: reviewStatus, rejection_reason }),
+      }),
+    );
+  }
+
   async function handleAssignZone(e: FormEvent) {
     e.preventDefault();
     if (!newZoneId) return;
@@ -332,6 +346,80 @@ export default function TechnicianDetailPage() {
                               variant="destructive"
                               disabled={isSaving}
                               onClick={() => handleReviewDocument(doc.id, 'rejected')}
+                            >
+                              رفض
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">الشهادات</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {detail.certificates.length === 0 ? (
+              <p className="text-sm text-muted-foreground">مفيش شهادات مرفوعة</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>العنوان</TableHead>
+                    <TableHead>الجهة المانحة</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead>الملف</TableHead>
+                    <TableHead>إجراء</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {detail.certificates.map((cert) => (
+                    <TableRow key={cert.id}>
+                      <TableCell>{cert.title}</TableCell>
+                      <TableCell>{cert.issuer_name ?? '—'}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            cert.review_status === 'approved'
+                              ? 'secondary'
+                              : cert.review_status === 'rejected'
+                                ? 'destructive'
+                                : 'outline'
+                          }
+                        >
+                          {cert.review_status === 'approved'
+                            ? 'معتمدة'
+                            : cert.review_status === 'rejected'
+                              ? 'مرفوضة'
+                              : 'قيد المراجعة'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <a href={cert.file_url} target="_blank" rel="noreferrer" className="underline">
+                          فتح الملف
+                        </a>
+                      </TableCell>
+                      <TableCell>
+                        {cert.review_status === 'pending' && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              disabled={isSaving}
+                              onClick={() => handleReviewCertificate(cert.id, 'approved')}
+                            >
+                              اعتماد
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={isSaving}
+                              onClick={() => handleReviewCertificate(cert.id, 'rejected')}
                             >
                               رفض
                             </Button>

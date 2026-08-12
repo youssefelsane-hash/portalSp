@@ -55,6 +55,12 @@ class CatalogService {
   final int inspectionFeeCents;
   final bool allowsScheduling;
   final bool allowsEmergency;
+  // هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة: الموديول القديم كان بيقرا
+  // allows_emergency بس، مش allows_individual/allows_team رغم إنهم موجودين في رد الباك-إند من
+  // زمان (service-response.dto.ts) — اكتشفت وقت بناء "الطلبات المتكررة" لما القالب كان بيتقبل
+  // بـbooking_mode=individual افتراضي حتى لو الخدمة أصلاً مش بتدعمه، فيفشل توليد الطلب بصمت للأبد.
+  final bool allowsIndividual;
+  final bool allowsTeam;
 
   CatalogService({
     required this.id,
@@ -66,6 +72,8 @@ class CatalogService {
     required this.inspectionFeeCents,
     required this.allowsScheduling,
     required this.allowsEmergency,
+    required this.allowsIndividual,
+    required this.allowsTeam,
   });
 
   factory CatalogService.fromJson(Map<String, dynamic> json) => CatalogService(
@@ -78,7 +86,18 @@ class CatalogService {
         inspectionFeeCents: json['inspection_fee_cents'] as int,
         allowsScheduling: json['allows_scheduling'] as bool,
         allowsEmergency: json['allows_emergency'] as bool,
+        allowsIndividual: json['allows_individual'] as bool,
+        allowsTeam: json['allows_team'] as bool,
       );
+
+  // أول وضع حجز متاح فعليًا للخدمة دي، بترتيب أولوية فرد > فريق > طوارئ — مستخدم في القوالب
+  // المتكررة عشان مانبعتش booking_mode مش متاح للخدمة (الباك-إند بيرفضه بوضوح لو حصل).
+  BookingMode? get defaultAllowedBookingMode {
+    if (allowsIndividual) return BookingMode.individual;
+    if (allowsTeam) return BookingMode.team;
+    if (allowsEmergency) return BookingMode.emergency;
+    return null;
+  }
 }
 
 // محرك التسعير الديناميكي (docs/08 §1) — مطابق لـ apps/api/src/modules/pricing/dto/pricing-response.dto.ts.
@@ -137,6 +156,38 @@ class PricingField {
             .toList(),
         minValue: json['min_value'] as num?,
         maxValue: json['max_value'] as num?,
+      );
+}
+
+// محرك الإنتاجية (docs/06 §3.1-§3.6) — مطابق لـ apps/api/src/modules/catalog/dto/standard-data-response.dto.ts.
+// كانت فجوة موثّقة صراحة: estimate-duration محتاجة id ده، بس مفيش endpoint عام يوفّره أصلاً.
+class ServiceStandardDataRow {
+  final String id;
+  final String executionTypeAr;
+  final String unitAr;
+
+  ServiceStandardDataRow({required this.id, required this.executionTypeAr, required this.unitAr});
+
+  factory ServiceStandardDataRow.fromJson(Map<String, dynamic> json) => ServiceStandardDataRow(
+        id: json['id'] as String,
+        executionTypeAr: json['execution_type_ar'] as String,
+        unitAr: json['unit_ar'] as String,
+      );
+}
+
+// مطابق لرد POST /services/:id/estimate-duration — المدة المتوقعة بس، من غير أي تكلفة داخلية
+// (docs/06 §3.6 صريح: مش المفروض تتعرض للعميل).
+class DurationEstimate {
+  final num estimatedDays;
+  final String unitAr;
+  final String executionTypeAr;
+
+  DurationEstimate({required this.estimatedDays, required this.unitAr, required this.executionTypeAr});
+
+  factory DurationEstimate.fromJson(Map<String, dynamic> json) => DurationEstimate(
+        estimatedDays: json['estimated_days'] as num,
+        unitAr: json['unit_ar'] as String,
+        executionTypeAr: json['execution_type_ar'] as String,
       );
 }
 

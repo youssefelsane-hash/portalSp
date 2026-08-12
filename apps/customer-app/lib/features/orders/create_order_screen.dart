@@ -46,10 +46,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
   final _promoController = TextEditingController();
+  final _buildingController = TextEditingController();
   Address? _selectedAddress;
   bool _submitting = false;
   bool _validatingPromo = false;
   String? _promoError;
+  bool _validatingBuilding = false;
+  String? _buildingError;
   String? _error;
   List<ServiceAddon> _addons = [];
   final Set<String> _selectedAddonIds = {};
@@ -79,6 +82,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // يحصل: تعديل عنوان سريع ورا تعديل إضافة)، النتيجة القديمة بتتجاهل بدل ما تكتب فوق الأحدث.
   int _previewRequestGeneration = 0;
 
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: مفيش UI بيعرض المدة المتوقعة
+  // قبل الحجز لخدمات غير formula (اللي عندها service_standard_data). مستقل تمامًا عن محرك
+  // التسعير الديناميكي (نظام أقدم منفصل عمدًا) — مؤثّرش على السعر خالص، معلوماتي بس.
+  List<ServiceStandardDataRow> _standardDataRows = [];
+  ServiceStandardDataRow? _selectedStandardData;
+  final _requestedUnitsController = TextEditingController();
+  DurationEstimate? _durationEstimate;
+  bool _estimatingDuration = false;
+  String? _durationError;
+  Timer? _durationDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -87,14 +101,58 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _selectedAddress = widget.initialAddress;
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
-    if (_isFormulaPricing) _loadPricingFields();
+    if (_isFormulaPricing) {
+      _loadPricingFields();
+    } else {
+      _loadStandardData();
+    }
     if (_selectedAddress != null) _refreshPreview();
   }
 
   @override
   void dispose() {
     _priceDebounce?.cancel();
+    _durationDebounce?.cancel();
+    _requestedUnitsController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadStandardData() async {
+    try {
+      final rows = await _catalogRepository.fetchStandardData(widget.service.id);
+      if (mounted && rows.isNotEmpty) {
+        setState(() {
+          _standardDataRows = rows;
+          _selectedStandardData = rows.first;
+        });
+      }
+    } on ApiException {
+      // تجاهل — المدة المتوقعة معلوماتية بس، مش لازم تمنع الحجز لو فشل تحميلها
+    }
+  }
+
+  void _onRequestedUnitsChanged(String _) {
+    setState(() {
+      _durationEstimate = null;
+      _durationError = null;
+    });
+    _durationDebounce?.cancel();
+    _durationDebounce = Timer(const Duration(milliseconds: 500), _refreshDurationEstimate);
+  }
+
+  Future<void> _refreshDurationEstimate() async {
+    final standardData = _selectedStandardData;
+    final units = num.tryParse(_requestedUnitsController.text.trim());
+    if (standardData == null || units == null || units <= 0) return;
+    setState(() => _estimatingDuration = true);
+    try {
+      final result = await _catalogRepository.estimateDuration(widget.service.id, standardData.id, units);
+      if (mounted) setState(() => _durationEstimate = result);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _durationError = err.message);
+    } finally {
+      if (mounted) setState(() => _estimatingDuration = false);
+    }
   }
 
   Future<void> _loadPricingFields() async {
@@ -136,7 +194,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // يحسب/يعرض بمنطقه الخاص. مفيش سعر حقيقي من غير عنوان (المنطقة عامل أساسي في السعر).
   // promoCode بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validatePromo) — مش أوتوماتيك مع كل
   // تعديل، عشان كود غلط وسط الكتابة ميغطّيش السعر الأساسي الصحيح.
-  Future<void> _refreshPreview({String? promoCode}) async {
+  Future<void> _refreshPreview({String? promoCode, String? buildingCode}) async {
     if (_selectedAddress == null) return;
     if (_isFormulaPricing && !_pricingFieldsComplete) return;
     final generation = ++_previewRequestGeneration;
@@ -149,6 +207,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
         promoCode: promoCode,
+        buildingCode: buildingCode,
       );
       if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
     } on ApiException catch (err) {
@@ -190,6 +249,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         // العنوان اتغيّر — أي معاينة سعر/خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
         _pricePreview = null;
         _promoError = null;
+        _buildingError = null;
       });
       _refreshPreview();
     }
@@ -209,6 +269,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     setState(() {
       _validatingPromo = true;
       _promoError = null;
+      _buildingController.clear();
+      _buildingError = null;
     });
     final generation = ++_previewRequestGeneration;
     try {
@@ -227,6 +289,46 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       if (mounted) setState(() => _promoError = err.message);
     } finally {
       if (mounted) setState(() => _validatingPromo = false);
+    }
+  }
+
+  // نظام العمائر (docs/08 §13, ADR-0003) — كانت فجوة موثّقة صراحة: الباك-إند بيدعم building_code
+  // بديل لـpromo_code في POST /orders و/orders/preview بالظبط من زمان (خصم تلقائي حسب اشتراك
+  // العمارة)، بس مفيش حقل في الشاشة كان بيستخدمه خالص. نفس منطق _validatePromo بالحرف — الاتنين
+  // مش مسموح يتبعتوا مع بعض (الباك-إند بيرفض)، فمسح الكود التاني عند تفعيل واحد بدل ما نسيب
+  // العميل يكتشف الرفض بعد التأكيد.
+  Future<void> _validateBuilding() async {
+    final code = _buildingController.text.trim();
+    if (code.isEmpty) return;
+    if (_selectedAddress == null) {
+      setState(() => _buildingError = 'اختار عنوان الأول');
+      return;
+    }
+    if (_isFormulaPricing && !_pricingFieldsComplete) {
+      setState(() => _buildingError = 'كمّل بيانات السعر الأول');
+      return;
+    }
+    setState(() {
+      _validatingBuilding = true;
+      _buildingError = null;
+      _promoController.clear();
+      _promoError = null;
+    });
+    final generation = ++_previewRequestGeneration;
+    try {
+      final result = await _repository.previewPrice(
+        serviceId: widget.service.id,
+        addressId: _selectedAddress!.id,
+        bookingMode: widget.bookingMode,
+        fieldValues: _isFormulaPricing ? _fieldValues : null,
+        addonIds: _selectedAddonIds.toList(),
+        buildingCode: code,
+      );
+      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _buildingError = err.message);
+    } finally {
+      if (mounted) setState(() => _validatingBuilding = false);
     }
   }
 
@@ -262,6 +364,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         bookingMode: widget.bookingMode,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
+        buildingCode: _buildingController.text.trim(),
         addonIds: _selectedAddonIds.toList(),
         requestedTechnicianId: widget.requestedTechnicianId,
         requestedTechnicianCompanyId: _selectedCompany?.id,
@@ -360,6 +463,69 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
       ],
     );
+  }
+
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة. مفيش شرط إجباري (خدمات كتير
+  // مالهاش service_standard_data خالص) — القايمة فاضية يعني الخدمة دي مش مفعّل ليها الإنتاجية،
+  // فالقسم كله بيختفي بهدوء من غير أي رسالة خطأ.
+  List<Widget> _buildStandardDataSection() {
+    if (_standardDataRows.isEmpty) return const [];
+    return [
+      const SizedBox(height: 16),
+      Text('المدة المتوقعة (اختياري)', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 8),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_standardDataRows.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: DropdownButtonFormField<ServiceStandardDataRow>(
+                    initialValue: _selectedStandardData,
+                    decoration: const InputDecoration(labelText: 'نوع التنفيذ', border: OutlineInputBorder()),
+                    items: _standardDataRows
+                        .map((row) => DropdownMenuItem(value: row, child: Text(row.executionTypeAr)))
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedStandardData = value;
+                        _durationEstimate = null;
+                        _durationError = null;
+                      });
+                      if (_requestedUnitsController.text.trim().isNotEmpty) _refreshDurationEstimate();
+                    },
+                  ),
+                ),
+              TextField(
+                controller: _requestedUnitsController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: 'الكمية (${_selectedStandardData?.unitAr ?? ''})',
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: _onRequestedUnitsChanged,
+              ),
+              if (_estimatingDuration) ...[
+                const SizedBox(height: 8),
+                const Text('بيتحسب...', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ] else if (_durationError != null) ...[
+                const SizedBox(height: 8),
+                Text(_durationError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ] else if (_durationEstimate != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'المدة المتوقعة: ${_durationEstimate!.estimatedDays} يوم (${_durationEstimate!.executionTypeAr})',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ];
   }
 
   List<Widget> _buildPricingFieldsSection() {
@@ -588,7 +754,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            if (_isFormulaPricing) ..._buildPricingFieldsSection(),
+            if (_isFormulaPricing) ..._buildPricingFieldsSection() else ..._buildStandardDataSection(),
             if (_addons.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text('إضافات اختيارية', style: Theme.of(context).textTheme.titleMedium),
@@ -681,6 +847,40 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             if (_promoError != null) ...[
               const SizedBox(height: 4),
               Text(_promoError!, style: const TextStyle(color: Colors.red)),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _buildingController,
+                    decoration: const InputDecoration(
+                      labelText: 'كود عمارة (اختياري — خصم بدل كود الخصم)',
+                      border: OutlineInputBorder(),
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                    onChanged: (_) {
+                      setState(() {
+                        _buildingError = null;
+                        _pricePreview = null;
+                      });
+                      _refreshPreview();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: _validatingBuilding ? null : _validateBuilding,
+                  child: _validatingBuilding
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('تحقق'),
+                ),
+              ],
+            ),
+            if (_buildingError != null) ...[
+              const SizedBox(height: 4),
+              Text(_buildingError!, style: const TextStyle(color: Colors.red)),
             ],
             const SizedBox(height: 16),
             Text('ملخص السعر', style: Theme.of(context).textTheme.titleMedium),

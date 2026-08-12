@@ -9,7 +9,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
 import { UpdateRecurringTemplateDto } from './dto/update-recurring-template.dto';
-import { OrderType } from './entities/order.entity';
+import { BookingMode, OrderType } from './entities/order.entity';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { OrdersService } from './orders.service';
 
@@ -72,9 +72,25 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   async create(userId: string, dto: CreateRecurringTemplateDto): Promise<RecurringOrderTemplate> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
-    await this.catalogService.findServiceOrThrow(dto.service_id);
+    const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     if (dto.requested_technician_id) {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
+    }
+
+    // نفس فحص OrdersService.create() بالحرف — كانت فجوة حقيقية اتلقطت وقت بناء واجهة العميل:
+    // مفيش تحقق هنا خالص، يعني العميل كان يقدر ينشئ قالب متكرر بـbooking_mode مش متاح للخدمة
+    // (مثلاً "فرد" لخدمة بتدعم "فريق" بس) وياخد رد 200 ناجح — بعدين generateFromTemplate() كانت
+    // هتفشل بصمت كل موعد للأبد (next_run_at بيتحرك قدّام حتى لو الطلب الحقيقي فشل، بتصميم متعمد،
+    // راجع تعليق generateFromTemplate() تحت) من غير ما العميل ياخد أي تنبيه إنه القالب معطوب.
+    const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
+    const bookingModeAllowed =
+      bookingMode === BookingMode.INDIVIDUAL
+        ? service.allowsIndividual
+        : bookingMode === BookingMode.TEAM
+          ? service.allowsTeam
+          : service.allowsEmergency;
+    if (!bookingModeAllowed) {
+      throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
     const startsAt = new Date(dto.starts_at);

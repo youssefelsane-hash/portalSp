@@ -126,6 +126,34 @@ class PortfolioLink {
       );
 }
 
+// الشهادات (docs/08) — كانت فجوة UI موثّقة صراحة: GET /technicians/:id/profile بيرجّع
+// certificates المعتمدة بس (approved)، بس مفيش أي شاشة في customer-app بتعرضها للعميل خالص.
+// مطابق لـ apps/api/src/modules/technicians/dto/certificate-response.dto.ts's
+// PublicCertificateResponseDto — نسخة عامة محدودة عمدًا (بدون تفاصيل المراجعة الداخلية).
+class TechnicianCertificate {
+  final String id;
+  final String title;
+  final String? issuerName;
+  final String? issuedAt;
+  final String fileUrl;
+
+  TechnicianCertificate({
+    required this.id,
+    required this.title,
+    required this.issuerName,
+    required this.issuedAt,
+    required this.fileUrl,
+  });
+
+  factory TechnicianCertificate.fromJson(Map<String, dynamic> json) => TechnicianCertificate(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        issuerName: json['issuer_name'] as String?,
+        issuedAt: json['issued_at'] as String?,
+        fileUrl: json['file_url'] as String,
+      );
+}
+
 class TechnicianReview {
   final int overallRating;
   final String? comment;
@@ -153,10 +181,15 @@ class TechnicianPublicProfile {
   final int completedOrdersCount;
   final int? cancellationRate;
   final int? onTimeRate;
+  // كانت فجوة موثّقة صراحة (docs/08 §4) — الباك-إند بيحسبهم ويرجّعهم في GET /technicians/:id/profile
+  // من زمان، بس مفيش شاشة كانت بتقراهم أو تعرضهم للعميل خالص.
+  final int? avgArrivalMinutes;
+  final int? avgCompletionMinutes;
   final List<TechnicianZoneInfo> zones;
   final List<TechnicianServiceInfo> services;
   final List<TechnicianReview> recentReviews;
   final List<PortfolioLink> portfolioLinks;
+  final List<TechnicianCertificate> certificates;
 
   TechnicianPublicProfile({
     required this.id,
@@ -171,10 +204,13 @@ class TechnicianPublicProfile {
     required this.completedOrdersCount,
     required this.cancellationRate,
     required this.onTimeRate,
+    required this.avgArrivalMinutes,
+    required this.avgCompletionMinutes,
     required this.zones,
     required this.services,
     required this.recentReviews,
     required this.portfolioLinks,
+    required this.certificates,
   });
 
   bool get isVerified => verificationStatus == 'approved';
@@ -192,6 +228,8 @@ class TechnicianPublicProfile {
         completedOrdersCount: json['completed_orders_count'] as int,
         cancellationRate: json['cancellation_rate'] as int?,
         onTimeRate: json['on_time_rate'] as int?,
+        avgArrivalMinutes: json['avg_arrival_minutes'] as int?,
+        avgCompletionMinutes: json['avg_completion_minutes'] as int?,
         zones: (json['zones'] as List).map((z) => TechnicianZoneInfo.fromJson(z as Map<String, dynamic>)).toList(),
         services: (json['services'] as List)
             .map((s) => TechnicianServiceInfo.fromJson(s as Map<String, dynamic>))
@@ -201,6 +239,9 @@ class TechnicianPublicProfile {
             .toList(),
         portfolioLinks: (json['portfolio_links'] as List)
             .map((p) => PortfolioLink.fromJson(p as Map<String, dynamic>))
+            .toList(),
+        certificates: (json['certificates'] as List)
+            .map((c) => TechnicianCertificate.fromJson(c as Map<String, dynamic>))
             .toList(),
       );
 }

@@ -34,6 +34,36 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 لـ documents_submitted") — يثبت إن الـ state machine بتمنع الرجوع للخلف مش بس بتسمح بالتقدّم.
 عميل حاول ينفّذ أي خطوة اترفض 403 قبل حتى يوصل لمنطق النقل.
 
+### تسجيل/onboarding فني جديد من `apps/technician-app` — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)
+
+**الفجوة اللي اتلقطت**: كل السابق (الحالات الوسيطة، رفع المستندات `POST/GET /technician/documents`،
+`GET /technician/me`) مختبر حي في الباك-إند — بس `apps/technician-app` معندهوش شاشة "تسجيل حساب جديد"
+أصلاً (`AuthRepository` فيه `verifyOtp()` بس، مفيش `register()`)، ومفيش أي شاشة بتنادي
+`GET/POST /technician/documents` خالص. فني جديد كان (لو سجّل عبر Postman/curl) بيوصل مباشرة لـ
+`AvailableOrdersScreen` الفاضية للأبد — `matching.service.ts` بيرفض أي فني `verification_status != approved`
+(`WHERE tp.verification_status = 'approved'`)، فمفيش أي طريقة يعرف بيها ليه، ولا طريقة يكمّل بيها.
+
+**الحل**:
+- `AuthRepository.register()` جديدة (`user_type='technician'` ثابت) — نفس نمط `apps/customer-app`
+  بالحرف (راجع `apps/customer-app/README.md`). `LoginScreen` بقى فيها مود تسجيل جديد + اقتراح تلقائي
+  لو فني حاول دخول برقم مش مسجّل.
+- `OnboardingScreen` جديدة بالكامل (`features/onboarding/`) — بتعرض `verification_status` الحالي
+  بترجمة عربية واضحة (٨ حالات، من `pending` لحد `approved`/`rejected`/`suspended`)، فورم رفع مستند
+  (نوع المستند من `TechnicianDocumentType` السبعة + `image_picker` لالتقاط/اختيار صورة)، وقايمة
+  المستندات المرفوعة بحالة مراجعتها (`review_status` + سبب الرفض لو موجود).
+- `main.dart`'s `_AuthGate` بقى فيه `_VerificationGate` جديدة — بتفحص `GET /technician/me` مرة واحدة
+  بعد تسجيل الدخول، وتوجّه لـ`OnboardingScreen` لو `verification_status != 'approved'` بدل
+  `AvailableOrdersScreen` مباشرة. **فشل آمن متعمّد**: لو الفحص فشل (مشكلة شبكة عابرة)، بيفضّل
+  `AvailableOrdersScreen` العادية — الباك-إند (`matching.service.ts`) أصلاً بيرفض أي فني مش approved
+  بغض النظر، فمفيش مخاطرة أمنية، بس مفيش قفل غير ضروري لفني approved فعلاً بسبب خطأ تقني عابر.
+
+**اتأكد حي بالكامل عبر curl** (Flutter SDK مش متاح في بيئة السيشن دي — تفاصيل كاملة في
+`apps/customer-app/README.md`، نفس القيد ينطبق هنا): تسجيل فني جديد → `verification_status:"pending"`
+فورًا من `GET /technician/me`؛ رفع مستند حقيقي (PNG) عبر `POST /technician/documents` (multipart،
+نفس شكل `AuthRepository.authedUpload()`) → رجع بنجاح بشكل `TechnicianDocumentResponseDto` الكامل؛
+`GET /technician/documents` بعد كده رجّع المستند في القايمة. بيانات الاختبار اتعملها حذف/soft-delete
+بعد التأكيد.
+
 ### مناطق عمل الفني (`technician_zones`) — كانت فجوة موثّقة ("يدوي عبر SQL")، اتقفلت
 
 `GET/POST /admin/technicians/:id/zones` + `DELETE /admin/technicians/:id/zones/:zoneId` — نفس نمط
@@ -184,8 +214,11 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
   - **`POST/GET/DELETE /technician/certificates`** (`TechnicianCertificatesService`، جديد بالكامل) — نفس نمط رفع الملفات في `technician-documents.service.ts` بالظبط (نفس أنواع MIME المسموحة، نفس حد 10MB).
   - **`POST /admin/technicians/:id/certificates/:certificateId/review`** — مراجعة الأدمن، مسجّلة في `audit_log` (`technician.certificate_reviewed`).
   - **`GET /technicians/:id/profile`** بقى بيرجّع `certificates` — **المعتمدة (`approved`) بس** (`listApprovedForTechnician()`)، بحقول عامة محدودة (بدون `review_status`/`rejection_reason`/`reviewed_by_user_id` الداخلية — `PublicCertificateResponseDto` منفصل عمداً عن `CertificateResponseDto` بنفس فلسفة الفرق بين `ScheduleSlotResponseDto`/`PublicScheduleSlotResponseDto`).
+  - **Admin UI لمراجعة الشهادات — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)**: `POST /admin/technicians/:id/certificates/:certificateId/review` كان جاهز ومختبر بلا أي شاشة أدمن — الأدمن كان لازم يوافق/يرفض عبر curl/Postman يدويًا. `GET /admin/technicians/:id` (تفاصيل الفني في `apps/admin`) بقى بيرجّع `certificates` كمان (زي `documents` بالظبط) — `AdminTechnicianDetailResponseDto`/`toAdminTechnicianDetailResponseDto()` اتوسّعوا، والـcontroller بقى بينادي `certificatesService.listForTechnician(id)`. صفحة تفاصيل الفني (`apps/admin/src/app/technicians/[id]/page.tsx`) بقى فيها كارت "الشهادات" جديد — نفس نمط كارت "المستندات" الموجود بالحرف (جدول: عنوان/جهة مانحة/حالة/فتح الملف/إجراء اعتماد-رفض). **اتأكد حي بالكامل**: فني رفع شهادة حقيقية → ظهرت `pending` في تفاصيل الفني بالأدمن → Playwright ضغط "اعتماد" فعليًا في المتصفح الحقيقي → الحالة اتحوّلت لـ"معتمدة" في الجدول فورًا (screenshot يثبت ده). `packages/shared-types` اتحدّث (`CertificateResponseDto` جديد، `AdminTechnicianDetailResponseDto.certificates`).
 - **اتعمله اختبار حي كامل**: فني رفع شهادة PDF حقيقية (عنوان + جهة مانحة + تاريخ) — ظهرت `pending` في قايمته الخاصة، **ومحجوبة تمامًا** من البروفايل العام في نفس الوقت (اتأكد من `certificates: []` في استجابة العميل). أدمن حاول يرفض من غير سبب — اترفض `VAL_001` بوضوح (نفس تحقق `ReviewDocumentDto`). أدمن وافق — ظهرت فورًا في البروفايل العام بالحقول العامة بس. محاولة مراجعة تانية لنفس الشهادة اترفضت `409` ("اترجع عليها قبل كده"). فني رفع ملف `.exe` — اترفض `400` بوضوح (نفس فلترة MIME). فني حذف الشهادة بنفسه — اختفت من البروفايل العام فورًا. متوسطات الوصول/التنفيذ اتحسبت صح على طلبات اختبار حقيقية سابقة (قيم قريبة من صفر دقيقة، متوقّع لأن الطلبات دي كانت محاكاة سريعة زمنيًا — مش بَقّة، الحساب نفسه `EXTRACT(EPOCH FROM ...) / 60` سليم ومتحقق منه رياضيًا).
 - **نطاق متعمّد لسه برّه**: الضمان (`docs/08` §7) قسم منفصل تمامًا، مش جزء من التحسينات دي. معرض الصور (بخلاف لينكات السوشيال ميديا الموجودة أصلاً) لسه مش مطلوب توسيع فيه — لينكات السوشيال ميديا بتغطي الاحتياج الأساسي دلوقتي.
+
+### **فجوة UI حقيقية اتلقطت لاحقًا واتقفلت (بناء 2026-08-12، تدقيق backend-vs-UI شامل)**: `avg_arrival_minutes`/`avg_completion_minutes`/`certificates` كانوا مختبرين حي في الباك-إند فوق، بس `TechnicianPublicProfile.fromJson()` (customer-app) **مكانتش بتقرأهم خالص من الـJSON**، و`TechnicianProfileScreen` معندهاش أي widget يعرضهم — العميل ميكنش يشوف شهادات الفني ولا متوسطات الوصول/التنفيذ خالص رغم إن الباك-إند بيرجّعهم من زمان. الموديل بقى فيه الحقول التلاتة + كلاس `TechnicianCertificate` جديد، والشاشة بقى فيها سطر متوسطات تحت كارت الإحصائيات وقسم "الشهادات" (أيقونة + عنوان + جهة مانحة + تاريخ). **اتأكد حي بالكامل**: فني حقيقي رفع شهادة، أدمن وافق عليها، `GET /technicians/:id/profile` رجّع الشهادة بالحقول الأربعة بالظبط اللي الموديل الجديد بيتوقعها، ونفس الطلب أكّد وجود `avg_arrival_minutes`/`avg_completion_minutes` في الرد.
 
 ## `GET /services/:id/technicians` مربوط فعليًا بـCustomer App — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)
 

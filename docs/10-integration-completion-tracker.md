@@ -28,46 +28,48 @@
 | 3 | الجدولة (Scheduler) end-to-end | ✅ اتأكد حي | Backend + Customer App + Technician App اتعملوا في سيشن سابقة (PR #65، #66) — اختبار حي كامل شامل سباق حقيقي. |
 | 4 | اختيار الفني قبل الحجز | ✅ خلص | كانت فجوة UI حقيقية مؤكّدة: الـendpoint مختبر حي بس مفيش أي شاشة بتناديه — العميل مكانش يقدر يختار فني قبل الحجز أصلاً. `TechnicianSelectionScreen` جديدة (customer-app) بتظهر بعد اختيار الخدمة لـ`booking_mode=individual`، "اختار لي تلقائيًا" أو كروت فنيين حقيقية. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
 | 5 | تسجيل عميل جديد (مش OTP login بس) | ✅ خلص | `LoginScreen` بقى فيها مود تسجيل جديد كامل (اسم + كود ترشيح اختياري + OTP بـ`purpose=register`) + اقتراح تلقائي للتحويل لو العميل حاول دخول برقم مش مسجّل. تفاصيل في `apps/customer-app/README.md`. |
-| 6 | تسجيل/onboarding فني جديد | ⏳ | محتاج تأكيد نفس الموضوع من ناحية Technician App. |
-| 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | 🔄 | جزء منه خلص مع #2: `estimated_duration_days` (من معادلة formula) بقى معروض في ملخص السعر. الجزء الباقي (المدة من `service_standard_data`/`estimateDuration()` لخدمات غير formula، وعرضها في شاشات الفني/الأدمن التشغيلية) لسه. |
+| 6 | تسجيل/onboarding فني جديد | ✅ خلص | كانت فجوة أعمق من customer-app: مفيش تسجيل ولا رفع مستندات خالص — فني جديد كان بيوصل لشاشة طلبات فاضية للأبد من غير تفسير. `OnboardingScreen` جديدة (حالة الاعتماد + رفع مستندات + قايمة مراجعتها) + `_VerificationGate` في `main.dart` بتوجّه الفني تلقائيًا. تفاصيل في `apps/api/src/modules/technicians/README.md` و`apps/technician-app/README.md`. |
+| 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | ✅ خلص | Formula (مع #2) + الآن غير-formula: `GET /services/:id/standard-data` جديد (كانت فجوة حقيقية — مفيش endpoint يوفّر الـids أصلاً) + قسم "المدة المتوقعة" في `CreateOrderScreen`. تفاصيل في `apps/api/src/modules/catalog/README.md`. عرضها في شاشات الفني/الأدمن التشغيلية لسه مش جزء من هذا الإغلاق (نطاق مختلف — P2 §35). |
 
 ### Phase B — الثقة والتنفيذ
 
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
-| 8 | بروفايل الفني العام الكامل | ⏳ | تحتاج مراجعة: هل كل الحقول اللي الباك-إند بيرجّعها (شهادات، متوسط وقت وصول/إنجاز) معروضة فعليًا؟ |
-| 9 | الشهادات: Technician + Admin + Customer | ⏳ | Technician upload موجود (تفاصيل docs/08). Admin review UI؟ Customer display؟ محتاج فحص. |
-| 10 | تقييم متقدم + صور بعد الخدمة | ⏳ | Backend يدعم `cleanliness_rating`/`after_photo_media_ids` — محتاج فحص الـCustomer UI. |
+| 8 | بروفايل الفني العام الكامل | ✅ خلص | كانت فجوة حقيقية مؤكّدة: `avg_arrival_minutes`/`avg_completion_minutes`/`certificates` كانوا مختبرين حي بالباك-إند بس Dart model (`TechnicianPublicProfile.fromJson`) مكانتش بتقرأهم خالص. اتضافوا للموديل + الشاشة (سطر متوسطات + قسم شهادات). اتأكد حي: فني رفع شهادة، أدمن وافق، ظهرت بالحقول الصح في `GET /technicians/:id/profile`. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
+| 9 | الشهادات: Technician + Admin + Customer | ✅ خلص | الثلاثة كاملين: Technician upload (موجود من قبل)، Customer display (مع #8)، وAdmin review UI (كارت جديد في صفحة تفاصيل الفني — نفس بند #29). اتأكد حي عبر Playwright: ضغط "اعتماد" فعلي غيّر الحالة في المتصفح الحقيقي. |
+| 10 | تقييم متقدم + صور بعد الخدمة | ✅ خلص | كانت فجوة حقيقية مؤكّدة على جانبين: (أ) `showRatingDialog()` كان بيبعت `overall_rating`+`comment` بس رغم إن الباك-إند بيدعم 5 أبعاد إضافية + `after_photo_media_ids` من زمان، (ب) **مفيش endpoint أصلاً للعميل يشوف صور طلبه** (`GET /orders/:id/media` كان مقصور على الأدمن/الفني). اتضاف الـendpoint (ownership check) + rewrite كامل لـ`rating_dialog.dart` (5 صفوف نجوم اختيارية + قسم اختيار صور بعد التنفيذ). اتأكد حي end-to-end كامل: طلب طوارئ حقيقي جديد (مش mock) عدّى دورة كاملة (قبول→تنفيذ→رفع صورة→تحصيل كاش)، العميل جاب الصور عبر الـendpoint الجديد وبعت تقييم بكل الأبعاد الستة + ربط الصورة — الرد رجع كل الحقول صح، ومحاولة تقييم تاني اترفضت `409` زي المتوقع. تفاصيل كاملة في `apps/customer-app/README.md` و`apps/api/src/modules/orders/README.md`. |
 | 11 | تجربة الضمان/إعادة الزيارة للعميل | ⏳ | Backend كامل (docs/08 §7) — محتاج فحص الـUI الفعلي. |
-| 12 | عرض أعضاء الفريق للعميل | ⏳ | `order_team_members` موجودة — محتاج فحص عرضها في Customer Order Detail. |
-| 13 | واجهة المساعد (Technician) | ⏳ | Backend كامل (docs/08 §6) — محتاج فحص الـTechnician App UI. |
-| 14 | واجهة الشركة/الفريق (Technician) | ⏳ | Backend API كبير موجود — محتاج فحص الـTechnician App UI. |
+| 12 | عرض أعضاء الفريق للعميل | ✅ خلص | كان endpoint يتيم بالكامل (`GET /orders/:id/team-members` موجود ومختبر حي من قبل بس صفر كود Dart بينادي عليه). اتضاف موديل + repository method + كارت "فريق الشغل" في `OrderDetailScreen` (يظهر بس لو `booking_mode=team` والقايمة مش فاضية). اتأكد حي: طلب فريق حقيقي، فني قائد ضاف عضو فريق حقيقي، العميل شافه فورًا عبر نفس الـendpoint اللي التطبيق بيستخدمه، وعميل تاني اترفض `404`. تفاصيل في `apps/customer-app/README.md`. |
+| 13 | واجهة المساعد (Technician) | ✅ خلص | `GET /technician/me` كان بيرجّع `assistant_link_status`/`technician_type` من زمان بس الـDart model مكانش بيقراهم، ومفيش شاشة لطلب/فك الربط خالص. `ProfileScreen` جديدة (`lib/features/profile/`) بكارت نوع الفني + كارت طلب/فك ربط المساعد. اتأكد حي end-to-end: فك ربط → طلب ربط جديد (`pending_approval`) → موافقة أدمن حقيقية (`approved`) — رجعت لنفس الحالة الأصلية. تفاصيل في `apps/technician-app/README.md`. |
+| 14 | واجهة الشركة/الفريق (Technician) | ✅ خلص | API كامل (إنشاء/فروع/أعضاء/نقل ملكية) كان موجود ومختبر حي في الباك-إند من زمان بصفر شاشة تستخدمه. `CompanyScreen` جديدة (`lib/features/company/`) — فورم إنشاء لو `GET /technician/company` رجّع `404`، تفاصيل شركة (فروع/أعضاء) لو موجودة، فورمات إضافة/تعديل تظهر بس لـ`owner`/`manager` (الدور محسوب من `staff` array نفسها). اتأكد حي end-to-end: إضافة فرع، تغيير دور عضو، حذف/إعادة إضافة عضو، ورفض `403` لعضو `worker` بيحاول يدير — كل الأفعال بنفس رسائل الباك-إند بالحرف. تفاصيل في `apps/technician-app/README.md`. |
 | 15 | تحديث لحظي بعد قرار عرض السعر | ⏳ | فجوة موثّقة صراحة من قبل — الشاشة بتفضل قديمة لحد ما الفني يرجع يدوي. |
 
 ### Phase C — الاحتفاظ (Retention)
 
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
-| 16 | واجهة الطلبات المتكررة (Customer) | ⏳ | |
-| 17 | واجهة الولاء (Loyalty) | ⏳ | |
-| 18 | صندوق إشعارات داخل التطبيق (عميل + فني) | ⏳ | مختلف عن push — inbox حقيقي. |
-| 19 | حساب/سجل عميل موحّد | ⏳ | UX aggregation بس، مش backend جديد. |
+| 16 | واجهة الطلبات المتكررة (Customer) | ✅ خلص | API كامل كان موجود ومختبر حي في الباك-إند من زمان بصفر شاشة تستخدمه. `RecurringOrdersScreen` جديدة (إنشاء/عرض/إيقاف/استئناف/حذف). **بَقّة حقيقية اتلقطت واتصلحت أثناء البناء**: `RecurringOrdersService.create()` مكانش بيتحقق من `booking_mode` مقابل قدرات الخدمة خالص — قوالب معطوبة كانت بتتقبل وتفشل بصمت للأبد. الإصلاح جانب الباك-إند + جانب الواجهة (اشتقاق تلقائي للوضع الصحيح). اتأكد حي end-to-end: الفحص الدوري الحقيقي ولّد طلب فعلي من قالب مستحق. تفاصيل في `apps/customer-app/README.md` و`apps/api/src/modules/orders/README.md`. |
+| 17 | واجهة الولاء (Loyalty) | ✅ خلص | `GET/POST /loyalty/*` كانت شغالة ومختبرة في الباك-إند من زمان بصفر شاشة تستخدمها. `LoyaltyScreen` جديدة — كارت رصيد + استبدال + سجل معاملات. اتأكد حي: استبدال حقيقي نقص الرصيد فورًا، رفض استبدال أكتر من الرصيد المتاح. تفاصيل في `apps/customer-app/README.md`. |
+| 18 | صندوق إشعارات داخل التطبيق (عميل + فني) | ✅ خلص | `GET/PATCH /notifications/*` كانت شغالة ومختبرة في الباك-إند من زمان بصفر شاشة تستخدمها في أي من التطبيقين. `NotificationsScreen` جديدة (نفس الكود في الاتنين، مكرر عمدًا) — قايمة + تعليم مقروء فردي/جماعي + Badge حي بعدد غير المقروء. اتأكد حي للعميل (76 إشعار) وللفني (12 إشعار). تفاصيل في `apps/customer-app/README.md` و`apps/technician-app/README.md`. |
+| 19 | حساب/سجل عميل موحّد | ✅ خلص | تجميع واجهة بحت، صفر backend جديد. `AccountScreen` جديدة تجمع طلبات/عناوين/ولاء/متكررة/ترشيح اللي كانت متبعثرة في أيقونات `AppBar` منفصلة. `BookingModeScreen` اتنضّف من 6 أيقونات لـ4. تفاصيل في `apps/customer-app/README.md`. |
 
 ### Phase D — Verticals إضافية
 
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
-| 20 | Buildings — Admin + Customer/QR | ⏳ | Customer جزء منها اتعمل (كود يدوي) — QR scan وAdmin UI محتاجين فحص. |
-| 21-23 | Domestic Worker — Customer/عامل/Admin | ⏳ | Backend كامل — مفيش UI حقيقي في أي تطبيق. |
+| 20 | Buildings — Admin + Customer/QR | ✅ خلص | كان API الأدمن الكامل (إنشاء/تعديل/QR) موجود ومختبر من زمان بصفر شاشة، وجانب العميل (`building_code` في `POST /orders`) مكانش مستخدم خالص. `/buildings` admin page جديدة كاملة + حقل "كود عمارة" في `CreateOrderScreen`. مسح QR بالكاميرا مؤجّل عمدًا (نفس قرار GPS اليدوي — مفيش جهاز حقيقي للاختبار)، إدخال يدوي بس. اتأكد حي: عمارة حقيقية بخصم 15%، معاينة/طلب حقيقيين طابقوا الحساب، ورفض واضح لكود غلط أو تضارب مع promo_code. تفاصيل في `apps/admin/README.md` و`apps/customer-app/README.md`. |
+| 21 | Domestic Worker — Customer (تصفّح/حجز) | ✅ خلص | `DomesticWorkersScreen`/`WorkerDetailScreen`/`WorkerBookingsScreen` جداد في apps/customer-app. اتأكد حي: تصفّح، حجز حقيقي (سعر مطابق تمامًا لمعادلة الباك-إند)، إلغاء. تفاصيل في `apps/customer-app/README.md`. |
+| 22 | Domestic Worker — عامل (self-service) | ⏳ | مؤجّل — يحتاج قرار معماري صريح (تطبيق Flutter رابع جديد، أو امتداد لـapps/technician-app بدعم UserType.DOMESTIC_WORKER) قبل التنفيذ، بدل اختراع القرار من غير توثيق. Backend كامل (`GET /domestic-worker/me`, بروفايل، موقع، حجوزات، تأكيد/إكمال) جاهز ومختبر. |
+| 23 | Domestic Worker — Admin (مراجعة) | ✅ خلص | `/domestic-workers` admin page جديدة (فلتر حالة + اعتماد/رفض). اتأكد حي عبر Playwright: تسجيل مقدّم خدمة حقيقي، ظهر pending، اعتماده نجح. تفاصيل في `apps/admin/README.md`. |
 
 ### قايمة Admin UI منفصلة (من نفس القايمة، مرقّمة تانية في رسالة المالك)
 
 | البند | الحالة |
 |---|---|
 | 28. Pricing Engine Visual Builder | ✅ خلص (نفس #1) |
-| 29. Certificate Review UI (Admin) | ⏳ |
-| 30. Buildings Admin UI | ⏳ |
-| 31. Domestic Workers Admin UI | ⏳ |
+| 29. Certificate Review UI (Admin) | ✅ خلص (نفس #9) |
+| 30. Buildings Admin UI | ✅ خلص (نفس #20) |
+| 31. Domestic Workers Admin UI | ✅ خلص (نفس #23) |
 
 ### P2 — مفيد مش عائق إطلاق
 
@@ -175,3 +177,29 @@
   ملحوظة عدم توفّر Flutter SDK تنطبق — الكود اتراجع يدويًا، و`test/widget_test.dart` الموجود (بيتأكد إن
   شاشة تسجيل الدخول بتظهر + نص "ابعت كود التحقق") لسه المفروض يعدّي لأن السلوك الافتراضي (login mode) لم
   يتغيّر — يحتاج تشغيل فعلي من سيشن عندها Flutter SDK للتأكيد.
+
+- **2026-08-12 (بند #6 خلص)**: `OnboardingScreen` جديدة في `apps/technician-app` (`features/onboarding/`) +
+  `_VerificationGate` في `main.dart`. تفاصيل كاملة في `apps/api/src/modules/technicians/README.md` و
+  `apps/technician-app/README.md`. اتأكد حي بالكامل عبر curl بعد ما اضطريت أعيد تشغيل Postgres/Redis/API
+  (الحاوية اتعمل لها restart أثناء الشغل — البيانات والـgit commits السابقة اتأكد إنها فضلت سليمة، الخدمات
+  بس اللي كانت واقفة): تسجيل فني جديد → `verification_status:"pending"` فورًا، رفع مستند PNG حقيقي عبر
+  multipart → نجح ورجع بالشكل المتوقع بالحرف، القايمة رجّعت المستند بعد كده. بيانات الاختبار اتعملها
+  حذف/soft-delete بعد التأكيد.
+
+- **2026-08-12 (بند #7 خلص بالكامل)**: `GET /services/:id/standard-data` جديد + قسم "المدة المتوقعة"
+  في `CreateOrderScreen` لخدمات غير formula. تفاصيل كاملة في `apps/api/src/modules/catalog/README.md`.
+  اتأكد حي بالكامل عبر curl على خدمة "سباكة بيت كامل" الحقيقية (صفّين standard_data فعليين) — قايمة
+  الأنواع + حساب مدة صح + حالات سلبية (خدمة تانية/قايمة فاضية). الفحوصات الثلاثة في apps/api عدّت
+  (`tsc`/`nest build`/`jest`). نفس ملحوظة عدم توفّر Flutter SDK تنطبق على الكود Dart.
+
+- **2026-08-12 (بند #8 خلص)**: `TechnicianCertificate` model جديد + حقلين ناقصين (`avgArrivalMinutes`/
+  `avgCompletionMinutes`) اتضافوا لـ`TechnicianPublicProfile` في `apps/customer-app`. `TechnicianProfileScreen`
+  بقى بيعرض التلاتة. اتأكد حي بالكامل عبر curl (رفع شهادة حقيقي → موافقة أدمن → ظهور في البروفايل العام
+  بالحقول المتوقعة بالحرف). بيانات الاختبار اتعملها حذف بعد التأكيد.
+
+- **2026-08-12 (بند #9/#29 خلص)**: كارت "الشهادات" جديد في `apps/admin/src/app/technicians/[id]/page.tsx`
+  (نفس نمط كارت "المستندات" بالحرف) + `certificates` اتضاف لـ`AdminTechnicianDetailResponseDto`
+  (backend + shared-types). تفاصيل كاملة في `apps/api/src/modules/technicians/README.md`. اتأكد حي
+  بالكامل عبر Playwright حقيقي: فني رفع شهادة، ظهرت pending في تفاصيل الفني بالأدمن، ضغط "اعتماد"
+  فعلي في المتصفح غيّر الحالة لـ"معتمدة" فورًا (screenshot). الفحوصات الثلاثة في apps/api +
+  tsc/eslint في apps/admin + shared-types build كلها عدّت. بيانات الاختبار اتعملها حذف بعد التأكيد.

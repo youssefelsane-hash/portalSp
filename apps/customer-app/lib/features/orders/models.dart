@@ -29,6 +29,7 @@ class Order {
   final String addressId;
   final String? technicianId;
   final String orderType;
+  final String bookingMode;
   final String orderStatus;
   final String? problemDescription;
   final int? estimatedPriceCents;
@@ -48,6 +49,7 @@ class Order {
     required this.addressId,
     required this.technicianId,
     required this.orderType,
+    required this.bookingMode,
     required this.orderStatus,
     required this.problemDescription,
     required this.estimatedPriceCents,
@@ -68,6 +70,7 @@ class Order {
         addressId: json['address_id'] as String,
         technicianId: json['technician_id'] as String?,
         orderType: json['order_type'] as String,
+        bookingMode: json['booking_mode'] as String,
         orderStatus: json['order_status'] as String,
         problemDescription: json['problem_description'] as String?,
         estimatedPriceCents: json['estimated_price_cents'] as int?,
@@ -250,3 +253,48 @@ const Map<String, String> orderItemTypeLabelsAr = {
   'spare_part': 'قطعة غيار',
   'extra_labor': 'أجرة إضافية',
 };
+
+// تقييم متقدم + صور بعد الخدمة (docs/08 §9) — كانت فجوة موثّقة صراحة: مفيش endpoint للعميل
+// يشوف بيه صور "قبل/بعد" الطلب أصلاً. مطابق لـ apps/api/src/modules/orders/dto/order-media-response.dto.ts.
+class OrderMedia {
+  final String id;
+  final String mediaType;
+  final String fileUrl;
+  final String? caption;
+
+  OrderMedia({required this.id, required this.mediaType, required this.fileUrl, required this.caption});
+
+  factory OrderMedia.fromJson(Map<String, dynamic> json) => OrderMedia(
+        id: json['id'] as String,
+        mediaType: json['media_type'] as String,
+        fileUrl: json['file_url'] as String,
+        caption: json['caption'] as String?,
+      );
+}
+
+// توزيع أدوار الفريق (docs/08 §5) — كانت فجوة موثّقة صراحة: GET /orders/:id/team-members موجود
+// من زمان (عميل يشوف مين هيشتغل معاه فعليًا في طلب "اعتماد")، بس مفيش أي كود Dart كان بينادي
+// عليه خالص — endpoint يتيم بالكامل. مطابق لـ apps/api/src/modules/orders/dto/team-member-response.dto.ts.
+class TeamMember {
+  final String id;
+  final String technicianId;
+  final String fullName;
+  final String? avatarUrl;
+  final String roleLabel;
+
+  TeamMember({
+    required this.id,
+    required this.technicianId,
+    required this.fullName,
+    required this.avatarUrl,
+    required this.roleLabel,
+  });
+
+  factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
+        id: json['id'] as String,
+        technicianId: json['technician_id'] as String,
+        fullName: json['full_name'] as String,
+        avatarUrl: json['avatar_url'] as String?,
+        roleLabel: json['role_label'] as String,
+      );
+}

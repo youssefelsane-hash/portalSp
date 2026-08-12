@@ -83,8 +83,8 @@ class AuthRepository extends ChangeNotifier {
     unawaited(PushNotificationService.registerCurrentDevice(authedRequest));
   }
 
-  Future<void> requestOtp(String phoneNumber) async {
-    await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
+  Future<void> requestOtp(String phoneNumber, {String purpose = 'login'}) async {
+    await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': purpose});
   }
 
   Future<void> verifyOtp(String phoneNumber, String otpCode) async {
@@ -92,6 +92,29 @@ class AuthRepository extends ChangeNotifier {
       'POST',
       '/auth/otp/verify',
       body: {'phone_number': phoneNumber, 'otp_code': otpCode},
+    );
+    _accessToken = data!['access_token'] as String;
+    await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);
+    await _fetchMe();
+    _registerPushDeviceInBackground();
+    notifyListeners();
+  }
+
+  // تسجيل فني جديد (كانت فجوة موثّقة صراحة: Technician App عندها OTP login بس، بيفترض ضمنيًا
+  // إن اليوزر موجود بالفعل — POST /auth/register كان جاهز ومختبر في الباك-إند بلا أي شاشة
+  // تستخدمه). user_type ثابت 'technician' — التطبيق ده للفني بس. تسجيل فني بينشئ technician_profiles
+  // تلقائيًا بـverification_status='pending' (TechnicianProfileListener)، فالفني لازم يكمّل رفع
+  // مستنداته بعد كده مباشرة (OnboardingScreen) قبل ما يقدر يستقبل طلبات فعلية.
+  Future<void> register(String phoneNumber, String otpCode, String fullName) async {
+    final data = await apiRequest(
+      'POST',
+      '/auth/register',
+      body: {
+        'phone_number': phoneNumber,
+        'otp_code': otpCode,
+        'full_name': fullName,
+        'user_type': 'technician',
+      },
     );
     _accessToken = data!['access_token'] as String;
     await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);

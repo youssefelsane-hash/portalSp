@@ -8,9 +8,11 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
+import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { OrderItemsService } from './order-items.service';
+import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 
@@ -21,6 +23,7 @@ export class OrdersController {
     private readonly ordersService: OrdersService,
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
+    private readonly orderMediaService: OrderMediaService,
     private readonly addressesService: AddressesService,
   ) {}
 
@@ -75,6 +78,15 @@ export class OrdersController {
   async declineQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const { order } = await this.orderItemsService.decline(user.sub, id);
     return toOrderResponseDto(order);
+  }
+
+  // كانت فجوة موثّقة صراحة (docs/08 §9) — تقييم متقدم بيدعم ربط صور "بعد التنفيذ" الموجودة
+  // بالفعل (after_photo_media_ids)، بس مفيش endpoint للعميل يشوف بيها الصور دي أصلاً قبل
+  // ما يختار. GET .../media كان موجود للأدمن وللفني بس، مش للعميل صاحب الطلب.
+  @Get(':id/media')
+  async listMedia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.ordersService.findOneOwnedOrThrow(user.sub, id);
+    return (await this.orderMediaService.listForOrder(id)).map(toOrderMediaResponseDto);
   }
 
   // توزيع أدوار الفريق (docs/08 §5) — العميل يشوف مين هيشتغل معاه فعليًا في طلب "اعتماد" (فريق).

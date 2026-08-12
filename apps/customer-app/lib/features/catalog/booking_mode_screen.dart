@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
+import '../account/account_screen.dart';
 import '../chat/chat_screen.dart';
+import '../domestic_workers/domestic_workers_screen.dart';
+import '../notifications/notifications_repository.dart';
+import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
-import '../referrals/referrals_screen.dart';
 import 'categories_screen.dart';
 import 'models.dart';
 
@@ -30,6 +33,27 @@ class BookingModeScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const OrdersScreen()),
               ),
             ),
+            // صندوق إشعارات داخل التطبيق (docs/08) — كانت فجوة موثّقة صراحة: الـendpoints
+            // كانت شغالة ومختبرة من زمان بس مفيش شاشة كانت بتستخدمها خالص.
+            Builder(
+              builder: (context) => FutureBuilder<int>(
+                future: NotificationsRepository(context.read<AuthRepository>()).unreadCount(),
+                builder: (context, snapshot) {
+                  final unread = snapshot.data ?? 0;
+                  return IconButton(
+                    icon: Badge(
+                      isLabelVisible: unread > 0,
+                      label: Text('$unread'),
+                      child: const Icon(Icons.notifications_outlined),
+                    ),
+                    tooltip: 'الإشعارات',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                    ),
+                  );
+                },
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
@@ -37,16 +61,24 @@ class BookingModeScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const ChatScreen.support()),
               ),
             ),
+            // قطاع الخدمات المنزلية (docs/08 §12, ADR-0004) — كانت فجوة موثّقة صراحة: الباك-إند
+            // كامل ومختبر حي من زمان بصفر شاشة تستخدمه.
             IconButton(
-              icon: const Icon(Icons.card_giftcard_outlined),
-              tooltip: 'رشّح صحابك',
+              icon: const Icon(Icons.cleaning_services_outlined),
+              tooltip: 'الخدمات المنزلية',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReferralsScreen()),
+                MaterialPageRoute(builder: (_) => const DomesticWorkersScreen()),
               ),
             ),
+            // حساب/سجل عميل موحّد (docs/08 §Retention) — كانت فجوة موثّقة صراحة: طلباتي/عناويني/
+            // ولاء/ترشيح/متكررة كانت متبعثرة في أيقونات AppBar منفصلة بلا نقطة تجميع واحدة —
+            // اتجمّعوا في AccountScreen واحدة (تجميع واجهة بحت، صفر backend جديد).
             IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () => context.read<AuthRepository>().logout(),
+              icon: const Icon(Icons.person_outline),
+              tooltip: 'حسابي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AccountScreen()),
+              ),
             ),
           ],
         ),
