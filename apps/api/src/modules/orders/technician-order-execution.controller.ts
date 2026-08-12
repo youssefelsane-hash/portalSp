@@ -136,7 +136,12 @@ export class TechnicianOrderExecutionController {
   }
 
   @Get(':id/team-members')
-  async listTeamMembers(@Param('id', ParseUUIDPipe) id: string) {
+  async listTeamMembers(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    // إصلاح أمني (مراجعة booking flow الشاملة 2026-08-12) — نفس فئة بَقّة listMedia بالظبط:
+    // كانت بتنادي listForOrder(id) (عامة عمداً، بلا تحقق ملكية) من غير أي فحص قبلها، فأي فني
+    // يقدر يشوف أعضاء فريق طلب مش بتاعه. findOwnedByTechnicianOrThrow نفس الفحص اللي getOne()
+    // بتستخدمه في نفس الـcontroller ده.
+    await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id);
     return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
   }
 
