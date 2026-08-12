@@ -6,21 +6,27 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminTechniciansService } from './admin-technicians.service';
+import { TechnicianCertificatesService } from './technician-certificates.service';
 import { toAdminTechnicianDetailResponseDto, toAdminTechnicianResponseDto } from './dto/admin-technician-response.dto';
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
+import { ReviewCertificateDto } from './dto/review-certificate.dto';
 import { SuspendTechnicianDto } from './dto/suspend-technician.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
+import { toCertificateResponseDto } from './dto/certificate-response.dto';
 import { toTechnicianZoneResponseDto } from './dto/technician-zone-response.dto';
 import { VerificationNoteDto } from './dto/verification-note.dto';
 
 @Controller('admin/technicians')
 @Roles(UserType.ADMIN)
 export class AdminTechniciansController {
-  constructor(private readonly adminTechniciansService: AdminTechniciansService) {}
+  constructor(
+    private readonly adminTechniciansService: AdminTechniciansService,
+    private readonly certificatesService: TechnicianCertificatesService,
+  ) {}
 
   @Get()
   async list(@Query() query: ListTechniciansQueryDto) {
@@ -150,6 +156,22 @@ export class AdminTechniciansController {
   ) {
     const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto, audit);
     return toTechnicianDocumentResponseDto(document);
+  }
+
+  // مراجعة شهادات/كورسات الفني (docs/08 §4) — نفس صلاحية مراجعة مستندات الـ KYC، عشان هي أصلاً
+  // نفس نوع القرار (approve/reject على مستند مرفوع من الفني قبل ما يبان لحد تاني).
+  @Post(':id/certificates/:certificateId/review')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.review_documents')
+  async reviewCertificate(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('certificateId', ParseUUIDPipe) certificateId: string,
+    @Body() dto: ReviewCertificateDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const certificate = await this.certificatesService.review(admin.sub, id, certificateId, dto, audit);
+    return toCertificateResponseDto(certificate);
   }
 
   // كانت فجوة موثّقة صراحة: تعيين مناطق عمل الفني كان يدوي عبر SQL مباشر تماماً.

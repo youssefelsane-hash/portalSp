@@ -1,6 +1,8 @@
 import { TechnicianProfile } from '../entities/technician-profile.entity';
 import { TechnicianPortfolioLink } from '../entities/technician-portfolio-link.entity';
+import { TechnicianCertificate } from '../entities/technician-certificate.entity';
 import { toPortfolioLinkResponseDto, PortfolioLinkResponseDto } from './portfolio-link-response.dto';
+import { toPublicCertificateResponseDto, PublicCertificateResponseDto } from './certificate-response.dto';
 
 export interface PublicTechnicianProfileResponseDto {
   id: string;
@@ -17,10 +19,15 @@ export interface PublicTechnicianProfileResponseDto {
   cancellation_rate: number | null;
   /** null = مفيش طلبات مجدولة (scheduled_at) اتنفّذت لسه يتحسب عليها الالتزام بالمواعيد. */
   on_time_rate: number | null;
+  /** متوسط الوقت بين "طالع للعميل" و"وصل فعليًا" بالدقايق. null = مفيش رحلات مسجّلة كفاية. */
+  avg_arrival_minutes: number | null;
+  /** متوسط مدة تنفيذ الخدمة (بدء→انتهاء) بالدقايق. null = مفيش طلبات مكتملة كفاية. */
+  avg_completion_minutes: number | null;
   zones: { id: string; name_ar: string }[];
   services: { id: string; name_ar: string; base_price_cents: number }[];
   recent_reviews: { overall_rating: number; comment: string | null; created_at: string }[];
   portfolio_links: PortfolioLinkResponseDto[];
+  certificates: PublicCertificateResponseDto[];
 }
 
 export function toPublicTechnicianProfileResponseDto(data: {
@@ -31,7 +38,10 @@ export function toPublicTechnicianProfileResponseDto(data: {
   services: { id: string; nameAr: string; basePriceCents: number }[];
   recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
   onTimeRate: number | null;
+  avgArrivalMinutes: number | null;
+  avgCompletionMinutes: number | null;
   portfolioLinks: TechnicianPortfolioLink[];
+  certificates: TechnicianCertificate[];
 }): PublicTechnicianProfileResponseDto {
   const { profile } = data;
   const totalDecided = profile.completedOrdersCount + profile.cancelledOrdersCount;
@@ -50,6 +60,8 @@ export function toPublicTechnicianProfileResponseDto(data: {
     completed_orders_count: profile.completedOrdersCount,
     cancellation_rate: cancellationRate,
     on_time_rate: data.onTimeRate,
+    avg_arrival_minutes: data.avgArrivalMinutes,
+    avg_completion_minutes: data.avgCompletionMinutes,
     zones: data.zones.map((z) => ({ id: z.id, name_ar: z.nameAr })),
     services: data.services.map((s) => ({ id: s.id, name_ar: s.nameAr, base_price_cents: s.basePriceCents })),
     recent_reviews: data.recentReviews.map((r) => ({
@@ -58,5 +70,6 @@ export function toPublicTechnicianProfileResponseDto(data: {
       created_at: r.createdAt.toISOString(),
     })),
     portfolio_links: data.portfolioLinks.map(toPortfolioLinkResponseDto),
+    certificates: data.certificates.map(toPublicCertificateResponseDto),
   };
 }
