@@ -164,3 +164,26 @@ domestic-workers، recurring-orders، order-team، referrals):
 
 مرجع كامل: `apps/api/src/modules/orders/README.md`، `apps/api/src/modules/matching/README.md`،
 `apps/api/src/modules/payments/README.md`.
+
+---
+
+## مرحلة ثالثة — مراجعة عميقة لتطبيقات الموبايل (Flutter) نفسها
+
+الباك-إند مراجَع بالكامل — بس "booking flow" بيمتد لطرفي العميل والفني في التطبيقين كمان، فالمراجعة
+اتوسعت لكود Dart الفعلي (`create_order_screen.dart`, `order_detail_screen.dart`,
+`payments_repository.dart` في `apps/customer-app`؛ `order_execution_screen.dart`,
+`orders_repository.dart` في `apps/technician-app`). **قيد صريح**: Flutter SDK مش متاح في البيئة دي
+(موثّق سابقًا في `apps/customer-app/README.md`) — كل مراجعة هنا مراجعة يدوية دقيقة للكود، مش
+`flutter analyze`/`flutter test`.
+
+| # | المشكلة | الخطورة | الحالة |
+|---|---------|---------|--------|
+| 5 | **`Idempotency-Key` معطّل فعليًا**: `payments_repository.dart` كان بيولّد مفتاح جديد كل نداء دفع بدل ما يفضل ثابت خلال retry — العقد المصمَّم في الباك-إند (رجوع نفس النتيجة لنفس المفتاح) كان معطّل تمامًا؛ الحماية الوحيدة الفعلية فضلت القفل الذرّي في الباك-إند. | متوسطة (العقد المصمَّم معطّل، لكن الباك-إند بيحمي بديل) | ✅ اتصلحت (PR #57) — المفتاح بقى بيتولّد مرة واحدة ويتخزن في state الشاشة |
+| 6 | **معاينة كود خصم قديمة**: `TextField` كود الخصم معندهوش `onChanged` — تعديل النص بعد التحقق كان يسيب السعر المعروض من الكود القديم. | منخفضة (UI بس، الباك-إند مصدر الحقيقة النهائي) | ✅ اتصلحت (PR #57) |
+
+**فجوة موثّقة (مؤجّلة عمدًا)**: `OrderExecutionScreen` في `apps/technician-app` معندهاش polling أو
+مستمع لحظي لتغييرات حالة الطلب — لو العميل وافق/رفض عرض سعر والشاشة لسه مفتوحة عند الفني، هتفضل
+عارضة الحالة القديمة لحد ما يرجع للقايمة ويدخل تاني (إشعار push بيوصله فعليًا، مش bug يوقف الطلب
+للأبد). الإصلاح الصحيح محتاج اختبار حي لسلوك polling/socket — مش قابل للتحقق بلا Flutter SDK فعلي.
+
+مرجع كامل: `apps/customer-app/README.md`، `apps/technician-app/README.md`.
