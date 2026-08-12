@@ -101,7 +101,7 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
 
-    const estimate = await this.catalogService.estimate(service.id, zone.id);
+    const estimate = await this.catalogService.estimate(service.id, zone.id, undefined, bookingMode === BookingMode.EMERGENCY);
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
 
@@ -176,7 +176,12 @@ export class OrdersService {
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder ? 0 : estimate.estimated_total_cents,
         inspectionFeeCents: originalOrder ? 0 : estimate.inspection_fee_cents,
-        totalAmountCents: originalOrder ? 0 : estimate.estimated_total_cents + estimate.inspection_fee_cents + addonsTotalCents,
+        // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد،
+        // بيتفعّل هنا. صفر لأي طلب مش طوارئ أو إعادة زيارة (مجانية بالكامل أصلاً).
+        surgeAmountCents: originalOrder ? 0 : estimate.emergency_surcharge_cents,
+        totalAmountCents: originalOrder
+          ? 0
+          : estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents,
         // لسه UNPAID عمداً حتى لو صفر جنيه — لازم يعدّي بنفس دورة الدفع العادية (collectCash/
         // payWithWallet → settleAndComplete) عشان الطلب يتقفل صح ويوصل COMPLETED، مش يعلق في
         // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.

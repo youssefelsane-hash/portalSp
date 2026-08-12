@@ -23,6 +23,8 @@ export interface OrderResponseDto {
   scheduled_at: string | null;
   estimated_price_cents: number | null;
   inspection_fee_cents: number;
+  /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
+  surge_amount_cents: number;
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
@@ -58,6 +60,7 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     estimated_price_cents: order.estimatedPriceCents,
     inspection_fee_cents: order.inspectionFeeCents,
+    surge_amount_cents: order.surgeAmountCents,
     discount_amount_cents: order.discountAmountCents,
     promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,

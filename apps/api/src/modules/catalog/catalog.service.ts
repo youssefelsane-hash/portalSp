@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
@@ -17,7 +18,15 @@ export interface PriceEstimate {
   surge_multiplier: number;
   level_price_multiplier: number;
   estimated_total_cents: number;
+  /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لو مش طلب طوارئ. منفصلة عن estimated_total_cents
+   * عمداً (نفس فلسفة inspection_fee_cents) عشان تتعرض للعميل كبند واضح، مش مدموجة في السعر. */
+  emergency_surcharge_cents: number;
+  /** الوقت المعلن للعميل بالدقايق ("هيوصلك خلال X دقيقة") — رقم معلن بس، مش ETA محسوب. null لو مش طوارئ. */
+  emergency_sla_minutes: number | null;
 }
+
+const EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK = 20;
+const EMERGENCY_SLA_MINUTES_FALLBACK = 60;
 
 // محرك الإنتاجية (docs/06 §3.3-§3.6) — بيرجع تقدير المدة اللي المفروض تتعرض على العميل، والتكلفة
 // الداخلية اللي **مش** المفروض تتعرض له (§3.6 صريح) — الفصل ده متعمّد على مستوى النوع نفسه، مش
@@ -43,6 +52,7 @@ export class CatalogService {
     @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
     @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
     @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
+    private readonly settingsService: SettingsService,
   ) {}
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {
@@ -93,7 +103,12 @@ export class CatalogService {
   // مش معروف لسه وقت الإنشاء (لسه في searching_technician). تطبيق المضاعف تلقائياً على السعر
   // الفعلي للطلب بعد ما فني معيّن يقبله محتاج قرار عمل (إعادة تسعير بعد ما العميل شاف تقدير التاني)
   // مش موجود في القاموس، فمش هنخترعه — فجوة موثّقة في catalog/README.md.
-  async estimate(serviceId: string, zoneId?: string, technicianLevel?: TechnicianLevel): Promise<PriceEstimate> {
+  async estimate(
+    serviceId: string,
+    zoneId?: string,
+    technicianLevel?: TechnicianLevel,
+    isEmergency = false,
+  ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
 
     let levelMultiplier = 1;
@@ -105,6 +120,16 @@ export class CatalogService {
         levelMultiplier = Number(levelRow.priceMultiplier);
       }
     }
+
+    // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد
+    // من migration 0007 الأولى، بيتفعّل هنا. منفصلة عن commission.emergency_adjustment_percentage
+    // (عمولة داخلية بين المنصة والفني) — دي رسوم على العميل نفسه، معروضة قبل التأكيد.
+    const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
+      ? await Promise.all([
+          this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
+          this.settingsService.getNumber('emergency.sla_minutes', EMERGENCY_SLA_MINUTES_FALLBACK),
+        ])
+      : [0, null];
 
     if (zoneId) {
       // تاريخ سريان (docs/06 §3.10) — ممكن يكون فيه أكتر من صف لنفس (خدمة، منطقة) بمدى سريان
@@ -123,22 +148,28 @@ export class CatalogService {
         .getOne();
       if (override) {
         const surge = Number(override.surgeMultiplier);
+        const estimatedTotalCents = Math.round(override.priceCents * surge * levelMultiplier);
         return {
           base_price_cents: override.priceCents,
           inspection_fee_cents: override.inspectionFeeCents,
           surge_multiplier: surge,
           level_price_multiplier: levelMultiplier,
-          estimated_total_cents: Math.round(override.priceCents * surge * levelMultiplier),
+          estimated_total_cents: estimatedTotalCents,
+          emergency_surcharge_cents: Math.round((estimatedTotalCents * emergencySurchargePercentage) / 100),
+          emergency_sla_minutes: emergencySlaMinutes,
         };
       }
     }
 
+    const estimatedTotalCents = Math.round(service.basePriceCents * levelMultiplier);
     return {
       base_price_cents: service.basePriceCents,
       inspection_fee_cents: service.inspectionFeeCents,
       surge_multiplier: 1,
       level_price_multiplier: levelMultiplier,
-      estimated_total_cents: Math.round(service.basePriceCents * levelMultiplier),
+      estimated_total_cents: estimatedTotalCents,
+      emergency_surcharge_cents: Math.round((estimatedTotalCents * emergencySurchargePercentage) / 100),
+      emergency_sla_minutes: emergencySlaMinutes,
     };
   }
 
