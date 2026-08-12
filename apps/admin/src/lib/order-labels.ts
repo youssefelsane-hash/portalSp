@@ -21,16 +21,17 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   refunded: 'مسترجَع',
 };
 
+// إصلاح حقيقي (مراجعة booking flow الشاملة 2026-08-12) — كانت القايمة دي فيها 5 حالات زيادة
+// (accepted/technician_on_way/technician_arrived/in_progress/awaiting_quote_approval) الأدمن
+// كان يشوف زرار "إلغاء الطلب" ليها بس الباك-إند (admin-orders.service.ts's cancel()) بيرفضها
+// دايمًا بـ409 — canTransition(status, CANCELLED_BY_SYSTEM) في order-state-machine.ts صحيح بس
+// لـ draft/pending_payment/searching_technician/technician_assigned (رسالة الخطأ نفسها بتوضّح
+// السبب: "بعد قبول الفني الإلغاء لازم يعدّي من الشكوى"). القايمة هنا بقت مطابقة حرفيًا.
 const CANCELLABLE_STATUSES: OrderStatus[] = [
   'draft',
   'pending_payment',
   'searching_technician',
   'technician_assigned',
-  'accepted',
-  'technician_on_way',
-  'technician_arrived',
-  'in_progress',
-  'awaiting_quote_approval',
 ];
 
 export function isOrderCancellable(status: OrderStatus): boolean {
