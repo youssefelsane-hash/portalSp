@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
+import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
 import '../referrals/referrals_screen.dart';
@@ -50,6 +51,13 @@ class BookingModeScreen extends StatelessWidget {
               tooltip: 'الطلبات المتكررة',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const RecurringOrdersScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.stars_outlined),
+              tooltip: 'نقاط الولاء',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LoyaltyScreen()),
               ),
             ),
             IconButton(
