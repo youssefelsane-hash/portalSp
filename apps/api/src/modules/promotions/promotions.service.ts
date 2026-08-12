@@ -31,13 +31,16 @@ export class PromotionsService {
     }
 
     const estimate = await this.catalogService.estimate(service.id, zone.id);
+    // مش customerProfile.totalOrdersCount — بَقّة حقيقية موثّقة في customer-profiles.service.ts's
+    // isNewCustomer()، العمود ده بيتحدّث async بعد commit إنشاء الطلب مش لحظيًا.
+    const isNewCustomer = await this.customerProfiles.isNewCustomer(customerProfile.id);
 
     return this.promoCodesService.preview(code, userId, {
       serviceId: service.id,
       zoneId: zone.id,
       totalBeforeDiscountCents: estimate.estimated_total_cents + estimate.inspection_fee_cents,
       inspectionFeeCents: estimate.inspection_fee_cents,
-      isNewCustomer: customerProfile.totalOrdersCount === 0,
+      isNewCustomer,
     });
   }
 }

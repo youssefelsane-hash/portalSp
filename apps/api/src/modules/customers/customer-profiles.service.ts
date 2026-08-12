@@ -1,12 +1,15 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CustomerProfile } from './entities/customer-profile.entity';
 
 @Injectable()
 export class CustomerProfilesService {
-  constructor(@InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>) {}
+  constructor(
+    @InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+  ) {}
 
   async findByUserIdOrThrow(userId: string): Promise<CustomerProfile> {
     const profile = await this.customerProfiles.findOne({ where: { userId } });
@@ -27,5 +30,21 @@ export class CustomerProfilesService {
       throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
     }
     return profile;
+  }
+
+  /**
+   * فحص "عميل جديد" الحقيقي وقت الاستخدام — عمداً مش `customerProfile.totalOrdersCount`
+   * (بَقّة حقيقية اتلقطت في مراجعة شاملة 2026-08-12: العمود ده بيتحدّث async عبر BullMQ job
+   * بعد commit إنشاء الطلب، مش لحظيًا — نفس فئة البَقّة الموثّقة بالفعل في referrals/README.md
+   * لـ`completed_orders_count`. الأثر: orders.service.ts وpromotions.service.ts كانوا بيستخدموا
+   * العمود المؤجَّل ده كشرط أكواد الخصم "لعملاء جدد بس"، يعني لو عميل عمل أكتر من طلب بسرعة قبل
+   * ما الـjob يشتغل، ممكن يتحسب "جديد" غلط أكتر من مرة). `COUNT(*)` مباشر هنا مضمون دقيق فورًا.
+   */
+  async isNewCustomer(customerProfileId: string): Promise<boolean> {
+    const [{ count }] = await this.dataSource.query<{ count: string }[]>(
+      'SELECT COUNT(*) AS count FROM orders WHERE customer_id = $1',
+      [customerProfileId],
+    );
+    return Number(count) === 0;
   }
 }
