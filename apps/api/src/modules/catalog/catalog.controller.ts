@@ -1,14 +1,20 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
+import { toTechnicianBookingListItemResponseDto } from '../technicians/dto/technician-booking-list-response.dto';
+import { TechniciansService } from '../technicians/technicians.service';
 import { CatalogService } from './catalog.service';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { EstimateQueryDto, ListServicesDto } from './dto/list-services.dto';
+import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
 
 @Controller()
 export class CatalogController {
-  constructor(private readonly catalogService: CatalogService) {}
+  constructor(
+    private readonly catalogService: CatalogService,
+    private readonly techniciansService: TechniciansService,
+  ) {}
 
   @Public()
   @Get('service-categories')
@@ -63,5 +69,14 @@ export class CatalogController {
       assigned_technicians: result.assigned_technicians,
       assigned_assistants: result.assigned_assistants,
     };
+  }
+
+  // اختيار الفني قبل الحجز (docs/08 §3) — بدل ما العميل يسيب auto-match بس، يشوف قايمة فنيين
+  // حقيقية مؤهلين للخدمة دي في منطقته، مرتبة بالتقييم ثم القرب الجغرافي ثم عدد الطلبات المكتملة.
+  @Public()
+  @Get('services/:id/technicians')
+  async listTechniciansForService(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListTechniciansForServiceDto) {
+    const items = await this.techniciansService.listForServiceBooking(id, query.address_id);
+    return items.map(toTechnicianBookingListItemResponseDto);
   }
 }
