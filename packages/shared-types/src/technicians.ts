@@ -43,8 +43,23 @@ export interface TechnicianDocumentResponseDto {
   created_at: string;
 }
 
+// مطابق لـ apps/api/src/modules/technicians/dto/certificate-response.dto.ts's CertificateResponseDto
+// (نسخة الأدمن — بتفاصيل المراجعة كاملة، مختلفة عن PublicCertificateResponseDto المحدودة للعميل).
+export interface CertificateResponseDto {
+  id: string;
+  title: string;
+  issuer_name: string | null;
+  issued_at: string | null;
+  file_url: string;
+  review_status: DocumentReviewStatus;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
 export interface AdminTechnicianDetailResponseDto extends AdminTechnicianResponseDto {
   documents: TechnicianDocumentResponseDto[];
+  certificates: CertificateResponseDto[];
 }
 
 // مطابق لـ apps/api/src/modules/technicians/dto/technician-zone-response.dto.ts

@@ -2,6 +2,8 @@ import { User } from '../../auth/entities/user.entity';
 import { TechnicianProfile } from '../entities/technician-profile.entity';
 import { TechnicianDocumentResponseDto, toTechnicianDocumentResponseDto } from './technician-document-response.dto';
 import { TechnicianDocument } from '../entities/technician-document.entity';
+import { CertificateResponseDto, toCertificateResponseDto } from './certificate-response.dto';
+import { TechnicianCertificate } from '../entities/technician-certificate.entity';
 
 export interface AdminTechnicianResponseDto {
   id: string;
@@ -45,15 +47,20 @@ export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: U
 
 export interface AdminTechnicianDetailResponseDto extends AdminTechnicianResponseDto {
   documents: TechnicianDocumentResponseDto[];
+  // الشهادات (docs/08) — كانت فجوة UI موثّقة صراحة: POST .../certificates/:certificateId/review
+  // كان جاهز ومختبر بلا أي شاشة أدمن تعرض الشهادات pending أصلاً (الأدمن كان محتاج curl/Postman).
+  certificates: CertificateResponseDto[];
 }
 
 export function toAdminTechnicianDetailResponseDto(
   profile: TechnicianProfile,
   user: User,
   documents: TechnicianDocument[],
+  certificates: TechnicianCertificate[],
 ): AdminTechnicianDetailResponseDto {
   return {
     ...toAdminTechnicianResponseDto(profile, user),
     documents: documents.map(toTechnicianDocumentResponseDto),
+    certificates: certificates.map(toCertificateResponseDto),
   };
 }

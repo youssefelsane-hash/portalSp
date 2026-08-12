@@ -36,7 +36,7 @@
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
 | 8 | بروفايل الفني العام الكامل | ✅ خلص | كانت فجوة حقيقية مؤكّدة: `avg_arrival_minutes`/`avg_completion_minutes`/`certificates` كانوا مختبرين حي بالباك-إند بس Dart model (`TechnicianPublicProfile.fromJson`) مكانتش بتقرأهم خالص. اتضافوا للموديل + الشاشة (سطر متوسطات + قسم شهادات). اتأكد حي: فني رفع شهادة، أدمن وافق، ظهرت بالحقول الصح في `GET /technicians/:id/profile`. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
-| 9 | الشهادات: Technician + Admin + Customer | 🔄 | Technician upload ✅ (موجود من قبل). Customer display ✅ خلص مع #8. **الباقي**: Admin review UI (نفس بند #29 تحت، لسه ⏳ — الأدمن دلوقتي بيوافق/يرفض عبر curl/Postman بس، مفيش شاشة). |
+| 9 | الشهادات: Technician + Admin + Customer | ✅ خلص | الثلاثة كاملين: Technician upload (موجود من قبل)، Customer display (مع #8)، وAdmin review UI (كارت جديد في صفحة تفاصيل الفني — نفس بند #29). اتأكد حي عبر Playwright: ضغط "اعتماد" فعلي غيّر الحالة في المتصفح الحقيقي. |
 | 10 | تقييم متقدم + صور بعد الخدمة | ⏳ | Backend يدعم `cleanliness_rating`/`after_photo_media_ids` — محتاج فحص الـCustomer UI. |
 | 11 | تجربة الضمان/إعادة الزيارة للعميل | ⏳ | Backend كامل (docs/08 §7) — محتاج فحص الـUI الفعلي. |
 | 12 | عرض أعضاء الفريق للعميل | ⏳ | `order_team_members` موجودة — محتاج فحص عرضها في Customer Order Detail. |
@@ -65,7 +65,7 @@
 | البند | الحالة |
 |---|---|
 | 28. Pricing Engine Visual Builder | ✅ خلص (نفس #1) |
-| 29. Certificate Review UI (Admin) | ⏳ |
+| 29. Certificate Review UI (Admin) | ✅ خلص (نفس #9) |
 | 30. Buildings Admin UI | ⏳ |
 | 31. Domestic Workers Admin UI | ⏳ |
 
@@ -194,3 +194,10 @@
   `avgCompletionMinutes`) اتضافوا لـ`TechnicianPublicProfile` في `apps/customer-app`. `TechnicianProfileScreen`
   بقى بيعرض التلاتة. اتأكد حي بالكامل عبر curl (رفع شهادة حقيقي → موافقة أدمن → ظهور في البروفايل العام
   بالحقول المتوقعة بالحرف). بيانات الاختبار اتعملها حذف بعد التأكيد.
+
+- **2026-08-12 (بند #9/#29 خلص)**: كارت "الشهادات" جديد في `apps/admin/src/app/technicians/[id]/page.tsx`
+  (نفس نمط كارت "المستندات" بالحرف) + `certificates` اتضاف لـ`AdminTechnicianDetailResponseDto`
+  (backend + shared-types). تفاصيل كاملة في `apps/api/src/modules/technicians/README.md`. اتأكد حي
+  بالكامل عبر Playwright حقيقي: فني رفع شهادة، ظهرت pending في تفاصيل الفني بالأدمن، ضغط "اعتماد"
+  فعلي في المتصفح غيّر الحالة لـ"معتمدة" فورًا (screenshot). الفحوصات الثلاثة في apps/api +
+  tsc/eslint في apps/admin + shared-types build كلها عدّت. بيانات الاختبار اتعملها حذف بعد التأكيد.

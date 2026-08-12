@@ -37,7 +37,8 @@ export class AdminTechniciansController {
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { profile, user, documents } = await this.adminTechniciansService.getDetail(id);
-    return toAdminTechnicianDetailResponseDto(profile, user, documents);
+    const certificates = await this.certificatesService.listForTechnician(id);
+    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates);
   }
 
   @Post(':id/approve')
