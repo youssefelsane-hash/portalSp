@@ -8,6 +8,7 @@ import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { EstimateQueryDto, ListServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
+import { toStandardDataResponseDto } from './dto/standard-data-response.dto';
 
 @Controller()
 export class CatalogController {
@@ -53,6 +54,15 @@ export class CatalogController {
   async listAddons(@Param('id', ParseUUIDPipe) id: string) {
     const addons = await this.catalogService.findAddons(id);
     return addons.map(toServiceAddonResponseDto);
+  }
+
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: estimate-duration تحت محتاجة
+  // standard_data_id، بس مفيش endpoint عام يخلي العميل يعرف الـid ده أصلاً. اتقفلت.
+  @Public()
+  @Get('services/:id/standard-data')
+  async listStandardData(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.catalogService.findStandardDataForService(id);
+    return rows.map(toStandardDataResponseDto);
   }
 
   // محرك الإنتاجية (docs/06 §3.3-§3.5) — المدة المتوقعة بس، **من غير أي تكلفة داخلية** (§3.6

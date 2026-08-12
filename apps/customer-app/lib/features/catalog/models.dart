@@ -140,6 +140,38 @@ class PricingField {
       );
 }
 
+// محرك الإنتاجية (docs/06 §3.1-§3.6) — مطابق لـ apps/api/src/modules/catalog/dto/standard-data-response.dto.ts.
+// كانت فجوة موثّقة صراحة: estimate-duration محتاجة id ده، بس مفيش endpoint عام يوفّره أصلاً.
+class ServiceStandardDataRow {
+  final String id;
+  final String executionTypeAr;
+  final String unitAr;
+
+  ServiceStandardDataRow({required this.id, required this.executionTypeAr, required this.unitAr});
+
+  factory ServiceStandardDataRow.fromJson(Map<String, dynamic> json) => ServiceStandardDataRow(
+        id: json['id'] as String,
+        executionTypeAr: json['execution_type_ar'] as String,
+        unitAr: json['unit_ar'] as String,
+      );
+}
+
+// مطابق لرد POST /services/:id/estimate-duration — المدة المتوقعة بس، من غير أي تكلفة داخلية
+// (docs/06 §3.6 صريح: مش المفروض تتعرض للعميل).
+class DurationEstimate {
+  final num estimatedDays;
+  final String unitAr;
+  final String executionTypeAr;
+
+  DurationEstimate({required this.estimatedDays, required this.unitAr, required this.executionTypeAr});
+
+  factory DurationEstimate.fromJson(Map<String, dynamic> json) => DurationEstimate(
+        estimatedDays: json['estimated_days'] as num,
+        unitAr: json['unit_ar'] as String,
+        executionTypeAr: json['execution_type_ar'] as String,
+      );
+}
+
 // مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts (ServiceAddonResponseDto)
 // — نفس الشكل يرجع من GET /services/:id/addons العامة.
 class ServiceAddon {

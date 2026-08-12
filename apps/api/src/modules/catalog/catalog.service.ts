@@ -73,6 +73,17 @@ export class CatalogService {
     return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC' } });
   }
 
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: estimateDuration() تحت محتاجة
+  // standard_data_id، بس مفيش endpoint عام يخلي العميل يعرف الـid ده أصلاً أو نوع التنفيذ/الوحدة
+  // بتاعته. القيم الداخلية (أجور، إنتاجية، حد أدنى عمالة) مُستبعدة عمدًا (docs/06 §3.6 صريح:
+  // "مش المفروض تتعرض للعميل") — بس execution_type_ar/unit_ar عشان يعرف يملا الفورم صح.
+  findStandardDataForService(serviceId: string): Promise<ServiceStandardData[]> {
+    return this.standardData.find({
+      where: { serviceId, isActive: true },
+      order: { displayOrder: 'ASC' },
+    });
+  }
+
   // مُستخدمة وقت إنشاء الطلب (orders.service.ts) — العميل بيختار إضافات جاهزة من كتالوج الخدمة
   // نفسها. بترمي واضح لو أي id مش موجود/مش نشط/بتاع خدمة تانية، بدل ما تتجاهله بصمت — إضافة
   // بسعرها متجاهلة بصمت معناها العميل مدفوعش عن حاجة طلبها فعلاً.

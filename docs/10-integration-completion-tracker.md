@@ -29,7 +29,7 @@
 | 4 | اختيار الفني قبل الحجز | ✅ خلص | كانت فجوة UI حقيقية مؤكّدة: الـendpoint مختبر حي بس مفيش أي شاشة بتناديه — العميل مكانش يقدر يختار فني قبل الحجز أصلاً. `TechnicianSelectionScreen` جديدة (customer-app) بتظهر بعد اختيار الخدمة لـ`booking_mode=individual`، "اختار لي تلقائيًا" أو كروت فنيين حقيقية. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
 | 5 | تسجيل عميل جديد (مش OTP login بس) | ✅ خلص | `LoginScreen` بقى فيها مود تسجيل جديد كامل (اسم + كود ترشيح اختياري + OTP بـ`purpose=register`) + اقتراح تلقائي للتحويل لو العميل حاول دخول برقم مش مسجّل. تفاصيل في `apps/customer-app/README.md`. |
 | 6 | تسجيل/onboarding فني جديد | ✅ خلص | كانت فجوة أعمق من customer-app: مفيش تسجيل ولا رفع مستندات خالص — فني جديد كان بيوصل لشاشة طلبات فاضية للأبد من غير تفسير. `OnboardingScreen` جديدة (حالة الاعتماد + رفع مستندات + قايمة مراجعتها) + `_VerificationGate` في `main.dart` بتوجّه الفني تلقائيًا. تفاصيل في `apps/api/src/modules/technicians/README.md` و`apps/technician-app/README.md`. |
-| 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | 🔄 | جزء منه خلص مع #2: `estimated_duration_days` (من معادلة formula) بقى معروض في ملخص السعر. الجزء الباقي (المدة من `service_standard_data`/`estimateDuration()` لخدمات غير formula، وعرضها في شاشات الفني/الأدمن التشغيلية) لسه. |
+| 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | ✅ خلص | Formula (مع #2) + الآن غير-formula: `GET /services/:id/standard-data` جديد (كانت فجوة حقيقية — مفيش endpoint يوفّر الـids أصلاً) + قسم "المدة المتوقعة" في `CreateOrderScreen`. تفاصيل في `apps/api/src/modules/catalog/README.md`. عرضها في شاشات الفني/الأدمن التشغيلية لسه مش جزء من هذا الإغلاق (نطاق مختلف — P2 §35). |
 
 ### Phase B — الثقة والتنفيذ
 
@@ -183,3 +183,9 @@
   بس اللي كانت واقفة): تسجيل فني جديد → `verification_status:"pending"` فورًا، رفع مستند PNG حقيقي عبر
   multipart → نجح ورجع بالشكل المتوقع بالحرف، القايمة رجّعت المستند بعد كده. بيانات الاختبار اتعملها
   حذف/soft-delete بعد التأكيد.
+
+- **2026-08-12 (بند #7 خلص بالكامل)**: `GET /services/:id/standard-data` جديد + قسم "المدة المتوقعة"
+  في `CreateOrderScreen` لخدمات غير formula. تفاصيل كاملة في `apps/api/src/modules/catalog/README.md`.
+  اتأكد حي بالكامل عبر curl على خدمة "سباكة بيت كامل" الحقيقية (صفّين standard_data فعليين) — قايمة
+  الأنواع + حساب مدة صح + حالات سلبية (خدمة تانية/قايمة فاضية). الفحوصات الثلاثة في apps/api عدّت
+  (`tsc`/`nest build`/`jest`). نفس ملحوظة عدم توفّر Flutter SDK تنطبق على الكود Dart.

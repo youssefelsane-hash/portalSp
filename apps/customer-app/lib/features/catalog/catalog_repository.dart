@@ -36,4 +36,20 @@ class CatalogRepository {
     final items = await apiRequestList('/services/$serviceId/pricing-fields');
     return items.map(PricingField.fromJson).toList();
   }
+
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: مفيش UI بيعرض المدة المتوقعة
+  // للعميل قبل الحجز لخدمات غير formula (اللي بتعتمد على service_standard_data). الاتنين تحت
+  // مستقلين عن محرك التسعير الديناميكي بالكامل — نظام أقدم منفصل عمدًا (راجع catalog/README.md).
+  Future<List<ServiceStandardDataRow>> fetchStandardData(String serviceId) async {
+    final items = await apiRequestList('/services/$serviceId/standard-data');
+    return items.map(ServiceStandardDataRow.fromJson).toList();
+  }
+
+  Future<DurationEstimate> estimateDuration(String serviceId, String standardDataId, num requestedUnits) async {
+    final data = await apiRequest('POST', '/services/$serviceId/estimate-duration', body: {
+      'standard_data_id': standardDataId,
+      'requested_units': requestedUnits,
+    });
+    return DurationEstimate.fromJson(data!);
+  }
 }

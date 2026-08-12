@@ -79,6 +79,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // يحصل: تعديل عنوان سريع ورا تعديل إضافة)، النتيجة القديمة بتتجاهل بدل ما تكتب فوق الأحدث.
   int _previewRequestGeneration = 0;
 
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة: مفيش UI بيعرض المدة المتوقعة
+  // قبل الحجز لخدمات غير formula (اللي عندها service_standard_data). مستقل تمامًا عن محرك
+  // التسعير الديناميكي (نظام أقدم منفصل عمدًا) — مؤثّرش على السعر خالص، معلوماتي بس.
+  List<ServiceStandardDataRow> _standardDataRows = [];
+  ServiceStandardDataRow? _selectedStandardData;
+  final _requestedUnitsController = TextEditingController();
+  DurationEstimate? _durationEstimate;
+  bool _estimatingDuration = false;
+  String? _durationError;
+  Timer? _durationDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -87,14 +98,58 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _selectedAddress = widget.initialAddress;
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
-    if (_isFormulaPricing) _loadPricingFields();
+    if (_isFormulaPricing) {
+      _loadPricingFields();
+    } else {
+      _loadStandardData();
+    }
     if (_selectedAddress != null) _refreshPreview();
   }
 
   @override
   void dispose() {
     _priceDebounce?.cancel();
+    _durationDebounce?.cancel();
+    _requestedUnitsController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadStandardData() async {
+    try {
+      final rows = await _catalogRepository.fetchStandardData(widget.service.id);
+      if (mounted && rows.isNotEmpty) {
+        setState(() {
+          _standardDataRows = rows;
+          _selectedStandardData = rows.first;
+        });
+      }
+    } on ApiException {
+      // تجاهل — المدة المتوقعة معلوماتية بس، مش لازم تمنع الحجز لو فشل تحميلها
+    }
+  }
+
+  void _onRequestedUnitsChanged(String _) {
+    setState(() {
+      _durationEstimate = null;
+      _durationError = null;
+    });
+    _durationDebounce?.cancel();
+    _durationDebounce = Timer(const Duration(milliseconds: 500), _refreshDurationEstimate);
+  }
+
+  Future<void> _refreshDurationEstimate() async {
+    final standardData = _selectedStandardData;
+    final units = num.tryParse(_requestedUnitsController.text.trim());
+    if (standardData == null || units == null || units <= 0) return;
+    setState(() => _estimatingDuration = true);
+    try {
+      final result = await _catalogRepository.estimateDuration(widget.service.id, standardData.id, units);
+      if (mounted) setState(() => _durationEstimate = result);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _durationError = err.message);
+    } finally {
+      if (mounted) setState(() => _estimatingDuration = false);
+    }
   }
 
   Future<void> _loadPricingFields() async {
@@ -362,6 +417,69 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     );
   }
 
+  // محرك الإنتاجية (docs/06 §3.1-§3.6) — كانت فجوة موثّقة صراحة. مفيش شرط إجباري (خدمات كتير
+  // مالهاش service_standard_data خالص) — القايمة فاضية يعني الخدمة دي مش مفعّل ليها الإنتاجية،
+  // فالقسم كله بيختفي بهدوء من غير أي رسالة خطأ.
+  List<Widget> _buildStandardDataSection() {
+    if (_standardDataRows.isEmpty) return const [];
+    return [
+      const SizedBox(height: 16),
+      Text('المدة المتوقعة (اختياري)', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 8),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_standardDataRows.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: DropdownButtonFormField<ServiceStandardDataRow>(
+                    initialValue: _selectedStandardData,
+                    decoration: const InputDecoration(labelText: 'نوع التنفيذ', border: OutlineInputBorder()),
+                    items: _standardDataRows
+                        .map((row) => DropdownMenuItem(value: row, child: Text(row.executionTypeAr)))
+                        .toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedStandardData = value;
+                        _durationEstimate = null;
+                        _durationError = null;
+                      });
+                      if (_requestedUnitsController.text.trim().isNotEmpty) _refreshDurationEstimate();
+                    },
+                  ),
+                ),
+              TextField(
+                controller: _requestedUnitsController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: 'الكمية (${_selectedStandardData?.unitAr ?? ''})',
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: _onRequestedUnitsChanged,
+              ),
+              if (_estimatingDuration) ...[
+                const SizedBox(height: 8),
+                const Text('بيتحسب...', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ] else if (_durationError != null) ...[
+                const SizedBox(height: 8),
+                Text(_durationError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ] else if (_durationEstimate != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'المدة المتوقعة: ${_durationEstimate!.estimatedDays} يوم (${_durationEstimate!.executionTypeAr})',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
   List<Widget> _buildPricingFieldsSection() {
     if (_loadingPricingFields) {
       return const [
@@ -588,7 +706,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            if (_isFormulaPricing) ..._buildPricingFieldsSection(),
+            if (_isFormulaPricing) ..._buildPricingFieldsSection() else ..._buildStandardDataSection(),
             if (_addons.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text('إضافات اختيارية', style: Theme.of(context).textTheme.titleMedium),
