@@ -56,4 +56,20 @@ export class OrderMediaService {
   listForOrder(orderId: string): Promise<OrderMedia[]> {
     return this.orderMedia.find({ where: { orderId }, order: { createdAt: 'ASC' } });
   }
+
+  /**
+   * إصلاح أمني (مراجعة booking flow الشاملة 2026-08-12) — كانت بَقّة حقيقية: التحكم بالطلبات
+   * (`TechnicianOrderExecutionController.listMedia()`) كان بينادي `listForOrder(id)` مباشرة
+   * من غير أي تحقق ملكية، يعني أي فني عنده توكن صالح يقدر يشوف صور طلب مش بتاعه لو عرف/خمّن
+   * الـid (Broken Object Level Authorization) — بعكس `listQuoteItems` في نفس الـcontroller اللي
+   * فعلاً بيتحقق (`listForTechnician` في order-items.service.ts). نفس النمط هنا دلوقتي.
+   */
+  async listForTechnician(userId: string, orderId: string): Promise<OrderMedia[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const order = await this.orders.findOne({ where: { id: orderId, technicianId: profile.id } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+    }
+    return this.listForOrder(orderId);
+  }
 }
