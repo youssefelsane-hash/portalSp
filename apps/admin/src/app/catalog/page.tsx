@@ -26,6 +26,9 @@ const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   hourly: 'بالساعة',
   per_unit: 'بالوحدة',
   inspection_then_quote: 'كشف ثم عرض سعر',
+  // محرك التسعير الديناميكي (docs/08 §1) — بعد الاختيار، إدارة الحقول/القواعد من صفحة تفاصيل
+  // الخدمة (قسم "محرك التسعير الديناميكي").
+  formula: 'معادلة ديناميكية',
 };
 
 export default function CatalogPage() {

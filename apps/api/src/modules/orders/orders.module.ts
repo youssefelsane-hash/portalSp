@@ -7,6 +7,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
 import { GeoModule } from '../geo/geo.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { PricingModule } from '../pricing/pricing.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
@@ -49,6 +50,7 @@ import { RecurringOrderTemplate } from './entities/recurring-order-template.enti
     CatalogModule,
     GeoModule,
     TechniciansModule,
+    PricingModule,
     PromotionsModule,
     SettingsModule,
     PaymentsModule,

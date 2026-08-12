@@ -1,7 +1,8 @@
 // مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts وentities
 import type { TechnicianLevel } from './technicians';
 
-export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote';
+// 'formula' — محرك التسعير الديناميكي (docs/08 §1، ADR-0001)، راجع pricing.ts لباقي أنواعه.
+export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote' | 'formula';
 
 export interface AdminServiceCategoryResponseDto {
   id: string;

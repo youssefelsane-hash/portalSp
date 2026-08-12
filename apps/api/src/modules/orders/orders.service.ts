@@ -18,6 +18,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
@@ -43,6 +44,7 @@ export class OrdersService {
     private readonly techniciansService: TechniciansService,
     private readonly technicianCompaniesService: TechnicianCompaniesService,
     private readonly scheduleService: TechnicianScheduleService,
+    private readonly pricingEngineService: PricingEngineService,
     private readonly promoCodesService: PromoCodesService,
     private readonly buildingsService: BuildingsService,
     private readonly cancellationReasonsService: CancellationReasonsService,
@@ -329,6 +331,13 @@ export class OrdersService {
 
       return order;
     });
+
+    // ربط سجل تدقيق تسعير formula (لو الخدمة formula) بالطلب اللي اتأكّد فعلاً — snapshot
+    // السعر التاريخي (docs/08 §1، طلب تتبّع السعر النهائي حتى لو الأدمن غيّر القواعد بعدين).
+    // بره الـtransaction عمداً — تدقيق مش لازم يفشّل إنشاء الطلب لو فشل، ومحتاج order.id الحقيقي.
+    if (estimate.pricing_evaluation_id) {
+      await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, order.id);
+    }
 
     // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس. لازم
     // emitAsync (مش emit) هنا تحديدًا: بَقّة حقيقية اتلقطت واتصلحت — emit() عادي بيستدعي

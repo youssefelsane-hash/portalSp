@@ -23,7 +23,7 @@
 
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
-| 1 | محرك التسعير الديناميكي end-to-end | 🔄 | Backend + Customer App اتعملوا في سيشن سابقة (PR #64). **الناقص**: Admin Pricing Builder UI (بصري، مش REST خام)، وتتبّع snapshot السعر التاريخي (audit trail لو الأدمن غيّر القواعد بعدين). |
+| 1 | محرك التسعير الديناميكي end-to-end | ✅ خلص | Backend + Customer App من سيشن سابقة (PR #64). **المتمم في السيشن دي (2026-08-12)**: Admin Pricing Builder UI كامل (`pricing-builder.tsx`) + تتبّع snapshot السعر التاريخي (`service_pricing_evaluations.order_id` بيتربط فعليًا بالطلب بعد الإنشاء عبر `linkEvaluationToOrder`). اتأكد حي بالكامل (Playwright + curl + DB): إنشاء حقول/lookup table/معادلة من الواجهة → معاينة صح → طلب حقيقي بنفس السعر بالظبط → صف التدقيق مرتبط بـ`order_id` الصح. تفاصيل كاملة في `apps/api/src/modules/pricing/README.md`. |
 | 2 | معاينة سعر حقيقية + تفصيل قبل التأكيد | ⏳ | جزء من #1 — لازم breakdown واضح (أساسي/منطقة/مستوى/معادلة/إضافات/طوارئ/خصم) مش رقم واحد غامض. |
 | 3 | الجدولة (Scheduler) end-to-end | ✅ اتأكد حي | Backend + Customer App + Technician App اتعملوا في سيشن سابقة (PR #65، #66) — اختبار حي كامل شامل سباق حقيقي. |
 | 4 | اختيار الفني قبل الحجز | ⏳ | `GET /services/:id/technicians` موجود ومختبر من سيشن سابقة (docs/08 §3) — محتاج تأكيد إن Customer App فعليًا بتستخدمه في تدفق الحجز الحقيقي (مش بس endpoint موجود). |
@@ -64,7 +64,7 @@
 
 | البند | الحالة |
 |---|---|
-| 28. Pricing Engine Visual Builder | 🔄 (نفس #1) |
+| 28. Pricing Engine Visual Builder | ✅ خلص (نفس #1) |
 | 29. Certificate Review UI (Admin) | ⏳ |
 | 30. Buildings Admin UI | ⏳ |
 | 31. Domestic Workers Admin UI | ⏳ |
@@ -132,3 +132,14 @@
 
 - **2026-08-12 (بداية المرحلة، فرع `hgotr7`)**: الملف اتعمل، القايمة الكاملة اتسجّلت بحالتها الأولية بعد فحص سريع
   لآخر merge (PR #66). البدء الفعلي حسب توجيه المالك الصريح: "Start with Pricing Engine end-to-end".
+- **2026-08-12 (بند #1 خلص)**: `PricingModel` كان ناقص `'formula'` في `packages/shared-types` (كان بيمنع الأدمن من
+  إنشاء خدمة formula من الواجهة أصلاً). اتضاف type جديد `packages/shared-types/src/pricing.ts` (مطابق لـDTOs
+  الباك-إند بالكامل: `PricingFieldType`, `FormulaNode`, `PricingRuleType`, ...). اتبنى `PricingBuilder` component
+  كامل في `apps/admin` (حقول ديناميكية + ثوابت + lookup tables + محرر معادلة JSON + معاينة حية). اتضاف
+  `PricingEngineService.linkEvaluationToOrder()` + استدعاؤه من `OrdersService.create()` بعد الـtransaction —
+  بيقفل فجوة تتبّع السعر التاريخي المطلوبة صراحة. اتأكد حي بالكامل: Playwright end-to-end على الواجهة الحقيقية
+  (تسجيل دخول أدمن → إنشاء خدمة → حقول → lookup table → معادلة → معاينة صح `14.00 ج.م.`)، وطلب حقيقي عبر `curl`
+  بنفس القيم رجع `estimated_price_cents:1400` مطابق تمامًا، وDB query أكّد `service_pricing_evaluations.order_id`
+  اتربط صح (مش NULL) بعد الطلب بينما صف الـpreview فضل NULL صح. بيانات الاختبار (خدمة+طلب) اتعملها soft-delete
+  بعد التأكيد. الفحوصات الثلاثة (`tsc`/`nest build`/`jest`) + `tsc`/`eslint`/`next build` في `apps/admin` كلها
+  عدّت. البند #2 (breakdown كامل للسعر في Customer App قبل التأكيد) لسه منفصل وقائم — مش جزء من هذا الإغلاق.
