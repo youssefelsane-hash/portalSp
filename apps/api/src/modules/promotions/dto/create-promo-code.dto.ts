@@ -80,4 +80,9 @@ export class CreatePromoCodeDto {
   @IsInt()
   @Min(0)
   budget_cents?: number;
+
+  // إصلاح أمني (migration 0067) — لو موجود، الكود ده مينفعش يتستخدم إلا من الـuser ده بالظبط.
+  @IsOptional()
+  @IsUUID()
+  restricted_to_user_id?: string;
 }

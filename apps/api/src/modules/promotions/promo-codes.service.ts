@@ -76,6 +76,11 @@ export class PromoCodesService {
     if (promoCode.newCustomersOnly && !ctx.isNewCustomer) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده للعملاء الجداد بس', HttpStatus.BAD_REQUEST);
     }
+    // إصلاح أمني (migration 0067) — كان فيه فجوة موثّقة: مكافآت الترشيح (referrals.service.ts)
+    // كانت بتتصدر كـpromo_codes عادي بلا أي قيد يمنع غير المُرشِّح من استخدامها لو الكود اتسرّب.
+    if (promoCode.restrictedToUserId && promoCode.restrictedToUserId !== userId) {
+      throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده مش بتاعك', HttpStatus.FORBIDDEN);
+    }
     if (promoCode.usageLimitTotal !== null && promoCode.usedCount >= promoCode.usageLimitTotal) {
       throw new ApiException(ErrorCode.VAL_001, 'كود الخصم ده خلص من الاستخدام', HttpStatus.BAD_REQUEST);
     }
@@ -169,6 +174,7 @@ export class PromoCodesService {
       validUntil,
       createdByUserId: adminUserId,
       budgetCents: dto.budget_cents ?? null,
+      restrictedToUserId: dto.restricted_to_user_id ?? null,
     });
     await this.promoCodes.save(promoCode);
 

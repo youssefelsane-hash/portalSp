@@ -104,9 +104,10 @@ export class ReferralsService {
     const rewardNumber = completedCount / requiredPerReward;
 
     // مُصدَر من نظام promo_codes الموجود أصلاً (بطلب المستخدم صراحة) — بحساب PLATFORM_SYSTEM_USER_ID
-    // كـ "الأدمن" المُصدر، مطابق لنفس الحساب النظامي المستخدم في تسويات المحفظة. ملحوظة صريحة: مفيش
-    // قيد فعلي في جدول promo_codes يمنع غير المُرشِّح من استخدام الكود (العمود ده مش موجود) — الحماية
-    // الوحيدة حاليًا إن الكود بيتوصّل بس عبر إشعار خاص للمُرشِّح. فجوة موثّقة، مش بَقّة.
+    // كـ "الأدمن" المُصدر، مطابق لنفس الحساب النظامي المستخدم في تسويات المحفظة.
+    // إصلاح أمني (migration 0067) — restricted_to_user_id بيقفل الكود على المُرشِّح نفسه بس،
+    // بدل ما تكون الحماية الوحيدة "الكود بيتوصّل عبر إشعار خاص" (كانت فجوة موثّقة صراحة هنا،
+    // أي حد يعرف الكود لو اتسرّب/اتشارك كان يقدر يستخدمه).
     const promo = await this.promoCodesService.create(PLATFORM_SYSTEM_USER_ID, {
       code,
       name_ar: `مكافأة ترشيح #${rewardNumber} — ${requiredPerReward} ترشيحات مكتملة`,
@@ -117,6 +118,7 @@ export class ReferralsService {
       new_customers_only: false,
       valid_from: now.toISOString(),
       valid_until: validUntil.toISOString(),
+      restricted_to_user_id: referrerUserId,
     });
 
     this.events.emit(

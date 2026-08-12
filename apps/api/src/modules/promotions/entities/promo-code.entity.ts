@@ -60,6 +60,12 @@ export class PromoCode {
   @Column({ name: 'created_by_user_id', type: 'uuid' })
   createdByUserId: string;
 
+  // إصلاح أمني (migration 0067) — لو موجود، الكود ده مينفعش يتستخدم إلا من الـuser ده بالظبط.
+  // مستخدمة أساسًا لمكافآت الترشيح (referrals.service.ts) عشان محدش تاني يقدر يستخدم كود
+  // اتسرّب أو اتشارك بالغلط.
+  @Column({ name: 'restricted_to_user_id', type: 'uuid', nullable: true })
+  restrictedToUserId: string | null;
+
   @Column({ name: 'budget_cents', type: 'integer', nullable: true })
   budgetCents: number | null;
 
