@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../orders/orders_screen.dart';
+import '../recurring/recurring_orders_screen.dart';
 import '../referrals/referrals_screen.dart';
 import 'categories_screen.dart';
 import 'models.dart';
@@ -42,6 +43,13 @@ class BookingModeScreen extends StatelessWidget {
               tooltip: 'رشّح صحابك',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ReferralsScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.repeat),
+              tooltip: 'الطلبات المتكررة',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const RecurringOrdersScreen()),
               ),
             ),
             IconButton(
