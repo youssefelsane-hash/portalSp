@@ -19,6 +19,7 @@ import { TechniciansController } from './technicians.controller';
 import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
 import { PortfolioLinksService } from './portfolio-links.service';
+import { TechnicianCertificatesService } from './technician-certificates.service';
 import { TechnicianProfileListener } from './technician-profile.listener';
 import { TechnicianStatsProcessor } from './technician-stats.processor';
 import { TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
@@ -31,6 +32,7 @@ import { TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianLevelConfig } from './entities/technician-level-config.entity';
 import { TechnicianLevelHistory } from './entities/technician-level-history.entity';
 import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.entity';
+import { TechnicianCertificate } from './entities/technician-certificate.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechnicianScheduleSlot } from './entities/technician-schedule-slot.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
@@ -46,6 +48,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
       TechnicianLevelHistory,
       TechnicianZone,
       TechnicianPortfolioLink,
+      TechnicianCertificate,
       TechnicianScheduleSlot,
       User,
     ]),
@@ -68,6 +71,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianProfileListener,
     TechnicianDocumentsService,
     PortfolioLinksService,
+    TechnicianCertificatesService,
     AdminTechniciansService,
     TechnicianCompaniesService,
     TechnicianLevelsService,

@@ -24,11 +24,14 @@ import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
 import { TechnicianScheduleService } from './technician-schedule.service';
 import { PortfolioLinksService } from './portfolio-links.service';
+import { TechnicianCertificatesService } from './technician-certificates.service';
 import { toTechnicianProfileResponseDto } from './dto/technician-profile-response.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 import { toPortfolioLinkResponseDto } from './dto/portfolio-link-response.dto';
 import { toScheduleSlotResponseDto } from './dto/schedule-slot-response.dto';
+import { toCertificateResponseDto } from './dto/certificate-response.dto';
 import { AddPortfolioLinkDto } from './dto/add-portfolio-link.dto';
+import { AddCertificateDto } from './dto/add-certificate.dto';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { RequestAssistantDto } from './dto/request-assistant.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
@@ -48,6 +51,7 @@ export class TechniciansController {
     private readonly technicianDocumentsService: TechnicianDocumentsService,
     private readonly portfolioLinksService: PortfolioLinksService,
     private readonly scheduleService: TechnicianScheduleService,
+    private readonly certificatesService: TechnicianCertificatesService,
   ) {}
 
   @Get('me')
@@ -176,5 +180,46 @@ export class TechniciansController {
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     await this.scheduleService.deleteSlot(profile.id, id);
     return { id, deleted: true };
+  }
+
+  // شهادات/كورسات الفني (docs/08 §4) — تسويقية بالكامل، لازم مراجعة أدمن (approve/reject) قبل
+  // ما تبان في البروفايل العام. تفاصيل كاملة في technicians/README.md.
+  @Get('certificates')
+  async listCertificates(@CurrentUser() user: JwtPayload) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const certificates = await this.certificatesService.listForTechnician(profile.id);
+    return certificates.map(toCertificateResponseDto);
+  }
+
+  @Post('certificates')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_DOCUMENT_SIZE_BYTES },
+    }),
+  )
+  async addCertificate(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: AddCertificateDto,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('لازم ترفع ملف');
+    }
+    if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException('نوع الملف غير مسموح — صور JPEG/PNG/WEBP أو PDF بس');
+    }
+
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const certificate = await this.certificatesService.add(profile.id, dto, file);
+    return toCertificateResponseDto(certificate);
+  }
+
+  @Delete('certificates/:id')
+  @HttpCode(HttpStatus.OK)
+  async removeCertificate(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    await this.certificatesService.remove(profile.id, id);
+    return null;
   }
 }
