@@ -54,9 +54,21 @@ class AuthRepository extends ChangeNotifier {
     final data = await apiRequest('POST', '/auth/refresh', body: {'refresh_token': storedRefreshToken});
     final newAccessToken = data!['access_token'] as String;
     final newRefreshToken = data['refresh_token'] as String;
-    await _secureStorage.write(key: _refreshTokenKey, value: newRefreshToken);
+    await _persistRefreshToken(newRefreshToken);
     _accessToken = newAccessToken;
     return newAccessToken;
+  }
+
+  // كتابة refresh_token في flutter_secure_storage ممكن ترمي (Keystore متلف بعد تحديث نظام،
+  // Secret Service مش متاح، إلخ) — فشلها ميستحقّش يوقف تسجيل الدخول (access_token في الذاكرة
+  // اشتغل فعلاً)، بس هيمنع استمرار الجلسة بعد إعادة فتح التطبيق. نفس مبدأ "فشل الـ infra
+  // الثانوي ميكسرش العملية الحقيقية للمستخدم" المتّبع في الباك-إند (queue/cache).
+  Future<void> _persistRefreshToken(String refreshToken) async {
+    try {
+      await _secureStorage.write(key: _refreshTokenKey, value: refreshToken);
+    } catch (e) {
+      debugPrint('فشل حفظ refresh_token بأمان — الجلسة الحالية سليمة، بس مش هتفضل بعد إعادة فتح التطبيق: $e');
+    }
   }
 
   Future<void> init() async {
@@ -94,7 +106,7 @@ class AuthRepository extends ChangeNotifier {
       body: {'phone_number': phoneNumber, 'otp_code': otpCode},
     );
     _accessToken = data!['access_token'] as String;
-    await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);
+    await _persistRefreshToken(data['refresh_token'] as String);
     await _fetchMe();
     _registerPushDeviceInBackground();
     notifyListeners();
@@ -117,7 +129,7 @@ class AuthRepository extends ChangeNotifier {
       },
     );
     _accessToken = data!['access_token'] as String;
-    await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);
+    await _persistRefreshToken(data['refresh_token'] as String);
     await _fetchMe();
     _registerPushDeviceInBackground();
     notifyListeners();
