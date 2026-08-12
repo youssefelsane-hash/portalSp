@@ -34,4 +34,10 @@ export class EstimateQueryDto {
   @IsOptional()
   @IsEnum(TechnicianLevel)
   technician_level?: TechnicianLevel;
+
+  // لمعاينة رسوم الطوارئ + الـ SLA المعلن قبل التأكيد (docs/08 §8) — لو "emergency"، الرد
+  // بيتضمن emergency_surcharge_cents/emergency_sla_minutes الفعليين.
+  @IsOptional()
+  @IsIn(BOOKING_MODE_FILTER_VALUES)
+  booking_mode?: BookingModeFilter;
 }

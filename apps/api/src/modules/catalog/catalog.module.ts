@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
+import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { AdminCatalogController } from './admin-catalog.controller';
 import { AdminCatalogService } from './admin-catalog.service';
@@ -29,6 +30,7 @@ import { TechnicianService } from './entities/technician-service.entity';
     ]),
     TechniciansModule,
     AuditModule,
+    SettingsModule,
   ],
   controllers: [CatalogController, AdminCatalogController],
   providers: [CatalogService, AdminCatalogService],
