@@ -66,8 +66,19 @@ export interface OrderStatusHistoryResponseDto {
   created_at: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/order-pricing-evaluation-response.dto.ts — للأدمن/
+// التشغيل بس (docs/08 §35: وضوح الإنتاجية/المدة المتوقعة). null لأي طلب لخدمة مش formula.
+export interface OrderPricingEvaluationResponseDto {
+  computed_duration_days: number | null;
+  computed_technicians: number | null;
+  computed_assistants: number | null;
+  field_values: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface OrderDetailResponseDto extends OrderResponseDto {
   status_history: OrderStatusHistoryResponseDto[];
+  pricing_evaluation: OrderPricingEvaluationResponseDto | null;
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-media-response.dto.ts

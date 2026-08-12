@@ -6,6 +6,8 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
@@ -44,6 +46,7 @@ export class AdminOrdersService {
     private readonly techniciansService: TechniciansService,
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
+    private readonly pricingEngineService: PricingEngineService,
   ) {}
 
   async list(
@@ -79,10 +82,13 @@ export class AdminOrdersService {
     return order;
   }
 
-  async getDetail(orderId: string): Promise<{ order: Order; history: OrderStatusHistory[] }> {
+  async getDetail(
+    orderId: string,
+  ): Promise<{ order: Order; history: OrderStatusHistory[]; pricingEvaluation: ServicePricingEvaluation | null }> {
     const order = await this.findOrThrow(orderId);
     const history = await this.statusHistory.find({ where: { orderId }, order: { createdAt: 'ASC' } });
-    return { order, history };
+    const pricingEvaluation = await this.pricingEngineService.findEvaluationForOrder(orderId);
+    return { order, history, pricingEvaluation };
   }
 
   async cancel(adminUserId: string, orderId: string, reason: string, meta?: AuditActorMeta): Promise<Order> {

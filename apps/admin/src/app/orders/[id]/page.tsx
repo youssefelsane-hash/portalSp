@@ -329,6 +329,40 @@ export default function OrderDetailPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle className="text-base">الإنتاجية والمدة المتوقعة</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            {!order.pricing_evaluation ? (
+              <p className="text-sm text-muted-foreground">
+                مفيش بيانات إنتاجية محسوبة لهذا الطلب — الخدمة مش بتستخدم معادلة تسعير (pricing_model=formula)
+              </p>
+            ) : (
+              <>
+                <p>
+                  المدة المتوقعة:{' '}
+                  {order.pricing_evaluation.computed_duration_days !== null
+                    ? `${order.pricing_evaluation.computed_duration_days} يوم`
+                    : '—'}
+                </p>
+                <p>
+                  عدد الصنايعية المطلوب:{' '}
+                  {order.pricing_evaluation.computed_technicians ?? '—'}
+                </p>
+                <p>
+                  عدد المساعدين المطلوب:{' '}
+                  {order.pricing_evaluation.computed_assistants ?? '—'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  محسوبة وقت الحجز في:{' '}
+                  {new Date(order.pricing_evaluation.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle className="text-base">بنود عرض السعر</CardTitle>
           </CardHeader>
           <CardContent>

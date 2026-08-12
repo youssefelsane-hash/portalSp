@@ -78,7 +78,7 @@
 | 32. وضوح الطلبات المتكررة في Admin | ⏳ |
 | 33. وضوح الضمان/إعادة الزيارة في Admin | ✅ خلص | نفس إصلاح #32/#34 (`OrderResponseDto` الناقص) — تاريخ الضمان + بادچ "إعادة زيارة" بقى رابط فعلي للطلب الأصلي. اتأكد حي عبر Playwright. تفاصيل في `apps/admin/README.md`. |
 | 34. معلومات الطوارئ واضحة في كل مكان | ✅ خلص | `OrderResponseDto` في shared-types كان ناقص 7 حقول موجودة في رد الباك-إند فعليًا (`booking_mode`/`surge_amount_cents`/`warranty_expires_at`/إلخ). اتضافوا + بادچات/عرض في `/orders` و`/orders/:id`. اتأكد حي عبر Playwright على طلب طوارئ حقيقي. تفاصيل في `apps/admin/README.md`. |
-| 35. وضوح الإنتاجية/المدة المتوقعة للعمليات | ⏳ |
+| 35. وضوح الإنتاجية/المدة المتوقعة للعمليات | ✅ خلص | كانت مبنية بس على مستوى إعداد الخدمة (catalog/services/:id: بيانات قياسية + إنتاجية)، مفيش أي مكان بيوضّح المدة/الطاقم *المحسوبة فعليًا* لطلب حقيقي معيّن. لقينا `service_pricing_evaluations` (جدول تدقيق موجود من زمان، `computed_duration_days`/`computed_technicians`/`computed_assistants`، مربوط بـ`order_id`) بيتسجّل وقت كل حجز لخدمة `pricing_model=formula` بس محدش بيعرضه لحد دلوقتي. أضفنا `PricingEngineService.findEvaluationForOrder()` + `GET /admin/orders/:id` بقى بيرجّع `pricing_evaluation` (null لو الخدمة مش formula). كارت جديد "الإنتاجية والمدة المتوقعة" في `/orders/:id`. اتأكد حي: خدمة formula تجريبية بمعادلة literal (مدة=2.5 يوم، صنايعية=2، مساعدين=1) → طلب حقيقي → Admin API رجّعت نفس القيم بالظبط → Playwright أكّد ظهورها في الكارت فعليًا (سكرين شوت). الخدمة التجريبية اتشالت (soft-delete) بعد الاختبار. تفاصيل في `apps/api/src/modules/orders/README.md` و`apps/admin/README.md`. |
 
 ### ⏸️ مؤجّل عمداً — backlog منفصل، مش جزء من مرحلة التكامل دي (بطلب صريح من المالك)
 

@@ -11,6 +11,7 @@ import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
+import { toOrderPricingEvaluationResponseDto } from './dto/order-pricing-evaluation-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
 import { OrderItemsService } from './order-items.service';
@@ -34,8 +35,14 @@ export class AdminOrdersController {
 
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
-    const { order, history } = await this.adminOrdersService.getDetail(id);
-    return { ...toOrderResponseDto(order), status_history: history.map(toOrderStatusHistoryResponseDto) };
+    const { order, history, pricingEvaluation } = await this.adminOrdersService.getDetail(id);
+    return {
+      ...toOrderResponseDto(order),
+      status_history: history.map(toOrderStatusHistoryResponseDto),
+      // للتشغيل بس (docs/08 §35) — null لو الخدمة مش pricing_model=formula، راجع
+      // PricingEngineService.findEvaluationForOrder().
+      pricing_evaluation: pricingEvaluation ? toOrderPricingEvaluationResponseDto(pricingEvaluation) : null,
+    };
   }
 
   // كانت فجوة موثّقة: GET /technician/orders/:id/media مقصور على @Roles(TECHNICIAN) بس —

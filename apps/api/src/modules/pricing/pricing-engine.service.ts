@@ -114,6 +114,13 @@ export class PricingEngineService {
     }
   }
 
+  // للأدمن/التشغيل بس (docs/08 §35: وضوح الإنتاجية/المدة المتوقعة) — الـsnapshot الوحيد اللي
+  // بيوضّح "المدة/عدد الفنيين/المساعدين المتوقعة لحظة الحجز" لطلب معيّن كان محسوب من formula.
+  // null لأي طلب لخدمة pricing_model != formula (مفيش تقييم اتسجل خالص وقتها).
+  async findEvaluationForOrder(orderId: string): Promise<ServicePricingEvaluation | null> {
+    return this.evaluations.findOne({ where: { orderId }, order: { createdAt: 'DESC' } });
+  }
+
   private validateAndNormalizeFieldValues(
     fields: ServicePricingField[],
     rawValues: Record<string, string | number | boolean>,
