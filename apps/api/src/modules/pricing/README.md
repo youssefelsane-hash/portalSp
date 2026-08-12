@@ -35,6 +35,30 @@
 - `GET/POST /admin/services/:id/pricing-fields`, `PATCH/DELETE /admin/services/pricing-fields/:fieldId`
 - `GET /admin/services/:id/pricing-rules`, `PUT /admin/services/:id/pricing-rules` (upsert بتاريخ سريان)، `DELETE /admin/services/pricing-rules/:ruleId` (تعطيل، مش حذف فعلي)
 
+### الربط بمسار إنشاء الطلب (`POST /orders`) — كانت فجوة موثّقة صراحة، اتقفلت (2026-08-12)
+
+**البَقّة الحقيقية اللي اتلقطت**: `CatalogService.estimate()` (في `catalog` module) — نقطة التسعير الوحيدة اللي `orders.service.ts`'s `create()`، `promotions.service.ts`'s `previewForOrder()`، و`GET /services/:id/estimate` (`catalog.controller.ts`) الثلاثة بينادوها — **كانت أصلاً مش عارفة `pricing_model=formula` خالص**. أي خدمة formula كان `estimate()` بيدّيها المسار الثابت العادي (`service.basePriceCents`)، واللي بيتسجّل `0` عمدًا لخدمات formula (مفيش سعر أساسي ثابت لها أصلاً، السعر كله من المعادلة) — يعني **أي طلب حقيقي لخدمة formula كان بيتحجز مجانًا بالكامل** (`estimated_price_cents=0`, `total_amount_cents=0`) من غير أي خطأ ولا تحذير، بينما `POST /services/:id/evaluate-price` (المسار المنفصل اللي `apps/customer-app` المفروض يستخدمه لعرض السعر الحي وقت ملء الفورم) كان شغال صح تمامًا ويحسب سعر حقيقي. يعني العميل كان ممكن يشوف سعر تقديري حقيقي (مثلاً 2110 قرش) في شاشة المعاينة، وبعدين الطلب الفعلي يتحجز بصفر — أخطر فجوة تسعير في المشروع كله لحد اللحظة دي.
+
+**الحل المعماري**: `CatalogService.estimate()` بقى بياخد `fieldValues?: Record<string, string | number | boolean>` كمعامل خامس اختياري، وبيتفرّع فورًا لو `service.pricingModel === PricingModel.FORMULA` لاستدعاء `PricingEngineService.evaluate(serviceId, fieldValues ?? {})` بدل المسار الثابت بالكامل — **مسار مستقل تمامًا**، مفيش تركيب مع `zone_pricing`/`level_pricing` (المعادلة نفسها مسؤولة عن كل عوامل السعر). القرارات المعمارية المحسومة هنا:
+- `CatalogModule` بقى بيستورد `PricingModule` (اتحقق الأول مفيش استيراد دائري: `PricingModule` بيستورد `TypeOrmModule`+`AuditModule` بس، مفيش استيراد لـ`CatalogModule` من جواه).
+- `inspection_fee_cents` لسه بييجي من `service.inspectionFeeCents` بشكل موحّد (مش جزء من ناتج المعادلة — `PricingEvaluationResult` مفيهوش حقل زيه أصلاً).
+- رسوم الطوارئ الإضافية (`emergency_surcharge_cents`/`emergency_sla_minutes`) لسه بتتطبّق فوق السعر الناتج من المعادلة بنفس منطق المسار الثابت بالحرف (نسبة `pricing.emergency_surcharge_percentage` من الإعدادات).
+- `PriceEstimate` (النوع المُرجَع) بقى فيه `min_price_cents`/`max_price_cents` إضافيين (مطابقين لناتج المعادلة، `null` دايمًا للنماذج التانية).
+- `CreateOrderDto` بقى فيه `field_values?: Record<string, string|number|boolean>` اختياري، بيتبعت مباشرة من `orders.service.ts`'s `create()` لـ`estimate()`. لو الخدمة formula وفيها حقل مطلوب ناقص، نفس خطأ `PricingEngineService.validateAndNormalizeFieldValues()` (`VAL_001` بوضوح) بيترفض **قبل** أي كتابة في transaction إنشاء الطلب — مفيش صف orphan.
+- `ValidatePromoCodeQueryDto` (`GET /promo-codes/:code/validate`) بقى فيه `field_values?` كمان — بما إنه `GET` بلا body، بيوصل كـ JSON string جوّه الـ query ويتفسّر بـ`@Transform`؛ JSON غير صالح بيتسيب كـ string عمدًا عشان `@IsObject()` يرفضه برسالة 400 واضحة بدل ما يتبلع بصمت. `previewForOrder()` بتستخدمها بنفس منطق `create()` بالحرف.
+
+**قرار موثّق صراحة (مش سهو)**: `PricingEngineService.evaluate()` بتتنادى **قبل** transaction إنشاء الطلب (زي حساب `zone_pricing` بالظبط أصلاً)، فسجل التدقيق `service_pricing_evaluations` بتاع لحظة إنشاء الطلب بيتسجّل بـ`order_id=NULL` (مش رابط بالطلب اللي هيتولد بعد كده) — قرار مقصود لتجنّب نداء تاني للمعادلة جوّه الـ transaction (ممكن يدّي نتيجة مختلفة لو القواعد اتغيّرت بين اللحظتين، وتعقيد إضافي بلا داعي واضح).
+
+**اختبار حي كامل** (خدمة formula حقيقية جديدة عبر `POST /admin/services` + 4 حقول + 3 قواعد تسعير، بنفس مثال المحارة في `docs/08` §1.8: مساحة×سعر_المتر[نوع الحيط] + 15% لو السمك 3سم + 500 قرش لو الدور>5):
+- `POST /services/:id/evaluate-price` بـ`{area:10, wall_type:internal, thickness_cm:"3", floor:6}` → `price_cents:2110` (10×140=1400 + 15%=210 + 500 دور = 2110) ✓.
+- `POST /services/:id/estimate` (المسار القديم، من غير `field_values`) → **قبل الإصلاح كان هيرجع `estimated_total_cents:0` بصمت**، بعد الإصلاح بيرفض بوضوح `"الحقل \"المساحة\" (area) مطلوب"` ✓ (رفض واضح أفضل بمراحل من سعر غلط صامت).
+- `POST /orders` بنفس `field_values` → طلب حقيقي اتحجز بـ`estimated_price_cents:2110`, `total_amount_cents:2110` بالظبط ✓، وصف في `service_pricing_evaluations` اتسجّل فعلاً.
+- `POST /orders` بـ`booking_mode:emergency` بنفس الحقول → `surge_amount_cents:422` (20% من 2110 مقرّبة) و`total_amount_cents:2532` بالظبط ✓ — رسوم الطوارئ بتتطبّق فوق سعر المعادلة صح.
+- `POST /orders` من غير `field_values` خالص، وبقيمة `dropdown` غير مسموحة — الاتنين اترفضوا `400` واضح **من غير ما يتعمل أي صف طلب orphan** (اتأكد بعدّ `orders` قبل/بعد).
+- `GET /promo-codes/:code/validate` بكود وهمي: من غير `field_values` → رفض "حقل مطلوب"؛ بـ`field_values` كاملة → عدّى التسعير ووصل لخطأ "كود الخصم غير موجود" (يثبت التسعير اتحسب صح ووصل لمرحلة البحث عن الكود)؛ بـJSON غير صالح → 400 واضح من `IsObject()`.
+
+**ملحوظة جانبية اتلاحظت أثناء الاختبار (مش بَقّة في الكود الجديد، سلوك موجود من Phase 1)**: حقل مُعرَّف `is_required:false` على مستوى `service_pricing_fields` (زي `floor` في المثال) لسه بيتطلّب قيمة لو معادلة `final_price` بتستخدمه جوّه شرط `if`/`gt` — `formula-evaluator.ts` بيرفض المقارنة `undefined` صراحة. ده سلوك المحرك الأصلي من Phase 1 (`formula-evaluator.spec.ts` بيغطيه)، مش حاجة اتغيّرت هنا — تصميم المعادلة نفسها (اختيار الأدمن يستخدم حقل "اختياري" جوّه شرط "إجباري" منطقيًا) هي المسؤولة، مش خطأ في المحرك.
+
 ### مرحلة 2 — لسه فاضية عمدًا (`docs/08` §1.7)
 
 واجهة "Builder" بصرية في `apps/admin` (سحب وإفلات للحقول، بناء المعادلة بـ blocks، Preview بقيم تجريبية قبل الحفظ) — شغل frontend كبير مستقل، الـ backend/API دلوقتي كافي يخلي المحرك شغال ومختبر حي بالكامل عبر REST مباشر لحد ما الواجهة تتبني.

@@ -181,4 +181,10 @@
 (موجودة من زمان، بتسمع `ORDER_STATUS_CHANGED_EVENT`) بقت تشتغل فعليًا دلوقتي — اتأكد حياً
 (`cancelled_orders_count` زاد صح بعد كل عملية).
 
+## ربط محرك التسعير الديناميكي بـ`POST /orders` — كانت أخطر فجوة تسعير موثّقة، اتقفلت (بناء 2026-08-12)
+
+**بَقّة حقيقية خطيرة اتلقطت**: `create()` بينادي `catalogService.estimate(service.id, zone.id, undefined, bookingMode===EMERGENCY)` — وكانت `estimate()` مش عارفة `pricing_model=formula` خالص، فأي خدمة formula كانت بتتحجز بـ`estimated_price_cents=0`/`total_amount_cents=0` بصمت (السعر الأساسي الثابت لخدمة formula مسجّل عمدًا 0 لأنه مالوش معنى — السعر كله من المعادلة)، بينما `POST /services/:id/evaluate-price` (المسار المنفصل من Phase 1) كان بيحسب سعر حقيقي صح. التفاصيل الكاملة والقرارات المعمارية في `../pricing/README.md` (قسم "الربط بمسار إنشاء الطلب") — بس الخلاصة المباشرة هنا: `CreateOrderDto` بقى فيه `field_values?: Record<string, string|number|boolean>` اختياري بيتبعت مباشرة لـ`catalogService.estimate()`، اللي بقت تتفرّع لـ`PricingEngineService.evaluate()` لو الخدمة formula.
+
+**اختبار حي**: خدمة formula حقيقية (مساحة×سعر_المتر + شروط) — `POST /orders` بـ`field_values` صحيحة أنتج `estimated_price_cents=2110`/`total_amount_cents=2110` مطابق تمامًا لناتج `evaluate-price`. `booking_mode=emergency` بنفس الحقول أنتج `surge_amount_cents=422`/`total_amount_cents=2532` (20% رسوم طوارئ فوق سعر المعادلة، صح). طلب من غير `field_values` أو بقيمة `dropdown` غير صالحة اترفض `400` واضح **قبل** أي كتابة في transaction — صفر صفوف orphan (اتأكد بعدّ `orders` قبل/بعد). `GET /promo-codes/:code/validate` (`PromotionsService.previewForOrder()`) اتصلحت بنفس المنطق بالحرف.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

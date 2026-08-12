@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
@@ -40,6 +42,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   List<TechnicianCompanySummary>? _companies;
   TechnicianCompanySummary? _selectedCompany;
 
+  // محرك التسعير الديناميكي (docs/08 §1) — كانت فجوة موثّقة صراحة: apps/customer-app مفيهوش
+  // شاشة تدخل بيها القيم اللازمة لحساب سعر خدمات pricing_model=formula، فالعميل مكانش يقدر
+  // يحجز الخدمات دي أصلاً من التطبيق (كان المسار الوحيد اختبار مباشر بـ curl). اتقفلت.
+  bool get _isFormulaPricing => widget.service.pricingModel == 'formula';
+  List<PricingField> _pricingFields = [];
+  bool _loadingPricingFields = false;
+  String? _pricingFieldsError;
+  final Map<String, dynamic> _fieldValues = {};
+  int? _livePriceCents;
+  bool _pricingLoading = false;
+  String? _pricingError;
+  Timer? _priceDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +62,61 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
+    if (_isFormulaPricing) _loadPricingFields();
+  }
+
+  @override
+  void dispose() {
+    _priceDebounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadPricingFields() async {
+    setState(() => _loadingPricingFields = true);
+    try {
+      final fields = await _catalogRepository.fetchPricingFields(widget.service.id);
+      if (mounted) setState(() => _pricingFields = fields);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _pricingFieldsError = err.message);
+    } finally {
+      if (mounted) setState(() => _loadingPricingFields = false);
+    }
+  }
+
+  // كل حقول formula المطلوبة والمدعومة (راجع PricingField.isSupported) لازم تتملى قبل ما نقدر
+  // نحسب سعر حقيقي — نفس التحقق اللي PricingEngineService.evaluate() بيعمله في الباك-إند بالظبط،
+  // بس هنا عشان نقرر إمتى نستدعي evaluate-price بدل ما نبعت طلبات ناقصة تترفض كل مرة.
+  bool get _pricingFieldsComplete => _pricingFields
+      .where((f) => f.isRequired && f.isSupported)
+      .every((f) => _fieldValues[f.fieldKey] != null && _fieldValues[f.fieldKey] != '');
+
+  bool get _hasUnsupportedRequiredField => _pricingFields.any((f) => f.isRequired && !f.isSupported);
+
+  void _onFieldValueChanged(String fieldKey, dynamic value) {
+    setState(() {
+      if (value == null || value == '') {
+        _fieldValues.remove(fieldKey);
+      } else {
+        _fieldValues[fieldKey] = value;
+      }
+      _livePriceCents = null;
+      _pricingError = null;
+    });
+    _priceDebounce?.cancel();
+    _priceDebounce = Timer(const Duration(milliseconds: 500), _refreshLivePrice);
+  }
+
+  Future<void> _refreshLivePrice() async {
+    if (!_isFormulaPricing || !_pricingFieldsComplete) return;
+    setState(() => _pricingLoading = true);
+    try {
+      final result = await _catalogRepository.evaluatePrice(widget.service.id, _fieldValues);
+      if (mounted) setState(() => _livePriceCents = result.priceCents);
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _pricingError = err.message);
+    } finally {
+      if (mounted) setState(() => _pricingLoading = false);
+    }
   }
 
   // فشل تحميل الشركات مش لازم يمنع الحجز نفسه — العميل يقدر يسيب المطابقة تختار له فني/فريق
@@ -92,6 +162,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       setState(() => _promoError = 'اختار عنوان الأول');
       return;
     }
+    if (_isFormulaPricing && !_pricingFieldsComplete) {
+      setState(() => _promoError = 'كمّل بيانات السعر الأول');
+      return;
+    }
     setState(() {
       _validatingPromo = true;
       _promoError = null;
@@ -102,6 +176,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         code: code,
         serviceId: widget.service.id,
         addressId: _selectedAddress!.id,
+        fieldValues: _isFormulaPricing ? _fieldValues : null,
       );
       if (mounted) setState(() => _promoDiscountCents = result['discount_cents'] as int);
     } on ApiException catch (err) {
@@ -115,6 +190,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_selectedAddress == null) {
       setState(() => _error = 'اختار عنوان الأول');
       return;
+    }
+    if (_isFormulaPricing) {
+      if (_hasUnsupportedRequiredField) {
+        setState(() => _error = 'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه — كلم الدعم لإتمام الحجز');
+        return;
+      }
+      if (!_pricingFieldsComplete) {
+        setState(() => _error = 'كمّل كل بيانات السعر المطلوبة الأول');
+        return;
+      }
+      if (_livePriceCents == null) {
+        setState(() => _error = 'استنى لحد ما السعر يتحسب');
+        return;
+      }
     }
     setState(() {
       _submitting = true;
@@ -130,6 +219,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         addonIds: _selectedAddonIds.toList(),
         requestedTechnicianId: widget.requestedTechnicianId,
         requestedTechnicianCompanyId: _selectedCompany?.id,
+        fieldValues: _isFormulaPricing ? _fieldValues : null,
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -145,6 +235,209 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
+  String _formulaPriceSubtitle() {
+    if (_livePriceCents != null) return 'السعر: ${_formatEgp(_livePriceCents!)}';
+    if (_pricingLoading) return 'بيتحسب السعر...';
+    if (_pricingError != null) return _pricingError!;
+    return 'كمّل التفاصيل تحت عشان نحسبلك السعر';
+  }
+
+  List<Widget> _buildPricingFieldsSection() {
+    if (_loadingPricingFields) {
+      return const [
+        SizedBox(height: 16),
+        Center(child: CircularProgressIndicator()),
+      ];
+    }
+    if (_pricingFieldsError != null) {
+      return [
+        const SizedBox(height: 16),
+        Text(_pricingFieldsError!, style: const TextStyle(color: Colors.red)),
+      ];
+    }
+    final sortedFields = [..._pricingFields]..sort((a, b) => a.fieldKey.compareTo(b.fieldKey));
+    return [
+      const SizedBox(height: 16),
+      Text('تفاصيل تحديد السعر', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 8),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: sortedFields.map(_buildPricingFieldWidget).toList(),
+          ),
+        ),
+      ),
+      if (_pricingError != null) ...[
+        const SizedBox(height: 4),
+        Text(_pricingError!, style: const TextStyle(color: Colors.red)),
+      ],
+    ];
+  }
+
+  Widget _buildPricingFieldWidget(PricingField field) {
+    // أنواع الحقول اللي لسه مش مدعومة (location/image_upload/video_upload/voice_note) —
+    // راجع الملحوظة في catalog/models.dart. لو مطلوب، بنمنع الإرسال في _submit()، وهنا بس
+    // بنوضّح للعميل ليه الحقل ده مش ظاهر كمدخل فعلي.
+    if (!field.isSupported) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(
+          field.isRequired
+              ? '⚠️ "${field.labelAr}" محتاج تفاصيل (صورة/موقع) مش مدعومة في التطبيق لسه'
+              : '"${field.labelAr}" اختياري ومش مدعوم في التطبيق حاليًا — هيتجاهل',
+          style: TextStyle(color: field.isRequired ? Colors.red : Colors.grey),
+        ),
+      );
+    }
+
+    final label = field.unitAr != null ? '${field.labelAr} (${field.unitAr})' : field.labelAr;
+
+    switch (field.fieldType) {
+      case 'number':
+      case 'area':
+      case 'length':
+      case 'volume':
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: TextFormField(
+            decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (value) {
+              final parsed = num.tryParse(value);
+              _onFieldValueChanged(field.fieldKey, parsed);
+            },
+          ),
+        );
+
+      case 'dropdown':
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: DropdownButtonFormField<String>(
+            decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+            initialValue: _fieldValues[field.fieldKey] as String?,
+            items: (field.options ?? [])
+                .map((o) => DropdownMenuItem(value: o.value, child: Text(o.labelAr)))
+                .toList(),
+            onChanged: (value) => _onFieldValueChanged(field.fieldKey, value),
+          ),
+        );
+
+      case 'multi_select':
+        final selected = (_fieldValues[field.fieldKey] as List<String>?) ?? <String>[];
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodyMedium),
+              Wrap(
+                spacing: 8,
+                children: (field.options ?? [])
+                    .map(
+                      (o) => FilterChip(
+                        label: Text(o.labelAr),
+                        selected: selected.contains(o.value),
+                        onSelected: (isSelected) {
+                          final updated = [...selected];
+                          if (isSelected) {
+                            updated.add(o.value);
+                          } else {
+                            updated.remove(o.value);
+                          }
+                          _onFieldValueChanged(field.fieldKey, updated.isEmpty ? null : updated);
+                        },
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ),
+        );
+
+      case 'checkbox':
+        return SwitchListTile(
+          title: Text(label),
+          value: (_fieldValues[field.fieldKey] as bool?) ?? false,
+          onChanged: (value) => _onFieldValueChanged(field.fieldKey, value),
+        );
+
+      case 'slider':
+        final min = (field.minValue ?? 0).toDouble();
+        final effectiveMax = (field.maxValue ?? 100).toDouble();
+        final max = effectiveMax > min ? effectiveMax : min + 1;
+        final current = ((_fieldValues[field.fieldKey] as num?)?.toDouble() ?? min).clamp(min, max).toDouble();
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('$label: ${current.toStringAsFixed(0)}'),
+              Slider(
+                min: min,
+                max: max,
+                value: current,
+                onChanged: (value) => _onFieldValueChanged(field.fieldKey, value),
+              ),
+            ],
+          ),
+        );
+
+      case 'date':
+        final currentValue = _fieldValues[field.fieldKey] as String?;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: ListTile(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: Theme.of(context).dividerColor)),
+            title: Text(label),
+            subtitle: Text(currentValue ?? 'اختار تاريخ'),
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: DateTime.now(),
+                firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+              );
+              if (picked != null) {
+                final formatted = '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                _onFieldValueChanged(field.fieldKey, formatted);
+              }
+            },
+          ),
+        );
+
+      case 'time':
+        final currentValue = _fieldValues[field.fieldKey] as String?;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: ListTile(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: Theme.of(context).dividerColor)),
+            title: Text(label),
+            subtitle: Text(currentValue ?? 'اختار وقت'),
+            onTap: () async {
+              final picked = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+              if (picked != null) {
+                final formatted = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                _onFieldValueChanged(field.fieldKey, formatted);
+              }
+            },
+          ),
+        );
+
+      default:
+        // نوع مش متوقع (enum جديد اتضاف في الباك-إند ومحدّش حدّث الفرونت) — نفس معاملة
+        // الأنواع الغير مدعومة (isSupported=false)، عشان مانضربش خطأ غير واضح للعميل.
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(
+            field.isRequired ? '⚠️ "${field.labelAr}" نوع حقل مش معروف — كلم الدعم' : '"${field.labelAr}" نوع حقل مش مدعوم، هيتجاهل',
+            style: TextStyle(color: field.isRequired ? Colors.red : Colors.grey),
+          ),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -157,7 +450,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             Card(
               child: ListTile(
                 title: Text(widget.service.nameAr),
-                subtitle: Text('السعر التقريبي: ${_formatEgp(widget.service.basePriceCents)}'),
+                subtitle: Text(_isFormulaPricing ? _formulaPriceSubtitle() : 'السعر التقريبي: ${_formatEgp(widget.service.basePriceCents)}'),
               ),
             ),
             const SizedBox(height: 16),
@@ -171,6 +464,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 onTap: _pickAddress,
               ),
             ),
+            if (_isFormulaPricing) ..._buildPricingFieldsSection(),
             if (_addons.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text('إضافات اختيارية', style: Theme.of(context).textTheme.titleMedium),

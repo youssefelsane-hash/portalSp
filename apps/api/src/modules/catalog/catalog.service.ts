@@ -2,13 +2,14 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
-import { Service } from './entities/service.entity';
+import { PricingModel, Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 import { BookingModeFilter } from './dto/list-services.dto';
 
@@ -23,6 +24,10 @@ export interface PriceEstimate {
   emergency_surcharge_cents: number;
   /** الوقت المعلن للعميل بالدقايق ("هيوصلك خلال X دقيقة") — رقم معلن بس، مش ETA محسوب. null لو مش طوارئ. */
   emergency_sla_minutes: number | null;
+  /** حدود السعر التقديرية من معادلة pricing_model=formula (docs/08 §1) — null دايمًا لباقي
+   * نماذج التسعير (fixed/hourly/per_unit/inspection_then_quote) لأنها مش جزء من صيغتها أصلاً. */
+  min_price_cents: number | null;
+  max_price_cents: number | null;
 }
 
 const EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK = 20;
@@ -53,6 +58,7 @@ export class CatalogService {
     @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
     @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
     private readonly settingsService: SettingsService,
+    private readonly pricingEngineService: PricingEngineService,
   ) {}
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {
@@ -108,8 +114,35 @@ export class CatalogService {
     zoneId?: string,
     technicianLevel?: TechnicianLevel,
     isEmergency = false,
+    fieldValues?: Record<string, string | number | boolean>,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
+
+    // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — مسار مستقل بالكامل عن باقي نماذج
+    // التسعير، مفيش تركيب مع zone override ولا level multiplier هنا (المعادلة نفسها مسؤولة عن
+    // كل عوامل السعر اللي العميل حددها في الفورم الديناميكي). كانت فجوة موثّقة صراحة: كان
+    // بيتفادى استدعاء PricingEngineService خالص ويستخدم service.basePriceCents (صفر لأي خدمة
+    // formula) — اتقفلت.
+    if (service.pricingModel === PricingModel.FORMULA) {
+      const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
+      const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
+        ? await Promise.all([
+            this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
+            this.settingsService.getNumber('emergency.sla_minutes', EMERGENCY_SLA_MINUTES_FALLBACK),
+          ])
+        : [0, null];
+      return {
+        base_price_cents: result.priceCents,
+        inspection_fee_cents: service.inspectionFeeCents,
+        surge_multiplier: 1,
+        level_price_multiplier: 1,
+        estimated_total_cents: result.priceCents,
+        emergency_surcharge_cents: Math.round((result.priceCents * emergencySurchargePercentage) / 100),
+        emergency_sla_minutes: emergencySlaMinutes,
+        min_price_cents: result.minPriceCents,
+        max_price_cents: result.maxPriceCents,
+      };
+    }
 
     let levelMultiplier = 1;
     if (technicianLevel) {
@@ -157,6 +190,8 @@ export class CatalogService {
           estimated_total_cents: estimatedTotalCents,
           emergency_surcharge_cents: Math.round((estimatedTotalCents * emergencySurchargePercentage) / 100),
           emergency_sla_minutes: emergencySlaMinutes,
+          min_price_cents: null,
+          max_price_cents: null,
         };
       }
     }
@@ -170,6 +205,8 @@ export class CatalogService {
       estimated_total_cents: estimatedTotalCents,
       emergency_surcharge_cents: Math.round((estimatedTotalCents * emergencySurchargePercentage) / 100),
       emergency_sla_minutes: emergencySlaMinutes,
+      min_price_cents: null,
+      max_price_cents: null,
     };
   }
 

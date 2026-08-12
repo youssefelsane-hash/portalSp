@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode, OrderType } from '../entities/order.entity';
 
 export class CreateOrderDto {
@@ -71,4 +71,12 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(20)
   building_code?: string;
+
+  // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — لازم لخدمات pricing_model=formula بس
+  // (نفس شكل PricingEngineService.evaluate()'s rawFieldValues بالحرف). العميل بيجيبها من
+  // GET /services/:id/pricing-fields وبيملاها في فورم ديناميكي قبل ما يوصل هنا. لو الخدمة مش
+  // formula، الحقل ده بيتجاهَل بأمان في CatalogService.estimate().
+  @IsOptional()
+  @IsObject()
+  field_values?: Record<string, string | number | boolean>;
 }
