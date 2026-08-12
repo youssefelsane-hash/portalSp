@@ -21,16 +21,18 @@ import { OrdersService } from './orders.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
+import { OrderTeamService } from './order-team.service';
 import { OrderTrackingGateway } from './order-tracking.gateway';
 import { CancellationReason } from './entities/cancellation-reason.entity';
 import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderMedia } from './entities/order-media.entity';
+import { OrderTeamMember } from './entities/order-team-member.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderStatusHistory, OrderMedia, OrderItem, CancellationReason]),
+    TypeOrmModule.forFeature([Order, OrderStatusHistory, OrderMedia, OrderItem, OrderTeamMember, CancellationReason]),
     CustomersModule,
     CatalogModule,
     GeoModule,
@@ -53,6 +55,7 @@ import { OrderMedia } from './entities/order-media.entity';
     OrderAutoCancelService,
     OrderItemsService,
     OrderMediaService,
+    OrderTeamService,
     OrderTrackingGateway,
     AdminOrdersService,
     CancellationReasonsService,
