@@ -35,8 +35,8 @@
 
 | # | البند | الحالة | ملاحظات |
 |---|-------|--------|---------|
-| 8 | بروفايل الفني العام الكامل | ⏳ | تحتاج مراجعة: هل كل الحقول اللي الباك-إند بيرجّعها (شهادات، متوسط وقت وصول/إنجاز) معروضة فعليًا؟ |
-| 9 | الشهادات: Technician + Admin + Customer | ⏳ | Technician upload موجود (تفاصيل docs/08). Admin review UI؟ Customer display؟ محتاج فحص. |
+| 8 | بروفايل الفني العام الكامل | ✅ خلص | كانت فجوة حقيقية مؤكّدة: `avg_arrival_minutes`/`avg_completion_minutes`/`certificates` كانوا مختبرين حي بالباك-إند بس Dart model (`TechnicianPublicProfile.fromJson`) مكانتش بتقرأهم خالص. اتضافوا للموديل + الشاشة (سطر متوسطات + قسم شهادات). اتأكد حي: فني رفع شهادة، أدمن وافق، ظهرت بالحقول الصح في `GET /technicians/:id/profile`. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
+| 9 | الشهادات: Technician + Admin + Customer | 🔄 | Technician upload ✅ (موجود من قبل). Customer display ✅ خلص مع #8. **الباقي**: Admin review UI (نفس بند #29 تحت، لسه ⏳ — الأدمن دلوقتي بيوافق/يرفض عبر curl/Postman بس، مفيش شاشة). |
 | 10 | تقييم متقدم + صور بعد الخدمة | ⏳ | Backend يدعم `cleanliness_rating`/`after_photo_media_ids` — محتاج فحص الـCustomer UI. |
 | 11 | تجربة الضمان/إعادة الزيارة للعميل | ⏳ | Backend كامل (docs/08 §7) — محتاج فحص الـUI الفعلي. |
 | 12 | عرض أعضاء الفريق للعميل | ⏳ | `order_team_members` موجودة — محتاج فحص عرضها في Customer Order Detail. |
@@ -189,3 +189,8 @@
   اتأكد حي بالكامل عبر curl على خدمة "سباكة بيت كامل" الحقيقية (صفّين standard_data فعليين) — قايمة
   الأنواع + حساب مدة صح + حالات سلبية (خدمة تانية/قايمة فاضية). الفحوصات الثلاثة في apps/api عدّت
   (`tsc`/`nest build`/`jest`). نفس ملحوظة عدم توفّر Flutter SDK تنطبق على الكود Dart.
+
+- **2026-08-12 (بند #8 خلص)**: `TechnicianCertificate` model جديد + حقلين ناقصين (`avgArrivalMinutes`/
+  `avgCompletionMinutes`) اتضافوا لـ`TechnicianPublicProfile` في `apps/customer-app`. `TechnicianProfileScreen`
+  بقى بيعرض التلاتة. اتأكد حي بالكامل عبر curl (رفع شهادة حقيقي → موافقة أدمن → ظهور في البروفايل العام
+  بالحقول المتوقعة بالحرف). بيانات الاختبار اتعملها حذف بعد التأكيد.

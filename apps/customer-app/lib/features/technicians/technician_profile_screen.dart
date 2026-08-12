@@ -230,6 +230,24 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                           ),
                         ),
                       ),
+                      if (profile.avgArrivalMinutes != null || profile.avgCompletionMinutes != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            if (profile.avgArrivalMinutes != null)
+                              Text(
+                                'بيوصل خلال ~${profile.avgArrivalMinutes} دقيقة',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            if (profile.avgCompletionMinutes != null)
+                              Text(
+                                'بينفّذ الشغل في ~${profile.avgCompletionMinutes} دقيقة',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                          ],
+                        ),
+                      ],
                       if (profile.zones.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         Text('مناطق العمل', style: Theme.of(context).textTheme.titleMedium),
@@ -248,6 +266,21 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                             contentPadding: EdgeInsets.zero,
                             title: Text(s.nameAr),
                             trailing: Text(_formatEgp(s.basePriceCents)),
+                          ),
+                      ],
+                      if (profile.certificates.isNotEmpty) ...[
+                        // الشهادات (docs/08) — كانت فجوة موثّقة صراحة: الباك-إند بيرجّع الشهادات
+                        // المعتمدة بس (approved) من زمان، بس مفيش شاشة كانت بتعرضها للعميل خالص.
+                        const SizedBox(height: 16),
+                        Text('الشهادات', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        for (final cert in profile.certificates)
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.workspace_premium_outlined),
+                            title: Text(cert.title),
+                            subtitle: cert.issuerName != null ? Text(cert.issuerName!) : null,
+                            trailing: cert.issuedAt != null ? Text(cert.issuedAt!) : null,
                           ),
                       ],
                       if (_scheduleSlots.any((s) => s.isAvailable)) ...[
