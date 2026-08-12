@@ -36,11 +36,15 @@ void main() {
       'requires_photos': true,
       'allows_scheduling': true,
       'allows_emergency': false,
+      'allows_individual': true,
+      'allows_team': false,
       'min_technician_level': 'new',
     };
     final service = CatalogService.fromJson(json);
     expect(service.nameAr, 'تسليك مواسير');
     expect(service.basePriceCents, 30000);
     expect(service.allowsEmergency, false);
+    expect(service.allowsIndividual, true);
+    expect(service.allowsTeam, false);
   });
 }
