@@ -155,5 +155,12 @@ domestic-workers، recurring-orders، order-team، referrals):
 أو حلقات `for...of` مع `await` جوّاها) في كل الـcontrollers والـservices — صفر حالة تانية غير اللي
 اتصلحت في `buildings` قبل كده.
 
+**مراجعة إضافية للقلب المالي/الحالة الأساسي (بعد الـ4 مشاكل فوق)**: قراءة كاملة سطر بسطر لـ
+`WalletsService` (القيد المزدوج، ترتيب القفل، منع deadlock)، `OrderItemsService` (عرض السعر أثناء
+التنفيذ)، `OrderAutoCancelService`، و`TechnicianScheduleService` — **صفر مشاكل إضافية**. كل الأربعة
+مصمّمين بعناية حقيقية (قفل ذرّي، دفتر immutable، تحقق دفاعي مزدوج) — الأخطاء الأربعة اللي فوق كانت
+مركّزة في طبقة الـcontroller (فحوصات ملكية ناقصة) وحالة واحدة قديمة في `refundOrder()`، مش في
+الـprimitives المالية/الحالة الأساسية نفسها.
+
 مرجع كامل: `apps/api/src/modules/orders/README.md`، `apps/api/src/modules/matching/README.md`،
 `apps/api/src/modules/payments/README.md`.
