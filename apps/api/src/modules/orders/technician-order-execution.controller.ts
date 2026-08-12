@@ -10,6 +10,7 @@ import { toOrderResponseDto } from './dto/order-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
+import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
@@ -57,6 +58,18 @@ export class TechnicianOrderExecutionController {
   @Get(':id')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.toDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
+  }
+
+  // كانت فجوة موثّقة صراحة: الفني معندوش أي طريقة يلغي طلب اتقبله بنفسه لو حصل ظرف طارئ —
+  // اتقفلت. متاح بس قبل ما الشغل الفعلي يبدأ (accepted/technician_on_way/technician_arrived)،
+  // تفاصيل كاملة في OrdersService.technicianCancel().
+  @Post(':id/cancel')
+  async cancel(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelOrderAsTechnicianDto,
+  ) {
+    return this.toDto(await this.ordersService.technicianCancel(user.sub, id, dto));
   }
 
   @Post(':id/depart')
