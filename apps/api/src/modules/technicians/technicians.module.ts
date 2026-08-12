@@ -24,6 +24,7 @@ import { TechnicianStatsProcessor } from './technician-stats.processor';
 import { TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
 import { TechnicianStatsRecalculationListener } from './technician-stats-recalculation.listener';
 import { TechnicianStatsService } from './technician-stats.service';
+import { TechnicianScheduleService } from './technician-schedule.service';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianDocument } from './entities/technician-document.entity';
@@ -31,6 +32,7 @@ import { TechnicianLevelConfig } from './entities/technician-level-config.entity
 import { TechnicianLevelHistory } from './entities/technician-level-history.entity';
 import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
+import { TechnicianScheduleSlot } from './entities/technician-schedule-slot.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
 
 @Module({
@@ -44,6 +46,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
       TechnicianLevelHistory,
       TechnicianZone,
       TechnicianPortfolioLink,
+      TechnicianScheduleSlot,
       User,
     ]),
     AuditModule,
@@ -71,8 +74,9 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianStatsService,
     TechnicianStatsProcessor,
     TechnicianStatsRecalculationListener,
+    TechnicianScheduleService,
     storageServiceProvider,
   ],
-  exports: [TechniciansService, TechnicianCompaniesService, TechnicianLevelsService, TechnicianStatsService],
+  exports: [TechniciansService, TechnicianCompaniesService, TechnicianLevelsService, TechnicianStatsService, TechnicianScheduleService],
 })
 export class TechniciansModule {}

@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -21,16 +22,20 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
+import { TechnicianScheduleService } from './technician-schedule.service';
 import { PortfolioLinksService } from './portfolio-links.service';
 import { toTechnicianProfileResponseDto } from './dto/technician-profile-response.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 import { toPortfolioLinkResponseDto } from './dto/portfolio-link-response.dto';
+import { toScheduleSlotResponseDto } from './dto/schedule-slot-response.dto';
 import { AddPortfolioLinkDto } from './dto/add-portfolio-link.dto';
+import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { RequestAssistantDto } from './dto/request-assistant.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
+import { ScheduleQueryDto } from './dto/schedule-query.dto';
 
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -42,6 +47,7 @@ export class TechniciansController {
     private readonly techniciansService: TechniciansService,
     private readonly technicianDocumentsService: TechnicianDocumentsService,
     private readonly portfolioLinksService: PortfolioLinksService,
+    private readonly scheduleService: TechnicianScheduleService,
   ) {}
 
   @Get('me')
@@ -147,5 +153,28 @@ export class TechniciansController {
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     await this.portfolioLinksService.remove(profile.id, id);
     return null;
+  }
+
+  // جدولة الفني الحقيقية (docs/08 §2، ADR-0002) — الفني بيدير سلوتاته بنفسه (متاح/إجازة)،
+  // العميل بيشوفها للحجز عبر public-technicians.controller.ts (أخضر/أحمر بس، بدون تفاصيل داخلية).
+  @Get('schedule')
+  async listSchedule(@CurrentUser() user: JwtPayload, @Query() query: ScheduleQueryDto) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const slots = await this.scheduleService.listForTechnician(profile.id, query.from, query.to);
+    return slots.map(toScheduleSlotResponseDto);
+  }
+
+  @Post('schedule')
+  async createScheduleSlot(@CurrentUser() user: JwtPayload, @Body() dto: CreateScheduleSlotDto) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    return toScheduleSlotResponseDto(await this.scheduleService.createSlot(profile.id, dto));
+  }
+
+  @Delete('schedule/:id')
+  @HttpCode(HttpStatus.OK)
+  async deleteScheduleSlot(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    await this.scheduleService.deleteSlot(profile.id, id);
+    return { id, deleted: true };
   }
 }
