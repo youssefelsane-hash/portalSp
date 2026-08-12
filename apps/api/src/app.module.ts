@@ -35,6 +35,7 @@ import { PricingModule } from './modules/pricing/pricing.module';
 import { BuildingsModule } from './modules/buildings/buildings.module';
 import { DomesticWorkersModule } from './modules/domestic-workers/domestic-workers.module';
 import { AcademyModule } from './modules/academy/academy.module';
+import { OpsModule } from './modules/ops/ops.module';
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { AcademyModule } from './modules/academy/academy.module';
     FeatureFlagsModule,
     HealthModule,
     AcademyModule,
+    OpsModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

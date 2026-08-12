@@ -20,6 +20,12 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
 
+  // لازم عشان onModuleDestroy hooks (زي إغلاق اتصالات DB/Redis، وclearInterval بتاع
+  // QueueWatchdogService) تتنفّذ فعليًا وقت SIGTERM — من غير كده NestJS معندهوش أي listener
+  // للإشارة دي افتراضيًا، فsystemd/docker بيضطروا يستنوا TimeoutStopSec كامل ثم SIGKILL قسري
+  // بدل إغلاق نظيف. جزء من خطة supervisor/restart الكاملة (infra/systemd/baytak-api.service).
+  app.enableShutdownHooks();
+
   // كانت بَقّة حقيقية: LocalDiskStorageService بيكتب الملفات فعلياً وبيرجّع رابط `/uploads/...`،
   // بس مفيش حاجة كانت بتخدمها فوق HTTP — أي `file_url` راجع من order-media كان رابط ميت 404.
   // بره الـ globalPrefix عمداً (نفس شكل الرابط اللي already بيترجع من LocalDiskStorageService.save()).

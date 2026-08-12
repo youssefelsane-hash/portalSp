@@ -1,0 +1,47 @@
+# baytak — الجزء التاني (خارجي) من خطة "supervisor/health-check/restart" — الجزء الأول
+# (اكتشاف التعليق) هو apps/api/src/modules/ops/queue-watchdog.service.ts. لما الـwatchdog يكتشف
+# طابور BullMQ معلّق ويعمل process.exit(1)، الوحدة دي هي اللي بتعيد التشغيل تلقائيًا خلال ثواني —
+# systemd هو الاختيار المباشر هنا لأنه موجود على أي سيرفر Linux حقيقي بدون تبعية إضافية (عكس
+# pm2/forever اللي محتاجين npm package منفصل)، ومفيش container orchestration (Kubernetes/ECS)
+# مُعتمد للمشروع ده لحد دلوقتي.
+#
+# التركيب (على السيرفر، مش جوّه الكونتينر بتاع التطوير المحلي):
+#   sudo cp infra/systemd/baytak-api.service /etc/systemd/system/
+#   # عدّل WorkingDirectory/User/EnvironmentFile تحت حسب مسار النشر الفعلي على السيرفر
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now baytak-api
+#   sudo systemctl status baytak-api      # للتأكد
+#   journalctl -u baytak-api -f           # لمتابعة اللوج حي (بما فيه رسائل الـwatchdog)
+
+[Unit]
+Description=baytak API (NestJS)
+# لازم قاعدة البيانات وRedis يكونوا شغالين الأول — عدّل الأسماء دي لو بتستخدم وحدات systemd
+# منفصلة لـPostgres/Redis بدل docker-compose (أو احذف السطر ده لو بتديرهم بطريقة تانية).
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+# عدّل المسارات دي حسب مكان النشر الفعلي على السيرفر — دي قيم افتراضية معقولة بس مش نهائية.
+WorkingDirectory=/opt/baytak/apps/api
+EnvironmentFile=/opt/baytak/apps/api/.env
+ExecStart=/usr/bin/node dist/main.js
+User=baytak
+Group=baytak
+
+# **العنصر الأهم هنا** — إعادة تشغيل تلقائية أيًا كان سبب الخروج (بما فيه exit(1) بتاع الـwatchdog)،
+# مع فترة انتظار قصيرة عشان ميعملش restart loop سريع جدًا لو فيه مشكلة حقيقية مستمرة (زي DB واقعة).
+Restart=always
+RestartSec=5
+
+# حد أقصى لعدد محاولات إعادة التشغيل في فترة زمنية — لو تعدّى الحد ده (مشكلة حقيقية مستمرة، مش
+# انقطاع عابر)، systemd بيوقف ويسيب تنبيه واضح في اللوج بدل restart loop لا نهائي بيغرق السيرفر.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# وقت معقول للإغلاق الرشيق (NestJS's onModuleDestroy hooks، إقفال اتصالات DB/Redis نظيف) قبل
+# ما systemd يبعت SIGKILL قسري.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
