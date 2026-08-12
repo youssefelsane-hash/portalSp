@@ -48,6 +48,42 @@ class ScheduleSlot {
       );
 }
 
+// اختيار الفني قبل الحجز (docs/08 §3) — مطابق لـ
+// apps/api/src/modules/technicians/dto/technician-booking-list-response.dto.ts. قايمة فنيين
+// مؤهّلين للخدمة في منطقة العميل، مرتبة (تقييم ثم قرب ثم طلبات مكتملة) من الباك-إند.
+class TechnicianBookingListItem {
+  final String id;
+  final String fullName;
+  final String? avatarUrl;
+  final String? bio;
+  final double averageRating;
+  final int totalRatingsCount;
+  final int completedOrdersCount;
+  final double? distanceKm;
+
+  TechnicianBookingListItem({
+    required this.id,
+    required this.fullName,
+    required this.avatarUrl,
+    required this.bio,
+    required this.averageRating,
+    required this.totalRatingsCount,
+    required this.completedOrdersCount,
+    required this.distanceKm,
+  });
+
+  factory TechnicianBookingListItem.fromJson(Map<String, dynamic> json) => TechnicianBookingListItem(
+        id: json['id'] as String,
+        fullName: json['full_name'] as String,
+        avatarUrl: json['avatar_url'] as String?,
+        bio: json['bio'] as String?,
+        averageRating: (json['average_rating'] as num).toDouble(),
+        totalRatingsCount: json['total_ratings_count'] as int,
+        completedOrdersCount: json['completed_orders_count'] as int,
+        distanceKm: (json['distance_km'] as num?)?.toDouble(),
+      );
+}
+
 class TechnicianZoneInfo {
   final String id;
   final String nameAr;

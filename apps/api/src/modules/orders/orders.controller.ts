@@ -5,6 +5,7 @@ import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
@@ -40,6 +41,12 @@ export class OrdersController {
   @Post()
   async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateOrderDto) {
     return toOrderResponseDto(await this.ordersService.create(user.sub, dto));
+  }
+
+  // معاينة السعر الكامل قبل التأكيد (docs/08 §1/§2) — read-only، نفس منطق create() بالحرف.
+  @Post('preview')
+  async preview(@CurrentUser() user: JwtPayload, @Body() dto: PreviewOrderDto) {
+    return this.ordersService.previewPrice(user.sub, dto);
   }
 
   @Post(':id/cancel')

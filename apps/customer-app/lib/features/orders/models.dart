@@ -84,6 +84,73 @@ class Order {
       );
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/preview-order-response.dto.ts — تفصيل السعر
+// الكامل قبل تأكيد الحجز (docs/08 §1/§2). كل حقل هنا بيطابق بالحرف نفس القيم اللي POST /orders
+// هيحسبها فعليًا لو اتبعتت نفس المدخلات — مفيش رقم غامض ولا فرق بين المعروض والمحصّل.
+class OrderPricePreviewAddon {
+  final String id;
+  final String nameAr;
+  final int priceCents;
+
+  OrderPricePreviewAddon({required this.id, required this.nameAr, required this.priceCents});
+
+  factory OrderPricePreviewAddon.fromJson(Map<String, dynamic> json) => OrderPricePreviewAddon(
+        id: json['id'] as String,
+        nameAr: json['name_ar'] as String,
+        priceCents: json['price_cents'] as int,
+      );
+}
+
+class OrderPricePreview {
+  final int basePriceCents;
+  final int inspectionFeeCents;
+  final int? minPriceCents;
+  final int? maxPriceCents;
+  final int emergencySurchargeCents;
+  final int? emergencySlaMinutes;
+  final List<OrderPricePreviewAddon> addons;
+  final int addonsTotalCents;
+  final int subtotalBeforeDiscountCents;
+  final int discountCents;
+  final String? discountSource;
+  final int totalAmountCents;
+  final double? estimatedDurationDays;
+
+  OrderPricePreview({
+    required this.basePriceCents,
+    required this.inspectionFeeCents,
+    required this.minPriceCents,
+    required this.maxPriceCents,
+    required this.emergencySurchargeCents,
+    required this.emergencySlaMinutes,
+    required this.addons,
+    required this.addonsTotalCents,
+    required this.subtotalBeforeDiscountCents,
+    required this.discountCents,
+    required this.discountSource,
+    required this.totalAmountCents,
+    required this.estimatedDurationDays,
+  });
+
+  factory OrderPricePreview.fromJson(Map<String, dynamic> json) => OrderPricePreview(
+        basePriceCents: json['base_price_cents'] as int,
+        inspectionFeeCents: json['inspection_fee_cents'] as int,
+        minPriceCents: json['min_price_cents'] as int?,
+        maxPriceCents: json['max_price_cents'] as int?,
+        emergencySurchargeCents: json['emergency_surcharge_cents'] as int,
+        emergencySlaMinutes: json['emergency_sla_minutes'] as int?,
+        addons: (json['addons'] as List<dynamic>)
+            .map((e) => OrderPricePreviewAddon.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        addonsTotalCents: json['addons_total_cents'] as int,
+        subtotalBeforeDiscountCents: json['subtotal_before_discount_cents'] as int,
+        discountCents: json['discount_cents'] as int,
+        discountSource: json['discount_source'] as String?,
+        totalAmountCents: json['total_amount_cents'] as int,
+        estimatedDurationDays: (json['estimated_duration_days'] as num?)?.toDouble(),
+      );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts
 class CancellationReason {
   final String id;

@@ -39,7 +39,13 @@ export class CatalogController {
   @Public()
   @Post('services/:id/estimate')
   async estimate(@Param('id', ParseUUIDPipe) id: string, @Query() query: EstimateQueryDto) {
-    return this.catalogService.estimate(id, query.zone_id, query.technician_level, query.booking_mode === 'emergency');
+    return this.catalogService.estimate(
+      id,
+      query.zone_id,
+      query.technician_level,
+      query.booking_mode === 'emergency',
+      query.field_values,
+    );
   }
 
   @Public()

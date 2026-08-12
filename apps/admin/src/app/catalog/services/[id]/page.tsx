@@ -10,6 +10,7 @@ import type {
   CreateServiceAddonBody,
   CreateServiceStandardDataBody,
   EligibleTechnicianResponseDto,
+  PricingModel,
   RecordProductivityActualBody,
   ServiceAddonResponseDto,
   ServiceLevelPricingResponseDto,
@@ -33,6 +34,15 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { PricingBuilder } from './pricing-builder';
+
+const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
+  fixed: 'ثابت',
+  hourly: 'بالساعة',
+  per_unit: 'بالوحدة',
+  inspection_then_quote: 'كشف ثم عرض سعر',
+  formula: 'معادلة ديناميكية',
+};
 
 const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
   new: 'جديد',
@@ -327,6 +337,7 @@ export default function ServiceDetailPage() {
     const maxPrice = form.get('max_price') as string;
     const body: UpdateServiceBody = {
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
+      pricing_model: form.get('pricing_model') as UpdateServiceBody['pricing_model'],
       min_price_cents: minPrice ? Math.round(Number(minPrice) * 100) : undefined,
       max_price_cents: maxPrice ? Math.round(Number(maxPrice) * 100) : undefined,
       warranty_days: Number(form.get('warranty_days')),
@@ -380,6 +391,21 @@ export default function ServiceDetailPage() {
           <form onSubmit={handleUpdateServiceDetails} className="flex flex-col gap-3">
             <Label htmlFor="svc_desc">وصف مختصر</Label>
             <Input id="svc_desc" name="short_description_ar" defaultValue={service.short_description_ar ?? ''} />
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
+              <SelectNative id="svc_pricing_model" name="pricing_model" defaultValue={service.pricing_model} className="max-w-xs">
+                {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </SelectNative>
+              {service.pricing_model === 'formula' && (
+                <p className="text-sm text-muted-foreground">
+                  السعر الأساسي فوق مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي تحت.
+                </p>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_min_price">أقل سعر (جنيه)</Label>
@@ -844,6 +870,13 @@ export default function ServiceDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {service.pricing_model === 'formula' && (
+        <div className="mt-6">
+          <h2 className="mb-3 text-lg font-semibold">محرك التسعير الديناميكي</h2>
+          <PricingBuilder serviceId={id} />
+        </div>
+      )}
     </AppShell>
   );
 }

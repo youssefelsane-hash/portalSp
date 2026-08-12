@@ -28,6 +28,14 @@ export interface PriceEstimate {
    * نماذج التسعير (fixed/hourly/per_unit/inspection_then_quote) لأنها مش جزء من صيغتها أصلاً. */
   min_price_cents: number | null;
   max_price_cents: number | null;
+  /** معرّف صف `service_pricing_evaluations` (تدقيق/snapshot تاريخي لمعادلة formula وقت الحساب) —
+   * null لأي نموذج تسعير تاني. OrdersService.create() بيربطه بالطلب بعد ما يتأكّد فعلاً
+   * (linkEvaluationToOrder) عشان السعر النهائي يفضل قابل للتتبّع حتى لو الأدمن غيّر القواعد بعدين. */
+  pricing_evaluation_id: string | null;
+  /** المدة المتوقعة بالأيام — بس لو معادلة formula بتحدد `estimated_duration_days` صراحة
+   * (اختياري في FinalPriceFormulaPayload). null لباقي نماذج التسعير أو لو المعادلة مش بتحسبها
+   * (الإنتاجية القائمة على service_standard_data منفصلة تمامًا، راجع estimateDuration() تحت). */
+  estimated_duration_days: number | null;
 }
 
 const EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK = 20;
@@ -141,6 +149,8 @@ export class CatalogService {
         emergency_sla_minutes: emergencySlaMinutes,
         min_price_cents: result.minPriceCents,
         max_price_cents: result.maxPriceCents,
+        pricing_evaluation_id: result.evaluationId,
+        estimated_duration_days: result.estimatedDurationDays,
       };
     }
 
@@ -192,6 +202,8 @@ export class CatalogService {
           emergency_sla_minutes: emergencySlaMinutes,
           min_price_cents: null,
           max_price_cents: null,
+          pricing_evaluation_id: null,
+          estimated_duration_days: null,
         };
       }
     }
@@ -207,6 +219,8 @@ export class CatalogService {
       emergency_sla_minutes: emergencySlaMinutes,
       min_price_cents: null,
       max_price_cents: null,
+      pricing_evaluation_id: null,
+      estimated_duration_days: null,
     };
   }
 

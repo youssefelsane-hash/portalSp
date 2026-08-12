@@ -18,10 +18,13 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { PreviewOrderDto } from './dto/preview-order.dto';
+import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
 import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
@@ -43,6 +46,7 @@ export class OrdersService {
     private readonly techniciansService: TechniciansService,
     private readonly technicianCompaniesService: TechnicianCompaniesService,
     private readonly scheduleService: TechnicianScheduleService,
+    private readonly pricingEngineService: PricingEngineService,
     private readonly promoCodesService: PromoCodesService,
     private readonly buildingsService: BuildingsService,
     private readonly cancellationReasonsService: CancellationReasonsService,
@@ -330,6 +334,13 @@ export class OrdersService {
       return order;
     });
 
+    // ربط سجل تدقيق تسعير formula (لو الخدمة formula) بالطلب اللي اتأكّد فعلاً — snapshot
+    // السعر التاريخي (docs/08 §1، طلب تتبّع السعر النهائي حتى لو الأدمن غيّر القواعد بعدين).
+    // بره الـtransaction عمداً — تدقيق مش لازم يفشّل إنشاء الطلب لو فشل، ومحتاج order.id الحقيقي.
+    if (estimate.pricing_evaluation_id) {
+      await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, order.id);
+    }
+
     // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس. لازم
     // emitAsync (مش emit) هنا تحديدًا: بَقّة حقيقية اتلقطت واتصلحت — emit() عادي بيستدعي
     // الـ listeners من غير ما يستنى الـ promise بتاعهم (fire-and-forget)، يعني create() كانت
@@ -344,6 +355,92 @@ export class OrdersService {
     await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
 
     return order;
+  }
+
+  // معاينة السعر الحقيقي الكامل قبل تأكيد الحجز (docs/08 §1/§2) — كانت فجوة موثّقة صراحة:
+  // apps/customer-app كان بيعرض إما basePriceCents الثابت (نموذج fixed) أو سعر formula خام
+  // من غير رسوم الطوارئ/رسوم الفحص أصلاً (نموذج formula)، وأي منهم بلا الإضافات ولا الخصم —
+  // رقم غامض ممكن يختلف عن المحصّل فعليًا. الحل: دالة معاينة read-only بتكرر **بالحرف** نفس
+  // منطق تحديد المنطقة وحساب السعر في create() فوق (نفس catalogService.estimate() ونفس
+  // حساب addonsTotalCents)، من غير أي كتابة/transaction/قفل — مفيش حاجة بتتغيّر في الداتابيز.
+  // **قرار موثّق صراحة**: أي تعديل في منطق تسعير create() لازم يتعدّل هنا بالتوازي (نفس فلسفة
+  // PromotionsService.previewForOrder() الموجودة من قبل لمعاينة كود الخصم بس).
+  async previewPrice(userId: string, dto: PreviewOrderDto): Promise<PreviewOrderResponseDto> {
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
+    const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+
+    const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
+    const bookingModeAllowed =
+      bookingMode === BookingMode.INDIVIDUAL
+        ? service.allowsIndividual
+        : bookingMode === BookingMode.TEAM
+          ? service.allowsTeam
+          : service.allowsEmergency;
+    if (!bookingModeAllowed) {
+      throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+    }
+
+    if (!address.cityId) {
+      throw new ApiException(ErrorCode.ORDR_001, 'العنوان مش مربوط بمدينة', HttpStatus.BAD_REQUEST);
+    }
+    const [longitude, latitude] = address.location.coordinates;
+    const zone = await this.geoService.findZoneForPoint(address.cityId, latitude, longitude);
+    if (!zone) {
+      throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
+    }
+
+    const estimate = await this.catalogService.estimate(
+      service.id,
+      zone.id,
+      undefined,
+      bookingMode === BookingMode.EMERGENCY,
+      dto.field_values,
+    );
+    const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
+    const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
+
+    if (dto.promo_code && dto.building_code) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش كود خصم وكود عمارة مع بعض', HttpStatus.BAD_REQUEST);
+    }
+
+    const subtotalBeforeDiscountCents =
+      estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents + addonsTotalCents;
+
+    let discountCents = 0;
+    let discountSource: 'promo_code' | 'building' | null = null;
+    if (dto.promo_code) {
+      const isNewCustomer = await this.customerProfiles.isNewCustomer(customerProfile.id);
+      const { discountCents: preview } = await this.promoCodesService.preview(dto.promo_code, userId, {
+        serviceId: service.id,
+        zoneId: zone.id,
+        totalBeforeDiscountCents: subtotalBeforeDiscountCents,
+        inspectionFeeCents: estimate.inspection_fee_cents,
+        isNewCustomer,
+      });
+      discountCents = preview;
+      discountSource = 'promo_code';
+    } else if (dto.building_code) {
+      const building = await this.buildingsService.findActiveByCodeOrThrow(dto.building_code);
+      discountCents = Math.round((subtotalBeforeDiscountCents * Number(building.discountPercentage)) / 100);
+      discountSource = 'building';
+    }
+
+    return {
+      base_price_cents: estimate.estimated_total_cents,
+      inspection_fee_cents: estimate.inspection_fee_cents,
+      min_price_cents: estimate.min_price_cents,
+      max_price_cents: estimate.max_price_cents,
+      emergency_surcharge_cents: estimate.emergency_surcharge_cents,
+      emergency_sla_minutes: estimate.emergency_sla_minutes,
+      addons: addons.map((addon) => ({ id: addon.id, name_ar: addon.nameAr, price_cents: addon.priceCents })),
+      addons_total_cents: addonsTotalCents,
+      subtotal_before_discount_cents: subtotalBeforeDiscountCents,
+      discount_cents: discountCents,
+      discount_source: discountSource,
+      total_amount_cents: subtotalBeforeDiscountCents - discountCents,
+      estimated_duration_days: estimate.estimated_duration_days,
+    };
   }
 
   async cancel(userId: string, orderId: string, dto: CancelOrderDto): Promise<Order> {

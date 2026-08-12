@@ -1,4 +1,5 @@
-import { IsEnum, IsIn, IsOptional, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
 
 // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختار منهم قبل ما يشوف الخدمات.
@@ -40,4 +41,20 @@ export class EstimateQueryDto {
   @IsOptional()
   @IsIn(BOOKING_MODE_FILTER_VALUES)
   booking_mode?: BookingModeFilter;
+
+  // لازم لخدمات pricing_model=formula بس (docs/08 §1) — كانت فجوة حقيقية: الـcontroller كان
+  // بيتجاهل field_values تمامًا حتى لو اتبعتت، فالمعاينة عبر endpoint ده كانت بترجع صفر لأي
+  // خدمة formula بينما POST /orders نفسه كان محسوب صح. نفس نمط ValidatePromoCodeQueryDto
+  // بالحرف — الـendpoint ده POST بس بلا body (query بس)، فـfield_values بتوصل كـJSON string.
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  })
+  @IsObject()
+  field_values?: Record<string, string | number | boolean>;
 }

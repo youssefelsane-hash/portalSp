@@ -1,3 +1,4 @@
+import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
 import 'models.dart';
 
@@ -5,6 +6,15 @@ class TechniciansRepository {
   final AuthRepository auth;
 
   TechniciansRepository(this.auth);
+
+  // اختيار الفني قبل الحجز (docs/08 §3) — @Public() في الباك-إند (GET /services/:id/technicians)،
+  // بس محتاج address_id عشان يحسب المسافة/يفلتر على المنطقة. كانت فجوة موثّقة صراحة: الـendpoint
+  // ده مختبر حي من سيشن سابقة بس مفيش أي شاشة في apps/customer-app بتناديه — العميل مكانش يقدر
+  // يختار فني بنفسه قبل الحجز أصلاً، auto-match بس. اتقفلت (TechnicianSelectionScreen).
+  Future<List<TechnicianBookingListItem>> listForService(String serviceId, String addressId) async {
+    final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId');
+    return items.map(TechnicianBookingListItem.fromJson).toList();
+  }
 
   Future<TechnicianPublicProfile> fetchPublicProfile(String technicianId) async {
     final data = await auth.authedRequest('GET', '/technicians/$technicianId/profile');

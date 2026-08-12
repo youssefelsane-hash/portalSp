@@ -31,7 +31,7 @@ export class PricingEngineService {
     serviceId: string,
     rawFieldValues: Record<string, string | number | boolean>,
     orderId?: string,
-  ): Promise<PricingEvaluationResult> {
+  ): Promise<PricingEvaluationResult & { evaluationId: string | null }> {
     const fields = await this.fieldsService.listForService(serviceId);
     const activeFields = fields.filter((f) => f.isActive);
     const fieldValues = this.validateAndNormalizeFieldValues(activeFields, rawFieldValues);
@@ -76,9 +76,12 @@ export class PricingEngineService {
     };
 
     // تسجيل للتدقيق (docs/08 §1.3) — بره أي transaction، فشله ميعطلش رجوع السعر للعميل، نفس
-    // فلسفة AuditLogService.record() (تسجيل التدقيق مهم بس مش أهم من العملية نفسها).
+    // فلسفة AuditLogService.record() (تسجيل التدقيق مهم بس مش أهم من العملية نفسها). الصف ده هو
+    // الـsnapshot الوحيد اللي بيحفظ القيم/السعر المحسوب لحظة التقييم — لو الأدمن غيّر قواعد
+    // التسعير بعد كده، الصف ده بيفضل يوضّح "السعر ده اتحسب إزاي وقتها" (تتبّع تاريخي حقيقي).
+    let evaluationId: string | null = null;
     try {
-      await this.evaluations.save(
+      const saved = await this.evaluations.save(
         this.evaluations.create({
           serviceId,
           orderId: orderId ?? null,
@@ -89,11 +92,26 @@ export class PricingEngineService {
           computedAssistants: result.requiredAssistants,
         }),
       );
+      evaluationId = saved.id;
     } catch {
       // تجاهل — التسجيل للتدقيق بس، مش لازم يكسر رجوع السعر الحقيقي للعميل.
     }
 
-    return result;
+    return { ...result, evaluationId };
+  }
+
+  /**
+   * ربط صف تدقيق تسعير موجود بالطلب اللي اتعمل منه — `evaluate()` بتتنادى قبل transaction
+   * إنشاء الطلب (order.id لسه مش موجود وقتها، راجع orders/README.md)، فده بيقفل الحلقة بعد ما
+   * الطلب يتأكّد فعلاً. فشل هنا (مثلاً orderId مش صحيح) **مش لازم يفشّل إنشاء الطلب نفسه** —
+   * نفس فلسفة التسجيل الأصلي، تتبّع مهم بس مش أهم من العملية الحقيقية للعميل.
+   */
+  async linkEvaluationToOrder(evaluationId: string, orderId: string): Promise<void> {
+    try {
+      await this.evaluations.update({ id: evaluationId }, { orderId });
+    } catch {
+      // تجاهل — نفس فلسفة try/catch في evaluate() فوق.
+    }
   }
 
   private validateAndNormalizeFieldValues(

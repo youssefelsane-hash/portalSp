@@ -9,6 +9,7 @@ export * from './payments';
 export * from './promotions';
 export * from './orders';
 export * from './catalog';
+export * from './pricing';
 export * from './settings';
 export * from './audit';
 export * from './feature-flags';

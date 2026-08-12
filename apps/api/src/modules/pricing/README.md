@@ -2,7 +2,7 @@
 
 حساب السعر والعمولة والخصم. يستخدم `service_zone_pricing` و`service_level_pricing` (قاموس §5.3-5.4) للتسعير الثابت العادي (موجود في `catalog` module نفسه). **تحديث 2026-08-11**: الموديول ده بقى فيه كمان محرك التسعير الديناميكي (Pricing Engine) — راجع `docs/08-pricing-engine-and-platform-vision.md` §1 و`docs/adr/0001-dynamic-pricing-engine.md` قبل أي تعديل.
 
-## محرك التسعير الديناميكي (Pricing Engine) — ✅ Phase 1 backend خلص
+## محرك التسعير الديناميكي (Pricing Engine) — ✅ خلص بالكامل end-to-end (Backend + Admin UI + تتبّع السعر بالطلب، 2026-08-12)
 
 **المشكلة**: خدمات زي المحارة/السباكة/الكهرباء سعرها بيتوقف على متغيرات كتير (مساحة، سمك، دور، نوع التنفيذ...) ومختلفة جذريًا من صنعة لصنعة — `services.base_price_cents` الثابت مش كافي. المالك طلب صراحة إن الأدمن يقدر "يبني" حرفة جديدة بحقول ومعادلة مخصصة من غير أي تعديل كود أو deploy.
 
@@ -47,7 +47,9 @@
 - `CreateOrderDto` بقى فيه `field_values?: Record<string, string|number|boolean>` اختياري، بيتبعت مباشرة من `orders.service.ts`'s `create()` لـ`estimate()`. لو الخدمة formula وفيها حقل مطلوب ناقص، نفس خطأ `PricingEngineService.validateAndNormalizeFieldValues()` (`VAL_001` بوضوح) بيترفض **قبل** أي كتابة في transaction إنشاء الطلب — مفيش صف orphan.
 - `ValidatePromoCodeQueryDto` (`GET /promo-codes/:code/validate`) بقى فيه `field_values?` كمان — بما إنه `GET` بلا body، بيوصل كـ JSON string جوّه الـ query ويتفسّر بـ`@Transform`؛ JSON غير صالح بيتسيب كـ string عمدًا عشان `@IsObject()` يرفضه برسالة 400 واضحة بدل ما يتبلع بصمت. `previewForOrder()` بتستخدمها بنفس منطق `create()` بالحرف.
 
-**قرار موثّق صراحة (مش سهو)**: `PricingEngineService.evaluate()` بتتنادى **قبل** transaction إنشاء الطلب (زي حساب `zone_pricing` بالظبط أصلاً)، فسجل التدقيق `service_pricing_evaluations` بتاع لحظة إنشاء الطلب بيتسجّل بـ`order_id=NULL` (مش رابط بالطلب اللي هيتولد بعد كده) — قرار مقصود لتجنّب نداء تاني للمعادلة جوّه الـ transaction (ممكن يدّي نتيجة مختلفة لو القواعد اتغيّرت بين اللحظتين، وتعقيد إضافي بلا داعي واضح).
+**قرار موثّق صراحة (مش سهو)**: `PricingEngineService.evaluate()` بتتنادى **قبل** transaction إنشاء الطلب (زي حساب `zone_pricing` بالظبط أصلاً)، فسجل التدقيق `service_pricing_evaluations` بتاع لحظة إنشاء الطلب بيتسجّل الأول بـ`order_id=NULL` — قرار مقصود لتجنّب نداء تاني للمعادلة جوّه الـ transaction (ممكن يدّي نتيجة مختلفة لو القواعد اتغيّرت بين اللحظتين، وتعقيد إضافي بلا داعي واضح).
+
+**تتبّع السعر التاريخي (Price Traceability) — ✅ خلص (2026-08-12)**: المالك طلب صراحة إن "السعر النهائي للطلب لازم يفضل قابل للتتبّع حتى لو الأدمن غيّر قواعد التسعير بعدين". الحل: `evaluate()` بترجّع دلوقتي `evaluationId` (id الصف اللي اتسجّل في `service_pricing_evaluations`) فوق `PricingEvaluationResult` العادي (نوع فرعي إضافي، مش تغيير في الـcontract العام). `CatalogService.estimate()` بتمرّر `pricing_evaluation_id` ده لحد `PriceEstimate`. `OrdersService.create()` بعد ما الـtransaction تخلص (وبقى عندنا `order.id` حقيقي)، بتنادي `PricingEngineService.linkEvaluationToOrder(evaluationId, order.id)` — `UPDATE` بسيط بره الـtransaction عمدًا (نفس فلسفة `AuditLogService.record()`: تدقيق مش لازم يفشّل إنشاء الطلب لو فشل الربط). **اتأكد حي**: طلب حقيقي اتعمل لخدمة formula بـ`field_values:{area:10,wall_type:internal}` → `estimated_price_cents:1400` (مطابق لناتج المعادلة بالظبط)، وصف `service_pricing_evaluations` المرتبط بيه اتحقق إن `order_id` بقى معبّى بـid الطلب (مش NULL) فورًا بعد الإنشاء، بينما صف preview سابق (من Admin Pricing Builder، بدون طلب) فضل `order_id=NULL` صح.
 
 **اختبار حي كامل** (خدمة formula حقيقية جديدة عبر `POST /admin/services` + 4 حقول + 3 قواعد تسعير، بنفس مثال المحارة في `docs/08` §1.8: مساحة×سعر_المتر[نوع الحيط] + 15% لو السمك 3سم + 500 قرش لو الدور>5):
 - `POST /services/:id/evaluate-price` بـ`{area:10, wall_type:internal, thickness_cm:"3", floor:6}` → `price_cents:2110` (10×140=1400 + 15%=210 + 500 دور = 2110) ✓.
@@ -59,9 +61,9 @@
 
 **ملحوظة جانبية اتلاحظت أثناء الاختبار (مش بَقّة في الكود الجديد، سلوك موجود من Phase 1)**: حقل مُعرَّف `is_required:false` على مستوى `service_pricing_fields` (زي `floor` في المثال) لسه بيتطلّب قيمة لو معادلة `final_price` بتستخدمه جوّه شرط `if`/`gt` — `formula-evaluator.ts` بيرفض المقارنة `undefined` صراحة. ده سلوك المحرك الأصلي من Phase 1 (`formula-evaluator.spec.ts` بيغطيه)، مش حاجة اتغيّرت هنا — تصميم المعادلة نفسها (اختيار الأدمن يستخدم حقل "اختياري" جوّه شرط "إجباري" منطقيًا) هي المسؤولة، مش خطأ في المحرك.
 
-### مرحلة 2 — لسه فاضية عمدًا (`docs/08` §1.7)
+### مرحلة 2 — ✅ خلصت (2026-08-12) — Admin Pricing Builder UI
 
-واجهة "Builder" بصرية في `apps/admin` (سحب وإفلات للحقول، بناء المعادلة بـ blocks، Preview بقيم تجريبية قبل الحفظ) — شغل frontend كبير مستقل، الـ backend/API دلوقتي كافي يخلي المحرك شغال ومختبر حي بالكامل عبر REST مباشر لحد ما الواجهة تتبني.
+واجهة "Builder" في `apps/admin` (`app/catalog/services/[id]/pricing-builder.tsx`, component `PricingBuilder`) — مش سحب وإفلات (تعقيد غير مبرر لعدد الحقول المتوقع)، فورم منظّم بأقسام واضحة: إدارة حقول الفورم الديناميكي (14 نوع، مع options/min/max/unit حسب النوع)، ثوابت التسعير، جداول البحث (lookup tables)، محرر JSON للمعادلة النهائية (`final_price`) مع رسالة أمان صريحة إن مفيش `eval`/JavaScript حر — JSON فقط بعمليات whitelist، وقسم معاينة/اختبار حي بيرسم حقول إدخال حسب نوع كل حقل ويستدعي `POST /services/:id/evaluate-price` الحقيقي (نفس الـendpoint اللي التطبيقات هتستخدمه). **اتأكد حي بالكامل عبر متصفح حقيقي (Playwright)**: تسجيل دخول أدمن → إنشاء خدمة `pricing_model=formula` → إضافة حقلين (`area` رقمي، `wall_type` dropdown) → إضافة جدول بحث (`price_per_meter`) → كتابة وحفظ معادلة `multiply(field_ref(area), lookup_ref(price_per_meter, wall_type))` → معاينة بـ`area=10, wall_type=internal` → السعر المعروض `14.00 ج.م.` (=1400 قرش=10×140) ✓ مطابق تمامًا لناتج نفس المعادلة لما استُخدمت في `POST /orders` حقيقي بعد كده. Type جديد `PricingModel='formula'` كان ناقص أصلاً من `packages/shared-types` — ده كان بيمنع الأدمن حتى من *إنشاء* خدمة formula من الواجهة أساسًا (فجوة اتقفلت هنا كمان).
 
 ### اختبار حي كامل (2026-08-11)
 
