@@ -9,6 +9,8 @@ export enum UserType {
   TECHNICIAN = 'technician',
   ADMIN = 'admin',
   PARTNER = 'partner',
+  // قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — شغالة/مربية/مقيمة، كيان مستقل عن technician.
+  DOMESTIC_WORKER = 'domestic_worker',
 }
 
 @Entity('users')

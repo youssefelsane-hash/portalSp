@@ -18,7 +18,9 @@ export class WalletProvisioningListener {
         ? WalletOwnerType.CUSTOMER
         : event.userType === UserType.TECHNICIAN
           ? WalletOwnerType.TECHNICIAN
-          : null;
+          : event.userType === UserType.DOMESTIC_WORKER
+            ? WalletOwnerType.DOMESTIC_WORKER
+            : null;
     if (!ownerType) return;
 
     await this.walletsService.getOrCreateWallet(event.userId, ownerType);
