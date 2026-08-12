@@ -39,6 +39,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _paying = false;
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
+  List<TeamMember> _teamMembers = [];
   // مفتاح مستقر لكل طريقة دفع (يتولّد مرة واحدة بس، يفضل زي ما هو خلال أي retry لنفس المحاولة) —
   // راجع التعليق الكامل في payments_repository.dart's generateIdempotencyKey().
   String? _walletIdempotencyKey;
@@ -61,6 +62,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (mounted) setState(() => _order = order);
       if (order.orderStatus == 'awaiting_quote_approval') {
         await _loadQuoteItems();
+      }
+      if (order.bookingMode == 'team' && order.technicianId != null) {
+        final members = await _repository.fetchTeamMembers(widget.orderId);
+        if (mounted) setState(() => _teamMembers = members);
       }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -360,6 +365,38 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                           icon: const Icon(Icons.person_outline),
                           label: const Text('بروفايل الفني'),
+                        ),
+                      ],
+                      if (_teamMembers.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('فريق الشغل', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 8),
+                                for (final member in _teamMembers)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                    child: Row(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 16,
+                                          backgroundImage:
+                                              member.avatarUrl != null ? NetworkImage(member.avatarUrl!) : null,
+                                          child: member.avatarUrl == null ? const Icon(Icons.person, size: 16) : null,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(child: Text(member.fullName)),
+                                        Text(member.roleLabel, style: Theme.of(context).textTheme.bodySmall),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                       if (_activeTrackingStatuses.contains(order.orderStatus)) ...[

@@ -92,6 +92,13 @@ class OrdersRepository {
     return items.map(OrderMedia.fromJson).toList();
   }
 
+  // توزيع أدوار الفريق (docs/08 §5) — كانت فجوة موثّقة صراحة: الـendpoint موجود من زمان بس
+  // مفيش UI كان بينادي عليه. مفيد بس لطلبات booking_mode=team، بيرجع قايمة فاضية غير كده.
+  Future<List<TeamMember>> fetchTeamMembers(String orderId) async {
+    final items = await auth.authedRequestList('/orders/$orderId/team-members');
+    return items.map(TeamMember.fromJson).toList();
+  }
+
   Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,
