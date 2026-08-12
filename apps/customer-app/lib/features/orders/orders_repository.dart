@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
 import '../catalog/models.dart';
@@ -33,6 +35,9 @@ class OrdersRepository {
     List<String>? addonIds,
     String? requestedTechnicianId,
     String? requestedTechnicianCompanyId,
+    // محرك التسعير الديناميكي (docs/08 §1) — لازم لخدمات pricing_model=formula بس، القيم اللي
+    // العميل ملاها في الفورم الديناميكي (CreateOrderScreen._buildPricingFieldWidget).
+    Map<String, dynamic>? fieldValues,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
@@ -48,20 +53,29 @@ class OrdersRepository {
       if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
       // "اعتماد" — تفضيل شركة/فريق بعينه، متاح بس مع bookingMode=team (الباك-إند بيرفض غير كده).
       if (requestedTechnicianCompanyId != null) 'requested_technician_company_id': requestedTechnicianCompanyId,
+      if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
     });
     return Order.fromJson(data!);
   }
 
   // معاينة خصم كود قبل الحجز — /promo-codes/:code/validate عامة بس محتاجة توكن عادي
   // (مش Public()، أي مستخدم مسجّل). بترجع الكود والخصم بالقرش لو الكود صالح.
+  // fieldValues لازمة لخدمات pricing_model=formula بس (نفس منطق create()) — من غيرها،
+  // معاينة الخصم لخدمة formula هترفض بخطأ "حقل مطلوب" واضح (نفس اللي POST /orders هيرفضه).
   Future<Map<String, dynamic>> validatePromoCode({
     required String code,
     required String serviceId,
     required String addressId,
+    Map<String, dynamic>? fieldValues,
   }) async {
+    final query = {
+      'service_id': serviceId,
+      'address_id': addressId,
+      if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': jsonEncode(fieldValues),
+    };
     final data = await auth.authedRequest(
       'GET',
-      '/promo-codes/$code/validate?service_id=$serviceId&address_id=$addressId',
+      '/promo-codes/$code/validate?${Uri(queryParameters: query).query}',
     );
     return data!;
   }

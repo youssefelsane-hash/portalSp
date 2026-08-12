@@ -24,6 +24,7 @@ export class PromotionsController {
       code,
       query.service_id,
       query.address_id,
+      query.field_values,
     );
     return { promo_code: toPromoCodeResponseDto(promoCode), discount_cents: discountCents };
   }

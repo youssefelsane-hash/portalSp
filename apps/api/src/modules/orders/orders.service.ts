@@ -104,7 +104,13 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
 
-    const estimate = await this.catalogService.estimate(service.id, zone.id, undefined, bookingMode === BookingMode.EMERGENCY);
+    const estimate = await this.catalogService.estimate(
+      service.id,
+      zone.id,
+      undefined,
+      bookingMode === BookingMode.EMERGENCY,
+      dto.field_values,
+    );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
 

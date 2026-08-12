@@ -33,6 +33,8 @@ Future<http.Response> _send(
       return http.get(uri, headers: headers);
     case 'POST':
       return http.post(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
+    case 'PUT':
+      return http.put(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
     case 'PATCH':
       return http.patch(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
     case 'DELETE':
