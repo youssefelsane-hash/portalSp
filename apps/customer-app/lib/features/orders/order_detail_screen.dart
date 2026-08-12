@@ -332,6 +332,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         MaterialPageRoute(
           builder: (_) => TechnicianSelectionScreen(
             service: service,
+            excludeTechnicianId: order.requestedTechnicianId,
             onManualSelect: (requestedTechnicianId) async {
               Navigator.of(context).pop();
               setState(() => _requestingRematch = true);

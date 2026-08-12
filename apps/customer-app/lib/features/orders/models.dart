@@ -47,6 +47,9 @@ class Order {
   final String? warrantyExpiresAt;
   // موجود بس لو الطلب ده نفسه "إعادة زيارة" — بيشاور على الطلب الأصلي.
   final String? originalOrderId;
+  // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
+  // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
+  final String? requestedTechnicianId;
 
   Order({
     required this.id,
@@ -69,6 +72,7 @@ class Order {
     this.address,
     this.warrantyExpiresAt,
     this.originalOrderId,
+    this.requestedTechnicianId,
   });
 
   bool get isUnderWarranty =>
@@ -97,6 +101,7 @@ class Order {
             : null,
         warrantyExpiresAt: json['warranty_expires_at'] as String?,
         originalOrderId: json['original_order_id'] as String?,
+        requestedTechnicianId: json['requested_technician_id'] as String?,
       );
 }
 

@@ -761,7 +761,13 @@ export class OrdersService {
       lockedOrder.orderStatus = newStatus;
       lockedOrder.technicianId = null;
       lockedOrder.assignedAt = null;
-      lockedOrder.requestedTechnicianId = null; // التفضيل القديم بقى ملوش معنى بعد الإلغاء
+      // AUTO_REMATCH: نصفّرها عشان dispatchNextRound() ميحاولش يقيّد الجولة الأولى على الفني
+      // اللي اتستبعد بالفعل (استعلام إضافي بلا فايدة، مش خطأ، بس تنظيف). MANUAL_RESELECTION_REQUIRED:
+      // نسيبها زي ما هي عمداً — القيمة دلوقتي بتشاور على الفني اللي لغى بالذات، وapps/customer-app
+      // بيستخدمها (exclude_technician_id) عشان القايمة متعرضهوش تاني في شاشة اختيار البديل.
+      if (recoveryAction === CancellationRecoveryAction.AUTO_REMATCH) {
+        lockedOrder.requestedTechnicianId = null;
+      }
       await manager.save(lockedOrder);
 
       await manager.save(

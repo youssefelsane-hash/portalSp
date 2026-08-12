@@ -92,7 +92,7 @@ export class CatalogController {
   @Public()
   @Get('services/:id/technicians')
   async listTechniciansForService(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListTechniciansForServiceDto) {
-    const items = await this.techniciansService.listForServiceBooking(id, query.address_id);
+    const items = await this.techniciansService.listForServiceBooking(id, query.address_id, query.exclude_technician_id);
     return items.map(toTechnicianBookingListItemResponseDto);
   }
 }

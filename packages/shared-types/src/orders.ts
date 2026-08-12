@@ -32,6 +32,8 @@ export interface OrderResponseDto {
   // الحقول دي من زمان (order-response.dto.ts) بس النوع هنا كان ناقصهم، فـapps/admin مكانش
   // بيعرضهم خالص رغم إنهم موجودين فعليًا في كل رد GET /admin/orders/:id.
   booking_mode: string;
+  /** سياسة إلغاء الفني (docs/10) — لو awaiting_technician_reselection، بيشاور على الفني اللي لغى. */
+  requested_technician_id: string | null;
   order_status: OrderStatus;
   problem_description: string | null;
   customer_notes: string | null;

@@ -22,7 +22,10 @@ class TechnicianSelectionScreen extends StatefulWidget {
   // السلوك الأصلي (اختيار فني قبل حجز جديد).
   final void Function(String? requestedTechnicianId)? onManualSelect;
 
-  const TechnicianSelectionScreen({super.key, required this.service, this.onManualSelect});
+  // سياسة إلغاء الفني (docs/10) — لو اتبعت (وضع إعادة الاختيار)، القايمة مش هتعرض الفني ده.
+  final String? excludeTechnicianId;
+
+  const TechnicianSelectionScreen({super.key, required this.service, this.onManualSelect, this.excludeTechnicianId});
 
   @override
   State<TechnicianSelectionScreen> createState() => _TechnicianSelectionScreenState();
@@ -64,7 +67,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     if (address == null) return;
     setState(() => _loading = true);
     try {
-      final items = await _repository.listForService(widget.service.id, address.id);
+      final items = await _repository.listForService(
+        widget.service.id,
+        address.id,
+        excludeTechnicianId: widget.excludeTechnicianId,
+      );
       if (mounted) setState(() => _technicians = items);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
