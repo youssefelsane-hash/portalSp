@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
+import '../account/account_screen.dart';
 import '../chat/chat_screen.dart';
-import '../loyalty/loyalty_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
-import '../recurring/recurring_orders_screen.dart';
-import '../referrals/referrals_screen.dart';
 import 'categories_screen.dart';
 import 'models.dart';
 
@@ -62,30 +60,15 @@ class BookingModeScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const ChatScreen.support()),
               ),
             ),
+            // حساب/سجل عميل موحّد (docs/08 §Retention) — كانت فجوة موثّقة صراحة: طلباتي/عناويني/
+            // ولاء/ترشيح/متكررة كانت متبعثرة في أيقونات AppBar منفصلة بلا نقطة تجميع واحدة —
+            // اتجمّعوا في AccountScreen واحدة (تجميع واجهة بحت، صفر backend جديد).
             IconButton(
-              icon: const Icon(Icons.card_giftcard_outlined),
-              tooltip: 'رشّح صحابك',
+              icon: const Icon(Icons.person_outline),
+              tooltip: 'حسابي',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReferralsScreen()),
+                MaterialPageRoute(builder: (_) => const AccountScreen()),
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.repeat),
-              tooltip: 'الطلبات المتكررة',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const RecurringOrdersScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.stars_outlined),
-              tooltip: 'نقاط الولاء',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const LoyaltyScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () => context.read<AuthRepository>().logout(),
             ),
           ],
         ),
