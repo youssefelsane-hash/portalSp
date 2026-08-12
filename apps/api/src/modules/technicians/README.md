@@ -34,6 +34,36 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 لـ documents_submitted") — يثبت إن الـ state machine بتمنع الرجوع للخلف مش بس بتسمح بالتقدّم.
 عميل حاول ينفّذ أي خطوة اترفض 403 قبل حتى يوصل لمنطق النقل.
 
+### تسجيل/onboarding فني جديد من `apps/technician-app` — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)
+
+**الفجوة اللي اتلقطت**: كل السابق (الحالات الوسيطة، رفع المستندات `POST/GET /technician/documents`،
+`GET /technician/me`) مختبر حي في الباك-إند — بس `apps/technician-app` معندهوش شاشة "تسجيل حساب جديد"
+أصلاً (`AuthRepository` فيه `verifyOtp()` بس، مفيش `register()`)، ومفيش أي شاشة بتنادي
+`GET/POST /technician/documents` خالص. فني جديد كان (لو سجّل عبر Postman/curl) بيوصل مباشرة لـ
+`AvailableOrdersScreen` الفاضية للأبد — `matching.service.ts` بيرفض أي فني `verification_status != approved`
+(`WHERE tp.verification_status = 'approved'`)، فمفيش أي طريقة يعرف بيها ليه، ولا طريقة يكمّل بيها.
+
+**الحل**:
+- `AuthRepository.register()` جديدة (`user_type='technician'` ثابت) — نفس نمط `apps/customer-app`
+  بالحرف (راجع `apps/customer-app/README.md`). `LoginScreen` بقى فيها مود تسجيل جديد + اقتراح تلقائي
+  لو فني حاول دخول برقم مش مسجّل.
+- `OnboardingScreen` جديدة بالكامل (`features/onboarding/`) — بتعرض `verification_status` الحالي
+  بترجمة عربية واضحة (٨ حالات، من `pending` لحد `approved`/`rejected`/`suspended`)، فورم رفع مستند
+  (نوع المستند من `TechnicianDocumentType` السبعة + `image_picker` لالتقاط/اختيار صورة)، وقايمة
+  المستندات المرفوعة بحالة مراجعتها (`review_status` + سبب الرفض لو موجود).
+- `main.dart`'s `_AuthGate` بقى فيه `_VerificationGate` جديدة — بتفحص `GET /technician/me` مرة واحدة
+  بعد تسجيل الدخول، وتوجّه لـ`OnboardingScreen` لو `verification_status != 'approved'` بدل
+  `AvailableOrdersScreen` مباشرة. **فشل آمن متعمّد**: لو الفحص فشل (مشكلة شبكة عابرة)، بيفضّل
+  `AvailableOrdersScreen` العادية — الباك-إند (`matching.service.ts`) أصلاً بيرفض أي فني مش approved
+  بغض النظر، فمفيش مخاطرة أمنية، بس مفيش قفل غير ضروري لفني approved فعلاً بسبب خطأ تقني عابر.
+
+**اتأكد حي بالكامل عبر curl** (Flutter SDK مش متاح في بيئة السيشن دي — تفاصيل كاملة في
+`apps/customer-app/README.md`، نفس القيد ينطبق هنا): تسجيل فني جديد → `verification_status:"pending"`
+فورًا من `GET /technician/me`؛ رفع مستند حقيقي (PNG) عبر `POST /technician/documents` (multipart،
+نفس شكل `AuthRepository.authedUpload()`) → رجع بنجاح بشكل `TechnicianDocumentResponseDto` الكامل؛
+`GET /technician/documents` بعد كده رجّع المستند في القايمة. بيانات الاختبار اتعملها حذف/soft-delete
+بعد التأكيد.
+
 ### مناطق عمل الفني (`technician_zones`) — كانت فجوة موثّقة ("يدوي عبر SQL")، اتقفلت
 
 `GET/POST /admin/technicians/:id/zones` + `DELETE /admin/technicians/:id/zones/:zoneId` — نفس نمط

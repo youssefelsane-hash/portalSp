@@ -28,7 +28,7 @@
 | 3 | الجدولة (Scheduler) end-to-end | ✅ اتأكد حي | Backend + Customer App + Technician App اتعملوا في سيشن سابقة (PR #65، #66) — اختبار حي كامل شامل سباق حقيقي. |
 | 4 | اختيار الفني قبل الحجز | ✅ خلص | كانت فجوة UI حقيقية مؤكّدة: الـendpoint مختبر حي بس مفيش أي شاشة بتناديه — العميل مكانش يقدر يختار فني قبل الحجز أصلاً. `TechnicianSelectionScreen` جديدة (customer-app) بتظهر بعد اختيار الخدمة لـ`booking_mode=individual`، "اختار لي تلقائيًا" أو كروت فنيين حقيقية. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
 | 5 | تسجيل عميل جديد (مش OTP login بس) | ✅ خلص | `LoginScreen` بقى فيها مود تسجيل جديد كامل (اسم + كود ترشيح اختياري + OTP بـ`purpose=register`) + اقتراح تلقائي للتحويل لو العميل حاول دخول برقم مش مسجّل. تفاصيل في `apps/customer-app/README.md`. |
-| 6 | تسجيل/onboarding فني جديد | ⏳ | محتاج تأكيد نفس الموضوع من ناحية Technician App. |
+| 6 | تسجيل/onboarding فني جديد | ✅ خلص | كانت فجوة أعمق من customer-app: مفيش تسجيل ولا رفع مستندات خالص — فني جديد كان بيوصل لشاشة طلبات فاضية للأبد من غير تفسير. `OnboardingScreen` جديدة (حالة الاعتماد + رفع مستندات + قايمة مراجعتها) + `_VerificationGate` في `main.dart` بتوجّه الفني تلقائيًا. تفاصيل في `apps/api/src/modules/technicians/README.md` و`apps/technician-app/README.md`. |
 | 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | 🔄 | جزء منه خلص مع #2: `estimated_duration_days` (من معادلة formula) بقى معروض في ملخص السعر. الجزء الباقي (المدة من `service_standard_data`/`estimateDuration()` لخدمات غير formula، وعرضها في شاشات الفني/الأدمن التشغيلية) لسه. |
 
 ### Phase B — الثقة والتنفيذ
@@ -175,3 +175,11 @@
   ملحوظة عدم توفّر Flutter SDK تنطبق — الكود اتراجع يدويًا، و`test/widget_test.dart` الموجود (بيتأكد إن
   شاشة تسجيل الدخول بتظهر + نص "ابعت كود التحقق") لسه المفروض يعدّي لأن السلوك الافتراضي (login mode) لم
   يتغيّر — يحتاج تشغيل فعلي من سيشن عندها Flutter SDK للتأكيد.
+
+- **2026-08-12 (بند #6 خلص)**: `OnboardingScreen` جديدة في `apps/technician-app` (`features/onboarding/`) +
+  `_VerificationGate` في `main.dart`. تفاصيل كاملة في `apps/api/src/modules/technicians/README.md` و
+  `apps/technician-app/README.md`. اتأكد حي بالكامل عبر curl بعد ما اضطريت أعيد تشغيل Postgres/Redis/API
+  (الحاوية اتعمل لها restart أثناء الشغل — البيانات والـgit commits السابقة اتأكد إنها فضلت سليمة، الخدمات
+  بس اللي كانت واقفة): تسجيل فني جديد → `verification_status:"pending"` فورًا، رفع مستند PNG حقيقي عبر
+  multipart → نجح ورجع بالشكل المتوقع بالحرف، القايمة رجّعت المستند بعد كده. بيانات الاختبار اتعملها
+  حذف/soft-delete بعد التأكيد.
