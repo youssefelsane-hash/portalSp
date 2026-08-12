@@ -187,3 +187,25 @@ domestic-workers، recurring-orders، order-team، referrals):
 للأبد). الإصلاح الصحيح محتاج اختبار حي لسلوك polling/socket — مش قابل للتحقق بلا Flutter SDK فعلي.
 
 مرجع كامل: `apps/customer-app/README.md`، `apps/technician-app/README.md`.
+
+---
+
+## مرحلة رابعة — مراجعة apps/admin (Next.js)
+
+**أمان auth flow**: مراجعة كاملة لـ`route.ts` الأربعة (`otp/request`, `otp/verify`, `refresh`,
+`logout`) و`auth-context.tsx` — `refresh_token` في كوكي `httpOnly`+`sameSite=lax` (حماية CSRF
+فعلية على المسارات دي)، `access_token` في الذاكرة بس (مش `localStorage`)، صفر `dangerouslySetInnerHTML`
+أو أنماط XSS خطرة في كل الكود، تسلسل تحديث التوكن عبر التابات بـ Web Locks API (`navigator.locks`)
+موثّق ومختبر من سيشن سابقة. **صفر مشاكل جديدة**.
+
+**جودة كود + بَقّة حقيقية مكرِّرة لنمط معروف**: `isOrderCancellable()` في `src/lib/order-labels.ts`
+كانت بترجّع `true` لـ9 حالة طلب، بس الباك-إند (`canTransition(status, CANCELLED_BY_SYSTEM)`) بيسمح
+بس لأول 4 — يعني زرار "إلغاء الطلب" كان ظاهر في `accepted`/`technician_on_way`/`technician_arrived`/
+`in_progress`/`awaiting_quote_approval` ويترفض دايمًا بـ409 لو اتضغط. **نفس فئة البَقّة بالحرف** اللي
+اتصلحت قبل كده لزرار "إعادة تعيين فني" (موثّقة في `apps/admin/README.md` من سيشن سابقة) — نمط متكرر:
+شرط عرض زرار في الواجهة بيتكتب يدوي بدل ما يتولّد/يتحقق من مصدر الحقيقة (state machine) في الباك-إند.
+✅ اتصلحت (PR #60)، اختبار حي: `POST /admin/orders/:id/cancel` على طلب `accepted` حقيقي اترفض فعليًا
+بـ`ORDR_003`/409 مطابق تمامًا. **سويپ منهجي** لكل شروط `_status ===` وقوائم `STATUSES` الأخرى عبر
+`apps/admin/src/app` و`src/lib` (payouts، complaints، support tickets) — صفر حالة تانية من نفس النمط.
+
+مرجع كامل: `apps/admin/README.md`.
