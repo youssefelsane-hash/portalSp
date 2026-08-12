@@ -32,6 +32,10 @@ export interface OrderResponseDto {
   cancellation_reason_id: string | null;
   cancellation_fee_cents: number;
   created_at: string;
+  /** null = مفيش ضمان (warranty_days=0) أو الطلب لسه ما اكتملش. الضمان (docs/08 §7). */
+  warranty_expires_at: string | null;
+  /** موجود بس لو الطلب "إعادة زيارة" (order_type=revisit) — بيشاور على الطلب الأصلي (عمود parent_order_id داخليًا). */
+  original_order_id: string | null;
   /** موجودة بس في مسارات تفاصيل الطلب الفردي (مش القوائم) — لخرائط التتبع/الملاحة. */
   address?: OrderAddressResponseDto;
 }
@@ -63,6 +67,8 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
     cancellation_reason_id: order.cancellationReasonId,
     cancellation_fee_cents: order.cancellationFeeCents,
     created_at: order.createdAt.toISOString(),
+    warranty_expires_at: order.warrantyExpiresAt ? order.warrantyExpiresAt.toISOString() : null,
+    original_order_id: order.parentOrderId,
     address: address
       ? {
           street_name: address.streetName,
