@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from './entities/technician-schedule-slot.entity';
@@ -52,6 +52,20 @@ export class TechnicianScheduleService {
     });
   }
 
+  /**
+   * ربط الجدولة بإنشاء الطلب (docs/08 §2-§3) — العميل بيختار سلوت `available` من جدول فني بعينه
+   * (`GET /technicians/:id/schedule`) قبل ما يوصل لـ`OrdersService.create()`. بيرمي واضح لو
+   * السلوت مش موجود/محجوز بالفعل/اتشال — بدل ما `OrdersService` تفترض ضمنيًا إنه متاح وتكتشف
+   * الفشل بس وقت `bookSlot()` الذرّي جوّه الـtransaction.
+   */
+  async findAvailableSlotOrThrow(slotId: string): Promise<TechnicianScheduleSlot> {
+    const slot = await this.slots.findOne({ where: { id: slotId, status: TechnicianScheduleSlotStatus.AVAILABLE } });
+    if (!slot) {
+      throw new ApiException(ErrorCode.VAL_001, 'السلوت ده مش متاح للحجز', HttpStatus.CONFLICT);
+    }
+    return slot;
+  }
+
   private async findOwnedSlotOrThrow(technicianProfileId: string, slotId: string): Promise<TechnicianScheduleSlot> {
     const slot = await this.slots.findOne({ where: { id: slotId, technicianId: technicianProfileId } });
     if (!slot) {
@@ -73,10 +87,14 @@ export class TechnicianScheduleService {
    * SELECT-then-UPDATE اللي ممكن يسمح بسباق بين طلبين بيحاولوا يحجزوا نفس اللحظة). بيرجع
    * false لو السلوت اتحجز بالفعل (من عميل تاني، أو اتشال) — الـcaller (تدفق اختيار الفني،
    * §3 من docs/08) لازم يتعامل مع الحالة دي برجوع واضح للعميل مش افتراض نجاح صامت.
+   *
+   * `manager` اختياري — `OrdersService.create()` بيبعت manager الـtransaction بتاعتها عشان
+   * "الطلب اتعمل" و"السلوت اتحجز" يبقوا عملية ذرّية واحدة (لو الحجز فشل، الطلب كله بيتلغي/يترول
+   * باك، مش يتعمل طلب بلا سلوت فعلي بيشاور عليه).
    */
-  async bookSlot(slotId: string, orderId: string): Promise<boolean> {
-    const result = await this.slots
-      .createQueryBuilder()
+  async bookSlot(slotId: string, orderId: string, manager?: EntityManager): Promise<boolean> {
+    const qb = manager ? manager.createQueryBuilder() : this.slots.createQueryBuilder();
+    const result = await qb
       .update(TechnicianScheduleSlot)
       .set({ status: TechnicianScheduleSlotStatus.BOOKED, orderId })
       .where('id = :slotId AND status = :availableStatus', { slotId, availableStatus: TechnicianScheduleSlotStatus.AVAILABLE })

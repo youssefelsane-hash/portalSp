@@ -187,4 +187,14 @@
 
 **اختبار حي**: خدمة formula حقيقية (مساحة×سعر_المتر + شروط) — `POST /orders` بـ`field_values` صحيحة أنتج `estimated_price_cents=2110`/`total_amount_cents=2110` مطابق تمامًا لناتج `evaluate-price`. `booking_mode=emergency` بنفس الحقول أنتج `surge_amount_cents=422`/`total_amount_cents=2532` (20% رسوم طوارئ فوق سعر المعادلة، صح). طلب من غير `field_values` أو بقيمة `dropdown` غير صالحة اترفض `400` واضح **قبل** أي كتابة في transaction — صفر صفوف orphan (اتأكد بعدّ `orders` قبل/بعد). `GET /promo-codes/:code/validate` (`PromotionsService.previewForOrder()`) اتصلحت بنفس المنطق بالحرف.
 
+## ربط الجدولة الحقيقية للفني بـ`POST /orders` — كانت فجوة موثّقة صراحة، اتقفلت (بناء 2026-08-12)
+
+`TechnicianScheduleService.bookSlot()`/`releaseSlotForOrder()` (`../technicians/README.md`) كانوا primitives ذرّية جاهزة ومختبرة بلا أي caller خالص — العميل مكانش يقدر يحجز سلوت وقت محدد من جدول فني بعينه أصلاً. `CreateOrderDto.schedule_slot_id` اختياري جديد بيتحل داخل `create()`:
+
+- **الفحص + الاشتقاق**: `findAvailableSlotOrThrow()` بترمي واضح لو السلوت مش موجود/محجوز بالفعل. `requestedTechnicianId`/`scheduledAt` بيتشتقوا تلقائيًا من السلوت — **بيتجاهلوا** أي `requested_technician_id`/`scheduled_at` تانيين اتبعتوا، إلا لو `requested_technician_id` بيتعارض صراحة مع فني السلوت (رفض واضح، مش اختيار صامت لأحدهم).
+- **متبادل استبعادياً**: طوارئ (`bookingMode===EMERGENCY`) وإعادة الزيارة (`original_order_id` — بترجع لنفس الفني الأصلي تلقائيًا أصلاً) — الاتنين بيترفضوا بوضوح لو `schedule_slot_id` اتبعت معاهم.
+- **الحجز الذرّي جوّه الـtransaction**: `bookSlot(slotId, order.id, manager)` بتتنادى فورًا بعد `manager.save(order)` — لو فشلت (سباق حقيقي، حد تاني حجز السلوت في نفس اللحظة)، رفض `409` بيترول باك الطلب كله (order + status history + addons + إلخ) مش يتعمل طلب بلا سلوت فعلي بيشاور عليه.
+- **التحرير عند الإلغاء**: مركزي عبر `ScheduleSlotReleaseListener` (موديول `technicians`) بيسمع `ORDER_STATUS_CHANGED_EVENT` — مش نداء يدوي في `cancel()`/`technicianCancel()`/الإلغاء الإداري/التلقائي الأربعة، استماع واحد بيغطيهم كلهم.
+- **اتعمله اختبار حي كامل** (تفاصيل الأرقام والاختبارات الكاملة في `../technicians/README.md`): فني حقيقي أنشأ سلوت، عميل حجز عليه، `requested_technician_id`/`scheduled_at` طابقوا السلوت بالظبط، `order_assignments` الجولة الأولى اتوزعت حصريًا على فني السلوت، إلغاء (عميل وفني) حرّر السلوت في الحالتين، سباق حقيقي بين عميلين على نفس السلوت — واحد بس نجح صفر orphan، وكل التوليفات المتعارضة (طوارئ/إعادة زيارة/فني مختلف) اترفضت بوضوح.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

@@ -16,4 +16,11 @@ class TechniciansRepository {
     final items = await auth.authedRequestList('/technician-companies');
     return items.map(TechnicianCompanySummary.fromJson).toList();
   }
+
+  // الجدولة الحقيقية للفني (docs/08 §2-§3) — العميل يشوف السلوتات الفاضية/المحجوزة (أخضر/أحمر)
+  // بتاعة فني بعينه ويختار واحد منها وقت الحجز. مش @Public() في الباك-إند (محتاج توكن عميل عادي).
+  Future<List<ScheduleSlot>> fetchSchedule(String technicianId) async {
+    final items = await auth.authedRequestList('/technicians/$technicianId/schedule');
+    return items.map(ScheduleSlot.fromJson).toList();
+  }
 }

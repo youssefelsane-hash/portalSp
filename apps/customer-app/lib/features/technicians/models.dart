@@ -21,6 +21,33 @@ class TechnicianCompanySummary {
       );
 }
 
+// الجدولة الحقيقية للفني (docs/08 §2-§3) — مطابق لـ
+// apps/api/src/modules/technicians/dto/schedule-slot-response.dto.ts's PublicScheduleSlotResponseDto.
+// نسخة العميل (عبر GET /technicians/:id/schedule) — is_available بس، مفيش order_id/notes داخلية.
+class ScheduleSlot {
+  final String id;
+  final String slotDate;
+  final String startTime;
+  final String endTime;
+  final bool isAvailable;
+
+  ScheduleSlot({
+    required this.id,
+    required this.slotDate,
+    required this.startTime,
+    required this.endTime,
+    required this.isAvailable,
+  });
+
+  factory ScheduleSlot.fromJson(Map<String, dynamic> json) => ScheduleSlot(
+        id: json['id'] as String,
+        slotDate: json['slot_date'] as String,
+        startTime: json['start_time'] as String,
+        endTime: json['end_time'] as String,
+        isAvailable: json['is_available'] as bool,
+      );
+}
+
 class TechnicianZoneInfo {
   final String id;
   final String nameAr;

@@ -16,6 +16,8 @@ import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
+import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
+import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
@@ -40,6 +42,7 @@ export class OrdersService {
     private readonly geoService: GeoService,
     private readonly techniciansService: TechniciansService,
     private readonly technicianCompaniesService: TechnicianCompaniesService,
+    private readonly scheduleService: TechnicianScheduleService,
     private readonly promoCodesService: PromoCodesService,
     private readonly buildingsService: BuildingsService,
     private readonly cancellationReasonsService: CancellationReasonsService,
@@ -121,6 +124,32 @@ export class OrdersService {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
 
+    // الجدولة الحقيقية للفني (docs/08 §2-§3، ADR-0002) — كانت `TechnicianScheduleService.bookSlot()`
+    // primitive جاهز ومختبر بلا أي caller خالص. العميل اختار سلوت `available` محدد من جدول فني
+    // بعينه (GET /technicians/:id/schedule)، ده أقوى من "تفضيل" عادي (requested_technician_id) —
+    // الفني نفسه حدد صراحة إنه فاضي في التاريخ/الوقت ده. متبادل استبعادياً مع الطوارئ (استجابة
+    // فورية، مش موعد مستقبلي بمعنى مختلف تمامًا) وإعادة الزيارة (بترجع لنفس الفني الأصلي
+    // تلقائيًا أصلاً). **قرار موثّق صراحة**: التوزيع لسه فوري وقت إنشاء الطلب مش مؤجّل لوقت
+    // السلوت نفسه — نفس السلوك الحالي بالظبط لـ`scheduled_at` العادي (توزيع مؤجل حقيقي محتاج
+    // queue جديد بالكامل مش موجود حتى للحقل القديم، فمش هنخترعه بس هنا).
+    let scheduleSlot: TechnicianScheduleSlot | null = null;
+    if (dto.schedule_slot_id) {
+      if (bookingMode === BookingMode.EMERGENCY) {
+        throw new ApiException(ErrorCode.VAL_001, 'حجز سلوت وقت محدد مش متاح لطلبات الطوارئ', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.original_order_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'إعادة الزيارة تحت الضمان بترجع لنفس الفني الأصلي تلقائيًا — مينفعش تختار سلوت كمان',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      scheduleSlot = await this.scheduleService.findAvailableSlotOrThrow(dto.schedule_slot_id);
+      if (dto.requested_technician_id && dto.requested_technician_id !== scheduleSlot.technicianId) {
+        throw new ApiException(ErrorCode.VAL_001, 'السلوت المختار بتاع فني مختلف عن الفني المطلوب — اختار واحد بس', HttpStatus.BAD_REQUEST);
+      }
+    }
+
     // إعادة زيارة تحت الضمان (docs/08 §7) — لازم: بتاعة نفس العميل، مكتملة فعلاً، لنفس الخدمة
     // ونفس العنوان بالظبط (نفس المشكلة المفروض)، وتحت warranty_expires_at الفعلي لسه. تفضيل
     // (مش ضمان) بيروح لنفس الفني الأصلي — requested_technician_id بتاعه بيتجاهَل ويتحل محله.
@@ -188,10 +217,20 @@ export class OrdersService {
         orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
-        scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null,
-        // إعادة الزيارة بتفضّل نفس الفني الأصلي دايماً — requested_technician_id بتاع الـ dto
-        // بيتجاهَل هنا عمداً لو الطلب إعادة زيارة (منطقي أكتر إنه يرجع لنفس اللي عمل الشغلانة).
-        requestedTechnicianId: originalOrder ? originalOrder.technicianId : (dto.requested_technician_id ?? null),
+        // سلوت الجدولة (لو اتحجز) بيحدد الموعد المطلوب فعليًا — أدق من dto.scheduled_at الحر
+        // (تاريخ/وقت السلوت نفسه اللي الفني أعلن عنه، UTC مباشرة زي باقي أوقات المشروع).
+        scheduledAt: scheduleSlot
+          ? new Date(`${scheduleSlot.slotDate}T${scheduleSlot.startTime}Z`)
+          : dto.scheduled_at
+            ? new Date(dto.scheduled_at)
+            : null,
+        // إعادة الزيارة بتفضّل نفس الفني الأصلي دايماً، وسلوت الجدولة (لو اتحجز) بيحدد فني
+        // السلوت نفسه — requested_technician_id بتاع الـ dto بيتجاهَل هنا عمداً في الحالتين.
+        requestedTechnicianId: originalOrder
+          ? originalOrder.technicianId
+          : scheduleSlot
+            ? scheduleSlot.technicianId
+            : (dto.requested_technician_id ?? null),
         parentOrderId: originalOrder ? originalOrder.id : null,
         buildingId: building ? building.id : null,
         // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
@@ -212,6 +251,15 @@ export class OrdersService {
         sourceChannel: OrderSourceChannel.CUSTOMER_APP,
       });
       await manager.save(order);
+
+      // حجز السلوت ذرّي جوّه نفس الـtransaction بتاعة إنشاء الطلب — لو حد تاني حجزه في نفس
+      // اللحظة (سباق حقيقي بين طلبين)، الطلب كله بيترول باك مش يتعمل بلا سلوت فعلي بيشاور عليه.
+      if (scheduleSlot) {
+        const booked = await this.scheduleService.bookSlot(scheduleSlot.id, order.id, manager);
+        if (!booked) {
+          throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من عميل تاني للتو — اختار سلوت تاني', HttpStatus.CONFLICT);
+        }
+      }
 
       await manager.save(
         manager.create(OrderStatusHistory, {

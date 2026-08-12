@@ -38,6 +38,10 @@ class OrdersRepository {
     // محرك التسعير الديناميكي (docs/08 §1) — لازم لخدمات pricing_model=formula بس، القيم اللي
     // العميل ملاها في الفورم الديناميكي (CreateOrderScreen._buildPricingFieldWidget).
     Map<String, dynamic>? fieldValues,
+    // الجدولة الحقيقية للفني (docs/08 §2-§3) — سلوت `available` محدد من جدول فني بعينه، اختاره
+    // العميل في TechnicianProfileScreen. أقوى من requestedTechnicianId (الفني نفسه أعلن التوافر
+    // في الوقت ده صراحة) — الباك-إند بيستنتج الفني منها تلقائيًا.
+    String? scheduleSlotId,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
@@ -54,6 +58,7 @@ class OrdersRepository {
       // "اعتماد" — تفضيل شركة/فريق بعينه، متاح بس مع bookingMode=team (الباك-إند بيرفض غير كده).
       if (requestedTechnicianCompanyId != null) 'requested_technician_company_id': requestedTechnicianCompanyId,
       if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
+      if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
     });
     return Order.fromJson(data!);
   }

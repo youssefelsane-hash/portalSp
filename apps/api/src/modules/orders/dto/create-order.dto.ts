@@ -79,4 +79,11 @@ export class CreateOrderDto {
   @IsOptional()
   @IsObject()
   field_values?: Record<string, string | number | boolean>;
+
+  // الجدولة الحقيقية للفني (docs/08 §2-§3، ADR-0002) — العميل اختار سلوت `available` محدد من
+  // جدول فني بعينه (GET /technicians/:id/schedule) بدل ما يسيب المطابقة تختار/يستخدم تفضيل عام.
+  // متبادل استبعادياً مع الطوارئ وإعادة الزيارة — تفاصيل كاملة في orders.service.ts.
+  @IsOptional()
+  @IsUUID()
+  schedule_slot_id?: string;
 }

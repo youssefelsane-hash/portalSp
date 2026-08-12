@@ -215,7 +215,7 @@ domestic-workers، recurring-orders، order-team، referrals):
 ## مرحلة خامسة — بناء الفجوات الموثّقة (توجيه صريح من المالك: "أي حاجة فيها مشكلة ومحتاجة بناء، كمّل بناء فيها")
 
 بعد ما مرحلة المراجعة (شيك بس، مفيش إضافة) خلصت بالكامل، المالك وجّه صراحة بالتوسّع لبناء أي فجوة حقيقية
-اتلقطت أثناء المراجعة لحد ما تشتغل كاملة في المشروع الحي — مش بس توثيقها كفجوة مؤجّلة. الثلاثة دول اتبنوا
+اتلقطت أثناء المراجعة لحد ما تشتغل كاملة في المشروع الحي — مش بس توثيقها كفجوة مؤجّلة. الأربعة دول اتبنوا
 بنفس منهج الاختبار الحي/التوثيق/commit+push+PR+merge المتّبع طول الجلسة:
 
 | # | البناء | الحالة |
@@ -223,5 +223,6 @@ domestic-workers، recurring-orders، order-team، referrals):
 | 1 | **`POST /technician/orders/:id/cancel`** — الفني ملوش طريقة يلغي طلب اتقبله بنفسه لو حصل ظرف طارئ (كانت فجوة موثّقة صراحة، حالة `CANCELLED_BY_TECHNICIAN` كانت موجودة في الـstate machine من زمان بس مفيش service method بتوصلها). | ✅ اتبنت (PR مدموج)، اختبار حي كامل (رصيد محفظة فني اتحرّك 136400→132400 برسوم 10%). تفاصيل: `apps/api/src/modules/orders/README.md`. **بونص**: قفلت كمان فجوة تانية قديمة — `technician_profiles.cancelled_orders_count` كان مجمّد على 0 للأبد. |
 | 2 | **سباق حقيقي في `matching.service.ts`'s `dispatchNextRound()`** — رفض فني في نفس لحظة انتهاء مهلة الجولة (round expiry) كان يقدر يعمل دفعتين متزامنتين لنفس الطلب (بدون قفل صف). | ✅ اتبنى (PR مدموج) — `pessimistic_write` على صف الطلب + الترانزاكشن كله بقى ذرّي + الأحداث الجانبية (event/BullMQ) بقت بعد الـcommit بس. اختبار حي **بفنيين حقيقيين اتنين برفض متزامن فعلي** — صفر صفوف مكرّرة، صفر deadlock. تفاصيل: `apps/api/src/modules/matching/README.md`. |
 | 3 | **`CatalogService.estimate()` مكنتش عارفة `pricing_model=formula`** — أخطر فجوة تسعير اتلقطت في الجلسة كلها: أي طلب حقيقي لخدمة formula كان بيتحجز مجانًا (`0` قرش) بصمت لأن `POST /orders` كان بيستخدم `estimate()` القديمة (مسار ثابت بس) مش `PricingEngineService.evaluate()` اللي كان شغال صح بس في مسار المعاينة المنفصل (`evaluate-price`). | ✅ اتبنى (PR مدموج) — `estimate()` بقت بتتفرّع للمحرك الديناميكي، `field_values` threaded من `CreateOrderDto`/`ValidatePromoCodeQueryDto`. اختبار حي كامل: طلب حقيقي بسعر 2110 قرش مطابق تمامًا لمعاينة `evaluate-price`، رسوم طوارئ فوقه صح، رفض واضح `400` بدل صفر صامت لو الحقول ناقصة. تفاصيل: `apps/api/src/modules/pricing/README.md`. |
+| 4 | **`TechnicianScheduleService.bookSlot()`/`releaseSlotForOrder()` بلا أي caller خالص** — العميل مكانش يقدر يحجز سلوت وقت محدد من جدول فني بعينه من `POST /orders` أصلاً، رغم إن الحجز الذرّي نفسه كان جاهز ومختبر من `docs/08` §2. | ✅ اتبنى (PR مدموج) — `CreateOrderDto.schedule_slot_id` بيشتق الفني/الموعد تلقائيًا من السلوت، حجز ذرّي جوّه نفس transaction إنشاء الطلب (`bookSlot()` بقت تاخد `EntityManager`)، تحرير مركزي عبر `ScheduleSlotReleaseListener` جديد عند أي إلغاء. `apps/customer-app` بقى فيه شاشة فعلية (`TechnicianProfileScreen`'s "مواعيد فاضية"). اختبار حي كامل بما فيه سباق حقيقي بين عميلين على نفس السلوت — واحد بس نجح، صفر orphan. تفاصيل: `apps/api/src/modules/technicians/README.md`. |
 
 مرجع كامل لكل التفاصيل المعمارية والقرارات: `docs/08-pricing-engine-and-platform-vision.md` (سجل التحديثات آخر الملف).
