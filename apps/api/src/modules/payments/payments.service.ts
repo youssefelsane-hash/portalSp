@@ -740,6 +740,12 @@ export class PaymentsService {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
 
+      // إصلاح حقيقي (مراجعة booking flow الشاملة 2026-08-12) — PaymentGateway.interface.ts
+      // معندهوش أي دالة refund() خالص (Paymob مش المرحلة دي)، يعني refundMethod=ORIGINAL_METHOD
+      // كان بيتسجّل لمدفوعات الكارت/فوري مع refundStatus=COMPLETED **من غير أي حركة فلوس حقيقية
+      // خالص** — العميل كان بيتقال له "اترد" بس فلوسه ميرجعلوش لا في محفظته ولا في كارته. بَقّة
+      // مالية حقيقية، مش تصميم مقصود. الإصلاح المؤقت الصادق: كل الطرق بترجع credit للمحفظة فعليًا
+      // (زي الكاش بالظبط) لحد ما تكامل refund حقيقي مع البوابة يتبني — أفضل من رقم "مكتمل" كاذب.
       const refundNumber = await this.nextRefundNumber(manager);
       const refund = manager.create(Refund, {
         refundNumber,
@@ -748,7 +754,7 @@ export class PaymentsService {
         amountCents: payment.amountCents,
         refundType: RefundType.FULL,
         reasonNotes,
-        refundMethod: payment.paymentMethod === PaymentMethod.CASH ? RefundMethod.WALLET_CREDIT : RefundMethod.ORIGINAL_METHOD,
+        refundMethod: RefundMethod.WALLET_CREDIT,
         refundStatus: RefundStatus.COMPLETED,
         requestedByUserId: performedByUserId,
         approvedByUserId: performedByUserId,
@@ -783,10 +789,11 @@ export class PaymentsService {
       }
 
       // الدفع بالمحفظة: فلوس العميل كانت فعلاً عند المنصة، فبترجعلها من هناك مباشرة.
-      // الدفع بالكاش: العميل دفع للفني يداً بيد، مفيش فلوس دخلت المنصة أصلاً — لكن المنصة لسه
-      // قادرة ترجّع له تعويض في محفظته، ممول من عكس أرباح الفني اللي فوق (نفس المبلغ بالظبط)،
-      // عشان كده refundMethod=WALLET_CREDIT في الحالة دي فعلاً بيتنفّذ مش مجرد تسمية.
-      if (payment.paymentMethod === PaymentMethod.WALLET || payment.paymentMethod === PaymentMethod.CASH) {
+      // الدفع بالكاش/الكارت/فوري: مفيش فلوس دخلت محفظة المنصة مباشرة وقت الدفع نفسه، لكن
+      // المنصة قادرة ترجّع تعويض حقيقي للعميل في محفظته دايماً — ممول محاسبيًا من عكس أرباح
+      // الفني اللي فوق (نفس المبلغ بالظبط، بيحصل لكل طرق الدفع وقت settleAndComplete). كل
+      // الطرق بترجع فلوس حقيقية للعميل بنفس الآلية دلوقتي (مش بس الكاش زي ما كان قبل الإصلاح).
+      {
         const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
