@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import type { AdminTechnicianResponseDto, OrderDetailResponseDto, OrderItemResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -171,7 +172,11 @@ export default function OrderDetailPage() {
           </Badge>
           {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
           {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
-          {order.original_order_id && <Badge variant="outline">إعادة زيارة</Badge>}
+          {order.original_order_id && (
+            <Link href={`/orders/${order.original_order_id}`}>
+              <Badge variant="outline">إعادة زيارة — الطلب الأصلي</Badge>
+            </Link>
+          )}
           {order.building_id && <Badge variant="outline">عمارة</Badge>}
         </div>
         <Button variant="outline" onClick={() => router.push('/orders')}>
