@@ -41,6 +41,12 @@ class Order {
   final int cancellationFeeCents;
   final String createdAt;
   final OrderAddress? address;
+  // الضمان/إعادة الزيارة (docs/08 §7) — كانت فجوة موثّقة صراحة: الباك-إند بيرجّع الحقلين دول من
+  // زمان (order-response.dto.ts) بس الموديل هنا مكانش بيقراهم خالص، فالعميل ماكانش يعرف إن طلبه
+  // تحت ضمان أصلاً ولا يقدر يطلب إعادة زيارة مجانية. null = مفيش ضمان أو الطلب لسه ما اكتملش.
+  final String? warrantyExpiresAt;
+  // موجود بس لو الطلب ده نفسه "إعادة زيارة" — بيشاور على الطلب الأصلي.
+  final String? originalOrderId;
 
   Order({
     required this.id,
@@ -61,7 +67,12 @@ class Order {
     required this.cancellationFeeCents,
     required this.createdAt,
     this.address,
+    this.warrantyExpiresAt,
+    this.originalOrderId,
   });
+
+  bool get isUnderWarranty =>
+      warrantyExpiresAt != null && DateTime.parse(warrantyExpiresAt!).isAfter(DateTime.now());
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
         id: json['id'] as String,
@@ -84,6 +95,8 @@ class Order {
         address: json['address'] != null
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,
+        warrantyExpiresAt: json['warranty_expires_at'] as String?,
+        originalOrderId: json['original_order_id'] as String?,
       );
 }
 

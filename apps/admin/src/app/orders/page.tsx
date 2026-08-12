@@ -9,7 +9,7 @@ import { AppShell } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { ORDER_STATUS_LABELS, orderStatusBadgeVariant } from '@/lib/order-labels';
+import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, orderStatusBadgeVariant } from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
 
 const PER_PAGE = 20;
@@ -74,6 +74,7 @@ export default function OrdersPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>رقم الطلب</TableHead>
+                <TableHead>النوع</TableHead>
                 <TableHead>الحالة</TableHead>
                 <TableHead>الإجمالي</TableHead>
                 <TableHead>حالة الدفع</TableHead>
@@ -87,6 +88,11 @@ export default function OrdersPage() {
                     <Link href={`/orders/${order.id}`} className="block">
                       {order.order_number}
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={order.order_type === 'emergency' ? 'destructive' : 'outline'}>
+                      {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Badge variant={orderStatusBadgeVariant(order.order_status)}>

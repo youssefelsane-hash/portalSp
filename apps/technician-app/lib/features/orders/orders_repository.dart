@@ -33,6 +33,14 @@ class OrdersRepository {
     return data == null ? null : Order.fromJson(data);
   }
 
+  // تحديث لحظي بعد قرار عرض السعر (docs/08 §15) — بتتنادى لما OrderTrackingGateway يبعت
+  // order:status_changed (tracking_client.dart)، عشان نجيب أحدث نسخة كاملة من الطلب بدل ما
+  // نبني Order يدوي من حقلين بس (order_status الجديد وحده مش كفاية، محتاجين باقي الحقول كمان).
+  Future<Order> getOne(String orderId) async {
+    final data = await authRepository.authedRequest('GET', '/technician/orders/$orderId');
+    return Order.fromJson(data!);
+  }
+
   // دورة تنفيذ الطلب بعد القبول — كل فعل بيرجّع نسخة محدّثة من الطلب، الشاشة بتستخدمها
   // تحدد الفعل الجاي (nextTechnicianAction في order.dart) من غير حاجة لـ endpoint تفاصيل منفصل.
   Future<Order> depart(String orderId) async {

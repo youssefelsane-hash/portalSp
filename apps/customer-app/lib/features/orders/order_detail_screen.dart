@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../catalog/models.dart' show BookingModeJson;
 import '../chat/chat_screen.dart';
 import '../payments/card_payment_screen.dart';
 import '../payments/fawry_reference_screen.dart';
@@ -37,6 +38,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _cancelling = false;
   bool _rated = false;
   bool _paying = false;
+  bool _requestingRevisit = false;
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
@@ -255,6 +257,50 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // إعادة الزيارة تحت الضمان (docs/08 §7) — كانت فجوة موثّقة صراحة: الباك-إند بيدعم
+  // POST /orders {original_order_id} من زمان (مجاني بالكامل، بيرجع لنفس الفني الأصلي تلقائيًا)
+  // بس العميل ماكانش يعرف إن طلبه تحت ضمان أصلاً ولا عنده أي طريقة يطلب إعادة زيارة.
+  Future<void> _requestRevisit() async {
+    final order = _order;
+    if (order == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('طلب إعادة زيارة (ضمان)'),
+          content: const Text('هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل، لو نفس المشكلة رجعت تاني.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('تراجع')),
+            FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('تأكيد الطلب')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _requestingRevisit = true);
+    try {
+      final revisitOrder = await _repository.create(
+        serviceId: order.serviceId,
+        addressId: order.addressId,
+        bookingMode: BookingModeJson.fromApiValue(order.bookingMode),
+        originalOrderId: order.id,
+      );
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: revisitOrder.id)),
+        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('اتبعت طلب إعادة الزيارة بنجاح ✅')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _requestingRevisit = false);
+    }
+  }
+
   Future<void> _payWithWallet() async {
     setState(() => _paying = true);
     try {
@@ -342,6 +388,26 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.problemDescription != null) ...[
                                 const SizedBox(height: 8),
                                 Text('الوصف: ${order.problemDescription}'),
+                              ],
+                              if (order.originalOrderId != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'إعادة زيارة لطلب سابق — مجانية بالكامل',
+                                  style: TextStyle(color: Theme.of(context).colorScheme.primary),
+                                ),
+                              ],
+                              if (order.warrantyExpiresAt != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  order.isUnderWarranty
+                                      ? 'تحت الضمان لحد ${DateTime.parse(order.warrantyExpiresAt!).toLocal().toString().substring(0, 10)}'
+                                      : 'انتهى الضمان في ${DateTime.parse(order.warrantyExpiresAt!).toLocal().toString().substring(0, 10)}',
+                                  style: TextStyle(
+                                    color: order.isUnderWarranty
+                                        ? Colors.green
+                                        : Theme.of(context).colorScheme.outline,
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -515,6 +581,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           onPressed: _rate,
                           icon: const Icon(Icons.star_outline),
                           label: const Text('قيّم الطلب'),
+                        ),
+                      ],
+                      if (order.orderStatus == 'completed' && order.isUnderWarranty) ...[
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _requestingRevisit ? null : _requestRevisit,
+                          icon: const Icon(Icons.replay_outlined),
+                          label: _requestingRevisit
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('طلب إعادة زيارة (ضمان)'),
                         ),
                       ],
                     ],

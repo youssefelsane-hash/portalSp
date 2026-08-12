@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
   { href: '/buildings', label: 'العمائر' },
   { href: '/domestic-workers', label: 'الخدمات المنزلية' },
+  { href: '/recurring-orders', label: 'الطلبات المتكررة' },
   { href: '/notification-routing', label: 'توجيه الإشعارات' },
   { href: '/technician-companies', label: 'شركات/فرق الفنيين' },
   { href: '/technician-levels', label: 'سياسة مستويات الفنيين' },

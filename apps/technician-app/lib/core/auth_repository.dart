@@ -105,7 +105,9 @@ class AuthRepository extends ChangeNotifier {
   // تستخدمه). user_type ثابت 'technician' — التطبيق ده للفني بس. تسجيل فني بينشئ technician_profiles
   // تلقائيًا بـverification_status='pending' (TechnicianProfileListener)، فالفني لازم يكمّل رفع
   // مستنداته بعد كده مباشرة (OnboardingScreen) قبل ما يقدر يستقبل طلبات فعلية.
-  Future<void> register(String phoneNumber, String otpCode, String fullName) async {
+  // بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني بدل تطبيق مستقل، فـuserType
+  // بقى باراميتر بدل ثابت. 'technician' هو الافتراضي (مفيش تغيير في مسار الفني الموجود).
+  Future<void> register(String phoneNumber, String otpCode, String fullName, {String userType = 'technician'}) async {
     final data = await apiRequest(
       'POST',
       '/auth/register',
@@ -113,7 +115,7 @@ class AuthRepository extends ChangeNotifier {
         'phone_number': phoneNumber,
         'otp_code': otpCode,
         'full_name': fullName,
-        'user_type': 'technician',
+        'user_type': userType,
       },
     );
     _accessToken = data!['access_token'] as String;

@@ -54,11 +54,27 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     if (_trackingConnected || !_activeTrackingStatuses.contains(_order.orderStatus)) return;
     _trackingClient.connect(
       accessToken: _accessToken,
+      orderId: _order.id,
       onError: (message) {
         if (mounted) setState(() => _error = message);
       },
+      onOrderStatusChanged: (previousStatus, newStatus) => _refreshFromServer(),
     );
     _trackingConnected = true;
+  }
+
+  // بتتنادى لما يوصل order:status_changed (docs/08 §15) — أهم سيناريو: العميل وافق/رفض عرض
+  // السعر (awaiting_quote_approval → in_progress)، والشاشة كانت هتفضل عارضة كارت العرض المعلّق
+  // القديم لحد ما الفني يخرج ويرجع يدوي. فشل التحديث (مشكلة شبكة عابرة) مش لازم يكسر الشاشة —
+  // القيمة المحلية بتفضل زي ما هي، والفني لسه يقدر يعمل pull-to-refresh يدوي (لو موجود) أو
+  // يخرج ويرجع، نفس السلوك القديم بالظبط.
+  Future<void> _refreshFromServer() async {
+    try {
+      final order = await _repository.getOne(_order.id);
+      if (mounted) setState(() => _order = order);
+    } on ApiException {
+      // تجاهل — راجع التعليق فوق.
+    }
   }
 
   Future<void> _shareLocation() async {

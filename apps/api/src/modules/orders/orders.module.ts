@@ -15,6 +15,7 @@ import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AdminCancellationReasonsController } from './admin-cancellation-reasons.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { AdminOrdersService } from './admin-orders.service';
+import { AdminRecurringOrdersController } from './admin-recurring-orders.controller';
 import { CancellationReasonsController } from './cancellation-reasons.controller';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { OrdersController } from './orders.controller';
@@ -63,6 +64,7 @@ import { RecurringOrderTemplate } from './entities/recurring-order-template.enti
     TechnicianOrderExecutionController,
     RecurringOrdersController,
     AdminOrdersController,
+    AdminRecurringOrdersController,
     CancellationReasonsController,
     AdminCancellationReasonsController,
   ],

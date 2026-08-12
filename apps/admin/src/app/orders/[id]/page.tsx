@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import type { AdminTechnicianResponseDto, OrderDetailResponseDto, OrderItemResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -33,7 +34,14 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { ORDER_STATUS_LABELS, orderStatusBadgeVariant, isOrderCancellable, isOrderReassignable } from '@/lib/order-labels';
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_TYPE_LABELS,
+  BOOKING_MODE_LABELS,
+  orderStatusBadgeVariant,
+  isOrderCancellable,
+  isOrderReassignable,
+} from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
@@ -162,6 +170,14 @@ export default function OrderDetailPage() {
           <Badge variant={orderStatusBadgeVariant(order.order_status)}>
             {ORDER_STATUS_LABELS[order.order_status]}
           </Badge>
+          {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
+          {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
+          {order.original_order_id && (
+            <Link href={`/orders/${order.original_order_id}`}>
+              <Badge variant="outline">إعادة زيارة — الطلب الأصلي</Badge>
+            </Link>
+          )}
+          {order.building_id && <Badge variant="outline">عمارة</Badge>}
         </div>
         <Button variant="outline" onClick={() => router.push('/orders')}>
           رجوع للقايمة
@@ -176,9 +192,14 @@ export default function OrderDetailPage() {
             <CardTitle className="text-base">البيانات</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
+            <p>نوع الطلب: {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</p>
+            <p>وضع الحجز: {BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</p>
             <p>الإجمالي: {formatEgp(order.total_amount_cents)}</p>
             <p>حالة الدفع: {order.payment_status}</p>
             <p>رسوم الكشف: {formatEgp(order.inspection_fee_cents)}</p>
+            {order.surge_amount_cents > 0 && (
+              <p className="text-destructive">رسوم الطوارئ: {formatEgp(order.surge_amount_cents)}</p>
+            )}
             {order.discount_amount_cents > 0 && <p>الخصم: {formatEgp(order.discount_amount_cents)}</p>}
             <p>الفني: {order.technician_id ? <span dir="ltr">{order.technician_id}</span> : 'لسه مفيش'}</p>
             {order.problem_description && <p>وصف المشكلة: {order.problem_description}</p>}
@@ -186,6 +207,20 @@ export default function OrderDetailPage() {
             <p>
               اتحجز في: {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
             </p>
+            {order.warranty_expires_at && (
+              <p>
+                الضمان لحد: {new Date(order.warranty_expires_at).toLocaleString('ar-EG-u-nu-latn')}
+                {new Date(order.warranty_expires_at) > new Date() ? (
+                  <Badge variant="secondary" className="mr-2">
+                    سارٍ
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="mr-2">
+                    منتهي
+                  </Badge>
+                )}
+              </p>
+            )}
           </CardContent>
           {isOrderCancellable(order.order_status) && (
             <CardFooter className="flex-col items-stretch gap-3">
@@ -288,6 +323,40 @@ export default function OrderDetailPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">الإنتاجية والمدة المتوقعة</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            {!order.pricing_evaluation ? (
+              <p className="text-sm text-muted-foreground">
+                مفيش بيانات إنتاجية محسوبة لهذا الطلب — الخدمة مش بتستخدم معادلة تسعير (pricing_model=formula)
+              </p>
+            ) : (
+              <>
+                <p>
+                  المدة المتوقعة:{' '}
+                  {order.pricing_evaluation.computed_duration_days !== null
+                    ? `${order.pricing_evaluation.computed_duration_days} يوم`
+                    : '—'}
+                </p>
+                <p>
+                  عدد الصنايعية المطلوب:{' '}
+                  {order.pricing_evaluation.computed_technicians ?? '—'}
+                </p>
+                <p>
+                  عدد المساعدين المطلوب:{' '}
+                  {order.pricing_evaluation.computed_assistants ?? '—'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  محسوبة وقت الحجز في:{' '}
+                  {new Date(order.pricing_evaluation.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                </p>
+              </>
             )}
           </CardContent>
         </Card>
