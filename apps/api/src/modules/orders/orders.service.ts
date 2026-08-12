@@ -18,6 +18,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
@@ -396,6 +397,99 @@ export class OrdersService {
     if (!order) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
+    return order;
+  }
+
+  /**
+   * الفني بيلغي طلب اتقبله بنفسه — كانت فجوة موثّقة صراحة: `CANCELLED_BY_TECHNICIAN` حالة صالحة
+   * في order-state-machine.ts (`ACCEPTED`/`TECHNICIAN_ON_WAY`/`TECHNICIAN_ARRIVED` بس، مش
+   * `IN_PROGRESS` — بعد ما الشغل الفعلي يبدأ، الإلغاء لازم يعدّي من الشكوى مش زرار مباشر) بس
+   * مفيش أي service method كانت بتحطها. **قرار الحالة النهائية**: الطلب بيتلغي نهائي
+   * (`CANCELLED_BY_TECHNICIAN: []` في الـstate machine — terminal زي إلغاء العميل/النظام بالظبط)،
+   * مش بيرجع searching_technician لإعادة توزيع — العميل بيتعرّف فورًا (إشعار) ويقدر يحجز تاني
+   * لو عايز، أوضح من إعادة توزيع صامتة تاخد وقت غير معروف.
+   */
+  async technicianCancel(userId: string, orderId: string, dto: CancelOrderAsTechnicianDto): Promise<Order> {
+    const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
+
+    if (!canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_TECHNICIAN)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تلغي الطلب وهو في حالة ${order.orderStatus} — بعد ما تبدأ الشغل الإلغاء لازم يعدّي من الشكوى`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    // نفس منطق رسوم إلغاء العميل بالظبط، بس هنا الرسوم (لو السبب المختار عليها رسوم) بتتحصّل
+    // من محفظة الفني نفسه — تعويض للمنصة/العميل عن فني قبل الطلب وبعدين رجع فيه. مفيش نافذة
+    // زمنية مجانية هنا (بعكس العميل) — القاموس الأصلي مالوش مفهوم "فترة سماح" لإلغاء الفني.
+    let feeCents = 0;
+    let cancellationReasonId: string | null = null;
+    if (dto.cancellation_reason_id) {
+      const cancellationReason = await this.cancellationReasonsService.findOrThrow(dto.cancellation_reason_id);
+      if (cancellationReason.appliesTo !== CancellationAppliesTo.TECHNICIAN) {
+        throw new ApiException(ErrorCode.VAL_001, 'سبب الإلغاء ده مش لإلغاء الفني', HttpStatus.BAD_REQUEST);
+      }
+      cancellationReasonId = cancellationReason.id;
+      if (cancellationReason.chargesFee) {
+        feeCents = Math.round((order.totalAmountCents * Number(cancellationReason.feePercentage)) / 100);
+      }
+    }
+
+    const previousStatus = order.orderStatus;
+    await this.dataSource.transaction(async (manager) => {
+      order.orderStatus = OrderStatus.CANCELLED_BY_TECHNICIAN;
+      order.cancelledAt = new Date();
+      order.cancelledByUserId = userId;
+      order.cancellationReasonId = cancellationReasonId;
+      order.cancellationFeeCents = feeCents;
+      await manager.save(order);
+
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.CANCELLED_BY_TECHNICIAN,
+          changedByUserId: userId,
+          changedByRole: 'technician',
+          changeSource: OrderChangeSource.TECHNICIAN,
+          reason: dto.reason ?? null,
+        }),
+      );
+
+      if (feeCents > 0) {
+        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
+        const technicianWallet = await this.walletsService.getOrCreateWallet(technicianProfile.userId, WalletOwnerType.TECHNICIAN);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: technicianWallet.id,
+            toWalletId: platformWallet.id,
+            amountCents: feeCents,
+            transactionType: WalletTxType.PENALTY,
+            referenceType: 'order',
+            referenceId: order.id,
+            descriptionAr: `رسوم إلغاء طلب ${order.orderNumber} بعد القبول`,
+            allowNegativeBalance: true,
+          },
+          manager,
+        );
+      }
+    });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(
+        order.id,
+        order.orderNumber,
+        previousStatus,
+        OrderStatus.CANCELLED_BY_TECHNICIAN,
+        order.customerId,
+        order.technicianId,
+        dto.reason ?? null,
+      ),
+    );
+
     return order;
   }
 

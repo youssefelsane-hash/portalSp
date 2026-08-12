@@ -59,6 +59,23 @@ export class OrderStatusNotificationListener {
         });
       }
 
+      // الفني لغى طلب اتقبله بنفسه (بعد ما بدأ الشغل الإلغاء لازم يعدّي من الشكوى، مش هنا) —
+      // كانت فجوة موثّقة صراحة، اتقفلت جنب OrdersService.technicianCancel().
+      if (event.newStatus === OrderStatus.CANCELLED_BY_TECHNICIAN) {
+        const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
+        await this.notificationsService.notify({
+          userId: customer.userId,
+          notificationType: 'order_cancelled_by_technician',
+          titleAr: 'الفني اعتذر عن الطلب',
+          bodyAr: event.reason
+            ? `طلب رقم ${event.orderNumber} — السبب: ${event.reason}. تقدر تحجز تاني وهنلاقيلك فني آخر.`
+            : `طلب رقم ${event.orderNumber} اتلغى من الفني. تقدر تحجز تاني وهنلاقيلك فني آخر.`,
+          referenceType: 'order',
+          referenceId: event.orderId,
+          deepLink: `/orders/${event.orderId}`,
+        });
+      }
+
       // العميل رد على عرض السعر (وافق أو رفض) — order-items.service.ts بيبعت الفرق في event.reason.
       // الفني محتاج يعرف يكمل الشغل بأي نطاق، فمفيش رسالة IN_PROGRESS عامة كفاية هنا.
       if (
