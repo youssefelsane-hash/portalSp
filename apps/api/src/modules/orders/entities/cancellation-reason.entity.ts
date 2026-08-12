@@ -23,6 +23,11 @@ export class CancellationReason {
   @Column({ name: 'charges_fee', type: 'boolean', default: false })
   chargesFee: boolean;
 
+  // سياسة إلغاء الفني (migration 0069) — لو true، سبب الإلغاء ده لازم نص حر معاه (زي "أخرى")،
+  // بيتفحص وقت التنفيذ في OrdersService.technicianCancel() مش هنا.
+  @Column({ name: 'requires_free_text', type: 'boolean', default: false })
+  requiresFreeText: boolean;
+
   @Column({ name: 'fee_percentage', type: 'numeric', precision: 5, scale: 2, default: 0 })
   feePercentage: string;
 

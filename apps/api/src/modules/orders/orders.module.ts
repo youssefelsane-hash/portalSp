@@ -30,6 +30,7 @@ import { OrderTrackingGateway } from './order-tracking.gateway';
 import { RecurringOrdersService } from './recurring-orders.service';
 import { CancellationReason } from './entities/cancellation-reason.entity';
 import { Order } from './entities/order.entity';
+import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderMedia } from './entities/order-media.entity';
@@ -46,6 +47,7 @@ import { RecurringOrderTemplate } from './entities/recurring-order-template.enti
       OrderTeamMember,
       RecurringOrderTemplate,
       CancellationReason,
+      TechnicianOrderCancellation,
     ]),
     CustomersModule,
     CatalogModule,

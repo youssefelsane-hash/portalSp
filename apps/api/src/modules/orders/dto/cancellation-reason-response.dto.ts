@@ -10,6 +10,7 @@ export interface CancellationReasonResponseDto {
   affects_technician_score: boolean;
   display_order: number;
   is_active: boolean;
+  requires_free_text: boolean;
 }
 
 export function toCancellationReasonResponseDto(reason: CancellationReason): CancellationReasonResponseDto {
@@ -23,5 +24,6 @@ export function toCancellationReasonResponseDto(reason: CancellationReason): Can
     affects_technician_score: reason.affectsTechnicianScore,
     display_order: reason.displayOrder,
     is_active: reason.isActive,
+    requires_free_text: reason.requiresFreeText,
   };
 }

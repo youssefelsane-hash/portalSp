@@ -52,6 +52,7 @@ export default function CancellationReasonsPage() {
       applies_to: form.get('applies_to') as CancellationAppliesTo,
       charges_fee: chargesFee,
       affects_technician_score: form.get('affects_technician_score') === 'on',
+      requires_free_text: form.get('requires_free_text') === 'on',
     };
     if (chargesFee) {
       body.fee_percentage = Number(form.get('fee_percentage') as string);
@@ -130,6 +131,10 @@ export default function CancellationReasonsPage() {
                 <input type="checkbox" name="affects_technician_score" />
                 بيأثر على تقييم الفني
               </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="requires_free_text" />
+                محتاج نص حر إجباري (زي &quot;أخرى&quot;)
+              </label>
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit sm:col-span-2">
                 حفظ السبب
               </Button>
@@ -148,6 +153,7 @@ export default function CancellationReasonsPage() {
               <TableHead>السبب</TableHead>
               <TableHead>بيتاح لـ</TableHead>
               <TableHead>الرسوم</TableHead>
+              <TableHead>نص حر إجباري</TableHead>
               <TableHead>الحالة</TableHead>
             </TableRow>
           </TableHeader>
@@ -157,6 +163,7 @@ export default function CancellationReasonsPage() {
                 <TableCell>{reason.reason_ar}</TableCell>
                 <TableCell>{APPLIES_TO_LABELS[reason.applies_to]}</TableCell>
                 <TableCell>{reason.charges_fee ? `${reason.fee_percentage}%` : '—'}</TableCell>
+                <TableCell>{reason.requires_free_text ? 'أيوه' : '—'}</TableCell>
                 <TableCell>
                   <button type="button" disabled={isSaving} onClick={() => toggleActive(reason)} className="cursor-pointer">
                     <Badge variant={reason.is_active ? 'secondary' : 'outline'}>

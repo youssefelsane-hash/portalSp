@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart' show BookingModeJson;
 import '../chat/chat_screen.dart';
 import '../payments/card_payment_screen.dart';
@@ -10,6 +11,7 @@ import '../payments/payments_repository.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../technicians/technician_profile_screen.dart';
+import '../technicians/technician_selection_screen.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
@@ -39,6 +41,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _rated = false;
   bool _paying = false;
   bool _requestingRevisit = false;
+  bool _requestingRematch = false;
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
@@ -298,6 +301,58 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _requestingRevisit = false);
+    }
+  }
+
+  // سياسة إلغاء الفني (docs/10) — الطلب بيوصل awaiting_technician_reselection لما فني يلغي
+  // طلب كان العميل اختاره بنفسه. مساران: مطابقة تلقائية فورية، أو اختيار فني بديل بعينه.
+  Future<void> _requestAutoRematch() async {
+    setState(() => _requestingRematch = true);
+    try {
+      await _repository.requestRematch(widget.orderId);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('بندوّرلك على فني بديل دلوقتي')));
+      }
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _requestingRematch = false);
+    }
+  }
+
+  Future<void> _openManualReselection() async {
+    final order = _order;
+    if (order == null) return;
+    try {
+      final service = await CatalogRepository().fetchService(order.serviceId);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TechnicianSelectionScreen(
+            service: service,
+            onManualSelect: (requestedTechnicianId) async {
+              Navigator.of(context).pop();
+              setState(() => _requestingRematch = true);
+              try {
+                await _repository.requestRematch(widget.orderId, requestedTechnicianId: requestedTechnicianId);
+                if (mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(const SnackBar(content: Text('اتبعت طلبك للفني اللي اخترته ✅')));
+                }
+                await _load();
+              } on ApiException catch (err) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+              } finally {
+                if (mounted) setState(() => _requestingRematch = false);
+              }
+            },
+          ),
+        ),
+      );
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     }
   }
 
@@ -591,6 +646,46 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           label: _requestingRevisit
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                               : const Text('طلب إعادة زيارة (ضمان)'),
+                        ),
+                      ],
+                      // سياسة إلغاء الفني (docs/10) — الفني اللي اخترته اعتذر، الطلب الأصلي
+                      // (خدمة/عنوان/موعد) محفوظ بالكامل، محتاج تختار بديل أو تسيبنا ندوّرلك.
+                      if (order.orderStatus == 'awaiting_technician_reselection') ...[
+                        const SizedBox(height: 12),
+                        Card(
+                          color: Colors.orange.shade50,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'الفني اعتذر عن طلبك. اختار فني بديل بنفسك أو سيبنا ندوّرلك على واحد.',
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: _requestingRematch ? null : _openManualReselection,
+                                        child: const Text('اختار فني بديل'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: FilledButton(
+                                        onPressed: _requestingRematch ? null : _requestAutoRematch,
+                                        child: _requestingRematch
+                                            ? const SizedBox(
+                                                width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                            : const Text('دوّرلي تلقائيًا'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ],

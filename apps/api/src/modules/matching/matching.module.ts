@@ -9,6 +9,7 @@ import { MatchingRoundExpiryProcessor } from './matching-round-expiry.processor'
 import { MATCHING_ROUNDS_QUEUE } from './matching-rounds.queue';
 import { MatchingService } from './matching.service';
 import { OrderDispatchListener } from './order-dispatch.listener';
+import { OrderRematchListener } from './order-rematch.listener';
 import { TechnicianOrdersController } from './technician-orders.controller';
 import { OrderAssignment } from './entities/order-assignment.entity';
 
@@ -32,7 +33,7 @@ import { OrderAssignment } from './entities/order-assignment.entity';
     BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }),
   ],
   controllers: [TechnicianOrdersController],
-  providers: [MatchingService, OrderDispatchListener, MatchingRoundExpiryProcessor],
+  providers: [MatchingService, OrderDispatchListener, OrderRematchListener, MatchingRoundExpiryProcessor],
   exports: [MatchingService],
 })
 export class MatchingModule {}

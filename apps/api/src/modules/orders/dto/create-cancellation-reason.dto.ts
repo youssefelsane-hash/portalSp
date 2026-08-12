@@ -28,6 +28,10 @@ export class CreateCancellationReasonDto {
   affects_technician_score?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  requires_free_text?: boolean;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   display_order?: number;

@@ -28,6 +28,7 @@ import { PayoutCompletedRoutingListener } from './listeners/payout-completed-rou
 import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires-review-routing.listener';
 import { RatingSubmittedNotificationListener } from './listeners/rating-submitted-notification.listener';
 import { ReferralRewardNotificationListener } from './listeners/referral-reward-notification.listener';
+import { TechnicianCancellationNotificationListener } from './listeners/technician-cancellation-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
@@ -65,6 +66,7 @@ import { NotificationsService } from './notifications.service';
     LowRatingRoutingListener,
     RatingSubmittedNotificationListener,
     ReferralRewardNotificationListener,
+    TechnicianCancellationNotificationListener,
   ],
   exports: [NotificationsService],
 })

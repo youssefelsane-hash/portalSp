@@ -95,9 +95,29 @@
 
 ## سياسة إلغاء الفني (Technician Cancellation Policy) — الطلب التفصيلي الكامل
 
-**الحالة العامة**: 🔄 محتاج إعادة بناء كبيرة — `OrdersService.technicianCancel()` الموجودة من سيشن سابقة (بناء على `POST /technician/orders/:id/cancel`)
-بسيطة: سبب مُختار + رسوم فقط، **hardcoded** (نافذة الإلغاء، سلوك إعادة التوزيع حسب booking_mode، الصلاحيات الهرمية
-للفريق) — لازم تتحول لسياسة كاملة قابلة للإعداد زي المطلوب بالتفصيل تحت.
+**الحالة العامة**: ✅ خلص بالكامل (سيشن جديدة، فرع `v13gb2` بعد الدمج مع `hgotr7` — 2026-08-12). السيشن اللي بدأت
+البناء وصلت لحد الاختبار الحي واتقطعت (limit) قبل أي commit — الشغل اتعاد بناؤه من الصفر (مش استرجاع) لأن
+التغييرات مكانتش متسجّلة في git خالص. التفاصيل الكاملة (السياسة/الأحداث/الجداول/الاختبار الحي) في
+`apps/api/src/modules/orders/README.md` § سياسة إلغاء الفني، وملخّص في `apps/api/src/modules/matching/README.md`
+و`apps/api/src/modules/notifications/README.md` و`apps/technician-app/README.md` و`apps/customer-app/README.md`
+و`apps/admin/README.md`.
+
+**ملخّص سريع لما اتبنى**: migrations 0068-0071 (حالة طلب جديدة `awaiting_technician_reselection`، جدول
+`technician_order_cancellations` مخصوص، عمود `cancellation_reasons.requires_free_text`، 5 إعدادات
+`group_name='cancellation'`، قاعدة توجيه أدمن افتراضية). `OrdersService.technicianCancel()` أعيد بناؤها بالكامل:
+فحص نافذة زمنية موحّد (استشاري + فرض حقيقي من نفس الدالة)، صلاحيات فريق (`team_role=worker` ممنوع إلا بإعداد
+صريح)، سبب إجباري + نص حر شرطي، وسلوك استرجاع مبني على 3 قواعد (طوارئ=دايمًا auto-rematch، اختيار العميل
+الصريح=دايمًا manual-reselection، غير كده=حسب إعداد). الطلب **ميتلغيش نهائي أبدًا** من فعل الفني — إما
+`searching_technician` (استبعاد الفني اللي لغى تلقائيًا عبر `order_assignments` الموجودة أصلاً) أو
+`awaiting_technician_reselection` (endpoint جديد للعميل `POST /orders/:id/request-rematch`). قفل ذرّي
+(`pessimistic_write`) في الاتنين — مفيش إلغاء مزدوج ولا سباق. اتعمله اختبار حي كامل (curl) لكل السيناريوهات
+المطلوبة صراحة: نافذة مفتوحة/مقفولة، طوارئ، اختيار عميل صريح، طلب إعادة مطابقة (بث/فني محدد)، عضو فريق غير
+مصرّح، إلغاء مكرر (409)، سبب "أخرى" بلا نص حر. UI كامل في التطبيقين + كارت أدمن جديد (Playwright مؤكّد).
+
+**نطاق مؤجّل عمداً، موثّق صراحة**: نافذة زمنية موحّدة لكل الـbooking modes (مش قيمة منفصلة لكل مود) —
+قرار متعمّد لتجنّب اختراع أرقام تجريبية إضافية مالهاش أساس؛ إضافتها لاحقًا تافهة (مجرد قراءة إعداد مختلف
+حسب `booking_mode`). محرك عقوبة/تصعيد تلقائي مستقبلي (سمعة، منع مؤقت) — الجدول الجديد (`technician_order_cancellations`)
+هو البنية التحتية الكافية له (استعلام مباشر)، مفيش سكيما إضافية أو منطق مبني فوقه دلوقتي.
 
 ### المتطلبات (ملخّص من رسالة المالك، بالإنجليزي الأصلي محفوظ في المحادثة):
 
@@ -203,3 +223,22 @@
   بالكامل عبر Playwright حقيقي: فني رفع شهادة، ظهرت pending في تفاصيل الفني بالأدمن، ضغط "اعتماد"
   فعلي في المتصفح غيّر الحالة لـ"معتمدة" فورًا (screenshot). الفحوصات الثلاثة في apps/api +
   tsc/eslint في apps/admin + shared-types build كلها عدّت. بيانات الاختبار اتعملها حذف بعد التأكيد.
+
+- **2026-08-12 (سيشن جديدة — دمج الفرعين + إكمال قايمة #1-35 والتأكد من صحتها + سياسة إلغاء الفني)**:
+  السيشن دي بدأت بدمج `claude/home-repair-company-project-hgotr7` (110 commit، البنود كلها فوق) جوّه
+  `claude/home-services-app-plan-v13gb2` (fast-forward نضيف، الفرعين ما اختلفوش). أول تحقق حقيقي: السيشن
+  اللي بنت أغلب البنود دي معندهاش Flutter SDK في بيئتها (موثّق صراحة في الملاحظات فوق) — أول
+  `flutter analyze`/`flutter test` حقيقي في بيئة فيها SDK كشف بَقّتين حقيقيتين صغيرتين (مش أخطاء compile،
+  كودها كان سليم فعلاً): `rating_dialog.dart` null-check زيادة، و`recurring_orders_screen.dart` كانت
+  بتحدّث `_acting` (loading state) بس مش بتقراه — تكرار ضغط زرار كان يقدر يبعت طلبين متزامنين لنفس
+  القالب. الاتنين اتصلحوا، الفحوصات الأربعة (backend tsc/build/jest، admin tsc/next-build، Flutter
+  analyze/test في التطبيقين) عدّت كلها نضيف. بعد كده: سياسة إلغاء الفني الكاملة (تفاصيلها فوق).
+
+- **2026-08-12 (سياسة إلغاء الفني خلصت end-to-end)**: migrations 0068-0071، `OrdersService.technicianCancel()`
+  إعادة بناء كاملة، `OrdersService.getTechnicianCancellationPolicy()`/`requestRematch()` جداد، جدول
+  `technician_order_cancellations`، حالة طلب `awaiting_technician_reselection`، `OrderRematchListener`
+  (matching)، `TechnicianCancellationNotificationListener` (notifications)، UI كامل في التطبيقين +
+  كارت أدمن. اتأكد حي بالكامل عبر curl لكل سيناريوهات المالك المطلوبة صراحة (تفاصيل الأرقام والنتائج
+  الكاملة في `apps/api/src/modules/orders/README.md`)، وPlaywright للأدمن. الفحوصات الثلاثة في apps/api +
+  tsc/next-build في apps/admin + flutter analyze/test في التطبيقين كلها عدّت. بيانات الاختبار (أسباب
+  إلغاء تجريبية، إعدادات مؤقتة، أدوار فنيين تجريبية) اترجعت لحالتها الأصلية بعد التأكيد.

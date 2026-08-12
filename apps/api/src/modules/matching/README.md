@@ -93,4 +93,13 @@ transaction dispatchNextRound الماسكة القفل بالفعل). الأح�
 مش اتنين). النداء التاني اتأكد إنه ضرب مسار `noop` بأمان (شاف الحالة اتغيّرت بالفعل ورجع من غير
 أي كتابة) — مش استثناء أو خطأ.
 
+## `OrderRematchListener` — سياسة إلغاء الفني (docs/10)
+
+بيسمع `ORDER_REMATCH_REQUESTED_EVENT` (بيتصدر من `orders` module بعد إعادة مطابقة تلقائية لطلب
+فني لغاه، أو بعد `POST /orders/:id/request-rematch` من العميل) وينادي `dispatchNextRound()`
+الموجودة أصلاً — نفس نمط `OrderDispatchListener`/`ORDER_CREATED_EVENT` بالحرف، صفر منطق توزيع
+جديد. الفني اللي لغى بيتستبعد تلقائيًا (صف `order_assignments` بتاعه لسه موجود لنفس الطلب، نفس
+آلية الاستبعاد الموجودة أصلاً في `findEligibleTechnicians()`). تفاصيل كاملة في `../orders/README.md`
+§ سياسة إلغاء الفني.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
