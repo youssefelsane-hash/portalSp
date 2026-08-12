@@ -242,3 +242,10 @@
   الكاملة في `apps/api/src/modules/orders/README.md`)، وPlaywright للأدمن. الفحوصات الثلاثة في apps/api +
   tsc/next-build في apps/admin + flutter analyze/test في التطبيقين كلها عدّت. بيانات الاختبار (أسباب
   إلغاء تجريبية، إعدادات مؤقتة، أدوار فنيين تجريبية) اترجعت لحالتها الأصلية بعد التأكيد.
+
+- **2026-08-12 (تقفيل فجوة صغيرة من سياسة إلغاء الفني — استبعاد الفني من قايمة إعادة الاختيار)**:
+  `GET /services/:id/technicians` بقى ليه `exclude_technician_id` اختياري، و`order.requestedTechnicianId`
+  بقى متسرّب للعميل ومتسيّب عمدًا بعد إلغاء فني في مسار `MANUAL_RESELECTION_REQUIRED` عشان يبقى مصدر
+  قيمة الاستبعاد دي في `apps/customer-app`. اتأكد حي عبر curl ضد Postgres حقيقي (فني اتربط مؤقتًا بمنطقة
+  ليها geo boundary حقيقي، عميل وعنوان جداد اتعملوا، القايمة اتفحصت قبل/بعد الاستبعاد + رفض UUID غلط) —
+  تفاصيل كاملة في `apps/api/src/modules/orders/README.md`. الفحوصات الأربعة كلها عدّت.
