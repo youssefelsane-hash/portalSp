@@ -15,6 +15,14 @@ extension BookingModeJson on BookingMode {
         BookingMode.team => 'اعتماد',
         BookingMode.emergency => 'طوارئ',
       };
+
+  // عكس apiValue — لازم لطلب إعادة الزيارة (docs/08 §7): بنعيد استخدام booking_mode بتاع
+  // الطلب الأصلي (نص من الـAPI) عشان ننشئ طلب جديد بنفس الوضع.
+  static BookingMode fromApiValue(String value) => switch (value) {
+        'team' => BookingMode.team,
+        'emergency' => BookingMode.emergency,
+        _ => BookingMode.individual,
+      };
 }
 
 // مطابق لـ apps/api/src/modules/catalog/dto/service-response.dto.ts

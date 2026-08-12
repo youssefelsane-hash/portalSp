@@ -46,6 +46,10 @@ class OrdersRepository {
     // العميل في TechnicianProfileScreen. أقوى من requestedTechnicianId (الفني نفسه أعلن التوافر
     // في الوقت ده صراحة) — الباك-إند بيستنتج الفني منها تلقائيًا.
     String? scheduleSlotId,
+    // إعادة الزيارة تحت الضمان (docs/08 §7) — الطلب الأصلي المكتمل. الباك-إند بيتجاهَل
+    // requestedTechnicianId/promoCode/buildingCode/addonIds لو اتبعت مع ده (مجانية بالكامل،
+    // بترجع لنفس الفني الأصلي تلقائيًا).
+    String? originalOrderId,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
@@ -64,6 +68,7 @@ class OrdersRepository {
       if (requestedTechnicianCompanyId != null) 'requested_technician_company_id': requestedTechnicianCompanyId,
       if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
       if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
+      if (originalOrderId != null) 'original_order_id': originalOrderId,
     });
     return Order.fromJson(data!);
   }
