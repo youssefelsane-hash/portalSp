@@ -5,6 +5,7 @@ import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -39,6 +40,7 @@ export class OrdersService {
     private readonly techniciansService: TechniciansService,
     private readonly technicianCompaniesService: TechnicianCompaniesService,
     private readonly promoCodesService: PromoCodesService,
+    private readonly buildingsService: BuildingsService,
     private readonly cancellationReasonsService: CancellationReasonsService,
     private readonly walletsService: WalletsService,
     private readonly settingsService: SettingsService,
@@ -134,7 +136,7 @@ export class OrdersService {
       if (!originalOrder.warrantyExpiresAt || originalOrder.warrantyExpiresAt.getTime() < Date.now()) {
         throw new ApiException(ErrorCode.VAL_001, 'ضمان الطلب الأصلي انتهى', HttpStatus.BAD_REQUEST);
       }
-      if (dto.promo_code || (dto.addon_ids && dto.addon_ids.length > 0)) {
+      if (dto.promo_code || dto.building_code || (dto.addon_ids && dto.addon_ids.length > 0)) {
         throw new ApiException(
           ErrorCode.VAL_001,
           'إعادة الزيارة تحت الضمان مجانية بالكامل — مفيش كود خصم ولا إضافات كتالوج معاها',
@@ -142,6 +144,14 @@ export class OrdersService {
         );
       }
     }
+
+    // نظام العمائر (docs/08 §13، ADR-0003) — متبادل استبعادياً مع promo_code (مش الاتنين مع
+    // بعض، القرار الكامل في ADR-0003). الحل بيتم قبل الـ transaction (مجرد قراءة، مفيش كتابة
+    // زي promo_code اللي محتاج order.id يتسجّل في promo_code_usages).
+    if (dto.promo_code && dto.building_code) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تستخدم كود خصم وكود عمارة مع بعض', HttpStatus.BAD_REQUEST);
+    }
+    const building = dto.building_code ? await this.buildingsService.findActiveByCodeOrThrow(dto.building_code) : null;
 
     const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
@@ -172,6 +182,7 @@ export class OrdersService {
         // بيتجاهَل هنا عمداً لو الطلب إعادة زيارة (منطقي أكتر إنه يرجع لنفس اللي عمل الشغلانة).
         requestedTechnicianId: originalOrder ? originalOrder.technicianId : (dto.requested_technician_id ?? null),
         parentOrderId: originalOrder ? originalOrder.id : null,
+        buildingId: building ? building.id : null,
         // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder ? 0 : estimate.estimated_total_cents,
@@ -242,6 +253,16 @@ export class OrdersService {
           },
         );
         order.promoCodeId = promoCode.id;
+        order.discountAmountCents = discountCents;
+        order.totalAmountCents -= discountCents;
+        await manager.save(order);
+      }
+
+      // خصم العمارة (docs/08 §13، ADR-0003) — نسبة مئوية على الإجمالي قبل الخصم، مفيش جدول
+      // usage/حدود زي promo_codes (مفيش حد استخدام شهري بالمعنى ده، بس تتبّع عدد الطلبات
+      // للمقارنة بـminimum_monthly_orders من واجهة الأدمن، تفصيل منفصل تمامًا عن الخصم نفسه).
+      if (building) {
+        const discountCents = Math.round((order.totalAmountCents * Number(building.discountPercentage)) / 100);
         order.discountAmountCents = discountCents;
         order.totalAmountCents -= discountCents;
         await manager.save(order);

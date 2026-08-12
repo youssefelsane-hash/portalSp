@@ -64,4 +64,11 @@ export class CreateOrderDto {
   @ArrayUnique()
   @IsUUID('all', { each: true })
   addon_ids?: string[];
+
+  // نظام العمائر (docs/08 §13، ADR-0003) — كود العمارة المطبوع/الممسوح بالـ QR. متبادل استبعادياً
+  // مع promo_code (مش الاتنين مع بعض) — القرار موثّق في ADR-0003.
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  building_code?: string;
 }

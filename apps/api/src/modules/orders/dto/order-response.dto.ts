@@ -38,6 +38,8 @@ export interface OrderResponseDto {
   warranty_expires_at: string | null;
   /** موجود بس لو الطلب "إعادة زيارة" (order_type=revisit) — بيشاور على الطلب الأصلي (عمود parent_order_id داخليًا). */
   original_order_id: string | null;
+  /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
+  building_id: string | null;
   /** موجودة بس في مسارات تفاصيل الطلب الفردي (مش القوائم) — لخرائط التتبع/الملاحة. */
   address?: OrderAddressResponseDto;
 }
@@ -72,6 +74,7 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
     created_at: order.createdAt.toISOString(),
     warranty_expires_at: order.warrantyExpiresAt ? order.warrantyExpiresAt.toISOString() : null,
     original_order_id: order.parentOrderId,
+    building_id: order.buildingId,
     address: address
       ? {
           street_name: address.streetName,

@@ -133,6 +133,10 @@ export class Order {
   @Column({ name: 'promo_code_id', type: 'uuid', nullable: true })
   promoCodeId: string | null;
 
+  // نظام العمائر (docs/08 §13، ADR-0003) — خصم عمارة، متبادل استبعادياً مع promo_code_id فوق.
+  @Column({ name: 'building_id', type: 'uuid', nullable: true })
+  buildingId: string | null;
+
   @Column({ name: 'platform_commission_cents', type: 'integer', default: 0 })
   platformCommissionCents: number;
 
