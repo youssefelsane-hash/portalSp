@@ -9,4 +9,14 @@
 - **`POST /orders` بقى ياخد `building_code` اختياري** — بيتحل (`findActiveByCodeOrThrow`) قبل الـ transaction (مجرد قراءة، مفيش كتابة زي `promo_code` اللي محتاج `order.id` يتسجّل في `promo_code_usages`)، والخصم بيتطبّق جوّه الـ transaction (نسبة مئوية على `totalAmountCents` قبل الخصم، بعد ما رسوم الطوارئ اتضافت).
 - **اتعمله اختبار حي كامل**: عمارة حقيقية اتعملت (`discount_percentage=15`, `minimum_monthly_orders=10`) وطلع كودها `BLD-2026-000001` تلقائي. `GET .../qr` رجّع `qr_data_uri` PNG حقيقي صالح. طلب حقيقي بالكود ده → خصم `6000` قرش بالظبط (15% من `40000`)، `total_amount_cents=34000`. كود غلط اترفض `404` بوضوح. محاولة `promo_code`+`building_code` مع بعض اترفضت `400`. بعد الطلب، `current_month_orders_count` ظهر `1` صح (`meets_minimum_monthly_orders=false` بما إن 1 < 10).
 
+## إصلاح أداء حقيقي (مراجعة شاملة 2026-08-12، فرع `hgotr7`) — N+1 في `GET /admin/buildings`
+
+`AdminBuildingsController.list()` كان بينادي `getCurrentMonthOrdersCount(b.id)` مرة منفصلة
+لكل عمارة جوّه `Promise.all(buildings.map(...))` — يعني استعلام `SELECT COUNT(*)` واحد لكل
+عمارة (N+1 كلاسيكي)، بدل استعلام واحد مجمّع. مش بَقّة وظيفية (النتيجة كانت صح) لكن غير كفء
+مع عدد كبير من العمائر. الإصلاح: `getCurrentMonthOrdersCountBulk(buildingIds)` جديدة في
+`buildings.service.ts` — استعلام واحد بـ`GROUP BY building_id` على كل الـ`IDs` دفعة واحدة،
+والعمائر اللي معندهاش طلبات الشهر ده بترجع `0` تلقائيًا (`Map` مبدئي بالكل=0 قبل الاستعلام).
+اتعمله اختبار حي: النتيجة طابقت `SELECT COUNT(*)` المباشر بالظبط (`1`) لعمارة حقيقية فيها طلب.
+
 مرجع كامل: `../../../../docs/08-pricing-engine-and-platform-vision.md` §13 و`../../../../docs/adr/0003-buildings-qr-discount.md`.
