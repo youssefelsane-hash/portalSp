@@ -60,7 +60,7 @@ Future<RatingResult?> showRatingDialog(BuildContext context, {List<OrderMedia> a
           return InkWell(
             onTap: () => setState(() => onChanged(value == starValue ? null : starValue)),
             child: Icon(
-              value != null && starValue <= value! ? Icons.star : Icons.star_border,
+              value != null && starValue <= value ? Icons.star : Icons.star_border,
               size: 20,
               color: Colors.amber,
             ),
