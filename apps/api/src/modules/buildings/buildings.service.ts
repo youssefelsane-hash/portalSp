@@ -1,0 +1,76 @@
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import * as QRCode from 'qrcode';
+import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { CreateBuildingDto } from './dto/create-building.dto';
+import { UpdateBuildingDto } from './dto/update-building.dto';
+import { Building } from './entities/building.entity';
+
+@Injectable()
+export class BuildingsService {
+  constructor(@InjectRepository(Building) private readonly buildings: Repository<Building>) {}
+
+  async create(dto: CreateBuildingDto): Promise<Building> {
+    const [{ next_human_readable_number: code }] = await this.buildings.manager.query<
+      { next_human_readable_number: string }[]
+    >("SELECT next_human_readable_number('BLD')");
+
+    const building = this.buildings.create({
+      code,
+      nameAr: dto.name_ar,
+      addressText: dto.address_text ?? null,
+      cityId: dto.city_id ?? null,
+      discountPercentage: dto.discount_percentage !== undefined ? String(dto.discount_percentage) : undefined,
+      minimumMonthlyOrders: dto.minimum_monthly_orders,
+    });
+    return this.buildings.save(building);
+  }
+
+  list(): Promise<Building[]> {
+    return this.buildings.find({ order: { createdAt: 'DESC' } });
+  }
+
+  async findByIdOrThrow(id: string): Promise<Building> {
+    const building = await this.buildings.findOne({ where: { id } });
+    if (!building) {
+      throw new ApiException(ErrorCode.VAL_001, 'العمارة غير موجودة', HttpStatus.NOT_FOUND);
+    }
+    return building;
+  }
+
+  /** بيتنادى من orders.service.ts وقت إنشاء طلب بكود عمارة — 404 واضح لو الكود غلط أو العمارة معطّلة. */
+  async findActiveByCodeOrThrow(code: string): Promise<Building> {
+    const building = await this.buildings.findOne({ where: { code, isActive: true } });
+    if (!building) {
+      throw new ApiException(ErrorCode.VAL_001, 'كود العمارة غير صحيح أو العمارة غير نشطة', HttpStatus.NOT_FOUND);
+    }
+    return building;
+  }
+
+  async update(id: string, dto: UpdateBuildingDto): Promise<Building> {
+    const building = await this.findByIdOrThrow(id);
+    if (dto.name_ar !== undefined) building.nameAr = dto.name_ar;
+    if (dto.address_text !== undefined) building.addressText = dto.address_text;
+    if (dto.city_id !== undefined) building.cityId = dto.city_id;
+    if (dto.discount_percentage !== undefined) building.discountPercentage = String(dto.discount_percentage);
+    if (dto.minimum_monthly_orders !== undefined) building.minimumMonthlyOrders = dto.minimum_monthly_orders;
+    if (dto.is_active !== undefined) building.isActive = dto.is_active;
+    return this.buildings.save(building);
+  }
+
+  /** "الاشتراك الشهري" — تتبّع بس، مفيش إنفاذ تلقائي (docs/adr/0003-buildings-qr-discount.md). */
+  async getCurrentMonthOrdersCount(buildingId: string): Promise<number> {
+    const [{ count }] = await this.buildings.manager.query<{ count: string }[]>(
+      `SELECT COUNT(*)::int AS count FROM orders
+       WHERE building_id = $1 AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')`,
+      [buildingId],
+    );
+    return Number(count);
+  }
+
+  /** QR محلي بالكامل (مكتبة qrcode، بدون أي تكامل خارجي) — الكود نفسه نص عادي (building.code). */
+  async generateQrPngDataUri(building: Building): Promise<string> {
+    return QRCode.toDataURL(building.code, { errorCorrectionLevel: 'M', margin: 2, width: 400 });
+  }
+}

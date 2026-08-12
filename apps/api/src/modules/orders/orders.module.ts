@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
+import { BuildingsModule } from '../buildings/buildings.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
 import { GeoModule } from '../geo/geo.module';
@@ -52,6 +53,7 @@ import { RecurringOrderTemplate } from './entities/recurring-order-template.enti
     SettingsModule,
     PaymentsModule,
     AuditModule,
+    BuildingsModule,
     JwtModule.register({}),
   ],
   controllers: [
