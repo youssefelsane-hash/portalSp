@@ -68,8 +68,8 @@
 |---|---|
 | 28. Pricing Engine Visual Builder | ✅ خلص (نفس #1) |
 | 29. Certificate Review UI (Admin) | ✅ خلص (نفس #9) |
-| 30. Buildings Admin UI | ⏳ |
-| 31. Domestic Workers Admin UI | ⏳ |
+| 30. Buildings Admin UI | ✅ خلص (نفس #20) |
+| 31. Domestic Workers Admin UI | ✅ خلص (نفس #23) |
 
 ### P2 — مفيد مش عائق إطلاق
 
