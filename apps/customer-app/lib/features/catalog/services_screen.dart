@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../orders/create_order_screen.dart';
+import '../technicians/technician_selection_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 
@@ -69,7 +70,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
                               ),
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(
-                                  builder: (_) => CreateOrderScreen(service: service, bookingMode: widget.bookingMode),
+                                  // اختيار الفني قبل الحجز (docs/08 §3) بس للحجز الفردي — "اعتماد"
+                                  // (team) ليها اختيار شركة/فريق منفصل جوّه CreateOrderScreen نفسها،
+                                  // و"طوارئ" بتتوزّع تلقائيًا بالكامل (مفيش وقت لاختيار يدوي).
+                                  builder: (_) => widget.bookingMode == BookingMode.individual
+                                      ? TechnicianSelectionScreen(service: service)
+                                      : CreateOrderScreen(service: service, bookingMode: widget.bookingMode),
                                 ),
                               ),
                             ),

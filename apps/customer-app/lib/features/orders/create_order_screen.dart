@@ -22,6 +22,10 @@ class CreateOrderScreen extends StatefulWidget {
   // requestedTechnicianId مش لازم يتبعت معاها (الباك-إند بيستنتجه من السلوت نفسه)، بس لو اتبعت
   // برضه لازم تكون بتاعة نفس فني السلوت وإلا الطلب هيترفض بوضوح.
   final String? scheduleSlotId;
+  // اختيار الفني قبل الحجز (docs/08 §3) — TechnicianSelectionScreen بتخلي العميل يختار عنوان
+  // الأول عشان تجيبله قايمة الفنيين (GET /services/:id/technicians محتاج address_id)؛ بنمررها
+  // هنا عشان العميل ميضطرش يختارها تاني هنا — تجربة استخدام أسوأ لو كررناها.
+  final Address? initialAddress;
 
   const CreateOrderScreen({
     super.key,
@@ -29,6 +33,7 @@ class CreateOrderScreen extends StatefulWidget {
     required this.bookingMode,
     this.requestedTechnicianId,
     this.scheduleSlotId,
+    this.initialAddress,
   });
 
   @override
@@ -79,9 +84,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
     _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
+    _selectedAddress = widget.initialAddress;
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
     if (_isFormulaPricing) _loadPricingFields();
+    if (_selectedAddress != null) _refreshPreview();
   }
 
   @override

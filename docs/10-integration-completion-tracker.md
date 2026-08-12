@@ -26,7 +26,7 @@
 | 1 | محرك التسعير الديناميكي end-to-end | ✅ خلص | Backend + Customer App من سيشن سابقة (PR #64). **المتمم في السيشن دي (2026-08-12)**: Admin Pricing Builder UI كامل (`pricing-builder.tsx`) + تتبّع snapshot السعر التاريخي (`service_pricing_evaluations.order_id` بيتربط فعليًا بالطلب بعد الإنشاء عبر `linkEvaluationToOrder`). اتأكد حي بالكامل (Playwright + curl + DB): إنشاء حقول/lookup table/معادلة من الواجهة → معاينة صح → طلب حقيقي بنفس السعر بالظبط → صف التدقيق مرتبط بـ`order_id` الصح. تفاصيل كاملة في `apps/api/src/modules/pricing/README.md`. |
 | 2 | معاينة سعر حقيقية + تفصيل قبل التأكيد | ✅ خلص | `POST /orders/preview` جديد (read-only، نفس منطق `OrdersService.create()` بالحرف) — `CreateOrderScreen` بقى بيعرض breakdown كامل (أساسي/فحص/طوارئ+SLA/إضافات/خصم/نطاق formula/مدة متوقعة/إجمالي) لكل نماذج التسعير، مش رقم واحد غامض. اتأكد حي: معاينة = طلب حقيقي بالحرف لخدمتين (fixed+formula). تفاصيل في `apps/api/src/modules/orders/README.md`. |
 | 3 | الجدولة (Scheduler) end-to-end | ✅ اتأكد حي | Backend + Customer App + Technician App اتعملوا في سيشن سابقة (PR #65، #66) — اختبار حي كامل شامل سباق حقيقي. |
-| 4 | اختيار الفني قبل الحجز | ⏳ | `GET /services/:id/technicians` موجود ومختبر من سيشن سابقة (docs/08 §3) — محتاج تأكيد إن Customer App فعليًا بتستخدمه في تدفق الحجز الحقيقي (مش بس endpoint موجود). |
+| 4 | اختيار الفني قبل الحجز | ✅ خلص | كانت فجوة UI حقيقية مؤكّدة: الـendpoint مختبر حي بس مفيش أي شاشة بتناديه — العميل مكانش يقدر يختار فني قبل الحجز أصلاً. `TechnicianSelectionScreen` جديدة (customer-app) بتظهر بعد اختيار الخدمة لـ`booking_mode=individual`، "اختار لي تلقائيًا" أو كروت فنيين حقيقية. تفاصيل في `apps/api/src/modules/technicians/README.md`. |
 | 5 | تسجيل عميل جديد (مش OTP login بس) | ⏳ | `POST /auth/register` موجود في الباك-إند — Customer App عندها OTP login بس، مفيش تدفق تسجيل حقيقي. |
 | 6 | تسجيل/onboarding فني جديد | ⏳ | محتاج تأكيد نفس الموضوع من ناحية Technician App. |
 | 7 | ربط الإنتاجية/المدة المتوقعة بتجربة الحجز | 🔄 | جزء منه خلص مع #2: `estimated_duration_days` (من معادلة formula) بقى معروض في ملخص السعر. الجزء الباقي (المدة من `service_standard_data`/`estimateDuration()` لخدمات غير formula، وعرضها في شاشات الفني/الأدمن التشغيلية) لسه. |
@@ -162,3 +162,9 @@
   الـwidgets الفعلي وتفاعل اللمس **لسه مش مُتحقَّق منه بصريًا** في السيشن دي — لو سيشن تانية عندها Flutter
   SDK متاح، تشغيل `flutter analyze` + `flutter test test_live/pricing_engine_order_creation_live_test.dart`
   مطلوب كخطوة تحقق إضافية.
+
+- **2026-08-12 (بند #4 خلص)**: `TechnicianSelectionScreen` جديدة — تفاصيل كاملة في
+  `apps/api/src/modules/technicians/README.md`. نفس الملحوظة بتاعة عدم توفّر Flutter SDK في بيئة السيشن دي
+  تنطبق هنا كمان — الـendpoint اللي الشاشة بتستخدمه (`GET /services/:id/technicians`) اتأكد حي عبر curl
+  إنه بيرجّع نفس الشكل بالظبط اللي الموديل الجديد `TechnicianBookingListItem` بيتوقعه، بس رندر الشاشة
+  نفسها بصريًا لسه محتاج `flutter analyze`/تشغيل فعلي من سيشن عندها Flutter SDK.
