@@ -11,8 +11,15 @@ class TechniciansRepository {
   // بس محتاج address_id عشان يحسب المسافة/يفلتر على المنطقة. كانت فجوة موثّقة صراحة: الـendpoint
   // ده مختبر حي من سيشن سابقة بس مفيش أي شاشة في apps/customer-app بتناديه — العميل مكانش يقدر
   // يختار فني بنفسه قبل الحجز أصلاً، auto-match بس. اتقفلت (TechnicianSelectionScreen).
-  Future<List<TechnicianBookingListItem>> listForService(String serviceId, String addressId) async {
-    final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId');
+  Future<List<TechnicianBookingListItem>> listForService(
+    String serviceId,
+    String addressId, {
+    String? excludeTechnicianId,
+  }) async {
+    // سياسة إلغاء الفني (docs/10) — excludeTechnicianId بيتبعت وقت اختيار فني بديل بعد ما فني
+    // لغى، عشان نفس الفني مايظهرش تاني في القايمة.
+    final query = excludeTechnicianId != null ? '&exclude_technician_id=$excludeTechnicianId' : '';
+    final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId$query');
     return items.map(TechnicianBookingListItem.fromJson).toList();
   }
 

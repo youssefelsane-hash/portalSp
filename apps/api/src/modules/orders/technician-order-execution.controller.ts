@@ -60,9 +60,16 @@ export class TechnicianOrderExecutionController {
     return this.toDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
   }
 
+  // سياسة إلغاء الفني (docs/10) — استشاري بس، الواجهة بتستخدمه قبل ما تعرض زرار "إلغاء" أصلاً.
+  // الفرض الحقيقي جوّه technicianCancel() بغض النظر عن الرد هنا.
+  @Get(':id/cancellation-policy')
+  async getCancellationPolicy(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.getTechnicianCancellationPolicy(user.sub, id);
+  }
+
   // كانت فجوة موثّقة صراحة: الفني معندوش أي طريقة يلغي طلب اتقبله بنفسه لو حصل ظرف طارئ —
-  // اتقفلت. متاح بس قبل ما الشغل الفعلي يبدأ (accepted/technician_on_way/technician_arrived)،
-  // تفاصيل كاملة في OrdersService.technicianCancel().
+  // اتقفلت، وبعدين اتحوّلت لسياسة كاملة قابلة للإعداد (نافذة زمنية، صلاحيات فريق، إعادة مطابقة
+  // حسب booking_mode) بدل القرار البسيط القديم — تفاصيل كاملة في OrdersService.technicianCancel().
   @Post(':id/cancel')
   async cancel(
     @CurrentUser() user: JwtPayload,

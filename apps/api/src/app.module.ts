@@ -34,6 +34,7 @@ import { HealthModule } from './modules/common/health/health.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { BuildingsModule } from './modules/buildings/buildings.module';
 import { DomesticWorkersModule } from './modules/domestic-workers/domestic-workers.module';
+import { AcademyModule } from './modules/academy/academy.module';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { DomesticWorkersModule } from './modules/domestic-workers/domestic-worke
     AdminModule,
     FeatureFlagsModule,
     HealthModule,
+    AcademyModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

@@ -25,6 +25,33 @@ class OrdersRepository {
     );
   }
 
+  // سياسة إلغاء الفني (docs/10) — استشاري بس قبل ما نعرض زرار "إلغاء"، الباك-إند بيفرض
+  // الحقيقة جوّه cancel() بغض النظر عن الرد هنا.
+  Future<CancellationPolicy> fetchCancellationPolicy(String orderId) async {
+    final data = await authRepository.authedRequest('GET', '/technician/orders/$orderId/cancellation-policy');
+    return CancellationPolicy.fromJson(data!);
+  }
+
+  Future<List<CancellationReason>> fetchCancellationReasons() async {
+    final items = await authRepository.authedRequestList('/cancellation-reasons?applies_to=technician');
+    return items.map(CancellationReason.fromJson).toList();
+  }
+
+  // سبب إجباري (كود + نص حر لو السبب محتاجه) — الطلب بعد الإلغاء بيرجع searching_technician
+  // (إعادة مطابقة تلقائية) أو awaiting_technician_reselection (يستني اختيار العميل)، مش بيتلغي
+  // نهائي أبدًا. تفاصيل كاملة في apps/api/src/modules/orders/README.md § سياسة إلغاء الفني.
+  Future<Order> cancel(String orderId, {required String cancellationReasonId, String? reason}) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/cancel',
+      body: {
+        'cancellation_reason_id': cancellationReasonId,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+    return Order.fromJson(data!);
+  }
+
   // كانت فجوة موثّقة: مفيش طريقة تسترجع "الطلب النشط الحالي" من غير ما تعرف الـ id مقدماً —
   // بتتنادى وقت فتح الشاشة الرئيسية عشان لو التطبيق اتقفل في نص دورة التنفيذ، نرجّع الفني
   // لشاشة التنفيذ تلقائياً بدل شاشة الطلبات المتاحة. null لو مفيش طلب نشط دلوقتي.

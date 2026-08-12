@@ -42,6 +42,7 @@ export class CancellationReasonsService {
       feePercentage: dto.fee_percentage !== undefined ? String(dto.fee_percentage) : '0',
       affectsTechnicianScore: dto.affects_technician_score ?? false,
       displayOrder: dto.display_order ?? 0,
+      requiresFreeText: dto.requires_free_text ?? false,
     });
     await this.reasons.save(reason);
 
@@ -74,6 +75,7 @@ export class CancellationReasonsService {
     if (dto.affects_technician_score !== undefined) reason.affectsTechnicianScore = dto.affects_technician_score;
     if (dto.display_order !== undefined) reason.displayOrder = dto.display_order;
     if (dto.is_active !== undefined) reason.isActive = dto.is_active;
+    if (dto.requires_free_text !== undefined) reason.requiresFreeText = dto.requires_free_text;
     await this.reasons.save(reason);
 
     await this.auditLog.record({

@@ -14,6 +14,7 @@ import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-as
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
+import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { canTransition } from './order-state-machine';
 
 // حالات مايصحش نعدّل السعر فيها: بعد الدفع (لازم يعدّي من استرداد/تحصيل إضافي حقيقي، مش
@@ -42,6 +43,8 @@ export class AdminOrdersService {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(OrderStatusHistory) private readonly statusHistory: Repository<OrderStatusHistory>,
+    @InjectRepository(TechnicianOrderCancellation)
+    private readonly technicianOrderCancellations: Repository<TechnicianOrderCancellation>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
     private readonly events: EventEmitter2,
@@ -82,13 +85,22 @@ export class AdminOrdersService {
     return order;
   }
 
-  async getDetail(
-    orderId: string,
-  ): Promise<{ order: Order; history: OrderStatusHistory[]; pricingEvaluation: ServicePricingEvaluation | null }> {
+  async getDetail(orderId: string): Promise<{
+    order: Order;
+    history: OrderStatusHistory[];
+    pricingEvaluation: ServicePricingEvaluation | null;
+    technicianCancellations: TechnicianOrderCancellation[];
+  }> {
     const order = await this.findOrThrow(orderId);
     const history = await this.statusHistory.find({ where: { orderId }, order: { createdAt: 'ASC' } });
     const pricingEvaluation = await this.pricingEngineService.findEvaluationForOrder(orderId);
-    return { order, history, pricingEvaluation };
+    // سياسة إلغاء الفني (docs/10) — "surface immediately in operations/audit views" — كارت جديد
+    // في /admin/orders/:id، صفر شاشة منفصلة (نفس فلسفة pricing_evaluation فوق بالحرف).
+    const technicianCancellations = await this.technicianOrderCancellations.find({
+      where: { orderId },
+      order: { cancelledAt: 'ASC' },
+    });
+    return { order, history, pricingEvaluation, technicianCancellations };
   }
 
   async cancel(adminUserId: string, orderId: string, reason: string, meta?: AuditActorMeta): Promise<Order> {
