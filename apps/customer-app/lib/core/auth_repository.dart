@@ -83,8 +83,8 @@ class AuthRepository extends ChangeNotifier {
     unawaited(PushNotificationService.registerCurrentDevice(authedRequest));
   }
 
-  Future<void> requestOtp(String phoneNumber) async {
-    await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': 'login'});
+  Future<void> requestOtp(String phoneNumber, {String purpose = 'login'}) async {
+    await apiRequest('POST', '/auth/otp/request', body: {'phone_number': phoneNumber, 'purpose': purpose});
   }
 
   Future<void> verifyOtp(String phoneNumber, String otpCode) async {
@@ -92,6 +92,29 @@ class AuthRepository extends ChangeNotifier {
       'POST',
       '/auth/otp/verify',
       body: {'phone_number': phoneNumber, 'otp_code': otpCode},
+    );
+    _accessToken = data!['access_token'] as String;
+    await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);
+    await _fetchMe();
+    _registerPushDeviceInBackground();
+    notifyListeners();
+  }
+
+  // تسجيل عميل جديد (كانت فجوة موثّقة صراحة: Customer App عندها OTP login بس، بيفترض ضمنيًا إن
+  // اليوزر موجود بالفعل — POST /auth/register كان جاهز ومختبر في الباك-إند بلا أي شاشة تستخدمه).
+  // نفس شكل verifyOtp تمامًا (بيرجّع token pair مباشرة) بس بمعامل full_name إضافي + user_type
+  // ثابت 'customer' (التطبيق ده للعميل بس — الفني له تطبيقه الخاص).
+  Future<void> register(String phoneNumber, String otpCode, String fullName, {String? referralCode}) async {
+    final data = await apiRequest(
+      'POST',
+      '/auth/register',
+      body: {
+        'phone_number': phoneNumber,
+        'otp_code': otpCode,
+        'full_name': fullName,
+        'user_type': 'customer',
+        if (referralCode != null && referralCode.isNotEmpty) 'referral_code': referralCode,
+      },
     );
     _accessToken = data!['access_token'] as String;
     await _secureStorage.write(key: _refreshTokenKey, value: data['refresh_token'] as String);

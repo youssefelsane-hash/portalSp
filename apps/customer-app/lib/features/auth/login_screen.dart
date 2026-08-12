@@ -13,24 +13,42 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController(text: '+20');
   final _otpController = TextEditingController();
+  final _fullNameController = TextEditingController();
+  final _referralCodeController = TextEditingController();
   bool _otpSent = false;
   bool _isSubmitting = false;
   String? _error;
+  // تسجيل عميل جديد (كانت فجوة موثّقة صراحة) — نفس الشاشة، مود مختلف بس. الفرق: OTP بـ
+  // purpose=register بدل login، وخطوة إضافية للاسم الكامل، ونداء register() بدل verifyOtp().
+  bool _isRegisterMode = false;
+  // لو العميل حاول "دخول" برقم مش مسجّل، الباك-إند بيرفض برسالة واضحة — بدل ما نسيبه يعلق،
+  // نعرضله اقتراح مباشر يحوّله لمود التسجيل بنفس الرقم من غير ما يكتبه تاني.
+  bool _suggestRegister = false;
 
   @override
   void dispose() {
     _phoneController.dispose();
     _otpController.dispose();
+    _fullNameController.dispose();
+    _referralCodeController.dispose();
     super.dispose();
   }
 
   Future<void> _requestOtp() async {
+    if (_isRegisterMode && _fullNameController.text.trim().length < 2) {
+      setState(() => _error = 'اكتب اسمك الكامل الأول');
+      return;
+    }
     setState(() {
       _isSubmitting = true;
       _error = null;
+      _suggestRegister = false;
     });
     try {
-      await context.read<AuthRepository>().requestOtp(_phoneController.text.trim());
+      await context.read<AuthRepository>().requestOtp(
+            _phoneController.text.trim(),
+            purpose: _isRegisterMode ? 'register' : 'login',
+          );
       setState(() => _otpSent = true);
     } on ApiException catch (err) {
       setState(() => _error = err.message);
@@ -43,14 +61,52 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _isSubmitting = true;
       _error = null;
+      _suggestRegister = false;
     });
     try {
-      await context.read<AuthRepository>().verifyOtp(_phoneController.text.trim(), _otpController.text.trim());
+      final auth = context.read<AuthRepository>();
+      if (_isRegisterMode) {
+        await auth.register(
+          _phoneController.text.trim(),
+          _otpController.text.trim(),
+          _fullNameController.text.trim(),
+          referralCode: _referralCodeController.text.trim(),
+        );
+      } else {
+        await auth.verifyOtp(_phoneController.text.trim(), _otpController.text.trim());
+      }
     } on ApiException catch (err) {
-      setState(() => _error = err.message);
+      // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
+      final suggestRegister = !_isRegisterMode && err.statusCode == 404;
+      setState(() {
+        _error = err.message;
+        _suggestRegister = suggestRegister;
+      });
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  void _switchToRegister() {
+    setState(() {
+      _isRegisterMode = true;
+      _otpSent = false;
+      _otpController.clear();
+      _error = null;
+      _suggestRegister = false;
+    });
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _isRegisterMode = !_isRegisterMode;
+      _otpSent = false;
+      _otpController.clear();
+      _fullNameController.clear();
+      _referralCodeController.clear();
+      _error = null;
+      _suggestRegister = false;
+    });
   }
 
   @override
@@ -60,7 +116,7 @@ class _LoginScreenState extends State<LoginScreen> {
       child: Scaffold(
         body: SafeArea(
           child: Center(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -69,18 +125,37 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text('صُنّاع', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
                   Text(
-                    _otpSent ? 'اتبعت كود لـ ${_phoneController.text}' : 'ادخل رقم موبايلك عشان تكمل',
+                    _otpSent
+                        ? 'اتبعت كود لـ ${_phoneController.text}'
+                        : (_isRegisterMode ? 'اعمل حساب جديد' : 'ادخل رقم موبايلك عشان تكمل'),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 24),
                   if (!_otpSent) ...[
+                    if (_isRegisterMode) ...[
+                      TextField(
+                        controller: _fullNameController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(labelText: 'الاسم الكامل'),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     TextField(
                       controller: _phoneController,
                       keyboardType: TextInputType.phone,
                       textDirection: TextDirection.ltr,
                       decoration: const InputDecoration(labelText: 'رقم الموبايل', hintText: '+201001234567'),
                     ),
+                    if (_isRegisterMode) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _referralCodeController,
+                        textCapitalization: TextCapitalization.characters,
+                        textDirection: TextDirection.ltr,
+                        decoration: const InputDecoration(labelText: 'كود ترشيح (اختياري)'),
+                      ),
+                    ],
                   ] else ...[
                     TextField(
                       controller: _otpController,
@@ -98,11 +173,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 8),
                     Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                   ],
+                  if (_suggestRegister) ...[
+                    const SizedBox(height: 4),
+                    TextButton(
+                      onPressed: _isSubmitting ? null : _switchToRegister,
+                      child: const Text('سجّل حساب جديد بنفس الرقم'),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   FilledButton(
                     onPressed: _isSubmitting ? null : (_otpSent ? _verifyOtp : _requestOtp),
-                    child: Text(_isSubmitting ? 'جاري التحميل…' : (_otpSent ? 'دخول' : 'ابعت كود التحقق')),
+                    child: Text(
+                      _isSubmitting
+                          ? 'جاري التحميل…'
+                          : (_otpSent ? (_isRegisterMode ? 'إنشاء الحساب' : 'دخول') : 'ابعت كود التحقق'),
+                    ),
                   ),
+                  if (!_otpSent) ...[
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: _isSubmitting ? null : _toggleMode,
+                      child: Text(_isRegisterMode ? 'عندك حساب؟ سجّل دخول' : 'مستخدم جديد؟ سجّل حساب'),
+                    ),
+                  ],
                 ],
               ),
             ),
