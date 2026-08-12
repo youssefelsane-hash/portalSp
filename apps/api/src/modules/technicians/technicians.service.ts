@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { GeoService } from '../geo/geo.service';
 import {
   TechnicianAssistantLinkStatus,
   TechnicianProfile,
@@ -14,6 +15,17 @@ import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
 import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.entity';
 import { PortfolioLinksService } from './portfolio-links.service';
+
+export interface TechnicianBookingListItem {
+  technicianId: string;
+  fullName: string;
+  avatarUrl: string | null;
+  bio: string | null;
+  averageRating: number;
+  totalRatingsCount: number;
+  serviceCompletedCount: number;
+  distanceKm: number | null;
+}
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
 // "فريق"/"شركة" (technician_companies, migration 0026) الفرق الوحيد بينهم commercial_registration_number
@@ -27,6 +39,7 @@ export class TechniciansService {
     @InjectRepository(TechnicianCompany) private readonly technicianCompanies: Repository<TechnicianCompany>,
     private readonly portfolioLinksService: PortfolioLinksService,
     private readonly auditLog: AuditLogService,
+    private readonly geoService: GeoService,
   ) {}
 
   async findByUserIdOrThrow(userId: string): Promise<TechnicianProfile> {
@@ -136,6 +149,71 @@ export class TechniciansService {
       return 'individual_with_assistant';
     }
     return 'individual';
+  }
+
+  /**
+   * قايمة الفنيين المؤهلين لخدمة في منطقة العميل — اختيار الفني قبل الحجز (docs/08 §3، بدل
+   * auto-match بس). الترتيب مطابق تمامًا لطلب المالك: التقييم أولاً، بعده القرب الجغرافي
+   * (PostGIS حقيقي، مش تقريب)، بعده عدد الطلبات المكتملة لنفس الخدمة تحديدًا (`technician_services.
+   * completed_count` — أدق من إجمالي الفني كله لأنه بيقيس خبرته في الخدمة دي بالذات).
+   */
+  async listForServiceBooking(serviceId: string, addressId: string): Promise<TechnicianBookingListItem[]> {
+    interface AddressRow {
+      city_id: string | null;
+      latitude: number;
+      longitude: number;
+    }
+    const [address] = await this.technicianProfiles.manager.query<AddressRow[]>(
+      `SELECT city_id, ST_Y(location::geometry) AS latitude, ST_X(location::geometry) AS longitude
+       FROM addresses WHERE id = $1 AND deleted_at IS NULL`,
+      [addressId],
+    );
+    if (!address || !address.city_id) {
+      throw new ApiException(ErrorCode.VAL_001, 'العنوان غير موجود', HttpStatus.NOT_FOUND);
+    }
+
+    const zone = await this.geoService.findZoneForPoint(address.city_id, address.latitude, address.longitude);
+    if (!zone) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة مش متاحة في منطقتك دلوقتي', HttpStatus.CONFLICT);
+    }
+
+    interface TechnicianRow {
+      technician_id: string;
+      full_name: string;
+      avatar_url: string | null;
+      bio: string | null;
+      average_rating: string;
+      total_ratings_count: number;
+      service_completed_count: number;
+      distance_km: string | null;
+    }
+    const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
+      `
+      SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
+             tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
+      FROM technician_profiles tp
+      JOIN users u ON u.id = tp.user_id
+      JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
+      WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+      ORDER BY tp.average_rating DESC, distance_km ASC NULLS LAST, ts.completed_count DESC
+      LIMIT 50
+      `,
+      [serviceId, zone.id, addressId],
+    );
+
+    return rows.map((row) => ({
+      technicianId: row.technician_id,
+      fullName: row.full_name,
+      avatarUrl: row.avatar_url,
+      bio: row.bio,
+      averageRating: Number(row.average_rating),
+      totalRatingsCount: row.total_ratings_count,
+      serviceCompletedCount: row.service_completed_count,
+      distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
+    }));
   }
 
   /**
