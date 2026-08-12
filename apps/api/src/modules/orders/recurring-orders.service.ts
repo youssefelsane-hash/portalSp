@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { FindOptionsWhere, LessThanOrEqual, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -115,6 +115,25 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   async listForCustomer(userId: string): Promise<RecurringOrderTemplate[]> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     return this.templates.find({ where: { customerId: customerProfile.id }, order: { createdAt: 'DESC' } });
+  }
+
+  // للأدمن/التشغيل بس (docs/08 §32: وضوح الطلبات المتكررة) — كانت فجوة موثّقة صراحة: مفيش أي
+  // مسار للأدمن يشوف القوالب المتكررة خالص، فمينفعش يتابع/يشخّص قالب معطوب (مثلاً next_run_at
+  // بيتحرّك للأبد من غير ما يولّد طلب فعلي — راجع generateFromTemplate() فوق).
+  async listAllForAdmin(
+    isActive: boolean | undefined,
+    page: number,
+    perPage: number,
+  ): Promise<{ items: RecurringOrderTemplate[]; meta: { page: number; per_page: number; total: number } }> {
+    const where: FindOptionsWhere<RecurringOrderTemplate> = {};
+    if (isActive !== undefined) where.isActive = isActive;
+    const [items, total] = await this.templates.findAndCount({
+      where,
+      order: { nextRunAt: 'ASC' },
+      skip: (page - 1) * perPage,
+      take: perPage,
+    });
+    return { items, meta: { page, per_page: perPage, total } };
   }
 
   private async findOwnedOrThrow(userId: string, templateId: string): Promise<RecurringOrderTemplate> {

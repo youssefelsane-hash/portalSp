@@ -29,3 +29,16 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     created_at: template.createdAt.toISOString(),
   };
 }
+
+// نسخة الأدمن — نفس شكل RecurringTemplateResponseDto زائد customer_id (العميل نفسه بيعرف إنه
+// قالبه، الأدمن محتاج يعرف مين صاحبه — docs/08 §32).
+export interface AdminRecurringTemplateResponseDto extends RecurringTemplateResponseDto {
+  customer_id: string;
+}
+
+export function toAdminRecurringTemplateResponseDto(template: RecurringOrderTemplate): AdminRecurringTemplateResponseDto {
+  return {
+    ...toRecurringTemplateResponseDto(template),
+    customer_id: template.customerId,
+  };
+}

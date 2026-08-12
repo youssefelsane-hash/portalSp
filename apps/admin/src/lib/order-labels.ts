@@ -77,3 +77,9 @@ export const BOOKING_MODE_LABELS: Record<string, string> = {
   team: 'فريق',
   emergency: 'طوارئ',
 };
+
+export const RECURRING_FREQUENCY_LABELS: Record<string, string> = {
+  weekly: 'أسبوعيًا',
+  monthly: 'شهريًا',
+  yearly: 'سنويًا',
+};

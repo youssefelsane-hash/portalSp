@@ -76,6 +76,28 @@ export interface OrderPricingEvaluationResponseDto {
   created_at: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/recurring-template-response.dto.ts — الجدولة
+// المستقبلية/المتكررة (docs/08 §11). النسخة الأدمن (P2 #32) زائد customer_id.
+export type RecurringOrderFrequency = 'weekly' | 'monthly' | 'yearly';
+
+export interface RecurringTemplateResponseDto {
+  id: string;
+  service_id: string;
+  address_id: string;
+  booking_mode: string;
+  requested_technician_id: string | null;
+  frequency: RecurringOrderFrequency;
+  problem_description: string | null;
+  next_run_at: string;
+  last_generated_order_id: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminRecurringTemplateResponseDto extends RecurringTemplateResponseDto {
+  customer_id: string;
+}
+
 export interface OrderDetailResponseDto extends OrderResponseDto {
   status_history: OrderStatusHistoryResponseDto[];
   pricing_evaluation: OrderPricingEvaluationResponseDto | null;
