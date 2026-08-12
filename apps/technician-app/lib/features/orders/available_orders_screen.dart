@@ -5,6 +5,7 @@ import '../../core/auth_repository.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../portfolio/portfolio_screen.dart';
+import '../schedule/schedule_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
@@ -91,13 +92,20 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('baytak — الفني'),
+          title: const Text('صُنّاع — الفني'),
           actions: [
             IconButton(
               icon: const Icon(Icons.account_balance_wallet_outlined),
               tooltip: 'أرباحي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const WalletScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.event_available_outlined),
+              tooltip: 'جدول مواعيدي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ScheduleScreen()),
               ),
             ),
             IconButton(
