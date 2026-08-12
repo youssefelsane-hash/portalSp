@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../loyalty/loyalty_screen.dart';
+import '../notifications/notifications_repository.dart';
+import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
 import '../referrals/referrals_screen.dart';
@@ -30,6 +32,27 @@ class BookingModeScreen extends StatelessWidget {
               tooltip: 'طلباتي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const OrdersScreen()),
+              ),
+            ),
+            // صندوق إشعارات داخل التطبيق (docs/08) — كانت فجوة موثّقة صراحة: الـendpoints
+            // كانت شغالة ومختبرة من زمان بس مفيش شاشة كانت بتستخدمها خالص.
+            Builder(
+              builder: (context) => FutureBuilder<int>(
+                future: NotificationsRepository(context.read<AuthRepository>()).unreadCount(),
+                builder: (context, snapshot) {
+                  final unread = snapshot.data ?? 0;
+                  return IconButton(
+                    icon: Badge(
+                      isLabelVisible: unread > 0,
+                      label: Text('$unread'),
+                      child: const Icon(Icons.notifications_outlined),
+                    ),
+                    tooltip: 'الإشعارات',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                    ),
+                  );
+                },
               ),
             ),
             IconButton(

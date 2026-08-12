@@ -5,6 +5,8 @@ import '../../core/auth_repository.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../company/company_screen.dart';
+import '../notifications/notifications_repository.dart';
+import '../notifications/notifications_screen.dart';
 import '../portfolio/portfolio_screen.dart';
 import '../profile/profile_screen.dart';
 import '../schedule/schedule_screen.dart';
@@ -96,6 +98,27 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         appBar: AppBar(
           title: const Text('صُنّاع — الفني'),
           actions: [
+            // صندوق إشعارات داخل التطبيق (docs/08) — كانت فجوة موثّقة صراحة: الـendpoints
+            // كانت شغالة ومختبرة من زمان بس مفيش شاشة كانت بتستخدمها خالص.
+            Builder(
+              builder: (context) => FutureBuilder<int>(
+                future: NotificationsRepository(context.read<AuthRepository>()).unreadCount(),
+                builder: (context, snapshot) {
+                  final unread = snapshot.data ?? 0;
+                  return IconButton(
+                    icon: Badge(
+                      isLabelVisible: unread > 0,
+                      label: Text('$unread'),
+                      child: const Icon(Icons.notifications_outlined),
+                    ),
+                    tooltip: 'الإشعارات',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                    ),
+                  );
+                },
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.account_balance_wallet_outlined),
               tooltip: 'أرباحي',
