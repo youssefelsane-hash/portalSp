@@ -89,7 +89,7 @@
 40. ~~طلب مراجعة Google/مشاركة.~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/ratings/README.md`.
 41. نظام أكاديمية/تدريب كامل (Applicant→Trainee→Trainer→Course→...) — **مختلف تمامًا عن `technician_certificates` الموجودة**. المالك صرّح: "ده إحنا هنعمله ولكن ما تركزش عليه دلوقتي... حاول تخليه في الآخر أو بس تعمله base كده". هيتحط كـschema أساسي في آخر المرحلة دي لو فيه وقت، مش أولوية.
 42. محرك التطور الوظيفي (Career/Workforce).
-43. باني أدوار ديناميكي (No-code RBAC builder).
+43. ~~باني أدوار ديناميكي (No-code RBAC builder).~~ **✅ خلص (2026-08-13، ADR-0010)** — تفاصيل في `docs/11-qr-referral-kpi-career-rbac-2026-08-13.md` وفي `apps/api/src/modules/admin/README.md` § باني الأدوار الديناميكي.
 
 ---
 

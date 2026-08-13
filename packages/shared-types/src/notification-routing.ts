@@ -20,11 +20,5 @@ export interface UpdateRoutingRuleBody {
   is_active?: boolean;
 }
 
-// `GET /admin/roles` بيرجّع صف `Role` الخام (camelCase) من غير DTO mapper — مفيش snake_case هنا.
-export interface RoleResponseDto {
-  id: string;
-  name: string;
-  displayName: string;
-  description: string | null;
-  isSystem: boolean;
-}
+// RoleResponseDto اتنقل لـ roles.ts (باني الأدوار الديناميكي، ADR-0010) — بيتصدّر من نفس
+// الحزمة (`@baytak/shared-types`) زي ما هو، مفيش تغيير على أي كود بيستورده.
