@@ -4,6 +4,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart' show BookingMode;
+import '../favorites/favorites_repository.dart';
 import '../orders/create_order_screen.dart';
 import 'models.dart';
 import 'portfolio_link_viewer_screen.dart';
@@ -27,6 +28,7 @@ class TechnicianProfileScreen extends StatefulWidget {
 
 class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
   late final TechniciansRepository _repository;
+  late final FavoritesRepository _favoritesRepository;
   final _catalogRepository = CatalogRepository();
   TechnicianPublicProfile? _profile;
   String? _error;
@@ -35,13 +37,43 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
   // الباك-إند بلا أي شاشة تستخدمه. فشل تحميل الجدول مش لازم يمنع باقي البروفايل من الظهور.
   List<ScheduleSlot> _scheduleSlots = [];
   bool _bookingSlot = false;
+  // المفضّلة (docs/10 بند 36) — null لحد ما نجيب الحالة الحقيقية، فمفيش أيقونة "مضغوطة بالغلط"
+  // قبل ما نعرف الحالة الفعلية من الباك-إند.
+  bool? _isFavorited;
+  bool _togglingFavorite = false;
 
   @override
   void initState() {
     super.initState();
     _repository = TechniciansRepository(context.read<AuthRepository>());
+    _favoritesRepository = FavoritesRepository(context.read<AuthRepository>());
     _load();
     _loadSchedule();
+    _loadFavoriteStatus();
+  }
+
+  Future<void> _loadFavoriteStatus() async {
+    try {
+      final favorited = await _favoritesRepository.isFavorited(widget.technicianId);
+      if (mounted) setState(() => _isFavorited = favorited);
+    } on ApiException {
+      // فشل جلب حالة المفضّلة مش لازم يمنع باقي البروفايل من الظهور — الأيقونة تفضل مخفية بس.
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    if (_isFavorited == null || _togglingFavorite) return;
+    setState(() => _togglingFavorite = true);
+    try {
+      final newState = _isFavorited!
+          ? await _favoritesRepository.removeFavorite(widget.technicianId)
+          : await _favoritesRepository.addFavorite(widget.technicianId);
+      if (mounted) setState(() => _isFavorited = newState);
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _togglingFavorite = false);
+    }
   }
 
   Future<void> _load() async {
@@ -154,7 +186,18 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text(profile?.fullName ?? 'بروفايل الفني')),
+        appBar: AppBar(
+          title: Text(profile?.fullName ?? 'بروفايل الفني'),
+          actions: [
+            if (_isFavorited != null)
+              IconButton(
+                icon: _togglingFavorite
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Icon(_isFavorited! ? Icons.favorite : Icons.favorite_border, color: Colors.red),
+                onPressed: _togglingFavorite ? null : _toggleFavorite,
+              ),
+          ],
+        ),
         body: _error != null
             ? Center(child: Text(_error!))
             : profile == null
