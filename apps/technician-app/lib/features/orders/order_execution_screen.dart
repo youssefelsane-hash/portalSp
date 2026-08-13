@@ -7,7 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
-import '../media/media_repository.dart';
+import '../media/media_repository.dart' show MediaRepository, OrderMediaItem;
 import '../tracking/tracking_client.dart';
 import 'models.dart';
 import 'order.dart';
@@ -20,6 +20,11 @@ const Set<String> _afterPhotoStatuses = {'in_progress', 'work_completed'};
 
 // نفس ACTIVE_TRACKING_STATUSES في order-tracking.gateway.ts بالظبط.
 const Set<String> _activeTrackingStatuses = {'accepted', 'technician_on_way', 'technician_arrived', 'in_progress'};
+
+// كانت فجوة موثّقة صراحة — راجع التعليق في _connectTrackingIfActive(). أوسع من
+// _activeTrackingStatuses بحالة واحدة إضافية (awaiting_quote_approval) عشان استقبال
+// order:status_changed لحظيًا حتى لو الفني مش محتاج يشارك موقعه في الحالة دي.
+const Set<String> _statusListenStatuses = {..._activeTrackingStatuses, 'awaiting_quote_approval'};
 
 // سياسة إلغاء الفني (docs/10) — نفس TECHNICIAN_CANCELLABLE_STATUSES في orders.service.ts
 // (accepted/technician_on_way/technician_arrived بس، مش in_progress). بنفحص السياسة الحقيقية
@@ -47,6 +52,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   String? _error;
   String? _photoMessage;
   CancellationPolicy? _cancellationPolicy;
+  List<OrderMediaItem>? _media;
 
   @override
   void initState() {
@@ -58,6 +64,18 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _order = widget.initialOrder;
     _connectTrackingIfActive();
     _loadCancellationPolicyIfApplicable();
+    _loadMedia();
+  }
+
+  // استرجاع الصور اللي اترفعت قبل كده — راجع التعليق في media_repository.dart. فشل التحميل
+  // (مشكلة شبكة عابرة) مايمنعش الشاشة تشتغل — زرار رفع الصور بيفضل شغال عادي، بس المعرض هيفضل فاضي.
+  Future<void> _loadMedia() async {
+    try {
+      final media = await _mediaRepository.listForOrder(_order.id);
+      if (mounted) setState(() => _media = media);
+    } catch (_) {
+      // تجاهل — راجع التعليق فوق.
+    }
   }
 
   // "Show Cancel Order only when backend policy permits it" — استشاري بس، الفرض الحقيقي جوّه
@@ -73,7 +91,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   }
 
   void _connectTrackingIfActive() {
-    if (_trackingConnected || !_activeTrackingStatuses.contains(_order.orderStatus)) return;
+    // بَقّة حقيقية اتلقطت: الاتصال (وبالتالي استقبال order:status_changed) كان مربوط
+    // بـ_activeTrackingStatuses بس (بتاعة مشاركة الموقع)، اللي مبتشملش awaiting_quote_approval —
+    // يعني لو الفني قفل التطبيق وفتحه تاني وهو بالظبط مستني رد العميل على عرض السعر، الاتصال
+    // مايحصلش تلقائيًا خالص وهيحتاج يخرج ويرجع يدوي حتى لو العميل رد فورًا. _statusListenStatuses
+    // بتوسّع شرط الاتصال (انضمام للـroom بس، مفيش بث موقع تلقائي — sendLocation() بتتنادى بس من
+    // زرار "شارك موقعك" الصريح) من غير ما تأثر على _activeTrackingStatuses نفسها (لسه بتتحكم في
+    // ظهور زرار المشاركة والملاحة، مالهاش لازمة في الحالة دي).
+    if (_trackingConnected || !_statusListenStatuses.contains(_order.orderStatus)) return;
     _trackingClient.connect(
       accessToken: _accessToken,
       orderId: _order.id,
@@ -186,6 +211,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
         mediaType: mediaType,
       );
       if (mounted) setState(() => _photoMessage = 'صورة $labelAr اترفعت ✅');
+      await _loadMedia();
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     } finally {
@@ -376,6 +402,11 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                     : Text(_beforePhotoStatuses.contains(_order.orderStatus) ? 'صوّر قبل الشغل' : 'صوّر بعد الشغل'),
               ),
             ],
+            if ((_media ?? []).any((m) => m.mediaType == 'before_photo' || m.mediaType == 'after_photo')) ...[
+              const SizedBox(height: 12),
+              _PhotoGallery(media: _media!.where((m) => m.mediaType == 'before_photo').toList(), titleAr: 'صور قبل الشغل'),
+              _PhotoGallery(media: _media!.where((m) => m.mediaType == 'after_photo').toList(), titleAr: 'صور بعد الشغل'),
+            ],
             if (_order.orderStatus == 'in_progress') ...[
               const SizedBox(height: 16),
               OutlinedButton.icon(
@@ -413,6 +444,52 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// معرض صغير للصور اللي اترفعت بالفعل — راجع التعليق في MediaRepository.listForOrder().
+class _PhotoGallery extends StatelessWidget {
+  final List<OrderMediaItem> media;
+  final String titleAr;
+
+  const _PhotoGallery({required this.media, required this.titleAr});
+
+  @override
+  Widget build(BuildContext context) {
+    if (media.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$titleAr (${media.length})', style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 72,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: media.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, index) => ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  media[index].fileUrl,
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(
+                    width: 72,
+                    height: 72,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    child: const Icon(Icons.broken_image_outlined),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
