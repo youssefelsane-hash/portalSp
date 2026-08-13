@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../assistant_offers/assistant_offers_screen.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../company/company_screen.dart';
@@ -124,6 +125,15 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'أرباحي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const WalletScreen()),
+              ),
+            ),
+            // مطابقة المساعد التلقائية (ADR-0007) — فرص مساعدة على طلبات فنيين تانيين
+            // (بث تنافسي، أول قبول صحيح ياخدها)، منفصلة عن قايمة "طلباتي المتاحة" فوق.
+            IconButton(
+              icon: const Icon(Icons.handshake_outlined),
+              tooltip: 'فرص المساعدة',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AssistantOffersScreen()),
               ),
             ),
             IconButton(

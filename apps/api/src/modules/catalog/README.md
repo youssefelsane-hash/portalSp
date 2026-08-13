@@ -107,4 +107,14 @@
 
 **البَقّة**: `estimate()` (النقطة الوحيدة اللي `orders.service.ts`/`promotions.service.ts`/`catalog.controller.ts` الثلاثة بينادوها) كانت بتتجاهل `service.pricingModel===formula` بالكامل وتستخدم المسار الثابت (`service.basePriceCents=0` لخدمات formula عمدًا) — يعني أي طلب حقيقي لخدمة formula كان بيتحجز مجانًا بصمت. الحل الكامل (استدعاء `PricingEngineService.evaluate()` لو `fieldValues`/`field_values` موجودة، مع threading كامل من `CreateOrderDto`/`ValidatePromoCodeQueryDto`) وتفاصيل الاختبار الحي الكاملة (2110 قرش مطابق تمامًا لـ`evaluate-price`، رفض واضح `400` بدل صفر صامت، صفر orphan rows) موثّقة بالتفصيل في `../pricing/README.md` قسم "الربط بمسار إنشاء الطلب" — عشان تفادي تكرار نفس التوثيق في مكانين.
 
+## `GET /services/:id/technicians` بقت بترجّع مستوى+سعر نهائي لكل فني — صُنّاع (`docs/08` §3) — قرار عمل صريح من المالك، اتقفلت (بناء 2026-08-13)
+
+**الفجوة**: القايمة (القسم فوق) كانت بترجّع اسم/صورة/تقييم/بايو/مسافة بس — العميل ميكنش يعرف السعر النهائي هيختلف إزاي لو اختار فني `platinum` بدل `new` قبل ما يضغط "اختار". المالك طلب صراحة: كل فني مرشّح لازم يظهر معاه رتبته والسعر النهائي المحسوب فعليًا بيه، **قبل** الاختيار — مفيش مفاجأة سعر بعد التأكيد.
+
+- `TechniciansService.listForServiceBooking()` بقت ترجّع `currentLevel` (`technician_profiles.current_level`) مع كل مرشّح، فوق زون الخدمة نفسها (`zoneId`) اللي كانت بتتحسب جوّاها أصلاً.
+- `CatalogController.listTechniciansForService()` (الـ handler الفعلي لـ`GET /services/:id/technicians`) بقى يجيب الخدمة نفسها ويتفرّع: لو `pricingModel===formula` (محتاجة `field_values` من العميل، مش متوفرة وقت قايمة الاختيار) → `final_price_cents:null`/`level_price_multiplier:null` لكل الفنيين (سلوك متعمّد، موثّق كـ"مش نقص" — المضاعف مفهوميًا مش بيتفعّل لخدمات formula أصلًا، `estimate()` بترجّع `level_price_multiplier:1` ثابت ليها بغض النظر عن المستوى). غير كده → `Promise.all` بينادي `catalogService.estimate(service.id, zoneId, item.currentLevel, isEmergency)` لكل مرشّح **بالتوازي**، نفس محرك `estimate()` المُختبر أصلًا، بلا أي تكرار حساب.
+- `final_price_cents = estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents` — بيشمل رسوم الطوارئ لو `is_emergency=true` في الطلب.
+- **قرار تصميم متعمّد لتفادي coupling جديد بين الموديولات**: `ListTechniciansForServiceDto` بقى فيها `booking_mode?` من نوع `BookingModeFilter` (نفس string-literal type المُكرر عمدًا في `list-services.dto.ts`)، **مش** import مباشر لـ`BookingMode` enum من موديول `orders` — نفس الاتفاقية الموجودة بالفعل في نفس الملف.
+- **اتأكد حي**: خدمة `fixed` أساسها 1000 ج.م.، فني `premium` (مضاعف `ServiceLevelPricing` = 1.20) ظهر في القايمة بـ`final_price_cents:120000`/`level_price_multiplier:1.20` — مطابق تمامًا لناتج `/orders/preview` وللطلب الفعلي بعدين (تفاصيل كاملة في `../orders/README.md`).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

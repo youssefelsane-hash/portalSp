@@ -332,11 +332,7 @@ export default function OrderDetailPage() {
             <CardTitle className="text-base">الإنتاجية والمدة المتوقعة</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
-            {!order.pricing_evaluation ? (
-              <p className="text-sm text-muted-foreground">
-                مفيش بيانات إنتاجية محسوبة لهذا الطلب — الخدمة مش بتستخدم معادلة تسعير (pricing_model=formula)
-              </p>
-            ) : (
+            {order.pricing_evaluation ? (
               <>
                 <p>
                   المدة المتوقعة:{' '}
@@ -357,6 +353,22 @@ export default function OrderDetailPage() {
                   {new Date(order.pricing_evaluation.created_at).toLocaleString('ar-EG-u-nu-latn')}
                 </p>
               </>
+            ) : order.standard_data_id ? (
+              // محرك الإنتاجية (docs/06 §3.3-§3.6) — نفس فكرة pricing_evaluation فوق بس لخدمات
+              // مبنية على بيانات قياسية (service_standard_data) مش formula.
+              <>
+                <p>
+                  المدة المتوقعة:{' '}
+                  {order.estimated_duration_days !== null ? `${order.estimated_duration_days} يوم` : '—'}
+                </p>
+                <p>عدد الصنايعية المطلوب: {order.required_technicians ?? '—'}</p>
+                <p>عدد المساعدين المطلوب: {order.required_assistants ?? '—'}</p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                مفيش بيانات إنتاجية محسوبة لهذا الطلب — الخدمة مش بتستخدم معادلة تسعير (pricing_model=formula)
+                ولا بيانات قياسية (service_standard_data)
+              </p>
             )}
           </CardContent>
         </Card>

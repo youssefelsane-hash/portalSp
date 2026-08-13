@@ -35,4 +35,10 @@ export class PreviewOrderDto {
   @IsString()
   @MaxLength(20)
   building_code?: string;
+
+  // مضاعف سعر مستوى الفني (docs/08) — لو العميل اختار فني بعينه بالفعل قبل المعاينة (نفس شاشة
+  // اختيار الفني)، السعر المعروض هنا لازم يطابق بالحرف اللي هيتحصّل فعليًا لو أكّد بنفس الفني ده.
+  @IsOptional()
+  @IsUUID()
+  requested_technician_id?: string;
 }

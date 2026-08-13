@@ -19,6 +19,7 @@ import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianTeamRole } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
@@ -26,10 +27,10 @@ import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
+import { RequestRematchDto } from './dto/request-rematch.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
-import { RequestRematchDto } from './dto/request-rematch.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
@@ -131,21 +132,14 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
 
-    const estimate = await this.catalogService.estimate(
-      service.id,
-      zone.id,
-      undefined,
-      bookingMode === BookingMode.EMERGENCY,
-      dto.field_values,
-    );
-    const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
-    const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
-
     // "إعادة الحجز" — نتأكد إن الـ id فعلاً فني حقيقي بس (404 واضح لو لأ)، مش هل هو متاح/مؤهّل
     // للخدمة دي تحديداً — ده بيتفحص وقت المطابقة نفسها (matching.service.ts)، فالتفضيل ده
-    // ببساطة بيتجاهَل بأمان لو مش قابل للتطبيق بدل ما يمنع إنشاء الطلب.
+    // ببساطة بيتجاهَل بأمان لو مش قابل للتطبيق بدل ما يمنع إنشاء الطلب. **منقولة قبل estimate()**
+    // (كانت بعده) عشان نعرف مستوى الفني المطلوب ونطبّق مضاعف سعره الصح من أول تقدير — مبدأ عمل
+    // صريح: "السعر النهائي معروف قبل التأكيد، مفيش زيادة مفاجئة بعده" (تفاصيل تحت).
+    let requestedTechnicianProfile: TechnicianProfile | null = null;
     if (dto.requested_technician_id) {
-      await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
+      requestedTechnicianProfile = await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
 
     // الجدولة الحقيقية للفني (docs/08 §2-§3، ADR-0002) — كانت `TechnicianScheduleService.bookSlot()`
@@ -172,6 +166,33 @@ export class OrdersService {
       if (dto.requested_technician_id && dto.requested_technician_id !== scheduleSlot.technicianId) {
         throw new ApiException(ErrorCode.VAL_001, 'السلوت المختار بتاع فني مختلف عن الفني المطلوب — اختار واحد بس', HttpStatus.BAD_REQUEST);
       }
+    }
+
+    // مضاعف سعر مستوى الفني (docs/08 — "قرار عمل: السعر النهائي معروف قبل التأكيد") — بيتطبّق
+    // بس لو الفني معروف صراحة وقت الحجز (اختيار مباشر أو سلوت جدولة)، مش لو العميل سايب المطابقة
+    // تختار (technicianLevel=undefined يبقى مضاعف=1 داخل estimate()، زي ما كان بالظبط). سلوت
+    // الجدولة بيغلب requested_technician_id لو الاتنين موجودين (نفس أولوية اختيار الفني تحت).
+    const scheduleSlotTechnicianProfile = scheduleSlot
+      ? await this.techniciansService.findByProfileIdOrThrow(scheduleSlot.technicianId)
+      : null;
+    const knownTechnicianLevel = scheduleSlotTechnicianProfile?.currentLevel ?? requestedTechnicianProfile?.currentLevel;
+
+    const estimate = await this.catalogService.estimate(
+      service.id,
+      zone.id,
+      knownTechnicianLevel,
+      bookingMode === BookingMode.EMERGENCY,
+      dto.field_values,
+    );
+    const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
+    const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
+
+    // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم المحسوبة هنا بتتسجّل
+    // snapshot على الطلب نفسه (مش مجرد معاينة زي POST /services/:id/estimate-duration)، عشان
+    // تفضل ظاهرة لفريق العمليات/الفني حتى لو الأدمن غيّر service_standard_data بعدين.
+    let durationEstimate: Awaited<ReturnType<CatalogService['estimateDuration']>> | null = null;
+    if (dto.standard_data_id && dto.requested_units) {
+      durationEstimate = await this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units);
     }
 
     // إعادة زيارة تحت الضمان (docs/08 §7) — لازم: بتاعة نفس العميل، مكتملة فعلاً، لنفس الخدمة
@@ -273,6 +294,11 @@ export class OrdersService {
         paymentStatus: OrderPaymentStatus.UNPAID,
         placedAt: now,
         sourceChannel: OrderSourceChannel.CUSTOMER_APP,
+        // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
+        standardDataId: durationEstimate ? dto.standard_data_id! : null,
+        requiredTechnicians: durationEstimate?.assigned_technicians ?? null,
+        requiredAssistants: durationEstimate?.assigned_assistants ?? null,
+        estimatedDurationDays: durationEstimate?.estimated_days ?? null,
       });
       await manager.save(order);
 
@@ -410,10 +436,15 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
 
+    // مضاعف سعر مستوى الفني (docs/08) — نفس منطق create() بالحرف، راجع تعليقها الكامل هناك.
+    const previewTechnicianLevel = dto.requested_technician_id
+      ? (await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id)).currentLevel
+      : undefined;
+
     const estimate = await this.catalogService.estimate(
       service.id,
       zone.id,
-      undefined,
+      previewTechnicianLevel,
       bookingMode === BookingMode.EMERGENCY,
       dto.field_values,
     );
@@ -460,6 +491,7 @@ export class OrdersService {
       discount_source: discountSource,
       total_amount_cents: subtotalBeforeDiscountCents - discountCents,
       estimated_duration_days: estimate.estimated_duration_days,
+      level_price_multiplier: estimate.level_price_multiplier,
     };
   }
 

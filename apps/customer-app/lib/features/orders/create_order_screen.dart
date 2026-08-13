@@ -370,6 +370,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         requestedTechnicianCompanyId: _selectedCompany?.id,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         scheduleSlotId: widget.scheduleSlotId,
+        standardDataId: _selectedStandardData?.id,
+        requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(

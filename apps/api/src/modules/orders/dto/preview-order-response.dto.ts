@@ -29,4 +29,7 @@ export interface PreviewOrderResponseDto {
    * POST /orders هيحسبها كـ total_amount_cents لو اتبعتت نفس المدخلات بالظبط. */
   total_amount_cents: number;
   estimated_duration_days: number | null;
+  /** مضاعف سعر مستوى الفني (docs/08) — 1 لو الفني مش معروف وقت المعاينة (مطابقة تلقائية).
+   * base_price_cents فوق أصلاً مضروب فيه — الحقل ده للعرض/الشفافية بس، مش لإعادة الحساب يدويًا. */
+  level_price_multiplier: number;
 }

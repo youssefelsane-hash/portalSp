@@ -85,7 +85,7 @@ export class OrderTeamService {
   async listForOrder(orderId: string): Promise<OrderTeamMemberRow[]> {
     return this.teamMembers.manager.query<OrderTeamMemberRow[]>(
       `SELECT otm.id, otm.technician_id AS "technicianId", u.full_name AS "fullName", u.avatar_url AS "avatarUrl",
-              otm.role_label AS "roleLabel", otm.created_at AS "createdAt"
+              otm.role_label AS "roleLabel", otm.member_type AS "memberType", otm.created_at AS "createdAt"
        FROM order_team_members otm
        JOIN technician_profiles tp ON tp.id = otm.technician_id
        JOIN users u ON u.id = tp.user_id

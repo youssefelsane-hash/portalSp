@@ -193,6 +193,57 @@
 (موجودة من زمان، بتسمع `ORDER_STATUS_CHANGED_EVENT`) بقت تشتغل فعليًا دلوقتي — اتأكد حياً
 (`cancelled_orders_count` زاد صح بعد كل عملية).
 
+## سياسة إلغاء الفني الكاملة القابلة للإعداد (ADR-0006) — إعادة بناء `technicianCancel()` (بناء 2026-08-12)
+
+القسم فوق ده وصف النسخة الأولى (hardcoded). المالك طلب تفصيلي: سياسة كاملة قابلة للإعداد — راجع
+`docs/adr/0006-technician-cancellation-policy.md` للقرار المعماري الكامل قبل التنفيذ (البدائل
+اللي اتقيّمت، تبرير كل قرار). الملخّص التقني:
+
+- **إعدادات جديدة** (`settings`, `group_name='technician_cancellation'`, migration `0068`):
+  `self_cancel_enabled` (مفتاح إيقاف عام)، `window_minutes_after_acceptance` (افتراضي 15 —
+  الإلغاء الذاتي ممنوع بعدها، `ORDR_003` واضح يوجّه للدعم)، `min_minutes_before_scheduled_start`
+  (افتراضي 60)، `auto_rematch_individual` (افتراضي `true` — فرد/طوارئ)، `auto_rematch_team_assigned`
+  (افتراضي `false` — "اعتماد"/تعيين يدوي من الإدارة).
+- **`order_status` قيمة جديدة `needs_technician_reselection`** (نفس migration، `ALTER TYPE ADD VALUE`).
+  انتقالات جديدة في `order-state-machine.ts`: `ACCEPTED|TECHNICIAN_ON_WAY|TECHNICIAN_ARRIVED` بقوا
+  يقدروا يروحوا `NEEDS_TECHNICIAN_RESELECTION` **أو** `SEARCHING_TECHNICIAN` مباشرة (مش بس
+  `CANCELLED_BY_TECHNICIAN` زي قبل)، و`NEEDS_TECHNICIAN_RESELECTION` نفسها بتروح `SEARCHING_TECHNICIAN`
+  (طلب إعادة مطابقة) أو `CANCELLED_BY_CUSTOMER`.
+- **تحديد "هل ده تعيين يدوي/اعتماد؟" بلا عمود جديد**: `order.bookingMode === TEAM` **أو** وجود صف
+  `order_status_history` بـ`change_source=admin` و`new_status=accepted` (بصمة `AdminOrdersService.reassign()`
+  الموجودة من زمان) — استنتاج من بيانات موجودة بالفعل، مش schema إضافي.
+  - لو صح **و** `auto_rematch_team_assigned=false` (الافتراضي) → `needs_technician_reselection`،
+    إشعار عالي الأولوية للعميل (`order-status-notification.listener.ts`, رسالة جديدة)، مفيش
+    إعادة توزيع صامتة.
+  - غير كده (فرد/طوارئ عادي) → `searching_technician` + بث `ORDER_CREATED_EVENT` — **نفس الحدث
+    اللي `OrderDispatchListener` الموجود بيسمعه من زمان لإنشاء طلب جديد**، فـ`dispatchNextRound()`
+    بيشتغل تلقائيًا من غير أي كود مطابقة جديد. الفني اللي لغى مستبعد تلقائيًا (لسه ليه صف
+    `order_assignments` من الجولة الأصلية — نفس شرط الاستبعاد الموجود أصلاً).
+- **`POST /orders/:id/request-rematch` جديد** (عميل) — بيرجّع طلب `needs_technician_reselection`
+  لـ`searching_technician` صراحة، `requested_technician_id` اختياري (تفضيل بس). **ملحوظة صريحة**:
+  `dispatchNextRound()` بيحترم `order.requestedTechnicianId` بس في أول جولة (`nextRound === 1`) —
+  الطلب هنا مش أول جولة أبدًا (رجع من إلغاء بعد جولات سابقة)، فالتفضيل بيتسجّل بس المطابقة العادية
+  هي اللي هتشتغل فعليًا. قرار مقصود لتفادي لمس منطق الجولات المُختبر جيدًا في `matching.service.ts`.
+- **السبب بقى إجباري دايمًا** (`cancellation_reason_id` مكانش، بقى) + عمود جديد
+  `cancellation_reasons.requires_free_text` (نفس migration) — لو `true`، النص الحر (`reason`) بقى
+  إجباري هو كمان (`VAL_001` واضح لو فاضي).
+- **حدث audit كامل عبر `AuditLogService`** (مش عمود جديد) — `newValues` بيحمل `accepted_at`،
+  `elapsed_minutes_since_acceptance`، `within_policy_window`، `booking_mode`، `rematch_behavior`.
+
+**اتعمله اختبار حي لمسار الفرد/الأوتوماتيك بالكامل**: فني حقيقي قبل طلب `individual`. سبب
+`requires_free_text=true` من غير نص اترفض `VAL_001`. طلب من غير `cancellation_reason_id` خالص
+اترفض (بقى إجباري). الإلغاء الفعلي نجح (`cancellation_fee_cents` احتُسبت صح من نسبة السبب)،
+`order_status` رجع `searching_technician` فورًا (مش `cancelled_by_technician` — تأكيد إن السلوك
+الجديد اشتغل صح للفرد)، `ORDER_CREATED_EVENT` اشتغل تلقائيًا وأعاد محاولة المطابقة (الفني اللي
+لغى اتستبعد صح، مفيش فنيين تانيين متاحين فالطلب اتلغى نظاميًا `ORDR_002` — سلوك متوقع تمامًا).
+صف `audit_logs` تأكّد فيه كل الحقول المطلوبة صراحة. أرصدة المحافظ اترجعت للحالة الأصلية بعد الاختبار.
+
+**لسه من غير — موثّق صراحة، مش سهو** (تفاصيل كاملة في `docs/10-integration-completion-tracker.md`):
+مسار "اعتماد"/التعيين اليدوي (`needs_technician_reselection` + `request-rematch`) مكتوب ومبني بس
+مش مُختبر حي لسه؛ `apps/technician-app`'s زرار الإلغاء لسه بيستخدم الـDTO القديم (السبب اختياري)؛
+`apps/customer-app` مفيهوش أي UI لحالة `needs_technician_reselection` ولا زرار "أعد المطابقة"؛
+قائد/مدير الفريق يلغي نيابة عن عضو تاني مؤجَّل عمدًا (محتاج قرار عمل، موثّق في ADR-0006 نفسه).
+
 ## ربط محرك التسعير الديناميكي بـ`POST /orders` — كانت أخطر فجوة تسعير موثّقة، اتقفلت (بناء 2026-08-12)
 
 **بَقّة حقيقية خطيرة اتلقطت**: `create()` بينادي `catalogService.estimate(service.id, zone.id, undefined, bookingMode===EMERGENCY)` — وكانت `estimate()` مش عارفة `pricing_model=formula` خالص، فأي خدمة formula كانت بتتحجز بـ`estimated_price_cents=0`/`total_amount_cents=0` بصمت (السعر الأساسي الثابت لخدمة formula مسجّل عمدًا 0 لأنه مالوش معنى — السعر كله من المعادلة)، بينما `POST /services/:id/evaluate-price` (المسار المنفصل من Phase 1) كان بيحسب سعر حقيقي صح. التفاصيل الكاملة والقرارات المعمارية في `../pricing/README.md` (قسم "الربط بمسار إنشاء الطلب") — بس الخلاصة المباشرة هنا: `CreateOrderDto` بقى فيه `field_values?: Record<string, string|number|boolean>` اختياري بيتبعت مباشرة لـ`catalogService.estimate()`، اللي بقت تتفرّع لـ`PricingEngineService.evaluate()` لو الخدمة formula.
@@ -220,6 +271,26 @@
 - **الحجز الذرّي جوّه الـtransaction**: `bookSlot(slotId, order.id, manager)` بتتنادى فورًا بعد `manager.save(order)` — لو فشلت (سباق حقيقي، حد تاني حجز السلوت في نفس اللحظة)، رفض `409` بيترول باك الطلب كله (order + status history + addons + إلخ) مش يتعمل طلب بلا سلوت فعلي بيشاور عليه.
 - **التحرير عند الإلغاء**: مركزي عبر `ScheduleSlotReleaseListener` (موديول `technicians`) بيسمع `ORDER_STATUS_CHANGED_EVENT` — مش نداء يدوي في `cancel()`/`technicianCancel()`/الإلغاء الإداري/التلقائي الأربعة، استماع واحد بيغطيهم كلهم.
 - **اتعمله اختبار حي كامل** (تفاصيل الأرقام والاختبارات الكاملة في `../technicians/README.md`): فني حقيقي أنشأ سلوت، عميل حجز عليه، `requested_technician_id`/`scheduled_at` طابقوا السلوت بالظبط، `order_assignments` الجولة الأولى اتوزعت حصريًا على فني السلوت، إلغاء (عميل وفني) حرّر السلوت في الحالتين، سباق حقيقي بين عميلين على نفس السلوت — واحد بس نجح صفر orphan، وكل التوليفات المتعارضة (طوارئ/إعادة زيارة/فني مختلف) اترفضت بوضوح.
+
+## إنتاجية الفريق وتقدير المدة على الطلب — صُنّاع (`docs/08` §5) — قرار عمل صريح من المالك، اتقفلت (بناء 2026-08-13)
+
+**الفجوة**: `docs/08` §5 كانت موثّقة صراحة "اتأجل عمداً — مقياس الإنتاجية محتاج قرار عمل صريح من المالك، مش هيتخترع". المالك حدد القرار بمثال دقيق: الأدمن بيعرّف إنتاجية حقيقية للسوق (مثلاً 30 م²/يوم لفني+مساعد)، والنظام ياخد كمية العميل الفعلية ويحسب فريق/مدة منها — **مش يخترع رقم**. `CatalogService.estimateDuration(serviceId, standardDataId, requestedUnits, assignedTechnicians?, assignedAssistants?)` كانت موجودة ومختبرة بمعزل من زمان (Part C)، بتنفّذ بالحرف نفس الصيغة اللي المالك وصفها، بس **مفيش أي مكان في `POST /orders` بينادي عليها ولا بيخزّن نتيجتها على الطلب** — العميل يقدر يطلب `estimate-duration` بشكل منفصل بس النتيجة بترمي بمجرد ما يأكد الحجز.
+
+**الحل (وصلة بس، مفيش محرك جديد)**: Migration `0074_order_team_productivity.sql` — `orders.standard_data_id`/`required_technicians`/`required_assistants`/`estimated_duration_days` (الأربعة NULL لو الخدمة مالهاش `ServiceStandardData` أصلاً أو العميل مبعتش `requested_units`). `CreateOrderDto` بقى فيه `standard_data_id?`/`requested_units?` اختياريين — لو الاتنين موجودين، `create()` بينادي `estimateDuration()` (نفس المحرك، بلا تكرار) ويخزّن النتيجة على صف الطلب وقت الإنشاء — **snapshot**، بالضبط زي أي حقل سعر تاني: لو الأدمن غيّر `productivityPerDay` بعدين، الطلبات القايمة بالفعل بتفضل بأرقامها الأصلية، وبس الطلبات الجديدة بتاخد الإعداد الجديد.
+
+**اتأكد حي بمثال المالك بالحرف**: `ServiceStandardData` حقيقي — `productivityPerDay=30`, `minTechnicians=1`, `minAssistants=1`. طلب حقيقي بـ`requested_units=120` → `required_technicians=1`, `required_assistants=1`, `estimated_duration_days=4` (= ⌈120/30⌉) — مطابق 100% لمثال المالك. طلب بلا `standard_data_id`/`requested_units` → الأعمدة الأربعة `null` بدون أي خطأ (سلوك اختياري صح). بيانات الاختبار (خدمة + بيانات قياسية + طلب) اتعملها soft-delete/تنضيف بعد التأكيد.
+
+**معروض في الواجهات**: `apps/admin` (صفحة تفاصيل الطلب، كارت "الإنتاجية والمدة المتوقعة" الموجود من Part B اتوسّع ليقرا من مصدر بيانات الطلب الجديد لو `pricing_evaluation` مش موجود) و`apps/customer-app` (`order_detail_screen.dart`، كارت جديد يظهر تحت وصف المشكلة لما `required_technicians`/`estimated_duration_days` موجودين). `create_order_screen.dart` بيبعت `standard_data_id`/`requested_units` من `_selectedStandardData`/حقل الكمية الموجودين بالفعل في شاشة إنشاء الطلب.
+
+## مضاعف مستوى الفني قبل التأكيد — صُنّاع (`docs/08` §3) — قرار عمل صريح من المالك، اتقفلت (بناء 2026-08-13)
+
+**الفجوة**: `CatalogService.estimate()` كانت بتاخد `technicianLevel` وتطبّق `ServiceLevelPricing.priceMultiplier` من زمان (Part A) — بس `OrdersService.create()`/`previewPrice()` **كانوا دايمًا بيبعتوا `technicianLevel=undefined`**، فمضاعف المستوى ماكانش بيتفعّل خالص في أي طلب حقيقي، والعميل ميكنش يشوف السعر المختلف باختلاف رتبة الفني قبل التأكيد أصلاً (نفس السعر بالظبط أيًا كان الفني المختار).
+
+**الحل**: `create()`/`previewPrice()` بقوا يستحضروا مستوى الفني الفعلي **قبل** ما ينادوا `estimate()` — من `requested_technician_id` (لو اتبعت) أو من الفني المرتبط بـ`schedule_slot_id` (لو الحجز عبر سلوت)، وبيبعتوه كمعامل تالت لـ`estimate()`. `PreviewOrderResponseDto` رجّع `level_price_multiplier` جديد عشان العميل يشوفه صريح في `/orders/preview` قبل التأكيد. تفاصيل قايمة الفنيين المعروضة بمستوى/سعر نهائي لكل واحد في `../catalog/README.md`.
+
+**اتأكد حي بمثال المالك بالحرف**: فني `premium` (مضاعف 1.20 في `ServiceLevelPricing`) على خدمة أساسها 1000 ج.م. — `/orders/preview` رجّع `level_price_multiplier:1.20`/`total_amount_cents:120000`، وطلب فعلي بنفس `requested_technician_id` رجّع `total_amount_cents:120000` **مطابق تمامًا** لما اتعرض في المعاينة — مفيش مفاجأة سعر بعد التأكيد. بيانات الاختبار اتعملها تنضيف بعد التأكيد.
+
+**لسه محتاج تأكيد حي (نطاق متبقي موثّق صراحة، مش سهو)**: مسار استحضار المستوى عبر `schedule_slot_id` (بدل `requested_technician_id` مباشرة) اتبنى بنفس المنطق تمامًا بس ماتاختبرش حي في الجلسة دي. رسوم الطوارئ (`emergency_surcharge_cents`) جوّه `final_price_cents` في قايمة اختيار الفني (`../catalog/README.md`) اتبنت بس ماتاختبرتش حي بطلب `booking_mode=emergency` فعلي — الكود موجود ونفس مسار `isEmergency` المُختبر أصلاً في مسارات تانية، بس التوليفة "مستوى فني + طوارئ مع بعض في نفس الطلب" محتاجة اختبار حي مخصص قبل ما تتوثّق كـ"مؤكد".
 
 ## سياسة إلغاء الفني الكاملة — كانت hardcoded بسيطة، اتحوّلت لسياسة قابلة للإعداد بالكامل (بناء 2026-08-12)
 

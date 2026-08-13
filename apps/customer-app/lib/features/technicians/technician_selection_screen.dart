@@ -155,16 +155,37 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                             backgroundImage: t.avatarUrl != null ? NetworkImage(t.avatarUrl!) : null,
                             child: t.avatarUrl == null ? const Icon(Icons.person) : null,
                           ),
-                          title: Text(t.fullName),
-                          subtitle: Row(
+                          title: Row(
                             children: [
-                              if (t.totalRatingsCount > 0) ...[
-                                const Icon(Icons.star, size: 14, color: Colors.amber),
-                                Text(' ${t.averageRating.toStringAsFixed(1)} (${t.totalRatingsCount})  '),
-                              ] else
-                                const Text('لسه من غير تقييم  '),
-                              Text('· ${t.completedOrdersCount} طلب مكتمل'),
-                              if (t.distanceKm != null) Text('  · ${t.distanceKm!.toStringAsFixed(1)} كم'),
+                              Expanded(child: Text(t.fullName)),
+                              // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة الفني
+                              // والسعر النهائي المحسوب فعليًا بيه قبل ما يختاره.
+                              Chip(
+                                label: Text(technicianLevelLabelsAr[t.technicianLevel] ?? t.technicianLevel),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ],
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  if (t.totalRatingsCount > 0) ...[
+                                    const Icon(Icons.star, size: 14, color: Colors.amber),
+                                    Text(' ${t.averageRating.toStringAsFixed(1)} (${t.totalRatingsCount})  '),
+                                  ] else
+                                    const Text('لسه من غير تقييم  '),
+                                  Text('· ${t.completedOrdersCount} طلب مكتمل'),
+                                  if (t.distanceKm != null) Text('  · ${t.distanceKm!.toStringAsFixed(1)} كم'),
+                                ],
+                              ),
+                              if (t.finalPriceCents != null)
+                                Text(
+                                  'السعر النهائي: ${(t.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
                             ],
                           ),
                           isThreeLine: false,

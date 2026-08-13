@@ -47,6 +47,11 @@ class Order {
   final String? warrantyExpiresAt;
   // موجود بس لو الطلب ده نفسه "إعادة زيارة" — بيشاور على الطلب الأصلي.
   final String? originalOrderId;
+  // محرك الإنتاجية (docs/06 §3.3-§3.6) — snapshot وقت الحجز، null لو الخدمة formula/fixed بلا
+  // بيانات قياسية مُستخدمة.
+  final int? requiredTechnicians;
+  final int? requiredAssistants;
+  final int? estimatedDurationDays;
   // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
   // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
   final String? requestedTechnicianId;
@@ -72,6 +77,9 @@ class Order {
     this.address,
     this.warrantyExpiresAt,
     this.originalOrderId,
+    this.requiredTechnicians,
+    this.requiredAssistants,
+    this.estimatedDurationDays,
     this.requestedTechnicianId,
   });
 
@@ -101,6 +109,9 @@ class Order {
             : null,
         warrantyExpiresAt: json['warranty_expires_at'] as String?,
         originalOrderId: json['original_order_id'] as String?,
+        requiredTechnicians: json['required_technicians'] as int?,
+        requiredAssistants: json['required_assistants'] as int?,
+        estimatedDurationDays: json['estimated_duration_days'] as int?,
         requestedTechnicianId: json['requested_technician_id'] as String?,
       );
 }

@@ -445,6 +445,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                 const SizedBox(height: 8),
                                 Text('الوصف: ${order.problemDescription}'),
                               ],
+                              // محرك الإنتاجية (docs/06 §3.3-§3.6) — كانت فجوة موثّقة صراحة:
+                              // العميل كان بيشوف معاينة المدة قبل الحجز بس، مش القيم اللي
+                              // اتسجلت فعليًا على طلبه بعد التأكيد.
+                              if (order.estimatedDurationDays != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'المدة المتوقعة: ${order.estimatedDurationDays} يوم'
+                                  '${order.requiredTechnicians != null ? ' — ${order.requiredTechnicians} صنايعي' : ''}'
+                                  '${(order.requiredAssistants ?? 0) > 0 ? ' + ${order.requiredAssistants} مساعد' : ''}',
+                                ),
+                              ],
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
                                 Text(

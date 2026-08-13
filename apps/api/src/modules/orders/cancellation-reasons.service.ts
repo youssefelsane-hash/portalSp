@@ -74,6 +74,7 @@ export class CancellationReasonsService {
     if (dto.fee_percentage !== undefined) reason.feePercentage = String(dto.fee_percentage);
     if (dto.affects_technician_score !== undefined) reason.affectsTechnicianScore = dto.affects_technician_score;
     if (dto.display_order !== undefined) reason.displayOrder = dto.display_order;
+    if (dto.requires_free_text !== undefined) reason.requiresFreeText = dto.requires_free_text;
     if (dto.is_active !== undefined) reason.isActive = dto.is_active;
     if (dto.requires_free_text !== undefined) reason.requiresFreeText = dto.requires_free_text;
     await this.reasons.save(reason);

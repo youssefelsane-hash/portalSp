@@ -16,6 +16,9 @@ import { AdminNotificationRoutingController } from './admin-notification-routing
 import { NotificationRoutingRule } from './entities/notification-routing-rule.entity';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
+import { AssistantMatchingEscalatedRoutingListener } from './listeners/assistant-matching-escalated-routing.listener';
+import { AssistantOpportunityNotificationListener } from './listeners/assistant-opportunity-notification.listener';
+import { AssistantPersonalAssignedNotificationListener } from './listeners/assistant-personal-assigned-notification.listener';
 import { CashCollectedRoutingListener } from './listeners/cash-collected-routing.listener';
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
@@ -66,6 +69,9 @@ import { NotificationsService } from './notifications.service';
     LowRatingRoutingListener,
     RatingSubmittedNotificationListener,
     ReferralRewardNotificationListener,
+    AssistantPersonalAssignedNotificationListener,
+    AssistantOpportunityNotificationListener,
+    AssistantMatchingEscalatedRoutingListener,
     TechnicianCancellationNotificationListener,
   ],
   exports: [NotificationsService],
