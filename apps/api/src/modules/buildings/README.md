@@ -19,4 +19,11 @@
 والعمائر اللي معندهاش طلبات الشهر ده بترجع `0` تلقائيًا (`Map` مبدئي بالكل=0 قبل الاستعلام).
 اتعمله اختبار حي: النتيجة طابقت `SELECT COUNT(*)` المباشر بالظبط (`1`) لعمارة حقيقية فيها طلب.
 
+## بَقّة حقيقية اتلقطت واتصلحت (2026-08-13) — `deleted_at` ناقص من عدّاد الاشتراك الشهري
+
+`getCurrentMonthOrdersCount()`/`getCurrentMonthOrdersCountBulk()` كانوا بيحسبوا `COUNT(*) FROM
+orders WHERE building_id=...` من غير `AND deleted_at IS NULL` — طلب اتعمله soft-delete كان لسه
+بيتحسب في عدّاد "الاشتراك الشهري" (مقارنة بـ`minimum_monthly_orders`)، فيدّي رقم أعلى من الطلبات
+الحقيقية الظاهرة فعليًا. الإصلاح: `AND deleted_at IS NULL` على الاستعلامين الاتنين.
+
 مرجع كامل: `../../../../docs/08-pricing-engine-and-platform-vision.md` §13 و`../../../../docs/adr/0003-buildings-qr-discount.md`.

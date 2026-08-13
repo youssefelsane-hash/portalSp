@@ -61,7 +61,7 @@ export class TechnicianStatsProcessor extends WorkerHost {
         `SELECT
            COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
            COUNT(*) FILTER (WHERE order_status IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system')) AS cancelled_orders_count
-         FROM orders WHERE technician_id = $1`,
+         FROM orders WHERE technician_id = $1 AND deleted_at IS NULL`,
         [technicianProfileId],
       );
 
@@ -96,7 +96,7 @@ export class TechnicianStatsProcessor extends WorkerHost {
   // بيكتبلها قيمة) — تفاصيل كاملة في technicians/README.md.
   private async recalculatePerServiceStats(technicianProfileId: string, serviceId: string): Promise<void> {
     const [{ completed_count: completedCount }] = await this.dataSource.query<{ completed_count: string }[]>(
-      `SELECT COUNT(*) AS completed_count FROM orders WHERE technician_id = $1 AND service_id = $2 AND order_status = 'completed'`,
+      `SELECT COUNT(*) AS completed_count FROM orders WHERE technician_id = $1 AND service_id = $2 AND order_status = 'completed' AND deleted_at IS NULL`,
       [technicianProfileId, serviceId],
     );
 

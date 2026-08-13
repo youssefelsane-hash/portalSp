@@ -307,7 +307,7 @@ export class TechniciansService {
          COUNT(*) FILTER (WHERE technician_arrived_at <= scheduled_at + interval '15 minutes') AS on_time,
          COUNT(*) AS total
        FROM orders
-       WHERE technician_id = $1 AND scheduled_at IS NOT NULL AND technician_arrived_at IS NOT NULL`,
+       WHERE technician_id = $1 AND scheduled_at IS NOT NULL AND technician_arrived_at IS NOT NULL AND deleted_at IS NULL`,
       [technicianProfileId],
     );
     const onTimeTotal = Number(onTimeRow.total);
@@ -322,7 +322,7 @@ export class TechniciansService {
     const [arrivalRow] = await this.technicianProfiles.manager.query<AvgDurationRow[]>(
       `SELECT AVG(EXTRACT(EPOCH FROM (technician_arrived_at - technician_departed_at)) / 60) AS avg_minutes
        FROM orders
-       WHERE technician_id = $1 AND technician_departed_at IS NOT NULL AND technician_arrived_at IS NOT NULL`,
+       WHERE technician_id = $1 AND technician_departed_at IS NOT NULL AND technician_arrived_at IS NOT NULL AND deleted_at IS NULL`,
       [technicianProfileId],
     );
     const avgArrivalMinutes = arrivalRow.avg_minutes !== null ? Math.round(Number(arrivalRow.avg_minutes)) : null;
@@ -331,7 +331,7 @@ export class TechniciansService {
     const [completionRow] = await this.technicianProfiles.manager.query<AvgDurationRow[]>(
       `SELECT AVG(EXTRACT(EPOCH FROM (work_completed_at - work_started_at)) / 60) AS avg_minutes
        FROM orders
-       WHERE technician_id = $1 AND work_started_at IS NOT NULL AND work_completed_at IS NOT NULL`,
+       WHERE technician_id = $1 AND work_started_at IS NOT NULL AND work_completed_at IS NOT NULL AND deleted_at IS NULL`,
       [technicianProfileId],
     );
     const avgCompletionMinutes = completionRow.avg_minutes !== null ? Math.round(Number(completionRow.avg_minutes)) : null;

@@ -236,3 +236,13 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 ## مطابقة المساعد التلقائية — موديول منفصل جديد، راجع `../assistant-matching/README.md`
 
 قرار عمل صريح من المالك (2026-08-13، ADR-0007) — بعد ما الفني القائد يقبل الطلب، لو الطلب محتاج مساعد (`orders.required_assistants`)، النظام بيدوّر على المساعد الشخصي المعتمد بتاع الفني (`assistant_link_status`/`assistant_technician_id` الموجودين هنا فوق) أولاً، وبعدين مجمع مساعدين مؤهلين بالبث التنافسي الذرّي لو مفيش. **مش موديول `technicians` نفسه عمدًا** — منطق مختلف تمامًا (قبول تنافسي على شريحة عمل، مش طلب كامل)، تفاصيل التصميم والاختبار الحي الكامل في `../assistant-matching/README.md`.
+
+## بَقّة حقيقية اتلقطت واتصلحت (2026-08-13) — `deleted_at` ناقص من إحصائيات البروفايل العام
+
+ثلاث استعلامات في `getPublicProfile()` (معدّل الالتزام بالمواعيد `on_time_rate`، متوسط وقت
+الوصول، متوسط مدة إنهاء الخدمة) كانت بتحسب على `FROM orders WHERE technician_id=...` من غير
+`AND deleted_at IS NULL` — طلب اتعمله soft-delete كان لسه بيؤثّر على مقاييس أداء الفني الظاهرة
+للعميل (`GET /technicians/:id/profile`) رغم إن الطلب نفسه مش ظاهر لحد. نفس البَقّة موجودة كانت
+في `technician-stats.processor.ts` (`completed_orders_count`/`cancelled_orders_count`/
+`technician_services.completed_count` — الأعمدة المخزّنة اللي بتتحدّث دوريًا) — كلهم اتصلحوا
+بإضافة `AND deleted_at IS NULL`.
