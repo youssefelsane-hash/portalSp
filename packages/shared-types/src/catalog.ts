@@ -220,7 +220,7 @@ export interface EstimateDurationResponseDto {
   assigned_assistants: number;
 }
 
-// أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بس.
+// أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل (يدوي أو تلقائي عند إكمال طلب).
 export interface ServiceProductivityActualResponseDto {
   id: string;
   service_standard_data_id: string;
@@ -231,6 +231,8 @@ export interface ServiceProductivityActualResponseDto {
   actual_assistants: number;
   computed_productivity_per_day: number;
   notes: string | null;
+  // system_auto = اتسجّل تلقائيًا عند إكمال طلب حقيقي (migration 0077)، manual = تسجيل يدوي.
+  source: string;
   created_at: string;
 }
 
@@ -241,4 +243,19 @@ export interface RecordProductivityActualBody {
   actual_technicians: number;
   actual_assistants: number;
   notes?: string;
+}
+
+// مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — اقتراح تحديث
+// productivity_per_day مبني على median لـobservations حقيقية، بانتظار موافقة/رفض الأدمن.
+export interface ServiceProductivitySuggestionResponseDto {
+  id: string;
+  service_standard_data_id: string;
+  current_productivity_per_day: number;
+  suggested_productivity_per_day: number;
+  sample_size: number;
+  confidence_score: number;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by_user_id: string | null;
 }

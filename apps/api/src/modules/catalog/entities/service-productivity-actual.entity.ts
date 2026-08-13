@@ -1,8 +1,13 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
 
-// أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بيانات فعلية بس، مش
-// خوارزمية التحديث التلقائي (مرحلة لاحقة، محتاجة بيانات تاريخية ضخمة). مطابق لـ
-// infra/migrations/0057.
+// أساس محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9) — مرحلة 1: تسجيل بيانات فعلية بس. مرحلة 2
+// (migration 0077) بقت موجودة: التقاط تلقائي عند إكمال طلب حقيقي (source='system_auto') +
+// تجميع/اقتراح (ProductivityLearningService) — راجع entities/service-productivity-suggestion.entity.ts.
+export enum ProductivityActualSource {
+  MANUAL = 'manual',
+  SYSTEM_AUTO = 'system_auto',
+}
+
 @Entity('service_productivity_actuals')
 export class ServiceProductivityActual {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
@@ -31,6 +36,9 @@ export class ServiceProductivityActual {
 
   @Column({ name: 'recorded_by_user_id', type: 'uuid', nullable: true })
   recordedByUserId: string | null;
+
+  @Column({ type: 'varchar', length: 20, default: ProductivityActualSource.MANUAL })
+  source: ProductivityActualSource;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

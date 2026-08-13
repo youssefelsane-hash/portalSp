@@ -6,6 +6,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminCatalogService } from './admin-catalog.service';
+import { ProductivityLearningService } from './productivity-learning.service';
+import { ProductivitySuggestionStatus } from './entities/service-productivity-suggestion.entity';
 import {
   toAdminServiceCategoryResponseDto,
   toAdminServiceResponseDto,
@@ -13,6 +15,7 @@ import {
   toServiceAddonResponseDto,
   toServiceLevelPricingResponseDto,
   toServiceProductivityActualResponseDto,
+  toServiceProductivitySuggestionResponseDto,
   toServiceStandardDataResponseDto,
   toServiceZonePricingResponseDto,
 } from './dto/admin-catalog-response.dto';
@@ -32,7 +35,10 @@ import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 @Controller('admin')
 @Roles(UserType.ADMIN)
 export class AdminCatalogController {
-  constructor(private readonly adminCatalogService: AdminCatalogService) {}
+  constructor(
+    private readonly adminCatalogService: AdminCatalogService,
+    private readonly productivityLearningService: ProductivityLearningService,
+  ) {}
 
   // ── الفئات ───────────────────────────────────────────────────────────
 
@@ -312,6 +318,50 @@ export class AdminCatalogController {
   ) {
     return toServiceProductivityActualResponseDto(
       await this.adminCatalogService.recordProductivityActual(admin.sub, standardDataId, dto, audit),
+    );
+  }
+
+  // ── مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) ─────
+  // observation → aggregate (median) → اقتراح → موافقة/رفض الأدمن. تفاصيل الـpipeline الكاملة
+  // في productivity-learning.service.ts.
+
+  @Get('services/productivity-suggestions')
+  async listProductivitySuggestions(@Query('status') status?: ProductivitySuggestionStatus) {
+    const rows = await this.productivityLearningService.listSuggestions(status);
+    return rows.map(toServiceProductivitySuggestionResponseDto);
+  }
+
+  // فحص التجميع الدوري (كل ساعة، onModuleInit) بيتحكّم فيه setInterval — الزرار ده بيخلي
+  // الأدمن/العمليات يقدروا يجبروا فحص فوري بدل الاستنى (نفس فلسفة "إعادة فحص فورية" في أي job
+  // دوري تاني بالمشروع)، مفيش منطق تجميع مكرر — نفس الدالة بالحرف.
+  @Post('services/productivity-suggestions/generate')
+  @RequirePermission('catalog.manage')
+  async generateProductivitySuggestionsNow() {
+    const created = await this.productivityLearningService.generateSuggestions();
+    return { created };
+  }
+
+  @Post('services/productivity-suggestions/:id/approve')
+  @RequirePermission('catalog.manage')
+  async approveProductivitySuggestion(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toServiceProductivitySuggestionResponseDto(
+      await this.productivityLearningService.approveSuggestion(admin.sub, id, audit),
+    );
+  }
+
+  @Post('services/productivity-suggestions/:id/reject')
+  @RequirePermission('catalog.manage')
+  async rejectProductivitySuggestion(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toServiceProductivitySuggestionResponseDto(
+      await this.productivityLearningService.rejectSuggestion(admin.sub, id, audit),
     );
   }
 }
