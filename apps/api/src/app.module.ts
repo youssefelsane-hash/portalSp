@@ -20,6 +20,7 @@ import { TechniciansModule } from './modules/technicians/technicians.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { AssistantMatchingModule } from './modules/assistant-matching/assistant-matching.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { InternalChatModule } from './modules/internal-chat/internal-chat.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -85,6 +86,9 @@ import { DomesticWorkersModule } from './modules/domestic-workers/domestic-worke
     // /technician/orders/:id (في OrdersModule) وإلا الـ ParseUUIDPipe بترفض "available" كـ id غلط.
     MatchingModule,
     OrdersModule,
+    // مكانها هنا تنظيمي بس — بتسمع ORDER_ACCEPTED_EVENT عبر EventEmitter2 العالمي، مفيش أي
+    // كوبلينج فعلي على ترتيب التحميل زي تحذير matching.module.ts.
+    AssistantMatchingModule,
     ChatModule,
     InternalChatModule,
     PaymentsModule,

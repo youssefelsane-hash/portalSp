@@ -19,6 +19,11 @@ export class OrderTeamMember {
   @Column({ name: 'added_by_technician_id', type: 'uuid' })
   addedByTechnicianId: string;
 
+  // مطابق لـ infra/migrations/0070_assistant_pool_matching.sql (ADR-0007) — 'assistant' = اتوصل
+  // عبر مطابقة المساعد التلقائية، 'team_member' (افتراضي) = إضافة يدوية من قائد الطلب في "اعتماد".
+  @Column({ name: 'member_type', type: 'varchar', length: 20, default: 'team_member' })
+  memberType: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
