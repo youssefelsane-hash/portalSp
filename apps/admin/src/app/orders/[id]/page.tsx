@@ -35,6 +35,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { StatusChip } from '@/components/status-chip';
+import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -145,13 +146,7 @@ export default function OrderDetailPage() {
   // بس مفيش زرار ليه في أي شاشة — نفس فئة فجوة "endpoint إداري من غير واجهة" اللي ظهرت في
   // /customers, /support, /payouts. مطابق تماماً لشروط payments.service.ts's refundOrder():
   // payment_status=paid + order_status في completed/disputed بس (canTransition(..., REFUNDED)).
-  async function handleRefund() {
-    const reason = window.prompt('سبب الاسترجاع (حرفين على الأقل)؟');
-    if (reason === null) return;
-    if (reason.trim().length < 2) {
-      window.alert('سبب الاسترجاع قصير جداً');
-      return;
-    }
+  async function handleRefund(reason: string) {
     setIsSaving(true);
     setError(null);
     try {
@@ -370,9 +365,19 @@ export default function OrderDetailPage() {
           {order.payment_status === 'paid' &&
             (order.order_status === 'completed' || order.order_status === 'disputed') && (
               <CardFooter>
-                <Button variant="destructive" disabled={isSaving} onClick={handleRefund}>
-                  استرجاع المبلغ
-                </Button>
+                <PromptDialog
+                  trigger={
+                    <Button variant="destructive" disabled={isSaving}>
+                      استرجاع المبلغ
+                    </Button>
+                  }
+                  title="استرجاع المبلغ"
+                  label="سبب الاسترجاع"
+                  minLength={2}
+                  confirmLabel="استرجاع"
+                  destructive
+                  onConfirm={handleRefund}
+                />
               </CardFooter>
             )}
           {order.payment_status !== 'paid' && (

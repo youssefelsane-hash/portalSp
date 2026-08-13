@@ -8,6 +8,7 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
+import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
@@ -65,13 +66,7 @@ export default function PayoutsPage() {
     await runAction(() => authedFetch(`/admin/payouts/${id}/complete`, { method: 'POST' }));
   }
 
-  async function handleReject(id: string) {
-    const reason = window.prompt('سبب الرفض (لازم يكون حرفين على الأقل)؟');
-    if (reason === null) return;
-    if (reason.trim().length < 2) {
-      window.alert('سبب الرفض قصير جداً');
-      return;
-    }
+  async function handleReject(id: string, reason: string) {
     await runAction(() => authedFetch(`/admin/payouts/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }));
   }
 
@@ -169,9 +164,19 @@ export default function PayoutsPage() {
                         payout.payout_status === 'under_review' ||
                         payout.payout_status === 'approved' ||
                         payout.payout_status === 'processing') && (
-                        <Button size="sm" variant="destructive" disabled={isSaving} onClick={() => handleReject(payout.id)}>
-                          رفض
-                        </Button>
+                        <PromptDialog
+                          trigger={
+                            <Button size="sm" variant="destructive" disabled={isSaving}>
+                              رفض
+                            </Button>
+                          }
+                          title="رفض طلب الصرف"
+                          label="سبب الرفض"
+                          minLength={2}
+                          confirmLabel="رفض"
+                          destructive
+                          onConfirm={(reason) => handleReject(payout.id, reason)}
+                        />
                       )}
                     </div>
                   </TableCell>

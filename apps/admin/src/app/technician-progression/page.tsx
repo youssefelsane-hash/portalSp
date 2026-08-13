@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -134,23 +135,11 @@ export default function TechnicianProgressionPage() {
     runAction(() => authedFetch(`/admin/technician-progression/${id}/approve`, { method: 'PATCH', body: JSON.stringify({}) }));
   }
 
-  function handleOverride(id: string) {
-    const reason = window.prompt('سبب الترقية الاستثنائية (10 حروف على الأقل، إلزامي)؟');
-    if (reason === null) return;
-    if (reason.trim().length < 10) {
-      window.alert('السبب قصير جداً');
-      return;
-    }
+  function handleOverride(id: string, reason: string) {
     runAction(() => authedFetch(`/admin/technician-progression/${id}/override`, { method: 'PATCH', body: JSON.stringify({ reason }) }));
   }
 
-  function handleReject(id: string) {
-    const reason = window.prompt('سبب رفض الترقية دلوقتي؟');
-    if (reason === null) return;
-    if (reason.trim().length < 5) {
-      window.alert('السبب قصير جداً');
-      return;
-    }
+  function handleReject(id: string, reason: string) {
     runAction(() => authedFetch(`/admin/technician-progression/${id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason }) }));
   }
 
@@ -343,14 +332,33 @@ export default function TechnicianProgressionPage() {
                           </Button>
                         )}
                         {!s.is_eligible && s.next_level && (
-                          <Button size="sm" variant="outline" disabled={isSaving} onClick={() => handleOverride(s.id)}>
-                            ترقية استثنائية
-                          </Button>
+                          <PromptDialog
+                            trigger={
+                              <Button size="sm" variant="outline" disabled={isSaving}>
+                                ترقية استثنائية
+                              </Button>
+                            }
+                            title="ترقية استثنائية"
+                            label="سبب الترقية الاستثنائية"
+                            minLength={10}
+                            confirmLabel="ترقية"
+                            onConfirm={(reason) => handleOverride(s.id, reason)}
+                          />
                         )}
                         {s.is_eligible && (
-                          <Button size="sm" variant="destructive" disabled={isSaving} onClick={() => handleReject(s.id)}>
-                            رفض دلوقتي
-                          </Button>
+                          <PromptDialog
+                            trigger={
+                              <Button size="sm" variant="destructive" disabled={isSaving}>
+                                رفض دلوقتي
+                              </Button>
+                            }
+                            title="رفض الترقية دلوقتي"
+                            label="سبب الرفض"
+                            minLength={5}
+                            confirmLabel="رفض"
+                            destructive
+                            onConfirm={(reason) => handleReject(s.id, reason)}
+                          />
                         )}
                       </div>
                     </TableCell>

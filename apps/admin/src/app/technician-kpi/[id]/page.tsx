@@ -9,6 +9,7 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { PromptDialog } from '@/components/prompt-dialog';
 import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -77,13 +78,7 @@ export default function TechnicianKpiDetailPage() {
     );
   }
 
-  async function handleReject() {
-    const reason = window.prompt('سبب الرفض (5 حروف على الأقل)؟');
-    if (reason === null) return;
-    if (reason.trim().length < 5) {
-      window.alert('السبب قصير جداً');
-      return;
-    }
+  async function handleReject(reason: string) {
     await runAction(() =>
       authedFetch(`/admin/technician-kpi/${params.id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
     );
@@ -221,9 +216,19 @@ export default function TechnicianKpiDetailPage() {
                   <Button disabled={isSaving} onClick={handleApprove}>
                     اعتماد المبلغ
                   </Button>
-                  <Button variant="destructive" disabled={isSaving} onClick={handleReject}>
-                    رفض المكافأة الشهر ده
-                  </Button>
+                  <PromptDialog
+                    trigger={
+                      <Button variant="destructive" disabled={isSaving}>
+                        رفض المكافأة الشهر ده
+                      </Button>
+                    }
+                    title="رفض مكافأة KPI الشهر ده"
+                    label="سبب الرفض"
+                    minLength={5}
+                    confirmLabel="رفض"
+                    destructive
+                    onConfirm={handleReject}
+                  />
                 </div>
               </div>
             ) : null}
