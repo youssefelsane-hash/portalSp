@@ -53,6 +53,12 @@ export interface OrderResponseDto {
   original_order_id: string | null;
   /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
   building_id: string | null;
+  /** محرك الإنتاجية (docs/06 §3.3-§3.6) — snapshot وقت الحجز من service_standard_data، null لو
+   * الخدمة formula (استخدم pricing_evaluation بدلاً منه) أو fixed بلا بيانات قياسية. */
+  standard_data_id: string | null;
+  required_technicians: number | null;
+  required_assistants: number | null;
+  estimated_duration_days: number | null;
 }
 
 export interface OrderStatusHistoryResponseDto {

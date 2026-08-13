@@ -51,6 +51,14 @@ class ScheduleSlot {
 // اختيار الفني قبل الحجز (docs/08 §3) — مطابق لـ
 // apps/api/src/modules/technicians/dto/technician-booking-list-response.dto.ts. قايمة فنيين
 // مؤهّلين للخدمة في منطقة العميل، مرتبة (تقييم ثم قرب ثم طلبات مكتملة) من الباك-إند.
+const Map<String, String> technicianLevelLabelsAr = {
+  'new': 'جديد',
+  'verified': 'موثّق',
+  'professional': 'محترف',
+  'premium': 'مميز',
+  'team_leader': 'قائد فريق',
+};
+
 class TechnicianBookingListItem {
   final String id;
   final String fullName;
@@ -60,6 +68,11 @@ class TechnicianBookingListItem {
   final int totalRatingsCount;
   final int completedOrdersCount;
   final double? distanceKm;
+  // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح والسعر النهائي المحسوب
+  // فعليًا بيه قبل ما يختاره. final_price_cents/level_price_multiplier = null لخدمات formula.
+  final String technicianLevel;
+  final int? finalPriceCents;
+  final double? levelPriceMultiplier;
 
   TechnicianBookingListItem({
     required this.id,
@@ -70,6 +83,9 @@ class TechnicianBookingListItem {
     required this.totalRatingsCount,
     required this.completedOrdersCount,
     required this.distanceKm,
+    required this.technicianLevel,
+    required this.finalPriceCents,
+    required this.levelPriceMultiplier,
   });
 
   factory TechnicianBookingListItem.fromJson(Map<String, dynamic> json) => TechnicianBookingListItem(
@@ -81,6 +97,9 @@ class TechnicianBookingListItem {
         totalRatingsCount: json['total_ratings_count'] as int,
         completedOrdersCount: json['completed_orders_count'] as int,
         distanceKm: (json['distance_km'] as num?)?.toDouble(),
+        technicianLevel: json['technician_level'] as String? ?? 'new',
+        finalPriceCents: json['final_price_cents'] as int?,
+        levelPriceMultiplier: (json['level_price_multiplier'] as num?)?.toDouble(),
       );
 }
 

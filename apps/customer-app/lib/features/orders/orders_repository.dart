@@ -50,10 +50,16 @@ class OrdersRepository {
     // requestedTechnicianId/promoCode/buildingCode/addonIds لو اتبعت مع ده (مجانية بالكامل،
     // بترجع لنفس الفني الأصلي تلقائيًا).
     String? originalOrderId,
+    // محرك الإنتاجية (docs/06 §3.3-§3.6) — كانت فجوة موثّقة صراحة: العميل كان بيشوف معاينة المدة
+    // بس (CatalogRepository.estimateDuration()) بلا ما القيم دي تتسجّل على الطلب نفسه خالص.
+    String? standardDataId,
+    num? requestedUnits,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
       'address_id': addressId,
+      if (standardDataId != null) 'standard_data_id': standardDataId,
+      if (requestedUnits != null) 'requested_units': requestedUnits,
       // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
       'booking_mode': bookingMode.apiValue,
       if (problemDescription != null && problemDescription.isNotEmpty)

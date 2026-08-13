@@ -6,6 +6,7 @@ import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { GeoService } from '../geo/geo.service';
 import {
   TechnicianAssistantLinkStatus,
+  TechnicianLevel,
   TechnicianProfile,
   TechnicianTeamRole,
 } from './entities/technician-profile.entity';
@@ -27,6 +28,8 @@ export interface TechnicianBookingListItem {
   totalRatingsCount: number;
   serviceCompletedCount: number;
   distanceKm: number | null;
+  // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح قبل ما يختاره.
+  currentLevel: TechnicianLevel;
 }
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
@@ -160,7 +163,10 @@ export class TechniciansService {
    * (PostGIS حقيقي، مش تقريب)، بعده عدد الطلبات المكتملة لنفس الخدمة تحديدًا (`technician_services.
    * completed_count` — أدق من إجمالي الفني كله لأنه بيقيس خبرته في الخدمة دي بالذات).
    */
-  async listForServiceBooking(serviceId: string, addressId: string): Promise<TechnicianBookingListItem[]> {
+  async listForServiceBooking(
+    serviceId: string,
+    addressId: string,
+  ): Promise<{ zoneId: string; items: TechnicianBookingListItem[] }> {
     interface AddressRow {
       city_id: string | null;
       latitude: number;
@@ -189,12 +195,13 @@ export class TechniciansService {
       total_ratings_count: number;
       service_completed_count: number;
       distance_km: string | null;
+      current_level: TechnicianLevel;
     }
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
              tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -207,16 +214,20 @@ export class TechniciansService {
       [serviceId, zone.id, addressId],
     );
 
-    return rows.map((row) => ({
-      technicianId: row.technician_id,
-      fullName: row.full_name,
-      avatarUrl: row.avatar_url,
-      bio: row.bio,
-      averageRating: Number(row.average_rating),
-      totalRatingsCount: row.total_ratings_count,
-      serviceCompletedCount: row.service_completed_count,
-      distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
-    }));
+    return {
+      zoneId: zone.id,
+      items: rows.map((row) => ({
+        technicianId: row.technician_id,
+        fullName: row.full_name,
+        avatarUrl: row.avatar_url,
+        bio: row.bio,
+        averageRating: Number(row.average_rating),
+        totalRatingsCount: row.total_ratings_count,
+        serviceCompletedCount: row.service_completed_count,
+        distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
+        currentLevel: row.current_level,
+      })),
+    };
   }
 
   /**

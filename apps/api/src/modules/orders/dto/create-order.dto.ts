@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode, OrderType } from '../entities/order.entity';
 
 export class CreateOrderDto {
@@ -86,4 +86,16 @@ export class CreateOrderDto {
   @IsOptional()
   @IsUUID()
   schedule_slot_id?: string;
+
+  // محرك الإنتاجية (docs/06 §3.3-§3.6) — العميل اختار صف بيانات قياسية (GET /services/:id/standard-data)
+  // ودخل الكمية/المساحة المطلوبة، فالباك-إند بيحسب الطاقم/المدة فعليًا (CatalogService.estimateDuration())
+  // ويسجّلهم على الطلب. الاتنين لازم يتبعتوا مع بعض أو ولا واحد فيهم — قرار عمل من المالك.
+  @IsOptional()
+  @IsUUID()
+  standard_data_id?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  requested_units?: number;
 }

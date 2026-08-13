@@ -40,6 +40,13 @@ export interface OrderResponseDto {
   original_order_id: string | null;
   /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
   building_id: string | null;
+  /** محرك الإنتاجية (docs/06 §3.3-§3.6) — snapshot وقت الحجز، null لو الخدمة formula/fixed
+   * بلا بيانات قياسية مُستخدمة. required_technicians/required_assistants هي الطاقم الفعلي
+   * (بالحد الأدنى لو العميل ما حددش)، estimated_duration_days المدة المتوقعة بالأيام. */
+  standard_data_id: string | null;
+  required_technicians: number | null;
+  required_assistants: number | null;
+  estimated_duration_days: number | null;
   /** موجودة بس في مسارات تفاصيل الطلب الفردي (مش القوائم) — لخرائط التتبع/الملاحة. */
   address?: OrderAddressResponseDto;
 }
@@ -75,6 +82,10 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
     warranty_expires_at: order.warrantyExpiresAt ? order.warrantyExpiresAt.toISOString() : null,
     original_order_id: order.parentOrderId,
     building_id: order.buildingId,
+    standard_data_id: order.standardDataId,
+    required_technicians: order.requiredTechnicians,
+    required_assistants: order.requiredAssistants,
+    estimated_duration_days: order.estimatedDurationDays,
     address: address
       ? {
           street_name: address.streetName,

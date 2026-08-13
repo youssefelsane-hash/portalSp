@@ -127,6 +127,21 @@ export class Order {
   @Column({ name: 'total_amount_cents', type: 'integer', default: 0 })
   totalAmountCents: number;
 
+  // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم دي snapshot وقت الحجز من
+  // CatalogService.estimateDuration()، مش مربوطة ديناميكياً بـservice_standard_data بعد كده
+  // (لو الأدمن غيّر الإعداد بعدين، الطلب القديم يفضل موضّح بالقيم اللي اتحسبت بيها وقتها).
+  @Column({ name: 'standard_data_id', type: 'uuid', nullable: true })
+  standardDataId: string | null;
+
+  @Column({ name: 'required_technicians', type: 'smallint', nullable: true })
+  requiredTechnicians: number | null;
+
+  @Column({ name: 'required_assistants', type: 'smallint', nullable: true })
+  requiredAssistants: number | null;
+
+  @Column({ name: 'estimated_duration_days', type: 'smallint', nullable: true })
+  estimatedDurationDays: number | null;
+
   @Column({ name: 'payment_method', type: 'enum', enum: ['cash', 'card', 'wallet', 'bank_transfer', 'corporate_credit'], enumName: 'payment_method', nullable: true })
   paymentMethod: string | null;
 

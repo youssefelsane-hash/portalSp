@@ -8,6 +8,7 @@ import { EstimateDurationDto } from './dto/estimate-duration.dto';
 import { EstimateQueryDto, ListServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
+import { PricingModel } from './entities/service.entity';
 import { toStandardDataResponseDto } from './dto/standard-data-response.dto';
 
 @Controller()
@@ -89,10 +90,29 @@ export class CatalogController {
 
   // اختيار الفني قبل الحجز (docs/08 §3) — بدل ما العميل يسيب auto-match بس، يشوف قايمة فنيين
   // حقيقية مؤهلين للخدمة دي في منطقته، مرتبة بالتقييم ثم القرب الجغرافي ثم عدد الطلبات المكتملة.
+  // مضاعف سعر مستوى الفني (docs/08 — "السعر النهائي معروف قبل التأكيد، مفيش زيادة مفاجئة بعده")
+  // — كل فني مرشّح بيرجع رتبته والسعر النهائي المحسوب فعليًا بمستواه هو، مش رقم عام واحد. بيستخدم
+  // نفس CatalogService.estimate() اللي POST /orders هتستخدمه بالحرف لو العميل اختار الفني ده —
+  // مفيش محرك تسعير تاني مكرر.
   @Public()
   @Get('services/:id/technicians')
   async listTechniciansForService(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListTechniciansForServiceDto) {
-    const items = await this.techniciansService.listForServiceBooking(id, query.address_id);
-    return items.map(toTechnicianBookingListItemResponseDto);
+    const { zoneId, items } = await this.techniciansService.listForServiceBooking(id, query.address_id);
+    const service = await this.catalogService.findServiceOrThrow(id);
+    const isEmergency = query.booking_mode === 'emergency';
+    // خدمات formula بيتجاهل مستوى الفني تمامًا (level_price_multiplier ثابت 1 دايمًا في
+    // catalogService.estimate()'s FORMULA branch) وبتحتاج field_values مش متاحة هنا (فورم
+    // ديناميكي، مش جزء من الفلترة/الاختيار قبل الحجز) — استدعاء estimate() هنا كان هيرفض بـ
+    // VAL_001 لأي حقل formula إجباري. final_price_cents = null صراحة لخدمات formula.
+    const withPricing =
+      service.pricingModel === PricingModel.FORMULA
+        ? items.map((item) => ({ item, estimate: null }))
+        : await Promise.all(
+            items.map(async (item) => {
+              const estimate = await this.catalogService.estimate(id, zoneId, item.currentLevel, isEmergency);
+              return { item, estimate };
+            }),
+          );
+    return withPricing.map(({ item, estimate }) => toTechnicianBookingListItemResponseDto(item, estimate));
   }
 }
