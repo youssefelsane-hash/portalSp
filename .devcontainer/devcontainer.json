@@ -17,7 +17,10 @@
   "postStartCommand": "bash .devcontainer/start.sh",
   "customizations": {
     "vscode": {
-      "extensions": ["dart-code.flutter", "dart-code.dart-code", "dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+      "extensions": ["dart-code.flutter", "dart-code.dart-code", "dbaeumer.vscode-eslint", "esbenp.prettier-vscode"],
+      "settings": {
+        "dart.flutterSdkPath": "/opt/flutter"
+      }
     }
   },
   "remoteEnv": {
