@@ -363,6 +363,55 @@ key: social.facebook_graph_access_token
 
 ---
 
+## 7. توقيع Android للإصدار (Release Signing)
+
+`apps/customer-app` و`apps/technician-app` بيبنوا بتوقيع debug افتراضيًا — ده كويس للتطوير
+(`flutter run --release` شغال من غير أي إعداد) بس Google Play Store برفض رفع APK/AAB بتوقيع
+debug. الملفين `apps/customer-app/android/app/build.gradle.kts` و
+`apps/technician-app/android/app/build.gradle.kts` فيهم نفس النمط الشرطي المستخدم بالفعل مع
+`google-services.json`: لو `android/key.properties` (كل تطبيق عنده نسخته الخاصة) موجود، بيتفعّل
+توقيع الإصدار الحقيقي تلقائيًا؛ من غيره البناء يفضل شغال بتوقيع debug زي الأول.
+
+### الخطوات (لكل تطبيق — customer-app وtechnician-app منفصلين، كل واحد له keystore خاص بيه)
+
+1. ولّد keystore حقيقي (مرة واحدة لكل تطبيق، واحفظه في مكان آمن برّه الـ repo — لو ضاع مينفعش
+   تحدّث نفس التطبيق على Play Store تاني):
+
+   ```bash
+   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 \
+     -validity 10000 -alias upload
+   ```
+
+   هيسألك عن `storePassword` و`keyPassword` (ينفع يبقوا نفس القيمة) واسم/تنظيم — احفظهم.
+
+2. انسخ `apps/customer-app/android/key.properties.example` لـ
+   `apps/customer-app/android/key.properties` (والمكافئ لـ `technician-app`)، واملأ القيم
+   الأربعة (`storePassword`, `keyPassword`, `keyAlias`, `storeFile` — مسار الـ `.jks` اللي
+   ولّدته فوق، نسبي لمجلد `android/` أو مطلق).
+
+3. الملف `key.properties` نفسه في `.gitignore` بالفعل (`apps/*/android/.gitignore`) — أبدًا
+   متعملوش commit، ده سر إصدار حقيقي زي كلمة سر قاعدة بيانات.
+
+### التأكد إنها اشتغلت
+
+```bash
+cd apps/customer-app && flutter build appbundle --release
+```
+
+لو `key.properties` موجود وصح، البناء يعدي عادي وينتج AAB بتوقيع الإصدار الحقيقي (تقدر تتأكد
+بـ `jarsigner -verify -verbose -certs build/app/outputs/bundle/release/app-release.aab` أو
+`apksigner verify` على APK). لو `key.properties` مش موجود، نفس الأمر يعدي برضه بس بتوقيع debug —
+مفيش أي فشل في أي الحالتين، ده العمد.
+
+### ملاحظة مهمة
+
+بناء AAB/APK حقيقي محتاج Android SDK/NDK كامل — البيئة السحابية اللي بيتطور فيها الكود دلوقتي
+مفيهاش SDK كامل للـ build الفعلي، فالتحقق اللي اتعمل هنا كان مراجعة syntax الـ Kotlin DSL يدويًا
++ مطابقته لنفس نمط `google-services.json` الشرطي الشغال بالفعل في نفس الملفين — مش تنفيذ build
+حقيقي. أول مرة حد يعمل build فعلي (لوكال أو CI بعتاد Android SDK) لازم يتأكد إن الأمر فوق بيعدي.
+
+---
+
 ## ملخص سريع — كل الـ env vars في مكان واحد
 
 انسخ `apps/api/.env.example` لـ `apps/api/.env` واملأ اللي عايزه بس (الباقي فاضي = القناة دي
