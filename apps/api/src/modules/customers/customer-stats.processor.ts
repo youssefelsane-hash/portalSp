@@ -57,7 +57,7 @@ export class CustomerStatsProcessor extends WorkerHost {
          MIN(created_at) AS first_order_at,
          MAX(created_at) AS last_order_at
        FROM orders
-       WHERE customer_id = $1`,
+       WHERE customer_id = $1 AND deleted_at IS NULL`,
       [customerProfileId],
     );
 

@@ -163,7 +163,14 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     return this.bookings.save(booking);
   }
 
-  /** خصم من محفظة العميل + إيداع لمحفظة الشغالة (بعد خصم عمولة المنصة) — جوّه transaction واحدة. */
+  /**
+   * خصم من محفظة العميل + إيداع لمحفظة الشغالة (بعد خصم عمولة المنصة) — جوّه transaction واحدة.
+   *
+   * **كانت بَقّة حقيقية**: نداءين منفصلين لـ`doubleEntry()` من غير `manager` مشترك — لو الأول
+   * (خصم العميل) نجح والتاني (إيداع الشغالة) فشل (خطأ DB عابر مثلاً)، العميل بيتخصم منه فعليًا
+   * والشغالة ما بتاخدش فلوسها، من غير أي rollback. الإصلاح: الاتنين جوّه نفس `dataSource.transaction`
+   * زي `PaymentsService.settleAndComplete()` بالظبط — فشل أي طرف بيرجع الاتنين.
+   */
   private async chargeCustomerAndPayWorker(booking: DomesticWorkerBooking, customerUserId: string, workerUserId: string): Promise<void> {
     const commissionPercentage = await this.commissionPercentage();
     const platformCommissionCents = Math.round((booking.priceCents * commissionPercentage) / 100);
@@ -173,30 +180,38 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
     const workerWallet = await this.walletsService.getOrCreateWallet(workerUserId, WalletOwnerType.DOMESTIC_WORKER);
 
-    await this.walletsService.doubleEntry({
-      fromWalletId: customerWallet.id,
-      toWalletId: platformWallet.id,
-      amountCents: booking.priceCents,
-      transactionType: WalletTxType.ADJUSTMENT,
-      referenceType: 'domestic_worker_booking',
-      referenceId: booking.id,
-      descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
-    });
+    await this.dataSource.transaction(async (manager) => {
+      await this.walletsService.doubleEntry(
+        {
+          fromWalletId: customerWallet.id,
+          toWalletId: platformWallet.id,
+          amountCents: booking.priceCents,
+          transactionType: WalletTxType.ADJUSTMENT,
+          referenceType: 'domestic_worker_booking',
+          referenceId: booking.id,
+          descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
+        },
+        manager,
+      );
 
-    if (workerEarningCents > 0) {
-      await this.walletsService.doubleEntry({
-        fromWalletId: platformWallet.id,
-        toWalletId: workerWallet.id,
-        amountCents: workerEarningCents,
-        transactionType: WalletTxType.ORDER_EARNING,
-        referenceType: 'domestic_worker_booking',
-        referenceId: booking.id,
-        descriptionAr: `أرباح حجز خدمة منزلية ${booking.bookingNumber}`,
-        // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود — نفس السبب بالحرف في
-        // payments.service.ts's settleAndComplete (تحويل أرباح الفني).
-        allowNegativeBalance: true,
-      });
-    }
+      if (workerEarningCents > 0) {
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: platformWallet.id,
+            toWalletId: workerWallet.id,
+            amountCents: workerEarningCents,
+            transactionType: WalletTxType.ORDER_EARNING,
+            referenceType: 'domestic_worker_booking',
+            referenceId: booking.id,
+            descriptionAr: `أرباح حجز خدمة منزلية ${booking.bookingNumber}`,
+            // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود — نفس السبب بالحرف في
+            // payments.service.ts's settleAndComplete (تحويل أرباح الفني).
+            allowNegativeBalance: true,
+          },
+          manager,
+        );
+      }
+    });
   }
 
   /** الشغالة بتقفل حجز بالساعة بعد ما تخلّص الزيارة — مفيش تحصيل هنا (اتحصّل وقت التأكيد). */
@@ -290,8 +305,17 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
   }
 }
 
+// كانت بَقّة حقيقية (نفس فئة البَقّة في recurring-orders.service.ts's nextOccurrence): `setMonth`
+// بيفيض بصمت لو اليوم مش موجود في الشهر الجديد (31 يناير + شهر → JS بتحسبها "31 فبراير" فتتدحرج
+// لـ3 مارس بدل آخر يوم في فبراير). الإصلاح: نحسب على "اليوم 1" الأول (مفيش فيضان)، وبعدين نـclamp
+// اليوم المطلوب لآخر يوم فعلي في الشهر الجديد.
 function addMonths(from: Date | number, months: number): Date {
-  const next = new Date(from);
-  next.setMonth(next.getMonth() + months);
+  const base = new Date(from);
+  const year = base.getUTCFullYear();
+  const monthIndex0 = base.getUTCMonth() + months;
+  const day = base.getUTCDate();
+  const lastDayOfNewMonth = new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+  const next = new Date(base);
+  next.setUTCFullYear(year, monthIndex0, Math.min(day, lastDayOfNewMonth));
   return next;
 }

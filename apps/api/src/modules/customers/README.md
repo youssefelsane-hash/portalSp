@@ -57,4 +57,11 @@
 طابق `3.50` بالظبط ((4+3)/2)، وتقييم الفني للعميل (`technician_to_customer`) في نفس الاختبار
 اتأكد إنه **مبيأثرش** على `average_rating_given` — الاتجاه صح.
 
+## بَقّة حقيقية اتلقطت واتصلحت (2026-08-13) — `deleted_at` ناقص من `customer-stats.processor.ts`
+
+استعلام إعادة حساب `total_orders_count`/`completed_orders_count`/`cancelled_orders_count`/
+`total_spent_cents` (`CustomerStatsProcessor`) كان بيحسب على `FROM orders WHERE customer_id=...`
+من غير `AND deleted_at IS NULL` — نفس فئة البَقّة الموثّقة في `../technicians/README.md` و
+`../buildings/README.md`. الإصلاح: `AND deleted_at IS NULL` على نفس الاستعلام.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

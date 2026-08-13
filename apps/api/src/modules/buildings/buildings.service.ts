@@ -61,9 +61,10 @@ export class BuildingsService {
 
   /** "الاشتراك الشهري" — تتبّع بس، مفيش إنفاذ تلقائي (docs/adr/0003-buildings-qr-discount.md). */
   async getCurrentMonthOrdersCount(buildingId: string): Promise<number> {
+    // لازم deleted_at IS NULL — بدونها طلب soft-deleted كان لسه بيتحسب في عدّاد الاشتراك الشهري.
     const [{ count }] = await this.buildings.manager.query<{ count: string }[]>(
       `SELECT COUNT(*)::int AS count FROM orders
-       WHERE building_id = $1 AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')`,
+       WHERE building_id = $1 AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AND deleted_at IS NULL`,
       [buildingId],
     );
     return Number(count);
@@ -80,7 +81,7 @@ export class BuildingsService {
     if (buildingIds.length === 0) return counts;
     const rows = await this.buildings.manager.query<{ building_id: string; count: string }[]>(
       `SELECT building_id, COUNT(*)::int AS count FROM orders
-       WHERE building_id = ANY($1) AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')
+       WHERE building_id = ANY($1) AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AND deleted_at IS NULL
        GROUP BY building_id`,
       [buildingIds],
     );

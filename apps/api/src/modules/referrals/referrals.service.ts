@@ -73,10 +73,12 @@ export class ReferralsService {
     });
     if (!referral) return; // اتقفل قبل كده، أو بيانات من قبل تفعيل الميزة
 
+    // لازم AND o.deleted_at IS NULL — بدونها، طلب مكتمل اتعمله soft-delete (نادر) كان بيتحسب في
+    // العدّاد فيخلي "أول طلب مكتمل" يترفض غلط (أو يزوّد الرقم عن الحقيقي وقت العملة الشهرية).
     const rows = await this.dataSource.query<{ count: string }[]>(
       `SELECT COUNT(*) AS count FROM orders o
        JOIN customer_profiles cp ON cp.id = o.customer_id
-       WHERE cp.user_id = $1 AND o.order_status = 'completed'`,
+       WHERE cp.user_id = $1 AND o.order_status = 'completed' AND o.deleted_at IS NULL`,
       [user.id],
     );
     if (Number(rows[0].count) !== 1) return; // مش أول طلب مكتمل للعميل ده
