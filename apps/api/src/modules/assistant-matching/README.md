@@ -87,16 +87,18 @@ migration `0075`). **نطاق مؤجَّل صراحة**: حل يدوي إدار�
   الاختبار الأول كشف كمان **بيانات اختبار عالقة من سيشن سابقة** (طلب `accepted` من غير تنظيف كان
   حابس الفني القائد كـ"مشغول")، اتصلحت مباشرة (تحويله لـ`cancelled_by_system`).
 
-**فجوة اتلاحظت أثناء الاختبار، اتقفلت (2026-08-13)**: استعلامات استبعاد "الفني عنده طلب نشط
-بالفعل" (هنا وفي `matching.service.ts`'s `findEligibleTechnicians` الأصلية) كانت بتفحص
-`order_status` بس، **من غير فلترة `deleted_at IS NULL`** — لو صف طلب اتعمله soft-delete (نادر، مش
-مسار عادي) لكن `order_status` فضل على قيمة نشطة (`accepted` مثلاً بدل حالة إلغاء صريحة)، الفني كان
-هيفضل "محبوس" كمشغول للأبد رغم إن الطلب نفسه مش ظاهر لحد — نفس فئة البَقّة الموثّقة في
+**بَقّة كانت موثّقة هنا واتصلحت (2026-08-13، اتصلحت باستقلالية في سيشنين متوازيتين بنفس الحل
+بالظبط)**: استعلامات استبعاد "الفني عنده طلب نشط بالفعل" (هنا في
+`isCandidateEligible()`/`broadcastToPool()` وفي `matching.service.ts`'s `findEligibleTechnicians`)
+كانت بتفحص `order_status` بس، **من غير فلترة `deleted_at IS NULL`** — لو صف طلب اتعمله soft-delete
+(نادر، مش مسار عادي) لكن `order_status` فضل على قيمة نشطة (`accepted` مثلاً بدل حالة إلغاء صريحة)،
+الفني كان بيفضل "محبوس" كمشغول للأبد رغم إن الطلب نفسه مش ظاهر لحد — نفس فئة البَقّة الموثّقة في
 `../technicians/README.md`/`../customers/README.md`/`../buildings/README.md`. **الإصلاح**:
-`AND deleted_at IS NULL` (أو `o.deleted_at IS NULL` للاستعلامات اللي فيها alias) على الـ5
-استعلامات الفرعية المتأثرة كلهم (واحد في `matching.service.ts`، أربعة في
-`assistant-matching.service.ts` — `isCandidateEligible` واستعلام `broadcastToPool` كل واحد فيهم
-استعلامين فرعيين). `tsc`/`nest build`/الـ42 اختبار عدّوا نضيف بعد الإصلاح.
+`AND deleted_at IS NULL` (أو `AND o.deleted_at IS NULL` لاستعلامات الـjoin على
+`order_team_members`) اتضافت على الأربع استعلامات هنا (`isCandidateEligible`'s subqueries الاتنين
+بـ`$2`، و`broadcastToPool`'s subqueries الاتنين بـ`$5`) وعلى استعلام `matching.service.ts` المطابق
+(الـ5 استعلامات كلهم). اختبار regression حي ضد Postgres حقيقي في `../matching/matching.service.spec.ts`
+بيثبت السلوك (طلب soft-deleted مبيستبعدش الفني تاني، وطلب حقيقي لسه بيستبعده زي الأول).
 
 ## نطاق مؤجَّل صراحة عن هذا البناء
 
