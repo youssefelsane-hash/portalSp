@@ -162,16 +162,27 @@ flutter run --dart-define=API_BASE_URL=http://localhost:3000/api/v1
 # Android emulator بيوصل للـhost عن طريق 10.0.2.2 مش localhost — القيمة الافتراضية already كده
 ```
 
-**بيانات دخول تجريبية**: بعد أول `migrate.js`، القاعدة فاضية من المستخدمين — سجّل حساب جديد من أي
-تطبيق (OTP بيتسجّل في لوج الباك-إند نفسه لو `TWILIO_*` مش متظبطة — مفيش SMS حقيقي محتاج للتجربة
-المحلية). لأول حساب `super_admin` (لا يوجد UI عمدًا لمنح أول أدمن — قرار أمان واعي، نفس مبدأ أي
-نظام حقيقي)، بعد ما تسجّل حساب عادي من `apps/admin`/عبر `POST /auth/register`، امنحه الدور مباشرة:
+**بيانات دخول تجريبية**: بعد أول `migrate.js`، القاعدة فاضية من المستخدمين — سجّل حساب جديد من
+`apps/customer-app`/`apps/technician-app` عادي (OTP بيتسجّل في لوج الباك-إند نفسه لو `TWILIO_*`
+مش متظبطة — مفيش SMS حقيقي محتاج للتجربة المحلية).
+
+**لأول حساب `super_admin`**: `POST /auth/register` **مايقبلش** `user_type=admin` أصلاً (قيمه
+المسموحة بس `customer`/`technician`/`domestic_worker`) — يعني لوحة `apps/admin` معندهاش تسجيل
+حساب جديد من الأساس، مفيش UI عمدًا لمنح أول أدمن (قرار أمان واعي، نفس مبدأ أي نظام حقيقي). أول
+حساب أدمن لازم يتعمل مباشرة بـSQL — استبدل رقم الموبايل والاسم زي ما تحب:
 ```sql
+WITH new_admin AS (
+  INSERT INTO users (phone_number, full_name, user_type, phone_verified_at)
+  VALUES ('+201001234567', 'اسمك هنا', 'admin', now())
+  RETURNING id
+)
 INSERT INTO user_roles (user_id, role_id)
-SELECT u.id, r.id FROM users u, roles r
-WHERE u.phone_number = '+20xxxxxxxxxx' AND r.name = 'super_admin';
+SELECT new_admin.id, roles.id FROM new_admin, roles WHERE roles.name = 'super_admin';
 ```
-(الدور نفسه وكل صلاحياته متسجّلين بالفعل من migration `0020` — الخطوة دي بس بتربطه بحسابك).
+لو Postgres شغال عبر Docker (زي Codespaces): `docker exec -i baytak-db psql -U baytak -d baytak`
+بدل `psql "$DATABASE_URL"` مباشرة، وحطّ الأمر فوق كـstdin ليه (`<<'SQL' ... SQL`). بعد كده سجّل
+دخول من `apps/admin` بنفس رقم الموبايل ده — الدور وكل صلاحياته متسجّلين بالفعل من migration
+`0020`، الأمر فوق بس بيربطهم بحسابك الجديد.
 
 **تشغيل الفحوصات قبل أي تعديل**: `cd apps/api && npx tsc --noEmit && npx nest build && npx jest`
 (الثلاثة لازم يعدّوا نضيف). لـFlutter: `flutter analyze` في كل تطبيق.
