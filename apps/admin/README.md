@@ -61,6 +61,15 @@
 - **`access_token`**: قصير العمر (15 دقيقة)، في الذاكرة بس (React state، مش localStorage) — عشان يبقى أقل عرضة لسرقة عبر XSS.
 - **باقي نداءات الـ API الحقيقية** (dashboard stats وغيرها) بتتبعت مباشرة لـ `apps/api` من الـ client (`NEXT_PUBLIC_API_URL`)، برفقة `Authorization: Bearer` — مش عن طريق البروكسي، عشان مانكتبش proxy route لكل endpoint.
 
+### رؤوس أمان HTTP (2026-08-13 — جولة تحصين قبل الإطلاق)
+
+`next.config.ts`: `poweredByHeader: false` (إخفاء تسريب الستاك) + `headers()` بترجّع
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` (منع clickjacking عبر iframe — لوحة
+تحكم أدمن ملهاش أي سبب تتحمّل جوّه إطار من موقع تاني), `Referrer-Policy: no-referrer`,
+`Strict-Transport-Security`. نفس المنطق المطبّق على `apps/api` (راجع `apps/api/README.md` §الأمان
+لتفاصيل helmet + CORS allowlist + إصلاح ثغرات تبعيات هناك). اتأكد `npx next build` لسه ناجح بعد
+الإضافة (صفر أثر على الـmiddleware/proxy.ts الموجود).
+
 ### بَقّة حقيقية اتلقطت واتصلحت وقت البناء — Single-flight refresh
 
 الباك-إند بيدوّر `refresh_token` على كل استخدام، وأي إعادة استخدام لتوكن اتلغى بيتعامل معاه كسرقة محتملة فبيقفل **كل** جلسات المستخدم فوراً (`revokeAllUserTokens` في `apps/api/.../auth.service.ts`). React Strict Mode (شغال افتراضياً في التطوير) بيعيد تشغيل الـ `useEffect` بتاع فحص الجلسة عند التحميل **مرتين** — لو كل تشغيلة بعتت نداء `/api/auth/refresh` منفصل، التاني كان هيستخدم نفس الكوكي القديم اللي التاني لسه ما دوّرهوش، فيترفض ويقفل حساب الأدمن كله. اتصلح بـ `inFlightRefresh` ref في `src/lib/auth-context.tsx` — أي نداء refresh بيشارك نفس الـ promise "في الطيران" بدل ما يبعت نداء منفصل، فمفيش سباق. اتأكد الإصلاح حياً (login → reload → session لسه شغالة → logout → redirect صحيح).
