@@ -7,6 +7,7 @@ import '../assistant_offers/assistant_offers_screen.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../company/company_screen.dart';
+import '../kpi/kpi_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../portfolio/portfolio_screen.dart';
@@ -185,6 +186,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'ترشيح العملاء',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ReferralScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.insights_outlined),
+              tooltip: 'الأداء الشهري',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const KpiScreen()),
               ),
             ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),
