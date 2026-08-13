@@ -112,6 +112,28 @@ baytak/
 
 ---
 
+## ⚡️ أسرع طريقة تجرب بيها — GitHub Codespaces (من غير أي تنصيب على جهازك)
+
+من صفحة المستودع على GitHub: **Code (الزرار الأخضر) → Codespaces → Create codespace on main**.
+هيفتحلك VS Code كامل جوّه المتصفح، وأول ما الـCodespace يخلص إعداده تلقائيًا (`.devcontainer/` —
+Postgres/Redis/MinIO عبر Docker + `apps/api` + `apps/admin` شغالين تلقائيًا في الخلفية)، هتلاقي
+تبويب معاينة بيتفتح لوحده للوحة الأدمن (`localhost:3001` جوّه الـCodespace، بيتفتح كتاب في المتصفح
+تلقائيًا). كود التحقق (OTP) هتلاقيه في اللوج: `grep OTP /tmp/baytak-logs/api.log`.
+
+لتطبيقات Flutter جوّه نفس الـCodespace (اختياري، لما تحتاجهم — مش بيشتغلوا تلقائيًا عشان الإعداد
+الأول يفضل سريع):
+```bash
+cd apps/customer-app && flutter pub get && flutter run -d web-server --web-port=8090 --web-hostname=0.0.0.0
+```
+هيظهرلك تبويب معاينة تاني (بورت 8090) تقدر تفتحه في تاب Chrome عادي وتدوس على التطبيق زي الموبايل
+بالظبط. نفس الكلام لـ`apps/technician-app` على بورت 8091.
+
+**ملحوظة صراحة**: الإعداد ده اتكتب وبُني بعناية بالاعتماد على أدوات Codespaces القياسية
+(`docker-outside-of-docker`)، بس متجربش بالكامل بضغطة فعلية على "Create Codespace" (محتاج متصفح
+مش متاح وقت الكتابة) — لو أي خطوة فيه فشلت، ابعتلي رسالة اللوج وأصلحها فورًا.
+
+---
+
 ## 🚀 تشغيل محلي كامل (Quickstart)
 
 للتجربة الكاملة على جهازك (Docker للبنية التحتية + Flutter للتطبيقات):

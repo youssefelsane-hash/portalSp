@@ -1,0 +1,26 @@
+{
+  "name": "baytak — تجربة كاملة في المتصفح (Codespaces)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "forwardPorts": [3000, 3001, 9001, 8090, 8091],
+  "portsAttributes": {
+    "3000": { "label": "API (NestJS) — apps/api", "onAutoForward": "notify" },
+    "3001": { "label": "لوحة الأدمن — apps/admin", "onAutoForward": "openPreview" },
+    "9001": { "label": "MinIO console (تخزين الملفات محليًا)", "onAutoForward": "silent" },
+    "8090": { "label": "تطبيق العميل (Flutter web) — شغّله يدويًا لما تحتاجه", "onAutoForward": "notify" },
+    "8091": { "label": "تطبيق الفني (Flutter web) — شغّله يدويًا لما تحتاجه", "onAutoForward": "notify" }
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dart-code.flutter", "dart-code.dart-code", "dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  },
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/opt/flutter/bin"
+  }
+}
