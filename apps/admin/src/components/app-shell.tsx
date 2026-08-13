@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/roles', label: 'الأدوار والصلاحيات' },
   { href: '/technician-referrals', label: 'ترشيح QR الفني' },
   { href: '/technician-kpi', label: 'KPI الشهري' },
+  { href: '/technician-progression', label: 'المسار الوظيفي' },
   { href: '/technicians', label: 'الفنيين' },
   { href: '/customers', label: 'العملاء' },
   { href: '/orders', label: 'الطلبات' },

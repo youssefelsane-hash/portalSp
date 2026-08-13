@@ -12,6 +12,7 @@ import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../portfolio/portfolio_screen.dart';
 import '../profile/profile_screen.dart';
+import '../progression/progression_screen.dart';
 import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
 import 'models.dart';
@@ -193,6 +194,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'الأداء الشهري',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const KpiScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.military_tech_outlined),
+              tooltip: 'المسار الوظيفي',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ProgressionScreen()),
               ),
             ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),
