@@ -7,6 +7,7 @@ import { LOW_RATING_SUBMITTED_EVENT, LowRatingSubmittedEvent } from '../../commo
 import { RATING_SUBMITTED_EVENT, RatingSubmittedEvent } from '../../common/events/rating-submitted.event';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CustomerStatsService } from '../customers/customer-stats.service';
+import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianStatsService } from '../technicians/technician-stats.service';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
@@ -24,6 +25,7 @@ export class RatingsService {
     private readonly techniciansService: TechniciansService,
     private readonly technicianStatsService: TechnicianStatsService,
     private readonly customerStatsService: CustomerStatsService,
+    private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -81,6 +83,26 @@ export class RatingsService {
     }
 
     return rating;
+  }
+
+  /**
+   * طلب مراجعة Google (docs/10 بند 40) — بس بعد تقييم عميل عالي (>= الحد الأدنى القابل للتعديل)،
+   * وبس لو رابط المراجعة اتحط فعلاً من الأدمن. عمداً بعد تقييم الفني (customer_to_technician)
+   * بس، مش بعد تقييم الفني للعميل — العميل هو اللي المفروض يقيّم المنصة على Google، مش العكس.
+   */
+  async getGoogleReviewPrompt(rating: Rating): Promise<{ shouldPrompt: boolean; reviewUrl: string | null }> {
+    if (rating.ratingType !== RatingType.CUSTOMER_TO_TECHNICIAN) {
+      return { shouldPrompt: false, reviewUrl: null };
+    }
+    const reviewUrl = await this.settingsService.getString('reviews.google_review_url', '');
+    if (!reviewUrl) {
+      return { shouldPrompt: false, reviewUrl: null };
+    }
+    const minRating = await this.settingsService.getNumber('reviews.min_rating_for_google_prompt', 4);
+    if (rating.overallRating < minRating) {
+      return { shouldPrompt: false, reviewUrl: null };
+    }
+    return { shouldPrompt: true, reviewUrl };
   }
 
   async rateAsTechnician(userId: string, orderId: string, dto: CreateRatingDto): Promise<Rating> {

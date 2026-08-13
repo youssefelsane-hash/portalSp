@@ -8,6 +8,7 @@ import '../chat/chat_screen.dart';
 import '../payments/card_payment_screen.dart';
 import '../payments/fawry_reference_screen.dart';
 import '../payments/payments_repository.dart';
+import '../ratings/google_review_prompt.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../technicians/technician_profile_screen.dart';
@@ -233,7 +234,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final result = await showRatingDialog(context, afterPhotos: afterPhotos);
     if (result == null) return;
     try {
-      await _ratingsRepository.rate(
+      final response = await _ratingsRepository.rate(
         widget.orderId,
         overallRating: result.overallRating,
         punctualityRating: result.punctualityRating,
@@ -247,6 +248,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       if (mounted) {
         setState(() => _rated = true);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('شكراً على تقييمك 🙏')));
+        final prompt = response['google_review_prompt'] as Map<String, dynamic>?;
+        final reviewUrl = prompt?['review_url'] as String?;
+        if (prompt?['should_prompt'] == true && reviewUrl != null && mounted) {
+          await showGoogleReviewPromptDialog(context, reviewUrl);
+        }
       }
     } on ApiException catch (err) {
       // 409 لو اتقيّم قبل كده (مفيش endpoint تحقق مسبق، راجع ratings_repository.dart) —
