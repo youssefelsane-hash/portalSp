@@ -38,6 +38,7 @@ import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
+import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
@@ -389,6 +390,17 @@ export class OrdersService {
       await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, order.id);
     }
 
+    // تأجيل بث المطابقة لطلب مجدول "بعيد" (ADR-0009 بند 1-2، P0-9) — بيتحسب هنا بالظبط (مش وقت
+    // معالجة الحدث لاحقًا) عشان dto.schedule_slot_id متاح مباشرة هنا؛ requestedTechnicianId على
+    // الطلب مش دليل كافي على وجود سلوت صريح (بيتحط من إعادة الزيارة والتفضيل العادي كمان). سلوت
+    // الجدولة الصريح (scheduleSlot) مستثنى دايمًا — الفني نفسه أعلن توافره في الوقت ده صراحة.
+    const leadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
+    const dispatchDeferredUntil = computeDispatchDeferredUntil({
+      scheduleSlotBooked: !!scheduleSlot,
+      scheduledAt: order.scheduledAt,
+      leadHours,
+    });
+
     // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس. لازم
     // emitAsync (مش emit) هنا تحديدًا: بَقّة حقيقية اتلقطت واتصلحت — emit() عادي بيستدعي
     // الـ listeners من غير ما يستنى الـ promise بتاعهم (fire-and-forget)، يعني create() كانت
@@ -396,11 +408,13 @@ export class OrdersService {
     // DB. لو الفني (أو اختبار حي) نادى accept() فوراً بعد استلام رد إنشاء الطلب من غير أي تأخير
     // طبيعي، كان بيرجع "العرض ده مبقاش متاح" رغم إن الطلب لسه بيتوزّع. اتلقطت بـ curl مباشر
     // (نداءين متتاليين من غير أي تأخير) قبل ما نلاقيها كمان في اختبار Dart حي جديد. emitAsync
-    // بتستنى كل الـ listeners (بما فيهم OrderDispatchListener) يخلّصوا قبل ما create() ترجع،
-    // فلما العميل يستلم رد الطلب يكون التوزيع للفنيين المؤهلين خلص فعلاً. باقي أحداث النظام
-    // (إشعارات، إحصائيات) لسه fire-and-forget عمداً — الاستثناء هنا بس لإن نتيجة التوزيع دي
-    // جزء أساسي من دورة الطلب مش side effect.
-    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    // بتستنى كل الـ listeners (بما فيهم OrderDispatchListener) يخلّصوا قبل ما create() ترجع —
+    // لطلب فوري/قريب من الموعد ده معناه التوزيع للفنيين المؤهلين خلص فعلاً وقت الرد؛ لطلب "بعيد"
+    // (dispatchDeferredUntil موجودة) OrderDispatchListener بيجدول job مؤجّل بدل ما يبث فورًا،
+    // فالرد بيرجع بسرعة برضو من غير ما ينتظر بث حقيقي هيحصل بعدين. باقي أحداث النظام (إشعارات،
+    // إحصائيات) لسه fire-and-forget عمداً — الاستثناء هنا بس لإن قرار التوزيع/التأجيل ده جزء
+    // أساسي من دورة الطلب مش side effect.
+    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id, dispatchDeferredUntil));
 
     return order;
   }

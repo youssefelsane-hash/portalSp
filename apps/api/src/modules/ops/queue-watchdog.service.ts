@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SettingsService } from '../settings/settings.service';
 import { MATCHING_ROUNDS_QUEUE } from '../matching/matching-rounds.queue';
+import { MATCHING_DISPATCH_QUEUE } from '../matching/matching-dispatch.queue';
 import { CUSTOMER_STATS_QUEUE } from '../customers/customer-stats.queue';
 import { TECHNICIAN_STATS_QUEUE } from '../technicians/technician-stats.queue';
 
@@ -31,6 +32,7 @@ export class QueueWatchdogService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue,
+    @InjectQueue(MATCHING_DISPATCH_QUEUE) private readonly dispatchQueue: Queue,
     @InjectQueue(CUSTOMER_STATS_QUEUE) private readonly customerStatsQueue: Queue,
     @InjectQueue(TECHNICIAN_STATS_QUEUE) private readonly technicianStatsQueue: Queue,
     private readonly settings: SettingsService,
@@ -54,7 +56,7 @@ export class QueueWatchdogService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async checkAllQueues(): Promise<void> {
-    for (const queue of [this.roundsQueue, this.customerStatsQueue, this.technicianStatsQueue]) {
+    for (const queue of [this.roundsQueue, this.dispatchQueue, this.customerStatsQueue, this.technicianStatsQueue]) {
       await this.checkQueue(queue);
     }
   }

@@ -136,3 +136,53 @@ psql): فني حقيقي عنده سلوت `booked` 10:00-12:00 UTC — طلب `
 صح، وطلب `scheduled_at=13:00` (بعد نهاية السلوت) رجّعه صح.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
+
+## تأجيل بث المطابقة لطلب مجدول "بعيد" — ADR-0009 بند 1-2، اتقفل جزئيًا (P0-9، 2026-08-13)
+
+قبل الإصلاح ده، طلب مجدول بعد أسبوعين كان بيوصله بث "طلب جديد — اقبل خلال 30 ثانية" لحظة **إنشاء**
+الطلب بالحرف — مزعج للفني (التزام مبكر لموعد بعيد) وغير منطقي تشغيليًا. التصميم الكامل (وأسباب
+تأجيل بند تاني مرتبط) موثّق في `../../../../docs/adr/0009-deferred-dispatch-for-scheduled-orders.md`
+— هنا تفاصيل التنفيذ الفعلي لبند 1-2 بس (**بند 3، إعادة تعريف "مشغول" بنافذة زمنية بدل استبعاد
+كامل، لسه مؤجّل عمدًا** — راجع "ليه التنفيذ مؤجَّل" في الـADR، السبب نفسه لسه قائم: تغيير جوهري
+في استعلام `findEligibleTechnicians()` المستخدم في كل جولة مطابقة بالنظام، مخاطرة مختلفة تمامًا
+عن بند 1-2).
+
+- **إعداد جديد** `matching.deferred_dispatch_lead_hours` (افتراضي 4 ساعات، `infra/migrations/0086`) —
+  طلب `scheduled_at - now() > lead_hours` = "بعيد" (بث مؤجّل)، غير كده = "قريب" (بث فوري، نفس
+  سلوك الطلب الفوري بالحرف).
+- **القرار محسوب في `OrdersService.create()` نفسها، مش وقت معالجة الحدث لاحقًا** — دالة نقية
+  `computeDispatchDeferredUntil()` (`../orders/deferred-dispatch.util.ts`) بتاخد `scheduleSlotBooked`
+  (بوليان مباشر من `!!scheduleSlot` — **مش** `requestedTechnicianId`، لأن العمود ده بيتحط من
+  مصادر تانية غير سلوت الجدولة الصريح: تفضيل عادي `dto.requested_technician_id`، وإعادة الزيارة
+  `originalOrder.technicianId`. لو اعتمدنا عليه هنقع في استثناء بند 1-2 ("سلوت صريح = بث فوري
+  دايمًا") غلط لطلبات مالهاش سلوت أصلاً). القرار ده بيتحمل جوّه `OrderCreatedEvent.dispatchDeferredUntil`
+  الجديدة (اختيارية) — أنضف من إعادة اشتقاقه وقت معالجة الحدث (كان محتاج يرجع للـ DB أو يفترض
+  علاقة غير مضمونة).
+- **`ORDER_CREATED_EVENT` لسه بيتصدّر فورًا دايمًا (`emitAsync`) بلا أي شرط** — قرار متعمّد: فيه
+  listeners تانية غير `OrderDispatchListener` بتسمع نفس الحدث (`CustomerStatsRecalculationListener`,
+  `OrderCreatedNotificationListener`, `EmergencyOrderRoutingListener`) ولازم تشتغل فورًا بغض النظر
+  عن بُعد الموعد (إحصائيات العميل، إشعار "طلبك اتسجّل"، توجيه الطوارئ). **التأجيل خاص ببث المطابقة
+  بس** — `OrderDispatchListener.handleOrderCreated()` هو اللي بيفحص `event.dispatchDeferredUntil`
+  ويقرر: لو مستقبلية، بيجدول job مؤجّل (`matching-dispatch` queue) بدل ما ينادي `dispatchNextRound()`
+  فورًا؛ غير كده (undefined، أو دفاعيًا لو كانت في الماضي) بيبث فورًا زي القديم بالحرف.
+- **`matching-dispatch` queue حقيقي (`@nestjs/bullmq`, Redis) + `MatchingDeferredDispatchProcessor`** —
+  نفس نمط `matching-rounds`/`MatchingRoundExpiryProcessor` بالحرف (`jobId` ثابت `deferred-${orderId}`
+  يمنع أي تكرار، مستمع `@OnWorkerEvent('error')` إجباري). لحد ما وقت البث المؤجّل يوصل، الطلب
+  محفوظ `searching_technician` من لحظة الإنشاء (العميل شايف "بندوّرلك على فني" وده صحيح فعلاً)، بس
+  مفيش `order_assignments` ولا إشعار "طلب جديد" وصل لأي فني. الـprocessor بيتأكد الطلب لسه
+  `searching_technician` قبل ما ينادي `dispatchNextRound()` (no-op لو اتلغى/اتحل بطريقة تانية قبل
+  ما الوقت يوصل).
+- **`ops.QueueWatchdogService`** اتحدّث يراقب الطابور الجديد كمان (نفس آلية `matching-rounds` —
+  فحص `getWaiting()` دوري، `getWaiting` بترجّع بس jobs جاهزة للتنفيذ فعلًا مش لسه `delayed`، فمفيش
+  false positive من الـdelay الطويل نفسه).
+- **اختبار حي**: (أ) `../orders/deferred-dispatch.util.spec.ts` — اختبار وحدة نقي بيغطي كل حالات
+  `computeDispatchDeferredUntil()` (فوري، بعيد، قريب، سلوت صريح، حافة leadHours بالظبط). (ب)
+  `order-dispatch.listener.spec.ts` — اختبار حي ضد Redis حقيقي (`Queue`/`getJob`/`getState` فعليين،
+  مش mock): `dispatchDeferredUntil` مستقبلية بتجدول job `delayed` حقيقي بـ`delay` مطابق ومفيش
+  `dispatchNextRound()`؛ من غيرها بيبث فورًا ومفيش job في الطابور خالص؛ قيمة ماضية (دفاعي) بتبث
+  فورًا برضو.
+
+**فجوة موثّقة صراحة متبقّية**: طلب فيه `dto.requested_technician_id` (تفضيل عادي، مش سلوت جدولة
+صريح) ومعاه `scheduled_at` بعيد — بيتأجّل بث المطابقة زي أي طلب تفضيل عادي (السلوك الصح حسب
+الـADR: الفني ده معلنش توافره صراحة في الوقت ده، مجرد "تفضيل"). لو المالك حاب سلوك مختلف لحالة
+"تفضيل فني + موعد بعيد" تحديدًا (مثلاً بث فوري ليه هو بس)، ده قرار عمل جديد مش جزء من نطاق P0-9.

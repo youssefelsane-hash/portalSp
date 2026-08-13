@@ -7,6 +7,8 @@ import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
 import { MatchingRoundExpiryProcessor } from './matching-round-expiry.processor';
 import { MATCHING_ROUNDS_QUEUE } from './matching-rounds.queue';
+import { MatchingDeferredDispatchProcessor } from './matching-deferred-dispatch.processor';
+import { MATCHING_DISPATCH_QUEUE } from './matching-dispatch.queue';
 import { MatchingService } from './matching.service';
 import { OrderDispatchListener } from './order-dispatch.listener';
 import { OrderRematchListener } from './order-rematch.listener';
@@ -30,10 +32,16 @@ import { OrderAssignment } from './entities/order-assignment.entity';
     // — عمداً مش OrdersModule زي التحذير فوق. CustomersModule بتاعته controller مختلف تماماً
     // (/addresses) ومفيش أي استيراد لـ OrdersModule جواها، فمفيش نفس فخ ترتيب التسجيل.
     CustomersModule,
-    BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }),
+    BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }, { name: MATCHING_DISPATCH_QUEUE }),
   ],
   controllers: [TechnicianOrdersController],
-  providers: [MatchingService, OrderDispatchListener, OrderRematchListener, MatchingRoundExpiryProcessor],
+  providers: [
+    MatchingService,
+    OrderDispatchListener,
+    OrderRematchListener,
+    MatchingRoundExpiryProcessor,
+    MatchingDeferredDispatchProcessor,
+  ],
   exports: [MatchingService],
 })
 export class MatchingModule {}
