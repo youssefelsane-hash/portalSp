@@ -566,6 +566,7 @@ export class PaymentsService {
     failureReason: string | null,
     gatewayTransactionId: string,
     paymentMethod: PaymentMethod = PaymentMethod.CARD,
+    webhookAmountCents: number | null = null,
   ): Promise<void> {
     const alreadyProcessed = await this.webhookEvents.findOne({ where: { externalEventId } });
     if (alreadyProcessed) {
@@ -617,6 +618,25 @@ export class PaymentsService {
       webhookEvent.errorMessage = `الدفعة already في حالة ${payment.paymentStatus}`;
       webhookEvent.processedAt = new Date();
       await this.webhookEvents.save(webhookEvent);
+      return;
+    }
+
+    /**
+     * بَقّة أمنية/مالية حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-7): الـwebhook
+     * كان بيثق في `succeeded=true` من البوابة ويسوّي الطلب بالكامل من غير أي مقارنة بين المبلغ
+     * اللي وصل فعلاً (`amountCents` من الـwebhook نفسه) والمبلغ المتوقع (`payment.amountCents`
+     * المسجّل وقت إنشاء الدفعة). توقيع HMAC بيمنع مهاجم عشوائي من تزوير حدث، لكن مبيحميش من خطأ
+     * إعداد/تكامل حقيقي في البوابة نفسها (partial payment، عملة مختلفة، bug في البوابة) يسوّي
+     * طلب بمبلغ أقل من قيمته الحقيقية. الفحص هنا مستقل عن HMAC عمداً — طبقة حماية إضافية، مش بديل.
+     */
+    if (succeeded && webhookAmountCents !== null && webhookAmountCents !== payment.amountCents) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+      webhookEvent.errorMessage = `المبلغ في الـwebhook (${webhookAmountCents}) مايطابقش المبلغ المتوقع (${payment.amountCents}) — الحدث اترفض بأمان`;
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      this.logger.error(
+        `webhook برد مبلغ غير متطابق اترفض: ${externalEventId} — دفعة ${paymentId} متوقّع ${payment.amountCents} ووصل ${webhookAmountCents}`,
+      );
       return;
     }
 

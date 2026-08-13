@@ -38,6 +38,7 @@ export class WebhooksController {
         result.failureReason,
         result.gatewayTransactionId,
         PaymentMethod.CARD,
+        result.amountCents,
       );
     } catch (err) {
       // بنسجّل ونرجع 200 برضه — الخطأ اتسجّل في webhook_events.error_message بالفعل جوّه
@@ -66,6 +67,7 @@ export class WebhooksController {
         result.failureReason,
         result.gatewayTransactionId,
         PaymentMethod.FAWRY_REFERENCE,
+        result.amountCents,
       );
     } catch (err) {
       this.logger.error('فشل معالجة webhook Fawry', err instanceof Error ? err.stack : err);
