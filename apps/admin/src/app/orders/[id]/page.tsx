@@ -59,6 +59,9 @@ export default function OrderDetailPage() {
   const [showReassignForm, setShowReassignForm] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
   const [approvedTechnicians, setApprovedTechnicians] = useState<AdminTechnicianResponseDto[] | null>(null);
+  const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
+  const [newTotalEgp, setNewTotalEgp] = useState('');
+  const [adjustPriceReason, setAdjustPriceReason] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -138,6 +141,34 @@ export default function OrderDetailPage() {
         method: 'POST',
         body: JSON.stringify({ reason_notes: reason }),
       });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // كانت فجوة موثّقة صراحة برضه: PATCH /admin/orders/:id/adjust-price موجود ومختبر (تعديل
+  // يدوي لسعر طلب لسه ما اتدفعش، لتصحيح خطأ/تعويض) بس مفيش أي زرار ليه في أي شاشة.
+  async function handleAdjustPrice(e: FormEvent) {
+    e.preventDefault();
+    const newTotalCents = Math.round(Number(newTotalEgp) * 100);
+    if (!newTotalCents || newTotalCents < 0) return;
+    if (adjustPriceReason.trim().length < 5) {
+      window.alert('السبب لازم يكون 5 حروف على الأقل');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/adjust-price`, {
+        method: 'PATCH',
+        body: JSON.stringify({ new_total_amount_cents: newTotalCents, reason: adjustPriceReason }),
+      });
+      setShowAdjustPriceForm(false);
+      setNewTotalEgp('');
+      setAdjustPriceReason('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -295,6 +326,50 @@ export default function OrderDetailPage() {
                 </Button>
               </CardFooter>
             )}
+          {order.payment_status !== 'paid' && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isSaving}
+                onClick={() => setShowAdjustPriceForm((s) => !s)}
+                className="w-fit"
+              >
+                تعديل السعر يدويًا
+              </Button>
+              {showAdjustPriceForm && (
+                <form onSubmit={handleAdjustPrice} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="new_total_egp">السعر الجديد (جنيه)</Label>
+                    <Input
+                      id="new_total_egp"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      dir="ltr"
+                      value={newTotalEgp}
+                      onChange={(e) => setNewTotalEgp(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="adjust_price_reason">السبب</Label>
+                    <Input
+                      id="adjust_price_reason"
+                      value={adjustPriceReason}
+                      onChange={(e) => setAdjustPriceReason(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
+                    حفظ السعر الجديد
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
         </Card>
 
         <Card>
