@@ -53,6 +53,12 @@ const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
 const FIELD_TYPES_WITH_OPTIONS: PricingFieldType[] = ['dropdown', 'multi_select'];
 const FIELD_TYPES_WITH_RANGE: PricingFieldType[] = ['number', 'area', 'length', 'volume', 'slider'];
 
+// أنواع حقول مش مدعومة في apps/customer-app لسه (راجع create_order_screen.dart's isSupported) —
+// كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): لو الأدمن يحطّها إجبارية، العميل بيوصل لحقل
+// محتاج تفاصيل مش قادر يدخلها خالص، فمينفعش يكمّل الحجز أبدًا. الحل الأبسط للنسخة دي: نمنع
+// الحفظ من الأساس بدل ما نستنى العميل يتفاجأ.
+const UNSUPPORTED_FIELD_TYPES: PricingFieldType[] = ['location', 'image_upload', 'video_upload', 'voice_note'];
+
 const FINAL_PRICE_TEMPLATE = JSON.stringify(
   {
     price_cents: { type: 'multiply', operands: [{ type: 'field_ref', field_key: 'area' }, { type: 'literal', value: 100 }] },
@@ -165,8 +171,14 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
 
   async function handleSaveField(e: FormEvent) {
     e.preventDefault();
-    setIsSaving(true);
     setError(null);
+    if (UNSUPPORTED_FIELD_TYPES.includes(fieldForm.field_type) && fieldForm.is_required) {
+      setError(
+        `نوع الحقل "${FIELD_TYPE_LABELS[fieldForm.field_type]}" مش مدعوم في تطبيقات العميل/الفني لسه — مينفعش يبقى إجباري (العميل مش هيقدر يكمّل الحجز خالص). سيبه اختياري، أو استخدم نوع حقل مدعوم.`,
+      );
+      return;
+    }
+    setIsSaving(true);
     const hasOptions = FIELD_TYPES_WITH_OPTIONS.includes(fieldForm.field_type);
     const body: CreatePricingFieldBody | UpdatePricingFieldBody = {
       ...fieldForm,
