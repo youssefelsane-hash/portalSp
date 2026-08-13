@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -282,7 +283,15 @@ export default function TechnicianProgressionPage() {
           {!statuses ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : statuses.length === 0 ? (
-            <p className="text-sm text-muted-foreground">مفيش بيانات — دوس &quot;احسب أهلية كل الفنيين&quot;</p>
+            <EmptyState
+              title="مفيش بيانات لسه"
+              description="احسب أهلية كل الفنيين عشان تبان حالتهم هنا"
+              action={
+                <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
+                  {isCalculating ? 'جاري التقييم…' : 'احسب أهلية كل الفنيين'}
+                </Button>
+              }
+            />
           ) : (
             <Table>
               <TableHeader>

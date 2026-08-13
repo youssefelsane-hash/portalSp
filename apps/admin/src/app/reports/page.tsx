@@ -93,7 +93,7 @@ const TECH_SORT_LABELS: Record<TechniciansReportSortBy, string> = {
 
 function RevenueChart({ rows }: { rows: RevenuePeriodRow[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">مفيش بيانات في الفترة دي</p>;
+  if (rows.length === 0) return <EmptyState title="مفيش بيانات في الفترة دي" />;
 
   const width = 800;
   const height = 220;

@@ -31,6 +31,7 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -511,7 +512,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
           {!fields ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : fields.length === 0 ? (
-            <p className="text-sm text-muted-foreground">مفيش حقول تسعير للخدمة دي لسه</p>
+            <EmptyState title="مفيش حقول تسعير للخدمة دي لسه" />
           ) : (
             <Table>
               <TableHeader>
@@ -574,7 +575,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
               </Button>
             </form>
             {constants.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش ثوابت متعرّفة لسه</p>
+              <EmptyState title="مفيش ثوابت متعرّفة لسه" />
             ) : (
               <Table>
                 <TableHeader>
@@ -636,7 +637,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
               </Button>
             </form>
             {lookupTables.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش جداول بحث متعرّفة لسه</p>
+              <EmptyState title="مفيش جداول بحث متعرّفة لسه" />
             ) : (
               <Table>
                 <TableHeader>
@@ -781,7 +782,7 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
         </CardHeader>
         <CardContent>
           {activeFields.length === 0 ? (
-            <p className="text-sm text-muted-foreground">أضف حقول أول عشان تقدر تعاين السعر</p>
+            <EmptyState title="أضف حقول أول عشان تقدر تعاين السعر" />
           ) : (
             <>
               <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">

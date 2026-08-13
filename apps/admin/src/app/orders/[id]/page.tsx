@@ -435,7 +435,7 @@ export default function OrderDetailPage() {
             </CardHeader>
             <CardContent>
               {teamMembers.length === 0 ? (
-                <p className="text-sm text-muted-foreground">مفيش مساعد معيّن لسه</p>
+                <EmptyState title="مفيش مساعد معيّن لسه" />
               ) : (
                 <Table>
                   <TableHeader>
