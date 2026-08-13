@@ -7,6 +7,16 @@ import { User } from '../auth/entities/user.entity';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { Notification, NotificationChannel, NotificationDeliveryStatus } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
+import { UserNotificationPreference } from './entities/user-notification-preference.entity';
+
+// القنوات القابلة للتعطيل من تفضيلات المستخدم — in_app مستثناة عمدًا (صندوق الإشعارات نفسه
+// جوّه التطبيق، مفيش معنى تعطيله).
+export const PREFERENCE_ELIGIBLE_CHANNELS = [
+  NotificationChannel.PUSH,
+  NotificationChannel.SMS,
+  NotificationChannel.WHATSAPP,
+  NotificationChannel.EMAIL,
+] as const;
 
 export interface NotifyInput {
   userId: string;
@@ -32,6 +42,8 @@ export class NotificationsService {
     @InjectRepository(Notification) private readonly notifications: Repository<Notification>,
     @InjectRepository(UserDevice) private readonly devices: Repository<UserDevice>,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(UserNotificationPreference)
+    private readonly preferences: Repository<UserNotificationPreference>,
     @Inject(NOTIFICATION_DISPATCHER) private readonly dispatcher: NotificationDispatcher,
   ) {}
 
@@ -84,6 +96,15 @@ export class NotificationsService {
       deliveryStatus: NotificationDeliveryStatus.QUEUED,
     });
     await this.notifications.save(notification);
+
+    // تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — in_app دايماً بتتسجّل وتترسل، مفيش
+    // تفضيل ليها أصلاً (راجع PREFERENCE_ELIGIBLE_CHANNELS). الصف اتسجّل فوق بالفعل (سجل دايم
+    // في صندوق الإشعارات) حتى لو القناة الفعلية معطّلة — بس مفيش dispatch حقيقي هيتبعت.
+    if (channel !== NotificationChannel.IN_APP && !(await this.isChannelEnabled(input.userId, channel))) {
+      notification.deliveryStatus = NotificationDeliveryStatus.FAILED;
+      notification.failureReason = 'المستخدم عطّل القناة دي من تفضيلاته';
+      return this.notifications.save(notification);
+    }
 
     const targets = await this.resolveTargets(input.userId, channel);
 
@@ -188,5 +209,35 @@ export class NotificationsService {
       .where('user_id = :userId AND read_at IS NULL', { userId })
       .execute();
     return result.affected ?? 0;
+  }
+
+  // ── تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) ──────────────────
+
+  private async isChannelEnabled(userId: string, channel: NotificationChannel): Promise<boolean> {
+    const pref = await this.preferences.findOne({ where: { userId, channel } });
+    // غياب الصف = مفعّل افتراضيًا (نفس فلسفة أي إعداد تاني في المشروع).
+    return pref ? pref.isEnabled : true;
+  }
+
+  async listMyPreferences(userId: string): Promise<{ channel: NotificationChannel; isEnabled: boolean }[]> {
+    const rows = await this.preferences.find({ where: { userId } });
+    const byChannel = new Map(rows.map((r) => [r.channel, r.isEnabled]));
+    return PREFERENCE_ELIGIBLE_CHANNELS.map((channel) => ({
+      channel,
+      isEnabled: byChannel.get(channel) ?? true,
+    }));
+  }
+
+  async setMyPreference(userId: string, channel: NotificationChannel, isEnabled: boolean): Promise<void> {
+    if (!(PREFERENCE_ELIGIBLE_CHANNELS as readonly NotificationChannel[]).includes(channel)) {
+      throw new ApiException(ErrorCode.VAL_001, 'قناة إشعار مش قابلة للتعديل', HttpStatus.BAD_REQUEST);
+    }
+    const existing = await this.preferences.findOne({ where: { userId, channel } });
+    if (existing) {
+      existing.isEnabled = isEnabled;
+      await this.preferences.save(existing);
+    } else {
+      await this.preferences.insert({ userId, channel, isEnabled });
+    }
   }
 }

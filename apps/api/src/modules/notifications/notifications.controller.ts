@@ -1,9 +1,11 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseEnumPipe, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ListNotificationsQueryDto } from './dto/list-notifications-query.dto';
 import { toNotificationResponseDto, toUserDeviceResponseDto } from './dto/notification-response.dto';
+import { UpdateNotificationPreferenceDto } from './dto/update-notification-preference.dto';
 import { RegisterDeviceDto } from './dto/register-device.dto';
+import { NotificationChannel } from './entities/notification.entity';
 import { NotificationsService } from './notifications.service';
 
 // كل الـ endpoints هنا متاحة لأي مستخدم مسجّل دخول (عميل/فني/أدمن) — مفيش @Roles لأن
@@ -46,5 +48,22 @@ export class NotificationsController {
   @Patch('notifications/read-all')
   async markAllRead(@CurrentUser() user: JwtPayload) {
     return { updated_count: await this.notificationsService.markAllRead(user.sub) };
+  }
+
+  // تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — مستوى القناة بس (push/sms/whatsapp/email).
+  @Get('me/notification-preferences')
+  async listMyPreferences(@CurrentUser() user: JwtPayload) {
+    const prefs = await this.notificationsService.listMyPreferences(user.sub);
+    return prefs.map((p) => ({ channel: p.channel, is_enabled: p.isEnabled }));
+  }
+
+  @Patch('me/notification-preferences/:channel')
+  async updateMyPreference(
+    @CurrentUser() user: JwtPayload,
+    @Param('channel', new ParseEnumPipe(NotificationChannel)) channel: NotificationChannel,
+    @Body() dto: UpdateNotificationPreferenceDto,
+  ) {
+    await this.notificationsService.setMyPreference(user.sub, channel, dto.is_enabled);
+    return { channel, is_enabled: dto.is_enabled };
   }
 }

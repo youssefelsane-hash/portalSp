@@ -83,7 +83,7 @@
 ### ⏸️ مؤجّل عمداً — backlog منفصل، مش جزء من مرحلة التكامل دي (بطلب صريح من المالك)
 
 36. ~~المفضّلة (Favorites) — مش موجودة خالص.~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/favorites/README.md`.
-37. تفضيلات إشعارات المستخدم (قنوات).
+37. ~~تفضيلات إشعارات المستخدم (قنوات).~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/notifications/README.md`.
 38. تعويض تأخير تلقائي.
 39. QR ترشيح خاص بالفني.
 40. ~~طلب مراجعة Google/مشاركة.~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/ratings/README.md`.
@@ -329,3 +329,15 @@
   عبر curl بـ3 عملاء وطلبات حقيقية مختلفة: من غير رابط متحط، بعد ما اتحط (`should_prompt:true`
   + نفس الرابط بالحرف)، وتقييم تحت العتبة (`should_prompt:false` رغم وجود الرابط) — كل الحالات
   طابقت المتوقع. الفحوصات الأربعة عدّت كلها. تفاصيل كاملة في `apps/api/src/modules/ratings/README.md`.
+
+- **2026-08-13 (بند 37 — تفضيلات إشعارات المستخدم بالقناة، خلص، فرع `v13gb2`)**: كانت مؤجّلة
+  عمدًا كـ`backlog` منفصل. `user_notification_preferences` (`migration 0080`، مستوى القناة بس:
+  push/sms/whatsapp/email — `in_app` مستثناة عمدًا، غياب الصف = مفعّل افتراضيًا) +
+  `GET/PATCH /me/notification-preferences[...]`. الفرض الفعلي في `NotificationsService.notify()`:
+  لو القناة معطّلة، الصف بيتسجّل `failed` بسبب واضح فورًا **من غير** أي نداء حقيقي للـdispatcher.
+  اتعمله اختبار حي عبر curl + سكريبت `NestFactory.createApplicationContext` مباشر بيثبت الفرق
+  بوضوح: نداء لقناة معطّلة يترفض فورًا بسبب "عطّل القناة"، نفس النداء بعد التفعيل يوصل فعليًا
+  للـdispatcher (بيترفض بسبب مختلف تمامًا — مفيش جهاز مسجّل — يعني وصل صح). `apps/customer-app`:
+  `NotificationPreferencesScreen` جديدة، مدخل من `NotificationsScreen`. `apps/technician-app`
+  لسه من غيرها عمدًا (نفس الـendpoints جاهزة). تفاصيل كاملة في
+  `apps/api/src/modules/notifications/README.md`.
