@@ -16,6 +16,15 @@ export default () => ({
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '30d',
   },
 
+  security: {
+    // مفصولة بفاصلة (زي "https://admin.baytak.com,https://baytak.com") — فاضي = مفتوح للكل،
+    // مرفوض في الإنتاج عبر env.validation.ts (CORS_ORIGIN مطلوبة هناك لو NODE_ENV=production).
+    corsOrigins: (process.env.CORS_ORIGIN ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  },
+
   otp: {
     expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES ?? '5', 10),
     maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS ?? '5', 10),

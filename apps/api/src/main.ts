@@ -2,8 +2,9 @@ import 'reflect-metadata';
 import { resolve } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ApiException, ErrorCode } from './common/exceptions/api.exception';
 
@@ -31,8 +32,30 @@ async function bootstrap() {
   // بره الـ globalPrefix عمداً (نفس شكل الرابط اللي already بيترجع من LocalDiskStorageService.save()).
   app.useStaticAssets(resolve(config.get<string>('storage.localDir')!), { prefix: '/uploads/' });
 
+  // رؤوس أمان قياسية (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security،
+  // إلخ) — API JSON بحت من غير أي صفحة HTML مُصيَّرة، فـcontentSecurityPolicy معطّلة عمداً
+  // (قيمتها الحقيقية ضد XSS في صفحات HTML، مش موجودة هنا) بدل ما تضيف تعقيد من غير فايدة.
+  // crossOriginResourcePolicy لازم 'cross-origin' صراحة — صور /uploads/* (طلبات/مستندات فنيين)
+  // بتتحمّل من أصل مختلف (لوحة الأدمن على subdomain تاني، تطبيقات Flutter) في الإنتاج.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+
   app.setGlobalPrefix(config.get<string>('apiPrefix')!);
-  app.enableCors();
+
+  // أصول الـCORS من env.validation.ts (CORS_ORIGIN) — فاضي = مفتوح للكل (`*`)، مقبول تطويريًا
+  // بس، مرفوض صراحة وقت الإقلاع لو NODE_ENV=production (راجع env.validation.ts). الـJWT بيتبعت
+  // كـBearer header مش cookie، فمفيش credentials تتسرّب حتى لو الأصل مفتوح — القيد ده طبقة
+  // دفاع إضافية (defense-in-depth)، مش الحماية الوحيدة.
+  const corsOrigins = config.get<string[]>('security.corsOrigins')!;
+  if (corsOrigins.length === 0) {
+    Logger.warn('CORS مفتوح للكل (*) — لازم CORS_ORIGIN يتحدد صراحة قبل أي نشر إنتاجي.', 'Bootstrap');
+  }
+  app.enableCors({ origin: corsOrigins.length > 0 ? corsOrigins : '*' });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

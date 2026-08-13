@@ -7,10 +7,28 @@ export const envValidationSchema = Joi.object({
 
   DATABASE_URL: Joi.string().uri().required(),
 
-  JWT_ACCESS_SECRET: Joi.string().min(16).required(),
+  // في الإنتاج (NODE_ENV=production) بس: طول أدنى أعلى (32 بدل 16) ورفض صريح للقيم الافتراضية
+  // الموجودة في .env.example — عشان لو حد نسي يستبدلها وقت النشر الحقيقي، السيرفر يرفض يشتغل
+  // من الأول (fail-fast) بدل ما يشتغل بسر ضعيف/معروف مسبقاً. في التطوير/الاختبار القيم
+  // الافتراضية من .env.example لسه شغالة عادي (نفس دليل التشغيل المحلي في README.md الرئيسي).
+  JWT_ACCESS_SECRET: Joi.string()
+    .min(16)
+    .required()
+    .when('NODE_ENV', { is: 'production', then: Joi.string().min(32).invalid('change-me-access-secret') }),
   JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
-  JWT_REFRESH_SECRET: Joi.string().min(16).required(),
+  JWT_REFRESH_SECRET: Joi.string()
+    .min(16)
+    .required()
+    .invalid(Joi.ref('JWT_ACCESS_SECRET')) // نفس السر لـaccess وrefresh يلغي فائدة فصلهم بالكامل
+    .when('NODE_ENV', { is: 'production', then: Joi.string().min(32).invalid('change-me-refresh-secret') }),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
+
+  // قائمة أصول (origins) مسموح لها بنداء الـAPI من متصفح، مفصولة بفاصلة — راجع الشرح الكامل في
+  // main.ts. فاضي/غير موجود = مفتوح للكل (`*`)، مقبول في التطوير بس مرفوض صراحة في الإنتاج.
+  CORS_ORIGIN: Joi.string()
+    .allow('')
+    .optional()
+    .when('NODE_ENV', { is: 'production', then: Joi.string().min(1).required() }),
 
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
