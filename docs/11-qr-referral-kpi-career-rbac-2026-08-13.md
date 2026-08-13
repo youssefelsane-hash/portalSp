@@ -78,3 +78,37 @@
   - الفحوصات الأربعة عدّت كلها (`tsc`/`nest build`/`jest` في `apps/api`، `tsc`/`next build` في
     `apps/admin`، `flutter analyze` نضيف في التطبيقين). تفاصيل كاملة في
     `apps/api/src/modules/technician-referrals/README.md`.
+
+- **2026-08-13 (§3 محرك KPI الشهري + موافقة/صرف الأدمن — ✅ خلص بالكامل)**: بحث معماري أولاني
+  (agent مخصص) لجرد بالظبط إيه اللي المنصة بتسجّله فعلاً قبل أي تصميم — النتيجة حكمت التصميم بالكامل:
+  استبعاد "الوصول في الوقت" (مفيش عمود مسجّل للفرق بين الموعد والوصول الفعلي) و"الإنتاجية مقابل
+  المتوقع" (تغطية جزئية جدًا) عمدًا من الأبعاد، بدل ما نقدّم تقدير تقريبي كـ"حقيقة مسجّلة".
+  - `migration 0083`: `technician_kpi_snapshots` (سنابشوت شهري لكل فني، immutable بعد
+    `approved`/`paid`) + 14 إعداد تحت `group_name='kpi'` (تفعيل، سقف شهري افتراضي 5000 جنيه، أوزان
+    كل بُعد، عتبة تقييم سلبي، عقوبة الشكوى المثبتة، تصفير آلي لشكوى حرجة، حد أدنى طلبات للأهلية،
+    السماح بتعديل المقترح، إظهار الملاحظات للفني) + 3 صلاحيات جديدة (`technician_kpi.calculate`،
+    `.approve`، `.override_max` — الأخيرة بنفس فلسفة `roles.grant_unrestricted` من ADR-0010 بالحرف،
+    مفيش دور تاني ياخدها افتراضيًا غير `super_admin` عن طريق الـbypass).
+  - كل بُعد (تقييم، قبول عروض، إتمام، إلغاء الفني، شكاوى مثبتة، إيراد نسبي) بيتحسب من جداول موجودة
+    أصلاً بس (`ratings`, `order_assignments`, `orders`, `technician_order_cancellations`,
+    `complaints`, `wallet_transactions`) — تفاصيل كل استعلام ولماذا في README الموديول. بُعد بيتحسب
+    بس لو فيه بيانات كافية الشهر ده، والوزن بيتعاد توزيعه على الأبعاد المتاحة تلقائيًا.
+  - شكوى `severity=critical` مثبتة بتصفّر `overall_score` بالكامل لو `kpi.serious_complaint_zero_score`
+    مفعّلة — تطبيق حرفي لطلب المالك "serious events force zero KPI".
+  - سير الموافقة `calculated → approved → paid` (أو `rejected`، قابل للمراجعة لاحقًا) — الأدمن
+    مش لازم يعتمد الرقم المقترح بالظبط (قابل للتعديل من الإعدادات)، السقف الشهري بيتفرض دايمًا إلا
+    بصلاحية `override_max`. الصرف عبر `WalletsService.doubleEntry()` الموجود (`WalletTxType.BONUS`).
+  - **اختبار حي كامل شمل اختبار سلبي حقيقي**: أدمن `ops_manager` (بلا `override_max`) حاول يعتمد
+    مبلغ فوق السقف الشهري → اترفض 403 بالضبط برسالة واضحة. نفس الأدمن اعتمد مبلغ داخل السقف
+    وصرفه، وقيد المحفظة اتأكد منه مباشرة من الداتابيز (`wallet_transactions`، صف debit من المنصة +
+    credit للفني). `super_admin` قدر يتخطى السقف (bypass متوقّع من ADR-0010، مش بَقّة). إعادة حساب
+    لنفس الشهر بعد الاعتماد أثبتت الـimmutability (`skippedLocked` صحيح للمقفولين، والباقي اتحسب
+    تاني). فني شاف ملخّصه الشخصي وملاحظات الأدمن الداخلية اتأكد إنها مخفية عنه افتراضيًا
+    (`kpi.expose_approval_notes_to_technician=false`) رغم إنها ظاهرة كاملة للأدمن في نفس اللحظة.
+  - **UI كامل**: `apps/admin` (`/technician-kpi` قائمة بفلتر شهر/سنة/حالة + زرار "احسب الشهر ده"،
+    `/technician-kpi/:id` تفاصيل كاملة بالأبعاد والبيانات الخام وفورم اعتماد/رفض/صرف) — Playwright
+    حقيقي أكّد الشاشتين بيانات صح. `apps/technician-app` (`KpiScreen` — الدرجة الكلية، تفصيل
+    الأبعاد، الحالة والمبلغ، سجل الشهور السابقة).
+  - الفحوصات الأربعة عدّت كلها (`tsc`/`nest build`/`jest` في `apps/api`، `tsc`/`next build` في
+    `apps/admin`، `flutter analyze` نضيف في `apps/technician-app`). تفاصيل كاملة في
+    `apps/api/src/modules/technician-kpi/README.md`.
