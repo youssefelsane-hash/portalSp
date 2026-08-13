@@ -1,0 +1,8 @@
+# انسخ الملف ده لـ key.properties (نفس المجلد) وحط فيه القيم الحقيقية بتاعة الـ release keystore.
+# key.properties نفسه في .gitignore عمدًا — أبدًا متعملوش commit، ده سر إصدار حقيقي.
+# خطوات توليد الـ keystore وتعبئة القيم دي: docs/03-external-integrations.md § توقيع Android.
+
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=CHANGE_ME
+storeFile=/absolute/or/relative/path/to/upload-keystore.jks
