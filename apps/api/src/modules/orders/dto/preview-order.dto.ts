@@ -2,8 +2,11 @@ import { ArrayMaxSize, ArrayUnique, IsArray, IsEnum, IsObject, IsOptional, IsStr
 import { BookingMode } from '../entities/order.entity';
 
 // معاينة السعر الحقيقي قبل تأكيد الحجز (docs/08 §1، طلب صريح: "عرض السعر قبل التأكيد لازم
-// يطابق بالظبط اللي هيتحصّل"). نفس الحقول المؤثرة في السعر بتاعة CreateOrderDto بالظبط —
-// عمدًا من غير حقول التنفيذ (scheduled_at, requested_technician_id, ...) لأنها مش بتأثر على السعر.
+// يطابق بالظبط اللي هيتحصّل"). نفس الحقول المؤثرة في السعر بتاعة CreateOrderDto — بما فيهم
+// requested_technician_id وschedule_slot_id (بَقّة حقيقية اتلقطت: كان مضاعف سعر مستوى الفني
+// بيتحسب صح في create() بس مش في المعاينة لو العميل اختار سلوت جدولة تحديدًا، فرق السعر بين
+// المعاينة والطلب الفعلي كان ممكن يحصل). عمدًا من غير حقول تنفيذ تانية زي scheduled_at اللي
+// فعلاً مش بتأثر على السعر.
 export class PreviewOrderDto {
   @IsUUID()
   service_id: string;
@@ -41,4 +44,10 @@ export class PreviewOrderDto {
   @IsOptional()
   @IsUUID()
   requested_technician_id?: string;
+
+  // نفس السبب بالظبط، لكن لسلوت جدولة محدد (GET /technicians/:id/schedule) — بيغلب
+  // requested_technician_id لو الاتنين اتبعتوا مع بعض، نفس أولوية create() بالحرف.
+  @IsOptional()
+  @IsUUID()
+  schedule_slot_id?: string;
 }

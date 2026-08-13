@@ -437,9 +437,16 @@ export class OrdersService {
     }
 
     // مضاعف سعر مستوى الفني (docs/08) — نفس منطق create() بالحرف، راجع تعليقها الكامل هناك.
-    const previewTechnicianLevel = dto.requested_technician_id
-      ? (await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id)).currentLevel
-      : undefined;
+    // سلوت الجدولة بيغلب requested_technician_id لو الاتنين موجودين (نفس أولوية create()).
+    const scheduleSlotTechnicianProfile = dto.schedule_slot_id
+      ? await this.techniciansService.findByProfileIdOrThrow(
+          (await this.scheduleService.findAvailableSlotOrThrow(dto.schedule_slot_id)).technicianId,
+        )
+      : null;
+    const requestedTechnicianProfile = dto.requested_technician_id
+      ? await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id)
+      : null;
+    const previewTechnicianLevel = scheduleSlotTechnicianProfile?.currentLevel ?? requestedTechnicianProfile?.currentLevel;
 
     const estimate = await this.catalogService.estimate(
       service.id,
