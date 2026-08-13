@@ -211,7 +211,7 @@ Recurring، Buildings، Domestic Worker base flows.
 
 | # | البند | الحالة |
 |---|---|---|
-| 1 | RBAC — `assignRole()`/`cloneRole()` privilege escalation | 🔲 لسه |
+| 1 | RBAC — `assignRole()`/`cloneRole()` privilege escalation | ✅ خلص |
 | 2 | Dynamic RBAC مش مطبّق على كل Admin endpoints (Reports/RecurringOrders...) | 🔲 لسه |
 | 3 | Admin UI مايحترمش الصلاحيات (Sidebar ثابت) | 🔲 لسه |
 | 4 | OTP بيتكتب في اللوج دايمًا | 🔲 لسه |

@@ -49,6 +49,53 @@ export class PermissionsService {
     return rows[0]?.exists === true;
   }
 
+  private async getRolePermissionNames(roleId: string): Promise<string[]> {
+    const rows = await this.dataSource.query<{ name: string }[]>(
+      `SELECT p.name FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = $1`,
+      [roleId],
+    );
+    return rows.map((r) => r.name);
+  }
+
+  /**
+   * بَقّة أمنية حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، بند P0-1) — منع تصعيد صلاحيات
+   * عبر `assignRole()`/`cloneRole()`: `setRolePermissions()` كان الوحيد اللي بيمنع الفاعل من منح
+   * صلاحية هو نفسه ماعندوش، لكن نفس القاعدة ماكانتش متطبّقة على تعيين دور جاهز لمستخدم تاني (يقدر
+   * ياخد صلاحيات أعلى بكتير من صلاحياته هو، من غير حتى يعدّل أي دور) ولا على نسخ دور (نسخة جديدة
+   * بنفس صلاحيات المصدر بالكامل). الدالة دي بتفرض نفس القاعدة في المكانين الجداد: مينفعش تمنح/تنسخ
+   * صلاحية إنت نفسك ملكهاش، إلا بـ`roles.grant_unrestricted` (أو `super_admin` اللي بيتخطاها أصلاً
+   * عن طريق `getUserPermissionNames()`).
+   */
+  private async assertActorCanGrantPermissions(actorUserId: string, permissionNames: string[]): Promise<void> {
+    if (permissionNames.length === 0) return;
+    const actorPermissions = await this.getUserPermissionNames(actorUserId);
+    if (actorPermissions.has('roles.grant_unrestricted')) return;
+    const forbidden = permissionNames.filter((n) => !actorPermissions.has(n));
+    if (forbidden.length > 0) {
+      throw new ApiException(
+        ErrorCode.AUTH_001,
+        `مينفعش تمنح صلاحية إنت نفسك ملكهاش: ${forbidden.join(', ')}`,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  /**
+   * `is_super_admin` مش موجود كـpermission في `role_permissions` أصلاً (بيتخطى الفحص بالكامل عن
+   * طريق تصميم `getUserPermissionNames()`) — يعني فحص "الفاعل عنده كل صلاحيات الدور" العادي
+   * مايكفيش لدور `super_admin` نفسه (ممكن يكون عدد صلاحياته المسجّلة فعليًا أقل من كتالوج
+   * الصلاحيات الكامل، فالفحص العادي كان هيعدّي غلط). الدور ده بالتحديد يحتاج فحص صريح منفصل.
+   */
+  private async assertActorIsSuperAdminOrThrow(actorUserId: string, actionAr: string): Promise<void> {
+    if (!(await this.isSuperAdminUser(actorUserId))) {
+      throw new ApiException(
+        ErrorCode.AUTH_001,
+        `لازم تكون Super Admin عشان ${actionAr}`,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
   /**
    * بيجمع كل صلاحيات المستخدم من كل أدواره المُعيَّنة — استعلام واحد، مفيش N+1.
    * super_admin (is_super_admin=true) بيتخطى الفحص بالكامل ويرجع كل الكتالوج — يقفل بَقّة
@@ -173,6 +220,15 @@ export class PermissionsService {
     meta?: AuditActorMeta,
   ): Promise<Role> {
     const source = await this.getRoleOrThrow(sourceRoleId);
+    // super_admin مش عادي — صلاحياته الفعلية "كل الكتالوج" عن طريق bypass، مش قائمة role_permissions
+    // (ممكن تكون أقل من الكتالوج الكامل)، فالفحص العادي تحت مش كافي لمنع نسخه.
+    if (source.isSuperAdmin) {
+      await this.assertActorIsSuperAdminOrThrow(actorUserId, 'تنسخ دور Super Admin');
+    } else {
+      const sourcePermissionNames = await this.getRolePermissionNames(sourceRoleId);
+      await this.assertActorCanGrantPermissions(actorUserId, sourcePermissionNames);
+    }
+
     const newRole = await this.createRole(actorUserId, dto, meta);
 
     const sourcePermissionIds = await this.dataSource.query<{ permission_id: string }[]>(
@@ -331,6 +387,12 @@ export class PermissionsService {
     if (!role.isActive) {
       throw new ApiException(ErrorCode.VAL_001, 'الدور ده معطّل حاليًا — مينفعش يتعيّن', HttpStatus.CONFLICT);
     }
+    if (role.isSuperAdmin) {
+      await this.assertActorIsSuperAdminOrThrow(assignedByUserId, 'تمنح دور Super Admin لمستخدم تاني');
+    } else {
+      const rolePermissionNames = await this.getRolePermissionNames(role.id);
+      await this.assertActorCanGrantPermissions(assignedByUserId, rolePermissionNames);
+    }
     const existing = await this.userRoles.findOne({ where: { userId, roleId: role.id } });
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'المستخدم عنده الدور ده بالفعل', HttpStatus.CONFLICT);
@@ -364,12 +426,17 @@ export class PermissionsService {
     if (!role) {
       throw new ApiException(ErrorCode.VAL_001, 'الدور غير موجود', HttpStatus.NOT_FOUND);
     }
-    if (roleName === SUPER_ADMIN_ROLE_NAME && (await this.isLastSuperAdmin(userId))) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'مينفعش تسحب دور super_admin من آخر حساب عنده — النظام هيتقفل تماماً',
-        HttpStatus.CONFLICT,
-      );
+    if (roleName === SUPER_ADMIN_ROLE_NAME) {
+      if (await this.isLastSuperAdmin(userId)) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'مينفعش تسحب دور super_admin من آخر حساب عنده — النظام هيتقفل تماماً',
+          HttpStatus.CONFLICT,
+        );
+      }
+      // بَقّة أمنية اتصلحت (P0-1): سحب دور super_admin من حساب تاني كان مسموح لأي أدمن عنده
+      // roles.manage بس — أدمن مش super_admin كان يقدر "يسقط" super_admin تاني من النظام.
+      await this.assertActorIsSuperAdminOrThrow(revokedByUserId, 'تسحب دور Super Admin من مستخدم تاني');
     }
     // حماية القفل الذاتي (ADR-0010 §4) — مختلفة عن فحص آخر super_admin فوق: هنا عن *أي* دور
     // لو ده آخر دور للفاعل نفسه (لا يقدر يفقد وصوله بالكامل بضغطة واحدة).

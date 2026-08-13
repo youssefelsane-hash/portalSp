@@ -41,6 +41,15 @@
 - **الأدوار النظامية الخمسة محمية بالكامل** (`is_system=true`): مينفعش تتحذف أو تتعطّل أو يتغيّر اسمها الداخلي — أسماؤها مستخدمة كـstring literals في `notification_routing_rules` الافتراضية (`'ops_manager'`, `'finance'`, ...)، حذفها/تغييرها كان هيكسر التوجيه بصمت. `display_name`/`description` قابلين للتعديل بحرية.
 - **منع تصعيد الصلاحيات**: صلاحية جديدة `roles.grant_unrestricted` (تُمنح لـ`super_admin` بس افتراضيًا) — الأدمن العادي (حتى لو عنده `roles.manage`) مينفعش يمنح دور تاني صلاحية هو نفسه ملهاش، إلا لو عنده الصلاحية الجديدة دي.
 - **حماية القفل الذاتي**: مختلفة عن حماية "آخر super_admin" الموجودة (فوق) — دي عن *أي* دور، لو ده آخر دور للفاعل نفسه (مش لأي مستخدم تاني)، `revokeRole()` بترفضها (409) بدل ما يفقد وصوله بالكامل.
+- **ثغرة تصعيد صلاحيات حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-1 في `docs/12`)**:
+  "منع تصعيد الصلاحيات" فوق كان متطبّق على `setRolePermissions()` بس — `assignRole()` كانت
+  بتسمح لأي أدمن عنده `roles.manage` (حتى من غير `roles.grant_unrestricted`) إنه يعيّن **أي دور
+  جاهز لمستخدم تاني، بما فيه `super_admin` نفسه**، من غير أي فحص صلاحيات. `cloneRole()` كانت
+  بتنسخ كل صلاحيات أي دور مصدر بلا فحص. `revokeRole()` كانت تسمح لأي أدمن عنده `roles.manage`
+  يسحب دور `super_admin` من حساب تاني. الإصلاح الكامل (فحص صلاحيات الدور الهدف/المصدر + فحص
+  خاص لـ`is_super_admin` مش بس `roles.grant_unrestricted`، لأن صلاحيات `super_admin` الفعلية
+  bypass بنيوي مش قائمة قابلة للمقارنة) موثّق بالتفصيل في `docs/adr/0010-dynamic-role-builder.md`
+  §3، واختبار regression حي (11 حالة) في `permissions.service.spec.ts`.
 - **Endpoints جديدة**: `GET /admin/permissions` (كتالوج، مفتوح)، `GET /admin/roles/:id` (تفاصيل + صلاحياته + المستخدمين الحاملين له، مفتوح)، `POST/PATCH/DELETE /admin/roles`، `POST /admin/roles/:id/clone`، `PUT /admin/roles/:id/permissions` (كلهم `roles.manage`). سجل التدقيق (`GET /admin/audit-logs?entity_type=role&entity_id=...`) بيغطي `role.created`/`role.updated`/`role.cloned`/`role.deleted`/`role.permissions_changed` بالإضافة لـ`role.assigned`/`role.revoked` الموجودين.
 - **كتالوج الصلاحيات حقيقي، مش تخميني**: 27 صلاحية (26 موجودة فعليًا ومفعّلة على endpoints حقيقية + `roles.grant_unrestricted` الجديدة) — عمدًا مفيش صفوف لموديولات (matching, recurring_orders, reports, ...) مالهاش أي فعل محمي فعليًا دلوقتي، عشان الأدمن ميتوهمش إن تفعيل/تعطيل صلاحية غير مفعّلة بيغيّر حاجة حقيقية.
 - **تنظيف**: نسخة تانية ميتة من `Role`/`UserRole` entities كانت موجودة في `auth/entities/` (مسجّلة بس مستخدمة صفر مرة) — اتشالت، النسخة الوحيدة دلوقتي في `admin/entities/`.
