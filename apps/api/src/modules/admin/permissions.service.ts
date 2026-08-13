@@ -4,7 +4,11 @@ import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User, UserType } from '../auth/entities/user.entity';
+import { CreateRoleDto } from './dto/create-role.dto';
+import { UpdateRoleDto } from './dto/update-role.dto';
+import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
+import { RolePermission } from './entities/role-permission.entity';
 import { UserRole } from './entities/user-role.entity';
 
 export interface RoleAssignment {
@@ -14,26 +18,53 @@ export interface RoleAssignment {
   assigned_at: string;
 }
 
+export interface RoleDetail {
+  role: Role;
+  permission_names: string[];
+  users: { user_id: string; full_name: string; phone_number: string; assigned_at: string }[];
+}
+
 const SUPER_ADMIN_ROLE_NAME = 'super_admin';
 
+// باني الأدوار الديناميكي (ADR-0010) — تمديد نظام RBAC الموجود من 0003_auth.sql، مش استبداله.
 @Injectable()
 export class PermissionsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Role) private readonly roles: Repository<Role>,
+    @InjectRepository(Permission) private readonly permissionsRepo: Repository<Permission>,
     @InjectRepository(UserRole) private readonly userRoles: Repository<UserRole>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly auditLog: AuditLogService,
   ) {}
 
-  /** بيجمع كل صلاحيات المستخدم من كل أدواره المُعيَّنة — استعلام واحد، مفيش N+1. */
+  private async isSuperAdminUser(userId: string): Promise<boolean> {
+    const rows = await this.dataSource.query<{ exists: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+         WHERE ur.user_id = $1 AND r.is_super_admin = true AND r.is_active = true AND r.deleted_at IS NULL
+       ) AS exists`,
+      [userId],
+    );
+    return rows[0]?.exists === true;
+  }
+
+  /**
+   * بيجمع كل صلاحيات المستخدم من كل أدواره المُعيَّنة — استعلام واحد، مفيش N+1.
+   * super_admin (is_super_admin=true) بيتخطى الفحص بالكامل ويرجع كل الكتالوج — يقفل بَقّة
+   * "لازم تفتكر تمنح كل صلاحية جديدة لـsuper_admin يدويًا" اللي كانت موجودة من 0020 (ADR-0010 §1).
+   */
   async getUserPermissionNames(userId: string): Promise<Set<string>> {
+    if (await this.isSuperAdminUser(userId)) {
+      const all = await this.permissionsRepo.find();
+      return new Set(all.map((p) => p.name));
+    }
     const rows = await this.dataSource.query<{ name: string }[]>(
       `SELECT DISTINCT p.name
        FROM user_roles ur
        JOIN role_permissions rp ON rp.role_id = ur.role_id
        JOIN permissions p ON p.id = rp.permission_id AND p.deleted_at IS NULL
-       JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL
+       JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL AND r.is_active = true
        WHERE ur.user_id = $1`,
       [userId],
     );
@@ -45,16 +76,238 @@ export class PermissionsService {
     return permissions.has(permissionName);
   }
 
+  // ── الأدوار (Roles) ──────────────────────────────────────────────────
+
   async listRoles(): Promise<Role[]> {
     return this.roles.find({ order: { name: 'ASC' } });
   }
+
+  async getRoleOrThrow(roleId: string): Promise<Role> {
+    const role = await this.roles.findOne({ where: { id: roleId } });
+    if (!role) {
+      throw new ApiException(ErrorCode.VAL_001, 'الدور غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return role;
+  }
+
+  async getRoleDetail(roleId: string): Promise<RoleDetail> {
+    const role = await this.getRoleOrThrow(roleId);
+    const permRows = await this.dataSource.query<{ name: string }[]>(
+      `SELECT p.name FROM role_permissions rp
+       JOIN permissions p ON p.id = rp.permission_id AND p.deleted_at IS NULL
+       WHERE rp.role_id = $1 ORDER BY p.name ASC`,
+      [roleId],
+    );
+    const userRows = await this.dataSource.query<
+      { user_id: string; full_name: string; phone_number: string; assigned_at: Date }[]
+    >(
+      `SELECT u.id AS user_id, u.full_name, u.phone_number, ur.assigned_at
+       FROM user_roles ur JOIN users u ON u.id = ur.user_id AND u.deleted_at IS NULL
+       WHERE ur.role_id = $1 ORDER BY ur.assigned_at ASC`,
+      [roleId],
+    );
+    return {
+      role,
+      permission_names: permRows.map((r) => r.name),
+      users: userRows.map((u) => ({
+        user_id: u.user_id,
+        full_name: u.full_name,
+        phone_number: u.phone_number,
+        assigned_at: u.assigned_at.toISOString(),
+      })),
+    };
+  }
+
+  async createRole(actorUserId: string, dto: CreateRoleDto, meta?: AuditActorMeta): Promise<Role> {
+    const existing = await this.roles.findOne({ where: { name: dto.name } });
+    if (existing) {
+      throw new ApiException(ErrorCode.VAL_001, 'اسم الدور ده مستخدم بالفعل', HttpStatus.CONFLICT);
+    }
+    // is_system وis_super_admin مش موجودين في CreateRoleDto عمدًا — أدوار جديدة دايمًا false
+    // للاتنين (منع تصعيد صلاحيات عبر إنشاء دور واسم مشابه للأدوار النظامية، ADR-0010 §1/§2).
+    const role = await this.roles.save(
+      this.roles.create({ name: dto.name, displayName: dto.display_name, description: dto.description ?? null }),
+    );
+
+    await this.auditLog.record({
+      actorUserId,
+      actorRole: 'admin',
+      action: 'role.created',
+      entityType: 'role',
+      entityId: role.id,
+      newValues: { name: role.name, display_name: role.displayName },
+      meta,
+    });
+    return role;
+  }
+
+  async updateRole(actorUserId: string, roleId: string, dto: UpdateRoleDto, meta?: AuditActorMeta): Promise<Role> {
+    const role = await this.getRoleOrThrow(roleId);
+    if (role.isSystem && dto.is_active === false) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تعطّل دور نظامي — الأدوار دي جزء أساسي من تشغيل المنصة', HttpStatus.FORBIDDEN);
+    }
+
+    const oldValues = { display_name: role.displayName, description: role.description, is_active: role.isActive };
+    if (dto.display_name !== undefined) role.displayName = dto.display_name;
+    if (dto.description !== undefined) role.description = dto.description;
+    if (dto.is_active !== undefined) role.isActive = dto.is_active;
+    await this.roles.save(role);
+
+    await this.auditLog.record({
+      actorUserId,
+      actorRole: 'admin',
+      action: 'role.updated',
+      entityType: 'role',
+      entityId: role.id,
+      oldValues,
+      newValues: { display_name: role.displayName, description: role.description, is_active: role.isActive },
+      meta,
+    });
+    return role;
+  }
+
+  async cloneRole(
+    actorUserId: string,
+    sourceRoleId: string,
+    dto: CreateRoleDto,
+    meta?: AuditActorMeta,
+  ): Promise<Role> {
+    const source = await this.getRoleOrThrow(sourceRoleId);
+    const newRole = await this.createRole(actorUserId, dto, meta);
+
+    const sourcePermissionIds = await this.dataSource.query<{ permission_id: string }[]>(
+      `SELECT permission_id FROM role_permissions WHERE role_id = $1`,
+      [sourceRoleId],
+    );
+    if (sourcePermissionIds.length > 0) {
+      const values = sourcePermissionIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+      await this.dataSource.query(
+        `INSERT INTO role_permissions (role_id, permission_id) VALUES ${values}`,
+        [newRole.id, ...sourcePermissionIds.map((r) => r.permission_id)],
+      );
+    }
+
+    await this.auditLog.record({
+      actorUserId,
+      actorRole: 'admin',
+      action: 'role.cloned',
+      entityType: 'role',
+      entityId: newRole.id,
+      oldValues: { source_role_id: source.id, source_role_name: source.name },
+      newValues: { name: newRole.name, permissions_copied: sourcePermissionIds.length },
+      meta,
+    });
+    return newRole;
+  }
+
+  async deleteRole(actorUserId: string, roleId: string, meta?: AuditActorMeta): Promise<void> {
+    const role = await this.getRoleOrThrow(roleId);
+    if (role.isSystem) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تحذف دور نظامي — الأدوار دي جزء أساسي من تشغيل المنصة', HttpStatus.FORBIDDEN);
+    }
+    await this.roles.softDelete(roleId);
+
+    await this.auditLog.record({
+      actorUserId,
+      actorRole: 'admin',
+      action: 'role.deleted',
+      entityType: 'role',
+      entityId: roleId,
+      oldValues: { name: role.name, display_name: role.displayName },
+      meta,
+    });
+  }
+
+  /**
+   * استبدال كامل لقايمة صلاحيات الدور — منع تصعيد صلاحيات (ADR-0010 §3): الفاعل مينفعش يمنح
+   * صلاحية هو نفسه ملوش، إلا لو عنده roles.grant_unrestricted (أو is_super_admin بيتخطاها).
+   * قفل صف الدور (pessimistic_write) طول الـtransaction — تعديلين متزامنين على نفس الدور
+   * مش هيضيعوا بعض (concurrency-safe، ADR-0010).
+   */
+  async setRolePermissions(
+    actorUserId: string,
+    roleId: string,
+    permissionNames: string[],
+    meta?: AuditActorMeta,
+  ): Promise<void> {
+    const uniqueNames = Array.from(new Set(permissionNames));
+
+    await this.dataSource.transaction(async (manager) => {
+      const role = await manager
+        .createQueryBuilder(Role, 'r')
+        .setLock('pessimistic_write')
+        .where('r.id = :id', { id: roleId })
+        .getOne();
+      if (!role) {
+        throw new ApiException(ErrorCode.VAL_001, 'الدور غير موجود', HttpStatus.NOT_FOUND);
+      }
+
+      const catalog = await manager.find(Permission);
+      const catalogNames = new Set(catalog.map((p) => p.name));
+      const unknown = uniqueNames.filter((n) => !catalogNames.has(n));
+      if (unknown.length > 0) {
+        throw new ApiException(ErrorCode.VAL_001, `صلاحيات غير موجودة في الكتالوج: ${unknown.join(', ')}`, HttpStatus.BAD_REQUEST);
+      }
+
+      const currentRows = await manager.query<{ name: string }[]>(
+        `SELECT p.name FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = $1`,
+        [roleId],
+      );
+      const currentNames = new Set(currentRows.map((r) => r.name));
+      const newlyAdded = uniqueNames.filter((n) => !currentNames.has(n));
+
+      if (newlyAdded.length > 0) {
+        const actorPermissions = await this.getUserPermissionNames(actorUserId);
+        const actorCanGrantAny = actorPermissions.has('roles.grant_unrestricted');
+        if (!actorCanGrantAny) {
+          const forbidden = newlyAdded.filter((n) => !actorPermissions.has(n));
+          if (forbidden.length > 0) {
+            throw new ApiException(
+              ErrorCode.AUTH_001,
+              `مينفعش تمنح صلاحية إنت نفسك ملكهاش: ${forbidden.join(', ')}`,
+              HttpStatus.FORBIDDEN,
+            );
+          }
+        }
+      }
+
+      await manager.delete(RolePermission, { roleId });
+      if (uniqueNames.length > 0) {
+        const idsByName = new Map(catalog.filter((p) => uniqueNames.includes(p.name)).map((p) => [p.name, p.id]));
+        const values = uniqueNames.map((_, i) => `($1, $${i + 2})`).join(', ');
+        await manager.query(
+          `INSERT INTO role_permissions (role_id, permission_id) VALUES ${values}`,
+          [roleId, ...uniqueNames.map((n) => idsByName.get(n))],
+        );
+      }
+
+      await this.auditLog.record({
+        actorUserId,
+        actorRole: 'admin',
+        action: 'role.permissions_changed',
+        entityType: 'role',
+        entityId: roleId,
+        oldValues: { permission_names: Array.from(currentNames) },
+        newValues: { permission_names: uniqueNames },
+        meta,
+      });
+    });
+  }
+
+  // ── كتالوج الصلاحيات ─────────────────────────────────────────────────
+
+  async listPermissions(): Promise<Permission[]> {
+    return this.permissionsRepo.find({ order: { resource: 'ASC', name: 'ASC' } });
+  }
+
+  // ── تعيين/سحب دور من مستخدم ──────────────────────────────────────────
 
   async listUserRoles(userId: string): Promise<RoleAssignment[]> {
     const rows = await this.dataSource.query<
       { role_id: string; role_name: string; display_name: string; assigned_at: Date }[]
     >(
       `SELECT r.id AS role_id, r.name AS role_name, r.display_name, ur.assigned_at
-       FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+       FROM user_roles ur JOIN roles r ON r.id = ur.role_id AND r.deleted_at IS NULL
        WHERE ur.user_id = $1 ORDER BY ur.assigned_at ASC`,
       [userId],
     );
@@ -74,6 +327,9 @@ export class PermissionsService {
     const role = await this.roles.findOne({ where: { name: roleName } });
     if (!role) {
       throw new ApiException(ErrorCode.VAL_001, 'الدور غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (!role.isActive) {
+      throw new ApiException(ErrorCode.VAL_001, 'الدور ده معطّل حاليًا — مينفعش يتعيّن', HttpStatus.CONFLICT);
     }
     const existing = await this.userRoles.findOne({ where: { userId, roleId: role.id } });
     if (existing) {
@@ -114,6 +370,18 @@ export class PermissionsService {
         'مينفعش تسحب دور super_admin من آخر حساب عنده — النظام هيتقفل تماماً',
         HttpStatus.CONFLICT,
       );
+    }
+    // حماية القفل الذاتي (ADR-0010 §4) — مختلفة عن فحص آخر super_admin فوق: هنا عن *أي* دور
+    // لو ده آخر دور للفاعل نفسه (لا يقدر يفقد وصوله بالكامل بضغطة واحدة).
+    if (revokedByUserId === userId) {
+      const currentRoles = await this.listUserRoles(userId);
+      if (currentRoles.length === 1 && currentRoles[0].role_name === roleName) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'مينفعش تسحب آخر دور من نفسك — هتفقد وصولك للنظام بالكامل',
+          HttpStatus.CONFLICT,
+        );
+      }
     }
     const result = await this.userRoles.delete({ userId, roleId: role.id });
     if (!result.affected) {

@@ -17,6 +17,7 @@ import { AdminEmployeesController } from './admin-employees.controller';
 import { AdminEmployeesService } from './admin-employees.service';
 import { AdminReportsController } from './admin-reports.controller';
 import { AdminReportsService } from './admin-reports.service';
+import { AdminRolesController } from './admin-roles.controller';
 import { AdminSettingsController } from './admin-settings.controller';
 import { AdminUsersController } from './admin-users.controller';
 import { EmployeeProfile } from './entities/employee-profile.entity';
@@ -49,6 +50,7 @@ import { PermissionsService } from './permissions.service';
   controllers: [
     AdminReportsController,
     AdminUsersController,
+    AdminRolesController,
     AdminAuditController,
     AdminSettingsController,
     AdminEmployeesController,

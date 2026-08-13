@@ -18,6 +18,14 @@ export class Role {
   @Column({ name: 'is_system', type: 'boolean', default: false })
   isSystem: boolean;
 
+  // باني الأدوار الديناميكي (ADR-0010) — دور معطّل بيوقف يمنح صلاحياته فورًا، عكسي (مختلف عن deletedAt).
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive: boolean;
+
+  // يتخطى فحص role_permissions بالكامل — محدود على الدور المزروع، مش قابل للتعيين من أي API.
+  @Column({ name: 'is_super_admin', type: 'boolean', default: false })
+  isSuperAdmin: boolean;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

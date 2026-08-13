@@ -8,13 +8,11 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { OtpCode } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { Role } from './entities/role.entity';
-import { UserRole } from './entities/user-role.entity';
 import { User } from './entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, OtpCode, RefreshToken, Role, UserRole]),
+    TypeOrmModule.forFeature([User, OtpCode, RefreshToken]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}), // الأسرار والصلاحية بيتحددوا لحظة التوقيع في AuthService، مش هنا
   ],
