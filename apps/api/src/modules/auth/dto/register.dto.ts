@@ -24,4 +24,12 @@ export class RegisterDto {
   @IsString()
   @Length(3, 12)
   referral_code?: string;
+
+  // اختياري — كود ترشيح فني (technician_profiles.technician_code، مسح QR أو deep link، docs/11
+  // §1). مختلف تمامًا عن referral_code فوق (ترشيح عميل-لعميل). خطأ في الكود ده **مايوقفش
+  // التسجيل** (خلاف referral_code) — نظام مكافأة الفني ثانوي، مش شرط لإنشاء الحساب.
+  @IsOptional()
+  @IsString()
+  @Length(3, 20)
+  technician_referral_code?: string;
 }

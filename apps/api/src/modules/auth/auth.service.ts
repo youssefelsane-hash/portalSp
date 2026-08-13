@@ -12,6 +12,10 @@ import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispa
 import { parseDurationToMs } from '../../common/utils/duration';
 import { USER_REGISTERED_EVENT, UserRegisteredEvent } from '../../common/events/user-registered.event';
 import { REFERRAL_REGISTERED_EVENT, ReferralRegisteredEvent } from '../../common/events/referral-registered.event';
+import {
+  TECHNICIAN_REFERRAL_CAPTURED_EVENT,
+  TechnicianReferralCapturedEvent,
+} from '../../common/events/technician-referral-captured.event';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
@@ -184,6 +188,14 @@ export class AuthService {
     );
     if (referrer) {
       this.events.emit(REFERRAL_REGISTERED_EVENT, new ReferralRegisteredEvent(referrer.id, user.id));
+    }
+    // ترشيح QR فني (docs/11 §1) — نظام منفصل تمامًا عن referral_code فوق. الفحص/الربط الفعلي
+    // بيحصل جوّه technician-referrals module (حدود الموديولات)، هنا بس بنصدر الحدث.
+    if (dto.technician_referral_code) {
+      this.events.emit(
+        TECHNICIAN_REFERRAL_CAPTURED_EVENT,
+        new TechnicianReferralCapturedEvent(user.id, dto.technician_referral_code),
+      );
     }
 
     return this.issueTokenPair(user, ip);

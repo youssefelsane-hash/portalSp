@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/pricing', label: 'محرك التسعير' },
   { href: '/employees', label: 'الموظفين' },
   { href: '/roles', label: 'الأدوار والصلاحيات' },
+  { href: '/technician-referrals', label: 'ترشيح QR الفني' },
   { href: '/technicians', label: 'الفنيين' },
   { href: '/customers', label: 'العملاء' },
   { href: '/orders', label: 'الطلبات' },

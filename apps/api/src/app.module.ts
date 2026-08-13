@@ -30,6 +30,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
+import { TechnicianReferralsModule } from './modules/technician-referrals/technician-referrals.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { HealthModule } from './modules/common/health/health.module';
@@ -101,6 +102,7 @@ import { OpsModule } from './modules/ops/ops.module';
     PromotionsModule,
     ReferralsModule,
     FavoritesModule,
+    TechnicianReferralsModule,
     AdminModule,
     FeatureFlagsModule,
     HealthModule,
