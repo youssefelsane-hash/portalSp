@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -25,8 +26,6 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
   final _yearsController = TextEditingController();
   final _hourlyController = TextEditingController();
   final _monthlyController = TextEditingController();
-  final _latController = TextEditingController();
-  final _lngController = TextEditingController();
   final Set<String> _selectedSpecialties = {};
 
   @override
@@ -97,22 +96,36 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
     }
   }
 
+  // بَقّة حقيقية اتلقطت: كان بيطلب من الشغالة تكتب lat/lng يدوي (نفس البَقّة المصلّحة في
+  // OrderExecutionScreen._shareLocation()) — دلوقتي بنستخدم geolocator لقراءة موقع الجهاز
+  // الحقيقي مباشرة، مفيش إدخال يدوي خالص.
   Future<void> _saveLocation() async {
-    final lat = double.tryParse(_latController.text.trim());
-    final lng = double.tryParse(_lngController.text.trim());
-    if (lat == null || lng == null) {
-      setState(() => _error = 'اكتب إحداثيات صحيحة');
-      return;
-    }
     setState(() {
       _acting = true;
       _error = null;
     });
     try {
-      await _repository.updateLocation(lat, lng);
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        setState(() => _error = 'خدمة تحديد الموقع مقفولة على جهازك، شغّلها الأول وحاول تاني');
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        setState(() => _error = 'محتاجين إذن الوصول لموقعك عشان نحدّثه — فعّله من إعدادات الجهاز');
+        return;
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      await _repository.updateLocation(position.latitude, position.longitude);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتحدّث موقعك')));
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'مقدرناش نحدد موقعك الحالي، حاول تاني');
     } finally {
       if (mounted) setState(() => _acting = false);
     }
@@ -243,27 +256,11 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                     const SizedBox(height: 24),
                     Text('موقعي الحالي', style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _latController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                            decoration: const InputDecoration(labelText: 'خط العرض', border: OutlineInputBorder()),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _lngController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                            decoration: const InputDecoration(labelText: 'خط الطول', border: OutlineInputBorder()),
-                          ),
-                        ),
-                      ],
+                    OutlinedButton.icon(
+                      onPressed: _acting ? null : _saveLocation,
+                      icon: const Icon(Icons.my_location),
+                      label: const Text('حدّث موقعي الحالي (GPS)'),
                     ),
-                    const SizedBox(height: 8),
-                    OutlinedButton(onPressed: _acting ? null : _saveLocation, child: const Text('تحديث الموقع')),
                     const SizedBox(height: 24),
                     Text('حجوزاتي', style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:safe_device/safe_device.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -97,47 +99,48 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  // بَقّة حقيقية اتلقطت: الفني كان بيكتب lat/lng يدوي بنفسه بدل ما نستخدم موقعه الفعلي —
+  // بيفتح باب لموقع غلط (قصدًا أو غلطة كتابة) يوصل للعميل والـtracking. دلوقتي بنستخدم
+  // geolocator (اتضاف كـdependency جديدة) نقرأ موقع الجهاز الحقيقي مباشرة.
   Future<void> _shareLocation() async {
-    final latController = TextEditingController();
-    final lngController = TextEditingController();
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('شارك موقعك'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: latController,
-                decoration: const InputDecoration(labelText: 'خط العرض (latitude)'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-              ),
-              TextField(
-                controller: lngController,
-                decoration: const InputDecoration(labelText: 'خط الطول (longitude)'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('إرسال')),
-          ],
-        ),
-      ),
-    );
-    if (result != true) return;
-    final lat = double.tryParse(latController.text.trim());
-    final lng = double.tryParse(lngController.text.trim());
-    if (lat == null || lng == null) {
-      if (mounted) setState(() => _error = 'الإحداثيات لازم تكون أرقام صحيحة');
-      return;
-    }
-    _trackingClient.sendLocation(latitude: lat, longitude: lng);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتبعت موقعك للعميل')));
+    if (mounted) setState(() => _error = null);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        if (mounted) setState(() => _error = 'خدمة تحديد الموقع مقفولة على جهازك، شغّلها الأول وحاول تاني');
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() => _error = 'محتاجين إذن الوصول لموقعك عشان نشاركه مع العميل — فعّله من إعدادات الجهاز');
+        }
+        return;
+      }
+      // منع mock location (§7.3) — كانت فجوة موثّقة صراحة، اتقفلت مع ربط geolocator: دلوقتي
+      // الموقع بجيه من GPS حقيقي فعلاً، فالفحص بقى له معنى (قبل كده كان بيتفحص إحداثيات مكتوبة
+      // يدوي أصلاً). فشل الفحص نفسه (خطأ منصة) مش نفس اكتشاف تزوير فعلي — بنكمل الإرسال عادي.
+      try {
+        if (await SafeDevice.isMockLocation) {
+          if (mounted) {
+            setState(() => _error = 'موقعك الحالي شكله متزوّر (mock location) — قفّل تطبيقات تزوير الـGPS وحاول تاني');
+          }
+          return;
+        }
+      } catch (_) {
+        // تجاهل — راجع التعليق فوق.
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      _trackingClient.sendLocation(latitude: position.latitude, longitude: position.longitude);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتبعت موقعك للعميل')));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = 'مقدرناش نحدد موقعك الحالي، حاول تاني');
     }
   }
 

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../core/api_exception.dart';
 import '../geo/geo_repository.dart';
 import '../geo/models.dart' as geo;
+import 'address_map_picker_screen.dart';
 import 'addresses_repository.dart';
 
 class AddressFormScreen extends StatefulWidget {
@@ -26,8 +28,7 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
   final _streetController = TextEditingController();
   final _buildingController = TextEditingController();
   final _landmarkController = TextEditingController();
-  final _latController = TextEditingController();
-  final _lngController = TextEditingController();
+  LatLng? _pickedLocation;
 
   bool _saving = false;
   String? _error;
@@ -60,15 +61,25 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
     }
   }
 
+  Future<void> _pickLocation() async {
+    final result = await Navigator.of(context).push<LatLng>(
+      MaterialPageRoute(
+        builder: (_) => AddressMapPickerScreen(
+          initialLatitude: _pickedLocation?.latitude,
+          initialLongitude: _pickedLocation?.longitude,
+        ),
+      ),
+    );
+    if (result != null && mounted) setState(() => _pickedLocation = result);
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate() || _cityId == null || _areaId == null) {
       setState(() => _error = 'من فضلك اختار المدينة والمنطقة');
       return;
     }
-    final lat = double.tryParse(_latController.text.trim());
-    final lng = double.tryParse(_lngController.text.trim());
-    if (lat == null || lng == null) {
-      setState(() => _error = 'الإحداثيات لازم تكون أرقام صحيحة');
+    if (_pickedLocation == null) {
+      setState(() => _error = 'من فضلك حدد موقعك على الخريطة');
       return;
     }
 
@@ -81,8 +92,8 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
         cityId: _cityId!,
         areaId: _areaId!,
         streetName: _streetController.text.trim(),
-        latitude: lat,
-        longitude: lng,
+        latitude: _pickedLocation!.latitude,
+        longitude: _pickedLocation!.longitude,
         label: _labelController.text.trim(),
         buildingNumber: _buildingController.text.trim(),
         landmark: _landmarkController.text.trim(),
@@ -157,26 +168,14 @@ class _AddressFormScreenState extends State<AddressFormScreen> {
                       decoration: const InputDecoration(labelText: 'علامة مميزة (اختياري)'),
                     ),
                     const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: _latController,
-                            decoration: const InputDecoration(labelText: 'خط العرض (latitude)'),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                            validator: (value) => double.tryParse(value ?? '') == null ? 'رقم غير صحيح' : null,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _lngController,
-                            decoration: const InputDecoration(labelText: 'خط الطول (longitude)'),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                            validator: (value) => double.tryParse(value ?? '') == null ? 'رقم غير صحيح' : null,
-                          ),
-                        ),
-                      ],
+                    OutlinedButton.icon(
+                      onPressed: _pickLocation,
+                      icon: const Icon(Icons.map_outlined),
+                      label: Text(
+                        _pickedLocation == null
+                            ? 'حدد موقعك على الخريطة'
+                            : 'الموقع اتحدد — عدّله على الخريطة (${_pickedLocation!.latitude.toStringAsFixed(5)}, ${_pickedLocation!.longitude.toStringAsFixed(5)})',
+                      ),
                     ),
                     const SizedBox(height: 24),
                     FilledButton(
