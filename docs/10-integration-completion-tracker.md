@@ -95,8 +95,29 @@
 
 ## سياسة إلغاء الفني (Technician Cancellation Policy) — الطلب التفصيلي الكامل
 
-**الحالة العامة**: 🔄 الباك-إند الأساسي خلص (`ADR-0006`)، الواجهات (technician-app/customer-app) لسه.
-تفاصيل دقيقة تحت "سجل التقدّم".
+**الحالة العامة**: ✅ خلص بالكامل (سيشن جديدة، فرع `v13gb2` بعد الدمج مع `hgotr7` — 2026-08-12). السيشن اللي بدأت
+البناء وصلت لحد الاختبار الحي واتقطعت (limit) قبل أي commit — الشغل اتعاد بناؤه من الصفر (مش استرجاع) لأن
+التغييرات مكانتش متسجّلة في git خالص. التفاصيل الكاملة (السياسة/الأحداث/الجداول/الاختبار الحي) في
+`apps/api/src/modules/orders/README.md` § سياسة إلغاء الفني، وملخّص في `apps/api/src/modules/matching/README.md`
+و`apps/api/src/modules/notifications/README.md` و`apps/technician-app/README.md` و`apps/customer-app/README.md`
+و`apps/admin/README.md`.
+
+**ملخّص سريع لما اتبنى**: migrations 0068-0071 (حالة طلب جديدة `awaiting_technician_reselection`، جدول
+`technician_order_cancellations` مخصوص، عمود `cancellation_reasons.requires_free_text`، 5 إعدادات
+`group_name='cancellation'`، قاعدة توجيه أدمن افتراضية). `OrdersService.technicianCancel()` أعيد بناؤها بالكامل:
+فحص نافذة زمنية موحّد (استشاري + فرض حقيقي من نفس الدالة)، صلاحيات فريق (`team_role=worker` ممنوع إلا بإعداد
+صريح)، سبب إجباري + نص حر شرطي، وسلوك استرجاع مبني على 3 قواعد (طوارئ=دايمًا auto-rematch، اختيار العميل
+الصريح=دايمًا manual-reselection، غير كده=حسب إعداد). الطلب **ميتلغيش نهائي أبدًا** من فعل الفني — إما
+`searching_technician` (استبعاد الفني اللي لغى تلقائيًا عبر `order_assignments` الموجودة أصلاً) أو
+`awaiting_technician_reselection` (endpoint جديد للعميل `POST /orders/:id/request-rematch`). قفل ذرّي
+(`pessimistic_write`) في الاتنين — مفيش إلغاء مزدوج ولا سباق. اتعمله اختبار حي كامل (curl) لكل السيناريوهات
+المطلوبة صراحة: نافذة مفتوحة/مقفولة، طوارئ، اختيار عميل صريح، طلب إعادة مطابقة (بث/فني محدد)، عضو فريق غير
+مصرّح، إلغاء مكرر (409)، سبب "أخرى" بلا نص حر. UI كامل في التطبيقين + كارت أدمن جديد (Playwright مؤكّد).
+
+**نطاق مؤجّل عمداً، موثّق صراحة**: نافذة زمنية موحّدة لكل الـbooking modes (مش قيمة منفصلة لكل مود) —
+قرار متعمّد لتجنّب اختراع أرقام تجريبية إضافية مالهاش أساس؛ إضافتها لاحقًا تافهة (مجرد قراءة إعداد مختلف
+حسب `booking_mode`). محرك عقوبة/تصعيد تلقائي مستقبلي (سمعة، منع مؤقت) — الجدول الجديد (`technician_order_cancellations`)
+هو البنية التحتية الكافية له (استعلام مباشر)، مفيش سكيما إضافية أو منطق مبني فوقه دلوقتي.
 
 ### المتطلبات (ملخّص من رسالة المالك، بالإنجليزي الأصلي محفوظ في المحادثة):
 
@@ -203,7 +224,13 @@
   فعلي في المتصفح غيّر الحالة لـ"معتمدة" فورًا (screenshot). الفحوصات الثلاثة في apps/api +
   tsc/eslint في apps/admin + shared-types build كلها عدّت. بيانات الاختبار اتعملها حذف بعد التأكيد.
 
-- **2026-08-12 (سياسة إلغاء الفني — الباك-إند الأساسي خلص، ADR-0006)**: `docs/adr/0006-technician-cancellation-policy.md`
+- **2026-08-12 (سياسة إلغاء الفني — الباك-إند الأساسي خلص، ADR-0006، فرع `hgotr7`)** — **ملحوظة دمج
+  (2026-08-13)**: النسخة دي كانت أول محاولة (باك-إند بس، مسار الفرد/الأوتوماتيك فقط)، اتبنت بمعزل في
+  نفس الوقت اللي سيشن تانية على فرع `v13gb2` كانت بتبني نسخة أشمل وأكمل لنفس الميزة بالظبط (تحت). وقت
+  دمج الفرعين اتأكد إن نسخة `v13gb2` (تحت، "سياسة إلغاء الفني خلصت end-to-end") بتغطي كل حاجة هنا وأكتر
+  (UI كامل، جدول تدقيق مخصوص، اختبار حي أشمل) — فهي اللي اتحافظ عليها في الكود، والنسخة دي (ADR-0006)
+  فضلت موثّقة هنا كسجل تاريخي بس:
+  `docs/adr/0006-technician-cancellation-policy.md`
   كامل (السياق/القرار/البدائل/الأثر) قبل أي كود، زي ما CLAUDE.md بيطلب لأي قرار معماري كبير.
   Migration `0068`: `order_status` قيمة جديدة `needs_technician_reselection` + `cancellation_reasons.requires_free_text`
   + 6 إعدادات `technician_cancellation.*` (نافذة زمنية بعد القبول، حد أدنى قبل الموعد المجدول،
@@ -234,3 +261,45 @@
   النافذة الزمنية/الحد الأدنى قبل الموعد مكتوبة ومنطقها صحيح بس مش مُختبرة حي (تحتاج تلاعب بـ
   `accepted_at`/`scheduled_at` في الداتابيز لمحاكاة الوقت، أو `sleep` فعلي). تفاصيل كاملة في
   `apps/api/src/modules/orders/README.md`.
+
+- **2026-08-12 (سيشن جديدة — دمج الفرعين + إكمال قايمة #1-35 والتأكد من صحتها + سياسة إلغاء الفني)**:
+  السيشن دي بدأت بدمج `claude/home-repair-company-project-hgotr7` (110 commit، البنود كلها فوق) جوّه
+  `claude/home-services-app-plan-v13gb2` (fast-forward نضيف، الفرعين ما اختلفوش). أول تحقق حقيقي: السيشن
+  اللي بنت أغلب البنود دي معندهاش Flutter SDK في بيئتها (موثّق صراحة في الملاحظات فوق) — أول
+  `flutter analyze`/`flutter test` حقيقي في بيئة فيها SDK كشف بَقّتين حقيقيتين صغيرتين (مش أخطاء compile،
+  كودها كان سليم فعلاً): `rating_dialog.dart` null-check زيادة، و`recurring_orders_screen.dart` كانت
+  بتحدّث `_acting` (loading state) بس مش بتقراه — تكرار ضغط زرار كان يقدر يبعت طلبين متزامنين لنفس
+  القالب. الاتنين اتصلحوا، الفحوصات الأربعة (backend tsc/build/jest، admin tsc/next-build، Flutter
+  analyze/test في التطبيقين) عدّت كلها نضيف. بعد كده: سياسة إلغاء الفني الكاملة (تفاصيلها فوق).
+
+- **2026-08-12 (سياسة إلغاء الفني خلصت end-to-end)**: migrations 0068-0071، `OrdersService.technicianCancel()`
+  إعادة بناء كاملة، `OrdersService.getTechnicianCancellationPolicy()`/`requestRematch()` جداد، جدول
+  `technician_order_cancellations`، حالة طلب `awaiting_technician_reselection`، `OrderRematchListener`
+  (matching)، `TechnicianCancellationNotificationListener` (notifications)، UI كامل في التطبيقين +
+  كارت أدمن. اتأكد حي بالكامل عبر curl لكل سيناريوهات المالك المطلوبة صراحة (تفاصيل الأرقام والنتائج
+  الكاملة في `apps/api/src/modules/orders/README.md`)، وPlaywright للأدمن. الفحوصات الثلاثة في apps/api +
+  tsc/next-build في apps/admin + flutter analyze/test في التطبيقين كلها عدّت. بيانات الاختبار (أسباب
+  إلغاء تجريبية، إعدادات مؤقتة، أدوار فنيين تجريبية) اترجعت لحالتها الأصلية بعد التأكيد.
+
+- **2026-08-12 (تقفيل فجوة صغيرة من سياسة إلغاء الفني — استبعاد الفني من قايمة إعادة الاختيار)**:
+  `GET /services/:id/technicians` بقى ليه `exclude_technician_id` اختياري، و`order.requestedTechnicianId`
+  بقى متسرّب للعميل ومتسيّب عمدًا بعد إلغاء فني في مسار `MANUAL_RESELECTION_REQUIRED` عشان يبقى مصدر
+  قيمة الاستبعاد دي في `apps/customer-app`. اتأكد حي عبر curl ضد Postgres حقيقي (فني اتربط مؤقتًا بمنطقة
+  ليها geo boundary حقيقي، عميل وعنوان جداد اتعملوا، القايمة اتفحصت قبل/بعد الاستبعاد + رفض UUID غلط) —
+  تفاصيل كاملة في `apps/api/src/modules/orders/README.md`. الفحوصات الأربعة كلها عدّت.
+
+- **2026-08-13 (دمج `main` جوّه فرع `hgotr7` — تعارض حقيقي، اتحل يدويًا)**: فرع `hgotr7` (بعد ما اتأكد
+  إن آخر 3 commits عليه — سياسة إلغاء الفني ADR-0006، إنتاجية الفريق/مضاعف مستوى الفني، مطابقة المساعد
+  التلقائية ADR-0007 — مش متدمجين في `main` لسه) اتعمله `git merge origin/main` صريح. التعارض الحقيقي
+  الوحيد: **سياسة إلغاء الفني اتبنت مرتين بمعزل** (هنا بـADR-0006 باك-إند بس، وفي `main` عبر فرع
+  `v13gb2` نسخة أشمل وكاملة UI) — migrations بنفس الأرقام (`0068`) بمحتوى مختلف، وحالة `order_status`
+  بأسماء مختلفة (`needs_technician_reselection` هنا مقابل `awaiting_technician_reselection` في `main`).
+  اتحل بإسقاط نسخة `hgotr7` بالكامل (باك-إند بس، مش مُختبرة UI) والإبقاء على نسخة `main` (أشمل، UI
+  كامل، مُختبرة حي بالكامل) كمصدر الحقيقة الوحيد — `migration 0068_technician_cancellation_policy.sql`
+  (نسخة `hgotr7`) اتشالت، و`0069_order_team_productivity.sql`/`0070_assistant_pool_matching.sql` (لسه
+  بندين حقيقيين جداد، مش تكرار) اتعاد ترقيمهم لـ`0074`/`0075` (`main` كان وصل لـ`0073`). كود
+  `technicianCancel()`/`requestRematch()` في `orders.service.ts` اتنضّف بالكامل من الازدواجية (كان فيه
+  method مكرر بنفس الاسم نتيجة تداخل الـdiff). إنتاجية الفريق/مضاعف مستوى الفني/مطابقة المساعد التلقائية
+  (البنود التلاتة التانية) **مفيهاش أي تعارض حقيقي مع `main`** — كانت أعمدة/جداول/موديولات جديدة تمامًا،
+  اندمجت نظيفة، بس محتاجة renumbering للـmigrations زي ما اتوضّح فوق. الفحوصات الثلاثة (`tsc`/`nest
+  build`/`jest`) في `apps/api` + `tsc` في `apps/admin` اتعملها إعادة تشغيل كاملة بعد الدمج وعدّت نضيف.

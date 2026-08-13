@@ -49,7 +49,7 @@
 مستمع منفصل (`AssistantMatchingEscalatedRoutingListener`، جوّه `NotificationsModule`) بيستخدم
 `NotificationRoutingService.routeToRole('assistant_matching.escalated', ...)` — نفس آلية
 `EmergencyOrderRoutingListener` بالحرف، بيوجّه لدور `ops_manager` (قاعدة توجيه مزروعة في
-migration `0070`). **نطاق مؤجَّل صراحة**: حل يدوي إداري بعد التصعيد (إشعار بس دلوقتي، مش endpoint
+migration `0075`). **نطاق مؤجَّل صراحة**: حل يدوي إداري بعد التصعيد (إشعار بس دلوقتي، مش endpoint
 جديد لتعيين مساعد يدوي — مش مطلوب صراحة في القرار الأصلي).
 
 ## لماذا الإشعارات عبر أحداث، مش نداء مباشر لـ`NotificationsService`

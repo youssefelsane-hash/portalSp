@@ -140,6 +140,7 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
                                   ),
                                   isThreeLine: true,
                                   trailing: PopupMenuButton<String>(
+                                    enabled: !_acting,
                                     onSelected: (value) {
                                       if (value == 'toggle') {
                                         _toggleActive(template);

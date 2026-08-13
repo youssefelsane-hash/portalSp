@@ -17,12 +17,9 @@ const CUSTOMER_MESSAGES: Partial<Record<OrderStatus, { title: string; body: stri
     body: 'الفني اقترح بنود إضافية (قطع غيار/أجرة إضافية) — راجع التفاصيل ووافق أو ارفض.',
   },
   [OrderStatus.WORK_COMPLETED]: { title: 'الشغل خلص', body: 'الفني خلّص الشغل — راجع الفاتورة واختار طريقة الدفع.' },
-  // سياسة إلغاء الفني (ADR-0006) — الفني اللي اخترته اعتذر، وطلبك مش هيترجع للمطابقة التلقائية
-  // (اعتماد/تعيين يدوي)، فمحتاج تعيد الاختيار بنفسك.
-  [OrderStatus.NEEDS_TECHNICIAN_RESELECTION]: {
-    title: 'الفني اعتذر — محتاج تعيد الاختيار',
-    body: 'الفني اللي اخترته اعتذر عن الطلب. اطلب إعادة مطابقة أو اختار فني تاني.',
-  },
+  // سياسة إلغاء الفني (docs/10) — إشعار awaiting_technician_reselection مغطّى بالكامل عبر
+  // TechnicianCancellationNotificationListener (يسمع TECHNICIAN_ORDER_CANCELLED_EVENT مباشرة،
+  // multi-channel + توجيه أدمن) — مش هنا، عشان نتفادى إشعار مكرر لنفس الحدث من مكانين.
 };
 
 @Injectable()
@@ -65,22 +62,13 @@ export class OrderStatusNotificationListener {
         });
       }
 
-      // الفني لغى طلب اتقبله بنفسه (بعد ما بدأ الشغل الإلغاء لازم يعدّي من الشكوى، مش هنا) —
-      // كانت فجوة موثّقة صراحة، اتقفلت جنب OrdersService.technicianCancel().
-      if (event.newStatus === OrderStatus.CANCELLED_BY_TECHNICIAN) {
-        const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
-        await this.notificationsService.notify({
-          userId: customer.userId,
-          notificationType: 'order_cancelled_by_technician',
-          titleAr: 'الفني اعتذر عن الطلب',
-          bodyAr: event.reason
-            ? `طلب رقم ${event.orderNumber} — السبب: ${event.reason}. تقدر تحجز تاني وهنلاقيلك فني آخر.`
-            : `طلب رقم ${event.orderNumber} اتلغى من الفني. تقدر تحجز تاني وهنلاقيلك فني آخر.`,
-          referenceType: 'order',
-          referenceId: event.orderId,
-          deepLink: `/orders/${event.orderId}`,
-        });
-      }
+      // ملحوظة: OrderStatus.CANCELLED_BY_TECHNICIAN بقى غير قابل للوصول من OrdersService.technicianCancel()
+      // بعد سياسة إلغاء الفني الكاملة (docs/10) — الفني دلوقتي بيرجّع الطلب searching_technician
+      // (إعادة مطابقة) أو awaiting_technician_reselection (يستنى اختيار العميل)، مش يلغيه نهائي.
+      // الإشعار المقابل بقى في notifications/listeners/technician-cancellation-notification.listener.ts
+      // (حدث مخصوص TECHNICIAN_ORDER_CANCELLED_EVENT، مش الحدث العام ده) — الفرع القديم هنا اتشال
+      // لأنه بقى كود ميت فعليًا (مفيش أي مكان بيصدّر الحالة دي تاني)، الـenum نفسه فضل موجود في
+      // order-state-machine.ts لتوافق البيانات التاريخية بس.
 
       // العميل رد على عرض السعر (وافق أو رفض) — order-items.service.ts بيبعت الفرق في event.reason.
       // الفني محتاج يعرف يكمل الشغل بأي نطاق، فمفيش رسالة IN_PROGRESS عامة كفاية هنا.

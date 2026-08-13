@@ -97,7 +97,11 @@ export class CatalogController {
   @Public()
   @Get('services/:id/technicians')
   async listTechniciansForService(@Param('id', ParseUUIDPipe) id: string, @Query() query: ListTechniciansForServiceDto) {
-    const { zoneId, items } = await this.techniciansService.listForServiceBooking(id, query.address_id);
+    const { zoneId, items } = await this.techniciansService.listForServiceBooking(
+      id,
+      query.address_id,
+      query.exclude_technician_id,
+    );
     const service = await this.catalogService.findServiceOrThrow(id);
     const isEmergency = query.booking_mode === 'emergency';
     // خدمات formula بيتجاهل مستوى الفني تمامًا (level_price_multiplier ثابت 1 دايمًا في

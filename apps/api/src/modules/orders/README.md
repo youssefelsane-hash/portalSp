@@ -276,7 +276,7 @@
 
 **الفجوة**: `docs/08` §5 كانت موثّقة صراحة "اتأجل عمداً — مقياس الإنتاجية محتاج قرار عمل صريح من المالك، مش هيتخترع". المالك حدد القرار بمثال دقيق: الأدمن بيعرّف إنتاجية حقيقية للسوق (مثلاً 30 م²/يوم لفني+مساعد)، والنظام ياخد كمية العميل الفعلية ويحسب فريق/مدة منها — **مش يخترع رقم**. `CatalogService.estimateDuration(serviceId, standardDataId, requestedUnits, assignedTechnicians?, assignedAssistants?)` كانت موجودة ومختبرة بمعزل من زمان (Part C)، بتنفّذ بالحرف نفس الصيغة اللي المالك وصفها، بس **مفيش أي مكان في `POST /orders` بينادي عليها ولا بيخزّن نتيجتها على الطلب** — العميل يقدر يطلب `estimate-duration` بشكل منفصل بس النتيجة بترمي بمجرد ما يأكد الحجز.
 
-**الحل (وصلة بس، مفيش محرك جديد)**: Migration `0069_order_team_productivity.sql` — `orders.standard_data_id`/`required_technicians`/`required_assistants`/`estimated_duration_days` (الأربعة NULL لو الخدمة مالهاش `ServiceStandardData` أصلاً أو العميل مبعتش `requested_units`). `CreateOrderDto` بقى فيه `standard_data_id?`/`requested_units?` اختياريين — لو الاتنين موجودين، `create()` بينادي `estimateDuration()` (نفس المحرك، بلا تكرار) ويخزّن النتيجة على صف الطلب وقت الإنشاء — **snapshot**، بالضبط زي أي حقل سعر تاني: لو الأدمن غيّر `productivityPerDay` بعدين، الطلبات القايمة بالفعل بتفضل بأرقامها الأصلية، وبس الطلبات الجديدة بتاخد الإعداد الجديد.
+**الحل (وصلة بس، مفيش محرك جديد)**: Migration `0074_order_team_productivity.sql` — `orders.standard_data_id`/`required_technicians`/`required_assistants`/`estimated_duration_days` (الأربعة NULL لو الخدمة مالهاش `ServiceStandardData` أصلاً أو العميل مبعتش `requested_units`). `CreateOrderDto` بقى فيه `standard_data_id?`/`requested_units?` اختياريين — لو الاتنين موجودين، `create()` بينادي `estimateDuration()` (نفس المحرك، بلا تكرار) ويخزّن النتيجة على صف الطلب وقت الإنشاء — **snapshot**، بالضبط زي أي حقل سعر تاني: لو الأدمن غيّر `productivityPerDay` بعدين، الطلبات القايمة بالفعل بتفضل بأرقامها الأصلية، وبس الطلبات الجديدة بتاخد الإعداد الجديد.
 
 **اتأكد حي بمثال المالك بالحرف**: `ServiceStandardData` حقيقي — `productivityPerDay=30`, `minTechnicians=1`, `minAssistants=1`. طلب حقيقي بـ`requested_units=120` → `required_technicians=1`, `required_assistants=1`, `estimated_duration_days=4` (= ⌈120/30⌉) — مطابق 100% لمثال المالك. طلب بلا `standard_data_id`/`requested_units` → الأعمدة الأربعة `null` بدون أي خطأ (سلوك اختياري صح). بيانات الاختبار (خدمة + بيانات قياسية + طلب) اتعملها soft-delete/تنضيف بعد التأكيد.
 
@@ -291,5 +291,65 @@
 **اتأكد حي بمثال المالك بالحرف**: فني `premium` (مضاعف 1.20 في `ServiceLevelPricing`) على خدمة أساسها 1000 ج.م. — `/orders/preview` رجّع `level_price_multiplier:1.20`/`total_amount_cents:120000`، وطلب فعلي بنفس `requested_technician_id` رجّع `total_amount_cents:120000` **مطابق تمامًا** لما اتعرض في المعاينة — مفيش مفاجأة سعر بعد التأكيد. بيانات الاختبار اتعملها تنضيف بعد التأكيد.
 
 **لسه محتاج تأكيد حي (نطاق متبقي موثّق صراحة، مش سهو)**: مسار استحضار المستوى عبر `schedule_slot_id` (بدل `requested_technician_id` مباشرة) اتبنى بنفس المنطق تمامًا بس ماتاختبرش حي في الجلسة دي. رسوم الطوارئ (`emergency_surcharge_cents`) جوّه `final_price_cents` في قايمة اختيار الفني (`../catalog/README.md`) اتبنت بس ماتاختبرتش حي بطلب `booking_mode=emergency` فعلي — الكود موجود ونفس مسار `isEmergency` المُختبر أصلاً في مسارات تانية، بس التوليفة "مستوى فني + طوارئ مع بعض في نفس الطلب" محتاجة اختبار حي مخصص قبل ما تتوثّق كـ"مؤكد".
+
+## سياسة إلغاء الفني الكاملة — كانت hardcoded بسيطة، اتحوّلت لسياسة قابلة للإعداد بالكامل (بناء 2026-08-12)
+
+**السياق**: `OrdersService.technicianCancel()` القديمة (سيشن سابقة) كانت: سبب اختياري + رسوم لو السبب عليها رسوم، وإلغاء **نهائي** دايمًا (`CANCELLED_BY_TECHNICIAN`، terminal). طلب المالك التفصيلي بالحرف: سياسة كاملة قابلة للإعداد (نافذة زمنية، تفعيل/تعطيل، سلوك مختلف حسب booking_mode)، سبب إجباري (كود+نص حر)، **الطلب ميتلغيش نهائي أبدًا** — إما إعادة مطابقة تلقائية أو استنى اختيار العميل، صلاحيات فريق/شركة، منع مزدوج/سباق، اختبارات سلبية وحية.
+
+### الإعدادات (`group_name='cancellation'`, migration 0070) — صفر UI جديد، `/settings` بيعرضهم تلقائيًا
+- `cancellation.technician_self_cancel_enabled` (افتراضي true) — تعطيل عام للميزة.
+- `cancellation.window_minutes_after_acceptance` (افتراضي 10) — النافذة المسموحة بعد القبول.
+- `cancellation.min_minutes_before_scheduled_start` (افتراضي 60) — لو الطلب مجدول (`scheduled_at`)، الإلغاء الذاتي بيتمنع لو اقتربنا من الموعد بأقل من ده، بغض النظر عن نافذة القبول.
+- `cancellation.auto_rematch_enabled` (افتراضي true) — لطلبات "auto-match" (مش طوارئ، مش اختيار عميل صريح): إعادة مطابقة تلقائية ولا استنى اختيار العميل.
+- `cancellation.team_workers_can_self_cancel` (افتراضي false) — عضو فريق عادي (`team_role=worker`) يقدر يلغي طلب "اعتماد" بنفسه ولا لأ.
+- **مفيش رقم عقوبة/تصعيد مالي مُخترَع** — الغرامة نفسها بتيجي من `cancellation_reasons.fee_percentage` الموجود أصلاً (لكل سبب). أي محرك تصعيد/سمعة مستقبلي (`docs/10` بند "penalty/escalation thresholds architecturally supported but not hardcoded") يقدر يُبنى فوق `technician_order_cancellations` مباشرة (كل إلغاء مسجّل بالكامل، عدّ نافذة زمنية = `COUNT(*) WHERE technician_id=... AND cancelled_at > now() - interval`) — مفيش سكيما إضافية لازمة دلوقتي.
+
+### جدول `technician_order_cancellations` (migration 0069) — سجل مخصوص، منفصل عن `order_status_history`
+بيسجّل لكل إلغاء فني: `technician_id`/`technician_user_id`، `cancellation_reason_id`، `reason_text`، `booking_mode`، `accepted_at`/`cancelled_at`/`elapsed_seconds_after_acceptance`، `within_policy_window`، `recovery_action` (`auto_rematch`|`manual_reselection_required`)، `fee_cents`. **`orders.cancelled_at`/`cancelled_by_user_id`/`cancellation_reason_id`/`cancellation_fee_cents` فضلوا زي ما هما (null)** — دول محجوزين للإلغاء النهائي الحقيقي (عميل/نظام) بس، إلغاء الفني هنا مش بيقفل الطلب.
+
+### حالة طلب جديدة: `awaiting_technician_reselection` (migration 0068)
+لما فني يلغي طلب كان العميل **اختاره بنفسه صراحة** (`requested_technician_id === technicianId` الحالي — يعني "إعادة الحجز" أو اختيار فني قبل الحجز، مش بث تلقائي)، أو لما `cancellation.auto_rematch_enabled=false`: الطلب بيتحول للحالة دي بدل الإلغاء أو إعادة المطابقة الصامتة. `orders.technician_id`/`requested_technician_id` بيتصفروا. العميل عنده مسارين:
+- `POST /orders/:id/request-rematch` **بلا** `requested_technician_id` → بث تلقائي عادي.
+- نفسه **مع** `requested_technician_id` → تفضيل فني بديل بعينه (نفس آلية "إعادة الحجز" — أول جولة بس، مش ضمان).
+
+الحالتين بيرجّعوا الطلب لـ`searching_technician` ويصدّروا `ORDER_REMATCH_REQUESTED_EVENT` — `OrderRematchListener` (موديول `matching`، نفس نمط `OrderDispatchListener`/`ORDER_CREATED_EVENT` بالحرف) بينادي `MatchingService.dispatchNextRound()` الموجودة بالفعل، صفر منطق توزيع جديد. `AWAITING_TECHNICIAN_RESELECTION` مضافة لـ`CUSTOMER_CANCELLABLE_STATUSES` (العميل يقدر يلغي كله بدل ما يستمر) ولقايمة إلغاء الأدمن.
+
+### سلوك استرجاع الطلب — 3 قرارات، كل واحد مبني على عمود/إعداد موجود فعلاً
+1. **طوارئ** (`booking_mode=emergency`) — دايمًا `AUTO_REMATCH`، الطلب "ما يتلغيش" أبدًا (نفس كلام المالك بالحرف).
+2. **العميل اختار الفني بنفسه** (`requested_technician_id === technicianId`) — دايمًا `MANUAL_RESELECTION_REQUIRED`، بغض النظر عن `auto_rematch_enabled` — مفيش تعيين صامت لفني تاني لاختيار العميل الصريح.
+3. **غير كده (بث تلقائي عادي)** — حسب `cancellation.auto_rematch_enabled`.
+
+**استبعاد الفني اللي لغى من إعادة المطابقة**: مجاني تمامًا — `findEligibleTechnicians()` في `matching.service.ts` أصلاً بتستبعد أي فني عنده صف `order_assignments` لنفس الطلب (من أي جولة سابقة)، وصف الفني اللي لغى فضل موجود (حالته `accepted`) — فمش هيترشح تاني لنفس الطلب أبدًا، حتى لو العميل طلب `requested_technician_id` بنفس الـid بالغلط (اتأكد حي).
+
+### صلاحيات الفريق/الشركة
+`booking_mode=team` + الفني اللي بيحاول يلغي `team_role=worker` (مش `owner`/`manager`/`independent`) → 403 `"مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق"`، إلا لو `cancellation.team_workers_can_self_cancel=true`. الفحص في `GET /technician/orders/:id/cancellation-policy` (استشاري) **و** `POST .../cancel` (فرض حقيقي) — نفس الدالة `canSelfCancelTeamOrder()`، مصدر حقيقة واحد.
+
+### النافذة الزمنية — `ORDR_004` (كود موجود من زمان، "انتهت مهلة الإلغاء المجاني"، أول استهلاك حقيقي هنا)
+`evaluateCancellationWindow()` — دالة واحدة يستخدمها الفحص الاستشاري (`GET .../cancellation-policy`) والفرض الحقيقي (`POST .../cancel`) بالحرف، فمفيش احتمال يختلفوا. برّه النافذة → 403 واضح يوجّه للدعم، **مش** تعطيل صامت للزرار بس (لو الواجهة فشلت تخفيه لأي سبب، الباك-إند بيرفض بردو).
+
+### `GET /technician/orders/:id/cancellation-policy` — استشاري بس
+`{can_cancel, reason_if_not, window_expires_at}` — `apps/technician-app` بيستخدمه قبل ما يعرض زرار "إلغاء" أصلاً (مش hide-only في الواجهة، الباك-إند بيفرض نفس القرار وقت الإلغاء الفعلي بغض النظر عن الرد هنا).
+
+### سبب إجباري + نص حر شرطي
+`cancellation_reason_id` بقى **إجباري** في `CancelOrderAsTechnicianDto` (كان اختياري). `cancellation_reasons.requires_free_text` عمود جديد (migration 0069) — لو `true` (زي سبب "أخرى")، `reason` (نص حر) بقى إجباري، بيتفحص في الـservice (cross-field، مش قابل لـ`class-validator` عادي). نفس جدول `cancellation_reasons` الموجود أصلاً (`applies_to=technician`) — مفيش enum سبب موازي جديد.
+
+### التركيبة الذرّية — مفيش إلغاء مزدوج ولا سباق
+`technicianCancel()`/`requestRematch()` الاتنين بياخدوا `pessimistic_write` على صف الطلب **جوّه الـtransaction** (نفس نمط `matching.service.ts dispatchNextRound()`/`accept()` بالحرف) — أي نداء متزامن تاني (عميل بيلغي، فني بيلغي، مطابقة جولة تانية) بيستنى القفل، وبعدين بيعيد فحص الحالة الحقيقية بدل ما يفترض القديمة. لو الحالة اتغيّرت، `409` واضح بدل تعارض صامت.
+
+### اتعمله اختبار حي كامل (curl ضد Postgres/Redis حقيقيين، مش mocks)
+- **إلغاء عادي (auto-match، بث تلقائي)**: طلب `individual` بلا `requested_technician_id`، فني قبل، سبب برسوم 10% → الطلب رجع `searching_technician`، `technician_order_cancellations` صف صحيح بالكامل (`fee_cents=3000` من 30000)، محفظة الفني اتخصمت فعليًا (`wallet_transactions` نوع `penalty`)، إشعار عميل `in_app`+`push` (push فشل بأمان — مفيش جهاز مسجّل، failure_reason واضح في الجدول)، إشعار أدمن `ops_manager` عبر `NotificationRoutingService` وصل فعليًا (اتنين مستخدمين مختلفين). محدش فني تاني متاح في المنطقة التجريبية → `cancelForNoTechnicians()` الموجودة أصلاً قفلت الطلب `cancelled_by_system` بشكل صحيح (سلوك متوقع، مش بَقّة).
+- **العميل اختار الفني بنفسه**: طلب بـ`requested_technician_id`، فني قبل، إلغاء بسبب من غير رسوم → `awaiting_technician_reselection` بالظبط (**مش** `searching_technician`) — الفرق الجوهري اتأكد حي.
+- **`request-rematch`**: بلا فني → `searching_technician` فورًا. محاولة تانية على نفس الطلب (مبقاش `awaiting_technician_reselection`) → `409` واضح. مع `requested_technician_id` (حتى لو نفس الفني اللي لغى) → اتقبل، بس الفني ده اتستبعد تلقائيًا من الترشيح (نفس آلية `order_assignments`).
+- **طوارئ**: طلب `emergency`، فني قبل، إلغاء → `searching_technician` فورًا (`recovery_action=auto_rematch` بغض النظر عن أي حاجة تانية) — اتأكد من صف `technician_order_cancellations` مباشرة.
+- **نافذة زمنية**: `cancellation.window_minutes_after_acceptance=0` مؤقتًا → `GET .../cancellation-policy` رجّع `can_cancel:false` بالسبب الصح، و`POST .../cancel` الفعلي رفض `ORDR_004` **بنفس الرسالة بالظبط** — الاستشاري والفرض الحقيقي متطابقين.
+- **سبب "أخرى" بلا نص حر** → `400` واضح "السبب ده محتاج توضيح نصي" قبل أي كتابة.
+- **عضو فريق عادي (`team_role=worker`) على طلب `team`** → `GET .../cancellation-policy` رجّع `can_cancel:false`، و`POST .../cancel` رفض `403` بنفس الرسالة — الاتنين متطابقين. (فني `team_role=owner` على نفس الطلب اتأكد إنه يقدر يلغي عادي.)
+- **بيانات الاختبار كلها اتنضّفت بعد التأكيد** (تعطيل أسباب الإلغاء التجريبية، رجوع الإعدادات لقيمها الافتراضية، رجوع أدوار/مستويات الفنيين التجريبيين).
+
+### apps/technician-app
+`OrderExecutionScreen` بيجيب السياسة (`fetchCancellationPolicy`) لما الحالة تكون `accepted`/`technician_on_way`/`technician_arrived` بس، وبيعرض زرار "إلغاء الطلب" بس لو `can_cancel:true` فعليًا. الضغط بيفتح `_CancelOrderDialog` (مرحلتين — اختيار سبب من قايمة حقيقية + نص حر شرطي، بعدين شاشة تأكيد نهائية صريحة — **مفيش إلغاء بضغطة واحدة**). بعد النجاح الطلب مبقاش بتاع الفني ده، فالشاشة بتقفل وترجع لقايمة الطلبات المتاحة.
+
+### apps/customer-app
+`OrderDetailScreen` بيعرض كارت تحذيري لما `order_status=awaiting_technician_reselection` — زرارين: "دوّرلي تلقائيًا" (`requestRematch` بلا فني) أو "اختار فني بديل" (بيفتح `TechnicianSelectionScreen` نفسها بوضع جديد `onManualSelect` — إعادة استخدام الشاشة الموجودة أصلاً من اختيار الفني قبل الحجز، مش شاشة موازية). **فجوة صغيرة موثّقة صراحة كانت هنا، اتقفلت (2026-08-12)**: قايمة الفنيين في `TechnicianSelectionScreen` (`GET /services/:id/technicians`) بقى ليها `exclude_technician_id` اختياري (`ListTechniciansForServiceDto` → `catalog.controller.ts` → `TechniciansService.listForServiceBooking()`, شرط SQL إضافي `AND ($4::uuid IS NULL OR tp.id != $4)`) — العميل دلوقتي مش بيشوف الفني اللي لغى بالذات في قايمة إعادة الاختيار من الأساس، مش بس بيتم استبعاده وقت المطابقة بعد اختياره بالغلط. `order.requestedTechnicianId` (مُتاح للعميل عبر `requested_technician_id` في `OrderResponseDto` دلوقتي) هو المصدر لقيمة الاستبعاد دي في `apps/customer-app`.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

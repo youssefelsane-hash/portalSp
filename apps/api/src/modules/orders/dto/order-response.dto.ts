@@ -16,6 +16,10 @@ export interface OrderResponseDto {
   technician_id: string | null;
   order_type: string;
   booking_mode: string;
+  /** سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، الحقل ده بيشاور
+   * على الفني اللي لغى بالذات (تفضيل قديم اتسيب عمدًا) عشان apps/customer-app يقدر يستبعده من
+   * قايمة اختيار البديل. لباقي الحالات: تفضيل "إعادة الحجز" العادي، ممكن يكون null. */
+  requested_technician_id: string | null;
   requested_technician_company_id: string | null;
   order_status: string;
   problem_description: string | null;
@@ -62,6 +66,7 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
     technician_id: order.technicianId,
     order_type: order.orderType,
     booking_mode: order.bookingMode,
+    requested_technician_id: order.requestedTechnicianId,
     requested_technician_company_id: order.requestedTechnicianCompanyId,
     order_status: order.orderStatus,
     problem_description: order.problemDescription,

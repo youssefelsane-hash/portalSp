@@ -1,8 +1,9 @@
 import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
-// سياسة إلغاء الفني (ADR-0006) — cancellation_reason_id بقى إجباري (مكانش)، السبب لازم يتحدد
-// دايمًا من القائمة المُعدّة إداريًا. `reason` (نص حر) بيفضل اختياري على مستوى الـDTO — إجباريته
-// الفعلية (لو السبب `requires_free_text=true`) بتتفحص في الـservice لأنها محتاجة تقرأ السبب نفسه.
+// سياسة إلغاء الفني (docs/10) — سبب إجباري دلوقتي (كان اختياري). النص الحر لسه اختياري على
+// مستوى الـDTO لأن "إجباري بس لو السبب المختار محتاجه" شرط متعدد الحقول (cross-field) بيتفحص
+// في OrdersService.technicianCancel() بعد ما نجيب CancellationReason.requiresFreeText —
+// مينفعش يتحقق هنا بـclass-validator عادي.
 export class CancelOrderAsTechnicianDto {
   @IsOptional()
   @IsString()

@@ -132,6 +132,17 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
+  // سياسة إلغاء الفني (docs/10) — بتتنادى على طلب awaiting_technician_reselection بس. لو
+  // requestedTechnicianId اتبعت، أول جولة مطابقة هتحاول تعرض عليه حصريًا (نفس "إعادة الحجز").
+  Future<Order> requestRematch(String orderId, {String? requestedTechnicianId}) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/request-rematch',
+      body: requestedTechnicianId != null ? {'requested_technician_id': requestedTechnicianId} : null,
+    );
+    return Order.fromJson(data!);
+  }
+
   // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (order-items.service.ts)،
   // العميل هنا بيوافق/يرفض. approve/decline بيرجعوا الطلب بحالته الجديدة (in_progress دايماً).
   Future<List<OrderItem>> listQuoteItems(String orderId) async {

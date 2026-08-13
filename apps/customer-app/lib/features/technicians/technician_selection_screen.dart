@@ -17,7 +17,15 @@ import 'technicians_repository.dart';
 class TechnicianSelectionScreen extends StatefulWidget {
   final CatalogService service;
 
-  const TechnicianSelectionScreen({super.key, required this.service});
+  // سياسة إلغاء الفني (docs/10) — لو اتبعت، الشاشة بتستخدمها بدل التنقل لـCreateOrderScreen
+  // (نفس الشاشة، غرض مختلف: اختيار فني بديل لطلب موجود بالفعل، مش إنشاء طلب جديد). null يعني
+  // السلوك الأصلي (اختيار فني قبل حجز جديد).
+  final void Function(String? requestedTechnicianId)? onManualSelect;
+
+  // سياسة إلغاء الفني (docs/10) — لو اتبعت (وضع إعادة الاختيار)، القايمة مش هتعرض الفني ده.
+  final String? excludeTechnicianId;
+
+  const TechnicianSelectionScreen({super.key, required this.service, this.onManualSelect, this.excludeTechnicianId});
 
   @override
   State<TechnicianSelectionScreen> createState() => _TechnicianSelectionScreenState();
@@ -59,7 +67,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     if (address == null) return;
     setState(() => _loading = true);
     try {
-      final items = await _repository.listForService(widget.service.id, address.id);
+      final items = await _repository.listForService(
+        widget.service.id,
+        address.id,
+        excludeTechnicianId: widget.excludeTechnicianId,
+      );
       if (mounted) setState(() => _technicians = items);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -68,7 +80,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     }
   }
 
-  void _goToCreateOrder({String? requestedTechnicianId}) {
+  void _confirmSelection({String? requestedTechnicianId}) {
+    if (widget.onManualSelect != null) {
+      widget.onManualSelect!(requestedTechnicianId);
+      return;
+    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => CreateOrderScreen(
@@ -99,7 +115,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       title: const Text('اختار لي تلقائيًا (أسرع)'),
                       subtitle: const Text('هنبعت الطلب لأقرب/أنسب فني متاح فورًا'),
                       trailing: const Icon(Icons.chevron_left),
-                      onTap: () => _goToCreateOrder(),
+                      onTap: () => _confirmSelection(),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -184,7 +200,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                                 ),
                               ),
                               FilledButton(
-                                onPressed: () => _goToCreateOrder(requestedTechnicianId: t.id),
+                                onPressed: () => _confirmSelection(requestedTechnicianId: t.id),
                                 child: const Text('اختار'),
                               ),
                             ],

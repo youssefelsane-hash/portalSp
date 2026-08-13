@@ -166,6 +166,7 @@ export class TechniciansService {
   async listForServiceBooking(
     serviceId: string,
     addressId: string,
+    excludeTechnicianId?: string,
   ): Promise<{ zoneId: string; items: TechnicianBookingListItem[] }> {
     interface AddressRow {
       city_id: string | null;
@@ -208,10 +209,11 @@ export class TechniciansService {
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        AND ($4::uuid IS NULL OR tp.id != $4)
       ORDER BY tp.average_rating DESC, distance_km ASC NULLS LAST, ts.completed_count DESC
       LIMIT 50
       `,
-      [serviceId, zone.id, addressId],
+      [serviceId, zone.id, addressId, excludeTechnicianId ?? null],
     );
 
     return {

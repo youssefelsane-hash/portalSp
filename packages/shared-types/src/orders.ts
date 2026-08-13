@@ -17,7 +17,9 @@ export type OrderStatus =
   | 'cancelled_by_system'
   | 'expired'
   | 'disputed'
-  | 'refunded';
+  | 'refunded'
+  // سياسة إلغاء الفني (docs/10) — فني لغى طلب كان العميل مختاره بنفسه، مستني العميل يختار بديل.
+  | 'awaiting_technician_reselection';
 
 export interface OrderResponseDto {
   id: string;
@@ -30,6 +32,8 @@ export interface OrderResponseDto {
   // الحقول دي من زمان (order-response.dto.ts) بس النوع هنا كان ناقصهم، فـapps/admin مكانش
   // بيعرضهم خالص رغم إنهم موجودين فعليًا في كل رد GET /admin/orders/:id.
   booking_mode: string;
+  /** سياسة إلغاء الفني (docs/10) — لو awaiting_technician_reselection، بيشاور على الفني اللي لغى. */
+  requested_technician_id: string | null;
   order_status: OrderStatus;
   problem_description: string | null;
   customer_notes: string | null;
@@ -104,9 +108,27 @@ export interface AdminRecurringTemplateResponseDto extends RecurringTemplateResp
   customer_id: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/technician-order-cancellation-response.dto.ts (docs/10)
+export type CancellationRecoveryAction = 'auto_rematch' | 'manual_reselection_required';
+
+export interface TechnicianOrderCancellationResponseDto {
+  id: string;
+  technician_id: string;
+  cancellation_reason_id: string;
+  reason_text: string | null;
+  booking_mode: string;
+  accepted_at: string;
+  cancelled_at: string;
+  elapsed_seconds_after_acceptance: number;
+  within_policy_window: boolean;
+  recovery_action: CancellationRecoveryAction;
+  fee_cents: number;
+}
+
 export interface OrderDetailResponseDto extends OrderResponseDto {
   status_history: OrderStatusHistoryResponseDto[];
   pricing_evaluation: OrderPricingEvaluationResponseDto | null;
+  technician_cancellations: TechnicianOrderCancellationResponseDto[];
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-media-response.dto.ts
@@ -131,6 +153,8 @@ export interface CancellationReasonResponseDto {
   affects_technician_score: boolean;
   display_order: number;
   is_active: boolean;
+  /** سياسة إلغاء الفني (docs/10) — لو true، لازم نص حر معاه (زي "أخرى"). */
+  requires_free_text: boolean;
 }
 
 export interface CreateCancellationReasonBody {
@@ -141,6 +165,7 @@ export interface CreateCancellationReasonBody {
   fee_percentage?: number;
   affects_technician_score?: boolean;
   display_order?: number;
+  requires_free_text?: boolean;
 }
 
 export type UpdateCancellationReasonBody = Partial<CreateCancellationReasonBody> & { is_active?: boolean };

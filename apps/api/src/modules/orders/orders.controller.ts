@@ -62,8 +62,8 @@ export class OrdersController {
     return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto));
   }
 
-  // سياسة إلغاء الفني (ADR-0006) — العميل بيطلب إعادة مطابقة صراحة بعد ما الطلب يتحول
-  // needs_technician_reselection (مثلاً بعد ما فني "اعتماد" لغى).
+  // سياسة إلغاء الفني (docs/10) — العميل بيستخدمها لما طلبه يبقى awaiting_technician_reselection
+  // (فني لغى طلب كان العميل مختاره بنفسه) عشان يختار فني بديل بعينه أو يسيب المطابقة التلقائية.
   @Post(':id/request-rematch')
   async requestRematch(
     @CurrentUser() user: JwtPayload,

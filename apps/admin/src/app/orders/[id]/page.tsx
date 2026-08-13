@@ -373,6 +373,42 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
+        {order.technician_cancellations.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">إلغاءات الفني (سياسة إلغاء الفني)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>وقت الإلغاء</TableHead>
+                    <TableHead>بعد القبول بـ</TableHead>
+                    <TableHead>جوّه النافذة؟</TableHead>
+                    <TableHead>إجراء الاسترجاع</TableHead>
+                    <TableHead>الرسوم</TableHead>
+                    <TableHead>السبب</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {order.technician_cancellations.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell>{new Date(c.cancelled_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell>{Math.round(c.elapsed_seconds_after_acceptance / 60)} دقيقة</TableCell>
+                      <TableCell>{c.within_policy_window ? 'أيوه' : 'لأ (متأخر)'}</TableCell>
+                      <TableCell>
+                        {c.recovery_action === 'auto_rematch' ? 'إعادة مطابقة تلقائية' : 'محتاج العميل يختار بديل'}
+                      </TableCell>
+                      <TableCell>{c.fee_cents > 0 ? `${c.fee_cents / 100} ج.م.` : '—'}</TableCell>
+                      <TableCell>{c.reason_text ?? '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">بنود عرض السعر</CardTitle>

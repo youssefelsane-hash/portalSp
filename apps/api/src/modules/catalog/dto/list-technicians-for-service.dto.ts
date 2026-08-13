@@ -11,4 +11,10 @@ export class ListTechniciansForServiceDto {
   @IsOptional()
   @IsIn(BOOKING_MODE_FILTER_VALUES)
   booking_mode?: BookingModeFilter;
+
+  // سياسة إلغاء الفني (docs/10) — بيستخدمه العميل وقت اختيار فني بديل بعد ما فني لغى، عشان
+  // القايمة متعرضش نفس الفني اللي لغى تاني (اختياري، مش مؤثر على مسار الاختيار قبل الحجز العادي).
+  @IsOptional()
+  @IsUUID()
+  exclude_technician_id?: string;
 }

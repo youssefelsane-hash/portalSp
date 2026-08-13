@@ -52,6 +52,9 @@ class Order {
   final int? requiredTechnicians;
   final int? requiredAssistants;
   final int? estimatedDurationDays;
+  // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
+  // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
+  final String? requestedTechnicianId;
 
   Order({
     required this.id,
@@ -77,6 +80,7 @@ class Order {
     this.requiredTechnicians,
     this.requiredAssistants,
     this.estimatedDurationDays,
+    this.requestedTechnicianId,
   });
 
   bool get isUnderWarranty =>
@@ -108,6 +112,7 @@ class Order {
         requiredTechnicians: json['required_technicians'] as int?,
         requiredAssistants: json['required_assistants'] as int?,
         estimatedDurationDays: json['estimated_duration_days'] as int?,
+        requestedTechnicianId: json['requested_technician_id'] as String?,
       );
 }
 
@@ -221,6 +226,8 @@ const Map<String, String> orderStatusLabelsAr = {
   'expired': 'انتهت صلاحيته',
   'disputed': 'فيه خلاف',
   'refunded': 'اترد',
+  // سياسة إلغاء الفني (docs/10) — الفني اعتذر عن طلب كنت اختاره بنفسك، محتاج تختار بديل.
+  'awaiting_technician_reselection': 'محتاج تختار فني بديل',
 };
 
 // مطابق لـ CUSTOMER_CANCELLABLE_STATUSES في order-state-machine.ts بالظبط — awaiting_quote_approval
@@ -234,6 +241,7 @@ const Set<String> customerCancellableStatuses = {
   'accepted',
   'technician_on_way',
   'awaiting_quote_approval',
+  'awaiting_technician_reselection',
 };
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts — بنود عرض السعر

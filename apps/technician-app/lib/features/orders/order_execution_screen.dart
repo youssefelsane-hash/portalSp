@@ -7,6 +7,7 @@ import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../media/media_repository.dart';
 import '../tracking/tracking_client.dart';
+import 'models.dart';
 import 'order.dart';
 import 'orders_repository.dart';
 
@@ -17,6 +18,11 @@ const Set<String> _afterPhotoStatuses = {'in_progress', 'work_completed'};
 
 // نفس ACTIVE_TRACKING_STATUSES في order-tracking.gateway.ts بالظبط.
 const Set<String> _activeTrackingStatuses = {'accepted', 'technician_on_way', 'technician_arrived', 'in_progress'};
+
+// سياسة إلغاء الفني (docs/10) — نفس TECHNICIAN_CANCELLABLE_STATUSES في orders.service.ts
+// (accepted/technician_on_way/technician_arrived بس، مش in_progress). بنفحص السياسة الحقيقية
+// (fetchCancellationPolicy) بس للحالات دي — توفير نداء شبكة مش لازم لباقي الحالات.
+const Set<String> _cancellableOrderStatuses = {'accepted', 'technician_on_way', 'technician_arrived'};
 
 class OrderExecutionScreen extends StatefulWidget {
   final Order initialOrder;
@@ -38,6 +44,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   bool _trackingConnected = false;
   String? _error;
   String? _photoMessage;
+  CancellationPolicy? _cancellationPolicy;
 
   @override
   void initState() {
@@ -48,6 +55,19 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _accessToken = auth.accessToken!;
     _order = widget.initialOrder;
     _connectTrackingIfActive();
+    _loadCancellationPolicyIfApplicable();
+  }
+
+  // "Show Cancel Order only when backend policy permits it" — استشاري بس، الفرض الحقيقي جوّه
+  // الباك-إند وقت الإلغاء الفعلي (نفس مصدر الحقيقة، لو الاتنين اختلفوا الباك-إند بيكسب دايمًا).
+  Future<void> _loadCancellationPolicyIfApplicable() async {
+    if (!_cancellableOrderStatuses.contains(_order.orderStatus)) return;
+    try {
+      final policy = await _repository.fetchCancellationPolicy(_order.id);
+      if (mounted) setState(() => _cancellationPolicy = policy);
+    } catch (_) {
+      // فشل الفحص الاستشاري مايمنعش بقية الشاشة تشتغل — الزرار هيفضل مخفي بس، مش كسر الشاشة كلها.
+    }
   }
 
   void _connectTrackingIfActive() {
@@ -204,6 +224,37 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  // سياسة إلغاء الفني (docs/10) — مفيش إلغاء بضغطة واحدة: (1) اختيار سبب من قايمة حقيقية +
+  // نص حر لو محتاج، (2) شاشة تأكيد أخيرة صريحة جوّه نفس الـdialog. بعد النجاح الطلب مبقاش بتاع
+  // الفني ده خالص (technician_id بقى null)، فبنقفل الشاشة ونرجّع لقايمة الطلبات المتاحة.
+  Future<void> _cancelOrder() async {
+    final reasons = await _repository.fetchCancellationReasons();
+    if (!mounted) return;
+    final result = await showDialog<_CancelOrderResult>(
+      context: context,
+      builder: (context) => _CancelOrderDialog(reasons: reasons),
+    );
+    if (result == null) return;
+
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      await _repository.cancel(_order.id, cancellationReasonId: result.reasonId, reason: result.freeText);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اتلغى الطلب — مبقاش بتاعك دلوقتي')),
+        );
+        Navigator.of(context).pop();
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _runAction(String action) async {
     setState(() {
       _acting = true;
@@ -328,6 +379,23 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 onPressed: _acting ? null : _proposeQuoteItems,
                 icon: const Icon(Icons.receipt_long_outlined),
                 label: const Text('اقترح عرض سعر (قطع غيار/أجرة إضافية)'),
+              ),
+            ],
+            // سياسة إلغاء الفني (docs/10) — الزرار يظهر بس لو can_cancel:true فعلاً من الباك-إند
+            // (مش مجرد "الحالة مسموحة" — النافذة الزمنية وصلاحيات الفريق ممكن يمنعوه كمان).
+            if (_cancellationPolicy?.canCancel == true) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _acting ? null : _cancelOrder,
+                icon: const Icon(Icons.cancel_outlined, color: Colors.red),
+                label: const Text('إلغاء الطلب', style: TextStyle(color: Colors.red)),
+                style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red)),
+              ),
+            ] else if (_cancellationPolicy != null && _cancellationPolicy!.reasonIfNot != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _cancellationPolicy!.reasonIfNot!,
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ],
             const SizedBox(height: 24),
@@ -498,6 +566,148 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
           FilledButton(onPressed: _submit, child: const Text('ابعت العرض')),
         ],
       ),
+    );
+  }
+}
+
+class _CancelOrderResult {
+  final String reasonId;
+  final String? freeText;
+
+  _CancelOrderResult({required this.reasonId, required this.freeText});
+}
+
+// سياسة إلغاء الفني (docs/10) — مرحلتين جوّه نفس الـdialog، مش إلغاء بضغطة واحدة:
+// 1) اختيار سبب (كود من قايمة حقيقية جاية من الباك-إند) + نص حر (إجباري لو السبب محتاجه).
+// 2) شاشة تأكيد أخيرة صريحة قبل ما الإلغاء يتبعت فعليًا.
+class _CancelOrderDialog extends StatefulWidget {
+  final List<CancellationReason> reasons;
+
+  const _CancelOrderDialog({required this.reasons});
+
+  @override
+  State<_CancelOrderDialog> createState() => _CancelOrderDialogState();
+}
+
+class _CancelOrderDialogState extends State<_CancelOrderDialog> {
+  CancellationReason? _selected;
+  final _freeTextController = TextEditingController();
+  bool _showConfirm = false;
+  String? _validationError;
+
+  @override
+  void dispose() {
+    _freeTextController.dispose();
+    super.dispose();
+  }
+
+  void _goToConfirm() {
+    if (_selected == null) {
+      setState(() => _validationError = 'اختار سبب الإلغاء الأول');
+      return;
+    }
+    if (_selected!.requiresFreeText && _freeTextController.text.trim().isEmpty) {
+      setState(() => _validationError = 'السبب ده محتاج توضيح نصي');
+      return;
+    }
+    setState(() {
+      _validationError = null;
+      _showConfirm = true;
+    });
+  }
+
+  void _confirm() {
+    Navigator.of(context).pop(
+      _CancelOrderResult(reasonId: _selected!.id, freeText: _freeTextController.text),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: Text(_showConfirm ? 'تأكيد إلغاء الطلب' : 'إلغاء الطلب'),
+        content: SizedBox(
+          width: 400,
+          child: _showConfirm ? _buildConfirmStep() : _buildReasonStep(),
+        ),
+        actions: _showConfirm
+            ? [
+                TextButton(
+                  onPressed: () => setState(() => _showConfirm = false),
+                  child: const Text('رجوع'),
+                ),
+                FilledButton(
+                  onPressed: _confirm,
+                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                  child: const Text('أيوه، ألغي الطلب'),
+                ),
+              ]
+            : [
+                TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+                FilledButton(onPressed: _goToConfirm, child: const Text('التالي')),
+              ],
+      ),
+    );
+  }
+
+  Widget _buildReasonStep() {
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('اختار سبب الإلغاء:'),
+          const SizedBox(height: 8),
+          if (widget.reasons.isEmpty)
+            const Text('مفيش أسباب إلغاء متاحة دلوقتي — تواصل مع الدعم', style: TextStyle(color: Colors.red)),
+          for (final reason in widget.reasons)
+            RadioListTile<CancellationReason>(
+              value: reason,
+              groupValue: _selected,
+              onChanged: (v) => setState(() => _selected = v),
+              title: Text(reason.reasonAr),
+              subtitle: reason.chargesFee ? Text('رسوم إلغاء ${reason.feePercentage.toStringAsFixed(0)}%') : null,
+              dense: true,
+            ),
+          if (_selected?.requiresFreeText == true) ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: _freeTextController,
+              decoration: const InputDecoration(labelText: 'وضّح السبب (إجباري)'),
+              maxLines: 3,
+            ),
+          ],
+          if (_validationError != null) ...[
+            const SizedBox(height: 8),
+            Text(_validationError!, style: const TextStyle(color: Colors.red)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfirmStep() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('هتلغي الطلب بسبب: ${_selected!.reasonAr}'),
+        if (_freeTextController.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text('التفاصيل: ${_freeTextController.text.trim()}'),
+        ],
+        if (_selected!.chargesFee) ...[
+          const SizedBox(height: 8),
+          Text(
+            'هيتخصم منك رسوم إلغاء ${_selected!.feePercentage.toStringAsFixed(0)}% من قيمة الطلب.',
+            style: const TextStyle(color: Colors.red),
+          ),
+        ],
+        const SizedBox(height: 12),
+        const Text('متأكد إنك عايز تلغي الطلب ده؟ الخطوة دي مش هترجع.'),
+      ],
     );
   }
 }

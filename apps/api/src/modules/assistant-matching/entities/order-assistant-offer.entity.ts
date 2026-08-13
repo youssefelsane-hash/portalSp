@@ -10,7 +10,7 @@ export enum AssistantOfferStatus {
   SLOT_FILLED = 'slot_filled',
 }
 
-// مطابق لـ infra/migrations/0070_assistant_pool_matching.sql (ADR-0007) — بث/عرض فردي لكل
+// مطابق لـ infra/migrations/0075_assistant_pool_matching.sql (ADR-0007) — بث/عرض فردي لكل
 // مرشّح مساعد، نفس فلسفة order_assignments بس لمجال "شرائح مساعد" (ممكن أكتر من صف accepted
 // لنفس الطلب لو orders.required_assistants > 1).
 @Entity('order_assistant_offers')

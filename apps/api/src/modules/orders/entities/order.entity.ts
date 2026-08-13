@@ -20,9 +20,10 @@ export enum OrderStatus {
   EXPIRED = 'expired',
   DISPUTED = 'disputed',
   REFUNDED = 'refunded',
-  // سياسة إلغاء الفني (ADR-0006) — الطلبات "اعتماد"/تعيين يدوي من الإدارة بعد إلغاء الفني مش
-  // بترجع تلقائي للمطابقة (افتراضيًا) — بتستنى العميل يعيد الاختيار بنفسه.
-  NEEDS_TECHNICIAN_RESELECTION = 'needs_technician_reselection',
+  // سياسة إلغاء الفني (migration 0068، docs/10) — فني لغى طلب كان العميل مختاره بنفسه
+  // (requested_technician_id)، ومفيش إعادة مطابقة تلقائية مفعّلة: الطلب محفوظ (مش بيتلغي)،
+  // بس محتاج العميل يختار فني بديل بنفسه. راجع OrdersService.technicianCancel().
+  AWAITING_TECHNICIAN_RESELECTION = 'awaiting_technician_reselection',
 }
 
 export enum OrderType {

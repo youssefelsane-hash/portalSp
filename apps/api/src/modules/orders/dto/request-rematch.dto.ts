@@ -1,8 +1,8 @@
 import { IsOptional, IsUUID } from 'class-validator';
 
-// سياسة إلغاء الفني (ADR-0006) — العميل بيطلب إعادة مطابقة صراحة بعد ما الطلب يتحول
-// needs_technician_reselection. requested_technician_id تفضيل بس مش ضمان، نفس فلسفة الحقل
-// المطابق في CreateOrderDto بالحرف.
+// العميل بيستخدمها على طلب awaiting_technician_reselection — لو requested_technician_id
+// اتبعت، أول جولة مطابقة هتحاول تعرض عليه حصريًا (نفس آلية "إعادة الحجز" الموجودة أصلاً في
+// matching.service.ts). لو مش متبعت، بث عادي لأي فني مؤهّل.
 export class RequestRematchDto {
   @IsOptional()
   @IsUUID()

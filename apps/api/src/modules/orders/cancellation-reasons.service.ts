@@ -76,6 +76,7 @@ export class CancellationReasonsService {
     if (dto.display_order !== undefined) reason.displayOrder = dto.display_order;
     if (dto.requires_free_text !== undefined) reason.requiresFreeText = dto.requires_free_text;
     if (dto.is_active !== undefined) reason.isActive = dto.is_active;
+    if (dto.requires_free_text !== undefined) reason.requiresFreeText = dto.requires_free_text;
     await this.reasons.save(reason);
 
     await this.auditLog.record({

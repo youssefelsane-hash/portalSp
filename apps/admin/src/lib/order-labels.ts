@@ -19,6 +19,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   expired: 'منتهي',
   disputed: 'متنازع عليه',
   refunded: 'مسترجَع',
+  awaiting_technician_reselection: 'بانتظار اختيار فني بديل',
 };
 
 // إصلاح حقيقي (مراجعة booking flow الشاملة 2026-08-12) — كانت القايمة دي فيها 5 حالات زيادة
@@ -32,6 +33,9 @@ const CANCELLABLE_STATUSES: OrderStatus[] = [
   'pending_payment',
   'searching_technician',
   'technician_assigned',
+  // سياسة إلغاء الفني (docs/10) — order-state-machine.ts بيسمح admin cancel() يقفل الطلب من
+  // الحالة دي (العميل واقف مستني اختيار فني بديل، ممكن يقرر يلغي كله بدل ما يستمر).
+  'awaiting_technician_reselection',
 ];
 
 export function isOrderCancellable(status: OrderStatus): boolean {

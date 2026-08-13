@@ -13,6 +13,7 @@ import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderPricingEvaluationResponseDto } from './dto/order-pricing-evaluation-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
+import { toTechnicianOrderCancellationResponseDto } from './dto/technician-order-cancellation-response.dto';
 import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
@@ -35,13 +36,16 @@ export class AdminOrdersController {
 
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
-    const { order, history, pricingEvaluation } = await this.adminOrdersService.getDetail(id);
+    const { order, history, pricingEvaluation, technicianCancellations } = await this.adminOrdersService.getDetail(id);
     return {
       ...toOrderResponseDto(order),
       status_history: history.map(toOrderStatusHistoryResponseDto),
       // للتشغيل بس (docs/08 §35) — null لو الخدمة مش pricing_model=formula، راجع
       // PricingEngineService.findEvaluationForOrder().
       pricing_evaluation: pricingEvaluation ? toOrderPricingEvaluationResponseDto(pricingEvaluation) : null,
+      // سياسة إلغاء الفني (docs/10) — قايمة فاضية لو الطلب ده معملوش أي فني إلغاء ذاتي. مصفوفة
+      // مش صف واحد لأن نفس الطلب ممكن يتلغى من فني، يترجّع، ويتلغى من فني تاني.
+      technician_cancellations: technicianCancellations.map(toTechnicianOrderCancellationResponseDto),
     };
   }
 

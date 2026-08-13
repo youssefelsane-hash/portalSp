@@ -3,9 +3,11 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
+import { ORDER_REMATCH_REQUESTED_EVENT, OrderRematchRequestedEvent } from '../../common/events/order-rematch-requested.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
-import { AuditLogService } from '../audit/audit-log.service';
+import { TECHNICIAN_ORDER_CANCELLED_EVENT, TechnicianOrderCancelledEvent } from '../../common/events/technician-order-cancelled.event';
 import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -15,6 +17,7 @@ import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/w
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
+import { TechnicianTeamRole } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
@@ -28,21 +31,35 @@ import { RequestRematchDto } from './dto/request-rematch.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
-import { CancellationAppliesTo } from './entities/cancellation-reason.entity';
+import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
+import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
+import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
+// سياسة إلغاء الفني (docs/10) — fallback بس، المصدر الحقيقي إعدادات cancellation.* (migration 0070).
+const TECHNICIAN_CANCEL_WINDOW_MINUTES_FALLBACK = 10;
+const TECHNICIAN_CANCEL_MIN_MINUTES_BEFORE_SCHEDULED_FALLBACK = 60;
+// أدوار الفريق اللي تقدر تلغي طلب "اعتماد" (فريق) بنفسها من غير إذن — عضو عادي (worker) لازم
+// يعدّي من مديره/المالك، إلا لو cancellation.team_workers_can_self_cancel مفعّل.
+const TEAM_SELF_CANCEL_ALLOWED_ROLES = new Set<TechnicianTeamRole>([
+  TechnicianTeamRole.INDEPENDENT,
+  TechnicianTeamRole.OWNER,
+  TechnicianTeamRole.MANAGER,
+]);
 
 @Injectable()
 export class OrdersService {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
-    @InjectRepository(OrderStatusHistory) private readonly orderStatusHistory: Repository<OrderStatusHistory>,
+    @InjectRepository(TechnicianOrderCancellation)
+    private readonly technicianOrderCancellations: Repository<TechnicianOrderCancellation>,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly auditLog: AuditLogService,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly addressesService: AddressesService,
     private readonly catalogService: CatalogService,
@@ -56,7 +73,6 @@ export class OrdersService {
     private readonly cancellationReasonsService: CancellationReasonsService,
     private readonly walletsService: WalletsService,
     private readonly settingsService: SettingsService,
-    private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -587,29 +603,105 @@ export class OrdersService {
     return order;
   }
 
+  // الحالات اللي الفني يقدر يلغي فيها نفسه — بعد ما الشغل الفعلي يبدأ (in_progress فما بعده)
+  // الإلغاء لازم يعدّي من الشكوى مش زرار مباشر (نفس الحد القديم، لسه موجود).
+  private static readonly TECHNICIAN_CANCELLABLE_STATUSES = new Set<OrderStatus>([
+    OrderStatus.ACCEPTED,
+    OrderStatus.TECHNICIAN_ON_WAY,
+    OrderStatus.TECHNICIAN_ARRIVED,
+  ]);
+
   /**
-   * سياسة إلغاء الفني الكاملة (ADR-0006) — كانت `technicianCancel()` بسيطة بالكامل (سبب اختياري
-   * + رسوم بس، hardcoded). دلوقتي: نافذة زمنية بعد القبول + حد أدنى قبل الموعد المجدول (الاتنين
-   * قابلين للإعداد)، سبب إجباري (+ نص حر إجباري لو السبب `requires_free_text`)، وسلوك استرجاع
-   * الطلب بيختلف حسب `booking_mode`:
-   * - **EMERGENCY/INDIVIDUAL** (`auto_rematch_individual=true`, الافتراضي): الطلب يرجع
-   *   `searching_technician` ويتبعت `ORDER_CREATED_EVENT` تاني — نفس محرك `dispatchNextRound()`
-   *   الموجود، الفني اللي لغى مستبعد تلقائيًا (لسه ليه صف `order_assignments` من الجولة الأولى).
-   * - **TEAM ("اعتماد") أو تعيين يدوي من الإدارة** (`auto_rematch_team_assigned=false`,
-   *   الافتراضي): **مفيش إعادة توزيع صامتة** — الطلب يتحول `needs_technician_reselection`،
-   *   العميل بيوصله إشعار عالي الأولوية (`order-status-notification.listener.ts`) وياخد
-   *   deep link يقدر يطلب منه إعادة مطابقة صراحة (`POST /orders/:id/request-rematch`) أو يلغي.
-   * - لو `auto_rematch_individual=false` صراحة: الطلب بيتلغي نهائي زي السلوك القديم بالظبط
-   *   (fallback آمن، مفيش سلوك مخترع بلا تأكيد).
+   * سياسة إلغاء الفني (docs/10-integration-completion-tracker.md) — بيحسب هل النافذة الزمنية
+   * المسموحة (بعد القبول + قبل موعد مجدول لو موجود) لسه مفتوحة. مُستخدمة من مكانين: الفحص
+   * الاستشاري قبل ما نعرض الزرار (getTechnicianCancellationPolicy) والفرض الفعلي (technicianCancel) —
+   * نفس المصدر بالظبط عشان الواجهة والباك-إند ميختلفوش أبداً.
+   */
+  private async evaluateCancellationWindow(
+    order: Order,
+  ): Promise<{ withinWindow: boolean; windowExpiresAt: Date | null; blockedReason: string | null }> {
+    if (!order.acceptedAt) {
+      return { withinWindow: false, windowExpiresAt: null, blockedReason: 'الطلب لسه ما اتقبلش' };
+    }
+    const windowMinutes = await this.settingsService.getNumber(
+      'cancellation.window_minutes_after_acceptance',
+      TECHNICIAN_CANCEL_WINDOW_MINUTES_FALLBACK,
+    );
+    const windowExpiresAt = new Date(order.acceptedAt.getTime() + windowMinutes * 60_000);
+    const now = new Date();
+    if (now > windowExpiresAt) {
+      return {
+        withinWindow: false,
+        windowExpiresAt,
+        blockedReason: `عدّت المدة المسموحة للإلغاء الذاتي (${windowMinutes} دقيقة بعد القبول) — تواصل مع الدعم لإلغاء إداري`,
+      };
+    }
+    if (order.scheduledAt) {
+      const minMinutesBefore = await this.settingsService.getNumber(
+        'cancellation.min_minutes_before_scheduled_start',
+        TECHNICIAN_CANCEL_MIN_MINUTES_BEFORE_SCHEDULED_FALLBACK,
+      );
+      const cutoff = new Date(order.scheduledAt.getTime() - minMinutesBefore * 60_000);
+      if (now > cutoff) {
+        return {
+          withinWindow: false,
+          windowExpiresAt,
+          blockedReason: `اقتربنا من موعد الطلب المجدول (أقل من ${minMinutesBefore} دقيقة) — الإلغاء الذاتي متوقف، تواصل مع الدعم`,
+        };
+      }
+    }
+    return { withinWindow: true, windowExpiresAt, blockedReason: null };
+  }
+
+  /** هل عضو الفريق ده مسموحله يلغي طلب "اعتماد" (فريق) بنفسه — مالك/مدير دايمًا، عضو عادي بس لو إعداد صريح مفعّل. */
+  private async canSelfCancelTeamOrder(teamRole: TechnicianTeamRole): Promise<boolean> {
+    if (TEAM_SELF_CANCEL_ALLOWED_ROLES.has(teamRole)) return true;
+    return this.settingsService.getBoolean('cancellation.team_workers_can_self_cancel', false);
+  }
+
+  /** بيستخدمه apps/technician-app قبل ما يعرض زرار "إلغاء" — استشاري بس، الفرض الحقيقي جوّه technicianCancel(). */
+  async getTechnicianCancellationPolicy(userId: string, orderId: string): Promise<TechnicianCancellationPolicyResponseDto> {
+    const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
+
+    if (!OrdersService.TECHNICIAN_CANCELLABLE_STATUSES.has(order.orderStatus)) {
+      return { can_cancel: false, reason_if_not: 'الطلب في حالة مينفعش تلغيه فيها', window_expires_at: null };
+    }
+
+    const selfCancelEnabled = await this.settingsService.getBoolean('cancellation.technician_self_cancel_enabled', true);
+    if (!selfCancelEnabled) {
+      return { can_cancel: false, reason_if_not: 'إلغاء الفني الذاتي متوقف حاليًا — تواصل مع الدعم', window_expires_at: null };
+    }
+
+    if (order.bookingMode === BookingMode.TEAM) {
+      const technicianProfile = await this.techniciansService.findByUserIdOrThrow(userId);
+      if (!(await this.canSelfCancelTeamOrder(technicianProfile.teamRole))) {
+        return { can_cancel: false, reason_if_not: 'مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق', window_expires_at: null };
+      }
+    }
+
+    const { withinWindow, windowExpiresAt, blockedReason } = await this.evaluateCancellationWindow(order);
+    return {
+      can_cancel: withinWindow,
+      reason_if_not: withinWindow ? null : blockedReason,
+      window_expires_at: windowExpiresAt?.toISOString() ?? null,
+    };
+  }
+
+  /**
+   * الفني بيلغي طلب اتقبله بنفسه — سياسة كاملة قابلة للإعداد (docs/10-integration-completion-tracker.md
+   * "سياسة إلغاء الفني")، مش القرار القديم (رسوم بس + إلغاء نهائي دايمًا). **قرار جوهري جديد**:
+   * الطلب **مابيتلغيش نهائي** — بيرجع للمطابقة التلقائية (`SEARCHING_TECHNICIAN`، استبعاد الفني
+   * اللي لغى تلقائيًا لأن `order_assignments` بتاعته لسه موجودة لنفس الطلب) لو مكانش العميل
+   * اختار الفني ده بنفسه، أو محتاج العميل يختار بديل بنفسه (`AWAITING_TECHNICIAN_RESELECTION`)
+   * لو كان اختيار صريح من العميل (`requested_technician_id`) أو auto-rematch متعطّل من الإعدادات.
+   * `CANCELLED_BY_TECHNICIAN` (الحالة النهائية القديمة) بقت غير قابلة للوصول من هنا — لسه موجودة
+   * في الـstate machine لأسباب توافقية بس (بيانات تاريخية قديمة قبل الميزة دي).
    */
   async technicianCancel(userId: string, orderId: string, dto: CancelOrderAsTechnicianDto): Promise<Order> {
     const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
+    const technicianProfile = await this.techniciansService.findByUserIdOrThrow(userId);
 
-    if (
-      !canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_TECHNICIAN) &&
-      !canTransition(order.orderStatus, OrderStatus.NEEDS_TECHNICIAN_RESELECTION) &&
-      !canTransition(order.orderStatus, OrderStatus.SEARCHING_TECHNICIAN)
-    ) {
+    if (!OrdersService.TECHNICIAN_CANCELLABLE_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
         `مينفعش تلغي الطلب وهو في حالة ${order.orderStatus} — بعد ما تبدأ الشغل الإلغاء لازم يعدّي من الشكوى`,
@@ -617,103 +709,102 @@ export class OrdersService {
       );
     }
 
-    const selfCancelEnabled = await this.settingsService.getBoolean('technician_cancellation.self_cancel_enabled', true);
+    const selfCancelEnabled = await this.settingsService.getBoolean('cancellation.technician_self_cancel_enabled', true);
     if (!selfCancelEnabled) {
+      throw new ApiException(ErrorCode.VAL_001, 'إلغاء الفني الذاتي متوقف حاليًا — تواصل مع الدعم', HttpStatus.FORBIDDEN);
+    }
+
+    // صلاحيات الفريق/الشركة — عضو عادي (worker) ميقدرش يلغي طلب "اعتماد" كامل إلا لو الباك-إند
+    // بيصرّح بكده صراحة (نفس مبدأ المالك). الفني المستقل/المالك/المدير مسموحلهم دايمًا.
+    if (order.bookingMode === BookingMode.TEAM && !(await this.canSelfCancelTeamOrder(technicianProfile.teamRole))) {
       throw new ApiException(
-        ErrorCode.ORDR_003,
-        'الإلغاء الذاتي معطّل حاليًا — كلّم الدعم لو محتاج تلغي الطلب ده',
-        HttpStatus.CONFLICT,
+        ErrorCode.VAL_001,
+        'مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق أو الدعم',
+        HttpStatus.FORBIDDEN,
       );
     }
 
-    const windowMinutes = await this.settingsService.getNumber('technician_cancellation.window_minutes_after_acceptance', 15);
-    const elapsedMinutes = order.acceptedAt ? (Date.now() - order.acceptedAt.getTime()) / 60000 : 0;
-    if (windowMinutes > 0 && elapsedMinutes > windowMinutes) {
-      throw new ApiException(
-        ErrorCode.ORDR_003,
-        `فات وقت الإلغاء الذاتي المسموح (${windowMinutes} دقيقة بعد القبول) — كلّم الدعم لو لازم تلغي`,
-        HttpStatus.CONFLICT,
-      );
+    // النافذة الزمنية — لو الفني برّه النافذة، الإلغاء المباشر ممنوع بغض النظر عن الواجهة
+    // (الباك-إند بيفرضها حتى لو التطبيق فشل يعرض الزرار صح لأي سبب).
+    const { withinWindow, blockedReason } = await this.evaluateCancellationWindow(order);
+    if (!withinWindow) {
+      throw new ApiException(ErrorCode.ORDR_004, blockedReason ?? 'الإلغاء الذاتي متوقف دلوقتي', HttpStatus.FORBIDDEN);
     }
 
-    const minMinutesBeforeStart = await this.settingsService.getNumber(
-      'technician_cancellation.min_minutes_before_scheduled_start',
-      60,
-    );
-    if (order.scheduledAt) {
-      const minutesUntilStart = (order.scheduledAt.getTime() - Date.now()) / 60000;
-      if (minutesUntilStart < minMinutesBeforeStart) {
-        throw new ApiException(
-          ErrorCode.ORDR_003,
-          `مينفعش تلغي الطلب وباقي أقل من ${minMinutesBeforeStart} دقيقة على الموعد المجدول — كلّم الدعم`,
-          HttpStatus.CONFLICT,
-        );
-      }
-    }
-
-    // نفس منطق رسوم إلغاء العميل بالظبط، بس هنا الرسوم (لو السبب المختار عليها رسوم) بتتحصّل
-    // من محفظة الفني نفسه — تعويض للمنصة/العميل عن فني قبل الطلب وبعدين رجع فيه.
+    // سبب إجباري (docs/10) — كود + نص حر إجباري لو السبب محتاجه صراحة (requires_free_text، زي "أخرى").
     const cancellationReason = await this.cancellationReasonsService.findOrThrow(dto.cancellation_reason_id);
     if (cancellationReason.appliesTo !== CancellationAppliesTo.TECHNICIAN) {
       throw new ApiException(ErrorCode.VAL_001, 'سبب الإلغاء ده مش لإلغاء الفني', HttpStatus.BAD_REQUEST);
     }
     if (cancellationReason.requiresFreeText && !dto.reason?.trim()) {
-      throw new ApiException(ErrorCode.VAL_001, 'السبب ده محتاج توضيح بالتفصيل (نص حر)', HttpStatus.BAD_REQUEST);
+      throw new ApiException(ErrorCode.VAL_001, 'السبب ده محتاج توضيح نصي', HttpStatus.BAD_REQUEST);
     }
     const feeCents = cancellationReason.chargesFee
       ? Math.round((order.totalAmountCents * Number(cancellationReason.feePercentage)) / 100)
       : 0;
 
-    // تحديد سلوك الاسترجاع (ADR-0006 §1/§3) — "اعتماد" أو تعيين يدوي من الإدارة (بصمة
-    // reassign() الموجودة: change_source=admin و new_status=accepted) مش بيرجع تلقائي للمطابقة
-    // افتراضيًا، عكس فرد/طوارئ.
-    const wasAdminAssigned = await this.orderStatusHistory.exists({
-      where: { orderId: order.id, changeSource: OrderChangeSource.ADMIN, newStatus: OrderStatus.ACCEPTED },
-    });
-    const isTeamOrAdminAssigned = order.bookingMode === BookingMode.TEAM || wasAdminAssigned;
-    const autoRematchTeamAssigned = await this.settingsService.getBoolean(
-      'technician_cancellation.auto_rematch_team_assigned',
-      false,
-    );
-    const autoRematchIndividual = await this.settingsService.getBoolean(
-      'technician_cancellation.auto_rematch_individual',
-      true,
-    );
-
+    // سلوك استرجاع الطلب — يختلف حسب booking_mode واختيار العميل الصريح (مش hardcoded،
+    // كل قرار هنا مبني على عمود موجود أو إعداد قابل للتعديل):
+    // - طوارئ: دايمًا إعادة مطابقة فورية (الطلب "ما يتلغيش" أبدًا، زي ما طلب المالك بالحرف).
+    // - العميل اختار الفني ده بنفسه (requestedTechnicianId === technicianId الحالي): مفيش تعيين
+    //   صامت لفني تاني — لازم العميل يختار بديل بنفسه.
+    // - غير كده (بث عادي): حسب إعداد cancellation.auto_rematch_enabled.
+    const customerPickedThisTechnician = order.requestedTechnicianId === order.technicianId;
+    let recoveryAction: CancellationRecoveryAction;
     let newStatus: OrderStatus;
-    let rematchBehavior: 'auto' | 'needs_reselection' | 'terminal';
-    if (isTeamOrAdminAssigned && !autoRematchTeamAssigned) {
-      newStatus = OrderStatus.NEEDS_TECHNICIAN_RESELECTION;
-      rematchBehavior = 'needs_reselection';
-    } else if (!isTeamOrAdminAssigned && autoRematchIndividual) {
+    if (order.bookingMode === BookingMode.EMERGENCY) {
+      recoveryAction = CancellationRecoveryAction.AUTO_REMATCH;
       newStatus = OrderStatus.SEARCHING_TECHNICIAN;
-      rematchBehavior = 'auto';
+    } else if (customerPickedThisTechnician) {
+      recoveryAction = CancellationRecoveryAction.MANUAL_RESELECTION_REQUIRED;
+      newStatus = OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
     } else {
-      newStatus = OrderStatus.CANCELLED_BY_TECHNICIAN;
-      rematchBehavior = 'terminal';
+      const autoRematchEnabled = await this.settingsService.getBoolean('cancellation.auto_rematch_enabled', true);
+      if (autoRematchEnabled) {
+        recoveryAction = CancellationRecoveryAction.AUTO_REMATCH;
+        newStatus = OrderStatus.SEARCHING_TECHNICIAN;
+      } else {
+        recoveryAction = CancellationRecoveryAction.MANUAL_RESELECTION_REQUIRED;
+        newStatus = OrderStatus.AWAITING_TECHNICIAN_RESELECTION;
+      }
     }
 
+    if (!canTransition(order.orderStatus, newStatus)) {
+      throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
+    }
+
+    const acceptedAt = order.acceptedAt!; // evaluateCancellationWindow اتأكدت فوق إنه موجود
+    const elapsedSecondsAfterAcceptance = Math.max(0, Math.round((Date.now() - acceptedAt.getTime()) / 1000));
+
     const previousStatus = order.orderStatus;
-    const cancelledTechnicianId = order.technicianId;
-    const acceptedAtSnapshot = order.acceptedAt;
+    const cancelledTechnicianId = order.technicianId!;
     await this.dataSource.transaction(async (manager) => {
-      order.orderStatus = newStatus;
-      order.cancelledByUserId = userId;
-      order.cancellationReasonId = cancellationReason.id;
-      order.cancellationFeeCents = feeCents;
-      if (newStatus === OrderStatus.CANCELLED_BY_TECHNICIAN) {
-        order.cancelledAt = new Date();
-      } else {
-        // مش نهائي — الفني بيتشال من الطلب (technicianId/acceptedAt) عشان الطلب يرجع
-        // "فاضي" بالظبط زي لو لسه ما اتعيّنش فني خالص، بدل ما يفضل يشاور على فني اتلغى.
-        order.technicianId = null;
-        order.acceptedAt = null;
+      // قفل ذرّي على صف الطلب — مفيش إلغاء مزدوج ولا سباق مع accept()/dispatchNextRound() اللي
+      // بتاخد نفس القفل (matching.service.ts)، نفس النمط بالظبط.
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!lockedOrder || lockedOrder.orderStatus !== previousStatus || lockedOrder.technicianId !== cancelledTechnicianId) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتغيّرت حالته بالفعل — حاول تاني', HttpStatus.CONFLICT);
       }
-      await manager.save(order);
+
+      lockedOrder.orderStatus = newStatus;
+      lockedOrder.technicianId = null;
+      lockedOrder.assignedAt = null;
+      // AUTO_REMATCH: نصفّرها عشان dispatchNextRound() ميحاولش يقيّد الجولة الأولى على الفني
+      // اللي اتستبعد بالفعل (استعلام إضافي بلا فايدة، مش خطأ، بس تنظيف). MANUAL_RESELECTION_REQUIRED:
+      // نسيبها زي ما هي عمداً — القيمة دلوقتي بتشاور على الفني اللي لغى بالذات، وapps/customer-app
+      // بيستخدمها (exclude_technician_id) عشان القايمة متعرضهوش تاني في شاشة اختيار البديل.
+      if (recoveryAction === CancellationRecoveryAction.AUTO_REMATCH) {
+        lockedOrder.requestedTechnicianId = null;
+      }
+      await manager.save(lockedOrder);
 
       await manager.save(
         manager.create(OrderStatusHistory, {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           previousStatus,
           newStatus,
           changedByUserId: userId,
@@ -723,8 +814,24 @@ export class OrdersService {
         }),
       );
 
+      await manager.save(
+        manager.create(TechnicianOrderCancellation, {
+          orderId: lockedOrder.id,
+          technicianId: technicianProfile.id,
+          technicianUserId: userId,
+          cancellationReasonId: cancellationReason.id,
+          reasonText: dto.reason ?? null,
+          bookingMode: lockedOrder.bookingMode,
+          acceptedAt,
+          cancelledAt: new Date(),
+          elapsedSecondsAfterAcceptance,
+          withinPolicyWindow: true,
+          recoveryAction,
+          feeCents,
+        }),
+      );
+
       if (feeCents > 0) {
-        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(cancelledTechnicianId!);
         const technicianWallet = await this.walletsService.getOrCreateWallet(technicianProfile.userId, WalletOwnerType.TECHNICIAN);
         const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
         await this.walletsService.doubleEntry(
@@ -734,90 +841,111 @@ export class OrdersService {
             amountCents: feeCents,
             transactionType: WalletTxType.PENALTY,
             referenceType: 'order',
-            referenceId: order.id,
-            descriptionAr: `رسوم إلغاء طلب ${order.orderNumber} بعد القبول`,
+            referenceId: lockedOrder.id,
+            descriptionAr: `رسوم إلغاء طلب ${lockedOrder.orderNumber} بعد القبول`,
             allowNegativeBalance: true,
           },
           manager,
         );
       }
+
+      order.orderStatus = lockedOrder.orderStatus;
+      order.technicianId = lockedOrder.technicianId;
+      order.assignedAt = lockedOrder.assignedAt;
+      order.requestedTechnicianId = lockedOrder.requestedTechnicianId;
     });
 
-    // حدث audit كامل (ADR-0006 §6) — بيانات تاريخية للمراجعة، مش state بيتقرأ في مسار العملية.
+    // حدث audit كامل — بيظهر تلقائيًا في /audit-log الموجودة في apps/admin، صفر شاشة جديدة.
     await this.auditLog.record({
       actorUserId: userId,
       actorRole: 'technician',
-      action: 'order.cancelled_by_technician',
+      action: 'order.technician_cancelled',
       entityType: 'order',
       entityId: order.id,
       newValues: {
-        accepted_at: acceptedAtSnapshot?.toISOString() ?? null,
-        cancelled_at: new Date().toISOString(),
-        elapsed_minutes_since_acceptance: Math.round(elapsedMinutes),
+        order_number: order.orderNumber,
+        cancellation_reason_id: cancellationReason.id,
+        reason_text: dto.reason ?? null,
+        elapsed_seconds_after_acceptance: elapsedSecondsAfterAcceptance,
         within_policy_window: true,
         booking_mode: order.bookingMode,
-        cancellation_reason_id: cancellationReason.id,
-        rematch_behavior: rematchBehavior,
+        recovery_action: recoveryAction,
+        fee_cents: feeCents,
       },
     });
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
-      new OrderStatusChangedEvent(
+      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, newStatus, order.customerId, null, dto.reason ?? null),
+    );
+    this.events.emit(
+      TECHNICIAN_ORDER_CANCELLED_EVENT,
+      new TechnicianOrderCancelledEvent(
         order.id,
         order.orderNumber,
-        previousStatus,
-        newStatus,
         order.customerId,
         cancelledTechnicianId,
-        dto.reason ?? null,
+        dto.reason ?? cancellationReason.reasonAr,
+        recoveryAction,
+        order.bookingMode,
       ),
     );
-
-    if (rematchBehavior === 'auto') {
-      this.events.emit(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    if (recoveryAction === CancellationRecoveryAction.AUTO_REMATCH) {
+      this.events.emit(ORDER_REMATCH_REQUESTED_EVENT, new OrderRematchRequestedEvent(order.id));
     }
 
     return order;
   }
 
   /**
-   * العميل بيطلب إعادة مطابقة صراحة بعد ما الطلب يتحول `needs_technician_reselection`
-   * (ADR-0006) — بديل عن "إلغاء وحجز طلب جديد من الأول". `requested_technician_id` تفضيل بس
-   * (نفس فلسفة الحقل المطابق وقت الإنشاء) — **ملحوظة صراحة**: `dispatchNextRound()` بيحترم
-   * التفضيل دا بس في أول جولة (`nextRound === 1`)؛ الطلب ده مش أول جولة أبدًا (رجع من إلغاء
-   * فني بعد جولات سابقة)، فالتفضيل هنا بيتسجّل بس المطابقة العادية هي اللي هتشتغل فعليًا —
-   * قرار مقصود لتفادي لمس منطق الجولات المُختبر جيدًا، مش سهو.
+   * العميل بيستخدمها لما طلبه يبقى `awaiting_technician_reselection` (فني لغى طلب كان مختاره
+   * بنفسه) — إما يختار فني بديل بعينه (`requested_technician_id`) أو يسيب المطابقة التلقائية
+   * تختار. الطلب الأصلي (خدمة/عنوان/موعد) محفوظ بالكامل — مفيش إنشاء طلب جديد.
    */
   async requestRematch(userId: string, orderId: string, dto: RequestRematchDto): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
-    if (!canTransition(order.orderStatus, OrderStatus.SEARCHING_TECHNICIAN)) {
-      throw new ApiException(
-        ErrorCode.ORDR_003,
-        `مينفعش تطلب إعادة مطابقة والطلب في حالة ${order.orderStatus}`,
-        HttpStatus.CONFLICT,
-      );
+    if (order.orderStatus !== OrderStatus.AWAITING_TECHNICIAN_RESELECTION) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الطلب مش في حالة تستني اختيار فني بديل', HttpStatus.CONFLICT);
+    }
+    if (dto.requested_technician_id) {
+      await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
 
     const previousStatus = order.orderStatus;
-    order.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
-    order.requestedTechnicianId = dto.requested_technician_id ?? null;
     await this.dataSource.transaction(async (manager) => {
-      await manager.save(order);
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!lockedOrder || lockedOrder.orderStatus !== OrderStatus.AWAITING_TECHNICIAN_RESELECTION) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب مش في حالة تستني اختيار فني بديل', HttpStatus.CONFLICT);
+      }
+      lockedOrder.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
+      lockedOrder.requestedTechnicianId = dto.requested_technician_id ?? null;
+      await manager.save(lockedOrder);
+
       await manager.save(
         manager.create(OrderStatusHistory, {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           previousStatus,
           newStatus: OrderStatus.SEARCHING_TECHNICIAN,
           changedByUserId: userId,
           changedByRole: 'customer',
           changeSource: OrderChangeSource.CUSTOMER,
-          reason: 'العميل طلب إعادة مطابقة بعد إلغاء الفني',
         }),
       );
+
+      order.orderStatus = lockedOrder.orderStatus;
+      order.requestedTechnicianId = lockedOrder.requestedTechnicianId;
     });
 
-    this.events.emit(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, OrderStatus.SEARCHING_TECHNICIAN, order.customerId, null),
+    );
+    this.events.emit(ORDER_REMATCH_REQUESTED_EVENT, new OrderRematchRequestedEvent(order.id));
+
     return order;
   }
 
