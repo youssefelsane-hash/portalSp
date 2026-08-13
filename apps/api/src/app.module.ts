@@ -32,6 +32,7 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
 import { TechnicianReferralsModule } from './modules/technician-referrals/technician-referrals.module';
 import { TechnicianKpiModule } from './modules/technician-kpi/technician-kpi.module';
+import { TechnicianProgressionModule } from './modules/technician-progression/technician-progression.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { HealthModule } from './modules/common/health/health.module';
@@ -105,6 +106,7 @@ import { OpsModule } from './modules/ops/ops.module';
     FavoritesModule,
     TechnicianReferralsModule,
     TechnicianKpiModule,
+    TechnicianProgressionModule,
     AdminModule,
     FeatureFlagsModule,
     HealthModule,

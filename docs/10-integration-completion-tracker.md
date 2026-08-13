@@ -84,11 +84,11 @@
 
 36. ~~المفضّلة (Favorites) — مش موجودة خالص.~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/favorites/README.md`.
 37. ~~تفضيلات إشعارات المستخدم (قنوات).~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/notifications/README.md`.
-38. تعويض تأخير تلقائي.
-39. QR ترشيح خاص بالفني.
+38. تعويض تأخير تلقائي — **ملغي صراحة من الإصدار الأول** (قرار مالك 2026-08-13، `docs/11`).
+39. ~~QR ترشيح خاص بالفني.~~ **✅ خلص (2026-08-13)** — تفاصيل في `docs/11-qr-referral-kpi-career-rbac-2026-08-13.md` وفي `apps/api/src/modules/technician-referrals/README.md`.
 40. ~~طلب مراجعة Google/مشاركة.~~ **✅ خلصت (2026-08-13)** — تفاصيل في سجل التقدّم تحت وفي `apps/api/src/modules/ratings/README.md`.
 41. نظام أكاديمية/تدريب كامل (Applicant→Trainee→Trainer→Course→...) — **مختلف تمامًا عن `technician_certificates` الموجودة**. المالك صرّح: "ده إحنا هنعمله ولكن ما تركزش عليه دلوقتي... حاول تخليه في الآخر أو بس تعمله base كده". هيتحط كـschema أساسي في آخر المرحلة دي لو فيه وقت، مش أولوية.
-42. محرك التطور الوظيفي (Career/Workforce).
+42. ~~محرك التطور الوظيفي (Career/Workforce).~~ **✅ خلص (2026-08-13)** — تفاصيل في `docs/11-qr-referral-kpi-career-rbac-2026-08-13.md` وفي `apps/api/src/modules/technician-progression/README.md`. (KPI الشهري اللي كان جزء من نفس الطلب موثّق في `apps/api/src/modules/technician-kpi/README.md`.)
 43. ~~باني أدوار ديناميكي (No-code RBAC builder).~~ **✅ خلص (2026-08-13، ADR-0010)** — تفاصيل في `docs/11-qr-referral-kpi-career-rbac-2026-08-13.md` وفي `apps/api/src/modules/admin/README.md` § باني الأدوار الديناميكي.
 
 ---
