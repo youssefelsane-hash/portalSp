@@ -17,6 +17,25 @@ echo "==> [2/5] تجهيز ملفات .env (القيم الافتراضية بت
 [ -f apps/api/.env ] || cp apps/api/.env.example apps/api/.env
 [ -f apps/admin/.env.local ] || cp apps/admin/.env.example apps/admin/.env.local
 
+# بَقّة حقيقية اتلقطت أول تجربة Codespace حي فعلية: apps/admin بيستخدم NEXT_PUBLIC_API_URL في
+# كود جافاسكريبت شغال جوّه متصفح المستخدم مباشرة (مش عن طريق سيرفر Next.js) لنداءات زي
+# GET /auth/me بعد تسجيل الدخول — القيمة الافتراضية http://localhost:3000 معناها "لوكال هوست
+# جهاز المستخدم نفسه" لما المتصفح ده فعليًا برّه الـCodespace (تاب Chrome عادي فاتح رابط
+# forwarded https://...-3001.app.github.dev). النتيجة: كل نداء زي ده بيفشل بصمت برسالة عامة
+# "حصل خطأ، حاول تاني" حتى لو تسجيل الدخول نفسه نجح فعلاً. الإصلاح: لو شغالين جوّه Codespace
+# فعليًا (CODESPACES=true، متغيّر بيتحط تلقائيًا)، نبني رابط الـforward العام الصح لبورت 3000
+# ونحطه بدل القيمة المحلية.
+if [ "${CODESPACES:-false}" = "true" ] && [ -n "${CODESPACE_NAME:-}" ]; then
+  FORWARD_DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
+  API_PUBLIC_URL="https://${CODESPACE_NAME}-3000.${FORWARD_DOMAIN}/api/v1"
+  echo "    Codespace متعرّف عليه — NEXT_PUBLIC_API_URL هيتظبط على: ${API_PUBLIC_URL}"
+  if grep -q '^NEXT_PUBLIC_API_URL=' apps/admin/.env.local; then
+    sed -i "s#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=${API_PUBLIC_URL}#" apps/admin/.env.local
+  else
+    echo "NEXT_PUBLIC_API_URL=${API_PUBLIC_URL}" >> apps/admin/.env.local
+  fi
+fi
+
 echo "==> [3/5] تثبيت حزم npm لكل الـworkspaces (api + admin + packages) ..."
 npm install
 
