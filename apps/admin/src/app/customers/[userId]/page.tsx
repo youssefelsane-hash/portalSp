@@ -128,6 +128,16 @@ export default function CustomerDetailPage() {
             <p>متوسط التقييم اللي بيدّيه: {detail.average_rating_given ?? '—'}</p>
             <p>أول طلب: {detail.first_order_at ? new Date(detail.first_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</p>
             <p>آخر طلب: {detail.last_order_at ? new Date(detail.last_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</p>
+            <p dir="ltr" className="text-muted-foreground">كود الترشيح: {detail.referral_code ?? '—'}</p>
+            {detail.referred_by_user_id && (
+              <p className="text-xs text-muted-foreground">
+                اترشّح بواسطة مستخدم آخر (
+                <a href={`/customers/${detail.referred_by_user_id}`} className="underline">
+                  عرض
+                </a>
+                )
+              </p>
+            )}
             {detail.is_blocked && detail.blocked_reason && (
               <p className="text-destructive">سبب الحظر: {detail.blocked_reason}</p>
             )}
