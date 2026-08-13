@@ -299,6 +299,8 @@ export class OrdersService {
         requiredTechnicians: durationEstimate?.assigned_technicians ?? null,
         requiredAssistants: durationEstimate?.assigned_assistants ?? null,
         estimatedDurationDays: durationEstimate?.estimated_days ?? null,
+        // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
+        requestedUnits: durationEstimate ? String(dto.requested_units) : null,
       });
       await manager.save(order);
 

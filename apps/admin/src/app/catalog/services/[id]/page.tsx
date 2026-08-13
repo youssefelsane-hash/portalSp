@@ -15,6 +15,7 @@ import type {
   ServiceAddonResponseDto,
   ServiceLevelPricingResponseDto,
   ServiceProductivityActualResponseDto,
+  ServiceProductivitySuggestionResponseDto,
   ServiceStandardDataResponseDto,
   ServiceZonePricingResponseDto,
   SkillLevel,
@@ -73,11 +74,20 @@ export default function ServiceDetailPage() {
   const [addons, setAddons] = useState<ServiceAddonResponseDto[] | null>(null);
   const [standardData, setStandardData] = useState<ServiceStandardDataResponseDto[] | null>(null);
   const [actualsByStandardData, setActualsByStandardData] = useState<Record<string, ServiceProductivityActualResponseDto[]>>({});
+  const [pendingSuggestions, setPendingSuggestions] = useState<ServiceProductivitySuggestionResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showNewAddon, setShowNewAddon] = useState(false);
   const [showNewStandardData, setShowNewStandardData] = useState(false);
   const [actualsFormOpenFor, setActualsFormOpenFor] = useState<string | null>(null);
+
+  // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — endpoint الاقتراحات
+  // عام (كل الخدمات)، بنفلتر هنا لاقتراحات standard_data بتوع الخدمة دي بس.
+  function loadPendingSuggestions() {
+    authedFetch<ServiceProductivitySuggestionResponseDto[]>('/admin/services/productivity-suggestions?status=pending')
+      .then(setPendingSuggestions)
+      .catch(() => setPendingSuggestions([]));
+  }
 
   function loadAll() {
     // مفيش GET /admin/services/:id مفرد — بنلاقيه جوّه القايمة الكاملة بدل endpoint مخصص
@@ -95,6 +105,7 @@ export default function ServiceDetailPage() {
     authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing).catch(() => setLevelPricing([]));
     authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons).catch(() => setAddons([]));
     authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData).catch(() => setStandardData([]));
+    loadPendingSuggestions();
   }
 
   function loadActuals(standardDataId: string) {
@@ -324,6 +335,34 @@ export default function ServiceDetailPage() {
       });
       (e.target as HTMLFormElement).reset();
       loadActuals(standardDataId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم — فحص فوري بدل استنى الجولة الدورية (كل ساعة).
+  async function handleGenerateSuggestions() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch('/admin/services/productivity-suggestions/generate', { method: 'POST' });
+      loadPendingSuggestions();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleReviewSuggestion(suggestionId: string, decision: 'approve' | 'reject') {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/productivity-suggestions/${suggestionId}/${decision}`, { method: 'POST' });
+      loadPendingSuggestions();
+      authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -796,9 +835,14 @@ export default function ServiceDetailPage() {
         <Card className="xl:col-span-2">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">بيانات قياسية (أجور يومية وإنتاجية)</CardTitle>
-            <Button size="sm" variant="outline" onClick={() => setShowNewStandardData((s) => !s)}>
-              + إضافة جديدة
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={isSaving} onClick={handleGenerateSuggestions}>
+                افحص اقتراحات الإنتاجية الآن
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setShowNewStandardData((s) => !s)}>
+                + إضافة جديدة
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {showNewStandardData && (
@@ -887,8 +931,46 @@ export default function ServiceDetailPage() {
                           <TableCell colSpan={8}>
                             <div className="rounded-md border p-3">
                               <p className="mb-2 text-sm font-medium">
-                                إنتاجية فعلية مسجّلة (مرحلة 1 — تسجيل يدوي فقط، لسه مش مربوطة تلقائيًا بالطلبات)
+                                إنتاجية فعلية مسجّلة — تسجيل يدوي، أو تلقائي عند إكمال طلب حقيقي مربوط بالبيانات القياسية دي (المصدر
+                                في العمود تحت)
                               </p>
+                              {(pendingSuggestions ?? []).filter((s) => s.service_standard_data_id === row.id).length > 0 && (
+                                <div className="mb-3 flex flex-col gap-2">
+                                  {(pendingSuggestions ?? [])
+                                    .filter((s) => s.service_standard_data_id === row.id)
+                                    .map((s) => (
+                                      <div
+                                        key={s.id}
+                                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/40 bg-primary/5 p-3"
+                                      >
+                                        <div className="text-sm">
+                                          <span className="font-medium">اقتراح تحديث الإنتاجية:</span>{' '}
+                                          <span dir="ltr">
+                                            {s.current_productivity_per_day} ← {s.suggested_productivity_per_day}
+                                          </span>{' '}
+                                          (عينة {s.sample_size} طلب، ثقة {(s.confidence_score * 100).toFixed(0)}%)
+                                        </div>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            size="sm"
+                                            disabled={isSaving}
+                                            onClick={() => handleReviewSuggestion(s.id, 'approve')}
+                                          >
+                                            موافقة
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled={isSaving}
+                                            onClick={() => handleReviewSuggestion(s.id, 'reject')}
+                                          >
+                                            رفض
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
                               <form
                                 onSubmit={(e) => handleRecordActual(e, row.id)}
                                 className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5 sm:items-end"
@@ -929,6 +1011,7 @@ export default function ServiceDetailPage() {
                                       <TableHead>الأيام</TableHead>
                                       <TableHead>الطاقم</TableHead>
                                       <TableHead>الإنتاجية المحسوبة/يوم</TableHead>
+                                      <TableHead>المصدر</TableHead>
                                       <TableHead>ملاحظات</TableHead>
                                     </TableRow>
                                   </TableHeader>
@@ -941,6 +1024,7 @@ export default function ServiceDetailPage() {
                                           {a.actual_technicians} فني{a.actual_assistants > 0 ? ` + ${a.actual_assistants} مساعد` : ''}
                                         </TableCell>
                                         <TableCell dir="ltr">{a.computed_productivity_per_day.toFixed(2)}</TableCell>
+                                        <TableCell>{a.source === 'system_auto' ? 'تلقائي (طلب حقيقي)' : 'يدوي'}</TableCell>
                                         <TableCell>{a.notes || '—'}</TableCell>
                                       </TableRow>
                                     ))}

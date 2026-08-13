@@ -143,6 +143,12 @@ export class Order {
   @Column({ name: 'estimated_duration_days', type: 'smallint', nullable: true })
   estimatedDurationDays: number | null;
 
+  // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — نفس فلسفة snapshot فوق:
+  // الوحدات المطلوبة وقت الحجز (requested_units بتاعة CreateOrderDto)، مخزّنة هنا عشان تُستخدم
+  // كـactual_units وقت التقاط observation تلقائي عند إكمال الطلب فعليًا.
+  @Column({ name: 'requested_units', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  requestedUnits: string | null;
+
   @Column({ name: 'payment_method', type: 'enum', enum: ['cash', 'card', 'wallet', 'bank_transfer', 'corporate_credit'], enumName: 'payment_method', nullable: true })
   paymentMethod: string | null;
 

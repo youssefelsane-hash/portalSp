@@ -2,6 +2,7 @@ import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
 import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
 import { ServiceProductivityActual } from '../entities/service-productivity-actual.entity';
+import { ServiceProductivitySuggestion } from '../entities/service-productivity-suggestion.entity';
 import { ServiceStandardData } from '../entities/service-standard-data.entity';
 import { ServiceZonePricing } from '../entities/service-zone-pricing.entity';
 import { Service } from '../entities/service.entity';
@@ -248,6 +249,8 @@ export interface ServiceProductivityActualResponseDto {
   actual_assistants: number;
   computed_productivity_per_day: number;
   notes: string | null;
+  // system_auto = اتسجّل تلقائيًا عند إكمال طلب حقيقي (migration 0077)، manual = تسجيل يدوي.
+  source: string;
   created_at: string;
 }
 
@@ -266,6 +269,39 @@ export function toServiceProductivityActualResponseDto(row: ServiceProductivityA
     // بالرقم القياسي (productivity_per_day) دلوقتي؛ المقارنة/التحديث التلقائي مرحلة لاحقة.
     computed_productivity_per_day: actualDays > 0 ? Math.round((actualUnits / actualDays) * 100) / 100 : 0,
     notes: row.notes,
+    source: row.source,
     created_at: row.createdAt.toISOString(),
+  };
+}
+
+// مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) —
+// ProductivityLearningService.generateSuggestions().
+export interface ServiceProductivitySuggestionResponseDto {
+  id: string;
+  service_standard_data_id: string;
+  current_productivity_per_day: number;
+  suggested_productivity_per_day: number;
+  sample_size: number;
+  confidence_score: number;
+  status: string;
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by_user_id: string | null;
+}
+
+export function toServiceProductivitySuggestionResponseDto(
+  row: ServiceProductivitySuggestion,
+): ServiceProductivitySuggestionResponseDto {
+  return {
+    id: row.id,
+    service_standard_data_id: row.serviceStandardDataId,
+    current_productivity_per_day: Number(row.currentProductivityPerDay),
+    suggested_productivity_per_day: Number(row.suggestedProductivityPerDay),
+    sample_size: row.sampleSize,
+    confidence_score: Number(row.confidenceScore),
+    status: row.status,
+    created_at: row.createdAt.toISOString(),
+    reviewed_at: row.reviewedAt ? row.reviewedAt.toISOString() : null,
+    reviewed_by_user_id: row.reviewedByUserId,
   };
 }

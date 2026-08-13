@@ -76,13 +76,27 @@
 - **الجزء التاني من طلب المالك ("الطلبات القديمة تفضل بأسعارها الأصلية") كان متحقق بالفعل هيكليًا من غير أي تغيير**: `orders.estimated_price_cents`/`total_amount_cents` بتتخزن على الطلب نفسه وقت الإنشاء (`orders.service.ts`)، ومفيش أي إعادة حساب لاحقة من `service_zone_pricing` — تغيير سعر منطقة (فوري أو مجدول) مبيأثرش على طلبات قديمة أصلاً بحكم التصميم الموجود.
 - **اتعمله اختبار حي كامل**: تسعير فوري (400ج) طُبّق فورًا على `estimate`؛ جدولة سعر (500ج) بعد سنة كاملة — `estimate` النهاردة **فضل يرجّع 400ج** (السعر المستقبلي لسه ما بدأش)، والصف القديم اتأكد إن `valid_until` اتضبط تلقائيًا لنفس لحظة سريان الجديد.
 
-## أساس محرك الإنتاجية الذاتي التعلّم — `service_productivity_actuals` (صُنّاع، `docs/06` §3.9، `docs/07` الجزء د)
+## محرك الإنتاجية الذاتي التعلّم — `service_productivity_actuals`/`service_productivity_suggestions` (صُنّاع، `docs/06` §3.9، `docs/07` الجزء د)
 
-جدول جديد (migration `0056`) — المالك اعتبره "أهم إضافة على الإطلاق": بعد كل شغلانة، تسجيل المساحة/الوقت/عدد العمالة **الفعليين** (مش النظريين) عشان تتجمع بيانات حقيقية بمرور الوقت. **نطاق هذا الجزء تحديدًا مرحلة 1 بس**: التسجيل، مش خوارزمية التحديث التلقائي (مرحلة لاحقة فعليًا — محتاجة بيانات تاريخية ضخمة، 100 ألف شغلانة في مثال المصدر).
+المالك اعتبره "أهم إضافة على الإطلاق": بعد كل شغلانة، تسجيل المساحة/الوقت/عدد العمالة **الفعليين** (مش النظريين) عشان تتجمع بيانات حقيقية بمرور الوقت، وبعدين استخدامها لاقتراح تحديث الرقم القياسي.
 
-- **`POST/GET /admin/services/standard-data/:standardDataId/actuals`** — تسجيل/عرض. `computed_productivity_per_day` (`actual_units ÷ actual_days`) بيتحسب ويترجع مباشرة للمقارنة اليدوية بالرقم القياسي — **مفيش مقارنة/تحديث تلقائي دلوقتي**، الأدمن يقارن بعينه.
-- **فجوة موثّقة صراحة، مش سهو**: مفيش نقطة تلقائية لحظة اكتمال الطلب تسجّل من عندها — `orders` الحالية **مش بتحمل** `standard_data_id`/المساحة المطلوبة/عدد العمالة المُعيَّن أصلاً (التكامل الكامل بين "اعتماد"/الشغلانات الكبيرة ومحرك الإنتاجية لسه خارج نطاق هذه الرؤية، المالك نفسه قال "التركيز الحالي على إن الهيكل يخلص الأول"). التسجيل هنا يدوي من الأدمن/العمليات عمدًا، عشان البيانات تبدأ تتجمع من أول يوم فعليًا بدل ما تستنى تكامل مستقبلي غير موجود.
-- **اتعمله اختبار حي**: شغلانة محارة داخلي (قياسي 30م²/يوم) اتسجّلت بـ150م²/4أيام حقيقيين → `computed_productivity_per_day=37.5` بالظبط — إثبات إن السجل بيوثّق فرق حقيقي عن الرقم النظري، بالظبط زي مثال المصدر (28م²/يوم فعلي في القاهرة مقابل 30 نظري).
+### مرحلة 1 (migration `0056`) — تسجيل، يدوي بس وقتها
+
+`POST/GET /admin/services/standard-data/:standardDataId/actuals` — تسجيل/عرض. `computed_productivity_per_day` (`actual_units ÷ actual_days`) بيتحسب ويترجع مباشرة للمقارنة اليدوية بالرقم القياسي. **اتعمله اختبار حي**: شغلانة محارة داخلي (قياسي 30م²/يوم) اتسجّلت بـ150م²/4أيام حقيقيين → `computed_productivity_per_day=37.5` بالظبط.
+
+### مرحلة 2 (migration `0077`، 2026-08-13) — ✅ خلصت: التقاط تلقائي + اقتراح + موافقة الأدمن
+
+كانت فجوة موثّقة صراحة: "تسجيل يدوي فقط، لسه مش مربوطة تلقائيًا بالطلبات... مفيش automatic learning من completed orders ولا suggested standard update." الـpipeline الكامل دلوقتي في `productivity-learning.service.ts` (`ProductivityLearningService`):
+
+1. **التقاط تلقائي** (`captureFromCompletedOrder()`، بيتنادى من `OrderCompletedProductivityCaptureListener` على `ORDER_STATUS_CHANGED_EVENT` لحظة ما طلب بـ`standard_data_id` يوصل `COMPLETED`) — صف `service_productivity_actuals` جديد بـ`source='system_auto'` تلقائيًا، من غير أي تدخل يدوي:
+   - `actual_units` من `orders.requested_units` (عمود جديد، migration `0077` — snapshot للوحدات المطلوبة وقت الحجز، مكانش متسجّل على الطلب نفسه قبل كده رغم إنه بيتحسب وقت `estimateDuration()`).
+   - `actual_days` من فرق `work_started_at`/`work_completed_at` (يوم واحد على الأقل).
+   - `actual_technicians`/`actual_assistants` من عدد `order_team_members` الفعليين + قائد الطلب.
+   - فشل الالتقاط (بيانات ناقصة، نادر) بيتسجّل بس ومايكسرش دورة إكمال الطلب.
+2. **تجميع دوري** (`generateSuggestions()`، فحص كل ساعة عبر `setInterval` — نفس فلسفة `OrderAutoCancelService`، مش BullMQ، عشان الاستقلال عن مشكلة Worker/Redis reconnection الموثّقة في `../technicians/README.md`؛ `POST /admin/services/productivity-suggestions/generate` بيسمح بفحص فوري كمان): لكل `service_standard_data` نشطة، بيجمع observations `system_auto` الجديدة (بعد آخر اقتراح، أو كلها لو مفيش)، لو العدد ≥ `productivity_learning.min_sample_size` (افتراضي 5، `/settings`) بيحسب **median** معدّل الإنتاجية المُطبّع على أساس `min_technicians` (عكس صيغة `estimateDuration()`'s `effectiveProductivity` بالظبط، عشان يتقارن مباشرة بـ`productivity_per_day`)، ولو الفرق عن القيمة الحالية ≥ `productivity_learning.min_change_percentage` (افتراضي 5%) بيولّد اقتراح `pending` جديد — مع `confidence_score` استرشادي (0-1، مبني على حجم العينة + ثبات القيم، **مش قرار آلي**). بيتجاهل `service_standard_data` لو عندها اقتراح `pending` بالفعل (مفيش تراكم).
+3. **موافقة/رفض الأدمن الصريحة** (`POST /admin/services/productivity-suggestions/:id/approve|reject`) — **مفيش تحديث تلقائي لـ`productivity_per_day` بلا موافقة صريحة أبدًا**؛ الموافقة بتحدّث الرقم القياسي فورًا + `audit_log` (`productivity_suggestion.approved`، بالقيمة القديمة/الجديدة). `GET /admin/services/productivity-suggestions?status=pending` لعرض قايمة الانتظار.
+
+**اتعمله اختبار حي كامل** عبر curl مباشر ضد Postgres حقيقي: 5 صفوف `system_auto` (38/39/40/41/42 م² في يوم واحد بفني واحد، رقم قياسي حالي 30) → `generate` ولّد اقتراح واحد بـ`median=40` بالظبط، `sample_size=5`، `confidence_score=0.538` (اتحقق يدويًا بنفس الصيغة). إعادة تشغيل `generate` رجّعت `created:0` (مفيش تكرار لاقتراح `pending` موجود). الموافقة حدّثت `productivity_per_day` من 30 لـ40 بالظبط + سجّلت `audit_log` صح، ومحاولة موافقة تانية على نفس الاقتراح اترفضت 409 ("الاقتراح ده اتراجع بالفعل").
 
 ## اختيار الفني قبل الحجز — صُنّاع (`docs/08` §3) — ✅ خلص
 
