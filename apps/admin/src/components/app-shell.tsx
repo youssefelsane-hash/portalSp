@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
   { href: '/', label: 'نظرة عامة' },
+  { href: '/pricing', label: 'محرك التسعير' },
   { href: '/employees', label: 'الموظفين' },
   { href: '/technicians', label: 'الفنيين' },
   { href: '/customers', label: 'العملاء' },
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { href: '/notification-routing', label: 'توجيه الإشعارات' },
   { href: '/technician-companies', label: 'شركات/فرق الفنيين' },
   { href: '/technician-levels', label: 'سياسة مستويات الفنيين' },
+  { href: '/academy', label: 'الأكاديمية' },
   { href: '/catalog', label: 'الكتالوج' },
   { href: '/geo', label: 'المدن والمناطق' },
   { href: '/settings', label: 'الإعدادات' },

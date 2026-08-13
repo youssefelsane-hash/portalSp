@@ -24,6 +24,7 @@ import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routi
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
+import { OrderAssistantAssignedManuallyNotificationListener } from './listeners/order-assistant-assigned-manually-notification.listener';
 import { OrderCreatedNotificationListener } from './listeners/order-created-notification.listener';
 import { OrderReassignedNotificationListener } from './listeners/order-reassigned-notification.listener';
 import { OrderStatusNotificationListener } from './listeners/order-status-notification.listener';
@@ -73,6 +74,7 @@ import { NotificationsService } from './notifications.service';
     AssistantOpportunityNotificationListener,
     AssistantMatchingEscalatedRoutingListener,
     TechnicianCancellationNotificationListener,
+    OrderAssistantAssignedManuallyNotificationListener,
   ],
   exports: [NotificationsService],
 })

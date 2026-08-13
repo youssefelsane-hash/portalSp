@@ -115,4 +115,24 @@ transaction dispatchNextRound الماسكة القفل بالفعل). الأح�
 آلية الاستبعاد الموجودة أصلاً في `findEligibleTechnicians()`). تفاصيل كاملة في `../orders/README.md`
 § سياسة إلغاء الفني.
 
+## تعارض جدولة (docs/08 §2) — كانت فجوة موثّقة صراحة (ADR-0007 §7)، اتقفلت (2026-08-13)
+
+`findEligibleTechnicians()` كانت بتستبعد فني عنده طلب نشط دلوقتي (`ACTIVE_TECHNICIAN_ORDER_STATUSES`)
+بس — كافي لطلب فوري، لكن لطلب `scheduled_at` مستقبلي مش كافي خالص: فني ممكن يكون فاضي دلوقتي
+بالظبط بس عنده سلوت `booked` (`technician_schedule_slots`، راجع `../technicians/README.md`)
+بيتقاطع مع وقت الطلب الجديد، ويترشّح ويقبله رغم التعارض. اتضاف شرط `NOT EXISTS` جديد يفحص
+تقاطع نافذة الطلب (`[scheduled_at, scheduled_at + services.estimated_duration_minutes]`، افتراضي
+ساعة لو الخدمة مالهاش مدة مقدّرة) مع أي سلوت `booked` لنفس الفني في نفس اليوم. لطلب فوري
+(`scheduled_at IS NULL`) الشرط كله no-op بالضبط (نفس السلوك القديم بالحرف — مفيش تغيير على
+مسار الطلبات الفورية أبدًا). كل القيم UTC مباشرة (نفس اتفاقية تركيب `scheduled_at` من
+`slot_date`/`start_time` في `orders.service.ts`، موثّقة في `../technicians/README.md`).
+
+**قيد موثّق صراحة**: النافذة المحسوبة ممكن تتخطى منتصف الليل نظريًا (لخدمة بمدة طويلة جدًا قرب
+نص الليل) وده مش متغطى بدقة — السلوتات نفسها أصلاً مقيّدة بيوم واحد (`end_time > start_time`
+مفروضة في `createSlot()`)، فحالة عملية نادرة جدًا ومقبولة كقيد معروف مش سهو.
+
+اتعمله اختبار حي مباشر ضد Postgres حقيقي (نفس استعلام `findEligibleTechnicians()` بالحرف عبر
+psql): فني حقيقي عنده سلوت `booked` 10:00-12:00 UTC — طلب `scheduled_at=11:00` (بيتقاطع) استبعده
+صح، وطلب `scheduled_at=13:00` (بعد نهاية السلوت) رجّعه صح.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

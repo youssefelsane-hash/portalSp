@@ -144,6 +144,17 @@ export default function TechnicianDetailPage() {
     );
   }
 
+  // "معاه مساعد؟" (docs/06 §3.7) — كانت فجوة موثّقة صراحة: endpoints الموافقة/الرفض كانت
+  // موجودة ومختبرة (assistant-matching module بيعتمد عليها فعليًا في الأولوية 1 للمطابقة)
+  // بس مفيش أي شاشة أدمن بتعرض طلبات pending_approval أصلاً.
+  async function handleApproveAssistant() {
+    await runAction(() => authedFetch(`/admin/technicians/${id}/assistant/approve`, { method: 'POST' }));
+  }
+
+  async function handleRejectAssistant() {
+    await runAction(() => authedFetch(`/admin/technicians/${id}/assistant/reject`, { method: 'POST' }));
+  }
+
   async function handleAssignZone(e: FormEvent) {
     e.preventDefault();
     if (!newZoneId) return;
@@ -287,6 +298,44 @@ export default function TechnicianDetailPage() {
             </CardFooter>
           </form>
         </Card>
+
+        {detail.assistant_link_status !== 'none' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">المساعد الشخصي</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <p className="text-sm">
+                الحالة:{' '}
+                <Badge
+                  variant={
+                    detail.assistant_link_status === 'approved'
+                      ? 'secondary'
+                      : detail.assistant_link_status === 'pending_approval'
+                        ? 'outline'
+                        : 'destructive'
+                  }
+                >
+                  {detail.assistant_link_status === 'approved'
+                    ? 'معتمد'
+                    : detail.assistant_link_status === 'pending_approval'
+                      ? 'في انتظار الموافقة'
+                      : detail.assistant_link_status}
+                </Badge>
+              </p>
+              {detail.assistant_link_status === 'pending_approval' && (
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" disabled={isSaving} onClick={handleApproveAssistant}>
+                    موافقة
+                  </Button>
+                  <Button type="button" size="sm" variant="destructive" disabled={isSaving} onClick={handleRejectAssistant}>
+                    رفض
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="lg:col-span-2">
           <CardHeader>

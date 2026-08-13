@@ -22,3 +22,4 @@ export * from './chat';
 export * from './internal-chat';
 export * from './buildings';
 export * from './domestic-workers';
+export * from './academy';

@@ -30,6 +30,8 @@ export interface AdminTechnicianResponseDto {
   is_available: boolean;
   is_on_duty: boolean;
   created_at: string;
+  assistant_link_status: 'none' | 'pending_approval' | 'approved';
+  assistant_technician_id: string | null;
 }
 
 export interface TechnicianDocumentResponseDto {

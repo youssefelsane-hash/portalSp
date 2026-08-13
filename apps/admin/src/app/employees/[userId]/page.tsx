@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { EmployeeDetail, UpdateEmployeeBody } from '@baytak/shared-types';
+import type { AssignRoleBody, EmployeeDetail, RoleResponseDto, UpdateEmployeeBody } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
@@ -19,8 +20,11 @@ export default function EmployeeDetailPage() {
   const router = useRouter();
 
   const [detail, setDetail] = useState<EmployeeDetail | null>(null);
+  const [allRoles, setAllRoles] = useState<RoleResponseDto[] | null>(null);
+  const [selectedRoleName, setSelectedRoleName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingRole, setIsSavingRole] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [showBlockForm, setShowBlockForm] = useState(false);
 
@@ -33,8 +37,41 @@ export default function EmployeeDetailPage() {
   useEffect(() => {
     if (isLoading) return;
     load();
+    authedFetch<RoleResponseDto[]>('/admin/roles')
+      .then(setAllRoles)
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الأدوار المتاحة'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, userId]);
+
+  async function handleAssignRole(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedRoleName) return;
+    setIsSavingRole(true);
+    setError(null);
+    try {
+      const body: AssignRoleBody = { role_name: selectedRoleName };
+      await authedFetch(`/admin/users/${userId}/roles`, { method: 'POST', body: JSON.stringify(body) });
+      setSelectedRoleName('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSavingRole(false);
+    }
+  }
+
+  async function handleRevokeRole(roleName: string) {
+    setIsSavingRole(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/users/${userId}/roles/${roleName}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSavingRole(false);
+    }
+  }
 
   async function handleUpdate(e: FormEvent) {
     e.preventDefault();
@@ -193,7 +230,7 @@ export default function EmployeeDetailPage() {
           <CardHeader>
             <CardTitle className="text-base">الأدوار</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-4">
             {detail.roles.length === 0 ? (
               <p className="text-sm text-muted-foreground">مفيش أدوار متعيّنة</p>
             ) : (
@@ -202,6 +239,7 @@ export default function EmployeeDetailPage() {
                   <TableRow>
                     <TableHead>الدور</TableHead>
                     <TableHead>اتعيّن في</TableHead>
+                    <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -209,10 +247,46 @@ export default function EmployeeDetailPage() {
                     <TableRow key={role.role_id}>
                       <TableCell>{role.display_name}</TableCell>
                       <TableCell>{new Date(role.assigned_at).toLocaleDateString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isSavingRole}
+                          onClick={() => handleRevokeRole(role.role_name)}
+                        >
+                          سحب
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+            )}
+
+            {allRoles && allRoles.filter((r) => !detail.roles.some((dr) => dr.role_name === r.name)).length > 0 && (
+              <form onSubmit={handleAssignRole} className="flex items-end gap-2 border-t pt-4">
+                <div className="flex-1">
+                  <Label htmlFor="new_role">منح دور جديد</Label>
+                  <SelectNative
+                    id="new_role"
+                    value={selectedRoleName}
+                    onChange={(e) => setSelectedRoleName(e.target.value)}
+                  >
+                    <option value="">— اختر دور —</option>
+                    {allRoles
+                      .filter((r) => !detail.roles.some((dr) => dr.role_name === r.name))
+                      .map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.displayName}
+                        </option>
+                      ))}
+                  </SelectNative>
+                </div>
+                <Button type="submit" size="sm" disabled={!selectedRoleName || isSavingRole}>
+                  منح
+                </Button>
+              </form>
             )}
           </CardContent>
         </Card>

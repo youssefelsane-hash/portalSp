@@ -1,9 +1,27 @@
-import { IsIn, IsOptional, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { BOOKING_MODE_FILTER_VALUES, BookingModeFilter } from './list-services.dto';
 
 export class ListTechniciansForServiceDto {
   @IsUUID()
   address_id: string;
+
+  // خدمات pricing_model=formula (docs/08 §1) — لو العميل ملى تفاصيل الشغل بالفعل (فورم ديناميكي
+  // قبل شاشة اختيار الفني)، السعر النهائي الحقيقي لكل فني مرشّح (بعد مضاعف مستواه) بيظهر هنا —
+  // نفس فلسفة "مفيش مفاجأة سعر بعد التأكيد" المطبّقة على باقي نماذج التسعير. من غيرها،
+  // final_price_cents بيرجع null صراحة لخدمات formula (زي ما كان دايمًا) بدل ما يرفض الطلب كله.
+  // مُبعتة كـJSON مُرمّز في query string (GET مالوش body) — نفس نمط أي مرشّح كائن في REST APIs.
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  })
+  @IsObject()
+  field_values?: Record<string, string | number | boolean>;
 
   // مضاعف سعر مستوى الفني (docs/08) — لازم نعرف لو الحجز طوارئ عشان السعر النهائي المعروض لكل
   // فني مرشّح يشمل رسوم الطوارئ بالظبط زي اللي هيتحصّل فعليًا لو العميل أكّد بيه. نفس نمط

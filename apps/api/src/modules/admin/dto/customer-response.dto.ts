@@ -18,6 +18,8 @@ export interface AdminCustomerResponseDto {
   first_order_at: string | null;
   last_order_at: string | null;
   created_at: string;
+  referral_code: string | null;
+  referred_by_user_id: string | null;
 }
 
 export function toAdminCustomerResponseDto(profile: CustomerProfile, user: User): AdminCustomerResponseDto {
@@ -38,5 +40,7 @@ export function toAdminCustomerResponseDto(profile: CustomerProfile, user: User)
     first_order_at: profile.firstOrderAt ? profile.firstOrderAt.toISOString() : null,
     last_order_at: profile.lastOrderAt ? profile.lastOrderAt.toISOString() : null,
     created_at: profile.createdAt.toISOString(),
+    referral_code: user.referralCode,
+    referred_by_user_id: user.referredByUserId,
   };
 }

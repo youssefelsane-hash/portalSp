@@ -65,8 +65,13 @@ export class AssistantMatchingService {
     return this.teamMembers.count({ where: { orderId, memberType: MEMBER_TYPE_ASSISTANT } });
   }
 
-  /** فحص أهلية أساسي مشترك بين أولوية 1 وأولوية 2 — نفس معايير findEligibleTechnicians في matching.service.ts. */
-  private async isCandidateEligible(technicianId: string): Promise<boolean> {
+  /**
+   * فحص أهلية أساسي مشترك بين أولوية 1 وأولوية 2 — نفس معايير findEligibleTechnicians في
+   * matching.service.ts، بما فيها تعارض الجدولة (كانت فجوة موثّقة صراحة في ADR-0007 §7 —
+   * "بالاكتفاء بفحص 'مفيش طلب نشط' نفس دقة الفني القائد" — اتقفلت 2026-08-13، نفس منطق
+   * matching.service.ts's findEligibleTechnicians() بالحرف، راجع التعليق هناك للتفاصيل الكاملة).
+   */
+  private async isCandidateEligible(technicianId: string, order: Order): Promise<boolean> {
     const [row] = await this.dataSource.query<{ eligible: boolean }[]>(
       `
       SELECT (
@@ -83,10 +88,21 @@ export class AssistantMatchingService {
           JOIN orders o ON o.id = otm.order_id
           WHERE otm.member_type = 'assistant' AND o.order_status = ANY($2::order_status[]) AND o.deleted_at IS NULL
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM technician_schedule_slots tss
+          WHERE tss.technician_id = tp.id
+            AND tss.status = 'booked'
+            AND tss.deleted_at IS NULL
+            AND $4::timestamptz IS NOT NULL
+            AND tss.slot_date = ($4::timestamptz)::date
+            AND tss.start_time < (($4::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
+            AND tss.end_time > ($4::timestamptz)::time
+        )
       ) AS eligible
-      FROM technician_profiles tp WHERE tp.id = $1
+      FROM technician_profiles tp, services s
+      WHERE tp.id = $1 AND s.id = $3
       `,
-      [technicianId, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+      [technicianId, ACTIVE_TECHNICIAN_ORDER_STATUSES, order.serviceId, order.scheduledAt ?? null],
     );
     return row?.eligible === true;
   }
@@ -104,7 +120,7 @@ export class AssistantMatchingService {
 
     // أولوية 1: المساعد الشخصي المعتمد
     if (lead.assistantLinkStatus === TechnicianAssistantLinkStatus.APPROVED && lead.assistantTechnicianId) {
-      const eligible = await this.isCandidateEligible(lead.assistantTechnicianId);
+      const eligible = await this.isCandidateEligible(lead.assistantTechnicianId, order);
       if (eligible) {
         await this.teamMembers.save(
           this.teamMembers.create({
@@ -145,6 +161,7 @@ export class AssistantMatchingService {
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
+      JOIN services s ON s.id = $1
       WHERE tp.verification_status = 'approved'
         AND tp.is_available = true
         AND tp.is_on_duty = true
@@ -160,10 +177,30 @@ export class AssistantMatchingService {
           JOIN orders o ON o.id = otm.order_id
           WHERE otm.member_type = 'assistant' AND o.order_status = ANY($5::order_status[]) AND o.deleted_at IS NULL
         )
+        -- تعارض جدولة (ADR-0007 §7 — كانت فجوة موثّقة صراحة، اتقفلت) — نفس منطق
+        -- matching.service.ts's findEligibleTechnicians() بالحرف بالنسبة للمساعد نفسه.
+        AND NOT EXISTS (
+          SELECT 1 FROM technician_schedule_slots tss
+          WHERE tss.technician_id = tp.id
+            AND tss.status = 'booked'
+            AND tss.deleted_at IS NULL
+            AND $7::timestamptz IS NOT NULL
+            AND tss.slot_date = ($7::timestamptz)::date
+            AND tss.start_time < (($7::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
+            AND tss.end_time > ($7::timestamptz)::time
+        )
       ORDER BY ST_Distance(tp.current_location, a.location) ASC
       LIMIT $4
       `,
-      [order.serviceId, order.serviceZoneId, order.addressId, batchSize, ACTIVE_TECHNICIAN_ORDER_STATUSES, excludeIds],
+      [
+        order.serviceId,
+        order.serviceZoneId,
+        order.addressId,
+        batchSize,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        excludeIds,
+        order.scheduledAt ?? null,
+      ],
     );
 
     if (candidates.length === 0) {

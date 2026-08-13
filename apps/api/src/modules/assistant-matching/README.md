@@ -49,8 +49,8 @@
 مستمع منفصل (`AssistantMatchingEscalatedRoutingListener`، جوّه `NotificationsModule`) بيستخدم
 `NotificationRoutingService.routeToRole('assistant_matching.escalated', ...)` — نفس آلية
 `EmergencyOrderRoutingListener` بالحرف، بيوجّه لدور `ops_manager` (قاعدة توجيه مزروعة في
-migration `0075`). **نطاق مؤجَّل صراحة**: حل يدوي إداري بعد التصعيد (إشعار بس دلوقتي، مش endpoint
-جديد لتعيين مساعد يدوي — مش مطلوب صراحة في القرار الأصلي).
+migration `0075`). الحل اليدوي الإداري بعد التصعيد اتقفل لاحقًا (ADR-0008، راجع "نطاق مؤجَّل
+صراحة" تحت).
 
 ## لماذا الإشعارات عبر أحداث، مش نداء مباشر لـ`NotificationsService`
 
@@ -102,11 +102,19 @@ migration `0075`). **نطاق مؤجَّل صراحة**: حل يدوي إدار�
 
 ## نطاق مؤجَّل صراحة عن هذا البناء
 
-- حل يدوي إداري بعد التصعيد (endpoint جديد لتعيين مساعد يدوي من الأدمن) — إشعار بس دلوقتي.
+- ~~حل يدوي إداري بعد التصعيد~~ — **اتقفلت (ADR-0008، 2026-08-13)**: `POST /admin/orders/:id/assistants`
+  جديد في `AdminOrdersController` (موديول `orders`، مش الموديول ده — راجع ADR-0008 كامل). الأدمن
+  بيختار فني من `/technicians` مباشرة (مفيش قايمة "مساعدين متاحين" منفصلة)، `order_team_members`
+  اتضافلها `added_by_admin_user_id` بديل لـ`added_by_technician_id` (migration `0076`) عشان
+  audit trail يفضل صادق (الأدمن مش فني). واجهة جديدة في `/admin/orders/:id` — كارت "المساعدين"
+  بيظهر بس لو الطلب محتاج مساعدين، مع فورم التعيين.
 - إعادة بث تلقائي عند كل رفض قبل انتهاء المهلة (زي `matching.service.ts`'s `reject()`) — قرار
   مقصود لتبسيط النطاق الأول، موثّق في ADR-0007 نفسه.
-- فحص تعارض جدولة صريح (`technician_schedule_slots`) للمساعد — بالاكتفاء بفحص "مفيش طلب نشط"،
-  نفس مستوى الدقة المستخدم للفني القائد في `matching.service.ts` أصلًا.
+- ~~فحص تعارض جدولة صريح (`technician_schedule_slots`) للمساعد~~ — **اتقفلت (2026-08-13)**:
+  `isCandidateEligible()` (أولوية 1) و`broadcastToPool()` (أولوية 2) الاتنين بقى فيهم نفس شرط
+  `NOT EXISTS` المضاف في `matching.service.ts`'s `findEligibleTechnicians()` — تقاطع نافذة الطلب
+  المتوقعة مع أي سلوت `booked` للمساعد المرشّح. راجع `../matching/README.md` § تعارض جدولة
+  للتفاصيل الكاملة والاختبار الحي (نفس المنطق بالحرف، مطبّق هنا على المساعد بدل القائد).
 - `apps/customer-app`: لا حاجة — العميل مايشوفش تفاصيل مطابقة المساعد خالص (قرار العمل بالكامل
   داخلي بين الفني القائد/المساعد/النظام، العميل بس بيشوف نتيجة الفريق النهائي لو محتاج، عبر
   `orders.required_assistants` الموجود من قبل في `../orders/README.md`).

@@ -18,6 +18,12 @@ export interface AdminCustomerResponseDto {
   first_order_at: string | null;
   last_order_at: string | null;
   created_at: string;
+  referral_code: string | null;
+  referred_by_user_id: string | null;
+}
+
+export interface CreditLoyaltyBody {
+  points: number;
 }
 
 export interface BlockCustomerBody {

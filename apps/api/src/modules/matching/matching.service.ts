@@ -94,6 +94,12 @@ export class MatchingService {
    * `preferredCompanyId` (docs/06 §1.5 — "اعتماد" بشركة محدّدة) — بيقيّد النتيجة لفنيي نفس
    * الشركة بس لو اتبعت، نفس فلسفة `requestedTechnicianId` بالحرف (تفضيل بس، مش ضمان — لو
    * الشركة مالهاش حد مؤهّل متاح، `dispatchNextRound` يرجع يسأل من غير القيد).
+   *
+   * **تعارض جدولة (docs/08 §2) — كانت فجوة موثّقة صراحة، اتقفلت (2026-08-13)**: لطلب
+   * `order.scheduledAt` مستقبلي، الاستعلام دلوقتي بيستبعد كمان أي فني عنده سلوت `booked` في
+   * `technician_schedule_slots` بيتقاطع زمنيًا مع نافذة الطلب المتوقعة (`scheduled_at` →
+   * `scheduled_at + services.estimated_duration_minutes`) — مش بس "مفيش طلب نشط دلوقتي" زي ما
+   * كان قبل كده. لطلب فوري (`scheduledAt` = `null`) الشرط ده no-op تمامًا، نفس السلوك القديم.
    */
   private findEligibleTechnicians(
     order: Order,
@@ -110,6 +116,7 @@ export class MatchingService {
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
+      JOIN services s ON s.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
       WHERE tp.verification_status = 'approved'
         AND ($8::boolean OR (tp.is_available = true AND tp.is_on_duty = true))
@@ -122,6 +129,23 @@ export class MatchingService {
         )
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
+        -- تعارض جدولة (docs/08 §2، كانت فجوة موثّقة صراحة في ADR-0007 §7 — "بالاكتفاء بفحص
+        -- 'مفيش طلب نشط' بدل فحص السلوتات"): لطلب scheduled_at مستقبلي، الفحص فوق (طلب نشط
+        -- دلوقتي) مش كافي — فني ممكن يكون فاضي دلوقتي بس عنده سلوت booked بطلب تاني يتعارض
+        -- بالظبط مع وقت الطلب ده. $10 (scheduled_at) بيكون NULL لطلبات فورية فالشرط كله no-op
+        -- (نفس السلوك القديم بالحرف). النافذة الزمنية = [scheduled_at, scheduled_at + مدة الخدمة
+        -- المقدّرة (services.estimated_duration_minutes، افتراضي ساعة لو مش محدد)] — كل القيم UTC
+        -- مباشرة (نفس اتفاقية تركيب scheduled_at من slot_date/start_time في orders.service.ts).
+        AND NOT EXISTS (
+          SELECT 1 FROM technician_schedule_slots tss
+          WHERE tss.technician_id = tp.id
+            AND tss.status = 'booked'
+            AND tss.deleted_at IS NULL
+            AND $10::timestamptz IS NOT NULL
+            AND tss.slot_date = ($10::timestamptz)::date
+            AND tss.start_time < (($10::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
+            AND tss.end_time > ($10::timestamptz)::time
+        )
       ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
@@ -135,6 +159,7 @@ export class MatchingService {
         requestedTechnicianId ?? null,
         ignoreAvailabilityFilter,
         preferredCompanyId ?? null,
+        order.scheduledAt ?? null,
       ],
     );
   }

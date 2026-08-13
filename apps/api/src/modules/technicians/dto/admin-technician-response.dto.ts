@@ -22,6 +22,8 @@ export interface AdminTechnicianResponseDto {
   is_available: boolean;
   is_on_duty: boolean;
   created_at: string;
+  assistant_link_status: string;
+  assistant_technician_id: string | null;
 }
 
 export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: User): AdminTechnicianResponseDto {
@@ -42,6 +44,8 @@ export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: U
     is_available: profile.isAvailable,
     is_on_duty: profile.isOnDuty,
     created_at: profile.createdAt.toISOString(),
+    assistant_link_status: profile.assistantLinkStatus,
+    assistant_technician_id: profile.assistantTechnicianId,
   };
 }
 

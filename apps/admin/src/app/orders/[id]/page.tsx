@@ -3,7 +3,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import type { AdminTechnicianResponseDto, OrderDetailResponseDto, OrderItemResponseDto, OrderMediaResponseDto } from '@baytak/shared-types';
+import type {
+  AdminTechnicianResponseDto,
+  OrderDetailResponseDto,
+  OrderItemResponseDto,
+  OrderMediaResponseDto,
+  TeamMemberResponseDto,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 
@@ -59,6 +65,12 @@ export default function OrderDetailPage() {
   const [showReassignForm, setShowReassignForm] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
   const [approvedTechnicians, setApprovedTechnicians] = useState<AdminTechnicianResponseDto[] | null>(null);
+  const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
+  const [newTotalEgp, setNewTotalEgp] = useState('');
+  const [adjustPriceReason, setAdjustPriceReason] = useState('');
+  const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
+  const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
+  const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -71,6 +83,11 @@ export default function OrderDetailPage() {
     authedFetch<OrderItemResponseDto[]>(`/admin/orders/${id}/quote-items`)
       .then(setQuoteItems)
       .catch(() => setQuoteItems([]));
+    // تعيين مساعد يدوي بعد التصعيد (ADR-0008) — محتاجين نعرف كام مساعد اتعيّن فعلاً عشان
+    // نعرف نعرض فورم التعيين ولا لأ (لو الأماكن اكتملت بالفعل، مفيش داعي نعرضه).
+    authedFetch<TeamMemberResponseDto[]>(`/admin/orders/${id}/team-members`)
+      .then(setTeamMembers)
+      .catch(() => setTeamMembers([]));
   }
 
   useEffect(() => {
@@ -138,6 +155,56 @@ export default function OrderDetailPage() {
         method: 'POST',
         body: JSON.stringify({ reason_notes: reason }),
       });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // كانت فجوة موثّقة صراحة برضه: PATCH /admin/orders/:id/adjust-price موجود ومختبر (تعديل
+  // يدوي لسعر طلب لسه ما اتدفعش، لتصحيح خطأ/تعويض) بس مفيش أي زرار ليه في أي شاشة.
+  async function handleAdjustPrice(e: FormEvent) {
+    e.preventDefault();
+    const newTotalCents = Math.round(Number(newTotalEgp) * 100);
+    if (!newTotalCents || newTotalCents < 0) return;
+    if (adjustPriceReason.trim().length < 5) {
+      window.alert('السبب لازم يكون 5 حروف على الأقل');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/adjust-price`, {
+        method: 'PATCH',
+        body: JSON.stringify({ new_total_amount_cents: newTotalCents, reason: adjustPriceReason }),
+      });
+      setShowAdjustPriceForm(false);
+      setNewTotalEgp('');
+      setAdjustPriceReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية (ADR-0008) — POST /admin/orders/:id/assistants
+  // كان موجود بلا أي واجهة تستخدمه، نفس فئة adjust-price/refund فوق.
+  async function handleAssignAssistant(e: FormEvent) {
+    e.preventDefault();
+    if (!assistantTechnicianId) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/assistants`, {
+        method: 'POST',
+        body: JSON.stringify({ technician_id: assistantTechnicianId }),
+      });
+      setShowAssignAssistantForm(false);
+      setAssistantTechnicianId('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -295,7 +362,128 @@ export default function OrderDetailPage() {
                 </Button>
               </CardFooter>
             )}
+          {order.payment_status !== 'paid' && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isSaving}
+                onClick={() => setShowAdjustPriceForm((s) => !s)}
+                className="w-fit"
+              >
+                تعديل السعر يدويًا
+              </Button>
+              {showAdjustPriceForm && (
+                <form onSubmit={handleAdjustPrice} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="new_total_egp">السعر الجديد (جنيه)</Label>
+                    <Input
+                      id="new_total_egp"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      dir="ltr"
+                      value={newTotalEgp}
+                      onChange={(e) => setNewTotalEgp(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="adjust_price_reason">السبب</Label>
+                    <Input
+                      id="adjust_price_reason"
+                      value={adjustPriceReason}
+                      onChange={(e) => setAdjustPriceReason(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
+                    حفظ السعر الجديد
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
         </Card>
+
+        {/* تعيين مساعد يدوي بعد التصعيد (ADR-0008) — بيظهر بس لو الطلب أصلاً محتاج مساعدين. */}
+        {!!order.required_assistants && order.required_assistants > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">المساعدين ({teamMembers.length}/{order.required_assistants})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {teamMembers.length === 0 ? (
+                <p className="text-sm text-muted-foreground">مفيش مساعد معيّن لسه</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>الاسم</TableHead>
+                      <TableHead>الدور</TableHead>
+                      <TableHead>اتعيّن إمتى</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {teamMembers.map((member) => (
+                      <TableRow key={member.id}>
+                        <TableCell>{member.full_name}</TableCell>
+                        <TableCell>{member.role_label}</TableCell>
+                        <TableCell>{new Date(member.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+            {teamMembers.length < order.required_assistants && (
+              <CardFooter className="flex-col items-stretch gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isSaving}
+                  className="w-fit"
+                  onClick={() => {
+                    setShowAssignAssistantForm((s) => !s);
+                    if (!approvedTechnicians) loadApprovedTechnicians();
+                  }}
+                >
+                  عيّن مساعد يدويًا
+                </Button>
+                {showAssignAssistantForm && (
+                  <form onSubmit={handleAssignAssistant} className="flex flex-col gap-2">
+                    <Label htmlFor="assistant_technician_id">الفني</Label>
+                    {!approvedTechnicians ? (
+                      <p className="text-sm text-muted-foreground">بيحمّل قايمة الفنيين…</p>
+                    ) : (
+                      <SelectNative
+                        id="assistant_technician_id"
+                        value={assistantTechnicianId}
+                        onChange={(e) => setAssistantTechnicianId(e.target.value)}
+                        required
+                      >
+                        <option value="" disabled>
+                          اختار فني
+                        </option>
+                        {approvedTechnicians.map((tech) => (
+                          <option key={tech.id} value={tech.id}>
+                            {tech.full_name} ({tech.technician_code})
+                          </option>
+                        ))}
+                      </SelectNative>
+                    )}
+                    <Button type="submit" size="sm" disabled={isSaving || !assistantTechnicianId}>
+                      تأكيد التعيين
+                    </Button>
+                  </form>
+                )}
+              </CardFooter>
+            )}
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

@@ -6,6 +6,10 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import {
+  ORDER_ASSISTANT_ASSIGNED_MANUALLY_EVENT,
+  OrderAssistantAssignedManuallyEvent,
+} from '../../common/events/order-assistant-assigned-manually.event';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
@@ -14,8 +18,11 @@ import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-as
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
+import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { canTransition } from './order-state-machine';
+
+const ASSISTANT_MEMBER_TYPE = 'assistant';
 
 // حالات مايصحش نعدّل السعر فيها: بعد الدفع (لازم يعدّي من استرداد/تحصيل إضافي حقيقي، مش
 // تعديل رقم خام) أو في أي حالة نهائية (اتلغى/انتهت صلاحيته/اتردله فلوسه) — التعديل هنا
@@ -45,6 +52,7 @@ export class AdminOrdersService {
     @InjectRepository(OrderStatusHistory) private readonly statusHistory: Repository<OrderStatusHistory>,
     @InjectRepository(TechnicianOrderCancellation)
     private readonly technicianOrderCancellations: Repository<TechnicianOrderCancellation>,
+    @InjectRepository(OrderTeamMember) private readonly teamMembers: Repository<OrderTeamMember>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
     private readonly events: EventEmitter2,
@@ -290,6 +298,71 @@ export class AdminOrdersService {
       entityId: order.id,
       oldValues: { total_amount_cents: previousTotal },
       newValues: { total_amount_cents: newTotalAmountCents, reason },
+      meta,
+    });
+
+    return order;
+  }
+
+  // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية (ADR-0008، يمتد ADR-0007 §7 اللي أجّل
+  // الحل ده صراحة). فعل نادر تشغيلي — بلا قفل pessimistic_write زي AssistantMatchingService.accept()
+  // (راجع تبرير ADR-0008 §2: سباق بين أدمنين اتنين نادر ومقبول، مش مسار مالي حرج).
+  async assignAssistant(
+    adminUserId: string,
+    orderId: string,
+    technicianProfileId: string,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
+    const order = await this.findOrThrow(orderId);
+    if (!order.requiredAssistants || order.requiredAssistants <= 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
+    }
+
+    const filled = await this.teamMembers.count({ where: { orderId, memberType: ASSISTANT_MEMBER_TYPE } });
+    if (filled >= order.requiredAssistants) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الأماكن المطلوبة اكتملت بالفعل', HttpStatus.CONFLICT);
+    }
+
+    const technician = await this.techniciansService.findByProfileIdOrThrow(technicianProfileId);
+    if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
+      throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
+    }
+    if (order.technicianId === technician.id) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
+    }
+    const alreadyAssistant = await this.teamMembers.findOne({
+      where: { orderId, technicianId: technician.id, memberType: ASSISTANT_MEMBER_TYPE },
+    });
+    if (alreadyAssistant) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده معيّن كمساعد على الطلب ده بالفعل', HttpStatus.CONFLICT);
+    }
+
+    await this.teamMembers.save(
+      this.teamMembers.create({
+        orderId,
+        technicianId: technician.id,
+        roleLabel: 'مساعد',
+        memberType: ASSISTANT_MEMBER_TYPE,
+        addedByTechnicianId: null,
+        addedByAdminUserId: adminUserId,
+      }),
+    );
+
+    // إشعار الفني عبر حدث، مش نداء مباشر لـNotificationsService — راجع "لماذا الإشعارات عبر
+    // أحداث" في assistant-matching/README.md، نفس الاتفاقية المتبعة في كل الموديول ده بالفعل
+    // (ORDER_STATUS_CHANGED_EVENT/ORDER_REASSIGNED_EVENT).
+    this.events.emit(
+      ORDER_ASSISTANT_ASSIGNED_MANUALLY_EVENT,
+      new OrderAssistantAssignedManuallyEvent(order.id, technician.id),
+    );
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.assistant_assigned_manually',
+      entityType: 'order',
+      entityId: order.id,
+      newValues: { technician_id: technician.id },
       meta,
     });
 

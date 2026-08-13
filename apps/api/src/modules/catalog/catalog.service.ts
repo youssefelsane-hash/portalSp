@@ -138,12 +138,28 @@ export class CatalogService {
     const service = await this.findServiceOrThrow(serviceId);
 
     // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — مسار مستقل بالكامل عن باقي نماذج
-    // التسعير، مفيش تركيب مع zone override ولا level multiplier هنا (المعادلة نفسها مسؤولة عن
-    // كل عوامل السعر اللي العميل حددها في الفورم الديناميكي). كانت فجوة موثّقة صراحة: كان
-    // بيتفادى استدعاء PricingEngineService خالص ويستخدم service.basePriceCents (صفر لأي خدمة
-    // formula) — اتقفلت.
+    // التسعير (مفيش تركيب مع zone override — المعادلة نفسها مسؤولة عن عوامل السعر اللي العميل
+    // حددها في الفورم الديناميكي). كانت فجوة موثّقة صراحة: كان بيتفادى استدعاء PricingEngineService
+    // خالص ويستخدم service.basePriceCents (صفر لأي خدمة formula) — اتقفلت.
+    //
+    // **بَقّة حقيقية اتلقطت واتصلحت (مراجعة مستخدم دقيقة)**: level_price_multiplier كان مقفول
+    // على 1 هنا دايمًا، حتى لو technicianLevel اتبعت فعليًا (من estimate-duration/preview/create
+    // بعد ما فني معروف) — يعني قرار "كل فني بيظهر بسعره النهائي حسب رتبته" (docs/08) كان مطبّق
+    // على كل نماذج التسعير إلا formula بالتحديد. الإصلاح: نفس بحث service_level_pricing
+    // المستخدم في باقي الفروع تحت، والمضاعف بيتطبّق على ناتج المعادلة (result.priceCents) بعد
+    // حسابها — مش جزء من المعادلة نفسها (الفني مش من مدخلات الفورم اللي العميل بيملاها).
     if (service.pricingModel === PricingModel.FORMULA) {
       const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
+      let formulaLevelMultiplier = 1;
+      if (technicianLevel) {
+        const levelRow = await this.levelPricing.findOne({
+          where: { serviceId, technicianLevel, isActive: true },
+        });
+        if (levelRow) {
+          formulaLevelMultiplier = Number(levelRow.priceMultiplier);
+        }
+      }
+      const formulaTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
       const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
         ? await Promise.all([
             this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
@@ -154,9 +170,9 @@ export class CatalogService {
         base_price_cents: result.priceCents,
         inspection_fee_cents: service.inspectionFeeCents,
         surge_multiplier: 1,
-        level_price_multiplier: 1,
-        estimated_total_cents: result.priceCents,
-        emergency_surcharge_cents: Math.round((result.priceCents * emergencySurchargePercentage) / 100),
+        level_price_multiplier: formulaLevelMultiplier,
+        estimated_total_cents: formulaTotalCents,
+        emergency_surcharge_cents: Math.round((formulaTotalCents * emergencySurchargePercentage) / 100),
         emergency_sla_minutes: emergencySlaMinutes,
         min_price_cents: result.minPriceCents,
         max_price_cents: result.maxPriceCents,

@@ -84,6 +84,10 @@ class OrdersRepository {
   // خام من غير رسوم الطوارئ/الفحص أصلاً، من غير الإضافات ولا الخصم مجمّعين في رقم واحد واضح.
   // /orders/preview بيرجّع نفس القيم بالحرف اللي POST /orders هيحسبها فعليًا لو اتبعتت نفس
   // المدخلات (نفس منطق OrdersService.create() بالظبط، اتأكد حي عبر curl مباشر).
+  // بَقّة حقيقية اتلقطت واتصلحت: requestedTechnicianId/scheduleSlotId كانوا متاحين في الشاشة
+  // (العميل اختار فني/سلوت بالفعل من شاشة اختيار الفني) بس مبيتبعتوش هنا رغم إن create() بيبعتهم
+  // فعليًا — يعني معاينة السعر كانت ممكن تفضل بدون مضاعف مستوى الفني، والطلب الفعلي بعدين يتحسب
+  // بمضاعف مختلف. الباك-إند بقى بيدعم الاتنين في /orders/preview (نفس منطق create() بالحرف).
   Future<OrderPricePreview> previewPrice({
     required String serviceId,
     required String addressId,
@@ -92,6 +96,8 @@ class OrdersRepository {
     List<String>? addonIds,
     String? promoCode,
     String? buildingCode,
+    String? requestedTechnicianId,
+    String? scheduleSlotId,
   }) async {
     final data = await auth.authedRequest('POST', '/orders/preview', body: {
       'service_id': serviceId,
@@ -101,6 +107,8 @@ class OrdersRepository {
       if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
       if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
+      if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
+      if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
     });
     return OrderPricePreview.fromJson(data!);
   }
