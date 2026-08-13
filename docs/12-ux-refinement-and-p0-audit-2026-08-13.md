@@ -212,7 +212,7 @@ Recurring، Buildings، Domestic Worker base flows.
 | # | البند | الحالة |
 |---|---|---|
 | 1 | RBAC — `assignRole()`/`cloneRole()` privilege escalation | ✅ خلص |
-| 2 | Dynamic RBAC مش مطبّق على كل Admin endpoints (Reports/RecurringOrders...) | 🔲 لسه |
+| 2 | Dynamic RBAC مش مطبّق على كل Admin endpoints (Reports/RecurringOrders...) | ✅ خلص |
 | 3 | Admin UI مايحترمش الصلاحيات (Sidebar ثابت) | 🔲 لسه |
 | 4 | OTP بيتكتب في اللوج دايمًا | 🔲 لسه |
 | 5 | Refresh-token rotation مش atomic | 🔲 لسه |
@@ -221,3 +221,20 @@ Recurring، Buildings، Domestic Worker base flows.
 | 8 | Webhook بيرجع 200 حتى مع Crash داخلي | 🔲 لسه |
 | 9 | الطلبات المجدولة البعيدة بتتوزّع فورًا (ADR-0009 تصميم فقط) | 🔲 لسه |
 | 10 | رحلة اختيار الفني مرتّبة غلط لخدمات Formula | 🔲 لسه |
+
+### P0-2 — تفاصيل التنفيذ
+
+الفحص الكامل (agent مخصص جرد كل الـcontrollers تحت `/admin`) أكّد إن الفجوة الحقيقية كانت
+مقصورة على **اتنين بالظبط**: `AdminReportsController` (`dashboard/stats`, `reports/revenue`,
+`reports/technicians`, `reports/zones`) و`AdminRecurringOrdersController` — الاتنين كان محميين
+بـ`@Roles(ADMIN)` بس من غير أي `@RequirePermission`، ومفيش `reports.view`/`recurring_orders.view`
+في كتالوج الصلاحيات أصلاً. الإصلاح: migration `0085` (صلاحيتين جداد، ممنوحتين لـ`ops_manager`/
+`finance` — `super_admin` بياخدها أوتوماتيك) + `@RequirePermission` على مستوى الكنترولر في
+الاتنين. اختبار regression حي في `apps/api/src/modules/admin/reports-and-recurring-orders-permission.spec.ts`.
+
+**كنترولرز تانية اتفحصت وطلع إن الفتح لأي أدمن قرار متعمّد موثّق (مش نفس الفجوة، متتلمسش تاني)**:
+`AdminWalletController` (تعليق: "طلب صريح: الأدمن عنده access إنه يخش يشوف المحفظة عشان يشوف هل
+في مشكلة أو لأ")، `AdminTechnicianCompaniesController` (read-only بالكامل عمدًا)،
+`AdminTechnicianReferralsController` (مفيش فعل مُغيّر يحتاج صلاحية دقيقة)، وGET endpoints في
+`AdminPaymentsController` (payouts list/order-items — الـmutations زي approve/reject/complete
+محمية فعلاً بـ`payouts.approve`/`refunds.issue`).
