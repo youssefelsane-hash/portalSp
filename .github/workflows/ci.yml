@@ -1,0 +1,125 @@
+name: CI
+
+# كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): مفيش أي CI في المشروع رغم حجمه — كل PR
+# جديد ممكن يرجّع بَقّة قديمة اتصلحت من زمان من غير ما حد يلاحظ. الـworkflow ده بيغطي نفس
+# الأربع فحوصات اللي CLAUDE.md بيطلب تشغيلها يدوي قبل أي commit في apps/api، زائد بناء الأدمن
+# وflutter analyze للتطبيقين — نفس الأوامر بالحرف اللي بتتشغل يدوي حاليًا، هنا بس أوتوماتيك.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API — typecheck + build + test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # نفس صورة infra/docker/docker-compose.yml بالحرف — الـmigrations محتاجة PostGIS فعلي.
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: baytak
+          POSTGRES_PASSWORD: baytak
+          POSTGRES_DB: baytak
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U baytak"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm install (كل الـworkspaces)
+        run: npm install
+
+      - name: تجهيز .env
+        run: |
+          cp apps/api/.env.example apps/api/.env
+          sed -i 's#^DATABASE_URL=.*#DATABASE_URL=postgres://baytak:baytak@localhost:5432/baytak#' apps/api/.env
+          sed -i 's#^REDIS_URL=.*#REDIS_URL=redis://localhost:6379#' apps/api/.env
+
+      - name: تطبيق الـmigrations
+        run: node infra/migrations/migrate.js
+        env:
+          DATABASE_URL: postgres://baytak:baytak@localhost:5432/baytak
+
+      - name: TypeScript typecheck
+        working-directory: apps/api
+        run: npx tsc --noEmit
+
+      - name: npx nest build
+        working-directory: apps/api
+        run: npm run build
+
+      - name: npx jest
+        working-directory: apps/api
+        run: npm test
+        env:
+          DATABASE_URL: postgres://baytak:baytak@localhost:5432/baytak
+          REDIS_URL: redis://localhost:6379
+
+  admin:
+    name: Admin — typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm install (كل الـworkspaces)
+        run: npm install
+
+      - name: بناء packages/shared-types
+        run: npm run build --workspace=@baytak/shared-types
+
+      - name: TypeScript typecheck
+        working-directory: apps/admin
+        run: npx tsc --noEmit
+
+      - name: next build
+        working-directory: apps/admin
+        run: npm run build
+
+  flutter:
+    name: "flutter analyze — ${{ matrix.app }}"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [customer-app, technician-app]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+
+      - name: flutter pub get
+        working-directory: apps/${{ matrix.app }}
+        run: flutter pub get
+
+      - name: flutter analyze
+        working-directory: apps/${{ matrix.app }}
+        run: flutter analyze

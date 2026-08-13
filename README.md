@@ -110,6 +110,8 @@ baytak/
 100% لكل واحدة فيهم ومختبر بمحاكاة كاملة، بس محتاج القيم الحقيقية (API keys/secrets) تتحط في
 `.env`. **الدليل الكامل لكل خدمة ومنين تجيب كل قيمة**: [`docs/03-external-integrations.md`](docs/03-external-integrations.md).
 
+**CI (2026-08-13، كانت فجوة موثّقة صراحة)**: `.github/workflows/ci.yml` بيشغّل تلقائيًا على كل PR وpush لـ`main` — نفس الفحوصات اللي CLAUDE.md بيطلب تشغيلها يدوي قبل أي commit (`npx tsc --noEmit` + `npx nest build` + `npx jest` ضد Postgres/Redis حقيقيين في `apps/api`، `next build` في `apps/admin`، `flutter analyze` في التطبيقين). لسه محتاج تفعيل branch protection يدوي من إعدادات المستودع (خارج نطاق الكود نفسه).
+
 ---
 
 ## ⚡️ أسرع طريقة تجرب بيها — GitHub Codespaces (من غير أي تنصيب على جهازك)

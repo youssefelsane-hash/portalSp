@@ -5,7 +5,19 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CreatePricingFieldDto } from './dto/create-pricing-field.dto';
 import { UpdatePricingFieldDto } from './dto/update-pricing-field.dto';
-import { ServicePricingField } from './entities/service-pricing-field.entity';
+import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
+
+// أنواع حقول مش مدعومة في apps/customer-app لسه (راجع create_order_screen.dart's isSupported) —
+// كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): حقل إجباري من النوع ده يخلي العميل عاجز
+// يكمّل الحجز خالص. الواجهة (pricing-builder.tsx) بترفض نفس الحالة قبل الإرسال — الفحص هنا
+// دفاع ثاني على مستوى الباك-إند (نفس فلسفة أي تحقق حرج تاني في المشروع، الواجهة مش مصدر الحقيقة
+// الوحيد).
+const UNSUPPORTED_FIELD_TYPES = new Set<PricingFieldType>([
+  PricingFieldType.LOCATION,
+  PricingFieldType.IMAGE_UPLOAD,
+  PricingFieldType.VIDEO_UPLOAD,
+  PricingFieldType.VOICE_NOTE,
+]);
 
 // إدارة حقول الفورم الديناميكي لخدمة pricing_model=formula — راجع docs/08 §1.7 (مرحلة 1:
 // CRUD عادي عبر REST، واجهة الأدمن Builder البصرية شغل frontend لاحق منفصل).
@@ -18,6 +30,16 @@ export class PricingFieldsService {
 
   listForService(serviceId: string): Promise<ServicePricingField[]> {
     return this.fields.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
+  }
+
+  private assertSupportedIfRequired(fieldType: PricingFieldType, isRequired: boolean): void {
+    if (isRequired && UNSUPPORTED_FIELD_TYPES.has(fieldType)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `نوع الحقل "${fieldType}" مش مدعوم في تطبيقات العميل/الفني لسه — مينفعش يبقى إجباري`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
   }
 
   private async findOrThrow(id: string): Promise<ServicePricingField> {
@@ -33,6 +55,8 @@ export class PricingFieldsService {
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, `field_key "${dto.field_key}" مستخدم بالفعل في الخدمة دي`, HttpStatus.CONFLICT);
     }
+
+    this.assertSupportedIfRequired(dto.field_type, dto.is_required ?? true);
 
     const field = this.fields.create({
       serviceId,
@@ -63,6 +87,8 @@ export class PricingFieldsService {
   async update(adminUserId: string, id: string, dto: UpdatePricingFieldDto, meta?: AuditActorMeta): Promise<ServicePricingField> {
     const field = await this.findOrThrow(id);
     const oldValues = { label_ar: field.labelAr, is_active: field.isActive };
+
+    this.assertSupportedIfRequired(dto.field_type ?? field.fieldType, dto.is_required ?? field.isRequired);
 
     if (dto.label_ar !== undefined) field.labelAr = dto.label_ar;
     if (dto.field_type !== undefined) field.fieldType = dto.field_type;
