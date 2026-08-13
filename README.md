@@ -84,7 +84,74 @@ baytak/
 
 ---
 
-## 🚦 حالة المشروع
+## 🚦 حالة المشروع (2026-08-13)
 
-**المرحلة الحالية: P0 — التأسيس.** لسه في خطوة تجهيز البنية التحتية (§5 — السبرنت 0.3).
+**مش P0 خالص — كود شغال ومختبر حي، قريب من جاهزية الإطلاق.** الملف ده كان فاضل موثّق بحالة قديمة
+(P0/التأسيس) رغم إن المشروع فعليًا وصل لأكتر من 20 موديول باك-إند، لوحة أدمن كاملة، وتطبيقي Flutter
+شغالين. الحالة الحقيقية دلوقتي:
+
+- **`apps/api`** (NestJS + PostgreSQL/PostGIS + Redis + BullMQ) — ~20 موديول شغالة ومختبرة حيًا
+  ضد Postgres/Redis حقيقيين (مش mocks): auth بالـOTP، الكتالوج + محرك تسعير ديناميكي + بيانات
+  قياسية للإنتاجية، المطابقة (فني رئيسي + مساعد بالبث التنافسي الذرّي)، سياسة إلغاء فني كاملة
+  قابلة للإعداد، مستويات الفنيين + مضاعف سعر حسب المستوى، الفرق/الشركات، المحفظة والدفع
+  (Paymob/كاش/محفظة داخلية)، الإشعارات (توجيه حسب الدور)، القطاع المنزلي (شغالات)، العمائر
+  (QR + خصم)، الأكاديمية (base)، مراقبة تشغيلية (queue watchdog + supervisor). تفاصيل كل موديول
+  في `README.md` بتاعه.
+- **`apps/admin`** (Next.js 16 + shadcn/ui) — شاشات كاملة ومختبرة (Playwright ضد الباك-إند
+  الحقيقي): موظفين، فنيين، طلبات، كتالوج، تسعير، إعدادات، تقارير، سجل نشاط.
+- **`apps/customer-app`, `apps/technician-app`** (Flutter) — كود شغال حقيقي (مش placeholder):
+  auth، طلبات كاملة الدورة، دفع، شات وتتبع لحظي، اختيار فني + سعر نهائي قبل التأكيد، جدولة،
+  مساعد. اختبارات حية حقيقية في `test_live/` لكل تطبيق، ورندر UI فعلي مُتحقق منه عبر Linux
+  desktop build (تفاصيل في `apps/customer-app/README.md`).
+
+**الفجوة الوحيدة الحقيقية قبل الإطلاق الفعلي: بيانات اعتماد الخدمات الخارجية الحقيقية** (بوابة
+دفع Paymob، SMS/WhatsApp عبر Twilio، إيميل SMTP، Google Maps، S3/تخزين سحابي حقيقي) — الكود جاهز
+100% لكل واحدة فيهم ومختبر بمحاكاة كاملة، بس محتاج القيم الحقيقية (API keys/secrets) تتحط في
+`.env`. **الدليل الكامل لكل خدمة ومنين تجيب كل قيمة**: [`docs/03-external-integrations.md`](docs/03-external-integrations.md).
+
+---
+
+## 🚀 تشغيل محلي كامل (Quickstart)
+
+للتجربة الكاملة على جهازك (Docker للبنية التحتية + Flutter للتطبيقات):
+
+```bash
+# 1) البنية التحتية (Postgres/PostGIS + Redis + MinIO كتخزين S3 محلي)
+cd infra/docker && docker compose up -d
+
+# 2) الباك-إند
+cd apps/api
+cp .env.example .env   # القيم الافتراضية بتشتغل مع docker-compose فوق من غير أي تعديل
+npm install
+node ../../infra/migrations/migrate.js   # يطبّق كل الـmigrations بالترتيب (DATABASE_URL من .env)
+npm run start:dev      # http://localhost:3000/api/v1 — يحتاج Postgres+Redis شغالين من خطوة 1
+
+# 3) لوحة الأدمن (تيرمنال تاني)
+cd apps/admin
+cp .env.example .env.local   # لو موجود، وإلا راجع apps/admin/README.md للقيم المطلوبة
+npm install
+npm run dev             # http://localhost:3001
+
+# 4) تطبيقات Flutter (تيرمنال تالت لكل تطبيق)
+cd apps/customer-app     # أو apps/technician-app
+flutter pub get
+flutter run --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+# Android emulator بيوصل للـhost عن طريق 10.0.2.2 مش localhost — القيمة الافتراضية already كده
+```
+
+**بيانات دخول تجريبية**: بعد أول `migrate.js`، القاعدة فاضية من المستخدمين — سجّل حساب جديد من أي
+تطبيق (OTP بيتسجّل في لوج الباك-إند نفسه لو `TWILIO_*` مش متظبطة — مفيش SMS حقيقي محتاج للتجربة
+المحلية). لأول حساب `super_admin` (لا يوجد UI عمدًا لمنح أول أدمن — قرار أمان واعي، نفس مبدأ أي
+نظام حقيقي)، بعد ما تسجّل حساب عادي من `apps/admin`/عبر `POST /auth/register`، امنحه الدور مباشرة:
+```sql
+INSERT INTO user_roles (user_id, role_id)
+SELECT u.id, r.id FROM users u, roles r
+WHERE u.phone_number = '+20xxxxxxxxxx' AND r.name = 'super_admin';
+```
+(الدور نفسه وكل صلاحياته متسجّلين بالفعل من migration `0020` — الخطوة دي بس بتربطه بحسابك).
+
+**تشغيل الفحوصات قبل أي تعديل**: `cd apps/api && npx tsc --noEmit && npx nest build && npx jest`
+(الثلاثة لازم يعدّوا نضيف). لـFlutter: `flutter analyze` في كل تطبيق.
+
+---
 راجع [أول 14 يوم](docs/01-master-plan.md#13-أول-14-يوم--خطوة-بخطوة-ابدأ-من-هنا) في الماستر بلان للخطوة الجاية بالظبط.
