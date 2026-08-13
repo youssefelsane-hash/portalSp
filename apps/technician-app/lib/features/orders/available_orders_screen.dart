@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../academy/academy_screen.dart';
 import '../assistant_offers/assistant_offers_screen.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
@@ -148,6 +149,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'معرض أعمالي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const PortfolioScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.school_outlined),
+              tooltip: 'الأكاديمية',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AcademyScreen()),
               ),
             ),
             IconButton(
