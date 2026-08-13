@@ -443,3 +443,28 @@ RTL سليم بالكامل، صفحات قديمة (orders) لسه شغالة �
 **نطاق متبقٍ محدّث**: تطبيق `StatusChip`/`EmptyState` الفعلي (مش `PageHeader` بس) عبر باقي
 الصفحات، و`PromptDialog` جديد لتدفقات "سبب إلزامي" الـ6، وإعادة تصميم محتوى الجداول/الفلاتر نفسها
 (مش العنوان بس) — دي المرحلة الجاية.
+
+## دفعة ثالثة — تطبيق `EmptyState` عبر كل قوائم Admin Panel (نفس اليوم، استكمال بلا توقف)
+
+تطبيق منهجي لمكوّن `EmptyState` (اتبنى في الدفعة الأولى، مش مستخدم في أي صفحة لحد الآن) بدل
+`<p className="text-muted-foreground">مفيش ...</p>` الخام في **كل الـ20 صفحة** اللي عندها رسالة
+"القايمة فاضية" حقيقية (استُبعدت نصوص التحميل `جاري التحميل…` وأي تعليقات كود بالصدفة فيها كلمة
+"مفيش" — الفلترة كانت بـregex دقيق `.length === 0 && <p ...>مفيش...`). كل صفحة أخدت تعديلين: إضافة
+`import { EmptyState } from '@/components/empty-state';` بعد استيراد `PageHeader` مباشرة، واستبدال
+سطر الـ`<p>` بـ`<EmptyState title="..." />` بنفس النص العربي الأصلي حرفيًا (زيرو تغيير في الصياغة).
+
+الصفحات العشرين: `recurring-orders`, `reports` (سطرين: فنيين/مناطق), `payouts`, `internal-chat`,
+`internal-chat/[id]`, `orders`, `technician-companies`, `technicians`, `employees`, `support-chat`,
+`support-chat/[id]`, `support`, `notification-routing`, `support-tickets`, `promotions`,
+`customers`, `cancellation-reasons`, `buildings`, `audit-log`, `domestic-workers`.
+
+**اتأكد حي**: `tsc --noEmit` صفر أخطاء، `eslint src` صفر تحذيرات/أخطاء جديدة (نفس الـ16 خطأ
+`react/no-unescaped-entities` المؤكَّدين قبل كده كسابقين على أي دفعة من الثلاثة — `git diff` صفر
+على كل ملفاتهم في الدفعة دي)، `next build` (production) نجح لكل الـ39 route. اختبار Playwright حي
+ضد الباك-إند الحقيقي: فلترة `/customers` برقم موبايل مش موجود، وفلترة `/audit-log` بنوع كيان وهمي —
+الاتنين عرضوا `EmptyState` بشكله الصحيح (صندوق بحدود متقطّعة، أيقونة صندوق، النص العربي، RTL سليم)،
+صفر console errors حقيقية (401 واحد متوقّع بس على فحص الجلسة قبل تسجيل الدخول).
+
+**نطاق متبقٍ**: `StatusChip` (مبني، `orderStatusTone()` جاهز في `lib/order-labels.ts`، بس لسه مش
+موصول بأي صفحة)، `PromptDialog` لتدفقات "سبب إلزامي" الـ6 (`window.prompt()`)، وإعادة تصميم محتوى
+الجداول/الفلاتر نفسها بعمق أكبر من مجرد رأس الصفحة وحالة الفراغ.

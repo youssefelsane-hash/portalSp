@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -329,7 +330,7 @@ export default function ReportsPage() {
 
             {techError && <p className="text-destructive">{techError}</p>}
             {!techError && !techRows && <p className="text-muted-foreground">جاري التحميل…</p>}
-            {techRows && techRows.length === 0 && <p className="text-muted-foreground">مفيش فنيين</p>}
+            {techRows && techRows.length === 0 && <EmptyState title="مفيش فنيين" />}
             {techRows && techRows.length > 0 && (
               <>
                 <Table>
@@ -394,7 +395,7 @@ export default function ReportsPage() {
           <CardContent>
             {zoneError && <p className="text-destructive">{zoneError}</p>}
             {!zoneError && !zoneRows && <p className="text-muted-foreground">جاري التحميل…</p>}
-            {zoneRows && zoneRows.length === 0 && <p className="text-muted-foreground">مفيش مناطق</p>}
+            {zoneRows && zoneRows.length === 0 && <EmptyState title="مفيش مناطق" />}
             {zoneRows && zoneRows.length > 0 && (
               <Table>
                 <TableHeader>

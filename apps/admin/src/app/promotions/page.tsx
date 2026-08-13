@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -244,7 +245,7 @@ export default function PromotionsPage() {
       )}
 
       {!promoCodes && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {promoCodes && promoCodes.length === 0 && <p className="text-muted-foreground">مفيش أكواد خصم لسه</p>}
+      {promoCodes && promoCodes.length === 0 && <EmptyState title="مفيش أكواد خصم لسه" />}
 
       {promoCodes && promoCodes.length > 0 && (
         <>

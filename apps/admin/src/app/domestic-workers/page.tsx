@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
@@ -84,7 +85,7 @@ export default function DomesticWorkersPage() {
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       {!workers && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {workers && workers.length === 0 && <p className="text-muted-foreground">مفيش مقدّمي خدمة بهذه الحالة</p>}
+      {workers && workers.length === 0 && <EmptyState title="مفيش مقدّمي خدمة بهذه الحالة" />}
 
       {workers && workers.length > 0 && (
         <Table>

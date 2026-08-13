@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -61,7 +62,7 @@ export default function SupportTicketsPage() {
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!tickets && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {tickets && tickets.length === 0 && <p className="text-muted-foreground">مفيش تذاكر</p>}
+      {tickets && tickets.length === 0 && <EmptyState title="مفيش تذاكر" />}
 
       {tickets && tickets.length > 0 && (
         <Table>

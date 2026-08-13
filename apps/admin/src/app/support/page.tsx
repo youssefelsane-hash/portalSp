@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -68,7 +69,7 @@ export default function SupportPage() {
 
       {error && <p className="text-destructive">{error}</p>}
       {!error && !filtered && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {filtered && filtered.length === 0 && <p className="text-muted-foreground">مفيش شكاوى مطابقة</p>}
+      {filtered && filtered.length === 0 && <EmptyState title="مفيش شكاوى مطابقة" />}
 
       {filtered && filtered.length > 0 && (
         <Table>
