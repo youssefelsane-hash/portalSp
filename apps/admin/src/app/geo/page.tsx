@@ -16,6 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -280,7 +281,7 @@ export default function GeoPage() {
           {!cities ? (
             <TableSkeleton columns={3} />
           ) : cities.length === 0 ? (
-            <p className="text-sm text-muted-foreground">مفيش مدن لسه</p>
+            <EmptyState title="مفيش مدن لسه" />
           ) : (
             <Table>
               <TableHeader>
@@ -350,7 +351,7 @@ export default function GeoPage() {
               {!areas ? (
                 <TableSkeleton columns={2} />
               ) : areas.length === 0 ? (
-                <p className="text-sm text-muted-foreground">مفيش مناطق للمدينة دي لسه</p>
+                <EmptyState title="مفيش مناطق للمدينة دي لسه" />
               ) : (
                 <Table>
                   <TableHeader>
@@ -409,7 +410,7 @@ export default function GeoPage() {
               {!zones ? (
                 <TableSkeleton columns={5} />
               ) : zones.length === 0 ? (
-                <p className="text-sm text-muted-foreground">مفيش نطاقات خدمة للمدينة دي لسه</p>
+                <EmptyState title="مفيش نطاقات خدمة للمدينة دي لسه" />
               ) : (
                 <Table>
                   <TableHeader>

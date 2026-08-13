@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -301,7 +302,7 @@ export default function RoleDetailPage() {
             </CardHeader>
             <CardContent>
               {users.length === 0 ? (
-                <p className="text-sm text-muted-foreground">مفيش حد عنده الدور ده دلوقتي</p>
+                <EmptyState title="مفيش حد عنده الدور ده دلوقتي" />
               ) : (
                 <Table>
                   <TableBody>
@@ -327,7 +328,7 @@ export default function RoleDetailPage() {
               {!auditLogs ? (
                 <p className="text-sm text-muted-foreground">جاري التحميل…</p>
               ) : auditLogs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">مفيش أي تعديلات مسجّلة لسه</p>
+                <EmptyState title="مفيش أي تعديلات مسجّلة لسه" />
               ) : (
                 <ul className="flex flex-col gap-3 text-sm">
                   {auditLogs.map((log) => (

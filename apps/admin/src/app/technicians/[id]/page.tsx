@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -347,7 +348,7 @@ export default function TechnicianDetailPage() {
           </CardHeader>
           <CardContent>
             {detail.documents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش مستندات مرفوعة</p>
+              <EmptyState title="مفيش مستندات مرفوعة" />
             ) : (
               <Table>
                 <TableHeader>
@@ -424,7 +425,7 @@ export default function TechnicianDetailPage() {
           </CardHeader>
           <CardContent>
             {detail.certificates.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش شهادات مرفوعة</p>
+              <EmptyState title="مفيش شهادات مرفوعة" />
             ) : (
               <Table>
                 <TableHeader>
@@ -535,7 +536,7 @@ export default function TechnicianDetailPage() {
             {!zones ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : zones.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش مناطق عمل معيّنة لسه</p>
+              <EmptyState title="مفيش مناطق عمل معيّنة لسه" />
             ) : (
               <Table>
                 <TableHeader>

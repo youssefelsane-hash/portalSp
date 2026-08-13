@@ -13,6 +13,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -361,7 +362,7 @@ export default function ComplaintDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {messages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش رسائل لسه</p>
+              <EmptyState title="مفيش رسائل لسه" />
             ) : (
               messages.map((msg) => (
                 <div

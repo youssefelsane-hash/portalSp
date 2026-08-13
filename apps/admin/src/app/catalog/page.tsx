@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -264,7 +265,7 @@ export default function CatalogPage() {
             {!categories ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : categories.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش فئات لسه</p>
+              <EmptyState title="مفيش فئات لسه" />
             ) : (
               <Table>
                 <TableHeader>
@@ -489,7 +490,7 @@ export default function CatalogPage() {
             {!services ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : services.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش خدمات في الفئة دي</p>
+              <EmptyState title="مفيش خدمات في الفئة دي" />
             ) : (
               <Table>
                 <TableHeader>

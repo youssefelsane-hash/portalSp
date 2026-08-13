@@ -34,6 +34,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 };
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
@@ -509,7 +510,7 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent>
             {order.status_history.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش سجل</p>
+              <EmptyState title="مفيش سجل" />
             ) : (
               <Table>
                 <TableHeader>
@@ -621,7 +622,7 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent>
             {quoteItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش بنود إضافية اتقترحت على الطلب ده</p>
+              <EmptyState title="مفيش بنود إضافية اتقترحت على الطلب ده" />
             ) : (
               <Table>
                 <TableHeader>
@@ -662,7 +663,7 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent>
             {media.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش صور اترفعت للطلب ده لسه</p>
+              <EmptyState title="مفيش صور اترفعت للطلب ده لسه" />
             ) : (
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
                 {media.map((item) => (
