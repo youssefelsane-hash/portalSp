@@ -20,6 +20,9 @@ export enum OrderStatus {
   EXPIRED = 'expired',
   DISPUTED = 'disputed',
   REFUNDED = 'refunded',
+  // سياسة إلغاء الفني (ADR-0006) — الطلبات "اعتماد"/تعيين يدوي من الإدارة بعد إلغاء الفني مش
+  // بترجع تلقائي للمطابقة (افتراضيًا) — بتستنى العميل يعيد الاختيار بنفسه.
+  NEEDS_TECHNICIAN_RESELECTION = 'needs_technician_reselection',
 }
 
 export enum OrderType {

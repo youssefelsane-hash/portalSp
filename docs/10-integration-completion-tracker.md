@@ -95,9 +95,8 @@
 
 ## سياسة إلغاء الفني (Technician Cancellation Policy) — الطلب التفصيلي الكامل
 
-**الحالة العامة**: 🔄 محتاج إعادة بناء كبيرة — `OrdersService.technicianCancel()` الموجودة من سيشن سابقة (بناء على `POST /technician/orders/:id/cancel`)
-بسيطة: سبب مُختار + رسوم فقط، **hardcoded** (نافذة الإلغاء، سلوك إعادة التوزيع حسب booking_mode، الصلاحيات الهرمية
-للفريق) — لازم تتحول لسياسة كاملة قابلة للإعداد زي المطلوب بالتفصيل تحت.
+**الحالة العامة**: 🔄 الباك-إند الأساسي خلص (`ADR-0006`)، الواجهات (technician-app/customer-app) لسه.
+تفاصيل دقيقة تحت "سجل التقدّم".
 
 ### المتطلبات (ملخّص من رسالة المالك، بالإنجليزي الأصلي محفوظ في المحادثة):
 
@@ -203,3 +202,35 @@
   بالكامل عبر Playwright حقيقي: فني رفع شهادة، ظهرت pending في تفاصيل الفني بالأدمن، ضغط "اعتماد"
   فعلي في المتصفح غيّر الحالة لـ"معتمدة" فورًا (screenshot). الفحوصات الثلاثة في apps/api +
   tsc/eslint في apps/admin + shared-types build كلها عدّت. بيانات الاختبار اتعملها حذف بعد التأكيد.
+
+- **2026-08-12 (سياسة إلغاء الفني — الباك-إند الأساسي خلص، ADR-0006)**: `docs/adr/0006-technician-cancellation-policy.md`
+  كامل (السياق/القرار/البدائل/الأثر) قبل أي كود، زي ما CLAUDE.md بيطلب لأي قرار معماري كبير.
+  Migration `0068`: `order_status` قيمة جديدة `needs_technician_reselection` + `cancellation_reasons.requires_free_text`
+  + 6 إعدادات `technician_cancellation.*` (نافذة زمنية بعد القبول، حد أدنى قبل الموعد المجدول،
+  auto-rematch للفرد/الطوارئ، auto-rematch للفريق/التعيين اليدوي — كل واحدة قابلة للتعديل من
+  `/admin/settings` بلا كود جديد). `OrdersService.technicianCancel()` اتعمله rewrite كامل: يفرض
+  النافذة الزمنية والحد الأدنى قبل الموعد (`ORDR_003` واضح لو اتخطّاهم)، سبب إجباري من القائمة
+  المُعدّة إداريًا + نص حر إجباري لو `requires_free_text`، وسلوك استرجاع مختلف حسب `booking_mode`:
+  فرد/طوارئ يرجع `searching_technician` تلقائيًا (بث `ORDER_CREATED_EVENT` نفسه اللي `OrderDispatchListener`
+  الموجود بيسمعه، مفيش محرك مطابقة جديد)، بينما "اعتماد"/تعيين يدوي من الإدارة (مُكتشف من `booking_mode=team`
+  أو بصمة `order_status_history` بتاعة `AdminOrdersService.reassign()` — مفيش عمود جديد) بيتحول
+  `needs_technician_reselection` بدل إعادة توزيع صامتة. `POST /orders/:id/request-rematch` جديد
+  (العميل، تفضيل فني اختياري) يرجّع الطلب لـ`searching_technician`. حدث audit كامل عبر `AuditLogService`
+  الموجودة (accepted_at/elapsed_minutes/within_window/booking_mode/rematch_behavior) — مفيش أعمدة
+  جديدة للتدقيق. **اتعمله اختبار حي كامل لمسار الفرد/الأوتوماتيك**: فني حقيقي قبل طلب `individual`،
+  محاولة إلغاء بسبب `requires_free_text=true` من غير نص اترفضت `VAL_001`، محاولة من غير
+  `cancellation_reason_id` اترفضت (بقى إجباري)، الإلغاء الفعلي نجح (`cancellation_fee_cents` صح)
+  ورجّع الطلب `searching_technician` فورًا، `ORDER_CREATED_EVENT` اشتغل تلقائيًا وأعاد المطابقة
+  (الفني اللي لغى مستبعد صح — مفيش فنيين تانيين متاحين فالطلب اتلغى نظاميًا `ORDR_002`، سلوك متوقع).
+  صف `audit_logs` تأكد فيه كل الحقول المطلوبة صراحة. أرصدة المحافظ اترجعت للحالة الأصلية بعد الاختبار.
+  الفحوصات الثلاثة (`tsc`/`nest build`/`jest`) عدّت.
+  **لسه من غير — موثّق صراحة، مش سهو**: (أ) اختبار حي لمسار "اعتماد"/التعيين اليدوي
+  (`needs_technician_reselection` + `request-rematch`) — الكود مكتوب ومبني بس مش مُختبر حي لسه.
+  (ب) `apps/technician-app`: زرار الإلغاء الحالي (`OrderExecutionScreen`) لسه بيستخدم DTO القديم
+  (`cancellation_reason_id` اختياري) — محتاج تحديث ليطابق الإجبارية الجديدة + إظهار/إخفاء الزرار
+  حسب النافذة الزمنية + رسالة تأكيد نهائية. (ج) `apps/customer-app`: مفيش أي UI لحالة
+  `needs_technician_reselection` ولا زرار "أعد المطابقة" (`request-rematch`) لسه. (د) قائد/مدير
+  الفريق يلغي نيابة عن عضو تاني — مؤجَّل عمدًا في الـADR نفسه (محتاج قرار عمل). (هـ) اختبارات
+  النافذة الزمنية/الحد الأدنى قبل الموعد مكتوبة ومنطقها صحيح بس مش مُختبرة حي (تحتاج تلاعب بـ
+  `accepted_at`/`scheduled_at` في الداتابيز لمحاكاة الوقت، أو `sleep` فعلي). تفاصيل كاملة في
+  `apps/api/src/modules/orders/README.md`.

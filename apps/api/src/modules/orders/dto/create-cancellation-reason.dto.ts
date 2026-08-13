@@ -31,4 +31,9 @@ export class CreateCancellationReasonDto {
   @IsInt()
   @Min(0)
   display_order?: number;
+
+  // سياسة إلغاء الفني (ADR-0006) — لازم النص الحر مع السبب ده (مثلاً "أخرى").
+  @IsOptional()
+  @IsBoolean()
+  requires_free_text?: boolean;
 }

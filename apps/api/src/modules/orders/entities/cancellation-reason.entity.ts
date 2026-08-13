@@ -29,6 +29,10 @@ export class CancellationReason {
   @Column({ name: 'affects_technician_score', type: 'boolean', default: false })
   affectsTechnicianScore: boolean;
 
+  // سياسة إلغاء الفني (ADR-0006) — لو true، النص الحر (reason) بقى إجباري مع السبب ده (مثلاً "أخرى").
+  @Column({ name: 'requires_free_text', type: 'boolean', default: false })
+  requiresFreeText: boolean;
+
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
   displayOrder: number;
 

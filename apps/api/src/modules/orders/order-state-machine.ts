@@ -30,13 +30,28 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.TECHNICIAN_ON_WAY,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_TECHNICIAN,
+    OrderStatus.NEEDS_TECHNICIAN_RESELECTION,
+    OrderStatus.SEARCHING_TECHNICIAN,
   ],
   [OrderStatus.TECHNICIAN_ON_WAY]: [
     OrderStatus.TECHNICIAN_ARRIVED,
     OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_TECHNICIAN,
+    OrderStatus.NEEDS_TECHNICIAN_RESELECTION,
+    OrderStatus.SEARCHING_TECHNICIAN,
   ],
-  [OrderStatus.TECHNICIAN_ARRIVED]: [OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_TECHNICIAN],
+  [OrderStatus.TECHNICIAN_ARRIVED]: [
+    OrderStatus.IN_PROGRESS,
+    OrderStatus.CANCELLED_BY_TECHNICIAN,
+    OrderStatus.NEEDS_TECHNICIAN_RESELECTION,
+    OrderStatus.SEARCHING_TECHNICIAN,
+  ],
+  // سياسة إلغاء الفني (ADR-0006) — العميل بيطلب إعادة مطابقة تلقائية (POST /orders/:id/request-rematch)
+  // أو يلغي الطلب كله بدل ما يعيد الاختيار.
+  [OrderStatus.NEEDS_TECHNICIAN_RESELECTION]: [
+    OrderStatus.SEARCHING_TECHNICIAN,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
+  ],
   [OrderStatus.IN_PROGRESS]: [
     OrderStatus.AWAITING_QUOTE_APPROVAL,
     OrderStatus.WORK_COMPLETED,
@@ -66,6 +81,8 @@ export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,
   OrderStatus.AWAITING_QUOTE_APPROVAL,
+  // سياسة إلغاء الفني (ADR-0006) — العميل يقدر يلغي الطلب كله بدل ما يعيد اختيار فني.
+  OrderStatus.NEEDS_TECHNICIAN_RESELECTION,
 ]);
 
 // الحالات اللي الطلب "نشط" فيها من ناحية الفني — مُستخدمة في order-tracking.gateway.ts (تحديد

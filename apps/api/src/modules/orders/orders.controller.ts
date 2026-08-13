@@ -7,6 +7,7 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { RequestRematchDto } from './dto/request-rematch.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
@@ -59,6 +60,17 @@ export class OrdersController {
     @Body() dto: CancelOrderDto,
   ) {
     return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto));
+  }
+
+  // سياسة إلغاء الفني (ADR-0006) — العميل بيطلب إعادة مطابقة صراحة بعد ما الطلب يتحول
+  // needs_technician_reselection (مثلاً بعد ما فني "اعتماد" لغى).
+  @Post(':id/request-rematch')
+  async requestRematch(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RequestRematchDto,
+  ) {
+    return toOrderResponseDto(await this.ordersService.requestRematch(user.sub, id, dto));
   }
 
   // كانت فجوة موثّقة صراحة (S7): مسار عرض السعر أثناء الشغل — الفني يقترح، العميل يوافق/يرفض.

@@ -193,6 +193,57 @@
 (موجودة من زمان، بتسمع `ORDER_STATUS_CHANGED_EVENT`) بقت تشتغل فعليًا دلوقتي — اتأكد حياً
 (`cancelled_orders_count` زاد صح بعد كل عملية).
 
+## سياسة إلغاء الفني الكاملة القابلة للإعداد (ADR-0006) — إعادة بناء `technicianCancel()` (بناء 2026-08-12)
+
+القسم فوق ده وصف النسخة الأولى (hardcoded). المالك طلب تفصيلي: سياسة كاملة قابلة للإعداد — راجع
+`docs/adr/0006-technician-cancellation-policy.md` للقرار المعماري الكامل قبل التنفيذ (البدائل
+اللي اتقيّمت، تبرير كل قرار). الملخّص التقني:
+
+- **إعدادات جديدة** (`settings`, `group_name='technician_cancellation'`, migration `0068`):
+  `self_cancel_enabled` (مفتاح إيقاف عام)، `window_minutes_after_acceptance` (افتراضي 15 —
+  الإلغاء الذاتي ممنوع بعدها، `ORDR_003` واضح يوجّه للدعم)، `min_minutes_before_scheduled_start`
+  (افتراضي 60)، `auto_rematch_individual` (افتراضي `true` — فرد/طوارئ)، `auto_rematch_team_assigned`
+  (افتراضي `false` — "اعتماد"/تعيين يدوي من الإدارة).
+- **`order_status` قيمة جديدة `needs_technician_reselection`** (نفس migration، `ALTER TYPE ADD VALUE`).
+  انتقالات جديدة في `order-state-machine.ts`: `ACCEPTED|TECHNICIAN_ON_WAY|TECHNICIAN_ARRIVED` بقوا
+  يقدروا يروحوا `NEEDS_TECHNICIAN_RESELECTION` **أو** `SEARCHING_TECHNICIAN` مباشرة (مش بس
+  `CANCELLED_BY_TECHNICIAN` زي قبل)، و`NEEDS_TECHNICIAN_RESELECTION` نفسها بتروح `SEARCHING_TECHNICIAN`
+  (طلب إعادة مطابقة) أو `CANCELLED_BY_CUSTOMER`.
+- **تحديد "هل ده تعيين يدوي/اعتماد؟" بلا عمود جديد**: `order.bookingMode === TEAM` **أو** وجود صف
+  `order_status_history` بـ`change_source=admin` و`new_status=accepted` (بصمة `AdminOrdersService.reassign()`
+  الموجودة من زمان) — استنتاج من بيانات موجودة بالفعل، مش schema إضافي.
+  - لو صح **و** `auto_rematch_team_assigned=false` (الافتراضي) → `needs_technician_reselection`،
+    إشعار عالي الأولوية للعميل (`order-status-notification.listener.ts`, رسالة جديدة)، مفيش
+    إعادة توزيع صامتة.
+  - غير كده (فرد/طوارئ عادي) → `searching_technician` + بث `ORDER_CREATED_EVENT` — **نفس الحدث
+    اللي `OrderDispatchListener` الموجود بيسمعه من زمان لإنشاء طلب جديد**، فـ`dispatchNextRound()`
+    بيشتغل تلقائيًا من غير أي كود مطابقة جديد. الفني اللي لغى مستبعد تلقائيًا (لسه ليه صف
+    `order_assignments` من الجولة الأصلية — نفس شرط الاستبعاد الموجود أصلاً).
+- **`POST /orders/:id/request-rematch` جديد** (عميل) — بيرجّع طلب `needs_technician_reselection`
+  لـ`searching_technician` صراحة، `requested_technician_id` اختياري (تفضيل بس). **ملحوظة صريحة**:
+  `dispatchNextRound()` بيحترم `order.requestedTechnicianId` بس في أول جولة (`nextRound === 1`) —
+  الطلب هنا مش أول جولة أبدًا (رجع من إلغاء بعد جولات سابقة)، فالتفضيل بيتسجّل بس المطابقة العادية
+  هي اللي هتشتغل فعليًا. قرار مقصود لتفادي لمس منطق الجولات المُختبر جيدًا في `matching.service.ts`.
+- **السبب بقى إجباري دايمًا** (`cancellation_reason_id` مكانش، بقى) + عمود جديد
+  `cancellation_reasons.requires_free_text` (نفس migration) — لو `true`، النص الحر (`reason`) بقى
+  إجباري هو كمان (`VAL_001` واضح لو فاضي).
+- **حدث audit كامل عبر `AuditLogService`** (مش عمود جديد) — `newValues` بيحمل `accepted_at`،
+  `elapsed_minutes_since_acceptance`، `within_policy_window`، `booking_mode`، `rematch_behavior`.
+
+**اتعمله اختبار حي لمسار الفرد/الأوتوماتيك بالكامل**: فني حقيقي قبل طلب `individual`. سبب
+`requires_free_text=true` من غير نص اترفض `VAL_001`. طلب من غير `cancellation_reason_id` خالص
+اترفض (بقى إجباري). الإلغاء الفعلي نجح (`cancellation_fee_cents` احتُسبت صح من نسبة السبب)،
+`order_status` رجع `searching_technician` فورًا (مش `cancelled_by_technician` — تأكيد إن السلوك
+الجديد اشتغل صح للفرد)، `ORDER_CREATED_EVENT` اشتغل تلقائيًا وأعاد محاولة المطابقة (الفني اللي
+لغى اتستبعد صح، مفيش فنيين تانيين متاحين فالطلب اتلغى نظاميًا `ORDR_002` — سلوك متوقع تمامًا).
+صف `audit_logs` تأكّد فيه كل الحقول المطلوبة صراحة. أرصدة المحافظ اترجعت للحالة الأصلية بعد الاختبار.
+
+**لسه من غير — موثّق صراحة، مش سهو** (تفاصيل كاملة في `docs/10-integration-completion-tracker.md`):
+مسار "اعتماد"/التعيين اليدوي (`needs_technician_reselection` + `request-rematch`) مكتوب ومبني بس
+مش مُختبر حي لسه؛ `apps/technician-app`'s زرار الإلغاء لسه بيستخدم الـDTO القديم (السبب اختياري)؛
+`apps/customer-app` مفيهوش أي UI لحالة `needs_technician_reselection` ولا زرار "أعد المطابقة"؛
+قائد/مدير الفريق يلغي نيابة عن عضو تاني مؤجَّل عمدًا (محتاج قرار عمل، موثّق في ADR-0006 نفسه).
+
 ## ربط محرك التسعير الديناميكي بـ`POST /orders` — كانت أخطر فجوة تسعير موثّقة، اتقفلت (بناء 2026-08-12)
 
 **بَقّة حقيقية خطيرة اتلقطت**: `create()` بينادي `catalogService.estimate(service.id, zone.id, undefined, bookingMode===EMERGENCY)` — وكانت `estimate()` مش عارفة `pricing_model=formula` خالص، فأي خدمة formula كانت بتتحجز بـ`estimated_price_cents=0`/`total_amount_cents=0` بصمت (السعر الأساسي الثابت لخدمة formula مسجّل عمدًا 0 لأنه مالوش معنى — السعر كله من المعادلة)، بينما `POST /services/:id/evaluate-price` (المسار المنفصل من Phase 1) كان بيحسب سعر حقيقي صح. التفاصيل الكاملة والقرارات المعمارية في `../pricing/README.md` (قسم "الربط بمسار إنشاء الطلب") — بس الخلاصة المباشرة هنا: `CreateOrderDto` بقى فيه `field_values?: Record<string, string|number|boolean>` اختياري بيتبعت مباشرة لـ`catalogService.estimate()`، اللي بقت تتفرّع لـ`PricingEngineService.evaluate()` لو الخدمة formula.

@@ -5,6 +5,7 @@ import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { AuditLogService } from '../audit/audit-log.service';
 import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -22,6 +23,7 @@ import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
+import { RequestRematchDto } from './dto/request-rematch.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
@@ -38,6 +40,7 @@ const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
 export class OrdersService {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
+    @InjectRepository(OrderStatusHistory) private readonly orderStatusHistory: Repository<OrderStatusHistory>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly addressesService: AddressesService,
@@ -52,6 +55,7 @@ export class OrdersService {
     private readonly cancellationReasonsService: CancellationReasonsService,
     private readonly walletsService: WalletsService,
     private readonly settingsService: SettingsService,
+    private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -552,18 +556,28 @@ export class OrdersService {
   }
 
   /**
-   * الفني بيلغي طلب اتقبله بنفسه — كانت فجوة موثّقة صراحة: `CANCELLED_BY_TECHNICIAN` حالة صالحة
-   * في order-state-machine.ts (`ACCEPTED`/`TECHNICIAN_ON_WAY`/`TECHNICIAN_ARRIVED` بس، مش
-   * `IN_PROGRESS` — بعد ما الشغل الفعلي يبدأ، الإلغاء لازم يعدّي من الشكوى مش زرار مباشر) بس
-   * مفيش أي service method كانت بتحطها. **قرار الحالة النهائية**: الطلب بيتلغي نهائي
-   * (`CANCELLED_BY_TECHNICIAN: []` في الـstate machine — terminal زي إلغاء العميل/النظام بالظبط)،
-   * مش بيرجع searching_technician لإعادة توزيع — العميل بيتعرّف فورًا (إشعار) ويقدر يحجز تاني
-   * لو عايز، أوضح من إعادة توزيع صامتة تاخد وقت غير معروف.
+   * سياسة إلغاء الفني الكاملة (ADR-0006) — كانت `technicianCancel()` بسيطة بالكامل (سبب اختياري
+   * + رسوم بس، hardcoded). دلوقتي: نافذة زمنية بعد القبول + حد أدنى قبل الموعد المجدول (الاتنين
+   * قابلين للإعداد)، سبب إجباري (+ نص حر إجباري لو السبب `requires_free_text`)، وسلوك استرجاع
+   * الطلب بيختلف حسب `booking_mode`:
+   * - **EMERGENCY/INDIVIDUAL** (`auto_rematch_individual=true`, الافتراضي): الطلب يرجع
+   *   `searching_technician` ويتبعت `ORDER_CREATED_EVENT` تاني — نفس محرك `dispatchNextRound()`
+   *   الموجود، الفني اللي لغى مستبعد تلقائيًا (لسه ليه صف `order_assignments` من الجولة الأولى).
+   * - **TEAM ("اعتماد") أو تعيين يدوي من الإدارة** (`auto_rematch_team_assigned=false`,
+   *   الافتراضي): **مفيش إعادة توزيع صامتة** — الطلب يتحول `needs_technician_reselection`،
+   *   العميل بيوصله إشعار عالي الأولوية (`order-status-notification.listener.ts`) وياخد
+   *   deep link يقدر يطلب منه إعادة مطابقة صراحة (`POST /orders/:id/request-rematch`) أو يلغي.
+   * - لو `auto_rematch_individual=false` صراحة: الطلب بيتلغي نهائي زي السلوك القديم بالظبط
+   *   (fallback آمن، مفيش سلوك مخترع بلا تأكيد).
    */
   async technicianCancel(userId: string, orderId: string, dto: CancelOrderAsTechnicianDto): Promise<Order> {
     const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
 
-    if (!canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_TECHNICIAN)) {
+    if (
+      !canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_TECHNICIAN) &&
+      !canTransition(order.orderStatus, OrderStatus.NEEDS_TECHNICIAN_RESELECTION) &&
+      !canTransition(order.orderStatus, OrderStatus.SEARCHING_TECHNICIAN)
+    ) {
       throw new ApiException(
         ErrorCode.ORDR_003,
         `مينفعش تلغي الطلب وهو في حالة ${order.orderStatus} — بعد ما تبدأ الشغل الإلغاء لازم يعدّي من الشكوى`,
@@ -571,45 +585,114 @@ export class OrdersService {
       );
     }
 
-    // نفس منطق رسوم إلغاء العميل بالظبط، بس هنا الرسوم (لو السبب المختار عليها رسوم) بتتحصّل
-    // من محفظة الفني نفسه — تعويض للمنصة/العميل عن فني قبل الطلب وبعدين رجع فيه. مفيش نافذة
-    // زمنية مجانية هنا (بعكس العميل) — القاموس الأصلي مالوش مفهوم "فترة سماح" لإلغاء الفني.
-    let feeCents = 0;
-    let cancellationReasonId: string | null = null;
-    if (dto.cancellation_reason_id) {
-      const cancellationReason = await this.cancellationReasonsService.findOrThrow(dto.cancellation_reason_id);
-      if (cancellationReason.appliesTo !== CancellationAppliesTo.TECHNICIAN) {
-        throw new ApiException(ErrorCode.VAL_001, 'سبب الإلغاء ده مش لإلغاء الفني', HttpStatus.BAD_REQUEST);
-      }
-      cancellationReasonId = cancellationReason.id;
-      if (cancellationReason.chargesFee) {
-        feeCents = Math.round((order.totalAmountCents * Number(cancellationReason.feePercentage)) / 100);
+    const selfCancelEnabled = await this.settingsService.getBoolean('technician_cancellation.self_cancel_enabled', true);
+    if (!selfCancelEnabled) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        'الإلغاء الذاتي معطّل حاليًا — كلّم الدعم لو محتاج تلغي الطلب ده',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const windowMinutes = await this.settingsService.getNumber('technician_cancellation.window_minutes_after_acceptance', 15);
+    const elapsedMinutes = order.acceptedAt ? (Date.now() - order.acceptedAt.getTime()) / 60000 : 0;
+    if (windowMinutes > 0 && elapsedMinutes > windowMinutes) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `فات وقت الإلغاء الذاتي المسموح (${windowMinutes} دقيقة بعد القبول) — كلّم الدعم لو لازم تلغي`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const minMinutesBeforeStart = await this.settingsService.getNumber(
+      'technician_cancellation.min_minutes_before_scheduled_start',
+      60,
+    );
+    if (order.scheduledAt) {
+      const minutesUntilStart = (order.scheduledAt.getTime() - Date.now()) / 60000;
+      if (minutesUntilStart < minMinutesBeforeStart) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          `مينفعش تلغي الطلب وباقي أقل من ${minMinutesBeforeStart} دقيقة على الموعد المجدول — كلّم الدعم`,
+          HttpStatus.CONFLICT,
+        );
       }
     }
 
+    // نفس منطق رسوم إلغاء العميل بالظبط، بس هنا الرسوم (لو السبب المختار عليها رسوم) بتتحصّل
+    // من محفظة الفني نفسه — تعويض للمنصة/العميل عن فني قبل الطلب وبعدين رجع فيه.
+    const cancellationReason = await this.cancellationReasonsService.findOrThrow(dto.cancellation_reason_id);
+    if (cancellationReason.appliesTo !== CancellationAppliesTo.TECHNICIAN) {
+      throw new ApiException(ErrorCode.VAL_001, 'سبب الإلغاء ده مش لإلغاء الفني', HttpStatus.BAD_REQUEST);
+    }
+    if (cancellationReason.requiresFreeText && !dto.reason?.trim()) {
+      throw new ApiException(ErrorCode.VAL_001, 'السبب ده محتاج توضيح بالتفصيل (نص حر)', HttpStatus.BAD_REQUEST);
+    }
+    const feeCents = cancellationReason.chargesFee
+      ? Math.round((order.totalAmountCents * Number(cancellationReason.feePercentage)) / 100)
+      : 0;
+
+    // تحديد سلوك الاسترجاع (ADR-0006 §1/§3) — "اعتماد" أو تعيين يدوي من الإدارة (بصمة
+    // reassign() الموجودة: change_source=admin و new_status=accepted) مش بيرجع تلقائي للمطابقة
+    // افتراضيًا، عكس فرد/طوارئ.
+    const wasAdminAssigned = await this.orderStatusHistory.exists({
+      where: { orderId: order.id, changeSource: OrderChangeSource.ADMIN, newStatus: OrderStatus.ACCEPTED },
+    });
+    const isTeamOrAdminAssigned = order.bookingMode === BookingMode.TEAM || wasAdminAssigned;
+    const autoRematchTeamAssigned = await this.settingsService.getBoolean(
+      'technician_cancellation.auto_rematch_team_assigned',
+      false,
+    );
+    const autoRematchIndividual = await this.settingsService.getBoolean(
+      'technician_cancellation.auto_rematch_individual',
+      true,
+    );
+
+    let newStatus: OrderStatus;
+    let rematchBehavior: 'auto' | 'needs_reselection' | 'terminal';
+    if (isTeamOrAdminAssigned && !autoRematchTeamAssigned) {
+      newStatus = OrderStatus.NEEDS_TECHNICIAN_RESELECTION;
+      rematchBehavior = 'needs_reselection';
+    } else if (!isTeamOrAdminAssigned && autoRematchIndividual) {
+      newStatus = OrderStatus.SEARCHING_TECHNICIAN;
+      rematchBehavior = 'auto';
+    } else {
+      newStatus = OrderStatus.CANCELLED_BY_TECHNICIAN;
+      rematchBehavior = 'terminal';
+    }
+
     const previousStatus = order.orderStatus;
+    const cancelledTechnicianId = order.technicianId;
+    const acceptedAtSnapshot = order.acceptedAt;
     await this.dataSource.transaction(async (manager) => {
-      order.orderStatus = OrderStatus.CANCELLED_BY_TECHNICIAN;
-      order.cancelledAt = new Date();
+      order.orderStatus = newStatus;
       order.cancelledByUserId = userId;
-      order.cancellationReasonId = cancellationReasonId;
+      order.cancellationReasonId = cancellationReason.id;
       order.cancellationFeeCents = feeCents;
+      if (newStatus === OrderStatus.CANCELLED_BY_TECHNICIAN) {
+        order.cancelledAt = new Date();
+      } else {
+        // مش نهائي — الفني بيتشال من الطلب (technicianId/acceptedAt) عشان الطلب يرجع
+        // "فاضي" بالظبط زي لو لسه ما اتعيّنش فني خالص، بدل ما يفضل يشاور على فني اتلغى.
+        order.technicianId = null;
+        order.acceptedAt = null;
+      }
       await manager.save(order);
 
       await manager.save(
         manager.create(OrderStatusHistory, {
           orderId: order.id,
           previousStatus,
-          newStatus: OrderStatus.CANCELLED_BY_TECHNICIAN,
+          newStatus,
           changedByUserId: userId,
           changedByRole: 'technician',
           changeSource: OrderChangeSource.TECHNICIAN,
-          reason: dto.reason ?? null,
+          reason: dto.reason ?? cancellationReason.reasonAr,
         }),
       );
 
       if (feeCents > 0) {
-        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
+        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(cancelledTechnicianId!);
         const technicianWallet = await this.walletsService.getOrCreateWallet(technicianProfile.userId, WalletOwnerType.TECHNICIAN);
         const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
         await this.walletsService.doubleEntry(
@@ -628,19 +711,81 @@ export class OrdersService {
       }
     });
 
+    // حدث audit كامل (ADR-0006 §6) — بيانات تاريخية للمراجعة، مش state بيتقرأ في مسار العملية.
+    await this.auditLog.record({
+      actorUserId: userId,
+      actorRole: 'technician',
+      action: 'order.cancelled_by_technician',
+      entityType: 'order',
+      entityId: order.id,
+      newValues: {
+        accepted_at: acceptedAtSnapshot?.toISOString() ?? null,
+        cancelled_at: new Date().toISOString(),
+        elapsed_minutes_since_acceptance: Math.round(elapsedMinutes),
+        within_policy_window: true,
+        booking_mode: order.bookingMode,
+        cancellation_reason_id: cancellationReason.id,
+        rematch_behavior: rematchBehavior,
+      },
+    });
+
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
       new OrderStatusChangedEvent(
         order.id,
         order.orderNumber,
         previousStatus,
-        OrderStatus.CANCELLED_BY_TECHNICIAN,
+        newStatus,
         order.customerId,
-        order.technicianId,
+        cancelledTechnicianId,
         dto.reason ?? null,
       ),
     );
 
+    if (rematchBehavior === 'auto') {
+      this.events.emit(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
+    }
+
+    return order;
+  }
+
+  /**
+   * العميل بيطلب إعادة مطابقة صراحة بعد ما الطلب يتحول `needs_technician_reselection`
+   * (ADR-0006) — بديل عن "إلغاء وحجز طلب جديد من الأول". `requested_technician_id` تفضيل بس
+   * (نفس فلسفة الحقل المطابق وقت الإنشاء) — **ملحوظة صراحة**: `dispatchNextRound()` بيحترم
+   * التفضيل دا بس في أول جولة (`nextRound === 1`)؛ الطلب ده مش أول جولة أبدًا (رجع من إلغاء
+   * فني بعد جولات سابقة)، فالتفضيل هنا بيتسجّل بس المطابقة العادية هي اللي هتشتغل فعليًا —
+   * قرار مقصود لتفادي لمس منطق الجولات المُختبر جيدًا، مش سهو.
+   */
+  async requestRematch(userId: string, orderId: string, dto: RequestRematchDto): Promise<Order> {
+    const order = await this.findOneOwnedOrThrow(userId, orderId);
+    if (!canTransition(order.orderStatus, OrderStatus.SEARCHING_TECHNICIAN)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تطلب إعادة مطابقة والطلب في حالة ${order.orderStatus}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const previousStatus = order.orderStatus;
+    order.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
+    order.requestedTechnicianId = dto.requested_technician_id ?? null;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.SEARCHING_TECHNICIAN,
+          changedByUserId: userId,
+          changedByRole: 'customer',
+          changeSource: OrderChangeSource.CUSTOMER,
+          reason: 'العميل طلب إعادة مطابقة بعد إلغاء الفني',
+        }),
+      );
+    });
+
+    this.events.emit(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id));
     return order;
   }
 
