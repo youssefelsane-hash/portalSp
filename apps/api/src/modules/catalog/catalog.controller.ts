@@ -104,16 +104,24 @@ export class CatalogController {
     );
     const service = await this.catalogService.findServiceOrThrow(id);
     const isEmergency = query.booking_mode === 'emergency';
-    // خدمات formula بيتجاهل مستوى الفني تمامًا (level_price_multiplier ثابت 1 دايمًا في
-    // catalogService.estimate()'s FORMULA branch) وبتحتاج field_values مش متاحة هنا (فورم
-    // ديناميكي، مش جزء من الفلترة/الاختيار قبل الحجز) — استدعاء estimate() هنا كان هيرفض بـ
-    // VAL_001 لأي حقل formula إجباري. final_price_cents = null صراحة لخدمات formula.
+    // خدمات formula محتاجة field_values عشان estimate() تقدر تحسب سعر أصلاً (المعادلة نفسها
+    // بتحتاج مدخلات الفورم الديناميكي) — لو العميل ملاها بالفعل قبل الوصول لشاشة اختيار الفني
+    // (field_values اتبعتت)، بقى نقدر نحسب final_price_cents حقيقي لكل فني حسب مستواه بالظبط
+    // زي باقي نماذج التسعير (كانت فجوة موثّقة صراحة، اتقفلت مع bug مضاعف مستوى الفني نفسه في
+    // catalogService.estimate()'s FORMULA branch). لو لسه مالهاش field_values، بترجع null صراحة
+    // بدل ما ترفض الطلب كله بـVAL_001 لأي حقل formula إجباري.
     const withPricing =
-      service.pricingModel === PricingModel.FORMULA
+      service.pricingModel === PricingModel.FORMULA && !query.field_values
         ? items.map((item) => ({ item, estimate: null }))
         : await Promise.all(
             items.map(async (item) => {
-              const estimate = await this.catalogService.estimate(id, zoneId, item.currentLevel, isEmergency);
+              const estimate = await this.catalogService.estimate(
+                id,
+                zoneId,
+                item.currentLevel,
+                isEmergency,
+                query.field_values,
+              );
               return { item, estimate };
             }),
           );
