@@ -8,6 +8,7 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminOrdersService } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
+import { AssignAssistantDto } from './dto/assign-assistant.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
@@ -15,8 +16,10 @@ import { toOrderPricingEvaluationResponseDto } from './dto/order-pricing-evaluat
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toTechnicianOrderCancellationResponseDto } from './dto/technician-order-cancellation-response.dto';
 import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
+import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
+import { OrderTeamService } from './order-team.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
 
 @Controller('admin/orders')
@@ -26,6 +29,7 @@ export class AdminOrdersController {
     private readonly adminOrdersService: AdminOrdersService,
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
+    private readonly orderTeamService: OrderTeamService,
   ) {}
 
   @Get()
@@ -100,6 +104,30 @@ export class AdminOrdersController {
   ) {
     return toOrderResponseDto(
       await this.adminOrdersService.adjustPrice(admin.sub, id, dto.new_total_amount_cents, dto.reason, audit),
+    );
+  }
+
+  // الأدمن محتاج يشوف أعضاء الفريق (فريق "اعتماد" + مساعدين) عشان يعرف كام مساعد لسه ناقص قبل
+  // ما يعيّن يدوي — نفس OrderTeamService.listForOrder() اللي customer/technician controllers
+  // بيستخدموها، مفيش أي endpoint إداري كان بيعرضها قبل كده.
+  @Get(':id/team-members')
+  async listTeamMembers(@Param('id', ParseUUIDPipe) id: string) {
+    return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
+  }
+
+  // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية — ADR-0008 (يمتد ADR-0007 §7 اللي أجّل
+  // الحل ده صراحة عن نطاقه الأول).
+  @Post(':id/assistants')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.assign_assistant')
+  async assignAssistant(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignAssistantDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.adminOrdersService.assignAssistant(admin.sub, id, dto.technician_id, audit),
     );
   }
 }

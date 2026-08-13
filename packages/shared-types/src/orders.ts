@@ -140,6 +140,24 @@ export interface OrderMediaResponseDto {
   taken_at: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/team-member-response.dto.ts
+export interface TeamMemberResponseDto {
+  id: string;
+  technician_id: string;
+  full_name: string;
+  avatar_url: string | null;
+  role_label: string;
+  // 'assistant' = اتوصل عبر مطابقة المساعد التلقائية (ADR-0007) أو تعيين يدوي من الأدمن
+  // (ADR-0008)، 'team_member' = إضافة يدوية من قائد الطلب في "اعتماد" (docs/08 §5).
+  member_type: string;
+  created_at: string;
+}
+
+// مطابق لـ apps/api/src/modules/orders/dto/assign-assistant.dto.ts (ADR-0008)
+export interface AssignAssistantBody {
+  technician_id: string;
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts وentities/cancellation-reason.entity.ts
 export type CancellationAppliesTo = 'customer' | 'technician' | 'admin';
 
