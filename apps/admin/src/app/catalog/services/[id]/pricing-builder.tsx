@@ -4,15 +4,23 @@
 // الباك-إند (حقول/قواعد/معاينة) كان جاهز ومختبر بالكامل من سيشن سابقة، بس مفيش أي واجهة أدمن
 // بصرية تستخدمه — الطريقة الوحيدة كانت REST خام (curl) من سيشن اختبار. اتقفلت هنا.
 //
-// **قرار أمان متعمّد**: المعادلة (rule_type=formula) بتتحرر كـJSON بيمثّل نفس شجرة FormulaNode
+// **قرار أمان متعمّد**: المعادلة (rule_type=formula) بتتبني كـobject بيمثّل نفس شجرة FormulaNode
 // الآمنة اللي الباك-إند بيفهمها (pricing-formula.types.ts) — مفيش أي حقل نص حر بيتفسّر كجافاسكريبت
 // أو SQL خالص. الباك-إند نفسه (`validateFormulaNode`) بيرفض أي عملية برّه القايمة البيضاء وقت
 // الحفظ، فالواجهة دي مش مصدر الأمان الوحيد — بس بتعرض رسالة الرفض بوضوح للأدمن بدل ما تتبلع.
+//
+// **مرحلة 3 (2026-08-13)**: المعادلة دلوقتي بتتبني بمحرر شجري بصري (`FormulaTreeEditor`، ملف
+// formula-tree-editor.tsx) — كانت فجوة موثّقة صراحة ("لسه JSON AST في textarea، مش تجربة Super
+// Admin احترافية"). وضع "عرض/تحرير JSON" لسه موجود اختياريًا (زرار toggle تحت)، مش الطريق
+// الافتراضي. تفاصيل كاملة في apps/api/src/modules/pricing/README.md § مرحلة 3.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
   CreatePricingFieldBody,
   EvaluatePricingBody,
+  FinalPriceFormulaPayload,
+  FormulaNode,
+  LookupTableRulePayload,
   PricingEvaluationResponseDto,
   PricingFieldOption,
   PricingFieldResponseDto,
@@ -32,6 +40,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { FormulaTreeEditor, type FormulaEditorContext } from './formula-tree-editor';
 
 const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
   number: 'رقم',
@@ -59,13 +68,21 @@ const FIELD_TYPES_WITH_RANGE: PricingFieldType[] = ['number', 'area', 'length', 
 // الحفظ من الأساس بدل ما نستنى العميل يتفاجأ.
 const UNSUPPORTED_FIELD_TYPES: PricingFieldType[] = ['location', 'image_upload', 'video_upload', 'voice_note'];
 
-const FINAL_PRICE_TEMPLATE = JSON.stringify(
-  {
-    price_cents: { type: 'multiply', operands: [{ type: 'field_ref', field_key: 'area' }, { type: 'literal', value: 100 }] },
-  },
-  null,
-  2,
-);
+const DEFAULT_FORMULA_PAYLOAD: FinalPriceFormulaPayload = {
+  price_cents: { type: 'literal', value: 0 },
+};
+
+// الحقول الاختيارية في FinalPriceFormulaPayload — كل واحد منهم قابل للإضافة/الحذف من الأدمن
+// بزرار toggle (price_cents وحده إجباري دايمًا). القيمة الافتراضية عند التفعيل نفسها في كل مرة.
+const OPTIONAL_PAYLOAD_KEYS: { key: keyof Omit<FinalPriceFormulaPayload, 'price_cents'>; labelAr: string }[] = [
+  { key: 'min_price_cents', labelAr: 'أقل سعر مسموح' },
+  { key: 'max_price_cents', labelAr: 'أعلى سعر مسموح' },
+  { key: 'estimated_duration_days', labelAr: 'المدة المقدّرة (أيام)' },
+  { key: 'required_technicians', labelAr: 'عدد الفنيين المطلوب' },
+  { key: 'required_assistants', labelAr: 'عدد المساعدين المطلوب' },
+  { key: 'requires_assistant', labelAr: 'محتاج مساعد؟ (0 = لأ، غير كده = أيوه)' },
+  { key: 'suitable_for_emergency', labelAr: 'مناسب لطوارئ؟ (0 = لأ، غير كده = أيوه)' },
+];
 
 function emptyFieldForm(): CreatePricingFieldBody {
   return { field_key: '', label_ar: '', field_type: 'number', is_required: true };
@@ -94,9 +111,26 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   const finalPriceRule = rules?.find((r) => r.rule_type === 'formula' && r.rule_key === 'final_price' && r.is_active) ?? null;
   // null = العرض لسه مشتق من finalPriceRule (المصدر الحقيقي) — لحد ما الأدمن يبدأ يعدّل بنفسه.
   // نمط "derived state" بدل useEffect+setState (كان بيسبب cascading render فعلي، اتلقط بالـlint).
-  const [formulaTextOverride, setFormulaTextOverride] = useState<string | null>(null);
-  const formulaText =
-    formulaTextOverride ?? (finalPriceRule ? JSON.stringify(finalPriceRule.payload, null, 2) : FINAL_PRICE_TEMPLATE);
+  // بقى object بنية (FinalPriceFormulaPayload) بدل نص JSON خام — المحرر البصري (FormulaTreeEditor)
+  // بيعدّل عليه مباشرة، صفر JSON ظاهر للأدمن إلا لو فتح وضع "عرض JSON" الاختياري تحت.
+  const [payloadOverride, setPayloadOverride] = useState<FinalPriceFormulaPayload | null>(null);
+  const payload: FinalPriceFormulaPayload =
+    payloadOverride ?? ((finalPriceRule?.payload as FinalPriceFormulaPayload | undefined) ?? DEFAULT_FORMULA_PAYLOAD);
+  const setPayload = (next: FinalPriceFormulaPayload) => setPayloadOverride(next);
+
+  const [showJsonView, setShowJsonView] = useState(false);
+  const [jsonText, setJsonText] = useState<string | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  // سياق المحرر البصري — أسماء الحقول/الثوابت/جداول البحث المتاحة، عشان FormulaTreeEditor يعرضها
+  // كـdropdowns بدل ما الأدمن يكتب field_key بإيده (زي ما كان لازم في وضع JSON القديم).
+  const formulaContext: FormulaEditorContext = {
+    fieldKeys: (fields ?? []).filter((f) => f.is_active).map((f) => f.field_key),
+    constantKeys: (rules ?? []).filter((r) => r.rule_type === 'constant' && r.is_active).map((r) => r.rule_key),
+    lookupTables: (rules ?? [])
+      .filter((r) => r.rule_type === 'lookup_table' && r.is_active)
+      .map((r) => ({ ruleKey: r.rule_key, fieldKey: (r.payload as LookupTableRulePayload).field_key })),
+  };
 
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewResult, setPreviewResult] = useState<PricingEvaluationResponseDto | null>(null);
@@ -293,15 +327,23 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   }
 
   async function handleSaveFormula() {
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(formulaText);
-    } catch {
-      setError('نص المعادلة (JSON) مش صالح — راجع الأقواس والفواصل');
-      return;
+    // وضع عرض JSON مفعّل — لازم نزامن أي تعديل يدوي فيه لـpayload قبل الحفظ (نفس فحص الأخطاء
+    // القديم، بس دلوقتي اختياري مش الطريق الوحيد).
+    let toSave = payload;
+    if (showJsonView && jsonText !== null) {
+      try {
+        toSave = JSON.parse(jsonText);
+      } catch {
+        setJsonError('نص المعادلة (JSON) مش صالح — راجع الأقواس والفواصل');
+        return;
+      }
+      setJsonError(null);
     }
-    const ok = await upsertRule({ rule_type: 'formula', rule_key: 'final_price', payload: parsed });
-    if (ok) setFormulaTextOverride(null);
+    const ok = await upsertRule({ rule_type: 'formula', rule_key: 'final_price', payload: toSave as unknown as Record<string, unknown> });
+    if (ok) {
+      setPayloadOverride(null);
+      setJsonText(null);
+    }
   }
 
   async function handleDeactivateRule(ruleId: string) {
@@ -634,18 +676,48 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
           <CardTitle className="text-base">المعادلة النهائية (final_price)</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="mb-2 text-sm text-muted-foreground">
-            شجرة عمليات JSON آمنة بس — مفيش تنفيذ كود حر خالص. العمليات المسموحة: literal, field_ref, constant_ref, lookup_ref, add,
-            subtract, multiply, divide, percentage, min, max, round, if. أي عملية تانية هترفض وقت الحفظ برسالة واضحة تحت.
+          <p className="mb-3 text-sm text-muted-foreground">
+            ابني معادلة السعر بصريًا من غير ما تكتب أي JSON — اختار نوع كل عنصر من القايمة، والباك-إند
+            بيرفض بوضوح لو الشجرة اتخربطت (نفس الأمان القديم بالحرف، بس مش محتاج تكتب الشكل بنفسك).
           </p>
-          <Textarea
-            value={formulaText}
-            onChange={(e) => setFormulaTextOverride(e.target.value)}
-            rows={16}
-            dir="ltr"
-            className="font-mono text-sm"
-          />
-          <div className="mt-2 flex gap-2">
+
+          <div className="mb-4">
+            <Label className="mb-1 block font-medium">السعر النهائي (price_cents) — إجباري</Label>
+            <FormulaTreeEditor
+              node={payload.price_cents}
+              onChange={(n) => setPayload({ ...payload, price_cents: n })}
+              context={formulaContext}
+            />
+          </div>
+
+          {OPTIONAL_PAYLOAD_KEYS.map(({ key, labelAr }) => {
+            const current = payload[key];
+            return (
+              <div key={key} className="mb-4 border-t pt-3">
+                <label className="mb-1 flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={current !== undefined}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setPayload({ ...payload, [key]: { type: 'literal', value: 0 } as FormulaNode });
+                      } else {
+                        const next = { ...payload };
+                        delete next[key];
+                        setPayload(next);
+                      }
+                    }}
+                  />
+                  {labelAr}
+                </label>
+                {current !== undefined && (
+                  <FormulaTreeEditor node={current} onChange={(n) => setPayload({ ...payload, [key]: n })} context={formulaContext} />
+                )}
+              </div>
+            );
+          })}
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={isSaving} onClick={handleSaveFormula}>
               حفظ المعادلة
             </Button>
@@ -654,7 +726,51 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                 تعطيل المعادلة الحالية
               </Button>
             )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (!showJsonView) setJsonText(JSON.stringify(payload, null, 2));
+                setShowJsonView((s) => !s);
+              }}
+            >
+              {showJsonView ? 'إخفاء JSON' : 'عرض/تحرير JSON (متقدّم)'}
+            </Button>
           </div>
+
+          {/* وضع متقدّم اختياري — عرض/تعديل نفس الـpayload كـJSON خام (نسخ/لصق سريع، مراجعة الشكل
+              المخزَّن فعليًا) بدل ما يبقى الطريق الوحيد زي قبل كده. "طبّق" بيرجّع القيمة للمحرر
+              البصري فوق، مفيش مصدرين حقيقة منفصلين. */}
+          {showJsonView && (
+            <div className="mt-3 rounded-md border p-3">
+              <Textarea
+                value={jsonText ?? JSON.stringify(payload, null, 2)}
+                onChange={(e) => setJsonText(e.target.value)}
+                rows={14}
+                dir="ltr"
+                className="font-mono text-sm"
+              />
+              {jsonError && <p className="mt-1 text-sm text-destructive">{jsonError}</p>}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() => {
+                  try {
+                    const parsed = JSON.parse(jsonText ?? '{}');
+                    setPayload(parsed);
+                    setJsonError(null);
+                  } catch {
+                    setJsonError('نص JSON مش صالح — راجع الأقواس والفواصل');
+                  }
+                }}
+              >
+                طبّق التعديل على المحرر البصري
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
