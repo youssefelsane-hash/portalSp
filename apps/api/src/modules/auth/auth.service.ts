@@ -74,10 +74,18 @@ export class AuthService {
     });
     await this.otpCodes.save(otp);
 
-    // اللوج ده بيتسجل دايماً (حتى لو بوابة SMS حقيقية متظبطة) — نفس فلسفة استمرار التطوير/الاختبار
-    // المحلي المتّبعة في كل تكامل خارجي تاني في المشروع (Paymob/S3/إلخ)، مش استبدال كامل له.
-    // eslint-disable-next-line no-console
-    console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+    // بَقّة أمنية حقيقية اتصلحت (مراجعة أمان شاملة 2026-08-13، P0-4): اللوج ده كان بيسجّل الكود
+    // نفسه دايماً بلا شرط — مقبول تمامًا للتطوير/الاختبار المحلي (نفس فلسفة كل تكامل خارجي تاني
+    // في المشروع، Paymob/S3/إلخ)، لكن خطر حقيقي في Production — أي حد عنده access للوجز يقدر
+    // ياخد أي كود OTP ويدخل أي حساب. الكود الفعلي بقى يظهر بس لو NODE_ENV≠production؛ في
+    // Production بيتسجّل رقم موبايل مقنّع (أول 5 أرقام + آخر رقمين بس) بلا الكود خالص.
+    if (this.config.get<string>('nodeEnv') !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+    } else {
+      const masked = dto.phone_number.length > 7 ? `${dto.phone_number.slice(0, 5)}***${dto.phone_number.slice(-2)}` : '***';
+      this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
+    }
 
     // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة Twilio SMS حقيقية اتبنت
     // معمارياً في common/notifications/ بـ isConfigured (تفعيلها = env vars، تفاصيل في

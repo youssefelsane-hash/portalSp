@@ -169,4 +169,46 @@ describe('AuthService', () => {
       code: ErrorCode.AUTH_001,
     });
   });
+
+  // بَقّة أمنية حقيقية اتصلحت (مراجعة أمان شاملة 2026-08-13، P0-4): requestOtp() كانت بتسجّل
+  // الكود الفعلي في اللوج دايمًا بلا شرط — خطر حقيقي في Production. الاختبار ده بيبني نسخة
+  // منفصلة من AuthService بـNODE_ENV=production عشان يثبت الكود مبقاش بيتسجّل خالص.
+  it('في Production مايتسجلش كود OTP الفعلي في اللوج خالص — كان الثغرة', async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        JwtService,
+        TwilioSmsDispatcher,
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) => {
+              const values: Record<string, unknown> = {
+                nodeEnv: 'production',
+                'otp.expiryMinutes': 5,
+                'otp.maxAttempts': 5,
+                'jwt.accessSecret': 'test-access-secret-0123456789',
+                'jwt.accessExpiresIn': '15m',
+                'jwt.refreshSecret': 'test-refresh-secret-0123456789',
+                'jwt.refreshExpiresIn': '30d',
+              };
+              return values[key];
+            },
+          },
+        },
+        { provide: getRepositoryToken(User), useValue: new FakeRepository<User>() },
+        { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
+        { provide: getRepositoryToken(RefreshToken), useValue: new FakeRepository<RefreshToken>() },
+      ],
+    }).compile();
+    const prodService = moduleRef.get(AuthService);
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    await prodService.requestOtp({ phone_number: '+201001234567', purpose: OtpPurpose.REGISTER }, null);
+    const loggedWithRawCode = logSpy.mock.calls.some((call) => /\[OTP\].*→\s*\d{6}/.test(String(call[0])));
+    logSpy.mockRestore();
+
+    expect(loggedWithRawCode).toBe(false);
+  });
 });
