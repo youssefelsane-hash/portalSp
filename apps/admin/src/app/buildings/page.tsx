@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -174,7 +175,7 @@ export default function BuildingsPage() {
         </Card>
       )}
 
-      {!buildings && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!buildings && <TableSkeleton columns={7} />}
       {buildings && buildings.length === 0 && <EmptyState title="مفيش عمائر لسه" />}
 
       {buildings && buildings.length > 0 && (

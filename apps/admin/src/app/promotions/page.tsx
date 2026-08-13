@@ -14,6 +14,7 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -244,7 +245,7 @@ export default function PromotionsPage() {
         </Card>
       )}
 
-      {!promoCodes && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!promoCodes && <TableSkeleton columns={7} />}
       {promoCodes && promoCodes.length === 0 && <EmptyState title="مفيش أكواد خصم لسه" />}
 
       {promoCodes && promoCodes.length > 0 && (

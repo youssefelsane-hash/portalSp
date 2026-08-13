@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
 import { PromptDialog } from '@/components/prompt-dialog';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
@@ -107,7 +108,7 @@ export default function PayoutsPage() {
       </div>
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
-      {!error && !payouts && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!error && !payouts && <TableSkeleton columns={7} />}
       {payouts && payouts.length === 0 && <EmptyState title="مفيش طلبات صرف مطابقة" />}
 
       {payouts && payouts.length > 0 && (

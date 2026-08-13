@@ -9,6 +9,7 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -74,7 +75,7 @@ export default function OrdersPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !orders && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!error && !orders && <TableSkeleton columns={6} />}
       {orders && orders.length === 0 && <EmptyState title="مفيش طلبات مطابقة" />}
 
       {orders && orders.length > 0 && (

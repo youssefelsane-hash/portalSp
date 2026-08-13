@@ -9,6 +9,7 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
@@ -61,7 +62,7 @@ export default function SupportTicketsPage() {
       </div>
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
-      {!tickets && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!tickets && !error && <TableSkeleton columns={7} />}
       {tickets && tickets.length === 0 && <EmptyState title="مفيش تذاكر" />}
 
       {tickets && tickets.length > 0 && (

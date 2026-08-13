@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -84,7 +85,7 @@ export default function CustomersPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !customers && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!error && !customers && <TableSkeleton columns={6} />}
       {customers && customers.length === 0 && <EmptyState title="مفيش عملاء مطابقين" />}
 
       {customers && customers.length > 0 && (

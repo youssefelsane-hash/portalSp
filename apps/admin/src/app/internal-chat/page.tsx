@@ -9,6 +9,7 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
@@ -97,7 +98,7 @@ export default function InternalChatThreadsPage() {
         </Card>
       )}
 
-      {!threads && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!threads && !error && <TableSkeleton columns={3} />}
       {threads && threads.length === 0 && <EmptyState title="مفيش محادثات لسه" />}
 
       {threads && threads.length > 0 && (

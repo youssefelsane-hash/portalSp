@@ -16,6 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -277,7 +278,7 @@ export default function GeoPage() {
             </form>
           )}
           {!cities ? (
-            <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+            <TableSkeleton columns={3} />
           ) : cities.length === 0 ? (
             <p className="text-sm text-muted-foreground">مفيش مدن لسه</p>
           ) : (
@@ -347,7 +348,7 @@ export default function GeoPage() {
                 </form>
               )}
               {!areas ? (
-                <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+                <TableSkeleton columns={2} />
               ) : areas.length === 0 ? (
                 <p className="text-sm text-muted-foreground">مفيش مناطق للمدينة دي لسه</p>
               ) : (
@@ -406,7 +407,7 @@ export default function GeoPage() {
                 </form>
               )}
               {!zones ? (
-                <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+                <TableSkeleton columns={5} />
               ) : zones.length === 0 ? (
                 <p className="text-sm text-muted-foreground">مفيش نطاقات خدمة للمدينة دي لسه</p>
               ) : (

@@ -7,6 +7,7 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -76,7 +77,7 @@ export default function AuditLogPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !logs && <p className="text-muted-foreground">جاري التحميل…</p>}
+      {!error && !logs && <TableSkeleton columns={4} />}
       {logs && logs.length === 0 && <EmptyState title="مفيش سجلات مطابقة" />}
 
       {logs && logs.length > 0 && (
