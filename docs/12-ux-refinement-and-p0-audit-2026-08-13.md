@@ -218,7 +218,7 @@ Recurring، Buildings، Domestic Worker base flows.
 | 5 | Refresh-token rotation مش atomic | ✅ خلص |
 | 6 | حظر المستخدم لا يبطل Access Token فورًا | ✅ خلص |
 | 7 | Webhook الدفع مايتحققش من المبلغ | ✅ خلص |
-| 8 | Webhook بيرجع 200 حتى مع Crash داخلي | 🔲 لسه |
+| 8 | Webhook بيرجع 200 حتى مع Crash داخلي | ✅ خلص (فجوة صغيرة متبقية موثّقة — راجع payments/README.md) |
 | 9 | الطلبات المجدولة البعيدة بتتوزّع فورًا (ADR-0009 تصميم فقط) | 🔲 لسه |
 | 10 | رحلة اختيار الفني مرتّبة غلط لخدمات Formula | 🔲 لسه |
 
