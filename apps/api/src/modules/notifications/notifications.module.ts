@@ -16,6 +16,7 @@ import { AdminNotificationRoutingController } from './admin-notification-routing
 import { NotificationRoutingRule } from './entities/notification-routing-rule.entity';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
+import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import { AssistantMatchingEscalatedRoutingListener } from './listeners/assistant-matching-escalated-routing.listener';
 import { AssistantOpportunityNotificationListener } from './listeners/assistant-opportunity-notification.listener';
 import { AssistantPersonalAssignedNotificationListener } from './listeners/assistant-personal-assigned-notification.listener';
@@ -41,7 +42,7 @@ import { NotificationsService } from './notifications.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Notification, UserDevice, NotificationRoutingRule, User, Order]),
+    TypeOrmModule.forFeature([Notification, UserDevice, NotificationRoutingRule, UserNotificationPreference, User, Order]),
     CustomersModule,
     TechniciansModule,
     AuditModule,

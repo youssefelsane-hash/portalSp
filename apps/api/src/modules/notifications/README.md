@@ -62,4 +62,33 @@
 
 - **`order.technician_cancelled`**: `TechnicianCancellationNotificationListener` جديد — سياسة إلغاء الفني (`docs/10`). حدث مخصوص `TECHNICIAN_ORDER_CANCELLED_EVENT` (مش `ORDER_STATUS_CHANGED_EVENT` العام، لأن الحالة الجديدة بعد الإلغاء — `searching_technician`/`awaiting_technician_reselection` — مش مميّزة كفاية لوحدها). العميل بياخد إشعار **متعدد القنوات** (`notifyMultiChannel([IN_APP, PUSH])` — "عالي الأولوية" بمعنى المشروع: مش in_app بس) بسبب آمن للعميل + deep link يفرّق بين "بندوّرلك تلقائي" و"اختار بديل بنفسك". الأدمن بياخد نسخة عبر `NotificationRoutingService.routeToRole()` الموجود أصلاً (قاعدة افتراضية جديدة `order.technician_cancelled → ops_manager`، migration 0071 — نفس نمط `order.emergency_created`). اتعمله اختبار حي: PUSH فشل بأمان (مفيش جهاز مسجّل للعميل التجريبي) وIN_APP نجح — الاتنين مسجّلين في `notifications` بحالة `delivery_status` مختلفة، مش استثناء يكسر الطلب. أدمن `ops_manager` استلم إشعار التوجيه فعليًا (اتنين مستخدمين مختلفين استلموه). تفاصيل كاملة في `../orders/README.md` § سياسة إلغاء الفني.
 
+## تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — ✅ خلص
+
+كانت مؤجّلة عمدًا كـ`backlog` منفصل. مستوى القناة بس (push/sms/whatsapp/email)، مش لكل
+`notification_type` — نفس نطاق الطلب الأصلي بالحرف.
+
+- `user_notification_preferences` (`migration 0080`): `(user_id, channel)` فريد، `is_enabled`
+  افتراضي `true`. **غياب الصف = مفعّل افتراضيًا** — مفيش سطر بيتخزّن لكل مستخدم لكل قناة من
+  أول تسجيل، بس لما المستخدم فعليًا يغيّر تفضيله. `in_app` مستثناة عمدًا من `PREFERENCE_ELIGIBLE_CHANNELS`
+  — هي صندوق الإشعارات نفسه جوّه التطبيق، مفيش معنى تعطيلها.
+- `GET /me/notification-preferences` (كل القنوات الأربعة بحالتها الحالية)، `PATCH
+  /me/notification-preferences/:channel` (`{is_enabled}`) — رفض واضح `400 VAL_001` لمحاولة
+  تعديل `in_app`.
+- **الفرض الفعلي**: `NotificationsService.notify()` بيسجّل صف `notifications` دايمًا (سجل دايم
+  في صندوق الإشعارات حتى لو القناة الفعلية معطّلة)، بس لو القناة (غير `in_app`) معطّلة من
+  تفضيلات المستخدم، **مفيش أي نداء لـ`dispatcher.dispatch()` أصلاً** — الصف بيتسجّل `failed`
+  بسبب واضح ("المستخدم عطّل القناة دي من تفضيلاته") فورًا، مش محاولة إرسال حقيقية بتتضيّع.
+- **اتعمله اختبار حي كامل**: `curl` (تعطيل/تفعيل `push` لعميل حقيقي، رفض `in_app`) + سكريبت
+  `NestFactory.createApplicationContext` مباشر بيستدعي `NotificationsService.notify()` نفسها
+  مرتين لنفس المستخدم — مرة والقناة معطّلة (اترجع `failed` بسبب التعطيل فورًا، **من غير** ما
+  يوصل لـ`resolveTargets()`/`dispatcher` خالص) ومرة بعد التفعيل (اترجع `failed` بسبب مختلف
+  تمامًا — "لا يوجد جهاز/بريد/رقم مسجّل" — يعني وصل فعليًا للـdispatcher المرة دي، الفرق ده
+  هو الدليل إن الفرض شغال صح مش مصادفة). بيانات الاختبار اترجعت لحالتها الأصلية بعد التأكيد.
+- `apps/customer-app`: `NotificationPreferencesScreen` جديدة (`features/notifications/`) —
+  `SwitchListTile` لكل قناة، مدخل من أيقونة ⚙️ في `AppBar` بتاع `NotificationsScreen`.
+  `flutter analyze` عدّى بلا أي مشكلة جديدة.
+- **نطاق مؤجّل عمدًا**: مفيش تفضيل لكل `notification_type` (زي "عطّلي إشعارات التسويق بس سيبي
+  التشغيلية") — الطلب الأصلي كان مستوى القناة بس. `apps/technician-app` لسه من غيره — نفس
+  الـendpoints جاهزة، مجرد شاشة مطابقة لو المالك عايزها لاحقًا.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
