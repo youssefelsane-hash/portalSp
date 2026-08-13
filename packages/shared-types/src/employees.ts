@@ -48,3 +48,7 @@ export interface UpdateEmployeeBody {
   notes?: string;
   is_active?: boolean;
 }
+
+export interface AssignRoleBody {
+  role_name: string;
+}
