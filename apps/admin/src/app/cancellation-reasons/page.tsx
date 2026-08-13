@@ -10,6 +10,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -146,8 +148,8 @@ export default function CancellationReasonsPage() {
         </Card>
       )}
 
-      {!reasons && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {reasons && reasons.length === 0 && <p className="text-muted-foreground">مفيش أسباب لسه</p>}
+      {!reasons && <TableSkeleton columns={5} />}
+      {reasons && reasons.length === 0 && <EmptyState title="مفيش أسباب لسه" />}
 
       {reasons && reasons.length > 0 && (
         <Table>

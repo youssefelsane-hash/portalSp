@@ -7,10 +7,20 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
+import { TableSkeleton } from '@/components/table-skeleton';
+import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, orderStatusBadgeVariant } from '@/lib/order-labels';
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_TYPE_LABELS,
+  orderStatusTone,
+  PAYMENT_STATUS_LABELS,
+  paymentStatusTone,
+} from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
 
 const PER_PAGE = 20;
@@ -66,8 +76,8 @@ export default function OrdersPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !orders && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {orders && orders.length === 0 && <p className="text-muted-foreground">مفيش طلبات مطابقة</p>}
+      {!error && !orders && <TableSkeleton columns={6} />}
+      {orders && orders.length === 0 && <EmptyState title="مفيش طلبات مطابقة" />}
 
       {orders && orders.length > 0 && (
         <>
@@ -96,12 +106,16 @@ export default function OrdersPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={orderStatusBadgeVariant(order.order_status)}>
+                    <StatusChip tone={orderStatusTone(order.order_status)}>
                       {ORDER_STATUS_LABELS[order.order_status]}
-                    </Badge>
+                    </StatusChip>
                   </TableCell>
                   <TableCell>{formatEgp(order.total_amount_cents)}</TableCell>
-                  <TableCell>{order.payment_status}</TableCell>
+                  <TableCell>
+                    <StatusChip tone={paymentStatusTone(order.payment_status)}>
+                      {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
+                    </StatusChip>
+                  </TableCell>
                   <TableCell>
                     {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
                   </TableCell>
@@ -110,24 +124,7 @@ export default function OrdersPage() {
             </TableBody>
           </Table>
 
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              صفحة {page} من {totalPages} ({total} طلب إجمالاً)
-            </span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                السابق
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                التالي
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="طلب" onPageChange={setPage} />
         </>
       )}
     </AppShell>

@@ -6,7 +6,9 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
-import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
+import { Pagination } from '@/components/pagination';
 import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
@@ -75,8 +77,8 @@ export default function AuditLogPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !logs && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {logs && logs.length === 0 && <p className="text-muted-foreground">مفيش سجلات مطابقة</p>}
+      {!error && !logs && <TableSkeleton columns={4} />}
+      {logs && logs.length === 0 && <EmptyState title="مفيش سجلات مطابقة" />}
 
       {logs && logs.length > 0 && (
         <>
@@ -115,24 +117,7 @@ export default function AuditLogPage() {
             </TableBody>
           </Table>
 
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              صفحة {page} من {totalPages} ({total} سجل إجمالاً)
-            </span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                السابق
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                التالي
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="سجل" onPageChange={setPage} />
         </>
       )}
     </AppShell>

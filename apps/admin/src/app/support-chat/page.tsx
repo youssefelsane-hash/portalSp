@@ -7,6 +7,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
@@ -30,8 +32,8 @@ export default function SupportChatThreadsPage() {
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
-      {!threads && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {threads && threads.length === 0 && <p className="text-muted-foreground">مفيش محادثات دعم لسه</p>}
+      {!threads && !error && <TableSkeleton columns={5} />}
+      {threads && threads.length === 0 && <EmptyState title="مفيش محادثات دعم لسه" />}
 
       {threads && threads.length > 0 && (
         <Table>

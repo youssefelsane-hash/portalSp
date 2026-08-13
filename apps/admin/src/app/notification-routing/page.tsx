@@ -11,7 +11,9 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -189,8 +191,8 @@ export default function NotificationRoutingPage() {
         </Card>
       )}
 
-      {!rules && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {rules && rules.length === 0 && <p className="text-muted-foreground">مفيش قواعد توجيه لسه</p>}
+      {!rules && <TableSkeleton columns={5} />}
+      {rules && rules.length === 0 && <EmptyState title="مفيش قواعد توجيه لسه" />}
 
       {rules && rules.length > 0 && (
         <Table>

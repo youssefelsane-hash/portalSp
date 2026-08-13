@@ -7,6 +7,9 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
+import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -72,8 +75,8 @@ export default function TechniciansPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !technicians && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {technicians && technicians.length === 0 && <p className="text-muted-foreground">مفيش فنيين مطابقين</p>}
+      {!error && !technicians && <TableSkeleton columns={6} />}
+      {technicians && technicians.length === 0 && <EmptyState title="مفيش فنيين مطابقين" />}
 
       {technicians && technicians.length > 0 && (
         <>
@@ -114,24 +117,7 @@ export default function TechniciansPage() {
             </TableBody>
           </Table>
 
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              صفحة {page} من {totalPages} ({total} فني إجمالاً)
-            </span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                السابق
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                التالي
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="فني" onPageChange={setPage} />
         </>
       )}
     </AppShell>

@@ -7,13 +7,14 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
-import { KPI_STATUS_LABELS, KPI_STATUS_BADGE_VARIANT } from '@/lib/technician-kpi-labels';
+import { KPI_STATUS_LABELS, KPI_STATUS_TONE } from '@/lib/technician-kpi-labels';
 
 const now = new Date();
 
@@ -133,7 +134,15 @@ export default function TechnicianKpiPage() {
       {!snapshots ? (
         <p className="text-sm text-muted-foreground">جاري التحميل…</p>
       ) : snapshots.length === 0 ? (
-        <p className="text-sm text-muted-foreground">مفيش بيانات KPI للشهر ده لسه — دوس "احسب الشهر ده"</p>
+        <EmptyState
+          title="مفيش بيانات KPI للشهر ده لسه"
+          description="احسب الشهر ده عشان تبان بيانات الفنيين هنا"
+          action={
+            <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
+              {isCalculating ? 'جاري الحساب…' : 'احسب الشهر ده'}
+            </Button>
+          }
+        />
       ) : (
         <Table>
           <TableHeader>
@@ -169,7 +178,7 @@ export default function TechnicianKpiPage() {
                 <TableCell>{s.complaints_upheld_count}</TableCell>
                 <TableCell>{s.suggested_bonus_cents !== null ? formatEgp(s.suggested_bonus_cents) : '—'}</TableCell>
                 <TableCell>
-                  <Badge variant={KPI_STATUS_BADGE_VARIANT[s.status]}>{KPI_STATUS_LABELS[s.status]}</Badge>
+                  <StatusChip tone={KPI_STATUS_TONE[s.status]}>{KPI_STATUS_LABELS[s.status]}</StatusChip>
                   {!s.is_eligible && <span className="block text-xs text-muted-foreground">{s.ineligibility_reason}</span>}
                 </TableCell>
                 <TableCell>

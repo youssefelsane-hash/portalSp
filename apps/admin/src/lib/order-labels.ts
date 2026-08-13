@@ -58,16 +58,10 @@ const CANCELLED_STATUSES: OrderStatus[] = [
   'expired',
 ];
 
-export function orderStatusBadgeVariant(status: OrderStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'completed') return 'secondary';
-  if (CANCELLED_STATUSES.includes(status) || status === 'disputed') return 'destructive';
-  return 'outline';
-}
-
-// نظام التصميم المشترك (docs/12) — StatusChip بديل أغنى دلاليًا من orderStatusBadgeVariant فوق
-// (اللي بيحصر كل الحالات النشطة/المعلّقة في تدرّج رمادي واحد "outline"، فمفيش فرق بصري بين
-// "بانتظار الدفع" و"جاري التنفيذ" مثلاً رغم إنهم يستأهلوا انتباه مختلف تمامًا). مُستبقاة الدالة
-// القديمة فوق زي ما هي (لسه مستخدمة في صفحات لسه ماتلمستش بالنظام الجديد).
+// نظام التصميم المشترك (docs/12) — بديل أغنى دلاليًا من Badge العادي (اللي كان بيحصر كل الحالات
+// النشطة/المعلّقة في تدرّج رمادي واحد "outline"، فمفيش فرق بصري بين "بانتظار الدفع" و"جاري التنفيذ"
+// مثلاً رغم إنهم يستأهلوا انتباه مختلف تمامًا). الدالة القديمة `orderStatusBadgeVariant` اتشالت —
+// كل الصفحات (orders/page.tsx, orders/[id]/page.tsx) بقت مستخدمة StatusChip.
 export function orderStatusTone(status: OrderStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   if (status === 'completed') return 'success';
   if (CANCELLED_STATUSES.includes(status) || status === 'disputed') return 'danger';
@@ -78,6 +72,27 @@ export function orderStatusTone(status: OrderStatus): 'success' | 'warning' | 'd
   // searching_technician/technician_assigned/accepted/technician_on_way/technician_arrived/
   // in_progress/work_completed — الطلب شغال طبيعي، لسه محتاج متابعة لكن مش تنبيه.
   return 'info';
+}
+
+// حالة الدفع (order_payment_status في infra/migrations/0002_enums.sql) — بَقّة حقيقية اتلقطت
+// أثناء تطبيق StatusChip: صفحتي الطلبات (القايمة والتفاصيل) كانتا بتعرضوا `order.payment_status`
+// خام (`unpaid`/`pending`/...) من غير ترجمة، تخالف نفس مبدأ "بدون enums خام" اللي اتصلح قبل كده
+// في technician-kpi/[id].
+export const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  unpaid: 'لسه ما اتدفعش',
+  pending: 'قيد التحصيل',
+  paid: 'مدفوع',
+  partially_refunded: 'مسترجَع جزئيًا',
+  refunded: 'مسترجَع بالكامل',
+  failed: 'فشل الدفع',
+};
+
+export function paymentStatusTone(status: string): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (status === 'paid') return 'success';
+  if (status === 'pending') return 'warning';
+  if (status === 'failed') return 'danger';
+  if (status === 'partially_refunded' || status === 'refunded') return 'neutral';
+  return 'neutral';
 }
 
 // هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة (P2 #32/#34): order_type/booking_mode

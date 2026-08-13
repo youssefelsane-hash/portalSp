@@ -16,6 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -176,7 +177,7 @@ export default function AcademyPage() {
             {!courses ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : courses.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش كورسات لسه</p>
+              <EmptyState title="مفيش كورسات لسه" />
             ) : (
               <Table>
                 <TableHeader>
@@ -286,7 +287,7 @@ export default function AcademyPage() {
                 {!attempts ? (
                   <p className="text-sm text-muted-foreground">جاري التحميل…</p>
                 ) : attempts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">مفيش نتائج اختبارات مسجّلة للفني ده لسه</p>
+                  <EmptyState title="مفيش نتائج اختبارات مسجّلة للفني ده لسه" />
                 ) : (
                   <Table>
                     <TableHeader>

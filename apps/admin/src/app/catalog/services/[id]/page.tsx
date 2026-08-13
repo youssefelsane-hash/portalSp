@@ -28,6 +28,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -634,7 +635,7 @@ export default function ServiceDetailPage() {
             {!zonePricing ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : zonePricing.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش تسعير مخصص لمناطق — بيستخدم السعر الأساسي</p>
+              <EmptyState title="مفيش تسعير مخصص لمناطق — بيستخدم السعر الأساسي" />
             ) : (
               <Table>
                 <TableHeader>
@@ -704,7 +705,7 @@ export default function ServiceDetailPage() {
             {!eligibleTechnicians ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : eligibleTechnicians.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش فنيين مؤهلين للخدمة دي لسه</p>
+              <EmptyState title="مفيش فنيين مؤهلين للخدمة دي لسه" />
             ) : (
               <Table>
                 <TableHeader>
@@ -760,7 +761,7 @@ export default function ServiceDetailPage() {
             {!levelPricing ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : levelPricing.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش تسعير مخصص للمستويات — كل المستويات بنفس السعر الأساسي</p>
+              <EmptyState title="مفيش تسعير مخصص للمستويات — كل المستويات بنفس السعر الأساسي" />
             ) : (
               <Table>
                 <TableHeader>
@@ -806,7 +807,7 @@ export default function ServiceDetailPage() {
             {!addons ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : addons.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش إضافات اختيارية للخدمة دي لسه</p>
+              <EmptyState title="مفيش إضافات اختيارية للخدمة دي لسه" />
             ) : (
               <Table>
                 <TableHeader>
@@ -888,7 +889,7 @@ export default function ServiceDetailPage() {
             {!standardData ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : standardData.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش بيانات قياسية للخدمة دي لسه — محرك تقدير المدة مش هيشتغل من غيرها</p>
+              <EmptyState title="مفيش بيانات قياسية للخدمة دي لسه — محرك تقدير المدة مش هيشتغل من غيرها" />
             ) : (
               <Table>
                 <TableHeader>
@@ -1005,7 +1006,7 @@ export default function ServiceDetailPage() {
                               {!actualsByStandardData[row.id] ? (
                                 <p className="text-sm text-muted-foreground">جاري التحميل…</p>
                               ) : actualsByStandardData[row.id].length === 0 ? (
-                                <p className="text-sm text-muted-foreground">مفيش إنتاجية فعلية متسجّلة لسه</p>
+                                <EmptyState title="مفيش إنتاجية فعلية متسجّلة لسه" />
                               ) : (
                                 <Table>
                                   <TableHeader>

@@ -13,6 +13,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,8 +28,8 @@ import {
   COMPLAINT_RESOLUTION_TYPE_LABELS,
   COMPLAINT_SEVERITY_LABELS,
   COMPLAINT_STATUS_LABELS,
-  complaintSeverityBadgeVariant,
-  complaintStatusBadgeVariant,
+  complaintSeverityTone,
+  complaintStatusTone,
   OPEN_COMPLAINT_STATUSES,
 } from '@/lib/support-labels';
 
@@ -203,12 +205,12 @@ export default function ComplaintDetailPage() {
         title={<span dir="ltr">{complaint.complaint_number}</span>}
         actions={
           <>
-            <Badge variant={complaintStatusBadgeVariant(complaint.complaint_status)}>
+            <StatusChip tone={complaintStatusTone(complaint.complaint_status)}>
               {COMPLAINT_STATUS_LABELS[complaint.complaint_status]}
-            </Badge>
-            <Badge variant={complaintSeverityBadgeVariant(complaint.severity)}>
+            </StatusChip>
+            <StatusChip tone={complaintSeverityTone(complaint.severity)}>
               {COMPLAINT_SEVERITY_LABELS[complaint.severity]}
-            </Badge>
+            </StatusChip>
             {complaint.complaint_status !== 'closed' && (
               <SelectNative
                 aria-label="تعديل التصنيف"
@@ -360,7 +362,7 @@ export default function ComplaintDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {messages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش رسائل لسه</p>
+              <EmptyState title="مفيش رسائل لسه" />
             ) : (
               messages.map((msg) => (
                 <div

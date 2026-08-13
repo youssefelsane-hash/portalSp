@@ -14,6 +14,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -85,10 +87,7 @@ export default function TechnicianDetailPage() {
     await runAction(() => authedFetch(`/admin/technicians/${id}/approve`, { method: 'POST' }));
   }
 
-  async function handleNextStep(endpoint: string) {
-    // null = المستخدم دوس "إلغاء" في الـ prompt — يعني عايز يلغي الخطوة كلها، مش يكمل بملاحظات فاضية
-    const notes = window.prompt('ملاحظات (اختياري)؟');
-    if (notes === null) return;
+  async function handleNextStep(endpoint: string, notes: string) {
     await runAction(() =>
       authedFetch(`/admin/technicians/${id}/${endpoint}`, {
         method: 'POST',
@@ -120,9 +119,7 @@ export default function TechnicianDetailPage() {
     );
   }
 
-  async function handleReviewDocument(documentId: string, reviewStatus: 'approved' | 'rejected') {
-    const rejection_reason = reviewStatus === 'rejected' ? window.prompt('سبب الرفض؟') : undefined;
-    if (reviewStatus === 'rejected' && !rejection_reason) return;
+  async function handleReviewDocument(documentId: string, reviewStatus: 'approved' | 'rejected', rejection_reason?: string) {
     await runAction(() =>
       authedFetch(`/admin/technicians/${id}/documents/${documentId}/review`, {
         method: 'POST',
@@ -134,9 +131,7 @@ export default function TechnicianDetailPage() {
   // كانت فجوة موثّقة صراحة: الشهادات (technician_certificates، تسويقية، منفصلة عن مستندات KYC
   // فوق) كانت بتتراجع عبر curl/Postman بس — مفيش شاشة أدمن تعرض المعلّقة أصلاً. نفس نمط
   // handleReviewDocument بالحرف.
-  async function handleReviewCertificate(certificateId: string, reviewStatus: 'approved' | 'rejected') {
-    const rejection_reason = reviewStatus === 'rejected' ? window.prompt('سبب الرفض؟') : undefined;
-    if (reviewStatus === 'rejected' && !rejection_reason) return;
+  async function handleReviewCertificate(certificateId: string, reviewStatus: 'approved' | 'rejected', rejection_reason?: string) {
     await runAction(() =>
       authedFetch(`/admin/technicians/${id}/certificates/${certificateId}/review`, {
         method: 'POST',
@@ -242,13 +237,18 @@ export default function TechnicianDetailPage() {
             <CardFooter className="flex-col items-stretch gap-3">
               <div className="flex gap-2">
                 {NEXT_VERIFICATION_STEP[detail.verification_status] && (
-                  <Button
-                    variant="secondary"
-                    disabled={isSaving}
-                    onClick={() => handleNextStep(NEXT_VERIFICATION_STEP[detail.verification_status]!.endpoint)}
-                  >
-                    {NEXT_VERIFICATION_STEP[detail.verification_status]!.label}
-                  </Button>
+                  <PromptDialog
+                    trigger={
+                      <Button variant="secondary" disabled={isSaving}>
+                        {NEXT_VERIFICATION_STEP[detail.verification_status]!.label}
+                      </Button>
+                    }
+                    title={NEXT_VERIFICATION_STEP[detail.verification_status]!.label}
+                    label="ملاحظات (اختياري)"
+                    required={false}
+                    confirmLabel="تأكيد"
+                    onConfirm={(notes) => handleNextStep(NEXT_VERIFICATION_STEP[detail.verification_status]!.endpoint, notes)}
+                  />
                 )}
                 <Button disabled={isSaving} onClick={handleApprove}>
                   اعتماد
@@ -348,7 +348,7 @@ export default function TechnicianDetailPage() {
           </CardHeader>
           <CardContent>
             {detail.documents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش مستندات مرفوعة</p>
+              <EmptyState title="مفيش مستندات مرفوعة" />
             ) : (
               <Table>
                 <TableHeader>
@@ -395,14 +395,19 @@ export default function TechnicianDetailPage() {
                             >
                               اعتماد
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              disabled={isSaving}
-                              onClick={() => handleReviewDocument(doc.id, 'rejected')}
-                            >
-                              رفض
-                            </Button>
+                            <PromptDialog
+                              trigger={
+                                <Button size="sm" variant="destructive" disabled={isSaving}>
+                                  رفض
+                                </Button>
+                              }
+                              title="رفض المستند"
+                              label="سبب الرفض"
+                              minLength={1}
+                              confirmLabel="رفض"
+                              destructive
+                              onConfirm={(reason) => handleReviewDocument(doc.id, 'rejected', reason)}
+                            />
                           </div>
                         )}
                       </TableCell>
@@ -420,7 +425,7 @@ export default function TechnicianDetailPage() {
           </CardHeader>
           <CardContent>
             {detail.certificates.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش شهادات مرفوعة</p>
+              <EmptyState title="مفيش شهادات مرفوعة" />
             ) : (
               <Table>
                 <TableHeader>
@@ -469,14 +474,19 @@ export default function TechnicianDetailPage() {
                             >
                               اعتماد
                             </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              disabled={isSaving}
-                              onClick={() => handleReviewCertificate(cert.id, 'rejected')}
-                            >
-                              رفض
-                            </Button>
+                            <PromptDialog
+                              trigger={
+                                <Button size="sm" variant="destructive" disabled={isSaving}>
+                                  رفض
+                                </Button>
+                              }
+                              title="رفض الشهادة"
+                              label="سبب الرفض"
+                              minLength={1}
+                              confirmLabel="رفض"
+                              destructive
+                              onConfirm={(reason) => handleReviewCertificate(cert.id, 'rejected', reason)}
+                            />
                           </div>
                         )}
                       </TableCell>
@@ -526,7 +536,7 @@ export default function TechnicianDetailPage() {
             {!zones ? (
               <p className="text-sm text-muted-foreground">جاري التحميل…</p>
             ) : zones.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش مناطق عمل معيّنة لسه</p>
+              <EmptyState title="مفيش مناطق عمل معيّنة لسه" />
             ) : (
               <Table>
                 <TableHeader>

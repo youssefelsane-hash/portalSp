@@ -7,9 +7,9 @@ export const KPI_STATUS_LABELS: Record<KpiSnapshotStatus, string> = {
   rejected: 'مرفوضة',
 };
 
-export const KPI_STATUS_BADGE_VARIANT: Record<KpiSnapshotStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  calculated: 'outline',
-  approved: 'secondary',
-  paid: 'default',
-  rejected: 'destructive',
+export const KPI_STATUS_TONE: Record<KpiSnapshotStatus, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
+  calculated: 'neutral',
+  approved: 'info',
+  paid: 'success',
+  rejected: 'danger',
 };

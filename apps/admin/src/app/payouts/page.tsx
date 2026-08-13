@@ -6,11 +6,14 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
+import { PromptDialog } from '@/components/prompt-dialog';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
-import { PAYOUT_METHOD_LABELS, PAYOUT_STATUS_LABELS, payoutStatusBadgeVariant } from '@/lib/payments-labels';
+import { PAYOUT_METHOD_LABELS, PAYOUT_STATUS_LABELS, payoutStatusTone } from '@/lib/payments-labels';
 
 const STATUS_FILTERS: { value: PayoutStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'الكل' },
@@ -64,13 +67,7 @@ export default function PayoutsPage() {
     await runAction(() => authedFetch(`/admin/payouts/${id}/complete`, { method: 'POST' }));
   }
 
-  async function handleReject(id: string) {
-    const reason = window.prompt('سبب الرفض (لازم يكون حرفين على الأقل)؟');
-    if (reason === null) return;
-    if (reason.trim().length < 2) {
-      window.alert('سبب الرفض قصير جداً');
-      return;
-    }
+  async function handleReject(id: string, reason: string) {
     await runAction(() => authedFetch(`/admin/payouts/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }));
   }
 
@@ -111,8 +108,8 @@ export default function PayoutsPage() {
       </div>
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
-      {!error && !payouts && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {payouts && payouts.length === 0 && <p className="text-muted-foreground">مفيش طلبات صرف مطابقة</p>}
+      {!error && !payouts && <TableSkeleton columns={7} />}
+      {payouts && payouts.length === 0 && <EmptyState title="مفيش طلبات صرف مطابقة" />}
 
       {payouts && payouts.length > 0 && (
         <Table>
@@ -141,9 +138,9 @@ export default function PayoutsPage() {
                   <TableCell>{formatEgp(payout.net_amount_cents)}</TableCell>
                   <TableCell>{PAYOUT_METHOD_LABELS[payout.payout_method]}</TableCell>
                   <TableCell>
-                    <Badge variant={payoutStatusBadgeVariant(payout.payout_status)}>
+                    <StatusChip tone={payoutStatusTone(payout.payout_status)}>
                       {PAYOUT_STATUS_LABELS[payout.payout_status]}
-                    </Badge>
+                    </StatusChip>
                     {payout.payout_status === 'rejected' && payout.rejection_reason && (
                       <span className="block text-xs text-muted-foreground">{payout.rejection_reason}</span>
                     )}
@@ -168,9 +165,19 @@ export default function PayoutsPage() {
                         payout.payout_status === 'under_review' ||
                         payout.payout_status === 'approved' ||
                         payout.payout_status === 'processing') && (
-                        <Button size="sm" variant="destructive" disabled={isSaving} onClick={() => handleReject(payout.id)}>
-                          رفض
-                        </Button>
+                        <PromptDialog
+                          trigger={
+                            <Button size="sm" variant="destructive" disabled={isSaving}>
+                              رفض
+                            </Button>
+                          }
+                          title="رفض طلب الصرف"
+                          label="سبب الرفض"
+                          minLength={2}
+                          confirmLabel="رفض"
+                          destructive
+                          onConfirm={(reason) => handleReject(payout.id, reason)}
+                        />
                       )}
                     </div>
                   </TableCell>

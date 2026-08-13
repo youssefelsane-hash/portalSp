@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -81,7 +82,7 @@ export default function InternalChatThreadDetailPage() {
         </CardHeader>
         <CardContent>
           {!messages && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
-          {messages && messages.length === 0 && <p className="text-muted-foreground">مفيش رسائل لسه</p>}
+          {messages && messages.length === 0 && <EmptyState title="مفيش رسائل لسه" />}
 
           {messages && messages.length > 0 && (
             <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pe-1">

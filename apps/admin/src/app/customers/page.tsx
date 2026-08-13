@@ -7,6 +7,9 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { TableSkeleton } from '@/components/table-skeleton';
+import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -83,8 +86,8 @@ export default function CustomersPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !customers && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {customers && customers.length === 0 && <p className="text-muted-foreground">مفيش عملاء مطابقين</p>}
+      {!error && !customers && <TableSkeleton columns={6} />}
+      {customers && customers.length === 0 && <EmptyState title="مفيش عملاء مطابقين" />}
 
       {customers && customers.length > 0 && (
         <>
@@ -123,24 +126,7 @@ export default function CustomersPage() {
             </TableBody>
           </Table>
 
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              صفحة {page} من {totalPages} ({total} عميل إجمالاً)
-            </span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                السابق
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                التالي
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="عميل" onPageChange={setPage} />
         </>
       )}
     </AppShell>

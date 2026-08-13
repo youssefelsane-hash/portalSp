@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -103,7 +104,7 @@ export default function TechnicianReferralsPage() {
           {!bonuses ? (
             <p className="text-sm text-muted-foreground">جاري التحميل…</p>
           ) : bonuses.length === 0 ? (
-            <p className="text-sm text-muted-foreground">مفيش سجلات بالفلتر ده</p>
+            <EmptyState title="مفيش سجلات بالفلتر ده" />
           ) : (
             <Table>
               <TableHeader>

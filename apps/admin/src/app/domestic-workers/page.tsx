@@ -6,6 +6,9 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { PromptDialog } from '@/components/prompt-dialog';
+import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
@@ -48,9 +51,7 @@ export default function DomesticWorkersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, status]);
 
-  async function handleReview(workerId: string, reviewStatus: 'approved' | 'rejected') {
-    const notes = reviewStatus === 'rejected' ? window.prompt('سبب الرفض؟') : undefined;
-    if (reviewStatus === 'rejected' && !notes) return;
+  async function handleReview(workerId: string, reviewStatus: 'approved' | 'rejected', notes?: string) {
     setIsSaving(true);
     setError(null);
     try {
@@ -83,8 +84,8 @@ export default function DomesticWorkersPage() {
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
-      {!workers && <p className="text-muted-foreground">جاري التحميل…</p>}
-      {workers && workers.length === 0 && <p className="text-muted-foreground">مفيش مقدّمي خدمة بهذه الحالة</p>}
+      {!workers && <TableSkeleton columns={7} />}
+      {workers && workers.length === 0 && <EmptyState title="مفيش مقدّمي خدمة بهذه الحالة" />}
 
       {workers && workers.length > 0 && (
         <Table>
@@ -121,14 +122,19 @@ export default function DomesticWorkersPage() {
                       <Button size="sm" disabled={isSaving} onClick={() => handleReview(worker.id, 'approved')}>
                         اعتماد
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={isSaving}
-                        onClick={() => handleReview(worker.id, 'rejected')}
-                      >
-                        رفض
-                      </Button>
+                      <PromptDialog
+                        trigger={
+                          <Button size="sm" variant="ghost" disabled={isSaving}>
+                            رفض
+                          </Button>
+                        }
+                        title="رفض مقدّم الخدمة"
+                        label="سبب الرفض"
+                        minLength={1}
+                        confirmLabel="رفض"
+                        destructive
+                        onConfirm={(notes) => handleReview(worker.id, 'rejected', notes)}
+                      />
                     </>
                   )}
                 </TableCell>

@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -92,7 +93,7 @@ const TECH_SORT_LABELS: Record<TechniciansReportSortBy, string> = {
 
 function RevenueChart({ rows }: { rows: RevenuePeriodRow[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">مفيش بيانات في الفترة دي</p>;
+  if (rows.length === 0) return <EmptyState title="مفيش بيانات في الفترة دي" />;
 
   const width = 800;
   const height = 220;
@@ -329,7 +330,7 @@ export default function ReportsPage() {
 
             {techError && <p className="text-destructive">{techError}</p>}
             {!techError && !techRows && <p className="text-muted-foreground">جاري التحميل…</p>}
-            {techRows && techRows.length === 0 && <p className="text-muted-foreground">مفيش فنيين</p>}
+            {techRows && techRows.length === 0 && <EmptyState title="مفيش فنيين" />}
             {techRows && techRows.length > 0 && (
               <>
                 <Table>
@@ -394,7 +395,7 @@ export default function ReportsPage() {
           <CardContent>
             {zoneError && <p className="text-destructive">{zoneError}</p>}
             {!zoneError && !zoneRows && <p className="text-muted-foreground">جاري التحميل…</p>}
-            {zoneRows && zoneRows.length === 0 && <p className="text-muted-foreground">مفيش مناطق</p>}
+            {zoneRows && zoneRows.length === 0 && <EmptyState title="مفيش مناطق" />}
             {zoneRows && zoneRows.length > 0 && (
               <Table>
                 <TableHeader>

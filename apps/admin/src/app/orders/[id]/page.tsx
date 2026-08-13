@@ -34,6 +34,9 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 };
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
+import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,7 +48,9 @@ import {
   ORDER_STATUS_LABELS,
   ORDER_TYPE_LABELS,
   BOOKING_MODE_LABELS,
-  orderStatusBadgeVariant,
+  orderStatusTone,
+  PAYMENT_STATUS_LABELS,
+  paymentStatusTone,
   isOrderCancellable,
   isOrderReassignable,
 } from '@/lib/order-labels';
@@ -142,13 +147,7 @@ export default function OrderDetailPage() {
   // بس مفيش زرار ليه في أي شاشة — نفس فئة فجوة "endpoint إداري من غير واجهة" اللي ظهرت في
   // /customers, /support, /payouts. مطابق تماماً لشروط payments.service.ts's refundOrder():
   // payment_status=paid + order_status في completed/disputed بس (canTransition(..., REFUNDED)).
-  async function handleRefund() {
-    const reason = window.prompt('سبب الاسترجاع (حرفين على الأقل)؟');
-    if (reason === null) return;
-    if (reason.trim().length < 2) {
-      window.alert('سبب الاسترجاع قصير جداً');
-      return;
-    }
+  async function handleRefund(reason: string) {
     setIsSaving(true);
     setError(null);
     try {
@@ -236,9 +235,9 @@ export default function OrderDetailPage() {
         title={
           <>
             طلب {order.order_number}
-            <Badge variant={orderStatusBadgeVariant(order.order_status)}>
+            <StatusChip tone={orderStatusTone(order.order_status)}>
               {ORDER_STATUS_LABELS[order.order_status]}
-            </Badge>
+            </StatusChip>
             {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
             {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
             {order.original_order_id && (
@@ -267,7 +266,12 @@ export default function OrderDetailPage() {
             <p>نوع الطلب: {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</p>
             <p>وضع الحجز: {BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</p>
             <p>الإجمالي: {formatEgp(order.total_amount_cents)}</p>
-            <p>حالة الدفع: {order.payment_status}</p>
+            <p className="flex items-center gap-2">
+              حالة الدفع:
+              <StatusChip tone={paymentStatusTone(order.payment_status)}>
+                {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
+              </StatusChip>
+            </p>
             <p>رسوم الكشف: {formatEgp(order.inspection_fee_cents)}</p>
             {order.surge_amount_cents > 0 && (
               <p className="text-destructive">رسوم الطوارئ: {formatEgp(order.surge_amount_cents)}</p>
@@ -362,9 +366,19 @@ export default function OrderDetailPage() {
           {order.payment_status === 'paid' &&
             (order.order_status === 'completed' || order.order_status === 'disputed') && (
               <CardFooter>
-                <Button variant="destructive" disabled={isSaving} onClick={handleRefund}>
-                  استرجاع المبلغ
-                </Button>
+                <PromptDialog
+                  trigger={
+                    <Button variant="destructive" disabled={isSaving}>
+                      استرجاع المبلغ
+                    </Button>
+                  }
+                  title="استرجاع المبلغ"
+                  label="سبب الاسترجاع"
+                  minLength={2}
+                  confirmLabel="استرجاع"
+                  destructive
+                  onConfirm={handleRefund}
+                />
               </CardFooter>
             )}
           {order.payment_status !== 'paid' && (
@@ -421,7 +435,7 @@ export default function OrderDetailPage() {
             </CardHeader>
             <CardContent>
               {teamMembers.length === 0 ? (
-                <p className="text-sm text-muted-foreground">مفيش مساعد معيّن لسه</p>
+                <EmptyState title="مفيش مساعد معيّن لسه" />
               ) : (
                 <Table>
                   <TableHeader>
@@ -496,7 +510,7 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent>
             {order.status_history.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش سجل</p>
+              <EmptyState title="مفيش سجل" />
             ) : (
               <Table>
                 <TableHeader>
@@ -608,7 +622,7 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent>
             {quoteItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش بنود إضافية اتقترحت على الطلب ده</p>
+              <EmptyState title="مفيش بنود إضافية اتقترحت على الطلب ده" />
             ) : (
               <Table>
                 <TableHeader>
@@ -649,7 +663,7 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent>
             {media.length === 0 ? (
-              <p className="text-sm text-muted-foreground">مفيش صور اترفعت للطلب ده لسه</p>
+              <EmptyState title="مفيش صور اترفعت للطلب ده لسه" />
             ) : (
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
                 {media.map((item) => (
