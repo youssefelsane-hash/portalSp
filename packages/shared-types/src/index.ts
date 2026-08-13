@@ -23,3 +23,4 @@ export * from './internal-chat';
 export * from './buildings';
 export * from './domestic-workers';
 export * from './academy';
+export * from './favorites';

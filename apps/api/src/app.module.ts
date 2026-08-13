@@ -29,6 +29,7 @@ import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { HealthModule } from './modules/common/health/health.module';
@@ -99,6 +100,7 @@ import { OpsModule } from './modules/ops/ops.module';
     NotificationsModule,
     PromotionsModule,
     ReferralsModule,
+    FavoritesModule,
     AdminModule,
     FeatureFlagsModule,
     HealthModule,

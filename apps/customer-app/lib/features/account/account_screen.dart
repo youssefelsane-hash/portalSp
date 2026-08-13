@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
+import '../favorites/favorites_screen.dart';
 import '../loyalty/loyalty_repository.dart';
 import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
@@ -78,6 +79,12 @@ class _AccountScreenState extends State<AccountScreen> {
               title: const Text('عناويني'),
               trailing: const Icon(Icons.chevron_left),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddressesScreen())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.favorite_border),
+              title: const Text('المفضّلة'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FavoritesScreen())),
             ),
             ListTile(
               leading: const Icon(Icons.stars_outlined),
