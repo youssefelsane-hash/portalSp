@@ -216,7 +216,7 @@ Recurring، Buildings، Domestic Worker base flows.
 | 3 | Admin UI مايحترمش الصلاحيات (Sidebar ثابت) | ✅ خلص |
 | 4 | OTP بيتكتب في اللوج دايمًا | ✅ خلص |
 | 5 | Refresh-token rotation مش atomic | ✅ خلص |
-| 6 | حظر المستخدم لا يبطل Access Token فورًا | 🔲 لسه |
+| 6 | حظر المستخدم لا يبطل Access Token فورًا | ✅ خلص |
 | 7 | Webhook الدفع مايتحققش من المبلغ | 🔲 لسه |
 | 8 | Webhook بيرجع 200 حتى مع Crash داخلي | 🔲 لسه |
 | 9 | الطلبات المجدولة البعيدة بتتوزّع فورًا (ADR-0009 تصميم فقط) | 🔲 لسه |
