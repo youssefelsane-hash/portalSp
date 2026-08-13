@@ -76,12 +76,12 @@ export class AssistantMatchingService {
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (
           SELECT technician_id FROM orders
-          WHERE technician_id IS NOT NULL AND order_status = ANY($2::order_status[])
+          WHERE technician_id IS NOT NULL AND order_status = ANY($2::order_status[]) AND deleted_at IS NULL
         )
         AND tp.id NOT IN (
           SELECT otm.technician_id FROM order_team_members otm
           JOIN orders o ON o.id = otm.order_id
-          WHERE otm.member_type = 'assistant' AND o.order_status = ANY($2::order_status[])
+          WHERE otm.member_type = 'assistant' AND o.order_status = ANY($2::order_status[]) AND o.deleted_at IS NULL
         )
       ) AS eligible
       FROM technician_profiles tp WHERE tp.id = $1
@@ -153,12 +153,12 @@ export class AssistantMatchingService {
         AND tp.id != ALL($6::uuid[])
         AND tp.id NOT IN (
           SELECT technician_id FROM orders
-          WHERE technician_id IS NOT NULL AND order_status = ANY($5::order_status[])
+          WHERE technician_id IS NOT NULL AND order_status = ANY($5::order_status[]) AND deleted_at IS NULL
         )
         AND tp.id NOT IN (
           SELECT otm.technician_id FROM order_team_members otm
           JOIN orders o ON o.id = otm.order_id
-          WHERE otm.member_type = 'assistant' AND o.order_status = ANY($5::order_status[])
+          WHERE otm.member_type = 'assistant' AND o.order_status = ANY($5::order_status[]) AND o.deleted_at IS NULL
         )
       ORDER BY ST_Distance(tp.current_location, a.location) ASC
       LIMIT $4

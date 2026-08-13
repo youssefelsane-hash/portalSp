@@ -113,7 +113,7 @@ export class MatchingService {
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
         AND tp.id NOT IN (
           SELECT technician_id FROM orders
-          WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[])
+          WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[]) AND deleted_at IS NULL
         )
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
