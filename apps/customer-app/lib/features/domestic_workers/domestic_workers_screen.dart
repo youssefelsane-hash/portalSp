@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'domestic_workers_repository.dart';
 import 'models.dart';
 import 'worker_bookings_screen.dart';
@@ -102,12 +104,12 @@ class _DomesticWorkersScreenState extends State<DomesticWorkersScreen> {
                 child: _error != null
                     ? Center(child: Text(_error!))
                     : _workers == null
-                        ? const Center(child: CircularProgressIndicator())
+                        ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                         : _workers!.isEmpty
                             ? ListView(
                                 children: const [
                                   SizedBox(height: 80),
-                                  Center(child: Text('مفيش مقدّمين خدمة متاحين لهذا التخصص')),
+                                  EmptyState(icon: Icons.person_search_outlined, title: 'مفيش مقدّمين خدمة متاحين لهذا التخصص'),
                                 ],
                               )
                             : ListView.builder(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'models.dart';
 import 'progression_repository.dart';
 
@@ -53,8 +54,12 @@ class _ProgressionScreenState extends State<ProgressionScreen> {
                   children: [
                     if (summary.status == null)
                       const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 40),
-                        child: Center(child: Text('لسه مفيش تقييم للمسار الوظيفي — استنى أول تقييم من الإدارة')),
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: EmptyState(
+                          icon: Icons.military_tech_outlined,
+                          title: 'لسه مفيش تقييم للمسار الوظيفي',
+                          description: 'استنى أول تقييم من الإدارة',
+                        ),
                       )
                     else ...[
                       Card(
@@ -102,10 +107,7 @@ class _ProgressionScreenState extends State<ProgressionScreen> {
                       Text('سجل الترقيات', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
                       if (summary.history.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Text('لسه مفيش ترقيات مسجّلة'),
-                        )
+                        const EmptyState(icon: Icons.trending_up, title: 'لسه مفيش ترقيات مسجّلة')
                       else
                         for (final entry in summary.history)
                           Card(

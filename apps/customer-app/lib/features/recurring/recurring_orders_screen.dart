@@ -4,6 +4,8 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_repository.dart';
 import '../addresses/models.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import 'models.dart';
@@ -118,12 +120,12 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
           child: _error != null
               ? Center(child: Text(_error!))
               : _templates == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                   : _templates!.isEmpty
                       ? ListView(
                           children: const [
                             SizedBox(height: 80),
-                            Center(child: Text('مفيش طلبات متكررة لسه')),
+                            EmptyState(icon: Icons.repeat_outlined, title: 'مفيش طلبات متكررة لسه'),
                           ],
                         )
                       : ListView(

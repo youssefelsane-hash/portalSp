@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'earnings_repository.dart';
 import 'models.dart';
 
@@ -42,9 +44,9 @@ class _PayoutsScreenState extends State<PayoutsScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _payouts == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : _payouts!.isEmpty
-                    ? const Center(child: Text('لسه ماطلبتش أي صرف'))
+                    ? const Center(child: EmptyState(icon: Icons.receipt_long_outlined, title: 'لسه ماطلبتش أي صرف'))
                     : RefreshIndicator(
                         onRefresh: _load,
                         child: ListView.separated(

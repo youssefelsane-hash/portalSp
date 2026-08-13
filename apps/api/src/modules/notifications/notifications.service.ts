@@ -8,6 +8,7 @@ import { RegisterDeviceDto } from './dto/register-device.dto';
 import { Notification, NotificationChannel, NotificationDeliveryStatus } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
+import { NotificationWorkflowService } from './notification-workflow.service';
 
 // القنوات القابلة للتعطيل من تفضيلات المستخدم — in_app مستثناة عمدًا (صندوق الإشعارات نفسه
 // جوّه التطبيق، مفيش معنى تعطيله).
@@ -26,6 +27,8 @@ export interface NotifyInput {
   referenceType?: string;
   referenceId?: string;
   deepLink?: string;
+  /** بيربط صف التسليم بالـNotificationWorkflow اللي ولّده (ADR-0012) — اختياري، مفيش أثر على الإرسال العادي. */
+  workflowId?: string;
 }
 
 export interface ListNotificationsParams {
@@ -45,6 +48,7 @@ export class NotificationsService {
     @InjectRepository(UserNotificationPreference)
     private readonly preferences: Repository<UserNotificationPreference>,
     @Inject(NOTIFICATION_DISPATCHER) private readonly dispatcher: NotificationDispatcher,
+    private readonly workflowService: NotificationWorkflowService,
   ) {}
 
   // ── الأجهزة ──────────────────────────────────────────────────────────
@@ -93,6 +97,7 @@ export class NotificationsService {
       deepLink: input.deepLink ?? null,
       referenceType: input.referenceType ?? null,
       referenceId: input.referenceId ?? null,
+      workflowId: input.workflowId ?? null,
       deliveryStatus: NotificationDeliveryStatus.QUEUED,
     });
     await this.notifications.save(notification);
@@ -197,6 +202,9 @@ export class NotificationsService {
       notification.readAt = new Date();
       notification.deliveryStatus = NotificationDeliveryStatus.READ;
       await this.notifications.save(notification);
+      if (notification.workflowId) {
+        await this.workflowService.acknowledgeById(notification.workflowId);
+      }
     }
     return notification;
   }

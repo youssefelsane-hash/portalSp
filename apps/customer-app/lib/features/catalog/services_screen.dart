@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
 import '../technicians/technician_selection_screen.dart';
@@ -50,9 +52,14 @@ class _ServicesScreenState extends State<ServicesScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _services == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : _services!.isEmpty
-                    ? Center(child: Text('مفيش خدمات "${widget.bookingMode.labelAr}" في الفئة دي دلوقتي'))
+                    ? Center(
+                        child: EmptyState(
+                          icon: Icons.build_outlined,
+                          title: 'مفيش خدمات "${widget.bookingMode.labelAr}" في الفئة دي دلوقتي',
+                        ),
+                      )
                     : ListView.separated(
                         padding: const EdgeInsets.all(16),
                         itemCount: _services!.length,

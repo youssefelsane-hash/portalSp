@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import '../academy/academy_screen.dart';
 import '../assistant_offers/assistant_offers_screen.dart';
 import '../earnings/wallet_screen.dart';
@@ -100,6 +102,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
+        // إصلاح ازدحام AppBar (docs/12 P1/P2 — كانت 12 IconButton متكدّسة فوق بعض على شاشة
+        // موبايل ضيقة). الإشعارات (متكررة/حساسة للوقت، شارة عداد) فضلت في الـAppBar مباشرة —
+        // كل حاجة تانية (ثانوية بطبيعتها) اتنقلت لـDrawer مجمّع منطقيًا، مركز الشاشة بقى فعليًا
+        // "المهمة الحالية" (قايمة الطلبات المتاحة) زي ما الطلب الأصلي نص عليه بالحرف.
+        drawer: const _TechnicianDrawer(),
         appBar: AppBar(
           title: const Text('صُنّاع — الفني'),
           actions: [
@@ -124,86 +131,6 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                 },
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.account_balance_wallet_outlined),
-              tooltip: 'أرباحي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const WalletScreen()),
-              ),
-            ),
-            // مطابقة المساعد التلقائية (ADR-0007) — فرص مساعدة على طلبات فنيين تانيين
-            // (بث تنافسي، أول قبول صحيح ياخدها)، منفصلة عن قايمة "طلباتي المتاحة" فوق.
-            IconButton(
-              icon: const Icon(Icons.handshake_outlined),
-              tooltip: 'فرص المساعدة',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AssistantOffersScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.event_available_outlined),
-              tooltip: 'جدول مواعيدي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ScheduleScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.video_library_outlined),
-              tooltip: 'معرض أعمالي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const PortfolioScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.school_outlined),
-              tooltip: 'الأكاديمية',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AcademyScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.support_agent_outlined),
-              tooltip: 'تواصل مع الإدارة',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const InternalChatListScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.person_outline),
-              tooltip: 'بروفايلي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.groups_outlined),
-              tooltip: 'شركتي / فريقي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CompanyScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.qr_code_outlined),
-              tooltip: 'ترشيح العملاء',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ReferralScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.insights_outlined),
-              tooltip: 'الأداء الشهري',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const KpiScreen()),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.military_tech_outlined),
-              tooltip: 'المسار الوظيفي',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ProgressionScreen()),
-              ),
-            ),
-            IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),
           ],
         ),
         body: RefreshIndicator(
@@ -211,14 +138,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           child: _error != null
               ? Center(child: Text(_error!))
               : _orders == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                   : _orders!.isEmpty
                       ? ListView(
                           children: [
-                            const SizedBox(height: 120),
+                            const SizedBox(height: 60),
                             Center(child: Text('أهلاً ${auth.user?.fullName ?? ''} 👋')),
                             const SizedBox(height: 12),
-                            const Center(child: Text('مفيش طلبات متاحة دلوقتي')),
+                            const EmptyState(icon: Icons.work_outline, title: 'مفيش طلبات متاحة دلوقتي'),
                           ],
                         )
                       : ListView.separated(
@@ -260,6 +187,148 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                         ),
         ),
       ),
+    );
+  }
+}
+
+// Drawer التنقّل الثانوي (docs/12 P1/P2) — نفس فلسفة تجميع sidebar الأدمن (`app-shell.tsx`
+// `NAV_GROUPS`) بمعادلها في Flutter: عناصر مبوّبة بعنوان مجموعة، مش قايمة أيقونات مسطّحة.
+class _TechnicianDrawer extends StatelessWidget {
+  const _TechnicianDrawer();
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthRepository>();
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Drawer(
+        child: SafeArea(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              DrawerHeader(
+                decoration: BoxDecoration(color: Theme.of(context).colorScheme.primaryContainer),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      child: Text(
+                        (auth.user?.fullName ?? '؟').characters.first,
+                        style: const TextStyle(color: Colors.white, fontSize: 20),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(auth.user?.fullName ?? '', style: Theme.of(context).textTheme.titleMedium),
+                    Text('صُنّاع — الفني', style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const _DrawerGroupLabel('الشغل'),
+              _DrawerItem(
+                icon: Icons.event_available_outlined,
+                label: 'جدول مواعيدي',
+                builder: (_) => const ScheduleScreen(),
+              ),
+              // مطابقة المساعد التلقائية (ADR-0007) — فرص مساعدة على طلبات فنيين تانيين
+              // (بث تنافسي، أول قبول صحيح ياخدها)، منفصلة عن قايمة "طلباتي المتاحة".
+              _DrawerItem(
+                icon: Icons.handshake_outlined,
+                label: 'فرص المساعدة',
+                builder: (_) => const AssistantOffersScreen(),
+              ),
+              _DrawerItem(
+                icon: Icons.video_library_outlined,
+                label: 'معرض أعمالي',
+                builder: (_) => const PortfolioScreen(),
+              ),
+              const Divider(height: 1),
+              const _DrawerGroupLabel('حسابي'),
+              _DrawerItem(icon: Icons.person_outline, label: 'بروفايلي', builder: (_) => const ProfileScreen()),
+              _DrawerItem(
+                icon: Icons.groups_outlined,
+                label: 'شركتي / فريقي',
+                builder: (_) => const CompanyScreen(),
+              ),
+              _DrawerItem(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'أرباحي',
+                builder: (_) => const WalletScreen(),
+              ),
+              _DrawerItem(icon: Icons.insights_outlined, label: 'الأداء الشهري', builder: (_) => const KpiScreen()),
+              _DrawerItem(
+                icon: Icons.military_tech_outlined,
+                label: 'المسار الوظيفي',
+                builder: (_) => const ProgressionScreen(),
+              ),
+              _DrawerItem(
+                icon: Icons.qr_code_outlined,
+                label: 'ترشيح العملاء',
+                builder: (_) => const ReferralScreen(),
+              ),
+              const Divider(height: 1),
+              const _DrawerGroupLabel('الدعم والتدريب'),
+              _DrawerItem(icon: Icons.school_outlined, label: 'الأكاديمية', builder: (_) => const AcademyScreen()),
+              _DrawerItem(
+                icon: Icons.support_agent_outlined,
+                label: 'تواصل مع الإدارة',
+                builder: (_) => const InternalChatListScreen(),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.logout, color: Theme.of(context).colorScheme.error),
+                title: Text('تسجيل الخروج', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.read<AuthRepository>().logout();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DrawerGroupLabel extends StatelessWidget {
+  const _DrawerGroupLabel(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(
+        label,
+        style: Theme.of(context)
+            .textTheme
+            .labelMedium
+            ?.copyWith(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+class _DrawerItem extends StatelessWidget {
+  const _DrawerItem({required this.icon, required this.label, required this.builder});
+
+  final IconData icon;
+  final String label;
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(label),
+      onTap: () {
+        Navigator.of(context).pop();
+        Navigator.of(context).push(MaterialPageRoute(builder: builder));
+      },
     );
   }
 }

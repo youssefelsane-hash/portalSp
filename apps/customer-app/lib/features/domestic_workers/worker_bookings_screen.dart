@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'domestic_workers_repository.dart';
 import 'models.dart';
 
@@ -59,12 +61,12 @@ class _WorkerBookingsScreenState extends State<WorkerBookingsScreen> {
           child: _error != null
               ? Center(child: Text(_error!))
               : _bookings == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                   : _bookings!.isEmpty
                       ? ListView(
                           children: const [
                             SizedBox(height: 80),
-                            Center(child: Text('مفيش حجوزات لسه')),
+                            EmptyState(icon: Icons.event_note_outlined, title: 'مفيش حجوزات لسه'),
                           ],
                         )
                       : ListView.builder(

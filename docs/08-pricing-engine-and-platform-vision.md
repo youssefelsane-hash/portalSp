@@ -25,6 +25,8 @@
 11. الجدولة المستقبلية/المتكررة
 12. قطاع الخدمات المنزلية (شغالة/babysitter/مقيمة بالشهور) — نطاق منتج جديد كامل، بعد ما الأساسيات فوق تخلص
 13. نظام العمائر (QR + اشتراك خصم) — نطاق منتج جديد كامل، بعد ما الأساسيات فوق تخلص
+14. **ترقية أمان دخول الأدمن (Passkeys/WebAuthn + MFA + Step-up)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §14 الجديد تحت. **⬜ فاضي بالكامل.**
+15. **محرك إشعارات حقيقي (أولوية/تكرار/reminders مُدارة من الباك-إند)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §15 الجديد تحت. **🔄 Phase 1 خلص (الأساس العام + action_required)، الباقي فاضي.**
 
 ---
 
@@ -200,7 +202,92 @@
 
 ---
 
-## §14. ملاحظات معمارية عامة (من مراجعة الكود الحالي)
+## §14. ترقية أمان دخول الأدمن — Passkeys/WebAuthn + MFA + Step-up Authentication — 🔄 النطاق اتحدد، التنفيذ بادئ (طلب صريح 2026-08-13)
+
+**مصدر الطلب**: رسالة مفصّلة من المالك (2026-08-13) بعد اطّلاعه على تدفق الدخول الحالي (OTP بالموبايل بس لكل الأدوار بما فيها Super Admin). النص الحاكم النهائي المطلوب تسجيله بالحرف (باقي الرسالة أعلاه سياق توضيحي عربي، الفقرة دي هي الـspec الرسمية اللي أي تنفيذ لازم يلتزم بيها):
+
+> Admin authentication must be upgraded from phone-OTP-only authentication. Require phishing-resistant MFA (preferably WebAuthn/passkeys) for Super Admin and other high-privilege roles, with step-up re-authentication for financial, RBAC, security, payout, refund, and account-recovery operations. SMS/phone OTP must not be the sole security factor protecting privileged administrative accounts. Preserve server-side session revocation, role checks, audit logging, trusted-device/session management, and secure recovery procedures.
+
+**التمييز الحاكم بين الأدوار (حسب طبقة الحساسية)**:
+
+| الدور | تسجيل الدخول الأول | الدخول السريع بعدين |
+|---|---|---|
+| عميل/فني (Customer/Technician app) | رقم موبايل + OTP (موجود بالفعل) | Face ID/بصمة على جهاز موثوق (ميزة تحسين لاحقة، مش أولوية أمنية حرجة زي الأدمن) |
+| موظف إداري عادي | رقم موبايل + OTP | Passkey/Authenticator **اختياري** كعامل إضافي، إجباري لو عنده صلاحيات حساسة |
+| Super Admin / Finance / أي حد يقدر يعدّل صلاحيات | Phone OTP + Passkey **إجباري** (MFA حقيقي، مش SMS بس ولا حتى SMS+Email لو الاتنين بيرجعوا لنفس رقم الموبايل وقت الاسترجاع) | Passkey (Face ID/Touch ID/Windows Hello/Security Key) بس — السيرفر برضه يتحقق كل مرة إن الحساب `active`، الدور/الصلاحيات ماتسحبتش، والـsession ماتلغاش |
+
+**Step-up re-authentication إجباري** (حتى لو الأدمن عامل Login بالفعل) قبل تنفيذ أي عملية من دي: تغيير حساب صرف/Payout method، اعتماد/تحويل مبالغ كبيرة، إنشاء Super Admin جديد، تغيير Roles/Permissions (`assignRole`/`setRolePermissions`/`cloneRole`)، تعطيل أي طبقة حماية، تغيير رقم هاتف Admin، سحب/إلغاء كل الجلسات (Logout All)، الموافقة على Refund. النمط: `Admin logged in → عملية حساسة → Verify with Passkey again → تنفيذ`.
+
+**Session management مطلوب**: الأدمن يشوف كل الأجهزة/الجلسات المفتوحة بتاعته، يقدر يعمل Logout لجهاز بعينه أو Logout All، وأي تغيير حساس في الحساب (تغيير كلمة سر/رقم موبايل/إلغاء MFA) يلغي الجلسات القديمة تلقائيًا.
+
+**Recovery لازم يكون قوي بنفس القوة**: أخطر ثغرة ممكنة هي "نسيت الحساب → SMS → رجعت Super Admin" — ده بيلغي كل حماية الـPasskey فوق. الـrecovery flow نفسه لازم يخضع لنفس مستوى التحقق (مش يرجع لعامل واحد ضعيف).
+
+**قرارات معمارية لازم تتحسم في ADR قبل أي تنفيذ** (`docs/adr/0011-admin-mfa-passkeys.md` — لسه ماتكتبش):
+- تخزين WebAuthn credentials: جدول جديد (`admin_webauthn_credentials` أو مشابه) — `credential_id`, `public_key`, `sign_count` (منع replay)، `device_label`, `created_at`, `last_used_at`. **السيرفر أبدًا ميخزّنش بصمة/بيانات بيومترية خام** — WebAuthn بطبيعتها public-key، الجهاز بس هو اللي بيتحقق محليًا.
+- مكتبة WebAuthn لـ NestJS backend (`@simplewebauthn/server` الأشهر) + مكتبة client-side مقابلة لـ`apps/admin` (Next.js، `@simplewebauthn/browser`) — الموظفين بيستخدموا متصفح، مش Flutter، فده يكفي لأدوار الأدمن (العميل/الفني على Face ID/بصمة الموبايل نفسه ميحتاجش WebAuthn، ده مسار منفصل تمامًا لو اتقرر لاحقًا).
+- جدول `admin_sessions`/تمديد `refresh_tokens` الموجود ليشمل `device_label`/`last_seen_at`/`ip_address`/`user_agent` عشان شاشة "الأجهزة والجلسات" تقدر تعرض بيانات حقيقية.
+- آلية step-up: `sensitive_action_verified_at` على مستوى الـsession، أو توكن مؤقت منفصل قصير العمر (`step_up_token`) بيترجع بعد تحقق Passkey ناجح ولازم يترفق مع الطلب الحساس، صالح لمدة قصيرة (دقايق) بس.
+- Recovery flow: قرار عمل صريح مطلوب من المالك قبل التنفيذ (مثلاً: Recovery codes مولّدة وقت تفعيل MFA أول مرة، محفوظة hashed، تُستخدم مرة واحدة بس + تنبيه فوري لكل الجلسات الأخرى — **مش SMS bypass**).
+
+**نطاق العميل/الفني (Face ID/بصمة على جهاز موثوق) مؤجّل قصدًا لبعد ما جزء الأدمن يخلص** — أقل حساسية أمنيًا (مفيش صلاحيات مالية/RBAC)، وتنفيذه مختلف تقنيًا (`local_auth` Flutter package + ربط بـrefresh token المحلي، مش WebAuthn).
+
+**قرار عمل صريح من المالك (2026-08-13، لاحقًا نفس اليوم)**: "اعملها لكل الـHigh-Privilege Roles من البداية، مش Super Admin فقط. أي حساب يقدر يشوف/يتحكم في الفلوس أو يغير Roles/Permissions لازم MFA/Passkey يكون إجباري عليه." — يعني مفيش Phase 1/Phase 2 تدريجي بالدور، النطاق الكامل من أول يوم.
+
+**تعريف "High-Privilege" — لازم يكون ديناميكي بالصلاحية مش بالاسم**: بما إن الـRBAC كامل ديناميكي (ADR-0010، أدمن يقدر ينشئ دور جديد ويمنحه أي صلاحية وقت ما يحب)، تعريف "دور حساس" **مينفعش يكون قايمة أسماء أدوار hardcoded** — لازم يكون فحص صلاحيات حي. المجموعة المحدَّدة (فحص فعلي على `permissions`/`role_permissions` وقت كتابة الـADR):
+- `payments.refund`, `payouts.approve`, `orders.adjust_price` — تحكّم مباشر في فلوس.
+- `roles.manage`, `roles.grant_unrestricted` — تغيير Roles/Permissions مباشرة.
+- `settings.manage` — بيشمل معاملات مالية على مستوى المنصة كلها (نسب عمولة، رسوم طوارئ، حدود موافقة صرف تلقائي) — قرار مني إنه يدخل ضمن "التحكم في الفلوس" بمعناها الواسع.
+- `is_super_admin=true` (بيتخطى الـpermission join بالكامل حسب ADR-0010) — يُعامل تلقائيًا كأنه حائز كل الصلاحيات فوق.
+
+**بالتطبيق على الأدوار الافتراضية الموجودة دلوقتي**: `super_admin` (كل الصلاحيات فوق)، `finance` (`payments.refund`, `payouts.approve`) → **الاتنين MFA إجباري**. `ops_manager` عنده `orders.adjust_price` → **MFA إجباري كمان** (تحكّم مباشر في سعر الطلب = فلوس). `recruiter`/`support_agent` — صفر صلاحية من المجموعة دلوقتي → **مش مطلوب لهم MFA حاليًا**، بس لو حد منح أي منهم صلاحية من المجموعة دي مستقبلاً (عبر role builder)، المستخدم بيبقى ملزَم تلقائيًا من غير أي تعديل كود — الفحص ديناميكي وقت الدخول/العملية الحساسة، مش قايمة مجمّدة وقت كتابة الـADR.
+
+---
+
+## §15. محرك إشعارات حقيقي — أولوية/تكرار مُدار من الباك-إند — 🔄 Phase 1 خلص (2026-08-13، فرع `hgotr7`)، الباقي فاضي (طلب صريح 2026-08-13)
+
+**المشكلة الحالية**: كل الإشعارات بتتعامل زي بعضها — نفس القناة، نفس الصوت تقريبًا، ومفيش تفرقة حقيقية بين "لازم رد فوري" و"معلومة بس". أي منطق تكرار/تذكير موجود (لو موجود أصلاً) على مستوى الـclient، يعني لو التطبيق اتقفل أو المستخدم مسح الذاكرة، منطق التذكير بيضيع بالكامل.
+
+**المطلوب المعماري — أربع مستويات أولوية واضحة**:
+
+| النوع | مثال | الصوت | التكرار | الأفعال |
+|---|---|---|---|---|
+| `critical_offer` | عرض طلب Emergency للفني | قوي ومميز | قصير جدًا داخل نافذة العرض (offer window) بس | قبول / رفض مباشرة من الإشعار نفسه (بدون فتح التطبيق) |
+| `action_required` | Quote يستنى موافقة، اختيار فني بديل، دفع معلّق | مميز، متوسط الإلحاح | كل ساعة لحد ما يتحل، بحد أقصى reminders + quiet hours قابلين للإعداد | الفعل المناسب مباشرة (موافقة/رفض/اختيار) |
+| `scheduled_job` | شغل مستقبلي اتأكد لفني بعينه | صوت خاص خفيف | تذكيرات ذكية لحد الـacknowledgment بس (مش كل ساعة من لحظة الحجز) — مثلاً: فورًا، بعد ساعة لو ما اتفتحش، صبح اليوم اللي قبله، وقبل الموعد بفترة | عرض التفاصيل — بمجرد ما يتفتح، الـreminders تتوقف |
+| `informational` | الفني قبل، الموعد اتحدد، الدفع تم، الطلب اكتمل | عادي | **مرة واحدة بس** — ما تتكررش لأنها مش محتاجة فعل | فتح بس |
+
+**تصحيح صريح على فكرة "الفني رفض → العميل يتنبه كل ساعة"**: الرفض نفسه مش المهم، المهم هل العميل مطلوب منه يعمل حاجة. لو auto-matching هيكمّل تلقائيًا (فني بديل تلقائي)، إشعار واحد بس ("الفني السابق مش متاح، بندوّرلك على بديل") — `informational`. لو العميل لازم يختار فني بديل بنفسه، ده يتحول لـ`action_required` ويتكرر لحد ما يختار.
+
+**نموذج بيانات جديد (schema، لازم ADR قبل التنفيذ — `docs/adr/0012-notification-engine.md`)**: كل صف إشعار (سواء جدول موجود `notifications` بتوسيع، أو جدول جديد `notification_workflows` مرتبط بيه) لازم يحمل:
+- `event_type` (نوع الحدث، مرجع لأي entity سبّب الإشعار)
+- `priority` (`critical_offer` | `action_required` | `scheduled_job` | `informational`)
+- `requires_action` (bool)
+- `action_type` (نوع الفعل المطلوب — نص مرجعي، الـclient بيستخدمه يقرر يعرض إيه)
+- `entity_id`/`entity_type` (الطلب/العرض/الـquote اللي الإشعار متعلق بيه)
+- `acknowledged_at` (nullable — أول ما المستخدم يفتح/يشوف الإشعار)
+- `resolved_at` (nullable — أول ما الفعل المطلوب يتم فعليًا، **مش نفس فتح الإشعار**)
+- `next_reminder_at` (nullable — الـqueue بتقرأه تقرر امتى تبعت تاني)
+- `reminder_count`
+- `expires_at` (نافذة العرض بتاعة `critical_offer` تحديدًا، أو حد أقصى زمني لأي نوع تاني)
+
+**التكرار Backend-driven مش Client-only** — Job/queue (BullMQ، نفس البنية التحتية الموجودة بالفعل للـmatching/KPI) هي اللي مسؤولة عن إعادة الإرسال بأمان، بتقرأ `next_reminder_at`/`expires_at`/`reminder_count` وتقرر تبعت تاني ولا لأ. بمجرد ما الفعل يتم (`resolved_at` يتحدد) أو الصلاحية تنتهي (`expires_at`)، أي job معلّق مرتبط بالإشعار ده يتلغي فورًا. كده لو الموبايل اتقفل أو التطبيق اتمسح، منطق التذكير ما يضيعش لأنه أصلاً مش عايش على الجهاز.
+
+**قيود منصّة مهمة (لازم تُحترم، مش نفترض قدرات مش مضمونة)**:
+- Android: Notification Channels نفسها بتدّي المستخدم تحكّم في الأهمية/الصوت من إعدادات النظام — التطبيق لازم يحترم القرار ده، مش يفرض صوت.
+- iOS: **Time Sensitive** notifications ممكن تتخطى بعض إعدادات Focus/الملخص، بس المستخدم يقدر يعطلها. **Critical Alerts** (تتخطى Silent/DND فعليًا) محتاجة **entitlement خاص من Apple وموافقة مسبقة** — **الخطة ميتبنيش على افتراض إننا هنقدر نستخدمها لخدمة منزلية عادية**، `critical_offer` هيستخدم أعلى أولوية متاحة عادةً (Time Sensitive + heads-up) مش Critical Alert.
+- Push مبالغ فيه (زي إعادة إرسال High-Priority كل 3 ثواني) ممكن FCM يعتبره misuse ويقلل أولوية الحساب بالكامل — التكرار المسموح محدود ومُصمّم (نافذة `critical_offer` = إشعار واحد يتحدّث/يتجدّد قليل، مش سيل إشعارات).
+
+**Actionable notification على مستوى الـOS**: `critical_offer` لازم يدعم أفعال مباشرة من الإشعار نفسه (قبول/رفض) بدون فتح التطبيق — ده محتاج `Notification Action Buttons` (Android) و`UNNotificationAction` (iOS)، وبالتالي الـbackend يستقبل الفعل عبر مسار منفصل (push action callback أو silent push processing) مش بس من داخل التطبيق المفتوح.
+
+**كل شيء قابل للإعداد من الأدمن، صفر hardcode**: مدة نافذة الـEmergency offer، الصوت/الـchannel لكل نوع، فترات الـreminders، الحد الأقصى لعدد الـreminders، quiet hours، هل `critical_offer` يتخطى quiet hours ولا لأ، هل `scheduled_job` محتاج acknowledgment أصلًا. ده يتخزن في `SettingsService` الموجود بالفعل (نفس محرك الإعدادات العام) مش جدول منفصل جديد إلا لو الشكل معقد بما يكفي (قرار وقت التنفيذ).
+
+**العلاقة بالبنية الموجودة**: `NotificationRoutingService`/`notifications` module موجودين بالفعل ومختبرين (docs/07 §4 — التوجيه المركزي حسب الدور). المحرك الجديد ده **يوسّع** نفس الموديول (أولوية/تكرار/state machine)، مش يستبدله أو يبني موديول موازي.
+
+**لسه محتاج قرار عمل صريح من المالك قبل البدء الفعلي**: هل نبدأ بـ`critical_offer` بس (أعلى قيمة فورية — ده أساسًا آلية بث الطوارئ/المساعد الموجودة بالفعل، محتاجة بس تتلبس بالـstate machine الجديد)، ولا نبني الـstate machine العامة (الأربع أنواع) من الأول؟ التوصية المبدئية: schema + state machine + queue jobs عامة الأول (أساس مشترك لكل الأنواع)، بعدين توصيل كل نوع بيه واحد واحد بالترتيب: `critical_offer` (الأعلى قيمة، بنية موجودة جزئيًا) → `action_required` → `scheduled_job` → `informational` (الأبسط، آخر واحد).
+
+---
+
+## §16. ملاحظات معمارية عامة (من مراجعة الكود الحالي)
 
 - `OrdersService` بقى بيحمل مسؤوليات كتير (validation, booking mode, matching trigger, company selection, emergency sync, requested technician) — لسه مقبول دلوقتي، بس لو محرك التسعير (§1) اتضاف كمان جواه هيكبر أكتر من اللازم. **قرار مبدئي (يتأكد بـ ADR وقت التنفيذ)**: `PricingEngineService` موديول مستقل من الأول (`apps/api/src/modules/pricing/` — الموديول موجود كـREADME فاضي بالفعل، ده مكانه الطبيعي)، `OrdersService` بينادي عليه بس مش بيحسب هو.
 - بعض الـ Response DTOs (خصوصًا في `catalog`/`orders`) بقت بتجمع بيانات كتير — لو كبرت أكتر بعد §1، فكّر في تقسيمها لـ DTOs أصغر مركّبة (composition) بدل واحد ضخم.
@@ -228,3 +315,21 @@
 - **2026-08-13 (لاحقًا نفس اليوم)**: محرر شجرة بصري (No-Code كامل) لمعادلة التسعير بدل JSON textarea في `apps/admin` — كانت فجوة موثّقة صراحة من نفس المراجعة (P1). تفاصيل كاملة في `apps/api/src/modules/pricing/README.md` § مرحلة 3.
 - **2026-08-13 (لاحقًا نفس اليوم)**: **مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (§3.9، migration `0077`) — ✅ خلصت**: كانت فجوة موثّقة صراحة ("تسجيل يدوي فقط، لسه مش مربوطة تلقائيًا بالطلبات، مفيش automatic learning من completed orders ولا suggested standard update"). الـpipeline الكامل بقى شغال: التقاط تلقائي (`ORDER_STATUS_CHANGED_EVENT` لحظة `COMPLETED`، `orders.requested_units` عمود جديد لتخزين الوحدات المطلوبة وقت الحجز) → تجميع دوري (median القيم المُطبّعة، فحص كل ساعة أو فوري عبر endpoint) → اقتراح (`service_productivity_suggestions` جديدة، مع `confidence_score` استرشادي) → موافقة/رفض الأدمن الصريحة (**مفيش تحديث تلقائي بلا موافقة أبدًا**). اتعمله اختبار حي كامل (median/confidence اتحققوا يدويًا بالحساب، موافقة حدّثت الرقم القياسي فعليًا + audit log، رفض تكرار الاقتراح، رفض إعادة مراجعة اقتراح اتراجع بالفعل). تفاصيل كاملة في `apps/api/src/modules/catalog/README.md` § محرك الإنتاجية الذاتي التعلّم.
 - **2026-08-13 (لاحقًا نفس اليوم، PR #88)**: **توقيع Android للإصدار (Release Signing) — ✅ خلص**: كانت فجوة موثّقة صراحة من نفس المراجعة (P1) — `apps/customer-app`/`apps/technician-app` كانوا بيستخدموا debug signing حتى في release build، بيمنع أي رفع على Play Store. اتقفلت بنفس فلسفة `google-services.json` الشرطية الموجودة بالفعل بالحرف: لو `android/key.properties` (ملف مش متتبّع في git لكل تطبيق) موجود، توقيع الإصدار الحقيقي بيتفعّل تلقائيًا من قيمه؛ من غيره fallback لتوقيع debug زي الأول — أي حد يقدر يعمل build عادي من غير keystore حقيقي لسه. `key.properties.example` (قالب فاضي) لكل تطبيق + خطوات توليد الـkeystore والتحقق في `docs/03-external-integrations.md` §7 الجديد. **ملاحظة صريحة**: التحقق كان مراجعة Kotlin DSL syntax يدويًا + `./gradlew help` (وصل لمرحلة resolve الملفات بنجاح قبل ما يقف على تحميل Android Gradle Plugin بسبب قيد شبكة في بيئة التطوير، مش خطأ في كودنا) — مفيش build فعلي كامل بـkeystore حقيقي اتنفذ لأن البيئة السحابية معندهاش Android SDK كامل، موثّق صراحة في الـdocs عشان أول build حقيقي يتأكد بنفسه.
+- **2026-08-13 (لاحقًا نفس اليوم، فرع `hgotr7` — رسالة جديدة من المالك، تسجيل قبل أي تنفيذ)**: طلبين كبار جداد اتسجّلوا بالكامل قبل ما يتلمس أي كود، حسب المبدأ الحاكم في `CLAUDE.md`. **§14 (جديد)**: ترقية أمان دخول الأدمن — Passkeys/WebAuthn + MFA إجباري لـSuper Admin وباقي الأدوار عالية الصلاحية + step-up re-authentication للعمليات الحساسة (مالية/RBAC/أمان/صرف/استرداد/استرجاع حساب) + إدارة أجهزة/جلسات + recovery قوي بنفس مستوى الحماية. النص الإنجليزي الرسمي المطلوب الالتزام بيه اتسجّل بالحرف. **§15 (جديد)**: محرك إشعارات حقيقي بأربع مستويات أولوية (`critical_offer`/`action_required`/`scheduled_job`/`informational`) — تكرار/تذكير مُدار بالكامل من الباك-إند (`event_type`, `priority`, `requires_action`, `action_type`, `entity_id`, `acknowledged_at`, `resolved_at`, `next_reminder_at`, `reminder_count`, `expires_at`) عبر queue jobs، مش منطق client-only بيضيع لو التطبيق اتقفل. **الاتنين لسه ⬜ فاضيين بالكامل** — محتاجين ADR (`0011-admin-mfa-passkeys.md`, `0012-notification-engine.md`) وقرار عمل صريح من المالك (نطاق البداية) قبل أي تنفيذ فعلي، تفاصيل كاملة في القسمين نفسهم.
+- **2026-08-13 (لاحقًا نفس اليوم، فرع `hgotr7`)**: **§15 (محرك الإشعارات) Phase 1 خلص** —
+  `docs/adr/0012-notification-engine.md` اتكتب أولاً، بعدين التنفيذ: migration `0087` (`notification_type_configs`
+  + `notification_workflows` + `notifications.workflow_id`)، `NotificationWorkflowService`،
+  `NotificationWorkflowReminderService` (sweep دوري زي `OrderAutoCancelService` بالحرف، مش
+  BullMQ — نفس درس بَقّة انقطاع Redis الموثّقة قبل كده)، وربط حقيقي أول (موافقة عرض السعر
+  `awaiting_quote_approval` — أنسب مثال `action_required` موجود بالفعل). اتعمله اختبار حي كامل
+  عبر `curl` (عميل/فنيين حقيقيين، دورة طلب كاملة لـ`awaiting_quote_approval` وموافقة)، بما فيه
+  **تأكيد حي لقيد ساعات الهدوء** (أول محاولة sweep حقيقية صادفت ساعات الهدوء الافتراضية فعليًا
+  وأجّلت التذكير صح) و**تأكيد حي للتذكير نفسه** بعد تضييق الهدوء مؤقتًا (`reminder_count`
+  اتزود، `next_reminder_at` اتحرك +60 دقيقة، صف `notifications` جديد اترتبط بنفس الـworkflow).
+  `tsc`/`nest build`/`jest` الثلاثة عدّوا نضيف (88 اختبار، +10 جداد لـ`quiet-hours.util`). تفاصيل
+  كاملة في `apps/api/src/modules/notifications/README.md`. **بَقّة بيئة تانية اتلقطت واتصلحت
+  أثناء الشغل**: `schema_migrations` كانت واقفة عند `0082` بينما migrations `0083-0086` كانت
+  فعليًا مطبّقة بالكامل على القاعدة (من سيشنز/إعادة تشغيل سابقة) — اتأكد بفحص كل جدول/عمود
+  متوقّع لكل migration قبل إدراج صفوف التتبّع يدويًا، مش افتراض. **نطاق Phase 1 بس — الباقي
+  (`scheduled_job`, `critical_offer` actionable push, واجهة أدمن لـ`notification_type_configs`)
+  موثّق صراحة كمتبقٍ في الـADR وفي `notifications/README.md`.**

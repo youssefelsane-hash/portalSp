@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import '../technicians/technician_profile_screen.dart';
 import 'favorites_repository.dart';
 import 'models.dart';
@@ -63,13 +65,15 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         body: RefreshIndicator(
           onRefresh: _load,
           child: favorites == null
-              ? (_error != null ? Center(child: Text(_error!)) : const Center(child: CircularProgressIndicator()))
+              ? (_error != null ? Center(child: Text(_error!)) : const Padding(padding: EdgeInsets.all(16), child: LoadingList()))
               : favorites.isEmpty
                   ? ListView(
                       children: const [
-                        Padding(
-                          padding: EdgeInsets.all(32),
-                          child: Center(child: Text('لسه مفيش فنيين في المفضّلة — احفظ فني بعد ما تشتغل معاه')),
+                        SizedBox(height: 80),
+                        EmptyState(
+                          icon: Icons.favorite_border,
+                          title: 'لسه مفيش فنيين في المفضّلة',
+                          description: 'احفظ فني بعد ما تشتغل معاه عشان تلاقيه هنا',
                         ),
                       ],
                     )

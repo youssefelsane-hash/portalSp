@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'loyalty_repository.dart';
 import 'models.dart';
 
@@ -119,7 +120,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
                     const SizedBox(height: 16),
                     Text('سجل المعاملات', style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
-                    if (_transactions == null || _transactions!.isEmpty) const Text('مفيش معاملات لسه'),
+                    if (_transactions == null || _transactions!.isEmpty) const EmptyState(icon: Icons.receipt_long_outlined, title: 'مفيش معاملات لسه'),
                     for (final tx in _transactions ?? <LoyaltyTransaction>[])
                       Card(
                         child: ListTile(

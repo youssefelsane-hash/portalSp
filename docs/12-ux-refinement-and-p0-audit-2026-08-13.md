@@ -765,3 +765,153 @@ infra/migrations/0085_....sql` و`0086_....sql`) — اتأكد بعدها إن 
 تنصيص خام (`"احسب الشهر ده"`) بدل `&quot;`، فحلّهم `react/no-unescaped-entities` تلقائيًا كأثر
 جانبي مفيد. `next build` نجح لكل الـ39 route. `apps/api`: `nest build` + `jest` (78 اختبار) عدّوا
 نضيف بلا أي تغيير (الدفعة دي `apps/admin` بس، الباك-إند اتأكد سليم بعد إصلاح الـmigrations فقط).
+
+## دفعة عاشرة — امتداد نظام التصميم من Admin Panel لـFlutter (customer-app + technician-app)، بلا توقف
+
+بعد ما نظام التصميم (design system) اكتمل في `apps/admin` (الدفعات 1-9)، امتداد طبيعي لنفس
+المبدأ الحاكم — اتساق بصري عبر المنتج **كله**، مش شاشات عرض قليلة — لـ`apps/customer-app` و
+`apps/technician-app` (Flutter). نفس فلسفة `EmptyState`/التحميل الهيكلي (skeleton) اللي بُنيت
+في Admin اتنقلت بمعادلها البصري في Material3، بدون افتراض إن Flutter محتاج حل مختلف من الأساس.
+
+**قرار معماري متعمّد (مش سهو)**: `packages/shared-ui` موجود بالفعل كـplaceholder فاضي، بس
+الـREADME بتاعه نفسه بيوضّح إنه لـweb/React بس. بدل إنشاء package Flutter مشترك جديد
+(`packages/shared-flutter-ui` مثلاً) لمستهلِكَين اتنين بس (`customer-app`, `technician-app`)،
+اتقرر نسخ مجلد `lib/design/` صغير بالحرف بين التطبيقين — تطبيق مباشر لمبدأ المشروع نفسه ("متضيفش
+تجريد قبل ما يتاح فعلاً" من `CLAUDE.md`). قرار بوزن معماري أقل من RBAC/محرك التسعير، فمعملوش
+ADR منفصل له — موثّق هنا بدل كده.
+
+**`lib/design/` الجديد (مطابق حرفيًا في التطبيقين)**:
+- `app_theme.dart` — `AppColors` (نفس القيم الدلالية لـ`globals.css` بس بـsRGB مش OKLCH، معادِلة
+  بصريًا مش رقميًا)، `AppSpacing` (4/8/12/16/24/32 بدل أرقام متفرقة)، `AppTheme.light()`/`.dark()`
+  (`ColorScheme.fromSeed` + `cardTheme`/`appBarTheme`/`filledButtonTheme`/`inputDecorationTheme`
+  مخصّصة)، وextension `SemanticColors` على `BuildContext` (`successColor`/`warningColor`/
+  `infoColor`/`dangerColor`) — Material3's `ColorScheme` معندهوش خانات success/warning/info
+  جاهزة، الextension دي بتسدّ الفجوة بنفس منطق admin's `--success`/`--warning`/`--info` tokens.
+- `empty_state.dart` — نفس فلسفة `apps/admin/src/components/empty-state.tsx` (أيقونة + عنوان +
+  وصف اختياري + `action` widget اختياري)، بديل موحّد عن نص "مفيش ..."/"لسه ..." خام وسط الشاشة.
+- `loading_list.dart` — بديل بصري لـ`CircularProgressIndicator` المفرد وسط الشاشة، بيحجز نفس
+  شكل/مساحة القايمة الحقيقية الجاية (بطاقات نابضة بـ`AnimationController`+`FadeTransition`) —
+  بيمنع قفزة تخطيط (layout shift) لحظة وصول البيانات، نفس فلسفة admin's `TableSkeleton`.
+- `status_chip.dart`, `confirm_dialog.dart` — جاهزين للاستخدام في دفعات لاحقة (لسه ماتستخدمش في
+  الشاشات المحوّلة في الدفعة دي، بس مبنيين ومختبرين تجميعيًا `flutter analyze`).
+
+**`main.dart` (التطبيقين)**: `ThemeData` الافتراضية (بذرة `Colors.deepPurple`/`Colors.teal`
+عشوائية من bootstrap أولي) اتستبدلت بـ`AppTheme.light()`/`AppTheme.dark()`.
+
+**11 شاشة اتحوّلت في `apps/customer-app`** (نفس النمط الميكانيكي المتّبع في batches 8-9 —
+`CircularProgressIndicator` مفرد وسط قايمة → `LoadingList`، نص "مفيش/لسه" خام → `EmptyState`
+بأيقونة مناسبة للسياق):
+- `orders/orders_screen.dart` — "لسه ماطلبتش أي حاجة" (أول شاشة اتحوّلت، بروفة قبل الباقي).
+- `addresses/addresses_screen.dart` — "مفيش عناوين محفوظة" + وصف "ضيف عنوان عشان تقدر تطلب".
+- `catalog/categories_screen.dart`, `catalog/services_screen.dart` — فئات/خدمات فاضية.
+- `domestic_workers/domestic_workers_screen.dart`, `worker_bookings_screen.dart` — مقدّمين
+  خدمة/حجوزات فاضية.
+- `favorites/favorites_screen.dart` — "لسه مفيش فنيين في المفضّلة" + وصف.
+- `loyalty/loyalty_screen.dart` — سجل المعاملات بس (رصيد النقاط نفسه فضل `CircularProgressIndicator`
+  عادي عمدًا — تحميل بطاقة واحدة مش قايمة، مش نفس السياق).
+- `notifications/notifications_screen.dart`, `recurring/recurring_orders_screen.dart`.
+- `technicians/technician_selection_screen.dart` — قسم مدمج جوّه صفحة (مش شاشة كاملة)، مع وصف
+  "استخدم 'اختار لي تلقائيًا' فوق" يوجّه لزرار موجود فعلاً في نفس الصفحة.
+
+**حالات اتفحصت واتستبعدت عمدًا (قرار تصميمي، مش سهو)**:
+- `tracking_screen.dart:137` ("مفيش إحداثيات كافية لعرض الخريطة لسه") — حالة انتقالية مؤقتة فوق
+  مكان خريطة، مش قايمة فاضية. صندوق `EmptyState` الكبير هيبان غريب فوق مكان خريطة متوقّع.
+  فضلت نص بسيط زي ما هي.
+- كل الـ`CircularProgressIndicator` الصغيرة (20×20 أو 16×16 جوّه أزرار "جاري..." أثناء submit)
+  — مش سياق قايمة/تحميل صفحة، فضلت زي ما هي (نفس مبدأ استبعاد Admin's inline spinners).
+- شاشات تحميل سجل واحد كامل الصفحة (`order_detail_screen`, `technician_profile_screen`,
+  `job_details_screen`, `address_form_screen`, `worker_detail_screen`,
+  `notification_preferences_screen`, `chat_screen`) — `CircularProgressIndicator` مفرد هنا
+  بيمثّل تحميل **سجل واحد** مش **قايمة**، فمش سياق `LoadingList` (اللي مصمم يحجز شكل قايمة
+  بطاقات). فضلوا زي ما هما.
+
+**بَقّة بيانات بيئة حقيقية اتلقطت واتصلحت أثناء الاختبار الحي**: أثناء التصفح الحي، فئة خدمة
+اختبارية قديمة ("فئة اختبار Playwright") ظهرت **حقيقةً مرئية للعميل** في قايمة الفئات — بيانات
+اختبار من دفعة سابقة (مش من السيشن دي) اتسابت من غير `deleted_at` بدل ما تتمسح فورًا بعد
+التأكيد (خلاف القاعدة المتّبعة في كل الدفعات). **الإصلاح**: `UPDATE service_categories SET
+deleted_at = now()` مباشرة على الصف ده. تذكير للسيشنز الجاية: أي صف تجريبي بيتحقن لازم يتمسح
+(أو يتعمله soft-delete) **فورًا** بعد التأكد البصري، مهما كان الاختبار بسيط.
+
+**اتأكد حي بالكامل** عبر `flutter build linux --debug` + `Xvfb`/`fluxbox` + `xdotool` (نفس
+منهجية `apps/customer-app/README.md` الموثّقة من قبل) — تسجيل دخول OTP حقيقي كامل (رقم موبايل
+حقيقي بصفر طلبات من القاعدة، كود OTP من `/tmp/api-dev.log` الحقيقي)، تصفح لشاشتين مختلفتين
+اتحوّلتا فعليًا: `orders_screen` (فاضية) و`addresses_screen` (فاضية) — الاتنين ظهروا بالضبط
+زي الكود الجديد (أيقونة + عنوان + وصف، بدون أي قفزة تخطيط). لقطات شاشة (`import -window root`)
+بتثبت الرندر RTL/الألوان/الأيقونات صح.
+
+`flutter analyze` (`apps/customer-app`): **27 info بالحرف** (نفس الأساس الموثّق قبل كده، صفر
+مشاكل جديدة من تعديلات الدفعة دي).
+
+**مراجعة إضافية لـ`apps/customer-app` (نفس الدفعة)**: `order_detail_screen.dart` (721 سطر) و
+`technician_profile_screen.dart` (464 سطر) اتقروا كاملين بحثًا عن حالات فراغ زيادة — طلع إن
+الاتنين **مفيهمش أي نص "مفيش/لسه" خام خالص**، كل قسم فيهم أصلاً بيتخفي بالكامل بـ`isNotEmpty`
+guard بدل ما يعرض نص بديل. **صفر تحويل مطلوب فعليًا فيهم**، قرار مش سهو.
+
+## دفعة حادية عشر — امتداد نظام التصميم لـ`apps/technician-app` (21 شاشة)، بلا توقف
+
+استكمال مباشر بعد الدفعة العاشرة على نفس المبدأ ("الحاجة اللي تلاقيها موجودة ما تعملهاش تاني،
+كمّل عليها"): نفس نمط `EmptyState`/`LoadingList` الميكانيكي اتطبّق على `apps/technician-app` —
+21 شاشة موجودة، `lib/design/` كان جاهز من الدفعة العاشرة (نسخة مطابقة حرفيًا)، بس مفيش شاشة
+كانت لسه بتستخدمه.
+
+**18 موقع تحويل عبر 15 ملف**: `academy_screen.dart` (كورسات + نتائج اختبارات، حالتين)،
+`assistant_offers_screen.dart`، `company_screen.dart` (فروع الشركة، قسم مدمج)،
+`worker_home_screen.dart` (حجوزات الشغالة، قسم مدمج)، `payouts_screen.dart`, `wallet_screen.dart`
+(حركات المحفظة، قسم مدمج)، `internal_chat_list_screen.dart`، `kpi_screen.dart` (تقييم شهري، قسم
+مدمج)، `notifications_screen.dart`، `onboarding_screen.dart` (مستندات مرفوعة، قسم مدمج)،
+`available_orders_screen.dart`، `portfolio_screen.dart` (لينكات + تحميلها، حالتين)،
+`progression_screen.dart` (تقييم مسار وظيفي + سجل ترقيات، حالتين)، `referral_screen.dart`
+(مكافآت، قسم مدمج)، `schedule_screen.dart`.
+
+**نفس معايير الاستبعاد المتّبعة في الدفعة العاشرة، طُبّقت هنا بالحرف**:
+- تحميل سجل واحد كامل الصفحة (`_loading`/`summary == null`/`wallet == null`/`me == null` بتاع
+  `company_screen`, `progression_screen`, `referral_screen`, `kpi_screen`, `wallet_screen`,
+  `worker_home_screen`, `onboarding_screen`) فضل `CircularProgressIndicator` عادي — مش سياق قايمة.
+- `chat_screen.dart` و`internal_chat_detail_screen.dart` — تحميل خيط رسائل واحد (thread)، مفيش
+  نص "مفيش رسائل" بديل أصلاً (قايمة رسائل فاضية بترجع بلا محتوى، نفس سلوك `customer-app`'s
+  `chat_screen.dart` غير الملموس هناك برضه). فضلوا زي ما هما.
+- `order_execution_screen.dart:744` ("مفيش أسباب إلغاء متاحة دلوقتي") — نص تحذيري أحمر جوّه خطوة
+  Dialog إلغاء مضغوطة، مش قايمة مستقلة. فضل زي ما هو (نفس فلسفة استبعاد الحقول المضغوطة).
+- `internal_chat_list_screen.dart:96` ("مفيش رسائل لسه") — subtitle نص جوّه `ListTile`، مش شاشة
+  فراغ. فضل زي ما هو.
+- `profile_screen.dart` — اتقرا كامل، **صفر نص "مفيش/لسه" خام فيه خالص**، صفر تحويل مطلوب.
+
+**ملحوظة بيئة (مذكورة سابقًا، بتتكرر هنا للسياق)**: `CompromisedDeviceScreen` بيمنع أي اختبار حي
+تفاعلي (Xvfb/xdotool) لـ`apps/technician-app` في بيئة السيشن دي تحديدًا — التحويل هنا اتعمل
+بمراجعة كود دقيقة (قراءة كل ملف كامل قبل التعديل، مطابقة نفس نمط `customer-app` المؤكَّد حيًا حرفيًا)
++ `flutter analyze` بس، بدون لقطة شاشة حية تأكيدية.
+
+`flutter analyze` (`apps/technician-app`): **10 info بالحرف** (نفس الأساس الموثّق قبل كده، صفر
+مشاكل جديدة من تعديلات الدفعة دي).
+
+**نطاق متبقٍ** (Flutter): كل حالات `EmptyState`/`LoadingList` الميكانيكية القابلة للتحويل في
+التطبيقين الاتنين اتقفلت فعليًا (batches 10-11). الباقي المتبقي عمدًا: `status_chip.dart`/
+`confirm_dialog.dart` جاهزين بس لسه ماتستخدموش (فرصة لدفعة مستقبلية لو ظهر سياق مناسب فعليًا —
+مش استبدال قسري لحاجة شغالة أصلاً)، وشاشات تحميل السجل الواحد المستبعدة عمدًا فوق (مرشّحة لنمط
+تاني تمامًا زي skeleton كامل الصفحة، مش `LoadingList`، لو المالك طلب ده صراحة لاحقًا).
+
+## دفعة ثانية عشر — إصلاح ازدحام AppBar في `apps/technician-app` (بند P1/P2 موثّق صراحة)
+
+استكمال مباشر بعد الدفعة حادية عشر: بند P1/P2 UI كان لسه مفتوح صراحة في جدول التتبع فوق ("Technician
+App الصفحة الرئيسية فيها IconButtons كتير في AppBar... يحتاج Bottom navigation/Drawer + مركز الشاشة
+يبقى 'المهمة الحالية'") — اتفحص وأُكِّد إنه لسه موجود فعليًا (`available_orders_screen.dart` AppBar
+كان فيه **12 `IconButton`** متكدّسة: إشعارات، أرباحي، فرص المساعدة، جدول مواعيدي، معرض أعمالي،
+الأكاديمية، تواصل مع الإدارة، بروفايلي، شركتي/فريقي، ترشيح العملاء، الأداء الشهري، المسار الوظيفي،
+خروج) — بند حقيقي مش سهو تسجيل قديم.
+
+**الحل**: `_TechnicianDrawer` جديد (نفس ملف `available_orders_screen.dart`) — Drawer مجمّع منطقيًا
+بـ3 مجموعات + خروج، بنفس فلسفة تجميع sidebar الأدمن (`app-shell.tsx` `NAV_GROUPS`، دفعة أولى):
+"الشغل" (جدول مواعيدي، فرص المساعدة، معرض أعمالي)، "حسابي" (بروفايلي، شركتي/فريقي، أرباحي، الأداء
+الشهري، المسار الوظيفي، ترشيح العملاء)، "الدعم والتدريب" (الأكاديمية، تواصل مع الإدارة)، ثم تسجيل
+الخروج بلون `error` منفصل بـ`Divider`. `DrawerHeader` بيعرض أفاتار بأول حرف من اسم الفني + اسمه
+الكامل + "صُنّاع — الفني". **الإشعارات فضلت في الـAppBar مباشرة** (مش جوّه الـDrawer) — الوحيدة
+اللي طبيعتها متكررة وحساسة للوقت (شارة عداد غير مقروء)، بعكس باقي الـ11 عنصر التانيين اللي طبيعتهم
+ثانوية (بيتفتحوا مرة كل فترة، مش كل جلسة). النتيجة: مركز الشاشة الرئيسية بقى فعليًا "المهمة الحالية"
+(قايمة الطلبات المتاحة) زي ما نص عليه الطلب الأصلي بالحرف لتطبيق الفني.
+
+`flutter analyze`: **10 info بالحرف** (نفس الأساس، صفر مشاكل جديدة). نفس قيد البيئة (`CompromisedDeviceScreen`
+بيمنع اختبار حي لـ`technician-app`) — التحقق اتعمل بمراجعة كود دقيقة، مش لقطة شاشة حية.
+
+**بند P1/P2 التاني في نفس القايمة ("Admin Sidebar... يحتاج تقسيم Operations/Marketplace/...")
+اتفحص واتأكد إنه **مقفول بالفعل** من الدفعة الأولى (`app-shell.tsx` — 8 مجموعات منطقية + صلاحيات
+P0-3 محفوظة، موثّق فوق) — مفيش عمل إضافي مطلوب هناك.

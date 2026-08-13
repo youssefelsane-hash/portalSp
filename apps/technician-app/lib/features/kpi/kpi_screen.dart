@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'kpi_repository.dart';
 import 'models.dart';
 
@@ -69,8 +70,12 @@ class _KpiScreenState extends State<KpiScreen> {
                   children: [
                     if (summary.latest == null)
                       const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 40),
-                        child: Center(child: Text('لسه مفيش تقييم أداء شهري متاح — استنى نهاية الشهر')),
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: EmptyState(
+                          icon: Icons.insights_outlined,
+                          title: 'لسه مفيش تقييم أداء شهري متاح',
+                          description: 'استنى نهاية الشهر',
+                        ),
                       )
                     else ...[
                       _LatestCard(snapshot: summary.latest!, formatEgp: _formatEgp),

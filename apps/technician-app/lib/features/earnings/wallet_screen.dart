@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'earnings_repository.dart';
 import 'models.dart';
 import 'payout_request_screen.dart';
@@ -128,10 +129,7 @@ class _WalletScreenState extends State<WalletScreen> {
                         Text('آخر الحركات', style: Theme.of(context).textTheme.titleMedium),
                         const SizedBox(height: 8),
                         if (_transactions == null || _transactions!.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Text('مفيش حركات لسه'),
-                          )
+                          const EmptyState(icon: Icons.receipt_long_outlined, title: 'مفيش حركات لسه')
                         else
                           ...(_transactions!.map(
                             (tx) => Card(

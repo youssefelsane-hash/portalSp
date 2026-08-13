@@ -83,6 +83,32 @@
 
 قرار عمل صريح من المالك — كانت فجوة موثّقة صراحة في `docs/08` §6 قبل كده. `lib/features/assistant_offers/` جديد بالكامل (`models.dart`, `assistant_offers_repository.dart`, `assistant_offers_screen.dart`) — نفس نمط `available_orders_screen.dart` بالحرف بس لفرص "شريحة مساعد" (بث تنافسي على طلبات فنيين تانيين، أول قبول صحيح ياخدها) بدل "طلبي أنا". أيقونة جديدة (`Icons.handshake_outlined`) في AppBar الشاشة الرئيسية (`available_orders_screen.dart`) بتفتحها. رفض واضح (`409`، رسالة الباك-إند بالحرف) لو حد تاني كسب السباق قبل ما الفني يضغط قبول. **اتأكد حي بالكامل من ناحية الباك-إند** (تفاصيل السيناريوهات الأربعة الكاملة في `apps/api/src/modules/assistant-matching/README.md`) — الشاشة نفسها اتفحصت بتحليل توازن الأقواس بدل `flutter analyze`/تشغيل فعلي (Flutter SDK لسه مش متاح في بيئة السيشن دي).
 
+## نظام التصميم المشترك (docs/12، دفعة عاشرة 2026-08-13)
+
+`lib/design/` جديد — نسخة مطابقة حرفيًا لنفس المجلد في `apps/customer-app` (تفاصيل كل ملف كاملة
+في `apps/customer-app/README.md`): `app_theme.dart` (`AppColors`/`AppSpacing`/`AppTheme.light()`/
+`.dark()`/`SemanticColors` extension)، `empty_state.dart`، `loading_list.dart`، `status_chip.dart`،
+`confirm_dialog.dart`. `main.dart` بقى بيستخدم `AppTheme.light()`/`.dark()` بدل الـ`ThemeData` الافتراضية
+(بذرة `Colors.teal` عشوائية من bootstrap أولي). **قرار متعمّد**: نسخ مباشر مش package Flutter مشترك
+جديد — نفس القرار وسببه موثّق في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md` قسم "دفعة عاشرة".
+
+**دفعة حادية عشر (2026-08-13)**: 18 موقع تحويل عبر 15 ملف اتحوّلوا لـ`EmptyState`/`LoadingList` —
+`academy_screen`, `assistant_offers_screen`, `company_screen`, `worker_home_screen`,
+`payouts_screen`, `wallet_screen`, `internal_chat_list_screen`, `kpi_screen`,
+`notifications_screen`, `onboarding_screen`, `available_orders_screen`, `portfolio_screen`,
+`progression_screen`, `referral_screen`, `schedule_screen`. تفاصيل كل حالة (المحوّلة والمستبعدة
+عمدًا) في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md` قسم "دفعة حادية عشر". ملحوظة بيئة:
+`CompromisedDeviceScreen` بيمنع أي اختبار حي تفاعلي (Xvfb/xdotool) لـ`apps/technician-app` تحديدًا
+في بيئة السيشن دي (موثّق فوق)، فالتحويل اتعمل بمراجعة كود دقيقة (كل ملف اتقرا كامل قبل التعديل) +
+`flutter analyze` (10 info بالحرف، نفس الأساس، صفر مشاكل جديدة) بس، من غير لقطة شاشة حية تأكيدية
+زي `customer-app`.
+
+**دفعة اتناشر (2026-08-13) — إصلاح ازدحام AppBar**: `available_orders_screen.dart` كان فيه 12
+`IconButton` متكدّسة في الـAppBar (بند P1/P2 موثّق صراحة في `docs/12`). `_TechnicianDrawer` جديد
+(نفس الملف) بينقّل كل العناصر الثانوية (11 من الـ12) لـDrawer مجمّع بـ3 مجموعات ("الشغل"/"حسابي"/
+"الدعم والتدريب") + تسجيل خروج منفصل — نفس فلسفة تجميع sidebar الأدمن. الإشعارات (متكررة/حساسة
+للوقت) فضلت في الـAppBar وحدها. تفاصيل كاملة في `docs/12` قسم "دفعة ثانية عشر".
+
 ## التشغيل محلياً (على جهاز فيه Android/iOS toolchain حقيقي)
 
 ```bash

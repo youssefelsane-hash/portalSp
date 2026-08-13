@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'academy_repository.dart';
 import 'models.dart';
 
@@ -57,13 +59,13 @@ class _AcademyScreenState extends State<AcademyScreen> {
         child: _error != null
             ? Center(child: Text(_error!))
             : _courses == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
                       Text('الكورسات المتاحة', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
-                      if (_courses!.isEmpty) const Text('مفيش كورسات متاحة دلوقتي'),
+                      if (_courses!.isEmpty) const EmptyState(icon: Icons.school_outlined, title: 'مفيش كورسات متاحة دلوقتي'),
                       for (final course in _courses!)
                         Card(
                           child: ListTile(
@@ -76,9 +78,9 @@ class _AcademyScreenState extends State<AcademyScreen> {
                       Text('نتائج اختباراتي', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
                       if (_attempts == null)
-                        const Center(child: CircularProgressIndicator())
+                        const LoadingList(itemCount: 2)
                       else if (_attempts!.isEmpty)
-                        const Text('مفيش نتائج اختبارات مسجّلة لسه')
+                        const EmptyState(icon: Icons.fact_check_outlined, title: 'مفيش نتائج اختبارات مسجّلة لسه')
                       else
                         for (final attempt in _attempts!)
                           Card(

@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'models.dart';
 import 'onboarding_repository.dart';
 
@@ -180,10 +181,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     Text('المستندات المرفوعة', style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
                     if (_documents.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Text('لسه ما رفعتش أي مستند'),
-                      )
+                      const EmptyState(icon: Icons.description_outlined, title: 'لسه ما رفعتش أي مستند')
                     else
                       ..._documents.map(
                         (doc) => Card(

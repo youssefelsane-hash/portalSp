@@ -11,9 +11,12 @@ import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { CustomersModule } from '../customers/customers.module';
 import { Order } from '../orders/entities/order.entity';
+import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { AdminNotificationRoutingController } from './admin-notification-routing.controller';
 import { NotificationRoutingRule } from './entities/notification-routing-rule.entity';
+import { NotificationTypeConfig } from './entities/notification-type-config.entity';
+import { NotificationWorkflow } from './entities/notification-workflow.entity';
 import { Notification } from './entities/notification.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
@@ -37,20 +40,34 @@ import { TechnicianCancellationNotificationListener } from './listeners/technici
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
+import { NotificationWorkflowReminderService } from './notification-workflow-reminder.service';
+import { NotificationWorkflowService } from './notification-workflow.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Notification, UserDevice, NotificationRoutingRule, UserNotificationPreference, User, Order]),
+    TypeOrmModule.forFeature([
+      Notification,
+      UserDevice,
+      NotificationRoutingRule,
+      UserNotificationPreference,
+      NotificationTypeConfig,
+      NotificationWorkflow,
+      User,
+      Order,
+    ]),
     CustomersModule,
     TechniciansModule,
+    SettingsModule,
     AuditModule,
   ],
   controllers: [NotificationsController, AdminNotificationRoutingController],
   providers: [
     NotificationsService,
     NotificationRoutingService,
+    NotificationWorkflowService,
+    NotificationWorkflowReminderService,
     LogOnlyNotificationDispatcher,
     FcmPushDispatcher,
     TwilioSmsDispatcher,
@@ -77,6 +94,6 @@ import { NotificationsService } from './notifications.service';
     TechnicianCancellationNotificationListener,
     OrderAssistantAssignedManuallyNotificationListener,
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, NotificationWorkflowService],
 })
 export class NotificationsModule {}

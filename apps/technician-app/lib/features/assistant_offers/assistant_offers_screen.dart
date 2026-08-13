@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'assistant_offers_repository.dart';
 import 'models.dart';
 
@@ -80,12 +82,12 @@ class _AssistantOffersScreenState extends State<AssistantOffersScreen> {
           child: _error != null
               ? Center(child: Text(_error!))
               : _offers == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                   : _offers!.isEmpty
                       ? ListView(
                           children: const [
-                            SizedBox(height: 120),
-                            Center(child: Text('مفيش فرص مساعدة متاحة ليك دلوقتي')),
+                            SizedBox(height: 80),
+                            EmptyState(icon: Icons.handshake_outlined, title: 'مفيش فرص مساعدة متاحة ليك دلوقتي'),
                           ],
                         )
                       : ListView.separated(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/auth_repository.dart';
+import 'design/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/catalog/booking_mode_screen.dart';
 
@@ -18,7 +19,8 @@ class BaytakApp extends StatelessWidget {
       child: MaterialApp(
         title: 'صُنّاع',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple), useMaterial3: true),
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),
         home: const _AuthGate(),
       ),

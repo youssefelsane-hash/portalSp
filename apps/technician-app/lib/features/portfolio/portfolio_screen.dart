@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'models.dart';
 import 'portfolio_repository.dart';
 
@@ -100,8 +102,8 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             ),
             const SizedBox(height: 24),
             const Divider(),
-            if (_links == null) const Center(child: CircularProgressIndicator()),
-            if (_links != null && _links!.isEmpty) const Text('مفيش لينكات لسه'),
+            if (_links == null) const LoadingList(itemCount: 2),
+            if (_links != null && _links!.isEmpty) const EmptyState(icon: Icons.video_library_outlined, title: 'مفيش لينكات لسه'),
             if (_links != null)
               for (final link in _links!)
                 ListTile(
