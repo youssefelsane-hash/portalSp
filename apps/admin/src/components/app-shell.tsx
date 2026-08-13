@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
   { href: '/', label: 'نظرة عامة' },
+  { href: '/pricing', label: 'محرك التسعير' },
   { href: '/employees', label: 'الموظفين' },
   { href: '/technicians', label: 'الفنيين' },
   { href: '/customers', label: 'العملاء' },
