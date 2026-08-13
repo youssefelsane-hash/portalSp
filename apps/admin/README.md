@@ -80,6 +80,18 @@
 
 اتصلح بـ **Web Locks API** (`navigator.locks.request('baytak-admin-refresh-token', ...)`) — قفل حقيقي عبر كل تابات نفس الأصل، مدعوم في كل المتصفحات الحديثة (Chrome 69+, Firefox 96+, Safari 15.4+)، بيسلسل أي محاولات refresh متزامنة بدل ما تتسابق (fallback للسلوك القديم لو المتصفح مايدعمش الـ API، بدل ما ينهار). اتأكد الإصلاح حياً بنفس أسلوب التحقيق (تابين حقيقيين + نداءين متزامنين، وكمان تحميل تاب تاني حقيقي بيعمل silent refresh تلقائي بتوقيت متداخل معاهم — 3 مصادر refresh متزامنة تقريباً): **قبل** الإصلاح، `refresh_tokens.created_at` أظهر صفين بفرق أقل من 10 ميلي ثانية والاتنين `is_revoked=false` (إصدار مزدوج حقيقي، مؤكّد من الـ DB مباشرة)؛ **بعد** الإصلاح، نفس السيناريو بالظبط أنتج سلسلة تدوير متتالية نضيفة (كل محاولة اترفضت أو نجحت بالترتيب، صف واحد بس فضل صالح في النهاية) من غير أي تداخل.
 
+**ملحوظة صريحة (لسه فجوة موثّقة، هتتقفل في P0-5)**: التخفيف فوق (Web Locks) بيحل السباق **على مستوى الـclient** بس — الجذر (`auth.service.ts`'s `refresh()` بلا `SELECT ... FOR UPDATE`) لسه موجود في الباك-إند، فأي عميل تاني غير `apps/admin` (تطبيق Flutter، سكريبت خارجي) لسه ممكن يستخدم نفس الفرصة. مسجّل في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md` بند P0-5.
+
+### `hasPermission()`/`app-shell.tsx` بقت بتحترم صلاحيات الأدمن الفعلية — P0-3 (مراجعة أمان شاملة 2026-08-13)
+
+`useAuth()` بقت بتحمّل صلاحيات الأدمن الحالي (`GET /admin/me/permissions` جديد في الباك-إند) مع
+بيانات المستخدم، وبتعرّض `hasPermission(name)`. `app-shell.tsx`'s `NAV_ITEMS` كل عنصر ممكن ياخد
+`permission` اختياري — العنصر بيتخفي فعليًا لو الأدمن مالوش الصلاحية دي (fail-closed لحد ما
+الصلاحيات تتحمّل). النطاق والتفاصيل الكاملة (ليه بعض الصفحات اتفلترت وبعضها لأ) في
+`apps/api/src/modules/admin/README.md` §`GET /admin/me/permissions` و
+`docs/12-ux-refinement-and-p0-audit-2026-08-13.md`. اتأكد حي بمتصفح حقيقي (Playwright): حساب
+`support_agent` حقيقي شاف بالظبط الـ23 عنصر المسموحين له، حساب `super_admin` شاف كل الـ30.
+
 ## ملاحظات Next.js 16 (breaking changes حقيقية اتلقطت)
 
 - **`middleware.ts` بقى `proxy.ts`، والدالة اسمها `proxy` مش `middleware`** — الاسم القديم deprecated. اتعمل التحويل هنا باستخدام الـ codemod الرسمي (`npx @next/codemod@canary middleware-to-proxy .`)، مش تخمين.

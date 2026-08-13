@@ -213,7 +213,7 @@ Recurring، Buildings، Domestic Worker base flows.
 |---|---|---|
 | 1 | RBAC — `assignRole()`/`cloneRole()` privilege escalation | ✅ خلص |
 | 2 | Dynamic RBAC مش مطبّق على كل Admin endpoints (Reports/RecurringOrders...) | ✅ خلص |
-| 3 | Admin UI مايحترمش الصلاحيات (Sidebar ثابت) | 🔲 لسه |
+| 3 | Admin UI مايحترمش الصلاحيات (Sidebar ثابت) | ✅ خلص |
 | 4 | OTP بيتكتب في اللوج دايمًا | 🔲 لسه |
 | 5 | Refresh-token rotation مش atomic | 🔲 لسه |
 | 6 | حظر المستخدم لا يبطل Access Token فورًا | 🔲 لسه |
@@ -238,3 +238,24 @@ Recurring، Buildings، Domestic Worker base flows.
 `AdminTechnicianReferralsController` (مفيش فعل مُغيّر يحتاج صلاحية دقيقة)، وGET endpoints في
 `AdminPaymentsController` (payouts list/order-items — الـmutations زي approve/reject/complete
 محمية فعلاً بـ`payouts.approve`/`refunds.issue`).
+
+### P0-3 — تفاصيل التنفيذ
+
+`GET /admin/me/permissions` جديد (`AdminRolesController`) بيرجّع صلاحيات الأدمن الحالي الفعلية
+(`super_admin` بياخد الكتالوج كامل عن طريق الـbypass زي أي مكان تاني). `apps/admin`:
+`useAuth()`/`AuthProvider` بقت بتحمّل الصلاحيات دي مع بيانات المستخدم (`permissions: Set<string>`,
+`hasPermission()`)، و`app-shell.tsx`'s `NAV_ITEMS` بقى كل عنصر ممكن ياخد `permission` اختياري —
+fail-closed (لو الصلاحيات لسه بتتحمّل، العنصر المقيّد يفضل مخفي مؤقتًا، مش ظاهر بالغلط).
+
+**النطاق مقصور على**: (أ) الصفحات اللي فعلاً بترفض من الباك-إند بلا الصلاحية (نظرة عامة/التقارير
+`reports.view`، الطلبات المتكررة `recurring_orders.view`، سجل النشاط `audit.view` — بدونها
+الصفحة كانت هتبان فاضية/بترمي خطأ)، (ب) الأمثلة اللي المالك سمّاها صراحة في نص المراجعة الأمنية
+(محرك التسعير `catalog.manage`، الأدوار والصلاحيات `roles.manage`، الإعدادات `settings.manage`).
+باقي الصفحات (~23 عنصر) الـGET بتاعها مفتوح لأي أدمن عمدًا (قرارات موثّقة في تعليقات
+الكنترولرز)، فمتفلترتش — توسيع الإخفاء لصفحات إدارة تانية (الكتالوج، المدن، إلخ) حسب الصلة
+التشغيلية لا الحجب الفعلي، نطاق مرحلة تحسين UI/UX القادمة، مش P0.
+
+**اتأكد حي بالكامل عبر متصفح حقيقي (Playwright)**: حساب `super_admin` حقيقي شاف كل الـ30 عنصر.
+حساب `support_agent` حقيقي (صلاحياته الفعليتين بس `complaints.resolve`/`support_tickets.manage`)
+شاف بالظبط الـ23 عنصر المفتوحين وماشافش الـ7 المقيّدين (نظرة عامة، محرك التسعير، الأدوار
+والصلاحيات، التقارير، الطلبات المتكررة، الإعدادات، سجل النشاط) — تطابق تام مع المتوقع.
