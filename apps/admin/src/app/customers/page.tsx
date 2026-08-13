@@ -6,6 +6,7 @@ import type { AdminCustomerResponseDto, CustomerTier } from '@baytak/shared-type
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -53,7 +54,7 @@ export default function CustomersPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">العملاء</h1>
+      <PageHeader title="العملاء" />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {BLOCKED_FILTERS.map((filter) => (

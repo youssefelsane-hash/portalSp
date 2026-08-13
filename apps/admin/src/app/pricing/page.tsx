@@ -13,6 +13,7 @@ import type { AdminServiceCategoryResponseDto, AdminServiceResponseDto, PricingM
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -71,14 +72,12 @@ export default function PricingEnginePage() {
 
   return (
     <AppShell>
-      <div className="space-y-6 p-6">
-        <div>
-          <h1 className="text-2xl font-bold">محرك التسعير الديناميكي</h1>
-          <p className="text-sm text-muted-foreground">
-            لكل خدمة معادلة تسعير خاصة بيها مبنية من حقول (مساحة، عدد غرف، نوع التنفيذ...) وقواعد
-            حساب — بدل سعر ثابت واحد لكل الحالات. إدارة الحقول/القواعد/المعاينة من صفحة كل خدمة.
-          </p>
-        </div>
+      <div className="space-y-6">
+        <PageHeader
+          className="mb-0"
+          title="محرك التسعير الديناميكي"
+          description="لكل خدمة معادلة تسعير خاصة بيها مبنية من حقول (مساحة، عدد غرف، نوع التنفيذ...) وقواعد حساب — بدل سعر ثابت واحد لكل الحالات. إدارة الحقول/القواعد/المعاينة من صفحة كل خدمة."
+        />
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 

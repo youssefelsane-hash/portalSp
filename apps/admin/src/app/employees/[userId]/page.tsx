@@ -6,6 +6,7 @@ import type { AssignRoleBody, EmployeeDetail, RoleResponseDto, UpdateEmployeeBod
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -146,21 +147,25 @@ export default function EmployeeDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold">{employee.full_name}</h1>
-          {employee.is_blocked ? (
-            <Badge variant="destructive">محظور</Badge>
-          ) : employee.is_active ? (
-            <Badge variant="secondary">نشط</Badge>
-          ) : (
-            <Badge variant="outline">غير نشط</Badge>
-          )}
-        </div>
-        <Button variant="outline" onClick={() => router.push('/employees')}>
-          رجوع للقايمة
-        </Button>
-      </div>
+      <PageHeader
+        title={
+          <>
+            {employee.full_name}
+            {employee.is_blocked ? (
+              <Badge variant="destructive">محظور</Badge>
+            ) : employee.is_active ? (
+              <Badge variant="secondary">نشط</Badge>
+            ) : (
+              <Badge variant="outline">غير نشط</Badge>
+            )}
+          </>
+        }
+        actions={
+          <Button variant="outline" onClick={() => router.push('/employees')}>
+            رجوع للقايمة
+          </Button>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

@@ -5,6 +5,7 @@ import type { AuditLogResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -48,7 +49,7 @@ export default function AuditLogPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">سجل النشاط</h1>
+      <PageHeader title="سجل النشاط" />
 
       <div className="mb-4 flex gap-2">
         <Input

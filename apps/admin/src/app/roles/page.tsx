@@ -6,6 +6,7 @@ import type { CreateRoleBody, RoleResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -59,12 +60,14 @@ export default function RolesPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">الأدوار الإدارية</h1>
-        <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
-          + دور جديد
-        </Button>
-      </div>
+      <PageHeader
+        title="الأدوار الإدارية"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
+            + دور جديد
+          </Button>
+        }
+      />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       {showNew && (

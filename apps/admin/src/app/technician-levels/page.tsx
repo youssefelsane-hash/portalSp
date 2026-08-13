@@ -5,6 +5,7 @@ import type { TechnicianLevelConfigResponseDto, UpdateTechnicianLevelConfigBody 
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -56,12 +57,10 @@ export default function TechnicianLevelsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">سياسة مستويات الفنيين</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          العمولة، أولوية الإرسال، حد قرار الفني في التسعير، وأهلية قيادة فريق — لكل مستوى، بدون أي تعديل كود.
-        </p>
-      </div>
+      <PageHeader
+        title="سياسة مستويات الفنيين"
+        description="العمولة، أولوية الإرسال، حد قرار الفني في التسعير، وأهلية قيادة فريق — لكل مستوى، بدون أي تعديل كود."
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!configs && !error && <p className="text-muted-foreground">جاري التحميل…</p>}

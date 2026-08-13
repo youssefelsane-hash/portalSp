@@ -6,6 +6,7 @@ import type { ComplaintResponseDto, ComplaintStatus } from '@baytak/shared-types
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -50,7 +51,7 @@ export default function SupportPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">الشكاوى</h1>
+      <PageHeader title="الشكاوى" />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => (

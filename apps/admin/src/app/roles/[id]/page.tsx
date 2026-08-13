@@ -13,6 +13,8 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -155,7 +157,6 @@ export default function RoleDetailPage() {
 
   async function handleDelete() {
     if (!detail) return;
-    if (!window.confirm(`متأكد إنك عايز تحذف الدور "${detail.role.displayName}"؟`)) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -182,19 +183,17 @@ export default function RoleDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{role.displayName}</h1>
-          <p dir="ltr" className="text-sm text-muted-foreground">
-            {role.name}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {role.isSystem && <Badge variant="outline">دور نظامي — محمي من الحذف/التعطيل</Badge>}
-          {role.isSuperAdmin && <Badge variant="secondary">كل الصلاحيات تلقائيًا</Badge>}
-          {!role.isActive && <Badge variant="destructive">معطّل</Badge>}
-        </div>
-      </div>
+      <PageHeader
+        title={role.displayName}
+        description={<span dir="ltr">{role.name}</span>}
+        actions={
+          <>
+            {role.isSystem && <Badge variant="outline">دور نظامي — محمي من الحذف/التعطيل</Badge>}
+            {role.isSuperAdmin && <Badge variant="secondary">كل الصلاحيات تلقائيًا</Badge>}
+            {!role.isActive && <Badge variant="destructive">معطّل</Badge>}
+          </>
+        }
+      />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -222,9 +221,16 @@ export default function RoleDetailPage() {
                     نسخ الدور
                   </Button>
                   {!role.isSystem && (
-                    <Button type="button" size="sm" variant="ghost" disabled={isSaving} onClick={handleDelete}>
-                      حذف الدور
-                    </Button>
+                    <ConfirmDialog
+                      trigger={
+                        <Button type="button" size="sm" variant="ghost" disabled={isSaving}>
+                          حذف الدور
+                        </Button>
+                      }
+                      title={`متأكد إنك عايز تحذف الدور "${role.displayName}"؟`}
+                      confirmLabel="حذف"
+                      onConfirm={handleDelete}
+                    />
                   )}
                 </div>
               </form>

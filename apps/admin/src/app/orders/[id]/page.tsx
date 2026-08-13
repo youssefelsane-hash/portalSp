@@ -33,6 +33,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   extra_labor: 'أجرة إضافية',
 };
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -231,25 +232,29 @@ export default function OrderDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-semibold">طلب {order.order_number}</h1>
-          <Badge variant={orderStatusBadgeVariant(order.order_status)}>
-            {ORDER_STATUS_LABELS[order.order_status]}
-          </Badge>
-          {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
-          {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
-          {order.original_order_id && (
-            <Link href={`/orders/${order.original_order_id}`}>
-              <Badge variant="outline">إعادة زيارة — الطلب الأصلي</Badge>
-            </Link>
-          )}
-          {order.building_id && <Badge variant="outline">عمارة</Badge>}
-        </div>
-        <Button variant="outline" onClick={() => router.push('/orders')}>
-          رجوع للقايمة
-        </Button>
-      </div>
+      <PageHeader
+        title={
+          <>
+            طلب {order.order_number}
+            <Badge variant={orderStatusBadgeVariant(order.order_status)}>
+              {ORDER_STATUS_LABELS[order.order_status]}
+            </Badge>
+            {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
+            {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
+            {order.original_order_id && (
+              <Link href={`/orders/${order.original_order_id}`}>
+                <Badge variant="outline">إعادة زيارة — الطلب الأصلي</Badge>
+              </Link>
+            )}
+            {order.building_id && <Badge variant="outline">عمارة</Badge>}
+          </>
+        }
+        actions={
+          <Button variant="outline" onClick={() => router.push('/orders')}>
+            رجوع للقايمة
+          </Button>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

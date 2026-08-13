@@ -6,6 +6,7 @@ import type { AdminSupportThreadResponseDto, MessageResponseDto } from '@baytak/
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -68,14 +69,10 @@ export default function SupportChatThreadDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">محادثة الدعم — {thread ? thread.customer_name : '…'}</h1>
-        {thread && (
-          <p dir="ltr" className="text-start text-sm text-muted-foreground">
-            {thread.customer_phone}
-          </p>
-        )}
-      </div>
+      <PageHeader
+        title={`محادثة الدعم — ${thread ? thread.customer_name : '…'}`}
+        description={thread ? <span dir="ltr">{thread.customer_phone}</span> : undefined}
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

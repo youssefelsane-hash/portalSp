@@ -5,6 +5,7 @@ import type { AdminPayoutResponseDto, PayoutOrderItemResponseDto, PayoutStatus }
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -94,7 +95,7 @@ export default function PayoutsPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">طلبات الصرف</h1>
+      <PageHeader title="طلبات الصرف" />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => (

@@ -6,6 +6,7 @@ import type { OrderResponseDto, OrderStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -46,7 +47,7 @@ export default function OrdersPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">الطلبات</h1>
+      <PageHeader title="الطلبات" />
 
       <div className="mb-4 flex gap-2">
         {QUICK_FILTERS.map((filter) => (

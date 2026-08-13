@@ -10,6 +10,8 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -104,7 +106,6 @@ export default function NotificationRoutingPage() {
   }
 
   async function deleteRule(rule: RoutingRuleResponseDto) {
-    if (!window.confirm(`متأكد من حذف قاعدة "${rule.event_type} → ${rule.role_name}"؟`)) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -119,12 +120,14 @@ export default function NotificationRoutingPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">قواعد توجيه الإشعارات</h1>
-        <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
-          + قاعدة جديدة
-        </Button>
-      </div>
+      <PageHeader
+        title="قواعد توجيه الإشعارات"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
+            + قاعدة جديدة
+          </Button>
+        }
+      />
       <p className="mb-4 text-sm text-muted-foreground">
         كل حدث داخلي محتاج فعل إداري (شكوى جديدة، صرف محتاج مراجعة، ...) بيوصل لكل أدمن عنده الدور المحدد هنا،
         عبر القنوات المختارة — بدون أي تعديل كود.
@@ -224,9 +227,16 @@ export default function NotificationRoutingPage() {
                   </button>
                 </TableCell>
                 <TableCell>
-                  <Button size="sm" variant="ghost" disabled={isSaving} onClick={() => deleteRule(rule)}>
-                    حذف
-                  </Button>
+                  <ConfirmDialog
+                    trigger={
+                      <Button size="sm" variant="ghost" disabled={isSaving}>
+                        حذف
+                      </Button>
+                    }
+                    title={`متأكد من حذف قاعدة "${rule.event_type} → ${rule.role_name}"؟`}
+                    confirmLabel="حذف"
+                    onConfirm={() => deleteRule(rule)}
+                  />
                 </TableCell>
               </TableRow>
             ))}

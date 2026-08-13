@@ -2,30 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { KpiSnapshotStatus, TechnicianKpiSnapshotResponseDto } from '@baytak/shared-types';
+import type { TechnicianKpiSnapshotResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
-
-const STATUS_LABELS_AR: Record<KpiSnapshotStatus, string> = {
-  calculated: 'محسوبة',
-  approved: 'اتوافق عليها',
-  paid: 'اتصرفت',
-  rejected: 'مرفوضة',
-};
-
-const STATUS_BADGE_VARIANT: Record<KpiSnapshotStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  calculated: 'outline',
-  approved: 'secondary',
-  paid: 'default',
-  rejected: 'destructive',
-};
+import { KPI_STATUS_LABELS, KPI_STATUS_BADGE_VARIANT } from '@/lib/technician-kpi-labels';
 
 const now = new Date();
 
@@ -82,28 +70,30 @@ export default function TechnicianKpiPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">KPI الشهري للفنيين</h1>
-        <div className="flex items-center gap-2">
-          <SelectNative value={month} onChange={(e) => setMonth(Number(e.target.value))} className="w-28">
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-              <option key={m} value={m}>
-                شهر {m}
-              </option>
-            ))}
-          </SelectNative>
-          <SelectNative value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-24">
-            {[year - 1, year, year + 1].map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </SelectNative>
-          <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
-            {isCalculating ? 'جاري الحساب…' : 'احسب الشهر ده'}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="KPI الشهري للفنيين"
+        actions={
+          <>
+            <SelectNative value={month} onChange={(e) => setMonth(Number(e.target.value))} className="w-28">
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                <option key={m} value={m}>
+                  شهر {m}
+                </option>
+              ))}
+            </SelectNative>
+            <SelectNative value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-24">
+              {[year - 1, year, year + 1].map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </SelectNative>
+            <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
+              {isCalculating ? 'جاري الحساب…' : 'احسب الشهر ده'}
+            </Button>
+          </>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {calcResult && <p className="mb-4 text-sm text-muted-foreground">{calcResult}</p>}
@@ -179,7 +169,7 @@ export default function TechnicianKpiPage() {
                 <TableCell>{s.complaints_upheld_count}</TableCell>
                 <TableCell>{s.suggested_bonus_cents !== null ? formatEgp(s.suggested_bonus_cents) : '—'}</TableCell>
                 <TableCell>
-                  <Badge variant={STATUS_BADGE_VARIANT[s.status]}>{STATUS_LABELS_AR[s.status]}</Badge>
+                  <Badge variant={KPI_STATUS_BADGE_VARIANT[s.status]}>{KPI_STATUS_LABELS[s.status]}</Badge>
                   {!s.is_eligible && <span className="block text-xs text-muted-foreground">{s.ineligibility_reason}</span>}
                 </TableCell>
                 <TableCell>

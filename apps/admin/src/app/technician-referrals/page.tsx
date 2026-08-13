@@ -6,6 +6,7 @@ import type { TechnicianReferralBonusResponseDto, TechnicianReferralBonusStatus 
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -64,10 +65,7 @@ export default function TechnicianReferralsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">ترشيح QR الفني</h1>
-        <p className="text-sm text-muted-foreground">{total} سجل</p>
-      </div>
+      <PageHeader title="ترشيح QR الفني" actions={<p className="text-sm text-muted-foreground">{total} سجل</p>} />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">

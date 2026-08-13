@@ -5,6 +5,7 @@ import type { BuildingQrCodeResponseDto, BuildingWithSubscriptionStatusDto, Crea
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -108,12 +109,14 @@ export default function BuildingsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">العمائر</h1>
-        <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
-          + عمارة جديدة
-        </Button>
-      </div>
+      <PageHeader
+        title="العمائر"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
+            + عمارة جديدة
+          </Button>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

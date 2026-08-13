@@ -5,6 +5,7 @@ import type { SettingResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -125,7 +126,7 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">الإعدادات</h1>
+      <PageHeader title="الإعدادات" />
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!settings && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
 

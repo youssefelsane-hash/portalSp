@@ -11,6 +11,7 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -231,7 +232,7 @@ export default function ReportsPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">التقارير</h1>
+      <PageHeader title="التقارير" />
 
       <div className="flex flex-col gap-6">
         <Card>

@@ -7,6 +7,7 @@ import type { InternalContactResponseDto, InternalThreadResponseDto } from '@bay
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
@@ -59,17 +60,15 @@ export default function InternalChatThreadsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">المحادثات الداخلية</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            تواصل مباشر بين الموظفين والفنيين — منفصل تماماً عن محادثات الدعم مع العملاء.
-          </p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
-          + محادثة جديدة
-        </Button>
-      </div>
+      <PageHeader
+        title="المحادثات الداخلية"
+        description="تواصل مباشر بين الموظفين والفنيين — منفصل تماماً عن محادثات الدعم مع العملاء."
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
+            + محادثة جديدة
+          </Button>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

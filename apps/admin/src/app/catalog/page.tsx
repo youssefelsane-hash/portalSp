@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import type {
   AdminServiceCategoryResponseDto,
@@ -13,6 +13,7 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -211,7 +212,7 @@ export default function CatalogPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">الكتالوج</h1>
+      <PageHeader title="الكتالوج" />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -276,8 +277,8 @@ export default function CatalogPage() {
                 </TableHeader>
                 <TableBody>
                   {categories.map((category) => (
-                    <>
-                      <TableRow key={category.id}>
+                    <Fragment key={category.id}>
+                      <TableRow>
                         <TableCell>{category.name_ar}</TableCell>
                         <TableCell dir="ltr">{category.slug}</TableCell>
                         <TableCell>
@@ -350,7 +351,7 @@ export default function CatalogPage() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
