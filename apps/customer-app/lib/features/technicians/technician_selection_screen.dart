@@ -25,7 +25,21 @@ class TechnicianSelectionScreen extends StatefulWidget {
   // سياسة إلغاء الفني (docs/10) — لو اتبعت (وضع إعادة الاختيار)، القايمة مش هتعرض الفني ده.
   final String? excludeTechnicianId;
 
-  const TechnicianSelectionScreen({super.key, required this.service, this.onManualSelect, this.excludeTechnicianId});
+  // P0-10 (2026-08-13) — خدمات pricing_model=formula: JobDetailsScreen بتبعت العنوان
+  // (اختاره العميل هناك بالفعل، مفيش داعي نكرر الاختيار) وfield_values (عشان القايمة تقدر
+  // تحسب final_price_cents حقيقي لكل فني). null للخدمات التانية (السلوك الأصلي بالحرف — العميل
+  // يختار عنوان هنا زي ما كان دايمًا).
+  final Address? initialAddress;
+  final Map<String, dynamic>? fieldValues;
+
+  const TechnicianSelectionScreen({
+    super.key,
+    required this.service,
+    this.onManualSelect,
+    this.excludeTechnicianId,
+    this.initialAddress,
+    this.fieldValues,
+  });
 
   @override
   State<TechnicianSelectionScreen> createState() => _TechnicianSelectionScreenState();
@@ -42,7 +56,12 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
   void initState() {
     super.initState();
     _repository = TechniciansRepository(context.read<AuthRepository>());
-    _pickAddress();
+    if (widget.initialAddress != null) {
+      _selectedAddress = widget.initialAddress;
+      _load();
+    } else {
+      _pickAddress();
+    }
   }
 
   Future<void> _pickAddress() async {
@@ -71,6 +90,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         widget.service.id,
         address.id,
         excludeTechnicianId: widget.excludeTechnicianId,
+        fieldValues: widget.fieldValues,
       );
       if (mounted) setState(() => _technicians = items);
     } on ApiException catch (err) {
@@ -92,6 +112,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           bookingMode: BookingMode.individual,
           requestedTechnicianId: requestedTechnicianId,
           initialAddress: _selectedAddress,
+          initialFieldValues: widget.fieldValues,
         ),
       ),
     );

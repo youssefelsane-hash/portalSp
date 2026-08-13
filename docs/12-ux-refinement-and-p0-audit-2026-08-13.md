@@ -220,7 +220,7 @@ Recurring، Buildings، Domestic Worker base flows.
 | 7 | Webhook الدفع مايتحققش من المبلغ | ✅ خلص |
 | 8 | Webhook بيرجع 200 حتى مع Crash داخلي | ✅ خلص (فجوة صغيرة متبقية موثّقة — راجع payments/README.md) |
 | 9 | الطلبات المجدولة البعيدة بتتوزّع فورًا (ADR-0009 بند 1-2) | ✅ خلص (بند 3 من نفس الـADR لسه مؤجّل عمدًا — قرار مخاطرة موثّق) |
-| 10 | رحلة اختيار الفني مرتّبة غلط لخدمات Formula | 🔲 لسه |
+| 10 | رحلة اختيار الفني مرتّبة غلط لخدمات Formula | ✅ خلص (مبني ومراجع يدويًا بالكامل — Flutter SDK مش متاح في بيئة السيشن دي لاختبار حي آلي، موثّق كفجوة تحقق صريحة) |
 
 ### P0-2 — تفاصيل التنفيذ
 
@@ -290,3 +290,33 @@ job `delayed` حقيقي بـdelay مطابق ومفيش بث فوري؛ طلب 
 
 كل الفحوصات (`tsc --noEmit`, `nest build`, `jest`) عدّت نضيف — 8 اختبارات جديدة، صفر regression
 على الـ78 اختبار الموجودين.
+
+### P0-10 — تفاصيل التنفيذ
+
+الفجوة كانت موثّقة صراحة بالفعل في `apps/customer-app/README.md` (قسم `TechnicianSelectionScreen`)
+كـ"قرار هندسي مؤجَّل" وقت أول مراجعة تقنية (نفس اليوم) — رحلة formula كانت "اختار فني (بلا سعر) ←
+دخّل تفاصيل الشغل"، فقايمة الفنيين كانت بتعرض `final_price_cents: null` لكل مرشّح لأن
+`GET /services/:id/technicians` محتاج `field_values` عشان يحسب. مراجعة P0 رفعت البند ده لأنه فجوة
+تجربة حقيقية تتعارض مع الهدف المعلن من "اختيار الفني قبل الحجز" (docs/08 §3) — العميل مش قادر
+يقارن سعر فعليًا بين الفنيين.
+
+**الحل**: شاشة جديدة `JobDetailsScreen` (`apps/customer-app/lib/features/orders/job_details_screen.dart`)
+— لخدمات `pricing_model=formula` بس، `services_screen.dart` بيوديها قبل قايمة الفنيين (عنوان +
+`field_values`)، وبعد "متابعة" بيروح لـ`TechnicianSelectionScreen` ومعاها البيانات جاهزة
+(`initialAddress`+`fieldValues` — باراميترين اختياريين جداد، مايأثّرش على أي استخدام تاني للشاشة).
+القايمة دلوقتي بتبعت `field_values` فعليًا لـ`GET /services/:id/technicians` (الباك-إند كان جاهز
+من زمان — مفيش أي تغيير backend محتاج) فبترجع `final_price_cents` حقيقي لكل فني. لو العميل اختار
+فني، `CreateOrderScreen` بياخد `initialFieldValues` جاهزة (باراميتر جديد) فمايدخلش نفس البيانات
+مرتين — الفورم لسه ظاهر ومعدّل (مش read-only) لو حاب يغيّر حاجة. منطق رسم حقول الفورم الديناميكي
+(كان مكرّر التكرار جوّه `CreateOrderScreen` بس) اتقلع لملف مشترك
+`apps/customer-app/lib/features/catalog/pricing_field_widgets.dart` تستخدمه الشاشتين. مسار
+"اختيار فني عبر سلوت جدولة" (`TechnicianProfileScreen` → `CreateOrderScreen` مباشرة، فني معروف
+من الأساس) والخدمات غير formula مش متأثرين خالص.
+
+**فجوة تحقق موثّقة صراحة**: بيئة السيشن دي معندهاش Flutter SDK مثبّت (رغم إن `CLAUDE.md` بيوثّق
+إنه متاح عادةً على `/opt/flutter/bin` في سيشنز تانية) — `flutter analyze`/`flutter test` متعذّرين
+هنا تمامًا. اتعملت مراجعة يدوية دقيقة لكل ملف اتلمس (استيرادات، توقيعات، أنواع، توافق مع الاستخدامات
+الموجودة) بدل التحقق الآلي، بس ده مش بديل عن اختبار حي فعلي. **لازم أول سيشن جاية فيها Flutter SDK
+متاح تشغّل المسار كامل حيًا** (formula service حقيقي → JobDetailsScreen → قايمة فنيين بسعر حقيقي
+→ CreateOrderScreen بقيم جاهزة → تأكيد) وتضيف اختبار `test_live/` مخصص، بالظبط زي باقي الشاشات
+الموثّقة في `apps/customer-app/README.md`.
