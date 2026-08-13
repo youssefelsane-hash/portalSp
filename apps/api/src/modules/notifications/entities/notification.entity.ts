@@ -46,6 +46,11 @@ export class Notification {
   @Column({ name: 'reference_id', type: 'uuid', nullable: true })
   referenceId: string | null;
 
+  // بيربط صف التسليم ده بالـNotificationWorkflow اللي ولّده (ADR-0012) — null لأي إشعار informational
+  // عادي مالوش state machine خالص.
+  @Column({ name: 'workflow_id', type: 'uuid', nullable: true })
+  workflowId: string | null;
+
   @Column({
     name: 'delivery_status',
     type: 'enum',

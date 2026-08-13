@@ -91,4 +91,63 @@
   التشغيلية") — الطلب الأصلي كان مستوى القناة بس. `apps/technician-app` لسه من غيره — نفس
   الـendpoints جاهزة، مجرد شاشة مطابقة لو المالك عايزها لاحقًا.
 
+## محرك إشعارات الأولوية (ADR-0012، docs/08 §15) — Phase 1 خلص (2026-08-13)
+
+طلب صريح جديد من المالك: أربع مستويات أولوية للإشعارات (`critical_offer`/`action_required`/
+`scheduled_job`/`informational`) بتكرار مُدار بالكامل من الباك-إند — لو التطبيق اتقفل أو اتمسح
+من الذاكرة، منطق التذكير ميضيعش لأنه أصلاً مش عايش على الجهاز. التصميم الكامل + البدائل اللي
+اترفضت في `../../../../docs/adr/0012-notification-engine.md`.
+
+**Migration `0087_notification_engine.sql`**: جدولين جداد —
+- `notification_type_configs` — إعداد أولوية/صوت/قناة/actionable لكل `notification_type`،
+  صفر hardcode. كل نوع موجود بالفعل في الكود اتزرع بـ`priority_tier='informational'` افتراضيًا
+  (قرار آمن متعمّد — مفيش نوع موجود يتحول تلقائيًا لسلوك جديد بدون قرار أدمن صريح). `order_quote_pending_approval`
+  الجديد (تحت) اتزرع مباشرة كـ`action_required`.
+- `notification_workflows` — state machine عام لـ`action_required`/`scheduled_job` (مش
+  `critical_offer` — ده تحسين UX فوق `order_assignments`/`order_assistant_offers` الموجودين
+  أصلاً، مش كيان جديد، لسه مؤجّل). الحقول بالحرف زي ما المالك طلبهم: `event_type`(=`notification_type`),
+  `priority`(`notification_type_configs.priority_tier`), `requires_action`, `action_type`,
+  `entity_id`, `acknowledged_at`, `resolved_at`, `next_reminder_at`, `reminder_count`, `expires_at`.
+- `notifications.workflow_id` (عمود إضافي) — كل صف تسليم فعلي (أول إرسال + أي تذكير) بيتربط
+  بالـworkflow اللي ولّده، تتبّع كامل من غير تكرار بيانات.
+
+**`NotificationWorkflowService`** (`create`/`resolve`/`acknowledge`/`acknowledgeById`) —
+`resolve()`/`acknowledge()` الاتنين idempotent وآمنين 100% (safe no-op لو مفيش workflow مفتوح
+مطابق)، نفس فلسفة `NotificationRoutingService.routeToRole()` اللي مابترميش استثناء أبدًا —
+استدعاءهم من نقطة اكتمال فعل موجودة (زي `order-status-notification.listener.ts`) ميكسرش
+العملية الأساسية لو حصل خطأ غير متوقع.
+
+**`NotificationWorkflowReminderService` — الـsweep الدوري، مش BullMQ**: قرار معماري متعمّد
+موثّق بالتفصيل في الـADR — `action_required`/`scheduled_job` ممكن يمتدوا لساعات/أيام، فاحتمالية
+التصادم مع بَقّة انقطاع Redis طويل الموثّقة في `../technicians/README.md` أعلى بكتير من مهلة
+دقايق زي `matching-rounds`. نفس نمط `../orders/order-auto-cancel.service.ts` بالحرف (`setInterval`
+كل دقيقة، `pessimistic_write` لكل صف على حدة، إعادة تقييم من Postgres مباشرة كل مرة). بيحترم
+`notification_engine.quiet_hours_start`/`_end` (إعدادات جديدة، UTC HH:MM) — تذكير مستحق جوّه
+ساعات الهدوء بيتأجل (مش يتلغى) لأول لحظة بعدها، `reminder_count` مايتزودش في جولة التأجيل دي.
+
+**أول استخدام حقيقي — موافقة عرض السعر (`awaiting_quote_approval`)**: `order-status-notification.listener.ts`
+بقى بيعمل `NotificationWorkflowService.create()` (قبل الإرسال الأول، عشان الإشعار الأول برضه
+يترتبط بـ`workflow_id`) لما الطلب يدخل `awaiting_quote_approval`، ويحله (`resolve('order', orderId,
+'approve_quote')`) لما الطلب يخرج منها لأي وجهة (موافقة، رفض، أو حتى إلغاء العميل للطلب بالكامل).
+
+**اتأكد حي بالكامل عبر `curl` ضد الباك-إند الحقيقي** (عميل/فنيين حقيقيين، دورة طلب كاملة):
+- إنشاء workflow لحظة `awaiting_quote_approval` — `next_reminder_at` = الآن + الإعداد (60 دقيقة
+  افتراضيًا)، `max_reminders`=24 (snapshot من الإعداد وقت الإنشاء)، الإشعار الأول مرتبط `workflow_id` صح.
+  موافقة العميل → `resolved_at` بيتحدد فورًا، `next_reminder_at` بيترجع `NULL`.
+- **الـsweep الحي نفسه (السيرفر شغال، مش استدعاء مباشر)**: `next_reminder_at` اتحط في الماضي
+  يدويًا → **أول محاولة صادفت ساعات الهدوء الفعلية (كانت ~22:2x UTC وقت الاختبار، جوّه
+  الافتراضي 22:00-08:00) فأجّلت التذكير لـ08:00 صح** (تأكيد حي إن قيد ساعات الهدوء شغال فعليًا،
+  مش نظري) — `reminder_count` فضل صفر زي المتوقع. بعد تضييق ساعات الهدوء مؤقتًا لنطاق برّه
+  الوقت الحالي، نفس الـworkflow اتبعتله تذكير حقيقي بعد ~دقيقة ونص (دورة الـsweep 60 ثانية):
+  `reminder_count` بقى 1، `next_reminder_at` اتحرك +60 دقيقة بالظبط، صف `notifications` تاني
+  اتسجّل مرتبط بنفس `workflow_id`. الإعدادات اترجعت لقيمها الافتراضية بعد التأكيد.
+- `tsc --noEmit`/`nest build`/`jest` الثلاثة عدّوا نضيف (88 اختبار، 10 منهم جداد لـ`quiet-hours.util`
+  — نطاق منتصف الليل، حدود شاملة/غير شاملة، نطاق صفري).
+
+**نطاق Phase 1 بس — متبقٍ صراحة (تفاصيل كاملة في الـADR)**: توصيل `scheduled_job` (تذكيرات
+شغل مستقبلي مؤكَّد، منطق جدولة مختلف)، باقي حالات `action_required` (اختيار فني بديل، دفع
+معلّق، رفع مستند، رد الدعم)، `critical_offer` actionable push (أزرار قبول/رفض من الإشعار نفسه
+— محتاج تعديل `fcm-push-dispatcher.service.ts` + جهاز حقيقي للاختبار)، واجهة أدمن لـ
+`notification_type_configs` (دلوقتي عبر `psql`/migration بس).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

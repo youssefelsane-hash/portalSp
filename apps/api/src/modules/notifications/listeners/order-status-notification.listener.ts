@@ -4,6 +4,7 @@ import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../../co
 import { OrderStatus } from '../../orders/entities/order.entity';
 import { CustomerProfilesService } from '../../customers/customer-profiles.service';
 import { TechniciansService } from '../../technicians/technicians.service';
+import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
 
 // عنوان/محتوى الإشعار للعميل حسب الحالة الجديدة — الحالات غير المذكورة هنا (draft, pending_payment, ...)
@@ -30,6 +31,7 @@ export class OrderStatusNotificationListener {
     private readonly customerProfiles: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly notificationsService: NotificationsService,
+    private readonly workflowService: NotificationWorkflowService,
   ) {}
 
   @OnEvent(ORDER_STATUS_CHANGED_EVENT)
@@ -38,6 +40,26 @@ export class OrderStatusNotificationListener {
       const customerMessage = CUSTOMER_MESSAGES[event.newStatus];
       if (customerMessage) {
         const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
+
+        // أول استخدام حقيقي لمحرك الإشعارات الجديد (ADR-0012، docs/08 §15) — عرض سعر يستنى
+        // موافقة العميل هو أنسب مثال action_required موجود بالفعل: العميل لازم يتخذ قرار فعلي
+        // (موافقة/رفض) قبل ما الشغل يكمل، مش مجرد معلومة. الـworkflow بيتعمل قبل الإرسال الأول
+        // عشان حتى الإشعار الأول (مش بس التذكيرات) يترتبط بيه (workflow_id) — تتبّع كامل. تذكير
+        // كل ساعة (إعداد قابل للتعديل) لحد ما يتحل — راجع الفرع تحت (previousStatus=AWAITING_QUOTE_APPROVAL) لنقطة الحل.
+        const workflow =
+          event.newStatus === OrderStatus.AWAITING_QUOTE_APPROVAL
+            ? await this.workflowService.create({
+                userId: customer.userId,
+                notificationType: 'order_quote_pending_approval',
+                titleAr: customerMessage.title,
+                bodyAr: customerMessage.body,
+                entityType: 'order',
+                entityId: event.orderId,
+                deepLink: `/orders/${event.orderId}`,
+                actionType: 'approve_quote',
+              })
+            : null;
+
         await this.notificationsService.notify({
           userId: customer.userId,
           notificationType: `order_${event.newStatus}`,
@@ -46,6 +68,7 @@ export class OrderStatusNotificationListener {
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/orders/${event.orderId}`,
+          workflowId: workflow?.id,
         });
       }
 
@@ -69,6 +92,12 @@ export class OrderStatusNotificationListener {
       // (حدث مخصوص TECHNICIAN_ORDER_CANCELLED_EVENT، مش الحدث العام ده) — الفرع القديم هنا اتشال
       // لأنه بقى كود ميت فعليًا (مفيش أي مكان بيصدّر الحالة دي تاني)، الـenum نفسه فضل موجود في
       // order-state-machine.ts لتوافق البيانات التاريخية بس.
+
+      // العميل خرج من awaiting_quote_approval (وافق/رفض/لغى الطلب بالكامل) — يوقف تذكيرات
+      // action_required بتاعة عرض السعر ده مهما كانت الوجهة التالية، مش بس مسار الموافقة العادي.
+      if (event.previousStatus === OrderStatus.AWAITING_QUOTE_APPROVAL && event.newStatus !== OrderStatus.AWAITING_QUOTE_APPROVAL) {
+        await this.workflowService.resolve('order', event.orderId, 'approve_quote');
+      }
 
       // العميل رد على عرض السعر (وافق أو رفض) — order-items.service.ts بيبعت الفرق في event.reason.
       // الفني محتاج يعرف يكمل الشغل بأي نطاق، فمفيش رسالة IN_PROGRESS عامة كفاية هنا.
