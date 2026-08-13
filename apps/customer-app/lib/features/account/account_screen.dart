@@ -9,6 +9,7 @@ import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
 import '../referrals/referrals_screen.dart';
+import '../technician_referral/technician_referral_screen.dart';
 
 // حساب/سجل عميل موحّد (docs/08 §Retention) — كانت فجوة موثّقة صراحة: كل ميزة (طلبات، عناوين،
 // ولاء، ترشيح، متكررة) كانت شغالة ومختبرة على حدة، بس متبعثرة في أيقونات AppBar منفصلة بلا أي
@@ -105,6 +106,13 @@ class _AccountScreenState extends State<AccountScreen> {
               title: const Text('رشّح صحابك'),
               trailing: const Icon(Icons.chevron_left),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReferralsScreen())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.qr_code_scanner_outlined),
+              title: const Text('عندك كود ترشيح فني؟'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () =>
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TechnicianReferralScreen())),
             ),
             const Divider(height: 1),
             ListTile(

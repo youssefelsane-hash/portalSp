@@ -15,6 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _otpController = TextEditingController();
   final _fullNameController = TextEditingController();
   final _referralCodeController = TextEditingController();
+  final _technicianReferralCodeController = TextEditingController();
   bool _otpSent = false;
   bool _isSubmitting = false;
   String? _error;
@@ -31,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _otpController.dispose();
     _fullNameController.dispose();
     _referralCodeController.dispose();
+    _technicianReferralCodeController.dispose();
     super.dispose();
   }
 
@@ -71,6 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _otpController.text.trim(),
           _fullNameController.text.trim(),
           referralCode: _referralCodeController.text.trim(),
+          technicianReferralCode: _technicianReferralCodeController.text.trim(),
         );
       } else {
         await auth.verifyOtp(_phoneController.text.trim(), _otpController.text.trim());
@@ -104,6 +107,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _otpController.clear();
       _fullNameController.clear();
       _referralCodeController.clear();
+      _technicianReferralCodeController.clear();
       _error = null;
       _suggestRegister = false;
     });
@@ -153,7 +157,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _referralCodeController,
                         textCapitalization: TextCapitalization.characters,
                         textDirection: TextDirection.ltr,
-                        decoration: const InputDecoration(labelText: 'كود ترشيح (اختياري)'),
+                        decoration: const InputDecoration(labelText: 'كود ترشيح صديق (اختياري)'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _technicianReferralCodeController,
+                        textCapitalization: TextCapitalization.characters,
+                        textDirection: TextDirection.ltr,
+                        decoration: const InputDecoration(labelText: 'كود ترشيح فني (اختياري، من QR)'),
                       ),
                     ],
                   ] else ...[

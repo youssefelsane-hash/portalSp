@@ -116,7 +116,13 @@ class AuthRepository extends ChangeNotifier {
   // اليوزر موجود بالفعل — POST /auth/register كان جاهز ومختبر في الباك-إند بلا أي شاشة تستخدمه).
   // نفس شكل verifyOtp تمامًا (بيرجّع token pair مباشرة) بس بمعامل full_name إضافي + user_type
   // ثابت 'customer' (التطبيق ده للعميل بس — الفني له تطبيقه الخاص).
-  Future<void> register(String phoneNumber, String otpCode, String fullName, {String? referralCode}) async {
+  Future<void> register(
+    String phoneNumber,
+    String otpCode,
+    String fullName, {
+    String? referralCode,
+    String? technicianReferralCode,
+  }) async {
     final data = await apiRequest(
       'POST',
       '/auth/register',
@@ -126,6 +132,9 @@ class AuthRepository extends ChangeNotifier {
         'full_name': fullName,
         'user_type': 'customer',
         if (referralCode != null && referralCode.isNotEmpty) 'referral_code': referralCode,
+        // ترشيح QR فني (docs/11 §1) — منفصل تمامًا عن referral_code فوق (ترشيح عميل-لعميل).
+        if (technicianReferralCode != null && technicianReferralCode.isNotEmpty)
+          'technician_referral_code': technicianReferralCode,
       },
     );
     _accessToken = data!['access_token'] as String;

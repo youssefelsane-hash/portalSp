@@ -57,3 +57,24 @@
     الأربعة (tsc/nest build/jest في `apps/api`، tsc/next build في `apps/admin`) عدّت كلها.
     تفاصيل كاملة في `docs/adr/0010-dynamic-role-builder.md` و
     `apps/api/src/modules/admin/README.md` § باني الأدوار الديناميكي.
+
+- **2026-08-13 (§2 ترشيح QR للفني + مكافأة — ✅ خلص بالكامل)**: `migration 0082` —
+  `technician_referral_attributions` (إسناد دائم، أول استخدام بيربح) + `technician_referral_bonuses`
+  (`order_id` UNIQUE = idempotency)، 8 إعدادات تحت `group_name='referral_qr'` (تفعيل، قيمة
+  المكافأة، أقل حالة طلب مؤهّلة، وضع المكافأة أول-طلب/كل-طلب، حد أدنى لقيمة الطلب، سقف شهري
+  للفني، تهدئة زمنية، رفض الجهاز المكرر) — **صفر قيم مكتوبة في الكود**، كل حاجة قابلة للتعديل.
+  - `TechnicianReferralsService.evaluateOrderForBonus()` بيتنفّذ على `ORDER_STATUS_CHANGED_EVENT`
+    الموجود أصلاً (مفيش حدث جديد)، وبيعمل double-entry حقيقي عبر `WalletsService` الموجود
+    (محفظة المنصة → محفظة الفني) + `reverseDoubleEntry()` للإلغاء عند إلغاء/استرداد الطلب.
+  - **بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي**: فحص "الجهاز المكرر" الأول كان بيقارن
+    `user_devices` اللايف، لكن `device_id` فريد على مستوى الجدول (الملكية بتتنقل بين المستخدمين)
+    فالفحص كان no-op دايمًا رياضيًا. اتصلح بعمود صورة (`customer_device_id` snapshot) على كل
+    صف مكافأة، والمقارنة بقت ضد الصور المخزّنة مش الحالة اللايف. اتأكد حي بسيناريو 3 عملاء/جهاز
+    واحد: مكافأة أولى `credited`، تانية `rejected_suspicious` بصفر أثر على المحفظة.
+  - **UI كامل الأربعة**: `apps/technician-app` (`ReferralScreen` — QR عبر `qr_flutter`، مشاركة
+    عبر `share_plus`، إحصائيات)، `apps/customer-app` (كود ترشيح اختياري في التسجيل + شاشة
+    "عندي كود ترشيح" للعميل الحالي)، `apps/admin` (`/technician-referrals` — جدول + إجمالي لكل
+    حالة، قراءة فقط لأن القرار كله آلي حسب الإعدادات).
+  - الفحوصات الأربعة عدّت كلها (`tsc`/`nest build`/`jest` في `apps/api`، `tsc`/`next build` في
+    `apps/admin`، `flutter analyze` نضيف في التطبيقين). تفاصيل كاملة في
+    `apps/api/src/modules/technician-referrals/README.md`.

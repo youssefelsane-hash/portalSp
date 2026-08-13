@@ -11,6 +11,7 @@ import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../portfolio/portfolio_screen.dart';
 import '../profile/profile_screen.dart';
+import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
@@ -177,6 +178,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               tooltip: 'شركتي / فريقي',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CompanyScreen()),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.qr_code_outlined),
+              tooltip: 'ترشيح العملاء',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ReferralScreen()),
               ),
             ),
             IconButton(icon: const Icon(Icons.logout), onPressed: () => context.read<AuthRepository>().logout()),
