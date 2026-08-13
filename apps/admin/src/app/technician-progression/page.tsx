@@ -6,6 +6,7 @@ import type { TechnicianProgressionRuleResponseDto, TechnicianProgressionStatusR
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -155,12 +156,14 @@ export default function TechnicianProgressionPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">المسار الوظيفي للفنيين</h1>
-        <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
-          {isCalculating ? 'جاري التقييم…' : 'احسب أهلية كل الفنيين'}
-        </Button>
-      </div>
+      <PageHeader
+        title="المسار الوظيفي للفنيين"
+        actions={
+          <Button size="sm" disabled={isCalculating} onClick={handleCalculate}>
+            {isCalculating ? 'جاري التقييم…' : 'احسب أهلية كل الفنيين'}
+          </Button>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

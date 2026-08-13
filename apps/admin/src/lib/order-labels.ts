@@ -64,6 +64,22 @@ export function orderStatusBadgeVariant(status: OrderStatus): 'default' | 'secon
   return 'outline';
 }
 
+// نظام التصميم المشترك (docs/12) — StatusChip بديل أغنى دلاليًا من orderStatusBadgeVariant فوق
+// (اللي بيحصر كل الحالات النشطة/المعلّقة في تدرّج رمادي واحد "outline"، فمفيش فرق بصري بين
+// "بانتظار الدفع" و"جاري التنفيذ" مثلاً رغم إنهم يستأهلوا انتباه مختلف تمامًا). مُستبقاة الدالة
+// القديمة فوق زي ما هي (لسه مستخدمة في صفحات لسه ماتلمستش بالنظام الجديد).
+export function orderStatusTone(status: OrderStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (status === 'completed') return 'success';
+  if (CANCELLED_STATUSES.includes(status) || status === 'disputed') return 'danger';
+  if (status === 'pending_payment' || status === 'awaiting_payment' || status === 'awaiting_quote_approval' || status === 'awaiting_technician_reselection') {
+    return 'warning';
+  }
+  if (status === 'draft' || status === 'refunded') return 'neutral';
+  // searching_technician/technician_assigned/accepted/technician_on_way/technician_arrived/
+  // in_progress/work_completed — الطلب شغال طبيعي، لسه محتاج متابعة لكن مش تنبيه.
+  return 'info';
+}
+
 // هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة (P2 #32/#34): order_type/booking_mode
 // موجودين في رد الباك-إند من زمان بس ما كانوش بيتعرضوا في apps/admin خالص، فمعلومات الطوارئ/
 // الطلب المتكرر/إعادة الزيارة ماكانتش واضحة لفريق العمليات من غير فتح الداتابيز مباشرة.

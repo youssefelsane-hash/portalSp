@@ -6,6 +6,7 @@ import type { InternalMessageResponseDto, InternalThreadResponseDto } from '@bay
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -67,12 +68,10 @@ export default function InternalChatThreadDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">محادثة داخلية — {thread ? thread.peer_full_name : '…'}</h1>
-        {thread && (
-          <p className="text-sm text-muted-foreground">{thread.peer_user_type === 'admin' ? 'موظف' : 'فني'}</p>
-        )}
-      </div>
+      <PageHeader
+        title={`محادثة داخلية — ${thread ? thread.peer_full_name : '…'}`}
+        description={thread ? (thread.peer_user_type === 'admin' ? 'موظف' : 'فني') : undefined}
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

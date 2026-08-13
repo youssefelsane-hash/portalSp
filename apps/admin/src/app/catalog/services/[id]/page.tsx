@@ -27,6 +27,7 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -433,12 +434,14 @@ export default function ServiceDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{service.name_ar}</h1>
-        <Button variant="outline" onClick={() => router.push('/catalog')}>
-          رجوع للكتالوج
-        </Button>
-      </div>
+      <PageHeader
+        title={service.name_ar}
+        actions={
+          <Button variant="outline" onClick={() => router.push('/catalog')}>
+            رجوع للكتالوج
+          </Button>
+        }
+      />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       <Card className="mb-6">

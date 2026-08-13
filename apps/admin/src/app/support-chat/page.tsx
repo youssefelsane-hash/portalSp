@@ -6,6 +6,7 @@ import type { AdminSupportThreadResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
@@ -23,12 +24,10 @@ export default function SupportChatThreadsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">محادثات الدعم</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          شات مباشر عام مع العملاء (مش مرتبط بطلب معيّن) — منفصل عن تذاكر الدعم والشكاوى.
-        </p>
-      </div>
+      <PageHeader
+        title="محادثات الدعم"
+        description="شات مباشر عام مع العملاء (مش مرتبط بطلب معيّن) — منفصل عن تذاكر الدعم والشكاوى."
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!threads && !error && <p className="text-muted-foreground">جاري التحميل…</p>}

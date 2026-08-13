@@ -8,6 +8,9 @@ interface AuthState {
   accessToken: string | null;
   user: UserResponseDto | null;
   isLoading: boolean;
+  // P0-3 (مراجعة أمان شاملة 2026-08-13، docs/12) — صلاحيات الأدمن الفعلية (GET /admin/me/permissions)،
+  // بتتحمّل مع بيانات المستخدم. null لسه ما اتحمّلتش/الجلسة مش موجودة، مش "بلا صلاحيات".
+  permissions: Set<string> | null;
 }
 
 interface AuthContextValue extends AuthState {
@@ -16,6 +19,9 @@ interface AuthContextValue extends AuthState {
   logout: () => Promise<void>;
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
   authedFetchPaginated: <T>(path: string, options?: RequestInit) => Promise<{ items: T[]; meta: ApiMeta }>;
+  // super_admin بيتخطى الفحص بالكامل (getUserPermissionNames في الباك-إند بترجّع الكتالوج كامل
+  // له أصلاً)، فمفيش حاجة نفرّقه هنا — الـSet بيوصل شامل كل الصلاحيات لو المستخدم super_admin.
+  hasPermission: (permissionName: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -37,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserResponseDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [permissions, setPermissions] = useState<Set<string> | null>(null);
 
   // الباك-إند بيدوّر refresh_token على كل استخدام وبيعتبر إعادة استخدام توكن اتلغى = سرقة
   // محتملة، فبيقفل كل جلسات المستخدم فوراً (revokeAllUserTokens في auth.service.ts). لو أكتر
@@ -92,6 +99,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchMe = useCallback(async (token: string) => {
     const me = await apiFetch<UserResponseDto>('/auth/me', token);
     setUser(me);
+    // فشل تحميل الصلاحيات مايوقفش تسجيل الدخول — الـSidebar هيفضل مخفي (permissions=null يعني
+    // "لسه محمّلة" مش "بلا صلاحيات"، فمفيش عناصر تختفي غلط) لحد ما authedFetch تنجح لاحقًا.
+    try {
+      const { permission_names: names } = await apiFetch<{ permission_names: string[] }>(
+        '/admin/me/permissions',
+        token,
+      );
+      setPermissions(new Set(names));
+    } catch {
+      setPermissions(null);
+    }
   }, []);
 
   // بمحاولة صامتة نعيد بناء الجلسة من الـ refresh_token cookie (httpOnly) عند تحميل الصفحة —
@@ -104,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       setAccessToken(null);
       setUser(null);
+      setPermissions(null);
     } finally {
       setIsLoading(false);
     }
@@ -136,6 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await callLocalAuthRoute('/api/auth/logout', {}).catch(() => null);
     setAccessToken(null);
     setUser(null);
+    setPermissions(null);
   }, []);
 
   // لو access_token انتهى (401)، نجرّب refresh (single-flight) ونعيد الطلب — لو فشل، الجلسة خلصت فعلاً.
@@ -171,9 +191,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [accessToken, doRefresh],
   );
 
+  const hasPermission = useCallback((permissionName: string) => permissions?.has(permissionName) ?? false, [permissions]);
+
   const value = useMemo(
-    () => ({ accessToken, user, isLoading, requestOtp, verifyOtp, logout, authedFetch, authedFetchPaginated }),
-    [accessToken, user, isLoading, requestOtp, verifyOtp, logout, authedFetch, authedFetchPaginated],
+    () => ({
+      accessToken,
+      user,
+      isLoading,
+      permissions,
+      requestOtp,
+      verifyOtp,
+      logout,
+      authedFetch,
+      authedFetchPaginated,
+      hasPermission,
+    }),
+    [accessToken, user, isLoading, permissions, requestOtp, verifyOtp, logout, authedFetch, authedFetchPaginated, hasPermission],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

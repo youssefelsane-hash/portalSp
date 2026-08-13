@@ -5,6 +5,7 @@ import type { WorkerResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
@@ -67,16 +68,18 @@ export default function DomesticWorkersPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">مقدّمو الخدمات المنزلية</h1>
-        <SelectNative value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
-          <option value="pending">قيد المراجعة</option>
-          <option value="approved">معتمدة</option>
-          <option value="rejected">مرفوضة</option>
-          <option value="suspended">موقوفة</option>
-          <option value="">الكل</option>
-        </SelectNative>
-      </div>
+      <PageHeader
+        title="مقدّمو الخدمات المنزلية"
+        actions={
+          <SelectNative value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
+            <option value="pending">قيد المراجعة</option>
+            <option value="approved">معتمدة</option>
+            <option value="rejected">مرفوضة</option>
+            <option value="suspended">موقوفة</option>
+            <option value="">الكل</option>
+          </SelectNative>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 

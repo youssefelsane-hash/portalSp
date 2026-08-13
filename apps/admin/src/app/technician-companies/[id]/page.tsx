@@ -6,6 +6,7 @@ import type { CompanyDetailResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -40,12 +41,14 @@ export default function TechnicianCompanyDetailPage() {
 
       {detail && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold">{detail.company.name}</h1>
-            <Badge variant={detail.company.is_active ? 'secondary' : 'outline'}>
-              {detail.company.is_active ? 'نشطة' : 'غير نشطة'}
-            </Badge>
-          </div>
+          <PageHeader
+            title={detail.company.name}
+            actions={
+              <Badge variant={detail.company.is_active ? 'secondary' : 'outline'}>
+                {detail.company.is_active ? 'نشطة' : 'غير نشطة'}
+              </Badge>
+            }
+          />
 
           <Card>
             <CardHeader>

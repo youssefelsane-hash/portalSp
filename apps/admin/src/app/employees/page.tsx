@@ -6,6 +6,7 @@ import type { EmployeeResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -33,12 +34,14 @@ export default function EmployeesPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">الموظفين</h1>
-        <Button asChild>
-          <Link href="/employees/new">+ إضافة موظف</Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="الموظفين"
+        actions={
+          <Button asChild>
+            <Link href="/employees/new">+ إضافة موظف</Link>
+          </Button>
+        }
+      />
 
       {error && <p className="text-destructive">{error}</p>}
       {!error && !employees && <p className="text-muted-foreground">جاري التحميل…</p>}

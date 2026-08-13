@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
 import 'models.dart';
@@ -15,10 +17,19 @@ class TechniciansRepository {
     String serviceId,
     String addressId, {
     String? excludeTechnicianId,
+    // P0-10 (2026-08-13) — خدمات pricing_model=formula: لو JobDetailsScreen جمعت تفاصيل الشغل
+    // قبل الوصول هنا، بنبعتها عشان final_price_cents يترجع حقيقي لكل فني (مش null) — راجع
+    // apps/api/src/modules/catalog/dto/list-technicians-for-service.dto.ts (JSON مُرمّز في
+    // query string، نفس نمط أي مرشّح كائن في REST APIs هنا).
+    Map<String, dynamic>? fieldValues,
   }) async {
     // سياسة إلغاء الفني (docs/10) — excludeTechnicianId بيتبعت وقت اختيار فني بديل بعد ما فني
     // لغى، عشان نفس الفني مايظهرش تاني في القايمة.
-    final query = excludeTechnicianId != null ? '&exclude_technician_id=$excludeTechnicianId' : '';
+    final query = StringBuffer();
+    if (excludeTechnicianId != null) query.write('&exclude_technician_id=$excludeTechnicianId');
+    if (fieldValues != null && fieldValues.isNotEmpty) {
+      query.write('&field_values=${Uri.encodeComponent(jsonEncode(fieldValues))}');
+    }
     final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId$query');
     return items.map(TechnicianBookingListItem.fromJson).toList();
   }

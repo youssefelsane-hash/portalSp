@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../orders/create_order_screen.dart';
+import '../orders/job_details_screen.dart';
 import '../technicians/technician_selection_screen.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
@@ -77,9 +78,14 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                   // اختيار الفني قبل الحجز (docs/08 §3) بس للحجز الفردي — "اعتماد"
                                   // (team) ليها اختيار شركة/فريق منفصل جوّه CreateOrderScreen نفسها،
                                   // و"طوارئ" بتتوزّع تلقائيًا بالكامل (مفيش وقت لاختيار يدوي).
-                                  builder: (_) => widget.bookingMode == BookingMode.individual
-                                      ? TechnicianSelectionScreen(service: service)
-                                      : CreateOrderScreen(service: service, bookingMode: widget.bookingMode),
+                                  // P0-10 (2026-08-13) — خدمات formula تحديدًا لازم تجمع تفاصيل
+                                  // الشغل (JobDetailsScreen) *قبل* قايمة الفنيين، وإلا القايمة
+                                  // بتعرض كل الفنيين بلا سعر نهائي (محتاج field_values يتحسب).
+                                  builder: (_) => widget.bookingMode != BookingMode.individual
+                                      ? CreateOrderScreen(service: service, bookingMode: widget.bookingMode)
+                                      : service.pricingModel == 'formula'
+                                          ? JobDetailsScreen(service: service)
+                                          : TechnicianSelectionScreen(service: service),
                                 ),
                               ),
                             ),

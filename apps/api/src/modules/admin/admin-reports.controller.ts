@@ -1,4 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { AdminReportsService } from './admin-reports.service';
@@ -6,8 +7,13 @@ import { RevenueReportQueryDto } from './dto/revenue-report-query.dto';
 import { TechniciansReportQueryDto } from './dto/technicians-report-query.dto';
 import { ZonesReportQueryDto } from './dto/zones-report-query.dto';
 
+// بَقّة أمنية حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-2): الكنترولر ده كان
+// محمي بـ@Roles(ADMIN) بس — أي حساب أدمن (حتى support_agent بلا أي دور تشغيلي) كان يقدر يشوف
+// الداشبورد/الإيراد/تقارير الفنيين والمناطق. reports.view جديدة (migration 0085)، ممنوحة
+// افتراضيًا لـops_manager/finance (super_admin بياخدها أوتوماتيك عن طريق is_super_admin bypass).
 @Controller('admin')
 @Roles(UserType.ADMIN)
+@RequirePermission('reports.view')
 export class AdminReportsController {
   constructor(private readonly adminReportsService: AdminReportsService) {}
 

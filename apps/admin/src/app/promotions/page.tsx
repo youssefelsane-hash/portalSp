@@ -11,6 +11,8 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -109,7 +111,6 @@ export default function PromotionsPage() {
   }
 
   async function handleDeactivate(id: string) {
-    if (!window.confirm('متأكد إنك عايز تعطّل الكود ده؟')) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -126,12 +127,14 @@ export default function PromotionsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">أكواد الخصم</h1>
-        <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
-          + كود جديد
-        </Button>
-      </div>
+      <PageHeader
+        title="أكواد الخصم"
+        actions={
+          <Button size="sm" variant="outline" onClick={() => setShowNew((s) => !s)}>
+            + كود جديد
+          </Button>
+        }
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
@@ -277,9 +280,16 @@ export default function PromotionsPage() {
                   </TableCell>
                   <TableCell>
                     {promo.is_active && (
-                      <Button size="sm" variant="ghost" disabled={isSaving} onClick={() => handleDeactivate(promo.id)}>
-                        تعطيل
-                      </Button>
+                      <ConfirmDialog
+                        trigger={
+                          <Button size="sm" variant="ghost" disabled={isSaving}>
+                            تعطيل
+                          </Button>
+                        }
+                        title="متأكد إنك عايز تعطّل الكود ده؟"
+                        confirmLabel="تعطيل"
+                        onConfirm={() => handleDeactivate(promo.id)}
+                      />
                     )}
                   </TableCell>
                 </TableRow>

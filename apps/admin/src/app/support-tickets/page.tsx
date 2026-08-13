@@ -6,6 +6,7 @@ import type { SupportTicketResponseDto, SupportTicketStatus } from '@baytak/shar
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -40,12 +41,10 @@ export default function SupportTicketsPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">تذاكر الدعم</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          تذاكر دعم عامة (سؤال فاتورة، مشكلة تقنية، ...) — منفصلة عن شكاوى الطلبات في "الشكاوى".
-        </p>
-      </div>
+      <PageHeader
+        title="تذاكر الدعم"
+        description='تذاكر دعم عامة (سؤال فاتورة، مشكلة تقنية، ...) — منفصلة عن شكاوى الطلبات في "الشكاوى".'
+      />
 
       <div className="mb-4 flex gap-2">
         {STATUS_FILTERS.map((f) => (

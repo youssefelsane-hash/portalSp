@@ -1,11 +1,11 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { LessThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { NotificationChannel } from '../notifications/entities/notification.entity';
 import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
@@ -48,6 +48,7 @@ export class AuthService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(OtpCode) private readonly otpCodes: Repository<OtpCode>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
@@ -74,10 +75,18 @@ export class AuthService {
     });
     await this.otpCodes.save(otp);
 
-    // اللوج ده بيتسجل دايماً (حتى لو بوابة SMS حقيقية متظبطة) — نفس فلسفة استمرار التطوير/الاختبار
-    // المحلي المتّبعة في كل تكامل خارجي تاني في المشروع (Paymob/S3/إلخ)، مش استبدال كامل له.
-    // eslint-disable-next-line no-console
-    console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+    // بَقّة أمنية حقيقية اتصلحت (مراجعة أمان شاملة 2026-08-13، P0-4): اللوج ده كان بيسجّل الكود
+    // نفسه دايماً بلا شرط — مقبول تمامًا للتطوير/الاختبار المحلي (نفس فلسفة كل تكامل خارجي تاني
+    // في المشروع، Paymob/S3/إلخ)، لكن خطر حقيقي في Production — أي حد عنده access للوجز يقدر
+    // ياخد أي كود OTP ويدخل أي حساب. الكود الفعلي بقى يظهر بس لو NODE_ENV≠production؛ في
+    // Production بيتسجّل رقم موبايل مقنّع (أول 5 أرقام + آخر رقمين بس) بلا الكود خالص.
+    if (this.config.get<string>('nodeEnv') !== 'production') {
+      // eslint-disable-next-line no-console
+      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+    } else {
+      const masked = dto.phone_number.length > 7 ? `${dto.phone_number.slice(0, 5)}***${dto.phone_number.slice(-2)}` : '***';
+      this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
+    }
 
     // كانت فجوة موثّقة صراحة (TODO ثابت هنا من أول يوم) — بوابة Twilio SMS حقيقية اتبنت
     // معمارياً في common/notifications/ بـ isConfigured (تفعيلها = env vars، تفاصيل في
@@ -225,7 +234,7 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private async issueTokenPair(user: User, ip: string | null): Promise<TokenPair> {
+  private async issueTokenPair(user: User, ip: string | null, manager?: EntityManager): Promise<TokenPair> {
     const accessExpiresIn = this.config.get<string>('jwt.accessExpiresIn')!;
     const accessToken = await this.jwt.signAsync(
       { sub: user.id, userType: user.userType },
@@ -235,14 +244,15 @@ export class AuthService {
     const refreshTokenRaw = randomBytes(48).toString('hex');
     const refreshExpiresIn = this.config.get<string>('jwt.refreshExpiresIn')!;
 
-    const refreshTokenEntity = this.refreshTokens.create({
+    const refreshTokens = manager ? manager.getRepository(RefreshToken) : this.refreshTokens;
+    const refreshTokenEntity = refreshTokens.create({
       userId: user.id,
       tokenHash: this.hashRefreshToken(refreshTokenRaw),
       ipAddress: ip,
       isRevoked: false,
       expiresAt: new Date(Date.now() + parseDurationToMs(refreshExpiresIn)),
     });
-    await this.refreshTokens.save(refreshTokenEntity);
+    await refreshTokens.save(refreshTokenEntity);
 
     return {
       access_token: accessToken,
@@ -251,29 +261,53 @@ export class AuthService {
     };
   }
 
-  /** تدوير: أي refresh token اتستخدم مرة واحدة يتبطل فوراً — استخدام تاني ليه = سرقة محتملة فيتقفل الحساب كله. */
+  /**
+   * تدوير: أي refresh token اتستخدم مرة واحدة يتبطل فوراً — استخدام تاني ليه = سرقة محتملة فيتقفل الحساب كله.
+   *
+   * **بَقّة أمنية حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-5)**: قبل كده الدالة دي
+   * كانت بتقرأ صف الـ`refresh_tokens` بـ`findOne` عادي (من غير قفل)، تفحصه في الذاكرة، وتكتب
+   * `isRevoked=true` بعد كده — بلا transaction ولا `SELECT ... FOR UPDATE`. طلبين `refresh()`
+   * متزامنين فعليًا بنفس التوكن (اتأكد حياً في `apps/admin`'s `auth-context.tsx` — راجع
+   * `apps/admin/README.md`) تحت READ COMMITTED كانوا الاتنين يقدروا يقروا `isRevoked=false` قبل
+   * ما أي واحد يكتب، فيعدّوا الاتنين ويصدروا **زوج توكنز صالح لكل واحد فيهم** — إصدار جلستين من
+   * توكن واحد بدل التصرف الصح (رفض واحد منهم). الإصلاح: نفس نمط `pessimistic_write` المستخدم في
+   * `matching.service.ts`'s `accept()`/`permissions.service.ts`'s `setRolePermissions()` — قفل
+   * صف الـtoken من أول خطوة جوّه transaction واحدة، فأي نداء تاني بيستنى القفل يتفك وبعدين يلاقي
+   * `isRevoked=true` فعلاً ويترفض بأمان (`AUTH_001`) بدل ما يعدّي.
+   */
   async refresh(rawToken: string, ip: string | null): Promise<TokenPair> {
     const tokenHash = this.hashRefreshToken(rawToken);
-    const existing = await this.refreshTokens.findOne({ where: { tokenHash } });
 
-    if (!existing || existing.isRevoked || existing.expiresAt.getTime() < Date.now()) {
-      if (existing?.isRevoked) {
-        await this.revokeAllUserTokens(existing.userId, 'security_breach');
+    return this.dataSource.transaction(async (manager) => {
+      const existing = await manager
+        .createQueryBuilder(RefreshToken, 'rt')
+        .setLock('pessimistic_write')
+        .where('rt.tokenHash = :tokenHash', { tokenHash })
+        .getOne();
+
+      if (!existing || existing.isRevoked || existing.expiresAt.getTime() < Date.now()) {
+        if (existing?.isRevoked) {
+          await manager.update(RefreshToken, { userId: existing.userId, isRevoked: false }, {
+            isRevoked: true,
+            revokedAt: new Date(),
+            revokedReason: 'security_breach',
+          });
+        }
+        throw new ApiException(ErrorCode.AUTH_001, 'توكن التجديد غير صالح، سجّل دخول تاني', HttpStatus.UNAUTHORIZED);
       }
-      throw new ApiException(ErrorCode.AUTH_001, 'توكن التجديد غير صالح، سجّل دخول تاني', HttpStatus.UNAUTHORIZED);
-    }
 
-    const user = await this.users.findOne({ where: { id: existing.userId } });
-    if (!user || user.isBlocked) {
-      throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
-    }
+      const user = await manager.findOne(User, { where: { id: existing.userId } });
+      if (!user || user.isBlocked) {
+        throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
+      }
 
-    existing.isRevoked = true;
-    existing.revokedAt = new Date();
-    existing.revokedReason = 'rotation';
-    await this.refreshTokens.save(existing);
+      existing.isRevoked = true;
+      existing.revokedAt = new Date();
+      existing.revokedReason = 'rotation';
+      await manager.save(existing);
 
-    return this.issueTokenPair(user, ip);
+      return this.issueTokenPair(user, ip, manager);
+    });
   }
 
   async logout(rawToken: string): Promise<void> {

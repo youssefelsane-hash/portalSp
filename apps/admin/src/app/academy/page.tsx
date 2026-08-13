@@ -15,6 +15,7 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -124,14 +125,12 @@ export default function AcademyPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6 p-6">
-        <div>
-          <h1 className="text-2xl font-bold">الأكاديمية</h1>
-          <p className="text-sm text-muted-foreground">
-            كورسات تدريب الفنيين ونتائج اختباراتهم — تسجيل النتائج يدوي من الأدمن (مفيش نظام
-            اختبار تلقائي داخل التطبيقات لسه، قرار عمل واعي).
-          </p>
-        </div>
+      <div className="space-y-6">
+        <PageHeader
+          className="mb-0"
+          title="الأكاديمية"
+          description="كورسات تدريب الفنيين ونتائج اختباراتهم — تسجيل النتائج يدوي من الأدمن (مفيش نظام اختبار تلقائي داخل التطبيقات لسه، قرار عمل واعي)."
+        />
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 

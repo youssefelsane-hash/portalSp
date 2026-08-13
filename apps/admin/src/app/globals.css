@@ -5,47 +5,77 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.99 0.002 247);
+  --foreground: oklch(0.18 0.014 255);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.18 0.014 255);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.18 0.014 255);
+  /* هوية "صُنّاع" — نظام التصميم المشترك (docs/12، مرحلة تحسين UI/UX 2026-08-13). كانت الواجهة
+     كلها رمادي محايد بالكامل (oklch بدون chroma/hue) — بدون هوية بصرية ولا تفريق دلالي بين
+     حالات (نجاح/تحذير/خطر). أزرق ثقة احترافي (نفس نطاق الألوان المستخدم في أنظمة تشغيل B2B
+     عالمية) بدل الرمادي البحت، واستُبقي التباين العالي لضمان قراءة عربية واضحة. */
+  --primary: oklch(0.47 0.16 258);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.96 0.006 255);
+  --secondary-foreground: oklch(0.22 0.02 255);
+  --muted: oklch(0.96 0.006 255);
+  --muted-foreground: oklch(0.5 0.02 255);
+  --accent: oklch(0.94 0.03 258);
+  --accent-foreground: oklch(0.3 0.09 258);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.9 0.006 255);
+  --input: oklch(0.9 0.006 255);
+  --ring: oklch(0.47 0.16 258 / 40%);
+  /* حالات دلالية (status chips، تنبيهات، ملخصات لوحة التحكم) — نجاح/تحذير/خطر/معلومة، منفصلة
+     عمداً عن --destructive (ده لإجراءات هدّامة زي "حذف"، مش لعرض حالة "طلب اتلغى"). */
+  --success: oklch(0.5 0.13 152);
+  --success-foreground: oklch(0.985 0 0);
+  --success-bg: oklch(0.94 0.05 152);
+  --warning: oklch(0.6 0.15 75);
+  --warning-foreground: oklch(0.2 0.02 75);
+  --warning-bg: oklch(0.94 0.07 85);
+  --danger: var(--destructive);
+  --danger-foreground: var(--destructive-foreground);
+  --danger-bg: oklch(0.94 0.05 25);
+  --info: oklch(0.5 0.15 258);
+  --info-foreground: oklch(0.985 0 0);
+  --info-bg: oklch(0.94 0.03 258);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.16 0.012 255);
+  --foreground: oklch(0.96 0.004 255);
+  --card: oklch(0.2 0.014 255);
+  --card-foreground: oklch(0.96 0.004 255);
+  --popover: oklch(0.2 0.014 255);
+  --popover-foreground: oklch(0.96 0.004 255);
+  --primary: oklch(0.72 0.13 258);
+  --primary-foreground: oklch(0.16 0.02 255);
+  --secondary: oklch(0.27 0.014 255);
+  --secondary-foreground: oklch(0.96 0.004 255);
+  --muted: oklch(0.27 0.014 255);
+  --muted-foreground: oklch(0.68 0.014 255);
+  --accent: oklch(0.3 0.05 258);
+  --accent-foreground: oklch(0.9 0.03 258);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.72 0.13 258 / 45%);
+  --success: oklch(0.72 0.15 152);
+  --success-foreground: oklch(0.16 0.02 255);
+  --success-bg: oklch(0.27 0.05 152);
+  --warning: oklch(0.78 0.15 85);
+  --warning-foreground: oklch(0.16 0.02 255);
+  --warning-bg: oklch(0.3 0.07 85);
+  --danger: var(--destructive);
+  --danger-foreground: var(--destructive-foreground);
+  --danger-bg: oklch(0.3 0.08 25);
+  --info: oklch(0.75 0.11 258);
+  --info-foreground: oklch(0.16 0.02 255);
+  --info-bg: oklch(0.28 0.05 258);
 }
 
 @theme inline {
@@ -72,6 +102,18 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-bg: var(--info-bg);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

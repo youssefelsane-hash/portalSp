@@ -6,6 +6,7 @@ import type { EmployeeResponseDto, SupportTicketResponseDto, SupportTicketStatus
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -86,17 +87,19 @@ export default function SupportTicketDetailPage() {
 
       {ticket && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-semibold">{ticket.subject}</h1>
-              <p dir="ltr" className="text-start font-mono text-sm text-muted-foreground">
+          <PageHeader
+            title={ticket.subject}
+            description={
+              <span dir="ltr" className="font-mono">
                 {ticket.ticket_number}
-              </p>
-            </div>
-            <Badge variant={ticketStatusBadgeVariant(ticket.ticket_status)}>
-              {TICKET_STATUS_LABELS[ticket.ticket_status]}
-            </Badge>
-          </div>
+              </span>
+            }
+            actions={
+              <Badge variant={ticketStatusBadgeVariant(ticket.ticket_status)}>
+                {TICKET_STATUS_LABELS[ticket.ticket_status]}
+              </Badge>
+            }
+          />
 
           <Card>
             <CardHeader>

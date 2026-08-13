@@ -23,6 +23,19 @@ export class AdminRolesController {
     return this.permissionsService.listPermissions();
   }
 
+  /**
+   * صلاحيات الأدمن الحالي الفعلية — P0-3 (مراجعة أمان شاملة 2026-08-13، docs/12): apps/admin
+   * كانت واجهته (app-shell.tsx) بتعرض كل عناصر القائمة (~30 صفحة) لأي حساب أدمن بغض النظر عن
+   * صلاحياته الفعلية، حتى لو الـbackend هيرفض كل فعل فيها. مفيش endpoint كان بيرجّع الصلاحيات
+   * الفعلية للمستخدم الحالي عشان الواجهة تقدر تفلتر بناءً عليه. مفتوح لأي أدمن (بيرجّع صلاحياته
+   * هو بس، مش بيانات حساسة عن حد تاني).
+   */
+  @Get('me/permissions')
+  async getMyPermissions(@CurrentUser() admin: JwtPayload) {
+    const names = await this.permissionsService.getUserPermissionNames(admin.sub);
+    return { permission_names: Array.from(names).sort() };
+  }
+
   @Get('roles/:id')
   getRoleDetail(@Param('id', ParseUUIDPipe) id: string) {
     return this.permissionsService.getRoleDetail(id);

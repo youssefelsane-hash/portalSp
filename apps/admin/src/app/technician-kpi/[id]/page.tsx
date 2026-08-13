@@ -7,12 +7,15 @@ import type { KpiDimensionScores, TechnicianKpiSnapshotResponseDto } from '@bayt
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatEgp } from '@/lib/format';
+import { KPI_STATUS_LABELS, KPI_STATUS_BADGE_VARIANT } from '@/lib/technician-kpi-labels';
 
 const DIMENSION_LABELS_AR: Record<keyof KpiDimensionScores, string> = {
   rating: 'متوسط التقييم',
@@ -87,7 +90,6 @@ export default function TechnicianKpiDetailPage() {
   }
 
   async function handlePay() {
-    if (!window.confirm('تأكيد صرف المكافأة المعتمدة فعليًا من محفظة المنصة؟')) return;
     await runAction(() => authedFetch(`/admin/technician-kpi/${params.id}/pay`, { method: 'POST' }));
   }
 
@@ -111,17 +113,15 @@ export default function TechnicianKpiDetailPage() {
 
   return (
     <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">
-            KPI الفني — {snapshot.period_month}/{snapshot.period_year}
-          </h1>
-          <Link href={`/technicians/${snapshot.technician_id}`} className="text-sm text-muted-foreground underline-offset-2 hover:underline">
+      <PageHeader
+        title={`KPI الفني — ${snapshot.period_month}/${snapshot.period_year}`}
+        description={
+          <Link href={`/technicians/${snapshot.technician_id}`} className="underline-offset-2 hover:underline">
             عرض ملف الفني
           </Link>
-        </div>
-        <Badge>{snapshot.status}</Badge>
-      </div>
+        }
+        actions={<Badge variant={KPI_STATUS_BADGE_VARIANT[snapshot.status]}>{KPI_STATUS_LABELS[snapshot.status]}</Badge>}
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
@@ -230,9 +230,13 @@ export default function TechnicianKpiDetailPage() {
 
             {snapshot.status === 'approved' && (
               <div className="border-t pt-4">
-                <Button disabled={isSaving} onClick={handlePay}>
-                  صرف المكافأة من المحفظة
-                </Button>
+                <ConfirmDialog
+                  trigger={<Button disabled={isSaving}>صرف المكافأة من المحفظة</Button>}
+                  title="تأكيد صرف المكافأة المعتمدة فعليًا من محفظة المنصة؟"
+                  confirmLabel="صرف"
+                  destructive={false}
+                  onConfirm={handlePay}
+                />
               </div>
             )}
 

@@ -6,6 +6,7 @@ import type { CompanyListRowDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
@@ -24,12 +25,10 @@ export default function TechnicianCompaniesPage() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold">شركات/فرق الفنيين</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          إشراف للقراءة بس — الإدارة (إضافة/إزالة أعضاء، الفروع) ذاتية من داخل تطبيق الفني نفسه.
-        </p>
-      </div>
+      <PageHeader
+        title="شركات/فرق الفنيين"
+        description="إشراف للقراءة بس — الإدارة (إضافة/إزالة أعضاء، الفروع) ذاتية من داخل تطبيق الفني نفسه."
+      />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!companies && !error && <p className="text-muted-foreground">جاري التحميل…</p>}

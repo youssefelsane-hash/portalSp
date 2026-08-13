@@ -15,6 +15,7 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -239,7 +240,7 @@ export default function GeoPage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">المدن والمناطق ونطاقات الخدمة</h1>
+      <PageHeader title="المدن والمناطق ونطاقات الخدمة" />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
       <Card className="mb-6">

@@ -2,45 +2,132 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import {
+  Avatar,
+  AvatarFallback,
+} from '@/components/ui/avatar';
+import {
+  BarChart3,
+  Banknote,
+  Bell,
+  Building,
+  Building2,
+  CalendarClock,
+  ClipboardList,
+  DollarSign,
+  GraduationCap,
+  Home as HomeIcon,
+  LayoutDashboard,
+  LifeBuoy,
+  ListX,
+  LogOut,
+  Map,
+  Megaphone,
+  MessageSquare,
+  MessagesSquare,
+  Package,
+  PieChart,
+  QrCode,
+  Route as RouteIcon,
+  ScrollText,
+  Settings,
+  Shield,
+  Star,
+  Tag,
+  ToggleLeft,
+  UserCog,
+  Users,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-const NAV_ITEMS = [
-  { href: '/', label: 'نظرة عامة' },
-  { href: '/pricing', label: 'محرك التسعير' },
-  { href: '/employees', label: 'الموظفين' },
-  { href: '/roles', label: 'الأدوار والصلاحيات' },
-  { href: '/technician-referrals', label: 'ترشيح QR الفني' },
-  { href: '/technician-kpi', label: 'KPI الشهري' },
-  { href: '/technician-progression', label: 'المسار الوظيفي' },
-  { href: '/technicians', label: 'الفنيين' },
-  { href: '/customers', label: 'العملاء' },
-  { href: '/orders', label: 'الطلبات' },
-  { href: '/reports', label: 'التقارير' },
-  { href: '/support', label: 'الشكاوى' },
-  { href: '/support-tickets', label: 'تذاكر الدعم' },
-  { href: '/support-chat', label: 'محادثات الدعم' },
-  { href: '/internal-chat', label: 'المحادثات الداخلية' },
-  { href: '/payouts', label: 'طلبات الصرف' },
-  { href: '/promotions', label: 'أكواد الخصم' },
-  { href: '/cancellation-reasons', label: 'أسباب الإلغاء' },
-  { href: '/buildings', label: 'العمائر' },
-  { href: '/domestic-workers', label: 'الخدمات المنزلية' },
-  { href: '/recurring-orders', label: 'الطلبات المتكررة' },
-  { href: '/notification-routing', label: 'توجيه الإشعارات' },
-  { href: '/technician-companies', label: 'شركات/فرق الفنيين' },
-  { href: '/technician-levels', label: 'سياسة مستويات الفنيين' },
-  { href: '/academy', label: 'الأكاديمية' },
-  { href: '/catalog', label: 'الكتالوج' },
-  { href: '/geo', label: 'المدن والمناطق' },
-  { href: '/settings', label: 'الإعدادات' },
-  { href: '/feature-flags', label: 'Feature Flags' },
-  { href: '/audit-log', label: 'سجل النشاط' },
+type NavItem = { href: string; label: string; icon: LucideIcon; permission?: string };
+type NavGroup = { label: string; items: NavItem[] };
+
+// نظام التصميم المشترك (docs/12، مرحلة تحسين UI/UX 2026-08-13) — كانت الـ30 صفحة كلها في قايمة
+// واحدة مسطّحة بلا تجميع ولا أيقونات، ترتيبها تاريخي (حسب وقت البناء) مش منطقي (مثلاً "الأدوار
+// والصلاحيات" جنب "ترشيح QR الفني"). اتقسّمت هنا لمجموعات بمعنى تشغيلي واحد — بنية معلومات فعلية،
+// نفس مبدأ "console تشغيلي احترافي مش صفحات CRUD متجمّعة" المطلوب صراحة في الطلب الأول.
+//
+// **الصلاحيات (P0-3) محفوظة بالحرف من غير أي تغيير** — كل `permission` هنا مطابق تمامًا لما كان
+// موجود قبل إعادة التجميع؛ إعادة الترتيب مجرد بصري، مالوش أي علاقة بمنطق fail-closed تحت.
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: '',
+    items: [{ href: '/', label: 'نظرة عامة', icon: LayoutDashboard, permission: 'reports.view' }],
+  },
+  {
+    label: 'العمليات',
+    items: [
+      { href: '/orders', label: 'الطلبات', icon: ClipboardList },
+      { href: '/recurring-orders', label: 'الطلبات المتكررة', icon: CalendarClock, permission: 'recurring_orders.view' },
+      { href: '/support', label: 'الشكاوى', icon: Megaphone },
+      { href: '/support-tickets', label: 'تذاكر الدعم', icon: LifeBuoy },
+      { href: '/support-chat', label: 'محادثات الدعم', icon: MessageSquare },
+      { href: '/internal-chat', label: 'المحادثات الداخلية', icon: MessagesSquare },
+    ],
+  },
+  {
+    label: 'الفنيين',
+    items: [
+      { href: '/technicians', label: 'الفنيين', icon: Wrench },
+      { href: '/technician-companies', label: 'شركات/فرق الفنيين', icon: Building2 },
+      { href: '/technician-levels', label: 'سياسة مستويات الفنيين', icon: Star },
+      { href: '/technician-referrals', label: 'ترشيح QR الفني', icon: QrCode },
+      { href: '/technician-kpi', label: 'KPI الشهري', icon: BarChart3 },
+      { href: '/technician-progression', label: 'المسار الوظيفي', icon: RouteIcon },
+      { href: '/academy', label: 'الأكاديمية', icon: GraduationCap },
+    ],
+  },
+  {
+    label: 'العملاء',
+    items: [{ href: '/customers', label: 'العملاء', icon: Users }],
+  },
+  {
+    label: 'الكتالوج والتسعير',
+    items: [
+      { href: '/pricing', label: 'محرك التسعير', icon: DollarSign, permission: 'catalog.manage' },
+      { href: '/catalog', label: 'الكتالوج', icon: Package },
+      { href: '/buildings', label: 'العمائر', icon: Building },
+      { href: '/domestic-workers', label: 'الخدمات المنزلية', icon: HomeIcon },
+      { href: '/geo', label: 'المدن والمناطق', icon: Map },
+    ],
+  },
+  {
+    label: 'المالية',
+    items: [
+      { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
+      { href: '/promotions', label: 'أكواد الخصم', icon: Tag },
+    ],
+  },
+  {
+    label: 'التقارير',
+    items: [{ href: '/reports', label: 'التقارير', icon: PieChart, permission: 'reports.view' }],
+  },
+  {
+    label: 'النظام والإعدادات',
+    items: [
+      { href: '/employees', label: 'الموظفين', icon: UserCog },
+      { href: '/roles', label: 'الأدوار والصلاحيات', icon: Shield, permission: 'roles.manage' },
+      { href: '/notification-routing', label: 'توجيه الإشعارات', icon: Bell },
+      { href: '/cancellation-reasons', label: 'أسباب الإلغاء', icon: ListX },
+      { href: '/settings', label: 'الإعدادات', icon: Settings, permission: 'settings.manage' },
+      { href: '/feature-flags', label: 'Feature Flags', icon: ToggleLeft },
+      { href: '/audit-log', label: 'سجل النشاط', icon: ScrollText, permission: 'audit.view' },
+    ],
+  },
 ];
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return (parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '');
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -49,26 +136,50 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.push('/login');
   }
 
+  // fail-closed: عنصر ليه permission بيتخفي إلا لو hasPermission() أكّدت الوجود — مش بيتفترض
+  // مفتوح لحد ما نتأكد. لو الصلاحيات لسه بتتحمّل (permissions=null)، hasPermission() بترجّع
+  // false، فالعناصر المقيّدة بتفضل مخفية لحظيًا (مش وميض ظاهر-مختفي).
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !item.permission || hasPermission(item.permission)),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-56 shrink-0 flex-col border-s bg-muted/30">
-        <div className="px-4 py-4 font-semibold">صُنّاع — إدارة</div>
-        <nav className="flex flex-1 flex-col gap-1 px-2">
-          {NAV_ITEMS.map((item) => {
-            const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'rounded-md px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground',
-                  isActive && 'bg-accent text-accent-foreground font-medium',
-                )}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
+      <aside className="flex w-64 shrink-0 flex-col border-s bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-4">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+            ص
+          </div>
+          <span className="font-semibold">صُنّاع — إدارة</span>
+        </div>
+        <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 pb-4">
+          {visibleGroups.map((group) => (
+            <div key={group.label || 'root'}>
+              {group.label && (
+                <div className="px-3 pb-1 text-xs font-medium text-muted-foreground">{group.label}</div>
+              )}
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((item) => {
+                  const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cn(
+                        'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-foreground/80 hover:bg-accent hover:text-accent-foreground',
+                        isActive && 'bg-accent text-accent-foreground font-medium',
+                      )}
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
         {/* placeholder للوجو/قواعد الاستخدام الحقيقية — docs/06-vision-brief-sanaa.md §0،
             لسه هتتبعت من صاحب المشروع. مفيش نص/لوجو مُخترَع هنا عمدًا. */}
@@ -78,11 +189,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b px-6 py-3">
+        <header className="flex items-center justify-between border-b bg-background/80 px-6 py-3 backdrop-blur">
           <div />
-          <div className="flex items-center gap-4">
-            {user && <span className="text-sm text-muted-foreground">{user.full_name}</span>}
+          <div className="flex items-center gap-3">
+            {user && (
+              <div className="flex items-center gap-2">
+                <Avatar className="size-7">
+                  <AvatarFallback className="text-xs">{initials(user.full_name)}</AvatarFallback>
+                </Avatar>
+                <span className="text-sm text-muted-foreground">{user.full_name}</span>
+              </div>
+            )}
             <Button variant="outline" size="sm" onClick={handleLogout}>
+              <LogOut className="size-4" />
               تسجيل الخروج
             </Button>
           </div>

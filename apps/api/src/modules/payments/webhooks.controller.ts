@@ -8,8 +8,17 @@ import { PaymentsService } from './payments.service';
 /**
  * مسارات webhooks بوابات الدفع — @Public() عمداً (البوابة الخارجية مالهاش JWT عندنا)، الأمان
  * هنا بالكامل عبر التحقق من توقيع HMAC جوّه PaymentGateway.verifyAndParseWebhook()، مش عبر Guard.
- * دايماً بيرجع 200 حتى لو الحدث اترفض/اتجاهل (بوابات الدفع بتعتبر أي رد غير 2xx = "فشل التسليم"
- * وتعيد المحاولة كذا مرة — مفيش داعي نخليها تعيد إرسال حدث احنا فعلاً معالجينه أو رافضينه بوعي).
+ *
+ * **بَقّة أمنية/تشغيلية حقيقية كانت هنا واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-8)**: الكنترولر
+ * كان بيرجع `200` **دايمًا** حتى لو `finalizeGatewayWebhook` رمى استثناء غير متوقّع (DB/Redis
+ * واقع، خطأ داخلي عابر) — يعني لو Paymob/Fawry بعتوا نجاح والداتابيز وقعت لحظتها، كنا بنرجّع
+ * "استلمت" للبوابة (فمتحاولش تاني) بينما الدفعة الحقيقية فضلت غير متسوّاة فعليًا. الفرق المهم:
+ * - `verifyAndParseWebhook()` بترمي بس لو الحمولة نفسها غير قابلة للتحليل (توقيع/شكل غلط تمامًا)
+ *   — إعادة إرسال نفس الحمولة الغلط مش هتصلح حاجة، فده لسه بيترجم لـ`200` (تجاهل واعي).
+ * - `finalizeGatewayWebhook()` **مبقتش ترمي إلا لأخطاء داخلية غير متوقّعة فعلاً** — كل قرار واعي
+ *   (توقيع غلط، مبلغ مش مطابق، دفعة already معالجة) بيرجع عادي من غيرها من غير استثناء. أي throw
+ *   طالع منها دلوقتي بيتسيب يتصاعد لـNest، فيرجّع `5xx` حقيقي — البوابة بتشوفه "فشل تسليم" وتعيد
+ *   المحاولة تلقائيًا (سلوكها القياسي)، بدل ما نكذب عليها بـ`200` كاذب.
  */
 @Controller('webhooks')
 export class WebhooksController {
@@ -25,25 +34,30 @@ export class WebhooksController {
   @Post('paymob')
   @HttpCode(HttpStatus.OK)
   async handlePaymobWebhook(@Body() body: Record<string, unknown>, @Query('hmac') hmac: string | undefined) {
+    let result: ReturnType<PaymentGateway['verifyAndParseWebhook']>;
     try {
-      const result = this.paymentGateway.verifyAndParseWebhook(body, hmac);
-      await this.paymentsService.finalizeGatewayWebhook(
-        result.externalEventId,
-        result.eventType,
-        this.paymentGateway.providerName,
-        body,
-        result.signatureValid,
-        result.paymentId,
-        result.succeeded,
-        result.failureReason,
-        result.gatewayTransactionId,
-        PaymentMethod.CARD,
-      );
+      result = this.paymentGateway.verifyAndParseWebhook(body, hmac);
     } catch (err) {
-      // بنسجّل ونرجع 200 برضه — الخطأ اتسجّل في webhook_events.error_message بالفعل جوّه
-      // finalizeGatewayWebhook، وإعادة محاولة تلقائية من البوابة مش هتصلح خطأ داخلي عندنا.
-      this.logger.error('فشل معالجة webhook Paymob', err instanceof Error ? err.stack : err);
+      // حمولة غير قابلة للتحليل خالص — إعادة إرسالها مش هتصلح حاجة، تجاهل واعي بـ200.
+      this.logger.error('فشل تحليل webhook Paymob (حمولة غير صالحة)', err instanceof Error ? err.stack : err);
+      return { received: true };
     }
+
+    // من هنا، أي throw معناه خطأ داخلي غير متوقّع جوّه finalizeGatewayWebhook — بيتصاعد لـNest
+    // عمدًا (مش بيتلقّط) عشان يرجّع 5xx حقيقي ويخلي Paymob تعيد المحاولة تلقائيًا.
+    await this.paymentsService.finalizeGatewayWebhook(
+      result.externalEventId,
+      result.eventType,
+      this.paymentGateway.providerName,
+      body,
+      result.signatureValid,
+      result.paymentId,
+      result.succeeded,
+      result.failureReason,
+      result.gatewayTransactionId,
+      PaymentMethod.CARD,
+      result.amountCents,
+    );
     return { received: true };
   }
 
@@ -53,23 +67,27 @@ export class WebhooksController {
   @Post('fawry')
   @HttpCode(HttpStatus.OK)
   async handleFawryWebhook(@Body() body: Record<string, unknown>) {
+    let result: ReturnType<FawryGateway['verifyAndParseWebhook']>;
     try {
-      const result = this.fawryGateway.verifyAndParseWebhook(body);
-      await this.paymentsService.finalizeGatewayWebhook(
-        result.externalEventId,
-        result.eventType,
-        this.fawryGateway.providerName,
-        body,
-        result.signatureValid,
-        result.paymentId,
-        result.succeeded,
-        result.failureReason,
-        result.gatewayTransactionId,
-        PaymentMethod.FAWRY_REFERENCE,
-      );
+      result = this.fawryGateway.verifyAndParseWebhook(body);
     } catch (err) {
-      this.logger.error('فشل معالجة webhook Fawry', err instanceof Error ? err.stack : err);
+      this.logger.error('فشل تحليل webhook Fawry (حمولة غير صالحة)', err instanceof Error ? err.stack : err);
+      return { received: true };
     }
+
+    await this.paymentsService.finalizeGatewayWebhook(
+      result.externalEventId,
+      result.eventType,
+      this.fawryGateway.providerName,
+      body,
+      result.signatureValid,
+      result.paymentId,
+      result.succeeded,
+      result.failureReason,
+      result.gatewayTransactionId,
+      PaymentMethod.FAWRY_REFERENCE,
+      result.amountCents,
+    );
     return { received: true };
   }
 }

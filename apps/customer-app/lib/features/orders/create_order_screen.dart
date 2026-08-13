@@ -8,6 +8,7 @@ import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
+import '../catalog/pricing_field_widgets.dart';
 import '../technicians/models.dart';
 import '../technicians/technicians_repository.dart';
 import 'models.dart';
@@ -26,6 +27,11 @@ class CreateOrderScreen extends StatefulWidget {
   // الأول عشان تجيبله قايمة الفنيين (GET /services/:id/technicians محتاج address_id)؛ بنمررها
   // هنا عشان العميل ميضطرش يختارها تاني هنا — تجربة استخدام أسوأ لو كررناها.
   final Address? initialAddress;
+  // P0-10 (2026-08-13) — لخدمات pricing_model=formula، JobDetailsScreen بتجمع field_values
+  // *قبل* شاشة اختيار الفني (عشان قايمة الفنيين تقدر تعرض السعر النهائي الحقيقي لكل واحد). لما
+  // العميل يوصل هنا بعد ما اختار فني من القايمة دي، القيم دي بتتمرر جاهزة عشان مايدخلش نفس
+  // البيانات مرتين — لسه ظاهرة ومعدّلة هنا (مش قراءة فقط) لو حاب يغيّر حاجة قبل التأكيد النهائي.
+  final Map<String, dynamic>? initialFieldValues;
 
   const CreateOrderScreen({
     super.key,
@@ -34,6 +40,7 @@ class CreateOrderScreen extends StatefulWidget {
     this.requestedTechnicianId,
     this.scheduleSlotId,
     this.initialAddress,
+    this.initialFieldValues,
   });
 
   @override
@@ -99,6 +106,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _repository = OrdersRepository(context.read<AuthRepository>());
     _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
     _selectedAddress = widget.initialAddress;
+    if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
     if (_isFormulaPricing) {
@@ -566,167 +574,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     ];
   }
 
-  Widget _buildPricingFieldWidget(PricingField field) {
-    // أنواع الحقول اللي لسه مش مدعومة (location/image_upload/video_upload/voice_note) —
-    // راجع الملحوظة في catalog/models.dart. لو مطلوب، بنمنع الإرسال في _submit()، وهنا بس
-    // بنوضّح للعميل ليه الحقل ده مش ظاهر كمدخل فعلي.
-    if (!field.isSupported) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Text(
-          field.isRequired
-              ? '⚠️ "${field.labelAr}" محتاج تفاصيل (صورة/موقع) مش مدعومة في التطبيق لسه'
-              : '"${field.labelAr}" اختياري ومش مدعوم في التطبيق حاليًا — هيتجاهل',
-          style: TextStyle(color: field.isRequired ? Colors.red : Colors.grey),
-        ),
-      );
-    }
-
-    final label = field.unitAr != null ? '${field.labelAr} (${field.unitAr})' : field.labelAr;
-
-    switch (field.fieldType) {
-      case 'number':
-      case 'area':
-      case 'length':
-      case 'volume':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: TextFormField(
-            decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (value) {
-              final parsed = num.tryParse(value);
-              _onFieldValueChanged(field.fieldKey, parsed);
-            },
-          ),
-        );
-
-      case 'dropdown':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: DropdownButtonFormField<String>(
-            decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-            initialValue: _fieldValues[field.fieldKey] as String?,
-            items: (field.options ?? [])
-                .map((o) => DropdownMenuItem(value: o.value, child: Text(o.labelAr)))
-                .toList(),
-            onChanged: (value) => _onFieldValueChanged(field.fieldKey, value),
-          ),
-        );
-
-      case 'multi_select':
-        final selected = (_fieldValues[field.fieldKey] as List<String>?) ?? <String>[];
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: Theme.of(context).textTheme.bodyMedium),
-              Wrap(
-                spacing: 8,
-                children: (field.options ?? [])
-                    .map(
-                      (o) => FilterChip(
-                        label: Text(o.labelAr),
-                        selected: selected.contains(o.value),
-                        onSelected: (isSelected) {
-                          final updated = [...selected];
-                          if (isSelected) {
-                            updated.add(o.value);
-                          } else {
-                            updated.remove(o.value);
-                          }
-                          _onFieldValueChanged(field.fieldKey, updated.isEmpty ? null : updated);
-                        },
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
-          ),
-        );
-
-      case 'checkbox':
-        return SwitchListTile(
-          title: Text(label),
-          value: (_fieldValues[field.fieldKey] as bool?) ?? false,
-          onChanged: (value) => _onFieldValueChanged(field.fieldKey, value),
-        );
-
-      case 'slider':
-        final min = (field.minValue ?? 0).toDouble();
-        final effectiveMax = (field.maxValue ?? 100).toDouble();
-        final max = effectiveMax > min ? effectiveMax : min + 1;
-        final current = ((_fieldValues[field.fieldKey] as num?)?.toDouble() ?? min).clamp(min, max).toDouble();
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$label: ${current.toStringAsFixed(0)}'),
-              Slider(
-                min: min,
-                max: max,
-                value: current,
-                onChanged: (value) => _onFieldValueChanged(field.fieldKey, value),
-              ),
-            ],
-          ),
-        );
-
-      case 'date':
-        final currentValue = _fieldValues[field.fieldKey] as String?;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: ListTile(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: Theme.of(context).dividerColor)),
-            title: Text(label),
-            subtitle: Text(currentValue ?? 'اختار تاريخ'),
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: DateTime.now(),
-                firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                lastDate: DateTime.now().add(const Duration(days: 365)),
-              );
-              if (picked != null) {
-                final formatted = '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-                _onFieldValueChanged(field.fieldKey, formatted);
-              }
-            },
-          ),
-        );
-
-      case 'time':
-        final currentValue = _fieldValues[field.fieldKey] as String?;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: ListTile(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4), side: BorderSide(color: Theme.of(context).dividerColor)),
-            title: Text(label),
-            subtitle: Text(currentValue ?? 'اختار وقت'),
-            onTap: () async {
-              final picked = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-              if (picked != null) {
-                final formatted = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-                _onFieldValueChanged(field.fieldKey, formatted);
-              }
-            },
-          ),
-        );
-
-      default:
-        // نوع مش متوقع (enum جديد اتضاف في الباك-إند ومحدّش حدّث الفرونت) — نفس معاملة
-        // الأنواع الغير مدعومة (isSupported=false)، عشان مانضربش خطأ غير واضح للعميل.
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text(
-            field.isRequired ? '⚠️ "${field.labelAr}" نوع حقل مش معروف — كلم الدعم' : '"${field.labelAr}" نوع حقل مش مدعوم، هيتجاهل',
-            style: TextStyle(color: field.isRequired ? Colors.red : Colors.grey),
-          ),
-        );
-    }
-  }
+  // منطق رسم الحقول اتقلع لملف مشترك (catalog/pricing_field_widgets.dart) — P0-10 (2026-08-13):
+  // JobDetailsScreen محتاجة نفس الرسم قبل شاشة اختيار الفني، فمفيش داعي نكرره هنا.
+  Widget _buildPricingFieldWidget(PricingField field) =>
+      buildPricingFieldWidget(context, field, _fieldValues, _onFieldValueChanged);
 
   @override
   Widget build(BuildContext context) {

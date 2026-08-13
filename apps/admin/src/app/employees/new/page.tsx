@@ -6,6 +6,7 @@ import type { CreateEmployeeBody, EmployeeResponseDto, RoleResponseDto } from '@
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
+import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,7 +59,7 @@ export default function NewEmployeePage() {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-xl font-semibold">إضافة موظف</h1>
+      <PageHeader title="إضافة موظف" />
       <Card className="max-w-lg">
         <form onSubmit={handleSubmit}>
           <CardHeader>
