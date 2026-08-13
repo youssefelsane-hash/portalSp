@@ -21,16 +21,16 @@ export const TICKET_CHANNEL_LABELS: Record<SupportChannel, string> = {
   email: 'إيميل',
 };
 
-export function ticketStatusBadgeVariant(status: SupportTicketStatus): 'default' | 'secondary' | 'outline' | 'destructive' {
+export function ticketStatusTone(status: SupportTicketStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
   switch (status) {
     case 'open':
-      return 'destructive';
+      return 'warning';
     case 'in_progress':
-      return 'default';
+      return 'info';
     case 'resolved':
-      return 'secondary';
+      return 'success';
     case 'closed':
-      return 'outline';
+      return 'neutral';
   }
 }
 

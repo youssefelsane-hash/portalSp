@@ -7,8 +7,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SelectNative } from '@/components/ui/select-native';
 import {
@@ -16,7 +16,7 @@ import {
   TICKET_CHANNEL_LABELS,
   TICKET_PRIORITY_LABELS,
   TICKET_STATUS_LABELS,
-  ticketStatusBadgeVariant,
+  ticketStatusTone,
 } from '@/lib/support-ticket-labels';
 
 export default function SupportTicketDetailPage() {
@@ -95,9 +95,9 @@ export default function SupportTicketDetailPage() {
               </span>
             }
             actions={
-              <Badge variant={ticketStatusBadgeVariant(ticket.ticket_status)}>
+              <StatusChip tone={ticketStatusTone(ticket.ticket_status)}>
                 {TICKET_STATUS_LABELS[ticket.ticket_status]}
-              </Badge>
+              </StatusChip>
             }
           />
 

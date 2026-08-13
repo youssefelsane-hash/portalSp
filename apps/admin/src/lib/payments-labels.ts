@@ -17,8 +17,10 @@ export const PAYOUT_STATUS_LABELS: Record<PayoutStatus, string> = {
   failed: 'فشل',
 };
 
-export function payoutStatusBadgeVariant(status: PayoutStatus) {
-  if (status === 'completed' || status === 'approved') return 'secondary' as const;
-  if (status === 'rejected' || status === 'failed') return 'destructive' as const;
-  return 'outline' as const;
+export function payoutStatusTone(status: PayoutStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (status === 'completed') return 'success';
+  if (status === 'approved') return 'info';
+  if (status === 'rejected' || status === 'failed') return 'danger';
+  if (status === 'under_review' || status === 'processing') return 'warning';
+  return 'neutral';
 }

@@ -8,10 +8,17 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, orderStatusBadgeVariant } from '@/lib/order-labels';
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_TYPE_LABELS,
+  orderStatusTone,
+  PAYMENT_STATUS_LABELS,
+  paymentStatusTone,
+} from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
 
 const PER_PAGE = 20;
@@ -97,12 +104,16 @@ export default function OrdersPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={orderStatusBadgeVariant(order.order_status)}>
+                    <StatusChip tone={orderStatusTone(order.order_status)}>
                       {ORDER_STATUS_LABELS[order.order_status]}
-                    </Badge>
+                    </StatusChip>
                   </TableCell>
                   <TableCell>{formatEgp(order.total_amount_cents)}</TableCell>
-                  <TableCell>{order.payment_status}</TableCell>
+                  <TableCell>
+                    <StatusChip tone={paymentStatusTone(order.payment_status)}>
+                      {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
+                    </StatusChip>
+                  </TableCell>
                   <TableCell>
                     {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
                   </TableCell>

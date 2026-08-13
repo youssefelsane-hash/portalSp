@@ -8,15 +8,15 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
   COMPLAINT_CATEGORY_LABELS,
   COMPLAINT_SEVERITY_LABELS,
   COMPLAINT_STATUS_LABELS,
-  complaintSeverityBadgeVariant,
-  complaintStatusBadgeVariant,
+  complaintSeverityTone,
+  complaintStatusTone,
   OPEN_COMPLAINT_STATUSES,
 } from '@/lib/support-labels';
 
@@ -98,14 +98,14 @@ export default function SupportPage() {
                 </TableCell>
                 <TableCell>{COMPLAINT_CATEGORY_LABELS[complaint.category]}</TableCell>
                 <TableCell>
-                  <Badge variant={complaintSeverityBadgeVariant(complaint.severity)}>
+                  <StatusChip tone={complaintSeverityTone(complaint.severity)}>
                     {COMPLAINT_SEVERITY_LABELS[complaint.severity]}
-                  </Badge>
+                  </StatusChip>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={complaintStatusBadgeVariant(complaint.complaint_status)}>
+                  <StatusChip tone={complaintStatusTone(complaint.complaint_status)}>
                     {COMPLAINT_STATUS_LABELS[complaint.complaint_status]}
-                  </Badge>
+                  </StatusChip>
                 </TableCell>
                 <TableCell>{new Date(complaint.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
               </TableRow>

@@ -7,11 +7,11 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
-import { PAYOUT_METHOD_LABELS, PAYOUT_STATUS_LABELS, payoutStatusBadgeVariant } from '@/lib/payments-labels';
+import { PAYOUT_METHOD_LABELS, PAYOUT_STATUS_LABELS, payoutStatusTone } from '@/lib/payments-labels';
 
 const STATUS_FILTERS: { value: PayoutStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'الكل' },
@@ -142,9 +142,9 @@ export default function PayoutsPage() {
                   <TableCell>{formatEgp(payout.net_amount_cents)}</TableCell>
                   <TableCell>{PAYOUT_METHOD_LABELS[payout.payout_method]}</TableCell>
                   <TableCell>
-                    <Badge variant={payoutStatusBadgeVariant(payout.payout_status)}>
+                    <StatusChip tone={payoutStatusTone(payout.payout_status)}>
                       {PAYOUT_STATUS_LABELS[payout.payout_status]}
-                    </Badge>
+                    </StatusChip>
                     {payout.payout_status === 'rejected' && payout.rejection_reason && (
                       <span className="block text-xs text-muted-foreground">{payout.rejection_reason}</span>
                     )}

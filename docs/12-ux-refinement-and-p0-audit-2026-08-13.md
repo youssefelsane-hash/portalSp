@@ -465,6 +465,42 @@ RTL سليم بالكامل، صفحات قديمة (orders) لسه شغالة �
 الاتنين عرضوا `EmptyState` بشكله الصحيح (صندوق بحدود متقطّعة، أيقونة صندوق، النص العربي، RTL سليم)،
 صفر console errors حقيقية (401 واحد متوقّع بس على فحص الجلسة قبل تسجيل الدخول).
 
-**نطاق متبقٍ**: `StatusChip` (مبني، `orderStatusTone()` جاهز في `lib/order-labels.ts`، بس لسه مش
-موصول بأي صفحة)، `PromptDialog` لتدفقات "سبب إلزامي" الـ6 (`window.prompt()`)، وإعادة تصميم محتوى
+**نطاق متبقٍ**: `PromptDialog` لتدفقات "سبب إلزامي" الـ6 (`window.prompt()`)، وإعادة تصميم محتوى
 الجداول/الفلاتر نفسها بعمق أكبر من مجرد رأس الصفحة وحالة الفراغ.
+
+## دفعة رابعة — تطبيق `StatusChip` عبر كل صفحات الحالة الدلالية (نفس اليوم، استكمال بلا توقف)
+
+استبدال `Badge` العادي (اللي بيحصر أي حالة في 4 ألوان محدودة `default`/`secondary`/`destructive`/
+`outline` من غير ربط دلالي بمعنى الحالة) بـ`StatusChip` (5 نغمات ثابتة: نجاح=أخضر، تحذير=كهرماني،
+خطر=أحمر، معلومة=أزرق، محايد=رمادي) عبر كل مكان بيعرض حالة enum حقيقية من الباك-إند:
+
+- **الطلبات** (`orders/page.tsx`, `orders/[id]/page.tsx`): `order_status` (دالة `orderStatusTone()`
+  الموجودة بالفعل من دفعة سابقة، مش مستخدمة قبل كده في أي صفحة).
+- **بَقّة حقيقية اتلقطت واتصلحت أثناء المراجعة**: الصفحتين كانتا بتعرضوا `order.payment_status`
+  **خام** (`unpaid`/`pending`/`paid`/...) من غير ترجمة عربية — يخالف صراحة مبدأ "بدون enums خام
+  تظهر للمستخدم" (نفس فئة بَقّة `technician-kpi/[id]` اللي اتصلحت في دفعة سابقة). اتضاف
+  `PAYMENT_STATUS_LABELS`/`paymentStatusTone()` جداد في `lib/order-labels.ts` (مطابقين لـ
+  `order_payment_status` enum في `infra/migrations/0002_enums.sql`).
+- **طلبات الصرف** (`payouts/page.tsx`): `payout_status` (`payoutStatusTone()` جديدة في
+  `lib/payments-labels.ts`، بديل لـ`payoutStatusBadgeVariant()` اللي اتشالت).
+- **الشكاوى** (`support/page.tsx`, `support/[id]/page.tsx`): `complaint_status` و`severity`
+  (`complaintStatusTone()`/`complaintSeverityTone()` جداد في `lib/support-labels.ts`).
+- **تذاكر الدعم** (`support-tickets/page.tsx`, `support-tickets/[id]/page.tsx`): `ticket_status`
+  (`ticketStatusTone()` جديدة في `lib/support-ticket-labels.ts`).
+- **KPI الفنيين** (`technician-kpi/page.tsx`, `technician-kpi/[id]/page.tsx`): `snapshot.status`
+  (`KPI_STATUS_TONE` جديد في `lib/technician-kpi-labels.ts`).
+
+كل دالة `*BadgeVariant`/`*_BADGE_VARIANT` القديمة المستبدَلة اتشالت بالكامل (مش مُستبقاة كنسخة
+ميتة) بعد التأكد إنها بقت من غير أي استخدام باقي عبر المشروع كله (`grep` شامل قبل الحذف).
+
+**اتأكد حي**: `tsc --noEmit` صفر أخطاء، `eslint src` نفس الـ16 خطأ/تحذيرين السابقين بالحرف (صفر
+جديد، `git diff` تأكيدي على كل ملف من ملفات الأخطاء)، `next build` نجح لكل الـ39 route. تحقق بصري
+حي حقيقي: اتحقن 4 شكاوى تجريبية + 4 تذاكر دعم تجريبية مباشرة في قاعدة البيانات (تغطي الحالات
+الأربع/الست المختلفة) عبر SQL مباشر، لقطة شاشة أكّدت الألوان الصحيحة لكل حالة (مفتوحة=كهرماني/أزرق
+حسب الصفحة، مصعّدة=أحمر، اتحلّت=أخضر، مقفولة=رمادي، خطورة عالية/حرجة=أحمر، متوسطة=كهرماني،
+منخفضة=رمادي) — الصفوف التجريبية اتمسحت فورًا بعد التأكد (`DELETE ... WHERE ... LIKE '%-TEST-%'`).
+
+**نطاق متبقٍ**: `PromptDialog` لتدفقات "سبب إلزامي" الـ6 (`window.prompt()`)، وإعادة تصميم محتوى
+الجداول/الفلاتر نفسها بعمق أكبر من مجرد رأس الصفحة/حالة الفراغ/شريحة الحالة. صفحات تانية فيها
+Badge لحالات ثنائية بسيطة (نشط/معطّل، مفعّل/موقوف) اتسيبت زي ما هي عمدًا — StatusChip مصمم لحالات
+enum متعددة القيم، مش toggle ثنائي بسيط لا يستفيد من 5 نغمات.

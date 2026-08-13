@@ -34,6 +34,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 };
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { StatusChip } from '@/components/status-chip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -45,7 +46,9 @@ import {
   ORDER_STATUS_LABELS,
   ORDER_TYPE_LABELS,
   BOOKING_MODE_LABELS,
-  orderStatusBadgeVariant,
+  orderStatusTone,
+  PAYMENT_STATUS_LABELS,
+  paymentStatusTone,
   isOrderCancellable,
   isOrderReassignable,
 } from '@/lib/order-labels';
@@ -236,9 +239,9 @@ export default function OrderDetailPage() {
         title={
           <>
             طلب {order.order_number}
-            <Badge variant={orderStatusBadgeVariant(order.order_status)}>
+            <StatusChip tone={orderStatusTone(order.order_status)}>
               {ORDER_STATUS_LABELS[order.order_status]}
-            </Badge>
+            </StatusChip>
             {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
             {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
             {order.original_order_id && (
@@ -267,7 +270,12 @@ export default function OrderDetailPage() {
             <p>نوع الطلب: {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</p>
             <p>وضع الحجز: {BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</p>
             <p>الإجمالي: {formatEgp(order.total_amount_cents)}</p>
-            <p>حالة الدفع: {order.payment_status}</p>
+            <p className="flex items-center gap-2">
+              حالة الدفع:
+              <StatusChip tone={paymentStatusTone(order.payment_status)}>
+                {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
+              </StatusChip>
+            </p>
             <p>رسوم الكشف: {formatEgp(order.inspection_fee_cents)}</p>
             {order.surge_amount_cents > 0 && (
               <p className="text-destructive">رسوم الطوارئ: {formatEgp(order.surge_amount_cents)}</p>

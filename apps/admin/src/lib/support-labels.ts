@@ -52,14 +52,16 @@ export const OPEN_COMPLAINT_STATUSES: ReadonlySet<ComplaintStatus> = new Set([
 // مطابق للانتقال المسموح لـ CLOSED في complaint-state-machine.ts (بس من resolved/rejected).
 export const CLOSABLE_COMPLAINT_STATUSES: ReadonlySet<ComplaintStatus> = new Set(['resolved', 'rejected']);
 
-export function complaintStatusBadgeVariant(status: ComplaintStatus) {
-  if (status === 'resolved' || status === 'closed') return 'secondary' as const;
-  if (status === 'rejected') return 'outline' as const;
-  if (status === 'escalated') return 'destructive' as const;
-  return 'outline' as const;
+export function complaintStatusTone(status: ComplaintStatus): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (status === 'resolved') return 'success';
+  if (status === 'closed' || status === 'rejected') return 'neutral';
+  if (status === 'escalated') return 'danger';
+  if (status === 'awaiting_customer' || status === 'awaiting_technician') return 'warning';
+  return 'info';
 }
 
-export function complaintSeverityBadgeVariant(severity: ComplaintSeverity) {
-  if (severity === 'critical' || severity === 'high') return 'destructive' as const;
-  return 'outline' as const;
+export function complaintSeverityTone(severity: ComplaintSeverity): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (severity === 'critical' || severity === 'high') return 'danger';
+  if (severity === 'medium') return 'warning';
+  return 'neutral';
 }
