@@ -92,11 +92,16 @@
 (بذرة `Colors.teal` عشوائية من bootstrap أولي). **قرار متعمّد**: نسخ مباشر مش package Flutter مشترك
 جديد — نفس القرار وسببه موثّق في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md` قسم "دفعة عاشرة".
 
-لسه ماتحولش أي شاشة فعلية من الـ21 شاشة هنا لاستخدام `EmptyState`/`LoadingList` (بعكس 11 شاشة
-اتحولت فعلاً في `apps/customer-app` في نفس الدفعة) — `main.dart`/الثيم بس اتوصل. ملحوظة بيئة:
+**دفعة حادية عشر (2026-08-13)**: 18 موقع تحويل عبر 15 ملف اتحوّلوا لـ`EmptyState`/`LoadingList` —
+`academy_screen`, `assistant_offers_screen`, `company_screen`, `worker_home_screen`,
+`payouts_screen`, `wallet_screen`, `internal_chat_list_screen`, `kpi_screen`,
+`notifications_screen`, `onboarding_screen`, `available_orders_screen`, `portfolio_screen`,
+`progression_screen`, `referral_screen`, `schedule_screen`. تفاصيل كل حالة (المحوّلة والمستبعدة
+عمدًا) في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md` قسم "دفعة حادية عشر". ملحوظة بيئة:
 `CompromisedDeviceScreen` بيمنع أي اختبار حي تفاعلي (Xvfb/xdotool) لـ`apps/technician-app` تحديدًا
-في بيئة السيشن دي (موثّق فوق)، فتحويل الشاشات هنا هيتم بمراجعة كود دقيقة + `flutter analyze` بس،
-من غير لقطة شاشة حية تأكيدية زي `customer-app`.
+في بيئة السيشن دي (موثّق فوق)، فالتحويل اتعمل بمراجعة كود دقيقة (كل ملف اتقرا كامل قبل التعديل) +
+`flutter analyze` (10 info بالحرف، نفس الأساس، صفر مشاكل جديدة) بس، من غير لقطة شاشة حية تأكيدية
+زي `customer-app`.
 
 ## التشغيل محلياً (على جهاز فيه Android/iOS toolchain حقيقي)
 

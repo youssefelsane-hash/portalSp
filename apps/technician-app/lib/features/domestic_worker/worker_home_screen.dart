@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'models.dart';
 import 'worker_repository.dart';
 
@@ -264,7 +265,7 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
                     const SizedBox(height: 24),
                     Text('حجوزاتي', style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 8),
-                    if (_bookings == null || _bookings!.isEmpty) const Text('مفيش حجوزات لسه'),
+                    if (_bookings == null || _bookings!.isEmpty) const EmptyState(icon: Icons.event_note_outlined, title: 'مفيش حجوزات لسه'),
                     for (final booking in _bookings ?? <WorkerBooking>[])
                       Card(
                         child: ListTile(

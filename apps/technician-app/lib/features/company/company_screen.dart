@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import '../onboarding/onboarding_repository.dart';
 import 'company_repository.dart';
 import 'models.dart';
@@ -243,7 +244,7 @@ class _CompanyScreenState extends State<CompanyScreen> {
         const SizedBox(height: 16),
         Text('الفروع', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        if (detail.branches.isEmpty) const Text('مفيش فروع مضافة لسه'),
+        if (detail.branches.isEmpty) const EmptyState(icon: Icons.store_outlined, title: 'مفيش فروع مضافة لسه'),
         for (final branch in detail.branches)
           Card(
             child: ListTile(

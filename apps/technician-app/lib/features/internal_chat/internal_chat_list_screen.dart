@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'internal_chat_detail_screen.dart';
 import 'internal_chat_repository.dart';
 import 'models.dart';
@@ -81,9 +83,11 @@ class _InternalChatListScreenState extends State<InternalChatListScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _threads == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : _threads!.isEmpty
-                    ? const Center(child: Text('مفيش محادثات لسه — دوس + عشان تبدأ واحدة'))
+                    ? const Center(
+                        child: EmptyState(icon: Icons.forum_outlined, title: 'مفيش محادثات لسه', description: 'دوس + عشان تبدأ واحدة'),
+                      )
                     : RefreshIndicator(
                         onRefresh: _load,
                         child: ListView.builder(

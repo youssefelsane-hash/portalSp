@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'models.dart';
 import 'schedule_repository.dart';
 
@@ -102,13 +104,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           child: _error != null
               ? Center(child: Text(_error!))
               : _slots == null
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                   : _slots!.isEmpty
                       ? ListView(
                           children: const [
-                            Padding(
-                              padding: EdgeInsets.all(32),
-                              child: Center(child: Text('مفيش مواعيد مضافة لسه — دوس + عشان تضيف وقت فاضي')),
+                            SizedBox(height: 40),
+                            EmptyState(
+                              icon: Icons.event_available_outlined,
+                              title: 'مفيش مواعيد مضافة لسه',
+                              description: 'دوس + عشان تضيف وقت فاضي',
                             ),
                           ],
                         )

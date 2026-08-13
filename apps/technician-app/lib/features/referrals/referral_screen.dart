@@ -4,6 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
 import 'models.dart';
 import 'referrals_repository.dart';
 
@@ -135,8 +136,12 @@ class _ReferralScreenState extends State<ReferralScreen> {
                     const SizedBox(height: 8),
                     if (summary.recentBonuses.isEmpty)
                       const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(child: Text('لسه مفيش مكافآت — شارك كودك مع عملائك!')),
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: EmptyState(
+                          icon: Icons.card_giftcard_outlined,
+                          title: 'لسه مفيش مكافآت',
+                          description: 'شارك كودك مع عملائك!',
+                        ),
                       )
                     else
                       for (final bonus in summary.recentBonuses)

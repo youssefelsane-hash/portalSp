@@ -842,9 +842,50 @@ deleted_at = now()` مباشرة على الصف ده. تذكير للسيشنز
 `flutter analyze` (`apps/customer-app`): **27 info بالحرف** (نفس الأساس الموثّق قبل كده، صفر
 مشاكل جديدة من تعديلات الدفعة دي).
 
-**نطاق متبقٍ** (Flutter، لسه مايتحولش): باقي شاشات `apps/customer-app` (تفاصيل الطلب/الفني، الدفع،
-التتبع، إنشاء الطلب، الشات، التقييمات — أغلبها تحميل سجل واحد مش قايمة، فمرشّح أقل لنفس النمط
-الميكانيكي، محتاج قرار حالة بحالة)، وكل شاشات `apps/technician-app` (21 شاشة، صفر منها اتلمس لسه
-— نفس `lib/design/` جاهز، بس لسه محتاج المرور عليها واحدة واحدة؛ ملحوظة بيئة: `CompromisedDeviceScreen`
-بيمنع الاختبار الحي التفاعلي لـ`technician-app` في البيئة دي تحديدًا، فالتحويل هيتم بالكود +
-`flutter analyze` بس، بدون لقطة شاشة حية، بعكس `customer-app`).
+**مراجعة إضافية لـ`apps/customer-app` (نفس الدفعة)**: `order_detail_screen.dart` (721 سطر) و
+`technician_profile_screen.dart` (464 سطر) اتقروا كاملين بحثًا عن حالات فراغ زيادة — طلع إن
+الاتنين **مفيهمش أي نص "مفيش/لسه" خام خالص**، كل قسم فيهم أصلاً بيتخفي بالكامل بـ`isNotEmpty`
+guard بدل ما يعرض نص بديل. **صفر تحويل مطلوب فعليًا فيهم**، قرار مش سهو.
+
+## دفعة حادية عشر — امتداد نظام التصميم لـ`apps/technician-app` (21 شاشة)، بلا توقف
+
+استكمال مباشر بعد الدفعة العاشرة على نفس المبدأ ("الحاجة اللي تلاقيها موجودة ما تعملهاش تاني،
+كمّل عليها"): نفس نمط `EmptyState`/`LoadingList` الميكانيكي اتطبّق على `apps/technician-app` —
+21 شاشة موجودة، `lib/design/` كان جاهز من الدفعة العاشرة (نسخة مطابقة حرفيًا)، بس مفيش شاشة
+كانت لسه بتستخدمه.
+
+**18 موقع تحويل عبر 15 ملف**: `academy_screen.dart` (كورسات + نتائج اختبارات، حالتين)،
+`assistant_offers_screen.dart`، `company_screen.dart` (فروع الشركة، قسم مدمج)،
+`worker_home_screen.dart` (حجوزات الشغالة، قسم مدمج)، `payouts_screen.dart`, `wallet_screen.dart`
+(حركات المحفظة، قسم مدمج)، `internal_chat_list_screen.dart`، `kpi_screen.dart` (تقييم شهري، قسم
+مدمج)، `notifications_screen.dart`، `onboarding_screen.dart` (مستندات مرفوعة، قسم مدمج)،
+`available_orders_screen.dart`، `portfolio_screen.dart` (لينكات + تحميلها، حالتين)،
+`progression_screen.dart` (تقييم مسار وظيفي + سجل ترقيات، حالتين)، `referral_screen.dart`
+(مكافآت، قسم مدمج)، `schedule_screen.dart`.
+
+**نفس معايير الاستبعاد المتّبعة في الدفعة العاشرة، طُبّقت هنا بالحرف**:
+- تحميل سجل واحد كامل الصفحة (`_loading`/`summary == null`/`wallet == null`/`me == null` بتاع
+  `company_screen`, `progression_screen`, `referral_screen`, `kpi_screen`, `wallet_screen`,
+  `worker_home_screen`, `onboarding_screen`) فضل `CircularProgressIndicator` عادي — مش سياق قايمة.
+- `chat_screen.dart` و`internal_chat_detail_screen.dart` — تحميل خيط رسائل واحد (thread)، مفيش
+  نص "مفيش رسائل" بديل أصلاً (قايمة رسائل فاضية بترجع بلا محتوى، نفس سلوك `customer-app`'s
+  `chat_screen.dart` غير الملموس هناك برضه). فضلوا زي ما هما.
+- `order_execution_screen.dart:744` ("مفيش أسباب إلغاء متاحة دلوقتي") — نص تحذيري أحمر جوّه خطوة
+  Dialog إلغاء مضغوطة، مش قايمة مستقلة. فضل زي ما هو (نفس فلسفة استبعاد الحقول المضغوطة).
+- `internal_chat_list_screen.dart:96` ("مفيش رسائل لسه") — subtitle نص جوّه `ListTile`، مش شاشة
+  فراغ. فضل زي ما هو.
+- `profile_screen.dart` — اتقرا كامل، **صفر نص "مفيش/لسه" خام فيه خالص**، صفر تحويل مطلوب.
+
+**ملحوظة بيئة (مذكورة سابقًا، بتتكرر هنا للسياق)**: `CompromisedDeviceScreen` بيمنع أي اختبار حي
+تفاعلي (Xvfb/xdotool) لـ`apps/technician-app` في بيئة السيشن دي تحديدًا — التحويل هنا اتعمل
+بمراجعة كود دقيقة (قراءة كل ملف كامل قبل التعديل، مطابقة نفس نمط `customer-app` المؤكَّد حيًا حرفيًا)
++ `flutter analyze` بس، بدون لقطة شاشة حية تأكيدية.
+
+`flutter analyze` (`apps/technician-app`): **10 info بالحرف** (نفس الأساس الموثّق قبل كده، صفر
+مشاكل جديدة من تعديلات الدفعة دي).
+
+**نطاق متبقٍ** (Flutter): كل حالات `EmptyState`/`LoadingList` الميكانيكية القابلة للتحويل في
+التطبيقين الاتنين اتقفلت فعليًا (batches 10-11). الباقي المتبقي عمدًا: `status_chip.dart`/
+`confirm_dialog.dart` جاهزين بس لسه ماتستخدموش (فرصة لدفعة مستقبلية لو ظهر سياق مناسب فعليًا —
+مش استبدال قسري لحاجة شغالة أصلاً)، وشاشات تحميل السجل الواحد المستبعدة عمدًا فوق (مرشّحة لنمط
+تاني تمامًا زي skeleton كامل الصفحة، مش `LoadingList`، لو المالك طلب ده صراحة لاحقًا).
