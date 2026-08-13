@@ -64,8 +64,12 @@ class _ServicesScreenState extends State<ServicesScreen> {
                               subtitle: service.shortDescriptionAr != null
                                   ? Text(service.shortDescriptionAr!)
                                   : null,
+                              // بَقّة حقيقية اتلقطت: خدمات pricing_model=formula بيتعرض ليها
+                              // basePriceCents (غالبًا صفر أو رقم داخلي مش مستخدم فعليًا — السعر
+                              // الحقيقي بيتحسب بالكامل من محرك التسعير الديناميكي بعد ما العميل
+                              // يملى تفاصيل الشغل) بدل ما توضّح إن السعر مش ثابت من الأساس.
                               trailing: Text(
-                                _formatEgp(service.basePriceCents),
+                                service.pricingModel == 'formula' ? 'يُحسب حسب التفاصيل' : _formatEgp(service.basePriceCents),
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               onTap: () => Navigator.of(context).push(

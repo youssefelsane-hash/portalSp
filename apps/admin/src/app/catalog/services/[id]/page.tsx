@@ -29,6 +29,7 @@ import { AppShell } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -335,9 +336,23 @@ export default function ServiceDetailPage() {
     const form = new FormData(e.target as HTMLFormElement);
     const minPrice = form.get('min_price') as string;
     const maxPrice = form.get('max_price') as string;
+    const basePrice = form.get('base_price') as string;
+    const inspectionFee = form.get('inspection_fee') as string;
+    const commission = form.get('commission_percentage') as string;
+    const displayOrder = form.get('display_order') as string;
+    const launchPhase = form.get('launch_phase') as string;
+    const minTechnicianLevel = form.get('min_technician_level') as string;
     const body: UpdateServiceBody = {
+      name_en: (form.get('name_en') as string) || undefined,
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
+      full_description_ar: (form.get('full_description_ar') as string) || undefined,
+      icon_url: (form.get('icon_url') as string) || undefined,
       pricing_model: form.get('pricing_model') as UpdateServiceBody['pricing_model'],
+      // كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي لخدمة قائمة من غير SQL مباشر —
+      // أدمن يعمل خدمة fixed بـ1000ج.م. وبعد أسبوع يحتاج يخليها 1200ج.م.، الواجهة ماكانتش بتوفر ده.
+      base_price_cents: basePrice ? Math.round(Number(basePrice) * 100) : undefined,
+      inspection_fee_cents: inspectionFee ? Math.round(Number(inspectionFee) * 100) : undefined,
+      unit_name_ar: (form.get('unit_name_ar') as string) || undefined,
       min_price_cents: minPrice ? Math.round(Number(minPrice) * 100) : undefined,
       max_price_cents: maxPrice ? Math.round(Number(maxPrice) * 100) : undefined,
       warranty_days: Number(form.get('warranty_days')),
@@ -349,6 +364,10 @@ export default function ServiceDetailPage() {
       allows_emergency: form.get('allows_emergency') === 'on',
       allows_individual: form.get('allows_individual') === 'on',
       allows_team: form.get('allows_team') === 'on',
+      min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
+      commission_percentage: commission ? Number(commission) : undefined,
+      display_order: displayOrder ? Number(displayOrder) : undefined,
+      launch_phase: launchPhase ? Number(launchPhase) : undefined,
     };
     setIsSaving(true);
     setError(null);
@@ -389,8 +408,20 @@ export default function ServiceDetailPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleUpdateServiceDetails} className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_name_en">الاسم بالإنجليزي</Label>
+                <Input id="svc_name_en" name="name_en" defaultValue={service.name_en ?? ''} dir="ltr" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_icon_url">رابط الأيقونة</Label>
+                <Input id="svc_icon_url" name="icon_url" defaultValue={service.icon_url ?? ''} dir="ltr" />
+              </div>
+            </div>
             <Label htmlFor="svc_desc">وصف مختصر</Label>
             <Input id="svc_desc" name="short_description_ar" defaultValue={service.short_description_ar ?? ''} />
+            <Label htmlFor="svc_full_desc">وصف كامل</Label>
+            <Textarea id="svc_full_desc" name="full_description_ar" defaultValue={service.full_description_ar ?? ''} rows={2} />
             <div className="flex flex-col gap-1">
               <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
               <SelectNative id="svc_pricing_model" name="pricing_model" defaultValue={service.pricing_model} className="max-w-xs">
@@ -402,11 +433,35 @@ export default function ServiceDetailPage() {
               </SelectNative>
               {service.pricing_model === 'formula' && (
                 <p className="text-sm text-muted-foreground">
-                  السعر الأساسي فوق مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي تحت.
+                  السعر الأساسي تحت مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي.
                 </p>
               )}
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="flex flex-col gap-1">
+                {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
+                    غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
+                <Label htmlFor="svc_base_price">السعر الأساسي (جنيه)</Label>
+                <Input
+                  id="svc_base_price"
+                  name="base_price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={service.base_price_cents / 100}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_inspection_fee">رسوم الكشف (جنيه)</Label>
+                <Input
+                  id="svc_inspection_fee"
+                  name="inspection_fee"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={service.inspection_fee_cents / 100}
+                />
+              </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_min_price">أقل سعر (جنيه)</Label>
                 <Input
@@ -430,6 +485,10 @@ export default function ServiceDetailPage() {
                 />
               </div>
               <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_unit">اسم الوحدة</Label>
+                <Input id="svc_unit" name="unit_name_ar" defaultValue={service.unit_name_ar ?? ''} />
+              </div>
+              <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_warranty">أيام الضمان</Label>
                 <Input id="svc_warranty" name="warranty_days" type="number" min="0" defaultValue={service.warranty_days} required />
               </div>
@@ -442,6 +501,36 @@ export default function ServiceDetailPage() {
                   min="1"
                   defaultValue={service.estimated_duration_minutes ?? ''}
                 />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_commission">نسبة عمولة المنصة %</Label>
+                <Input
+                  id="svc_commission"
+                  name="commission_percentage"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  defaultValue={service.commission_percentage}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_min_level">أقل مستوى فني مسموح</Label>
+                <SelectNative id="svc_min_level" name="min_technician_level" defaultValue={service.min_technician_level}>
+                  {Object.entries(TECHNICIAN_LEVEL_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </SelectNative>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_display_order">ترتيب العرض</Label>
+                <Input id="svc_display_order" name="display_order" type="number" min="0" defaultValue={service.display_order} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_launch_phase">مرحلة الإطلاق</Label>
+                <Input id="svc_launch_phase" name="launch_phase" type="number" min="1" defaultValue={service.launch_phase} />
               </div>
             </div>
             <div className="flex flex-wrap gap-4 text-sm">
