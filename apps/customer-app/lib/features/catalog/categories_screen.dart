@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 import 'services_screen.dart';
@@ -44,9 +46,9 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _categories == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : _categories!.isEmpty
-                    ? const Center(child: Text('مفيش فئات خدمات متاحة دلوقتي'))
+                    ? const Center(child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي'))
                     : GridView.builder(
                         padding: const EdgeInsets.all(16),
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(

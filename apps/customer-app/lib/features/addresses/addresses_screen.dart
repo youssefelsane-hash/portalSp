@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'address_form_screen.dart';
 import 'addresses_repository.dart';
 import 'models.dart';
@@ -72,9 +74,15 @@ class _AddressesScreenState extends State<AddressesScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _addresses == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : _addresses!.isEmpty
-                    ? const Center(child: Text('مفيش عناوين محفوظة — ضيف واحد عشان تقدر تطلب'))
+                    ? const Center(
+                        child: EmptyState(
+                          icon: Icons.location_on_outlined,
+                          title: 'مفيش عناوين محفوظة',
+                          description: 'ضيف عنوان عشان تقدر تطلب',
+                        ),
+                      )
                     : ListView.separated(
                         padding: const EdgeInsets.all(16),
                         itemCount: _addresses!.length,

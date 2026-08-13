@@ -147,6 +147,42 @@ notifyListeners();                                  // ٤. مبيتنفّذش �
 
 نفس خطوات البناء/التشغيل نجحت لـ`apps/technician-app` (نفس الإصلاح اتطبّق على `AuthRepository` بتاعه، نفس الكود بالحرف). الشاشة الأولى اللي ظهرت: **"التطبيق مش متاح على الجهاز ده — التطبيق ده بيتعامل مع بيانات مالية حساسة، ومش بيشتغل على أجهزة محاكاة (إيموليتور)."** — ده مش بَقّة، ده فحص أمان حقيقي (`compromised_device_screen.dart`) بيشتغل صح ويمنع التطبيق من العمل في بيئة افتراضية (Xvfb+headless بالنسبة له بيبان زي إيموليتور) — منطقي جدًا لتطبيق بيتعامل مع محفظة/أرباح فعلية. يمنعنا نكمّل اختبار تفاعلي أعمق لـ`apps/technician-app` في البيئة دي تحديدًا (بعكس `apps/customer-app`)، بس ده تأكيد إيجابي لضابط أمان شغال صح مش فجوة.
 
+## نظام التصميم المشترك (docs/12، دفعة عاشرة 2026-08-13)
+
+`lib/design/` جديد — امتداد طبيعي لنظام التصميم اللي اتبنى في `apps/admin` (الدفعات 1-9، تفاصيل
+كاملة في `apps/admin/README.md`)، بمعادله البصري في Flutter/Material3. تفاصيل القرار المعماري
+الكاملة (ليه نسخ مش package مشترك جديد) في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md`
+قسم "دفعة عاشرة".
+
+- `app_theme.dart` — `AppColors` (نفس القيم الدلالية لـ`apps/admin/src/app/globals.css` بس
+  بـsRGB مش OKLCH، معادِلة بصريًا مش رقميًا حرفيًا)، `AppSpacing` (4/8/12/16/24/32 موحّدة بدل
+  أرقام متفرقة)، `AppTheme.light()`/`.dark()`، وextension `SemanticColors` على `BuildContext`
+  (`successColor`/`warningColor`/`infoColor`/`dangerColor`) — بيسدّ فجوة إن `ColorScheme` بتاع
+  Material3 معندهوش خانات success/warning/info أصلاً.
+- `empty_state.dart` — نفس فلسفة `apps/admin/src/components/empty-state.tsx` (أيقونة + عنوان +
+  وصف اختياري + `action` widget اختياري).
+- `loading_list.dart` — بديل عن `CircularProgressIndicator` المفرد وسط قايمة، بيحجز شكل/مساحة
+  القايمة الحقيقية الجاية (بطاقات نابضة) عشان يمنع قفزة تخطيط لحظة وصول البيانات.
+- `status_chip.dart`, `confirm_dialog.dart` — جاهزين للاستخدام في دفعات لاحقة.
+
+`main.dart` بقى بيستخدم `AppTheme.light()`/`AppTheme.dark()` بدل الـ`ThemeData` الافتراضية.
+
+**11 شاشة اتحوّلت** لاستخدام `EmptyState`/`LoadingList` بدل نص "مفيش/لسه" خام و
+`CircularProgressIndicator` مفرد وسط قايمة: `orders_screen`, `addresses_screen`,
+`categories_screen`, `services_screen`, `domestic_workers_screen`, `worker_bookings_screen`,
+`favorites_screen`, `loyalty_screen` (سجل المعاملات بس), `notifications_screen`,
+`recurring_orders_screen`, `technician_selection_screen`. قايمة كاملة بالحالات المستبعدة عمدًا
+(تحميل سجل واحد كامل الصفحة، spinners صغيرة جوّه أزرار، حالة خريطة انتقالية) في `docs/12` نفسه.
+
+**اتأكد حي بالكامل** بنفس منهجية Xvfb/fluxbox/xdotool الموثّقة فوق — تسجيل دخول OTP حقيقي، تصفح
+لـ`orders_screen` و`addresses_screen` الفاضيين، الاتنين ظهروا بالضبط زي الكود الجديد (أيقونة +
+عنوان + وصف). `flutter analyze`: 27 info بالحرف (نفس الأساس، صفر مشاكل جديدة).
+
+**بَقّة بيانات بيئة حقيقية اتلقطت واتصلحت أثناء الاختبار**: فئة خدمة اختبارية قديمة من دفعة سابقة
+("فئة اختبار Playwright") كانت لسه ظاهرة **حقيقةً للعميل** في قايمة الفئات — مسابتش `deleted_at`
+بعد التأكيد زي المفروض. اتعمله `soft-delete` مباشر. تذكير: أي بيانات اختبار لازم تتمسح فورًا بعد
+التأكد البصري، مهما كان الاختبار بسيط.
+
 ## التشغيل محلياً (على جهاز فيه Android/iOS toolchain حقيقي)
 
 ```bash

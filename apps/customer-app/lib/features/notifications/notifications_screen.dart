@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'models.dart';
 import 'notification_preferences_screen.dart';
 import 'notifications_repository.dart';
@@ -79,12 +81,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         body: RefreshIndicator(
           onRefresh: _load,
           child: _notifications == null
-              ? (_error != null ? Center(child: Text(_error!)) : const Center(child: CircularProgressIndicator()))
+              ? (_error != null ? Center(child: Text(_error!)) : const Padding(padding: EdgeInsets.all(16), child: LoadingList()))
               : _notifications!.isEmpty
                   ? ListView(
                       children: const [
                         SizedBox(height: 80),
-                        Center(child: Text('مفيش إشعارات لسه')),
+                        EmptyState(icon: Icons.notifications_none_outlined, title: 'مفيش إشعارات لسه'),
                       ],
                     )
                   : ListView.separated(

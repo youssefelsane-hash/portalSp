@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
@@ -153,10 +155,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                   ),
                   const SizedBox(height: 8),
                   if (_loading)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LoadingList(itemCount: 3))
                   else if (_error != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -165,7 +164,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                   else if ((_technicians ?? []).isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('مفيش فنيين متاحين للخدمة دي في منطقتك دلوقتي — استخدم "اختار لي تلقائيًا"'),
+                      child: EmptyState(
+                        icon: Icons.engineering_outlined,
+                        title: 'مفيش فنيين متاحين للخدمة دي في منطقتك دلوقتي',
+                        description: 'استخدم "اختار لي تلقائيًا" فوق',
+                      ),
                     )
                   else
                     ..._technicians!.map(

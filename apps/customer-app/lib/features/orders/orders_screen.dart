@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/empty_state.dart';
+import '../../design/loading_list.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
@@ -45,9 +47,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
         body: _error != null
             ? Center(child: Text(_error!))
             : _orders == null
-                ? const Center(child: CircularProgressIndicator())
+                ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
                 : _orders!.isEmpty
-                    ? const Center(child: Text('لسه ماطلبتش أي حاجة'))
+                    ? const Center(
+                        child: EmptyState(
+                          icon: Icons.receipt_long_outlined,
+                          title: 'لسه ماطلبتش أي حاجة',
+                          description: 'أول ما تحجز خدمة، هتلاقي طلباتك هنا',
+                        ),
+                      )
                     : RefreshIndicator(
                         onRefresh: _load,
                         child: ListView.separated(

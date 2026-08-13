@@ -4,6 +4,7 @@ import 'core/api_exception.dart';
 import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
 import 'core/device_security.dart';
+import 'design/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/domestic_worker/worker_home_screen.dart';
 import 'features/onboarding/onboarding_repository.dart';
@@ -24,7 +25,8 @@ class BaytakTechnicianApp extends StatelessWidget {
       child: MaterialApp(
         title: 'صُنّاع — الفني',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal), useMaterial3: true),
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),
         home: const _DeviceSecurityGate(),
       ),

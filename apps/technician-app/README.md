@@ -83,6 +83,21 @@
 
 قرار عمل صريح من المالك — كانت فجوة موثّقة صراحة في `docs/08` §6 قبل كده. `lib/features/assistant_offers/` جديد بالكامل (`models.dart`, `assistant_offers_repository.dart`, `assistant_offers_screen.dart`) — نفس نمط `available_orders_screen.dart` بالحرف بس لفرص "شريحة مساعد" (بث تنافسي على طلبات فنيين تانيين، أول قبول صحيح ياخدها) بدل "طلبي أنا". أيقونة جديدة (`Icons.handshake_outlined`) في AppBar الشاشة الرئيسية (`available_orders_screen.dart`) بتفتحها. رفض واضح (`409`، رسالة الباك-إند بالحرف) لو حد تاني كسب السباق قبل ما الفني يضغط قبول. **اتأكد حي بالكامل من ناحية الباك-إند** (تفاصيل السيناريوهات الأربعة الكاملة في `apps/api/src/modules/assistant-matching/README.md`) — الشاشة نفسها اتفحصت بتحليل توازن الأقواس بدل `flutter analyze`/تشغيل فعلي (Flutter SDK لسه مش متاح في بيئة السيشن دي).
 
+## نظام التصميم المشترك (docs/12، دفعة عاشرة 2026-08-13)
+
+`lib/design/` جديد — نسخة مطابقة حرفيًا لنفس المجلد في `apps/customer-app` (تفاصيل كل ملف كاملة
+في `apps/customer-app/README.md`): `app_theme.dart` (`AppColors`/`AppSpacing`/`AppTheme.light()`/
+`.dark()`/`SemanticColors` extension)، `empty_state.dart`، `loading_list.dart`، `status_chip.dart`،
+`confirm_dialog.dart`. `main.dart` بقى بيستخدم `AppTheme.light()`/`.dark()` بدل الـ`ThemeData` الافتراضية
+(بذرة `Colors.teal` عشوائية من bootstrap أولي). **قرار متعمّد**: نسخ مباشر مش package Flutter مشترك
+جديد — نفس القرار وسببه موثّق في `docs/12-ux-refinement-and-p0-audit-2026-08-13.md` قسم "دفعة عاشرة".
+
+لسه ماتحولش أي شاشة فعلية من الـ21 شاشة هنا لاستخدام `EmptyState`/`LoadingList` (بعكس 11 شاشة
+اتحولت فعلاً في `apps/customer-app` في نفس الدفعة) — `main.dart`/الثيم بس اتوصل. ملحوظة بيئة:
+`CompromisedDeviceScreen` بيمنع أي اختبار حي تفاعلي (Xvfb/xdotool) لـ`apps/technician-app` تحديدًا
+في بيئة السيشن دي (موثّق فوق)، فتحويل الشاشات هنا هيتم بمراجعة كود دقيقة + `flutter analyze` بس،
+من غير لقطة شاشة حية تأكيدية زي `customer-app`.
+
 ## التشغيل محلياً (على جهاز فيه Android/iOS toolchain حقيقي)
 
 ```bash
