@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
+import { DataSource } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
@@ -53,6 +54,40 @@ class FakeRepository<T extends { id?: string }> {
   }
 }
 
+// DataSource وهمية — refresh() (P0-5) بقت بتستخدم transaction()/pessimistic_write حقيقي، فمحتاجة
+// manager يقدر يخدم نفس النداءات (createQueryBuilder/update/findOne/save/getRepository) بالظبط
+// اللي auth.service.ts بينادّيها. مش محاكاة TypeORM عامة — مبنية على نفس نداءات الكود الفعلي بس،
+// زي فلسفة FakeRepository فوق بالحرف.
+function createFakeDataSource(users: FakeRepository<User>, refreshTokens: FakeRepository<RefreshToken>): DataSource {
+  const manager = {
+    createQueryBuilder: (entity: unknown) => {
+      let whereParams: Record<string, unknown> = {};
+      const qb = {
+        setLock: () => qb,
+        where: (_cond: string, params: Record<string, unknown>) => {
+          whereParams = params;
+          return qb;
+        },
+        getOne: async () => {
+          if (entity !== RefreshToken) return null;
+          return refreshTokens.rows.find((r) => r.tokenHash === whereParams.tokenHash) ?? null;
+        },
+      };
+      return qb;
+    },
+    update: async (entity: unknown, where: Record<string, unknown>, patch: Record<string, unknown>) => {
+      if (entity === RefreshToken) await refreshTokens.update(where as Partial<RefreshToken>, patch as Partial<RefreshToken>);
+    },
+    findOne: async (entity: unknown, options: { where: Record<string, unknown> }) => {
+      if (entity === User) return users.findOne(options as { where: Partial<User> });
+      return null;
+    },
+    save: async (entity: RefreshToken) => refreshTokens.save(entity),
+    getRepository: (entity: unknown) => (entity === RefreshToken ? refreshTokens : users),
+  };
+  return { transaction: async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager) } as unknown as DataSource;
+}
+
 describe('AuthService', () => {
   let service: AuthService;
   let users: FakeRepository<User>;
@@ -93,6 +128,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: users },
         { provide: getRepositoryToken(OtpCode), useValue: otpCodes },
         { provide: getRepositoryToken(RefreshToken), useValue: refreshTokens },
+        { provide: DataSource, useValue: createFakeDataSource(users, refreshTokens) },
       ],
     }).compile();
 
@@ -174,6 +210,8 @@ describe('AuthService', () => {
   // الكود الفعلي في اللوج دايمًا بلا شرط — خطر حقيقي في Production. الاختبار ده بيبني نسخة
   // منفصلة من AuthService بـNODE_ENV=production عشان يثبت الكود مبقاش بيتسجّل خالص.
   it('في Production مايتسجلش كود OTP الفعلي في اللوج خالص — كان الثغرة', async () => {
+    const prodUsers = new FakeRepository<User>();
+    const prodRefreshTokens = new FakeRepository<RefreshToken>();
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -197,9 +235,10 @@ describe('AuthService', () => {
             },
           },
         },
-        { provide: getRepositoryToken(User), useValue: new FakeRepository<User>() },
+        { provide: getRepositoryToken(User), useValue: prodUsers },
         { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
-        { provide: getRepositoryToken(RefreshToken), useValue: new FakeRepository<RefreshToken>() },
+        { provide: getRepositoryToken(RefreshToken), useValue: prodRefreshTokens },
+        { provide: DataSource, useValue: createFakeDataSource(prodUsers, prodRefreshTokens) },
       ],
     }).compile();
     const prodService = moduleRef.get(AuthService);

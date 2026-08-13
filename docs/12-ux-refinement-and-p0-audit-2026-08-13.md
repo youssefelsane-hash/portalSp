@@ -215,7 +215,7 @@ Recurring، Buildings، Domestic Worker base flows.
 | 2 | Dynamic RBAC مش مطبّق على كل Admin endpoints (Reports/RecurringOrders...) | ✅ خلص |
 | 3 | Admin UI مايحترمش الصلاحيات (Sidebar ثابت) | ✅ خلص |
 | 4 | OTP بيتكتب في اللوج دايمًا | ✅ خلص |
-| 5 | Refresh-token rotation مش atomic | 🔲 لسه |
+| 5 | Refresh-token rotation مش atomic | ✅ خلص |
 | 6 | حظر المستخدم لا يبطل Access Token فورًا | 🔲 لسه |
 | 7 | Webhook الدفع مايتحققش من المبلغ | 🔲 لسه |
 | 8 | Webhook بيرجع 200 حتى مع Crash داخلي | 🔲 لسه |

@@ -15,4 +15,25 @@
 
 - **نظام الترشيحات — تفعيل `users.referral_code`/`referred_by_user_id`**: كانوا أعمدة موجودة من `0003_auth.sql` بس مش مستخدمين. `register()` بقى يولّد `referral_code` فريد (6 أحرف، استبعاد 0/O/1/I) لكل مستخدم جديد تلقائياً، وبيقبل `referral_code` اختياري في `RegisterDto` — لو اتبعت وغلط بيترفض بـ`VAL_001` واضح مش تجاهل صامت. توليد الكود وقراءته بيحصلوا هنا مباشرة (مش عبر حقن `ReferralsService`) لأن العمودين دول على `users` اللي `auth` بيتحكم فيه لوحده — إنشاء صف `referrals` المعلّق نفسه مسؤولية موديول `referrals` (بيستقبل `REFERRAL_REGISTERED_EVENT`). تفاصيل كاملة: `../referrals/README.md`.
 
+## `refresh()` بقت ذرّية فعليًا — كانت بَقّة أمنية موثّقة في `apps/admin/README.md`، اتقفلت (P0-5)
+
+`AuthService.refresh()` كانت بتقرأ صف `refresh_tokens` بـ`findOne` عادي (من غير قفل)، تفحصه في
+الذاكرة، وتكتب `isRevoked=true` بعد كده — بلا transaction ولا `SELECT ... FOR UPDATE`. تحقيق حي
+سابق (`apps/admin/README.md`§ "فجوة السباق عبر التابات") أثبت فعليًا إن طلبين `refresh()` متزامنين
+بنفس التوكن تحت READ COMMITTED كانوا الاتنين يقدروا يقروا `isRevoked=false` قبل ما أي واحد يكتب،
+فيعدّوا الاتنين ويصدروا **زوج توكنز صالح لكل واحد فيهم** — إصدار جلستين من توكن واحد بدل رفض واحد
+منهم. `apps/admin`'s Web Locks API كان تخفيف على مستوى الـclient بس (تاب واحد/متصفح واحد)، الجذر
+في الباك-إند فضل موجود لأي عميل تاني (Flutter، سكريبت خارجي).
+
+**الإصلاح**: نفس نمط `pessimistic_write` جوّه `dataSource.transaction()` المستخدم في
+`matching.service.ts`'s `accept()`/`permissions.service.ts`'s `setRolePermissions()` — قفل صف
+التوكن من أول خطوة، فأي نداء تاني بيستنى القفل يتفك وبعدين يلاقي `isRevoked=true` فعلاً ويترفض
+بأمان (`AUTH_001`). `issueTokenPair()` بقت تاخد `manager` اختياري (نفس نمط `WalletsService.doubleEntry()`)
+عشان إصدار الزوج الجديد يحصل جوّه نفس الـtransaction الماسكة القفل.
+
+**اختبار regression حي ضد قفل Postgres حقيقي** (`refresh-token-rotation.spec.ts` — الاختبار
+الوهمي في `auth.service.spec.ts` مايقدرش يثبت ده لأنه مالوش قفل صفوف حقيقي): نداءين `refresh()`
+متزامنين فعليًا (`Promise.allSettled`) بنفس التوكن — **واحد بس نجح**، التاني اترفض `AUTH_001`
+بوضوح، وصف واحد بس فضل `is_revoked=false` في النهاية (مش اتنين، السلوك القديم قبل الإصلاح).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
