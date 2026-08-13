@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CustomerTier } from '@baytak/shared-types';
+import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CreditLoyaltyBody, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -32,6 +32,9 @@ export default function CustomerDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [showBlockForm, setShowBlockForm] = useState(false);
+  const [showLoyaltyForm, setShowLoyaltyForm] = useState(false);
+  const [loyaltyPoints, setLoyaltyPoints] = useState('');
+  const [isSavingLoyalty, setIsSavingLoyalty] = useState(false);
 
   function load() {
     authedFetch<AdminCustomerResponseDto>(`/admin/customers/${userId}`)
@@ -80,6 +83,25 @@ export default function CustomerDetailPage() {
     }
   }
 
+  async function handleCreditLoyalty(e: FormEvent) {
+    e.preventDefault();
+    const points = Number(loyaltyPoints);
+    if (!points || points <= 0) return;
+    setIsSavingLoyalty(true);
+    setError(null);
+    try {
+      const body: CreditLoyaltyBody = { points };
+      await authedFetch(`/admin/customers/${userId}/loyalty/credit`, { method: 'POST', body: JSON.stringify(body) });
+      setShowLoyaltyForm(false);
+      setLoyaltyPoints('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSavingLoyalty(false);
+    }
+  }
+
   if (error && !detail) {
     return (
       <AppShell>
@@ -124,7 +146,31 @@ export default function CustomerDetailPage() {
             <p>الفئة: {TIER_LABELS[detail.customer_tier]}</p>
             <p>طلبات: {detail.total_orders_count} إجمالي · {detail.completed_orders_count} مكتملة · {detail.cancelled_orders_count} ملغاة</p>
             <p>إجمالي الإنفاق: {formatEgp(detail.total_spent_cents)}</p>
-            <p>رصيد نقاط الولاء: {detail.loyalty_points_balance}</p>
+            <div className="flex items-center gap-2">
+              <p>رصيد نقاط الولاء: {detail.loyalty_points_balance}</p>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowLoyaltyForm((s) => !s)}>
+                + إضافة نقاط
+              </Button>
+            </div>
+            {showLoyaltyForm && (
+              <form onSubmit={handleCreditLoyalty} className="flex items-end gap-2">
+                <div>
+                  <Label htmlFor="loyalty_points">عدد النقاط (تعويض/هدية)</Label>
+                  <Input
+                    id="loyalty_points"
+                    type="number"
+                    min={1}
+                    dir="ltr"
+                    value={loyaltyPoints}
+                    onChange={(e) => setLoyaltyPoints(e.target.value)}
+                    required
+                  />
+                </div>
+                <Button type="submit" size="sm" disabled={isSavingLoyalty}>
+                  إضافة
+                </Button>
+              </form>
+            )}
             <p>متوسط التقييم اللي بيدّيه: {detail.average_rating_given ?? '—'}</p>
             <p>أول طلب: {detail.first_order_at ? new Date(detail.first_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</p>
             <p>آخر طلب: {detail.last_order_at ? new Date(detail.last_order_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</p>

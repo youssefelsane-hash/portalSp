@@ -22,6 +22,10 @@ export interface AdminCustomerResponseDto {
   referred_by_user_id: string | null;
 }
 
+export interface CreditLoyaltyBody {
+  points: number;
+}
+
 export interface BlockCustomerBody {
   reason: string;
 }
