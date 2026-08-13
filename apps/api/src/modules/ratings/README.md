@@ -28,4 +28,28 @@
 - **`RatingResponseDto` بقى بيرجّع `cleanliness_rating` و`after_photos`** (`[{id, file_url}]`) — `POST /orders/:id/rate` بيرجّع القايمة كاملة فورًا بعد الربط.
 - **اتعمله اختبار حي كامل**: فني رفع صورة "بعد التنفيذ" حقيقية لطلب مكتمل، عميل قيّم الطلب بـ`cleanliness_rating=4` وربط الصورة — رجعت فورًا في `after_photos` بالرد. محاولة تقييم تاني لنفس الطلب اترفضت `409` (نفس القيد الموجود من زمان). محاولة ربط صورة **من طلب تاني تمامًا** بتقييم جديد اترفضت `400` بوضوح **وبدون ما يتعمل أي صف تقييم خالص** (اتأكد بعدّ مباشر من الداتابيز = صفر) — الفحص قبل الإنشاء مش بعده.
 
+## طلب مراجعة Google (docs/10 بند 40) — ✅ خلص
+
+كان مؤجّل عمدًا كـ`backlog` منفصل. الفكرة: بعد تقييم عميل عالي (>= حد أدنى قابل للتعديل)،
+نقترح عليه يقيّمنا كمان على Google الحقيقي — مفيش إزعاج للعملاء اللي قيّموا منخفض (مفيش داعي
+نوجّههم لمراجعة عامة سلبية، الأفضل يتوجهوا لمسار `rating.low_rating_submitted` الموجود أصلاً).
+
+- إعدادين جداد (`migration 0079`، `group_name='reviews'`): `reviews.google_review_url` (فاضي
+  افتراضيًا — الاقتراح متوقف تلقائيًا لحد ما الأدمن يحط رابط حقيقي من `/settings`)،
+  `reviews.min_rating_for_google_prompt` (افتراضي 4 من 5).
+- `RatingsService.getGoogleReviewPrompt(rating)` — بس لتقييمات `customer_to_technician` (العميل
+  اللي بيقيّم المنصة، مش العكس)، بيرجّع `{shouldPrompt, reviewUrl}` محسوبة سيرفر-سايد بالكامل
+  (مفيش منطق قرار في الواجهة). `POST /orders/:id/rate` بقى بيرجّع `google_review_prompt` في الرد
+  زيادة على باقي الحقول.
+- `apps/customer-app`: `showGoogleReviewPromptDialog()` (`features/ratings/google_review_prompt.dart`)
+  بتظهر بعد إرسال تقييم لو `should_prompt=true` — تأكيد ثم فتح الرابط **خارج التطبيق** (`url_launcher`
+  `LaunchMode.externalApplication`، مش WebView مضمّن — مراجعة Google لازم تتعمل من حساب Google
+  حقيقي للمستخدم في تطبيق/متصفح حقيقي، عكس فلسفة `PortfolioLinkViewerScreen` اللي بتضمّن الفيديو
+  عمدًا).
+- **اتعمله اختبار حي كامل عبر curl** (3 عملاء حقيقيين مختلفين، 3 طلبات مكتملة حقيقية غير مقيّمة):
+  تقييم 5/5 من غير رابط Google متحط (`should_prompt:false`)، تقييم 5/5 بعد ما اتحط رابط تجريبي
+  (`should_prompt:true` + نفس الرابط بالحرف)، تقييم 3/5 (تحت العتبة الافتراضية 4) رغم وجود الرابط
+  (`should_prompt:false`) — كل الحالات طابقت المتوقع بالحرف. الإعداد اترجع فاضي بعد التأكيد.
+- `flutter analyze` عدّى بلا أي مشكلة جديدة (27 info موجودة من قبل، صفر منهم في الكود الجديد).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

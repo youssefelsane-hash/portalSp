@@ -16,6 +16,7 @@ export class RatingsController {
   async rate(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateRatingDto) {
     const rating = await this.ratingsService.rateAsCustomer(user.sub, id, dto);
     const afterPhotos = await this.ratingsService.getAfterPhotosForRating(rating.id);
-    return toRatingResponseDto(rating, afterPhotos);
+    const googleReviewPrompt = await this.ratingsService.getGoogleReviewPrompt(rating);
+    return toRatingResponseDto(rating, afterPhotos, googleReviewPrompt);
   }
 }
