@@ -465,6 +465,32 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 `IMPLEMENTED — EXTERNAL CREDENTIALS REQUIRED` / `DEFERRED BY OWNER` / `BUSINESS DECISION REQUIRED`
 / `NOT STARTED`.
 
+### نقطة توقف السيشن (2026-08-14) — بند 1-13 (`PaymentProvider` + دفع قبل التوزيع)
+
+**فرع الشغل الصحيح**: `claude/home-services-app-plan-v13gb2` — كان راكد على PR قديم متعمل merge
+(#96)، اتصلح في السيشن دي (اتعمل reset لآخر شغل حقيقي + force-push) عشان يبقى متوافق مع تعليمات
+المالك الحالية. لو سيشن جديدة لقت الفرع ده مختلف عن اللي هي متوقعاه، الفرع الحالي (بعد الـpush ده)
+هو مصدر الحقيقة، مش أي نسخة قديمة محفوظة محليًا.
+
+**`DONE + AUTOMATED VERIFIED`** (commit `4b10112`، ADR-0013 كامل في `docs/adr/0013-payment-provider-abstraction.md`):
+- `PaymentProvider` interface + `PaymentProviderRegistry` + 5 Adapters (Paymob/Cash/Wallet/InstaPay/Fawry).
+- Paymob مهاجر لـIntention API (حقول اتأكدت من Postman collections الرسمية على GitHub — `developers.paymob.com` محجوب في بيئة التنفيذ).
+- دفع قبل التوزيع: `CreateOrderDto.payment_method` اختياري (`card`/`instapay`) → `OrdersService.create()` بيعمل `PENDING_PAYMENT` بدل `SEARCHING_TECHNICIAN` ويأجّل `ORDER_CREATED_EVENT` لحد التأكيد (`PaymentsService.emitPaymentConfirmedEvents()`، بتتنادى من `finalizeGatewayWebhook()` بعد نجاح الويبهوك أو من `confirmInstaPayPayment()`).
+- InstaPay: `payWithInstaPay()` + تأكيد يدوي `confirmInstaPayPayment()` (صلاحية `payments.confirm_manual` جديدة، **مضافة كمان لـ`MFA_REQUIRED_PERMISSIONS`** في `mfa-policy.service.ts` — تحكم مباشر في فلوس حقيقية).
+- استرداد جزئي حقيقي عبر البوابة (`refundOrder()` بيحاول `provider.refund()` الأول، fallback لـwallet credit بس للطرق اللي مش بتدعم استرداد حقيقي، `RefundStatus.REJECTED` لو البوابة رفضت — مش نجاح كاذب).
+- `webhooks.controller.ts` بقى بيستخدم `PaymentProviderRegistry.getByProviderKey()` بدل الحقن المباشر القديم.
+- Migrations 0091-0094 اتكتبت **و اتطبّقت فعليًا** على DB التطوير المحلي (Postgres 16 + Redis محليين، مش Docker — البيئة دي معندهاش docker daemon).
+- `npx tsc --noEmit` + `npx nest build` + `npx jest src/modules/payments src/modules/orders` (20 اختبار) **عدّوا نضيف** بعد كل تعديل.
+
+**`IMPLEMENTED — NOT YET LIVE-HTTP-VERIFIED`** (الكود شغال ومتأكد بالمراجعة + الاختبارات الآلية، بس مسار HTTP الكامل من الأول للآخر (تسجيل فني/عميل → طلب → دفع → تأكيد → توزيع → قبول الفني) **لسه ما اتلقطش end-to-end بـcurl حي** — كان قيد التنفيذ لما السيشن اتوقفت. سكريبت الاختبار جاهز على `/tmp/.../scratchpad/adr13_live_test.sh` (سيشن جديدة هتحتاج تعمله من الأول لو الـscratchpad اتمسح، مش حاجة دايمة). العقبة الوحيدة كانت rate-limiting على `/auth/otp/request` (5/دقيقة) بطيّئة التصحيح، مش بَقّة في الكود.
+
+**لسه `NOT STARTED`** من بند 1-13:
+- تدفق "شغل إضافي بعد الدفع" (§5 — دفعة تانية منفصلة فوق الأصلية) — لسه مش متلمّس في `order-items.service.ts`.
+- تحديث `apps/api/src/modules/payments/README.md` بالقرارات الجديدة (كان على الليستة، ما اتعملش).
+- حذف الملفات القديمة `payment-gateway.interface.ts`/`paymob-gateway.service.ts` **اتعمل بالفعل** (مش ناقص).
+
+**بنود 14-30 من §17 لسه `NOT STARTED` بالكامل** — إنتاجية configurable، دفعات طوارئ، critical_offer push، MFA Phase 2 frontend، بصمة Flutter، مراجعة أمان نهائية. راجع task list السيشن (#62-#66) لتفاصيل كل بند ونقطة البداية المقترحة لكل واحد.
+
 ---
 
 ## §18. ملاحظات معمارية عامة (من مراجعة الكود الحالي)
