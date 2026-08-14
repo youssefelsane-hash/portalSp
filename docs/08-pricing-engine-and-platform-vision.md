@@ -606,11 +606,30 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 `MatchingService`/`AssistantMatchingService` نفسه، مش طبقة قراءة فوق بيانات موجودة) ومحتاج جلسة/وقت
 منفصل. راجع النص الكامل في §15 فوق قبل البدء.
 
-**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.16 (critical_offer push + concurrency)، §17.22 (بصمة
-Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه (خصوصًا: enumeration/brute-force على مسارات
-OTP/recovery، session-revocation-mid-request، permission-removal-mid-session لحيّ HTTP مش بس نظري،
-additional-work-payment-bypass لأن endpoint "شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task
-list السيشن (#63, #65).
+**§17.16 (`critical_offer` actionable push + concurrency hardening) — `DONE`، جزء Flutter
+`IMPLEMENTED — DEVICE TEST PENDING`** — تفاصيل كاملة في `apps/api/src/modules/notifications/README.md`
+و`apps/api/src/modules/matching/README.md` و`apps/technician-app/README.md`. ملخص:
+- حدثين جدد (`ORDER_OFFER_CREATED_EVENT`/`ORDER_OFFER_RESOLVED_EVENT`) — قبل كده مفيش أي إشعار كان
+  بيوصل للفني أصلاً لما عرض طلب (عادي أو طوارئ) يتبعتله، فجوة اتلقطت بالبحث الخلفي مش افتراض.
+- دورة تذكير `critical_offer` حقيقية (ADR-0012 كان أجّلها صراحة) — checkpoints كنِسَب قابلة
+  للتعديل جوّه نافذة الصلاحية نفسها، بتتخطى ساعات الهدوء عمدًا، بتوقف فورًا عند القبول/الرفض/فوز
+  فني تاني/الانتهاء.
+- `NotificationTypeConfig.priorityTier`/`soundKey`/`isActionable`/`actionLabels` (كانوا موجودين من
+  ADR-0012 بس مش بيتقروا خالص) بقوا فعليًا بيوصلوا لـ`FcmPushDispatcher` — إشعارات actionable
+  بتتبعت data-only بأولوية عالية عشان أزرار قبول/رفض حقيقية جوّه الإشعار نفسه.
+- **Concurrency hardening اتأكد حي بتزامن حقيقي** (مش افتراض من قراءة كود القفل الموجود من زمان):
+  `matching-accept-concurrency.spec.ts` + `assistant-matching-accept-concurrency.spec.ts` — فنيين
+  حقيقيين بيقبلوا نفس العرض في نفس اللحظة، واحد بس يفوز، الخاسر يترفض بـ409 وعرضه بيتلغي فعليًا.
+- `apps/technician-app`: `flutter_local_notifications` جديد، إشعار محلي بأزرار قبول/رفض حقيقية،
+  الأزرار شغالة حتى لو التطبيق مقفول تمامًا (background isolate بيعيد بناء جلسة مصادقة من
+  `refresh_token` المحفوظ بنفسه). `flutter analyze`/`flutter build linux` الاتنين نضاف. جزء
+  الهاردوير الفعلي (heads-up حقيقي، لمس الأزرار، اهتزاز) مش قابل للاختبار في البيئة دي —
+  `IMPLEMENTED — DEVICE TEST PENDING`، نفس تصنيف بصمة `apps/customer-app`.
+
+**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.22 (بصمة Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه
+(خصوصًا: enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
+permission-removal-mid-session لحيّ HTTP مش بس نظري، additional-work-payment-bypass لأن endpoint
+"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#65).
 
 ---
 

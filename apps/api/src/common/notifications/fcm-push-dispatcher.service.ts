@@ -1,8 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
-import { getMessaging, Messaging } from 'firebase-admin/messaging';
+import { getMessaging, Messaging, MulticastMessage } from 'firebase-admin/messaging';
+import { NotificationPriorityTier } from '../../modules/notifications/entities/notification-type-config.entity';
 import { DispatchNotificationInput, DispatchResult } from './notification-dispatcher';
+
+const HIGH_PRIORITY_TIERS: NotificationPriorityTier[] = [
+  NotificationPriorityTier.CRITICAL_OFFER,
+  NotificationPriorityTier.ACTION_REQUIRED,
+];
 
 /**
  * إشعارات push حقيقية عبر Firebase Cloud Messaging — نفس فلسفة كل الـ adapters التانية في
@@ -47,11 +53,7 @@ export class FcmPushDispatcher {
     }
 
     try {
-      const result = await this.messaging.sendEachForMulticast({
-        tokens: input.targets,
-        notification: { title: input.titleAr, body: input.bodyAr },
-        data: input.deepLink ? { deep_link: input.deepLink } : undefined,
-      });
+      const result = await this.messaging.sendEachForMulticast(this.buildMessage(input));
 
       if (result.successCount === 0) {
         const firstError = result.responses.find((r) => !r.success)?.error?.message ?? 'فشل الإرسال لكل الأجهزة';
@@ -64,5 +66,56 @@ export class FcmPushDispatcher {
       this.logger.error('فشل إرسال FCM', err instanceof Error ? err.stack : err);
       return { delivered: false, failureReason: err instanceof Error ? err.message : 'خطأ غير معروف في إرسال push' };
     }
+  }
+
+  /**
+   * docs/08 §17.16 — إشعارات actionable (زي عرض طلب/طوارئ) بتتبعت **data-only** (بلا `notification`
+   * block) عمدًا: أزرار قبول/رفض حقيقية جوّه الإشعار نفسه محتاجة إشعار محلي مبني على جهاز العميل
+   * (flutter_local_notifications) — حمولة FCM القياسية `notification` مالهاش أزرار قابلة للتخصيص.
+   * الأولوية العالية (Android `priority: 'high'` + APNs `apns-priority: '10'`) إجبارية هنا عشان
+   * data-only messages توصل فورًا حتى لو التطبيق في الخلفية، مش لما الجهاز "يستريح" بعدين.
+   * إشعارات عادية (informational مثلاً) بتفضل تستخدم `notification` block العادي — أبسط، بيشتغل
+   * من غير أي كود Flutter إضافي في كل الحالات (foreground/background/terminated).
+   */
+  private buildMessage(input: DispatchNotificationInput): MulticastMessage {
+    const isHighPriority = input.priorityTier ? HIGH_PRIORITY_TIERS.includes(input.priorityTier) : false;
+    const androidPriority = isHighPriority ? ('high' as const) : ('normal' as const);
+    const apnsPriority = isHighPriority ? '10' : '5';
+
+    const baseData: Record<string, string> = {
+      type: input.notificationType,
+      ...(input.deepLink ? { deep_link: input.deepLink } : {}),
+      ...(input.priorityTier ? { priority_tier: input.priorityTier } : {}),
+      ...(input.soundKey ? { sound_key: input.soundKey } : {}),
+      actionable: String(input.isActionable ?? false),
+      ...(input.actionLabels ? { action_labels: JSON.stringify(input.actionLabels) } : {}),
+    };
+
+    if (input.isActionable) {
+      // data-only — العميل هو المسؤول عن بناء الإشعار المحلي بالأزرار (title/body مبعوتين جوّه data).
+      return {
+        tokens: input.targets,
+        data: { ...baseData, title: input.titleAr, body: input.bodyAr },
+        android: { priority: androidPriority },
+        apns: {
+          headers: { 'apns-priority': apnsPriority, 'apns-push-type': 'alert' },
+          payload: { aps: { 'content-available': 1, sound: input.soundKey ?? 'default' } },
+        },
+      };
+    }
+
+    return {
+      tokens: input.targets,
+      notification: { title: input.titleAr, body: input.bodyAr },
+      data: baseData,
+      android: {
+        priority: androidPriority,
+        notification: input.soundKey ? { sound: input.soundKey, channelId: input.priorityTier } : undefined,
+      },
+      apns: {
+        headers: { 'apns-priority': apnsPriority },
+        payload: { aps: { sound: input.soundKey ?? 'default' } },
+      },
+    };
   }
 }

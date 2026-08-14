@@ -118,6 +118,7 @@ export class AuthService {
       bodyAr: `كودك: ${code} — صالح لمدة ${expiryMinutes} دقيقة. متشاركوش الكود ده مع حد.`,
       deepLink: null,
       targets: [dto.phone_number],
+      notificationType: 'otp',
     });
     if (!result.delivered) {
       // ملحوظة: النص ده متعمّد ميحتويش على الحرفين "OTP" (الإنجليزية) — أدوات/سكريبتات الاختبار

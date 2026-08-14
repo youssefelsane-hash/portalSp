@@ -6,6 +6,7 @@ import { NOTIFICATION_DISPATCHER, NotificationDispatcher } from '../../common/no
 import { User } from '../auth/entities/user.entity';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 import { Notification, NotificationChannel, NotificationDeliveryStatus } from './entities/notification.entity';
+import { NotificationTypeConfig } from './entities/notification-type-config.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { UserNotificationPreference } from './entities/user-notification-preference.entity';
 import { NotificationWorkflowService } from './notification-workflow.service';
@@ -47,6 +48,7 @@ export class NotificationsService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(UserNotificationPreference)
     private readonly preferences: Repository<UserNotificationPreference>,
+    @InjectRepository(NotificationTypeConfig) private readonly typeConfigs: Repository<NotificationTypeConfig>,
     @Inject(NOTIFICATION_DISPATCHER) private readonly dispatcher: NotificationDispatcher,
     private readonly workflowService: NotificationWorkflowService,
   ) {}
@@ -112,6 +114,9 @@ export class NotificationsService {
     }
 
     const targets = await this.resolveTargets(input.userId, channel);
+    // priority/sound/actionable من NotificationTypeConfig (docs/08 §17.16) — لو النوع مالوش صف،
+    // undefined بيرجع بأمان (سلوك افتراضي عادي، نفس أي إشعار تاني قبل الميزة دي).
+    const typeConfig = await this.typeConfigs.findOne({ where: { notificationType: input.notificationType } });
 
     try {
       const result = await this.dispatcher.dispatch({
@@ -121,6 +126,11 @@ export class NotificationsService {
         bodyAr: input.bodyAr,
         deepLink: notification.deepLink,
         targets,
+        notificationType: input.notificationType,
+        priorityTier: typeConfig?.priorityTier,
+        soundKey: typeConfig?.soundKey ?? null,
+        isActionable: typeConfig?.isActionable ?? false,
+        actionLabels: typeConfig?.actionLabels ?? null,
       });
 
       const now = new Date();

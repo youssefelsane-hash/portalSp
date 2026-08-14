@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- عرض إشعارات push actionable (docs/08 §17.16) — POST_NOTIFICATIONS إجباري على Android 13+
+         وإلا مفيش إشعار هيظهر خالص، بغض النظر عن FCM. VIBRATE لاهتزاز قناة عروض الطوارئ.
+         USE_FULL_SCREEN_INTENT لعرض عرض الطوارئ فوق قفل الشاشة زي مكالمة واردة. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <application
         android:label="technician_app"
         android:name="${applicationName}"

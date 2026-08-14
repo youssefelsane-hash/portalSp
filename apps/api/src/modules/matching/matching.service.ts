@@ -3,9 +3,11 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
-import { DataSource, EntityManager, In, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
+import { ORDER_OFFER_CREATED_EVENT, OrderOfferCreatedEvent } from '../../common/events/order-offer-created.event';
+import { ORDER_OFFER_RESOLVED_EVENT, OrderOfferResolvedEvent } from '../../common/events/order-offer-resolved.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
@@ -258,7 +260,7 @@ export class MatchingService {
       await manager.save(rows);
       this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
 
-      return { kind: 'dispatched' as const, order, nextRound, responseTimeoutSeconds, dispatched: rows.length };
+      return { kind: 'dispatched' as const, order, nextRound, responseTimeoutSeconds, dispatched: rows.length, rows, isEmergency, sentAt: now, expiresAt };
     });
 
     if (result.kind === 'noop') {
@@ -267,6 +269,16 @@ export class MatchingService {
     if (result.kind === 'cancelled') {
       this.emitCancelledForNoTechnicians(result.order);
       return { dispatched: 0 };
+    }
+
+    // بره الـ transaction عمداً (زي ORDER_ACCEPTED_EVENT) — مفيش داعي حد يسمع بيانات مش مؤكّدة.
+    // docs/08 §17.16 — عرض طلب لكل فني، عادي أو طوارئ (isEmergency)، المستمع (notifications
+    // module) هو اللي بيقرر القناة/الأولوية الفعلية.
+    for (const row of result.rows) {
+      this.events.emit(
+        ORDER_OFFER_CREATED_EVENT,
+        new OrderOfferCreatedEvent(row.id, result.order.id, result.order.orderNumber, row.technicianId, result.isEmergency, result.sentAt, result.expiresAt),
+      );
     }
 
     // مهلة حقيقية مجدولة (مش انتظار سلبي) — لو محدش رد (لا قبول ولا رفض صريح) خلال
@@ -393,11 +405,21 @@ export class MatchingService {
       assignment.respondedAt = now;
       await manager.save(assignment);
 
-      await manager.update(
-        OrderAssignment,
-        { orderId, id: Not(assignment.id), assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
-        { assignmentStatus: AssignmentStatus.CANCELLED, respondedAt: now },
-      );
+      // RETURNING عشان نعرف بعد الـtransaction مين العروض المرفوضة تلقائيًا (فني تاني قبل) —
+      // docs/08 §17.16: الخاسر لازم ياخد فورًا "العرض مبقاش متاح" + أي دورة تذكير critical_offer
+      // شغالة ليه لازم توقف. manager.update() العادي مابيرجّعش الصفوف المتأثرة.
+      const supersededResult = await manager
+        .createQueryBuilder()
+        .update(OrderAssignment)
+        .set({ assignmentStatus: AssignmentStatus.CANCELLED, respondedAt: now })
+        .where('order_id = :orderId AND id != :acceptedId AND assignment_status IN (:...statuses)', {
+          orderId,
+          acceptedId: assignment.id,
+          statuses: [AssignmentStatus.SENT, AssignmentStatus.VIEWED],
+        })
+        .returning(['id', 'technician_id'])
+        .execute();
+      const supersededAssignments = supersededResult.raw as { id: string; technician_id: string }[];
 
       if (!canTransition(order.orderStatus, OrderStatus.TECHNICIAN_ASSIGNED)) {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
@@ -431,13 +453,32 @@ export class MatchingService {
         }),
       );
 
-      return order;
+      return { order, assignmentId: assignment.id, supersededAssignments };
     });
 
     // بره الـ transaction عمداً — زي order.created، مفيش داعي حد يسمع بيانات مش مؤكّدة
-    this.events.emit(ORDER_ACCEPTED_EVENT, new OrderAcceptedEvent(order.id, order.customerId, profile.id, order.scheduledAt));
+    this.events.emit(
+      ORDER_ACCEPTED_EVENT,
+      new OrderAcceptedEvent(order.order.id, order.order.customerId, profile.id, order.order.scheduledAt),
+    );
+    this.events.emit(
+      ORDER_OFFER_RESOLVED_EVENT,
+      new OrderOfferResolvedEvent(order.assignmentId, order.order.id, order.order.orderNumber, profile.id, 'accepted'),
+    );
+    for (const superseded of order.supersededAssignments) {
+      this.events.emit(
+        ORDER_OFFER_RESOLVED_EVENT,
+        new OrderOfferResolvedEvent(
+          superseded.id,
+          order.order.id,
+          order.order.orderNumber,
+          superseded.technician_id,
+          'cancelled_offer_taken',
+        ),
+      );
+    }
 
-    return order;
+    return order.order;
   }
 
   async reject(userId: string, orderId: string, reasonCode: string | undefined): Promise<void> {
@@ -454,6 +495,14 @@ export class MatchingService {
     assignment.respondedAt = new Date();
     assignment.rejectionReasonCode = reasonCode ?? null;
     await this.assignments.save(assignment);
+
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (order) {
+      this.events.emit(
+        ORDER_OFFER_RESOLVED_EVENT,
+        new OrderOfferResolvedEvent(assignment.id, orderId, order.orderNumber, profile.id, 'rejected'),
+      );
+    }
 
     const remaining = await this.assignments.count({
       where: { orderId, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
