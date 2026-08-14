@@ -569,11 +569,48 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
   mimetype معلَن بس) — 12 اختبار في `branding-file-validator.spec.ts` + اتأكد حي عبر متصفح حقيقي
   إن الرفع من غير صلاحية/Step-Up مايعديش خالص.
 
-**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.14-15 (إنتاجية configurable، دفعات طوارئ)، §17.16
-(critical_offer push + concurrency)، §17.22 (بصمة Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه
-(خصوصًا: enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
-permission-removal-mid-session لحيّ HTTP مش بس نظري، additional-work-payment-bypass لأن endpoint
-"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#62, #63, #65).
+**§17.14 (إنتاجية configurable، `DONE + LIVE VERIFIED`)** — موديول جديد `technician-productivity`،
+طبقة تسجيل موزون ثانية **بلا أي جدول/جمع بيانات جديد** — بيقرأ نفس صفوف `technician_kpi_snapshots`
+الموجودة بالفعل (مصدر الحقيقة الوحيد، صفر بيانات مصطنعة):
+- `TechnicianProductivityService.computeForTechnician(technicianId, months?)` — تجميع حقيقي عبر
+  فترة (SUM لـ`completed_orders`/`revenue_delivered`، متوسط للنسب، ratio-of-sums لـ`complaint_rate`،
+  متوسط موزون بعدد التقييمات لـ`customer_rating`)، مش قراءة شهر واحد بس.
+- 8 مقاييس، كل واحد `enabled`/`weight`/`direction` (`higher_is_better`/`lower_is_better`)/
+  `minSampleSize`/`target` اختياري — قابل للتعديل الكامل من `/settings` (`productivity.metrics_config`،
+  `value_type=json`، محرر الإعدادات العام الموجود، صفر شاشة جديدة مطلوبة). تعطيل مقياس أو رفع حجم
+  العينة الأدنى بيستبعده فعليًا من الحساب مع توزيع تلقائي للأوزان على الباقي (نفس فلسفة KPI) —
+  **مش تجاهل صامت**، كل مقياس مستبعد له `exclusion_reason` واضح بالعربي.
+  **يتكامل مع KPI الموجود** — `monthly_kpi_score` نفسه أحد الـ8 مقاييس القابلة للتفعيل/التعطيل،
+  مفيش محرك أداء موازٍ.
+- `SettingsService.getJson<T>()` (method جديدة بسيطة، بنفس نمط `getNumber`/`getBoolean`/`getString`
+  الموجودين) — أول استهلاك حقيقي لإعدادات `value_type=json` في المشروع.
+  `GET /admin/technician-productivity/:technicianId?months=N` — صلاحية `technician_productivity.view`
+  (ممنوحة لـ`ops_manager`/`finance`، نفس نمط KPI). Migration `0096` (مطبّقة على DB التطوير).
+- **اتثبت بـ5 اختبارات حية ضد Postgres حقيقي** (`technician-productivity.service.spec.ts`) —
+  فني حقيقي (users + technician_profiles، مش UUID عشوائي بلا FK) بـ3 شهور snapshots حقيقية
+  بقيم مختلفة عمدًا: تجميع 3-شهور صحيح (مجموع/متوسط فعلي عبر الفترة مش شهر واحد)، فترة شهر واحد
+  بتاخد آخر شهر بالظبط، تعطيل مقياس من الإعدادات (SQL خام، مش `SettingsService.update()`) بيستبعده
+  فعليًا بعد إبطال الكاش يدويًا، حجم عينة أدنى أكبر من المتاح بيستبعد بسبب واضح، فني بلا بيانات
+  بيرجّع `overall_score=null` بتفسير واضح بدل استثناء غير متوقع.
+- **بَقّتين حقيقيتين اتلقطوا وانصلحوا وقت كتابة الاختبار الحي (مش نظري)**: (1) الاختبار الأول حاول
+  يدخل snapshots بـ`technician_id` عشوائي (`randomUUID()`) من غير صف `technician_profiles` حقيقي —
+  `technician_kpi_snapshots.technician_id` بيربط بـ`technician_profiles(id)` فعليًا (FK حقيقي)،
+  فالإدخال كان بيترفض. الإصلاح: إدخال `users`+`technician_profiles` حقيقيين أول الاختبار (نفس نمط
+  `matching.service.spec.ts`). (2) تعديل `productivity.metrics_config` بـSQL خام مباشر (لمحاكاة
+  تعديل أدمن يدوي) كان بيتجاهله `SettingsService` بصمت — الكاش (`RedisCacheService`، TTL دقيقة)
+  بيتبطّل بس جوّه `SettingsService.update()` نفسها، مش أي تعديل مباشر في القاعدة. الإصلاح: إبطال
+  الكاش يدويًا (`cache.del('settings:...')`) في الاختبار بعد كل تعديل SQL خام — موثّق كتحذير في
+  الكود عشان أي كود إنتاج تاني يعدّل الإعدادات لازم يعدّي بـ`update()` مش SQL مباشر.
+
+**§17.15 (تدرّج دفعات الطوارئ) لسه `NOT STARTED`** — النطاق أكبر من §17.14 (تعديل حقيقي في منطق
+`MatchingService`/`AssistantMatchingService` نفسه، مش طبقة قراءة فوق بيانات موجودة) ومحتاج جلسة/وقت
+منفصل. راجع النص الكامل في §15 فوق قبل البدء.
+
+**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.16 (critical_offer push + concurrency)، §17.22 (بصمة
+Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه (خصوصًا: enumeration/brute-force على مسارات
+OTP/recovery، session-revocation-mid-request، permission-removal-mid-session لحيّ HTTP مش بس نظري،
+additional-work-payment-bypass لأن endpoint "شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task
+list السيشن (#63, #65).
 
 ---
 
