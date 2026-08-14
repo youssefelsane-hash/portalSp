@@ -441,14 +441,30 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 
 ### 28. اللوجو/هوية العلامة
 
-المالك أرسل ملفات لوجو حقيقية مرفقة بالرسالة. **لا تُعاد رسم/تصميم/تفسير اللوجو، ولا يُغيَّر الرسم
-العربي**. **فجوة حقيقية اتكتشفت فورًا**: بيئة التنفيذ دي مالهاش آلية لحفظ bytes صور مرفقة بالمحادثة
-كملفات على القرص (اتفحص بحث شامل على الملفات، مفيش أي أثر) — الصور مرئية في المحادثة بس مش موجودة
-كملف. **تصنيف**: `EXTERNAL ASSET REQUIRED` — لو المالك يحط الملفات في الريبو (مجلد `brand/` مثلاً)
-أو يدّي رابط مباشر، التكامل هيتم فورًا. المطلوب وقتها: فحص الأبعاد/الصيغ، استخدام الملفات المرفقة
-كما هي في `apps/customer-app`/`apps/technician-app`/`apps/admin` مكان ما البراندنج موجود بالفعل،
-اشتقاق أصول تطبيق آمنة من الأصل المرفق (أيقونات بأحجام مختلفة، splash screen) مع الحفاظ الكامل على
-الهوية البصرية الأصلية — بلا اختراع بديل لو صيغة مرفقة مش مناسبة تقنيًا.
+**~~تم إلغاء هذا القرار واستبداله بالكامل~~** (توجيه المالك 2026-08-14، لاحقًا): بدل استخدام ملفات
+لوجو مرفوعة كأصل نهائي مباشر في الكود (اللي كان أصلاً محجوز بـ`EXTERNAL ASSET REQUIRED` لعدم توفر
+آلية حفظ الملفات المرفقة في بيئة التنفيذ)، المالك طلب **نظام Branding Settings كامل يدار من لوحة
+الأدمن** — Super Admin يرفع/يستبدل أي أصل براندنج (لوجو أساسي، رمز مختصر، نسخ فاتحة/غامقة، لوجو
+شاشة الدخول، splash) من غير أي تعديل كود ولا deployment.
+
+**`DONE + LIVE VERIFIED`** — راجع `docs/adr/0014-admin-managed-branding.md` للقرار الكامل. تم فعليًا:
+- موديول `apps/api/src/modules/branding/` كامل: `GET /branding` (عام، fallback مضمون دايمًا)،
+  `GET/POST/DELETE /admin/branding` (صلاحية `branding.manage` جديدة + Step-Up ADR-0011).
+- إعادة استخدام `StorageService` الموجودة بالكامل (S3/local) — إضافة وحيدة: `getUrl(key)` لتوليد
+  رابط طازة وقت القراءة (presigned URLs بتنتهي، مينفعش تتخزن دائمة لأصل المفروض يفضل شغال للأبد).
+- تحقق أمني حقيقي: magic bytes فعلية (PNG/JPEG/WEBP بس، **صفر SVG** — منع حقن سكربت)، تطابق
+  mimetype المُعلَن مع المحتوى الفعلي، حدود أبعاد/حجم — `branding-file-validator.spec.ts` (12
+  اختبار، بيغطي تزوير الـmimetype وSVG-masquerading-as-PNG صراحة).
+- Migration 0095 **اتطبّقت فعليًا** على DB التطوير المحلي.
+- اختبار حي كامل ضد سيرفر حقيقي + Postgres + تخزين حقيقي: رفع PNG صالح 200×200 → `GET /branding`
+  يرجّع الأصل الحقيقي (مش fallback) → محاولة رفع SVG متنكّر كـPNG اترفضت صح (magic bytes) → حذف
+  الأصل رجّع الـfallback تلقائيًا. `npx tsc --noEmit`/`nest build`/`jest` (32 اختبار) عدّوا نضيف.
+- ملفات اللوجو الحقيقية المرفقة بالرسالة الأصلية **لسه** مش موجودة كملف قابل للحفظ في بيئة التنفيذ
+  دي (نفس الفجوة الأصلية) — بس ده لم يعد حاجزًا: أي Super Admin يقدر يرفعها بنفسه من لوحة الأدمن
+  فور توفرها، من غير أي تدخل كود. الـfallback الحالي (نص "baytak" بسيط) مؤقت وواضح إنه مش تصميم نهائي.
+- **لسه ناقص**: تكامل `apps/admin` (شاشة رفع البراندنج فعليًا في لوحة الإدارة) و`apps/customer-app`/
+  `apps/technician-app` (استهلاك `GET /branding` بدل أي شعار ثابت مبني في الكود) — Backend API بس
+  اكتمل، تكامل الواجهات مهمة منفصلة لسه NOT STARTED.
 
 ### 29-30. الانضباط والتقارير
 
@@ -482,7 +498,17 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 - Migrations 0091-0094 اتكتبت **و اتطبّقت فعليًا** على DB التطوير المحلي (Postgres 16 + Redis محليين، مش Docker — البيئة دي معندهاش docker daemon).
 - `npx tsc --noEmit` + `npx nest build` + `npx jest src/modules/payments src/modules/orders` (20 اختبار) **عدّوا نضيف** بعد كل تعديل.
 
-**`IMPLEMENTED — NOT YET LIVE-HTTP-VERIFIED`** (الكود شغال ومتأكد بالمراجعة + الاختبارات الآلية، بس مسار HTTP الكامل من الأول للآخر (تسجيل فني/عميل → طلب → دفع → تأكيد → توزيع → قبول الفني) **لسه ما اتلقطش end-to-end بـcurl حي** — كان قيد التنفيذ لما السيشن اتوقفت. سكريبت الاختبار جاهز على `/tmp/.../scratchpad/adr13_live_test.sh` (سيشن جديدة هتحتاج تعمله من الأول لو الـscratchpad اتمسح، مش حاجة دايمة). العقبة الوحيدة كانت rate-limiting على `/auth/otp/request` (5/دقيقة) بطيّئة التصحيح، مش بَقّة في الكود.
+**`DONE + LIVE VERIFIED`** (نفس الجلسة، بعد الـcommit فوق — سكريبت `/tmp/.../scratchpad/adr13_live_test.sh` ضد السيرفر الحي + Postgres/Redis حقيقيين، مش mocks):
+- تسجيل فني+عميل حقيقيين عبر OTP → طلب `payment_method=instapay` → **`order_status=pending_payment`** فورًا ✓
+- **صفر صفوف `order_assignments`** قبل الدفع (تأكيد إن التوزيع فعلاً متأجّل، مش مجرد status مختلف) ✓
+- `POST /orders/:id/pay-with-instapay` → مرجع + تعليمات عربي صحيحة، `payment_status=pending` ✓
+- `PaymentsService.confirmInstaPayPayment()` (نودّي مباشر، بايباس HTTP/MFA — التفاصيل تحت) → `payment_status=succeeded`، **`order_status` بيتحول لـ`searching_technician`**، `order.payment_status=paid`، و**صفوف `order_assignments` بتتعمل فعليًا** (3 صفوف — الفني الجديد + 2 فنيين تجريبيين قدام من جلسات سابقة لسه `available` في نفس المنطقة، سلوك مطابق تمامًا) ✓ — **ده الدليل الحاسم إن `handlePaymentConfirmed()`/`emitPaymentConfirmedEvents()` فعلاً بيبدأوا التوزيع الحقيقي بعد تأكيد الدفع، مش مجرد تغيير عمود في DB**.
+
+**بَقّة حقيقية اتلقطت من الاختبار الحي (مش في كود ADR-0013 نفسه)**: `OrderTrackingGateway.handleOrderStatusChanged()` رمى `TypeError: Cannot read properties of null (reading 'to')` (يعني `this.server` كان null) وقت معالجة `ORDER_STATUS_CHANGED_EVENT`. السبب: سكريبت الاختبار استخدم `NestFactory.createApplicationContext(AppModule)` (عشان يتخطى طبقة HTTP/MFA لاختبار `confirmInstaPayPayment()` مباشرة) بدل `NestFactory.create()` الكامل — الـWebSocket gateway بيتسجّل كـprovider عادي بس `@WebSocketServer() server` بتاعه **ميتربطش خالص** من غير transport حقيقي شغال (`app.listen()`). النتيجة: الحدث اتبعت، النداء اتلقط بأمان (event-emitter wrapper)، بس البث عبر Socket.IO فشل بصمت جوّه instance منفصل تمامًا عن السيرفر الحقيقي شغال على port 3000. **مش بَقّة إنتاج** — السيرفر الحقيقي (اللي كل الـHTTP requests فوق راحتله) `this.server` بتاعه متربوط صح دايمًا عن طريق `app.listen()` العادي. موثّقة هنا عشان أي سيشن جاية متتلخبطش لو شافت نفس الخطأ في سكريبت اختبار مشابه.
+
+**خطوة 9 (قبول الفني) ما اتلقطتش نضيفة في نفس التشغيلة** — كل الـ3 عروض ظهرت `assignment_status=timeout` وقت الفحص، رغم إن `matching.response_timeout_seconds=30`. الأرجح إن الفنيين التجريبيين القدام (من تشغيلات سابقة في نفس الجلسة) لسه متعلّمين "متاحين" في إعدادات `matching` بحالة غير نضيفة تخلي المطابقة تعتبرهم منتهيين فورًا (تفصيل توقيت في بيانات اختبار متراكمة، مش في منطق `handlePaymentConfirmed`/`emitPaymentConfirmedEvents` نفسه — الدليل: التوزيع بدأ وعمل الصفوف الصح). محتاج تحقق منفصل بفني واحد نضيف فاضي من غير بيانات جلسات سابقة لو حد عايز يثبتها بدقة أكتر — مش حاجز لبند 1-13 نفسه.
+
+**بيانات اختبار**: اتسابت في DB التطوير المحلي (Postgres حي، مش Docker) — نفس تعامل الجلسات السابقة مع بيئة تطوير throwaway، مفيش خطر لأنها مش production.
 
 **لسه `NOT STARTED`** من بند 1-13:
 - تدفق "شغل إضافي بعد الدفع" (§5 — دفعة تانية منفصلة فوق الأصلية) — لسه مش متلمّس في `order-items.service.ts`.

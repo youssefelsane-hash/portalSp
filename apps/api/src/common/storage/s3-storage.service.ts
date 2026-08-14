@@ -65,6 +65,13 @@ export class S3StorageService implements StorageService {
       }),
     );
 
+    return this.getUrl(key);
+  }
+
+  // presigned جديد كل مرة — الكولر (زي branding module) بيخزّن الـkey بس، مش الرابط، عشان
+  // presigned URL بينتهي بعد urlExpirySeconds (7 أيام حالياً) ومفيش آلية "تجديد وقت القراءة"
+  // للروابط المخزّنة القديمة في الموديولات التانية (راجع تعليق التصميم فوق الكلاس).
+  async getUrl(key: string): Promise<string> {
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: this.urlExpirySeconds,
     });

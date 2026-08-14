@@ -24,4 +24,9 @@ export class LocalDiskStorageService implements StorageService {
     await writeFile(filePath, buffer);
     return `/uploads/${key}`;
   }
+
+  // مسار محلي ثابت أصلاً (مفيش presigning)، فمفيش حاجة تتجدد — نفس النتيجة اللي save() برجعها.
+  async getUrl(key: string): Promise<string> {
+    return `/uploads/${key}`;
+  }
 }
