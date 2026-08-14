@@ -232,9 +232,23 @@ export class WalletsService {
     return manager.save(wallet);
   }
 
-  /** بيلغي حجز (رفض الصرف مثلاً) — يرجّع المبلغ من reserved_balance_cents لـ balance_cents. */
+  /**
+   * بيلغي حجز (رفض الصرف مثلاً) — يرجّع المبلغ من reserved_balance_cents لـ balance_cents.
+   *
+   * **بَقّة حقيقية اتلقطت واتصلحت (docs/08 §20 بند 9)**: قبل الفحص تحت، الدالة كانت بتطرح
+   * `amountCents` من `reservedBalanceCents` من غير أي تحقق إن المحجوز أصلاً كافٍ — عكس
+   * `finalizePayout()` (تحت) اللي عندها نفس الفحص بالظبط. يعني لو `adminReject()` اتنادت مرتين
+   * متزامنتين على نفس الصرف (double-click، إعادة محاولة بعد timeout، إلخ) — الاتنين كانوا بيعدّوا
+   * فحص `payoutStatus` (بيقرا الحالة القديمة قبل ما أي حد يلتزم)، وبعدين بيتسلسلوا على قفل
+   * المحفظة، والتاني كان بيطرح المبلغ **تاني** من `reservedBalanceCents` (يروح سالب بصمت) ويضيفه
+   * **تاني** لـ`balanceCents` — فلوس حقيقية بتتخلق من العدم للفني. الفحص ده بيقفل الثغرة عند
+   * مصدرها الحقيقي (نفس مبدأ `finalizePayout`)، مش بس عرض عدم اتساق.
+   */
   async releaseReservation(walletId: string, amountCents: number, manager: EntityManager): Promise<Wallet> {
     const wallet = await this.lockWallet(walletId, manager);
+    if (wallet.reservedBalanceCents < amountCents) {
+      throw new ApiException(ErrorCode.PAY_002, 'المبلغ المحجوز أقل من مبلغ الحجز المطلوب إلغاؤه', HttpStatus.CONFLICT);
+    }
     wallet.reservedBalanceCents -= amountCents;
     wallet.balanceCents += amountCents;
     return manager.save(wallet);
