@@ -99,6 +99,12 @@ export class OrderStatusNotificationListener {
         await this.workflowService.resolve('order', event.orderId, 'approve_quote');
       }
 
+      // الطلب خرج من accepted (الفني بدأ يتحرك فعليًا، أو اتلغى/اتحول لإعادة اختيار) — تذكيرات
+      // scheduled_job بتاعة الموعد المستقبلي مالهاش معنى بعد كده (ADR-0012، docs/08 §15).
+      if (event.previousStatus === OrderStatus.ACCEPTED && event.newStatus !== OrderStatus.ACCEPTED) {
+        await this.workflowService.resolve('order', event.orderId, undefined, 'order_assigned_scheduled');
+      }
+
       // العميل رد على عرض السعر (وافق أو رفض) — order-items.service.ts بيبعت الفرق في event.reason.
       // الفني محتاج يعرف يكمل الشغل بأي نطاق، فمفيش رسالة IN_PROGRESS عامة كفاية هنا.
       if (

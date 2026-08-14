@@ -144,10 +144,57 @@
 - `tsc --noEmit`/`nest build`/`jest` الثلاثة عدّوا نضيف (88 اختبار، 10 منهم جداد لـ`quiet-hours.util`
   — نطاق منتصف الليل، حدود شاملة/غير شاملة، نطاق صفري).
 
-**نطاق Phase 1 بس — متبقٍ صراحة (تفاصيل كاملة في الـADR)**: توصيل `scheduled_job` (تذكيرات
-شغل مستقبلي مؤكَّد، منطق جدولة مختلف)، باقي حالات `action_required` (اختيار فني بديل، دفع
-معلّق، رفع مستند، رد الدعم)، `critical_offer` actionable push (أزرار قبول/رفض من الإشعار نفسه
-— محتاج تعديل `fcm-push-dispatcher.service.ts` + جهاز حقيقي للاختبار)، واجهة أدمن لـ
-`notification_type_configs` (دلوقتي عبر `psql`/migration بس).
+**نطاق Phase 1 بس — كان متبقٍ صراحة، `scheduled_job` اتقفل تحت**: باقي حالات `action_required`
+(اختيار فني بديل، دفع معلّق، رفع مستند، رد الدعم)، `critical_offer` actionable push (أزرار
+قبول/رفض من الإشعار نفسه — محتاج تعديل `fcm-push-dispatcher.service.ts` + جهاز حقيقي للاختبار)،
+واجهة أدمن لـ`notification_type_configs` (دلوقتي عبر `psql`/migration بس) — لسه مؤجّلين.
+
+## `scheduled_job` — تذكيرات ذكية للشغل المستقبلي المؤكَّد (migration `0089`، 2026-08-13)
+
+مختلف جوهريًا عن `action_required`: مش فاصل ثابت متكرر (كل ساعة لحد ما يتحل)، سلسلة **checkpoints**
+مبنية على الموعد المستهدف نفسه (`notification_workflows.target_at`، عمود جديد) — فورًا (وقت
+الإنشاء، مش تذكير سويب)، بعدها لو لسه ما اتفتحش: بعد N دقيقة (افتراضي 60)، صبح اليوم اللي قبل
+الموعد (افتراضي 8 صباحًا UTC)، وقبل الموعد بفترة أخيرة (افتراضي ساعتين) — كل قيمة إعداد قابل
+للتعديل من الأدمن (`notification_engine.scheduled_job_*`). وبيوقف **بمجرد ما يتفتح**
+(`acknowledged_at`، مش `resolved_at`) — مش محتاج "فعل" فعلي زي `action_required`، بس ده بس لو
+`requires_acknowledgment` مفعّلة لنوع الإشعار (قابلة للتعديل — تمامًا زي ما المالك طلب: "هل
+`scheduled_job` محتاج acknowledgment أصلًا").
+
+**`computeScheduledJobCheckpoints()`** (`scheduled-job-checkpoints.util.ts`، دالة صافية زي
+`quiet-hours.util.ts` بالحرف، 4 اختبارات) — بترجّع الـcheckpoints المرشّحة، بتفلتر تلقائيًا أي
+checkpoint برّه النطاق `(created_at, target_at)`: موعد قريب جدًا يعني checkpoints أقل (مش تراكم
+تذكيرات فات ميعادها)، موعد بعيد يعني الأربعة موجودين. بتتحسب **من جديد في كل sweep** (مش snapshot
+وقت الإنشاء) — تغيير الإعداد بيأثر فورًا على workflows الشغالة، نفس فلسفة `SettingsService` في كل
+مكان تاني.
+
+**`NotificationWorkflowReminderService.processOne()`** بقى بيفرّق حسب `notification_type_configs.
+priority_tier` (بيتقرا لأول مرة فعليًا — كان جدول موجود من Phase 1 بلا أي قارئ): `scheduled_job`
+→ فحص `acknowledged_at` الأول، بعدين checkpoints؛ أي حاجة تانية → نفس منطق الفاصل الثابت زي ما هو
+(صفر تغيير سلوكي لـ`action_required`).
+
+**التوصيل الحقيقي**: `order-accepted-notification.listener.ts` — `OrderAcceptedEvent` اتوسّع بحقل
+`scheduledAt` جديد (`matching.service.ts`'s `accept()` بيمرره من `order.scheduledAt`). لو موجود
+(موعد مستقبلي، مش ASAP)، الفني ياخد `order_assigned_scheduled` (نوع جديد، `scheduled_job`) بدل
+`order_assigned` العادي (صفر تغيير سلوكي لطلبات ASAP). الـworkflow بيتحل (`resolve()`، الدالة
+اتوسّعت بفلتر `notificationType` اختياري جديد) لما الطلب يخرج من `accepted` لأي وجهة (بدأ الشغل
+فعليًا، اتلغى، إلخ) — مالوش معنى يفضل يذكّر بموعد اتلغى أو بدأ بالفعل.
+
+**اتأكد حي بالكامل عبر `curl` ضد الباك-إند الحقيقي** (عميل/فني حقيقيين، طلب فعلي بـ`scheduled_at`
+بعد 6 دقايق، تضييق `scheduled_job_reminder_after_minutes`/`_pre_appointment_minutes` مؤقتًا
+لدقيقة بس + تعطيل ساعات الهدوء مؤقتًا عشان اختبار سريع):
+- الفني قبل الطلب → `notification_workflows` جديد فعليًا: `target_at`=`scheduled_at` بالظبط،
+  `expires_at`=نفس القيمة، `next_reminder_at`=أول checkpoint (created_at+1 دقيقة، الـ"يوم اللي
+  قبله" اتفلتر صح لأن الموعد قريب جدًا). الإشعار الأول اترتبط بـ`workflow_id` صح.
+  **`order_assigned` العادي (ASAP) فضل زي ما هو تمامًا — صفر تغيير سلوكي، اتأكد بنفس الاختبار**.
+- **الـsweep الحي نفسه**: أول checkpoint اتبعت صح بعد ~دقيقة ونص (سويب كل دقيقة)، `reminder_count`
+  بقى 1، `next_reminder_at` اتحرك لـcheckpoint التاني (قبل الموعد بدقيقة، مش "يوم قبله" — برضه
+  اتفلتر صح لأن الموعد لسه قريب). صف `notifications` تاني اترتبط بنفس `workflow_id`.
+  الفني عمل `PATCH /notifications/:id/read` على التذكير → `acknowledged_at` اتحدد فورًا.
+  **إثبات قاطع إن التذكيرات بتوقف فعليًا**: `next_reminder_at` اتحطّ في الماضي يدويًا (نفس تقنية
+  اختبار `action_required` الأول) → السويب الحي شافها، لاحظ `acknowledged_at` موجود، وقف فورًا
+  (`next_reminder_at`→`NULL`) **من غير ما يبعت أي تذكير جديد ولا يزوّد `reminder_count`** — عدد
+  صفوف `notifications` المرتبطة فضل 2 بالظبط (الإرسال الأول + التذكير الوحيد)، مش 3.
+- `tsc --noEmit`/`nest build`/`jest` الثلاثة عدّوا نضيف (92 اختبار، +4 جداد لـ
+  `scheduled-job-checkpoints.util`).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
