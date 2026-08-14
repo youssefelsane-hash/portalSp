@@ -585,14 +585,23 @@ export default function TechnicianDetailPage() {
             {wallet && (
               <>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold">{formatEgp(wallet.wallet.balance_cents)}</span>
+                  <span className={`text-lg font-semibold ${wallet.wallet.balance_cents < 0 ? 'text-destructive' : ''}`}>
+                    {formatEgp(wallet.wallet.balance_cents)}
+                  </span>
                   {wallet.wallet.is_frozen && <Badge variant="destructive">مجمّدة</Badge>}
+                  {wallet.wallet.balance_cents < 0 && <Badge variant="destructive">مديون للمنصة</Badge>}
                 </div>
                 <p className="text-muted-foreground">
                   محجوز للصرف: {formatEgp(wallet.wallet.reserved_balance_cents)} · إجمالي مكتسب:{' '}
                   {formatEgp(wallet.wallet.total_earned_cents)} · إجمالي مسحوب:{' '}
                   {formatEgp(wallet.wallet.total_withdrawn_cents)}
                 </p>
+                {wallet.wallet.balance_cents < 0 && (
+                  <p className="text-xs text-destructive">
+                    رصيد الفني سالب — عمولة كاش لسه متحصّلتش أو تصحيح استرداد بعد صرف سابق (docs/08 §20 بند 7).
+                    هيتسوّى تلقائيًا من أول أرباح جاية قبل ما يقدر يطلب صرف تاني.
+                  </p>
+                )}
                 <div>
                   <p className="mb-2 font-medium">آخر الحركات</p>
                   {wallet.transactions.length === 0 && <p className="text-muted-foreground">مفيش حركات لسه</p>}
