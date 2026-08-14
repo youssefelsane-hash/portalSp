@@ -237,8 +237,11 @@ export default function CustomerDetailPage() {
             {wallet && (
               <>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold">{formatEgp(wallet.wallet.balance_cents)}</span>
+                  <span className={`text-lg font-semibold ${wallet.wallet.balance_cents < 0 ? 'text-destructive' : ''}`}>
+                    {formatEgp(wallet.wallet.balance_cents)}
+                  </span>
                   {wallet.wallet.is_frozen && <Badge variant="destructive">مجمّدة</Badge>}
+                  {wallet.wallet.balance_cents < 0 && <Badge variant="destructive">مديون للمنصة</Badge>}
                 </div>
                 <p className="text-muted-foreground">
                   إجمالي مكتسب: {formatEgp(wallet.wallet.total_earned_cents)} · إجمالي مسحوب:{' '}

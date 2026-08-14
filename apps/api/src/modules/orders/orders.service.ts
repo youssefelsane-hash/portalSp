@@ -15,6 +15,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { GeoService } from '../geo/geo.service';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
+import { PaymentsService } from '../payments/payments.service';
 import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianTeamRole } from '../technicians/entities/technician-profile.entity';
@@ -74,6 +75,7 @@ export class OrdersService {
     private readonly cancellationReasonsService: CancellationReasonsService,
     private readonly walletsService: WalletsService,
     private readonly settingsService: SettingsService,
+    private readonly paymentsService: PaymentsService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -636,6 +638,35 @@ export class OrdersService {
         dto.reason ?? null,
       ),
     );
+
+    // بَقّة حقيقية اتلقطت واتصلحت (docs/08 §20.7): طلب مدفوع مسبقًا إلكترونيًا (كارت/InstaPay،
+    // ADR-0013) كان لو العميل لغاه بنفسه (مش النظام) قبل ما أي تسوية أرباح فني تحصل، فلوسه
+    // تفضل معلّقة (paymentStatus=PAID على طلب CANCELLED_BY_CUSTOMER نهائي) لحد ما أدمن يلاحظ
+    // ويرد يدويًا — رغم إن نفس السيناريو المالي بالظبط كان بيتصرف صح تلقائيًا لو النظام هو اللي
+    // لغى (order-auto-cancel.service.ts). برّه أي transaction عمدًا — نداء بوابة دفع خارجي حقيقي
+    // مايصحش يكون جوّه transaction ممكن ترجع لورا (تفاصيل الأمان الكاملة في
+    // PaymentsService.refundCancelledPrepaidOrder()). فشل الاسترداد هنا بيتلقط ويتسجّل بس
+    // مايكسرش تجربة العميل — الطلب فضل ملغي صح حتى لو الاسترداد فشل واحتاج مراجعة يدوية.
+    if (order.paymentStatus === OrderPaymentStatus.PAID) {
+      try {
+        await this.paymentsService.refundCancelledPrepaidOrder(
+          order.id,
+          `استرداد تلقائي — العميل لغى طلب مدفوع مسبقًا قبل بدء الشغل${dto.reason ? `: ${dto.reason}` : ''}`,
+          'customer_cancel',
+        );
+      } catch (err) {
+        this.auditLog
+          .record({
+            actorUserId: userId,
+            actorRole: 'customer',
+            action: 'order.refund_failed_needs_manual_review',
+            entityType: 'order',
+            entityId: order.id,
+            newValues: { order_number: order.orderNumber, error: err instanceof Error ? err.message : String(err) },
+          })
+          .catch(() => {});
+      }
+    }
 
     return order;
   }

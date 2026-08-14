@@ -417,4 +417,63 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     const techBalanceAfterRefund = await techWalletBalance();
     expect(techBalanceAfterRefund).toBe(techBalanceBefore); // رجع لنفس القيمة قبل التسوية بالظبط
   });
+
+  // §20 بند 6 — تغيير السعر النهائي لأقل (المثال أ من طلب المالك): مفيش مسار منفصل مطلوب، إعادة
+  // استخدام refundOrder() الموجودة بمبلغ استرداد جزئي = الفرق. الاختبارين دول بيثبتوا إن الصيغة
+  // النسبية الموجودة أصلاً (technicianReversalCents = earning × refund/paymentTotal) بتحسب صافي دَين
+  // الفني الصح تلقائيًا حتى مع كاش — من غير أي كود جديد.
+  it('استرداد جزئي لطلب كاش (تصحيح سعر نهائي لأقل) — دَين الفني = العمولة المصححة + الكاش الزيادة المردودة', async () => {
+    // طلب 1000ج (عمولة 20% = 200، أرباح 800)، السعر الصح طلع 900ج بس (100ج زيادة اترد للعميل).
+    // دَين الفني الصح = عمولة 900*20%=180 + الـ100 الزيادة اللي المنصة ردّتها للعميل بدل الفني مباشرة = 280.
+    const techBalanceBefore = await techWalletBalance();
+    const customerWalletBefore = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]);
+    const customerBalanceBefore = customerWalletBefore.length > 0 ? Number(customerWalletBefore[0].balance_cents) : 0;
+
+    const orderId = await insertWorkCompletedOrder(`partial-cash-${runId}`, 100000, ids.service20);
+    await service.collectCash(ids.techUser, orderId);
+
+    const refund = await service.refundOrder(ids.customerUser, orderId, 'تصحيح سعر نهائي — 100ج زيادة', 10000);
+    expect(refund.refundType).toBe('partial');
+    expect(refund.refundMethod).toBe('wallet_credit');
+
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.COMPLETED); // استرداد جزئي مايغيّرش حالة الطلب
+    expect(order?.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_REFUNDED);
+
+    const techBalanceAfter = await techWalletBalance();
+    expect(techBalanceAfter - techBalanceBefore).toBe(-28000); // -200 (عمولة) - 80 (عكس نسبي) = -280ج
+
+    const customerWalletAfter = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]);
+    const customerBalanceAfter = Number(customerWalletAfter[0].balance_cents);
+    expect(customerBalanceAfter - customerBalanceBefore).toBe(10000); // العميل ياخد الفرق بالظبط
+  });
+
+  it('استرداد جزئي لطلب إلكتروني (تصحيح سعر نهائي لأقل) — رصيد الفني يرجع مطابق للعمولة المصححة بالظبط', async () => {
+    const orderId = await insertWorkCompletedOrder(`partial-wallet-${runId}`, 100000, ids.service20);
+    await dataSource.query(
+      `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
+       VALUES ($1,$2,$3,$4,'wallet','succeeded',$5, now())`,
+      [`PAYCSD-pw-${runId}`.slice(0, 24), orderId, ids.customerProfile, 100000, `idem-csd-pw-${runId}`],
+    );
+    const techBalanceBeforeSettlement = await techWalletBalance();
+    await dataSource.transaction(async (manager) => {
+      const order = await manager.findOneOrFail(Order, { where: { id: orderId } });
+      await (service as unknown as { settleAndComplete: (...args: unknown[]) => Promise<Order> }).settleAndComplete(
+        manager,
+        order,
+        PaymentMethod.WALLET,
+        ids.customerUser,
+        'customer',
+      );
+    });
+
+    await service.refundOrder(ids.customerUser, orderId, 'تصحيح سعر نهائي — 100ج زيادة', 10000);
+
+    // المنصة ماسكة الفلوس أصلاً — بعد التصحيح لازم رصيد الفني يطابق أرباح الـ900ج الصح (720ج) بالظبط
+    const techBalanceAfter = await techWalletBalance();
+    expect(techBalanceAfter - techBalanceBeforeSettlement).toBe(72000);
+
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_REFUNDED);
+  });
 });
