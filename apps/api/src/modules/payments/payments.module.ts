@@ -20,10 +20,14 @@ import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 import { WalletsService } from './wallets.service';
 import { WalletProvisioningListener } from './wallet-provisioning.listener';
-import { PAYMENT_GATEWAY } from './gateways/payment-gateway.interface';
-import { PaymobGatewayService } from './gateways/paymob-gateway.service';
 import { FAWRY_GATEWAY } from './gateways/fawry-gateway.interface';
 import { FawryGatewayService } from './gateways/fawry-gateway.service';
+import { CashProvider } from './gateways/cash-provider.service';
+import { FawryProvider } from './gateways/fawry-provider.service';
+import { InstaPayProvider } from './gateways/instapay-provider.service';
+import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
+import { PaymobProvider } from './gateways/paymob-provider.service';
+import { WalletProvider } from './gateways/wallet-provider.service';
 import { Payment } from './entities/payment.entity';
 import { Payout } from './entities/payout.entity';
 import { PayoutOrderItem } from './entities/payout-order-item.entity';
@@ -67,13 +71,17 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     PaymentsService,
     PayoutsService,
     WalletProvisioningListener,
-    // Paymob هو التطبيق الوحيد دلوقتي لواجهة PaymentGateway — لو مفيش env vars مُعدّة،
-    // isConfigured بيبقى false وبيرفض بوضوح (نفس فلسفة DisabledPaymentGateway، مجرد إن
-    // PaymobGatewayService نفسها بتتصرف كـ"معطّلة" لما تلاقي نفسها من غير مفاتيح — أبسط من
-    // provider شرطي في NestJS DI، وبيدي رسالة خطأ أوضح بتقول بالظبط أي env var ناقص).
-    { provide: PAYMENT_GATEWAY, useClass: PaymobGatewayService },
-    // بوابة تانية جنب Paymob (كود مرجعي فوري) — provider منفصل بالكامل، مش بديل لـ PAYMENT_GATEWAY.
+    // بوابة Fawry الأصلية (كود مرجعي فوري) — لسه محقونة مباشرة، FawryProvider بيغلّفها بس
+    // (ADR-0013). لو مفيش env vars مُعدّة، isConfigured بيبقى false وبيرفض بوضوح.
     { provide: FAWRY_GATEWAY, useClass: FawryGatewayService },
+    // PaymentProvider adapters (ADR-0013) — كل طريقة دفع ليها provider واحد مسجّل في
+    // PaymentProviderRegistry، صفر تعديل في payments.service.ts لإضافة طريقة جديدة مستقبلاً.
+    PaymobProvider,
+    CashProvider,
+    WalletProvider,
+    InstaPayProvider,
+    FawryProvider,
+    PaymentProviderRegistry,
   ],
   exports: [WalletsService, PaymentsService, PayoutsService],
 })

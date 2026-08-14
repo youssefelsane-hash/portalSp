@@ -54,7 +54,12 @@ export const envValidationSchema = Joi.object({
   // فاضية موجودة (`''`) — مختلف عن القيمة غير الموجودة خالص. نسخ .env.example زي ما هو كان
   // بيكسر تشغيل السيرفر بالكامل (Config validation error) بدل ما "يرجع log-only" زي الموثّق.
   PAYMOB_BASE_URL: Joi.string().uri().default('https://accept.paymob.com'),
+  // API_KEY لسه لازم لـTransaction Inquiry القديم (auth_token عبر /api/auth/tokens) — Paymob
+  // مبدّلش مصادقة الـendpoint ده لـIntention API لسه (ADR-0013). SECRET_KEY/PUBLIC_KEY جداد —
+  // Intention API (Token auth) وUnified Checkout بالترتيب.
   PAYMOB_API_KEY: Joi.string().allow('').optional(),
+  PAYMOB_SECRET_KEY: Joi.string().allow('').optional(),
+  PAYMOB_PUBLIC_KEY: Joi.string().allow('').optional(),
   PAYMOB_INTEGRATION_ID_CARD: Joi.string().allow('').optional(),
   PAYMOB_IFRAME_ID: Joi.string().allow('').optional(),
   PAYMOB_HMAC_SECRET: Joi.string().allow('').optional(),
@@ -65,6 +70,10 @@ export const envValidationSchema = Joi.object({
   FAWRY_MERCHANT_CODE: Joi.string().allow('').optional(),
   FAWRY_SECURE_KEY: Joi.string().allow('').optional(),
   FAWRY_REFERENCE_EXPIRY_HOURS: Joi.number().default(72),
+
+  // InstaPay — تعليمات تحويل يدوي بس (ADR-0013 §7)، مفيش سرّ/توقيع مطلوب هنا خالص.
+  INSTAPAY_IPA_ADDRESS: Joi.string().allow('').optional(),
+  INSTAPAY_RECIPIENT_NAME: Joi.string().allow('').optional(),
 
   // تخزين الملفات — 'local' افتراضي (تطوير)، 'S3' للإنتاج. تفاصيل كل قيمة: docs/03-external-integrations.md
   STORAGE_PROVIDER: Joi.string().valid('local', 's3').default('local'),

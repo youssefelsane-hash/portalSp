@@ -1,9 +1,12 @@
 import { createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
-import { PaymobGatewayService } from './paymob-gateway.service';
+import { PaymobProvider } from './paymob-provider.service';
 
-// ConfigService وهمي بسيط بيرجّع من map ثابت — نفس فلسفة FakeRepository في auth.service.spec.ts،
-// كفاية عشان نختبر منطق PaymobGatewayService لوحده من غير NestJS testing module كامل.
+// ConfigService وهمي بسيط بيرجّع من map ثابت — نفس فلسفة FakeRepository في auth.service.spec.ts.
+// اتحدّث (ADR-0013) عشان يختبر PaymobProvider (Intention API) بدل PaymobGatewayService المهجورة —
+// منطق HMAC نفسه بالحرف (computeHmac منسوخ صفريًا من الكود القديم)، الفرق بس إعدادات isConfigured
+// (secretKey/publicKey بدل apiKey/iframeId — الأخيرين بقوا مستخدَمين بس في مسار Transaction Inquiry
+// القديم اللي لسه شغال جنب Intention API).
 function fakeConfig(values: Record<string, string>): ConfigService {
   return { get: (key: string) => values[key] } as unknown as ConfigService;
 }
@@ -11,8 +14,9 @@ function fakeConfig(values: Record<string, string>): ConfigService {
 const CONFIGURED_ENV = {
   'payments.paymob.baseUrl': 'https://accept.paymob.com',
   'payments.paymob.apiKey': 'test-api-key',
+  'payments.paymob.secretKey': 'test-secret-key',
+  'payments.paymob.publicKey': 'test-public-key',
   'payments.paymob.integrationIdCard': '12345',
-  'payments.paymob.iframeId': '67890',
   'payments.paymob.hmacSecret': 'super-secret-hmac-key',
 };
 
@@ -40,9 +44,8 @@ function buildTransactionObj(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-// نفس خوارزمية الحساب الموثّقة في Paymob HMAC Calculation — منسوخة هنا مستقلة عن كود
-// الخدمة نفسها عشان الاختبار يثبت إن التنفيذ الحقيقي (computeHmac الخاصة) بيتوافق مع
-// المواصفة الرسمية، مش بس متّسق مع نفسه.
+// نفس خوارزمية الحساب الموثّقة في Paymob HMAC Calculation — منسوخة هنا مستقلة عن كود الخدمة
+// نفسها عشان الاختبار يثبت إن التنفيذ الحقيقي (computeHmac الخاصة) بيتوافق مع المواصفة الرسمية.
 function referenceHmac(obj: ReturnType<typeof buildTransactionObj>, secret: string): string {
   const fields = [
     String(obj.amount_cents),
@@ -69,27 +72,27 @@ function referenceHmac(obj: ReturnType<typeof buildTransactionObj>, secret: stri
   return createHmac('sha512', secret).update(fields).digest('hex');
 }
 
-describe('PaymobGatewayService', () => {
+describe('PaymobProvider', () => {
   describe('isConfigured', () => {
-    it('true لما كل env vars الأربعة موجودة', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
-      expect(gateway.isConfigured).toBe(true);
+    it('true لما secretKey/publicKey/integrationIdCard/hmacSecret كلهم موجودين', () => {
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
+      expect(provider.isConfigured).toBe(true);
     });
 
-    it('false لو ولا حتى واحدة من الأربعة ناقصة', () => {
+    it('false لو ولا حتى واحد من الأربعة ناقص', () => {
       const { 'payments.paymob.hmacSecret': _omit, ...rest } = CONFIGURED_ENV;
-      const gateway = new PaymobGatewayService(fakeConfig(rest));
-      expect(gateway.isConfigured).toBe(false);
+      const provider = new PaymobProvider(fakeConfig(rest));
+      expect(provider.isConfigured).toBe(false);
     });
   });
 
-  describe('verifyAndParseWebhook', () => {
+  describe('verifyWebhook', () => {
     it('يقبل حمولة صحيحة بتوقيع HMAC صح، ويستخرج كل الحقول صح', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
       const obj = buildTransactionObj();
       const hmac = referenceHmac(obj, CONFIGURED_ENV['payments.paymob.hmacSecret']);
 
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj }, hmac);
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj }, hmac);
 
       expect(result.signatureValid).toBe(true);
       expect(result.succeeded).toBe(true);
@@ -100,63 +103,62 @@ describe('PaymobGatewayService', () => {
     });
 
     it('يرفض لو الـ HMAC غلط', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
       const obj = buildTransactionObj();
 
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj }, 'a'.repeat(128));
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj }, 'a'.repeat(128));
 
       expect(result.signatureValid).toBe(false);
       expect(result.failureReason).toContain('توقيع');
     });
 
     it('يرفض لو أي حقل اتلاعب فيه بعد حساب الـ HMAC (amount_cents هنا) — يثبت إن التوقيع فعلاً بيغطي المبلغ', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
       const obj = buildTransactionObj();
       const hmac = referenceHmac(obj, CONFIGURED_ENV['payments.paymob.hmacSecret']);
 
-      // نفس التوقيع القديم لكن المبلغ اتغيّر بعد الحساب — محاكاة محاولة تلاعب بمبلغ الدفع
       const tamperedObj = { ...obj, amount_cents: 999999 };
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj: tamperedObj }, hmac);
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj: tamperedObj }, hmac);
 
       expect(result.signatureValid).toBe(false);
     });
 
     it('يرفض لو الـ secret غلط (بوابة متظبطة بمفتاح مختلف)', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
       const obj = buildTransactionObj();
       const hmacWithWrongSecret = referenceHmac(obj, 'wrong-secret');
 
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj }, hmacWithWrongSecret);
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj }, hmacWithWrongSecret);
 
       expect(result.signatureValid).toBe(false);
     });
 
     it('يرفض لو مفيش hmac خالص في الطلب', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
       const obj = buildTransactionObj();
 
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj }, undefined);
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj }, undefined);
 
       expect(result.signatureValid).toBe(false);
     });
 
     it('يرفض فوراً لو البوابة مش مُعدّة أصلاً (مفيش hmacSecret)', () => {
       const { 'payments.paymob.hmacSecret': _omit, ...rest } = CONFIGURED_ENV;
-      const gateway = new PaymobGatewayService(fakeConfig(rest));
+      const provider = new PaymobProvider(fakeConfig(rest));
       const obj = buildTransactionObj();
 
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj }, 'anything');
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj }, 'anything');
 
       expect(result.signatureValid).toBe(false);
       expect(result.failureReason).toContain('مُعدّة');
     });
 
     it('succeeded=false لو success=false في الحمولة حتى لو التوقيع صح', () => {
-      const gateway = new PaymobGatewayService(fakeConfig(CONFIGURED_ENV));
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
       const obj = buildTransactionObj({ success: false, data: { message: 'Insufficient funds' } });
       const hmac = referenceHmac(obj, CONFIGURED_ENV['payments.paymob.hmacSecret']);
 
-      const result = gateway.verifyAndParseWebhook({ type: 'TRANSACTION', obj }, hmac);
+      const result = provider.verifyWebhook({ type: 'TRANSACTION', obj }, hmac);
 
       expect(result.signatureValid).toBe(true);
       expect(result.succeeded).toBe(false);
@@ -164,11 +166,11 @@ describe('PaymobGatewayService', () => {
     });
   });
 
-  describe('createCardPayment', () => {
+  describe('createPayment', () => {
     it('يرفض فوراً بخطأ واضح لو البوابة مش مُعدّة، من غير أي نداء شبكة', async () => {
-      const gateway = new PaymobGatewayService(fakeConfig({}));
+      const provider = new PaymobProvider(fakeConfig({ 'payments.paymob.baseUrl': 'https://accept.paymob.com' }));
       await expect(
-        gateway.createCardPayment({
+        provider.createPayment({
           paymentId: 'p1',
           orderNumber: 'ORD-1',
           amountCents: 1000,

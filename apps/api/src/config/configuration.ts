@@ -90,7 +90,12 @@ export default () => ({
       // والدفع بالبطاقة بيرفض بوضوح (DisabledPaymentGateway/PaymobGatewayService غير مُعدّة)
       // من غير ما يمنع الكاش/المحفظة. تفاصيل الحصول على كل قيمة في docs/03-external-integrations.md.
       baseUrl: process.env.PAYMOB_BASE_URL ?? 'https://accept.paymob.com',
+      // API_KEY لسه لازم لـTransaction Inquiry (auth_token قديم) — Intention/Refund/Void/Capture
+      // بتستخدم SECRET_KEY (Authorization: Token) بدل كده. PUBLIC_KEY لـUnified Checkout redirect
+      // URL بس (ADR-0013، مش سرّ — آمن يوصل للـclient لو احتجنا مستقبلاً، بس هنا بيتستخدم سيرفر-side).
       apiKey: process.env.PAYMOB_API_KEY,
+      secretKey: process.env.PAYMOB_SECRET_KEY,
+      publicKey: process.env.PAYMOB_PUBLIC_KEY,
       integrationIdCard: process.env.PAYMOB_INTEGRATION_ID_CARD,
       iframeId: process.env.PAYMOB_IFRAME_ID,
       hmacSecret: process.env.PAYMOB_HMAC_SECRET,
@@ -106,6 +111,12 @@ export default () => ({
       referenceExpiryHours: process.env.FAWRY_REFERENCE_EXPIRY_HOURS
         ? parseInt(process.env.FAWRY_REFERENCE_EXPIRY_HOURS, 10)
         : 72,
+    },
+    // InstaPay — مسبق الدفع بتأكيد يدوي بس (ADR-0013 §7)، مفيش بوابة API حقيقية. عنوان IPA
+    // بيتعرض للعميل كتعليمات تحويل، الاسم بس للطمأنة (يتأكد إن المرسل واقف صح).
+    instapay: {
+      ipaAddress: process.env.INSTAPAY_IPA_ADDRESS,
+      recipientName: process.env.INSTAPAY_RECIPIENT_NAME,
     },
   },
 });

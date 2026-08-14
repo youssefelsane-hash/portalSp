@@ -1,7 +1,6 @@
-import { Body, Controller, HttpCode, HttpStatus, Inject, Logger, Post, Query } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Logger, Post, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
-import { PAYMENT_GATEWAY, PaymentGateway } from './gateways/payment-gateway.interface';
-import { FAWRY_GATEWAY, FawryGateway } from './gateways/fawry-gateway.interface';
+import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymentMethod } from './entities/payment.entity';
 import { PaymentsService } from './payments.service';
 
@@ -26,17 +25,17 @@ export class WebhooksController {
 
   constructor(
     private readonly paymentsService: PaymentsService,
-    @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
-    @Inject(FAWRY_GATEWAY) private readonly fawryGateway: FawryGateway,
+    private readonly paymentProviders: PaymentProviderRegistry,
   ) {}
 
   @Public()
   @Post('paymob')
   @HttpCode(HttpStatus.OK)
   async handlePaymobWebhook(@Body() body: Record<string, unknown>, @Query('hmac') hmac: string | undefined) {
-    let result: ReturnType<PaymentGateway['verifyAndParseWebhook']>;
+    const provider = this.paymentProviders.getByProviderKey('paymob');
+    let result: ReturnType<typeof provider.verifyWebhook>;
     try {
-      result = this.paymentGateway.verifyAndParseWebhook(body, hmac);
+      result = provider.verifyWebhook(body, hmac);
     } catch (err) {
       // حمولة غير قابلة للتحليل خالص — إعادة إرسالها مش هتصلح حاجة، تجاهل واعي بـ200.
       this.logger.error('فشل تحليل webhook Paymob (حمولة غير صالحة)', err instanceof Error ? err.stack : err);
@@ -48,7 +47,7 @@ export class WebhooksController {
     await this.paymentsService.finalizeGatewayWebhook(
       result.externalEventId,
       result.eventType,
-      this.paymentGateway.providerName,
+      'paymob',
       body,
       result.signatureValid,
       result.paymentId,
@@ -67,9 +66,10 @@ export class WebhooksController {
   @Post('fawry')
   @HttpCode(HttpStatus.OK)
   async handleFawryWebhook(@Body() body: Record<string, unknown>) {
-    let result: ReturnType<FawryGateway['verifyAndParseWebhook']>;
+    const provider = this.paymentProviders.getByProviderKey('fawry');
+    let result: ReturnType<typeof provider.verifyWebhook>;
     try {
-      result = this.fawryGateway.verifyAndParseWebhook(body);
+      result = provider.verifyWebhook(body, undefined);
     } catch (err) {
       this.logger.error('فشل تحليل webhook Fawry (حمولة غير صالحة)', err instanceof Error ? err.stack : err);
       return { received: true };
@@ -78,7 +78,7 @@ export class WebhooksController {
     await this.paymentsService.finalizeGatewayWebhook(
       result.externalEventId,
       result.eventType,
-      this.fawryGateway.providerName,
+      'fawry',
       body,
       result.signatureValid,
       result.paymentId,
