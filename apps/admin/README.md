@@ -191,6 +191,31 @@ RTL سليم). البيانات التجريبية المحقونة اتمسحت
 `docs/12-ux-refinement-and-p0-audit-2026-08-13.md`. اتأكد حي بمتصفح حقيقي (Playwright): حساب
 `support_agent` حقيقي شاف بالظبط الـ23 عنصر المسموحين له، حساب `super_admin` شاف كل الـ30.
 
+## MFA/Passkeys (ADR-0011 Phase 2) + Step-Up تلقائي
+
+- تسجيل دخول حساب High-Privilege بيرجّع `mfa_required` بدل TokenPair (`/api/auth/otp/verify`
+  بيمرّرها زي ما هي، مفيش كوكي يتحط لحد ما ceremony الـPasskey يخلص). `/login` بيفرّع لـ
+  `enrollPasskey()` (`ceremony=registration`، أول مرة) أو `authenticateWithPasskey()`
+  (`ceremony=authentication`، فيه Passkey مسجّل بالفعل) — الاتنين بيستخدموا
+  `@simplewebauthn/browser`'s `startRegistration`/`startAuthentication` مباشرة مع الـoptions
+  الراجعة من الباك-إند، ومحتاجين يتصدّروا من جوّه نفس ضغطة الزرار (user gesture) عشان بعض
+  المتصفحات (Safari خصوصًا) بترفض تفتح WebAuthn prompt من غير كده.
+- **Step-Up تلقائي وشفّاف تمامًا للصفحات** — `authedFetch`/`authedFetchPaginated` (auth-context.tsx)
+  بيمسكوا `AUTH_006` زي ما بيمسكوا `401` بالظبط: بيفتحوا `<StepUpDialog>` (imperative، مش مربوط
+  بأي شاشة معينة)، يستنوا المستخدم يدوس "تأكيد بـ Passkey"، ويعيدوا نفس الطلب الأصلي بـ
+  `X-Step-Up-Token` — الصفحة نفسها (زي `/branding`) مش عارفة عن Step-Up خالص، بتنادي `authedFetch`
+  عادي وبس. ده تنفيذ حرفي لطلب المالك: "لما عملية حساسة ترجع step-up-required: افتح step-up →
+  تأكد → أعد المحاولة بأمان، متخليش المستخدم يبدأ العملية من الأول".
+- `/security` — إدارة Passkeys (شيل بس، مفيش "ضيف Passkey تاني" لحساب داخل بالفعل، قيد الباك-إند
+  الحالي: تسجيل Passkey بيحصل جوّه مسار MFA login بس) + الأجهزة/الجلسات (`/auth/sessions`، إلغاء
+  فردي أو كلي).
+- **اتأكد حي بمتصفح حقيقي (Playwright + CDP virtual WebAuthn authenticator)**: تسجيل دخول →
+  `ceremony=registration` → تسجيل Passkey فعلي (authenticator افتراضي، مش mock) → حوار أكواد
+  الاسترجاع ظهر واتأكّد → دخول للوحة → `/security` عرض الـPasskey صح → `/branding` رفع ملف حقيقي
+  رجّع `403 AUTH_006` → `<StepUpDialog>` فتح تلقائي → تأكيد بنفس الـauthenticator → الطلب الأصلي
+  اتعاد بنجاح من غير ما المستخدم يعمل أي حاجة تانية. بيانات الاختبار (credential/session/recovery
+  codes بتاعة `super_admin` التجريبي) اتنضّفت من الـDB بعد التأكد.
+
 ## ملاحظات Next.js 16 (breaking changes حقيقية اتلقطت)
 
 - **`middleware.ts` بقى `proxy.ts`، والدالة اسمها `proxy` مش `middleware`** — الاسم القديم deprecated. اتعمل التحويل هنا باستخدام الـ codemod الرسمي (`npx @next/codemod@canary middleware-to-proxy .`)، مش تخمين.

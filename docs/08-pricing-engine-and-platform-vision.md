@@ -515,7 +515,33 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 - تحديث `apps/api/src/modules/payments/README.md` بالقرارات الجديدة (كان على الليستة، ما اتعملش).
 - حذف الملفات القديمة `payment-gateway.interface.ts`/`paymob-gateway.service.ts` **اتعمل بالفعل** (مش ناقص).
 
-**بنود 14-30 من §17 لسه `NOT STARTED` بالكامل** — إنتاجية configurable، دفعات طوارئ، critical_offer push، MFA Phase 2 frontend، بصمة Flutter، مراجعة أمان نهائية. راجع task list السيشن (#62-#66) لتفاصيل كل بند ونقطة البداية المقترحة لكل واحد.
+**§17.21 (MFA Phase 2 frontend، `DONE + LIVE VERIFIED`)** — قبل كده كانت أي حساب High-Privilege
+(super_admin وأي حساب عنده `payments.confirm_manual`/`branding.manage`/إلخ من `MFA_REQUIRED_PERMISSIONS`)
+**مقفول فعليًا برّه لوحة الإدارة** — الباك-إند بيرجّع `mfa_required` بدل TokenPair والـfrontend
+كان بيحاول يحط `undefined` في كوكي الـrefresh (بَقّة حقيقية اتلقطت، مش نظرية). اتصلح بالكامل:
+- `apps/admin/src/lib/auth-context.tsx`: `verifyOtp()` بيفرّع على `mfa_required`، `enrollPasskey()`/
+  `authenticateWithPasskey()` جديدين (`@simplewebauthn/browser`)، و**Step-Up تلقائي وشفّاف** —
+  `authedFetch`/`authedFetchPaginated` بيمسكوا `AUTH_006` زي `401` بالظبط: يفتحوا حوار، يستنوا
+  تأكيد Passkey، يعيدوا نفس الطلب بـ`X-Step-Up-Token`. الصفحات (`/branding` مثلاً) مش عارفة عن
+  Step-Up خالص — تنفيذ حرفي لطلب المالك "متخليش المستخدم يبدأ العملية من الأول".
+- `/login` بقى بيفرّع لـ3 مسارات (`ceremony=registration`/`authentication`/استرجاع بكود)، مع حوار
+  عرض أكواد الاسترجاع مرة واحدة بس (إجباري التأكيد قبل الاستمرار).
+- `/security` (صفحة جديدة) — إدارة Passkeys (شيل بس) + الأجهزة/الجلسات (إلغاء فردي/كلي).
+- `payments.confirm_manual`/`branding.manage` اتضافوا لـ`MFA_REQUIRED_PERMISSIONS`
+  (`mfa-policy.service.ts`) — تحكم مباشر في فلوس/براندنج حقيقي، نفس مبدأ `refunds.issue`.
+- **اتأكد حي بمتصفح Chromium حقيقي (Playwright + CDP virtual WebAuthn authenticator، مش mock)**:
+  تسجيل دخول super_admin → `ceremony=registration` → تسجيل Passkey فعلي → حوار أكواد الاسترجاع →
+  دخول للوحة → `/security` عرض الـPasskey → `/branding` رفع ملف حقيقي رجّع `403 AUTH_006` تلقائيًا
+  → `<StepUpDialog>` فتح لوحده → تأكيد → الرفع الأصلي نجح من غير أي تدخل تاني من المستخدم. تفاصيل
+  كاملة + لقطة الأوامر في `apps/admin/README.md`. بيانات الاختبار (Passkey/session/recovery codes
+  التجريبية) اتنضّفت من الـDB بعدها.
+
+**فرع البراندنج (`branding.manage` UI، جزء من ربط §28 الجديد)**: `/branding` (صفحة جديدة) — كارت
+لكل نوع أصل (6 أنواع)، معاينة حية، رفع (multipart، Step-Up تلقائي عبر البنية فوق)، رجوع للـfallback.
+اتأكد حي في نفس تشغيلة Playwright فوق (الرفع نجح فعليًا بعد الـStep-Up).
+
+**لسه `NOT STARTED`** من §17: §17.14-15 (إنتاجية configurable، دفعات طوارئ)، §17.16 (critical_offer
+push)، §17.22 (بصمة Flutter)، §17.25-27 (مراجعة أمان نهائية). راجع task list السيشن (#62, #63, #65, #66).
 
 ---
 
