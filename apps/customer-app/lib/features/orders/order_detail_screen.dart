@@ -7,6 +7,7 @@ import '../catalog/models.dart' show BookingModeJson;
 import '../chat/chat_screen.dart';
 import '../payments/card_payment_screen.dart';
 import '../payments/fawry_reference_screen.dart';
+import '../payments/instapay_reference_screen.dart';
 import '../payments/payments_repository.dart';
 import '../ratings/google_review_prompt.dart';
 import '../ratings/rating_dialog.dart';
@@ -18,7 +19,11 @@ import 'models.dart';
 import 'orders_repository.dart';
 
 // نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط.
-const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment'};
+// pending_payment (docs/08 §19 بند 1) — دفع قبل التوزيع (ADR-0013): لو محاولة الدفع الأولى وقت
+// إنشاء الطلب (CreateOrderScreen._startPrepayment) فشلت أو العميل رجع من غير ما يكمّل، الطلب
+// بيفضل هنا يقدر يدفع منه تاني (نفس الأزرار) بدل ما يوصل شاشة بلا أي فعل ممكن — الباك-إند
+// (assertPayable) أصلاً بيسمح بالتحصيل للحالة دي.
+const Set<String> _payableOrderStatuses = {'work_completed', 'awaiting_payment', 'pending_payment'};
 
 // نفس ACTIVE_TRACKING_STATUSES في order-tracking.gateway.ts بالظبط.
 const Set<String> _activeTrackingStatuses = {'accepted', 'technician_on_way', 'technician_arrived', 'in_progress'};
@@ -51,6 +56,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   String? _walletIdempotencyKey;
   String? _cardIdempotencyKey;
   String? _fawryIdempotencyKey;
+  String? _instapayIdempotencyKey;
 
   @override
   void initState() {
@@ -419,6 +425,29 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // InstaPay — كانت فجوة UI موثّقة صراحة (docs/08 §19 بند 1): الـendpoint (POST /orders/:id/pay-with-instapay)
+  // موجود من ADR-0013 بلا أي شاشة بتنادي عليه خالص، رغم إن باقي الطرق التلاتة (محفظة/كارت/فوري)
+  // كانوا متوصّلين. نفس نمط _payWithFawryReference بالحرف.
+  Future<void> _payWithInstaPay() async {
+    setState(() => _paying = true);
+    try {
+      _instapayIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
+      final reference = await _paymentsRepository.payWithInstaPay(widget.orderId, _instapayIdempotencyKey!);
+      if (!mounted) return;
+      final confirmedPaid = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => InstaPayReferenceScreen(orderId: widget.orderId, reference: reference)),
+      );
+      if (confirmedPaid == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتدفع بنجاح ✅')));
+      }
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   @override
@@ -637,6 +666,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           onPressed: _paying ? null : _payWithFawryReference,
                           icon: const Icon(Icons.storefront_outlined),
                           label: const Text('ادفع في أقرب فوري'),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _paying ? null : _payWithInstaPay,
+                          icon: const Icon(Icons.send_outlined),
+                          label: const Text('ادفع عبر InstaPay'),
                         ),
                       ],
                       if (customerCancellableStatuses.contains(order.orderStatus)) ...[

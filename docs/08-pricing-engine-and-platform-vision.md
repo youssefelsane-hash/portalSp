@@ -994,3 +994,40 @@ unit test، 3 اختبارات): دلتا=صفر يسوّي تلقائيًا م�
 
 فجوة موثّقة صراحة، خارج نطاق هذا التنفيذ: تصميم UI جديد في apps/customer-app لشاشة "ادفع
 المبلغ الإضافي" — العميل هيشوف الفرق كـ"دفعة جديدة" في نفس شاشات الدفع الموجودة أصلاً.
+
+### تحديث تنفيذ §19 — بند 1 (Customer App: اختيار وسيلة الدفع + شاشة دفع قبل التأكيد) — ✅ `DONE + LIVE VERIFIED`
+
+`CreateOrderScreen` (`apps/customer-app/lib/features/orders/create_order_screen.dart`) بقى
+فيها قسم "طريقة الدفع" جديد (3 `RadioListTile<String?>`: دفع بعد الخدمة/بطاقة/InstaPay) بين
+كارت ملخص السعر ووصف المشكلة. `OrdersRepository.create()` بقت تبعت `payment_method` في الـbody
+لو العميل اختار كارت/InstaPay. لو الطلب الراجع `order_status == pending_payment` (ADR-0013)،
+الشاشة بتفتح فورًا شاشة الدفع المناسبة: `CardPaymentScreen` الموجودة أصلاً (صفر تعديل — نفس
+النمط اتستخدم زي ما هو) أو `InstaPayReferenceScreen` جديدة (نسخة من نمط `FawryReferenceScreen`
+بالحرف: رقم مرجعي + تعليمات، polling كل 2 ثانية × 5 محاولات على `GET /orders/:id` لحد
+`payment_status=='paid'`). `PaymentsRepository.payWithInstaPay()` جديدة. `order_detail_screen.dart`
+اتضاف له زرار InstaPay جنب Fawry الموجود، و`_payableOrderStatuses` اتوسّعت تشمل `pending_payment`
+(شبكة أمان لإعادة محاولة دفع فشل/اتترك في نص الطريق).
+
+**🔴 بَقّة حرجة حقيقية اتلقطت حيًا أثناء بناء الميزة دي (مش في UI الجديد نفسه — في state machine
+الباك-إند اللي كانت موجودة من زمان)**: `ORDER_TRANSITIONS[PENDING_PAYMENT]`
+(`apps/api/src/modules/orders/order-state-machine.ts`) معندهاش `CANCELLED_BY_CUSTOMER` خالص،
+رغم إن `PENDING_PAYMENT` مُدرجة صراحة في `CUSTOMER_CANCELLABLE_STATUSES` (بتقول إن العميل يقدر
+يلغيها). يعني أي عميل حقيقي بدأ دفع مسبق (كارت/InstaPay) وغيّر رأيه قبل ما يكمّل الدفع كان
+هيترفض بـ`ORDR_003`/409 "انتقال حالة غير مسموح" لو حاول يلغي — رغم إن الواجهة بتقوله إنه يقدر.
+البَقّة دي كانت **غير مرئية تمامًا** لكل الـ151 اختبار jest اللي كانت عدّية قبل كده (مفيش
+واحد فيهم اختبر إلغاء عميل لطلب `pending_payment`) ولمراجعة الكود الثابتة — اتلقطت بس لأن
+الاختبار الحي الجديد (`test_live/pending_payment_order_creation_live_test.dart`) حاول يعمل
+تنظيف طبيعي (`cancel` بعد التأكد إن `pay-with-card` بترفض بوضوح لعدم وجود بيانات Paymob في
+بيئة التطوير) ورجع `409` حقيقي غير متوقع. الإصلاح: إضافة `CANCELLED_BY_CUSTOMER` (زي
+`CANCELLED_BY_SYSTEM`/`EXPIRED` الموجودين أصلاً) لقايمة انتقالات `PENDING_PAYMENT`. اتضاف
+`order-state-machine.spec.ts` جديد (اختبار وحدة نقي، 3 اختبارات) — واحد منهم عام: بيتأكد إن
+**كل** حالة في `CUSTOMER_CANCELLABLE_STATUSES` فعلاً عندها `CANCELLED_BY_CUSTOMER` كانتقال
+مسموح، عشان يمنع تكرار نفس فئة البَقّة لأي حالة جديدة تتضاف مستقبلاً لأي من القايمتين بمفردها.
+
+اتأكد حيًا بالكامل: `flutter analyze` نضيف (صفر أخطاء/تحذيرات، الـ34 `info` عن
+`RadioListTile.groupValue` المهجورة موجودة بالفعل في الكود القديم مش إضافة جديدة)، اختبار
+Flutter حي كامل (`pending_payment_order_creation_live_test.dart` — عميل حقيقي جديد، طلب حقيقي
+كارت وInstaPay كل واحد بيرجع `pending_payment`، محاولة الدفع بترفض `503`/"مش متاح دلوقتي"
+بالظبط زي المتوقع لبيئة بلا بيانات اعتماد بوابة، والإلغاء بعدها بينجح — ده اللي كشف البَقّة
+وأثبت الإصلاح). `tsc --noEmit` → `nest build` → `jest` (29 suite، 154 اختبار، شامل
+`order-state-machine.spec.ts` الجديد) كلهم عدّوا نضيف.
