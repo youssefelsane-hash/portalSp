@@ -241,9 +241,35 @@ export class PaymentsService {
       }),
     );
 
-    // عمولة المنصة والفني بتتسوّى دايماً عبر محفظة المنصة، حتى في الكاش — الفني فعلياً
-    // ماسك الكاش من العميل، فده تسوية محاسبية داخلية مش تحويل فلوس حقيقي (موثّق في README).
-    if (technicianEarningCents > 0 && order.technicianId) {
+    // تسوية اتجاه الفلوس الصح حسب مين ماسك الكاش فعليًا (docs/08 §20 بند 2/3/4) — كانت بَقّة
+    // محاسبية جوهرية: settleAndComplete() كانت دايمًا بتحوّل technicianEarningCents من محفظة
+    // المنصة لمحفظة الفني بغض النظر عن طريقة الدفع، وكأن المنصة هي اللي ماسكة الفلوس دايمًا.
+    // ده صحيح للطرق الإلكترونية (wallet/card/instapay/fawry — المنصة فعلاً استلمت الفلوس عبر
+    // البوابة/محفظة العميل الداخلية)، بس **غلط تمامًا للكاش**: الفني بياخد المبلغ الكامل من
+    // العميل يدًا بيد، فمفروض هو اللي مديون للمنصة بالعمولة، مش العكس. النتيجة العملية للبَقّة
+    // القديمة: طلب كاش 1000ج (عمولة 200/أرباح 800) كان بيخلّي رصيد محفظة الفني +800 كأن المنصة
+    // مدينة له، فيقدر يطلب صرف 800ج إضافيين فوق الـ1000ج اللي ماسكها بالفعل — فلوس مضاعفة حقيقية.
+    //
+    // **الحل عام لأي مزيج دفع، مش مجرد فحص paymentMethod الحالي**: بند إضافي بعد دفع مسبق
+    // إلكتروني (ADR-0015) ممكن يتحصّل جزء منه كاش والباقي كارت لنفس الطلب — فبنحسب كام فعليًا
+    // الفني ماسكه كاش **لنفس الطلب ده** (مجموع كل صفوف payments بـpayment_method=cash وpayment_status=succeeded،
+    // بما فيها الدفعة الحالية اللي اتسجّلت قبل نداء الدالة دي مباشرة)، ونقارنه بنصيب الفني العادل
+    // (technicianEarningCents، محسوب على الإجمالي النهائي الكامل زي ما هو دايمًا). الفرق (net)
+    // هو الحركة الوحيدة المطلوبة، باتجاهها الصحيح:
+    // - net > 0 → المنصة ماسكة فلوس أكتر من نصيب الفني (الحالة الإلكترونية العادية، أو كاش جزئي
+    //   بس مش كل حاجة) → تحويل عادي من محفظة المنصة لمحفظة الفني (ORDER_EARNING)، زي زمان بالحرف.
+    // - net < 0 → الفني ماسك كاش أكتر من نصيبه العادل (كاش كامل، أو كاش أكتر من نصيبه) → الفني
+    //   مديون للمنصة بالفرق، خصم من محفظته لمحفظة المنصة (COMMISSION_DEDUCTION — كانت موجودة في
+    //   enum WalletTxType من زمان بلا أي استخدام حقيقي، أول استهلاك ليها هنا).
+    // - net = 0 → مفيش حركة مطلوبة خالص (الفني ماسك بالظبط نصيبه العادل، نادر بس ممكن).
+    //
+    // **إثبات إن refundOrder() (تحت) ماحتاجش أي تعديل مقابل**: صيغة عكس أرباح الفني هناك
+    // (`technicianReversalCents = round(technicianEarningCents * refundAmount / paymentAmount)`)
+    // بتعمل نفس اتجاه الخصم (فني→منصة) دايمًا، بغض النظر عن كانت آخر حركة ائتمان أو خصم — وده
+    // بالظبط الصح رياضيًا: لو الفني كان مديون (كاش)، الاسترداد بيزوّد الدين (لازم يرجّع الأصل
+    // كامل مش بس العمولة)؛ لو كان دائن (إلكتروني)، الاسترداد بيعكس الائتمان زي زمان. اتأكد
+    // بالحساب اليدوي الكامل لسيناريوهات كاش/إلكتروني/مختلط قبل التنفيذ (docs/08 §20).
+    if (order.technicianId) {
       const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
       const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
       const technicianWallet = await this.walletsService.getOrCreateWallet(
@@ -251,19 +277,47 @@ export class PaymentsService {
         WalletOwnerType.TECHNICIAN,
       );
 
-      await this.walletsService.doubleEntry(
-        {
-          fromWalletId: platformWallet.id,
-          toWalletId: technicianWallet.id,
-          amountCents: technicianEarningCents,
-          transactionType: WalletTxType.ORDER_EARNING,
-          referenceType: 'order',
-          referenceId: order.id,
-          descriptionAr: `أرباح طلب ${order.orderNumber}`,
-          allowNegativeBalance: true, // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود
-        },
-        manager,
-      );
+      const cashSumRow = await manager
+        .createQueryBuilder(Payment, 'p')
+        .select('COALESCE(SUM(p.amount_cents), 0)', 'cash_collected_cents')
+        .where('p.order_id = :orderId AND p.payment_method = :cashMethod AND p.payment_status = :succeeded', {
+          orderId: order.id,
+          cashMethod: PaymentMethod.CASH,
+          succeeded: PaymentGatewayStatus.SUCCEEDED,
+        })
+        .getRawOne<{ cash_collected_cents: string }>();
+      const cashHeldByTechnicianCents = Number(cashSumRow?.cash_collected_cents ?? 0);
+      const netMovementCents = technicianEarningCents - cashHeldByTechnicianCents;
+
+      if (netMovementCents > 0) {
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: platformWallet.id,
+            toWalletId: technicianWallet.id,
+            amountCents: netMovementCents,
+            transactionType: WalletTxType.ORDER_EARNING,
+            referenceType: 'order',
+            referenceId: order.id,
+            descriptionAr: `أرباح طلب ${order.orderNumber}`,
+            allowNegativeBalance: true, // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود
+          },
+          manager,
+        );
+      } else if (netMovementCents < 0) {
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: technicianWallet.id,
+            toWalletId: platformWallet.id,
+            amountCents: -netMovementCents,
+            transactionType: WalletTxType.COMMISSION_DEDUCTION,
+            referenceType: 'order',
+            referenceId: order.id,
+            descriptionAr: `عمولة كاش طلب ${order.orderNumber} — الفني ماسك المبلغ كامل يدًا بيد`,
+            allowNegativeBalance: true, // دَين مشروع على الفني (هيتسوّى في الصرف الجاي)، مش سحب فوق رصيد حقيقي
+          },
+          manager,
+        );
+      }
     }
 
     // كسب نقاط ولاء تلقائي — كانت فجوة موثّقة صراحة ("معدل الكسب مالوش رقم في القاموس، مش
@@ -1351,5 +1405,51 @@ export class PaymentsService {
         ),
       );
     }
+  }
+
+  /**
+   * تصحيح محفظة يدوي (docs/08 §20 بند 5) — كانت فجوة حقيقية: `AdminWalletController` قراءة بس
+   * (GET)، صفر مسار لأدمن/مالية يصحّح رصيد فني (مثلاً الفني سجّل تحصيل كاش غلط، الصح أقل).
+   * **مبدأ append-only بالحرف**: مفيش تعديل لأي قيد قديم — قيد `ADJUSTMENT` جديد بس (نفس آلية
+   * `doubleEntry()`/`reverseDoubleEntry()` الموجودة، صفر منطق محاسبي جديد)، فالتاريخ الأصلي
+   * (مثلاً الـ`COMMISSION_DEDUCTION` وقت التسوية) يفضل زي ما هو للأبد — التصحيح ظاهر كحركة منفصلة
+   * لها سببها وتوقيتها ومين عملها، مش استبدال للرقم القديم. محفظة المنصة هي الطرف التاني دايمًا
+   * (نفس نمط bonus/penalty الموجودين بالفعل في `technician-kpi.service.ts`/`orders.service.ts`).
+   */
+  async adminAdjustWallet(
+    adminUserId: string,
+    targetUserId: string,
+    amountCents: number,
+    direction: 'credit' | 'debit',
+    reasonAr: string,
+    meta?: AuditActorMeta,
+  ): Promise<{ debit: unknown; credit: unknown; newBalanceCents: number }> {
+    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    const targetWallet = await this.walletsService.findByUserIdOrThrow(targetUserId);
+
+    const entry = await this.walletsService.doubleEntry({
+      fromWalletId: direction === 'credit' ? platformWallet.id : targetWallet.id,
+      toWalletId: direction === 'credit' ? targetWallet.id : platformWallet.id,
+      amountCents,
+      transactionType: WalletTxType.ADJUSTMENT,
+      referenceType: 'admin_adjustment',
+      referenceId: adminUserId,
+      descriptionAr: reasonAr,
+      performedByUserId: adminUserId,
+      allowNegativeBalance: true, // تصحيح إداري واعي — مينفعش يترفض برصيد "غير كافٍ"
+    });
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'wallet.adjusted',
+      entityType: 'wallet',
+      entityId: targetWallet.id,
+      newValues: { target_user_id: targetUserId, amount_cents: amountCents, direction, reason_ar: reasonAr },
+      meta,
+    });
+
+    const reloaded = await this.walletsService.findByUserIdOrThrow(targetUserId);
+    return { debit: entry.debit, credit: entry.credit, newBalanceCents: reloaded.balanceCents };
   }
 }

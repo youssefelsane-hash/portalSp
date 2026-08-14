@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -15,6 +16,7 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
   let service: RecurringOrdersService;
   let createSpy: jest.Mock;
   let emitSpy: jest.Mock;
+  let setBehaviorForThisTemplate: (fn: () => Promise<{ id: string }>) => void;
 
   const runId = Date.now().toString(36);
   const ids = { customerUser: '', customerProfile: '', service: '', address: '', category: '', template: '' };
@@ -54,15 +56,31 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
     );
     ids.address = address.id;
 
+    // is_active=false هنا عمدًا (مش true) — راجع sweepOwnTemplateOnly() تحت لسبب مفصّل.
     const [template] = await q(
       `INSERT INTO recurring_order_templates (customer_id, service_id, address_id, booking_mode, frequency, next_run_at, is_active)
-       VALUES ($1,$2,$3,'individual','weekly', now() - interval '1 minute', true) RETURNING id`,
+       VALUES ($1,$2,$3,'individual','weekly', now() - interval '1 minute', false) RETURNING id`,
       [ids.customerProfile, ids.service, ids.address],
     );
     ids.template = template.id;
 
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
-    createSpy = jest.fn();
+    // sweep() بيدور على *كل* القوالب المستحقة في الجدول الحقيقي، مش بس قالب الاختبار ده — لو ملف
+    // اختبار تاني (recurring-orders-payment-method.spec.ts مثلاً) شغّال بالتوازي (jest worker
+    // process منفصل، نفس قاعدة البيانات الحقيقية) وعنده قالب مستحق في نفس اللحظة، sweep() هينادي
+    // createSpy لقالب الاختبار التاني كمان — لو استخدمنا mockRejectedValueOnce/mockResolvedValueOnce
+    // العاديين، الرفض/النجاح المتحكم فيه ممكن "يتاكل" من نداء قالب مش بتاعنا خالص (بَقّة عزل اختبار
+    // حقيقية اتلقطت أثناء تشغيل الـsuite كامل — docs/08 §20). الحل: نفلتر بـservice_id (فريد لكل
+    // ملف اختبار عبر runId) — قوالب تانية بتاخد نجاح فوري تلقائي (مالهاش أثر على العدّاد بتاعنا)،
+    // وبس قالب الاختبار ده اللي بياخد السلوك المتحكم فيه (نجاح/فشل) اللي كل it() بيحدده.
+    let behaviorForThisTemplate: () => Promise<{ id: string }> = () => Promise.resolve({ id: 'unused' });
+    createSpy = jest.fn(async (_userId: string, dto: { service_id: string }) => {
+      if (dto.service_id !== ids.service) return { id: randomUUID() };
+      return behaviorForThisTemplate();
+    });
+    setBehaviorForThisTemplate = (fn) => {
+      behaviorForThisTemplate = fn;
+    };
     emitSpy = jest.fn();
 
     service = new RecurringOrdersService(
@@ -90,6 +108,23 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
     await dataSource.destroy();
   });
 
+  // sweep() الحقيقية بتدور على *كل* القوالب المستحقة في الجدول، مش قالب معيّن — لو ملف اختبار
+  // تاني (recurring-orders-payment-method.spec.ts) شغّال بالتوازي (jest worker process منفصل،
+  // نفس قاعدة البيانات الحقيقية) وعنده قالب مستحق في نفس اللحظة، sweep() بتاعه ممكن "يسرق"
+  // ويعالج قالب الاختبار ده كمان (ومنطقه هو دايمًا بينجح، فهيصفّر consecutive_failure_count بتاعنا
+  // في نص السلسلة المتحكم فيها) — بَقّة عزل اختبار حقيقية تانية اتلقطت أثناء تشغيل الـsuite كامل
+  // (docs/08 §20)، أعمق من فلترة createSpy بس (اللي بتحمي نداءات الاختبار ده من قوالب غريبة، لكن
+  // مش العكس). الحل: القالب `is_active=false` طول الوقت إلا في اللحظة الفعلية لنداء sweep()
+  // بتاعنا نفسه — نافذة الظهور لأي sweep() تانية بتتقلّص لأجزاء من الثانية بدل عمر الملف كله.
+  async function sweepOwnTemplateOnly(): Promise<void> {
+    await dataSource.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [ids.template]);
+    try {
+      await service.sweep();
+    } finally {
+      await dataSource.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [ids.template]);
+    }
+  }
+
   async function loadTemplate() {
     const [row] = await dataSource.query(
       `SELECT next_run_at, consecutive_failure_count, last_failure_reason, last_failed_at FROM recurring_order_templates WHERE id = $1`,
@@ -105,11 +140,14 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
 
   it('فشل مؤقت (تحت السقف) — next_run_at ميتحركش، consecutive_failure_count بيزيد، صفر إشعار', async () => {
     const before = await loadTemplate();
-    createSpy.mockRejectedValueOnce(new Error('DB blip مؤقت'));
+    setBehaviorForThisTemplate(() => Promise.reject(new Error('DB blip مؤقت')));
 
-    const generated = await service.sweep();
+    // مفيش تأكيد على القيمة الرجعة من sweep() هنا عمدًا — sweep() بترجّع عدد كل القوالب اللي
+    // اتولّدت بنجاح في التشغيلة دي (مش قالب الاختبار ده بس)، فممكن تتأثر بقوالب تانية مستحقة في
+    // نفس اللحظة من ملفات اختبار تانية شغالة بالتوازي. حالة قالب الاختبار ده نفسه (تحت) هي
+    // التأكيد الدقيق والمعزول فعليًا.
+    await sweepOwnTemplateOnly();
 
-    expect(generated).toBe(0);
     const after = await loadTemplate();
     expect(after.next_run_at.getTime()).toBe(before.next_run_at.getTime());
     expect(after.consecutive_failure_count).toBe(1);
@@ -119,8 +157,8 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
   });
 
   it('محاولة تانية فاشلة — لسه ميتخطاش، العداد بقى 2', async () => {
-    createSpy.mockRejectedValueOnce(new Error('فشل تاني'));
-    await service.sweep();
+    setBehaviorForThisTemplate(() => Promise.reject(new Error('فشل تاني')));
+    await sweepOwnTemplateOnly();
     const after = await loadTemplate();
     expect(after.consecutive_failure_count).toBe(2);
     expect(emitSpy).not.toHaveBeenCalled();
@@ -128,9 +166,9 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
 
   it('المحاولة الثالثة (وصلت السقف) — dead-letter: next_run_at بيتخطّى، العداد يرجع صفر، إشعار ops_manager بيتصدّر', async () => {
     const before = await loadTemplate();
-    createSpy.mockRejectedValueOnce(new Error('فشل ثالث ونهائي'));
+    setBehaviorForThisTemplate(() => Promise.reject(new Error('فشل ثالث ونهائي')));
 
-    await service.sweep();
+    await sweepOwnTemplateOnly();
 
     const after = await loadTemplate();
     expect(after.next_run_at.getTime()).toBeGreaterThan(before.next_run_at.getTime());
@@ -157,11 +195,12 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
        VALUES ($1,$2,$3,$4,'draft',0,0) RETURNING id`,
       [`TESTREL-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address],
     );
-    createSpy.mockResolvedValueOnce({ id: fakeOrder.id });
+    setBehaviorForThisTemplate(() => Promise.resolve({ id: fakeOrder.id as string }));
 
-    const generated = await service.sweep();
+    // نفس ملاحظة الاختبار الأول — مفيش تأكيد على القيمة الرجعة من sweep() (ممكن تتأثر بقوالب
+    // تانية من ملفات اختبار متوازية)، حالة قالب الاختبار ده نفسه هي التأكيد الدقيق.
+    await sweepOwnTemplateOnly();
 
-    expect(generated).toBe(1);
     const after = await loadTemplate();
     expect(after.consecutive_failure_count).toBe(0);
     expect(after.last_failure_reason).toBeNull();

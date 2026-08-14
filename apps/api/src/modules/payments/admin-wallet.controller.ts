@@ -1,7 +1,12 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
+import { JwtPayload } from '../auth/types/authenticated-request';
+import { AdjustWalletDto } from './dto/adjust-wallet.dto';
+import { PaymentsService } from './payments.service';
 import { WalletsService } from './wallets.service';
 import { toWalletResponseDto, toWalletTransactionResponseDto } from './dto/payments-response.dto';
 
@@ -14,7 +19,10 @@ import { toWalletResponseDto, toWalletTransactionResponseDto } from './dto/payme
 @Roles(UserType.ADMIN)
 @RequirePermission('wallets.view')
 export class AdminWalletController {
-  constructor(private readonly walletsService: WalletsService) {}
+  constructor(
+    private readonly walletsService: WalletsService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   @Get(':userId')
   async getWallet(@Param('userId', ParseUUIDPipe) userId: string) {
@@ -26,5 +34,19 @@ export class AdminWalletController {
       wallet: toWalletResponseDto(wallet),
       transactions: transactions.map(toWalletTransactionResponseDto),
     };
+  }
+
+  // تصحيح محفظة يدوي (docs/08 §20 بند 5) — صلاحية أضيق من القراءة (wallets.adjust بدل
+  // wallets.view، migration 0104) + MFA/step-up إجباري (MFA_REQUIRED_PERMISSIONS) لأنه تحويل
+  // فلوس حقيقي بقرار أدمن مباشر، نفس مستوى حساسية refunds.issue/payouts.approve بالظبط.
+  @Patch(':userId/adjust')
+  @RequirePermission('wallets.adjust')
+  async adjustWallet(
+    @CurrentUser() admin: JwtPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: AdjustWalletDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.paymentsService.adminAdjustWallet(admin.sub, userId, dto.amount_cents, dto.direction, dto.reason_ar, audit);
   }
 }

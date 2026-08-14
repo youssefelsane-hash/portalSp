@@ -19,6 +19,9 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // تغيير البراندنج المعروض لكل المستخدمين في كل التطبيقات (ADR-0014) — تحكم مباشر في هوية
   // المنصة العامة، نفس مستوى حساسية settings.manage فوق.
   'branding.manage',
+  // تصحيح محفظة يدوي (docs/08 §20 بند 5، migration 0104) — تحويل فلوس مباشر بقرار أدمن بلا أي
+  // نظام تلقائي يتحقق منه، نفس مستوى حساسية refunds.issue/payouts.approve بالظبط.
+  'wallets.adjust',
 ] as const;
 
 @Injectable()
