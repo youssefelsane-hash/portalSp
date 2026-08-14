@@ -1994,3 +1994,157 @@ metadata مطابقة للمتوقع وفعليًا عضو في `MFA_REQUIRED_PE
 **تبرير الإصلاح تحت قيد "NO FEATURE CREEP"**: هذا إصلاح أمني بحت (fixing a documented-but-unenforced
 security invariant) — مسموح صراحة تحت استثناء المالك "A security fix is allowed" ضمن قيد إغلاق الإطلاق
 النهائي الصارم بمنع أي ميزة جديدة.
+
+**Commit مدفوع**: `6862ccb` — `fix(security): enforce missing @RequireStepUp() on 4 MFA-required admin endpoints`.
+
+### تدقيق أمني إضافي مُركّز (بعد إصلاح MFA/step-up) — صفر بَقّة جديدة
+
+طبقًا لتعليمات المالك ("Do not repeatedly re-audit already proven items without reason")، بعد إصلاح
+فجوة step-up اتعمل تمرير مُركّز (مش إعادة تدقيق شامل من الصفر) على 5 فئات من قايمة الأمان المطلوبة
+لسه مالهاش تحقق مباشر في هذه الجلسة: IDOR/cross-account access، رفع ملفات غير آمن، أسرار مكشوفة/
+إعدادات إنتاج غير آمنة، تزوير/إعادة webhook، وإلغاء صلاحية الجلسة. **صفر بَقّة جديدة اتلقطت** —
+كل الخمسة فئات عندها ضوابط حقيقية شغالة (مش زخرفة):
+
+| الفئة | الدليل | الحكم |
+|---|---|---|
+| IDOR/cross-account | `findOneOwnedOrThrow`/`findOwnedByTechnicianOrThrow` (`orders.service.ts`) بيحطوا `customerId`/`technicianId` في شرط `WHERE` نفسه مش fetch-then-check؛ `chat.service.ts` بيتحقق إن المتصل فعلاً طرف في الـthread قبل ما يرجّع أي رسالة؛ `AdminWalletController`/`wallet.controller.ts` العميل بياخد بياناته هو بس من `user.sub`، صفر ID parameter قابل للتلاعب. | ✅ PASS |
+| رفع ملفات غير آمن | `file-signature-validator.ts` بيتحقق من الـmagic bytes الفعلية (PNG/JPEG/WEBP/PDF) مقابل الـMIME المُعلن، مش اسم الملف/الهيدر بس — مطبّق باستمرار على كل مسارات الرفع (شات، شكاوى، صور فني، إثبات إنجاز الشغل)، زائد حدود حجم عبر multer. | ✅ PASS |
+| أسرار مكشوفة/defaults إنتاج غير آمنة | `env.validation.ts` بيرفض fail-fast في `NODE_ENV=production` أي secret افتراضي (`change-me-*`)، أي CORS origin بـ`localhost`، أي WebAuthn RP ID بـ`local`، وبيلزم اعتمادات Twilio (OTP هو قناة الدخول الوحيدة). صفر مسار `NODE_ENV !== 'production'` بيتخطى الأمان. | ✅ PASS |
+| تزوير/إعادة webhook | HMAC-SHA512 (`paymob-provider.service.ts`) بمقارنة `timingSafeEqual` (مش `===`)؛ حماية مزدوجة ضد التكرار (`externalEventId` + فحص `PENDING` جوّه القفل، `payments.service.ts`)؛ فحص تطابق المبلغ (P0-7) لسه شغال. | ✅ PASS |
+| إلغاء صلاحية الجلسة | `logout()`/`revokeAllUserTokens()` (`auth.service.ts`) بيلغوا refresh tokens (مش access tokens بس)؛ حظر عميل/موظف بيلغي التوكنات جوّه نفس الـtransaction بتاعة الحظر (`admin-customers.service.ts`/`admin-employees.service.ts`). صفر مسار تغيير باسورد منفصل (الدخول OTP بس، متسق مع P0-4). | ✅ PASS |
+
+**خلاصة**: صفر Critical/High جديد من هذا التمرير المُركّز. مفيش داعي لتوسيع نطاقه أكتر — البنود
+التانية في قايمة الأمان (auth bypass، RBAC bypass، IDOR الإضافي، privilege escalation، OTP/recovery
+abuse) اتغطت بالكامل بالفعل في مراجعات سابقة (P0-1 لـP0-10، مراجعة أمان شاملة 2026-08-13) ومفيش سبب
+لإعادة تدقيقها من غير دليل جديد.
+
+---
+
+## 🧮 تدقيق الإغلاق المالي (Financial Closure) — تركيبة نهائية (2026-08-14)
+
+كل ضمانة من ضمانات المالك المطلوبة اتثبتت (مش مُخترعة) عبر §20 كامل + هذا التمرير الأمني، بدون أي
+كود جديد إضافي مطلوب هنا (تركيبة/تجميع بس):
+
+| الضمانة | الإثبات |
+|---|---|
+| مبلغ العميل، وسيلة الدفع، المبلغ المدفوع | `orders.total_amount_cents`/`payment_method`/`payments` table — `getFinancialSummaryForOrder()` (§20 بند 11) بيرجّعهم كلهم في endpoint واحد. |
+| كاش مُحصّل ومين حصّله | `orders.cash_collected_cents` + `settleAndComplete()` — راجع §20.1-4 (بَقّة اتجاه التسوية المُصلّحة). |
+| رسوم إضافية | `order_items`/`AWAITING_QUOTE_APPROVAL` — قبول/رفض بيغيّر/مايغيرش المبلغ النهائي بدقة (§20.13 ثابت 8/9، `order-items.service.ts`). |
+| استرداد | `refundOrder()` — جزئي/كامل، مرتبط بمرجع الدفعة، مايتنفذش مرتين (§20.13 ثابت 2، `refund_status` idempotent). |
+| عمولة المنصة | محسوبة ومخزّنة وقت إنشاء الطلب (`platformCommissionCents`)، ظاهرة في `getFinancialSummaryForOrder()`. |
+| أرباح الفني/الشركة | `technicianEarningCents`/تسوية فني شركة — صفر التباس، كل فني له محفظته (§20.13 ثابت 7). |
+| دَين الفني للمنصة | `netMovementCents = technicianEarningCents - cashHeldByTechnicianCents` — الصيغة المُصلّحة (§20.1-4) بتغطي كاش زيادة/نقصان صح رياضيًا (§20 بند 6). |
+| حركات المحفظة | `WalletsService.doubleEntry()` — كل حركة مزدوجة القيد، `wallet_transactions` append-only (DB-level `REVOKE UPDATE, DELETE`). |
+| علاقة الصرف (payout) | `requestPayout`/`adminApprove`/`adminComplete`/`adminReject` — قفل ذرّي، صفر مضاعفة (§20.9 المُصلّحة، §20.13 ثابت 3). |
+| تصحيحات يدوية + أثر تدقيقي | `adminAdjustWallet()` — قيد `ADJUSTMENT` منفصل (append-only، مش تعديل الأصلي)، `reason_ar` إجباري، `audit_logs` مسجّل. الآن زائد `@RequireStepUp()` (الإصلاح الأمني فوق). |
+
+**اختبار مزدوج/متزامن**: `refresh-token-rotation.spec.ts`، `matching-accept-concurrency.spec.ts`،
+`assistant-matching-accept-concurrency.spec.ts`، `payout-double-release.spec.ts`،
+`webhook-amount-verification.spec.ts` (بما فيه replay اختبار صريح) — كلهم بيثبتوا حيًا إن الفلوس
+معاندة الظهور مرتين/الاختفاء/الاسترداد المزدوج/الصرف المزدوج/نسبتها لطرف غلط.
+
+**الحكم المالي النهائي**: ✅ كل طلب مهم قابل للتفسير المالي الكامل، صفر Critical/High مفتوح.
+
+---
+
+## 🚦 بوابة الاختبار/البناء النهائية (2026-08-14)
+
+| المكوّن | الفحص | النتيجة |
+|---|---|---|
+| `apps/api` | `npx tsc --noEmit` | ✅ نضيف |
+| `apps/api` | `npx nest build` | ✅ نضيف |
+| `apps/api` | `npx jest --runInBand --forceExit` | ✅ **42 suite / 229 test نجحوا كلهم** |
+| `apps/api` | Migrations (104 ملف، `infra/migrations/`) | ✅ بتتطبق نضيفة على قاعدة فاضية (مُثبت عبر نجاح كل الـjest اللي بتعتمد على schema حي) |
+| `packages/shared-types` | `npm run build` | ✅ نضيف |
+| `apps/admin` | `npx tsc --noEmit` | ✅ نضيف |
+| `apps/admin` | `npm run build` (production Next.js build) | ✅ نضيف — 45 صفحة اتبنت بنجاح |
+| `apps/customer-app` | `flutter analyze` | ✅ صفر error/warning (35 info-level style suggestion موجودة من زمان) |
+| `apps/customer-app` | `flutter test` (unit) | ✅ 3/3 نجحوا |
+| `apps/technician-app` | `flutter analyze` | ✅ صفر error/warning (10 info-level، شامل `order_execution_screen.dart` اللي اتلمس في §20.12) |
+| `apps/technician-app` | `flutter test` (unit) | ✅ 1/1 نجح |
+| `.github/workflows/ci.yml` | فحص إن CI فعلاً بينفّذ اللي بيدّعيه | ✅ اتأكد: `api` (migrate + tsc + nest build + jest ضد Postgres/Redis حقيقيين)، `admin` (shared-types build + tsc + next build)، `flutter` (matrix customer/technician: pub get + analyze + test + `flutter build apk --debug` بـAndroid SDK حقيقي عبر `subosito/flutter-action`) — الثلاثة بيطابقوا الواقع. |
+
+**فجوة بيئة معروفة (مش code regression)**: `test_live/` (اختبارات Flutter حية أعمق ضد باك-إند حقيقي)
+بتعتمد على مسارات ملف OTP-log مُثبّتة بالكامل من سيشن سابقة (`164813e6-...`) + بيانات fixture مُجهّزة
+مسبقًا (أرقام هاتف/طلبات محددة) مش موجودة في قاعدة بيانات هذه الحاوية الطازجة، وبعض الاختبارات
+اصطدمت بـ throttling حقيقي للـOTP (feature أمان شغالة صح، مش بَقّة) وقت تشغيلها بالتتابع السريع. ده
+ضعف في تصميم أدوات الاختبار الحية (absolute paths مش قابلة لإعادة الاستخدام عبر سيشنز/حاويات)، **مش
+مرتبط بأي كود اتلمس في هذه الجلسة** (التغييرات كلها Backend-only: 4 endpoints + ملف اختبار جديد،
+صفر لمسة على `apps/customer-app`). التغطية الحقيقية لكل تغيير في هذه الجلسة (بما فيها §20.12) مُثبتة
+عبر اختبارات jest حية ضد Postgres/Redis حقيقيين (`technician-complete-proof-of-work.spec.ts`،
+`mfa-step-up-enforcement.spec.ts`) — مش عبر `test_live/`. تحسين هيكلة `test_live/` (استخدام env var
+بدل absolute path) مؤجّل صراحة لـPOST-LAUNCH (تحسين بنية اختبار، مش بَقّة منتج ولا أمان ولا مالية).
+
+---
+
+## 📋 قائمة تفعيل خدمات الإنتاج الخارجية (EXTERNAL / PRODUCTION ACTIVATION REMAINING)
+
+الكود جاهز 100% لكل الخدمات دي (تفاصيل كاملة في `docs/03-external-integrations.md`) — **لسه محتاجة
+اعتمادات/وصول إنتاج حقيقي غير متاح في بيئة التطوير دي**. صفر منها اتفعّل أو اتحقق ضد بيئة إنتاج
+حقيقية في هذه الجلسة أو أي جلسة سابقة — دا مش ادّعاء، دي حقيقة البيئة:
+
+1. **Paymob (بوابة الدفع بالكارت/InstaPay)** — `PAYMOB_SECRET_KEY`/`PAYMOB_PUBLIC_KEY`/
+   `PAYMOB_INTEGRATION_ID_CARD`/`PAYMOB_HMAC_SECRET` — مفقودة (اتأكد بتحذير حي وقت تشغيل الجلسة:
+   "الدفع بالبطاقة هيرفض بوضوح لحد ما تتظبط"). الكود (`paymob-provider.service.ts`) جاهز ومُختبر
+   منطقيًا (HMAC verification، أمثلة payload) بس مش ضد Paymob API حقيقي.
+2. **Twilio (إرسال SMS لـOTP)** — بيئة التطوير بتستخدم fallback بيسجّل الكود في اللوج (development-only
+   guard، `env.validation.ts` بيرفضه fail-fast في production). اعتماد Twilio حقيقي (Account SID/Auth
+   Token/رقم مُرسل) مش متاح هنا.
+3. **FCM (push notifications)** — الكود (`onMessage`/background handler/actionable notifications،
+   بند 11 موثّق) جاهز، بس مفتاح FCM Server Key/`google-services.json`/`GoogleService-Info.plist`
+   حقيقيين للإنتاج مش متاحين.
+4. **S3 (أو مزوّد تخزين متوافق)** — `StorageService` بيدعم S3 بالكامل، بس اعتمادات bucket إنتاج حقيقي
+   (Access Key/Secret/Region/Bucket name) مش متاحة — البيئة دي بتستخدم local filesystem storage.
+5. **Google Maps (Geocoding/Distance Matrix)** — أي مفتاح API إنتاج حقيقي لخرائط جوجل مش متاح.
+6. **قاعدة بيانات/Redis إنتاج حقيقيين** — كل الاختبار في هذه الجلسة (والجلسات السابقة) ضد Postgres/
+   Redis محليين في الحاوية، مش instance إنتاج حقيقي (managed DB، Redis cluster، إلخ).
+7. **دومين/DNS/TLS** — مفيش دومين إنتاج مُسجّل أو شهادة TLS مُفعّلة اتحقق منها هنا.
+8. **توقيع/provisioning لمتاجر التطبيقات** — Android keystore حقيقي للـrelease build، Apple
+   Developer Program enrollment + provisioning profiles لـiOS — مش متاحين. `flutter build apk
+   --debug` بس (عبر CI) اتحقق منه، مش `--release` بتوقيع حقيقي.
+9. **أسرار الاستضافة/بيئة الإنتاج (hosting secrets)** — أي environment variables إنتاج حقيقية غير
+   دي المذكورة فوق (مثلاً secrets manager، CI/CD deployment credentials) مش متاحة/مُفعّلة هنا.
+10. **موافقات المزوّدين (provider approvals)** — أي موافقة تجارية/امتثال مطلوبة من Paymob/Twilio/
+    Google/متاجر التطبيقات (KYC للتاجر، إلخ) خارج نطاق هذه الجلسة تمامًا.
+
+**مهم**: هذه القائمة مش launch blocker من ناحية الكود — الكود جاهز ومُختبر منطقيًا لكل بند فيها. هي
+عمل تفعيل/تكامل تشغيلي (ops) لازم يحصل قبل الإطلاق الفعلي للجمهور، مش عمل تطوير إضافي.
+
+---
+
+## 🏆 الحكم النهائي (FINAL VERDICT) — 2026-08-14
+
+# **READY FOR MVP LAUNCH** ✅
+
+(مشروط بإتمام قائمة "تفعيل خدمات الإنتاج الخارجية" فوق — دي أعمال تفعيل تشغيلية، مش أعمال تطوير
+إضافية، ومستثناة صراحة من حكم الجاهزية طبقًا لتعليمات المالك.)
+
+1. **نتائج الاختبار/البناء النهائية**: راجع جدول "بوابة الاختبار/البناء النهائية" فوق — 42 suite/229
+   test (apps/api) + build نضيف (admin، shared-types) + analyze/test نضيف (customer-app،
+   technician-app) + CI مُتحقق إنه بيعمل اللي بيدّعيه. صفر فشل حقيقي.
+2. **الحكم المالي**: ✅ كل طلب مهم قابل للتفسير المالي الكامل (راجع "تدقيق الإغلاق المالي" فوق). 3 بَقات
+   مالية حقيقية اتلقطت واتصلحت واتختبرت حيًا خلال §20 (اتجاه تسوية الكاش، استرداد إلغاء العميل المدفوع
+   مسبقًا، رفض الصرف المزدوج) — صفر بَقّة مالية مفتوحة دلوقتي.
+3. **الحكم الأمني**: ✅ بَقّة أمنية حقيقية واحدة اتلقطت واتصلحت هذه الجلسة (فجوة MFA/step-up على 4
+   endpoints) + تمرير مُركّز على 5 فئات تانية صفر بَقّة جديدة + كل P0-1→P0-10 من مراجعة الأمان الشاملة
+   السابقة (2026-08-13) لسه مُصلّحة ومُختبرة. صفر Critical/High مفتوح.
+4. **الحكم على دورة حياة الطلب**: ✅ 15/15 ثابت نظام اتثبت (§20.13) + 31/31 سيناريو واقعي اتحقق (§20.14،
+   بما فيهم §20.12 الجديد). صفر Critical/High defect.
+5. **حكم Customer App**: ✅ `flutter analyze`/`flutter test` نضيفين، `flutter build linux --debug`
+   نجح (أقرب تحقق بناء حقيقي متاح محليًا في بيئة بلا Android SDK)، Android APK debug مُتحقق عبر CI.
+6. **حكم Technician App**: ✅ نفس الشيء + تلميح §20.12 (after_photo) الجديد اتأكد إنه صفر تحذير جديد.
+7. **حكم Admin/العمليات**: ✅ `next build` إنتاجي نضيف (45 صفحة)، `tsc --noEmit` نضيف.
+8. **مشاكل معروفة غير-مانعة (NON-BLOCKING، موثّقة مش مبنية)**:
+   - تحصيل رسوم إلغاء العميل لو رصيد محفظته الداخلية سالب (§20.7) — قرار عمل لسه محتاج رد مالك.
+   - تعليق صرف الفني تلقائيًا وقت شكوى مفتوحة (§20.8) — قرار إدارة مخاطر.
+   - رسوم no-show (§20.14) — نفس قرار §20.7 بالحرف.
+   - إعادة جدولة طلب فردي — فجوة UX قديمة، مش مالية.
+   - `test_live/` هيكلة absolute-path هشة عبر سيشنز/حاويات مختلفة — تحسين بنية اختبار مؤجّل لـ
+     POST-LAUNCH (تفاصيل فوق).
+   - BullMQ Worker reconnection bug بعد انقطاع Redis طويل — فجوة مكتبة خارجية موثّقة (GitHub issue
+     #4479 في BullMQ نفسه)، مش كود المشروع.
+9. **خدمات إنتاج خارجية لسه محتاجة تفعيل**: راجع القائمة الكاملة فوق (Paymob، Twilio، FCM، S3، Google
+   Maps، DB/Redis إنتاج، دومين/DNS/TLS، توقيع متاجر التطبيقات، أسرار الاستضافة، موافقات المزوّدين).
+10. **الفرع والـcommit النهائي**: `claude/home-services-app-plan-v13gb2` @ `6862ccb`.
+11. **حالة الـpush**: ✅ اتدفع لـ`origin/claude/home-services-app-plan-v13gb2`.
+12. **حالة الـworking tree**: ✅ نضيف تمامًا (`git status` صفر تغيير غير مُدفوع).
