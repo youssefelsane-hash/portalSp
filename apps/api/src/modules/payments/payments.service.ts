@@ -1083,4 +1083,149 @@ export class PaymentsService {
     });
     return finalRefund;
   }
+
+  /**
+   * استرداد فوري لطلب اتلغى نظاميًا قبل ما فني يتحدد (docs/08 §19 بند 3+5) — بينادى من
+   * `OrderAutoCancelService` لما SEARCHING_TECHNICIAN مدفوعة مسبقًا (كارت/InstaPay، ADR-0013
+   * "PAY BEFORE DISPATCH") تتلغى تلقائيًا لعدم توفر فني خلال المهلة.
+   *
+   * **مختلف عمدًا عن `refundOrder()`**: هناك الطلب لازم يكون COMPLETED/DISPUTED عشان ينتقل لحالة
+   * REFUNDED نهائية (استرداد بعد خدمة اتقدّمت فعلاً أو نزاع). هنا الطلب **بالفعل** بقى
+   * CANCELLED_BY_SYSTEM — دي الحالة النهائية الصح اللي تحكي قصته الحقيقية (اتلغى، مش اتسلّم
+   * واترجعت فلوسه)، فمفيش انتقال orderStatus تاني مطلوب أو مسموح بيه (`ORDER_TRANSITIONS` مفيهاش
+   * CANCELLED_BY_SYSTEM → REFUNDED عمدًا) — بس `paymentStatus` لازم يتسجّل REFUNDED عشان يبان
+   * فعليًا إن الفلوس رجعت. مفيش عكس أرباح فني هنا: الفحص الدوري بيستهدف طلبات SEARCHING_TECHNICIAN
+   * بس (`technicianId` لسه null بالتعريف — مفيش فني اتعيّن أصلاً).
+   *
+   * نفس نمط أمان الـ3 مراحل بتاع `refundOrder()` بالظبط (صف Refund PROCESSING قبل أي نداء خارجي،
+   * النداء نفسه برّه أي transaction، تسجيل النتيجة في transaction منفصلة) — نفس السبب: نداء
+   * `provider.refund()` نداء HTTP خارجي حقيقي مايصحش يكون جوّه DB transaction ممكن ترجع لورا.
+   *
+   * **Idempotent عمدًا**: بترجع `null` بهدوء (بلا استثناء) لو مفيش دفعة ناجحة أو لو فيه Refund
+   * مسجّل بالفعل لنفس الدفعة — الفحص الدوري ممكن يعيد استدعاء نفس الطلب أكتر من مرة (نظريًا) لو
+   * `sweep()` اتأخر عليه بسبب مشكلة عابرة، فمفيش داعي يفشل بـexception يوقف بقية الدفعة.
+   */
+  async refundSystemCancelledOrder(orderId: string, reasonNotes: string): Promise<Refund | null> {
+    const prepared = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order || order.orderStatus !== OrderStatus.CANCELLED_BY_SYSTEM) return null;
+      if (order.paymentStatus !== OrderPaymentStatus.PAID) return null;
+
+      const payment = await manager.findOne(Payment, {
+        where: { orderId, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
+        order: { completedAt: 'DESC' },
+      });
+      if (!payment) return null;
+
+      const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
+      if (existingRefund) return null;
+
+      const provider = this.paymentProviders.getProvider(payment.paymentMethod);
+      const goesThroughGateway = provider.supportsRefund && !!payment.gatewayTransactionId;
+
+      const refundNumber = await this.nextRefundNumber(manager);
+      const refund = manager.create(Refund, {
+        refundNumber,
+        paymentId: payment.id,
+        orderId: order.id,
+        amountCents: payment.amountCents,
+        refundType: RefundType.FULL,
+        reasonNotes,
+        refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
+        refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
+        requestedByUserId: PLATFORM_SYSTEM_USER_ID,
+        approvedByUserId: PLATFORM_SYSTEM_USER_ID,
+        requestedAt: new Date(),
+        approvedAt: new Date(),
+        completedAt: goesThroughGateway ? null : new Date(),
+        providerRefundId: null,
+      });
+      await manager.save(refund);
+
+      return { order, payment, goesThroughGateway, provider, refund };
+    });
+
+    if (!prepared) return null;
+    const { order, payment, goesThroughGateway, provider, refund } = prepared;
+
+    let providerSucceeded = true;
+    let providerRefundId: string | null = null;
+    if (goesThroughGateway) {
+      const providerResult = await provider.refund({
+        providerReference: payment.gatewayTransactionId!,
+        amountCents: payment.amountCents,
+        reasonAr: reasonNotes,
+      });
+      providerSucceeded = providerResult.succeeded;
+      providerRefundId = providerResult.succeeded ? providerResult.providerRefundId : null;
+    }
+
+    const finalRefund = await this.dataSource.transaction(async (manager) => {
+      if (goesThroughGateway && !providerSucceeded) {
+        refund.refundStatus = RefundStatus.REJECTED;
+        await manager.save(refund);
+        return refund;
+      }
+
+      if (goesThroughGateway) {
+        refund.refundStatus = RefundStatus.COMPLETED;
+        refund.providerRefundId = providerRefundId;
+        refund.completedAt = new Date();
+        await manager.save(refund);
+      }
+
+      if (refund.refundMethod === RefundMethod.WALLET_CREDIT) {
+        const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+        const customerWallet = await this.walletsService.getOrCreateWallet(
+          customerProfile.userId,
+          WalletOwnerType.CUSTOMER,
+        );
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: platformWallet.id,
+            toWalletId: customerWallet.id,
+            amountCents: payment.amountCents,
+            transactionType: WalletTxType.REFUND,
+            referenceType: 'refund',
+            referenceId: refund.id,
+            descriptionAr: `استرجاع طلب ${order.orderNumber} — إلغاء نظامي`,
+            allowNegativeBalance: true,
+          },
+          manager,
+        );
+      }
+
+      payment.paymentStatus = PaymentGatewayStatus.REFUNDED;
+      await manager.save(payment);
+
+      order.paymentStatus = OrderPaymentStatus.REFUNDED;
+      await manager.save(order);
+      // orderStatus فضل CANCELLED_BY_SYSTEM عمدًا — مفيش صف OrderStatusHistory إضافي هنا،
+      // OrderAutoCancelService سجّل بالفعل صف الانتقال SEARCHING_TECHNICIAN → CANCELLED_BY_SYSTEM.
+
+      return refund;
+    });
+
+    await this.auditLog.record({
+      actorUserId: PLATFORM_SYSTEM_USER_ID,
+      actorRole: 'system',
+      action: finalRefund.refundStatus === RefundStatus.REJECTED ? 'order.refund_rejected' : 'order.refunded',
+      entityType: 'order',
+      entityId: orderId,
+      newValues: {
+        refund_id: finalRefund.id,
+        amount_cents: finalRefund.amountCents,
+        refund_status: finalRefund.refundStatus,
+        trigger: 'system_auto_cancel',
+      },
+    });
+
+    return finalRefund;
+  }
 }

@@ -100,5 +100,19 @@
   `PAID`، ومحاولة استرداد تانية فورية بترفض بـ409 واضح — الثغرة الأصلية اتقفلت.
 - محاولة استرداد تانية بعد رفض أول: بترفض برضه (منع تكرار محاولات على نفس الدفعة).
 
+## `refundSystemCancelledOrder()` — استرداد فوري لإلغاء نظامي قبل التوزيع (docs/08 §19 بند 3+5)
+
+بينادى من `OrderAutoCancelService` (`../orders/order-auto-cancel.service.ts`) لما طلب
+`SEARCHING_TECHNICIAN` مدفوع مسبقًا (كارت/InstaPay) يتلغى تلقائيًا لعدم توفر فني. **مختلف عمدًا
+عن `refundOrder()` فوق**: هناك الطلب لازم `COMPLETED`/`DISPUTED` عشان ينتقل لـ`REFUNDED` نهائية
+(استرداد بعد خدمة/نزاع). هنا الطلب **بالفعل** `CANCELLED_BY_SYSTEM` — الحالة الصح اللي تحكي قصته
+الحقيقية (اتلغى، مش اتسلّم واترجعت فلوسه) — فمفيش انتقال `orderStatus` تاني (`ORDER_TRANSITIONS`
+مفيهاش `CANCELLED_BY_SYSTEM → REFUNDED` عمدًا)، بس `paymentStatus` بيتسجّل `REFUNDED`. نفس نمط
+أمان الـ3 مراحل بتاع `refundOrder()` بالظبط ولنفس السبب (نداء بوابة خارجي حقيقي). مفيش عكس أرباح
+فني (الفحص الدوري بيستهدف طلبات `technicianId=null` بالتعريف). Idempotent — بترجع `null` بهدوء
+لو مفيش دفعة ناجحة أو فيه `Refund` مسجّل بالفعل، بدل ما ترمي استثناء يوقف بقية الفحص الدوري.
+
+اتأكد حي في `../orders/order-auto-cancel-pending-payment.spec.ts` — تفاصيل في `../orders/README.md`.
+
 `tsc --noEmit`/`nest build`/الـ133 اختبار (23 suite) عدّوا نضيف — صفر تغيير سلوكي في المسارات
 اللي مش بتعدّي على بوابة حقيقية (كاش/محفظة/InstaPay/فوري، `WALLET_CREDIT` fallback زي ما هو).

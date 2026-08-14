@@ -884,3 +884,35 @@ InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كا�
 فجوة متبقية موثّقة صراحة: صف `Refund` عالق بحالة `PROCESSING` (لو الـprocess وقع بعد نجاح
 البوابة وقبل تسجيل النتيجة) محتاج مراجعة يدوية عبر `provider.reconcile()` — مفيش auto-sweep
 تلقائي لسه، خارج نطاق هذا الإصلاح المحدّد.
+
+### تحديث تنفيذ §19 — بنود 3+5 (PENDING_PAYMENT sweep + استرداد تلقائي) — ✅ `DONE + AUTOMATED VERIFIED`
+
+`OrderAutoCancelService` (`apps/api/src/modules/orders/order-auto-cancel.service.ts`) بقى بيغطي
+مسارين إضافيين فوق الفحص الأصلي (SEARCHING_TECHNICIAN منتهي المهلة):
+
+1. **`sweepPendingPayment()`** — طلبات `PENDING_PAYMENT` أقدم من إعداد جديد
+   `orders.payment_timeout_minutes` (افتراضي 15 دقيقة، migration `0100`) بتتلغى `CANCELLED_BY_SYSTEM`
+   بلا أي استرداد — الدفع أصلاً مكملش، فمفيش فلوس اتاخدت ترجع.
+2. **استرداد فوري تلقائي** — لما `cancelIfStillSearching()` تلغي طلب `SEARCHING_TECHNICIAN`
+   لقيت `paymentStatus=PAID` (كارت/InstaPay مسبق الدفع)، بتنادي فورًا `PaymentsService.refundSystemCancelledOrder()`
+   جديدة — دالة منفصلة عمدًا عن `refundOrder()` الحالية (مش نفس الاستخدام): `refundOrder()` بتفترض
+   الطلب `COMPLETED`/`DISPUTED` وبتنقّله لحالة `REFUNDED` نهائية (استرداد بعد خدمة/نزاع)، بينما هنا
+   الطلب **بالفعل** `CANCELLED_BY_SYSTEM` (الحالة الصح اللي تحكي قصته الحقيقية — اتلغى قبل ما فني
+   يتحدد، مش اتسلّم واترجعت فلوسه) — فمفيش انتقال orderStatus تاني (`ORDER_TRANSITIONS` أصلاً
+   مفيهاش `CANCELLED_BY_SYSTEM → REFUNDED`)، بس `paymentStatus` بيتسجّل `REFUNDED`. نفس نمط أمان
+   الـ3 مراحل بتاع بند 4 بالظبط (صف `Refund` PROCESSING قبل أي نداء خارجي، النداء نفسه برّه أي
+   transaction، تسجيل النتيجة في transaction منفصلة) — نفس السبب: نداء بوابة خارجي حقيقي.
+   Idempotent (بترجع `null` بهدوء لو مفيش دفعة/فيه Refund مسجّل بالفعل)، ومفيش عكس أرباح فني
+   (الفحص بيستهدف طلبات مفيش فني اتعيّن عليها أصلاً).
+
+**فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح عمدًا** (مكتوبة كمان كتعليق في الكود نفسه): استخدام
+`promo_code` وقت إنشاء الطلب بيزوّد `PromoCode.usedCount` بس مفيش أي decrement/release ليه في أي
+مسار إلغاء بالكامل في النظام (مش بس هنا — ولا `OrdersService.cancel()` ولا إلغاء الفني). قصور
+نظامي أوسع سابق على هذا التعديل، محتاج قرار عمل منفصل (Business Decision Required).
+
+**اتأكد حي** (`order-auto-cancel-pending-payment.spec.ts`، 3 اختبارات ضد Postgres حقيقي):
+طلب `PENDING_PAYMENT` قديم يتلغى بلا استرداد، طلب `SEARCHING_TECHNICIAN` مدفوع (كارت) قديم
+يتلغى **ويترد فورًا تلقائيًا** (`orderStatus` فضل `CANCELLED_BY_SYSTEM`، `paymentStatus` بقى
+`REFUNDED`، صف `Refund` اتسجّل بالمبلغ والـ`providerRefundId` الصح)، وطلب `SEARCHING_TECHNICIAN`
+غير مدفوع (كاش) قديم يتلغى بلا أي محاولة استرداد كاذبة (regression). `tsc --noEmit` →
+`nest build` → `jest` كلهم عدّوا نضيف.
