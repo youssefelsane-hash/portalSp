@@ -439,3 +439,29 @@
 طلب غير موجود يترفض بوضوح (`ApiException`) بدل ما يرجّع بيانات فاضية بصمت. `tsc --noEmit`/
 `nest build`/40 suite (209 اختبار) عدّوا نضيف. صفر migration مطلوبة (صفر عمود جديد، البيانات كانت
 موجودة بالفعل).
+
+## إثبات إنجاز الشغل إجباري — صورة `after_photo` واحدة قبل `WORK_COMPLETED` (docs/08 §20 بند 12، قرار مالك نهائي 2026-08-14)
+
+**القرار**: عمداً بسيط لـMVP — صورة `after_photo` واحدة بس إجبارية قبل ما الفني يقدر يقفل الشغل،
+لكل الطلبات بلا استثناء (صفر قواعد حسب نوع الخدمة/الطوارئ)، صفر توقيع عميل، صفر إعداد قابل للتهيئة،
+صفر أثر رجعي على طلبات مكتملة بالفعل.
+
+**التنفيذ**: `transitionAsTechnician()` (الدالة المشتركة وراء `depart`/`arrive`/`start`/`complete`
+كلهم) — لو `to === WORK_COMPLETED` بس، بتعدّ صفوف `order_media` بـ`media_type='after_photo'`
+للطلب وترفض (`ErrorCode.ORDR_005`, `400`) لو صفر. الفحص قبل أي `transaction` (قراءة بس)، وجوّه
+الدالة المشتركة نفسها — يعني **مايتلفش** بنداء `POST /technician/orders/:id/complete` مباشرة (خارج
+Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`orders.module.ts` كانت مسجّلاها
+أصلاً في `TypeOrmModule.forFeature`، صفر تغيير موديول).
+
+**`apps/technician-app`**: تلميح استباقي في `order_execution_screen.dart` — لو الفعل الجاي
+`complete` ومفيش `after_photo` مرفوع لسه، سطر تحذير برتقالي فوق زرار "إنهاء الشغل" مباشرة (نفس فحص
+الباك-إند بالظبط). فشل النداء الفعلي (لو الفني تجاهل التلميح وضغط) بيظهر برسالة `ORDR_005` العربية
+الواضحة عبر نفس `_error`/`ApiException.message` pathway الموجود بالفعل لكل فعل تاني — صفر plumbing
+جديد. **صفر تعديل على زرار رفع الصور نفسه، صفر شاشة توقيع جديدة** — القرار رفضهم صراحة.
+
+**الاختبار**: `technician-complete-proof-of-work.spec.ts` (4 اختبارات حية، بتنادي
+`OrdersService.complete()` مباشرة — إثبات مباشر إن الفحص مايتلفش لو حد نادى الـendpoint بلا Flutter):
+إنهاء بلا `after_photo` يترفض (`ORDR_005`، الطلب يفضل `in_progress`)؛ صورة واحدة كافية (`work_completed`
+بنجاح)؛ أكتر من صورة مسموح (نفس النجاح، صفر حد أعلى)؛ `before_photo` بس مش كافي (النوع مهم مش أي
+صورة). `tsc --noEmit`/`nest build`/41 suite (213 اختبار) عدّوا نضيف. `flutter analyze` نضيف (صفر
+تحذير جديد). صفر migration (`order_media` موجودة من زمان، الفحص منطقي بس).
