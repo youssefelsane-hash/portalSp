@@ -887,6 +887,19 @@ InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كا�
 8. باقي البنود (10, 11, 13-16, 18-24) — تُفحص وتُقفل بالترتيب بعد الستة فوق، كل واحد بنفس منهجية
    "افحص الكود الفعلي أول، وثّق النتيجة، ابنِ لو فجوة حقيقية" — تفاصيل الحالة تُضاف هنا أول ما تُقفل.
 
+### تحديث تنفيذ §19 — بند 8 (RBAC مالي — default-deny) — ✅ `DONE + AUTOMATED VERIFIED`
+
+`GET /admin/payouts`, `GET /admin/payouts/:id/order-items`, `GET /admin/wallets/:userId` كانوا
+محميين بـ`@Roles(ADMIN)` بس بلا `@RequirePermission` — أي حساب أدمن (حتى `support_agent` بلا أي
+دور تشغيلي) كان يقدر يقرا بيانات صرف/محفظة حساسة. `GET /admin/reports/revenue` كانت تحت
+`reports.view` العامة الممنوحة لـ`ops_manager` كمان، رغم إنها بيانات مالية بحتة.
+
+`migration 0099`: صلاحيات جديدة `payouts.view`/`wallets.view`/`reports.view_revenue`، ممنوحة
+لـ`finance` بس (`super_admin` بياخدها bypass تلقائي). الكنترولرات التلاتة بقى عليها
+`@RequirePermission`. اتأكد حي (`financial-read-permissions.spec.ts`): `support_agent` صفر
+وصول، `ops_manager` عنده `reports.view` العامة بس مش الصلاحيات المالية الجديدة، `finance` عنده
+الصلاحيات التلاتة. `tsc`/`nest build`/الـ129 اختبار (22 suite) عدّوا نضيف.
+
 ### تحديث تنفيذ §19 — بند 4 (بَقّة refund transaction) — ✅ `DONE + AUTOMATED VERIFIED`
 
 `refundOrder()` (`payments.service.ts`) بقت 3 مراحل منفصلة بدل transaction واحدة تحتوي نداء
@@ -1157,3 +1170,109 @@ points→value حقيقي أو تخفي Redeem بالكامل في V1". بناء
 نطاق هذا الإصلاح كمان — التطبيقات ملهاش مفهوم "boot-time validation" زي NestJS's ConfigModule
 أصلاً (المفتاح بيتضمّن وقت الـbuild، مش runtime)، موثّق بالفعل في `docs/03-external-integrations.md`
 §5، وأي فحص build-time له هيتغطى في بند 18 (CI).
+
+### تحديث تنفيذ §19 — بند 18 (CI — `flutter analyze` بس، بلا `test`/`build`) — ✅ `DONE + LIVE VERIFIED`
+
+المالك لاحظ إن `.github/workflows/ci.yml` (بند 17 كان بناها من الصفر) بتشغّل `flutter analyze`
+بس لتطبيقَي Flutter — وده static analysis مش أكتر (بيعدّي حتى لو منطق الاختبار غلط تمامًا، وما
+بيلقطش أخطاء تصدير حقيقية زي تسجيل plugin ناقص في Kotlin أو مشكلة في `AndroidManifest.xml`).
+اختبارات `test/` الوحدة/widget الحقيقية اللي موجودة فعلاً في التطبيقين (منفصلة عمدًا عن `test_live/`
+اللي محتاجة باك-إند حي) ما كانتش بتتشغّل في CI خالص — يعني ممكن حد يكسرها ويعدّي الـPR بلا ما حد
+يلاحظ.
+
+الحل: خطوتين جداد اتضافوا بعد `flutter analyze` في job الـ`flutter` (matrix على التطبيقين):
+
+1. `flutter test` — يشغّل كل اختبارات `test/` الوحدة/widget الموجودة فعلاً (بلا باك-إند حي).
+2. `flutter build apk --debug` — فحص تصدير حقيقي فعلي للمنصة (Kotlin/Gradle/plugin registration)،
+   مش static analysis بس. بيستخدم توقيع debug تلقائيًا لأن `key.properties` (فيه أسرار حقيقية،
+   `.gitignore`) مش موجود في بيئة CI — نفس السلوك بالظبط بتاع `flutter run --release` محليًا بلا
+   keystore، تصميم موجود من زمان مش تعديل جديد. فحص توقيع الإصدار الحقيقي (`--release` بمفتاح
+   حقيقي) خارج نطاق CI عمدًا — ده جزء من عملية الإصدار (release) نفسها، مش فحص كل PR.
+
+**خارج نطاق هذا البند عمدًا (قرارات موثّقة صراحة، مش سهو)**:
+- `test_live/` (17 ملف customer-app + 10 technician-app) محتاجة سيرفر API حقيقي شغال + Postgres/Redis
+  حقيقيين (زي ما موضّح في README كل تطبيق) — تشغيلها في CI يحتاج بنية `services:` إضافية معقّدة
+  (Postgres+Redis+API نفسه كـservice container، مش مجرد DB زي job الـ`api`) وخارج نطاق البند
+  المطلوب من المالك هنا.
+- `apps/admin` ملهاش أي suite اختبارات Playwright مُثبَّت (رغم إن `playwright-core` موجودة
+  كـ`devDependency` — بتُستخدم تاريخيًا للتحقق اليدوي المباشر بس، مش suite دائم). بناء suite
+  Playwright جديد من الصفر مهمة منفصلة أكبر بكتير من نطاق "فجوة في CI موجود"، وخارج نطاق البند ده.
+
+اتأكد محليًا (بيئة السيشن دي معندهاش Android SDK كامل مُجهّز لتشغيل `flutter build apk` فعليًا،
+فالتحقق كان عبر قراءة الـworkflow YAML بعناية + `python3 -c "import yaml; yaml.safe_load(...)"`
+للتأكد من صحة الصياغة، زائد إن الأوامر التلاتة (`flutter pub get` / `flutter analyze` / `flutter test`)
+هي بالحرف نفس الأوامر اللي `apps/customer-app/README.md` و`apps/technician-app/README.md` بيوثّقوا
+إنها بتعدّي محليًا في تطوير المشروع) — تشغيل GitHub Actions الفعلي هيتأكد منه أول push/PR بعد
+الدمج (بيئة CI فيها Android SDK كامل عبر `subosito/flutter-action`، بعكس بيئة السيشن دي).
+
+### تحديث تنفيذ §19 — بند 19 (Migration checksum — تعديل ملف اتطبّق قبل كده مش بيتلاقط) — ✅ `DONE + LIVE VERIFIED`
+
+المالك لاحظ إن `infra/migrations/migrate.js` كان بيسجّل اسم الملف بس في `schema_migrations`
+(`filename VARCHAR(255) PRIMARY KEY, applied_at TIMESTAMPTZ`) — يعني لو حد عدّل محتوى ملف migration
+اتطبّق بالفعل (بدل ما يعمل ملف جديد برقم تالي، زي القاعدة في `CLAUDE.md`)، قاعدة البيانات مالهاش
+أي طريقة تعرف إن الملف اتغيّر، والتعديل بيتجاهل تمامًا في أي تشغيلة جديدة للـmigrate.js.
+
+الحل: عمود `checksum VARCHAR(64)` جديد (SHA-256 hex لمحتوى الملف وقت التطبيق)، بيتسجّل مع كل
+migration جديدة، وبيتقارن مع checksum الملف الحالي في كل تشغيلة لأي migration متسجّلة قبل كده:
+- **مطابق** → تخطي عادي (زي قبل).
+- **مختلف** → رفض فوري (`process.exit(1)`) برسالة واضحة بتوضّح checksum المسجّل وقت التطبيق مقابل
+  checksum الملف الحالي، وتوجّه لقاعدة "migration اتعملها commit تفضل ثابتة".
+- **صف قديم من قبل إضافة العمود (`checksum IS NULL`)** → بَكفِلّ (backfill) صامت بقيمة اليوم كنقطة
+  بداية، مش رفض — مفيش checksum تاريخي نقارن بيه أصلاً (التعديل المحتمل يبقى حصل قبل الميزة دي)،
+  فمفيش داعي نكسر أول تشغيلة بعد إضافة الميزة على قاعدة بيانات موجودة فعلاً.
+
+اتأكد حيًا (live) على قاعدة بيانات التطوير المحلية الحقيقية (Postgres/PostGIS شغالة فعليًا، مش mock)
+في 3 سيناريوهات:
+1. **تطبيق جديد + بَكفِلّ**: تشغيلة أولى بعد التعديل — 4 migrations معلّقة (`0099`-`0102`) اتطبّقوا
+   عاديًا، و98 صف قديم اتبكفلّوا (`checksum` كان `NULL`) بقيمة اليوم، صفر رفض.
+2. **إعادة تشغيل في حالة مستقرة**: تشغيلة تانية فورية — كل الـchecksums مطابقة، صفر بَكفِلّ، صفر رفض
+   (السلوك الطبيعي المتوقع لأي deploy تاني بلا migrations جديدة).
+3. **اكتشاف تلاعب (drift detection)**: نسخة احتياطية من `0002_enums.sql` (migration حقيقية متطبقة
+   بالفعل)، إضافة نص تلاعب لمحتواه، تشغيل `migrate.js` — اترفض فورًا بـ`exit code 1` ورسالة واضحة
+   بالـchecksum القديم/الجديد، من غير ما يلمس أي migration تانية. استعادة المحتوى الأصلي بعد كده،
+   وتأكيد `git status --short` إن الملف رجع مطابق تمامًا للنسخة المعمول لها commit (صفر فرق).
+
+**خارج نطاق هذا الإصلاح عمدًا**: صفر آلية "rollback" أو "undo migration" — ده تصميم قائم من الأول
+(migrations SQL خام، `synchronize:false` دايمًا، تصحيح أي غلط يبقى migration جديدة زي ما `CLAUDE.md`
+بينص)، مش جزء من فجوة الـchecksum. كمان صفر تحقق retroactive على تاريخ ما قبل الميزة دي — لو ملف
+اتغيّر بعد ما اتطبّق وقبل ما عمود الـchecksum يتضاف، مفيش طريقة نعرف بيها (نفس القيد المذكور في
+كود الـبَكفِلّ نفسه، موثّق كتعليق عربي جوّه `migrate.js`).
+
+### تحديث تنفيذ §19 — بند 20 (موثوقية توليد الطلبات المتكررة) — ✅ `DONE + LIVE VERIFIED`
+
+المالك لاحظ إن `RecurringOrdersService.generateFromTemplate()` كانت بتحرّك `next_run_at` قدّام
+دايمًا مهما كان سبب الفشل — يعني فشل مؤقت (DB/شبكة لحظية أثناء `OrdersService.create()`) كان بيسقط
+الموعد المستحق نهائيًا من أول محاولة، وسطر `logger.error()` بس بيوثّق الحادثة (بيتغرق وسط باقي
+اللوجات، صفر أثر تاني وصفر تنبيه لحد). قالب متكرر شهري لعميل معينه، لو فشلت محاولة توليده مرة واحدة
+بسبب عابر، كان بيخسر الموعد ده نهائيًا من غير ما حد يلاحظ لحد ما العميل يسأل "فين طلبي".
+
+الحل — إعادة محاولة محدودة + dead-letter مرئي (بدل السقوط الصامت من أول مرة):
+- أعمدة جداد على `recurring_order_templates`: `consecutive_failure_count` (INTEGER)،
+  `last_failure_reason`/`last_failed_at` (migration `0103`).
+- فشل ومحاولاته لسه تحت `MAX_CONSECUTIVE_FAILURES=3` → `next_run_at` **ميتحركش عمدًا**، فنفس
+  الموعد بيتحاول تاني في دورة `sweep()` الجاية (بعد دقيقة — نفس فترة الـsweep الموجودة، كافي لأغلب
+  الأعطال المؤقتة تتعافى من غير أي انتظار إضافي أو مكتبة backoff منفصلة).
+- وصل للسقف (3 محاولات، ~3 دقايق) → **dead-letter حقيقي**: `next_run_at` بيتخطّى الموعد ده نهائيًا
+  (عشان مش هيفضل يتحاول للأبد لو السبب دائم زي عنوان اتمسح)، العدّاد بيرجع صفر (لأول محاولة في
+  الموعد الجاي)، بس `last_failure_reason`/`last_failed_at` بيفضلوا محفوظين (مش بيتمسحوا غير لما
+  توليد ينجح فعلاً) — دليل تشخيصي دائم للأدمن، مش سطر log بيتغرق. حدث جديد
+  `orders.recurring_template_generation_failing` بيتصدّر مرة واحدة بس لكل نوبة فشل، بنفس نمط
+  `EmergencyDispatchStrugglingRoutingListener` بالحرف (`routeToRole` الموجود بالفعل) — بيوجّه
+  لـ`ops_manager` (`notification_routing_rules`، migration `0103` نفسها).
+- **واجهة أدمن**: `AdminRecurringTemplateResponseDto`/`RecurringTemplateResponseDto` (apps/api
+  وpackages/shared-types — الاتنين اتزامنوا؛ اكتشفنا أثناء الشغل إن `payment_method` (بند 6) كان
+  اتضاف لـDTO الـAPI وماتزامنش مع `packages/shared-types` وقتها، فاتصلح هنا كمان كفجوة صغيرة من
+  نفس الفئة) بقى فيهم الحقول الجداد. `apps/admin/src/app/recurring-orders/page.tsx` (شاشة موجودة
+  بالفعل من §32) بقى فيها عمود "الفشل" جديد بيعرض العدّاد + وقت آخر فشل + السبب (tooltip).
+
+اتأكد حيًا (live) بـ4 اختبارات جديدة (`recurring-orders-generation-reliability.spec.ts`) ضد
+Postgres حقيقية: فشل تحت السقف (next_run_at ثابت، العدّاد بيزيد، صفر إشعار) → فشل تاني (العدّاد 2)
+→ الفشل الثالث (dead-letter: next_run_at بيتخطّى فعليًا، العدّاد يرجع صفر، الإشعار بيتصدّر بالضبط
+مرة واحدة بالبيانات الصح) → نجاح بعد كده (العدّاد وسبب الفشل بيترجعوا NULL/صفر). `tsc` → `nest build`
+→ `jest` (32 suite، 174 اختبار، +1 suite +4 اختبارات عن قبل) عدّوا نضيف. `apps/admin`: `tsc --noEmit`
++ `next build` عدّوا نضيف بعد تحديث الشاشة.
+
+**خارج نطاق هذا الإصلاح عمدًا**: صفر Dead Letter Queue حقيقي (BullMQ/جدول منفصل) — القالب نفسه
+بيبقى الـ"سجل" (نفس فلسفة "فحص دوري مش BullMQ" الموجودة في تعليق الكلاس من الأول، عشان نتجنب بَقّة
+Worker recovery الموثّقة). لو المالك احتاج لاحقًا "قايمة كل نوبات الفشل تاريخيًا" (مش بس آخر نوبة)،
+ده تصميم schema إضافي (جدول `recurring_template_failure_log` مثلاً) خارج نطاق البند المطلوب هنا.

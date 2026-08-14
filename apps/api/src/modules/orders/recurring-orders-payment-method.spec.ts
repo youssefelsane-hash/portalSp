@@ -92,6 +92,7 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
       {} as never, // catalogService
       {} as never, // techniciansService
       { create: createSpy } as never, // ordersService — مزيّف عشان نسجّل الـDTO اللي وصله
+      { emit: jest.fn() } as never, // eventEmitter — مش متنادى في المسار السعيد (docs/08 §19 بند 20)
     );
   });
 

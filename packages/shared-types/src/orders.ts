@@ -98,10 +98,17 @@ export interface RecurringTemplateResponseDto {
   requested_technician_id: string | null;
   frequency: RecurringOrderFrequency;
   problem_description: string | null;
+  // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة: العمود ده اتضاف لـapps/api's
+  // RecurringTemplateResponseDto وماتزامنش هنا وقتها.
+  payment_method: 'card' | 'instapay' | null;
   next_run_at: string;
   last_generated_order_id: string | null;
   is_active: boolean;
   created_at: string;
+  // موثوقية التوليد (docs/08 §19 بند 20)
+  consecutive_failure_count: number;
+  last_failure_reason: string | null;
+  last_failed_at: string | null;
 }
 
 export interface AdminRecurringTemplateResponseDto extends RecurringTemplateResponseDto {

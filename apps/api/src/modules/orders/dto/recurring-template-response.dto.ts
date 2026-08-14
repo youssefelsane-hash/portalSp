@@ -13,6 +13,11 @@ export interface RecurringTemplateResponseDto {
   last_generated_order_id: string | null;
   is_active: boolean;
   created_at: string;
+  // موثوقية التوليد (docs/08 §19 بند 20) — consecutive_failure_count بيرجع صفر بمجرد نجاح توليد
+  // أو بمجرد ما نوبة فشل توصل للسقف وتتخطّى (dead-letter) — راجع RecurringOrdersService.recordFailure().
+  consecutive_failure_count: number;
+  last_failure_reason: string | null;
+  last_failed_at: string | null;
 }
 
 export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate): RecurringTemplateResponseDto {
@@ -29,6 +34,9 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     last_generated_order_id: template.lastGeneratedOrderId,
     is_active: template.isActive,
     created_at: template.createdAt.toISOString(),
+    consecutive_failure_count: template.consecutiveFailureCount,
+    last_failure_reason: template.lastFailureReason,
+    last_failed_at: template.lastFailedAt ? template.lastFailedAt.toISOString() : null,
   };
 }
 

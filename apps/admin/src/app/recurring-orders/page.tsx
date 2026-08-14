@@ -19,7 +19,9 @@ const PER_PAGE = 20;
 
 // وضوح الطلبات المتكررة للتشغيل (docs/08 §32) — كانت فجوة موثّقة صراحة: القوالب المتكررة
 // (`recurring_order_templates`) بتولّد طلبات حقيقية كل موعد من غير أي مسار أدمن يشوفها خالص —
-// مفيش طريقة يتابع بيها فريق العمليات قالب معطوب (`next_run_at` بيتحرّك قدّام حتى لو التوليد فشل).
+// مفيش طريقة يتابع بيها فريق العمليات قالب معطوب. عمود "الفشل" (docs/08 §19 بند 20) بيعرض
+// consecutive_failure_count/last_failure_reason — القالب مايتخطاش أي موعد صامت (retry/dead-letter
+// في RecurringOrdersService)، وأي نوبة فشل بتوصل للسقف بتبعت إشعار ops_manager كمان.
 export default function RecurringOrdersPage() {
   const { isLoading, authedFetchPaginated } = useAuth();
   const [templates, setTemplates] = useState<AdminRecurringTemplateResponseDto[] | null>(null);
@@ -63,7 +65,7 @@ export default function RecurringOrdersPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !templates && <TableSkeleton columns={7} />}
+      {!error && !templates && <TableSkeleton columns={8} />}
       {templates && templates.length === 0 && <EmptyState title="مفيش قوالب متكررة مطابقة" />}
 
       {templates && templates.length > 0 && (
@@ -78,6 +80,7 @@ export default function RecurringOrdersPage() {
                 <TableHead>الموعد الجاي</TableHead>
                 <TableHead>آخر طلب اتولّد</TableHead>
                 <TableHead>الحالة</TableHead>
+                <TableHead>الفشل</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -105,6 +108,15 @@ export default function RecurringOrdersPage() {
                     <Badge variant={template.is_active ? 'secondary' : 'outline'}>
                       {template.is_active ? 'نشط' : 'موقوف'}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {template.last_failure_reason ? (
+                      <Badge variant="destructive" title={template.last_failure_reason}>
+                        فشل ({template.consecutive_failure_count}/3) — {new Date(template.last_failed_at!).toLocaleString('ar-EG-u-nu-latn')}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
