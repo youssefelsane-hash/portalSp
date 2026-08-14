@@ -24,4 +24,30 @@
 
 **فجوة مطابقة، خارج نطاق بند 9 (اللي حدد صراحة التلات جداول دول بس)، موثّقة صراحة**: `technician_certificates` (`technician-certificates.service.ts`/`certificate-response.dto.ts`) عندها **نفس البَقّة بالظبط** (`file_url` ثابت بيتخزن دائم، مفيش `storage_key`) — اتلقطت أثناء المراجعة دي بس متصلحتش عمدًا (خارج التلات جداول المحددة صراحة في تدقيق المالك)، محتاجة نفس الإصلاح ميكانيكيًا كامتداد لاحق.
 
+## `file-signature-validator.ts` — magic bytes بدل الثقة في `mimetype` المُعلَن (docs/08 §19 بند 10، اتقفلت)
+
+كانت فجوة أمنية موثّقة صراحة في تدقيق المالك: كل مسارات رفع الملفات في النظام (order media، chat
+images، technician documents/certificates، complaint attachments) كانت بتتحقق من نوع الملف
+بمقارنة `file.mimetype` بس — القيمة دي جايه من `Content-Type` header اللي الكلاينت بيبعته في
+الـmultipart request، سهلة التزوير تمامًا (مهاجم يقدر يرفع أي محتوى ويسمّيه `image/png`). نفس
+المبدأ اللي `branding-file-validator.ts` كان مطبّقه من زمان (ADR-0014) — فحص أول بايتات الملف
+الحقيقية (magic bytes) والتأكد إنها بتطابق المُعلَن — اتعمم هنا في `assertFileSignatureMatches()`
+جديدة (`detectActualFileFormat()` بتدعم PNG/JPEG/WEBP + PDF لمستندات/شهادات الفني)، وحلّت محل
+فحص `ALLOWED_X.has(file.mimetype)` القديم في الخمس كنترولرات: `technician-order-execution.controller.ts`
+(order media)، `chat.controller.ts` (صور الشات)، `technicians.controller.ts` (documents +
+certificates، موقعين)، `support.controller.ts` (مرفقات الشكاوى). كل موقع بقى بينادي
+`assertFileSignatureMatches(file.buffer, file.mimetype, ALLOWED_X)` بدل التحقق اليدوي القديم —
+تبديل سطر واحد ميكانيكي في كل موقع، الـ`allowedMimeTypes` set نفسه فضل زي ما هو لكل كنترولر
+(مفيش تغيير في الأنواع المسموحة، بس التحقق بقى حقيقي مش شكلي).
+
+`branding-file-validator.ts` فضل زي ما هو عمدًا (منطق إضافي خاص بيه: فحص أبعاد الصورة، حدود
+حجم مختلفة) — مش موحّد مع الملف الجديد ده تجنبًا لأي regression على اختباراته الموجودة، رغم
+تطابق منطق كشف الـmagic bytes بين الاتنين تقريبًا 1:1.
+
+**اتأكد** (`file-signature-validator.spec.ts`، 6 اختبارات وحدة نقية بدون DB): كشف صحيح لكل
+الأنواع الأربعة من بايتاتها الحقيقية، رفض محتوى مش معروف، رفض MIME مش في القايمة المسموحة أصلاً،
+وسيناريو الهجوم الفعلي (بند 10 بالحرف): ملف مش صورة خالص متسمّي `image/png`، وملف PDF حقيقي
+متسمّي `image/jpeg` عشان يعدّي فلتر "صور بس" — الاتنين بيترفضوا بوضوح. `tsc --noEmit` →
+`nest build` → `jest` (30 suite، 160 اختبار) كلهم عدّوا نضيف.
+
 مرجع كامل: `../../../../docs/01-master-plan.md`، `../../../../docs/03-external-integrations.md`

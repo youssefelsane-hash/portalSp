@@ -1031,3 +1031,23 @@ Flutter حي كامل (`pending_payment_order_creation_live_test.dart` — عم�
 بالظبط زي المتوقع لبيئة بلا بيانات اعتماد بوابة، والإلغاء بعدها بينجح — ده اللي كشف البَقّة
 وأثبت الإصلاح). `tsc --noEmit` → `nest build` → `jest` (29 suite، 154 اختبار، شامل
 `order-state-machine.spec.ts` الجديد) كلهم عدّوا نضيف.
+
+### تحديث تنفيذ §19 — بند 10 (Upload validation — magic-byte بدل mimetype المُعلَن) — ✅ `DONE + AUTOMATED VERIFIED`
+
+نمط `branding-file-validator.ts` (فحص magic bytes حقيقية، ADR-0014) اتعمم في
+`common/storage/file-signature-validator.ts` جديد (`assertFileSignatureMatches()` +
+`detectActualFileFormat()` — PNG/JPEG/WEBP/PDF) على كل مسارات الرفع اللي كانت بتثق في
+`file.mimetype` المُعلَن بس: order media، صور الشات، مستندات/شهادات الفني (PDF مدعوم هنا)،
+مرفقات الشكاوى — 5 مواقع في `technician-order-execution.controller.ts`/`chat.controller.ts`/
+`technicians.controller.ts` (موقعين)/`support.controller.ts`. كل موقع كان بس بيتحقق إن
+`file.mimetype` (قيمة سهلة التزوير، جايه من `Content-Type` header اللي الكلاينت بيتحكم فيه)
+موجودة في قايمة مسموحة — دلوقتي بيتحقق كمان إن أول بايتات الملف الحقيقية بتطابق النوع المُعلَن،
+فملف مش صورة/PDF خالص (أو نوع مختلف اتسمّى غلط عشان يعدّي الفلتر) بيترفض `400` بوضوح. تفاصيل
+كاملة (بما فيها ليه `branding-file-validator.ts` فضل منفصل عمدًا) في `apps/api/src/common/storage/README.md`.
+
+اتأكد بـ`file-signature-validator.spec.ts` (6 اختبارات وحدة نقية): كشف صحيح للأربع أنواع، رفض
+محتوى مجهول، رفض MIME خارج القايمة المسموحة، وسيناريو الهجوم بالحرف (ملف مزوَّر النوع، PDF
+متنكّر كصورة). `tsc --noEmit` → `nest build` → `jest` (30 suite، 160 اختبار) كلهم عدّوا نضيف.
+تحقق live-HTTP لكل الخمس endpoints مش اتعمل هنا (محتاج تجهيز مستخدمين/طلبات فعلية لكل مسار) —
+نفس منهجية التحقق المتّبعة في بند 9 (اختبار وحدة نقي للمنطق المشترك، التوصيل بالكنترولرات تبديل
+سطر واحد ميكانيكي مؤكَّد بـ`tsc`/قراءة كود مباشرة).

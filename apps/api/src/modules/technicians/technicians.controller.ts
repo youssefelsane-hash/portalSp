@@ -20,6 +20,7 @@ import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { TechniciansService } from './technicians.service';
@@ -126,9 +127,7 @@ export class TechniciansController {
     if (!file) {
       throw new BadRequestException('لازم ترفع ملف');
     }
-    if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('نوع الملف غير مسموح — صور JPEG/PNG/WEBP أو PDF بس');
-    }
+    assertFileSignatureMatches(file.buffer, file.mimetype, ALLOWED_DOCUMENT_MIME_TYPES);
 
     const document = await this.technicianDocumentsService.upload(user.sub, dto, file);
     return toTechnicianDocumentResponseDto(document, this.storage);
@@ -209,9 +208,7 @@ export class TechniciansController {
     if (!file) {
       throw new BadRequestException('لازم ترفع ملف');
     }
-    if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('نوع الملف غير مسموح — صور JPEG/PNG/WEBP أو PDF بس');
-    }
+    assertFileSignatureMatches(file.buffer, file.mimetype, ALLOWED_DOCUMENT_MIME_TYPES);
 
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     const certificate = await this.certificatesService.add(profile.id, dto, file);

@@ -4,6 +4,7 @@ import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toComplaintAttachmentResponseDto } from './dto/complaint-attachment-response.dto';
@@ -74,9 +75,7 @@ export class SupportController {
     if (!file) {
       throw new BadRequestException('لازم ترفع ملف');
     }
-    if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('نوع الملف غير مسموح — صور JPEG/PNG/WEBP بس');
-    }
+    assertFileSignatureMatches(file.buffer, file.mimetype, ALLOWED_ATTACHMENT_MIME_TYPES);
 
     const attachment = await this.supportService.uploadAttachment(user, id, file);
     return toComplaintAttachmentResponseDto(attachment, this.storage);
