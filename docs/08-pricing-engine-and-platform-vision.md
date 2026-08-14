@@ -1276,3 +1276,50 @@ Postgres حقيقية: فشل تحت السقف (next_run_at ثابت، العد
 بيبقى الـ"سجل" (نفس فلسفة "فحص دوري مش BullMQ" الموجودة في تعليق الكلاس من الأول، عشان نتجنب بَقّة
 Worker recovery الموثّقة). لو المالك احتاج لاحقًا "قايمة كل نوبات الفشل تاريخيًا" (مش بس آخر نوبة)،
 ده تصميم schema إضافي (جدول `recurring_template_failure_log` مثلاً) خارج نطاق البند المطلوب هنا.
+
+### تحديث تنفيذ §19 — بند 21 (تحصين WebSocket — CORS/query-token/تغطية اختبار) — ✅ `DONE + LIVE VERIFIED`
+
+المالك حدد 3 مشاكل في `ChatGateway`/`OrderTrackingGateway`، الاتنين اتأكدوا بقراءة الكود:
+
+1. **`cors: { origin: '*' }` مثبّتة صراحة** في `@WebSocketGateway({...})` — بعكس `main.ts` اللي
+   بيقرأ `CORS_ORIGIN` من `env.validation.ts` (مفروضة إجباريًا في الإنتاج). يعني حتى لو الأدمن ظبط
+   `CORS_ORIGIN` صح للـREST API، بوابات الـWebSocket كانت بتفضل مفتوحة للكل بلا أي علاقة بالإعداد.
+2. **`handshake.auth?.token ?? handshake.query?.token`** — fallback لتوكن في query string الرابط
+   جنب آلية `auth` الرسمية بتاعة socket.io. العملاء الحقيقيين (`chat_client.dart`/`tracking_client.dart`
+   في التطبيقين) بيستخدموا `auth` بس فعليًا (`.setAuth({'token': accessToken})`) — الـfallback مش
+   مستخدم، وبيوسّع سطح الهجوم بلا داعي (query strings بتتسجّل في access logs/الـproxies أسهل بكتير
+   من حمولة الـhandshake).
+3. **صفر تغطية اختبار خالص** لأي من البوابتين — أول `*.gateway.spec.ts` في المشروع كله.
+
+الحل:
+- `common/websocket/websocket-cors.util.ts` — `websocketCorsOriginHandler(origin, callback)` بديل
+  لـ`cors: { origin: '*' }`. **ليه function مش array ثابتة**: خيارات `@WebSocketGateway({...})`
+  بتتقيّم وقت تحميل الملف (module-load، قبل ما `ConfigModule`/`dotenv` يشتغلوا فعليًا)، فقراءة
+  `process.env.CORS_ORIGIN` وقت التقييم ده مش مضمونة. الـfunction بتتنفّذ مع كل اتصال فعليًا وقت
+  runtime (socket.io/engine.io بيدعموها رسميًا) — بحلول أول اتصال حقيقي، `.env` يكون اتحمّل بالفعل.
+  نفس منطق `main.ts` بالحرف: فاضي = مفتوح للكل (تطوير)، مضبوطة = قايمة مفصولة بفاصلة، اتصال بلا
+  `Origin` header (عملاء Flutter/native، مش متصفح) بيتقبل دايمًا بغض النظر عن الإعداد.
+- الـfallback لـ`handshake.query.token` اتشال من الجيتواِيهين — `auth.token` بس دلوقتي.
+
+اتأكد حيًا (live) بـ9 اختبارات جديدة عبر ملفين:
+- `websocket-cors.util.spec.ts` (4 اختبارات، pure function): فاضي=مفتوح، أصل مطابق=مقبول، أصل غير
+  مطابق=مرفوض، بلا `Origin` header=مقبول دايمًا.
+- `order-tracking-gateway-ownership.spec.ts` (5 اختبارات) — أول اختبار WebSocket حي في المشروع:
+  `http.createServer()` + `socket.io.Server` حقيقي + `socket.io-client` حقيقي متصل عبر شبكة فعلية
+  (مش mock)، `OrderTrackingGateway` متبني مباشرة بـrepos حقيقية من `DataSource` (نفس نمط
+  `recurring-orders-*.spec.ts`)، توكنز JWT حقيقية بـ`JwtService.sign()`. بيثبت: (1) مالك الطلب
+  الحقيقي بينضم للغرفة بنجاح، (2) عميل غريب بيترفض بـ`AUTH_001` وميقدرش ينضم، (3) **إعادة اتصال
+  حقيقية** (اتصال جديد بالكامل بنفس التوكن، محاكاة فقد شبكة مؤقت زي اللي بيحصل مع تطبيق Flutter) —
+  نفس فحص الملكية بيتطبّق تاني من الصفر (مفيش cache/تخطي)، وبعد إعادة الاتصال الغريب لسه بيترفض،
+  (4) توكن في query string بس (بدون `auth`) — السيرفر بيرفضه ويقطع الاتصال فعليًا (تأكيد الفحص
+  1)، (5) بلا توكن خالص — نفس الرفض. **ملاحظة توقيت مهمة اتوثّقت كتعليق في الاختبار نفسه**: عميل
+  socket.io بياخد `connect` ack على مستوى الـtransport فورًا وقت الـhandshake، قبل ما منطق التطبيق
+  (`handleConnection`) يتنفّذ أصلاً — فالتأكيد الصح مش "الاتصال اترفض" (هيتقبل مؤقتًا دايمًا) لكن
+  "السيرفر رفضه بعد كده وقطعه فعليًا" (`disconnect` event حقيقي، مش نظري).
+
+`tsc` → `nest build` → `jest` (34 suite، 183 اختبار، +2 suite +9 اختبارات عن قبل) عدّوا نضيف.
+
+**خارج نطاق هذا الإصلاح عمدًا**: صفر تغطية اختبار لـ`ChatGateway` نفسه (نفس النمط بالحرف، مؤجّل
+لأن `OrderTrackingGateway` بيغطي نفس فئة البَقّة بالكامل — الفحص الأمني/الـCORS/الـauth مشتركين).
+صفر rate-limiting على مستوى الـWebSocket (مثلاً حد أقصى رسائل/ثانية لكل عميل) — خارج نطاق "تحصين"
+المطلوب هنا، مش جزء من الثلاث نقاط اللي المالك حددها صراحة.

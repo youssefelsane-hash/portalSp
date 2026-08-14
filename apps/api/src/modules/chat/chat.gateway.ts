@@ -11,6 +11,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { websocketCorsOriginHandler } from '../../common/websocket/websocket-cors.util';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -21,7 +22,7 @@ interface AuthenticatedSocket extends Socket {
 }
 
 // اتصال WebSocket لازم يحمل JWT access token في handshake.auth.token — نفس التوكن المستخدم في REST
-@WebSocketGateway({ namespace: 'chat', cors: { origin: '*' } })
+@WebSocketGateway({ namespace: 'chat', cors: { origin: websocketCorsOriginHandler } })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(ChatGateway.name);
 
@@ -36,7 +37,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
     try {
-      const token = client.handshake.auth?.token ?? client.handshake.query?.token;
+      // docs/08 §19 بند 21 — كانت فجوة حقيقية: fallback لـ`handshake.query.token` (توكن في query
+      // string الرابط) موجود جنب `handshake.auth.token` (آلية socket.io الرسمية للـauth). العميلين
+      // الحقيقيين (customer-app/technician-app) بيبعتوا التوكن عبر `auth` بس فعليًا (chat_client.dart
+      // — `.setAuth({'token': accessToken})`)، فالـquery fallback مش مستخدم، وبيوسّع سطح الهجوم بلا
+      // داعي: query strings بتتسجّل في access logs/عناوين المتصفح/الـproxies بسهولة أكتر من حمولة
+      // الـhandshake، فتوكن JWT كامل مش المفروض يظهر هناك خالص.
+      const token = client.handshake.auth?.token;
       if (!token || typeof token !== 'string') throw new Error('no token');
 
       const payload = await this.jwt.verifyAsync<JwtPayload>(token, {
