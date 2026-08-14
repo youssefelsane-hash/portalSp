@@ -25,7 +25,7 @@
 11. الجدولة المستقبلية/المتكررة
 12. قطاع الخدمات المنزلية (شغالة/babysitter/مقيمة بالشهور) — نطاق منتج جديد كامل، بعد ما الأساسيات فوق تخلص
 13. نظام العمائر (QR + اشتراك خصم) — نطاق منتج جديد كامل، بعد ما الأساسيات فوق تخلص
-14. **ترقية أمان دخول الأدمن (Passkeys/WebAuthn + MFA + Step-up)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §14 الجديد تحت. **⬜ فاضي بالكامل.**
+14. **ترقية أمان دخول الأدمن (Passkeys/WebAuthn + MFA + Step-up)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §14 الجديد تحت. **🔄 Phase 1 Backend خلص، واجهة apps/admin مؤجّلة لـPhase 2.**
 15. **محرك إشعارات حقيقي (أولوية/تكرار/reminders مُدارة من الباك-إند)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §15 الجديد تحت. **🔄 Phase 1 خلص (الأساس العام + action_required)، الباقي فاضي.**
 
 ---
@@ -202,7 +202,7 @@
 
 ---
 
-## §14. ترقية أمان دخول الأدمن — Passkeys/WebAuthn + MFA + Step-up Authentication — 🔄 النطاق اتحدد، التنفيذ بادئ (طلب صريح 2026-08-13)
+## §14. ترقية أمان دخول الأدمن — Passkeys/WebAuthn + MFA + Step-up Authentication — 🔄 Phase 1 Backend خلص بالكامل (2026-08-13)، واجهة apps/admin مؤجّلة لـPhase 2
 
 **مصدر الطلب**: رسالة مفصّلة من المالك (2026-08-13) بعد اطّلاعه على تدفق الدخول الحالي (OTP بالموبايل بس لكل الأدوار بما فيها Super Admin). النص الحاكم النهائي المطلوب تسجيله بالحرف (باقي الرسالة أعلاه سياق توضيحي عربي، الفقرة دي هي الـspec الرسمية اللي أي تنفيذ لازم يلتزم بيها):
 
@@ -333,3 +333,27 @@
   متوقّع لكل migration قبل إدراج صفوف التتبّع يدويًا، مش افتراض. **نطاق Phase 1 بس — الباقي
   (`scheduled_job`, `critical_offer` actionable push, واجهة أدمن لـ`notification_type_configs`)
   موثّق صراحة كمتبقٍ في الـADR وفي `notifications/README.md`.**
+- **2026-08-13 (لاحقًا نفس اليوم، فرع `hgotr7`)**: **§14 (MFA/Passkeys للأدمن) Phase 1 Backend خلص
+  بالكامل** — قرار عمل صريح من المالك: "اعملها لكل الـHigh-Privilege Roles من البداية، مش Super
+  Admin فقط" (مسجّل بالحرف فوق). `docs/adr/0011-admin-mfa-passkeys.md` اتكتب أولاً، بعدين
+  التنفيذ: migration `0088` (`webauthn_credentials`, `admin_mfa_recovery_codes`,
+  `webauthn_challenges`, `step_up_tokens` + `refresh_tokens.last_seen_at/user_agent/amr`) +
+  `@simplewebauthn/server` + `MfaPolicyService` (فحص High-Privilege حي بالصلاحية مش بالاسم) +
+  `WebAuthnService` (تسجيل/تحقق Passkey، أكواد استرجاع) + `StepUpService`/`StepUpGuard`
+  (Postgres مش Redis — قرار fail-closed متعمّد) + إدارة أجهزة/جلسات + `POST /auth/recovery/verify`
+  + `POST /admin/users/:id/mfa/reset` (تعافي إداري لو الـ10 أكواد اتستهلكوا). `@RequireStepUp()`
+  اتطبّق فعليًا على: refund، payout approve/complete، كل تعديلات role builder (create/update/
+  clone/delete role, setRolePermissions, assignRole/revokeRole)، مسح Passkey، revoke-all
+  sessions، admin MFA reset. اتعمله اختبار حي كامل ضد السيرفر شغال فعليًا (مش unit tests بس):
+  حساب `finance` حقيقي → `mfa_required` صح، حساب `support_agent` حقيقي → توكن عادي فورًا (صفر
+  تغيير سلوكي)، `StepUpGuard` بيرفض `AUTH_006` فعليًا من غير هيدر، إدارة الجلسات بترجّع بيانات
+  الجهاز صح. **بَقّتين حقيقيتين اتلقطوا واتصلحوا أثناء الاختبار الحي (مش نظريًا)**: (1) اسم صلاحية
+  غلط في `MFA_REQUIRED_PERMISSIONS` (`payments.refund` مش موجود أصلاً، الاسم الصح `refunds.issue`)
+  — كان معناها دور بصلاحية استرداد بس (من غير `payouts.approve`) مش هيتفرض عليه MFA رغم قدرته
+  يسترد فلوس فعلي؛ (2) DTO محلي في `webauthn.controller.ts` من غير class-validator decorators —
+  `ValidationPipe`'s `forbidNonWhitelisted` كان هيرفض كل طلب فعلي بـ"property should not exist"
+  رغم إن كل الكومبايل/الاختبارات النظرية عدّت. `tsc`/`nest build`/`jest` الثلاثة عدّوا نضيف (88
+  اختبار). تفاصيل كاملة في `apps/api/src/modules/auth/README.md`. **نطاق Phase 2 مؤجّل صراحة**:
+  واجهة `apps/admin` (تسجيل Passkey، شاشة الأجهزة/الجلسات، step-up prompt، عرض recovery codes)،
+  Face ID/بصمة للعميل/الفني (`local_auth`، خارج نطاق الـADR ده تمامًا)، واختبار WebAuthn ceremony
+  فعلي end-to-end (محتاج virtual authenticator أو جهاز فعلي، مش جزء من الاختبار الحي اللي اتعمل).

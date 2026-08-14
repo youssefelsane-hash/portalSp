@@ -4,6 +4,7 @@ import { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
+import { RecoveryVerifyDto } from './dto/recovery-verify.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -41,11 +42,22 @@ export class AuthController {
     return this.authService.login(dto, clientIp(req));
   }
 
+  // استرجاع حساب Admin عليه MFA — OTP + recovery code سويًا (مش أي واحد لوحده)، بيمسح كل
+  // الـPasskeys/recovery codes الحاليين ويرجّع نفس شكل mfa_required (ceremony: registration) —
+  // إجبار تسجيل Passkey جديد فورًا (ADR-0011 §6).
+  @Public()
+  @Post('recovery/verify')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  recoveryVerify(@Body() dto: RecoveryVerifyDto, @Req() req: Request) {
+    return this.authService.recoveryLogin(dto, clientIp(req));
+  }
+
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   refresh(@Body() dto: RefreshTokenDto, @Req() req: Request) {
-    return this.authService.refresh(dto.refresh_token, clientIp(req));
+    return this.authService.refresh(dto.refresh_token, clientIp(req), dto);
   }
 
   @Public()

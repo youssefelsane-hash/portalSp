@@ -30,6 +30,15 @@ export default () => ({
     maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS ?? '5', 10),
   },
 
+  // WebAuthn/Passkeys لدخول الأدمن (ADR-0011) — القيم الافتراضية مضبوطة لبيئة التطوير المحلية
+  // (apps/admin شغال على 3001). لازم تتظبط صح في الإنتاج (rpID = دومين الأدمن الحقيقي بدون
+  // بروتوكول، origin = الرابط الكامل بالـhttps) وإلا كل ceremony هيترفض من المتصفح نفسه.
+  webauthn: {
+    rpName: process.env.WEBAUTHN_RP_NAME ?? 'صُنّاع — لوحة التحكم',
+    rpId: process.env.WEBAUTHN_RP_ID ?? 'localhost',
+    origin: process.env.WEBAUTHN_ORIGIN ?? 'http://localhost:3001',
+  },
+
   storage: {
     // 'local' (افتراضي، للتطوير) أو 's3' — راجع common/storage/storage.provider.ts
     provider: process.env.STORAGE_PROVIDER ?? 'local',

@@ -16,6 +16,7 @@ import {
   TECHNICIAN_REFERRAL_CAPTURED_EVENT,
   TechnicianReferralCapturedEvent,
 } from '../../common/events/technician-referral-captured.event';
+import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
@@ -23,6 +24,10 @@ import { RequestOtpDto } from './dto/request-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
+import { MfaPolicyService } from './mfa-policy.service';
+import { WebAuthnService } from './webauthn.service';
+import { RecoveryVerifyDto } from './dto/recovery-verify.dto';
+import { NotificationRoutingService } from '../notifications/notification-routing.service';
 
 export interface TokenPair {
   access_token: string;
@@ -30,8 +35,18 @@ export interface TokenPair {
   expires_in_seconds: number;
 }
 
+// المستخدم محتاج يكمل MFA (ADR-0011) — التوكن النهائي مش بيتصدر لحد ما ceremony الـWebAuthn تنجح.
+export interface MfaRequiredResponse {
+  mfa_required: true;
+  ceremony: 'registration' | 'authentication';
+  mfa_session_token: string;
+}
+
+export type LoginResult = TokenPair | MfaRequiredResponse;
+
 const OTP_CODE_LENGTH = 6;
 const BCRYPT_SALT_ROUNDS = 10;
+const MFA_PENDING_TOKEN_TTL_MS = 5 * 60_000; // 5 دقايق — نفس مهلة تحدي WebAuthn (ADR-0011 §3)
 
 // أحرف واضحة بصريًا بس — استبعاد 0/O و1/I لتقليل غلطات النسخ اليدوي لكود الترشيح. مكرّرة عمداً هنا
 // (وفي ReferralsService.generateUniqueReferralCode لإعادة توليد كود لمستخدمين قدامى) بدل ما auth
@@ -53,6 +68,9 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
     private readonly smsDispatcher: TwilioSmsDispatcher,
+    private readonly mfaPolicy: MfaPolicyService,
+    private readonly webAuthn: WebAuthnService,
+    private readonly notificationRouting: NotificationRoutingService,
   ) {}
 
   // ── OTP ──────────────────────────────────────────────────────────────
@@ -207,10 +225,10 @@ export class AuthService {
       );
     }
 
-    return this.issueTokenPair(user, ip);
+    return this.issueTokenPair(user, ip, ['otp']);
   }
 
-  async login(dto: VerifyOtpDto, ip: string | null): Promise<TokenPair> {
+  async login(dto: VerifyOtpDto, ip: string | null): Promise<LoginResult> {
     await this.consumeOtp(dto.phone_number, dto.otp_code, OtpPurpose.LOGIN);
 
     const user = await this.users.findOne({ where: { phoneNumber: dto.phone_number } });
@@ -225,7 +243,102 @@ export class AuthService {
     user.lastLoginIp = ip;
     await this.users.save(user);
 
-    return this.issueTokenPair(user, ip);
+    // MFA إجباري لأي حساب High-Privilege (ADR-0011، docs/08 §14) — فحص حي، صفر تغيير سلوكي
+    // لأي حساب تاني (الغالبية العظمى). لو مطلوب، التوكن النهائي ميتصدرش هنا خالص.
+    if (await this.mfaPolicy.userRequiresMfa(user.id)) {
+      const hasCredential = await this.webAuthn.hasAnyCredential(user.id);
+      return {
+        mfa_required: true,
+        ceremony: hasCredential ? 'authentication' : 'registration',
+        mfa_session_token: await this.issueMfaPendingToken(user.id),
+      };
+    }
+
+    return this.issueTokenPair(user, ip, ['otp'], dto);
+  }
+
+  // ── MFA (ADR-0011) ───────────────────────────────────────────────────
+
+  private async issueMfaPendingToken(userId: string): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: userId, typ: 'mfa_pending' },
+      { secret: this.config.get<string>('jwt.refreshSecret'), expiresIn: `${MFA_PENDING_TOKEN_TTL_MS / 1000}s` },
+    );
+  }
+
+  /** بيرجّع userId لو التوكن صالح، يرمي AUTH_005 غير كده. */
+  async verifyMfaPendingToken(token: string): Promise<string> {
+    try {
+      const payload = await this.jwt.verifyAsync<{ sub: string; typ: string }>(token, {
+        secret: this.config.get<string>('jwt.refreshSecret'),
+      });
+      if (payload.typ !== 'mfa_pending') throw new Error('نوع توكن غلط');
+      return payload.sub;
+    } catch {
+      throw new ApiException(ErrorCode.AUTH_005, 'جلسة التحقق انتهت، سجّل دخول تاني', HttpStatus.UNAUTHORIZED);
+    }
+  }
+
+  /** بتتنادى من WebAuthnController بعد ما ceremony الدخول (OTP+Passkey) تنجح فعليًا. */
+  async completeMfaLogin(userId: string, ip: string | null, device?: DeviceMetadataDto): Promise<TokenPair> {
+    const user = await this.users.findOneOrFail({ where: { id: userId } });
+    return this.issueTokenPair(user, ip, ['otp', 'webauthn'], device);
+  }
+
+  /** الدخول السريع اليومي بـPasskey بس (discoverable credential، مفيش OTP خالص) — السيرفر برضه بيتحقق is_blocked/is_active حي هنا (نفس ما طلب المالك بالحرف). */
+  async passwordlessLogin(userId: string, ip: string | null, device?: DeviceMetadataDto): Promise<TokenPair> {
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
+    }
+    if (user.isBlocked) {
+      throw new ApiException(ErrorCode.AUTH_001, user.blockedReason ?? 'حسابك موقوف', HttpStatus.FORBIDDEN);
+    }
+    user.lastLoginAt = new Date();
+    user.lastLoginIp = ip;
+    await this.users.save(user);
+    return this.issueTokenPair(user, ip, ['webauthn'], device);
+  }
+
+  /**
+   * استرجاع MFA (ADR-0011 §6) — OTP + recovery code **مع بعض**، عاملين مستقلين. لو نجح: كل
+   * الـPasskeys/أكواد الاسترجاع القديمة بتتمسح بالكامل (نفس فلسفة "الجهاز القديم مفقود/مش
+   * موثوق")، كل الجلسات القديمة بتتلغي، تصعيد أمني فوري لـsuper_admin، والمستخدم يرجعله نفس رد
+   * "مفيش Passkey" العادي (mfa_required + ceremony=registration) — إعادة استخدام كاملة لمسار
+   * enrollment الموجود، مفيش رد جديد منفصل.
+   */
+  async recoveryLogin(dto: RecoveryVerifyDto, ip: string | null): Promise<MfaRequiredResponse> {
+    await this.consumeOtp(dto.phone_number, dto.otp_code, OtpPurpose.LOGIN);
+
+    const user = await this.users.findOne({ where: { phoneNumber: dto.phone_number } });
+    if (!user) {
+      throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مش مسجل', HttpStatus.NOT_FOUND);
+    }
+    if (user.isBlocked) {
+      throw new ApiException(ErrorCode.AUTH_001, user.blockedReason ?? 'حسابك موقوف', HttpStatus.FORBIDDEN);
+    }
+
+    const recoveryValid = await this.webAuthn.consumeRecoveryCode(user.id, dto.recovery_code);
+    if (!recoveryValid) {
+      throw new ApiException(ErrorCode.AUTH_003, 'كود الاسترجاع غير صحيح أو مستخدم قبل كده', HttpStatus.BAD_REQUEST);
+    }
+
+    await this.webAuthn.resetMfa(user.id);
+    await this.revokeAllUserTokens(user.id, 'mfa_recovery');
+
+    await this.notificationRouting.routeToRole('admin_mfa.recovery_used', {
+      notificationType: 'admin_mfa.recovery_used',
+      titleAr: 'استخدام كود استرجاع MFA',
+      bodyAr: `الحساب ${user.fullName} (${user.phoneNumber}) استخدم كود استرجاع MFA — كل الجلسات القديمة اتلغت وهيحتاج يسجّل Passkey جديد.`,
+      referenceType: 'user',
+      referenceId: user.id,
+    });
+
+    return {
+      mfa_required: true,
+      ceremony: 'registration',
+      mfa_session_token: await this.issueMfaPendingToken(user.id),
+    };
   }
 
   // ── التوكن ───────────────────────────────────────────────────────────
@@ -234,10 +347,16 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  private async issueTokenPair(user: User, ip: string | null, manager?: EntityManager): Promise<TokenPair> {
+  private async issueTokenPair(
+    user: User,
+    ip: string | null,
+    amr: ('otp' | 'webauthn')[],
+    device?: DeviceMetadataDto,
+    manager?: EntityManager,
+  ): Promise<TokenPair> {
     const accessExpiresIn = this.config.get<string>('jwt.accessExpiresIn')!;
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, userType: user.userType },
+      { sub: user.id, userType: user.userType, amr },
       { secret: this.config.get<string>('jwt.accessSecret'), expiresIn: accessExpiresIn },
     );
 
@@ -245,10 +364,16 @@ export class AuthService {
     const refreshExpiresIn = this.config.get<string>('jwt.refreshExpiresIn')!;
 
     const refreshTokens = manager ? manager.getRepository(RefreshToken) : this.refreshTokens;
+    const now = new Date();
     const refreshTokenEntity = refreshTokens.create({
       userId: user.id,
       tokenHash: this.hashRefreshToken(refreshTokenRaw),
       ipAddress: ip,
+      deviceId: device?.device_id ?? null,
+      deviceName: device?.device_name ?? null,
+      devicePlatform: device?.device_platform ?? null,
+      lastSeenAt: now,
+      amr,
       isRevoked: false,
       expiresAt: new Date(Date.now() + parseDurationToMs(refreshExpiresIn)),
     });
@@ -275,7 +400,7 @@ export class AuthService {
    * صف الـtoken من أول خطوة جوّه transaction واحدة، فأي نداء تاني بيستنى القفل يتفك وبعدين يلاقي
    * `isRevoked=true` فعلاً ويترفض بأمان (`AUTH_001`) بدل ما يعدّي.
    */
-  async refresh(rawToken: string, ip: string | null): Promise<TokenPair> {
+  async refresh(rawToken: string, ip: string | null, device?: DeviceMetadataDto): Promise<TokenPair> {
     const tokenHash = this.hashRefreshToken(rawToken);
 
     return this.dataSource.transaction(async (manager) => {
@@ -304,9 +429,12 @@ export class AuthService {
       existing.isRevoked = true;
       existing.revokedAt = new Date();
       existing.revokedReason = 'rotation';
+      existing.lastSeenAt = new Date();
       await manager.save(existing);
 
-      return this.issueTokenPair(user, ip, manager);
+      // amr بيتنقل من الجلسة القديمة (ADR-0011) — لو المستخدم أثبت هويته بـwebauthn قبل كده،
+      // الجلسات الجديدة الناتجة من refresh() تفضل عارفة ده مش ترجع لـotp بس بصمت.
+      return this.issueTokenPair(user, ip, existing.amr, device, manager);
     });
   }
 
@@ -318,11 +446,31 @@ export class AuthService {
     );
   }
 
-  private async revokeAllUserTokens(userId: string, reason: string): Promise<void> {
+  /** عام (مش private) — بيتستخدم من WebAuthnController (enrollment/recovery) وSessionsController (revoke-all يدوي، ADR-0011 §5). */
+  async revokeAllUserTokens(userId: string, reason: string): Promise<void> {
     await this.refreshTokens.update(
       { userId, isRevoked: false },
       { isRevoked: true, revokedAt: new Date(), revokedReason: reason },
     );
+  }
+
+  // ── إدارة الأجهزة/الجلسات (ADR-0011 §5) ──────────────────────────────
+
+  listSessions(userId: string): Promise<RefreshToken[]> {
+    return this.refreshTokens.find({
+      where: { userId, isRevoked: false },
+      order: { lastSeenAt: 'DESC', createdAt: 'DESC' },
+    });
+  }
+
+  async revokeSession(userId: string, sessionId: string): Promise<void> {
+    const result = await this.refreshTokens.update(
+      { id: sessionId, userId, isRevoked: false },
+      { isRevoked: true, revokedAt: new Date(), revokedReason: 'user_revoked' },
+    );
+    if (!result.affected) {
+      throw new ApiException(ErrorCode.VAL_001, 'الجلسة غير موجودة', HttpStatus.NOT_FOUND);
+    }
   }
 
   /** بيتنضف دورياً (BullMQ cron) — مش جزء من مسار الطلب الحي. */
