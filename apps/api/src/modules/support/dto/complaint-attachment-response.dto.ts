@@ -1,3 +1,4 @@
+import { StorageService } from '../../../common/storage/storage.service';
 import { ComplaintAttachment } from '../entities/complaint-attachment.entity';
 
 export interface ComplaintAttachmentResponseDto {
@@ -8,10 +9,14 @@ export interface ComplaintAttachmentResponseDto {
   created_at: string;
 }
 
-export function toComplaintAttachmentResponseDto(attachment: ComplaintAttachment): ComplaintAttachmentResponseDto {
+// docs/08 §19 بند 9 — نفس نمط toOrderMediaResponseDto (getUrl(key) طازة لو storageKey موجود).
+export async function toComplaintAttachmentResponseDto(
+  attachment: ComplaintAttachment,
+  storage: StorageService,
+): Promise<ComplaintAttachmentResponseDto> {
   return {
     id: attachment.id,
-    file_url: attachment.fileUrl,
+    file_url: attachment.storageKey ? await storage.getUrl(attachment.storageKey) : attachment.fileUrl,
     file_type: attachment.fileType,
     uploaded_by_user_id: attachment.uploadedByUserId,
     created_at: attachment.createdAt.toISOString(),

@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminOrdersService } from './admin-orders.service';
@@ -30,6 +31,7 @@ export class AdminOrdersController {
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Get()
@@ -59,7 +61,7 @@ export class AdminOrdersController {
   @Get(':id/media')
   async listMedia(@Param('id', ParseUUIDPipe) id: string) {
     const media = await this.orderMediaService.listForOrder(id);
-    return media.map(toOrderMediaResponseDto);
+    return Promise.all(media.map((m) => toOrderMediaResponseDto(m, this.storage)));
   }
 
   // نفس نمط listMedia فوق — الأدمن محتاج يشوف بنود عرض السعر (مقترحة/معتمدة) وقت مراجعة شكوى

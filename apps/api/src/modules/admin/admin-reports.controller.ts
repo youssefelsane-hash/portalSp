@@ -11,6 +11,12 @@ import { ZonesReportQueryDto } from './dto/zones-report-query.dto';
 // محمي بـ@Roles(ADMIN) بس — أي حساب أدمن (حتى support_agent بلا أي دور تشغيلي) كان يقدر يشوف
 // الداشبورد/الإيراد/تقارير الفنيين والمناطق. reports.view جديدة (migration 0085)، ممنوحة
 // افتراضيًا لـops_manager/finance (super_admin بياخدها أوتوماتيك عن طريق is_super_admin bypass).
+//
+// بَقّة أمنية تانية اتصلحت لاحقًا (docs/08 §19 بند 8): reports.view واحدة كانت بتغطي الإيراد
+// المالي (revenueReport) والتقارير التشغيلية (dashboard/technicians/zones) مع بعض — يعني
+// ops_manager (اللي محتاج التقارير التشغيلية فعلاً) كان يقدر يشوف إيراد الشركة كمان، رغم إن ده
+// بيانات مالية حساسة المفروض تبقى default-deny. reports.view_revenue جديدة (migration 0099)،
+// ممنوحة لـfinance بس — reports.view الأصلية فضلت زي ما هي لباقي الـendpoints التشغيلية.
 @Controller('admin')
 @Roles(UserType.ADMIN)
 @RequirePermission('reports.view')
@@ -23,6 +29,7 @@ export class AdminReportsController {
   }
 
   @Get('reports/revenue')
+  @RequirePermission('reports.view_revenue')
   revenueReport(@Query() query: RevenueReportQueryDto) {
     return this.adminReportsService.revenueByPeriod(query);
   }

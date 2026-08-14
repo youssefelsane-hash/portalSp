@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toComplaintAttachmentResponseDto } from './dto/complaint-attachment-response.dto';
@@ -18,7 +19,10 @@ const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB — نفس حد صو
 @Controller('complaints')
 @Roles(UserType.CUSTOMER, UserType.TECHNICIAN)
 export class SupportController {
-  constructor(private readonly supportService: SupportService) {}
+  constructor(
+    private readonly supportService: SupportService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+  ) {}
 
   @Post()
   async file(@CurrentUser() user: JwtPayload, @Body() dto: FileComplaintDto) {
@@ -75,13 +79,13 @@ export class SupportController {
     }
 
     const attachment = await this.supportService.uploadAttachment(user, id, file);
-    return toComplaintAttachmentResponseDto(attachment);
+    return toComplaintAttachmentResponseDto(attachment, this.storage);
   }
 
   @Get(':id/attachments')
   @Roles(UserType.CUSTOMER, UserType.TECHNICIAN, UserType.ADMIN)
   async listAttachments(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const attachments = await this.supportService.listAttachments(user, id);
-    return attachments.map(toComplaintAttachmentResponseDto);
+    return Promise.all(attachments.map((a) => toComplaintAttachmentResponseDto(a, this.storage)));
   }
 }

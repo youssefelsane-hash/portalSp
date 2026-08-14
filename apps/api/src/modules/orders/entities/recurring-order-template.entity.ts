@@ -34,6 +34,11 @@ export class RecurringOrderTemplate {
   @Column({ name: 'problem_description', type: 'text', nullable: true })
   problemDescription: string | null;
 
+  // دفع قبل التوزيع (ADR-0013) لكل طلب متولّد من القالب — اختياري، NULL = دفع بعد الشغل زي
+  // زمان (كاش/محفظة). نفس قيم CreateOrderDto.payment_method (docs/08 §19 بند 6).
+  @Column({ name: 'payment_method', type: 'enum', enum: ['card', 'instapay'], enumName: 'payment_method', nullable: true })
+  paymentMethod: 'card' | 'instapay' | null;
+
   @Column({ name: 'next_run_at', type: 'timestamptz' })
   nextRunAt: Date;
 

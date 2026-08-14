@@ -18,6 +18,13 @@ const CUSTOMER_MESSAGES: Partial<Record<OrderStatus, { title: string; body: stri
     body: 'الفني اقترح بنود إضافية (قطع غيار/أجرة إضافية) — راجع التفاصيل ووافق أو ارفض.',
   },
   [OrderStatus.WORK_COMPLETED]: { title: 'الشغل خلص', body: 'الفني خلّص الشغل — راجع الفاتورة واختار طريقة الدفع.' },
+  // ADR-0015 — طلب كان مدفوع مسبقًا (كارت/InstaPay قبل التوزيع) واتضاف عليه بند إضافي بعد
+  // الدفع — الفرق (الدلتا) لازم يترحصّل قبل ما الطلب يقفل. السبب الدقيق (المبلغ) موجود في
+  // event.reason، بس مش متسجّل هنا (القاموس ده رسالة عامة بس) — التفاصيل في تفاصيل الطلب نفسه.
+  [OrderStatus.AWAITING_PAYMENT]: {
+    title: 'مبلغ إضافي مطلوب',
+    body: 'اتضاف بند إضافي على طلبك بعد الدفع — راجع طلبك وادفع المبلغ المتبقي.',
+  },
   // سياسة إلغاء الفني (docs/10) — إشعار awaiting_technician_reselection مغطّى بالكامل عبر
   // TechnicianCancellationNotificationListener (يسمع TECHNICIAN_ORDER_CANCELLED_EVENT مباشرة،
   // multi-channel + توجيه أدمن) — مش هنا، عشان نتفادى إشعار مكرر لنفس الحدث من مكانين.

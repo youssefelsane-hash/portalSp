@@ -46,6 +46,7 @@ export class OrderMediaService {
       uploadedByUserId: userId,
       mediaType,
       fileUrl,
+      storageKey: key,
       fileSizeBytes: file.size,
       caption: caption ?? null,
     });

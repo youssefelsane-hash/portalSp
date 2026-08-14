@@ -28,6 +28,9 @@
 14. **ترقية أمان دخول الأدمن (Passkeys/WebAuthn + MFA + Step-up)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §14 الجديد تحت. **🔄 Phase 1 Backend خلص، واجهة apps/admin مؤجّلة لـPhase 2.**
 15. **محرك إشعارات حقيقي (أولوية/تكرار/reminders مُدارة من الباك-إند)** — طلب صريح جديد من المالك (2026-08-13)، تفاصيل §15 الجديد تحت. **🔄 الأساس + action_required (حالتين) + scheduled_job + واجهة أدمن `notification_type_configs` خلصوا. متبقٍ: `critical_offer` actionable push (محتاج جهاز حقيقي)، دفع معلّق/رفع مستند/رد الدعم (محتاجين قرار عمل).**
 16. **توجيه شامل: معمارية دفع provider-agnostic + إكمال Phase 2 (MFA UI + بصمة) + إكمال الإشعارات المتبقية + إنتاجية/طوارئ configurable + مراجعة أمان شاملة** — طلب صريح جديد من المالك (2026-08-14، 30 بند، قرارات عمل نهائية بدل الفجوات المؤجّلة). تفاصيل §17 الجديد تحت. **🔄 قيد التنفيذ.** **فجوة حقيقية واحدة بس**: ملفات اللوجو المرفقة مالهاش آلية حفظ كملف في البيئة دي (`EXTERNAL ASSET REQUIRED`) — كل حاجة تانية بتتنفذ.
+17. **تدقيق جاهزية الإطلاق (Release Readiness Audit)** — 24 بند تقني من المالك بعد مراجعة `main`
+    الحالي، يركّز على فجوات دفع/RBAC مالي/تخزين حقيقية باقية رغم إغلاق §17. تفاصيل §19 الجديد تحت.
+    **🔄 قيد التنفيذ.**
 
 ---
 
@@ -812,3 +815,182 @@ InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كا�
   دلوقتي أصلاً** (الدفع الفعلي بيحصل والطلب لسه `work_completed`، مفيش نقطة انتقال حقيقية
   لـ`AWAITING_PAYMENT` تتوصّل بيها من غير اختراع منطق عمل جديد) — اتسجّلت كفجوة موثّقة صراحة
   بدل ما تتجاهل بصمت. تفاصيل كاملة في `apps/api/src/modules/notifications/README.md`.
+
+## §19. تدقيق جاهزية الإطلاق (Release Readiness Audit) — 24 بند من المالك (2026-08-14، جلسة لاحقة) — 🔄 قيد التنفيذ
+
+**مصدر الطلب**: بعد إغلاق §17 (30 بند)، المالك بعت تدقيق تقني منفصل (24 بند P0/P1/P2) راجع فيه
+الكود الفعلي على `main` بعد كل شغل §17، ولقى فجوات حقيقية باقية — النص الكامل الأصلي (عربي، تفصيلي)
+محفوظ في سجل المحادثة. **تعليمات المالك الصريحة**: لكل بند — لو موجود فعلاً (اتقفل في شغل لاحق)، اتأكد
+منه بس وسجّله كده. لو مش موجود، ابنيه بأفضل طريقة ممكنة وكمّل شغل طبيعي بلا توقف للتأكيد.
+
+**التحقق الأول (قبل أي كود، ضد `main` بعد merge PR #106)** — 3 بنود طلعوا **بالفعل خلصوا** في شغل
+§17 اللاحق ولسه مش محدَّثين في تقرير المالك (تقرير قديم نسبيًا):
+- بند 7 (MFA Phase 2 admin UI) → **✅ خلص بالفعل** (§17.21 فوق، `DONE + LIVE VERIFIED`).
+- بند 12 (بصمة العميل/الفني) → **✅ خلص بالفعل** (§17.22 فوق، `IMPLEMENTED — DEVICE TEST PENDING`).
+- بند 17 (Android release signing) → **✅ خلص بالفعل** (2026-08-13 PR #88، مذكور في سجل التحديثات).
+
+**باقي الـ21 بند اتفحصوا واحد واحد ضد الكود الفعلي (مش افتراض) — كلهم فجوات حقيقية مؤكَّدة**:
+1, 2, 3, 4, 5, 6, 8, 9 (الستة اللي المالك حدد أولويتهم صراحة + اتنين تانيين اتأكدوا أثناء الفحص)
+اتأكدوا بقراءة الكود الفعلي مباشرة (مش grep سطحي):
+- **بند 1** — `apps/customer-app/lib/features/orders/orders_repository.dart`'s `create()`: صفر
+  `payment_method` في الـbody المُرسل، وصفر أي شاشة اختيار وسيلة دفع قبل التأكيد. مؤكَّد.
+- **بند 2** — `order-items.service.ts`'s `approve()`: بيضيف `addedCents` لـ`totalAmountCents`
+  ويرجّع `IN_PROGRESS` فورًا، صفر مسار دفع إضافي. **مطابق تمامًا لتوثيق §17.1-13 نفسه** ("لسه
+  NOT STARTED: تدفق شغل إضافي بعد الدفع") — مش اكتشاف جديد، تأكيد لفجوة موثّقة بالفعل.
+- **بند 3** — `order-auto-cancel.service.ts`: صفر أي استدعاء لـ`refund`/`payment` في الملف كله.
+  مؤكَّد: طلب مدفوع(pending_payment→searching_technician بعد الدفع) لو اتلغى تلقائيًا من النظام
+  (مفيش فني اتلاقى) مفيش أي استرداد بيتحرّك.
+- **بند 4** — `payments.service.ts`'s `refundOrder()` (سطر 853+): `provider.refund()` (نداء HTTP
+  خارجي حقيقي لـPaymob) بينفّذ **جوّه** `this.dataSource.transaction(...)` (بادئة من سطر 860).
+  التعليق الموجود في الكود بيغطي بس حالة "provider.refund() نفسه رمى استثناء" — مش حالة "نجح
+  فعليًا، وبعده خطوة تانية جوّه نفس الـtransaction فشلت" (DB rollback بعد استرداد حقيقي فعلي عند
+  المزوّد = فلوس اترجعت للعميل فعليًا بس نظامنا مش عارف). مؤكَّد، خطر مالي حقيقي.
+- **بند 5** — صفر أي منطق `PENDING_PAYMENT` جوّه `order-auto-cancel.service.ts`. مؤكَّد: طلب بدأ
+  دفع كارت وماكملش (checkout متروك) بيحجز `schedule_slot`/يستهلك `promo_code` للأبد بلا timeout.
+- **بند 6** — `recurring-orders.service.ts` بيبني `CreateOrderDto` بدون `payment_method` خالص.
+  مؤكَّد: القوالب المتكررة بتتولّد كطلبات non-prepaid دايمًا، بتكسر قاعدة الدفع-قبل-التوزيع.
+- **بند 8** — `admin-payments.controller.ts`'s `GET /admin/payouts` و`GET /admin/payouts/:id/order-items`،
+  و`admin-wallet.controller.ts`'s `GET /admin/wallets/:userId` — الثلاثة `@Roles(ADMIN)` بس، **صفر**
+  `@RequirePermission(...)` (بعكس نفس الملف's `POST` endpoints اللي كلها محمية بصلاحيات محدّدة).
+  تعليق صريح في `admin-wallet.controller.ts` نفسه بيأكد القرار ده مقصود ("قراءة بس، مفيش
+  RequirePermission"). مؤكَّد: أي حساب من نوع admin (مش بس finance/super_admin) يقدر يقرا بيانات
+  صرف/محفظة حساسة.
+- **بند 9** — `s3-storage.service.ts`'s تعليق الكلاس نفسه (سطر 14-27) بيوثّق الفجوة دي **صراحة
+  بالفعل** — `save()` بترجع presigned URL بعمر 7 أيام يتخزن دائم في `order_media.file_url`/
+  `complaint_attachments`/`technician_documents`، ومفيش آلية تجديد وقت القراءة. بس `branding`
+  module اتصلح (`getUrl(key)` جديدة، الكولر بيخزن الـkey بس) — باقي الموديولات لسه على النمط القديم.
+  مؤكَّد، مش سهو (الكود نفسه صريح عن كونه فجوة).
+
+**باقي البنود (7 خلصوا بالفعل زي فوق، 21-9=12 باقيين + 10/11/13-16/18-24) هيتفحصوا واحد واحد
+بنفس الدقة أثناء التنفيذ، مش دفعة واحدة دلوقتي — ترتيب الأولوية زي ما المالك حدده صراحة**:
+
+### ترتيب التنفيذ (بلا توقف، commit/push على دفعات متماسكة)
+
+1. **RBAC مالي (بند 8)** — أسرع/أعزل إصلاح، أولوية أولى.
+2. **بَقّة الـrefund transaction (بند 4)** — عزل `provider.refund()` برّه الـDB transaction، idempotency-safe.
+3. **PENDING_PAYMENT sweep + استرداد تلقائي عند إلغاء نظامي لطلب مدفوع (بنود 3+5)** — مترابطين معماريًا.
+4. **Recurring orders payment_method (بند 6)** — صغير، معزول.
+5. **Storage/KYC — تعميم نمط `getUrl(key)` على order_media/technician_documents/complaint_attachments (بند 9)**.
+6. **Customer App: اختيار وسيلة الدفع + شاشة دفع فعلية قبل تأكيد الحجز (بند 1)** — أكبر تغيير UI.
+7. **الدفع الإضافي بعد الموافقة على بند إضافي (بند 2)** — الأكبر معماريًا، محتاج ADR منفصل قبل التنفيذ
+   (قرار schema/state-machine جوهري حسب قاعدة `CLAUDE.md`) — راجع `docs/adr/` وقت التنفيذ.
+
+   **🔴 اكتشاف حرج أثناء تصميم الحل (2026-08-14) — أخطر من بند 2 نفسه، اتأكد حيًا بشكل قاطع**:
+   أي طلب مدفوع مسبقًا (كارت/InstaPay، ADR-0013) بيفضل عالق في `WORK_COMPLETED` للأبد بمجرد ما
+   الفني يخلّص الشغل — `PaymentsService.assertPayable()` بترفض أي محاولة تسوية لأن `paymentStatus`
+   بقى `PAID` من قبل التوزيع أصلاً، مش بعد اكتمال الشغل. الفني ماياخدش أرباحه، الطلب مايوصلش
+   `COMPLETED`، مفيش تقييم/ضمان/إغلاق شات. **ده بيبطّل ميزة "Payment Customer App integration"
+   كليًا** — واحدة من الست أولويات المحددة صراحة. تفاصيل الاكتشاف والحل الكامل (يعالج بند 2 والبَقّة
+   دي معًا بنفس الآلية) في `docs/adr/0015-prepaid-order-settlement-and-additional-payment.md`.
+   **ترتيب الأولوية اتحدّث: البند ده (بند 7 الأصلي) بقى قبل بند 6 (Customer App UI)** — إصلاح
+   backend حرج قبل بناء UI فوق مسار مكسور.
+8. باقي البنود (10, 11, 13-16, 18-24) — تُفحص وتُقفل بالترتيب بعد الستة فوق، كل واحد بنفس منهجية
+   "افحص الكود الفعلي أول، وثّق النتيجة، ابنِ لو فجوة حقيقية" — تفاصيل الحالة تُضاف هنا أول ما تُقفل.
+
+### تحديث تنفيذ §19 — بند 4 (بَقّة refund transaction) — ✅ `DONE + AUTOMATED VERIFIED`
+
+`refundOrder()` (`payments.service.ts`) بقت 3 مراحل منفصلة بدل transaction واحدة تحتوي نداء
+خارجي حقيقي — تفاصيل كاملة + الاختبارات الأربعة في `apps/api/src/modules/payments/README.md`.
+فجوة متبقية موثّقة صراحة: صف `Refund` عالق بحالة `PROCESSING` (لو الـprocess وقع بعد نجاح
+البوابة وقبل تسجيل النتيجة) محتاج مراجعة يدوية عبر `provider.reconcile()` — مفيش auto-sweep
+تلقائي لسه، خارج نطاق هذا الإصلاح المحدّد.
+
+### تحديث تنفيذ §19 — بنود 3+5 (PENDING_PAYMENT sweep + استرداد تلقائي) — ✅ `DONE + AUTOMATED VERIFIED`
+
+`OrderAutoCancelService` (`apps/api/src/modules/orders/order-auto-cancel.service.ts`) بقى بيغطي
+مسارين إضافيين فوق الفحص الأصلي (SEARCHING_TECHNICIAN منتهي المهلة):
+
+1. **`sweepPendingPayment()`** — طلبات `PENDING_PAYMENT` أقدم من إعداد جديد
+   `orders.payment_timeout_minutes` (افتراضي 15 دقيقة، migration `0100`) بتتلغى `CANCELLED_BY_SYSTEM`
+   بلا أي استرداد — الدفع أصلاً مكملش، فمفيش فلوس اتاخدت ترجع.
+2. **استرداد فوري تلقائي** — لما `cancelIfStillSearching()` تلغي طلب `SEARCHING_TECHNICIAN`
+   لقيت `paymentStatus=PAID` (كارت/InstaPay مسبق الدفع)، بتنادي فورًا `PaymentsService.refundSystemCancelledOrder()`
+   جديدة — دالة منفصلة عمدًا عن `refundOrder()` الحالية (مش نفس الاستخدام): `refundOrder()` بتفترض
+   الطلب `COMPLETED`/`DISPUTED` وبتنقّله لحالة `REFUNDED` نهائية (استرداد بعد خدمة/نزاع)، بينما هنا
+   الطلب **بالفعل** `CANCELLED_BY_SYSTEM` (الحالة الصح اللي تحكي قصته الحقيقية — اتلغى قبل ما فني
+   يتحدد، مش اتسلّم واترجعت فلوسه) — فمفيش انتقال orderStatus تاني (`ORDER_TRANSITIONS` أصلاً
+   مفيهاش `CANCELLED_BY_SYSTEM → REFUNDED`)، بس `paymentStatus` بيتسجّل `REFUNDED`. نفس نمط أمان
+   الـ3 مراحل بتاع بند 4 بالظبط (صف `Refund` PROCESSING قبل أي نداء خارجي، النداء نفسه برّه أي
+   transaction، تسجيل النتيجة في transaction منفصلة) — نفس السبب: نداء بوابة خارجي حقيقي.
+   Idempotent (بترجع `null` بهدوء لو مفيش دفعة/فيه Refund مسجّل بالفعل)، ومفيش عكس أرباح فني
+   (الفحص بيستهدف طلبات مفيش فني اتعيّن عليها أصلاً).
+
+**فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح عمدًا** (مكتوبة كمان كتعليق في الكود نفسه): استخدام
+`promo_code` وقت إنشاء الطلب بيزوّد `PromoCode.usedCount` بس مفيش أي decrement/release ليه في أي
+مسار إلغاء بالكامل في النظام (مش بس هنا — ولا `OrdersService.cancel()` ولا إلغاء الفني). قصور
+نظامي أوسع سابق على هذا التعديل، محتاج قرار عمل منفصل (Business Decision Required).
+
+**اتأكد حي** (`order-auto-cancel-pending-payment.spec.ts`، 3 اختبارات ضد Postgres حقيقي):
+طلب `PENDING_PAYMENT` قديم يتلغى بلا استرداد، طلب `SEARCHING_TECHNICIAN` مدفوع (كارت) قديم
+يتلغى **ويترد فورًا تلقائيًا** (`orderStatus` فضل `CANCELLED_BY_SYSTEM`، `paymentStatus` بقى
+`REFUNDED`، صف `Refund` اتسجّل بالمبلغ والـ`providerRefundId` الصح)، وطلب `SEARCHING_TECHNICIAN`
+غير مدفوع (كاش) قديم يتلغى بلا أي محاولة استرداد كاذبة (regression). `tsc --noEmit` →
+`nest build` → `jest` كلهم عدّوا نضيف.
+
+### تحديث تنفيذ §19 — بند 6 (Recurring orders payment_method) — ✅ `DONE + AUTOMATED VERIFIED`
+
+`RecurringOrderTemplate` بقى عنده عمود `payment_method` اختياري (`card`/`instapay` بس، migration
+`0101`، `NULL` = دفع بعد الشغل زي زمان). `CreateRecurringTemplateDto` بقى بياخده (نفس قيد
+`CreateOrderDto.payment_method` بالظبط)، و`RecurringOrdersService.generateFromTemplate()` بقت
+بتمرّره لـ`CreateOrderDto` وقت توليد كل طلب — القالب المتكرر بقى يقدر فعليًا يطلب دفع قبل التوزيع
+لكل مناسبة متولّدة، بدل ما يكون non-prepaid دايمًا. الطلب المتولّد اللي بيحتاج دفع بيدخل
+`PENDING_PAYMENT` زي أي طلب عادي — وده يستفيد أوتوماتيك من `sweepPendingPayment()` (بند 3+5 فوق)
+لو العميل ماكملش الدفع، من غير أي كود إضافي.
+
+**فجوة حقيقية جديدة اتلقطت أثناء البناء، موثّقة صراحة (خارج نطاق بند 6 الضيق، محتاجة قرار/بناء
+منفصل)**: طلب عادي بيدخل `PENDING_PAYMENT` والعميل نفسه في التطبيق فاتح شاشة الدفع (فمفيش داعي
+لإشعار push — هو شايف الشاشة). لكن طلب متولّد من قالب متكرر بيدخل `PENDING_PAYMENT` **في الخلفية**
+(الفحص الدوري، مفيش عميل فاتح حاجة وقتها) — من غير إشعار push حقيقي "طلبك المتكرر محتاج تأكيد دفع"،
+العميل مش هيعرف خالص إن فيه طلب مستني، وهيتلغي تلقائيًا بصمت بعد `orders.payment_timeout_minutes`.
+مفيش أي كود إشعار زي ده موجود دلوقتي — `OrderStatusNotificationListener` بيعالج انتقالات حالة
+تانية، مش إنشاء `PENDING_PAYMENT` نفسه. **Business/UX Decision Required قبل البناء** — مش تقني بس
+(هل الإشعار push بس، ولا كمان email/SMS احتياطي؟ هل فيه grace period أطول للطلبات المتكررة تحديدًا؟).
+
+**اتأكد حي** (`recurring-orders-payment-method.spec.ts`، 3 اختبارات ضد Postgres حقيقي): قالب
+`payment_method=card` يولّد طلب بـ`payment_method='card'` فعليًا في الـDTO الواصل لـ
+`OrdersService.create()`، نفس الشيء لـ`instapay`، وقالب من غير `payment_method` بيولّد طلب
+بـ`payment_method=undefined` (regression — مفيش دفع مسبق كاذب على القوالب القديمة). النطاق مقصود
+وضيق: بيثبت وصول القيمة صح لحدود `OrdersService.create()`، مش بيعيد اختبار منطق `PENDING_PAYMENT`
+transition نفسه (ده مسؤولية `OrdersService.create()` منفصلة ومختبرة في مكان تاني بالفعل).
+
+### تحديث تنفيذ §19 — بند 9 (Storage/KYC — تعميم `getUrl(key)`) — ✅ `DONE + AUTOMATED VERIFIED`
+
+نمط `getUrl(key)` (كان مبني لـ`branding` بس) اتعمم على التلات جداول اللي `s3-storage.service.ts`
+نفسها كانت بتوثّق الفجوة فيهم صراحة: `order_media`، `technician_documents`، `complaint_attachments`.
+عمود `storage_key` جديد (`infra/migrations/0102`، اختياري) بيتسجّل وقت كل رفع جنب `file_url`
+القديم؛ التلات مابرز (`toOrderMediaResponseDto`/`toTechnicianDocumentResponseDto`/
+`toComplaintAttachmentResponseDto`) بقوا `async` بياخدوا `StorageService` — لو `storage_key`
+موجود، رابط طازة عبر `getUrl(key)` كل قراءة (بيحل مشكلة انتهاء presigned URL بعد 7 أيام مع S3)؛
+لو `null` (صف قديم قبل الإصلاح)، `file_url` المخزّن زي ما هو (مفيش backfill ممكن — الـkey الأصلي
+مش متسجّل). كل الكنترولرات المستهلكة (`OrdersController`/`AdminOrdersController`/
+`TechnicianOrderExecutionController`/`TechniciansController`/`AdminTechniciansController`/
+`SupportController`) بقت تحقن `StorageService` وتستخدم `Promise.all()`.
+
+**فجوة مطابقة اتلقطت، خارج نطاق بند 9 (اللي حدد التلات جداول دول صراحة)، موثّقة صراحة**:
+`technician_certificates` عندها نفس البَقّة بالظبط، متصلحتش عمدًا هنا.
+
+اتأكد بـ`getUrl-response-mappers.spec.ts` (اختبار وحدة نقي بدون DB، 6 اختبارات): التلات مابرز
+بيتصرفوا صح مع `storage_key` موجود (نداء `getUrl(key)` فعلي، النتيجة هي `file_url` الراجع) ومع
+`storage_key=null` (رجوع `file_url` القديم بلا أي نداء لـ`storage` خالص). `tsc --noEmit` →
+`nest build` → `jest` (145 اختبار، 26 suite) كلهم عدّوا نضيف.
+
+### تحديث تنفيذ ADR-0015 — تسوية الطلب المدفوع مسبقًا + بند 2 — ✅ DONE + AUTOMATED VERIFIED
+
+تنفيذ كامل للقرار الموثّق في docs/adr/0015-prepaid-order-settlement-and-additional-payment.md
+(البَقّة الحرجة المُكتشَفة + بند 2 الأصلي معًا بنفس الآلية). التفاصيل الكاملة في
+apps/api/src/modules/payments/README.md (قسم "تسوية الطلب المدفوع مسبقًا + الدفع الإضافي").
+ملخص: PrepaidOrderSettlementListener جديد بيسوّي أي طلب مدفوع مسبقًا تلقائيًا لما يوصل
+WORK_COMPLETED (دلتا=صفر) أو ينقله لـAWAITING_PAYMENT (دلتا>صفر، حالة كانت معرّفة من أول يوم
+بلا استخدام)، وassertPayable()/amountOwedNow() جداد بيضمنوا إن نفس الـendpoints الموجودة
+(كاش/محفظة/كارت/InstaPay) تحصّل الدلتا الصح بدل الإجمالي الكامل تاني (تحصيل مزدوج). صفر
+endpoint جديد، صفر migration.
+
+اتأكد حي بحساب عمولة حقيقي دقيق (prepaid-order-settlement.spec.ts، 3 اختبارات + listener
+unit test، 3 اختبارات): دلتا=صفر يسوّي تلقائيًا مع عمولة صحيحة رياضيًا وتحويل أرباح فعلي لمحفظة
+الفني، دلتا>صفر ينقل لـAWAITING_PAYMENT (idempotent) وبعد تحصيل الدلتا بس يقفل صح بعمولة
+محسوبة من الإجمالي الكامل، ومحاولة تحصيل تالتة بعد الإغلاق اترفضت (منع تحصيل مزدوج) — ومسار الطلب
+العادي (مش مدفوع مسبقًا) فضل زي زمان بالحرف (regression). tsc --noEmit → nest build → jest
+(151 اختبار، 28 suite) كلهم عدّوا نضيف.
+
+فجوة موثّقة صراحة، خارج نطاق هذا التنفيذ: تصميم UI جديد في apps/customer-app لشاشة "ادفع
+المبلغ الإضافي" — العميل هيشوف الفرق كـ"دفعة جديدة" في نفس شاشات الدفع الموجودة أصلاً.

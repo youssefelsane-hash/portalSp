@@ -30,15 +30,20 @@ export class AdminPaymentsController {
 
   // كانت فجوة موثّقة صراحة: approve/reject/complete تحت موجودين من زمان بس مفيش GET يرجّع
   // قايمة طلبات الصرف أصلاً — يعني الأدمن ملوش طريقة عملية يعرف الـ id يتصرف عليه.
+  // بَقّة أمنية اتصلحت (docs/08 §19 بند 8): مكانتش عندها @RequirePermission خالص (RolesGuard
+  // بس)، يعني أي حساب أدمن (مش finance/super_admin بس) كان يقدر يقرا بيانات صرف حساسة —
+  // payouts.view جديدة (migration 0099)، ممنوحة لـfinance (super_admin بياخدها bypass).
   @Get('payouts')
+  @RequirePermission('payouts.view')
   async listPayouts(@Query() query: ListPayoutsQueryDto) {
     const rows = await this.payoutsService.listForAdmin(query.status);
     return rows.map(toAdminPayoutResponseDto);
   }
 
   // كانت فجوة موثّقة: payout_order_items موجود في الـ schema من أول يوم بس مفيش حد كان بيملاه —
-  // تفاصيل كاملة في ../../payouts/README.md.
+  // تفاصيل كاملة في ../../payouts/README.md. نفس بَقّة الصلاحية فوق.
   @Get('payouts/:id/order-items')
+  @RequirePermission('payouts.view')
   async listPayoutOrderItems(@Param('id', ParseUUIDPipe) id: string) {
     const items = await this.payoutsService.listOrderItems(id);
     return items.map(toPayoutOrderItemResponseDto);

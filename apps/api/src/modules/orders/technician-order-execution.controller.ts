@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -33,6 +34,7 @@ export class TechnicianOrderExecutionController {
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
     private readonly addressesService: AddressesService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   // findByIdOrThrow من غير فحص ملكية عمداً — أي طلب بيوصل هنا أصلاً اتحقق إنه بتاع الفني الحالي
@@ -120,13 +122,13 @@ export class TechnicianOrderExecutionController {
     }
 
     const media = await this.orderMediaService.upload(user.sub, id, dto.media_type, dto.caption, file);
-    return toOrderMediaResponseDto(media);
+    return toOrderMediaResponseDto(media, this.storage);
   }
 
   @Get(':id/media')
   async listMedia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const media = await this.orderMediaService.listForTechnician(user.sub, id);
-    return media.map(toOrderMediaResponseDto);
+    return Promise.all(media.map((m) => toOrderMediaResponseDto(m, this.storage)));
   }
 
   // كانت فجوة موثّقة صراحة (S7): مفيش مسار لاقتراح قطع غيار/أجرة إضافية بموافقة العميل —

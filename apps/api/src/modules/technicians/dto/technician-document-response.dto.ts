@@ -1,3 +1,4 @@
+import { StorageService } from '../../../common/storage/storage.service';
 import { TechnicianDocument } from '../entities/technician-document.entity';
 
 export interface TechnicianDocumentResponseDto {
@@ -11,11 +12,15 @@ export interface TechnicianDocumentResponseDto {
   created_at: string;
 }
 
-export function toTechnicianDocumentResponseDto(document: TechnicianDocument): TechnicianDocumentResponseDto {
+// docs/08 §19 بند 9 — نفس نمط toOrderMediaResponseDto (getUrl(key) طازة لو storageKey موجود).
+export async function toTechnicianDocumentResponseDto(
+  document: TechnicianDocument,
+  storage: StorageService,
+): Promise<TechnicianDocumentResponseDto> {
   return {
     id: document.id,
     document_type: document.documentType,
-    file_url: document.fileUrl,
+    file_url: document.storageKey ? await storage.getUrl(document.storageKey) : document.fileUrl,
     review_status: document.reviewStatus,
     rejection_reason: document.rejectionReason,
     reviewed_at: document.reviewedAt ? document.reviewedAt.toISOString() : null,

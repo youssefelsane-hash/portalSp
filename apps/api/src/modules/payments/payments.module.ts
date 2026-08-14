@@ -20,6 +20,7 @@ import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 import { WalletsService } from './wallets.service';
 import { WalletProvisioningListener } from './wallet-provisioning.listener';
+import { PrepaidOrderSettlementListener } from './prepaid-order-settlement.listener';
 import { FAWRY_GATEWAY } from './gateways/fawry-gateway.interface';
 import { FawryGatewayService } from './gateways/fawry-gateway.service';
 import { CashProvider } from './gateways/cash-provider.service';
@@ -71,6 +72,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     PaymentsService,
     PayoutsService,
     WalletProvisioningListener,
+    PrepaidOrderSettlementListener,
     // بوابة Fawry الأصلية (كود مرجعي فوري) — لسه محقونة مباشرة، FawryProvider بيغلّفها بس
     // (ADR-0013). لو مفيش env vars مُعدّة، isConfigured بيبقى false وبيرفض بوضوح.
     { provide: FAWRY_GATEWAY, useClass: FawryGatewayService },

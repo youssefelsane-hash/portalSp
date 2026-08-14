@@ -11,6 +11,17 @@
 
 ## قرار تصميم صريح: presigned URL بمدة 7 أيام، مش 15 دقيقة
 
-القاموس (`docs/01-master-plan.md` §7.2) بيقول "روابط موقّتة، صلاحية 15 دقيقة". `S3StorageService` الحالي بيرجّع presigned URL فعلاً — بس بمدة 7 أيام (أقصى مدة مسموحة لـ AWS SigV4 presigned URLs)، مش 15 دقيقة. السبب: `StorageService.save()` بترجع سترينج واحد بيتخزن *دايماً* في عمود `file_url` (`order_media`/`complaint_attachments`/`technician_documents`) وبيتقرا كما هو في كل رد API بعد كده — تطبيق "15 دقيقة" حرفياً كان محتاج تخزين الـ key بس (مش رابط) وتعديل 4 مسارات قراءة مختلفة (`order-media`, `complaint-attachment`, `technician-document`, `chat-message`) عشان يولّدوا رابط presigned جديد وقت كل قراءة — تغيير معماري أوسع بكتير من نطاق "أضف S3 adapter"، وغير قابل للاختبار حياً هنا أصلاً (مفيش S3 حقيقي متاح للتأكد). 7 أيام بتغطي عملياً كل حالات الاستخدام الحالية (مراجعة صور/مستندات بعد الرفع بوقت قريب نسبياً). **تحسين مستقبلي موثّق صراحة**: الانتقال لتخزين الـ key + توليد الرابط وقت القراءة، لو الأمان بمستوى "15 دقيقة بالظبط" أصبح مطلوب فعلياً.
+القاموس (`docs/01-master-plan.md` §7.2) بيقول "روابط موقّتة، صلاحية 15 دقيقة". `S3StorageService` الحالي بيرجّع presigned URL فعلاً — بس بمدة 7 أيام (أقصى مدة مسموحة لـ AWS SigV4 presigned URLs)، مش 15 دقيقة. `StorageService.save()` لسه بترجع سترينج واحد بيتخزن في `file_url` وقت الرفع (لأي استهلاك مستقبلي أو تصحيح يدوي) — بس القراءة بقت تعتمد على نمط تاني، تفاصيل تحت.
+
+## نمط `getUrl(key)` — تعميم على order_media/technician_documents/complaint_attachments (docs/08 §19 بند 9، اتقفلت)
+
+كانت فجوة موثّقة صراحة هنا نفسها: `file_url` المخزّن بيبقى ميت (404) بعد 7 أيام مع S3، ومفيش آلية تجديد وقت القراءة — بس `branding` module كان مصلّح (بيخزّن الـ`key` بس، `getUrl(key)` بيولّد رابط طازة وقت كل قراءة). النمط ده بقى معمّم دلوقتي على التلات جداول التانية اللي عندهم نفس المشكلة:
+
+- **الكتابة**: `order-media.service.ts`/`technician-documents.service.ts`/`support.service.ts`'s `uploadAttachment()` بقوا بيسجّلوا `storageKey: key` (عمود جديد، `infra/migrations/0102`) جنب `fileUrl` القديم (بيفضل يتسجّل برضو، مش بيتشال — مفيد كـfallback/تصحيح يدوي).
+- **القراءة**: `toOrderMediaResponseDto()`/`toTechnicianDocumentResponseDto()`/`toComplaintAttachmentResponseDto()` بقوا `async` وبياخدوا `StorageService` — لو `storageKey` موجود (رفع بعد الإصلاح)، رابط طازة عبر `storage.getUrl(key)` بيتولّد كل مرة؛ لو `null` (صف قديم قبل الإصلاح، مفيش key أصلي متسجّل ليه)، `fileUrl` المخزّن بيتستخدم زي ما هو (مفيش backfill ممكن). كل الكنترولرات اللي بتنادي المابرز دي (`OrdersController`/`AdminOrdersController`/`TechnicianOrderExecutionController`/`TechniciansController`/`AdminTechniciansController`/`SupportController`) بقت تحقن `StorageService` وتستخدم `Promise.all()` للمصفوفات.
+
+**اتأكد** (`getUrl-response-mappers.spec.ts`، اختبار وحدة نقي بدون DB): التلات مابرز بيتصرفوا صح — `storageKey` موجود يستدعي `storage.getUrl(key)` ويرجّع نتيجته، `storageKey=null` يرجّع `fileUrl` القديم بلا أي نداء لـ`storage` خالص.
+
+**فجوة مطابقة، خارج نطاق بند 9 (اللي حدد صراحة التلات جداول دول بس)، موثّقة صراحة**: `technician_certificates` (`technician-certificates.service.ts`/`certificate-response.dto.ts`) عندها **نفس البَقّة بالظبط** (`file_url` ثابت بيتخزن دائم، مفيش `storage_key`) — اتلقطت أثناء المراجعة دي بس متصلحتش عمدًا (خارج التلات جداول المحددة صراحة في تدقيق المالك)، محتاجة نفس الإصلاح ميكانيكيًا كامتداد لاحق.
 
 مرجع كامل: `../../../../docs/01-master-plan.md`، `../../../../docs/03-external-integrations.md`

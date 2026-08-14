@@ -1,0 +1,144 @@
+import { DataSource } from 'typeorm';
+import { CustomerProfilesService } from '../customers/customer-profiles.service';
+import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { User } from '../auth/entities/user.entity';
+import { RecurringOrdersService } from './recurring-orders.service';
+import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { BookingMode, Order, OrderType } from './entities/order.entity';
+import type { CreateOrderDto } from './dto/create-order.dto';
+
+// اختبار حي ضد Postgres حقيقي — بيثبت إصلاح فجوة حقيقية (docs/08 §19 بند 6): generateFromTemplate()
+// كانت بتبني CreateOrderDto من غير payment_method خالص، يعني كل طلب متولّد من قالب متكرر كان
+// non-prepaid دايمًا مهما كان تفضيل العميل وقت إنشاء القالب (بيكسر قاعدة الدفع-قبل-التوزيع،
+// ADR-0013). النطاق هنا مقصود وضيق: بنثبت إن template.paymentMethod بيوصل فعليًا لـ
+// OrdersService.create() (مش بنعيد اختبار OrdersService.create() نفسها — دي حدود مسؤولية منفصلة
+// ومختبرة في مكان تاني)، فـOrdersService هنا jest.fn() بيسجّل الـDTO اللي وصله بالظبط.
+describe('RecurringOrdersService.generateFromTemplate() — payment_method يوصل صح (docs/08 §19 بند 6)', () => {
+  let dataSource: DataSource;
+  let service: RecurringOrdersService;
+  let createSpy: jest.Mock;
+
+  const runId = Date.now().toString(36);
+  const ids = {
+    customerUser: '',
+    customerProfile: '',
+    service: '',
+    address: '',
+    category: '',
+  };
+
+  async function insertTemplate(opts: { label: string; paymentMethod: 'card' | 'instapay' | null }) {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [template] = await q(
+      `INSERT INTO recurring_order_templates (customer_id, service_id, address_id, booking_mode, frequency, next_run_at, payment_method, is_active)
+       VALUES ($1,$2,$3,'individual','weekly', now() - interval '1 minute', $4, true) RETURNING id`,
+      [ids.customerProfile, ids.service, ids.address, opts.paymentMethod],
+    );
+    return template.id as string;
+  }
+
+  beforeAll(async () => {
+    dataSource = new DataSource({
+      type: 'postgres',
+      url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
+      entities: [RecurringOrderTemplate, CustomerProfile, User, Order],
+    });
+    await dataSource.initialize();
+
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [customerUser] = await q(
+      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
+      [`+2017${runId}`.slice(0, 15), `عميل اختبار ${runId}`],
+    );
+    ids.customerUser = customerUser.id;
+    const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [
+      ids.customerUser,
+    ]);
+    ids.customerProfile = customerProfile.id;
+    const [category] = await q(
+      `INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,
+      [`فئة اختبار ${runId}`, `Test Category ${runId}`, `test-category-rot-${runId}`],
+    );
+    ids.category = category.id;
+    const [serviceRow] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',10000) RETURNING id`,
+      [ids.category, `خدمة اختبار ${runId}`, `test-service-rot-${runId}`],
+    );
+    ids.service = serviceRow.id;
+    const [address] = await q(
+      `INSERT INTO addresses (user_id, street_name, location)
+       VALUES ($1,$2, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
+      [ids.customerUser, `شارع اختبار ${runId}`],
+    );
+    ids.address = address.id;
+
+    const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
+
+    // last_generated_order_id عنده FK حقيقي لـorders(id) — لازم صف طلب حقيقي موجود فعلاً عشان
+    // generateFromTemplate() تقدر تحدّثه بأمان، حتى لو مش بنختبر تفاصيل الطلب نفسه هنا (ده مسؤولية
+    // OrdersService.create() المزيّفة تحت).
+    const [fakeOrder] = await q(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, total_amount_cents, technician_earning_cents)
+       VALUES ($1,$2,$3,$4,'draft',0,0) RETURNING id`,
+      [`TESTROT-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address],
+    );
+
+    createSpy = jest.fn(async (_userId: string, _dto: CreateOrderDto) => ({ id: fakeOrder.id as string }) as Order);
+
+    service = new RecurringOrdersService(
+      dataSource.getRepository(RecurringOrderTemplate),
+      customerProfilesService,
+      {} as never, // addressesService — مش متنادى (generateFromTemplate بس بيتفحص هنا)
+      {} as never, // catalogService
+      {} as never, // techniciansService
+      { create: createSpy } as never, // ordersService — مزيّف عشان نسجّل الـDTO اللي وصله
+    );
+  });
+
+  afterAll(async () => {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
+    await q(`DELETE FROM orders WHERE order_number = $1`, [`TESTROT-${runId}`.slice(0, 24)]);
+    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+    await dataSource.destroy();
+  });
+
+  it('قالب بـpayment_method=card — الطلب المتولّد بيتطلب دفع كارت مسبق (payment_method بيوصل لـOrdersService.create())', async () => {
+    await insertTemplate({ label: `card-${runId}`, paymentMethod: 'card' });
+    createSpy.mockClear();
+
+    await service.sweep();
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    const [, dto] = createSpy.mock.calls[0] as [string, CreateOrderDto];
+    expect(dto.payment_method).toBe('card');
+    expect(dto.order_type).toBe(OrderType.RECURRING);
+    expect(dto.booking_mode).toBe(BookingMode.INDIVIDUAL);
+  });
+
+  it('قالب بـpayment_method=instapay — نفس المنطق', async () => {
+    await insertTemplate({ label: `insta-${runId}`, paymentMethod: 'instapay' });
+    createSpy.mockClear();
+
+    await service.sweep();
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    const [, dto] = createSpy.mock.calls[0] as [string, CreateOrderDto];
+    expect(dto.payment_method).toBe('instapay');
+  });
+
+  it('قالب من غير payment_method (الافتراضي زي زمان) — CreateOrderDto مالوش payment_method خالص (regression: مفيش دفع مسبق كاذب)', async () => {
+    await insertTemplate({ label: `none-${runId}`, paymentMethod: null });
+    createSpy.mockClear();
+
+    await service.sweep();
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    const [, dto] = createSpy.mock.calls[0] as [string, CreateOrderDto];
+    expect(dto.payment_method).toBeUndefined();
+  });
+});

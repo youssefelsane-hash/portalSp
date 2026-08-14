@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -26,6 +27,7 @@ export class OrdersController {
     private readonly orderTeamService: OrderTeamService,
     private readonly orderMediaService: OrderMediaService,
     private readonly addressesService: AddressesService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Get()
@@ -98,7 +100,8 @@ export class OrdersController {
   @Get(':id/media')
   async listMedia(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     await this.ordersService.findOneOwnedOrThrow(user.sub, id);
-    return (await this.orderMediaService.listForOrder(id)).map(toOrderMediaResponseDto);
+    const media = await this.orderMediaService.listForOrder(id);
+    return Promise.all(media.map((m) => toOrderMediaResponseDto(m, this.storage)));
   }
 
   // توزيع أدوار الفريق (docs/08 §5) — العميل يشوف مين هيشتغل معاه فعليًا في طلب "اعتماد" (فريق).
