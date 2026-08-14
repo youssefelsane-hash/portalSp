@@ -75,6 +75,13 @@ export class SettingsService {
     return raw.value;
   }
 
+  /** لإعدادات `value_type='json'` (زي `productivity.metrics_config`) — مفيش تحقق شكل هنا (T مسؤولية الكولر)، بس fallback آمن لو الإعداد مفقود/فاسد. */
+  async getJson<T>(key: string, fallback: T): Promise<T> {
+    const raw = await this.readRaw(key);
+    if (!raw || raw.valueType !== 'json') return fallback;
+    return raw.value as T;
+  }
+
   private assertValueMatchesType(setting: Setting, value: unknown): void {
     const actualType = Array.isArray(value) ? 'array' : typeof value;
     const expected = setting.valueType;

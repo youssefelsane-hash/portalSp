@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
+import { computeCriticalOfferCheckpoints } from './critical-offer-checkpoints.util';
 import { NotificationTypeConfig, NotificationPriorityTier } from './entities/notification-type-config.entity';
 import { NotificationWorkflow } from './entities/notification-workflow.entity';
 import { computeScheduledJobCheckpoints } from './scheduled-job-checkpoints.util';
@@ -11,6 +12,9 @@ const ACTION_REQUIRED_MAX_REMINDERS_FALLBACK = 24;
 const SCHEDULED_JOB_AFTER_MINUTES_FALLBACK = 60;
 const SCHEDULED_JOB_DAY_BEFORE_HOUR_UTC_FALLBACK = 8;
 const SCHEDULED_JOB_PRE_APPOINTMENT_MINUTES_FALLBACK = 120;
+// نِسَب موضع التذكير جوّه نافذة عرض الطوارئ (docs/08 §17.16) — [0.5, 0.85] افتراضي تطويري:
+// تذكير في نص المهلة، وتذكير أخير قرب الانتهاء. قابلة للتعديل الكامل من `/settings`.
+const CRITICAL_OFFER_REMINDER_RATIOS_FALLBACK = [0.5, 0.85];
 
 export interface CreateWorkflowInput {
   userId: string;
@@ -44,12 +48,18 @@ export class NotificationWorkflowService {
   async create(input: CreateWorkflowInput): Promise<NotificationWorkflow> {
     const typeConfig = await this.typeConfigs.findOne({ where: { notificationType: input.notificationType } });
     const isScheduledJob = typeConfig?.priorityTier === NotificationPriorityTier.SCHEDULED_JOB;
+    const isCriticalOffer = typeConfig?.priorityTier === NotificationPriorityTier.CRITICAL_OFFER;
 
     const createdAt = new Date();
     let nextReminderAt: Date | null;
     let maxReminders: number | null;
 
-    if (isScheduledJob && input.targetAt) {
+    if (isCriticalOffer && input.expiresAt) {
+      const checkpoints = await this.criticalOfferCheckpoints(createdAt, input.expiresAt);
+      nextReminderAt = checkpoints[0] ?? null;
+      // زي scheduled_job بالظبط — طول قايمة الـcheckpoints نفسها هي الحد، مفيش max_reminders ثابت.
+      maxReminders = null;
+    } else if (isScheduledJob && input.targetAt) {
       const checkpoints = await this.scheduledJobCheckpoints(createdAt, input.targetAt);
       nextReminderAt = checkpoints[0] ?? null;
       // مفيش max_reminders ثابت هنا — طول قايمة الـcheckpoints نفسها هي الحد (بتتحسب من جديد
@@ -75,7 +85,9 @@ export class NotificationWorkflowService {
       titleAr: input.titleAr,
       bodyAr: input.bodyAr,
       deepLink: input.deepLink ?? null,
-      requiresAction: typeConfig?.priorityTier === NotificationPriorityTier.ACTION_REQUIRED,
+      requiresAction:
+        typeConfig?.priorityTier === NotificationPriorityTier.ACTION_REQUIRED ||
+        typeConfig?.priorityTier === NotificationPriorityTier.CRITICAL_OFFER,
       actionType: input.actionType ?? null,
       nextReminderAt,
       maxReminders,
@@ -83,6 +95,14 @@ export class NotificationWorkflowService {
       targetAt: input.targetAt ?? null,
     });
     return this.workflows.save(workflow);
+  }
+
+  private async criticalOfferCheckpoints(sentAt: Date, expiresAt: Date): Promise<Date[]> {
+    const ratios = await this.settingsService.getJson<number[]>(
+      'notification_engine.critical_offer_reminder_ratios',
+      CRITICAL_OFFER_REMINDER_RATIOS_FALLBACK,
+    );
+    return computeCriticalOfferCheckpoints(sentAt, expiresAt, ratios);
   }
 
   private async scheduledJobCheckpoints(createdAt: Date, targetAt: Date): Promise<Date[]> {

@@ -1,8 +1,12 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { ApiEnvelope, ApiMeta, OtpPurpose, UserResponseDto } from '@baytak/shared-types';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
+import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+import type { ApiEnvelope, ApiMeta, LoginResult, MfaRequiredResponse, OtpPurpose, UserResponseDto } from '@baytak/shared-types';
+import { isMfaRequiredResponse } from '@baytak/shared-types';
 import { apiFetch, apiFetchPaginated, ApiError } from './api-client';
+import { StepUpDialog } from '@/components/step-up-dialog';
 
 interface AuthState {
   accessToken: string | null;
@@ -15,7 +19,14 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   requestOtp: (phoneNumber: string, purpose: OtpPurpose) => Promise<void>;
-  verifyOtp: (phoneNumber: string, otpCode: string) => Promise<void>;
+  // ADR-0011 — لو الحساب High-Privilege، مبيكملش تسجيل دخول فورًا؛ بيرجّع MfaRequiredResponse
+  // بدل كده والكولر (شاشة /login) هو اللي يقرر يعرض إيه (enrollPasskey أو authenticateWithPasskey).
+  verifyOtp: (phoneNumber: string, otpCode: string) => Promise<LoginResult>;
+  verifyRecoveryCode: (phoneNumber: string, otpCode: string, recoveryCode: string) => Promise<MfaRequiredResponse>;
+  // تسجيل Passkey جديد جوّه مسار MFA بس (مفيش "ضيف Passkey تاني" لمستخدم داخل بالفعل — قيد
+  // الباك-إند الحالي، Phase 1). بيكمّل تسجيل الدخول فعليًا ويرجّع أكواد الاسترجاع (مرة واحدة بس).
+  enrollPasskey: (mfaSessionToken: string, deviceLabel?: string) => Promise<string[] | null>;
+  authenticateWithPasskey: (mfaSessionToken: string) => Promise<void>;
   logout: () => Promise<void>;
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
   authedFetchPaginated: <T>(path: string, options?: RequestInit) => Promise<{ items: T[]; meta: ApiMeta }>;
@@ -39,11 +50,31 @@ async function callLocalAuthRoute<T>(path: string, body: unknown): Promise<T> {
   return envelope.data as T;
 }
 
+interface PendingStepUp {
+  optionsJSON: PublicKeyCredentialRequestOptionsJSON;
+  resolve: (token: string) => void;
+  reject: (err: Error) => void;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<UserResponseDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [permissions, setPermissions] = useState<Set<string> | null>(null);
+
+  // مصدر الحقيقة الفعلي لـaccessToken وقت الاستخدام الفوري (requestStepUp) — state بتتحدّث
+  // async، والـref ده بيتحدّث sync في نفس اللحظة اللي setAccessToken بيتنادى فيها (راجع doRefresh
+  // وverifyOtp/authenticateWithPasskey تحت)، فمفيش خطر إن Step-Up يستخدم توكن قديم لو حصل
+  // refresh لحظة قبله بالظبط.
+  const accessTokenRef = useRef<string | null>(null);
+  const setAccessTokenBoth = useCallback((token: string | null) => {
+    accessTokenRef.current = token;
+    setAccessToken(token);
+  }, []);
+
+  const [pendingStepUp, setPendingStepUp] = useState<PendingStepUp | null>(null);
+  const [stepUpVerifying, setStepUpVerifying] = useState(false);
+  const [stepUpError, setStepUpError] = useState<string | null>(null);
 
   // الباك-إند بيدوّر refresh_token على كل استخدام وبيعتبر إعادة استخدام توكن اتلغى = سرقة
   // محتملة، فبيقفل كل جلسات المستخدم فوراً (revokeAllUserTokens في auth.service.ts). لو أكتر
@@ -53,34 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // "في الطيران" في أي وقت جوّه نفس التاب، وأي نداء تاني بيستنى نفس الـ promise بدل ما يبعت نداء منفصل.
   const inFlightRefresh = useRef<Promise<{ access_token: string; expires_in_seconds: number }> | null>(null);
 
-  // كانت فجوة موثّقة صراحة كـ"سباق نادر ممكن يقفل الحساب كله" — الحل فوق (`inFlightRefresh`)
-  // بيمنع السباق جوّه نفس التاب بس، وتابين مفتوحين لنفس الحساب كل واحد عنده ref منفصل (حالة
-  // React منفصلة تماماً)، فمفيش حاجة كانت بتمنعهم الاتنين يبعتوا /api/auth/refresh بنفس الكوكي
-  // في نفس اللحظة. **تحقيق حي وقت الإصلاح صحّح الفرضية الأصلية**: السباق الحقيقي (اتأكد حياً —
-  // نداءين متزامنين فعلياً من تابين، فرق التوقيت في الـ DB 3 ميلي ثانية بس) **مابيسببش قفل
-  // الحساب** زي ما كان متوقّع — `auth.service.ts`'s `refresh()` بيعمل `findOne` عادي من غير
-  // `SELECT ... FOR UPDATE` ولا optimistic lock، فتحت READ COMMITTED الاتنين بيلاقوا نفس
-  // الصف لسه `is_revoked=false` ويعدّوا، وبيصدروا **زوج توكنز صالح لكل واحد فيهم** بدل ما التاني
-  // يترفض — يعني مش "قفل حساب"، لكن "إصدار جلستين صالحتين من توكن واحد" (تضييع/تكرار، مش خرق
-  // أمني). مسار `revokeAllUserTokens('security_breach')` (فوق) لسه بيشتغل صح للحالة اللي فعلاً
-  // مصمم ليها — إعادة استخدام توكن **اتلغى بالفعل من قبل** (سرقة/replay حقيقي) — بس مش دي.
-  // الإصلاح هنا برضه يستاهل: Web Locks API (`navigator.locks`) — قفل حقيقي عبر التابات كلها لنفس
-  // الأصل (Chrome 69+, Firefox 96+, Safari 15.4+) بيسلسل أي محاولات refresh متزامنة (من التطبيق
-  // نفسه أو من مصادر تانية) بدل ما تتسابق، فيقفل فجوة "إصدار جلستين من نداء واحد" دي. اتأكد حياً:
-  // 3 محاولات refresh متزامنة (وحدة حقيقية من تحميل تاب تاني + اتنين يدويين) اتسلسلوا صح من غير
-  // أي فشل. لو المتصفح مايدعمش Web Locks (نادر جداً دلوقتي)، بيرجع للسلوك القديم (قفل جوّه التاب
-  // بس) بدل ما ينهار.
   const doRefresh = useCallback(() => {
     if (!inFlightRefresh.current) {
       const runRefresh = (): Promise<{ access_token: string; expires_in_seconds: number }> =>
         callLocalAuthRoute('/api/auth/refresh', {});
 
-      // ملحوظة TypeScript: `lib.dom.d.ts` هنا بيعرّف `LockGrantedCallback<T>` كـ`(lock) => T`
-      // من غير `| PromiseLike<T>` (فجوة في التعريف نفسه، مش في السلوك الحقيقي) — يعني بيستنتج
-      // T = `Promise<{...}>` بدل `{...}` ويطلع النوع `Promise<Promise<{...}>>` غلط. وقت التشغيل
-      // الفعلي مفيش مشكلة خالص: `navigator.locks.request` بيستنى (await) أي promise يرجعه الـ
-      // callback فعلاً (Web Locks spec)، وأي `Promise` بترجع promise تانية بتتسطّح تلقائياً
-      // (Promise/A+) — الـ cast هنا بيصحّح النوع بس، مش بيغيّر أي سلوك حقيقي وقت التشغيل.
       const promise: Promise<{ access_token: string; expires_in_seconds: number }> =
         typeof navigator !== 'undefined' && 'locks' in navigator
           ? (navigator.locks.request('baytak-admin-refresh-token', runRefresh) as unknown as Promise<{
@@ -99,8 +107,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchMe = useCallback(async (token: string) => {
     const me = await apiFetch<UserResponseDto>('/auth/me', token);
     setUser(me);
-    // فشل تحميل الصلاحيات مايوقفش تسجيل الدخول — الـSidebar هيفضل مخفي (permissions=null يعني
-    // "لسه محمّلة" مش "بلا صلاحيات"، فمفيش عناصر تختفي غلط) لحد ما authedFetch تنجح لاحقًا.
     try {
       const { permission_names: names } = await apiFetch<{ permission_names: string[] }>(
         '/admin/me/permissions',
@@ -112,26 +118,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // بمحاولة صامتة نعيد بناء الجلسة من الـ refresh_token cookie (httpOnly) عند تحميل الصفحة —
-  // access_token عمداً في الذاكرة بس (مش localStorage) عشان يبقى أقل عرضة لسرقة عبر XSS.
   const trySilentRefresh = useCallback(async () => {
     try {
       const result = await doRefresh();
-      setAccessToken(result.access_token);
+      setAccessTokenBoth(result.access_token);
       await fetchMe(result.access_token);
     } catch {
-      setAccessToken(null);
+      setAccessTokenBoth(null);
       setUser(null);
       setPermissions(null);
     } finally {
       setIsLoading(false);
     }
-  }, [doRefresh, fetchMe]);
+  }, [doRefresh, fetchMe, setAccessTokenBoth]);
 
   useEffect(() => {
     void trySilentRefresh();
-    // متعمّد نستخدم [] — الفحص لازم يحصل مرة واحدة بس عند التحميل، مش كل مرة trySilentRefresh
-    // يتعاد إنشاؤه (ده هيحصل تلقائي أول ما fetchMe يتغيّر، مش المطلوب هنا).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -139,56 +141,188 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await callLocalAuthRoute('/api/auth/otp/request', { phone_number: phoneNumber, purpose });
   }, []);
 
-  const verifyOtp = useCallback(
-    async (phoneNumber: string, otpCode: string) => {
-      const result = await callLocalAuthRoute<{ access_token: string; expires_in_seconds: number }>(
-        '/api/auth/otp/verify',
-        { phone_number: phoneNumber, otp_code: otpCode },
+  const verifyOtp = useCallback(async (phoneNumber: string, otpCode: string): Promise<LoginResult> => {
+    const result = await callLocalAuthRoute<LoginResult>('/api/auth/otp/verify', {
+      phone_number: phoneNumber,
+      otp_code: otpCode,
+    });
+    if (isMfaRequiredResponse(result)) {
+      return result;
+    }
+    setAccessTokenBoth(result.access_token);
+    await fetchMe(result.access_token);
+    return result;
+  }, [fetchMe, setAccessTokenBoth]);
+
+  const verifyRecoveryCode = useCallback(
+    async (phoneNumber: string, otpCode: string, recoveryCode: string): Promise<MfaRequiredResponse> => {
+      return callLocalAuthRoute<MfaRequiredResponse>('/api/auth/recovery/verify', {
+        phone_number: phoneNumber,
+        otp_code: otpCode,
+        recovery_code: recoveryCode,
+      });
+    },
+    [],
+  );
+
+  const enrollPasskey = useCallback(
+    async (mfaSessionToken: string, deviceLabel?: string): Promise<string[] | null> => {
+      const optionsJSON = await apiFetch<PublicKeyCredentialCreationOptionsJSON>(
+        '/auth/webauthn/registration/options',
+        null,
+        { method: 'POST', body: JSON.stringify({ mfa_session_token: mfaSessionToken }) },
       );
-      setAccessToken(result.access_token);
+      // لازم يتصدّر مباشرة من جوّه handler الضغطة (زرار "سجّل Passkey") من غير أي await قبله —
+      // بعض المتصفحات (Safari خصوصًا) بترفض تفتح WebAuthn prompt لو مفيش "user gesture" حديث.
+      // الكولر (login page) هو اللي بيضمن ده، مش الدالة دي.
+      const response = await startRegistration({ optionsJSON });
+      const result = await callLocalAuthRoute<{ access_token: string; expires_in_seconds: number; recovery_codes: string[] | null }>(
+        '/api/auth/webauthn/registration/verify',
+        { response, device_label: deviceLabel, mfa_session_token: mfaSessionToken },
+      );
+      setAccessTokenBoth(result.access_token);
+      await fetchMe(result.access_token);
+      return result.recovery_codes;
+    },
+    [fetchMe, setAccessTokenBoth],
+  );
+
+  const authenticateWithPasskey = useCallback(
+    async (mfaSessionToken: string): Promise<void> => {
+      const optionsJSON = await apiFetch<PublicKeyCredentialRequestOptionsJSON>(
+        '/auth/webauthn/authentication/options',
+        null,
+        { method: 'POST', body: JSON.stringify({ mfa_session_token: mfaSessionToken }) },
+      );
+      const response = await startAuthentication({ optionsJSON });
+      const result = await callLocalAuthRoute<{ access_token: string; expires_in_seconds: number }>(
+        '/api/auth/webauthn/authentication/verify',
+        { response, mfa_session_token: mfaSessionToken },
+      );
+      setAccessTokenBoth(result.access_token);
       await fetchMe(result.access_token);
     },
-    [fetchMe],
+    [fetchMe, setAccessTokenBoth],
   );
 
   const logout = useCallback(async () => {
     await callLocalAuthRoute('/api/auth/logout', {}).catch(() => null);
-    setAccessToken(null);
+    setAccessTokenBoth(null);
     setUser(null);
     setPermissions(null);
+  }, [setAccessTokenBoth]);
+
+  // Step-Up (ADR-0011 §4) — بيفتح الحوار، بيستنى المستخدم يدوس "تأكيد"، وبيرجّع step_up_token
+  // صالح مرة واحدة/دقيقتين. Reject لو المستخدم لغى أو WebAuthn فشل (جهاز مش مسجّل، رفض المستخدم، ...).
+  const requestStepUp = useCallback((): Promise<string> => {
+    return new Promise<string>((resolve, reject) => {
+      void (async () => {
+        try {
+          const optionsJSON = await apiFetch<PublicKeyCredentialRequestOptionsJSON>(
+            '/auth/webauthn/step-up/options',
+            accessTokenRef.current,
+            { method: 'POST' },
+          );
+          setStepUpError(null);
+          setPendingStepUp({ optionsJSON, resolve, reject });
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error('فشل تجهيز تأكيد الهوية'));
+        }
+      })();
+    });
   }, []);
 
-  // لو access_token انتهى (401)، نجرّب refresh (single-flight) ونعيد الطلب — لو فشل، الجلسة خلصت فعلاً.
+  const handleStepUpConfirm = useCallback(() => {
+    if (!pendingStepUp) return;
+    const { optionsJSON, resolve } = pendingStepUp;
+    void (async () => {
+      setStepUpVerifying(true);
+      setStepUpError(null);
+      try {
+        const response = await startAuthentication({ optionsJSON });
+        const { step_up_token } = await apiFetch<{ step_up_token: string; expires_at: string }>(
+          '/auth/webauthn/step-up/verify',
+          accessTokenRef.current,
+          { method: 'POST', body: JSON.stringify({ response }) },
+        );
+        setPendingStepUp(null);
+        resolve(step_up_token);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : 'فشل تأكيد الـPasskey — حاول تاني';
+        setStepUpError(message);
+        // مش بنعمل reject هنا — بنسيب الحوار مفتوح عشان المستخدم يعيد المحاولة (مش يضطر يبدأ
+        // العملية الأصلية من الأول). reject بيحصل بس لو المستخدم دوس "إلغاء" فعليًا تحت.
+      } finally {
+        setStepUpVerifying(false);
+      }
+    })();
+  }, [pendingStepUp]);
+
+  const handleStepUpCancel = useCallback(() => {
+    if (!pendingStepUp) return;
+    pendingStepUp.reject(new Error('اتلغى تأكيد الهوية'));
+    setPendingStepUp(null);
+    setStepUpError(null);
+  }, [pendingStepUp]);
+
+  // authedFetch/authedFetchPaginated بيتعاملوا مع نوعين من الفشل تلقائيًا وشفّاف تمامًا للكولر:
+  // 401 → refresh مرة واحدة وإعادة المحاولة، AUTH_006 (Step-Up مطلوب) → فتح حوار Step-Up وإعادة
+  // المحاولة بنفس الطلب + X-Step-Up-Token. الكولر (زي شاشة البراندنج) مش محتاج يعرف عن أي حاجة
+  // من دول — نفس فلسفة "متضطرش تعيد المستخدم يبدأ من الأول" (توجيه المالك، ADR-0011 §21).
   const authedFetch = useCallback(
     async <T,>(path: string, options: RequestInit = {}): Promise<T> => {
+      const attempt = async (extraHeaders?: HeadersInit): Promise<T> => {
+        const mergedOptions: RequestInit = { ...options, headers: { ...options.headers, ...extraHeaders } };
+        try {
+          return await apiFetch<T>(path, accessTokenRef.current, mergedOptions);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) {
+            const result = await doRefresh();
+            setAccessTokenBoth(result.access_token);
+            return apiFetch<T>(path, result.access_token, mergedOptions);
+          }
+          throw err;
+        }
+      };
       try {
-        return await apiFetch<T>(path, accessToken, options);
+        return await attempt();
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          const result = await doRefresh();
-          setAccessToken(result.access_token);
-          return apiFetch<T>(path, result.access_token, options);
+        if (err instanceof ApiError && err.code === 'AUTH_006') {
+          const stepUpToken = await requestStepUp();
+          return attempt({ 'X-Step-Up-Token': stepUpToken });
         }
         throw err;
       }
     },
-    [accessToken, doRefresh],
+    [doRefresh, requestStepUp, setAccessTokenBoth],
   );
 
   const authedFetchPaginated = useCallback(
     async <T,>(path: string, options: RequestInit = {}): Promise<{ items: T[]; meta: ApiMeta }> => {
+      const attempt = async (extraHeaders?: HeadersInit): Promise<{ items: T[]; meta: ApiMeta }> => {
+        const mergedOptions: RequestInit = { ...options, headers: { ...options.headers, ...extraHeaders } };
+        try {
+          return await apiFetchPaginated<T>(path, accessTokenRef.current, mergedOptions);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) {
+            const result = await doRefresh();
+            setAccessTokenBoth(result.access_token);
+            return apiFetchPaginated<T>(path, result.access_token, mergedOptions);
+          }
+          throw err;
+        }
+      };
       try {
-        return await apiFetchPaginated<T>(path, accessToken, options);
+        return await attempt();
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          const result = await doRefresh();
-          setAccessToken(result.access_token);
-          return apiFetchPaginated<T>(path, result.access_token, options);
+        if (err instanceof ApiError && err.code === 'AUTH_006') {
+          const stepUpToken = await requestStepUp();
+          return attempt({ 'X-Step-Up-Token': stepUpToken });
         }
         throw err;
       }
     },
-    [accessToken, doRefresh],
+    [doRefresh, requestStepUp, setAccessTokenBoth],
   );
 
   const hasPermission = useCallback((permissionName: string) => permissions?.has(permissionName) ?? false, [permissions]);
@@ -201,15 +335,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       permissions,
       requestOtp,
       verifyOtp,
+      verifyRecoveryCode,
+      enrollPasskey,
+      authenticateWithPasskey,
       logout,
       authedFetch,
       authedFetchPaginated,
       hasPermission,
     }),
-    [accessToken, user, isLoading, permissions, requestOtp, verifyOtp, logout, authedFetch, authedFetchPaginated, hasPermission],
+    [
+      accessToken,
+      user,
+      isLoading,
+      permissions,
+      requestOtp,
+      verifyOtp,
+      verifyRecoveryCode,
+      enrollPasskey,
+      authenticateWithPasskey,
+      logout,
+      authedFetch,
+      authedFetchPaginated,
+      hasPermission,
+    ],
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      <StepUpDialog
+        open={pendingStepUp !== null}
+        isVerifying={stepUpVerifying}
+        error={stepUpError}
+        onConfirm={handleStepUpConfirm}
+        onCancel={handleStepUpCancel}
+      />
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

@@ -26,11 +26,14 @@ import { AssistantOpportunityNotificationListener } from './listeners/assistant-
 import { AssistantPersonalAssignedNotificationListener } from './listeners/assistant-personal-assigned-notification.listener';
 import { CashCollectedRoutingListener } from './listeners/cash-collected-routing.listener';
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
+import { EmergencyDispatchStrugglingRoutingListener } from './listeners/emergency-dispatch-struggling-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
 import { OrderAssistantAssignedManuallyNotificationListener } from './listeners/order-assistant-assigned-manually-notification.listener';
 import { OrderCreatedNotificationListener } from './listeners/order-created-notification.listener';
+import { OrderOfferNotificationListener } from './listeners/order-offer-notification.listener';
+import { OrderOfferResolutionListener } from './listeners/order-offer-resolution.listener';
 import { OrderReassignedNotificationListener } from './listeners/order-reassigned-notification.listener';
 import { OrderStatusNotificationListener } from './listeners/order-status-notification.listener';
 import { PayoutCompletedRoutingListener } from './listeners/payout-completed-routing.listener';
@@ -96,6 +99,9 @@ import { NotificationsService } from './notifications.service';
     AssistantMatchingEscalatedRoutingListener,
     TechnicianCancellationNotificationListener,
     OrderAssistantAssignedManuallyNotificationListener,
+    OrderOfferNotificationListener,
+    OrderOfferResolutionListener,
+    EmergencyDispatchStrugglingRoutingListener,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })

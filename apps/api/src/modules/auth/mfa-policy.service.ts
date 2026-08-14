@@ -16,6 +16,9 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // تأكيد استلام دفعة InstaPay يدويًا (ADR-0013 §7) — تحكم مباشر في فلوس حقيقية (بيسوّي الدفعة
   // SUCCEEDED ويبدأ التوزيع)، نفس مبدأ refunds.issue/payouts.approve فوق بالحرف.
   'payments.confirm_manual',
+  // تغيير البراندنج المعروض لكل المستخدمين في كل التطبيقات (ADR-0014) — تحكم مباشر في هوية
+  // المنصة العامة، نفس مستوى حساسية settings.manage فوق.
+  'branding.manage',
 ] as const;
 
 @Injectable()

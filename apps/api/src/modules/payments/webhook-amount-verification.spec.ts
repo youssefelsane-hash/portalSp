@@ -198,4 +198,25 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     const events = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId: `evt-match-${runId}` } });
     expect(events[0]?.errorMessage).not.toContain('مايطابقش');
   });
+
+  it('نفس external_event_id بيتبعت مرتين (retry شائع من بوابات الدفع): المرة التانية no-op تمامًا — regression §26 (financial idempotency)', async () => {
+    const externalEventId = `evt-replay-${runId}`;
+    // أول نداء — هيفشل داخليًا (اعتماديات مموّهة، زي أي اختبار تاني هنا) لكن المهم إن صف
+    // webhook_events اتسجّل قبل الفشل.
+    await service
+      .finalizeGatewayWebhook(externalEventId, 'TRANSACTION', 'paymob', { fake: true }, true, ids.payment, true, null, 'gw-txn-3', PaymentMethod.CARD, EXPECTED_AMOUNT_CENTS)
+      .catch(() => null);
+
+    const eventsAfterFirst = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId } });
+    expect(eventsAfterFirst.length).toBe(1);
+
+    // نداء تاني بنفس external_event_id — لازم يرجع فورًا من غير ما يحاول يعالج تاني خالص (مفيش
+    // throw، مفيش صف جديد) — ده اللي بيمنع بوابة دفع بتعيد إرسال نفس الحدث من تسبيب أي أثر مضاعف.
+    await expect(
+      service.finalizeGatewayWebhook(externalEventId, 'TRANSACTION', 'paymob', { fake: true }, true, ids.payment, true, null, 'gw-txn-3', PaymentMethod.CARD, EXPECTED_AMOUNT_CENTS),
+    ).resolves.toBeUndefined();
+
+    const eventsAfterSecond = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId } });
+    expect(eventsAfterSecond.length).toBe(1); // صف واحد بس، مش اتنين
+  });
 });

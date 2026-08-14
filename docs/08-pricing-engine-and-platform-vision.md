@@ -515,7 +515,144 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 - تحديث `apps/api/src/modules/payments/README.md` بالقرارات الجديدة (كان على الليستة، ما اتعملش).
 - حذف الملفات القديمة `payment-gateway.interface.ts`/`paymob-gateway.service.ts` **اتعمل بالفعل** (مش ناقص).
 
-**بنود 14-30 من §17 لسه `NOT STARTED` بالكامل** — إنتاجية configurable، دفعات طوارئ، critical_offer push، MFA Phase 2 frontend، بصمة Flutter، مراجعة أمان نهائية. راجع task list السيشن (#62-#66) لتفاصيل كل بند ونقطة البداية المقترحة لكل واحد.
+**§17.21 (MFA Phase 2 frontend، `DONE + LIVE VERIFIED`)** — قبل كده كانت أي حساب High-Privilege
+(super_admin وأي حساب عنده `payments.confirm_manual`/`branding.manage`/إلخ من `MFA_REQUIRED_PERMISSIONS`)
+**مقفول فعليًا برّه لوحة الإدارة** — الباك-إند بيرجّع `mfa_required` بدل TokenPair والـfrontend
+كان بيحاول يحط `undefined` في كوكي الـrefresh (بَقّة حقيقية اتلقطت، مش نظرية). اتصلح بالكامل:
+- `apps/admin/src/lib/auth-context.tsx`: `verifyOtp()` بيفرّع على `mfa_required`، `enrollPasskey()`/
+  `authenticateWithPasskey()` جديدين (`@simplewebauthn/browser`)، و**Step-Up تلقائي وشفّاف** —
+  `authedFetch`/`authedFetchPaginated` بيمسكوا `AUTH_006` زي `401` بالظبط: يفتحوا حوار، يستنوا
+  تأكيد Passkey، يعيدوا نفس الطلب بـ`X-Step-Up-Token`. الصفحات (`/branding` مثلاً) مش عارفة عن
+  Step-Up خالص — تنفيذ حرفي لطلب المالك "متخليش المستخدم يبدأ العملية من الأول".
+- `/login` بقى بيفرّع لـ3 مسارات (`ceremony=registration`/`authentication`/استرجاع بكود)، مع حوار
+  عرض أكواد الاسترجاع مرة واحدة بس (إجباري التأكيد قبل الاستمرار).
+- `/security` (صفحة جديدة) — إدارة Passkeys (شيل بس) + الأجهزة/الجلسات (إلغاء فردي/كلي).
+- `payments.confirm_manual`/`branding.manage` اتضافوا لـ`MFA_REQUIRED_PERMISSIONS`
+  (`mfa-policy.service.ts`) — تحكم مباشر في فلوس/براندنج حقيقي، نفس مبدأ `refunds.issue`.
+- **اتأكد حي بمتصفح Chromium حقيقي (Playwright + CDP virtual WebAuthn authenticator، مش mock)**:
+  تسجيل دخول super_admin → `ceremony=registration` → تسجيل Passkey فعلي → حوار أكواد الاسترجاع →
+  دخول للوحة → `/security` عرض الـPasskey → `/branding` رفع ملف حقيقي رجّع `403 AUTH_006` تلقائيًا
+  → `<StepUpDialog>` فتح لوحده → تأكيد → الرفع الأصلي نجح من غير أي تدخل تاني من المستخدم. تفاصيل
+  كاملة + لقطة الأوامر في `apps/admin/README.md`. بيانات الاختبار (Passkey/session/recovery codes
+  التجريبية) اتنضّفت من الـDB بعدها.
+
+**فرع البراندنج (`branding.manage` UI، جزء من ربط §28 الجديد)**: `/branding` (صفحة جديدة) — كارت
+لكل نوع أصل (6 أنواع)، معاينة حية، رفع (multipart، Step-Up تلقائي عبر البنية فوق)، رجوع للـfallback.
+اتأكد حي في نفس تشغيلة Playwright فوق (الرفع نجح فعليًا بعد الـStep-Up).
+
+**§17.25-27 (مراجعة أمان — `DONE + AUTOMATED VERIFIED`، جزئي مركّز مش §25 كامل حرفيًا)**: مراجعة
+مركّزة على أحدث وأخطر كود اتبنى الجلسة دي (MFA/Step-Up/InstaPay/البراندنج) — مش كل بند من الـ~40
+سيناريو في §25 الأصلية بالحرف (ده كان محتاج وقت أكبر بكتير من فرصة "استمر بلا توقف" الحالية)، بس
+كل حاجة اتفحصت **باختبارات آلية حية ضد Postgres حقيقي أو حية عبر متصفح حقيقي**، مش "آمن من قراءة
+الكود بس" (طلب المالك صراحة):
+
+- **بَقّة حقيقية اتلقطت وانصلحت**: `WebAuthnService.consumeRecoveryCode()` كان فيه سباق حقيقي (race
+  condition) — `find()` بعدين `save()` عادي من غير قفل ولا شرط `WHERE used_at IS NULL` وقت الكتابة.
+  طلبين متزامنين بنفس كود الاسترجاع الصحيح كانوا الاتنين ممكن ينجحوا (read-read-write-write بدل
+  read-write ذرّي)، كاسرين ضمان "كود واحد = استخدام واحد بس" (بالظبط الفجوة اللي المالك طلب صراحة
+  نراجعها في §23: "recovery-code replay"). الإصلاح: UPDATE ذرّي بشرط `id + used_at IS NULL` (نفس
+  فلسفة `StepUpService.consume()` الموجودة بالفعل)، مع فحص `affected > 0` قبل ما نرجّع نجاح. اتثبت
+  بـ`security-regression.spec.ts`: 5 محاولات متزامنة حقيقية بنفس الكود → واحدة بس نجحت.
+- `StepUpService.consume()` اتفحص حيًا (مش افتراض): single-use تحت تزامن حقيقي ✓، مينفعش يُستهلك
+  بمعرّف مستخدم مختلف عن اللي اتصدر له (منع سرقة/استخدام عبر حسابات) ✓، توكن منتهي الصلاحية بيترفض ✓.
+- **Webhook replay/idempotency (§26)**: `finalizeGatewayWebhook()` مع نفس `external_event_id`
+  مرتين — الثانية no-op تمامًا (صفر معالجة، صفر صف مكرر في `webhook_events`)، اللوج بيأكّد
+  "webhook مكرر اتجاهل". اختبار جديد في `webhook-amount-verification.spec.ts`.
+- **InstaPay manual confirm idempotency**: اتأكد حيًا الجلسة اللي فاتت (ADR-0013 verification) —
+  نقر مزدوج بيرجع نفس الدفعة من غير أي أثر مالي إضافي (pessimistic_write + فحص PENDING جوّه القفل).
+- **Payment provider abstraction (§25 payments)**: توقيع HMAC مزوّر/متلاعب فيه/secret غلط/مفيش
+  hmac خالص — كل الحالات دي مغطاة بـ12 اختبار في `paymob-provider.service.spec.ts` (منها اختبار
+  "تلاعب بالمبلغ بعد حساب التوقيع" صراحة — يثبت التوقيع فعلاً بيغطي المبلغ مش بس شكل عام للحمولة).
+- **دفع قبل التوزيع (§25 dispatch race)**: اتأكد حيًا (ADR-0013 verification) — order_assignments
+  صفر قبل الدفع، بيتعمل فعليًا بس بعد تأكيد الدفع، مفيش مسار توزيع أي طلب `pending_payment`.
+- **Branding upload abuse (§25 file upload)**: SVG-متنكّر-كـPNG اترفض (magic bytes فعلية، مش
+  mimetype معلَن بس) — 12 اختبار في `branding-file-validator.spec.ts` + اتأكد حي عبر متصفح حقيقي
+  إن الرفع من غير صلاحية/Step-Up مايعديش خالص.
+
+**§17.14 (إنتاجية configurable، `DONE + LIVE VERIFIED`)** — موديول جديد `technician-productivity`،
+طبقة تسجيل موزون ثانية **بلا أي جدول/جمع بيانات جديد** — بيقرأ نفس صفوف `technician_kpi_snapshots`
+الموجودة بالفعل (مصدر الحقيقة الوحيد، صفر بيانات مصطنعة):
+- `TechnicianProductivityService.computeForTechnician(technicianId, months?)` — تجميع حقيقي عبر
+  فترة (SUM لـ`completed_orders`/`revenue_delivered`، متوسط للنسب، ratio-of-sums لـ`complaint_rate`،
+  متوسط موزون بعدد التقييمات لـ`customer_rating`)، مش قراءة شهر واحد بس.
+- 8 مقاييس، كل واحد `enabled`/`weight`/`direction` (`higher_is_better`/`lower_is_better`)/
+  `minSampleSize`/`target` اختياري — قابل للتعديل الكامل من `/settings` (`productivity.metrics_config`،
+  `value_type=json`، محرر الإعدادات العام الموجود، صفر شاشة جديدة مطلوبة). تعطيل مقياس أو رفع حجم
+  العينة الأدنى بيستبعده فعليًا من الحساب مع توزيع تلقائي للأوزان على الباقي (نفس فلسفة KPI) —
+  **مش تجاهل صامت**، كل مقياس مستبعد له `exclusion_reason` واضح بالعربي.
+  **يتكامل مع KPI الموجود** — `monthly_kpi_score` نفسه أحد الـ8 مقاييس القابلة للتفعيل/التعطيل،
+  مفيش محرك أداء موازٍ.
+- `SettingsService.getJson<T>()` (method جديدة بسيطة، بنفس نمط `getNumber`/`getBoolean`/`getString`
+  الموجودين) — أول استهلاك حقيقي لإعدادات `value_type=json` في المشروع.
+  `GET /admin/technician-productivity/:technicianId?months=N` — صلاحية `technician_productivity.view`
+  (ممنوحة لـ`ops_manager`/`finance`، نفس نمط KPI). Migration `0096` (مطبّقة على DB التطوير).
+- **اتثبت بـ5 اختبارات حية ضد Postgres حقيقي** (`technician-productivity.service.spec.ts`) —
+  فني حقيقي (users + technician_profiles، مش UUID عشوائي بلا FK) بـ3 شهور snapshots حقيقية
+  بقيم مختلفة عمدًا: تجميع 3-شهور صحيح (مجموع/متوسط فعلي عبر الفترة مش شهر واحد)، فترة شهر واحد
+  بتاخد آخر شهر بالظبط، تعطيل مقياس من الإعدادات (SQL خام، مش `SettingsService.update()`) بيستبعده
+  فعليًا بعد إبطال الكاش يدويًا، حجم عينة أدنى أكبر من المتاح بيستبعد بسبب واضح، فني بلا بيانات
+  بيرجّع `overall_score=null` بتفسير واضح بدل استثناء غير متوقع.
+- **بَقّتين حقيقيتين اتلقطوا وانصلحوا وقت كتابة الاختبار الحي (مش نظري)**: (1) الاختبار الأول حاول
+  يدخل snapshots بـ`technician_id` عشوائي (`randomUUID()`) من غير صف `technician_profiles` حقيقي —
+  `technician_kpi_snapshots.technician_id` بيربط بـ`technician_profiles(id)` فعليًا (FK حقيقي)،
+  فالإدخال كان بيترفض. الإصلاح: إدخال `users`+`technician_profiles` حقيقيين أول الاختبار (نفس نمط
+  `matching.service.spec.ts`). (2) تعديل `productivity.metrics_config` بـSQL خام مباشر (لمحاكاة
+  تعديل أدمن يدوي) كان بيتجاهله `SettingsService` بصمت — الكاش (`RedisCacheService`، TTL دقيقة)
+  بيتبطّل بس جوّه `SettingsService.update()` نفسها، مش أي تعديل مباشر في القاعدة. الإصلاح: إبطال
+  الكاش يدويًا (`cache.del('settings:...')`) في الاختبار بعد كل تعديل SQL خام — موثّق كتحذير في
+  الكود عشان أي كود إنتاج تاني يعدّل الإعدادات لازم يعدّي بـ`update()` مش SQL مباشر.
+
+**§17.15 (تدرّج دفعات الطوارئ) — `DONE + LIVE VERIFIED`** — تفاصيل كاملة في
+`apps/api/src/modules/matching/README.md`. ملخص:
+- **دفعة أولى/تالية منفصلتين** (`matching.emergency_batch_size` للجولة 1، `matching.emergency_subsequent_batch_size`
+  جديد للجولة 2+) — قابلين للتعديل المستقل.
+- **مهلة رد أقصر للطوارئ** (`matching.emergency_response_timeout_seconds`، افتراضي 20 ثانية مقابل
+  30 للعادي) — "عمر العرض" من النص الأصلي.
+- **سقف أقصى لإجمالي الفنيين المتواصَل معاهم** (`matching.emergency_max_technicians_contacted`،
+  افتراضي 40) عبر كل الجولات مجتمعة — مستقل عن `matching.max_rounds` (ده بيحدّ عدد الجولات، ده
+  بيحدّ عدد الفنيين). لو الميزانية المتبقية أصغر من حجم الدفعة المطلوب، الدفعة بتتقصّ تلقائيًا
+  (مش ترفض كليًا) — اتأكد حي: دفعة مطلوبة 3 اتقصّت لـ2 فعليًا لما الميزانية المتبقية كانت 2 بالظبط.
+- **سياسة تصعيد** (`matching.emergency_escalation_after_rounds`، افتراضي جولتين) — حدث جديد
+  `ORDER_EMERGENCY_DISPATCH_STRUGGLING_EVENT` بيتصدّر مرة واحدة بس لما عدد الجولات يوصل للعتبة،
+  مستمع جديد (`EmergencyDispatchStrugglingRoutingListener`) بيوجّهه لـ`ops_manager` عبر
+  `NotificationRoutingService.routeToRole()` الموجود بالفعل — نفس نمط `order.emergency_created`
+  بالحرف، مفيش نظام توجيه موازي.
+- **"توسّع نطاق جغرافي/نصف قطر" — قرار نطاق واعي، مش نسيان**: البنية الحالية zone-based
+  (`technician_zones`) مش point-radius — إضافة radius fallback حقيقي كان هيحتاج تغيير معماري في
+  منطق المطابقة نفسه (بُعد جديد كليًا)، وده بالظبط النوع اللي المالك حذّر منه صراحة ("ممنوع إضعاف
+  صحة المطابقة لمجرد تسريع توزيع الطوارئ"). اتأجّل عمدًا كفجوة موثّقة صراحة، مش اتلمس بعجلة.
+- **حفاظ كامل على قواعد أهلية المطابقة الموجودة** — صفر تغيير في `findEligibleTechnicians()` نفسها
+  (التوثيق/الأهلية/التوفّر/تعارض الجدول/قيود الشركة/الاستبعاد الجغرافي بالـzone كلهم زي ما هم).
+  التغيير كله في *كام فني نبعتلهم* و*إمتى*، مش *مين مؤهّل أصلاً*.
+- **اتأكد حي بالكامل** (`emergency-batch-dispatch-policy.spec.ts`، 3 اختبارات ضد Postgres حقيقي):
+  الجولة الأولى بتستخدم الحجم الصح، الجولة التانية بتستخدم الحجم التاني الصح **والسقف بيقصّها
+  فعليًا** (2 بدل 3 المطلوبة)، التصعيد بيتصدّر مرة واحدة بالظبط في الجولة الصح، والجولة التالتة
+  (ميزانية 0) بتلغي الطلب فورًا بدل ما تبعت لأي فني.
+
+**§17.16 (`critical_offer` actionable push + concurrency hardening) — `DONE`، جزء Flutter
+`IMPLEMENTED — DEVICE TEST PENDING`** — تفاصيل كاملة في `apps/api/src/modules/notifications/README.md`
+و`apps/api/src/modules/matching/README.md` و`apps/technician-app/README.md`. ملخص:
+- حدثين جدد (`ORDER_OFFER_CREATED_EVENT`/`ORDER_OFFER_RESOLVED_EVENT`) — قبل كده مفيش أي إشعار كان
+  بيوصل للفني أصلاً لما عرض طلب (عادي أو طوارئ) يتبعتله، فجوة اتلقطت بالبحث الخلفي مش افتراض.
+- دورة تذكير `critical_offer` حقيقية (ADR-0012 كان أجّلها صراحة) — checkpoints كنِسَب قابلة
+  للتعديل جوّه نافذة الصلاحية نفسها، بتتخطى ساعات الهدوء عمدًا، بتوقف فورًا عند القبول/الرفض/فوز
+  فني تاني/الانتهاء.
+- `NotificationTypeConfig.priorityTier`/`soundKey`/`isActionable`/`actionLabels` (كانوا موجودين من
+  ADR-0012 بس مش بيتقروا خالص) بقوا فعليًا بيوصلوا لـ`FcmPushDispatcher` — إشعارات actionable
+  بتتبعت data-only بأولوية عالية عشان أزرار قبول/رفض حقيقية جوّه الإشعار نفسه.
+- **Concurrency hardening اتأكد حي بتزامن حقيقي** (مش افتراض من قراءة كود القفل الموجود من زمان):
+  `matching-accept-concurrency.spec.ts` + `assistant-matching-accept-concurrency.spec.ts` — فنيين
+  حقيقيين بيقبلوا نفس العرض في نفس اللحظة، واحد بس يفوز، الخاسر يترفض بـ409 وعرضه بيتلغي فعليًا.
+- `apps/technician-app`: `flutter_local_notifications` جديد، إشعار محلي بأزرار قبول/رفض حقيقية،
+  الأزرار شغالة حتى لو التطبيق مقفول تمامًا (background isolate بيعيد بناء جلسة مصادقة من
+  `refresh_token` المحفوظ بنفسه). `flutter analyze`/`flutter build linux` الاتنين نضاف. جزء
+  الهاردوير الفعلي (heads-up حقيقي، لمس الأزرار، اهتزاز) مش قابل للاختبار في البيئة دي —
+  `IMPLEMENTED — DEVICE TEST PENDING`، نفس تصنيف بصمة `apps/customer-app`.
+
+**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.22 (بصمة Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه
+(خصوصًا: enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
+permission-removal-mid-session لحيّ HTTP مش بس نظري، additional-work-payment-bypass لأن endpoint
+"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#65).
 
 ---
 

@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, LessThanOrEqual, Repository } from 'typeorm';
 import { SettingsService } from '../settings/settings.service';
+import { computeCriticalOfferCheckpoints } from './critical-offer-checkpoints.util';
 import { NotificationTypeConfig, NotificationPriorityTier } from './entities/notification-type-config.entity';
 import { NotificationWorkflow } from './entities/notification-workflow.entity';
 import { NotificationsService } from './notifications.service';
@@ -15,6 +16,7 @@ const SCHEDULED_JOB_DAY_BEFORE_HOUR_UTC_FALLBACK = 8;
 const SCHEDULED_JOB_PRE_APPOINTMENT_MINUTES_FALLBACK = 120;
 const QUIET_HOURS_START_FALLBACK = '22:00';
 const QUIET_HOURS_END_FALLBACK = '08:00';
+const CRITICAL_OFFER_REMINDER_RATIOS_FALLBACK = [0.5, 0.85];
 
 /**
  * التكرار مُدار بالكامل من الباك-إند (ADR-0012) — فحص دوري (setInterval) بدل BullMQ delayed job
@@ -88,6 +90,7 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
 
       const typeConfig = await this.typeConfigs.findOne({ where: { notificationType: workflow.notificationType } });
       const isScheduledJob = typeConfig?.priorityTier === NotificationPriorityTier.SCHEDULED_JOB;
+      const isCriticalOffer = typeConfig?.priorityTier === NotificationPriorityTier.CRITICAL_OFFER;
 
       // scheduled_job بيوقف بمجرد ما يتفتح (acknowledged_at) — مش محتاج "فعل" فعلي زي
       // action_required، بس ده بس لو requires_acknowledgment مفعّلة للنوع ده (قابل للتعديل).
@@ -97,7 +100,7 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
         return null;
       }
 
-      if (!isScheduledJob && workflow.maxReminders !== null && workflow.reminderCount >= workflow.maxReminders) {
+      if (!isScheduledJob && !isCriticalOffer && workflow.maxReminders !== null && workflow.reminderCount >= workflow.maxReminders) {
         workflow.nextReminderAt = null;
         await manager.save(workflow);
         return null;
@@ -106,16 +109,30 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
       const quietStart = await this.settingsService.getString('notification_engine.quiet_hours_start', QUIET_HOURS_START_FALLBACK);
       const quietEnd = await this.settingsService.getString('notification_engine.quiet_hours_end', QUIET_HOURS_END_FALLBACK);
 
-      // التذكير ده نفسه بيتأجل لو جوّه ساعات الهدوء دلوقتي — مش يتلغى، next_reminder_at بترجع
-      // لأول لحظة برّه الهدوء (مفيش إرسال فعلي في الجولة دي، بس مش "استهلاك" لـreminder_count).
-      if (isWithinQuietHours(now, quietStart, quietEnd)) {
+      // critical_offer بتتخطى ساعات الهدوء عمدًا — عرض طوارئ للفني مش تذكير روتيني، الإلحاح
+      // نفسه هو السبب في وجود الطبقة دي أصلاً (docs/08 §17.16). التذكير ده نفسه بيتأجل لو جوّه
+      // ساعات الهدوء دلوقتي — مش يتلغى، next_reminder_at بترجع لأول لحظة برّه الهدوء (مفيش إرسال
+      // فعلي في الجولة دي، بس مش "استهلاك" لـreminder_count).
+      if (!isCriticalOffer && isWithinQuietHours(now, quietStart, quietEnd)) {
         workflow.nextReminderAt = nextTimeOutsideQuietHours(now, quietStart, quietEnd);
         await manager.save(workflow);
         return null;
       }
 
       let nextAt: Date | null;
-      if (isScheduledJob) {
+      if (isCriticalOffer) {
+        if (!workflow.expiresAt) {
+          workflow.nextReminderAt = null;
+          await manager.save(workflow);
+          return null;
+        }
+        const ratios = await this.settingsService.getJson<number[]>(
+          'notification_engine.critical_offer_reminder_ratios',
+          CRITICAL_OFFER_REMINDER_RATIOS_FALLBACK,
+        );
+        const checkpoints = computeCriticalOfferCheckpoints(workflow.createdAt, workflow.expiresAt, ratios);
+        nextAt = checkpoints[workflow.reminderCount + 1] ?? null;
+      } else if (isScheduledJob) {
         if (!workflow.targetAt) {
           // حالة نظرية بس (scheduled_job لازم يتعمل بـtargetAt دايمًا) — safe no-op بدل استثناء.
           workflow.nextReminderAt = null;

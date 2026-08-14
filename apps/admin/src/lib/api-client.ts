@@ -21,10 +21,13 @@ export async function apiFetch<T>(
   accessToken: string | null,
   options: RequestInit = {},
 ): Promise<T> {
+  // FormData (رفع ملفات، زي البراندنج) لازم الـbrowser نفسه يحدد Content-Type (multipart/form-data
+  // + boundary) — تحديده يدوي بـ application/json هنا هيكسر الرفع تمامًا.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...options.headers,
     },

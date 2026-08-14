@@ -1,9 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { In, Repository } from 'typeorm';
 import { getRedisUrl } from '../../config/redis-url.util';
+import { ORDER_OFFER_RESOLVED_EVENT, OrderOfferResolvedEvent } from '../../common/events/order-offer-resolved.event';
 import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, RoundExpiredJobData } from './matching-rounds.queue';
@@ -39,6 +41,7 @@ export class MatchingRoundExpiryProcessor extends WorkerHost {
     @InjectRepository(OrderAssignment) private readonly assignments: Repository<OrderAssignment>,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly matchingService: MatchingService,
+    private readonly events: EventEmitter2,
   ) {
     super();
   }
@@ -72,6 +75,15 @@ export class MatchingRoundExpiryProcessor extends WorkerHost {
     }
     await this.assignments.save(staleAssignments);
     this.logger.log(`جولة ${round} انتهت من غير رد لـ${staleAssignments.length} فني — طلب ${order.orderNumber}, بنبعت الجولة الجاية`);
+
+    // docs/08 §17.16 — أي دورة تذكير critical_offer شغالة للعروض دي لازم توقف فورًا (idempotent،
+    // safe no-op للعروض العادية اللي مالهاش workflow أصلاً).
+    for (const assignment of staleAssignments) {
+      this.events.emit(
+        ORDER_OFFER_RESOLVED_EVENT,
+        new OrderOfferResolvedEvent(assignment.id, orderId, order.orderNumber, assignment.technicianId, 'expired'),
+      );
+    }
 
     await this.matchingService.dispatchNextRound(orderId);
   }

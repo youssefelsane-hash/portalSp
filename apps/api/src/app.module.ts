@@ -43,6 +43,7 @@ import { DomesticWorkersModule } from './modules/domestic-workers/domestic-worke
 import { AcademyModule } from './modules/academy/academy.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { BrandingModule } from './modules/branding/branding.module';
+import { TechnicianProductivityModule } from './modules/technician-productivity/technician-productivity.module';
 
 @Module({
   imports: [
@@ -115,6 +116,7 @@ import { BrandingModule } from './modules/branding/branding.module';
     AcademyModule,
     OpsModule,
     BrandingModule,
+    TechnicianProductivityModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

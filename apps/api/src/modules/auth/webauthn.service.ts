@@ -253,17 +253,32 @@ export class WebAuthnService {
   }
 
   /** بيتستخدم مع OTP مش بمفرده (ADR-0011 §6) — الاستدعاء من AuthService بعد ما OTP يتستهلك. */
+  /**
+   * بَقّة حقيقية اتلقطت في مراجعة أمان (2026-08-14، §23 من توجيه المالك — "audit recovery
+   * endpoints for... recovery-code replay"): النسخة القديمة كانت `find()` بس، تعمل bcrypt.compare،
+   * وبعدين `save()` عادي — مفيش قفل ولا شرط `WHERE used_at IS NULL` وقت الكتابة. طلبين متزامنين
+   * بنفس كود الاسترجاع الصحيح كانوا الاتنين ممكن يعدّوا الـ`find()` قبل ما أي واحد فيهم يكتب
+   * (السباق: read-read-write-write بدل read-write ذرّي)، فالاتنين يعتبروا الكود "استُهلك بنجاح"
+   * ويبدأوا مسار MFA reset — كسر لضمان "كود واحد = استخدام واحد بس". الإصلاح: UPDATE ذرّي بشرط
+   * `WHERE id = :id AND used_at IS NULL` (نفس فلسفة `StepUpService.consume()` بالحرف)، وبنتأكد إن
+   * الطلب ده فعلاً هو اللي كسب السباق عبر `affected > 0` قبل ما نرجّع true.
+   */
   async consumeRecoveryCode(userId: string, plainCode: string): Promise<boolean> {
     const unused = await this.recoveryCodes.find({ where: { userId, usedAt: IsNull() } });
     for (const row of unused) {
       // eslint-disable-next-line no-await-in-loop
       const matches = await bcrypt.compare(plainCode, row.codeHash);
-      if (matches) {
-        row.usedAt = new Date();
-        // eslint-disable-next-line no-await-in-loop
-        await this.recoveryCodes.save(row);
-        return true;
-      }
+      if (!matches) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      const result = await this.recoveryCodes
+        .createQueryBuilder()
+        .update(AdminMfaRecoveryCode)
+        .set({ usedAt: () => 'now()' })
+        .where('id = :id', { id: row.id })
+        .andWhere('used_at IS NULL')
+        .execute();
+      return (result.affected ?? 0) > 0;
     }
     return false;
   }

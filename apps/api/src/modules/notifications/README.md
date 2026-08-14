@@ -62,6 +62,8 @@
 
 - **`order.technician_cancelled`**: `TechnicianCancellationNotificationListener` جديد — سياسة إلغاء الفني (`docs/10`). حدث مخصوص `TECHNICIAN_ORDER_CANCELLED_EVENT` (مش `ORDER_STATUS_CHANGED_EVENT` العام، لأن الحالة الجديدة بعد الإلغاء — `searching_technician`/`awaiting_technician_reselection` — مش مميّزة كفاية لوحدها). العميل بياخد إشعار **متعدد القنوات** (`notifyMultiChannel([IN_APP, PUSH])` — "عالي الأولوية" بمعنى المشروع: مش in_app بس) بسبب آمن للعميل + deep link يفرّق بين "بندوّرلك تلقائي" و"اختار بديل بنفسك". الأدمن بياخد نسخة عبر `NotificationRoutingService.routeToRole()` الموجود أصلاً (قاعدة افتراضية جديدة `order.technician_cancelled → ops_manager`، migration 0071 — نفس نمط `order.emergency_created`). اتعمله اختبار حي: PUSH فشل بأمان (مفيش جهاز مسجّل للعميل التجريبي) وIN_APP نجح — الاتنين مسجّلين في `notifications` بحالة `delivery_status` مختلفة، مش استثناء يكسر الطلب. أدمن `ops_manager` استلم إشعار التوجيه فعليًا (اتنين مستخدمين مختلفين استلموه). تفاصيل كاملة في `../orders/README.md` § سياسة إلغاء الفني.
 
+- **`order.emergency_dispatch_struggling`** (docs/08 §17.15، migration `0098`): `EmergencyDispatchStrugglingRoutingListener` جديد — نفس نمط `order.emergency_created`/`order.technician_cancelled` بالحرف (`routeToRole()`، قاعدة افتراضية جديدة `→ ops_manager`). بيتصدّر من `MatchingService.dispatchNextRound()` (`../matching/`) مرة واحدة بس لكل طلب طوارئ، لما عدد جولات التوزيع يوصل لعتبة `matching.emergency_escalation_after_rounds`، قبل ما يوصل لسقف الجولات/الفنيين ويتلغي تلقائي — تفاصيل كاملة في `../matching/README.md` § تدرّج دفعات الطوارئ.
+
 ## تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — ✅ خلص
 
 كانت مؤجّلة عمدًا كـ`backlog` منفصل. مستوى القناة بس (push/sms/whatsapp/email)، مش لكل
@@ -252,5 +254,52 @@ status) اتفحص خصيصًا واتلقى **مش موصّل فعليًا لأ
 `PATCH order_assigned_scheduled` (`sound_key`, `is_actionable`, `action_labels`) اتحفظ فعليًا في
 القاعدة ورجع في الرد بنفس القيم، `audit_logs` سجّل الـold/new values صح. حساب `ops_manager` (مالوش
 `notifications.manage`) اترفض `AUTH_001` فورًا. القيم الأصلية اترجعت بعد الاختبار.
+
+## عرض طلب actionable + دورة تذكير `critical_offer` (docs/08 §17.16، migration `0097`، 2026-08-14)
+
+كانت فجوة موثّقة صراحة (بحث خلفي في نفس الجلسة، مش افتراض): **مفيش أي حدث كان بيتصدّر خالص** لما
+فني يستقبل عرض طلب (عادي أو طوارئ) — على عكس مسار مطابقة المساعد (`ASSISTANT_OPPORTUNITY_OFFERED_EVENT`
+كان موجود من زمان). حقول `priorityTier`/`soundKey`/`isActionable`/`actionLabels` في
+`NotificationTypeConfig` كانت موجودة من ADR-0012 (schema + CRUD أدمن) بس **مش بتتقرا خالص** — مفيش
+أي push كان بيوصل بأولوية عالية/صوت مخصوص/أزرار.
+
+- **الأحداث الجديدة** (`common/events/order-offer-created.event.ts`/`order-offer-resolved.event.ts`):
+  `ORDER_OFFER_CREATED_EVENT` بيتصدّر من `MatchingService.dispatchNextRound()` مرة لكل عرض،
+  `ORDER_OFFER_RESOLVED_EVENT` من `accept()`/`reject()`/`MatchingRoundExpiryProcessor` بـ4 حالات
+  (`accepted`/`cancelled_offer_taken`/`rejected`/`expired`). تفاصيل كاملة في `../matching/README.md`.
+- **`OrderOfferNotificationListener`** (`listeners/`): عرض عادي (`order_offer`، `priority_tier=action_required`)
+  → إرسال فوري بس، **بلا `NotificationWorkflow`** (نافذة الرد ثواني قليلة، تذكير "بعد ساعة" مالوش
+  معنى). عرض طوارئ (`order_offer_emergency`، `priority_tier=critical_offer`) → **workflow-backed**
+  فعليًا، بدورة تذكير قصيرة جوّه نافذة الصلاحية نفسها (تفاصيل تحت).
+- **`OrderOfferResolutionListener`**: بيحل الـworkflow فورًا (idempotent) على أي حل، وبينبّه الفني
+  الخاسر (`cancelled_offer_taken`) بإشعار `order_offer_lost` فوري — طلب المالك الصريح "الخاسر ياخد
+  فورًا العرض مبقاش متاح".
+- **دورة تذكير `critical_offer`** — ADR-0012 كان أجّلها صراحة ("مفيش reminder cycle لـcritical_offer
+  دلوقتي"). `computeCriticalOfferCheckpoints()` (util جديد، نفس فلسفة `computeScheduledJobCheckpoints`
+  بالحرف) بيحسب checkpoints كنِسَب (`notification_engine.critical_offer_reminder_ratios`، افتراضي
+  `[0.5, 0.85]`) من نافذة `[sentAt, expiresAt)` نفسها — مش فاصل ثابت زي `action_required`. فرقين
+  متعمّدين عن باقي التصنيفات في `NotificationWorkflowReminderService`: (1) بتتخطى ساعات الهدوء
+  عمدًا (عرض طوارئ مش تذكير روتيني)، (2) `maxReminders` بيتحسب من طول قايمة الـcheckpoints نفسها
+  (زي `scheduled_job`)، مش رقم ثابت.
+- **`SettingsService.getJson<T>()`** (method جديدة، نفس نمط `getNumber`/`getBoolean`/`getString`)
+  — أول استهلاك ليها في الموديول ده لقراءة النِسَب.
+- **`FcmPushDispatcher` — push actionable حقيقي**: `NotificationsService.notify()` بقى بيقرا
+  `NotificationTypeConfig` ويمرّر `priorityTier`/`soundKey`/`isActionable`/`actionLabels` للـ
+  dispatcher (`DispatchNotificationInput` اتوسّعت). إشعارات `isActionable=true` بتتبعت **data-only**
+  (بلا `notification` block) عمدًا — أزرار قبول/رفض حقيقية محتاجة إشعار محلي مبني على جهاز العميل
+  (`flutter_local_notifications`)، حمولة FCM القياسية `notification` مالهاش أزرار قابلة للتخصيص.
+  أولوية عالية (`android.priority='high'`, `apns-priority: '10'`) لـ`critical_offer`/`action_required`
+  الاتنين. تفاصيل استهلاك apps/technician-app الكاملة في `../../../../technician-app/README.md`.
+- **migration `0097`**: `order_offer`/`order_offer_emergency`/`order_offer_lost` type configs +
+  إعداد `notification_engine.critical_offer_reminder_ratios`.
+- **اختبار حي**: `critical-offer-checkpoints.util.spec.ts` (5 اختبارات وحدة — ترتيب، استبعاد نِسَب
+  برّه `(0,1)`، نافذة صفر/سالبة، مصفوفة فاضية). Concurrency الفعلية (double-accept protection اللي
+  دورة التذكير دي بتوقف عندها) متأكدة في `../matching/matching-accept-concurrency.spec.ts` —
+  تفاصيل في `../matching/README.md`.
+
+**فجوة موثّقة صراحة**: التحقق الفعلي على جهاز حقيقي (heads-up notification، أزرار قابلة للمس،
+اهتزاز) مش ممكن في بيئة السيشن دي — الكود شغال ومتأكد بـ`tsc`/`nest build`/اختبارات حية، بس
+`IMPLEMENTED — DEVICE TEST PENDING` للجزء اللي محتاج هاردوير فعلي، مطابقة لتصنيف بصمة
+`apps/customer-app` في نفس الوثيقة (docs/08).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

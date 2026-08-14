@@ -186,3 +186,59 @@ psql): فني حقيقي عنده سلوت `booked` 10:00-12:00 UTC — طلب `
 صريح) ومعاه `scheduled_at` بعيد — بيتأجّل بث المطابقة زي أي طلب تفضيل عادي (السلوك الصح حسب
 الـADR: الفني ده معلنش توافره صراحة في الوقت ده، مجرد "تفضيل"). لو المالك حاب سلوك مختلف لحالة
 "تفضيل فني + موعد بعيد" تحديدًا (مثلاً بث فوري ليه هو بس)، ده قرار عمل جديد مش جزء من نطاق P0-9.
+
+## أحداث عرض الطلب — `ORDER_OFFER_CREATED_EVENT`/`ORDER_OFFER_RESOLVED_EVENT` (docs/08 §17.16)
+
+`dispatchNextRound()` بقى بيصدّر `ORDER_OFFER_CREATED_EVENT` مرة لكل صف `order_assignments` جديد
+(عادي أو طوارئ `isEmergency`) — قبل كده مفيش أي إشعار كان بيوصل للفني أصلاً لما عرض جديد يتبعتله،
+فجوة موثّقة كانت اتلقطت بالبحث في الجلسة اللي فاتت. المستمع (`OrderOfferNotificationListener` في
+`../notifications/`) هو المسؤول الوحيد عن قرار القناة/الأولوية — `MatchingService` نفسه مالوش أي
+معرفة بالإشعارات، نفس فلسفة `ORDER_ACCEPTED_EVENT` بالحرف.
+
+`accept()`/`reject()` والـ`MatchingRoundExpiryProcessor` (انتهاء مهلة الجولة) الثلاثة بيصدّروا
+`ORDER_OFFER_RESOLVED_EVENT` (`accepted`/`cancelled_offer_taken`/`rejected`/`expired`) — المستمع
+بيوقف أي دورة تذكير `critical_offer` شغالة للعرض ده فورًا (idempotent، safe no-op للعروض العادية)،
+وبينبّه الفني الخاسر فورًا "العرض بقى مش متاح" بدل ما يفضل مستني رد لعرض راح فعلاً (طلب المالك
+الصريح). `accept()` بقى بيستخدم `UPDATE ... RETURNING` بدل `manager.update()` العادي عشان يعرف
+بالظبط مين العروض المرفوضة تلقائيًا (فني تاني قبل) — `manager.update()` مابيرجّعش الصفوف المتأثرة.
+
+**اتأكد حيًا بتزامن حقيقي** (`matching-accept-concurrency.spec.ts`، ومقابله في
+`../assistant-matching/assistant-matching-accept-concurrency.spec.ts`): فنيين حقيقيين بيقبلوا نفس
+الطلب في نفس اللحظة (`Promise.allSettled`) — واحد بس يفوز (`fulfilled`)، التاني يترفض بـ`409`
+(`ORDR_003`)، عرض الخاسر بيتلغي فعليًا في القاعدة (مش يفضل `sent` معلّق للأبد). ده أول اختبار
+concurrency حقيقي لأخطر مسار في المطابقة كله رغم إن الكود نفسه (قفل `pessimistic_write`) كان موجود
+من زمان — "اتحقق حي مش افتراض من قراءة الكود" (طلب المالك الصريح، §17.25).
+
+## تدرّج دفعات الطوارئ (docs/08 §17.15، migration `0098`)
+
+`dispatchNextRound()` عنده دلوقتي سياسة توزيع طوارئ منفصلة بالكامل عن العادي، صفر أرقام دائمة:
+
+- **دفعة أولى/تالية منفصلتين**: `matching.emergency_batch_size` (الجولة 1 بس) و
+  `matching.emergency_subsequent_batch_size` (جديد، الجولة 2+) — قابلين للتعديل المستقل، مفيش
+  افتراض إنهم لازم يبقوا بنفس الحجم.
+- **مهلة رد أقصر**: `matching.emergency_response_timeout_seconds` (افتراضي 20 ثانية) بدل
+  `matching.response_timeout_seconds` العادية (30 ثانية) — "عمر العرض" مستقل بالكامل عن الطلب العادي.
+- **سقف أقصى لإجمالي الفنيين المتواصَل معاهم** (`matching.emergency_max_technicians_contacted`،
+  افتراضي 40) — بيتحسب **قبل** كل جولة (`COUNT(*) FROM order_assignments WHERE order_id=...`)،
+  مستقل عن `matching.max_rounds` تمامًا (ده بيحدّ عدد *الجولات*، ده بيحدّ عدد *الفنيين* الكلي —
+  مفيد لو batch size كبير وعدد الجولات قليل، أو العكس). لو الميزانية المتبقية أصغر من حجم الدفعة
+  المطلوب، الدفعة بتتقصّ لحجم الميزانية فعليًا (`Math.min`) مش ترفض كليًا — الطلب بيتلغي
+  (`cancelForNoTechnicians`) بس لو الميزانية وصلت صفر قبل ما الجولة تبدأ أصلاً.
+- **تصعيد تلقائي** (`matching.emergency_escalation_after_rounds`، افتراضي جولتين): حدث جديد
+  `ORDER_EMERGENCY_DISPATCH_STRUGGLING_EVENT` بيتصدّر **مرة واحدة بس** لكل طلب (`nextRound ===`
+  العتبة بالظبط، مش `>=`) — مستمع `EmergencyDispatchStrugglingRoutingListener` في `../notifications/`
+  بيوجّهه لـ`ops_manager` عبر `NotificationRoutingService.routeToRole()` الموجود بالفعل، نفس نمط
+  `EmergencyOrderRoutingListener` بالحرف (event_type مختلف عمداً — `order.emergency_dispatch_struggling`
+  — عشان الأدمن يقدر يوجّهه لفريق تصعيد مختلف عن استقبال الطلب نفسه).
+- **"توسّع نطاق جغرافي/نصف قطر" من النص الأصلي — قرار نطاق واعي**: البنية الحالية zone-based
+  (`technician_zones`) مش point-radius، فمفيش "نصف قطر" حرفي ممكن يتوسّع. بناء fallback حقيقي
+  بالـradius كان هيحتاج بُعد مطابقة جديد كليًا في `findEligibleTechnicians()` — بالظبط النوع اللي
+  المالك حذّر منه صراحة ("ممنوع إضعاف صحة المطابقة لمجرد تسريع توزيع الطوارئ"). اتأجّل عمدًا،
+  موثّق هنا كفجوة صريحة مش نسيان.
+- **حفاظ كامل على قواعد الأهلية**: صفر تغيير في `findEligibleTechnicians()` نفسها — التغيير كله
+  في *كام فني نبعتلهم* و*إمتى*، مش *مين مؤهّل أصلاً*.
+- **اتأكد حي بالكامل** (`emergency-batch-dispatch-policy.spec.ts`، 3 اختبارات، `EventEmitter2`
+  حقيقي بيلتقط الأحداث المتصدّرة فعليًا مش mock): جولة 1 بحجمها الصح، جولة 2 بحجمها الصح **والسقف
+  بيقصّها من 3 المطلوبة لـ2 المتاحة فعليًا** (مش رفض كامل)، التصعيد بيتصدّر مرة واحدة بالظبط في
+  الجولة الصح بالبيانات الصح (`roundsSoFar`/`techniciansContactedSoFar`)، وجولة 3 (ميزانية 0)
+  بتلغي الطلب فورًا بدل ما تبعت أي عرض جديد.
