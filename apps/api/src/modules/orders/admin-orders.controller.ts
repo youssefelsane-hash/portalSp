@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPi
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
@@ -108,8 +109,12 @@ export class AdminOrdersController {
     return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
   }
 
+  // بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): orders.adjust_price
+  // مُدرجة في MFA_REQUIRED_PERMISSIONS (mfa-policy.service.ts) بس @RequireStepUp() الفعلية
+  // متضافتش خالص — جلسة مسروقة كانت تقدر تعدّل سعر أي طلب من غير أي تأكيد Passkey حديث.
   @Patch(':id/adjust-price')
   @RequirePermission('orders.adjust_price')
+  @RequireStepUp()
   async adjustPrice(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

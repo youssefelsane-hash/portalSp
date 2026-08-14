@@ -1945,3 +1945,52 @@ Medium/Low، مش launch blockers.
 
 **الخطوة الجاية**: إغلاق §20 → تدقيق جاهزية إطلاق نهائي شامل (أمان + مالية + build gate كامل عبر
 كل التطبيقات) → قائمة تفعيل خدمات إنتاج خارجية → حكم نهائي READY/NOT READY.
+
+---
+
+## 🔒 تدقيق جاهزية الإطلاق النهائي — أمان (2026-08-14، بعد إغلاق §20)
+
+طبقًا لتعليمات المالك الصريحة ("AUDIT → TEST → BREAK → FIX → RETEST → HARDEN → CLOSE")، بعد إغلاق
+§20 بدأ تدقيق أمان/مالية/build شامل للمنصة الحالية (بدون أي ميزة جديدة). أهم اكتشاف:
+
+### بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على 4 endpoints حساسة
+
+**الاكتشاف**: `mfa-policy.service.ts` بيعرّف `MFA_REQUIRED_PERMISSIONS` — قايمة 9 صلاحيات (تشمل
+`wallets.adjust`, `orders.adjust_price`, `payments.confirm_manual`, `settings.manage`) اللي المفروض
+تحتاج تأكيد Passkey حديث (`@RequireStepUp()` + `StepUpGuard`) على كل عملية حساسة بيها، منفصلة تمامًا
+عن اشتراط MFA وقت الدخول للحساب نفسه. بمقارنة القايمة دي فعليًا بكل استخدامات `@RequireStepUp()` في
+الكود، اتلقت **4 endpoints حقيقية عندها الصلاحية الحساسة بس من غير الـdecorator الفعلي خالص**:
+
+| Endpoint | الصلاحية | الملف |
+|---|---|---|
+| `PATCH admin/wallets/:userId/adjust` | `wallets.adjust` | `admin-wallet.controller.ts` |
+| `PATCH admin/orders/:id/adjust-price` | `orders.adjust_price` | `admin-orders.controller.ts` |
+| `POST admin/payments/:id/confirm-instapay` | `payments.confirm_manual` | `admin-payments.controller.ts` |
+| `PATCH admin/settings/:key` | `settings.manage` | `admin-settings.controller.ts` |
+
+بما إن `StepUpGuard` مسجّل `APP_GUARD` global وبيبقى no-op تمامًا من غير `@RequireStepUp()` metadata على
+الـhandler، فالمعنى العملي: **جلسة أدمن مسروقة/مخترقة (XSS، توكن متسرّب، جهاز مفتوح) كانت تقدر تحوّل
+فلوس من محفظة، تعدّل سعر طلب، تأكّد دفعة InstaPay يدويًا، أو تغيّر إعداد منصة حساس — من غير أي تأكيد
+Passkey حديث خالص**، رغم إن كومنت الكود في `admin-wallet.controller.ts` كان بيدّعي صراحة إن step-up
+إجباري. دي فئة بَقّة "code-comment drift" — النية موثّقة صح بس التنفيذ ناقص.
+
+**الإصلاح**: إضافة `@RequireStepUp()` (زائد الـimport لو ناقص) للأربعة endpoints بالظبط.
+`rejectPayout` اتفحصت وعمدًا **مُستثناة** من نفس الفئة: هي بترجّع حجز فلوس موجود بالفعل
+(`releaseReservation`) لصاحبه الأصلي، مش تحويل فلوس لطرف خارجي — نفس مستوى حساسية عملية قراءة، مش
+نفس مستوى `approvePayout`/`completePayout` اللي فعلاً بيحركوا فلوس للخارج.
+
+**الاختبار**: `apps/api/src/modules/auth/mfa-step-up-enforcement.spec.ts` (جديد) — اختبار وحدة صفر
+DB/DI، بيقرا الـmetadata مباشرة من `Reflect.getMetadata()` على الـhandler نفسه (NestJS's
+`SetMetadata()` بيخزّن الـmetadata على الـfunction reference نفسه، فمينفعش يتقرا من غير Reflector
+كامل). 16 حالة (كل الـ13 endpoint اللي بيستخدموا صلاحية من `MFA_REQUIRED_PERMISSIONS`، زائد 3 endpoints
+تانية من `AdminRolesController` اتلقت أثناء المراجعة إنها بالفعل محمية صح) بتتأكد: (أ) الـpermission
+metadata مطابقة للمتوقع وفعليًا عضو في `MFA_REQUIRED_PERMISSIONS`، (ب) الـstep-up metadata موجودة أو
+غايبة بالظبط زي المتوقع لكل endpoint. الاختبار ده بيمنع نفس فئة البَقّة (comment يدّعي حماية موجودة
+والكود الفعلي ناقصها) ترجع تحصل بصمت لأي endpoint جديد مستقبلي.
+
+**النتيجة**: `npx tsc --noEmit` نضيف، `npx nest build` نضيف، `npx jest --runInBand --forceExit` كامل
+= **42 test suite / 229 test نجحوا كلهم** (صفر regression من الإصلاح).
+
+**تبرير الإصلاح تحت قيد "NO FEATURE CREEP"**: هذا إصلاح أمني بحت (fixing a documented-but-unenforced
+security invariant) — مسموح صراحة تحت استثناء المالك "A security fix is allowed" ضمن قيد إغلاق الإطلاق
+النهائي الصارم بمنع أي ميزة جديدة.

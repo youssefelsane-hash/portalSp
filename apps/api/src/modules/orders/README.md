@@ -465,3 +465,13 @@ Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`ord
 بنجاح)؛ أكتر من صورة مسموح (نفس النجاح، صفر حد أعلى)؛ `before_photo` بس مش كافي (النوع مهم مش أي
 صورة). `tsc --noEmit`/`nest build`/41 suite (213 اختبار) عدّوا نضيف. `flutter analyze` نضيف (صفر
 تحذير جديد). صفر migration (`order_media` موجودة من زمان، الفحص منطقي بس).
+
+## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `adjustPrice` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
+
+`orders.adjust_price` مُدرجة في `MFA_REQUIRED_PERMISSIONS` (`../auth/mfa-policy.service.ts`) بس
+`@RequireStepUp()` الفعلية متضافتش خالص على `PATCH /admin/orders/:id/adjust-price`
+(`admin-orders.controller.ts`) — يعني `StepUpGuard` (global) كان no-op عليها، فجلسة أدمن مسروقة
+كانت تقدر تعدّل سعر أي طلب من غير أي تأكيد Passkey حديث. اتصلحت بإضافة `@RequireStepUp()` (نفس فئة
+البَقّة اللي اتصلحت في `wallets.adjust`/`payments.confirm_manual`/`settings.manage` مع بعض). تفاصيل
+كاملة + الاختبار الجديد (`../auth/mfa-step-up-enforcement.spec.ts`) في
+`../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".

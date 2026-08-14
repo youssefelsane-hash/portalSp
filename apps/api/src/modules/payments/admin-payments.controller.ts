@@ -68,9 +68,14 @@ export class AdminPaymentsController {
    * (Finance/Super Admin بس)، مش `refunds.issue` ولا أي صلاحية عامة. Idempotent فعليًا داخل
    * PaymentsService.confirmInstaPayPayment() (قفل pessimistic_write + فحص PENDING جوّه القفل) —
    * Audit كامل (الموظف/الوقت/المبلغ/الحالة قبل وبعد) بيتسجّل جوّه الخدمة نفسها.
+   *
+   * بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14):
+   * payments.confirm_manual مُدرجة في MFA_REQUIRED_PERMISSIONS بس @RequireStepUp() متضافتش —
+   * نفس الفئة اللي اتصلحت لـwallets.adjust/orders.adjust_price/settings.manage.
    */
   @Post('payments/:id/confirm-instapay')
   @RequirePermission('payments.confirm_manual')
+  @RequireStepUp()
   async confirmInstaPayPayment(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
