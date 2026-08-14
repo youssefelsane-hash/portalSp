@@ -229,6 +229,28 @@ rematch`، أو لغى الطلب بالكامل.
   مغطّى بالاختبار الحي فوق، مفيش منطق حسابي جديد يستاهل unit test منفصل زي `checkpoints`).
 
 **متبقٍ صريح من `action_required`**: دفع معلّق، رفع مستند، رد الدعم — لسه محتاجين تصميم/قرار عمل
-قبل التوصيل، مش موجودين كـstate machine واضحة زي الحالتين اللي اتقفلوا.
+قبل التوصيل، مش موجودين كـstate machine واضحة زي الحالتين اللي اتقفلوا. `AWAITING_PAYMENT` (order
+status) اتفحص خصيصًا واتلقى **مش موصّل فعليًا لأي كود دلوقتي** — الدفع الفعلي بيحصل والطلب لسه
+`work_completed` (`PAYABLE_ORDER_STATUSES` في `payments.service.ts`)، فمفيش نقطة انتقال حقيقية
+لـ`AWAITING_PAYMENT` تتوصّل بيها من غير اختراع منطق عمل جديد (قرار مش موجود صراحة) — اتسجّل
+كفجوة موثّقة صراحة، مش سهو.
+
+## واجهة أدمن لـ`notification_type_configs` — `GET/PATCH /admin/notification-type-configs` (2026-08-14)
+
+كانت فجوة موثّقة صراحة من Phase 1: تعديل الأولوية/الصوت/القناة/actionable لأي `notification_type`
+كان ممكن بس عبر `psql`/migration مباشرة — بيناقض طلب المالك الصريح "كل شيء قابل للإعداد من الأدمن"
+عمليًا (مفيش أدمن حقيقي يقدر يستخدم `psql`). أول endpoint حقيقي يقرا/يعدّل الجدول ده.
+
+**`NotificationTypeConfigService`** (`list`/`update`، مفيش `create`/`delete` عمداً — صف
+`notification_type_configs` بيتولّد لما نوع إشعار جديد يتضاف في الكود نفسه عبر migration seed،
+مش حاجة الأدمن يخترعها بنفسه من غير أي كود بيصدرها). `GET` مفتوح لأي أدمن (بيانات غير حساسة،
+نفس فلسفة `GET /admin/notification-routing-rules`)، `PATCH /:notificationType` محتاج
+`notifications.manage` (الصلاحية الموجودة بالفعل، migration `0031`)، مسجّل بـ`audit_logs`
+(`notification_type_config.updated`، old/new values كاملة).
+
+**اتأكد حي بالكامل عبر `curl` ضد الباك-إند الحقيقي**: `GET` رجّع كل الأنواع المزروعة صح.
+`PATCH order_assigned_scheduled` (`sound_key`, `is_actionable`, `action_labels`) اتحفظ فعليًا في
+القاعدة ورجع في الرد بنفس القيم، `audit_logs` سجّل الـold/new values صح. حساب `ops_manager` (مالوش
+`notifications.manage`) اترفض `AUTH_001` فورًا. القيم الأصلية اترجعت بعد الاختبار.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
