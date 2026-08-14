@@ -3,6 +3,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <!-- الدخول بالبصمة (docs/08 §17.22) — local_auth محتاجها عشان يفتح BiometricPrompt. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- عرض إشعارات push محلية (docs/08 §19 بند 11) — POST_NOTIFICATIONS إجباري على Android 13+
+         وإلا مفيش إشعار هيظهر خالص، بغض النظر عن FCM. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="customer_app"
         android:name="${applicationName}"

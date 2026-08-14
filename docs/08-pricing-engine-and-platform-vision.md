@@ -1051,3 +1051,28 @@ Flutter حي كامل (`pending_payment_order_creation_live_test.dart` — عم�
 تحقق live-HTTP لكل الخمس endpoints مش اتعمل هنا (محتاج تجهيز مستخدمين/طلبات فعلية لكل مسار) —
 نفس منهجية التحقق المتّبعة في بند 9 (اختبار وحدة نقي للمنطق المشترك، التوصيل بالكنترولرات تبديل
 سطر واحد ميكانيكي مؤكَّد بـ`tsc`/قراءة كود مباشرة).
+
+### تحديث تنفيذ §19 — بند 11 (Push notifications — onMessage/onMessageOpenedApp/getInitialMessage/deep-link) — ✅ `IMPLEMENTED — DEVICE TEST PENDING`
+
+كانت فجوة موثّقة صراحة في تدقيق المالك: `PushNotificationService` في التطبيقين كان بيعمل بس
+Firebase init → إذن → توكن → `POST /devices` — صفر `onMessage`/`onMessageOpenedApp`/
+`getInitialMessage`، وعروض الطلب actionable (§17.16، اتقفلت في جلسة سابقة) كانت الوحيدة اللي
+عندها background handler + عرض محلي. يعني (أ) إشعار وصل والتطبيق foreground كان بيختفي بصمت
+تمامًا في التطبيقين الاتنين (حتى عروض الطلب actionable — `_showActionableNotificationIfNeeded`
+كانت بترجع فورًا لغير actionable من غير أي بديل)، و(ب) تاب على أي إشعار (foreground/background/
+cold-start) كان بيفتح التطبيق على الشاشة الافتراضية بلا ملاحة لمحتواه — تعليق `_handleNotificationAction`
+القديم في `apps/technician-app` كان بيقول ده صراحة ("لو حبينا نضيف navigation فعلي لاحقًا").
+
+**الإصلاح**: `core/deep_link_router.dart` جديد في التطبيقين (محدود عمدًا على أنماط `deep_link`
+الحقيقية اللي الباك-إند بيبعتها فعلاً — `grep -rn "deepLink:" apps/api/src/modules/notifications`
+— `/orders/:id` للعميل، `/technician/orders/:id`+`/technician/assistant-offers/:id` للفني).
+`flutter_local_notifications` جديد في `customer-app` (كان موجود بالفعل في `technician-app` من
+§17.16). `onMessage` بقى بيعرض إشعار محلي لكل الرسايل foreground (مش actionable بس زي زمان)،
+`onMessageOpenedApp`/`getInitialMessage`/تاب على الإشعار المحلي التلاتة بينادوا `handleDeepLink()`.
+تفاصيل كل تطبيق (بما فيها فجوة متبقية موثّقة صراحة وضيقة عمدًا — تاب على جسم إشعار actionable
+والتطبيق مقفول تمامًا، بيوصل لـbackground isolate بلا Navigator أصلاً) في
+`apps/customer-app/README.md` و`apps/technician-app/README.md`.
+
+اتأكد بـ`flutter analyze` نضيف على التطبيقين الاتنين (صفر أخطاء/تحذيرات جديدة). نفس تصنيف
+§17.16: `IMPLEMENTED — DEVICE TEST PENDING` — heads-up notification حقيقي/تاب فعلي على جهاز
+محتاج جهاز/إعداد Firebase حقيقي مش متاحين في بيئة السيشن دي.

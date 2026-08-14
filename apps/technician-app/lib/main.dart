@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'core/api_exception.dart';
 import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
+import 'core/deep_link_router.dart';
 import 'core/device_security.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
@@ -26,6 +27,7 @@ class BaytakTechnicianApp extends StatelessWidget {
       child: MaterialApp(
         title: 'صُنّاع — الفني',
         debugShowCheckedModeBanner: false,
+        navigatorKey: rootNavigatorKey,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),
