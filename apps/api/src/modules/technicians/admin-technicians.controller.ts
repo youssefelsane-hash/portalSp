@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminTechniciansService } from './admin-technicians.service';
@@ -26,6 +27,7 @@ export class AdminTechniciansController {
   constructor(
     private readonly adminTechniciansService: AdminTechniciansService,
     private readonly certificatesService: TechnicianCertificatesService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Get()
@@ -38,7 +40,7 @@ export class AdminTechniciansController {
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { profile, user, documents } = await this.adminTechniciansService.getDetail(id);
     const certificates = await this.certificatesService.listForTechnician(id);
-    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates);
+    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates, this.storage);
   }
 
   @Post(':id/approve')
@@ -156,7 +158,7 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const document = await this.adminTechniciansService.reviewDocument(admin.sub, id, documentId, dto, audit);
-    return toTechnicianDocumentResponseDto(document);
+    return toTechnicianDocumentResponseDto(document, this.storage);
   }
 
   // مراجعة شهادات/كورسات الفني (docs/08 §4) — نفس صلاحية مراجعة مستندات الـ KYC، عشان هي أصلاً

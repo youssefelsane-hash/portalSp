@@ -32,6 +32,11 @@ export class OrderMedia {
   @Column({ name: 'file_url', type: 'text' })
   fileUrl: string;
 
+  // مفتاح التخزين (docs/08 §19 بند 9) — لو موجود، نمط getUrl(key) بيتستخدم وقت القراءة (رابط
+  // طازة كل مرة بدل file_url الثابت اللي بينتهي بعد 7 أيام مع S3). NULL لأي صف قديم قبل الإصلاح.
+  @Column({ name: 'storage_key', type: 'text', nullable: true })
+  storageKey: string | null;
+
   @Column({ name: 'file_size_bytes', type: 'integer', nullable: true })
   fileSizeBytes: number | null;
 

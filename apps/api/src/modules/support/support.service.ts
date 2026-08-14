@@ -392,6 +392,7 @@ export class SupportService {
     const attachment = this.attachments.create({
       complaintId: complaint.id,
       fileUrl,
+      storageKey: key,
       fileType: file.mimetype,
       uploadedByUserId: user.sub,
     });

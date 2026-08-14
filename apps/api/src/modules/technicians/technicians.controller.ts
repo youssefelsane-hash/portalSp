@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -18,6 +19,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { TechniciansService } from './technicians.service';
@@ -52,6 +54,7 @@ export class TechniciansController {
     private readonly portfolioLinksService: PortfolioLinksService,
     private readonly scheduleService: TechnicianScheduleService,
     private readonly certificatesService: TechnicianCertificatesService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Get('me')
@@ -128,13 +131,13 @@ export class TechniciansController {
     }
 
     const document = await this.technicianDocumentsService.upload(user.sub, dto, file);
-    return toTechnicianDocumentResponseDto(document);
+    return toTechnicianDocumentResponseDto(document, this.storage);
   }
 
   @Get('documents')
   async listDocuments(@CurrentUser() user: JwtPayload) {
     const documents = await this.technicianDocumentsService.listMine(user.sub);
-    return documents.map(toTechnicianDocumentResponseDto);
+    return Promise.all(documents.map((d) => toTechnicianDocumentResponseDto(d, this.storage)));
   }
 
   // معرض أعمال الفني عبر لينكات السوشيال ميديا — تفاصيل كاملة في technicians/README.md.

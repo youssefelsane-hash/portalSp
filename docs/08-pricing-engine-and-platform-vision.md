@@ -942,3 +942,24 @@ InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كا�
 بـ`payment_method=undefined` (regression — مفيش دفع مسبق كاذب على القوالب القديمة). النطاق مقصود
 وضيق: بيثبت وصول القيمة صح لحدود `OrdersService.create()`، مش بيعيد اختبار منطق `PENDING_PAYMENT`
 transition نفسه (ده مسؤولية `OrdersService.create()` منفصلة ومختبرة في مكان تاني بالفعل).
+
+### تحديث تنفيذ §19 — بند 9 (Storage/KYC — تعميم `getUrl(key)`) — ✅ `DONE + AUTOMATED VERIFIED`
+
+نمط `getUrl(key)` (كان مبني لـ`branding` بس) اتعمم على التلات جداول اللي `s3-storage.service.ts`
+نفسها كانت بتوثّق الفجوة فيهم صراحة: `order_media`، `technician_documents`، `complaint_attachments`.
+عمود `storage_key` جديد (`infra/migrations/0102`، اختياري) بيتسجّل وقت كل رفع جنب `file_url`
+القديم؛ التلات مابرز (`toOrderMediaResponseDto`/`toTechnicianDocumentResponseDto`/
+`toComplaintAttachmentResponseDto`) بقوا `async` بياخدوا `StorageService` — لو `storage_key`
+موجود، رابط طازة عبر `getUrl(key)` كل قراءة (بيحل مشكلة انتهاء presigned URL بعد 7 أيام مع S3)؛
+لو `null` (صف قديم قبل الإصلاح)، `file_url` المخزّن زي ما هو (مفيش backfill ممكن — الـkey الأصلي
+مش متسجّل). كل الكنترولرات المستهلكة (`OrdersController`/`AdminOrdersController`/
+`TechnicianOrderExecutionController`/`TechniciansController`/`AdminTechniciansController`/
+`SupportController`) بقت تحقن `StorageService` وتستخدم `Promise.all()`.
+
+**فجوة مطابقة اتلقطت، خارج نطاق بند 9 (اللي حدد التلات جداول دول صراحة)، موثّقة صراحة**:
+`technician_certificates` عندها نفس البَقّة بالظبط، متصلحتش عمدًا هنا.
+
+اتأكد بـ`getUrl-response-mappers.spec.ts` (اختبار وحدة نقي بدون DB، 6 اختبارات): التلات مابرز
+بيتصرفوا صح مع `storage_key` موجود (نداء `getUrl(key)` فعلي، النتيجة هي `file_url` الراجع) ومع
+`storage_key=null` (رجوع `file_url` القديم بلا أي نداء لـ`storage` خالص). `tsc --noEmit` →
+`nest build` → `jest` (145 اختبار، 26 suite) كلهم عدّوا نضيف.

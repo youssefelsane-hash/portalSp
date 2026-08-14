@@ -31,6 +31,11 @@ export class TechnicianDocument {
   @Column({ name: 'file_url', type: 'text' })
   fileUrl: string;
 
+  // مفتاح التخزين (docs/08 §19 بند 9) — لو موجود، نمط getUrl(key) بيتستخدم وقت القراءة بدل
+  // file_url الثابت. NULL لأي صف قديم قبل الإصلاح.
+  @Column({ name: 'storage_key', type: 'text', nullable: true })
+  storageKey: string | null;
+
   @Column({ name: 'file_size_bytes', type: 'integer', nullable: true })
   fileSizeBytes: number | null;
 

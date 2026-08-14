@@ -34,6 +34,7 @@ export class TechnicianDocumentsService {
       technicianId: profile.id,
       documentType: dto.document_type,
       fileUrl,
+      storageKey: key,
       fileSizeBytes: file.size,
       mimeType: file.mimetype,
       expiresAt: dto.expires_at ?? null,

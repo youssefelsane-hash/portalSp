@@ -1,3 +1,4 @@
+import { StorageService } from '../../../common/storage/storage.service';
 import { User } from '../../auth/entities/user.entity';
 import { TechnicianProfile } from '../entities/technician-profile.entity';
 import { TechnicianDocumentResponseDto, toTechnicianDocumentResponseDto } from './technician-document-response.dto';
@@ -56,15 +57,18 @@ export interface AdminTechnicianDetailResponseDto extends AdminTechnicianRespons
   certificates: CertificateResponseDto[];
 }
 
-export function toAdminTechnicianDetailResponseDto(
+// docs/08 §19 بند 9 — الأدمن (بس مش الفني) هو الطرف الوحيد اللي بيقرا roots المستندات دي كتلة
+// واحدة، فأصبحت async عشان توليد رابط طازة لكل مستند عن طريق getUrl(key) بدل file_url الثابت.
+export async function toAdminTechnicianDetailResponseDto(
   profile: TechnicianProfile,
   user: User,
   documents: TechnicianDocument[],
   certificates: TechnicianCertificate[],
-): AdminTechnicianDetailResponseDto {
+  storage: StorageService,
+): Promise<AdminTechnicianDetailResponseDto> {
   return {
     ...toAdminTechnicianResponseDto(profile, user),
-    documents: documents.map(toTechnicianDocumentResponseDto),
+    documents: await Promise.all(documents.map((d) => toTechnicianDocumentResponseDto(d, storage))),
     certificates: certificates.map(toCertificateResponseDto),
   };
 }
