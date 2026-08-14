@@ -103,7 +103,14 @@ jobs:
         run: npm run build
 
   flutter:
-    name: "flutter analyze — ${{ matrix.app }}"
+    # كانت فجوة موثّقة صراحة (docs/08 §19 بند 18): flutter analyze بس مش بيثبت إن الكود شغال
+    # فعليًا (static analysis يعدّي حتى لو منطق الاختبار غلط) ولا إنه بيتبني فعلاً للمنصة
+    # الحقيقية (يتلقط أخطاء Kotlin/native plugin registration/AndroidManifest مش ظاهرة لـanalyze).
+    # test/ (وحدة/widget بلا باك-إند حي — test_live/ منفصل عمدًا، محتاج سيرفر API حقيقي شغال زي
+    # ما موضّح في README كل تطبيق، خارج نطاق CI الحالي) وbuild apk --debug (بيستخدم توقيع debug
+    # تلقائيًا من غير key.properties — نفس سلوك `flutter run --release` المحلي، مش فحص توقيع
+    # الإصدار الحقيقي) اتضافوا هنا.
+    name: "flutter analyze + test + build — ${{ matrix.app }}"
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -123,3 +130,11 @@ jobs:
       - name: flutter analyze
         working-directory: apps/${{ matrix.app }}
         run: flutter analyze
+
+      - name: flutter test (وحدة/widget بلا باك-إند حي)
+        working-directory: apps/${{ matrix.app }}
+        run: flutter test
+
+      - name: flutter build apk --debug (فحص تصدير حقيقي، مش static analysis بس)
+        working-directory: apps/${{ matrix.app }}
+        run: flutter build apk --debug
