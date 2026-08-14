@@ -1566,3 +1566,90 @@ quote_approval_live_test.dart`) — فني اقترح قطعة غيار 60ج ع�
 `order.payment_status` بقى `partially_refunded` و`order_status` فضل `completed`). **الفجوة الوحيدة
 الحقيقية اللي اتقفلت هنا فعليًا مش كود — كانت غياب أي اختبار للمسار الجزئي خالص** (كل الاختبارات
 السابقة كانت استرداد كامل بس)؛ دلوقتي الصيغة مُثبتة رياضيًا وحيًا للحالتين.
+
+---
+
+## 🔖 CURRENT HANDOFF — §20 Financial Operations Audit (checkpoint 2026-08-14, session cut short by usage limit)
+
+**هدف السطرين دول**: أي سيشن/أكاونت جديدة تقرأ هنا الأول قبل أي حاجة تانية في §20 — الملخص ده هو
+المصدر الوحيد اللي لازم يتصدّق، مش أي استنتاج من commit history لوحده.
+
+### ✅ Completed and verified (§20.1–§20.6) — DO NOT reopen unless §20.7 finds a real regression touching them
+
+- **§20.1 Audit** — الموديل المالي الموجود (orders/payments/wallets/wallet_transactions/refunds/
+  payouts) اتأكد إنه كافي معماريًا؛ الفجوة الوحيدة كانت اتجاه حركة التسوية (تحت).
+- **§20.2-4 (نفس الإصلاح الواحد)** — `settleAndComplete()` في `payments.service.ts` بقت بتحسب
+  `netMovementCents = technicianEarningCents - cashHeldByTechnicianCents` بدل التحويل الأعمى
+  القديم. كاش → `COMMISSION_DEDUCTION` (دَين على الفني)، إلكتروني → `ORDER_EARNING` (زي زمان)،
+  مختلط (ADR-0015) → الفرق بس. مُختبر حيًا بالكامل في `cash-settlement-direction.spec.ts`.
+- **§20.5** — `PaymentsService.adminAdjustWallet()` + `PATCH /admin/wallets/:userId/adjust` جديدين
+  (تصحيح مالي يدوي append-only، صلاحية `wallets.adjust` migration `0104` + MFA). مُختبر حيًا في
+  `wallet-manual-adjustment.spec.ts`.
+- **§20.6** — تحقق رياضي + اختبار حي فقط (صفر كود جديد) إن `refundOrder()` الموجودة بالفعل (بتدعم
+  `amount_cents` جزئي) بترجع دَين الفني الصح تلقائيًا حتى لطلبات الكاش لما السعر النهائي ينزّل.
+
+**آخر commit مدفوع فعليًا لكل الشغل ده**: `ca81434` — راجع `git log` للتأكد، ده الأحدث وقت كتابة
+الـcheckpoint ده. لو فيه commits بعده، اقرأهم كمان قبل ما تكمّل.
+
+**آخر full test gate نجح**: 37 test suite / 201 test — كلهم عدّوا، `tsc --noEmit` و`nest build`
+نضيفين، في نفس نقطة الـcommit `ca81434`.
+
+### 🔄 §20.7 (Cancellation/refund settlement scenarios) — IN PROGRESS, لسه من غير أي كود اتكتب
+
+**الحالة بالظبط**: تم إطلاق subagent بحثي (read-only، Explore) عشان يدقق 8 نقاط محددة، بس الـsession
+اتقفلت (worker restart) قبل ما يرجع بنتيجة — **صفر نتيجة اتسجّلت، صفر كود اتكتب لـ§20.7 لحد دلوقتي**.
+مفيش أي uncommitted changes في working tree وقت كتابة الـcheckpoint ده (`git status` نضيف تمامًا).
+
+**الـ8 نقاط اللي كانت مطلوبة من الـsubagent (لسه محتاجة تحقيق من الصفر، انسخهم زي ما هم لأي prompt
+تاني)**:
+1. `OrdersService.cancel()` (`orders.service.ts`) — `CUSTOMER_CANCELLABLE_STATUSES`، وهل بيطلق أي
+   refund تلقائي لو الطلب كان مدفوع مسبقًا (كارت/InstaPay قبل التوزيع، ADR-0013/0015) قبل ما فني
+   يتعيّن، ولا بيسيب الطلب `CANCELLED_BY_CUSTOMER` + `paymentStatus=PAID` معلّق لحد ما أدمن يتصرف يدويًا.
+2. `order-state-machine.ts` كامل — كل انتقال لـ`CANCELLED_BY_CUSTOMER`/`CANCELLED_BY_TECHNICIAN`/
+   `CANCELLED_BY_SYSTEM`/`DISPUTED`/`REFUNDED`، ومن أي حالة (قبل التعيين/بعده-قبل التحرك/في الطريق/
+   بعد بدء الشغل).
+3. سياسة إلغاء الفني (`docs/10`، جدول `technician_order_cancellations`) — هل فيها غرامة
+   (`cancellation_reasons.fee_percentage`)، هل بترد فلوس العميل لو الطلب مدفوع مسبقًا، هل بتتكامل
+   صح مع إعادة المطابقة (`SEARCHING_TECHNICIAN`).
+4. `order-auto-cancel.service.ts` — إلغاء نظامي (timeout انتظار فني/دفع) — هل بيستدعي
+   `refundSystemCancelledOrder()` تلقائيًا لكل حالة مدفوعة، ولا بعضها بيسيب الفلوس معلّقة.
+5. كل نقاط استدعاء `refundOrder()`/`refundSystemCancelledOrder()` في المشروع كله — تلقائي ولا
+   بيحتاج فعل أدمن بصلاحية `refunds.issue`.
+6. **السؤال الأهم**: عميل لغى طلب مدفوع إلكترونيًا (كارت/InstaPay) **قبل** ما فني يتعيّن — بيترد
+   تلقائيًا ولا الفلوس تفضل معلّقة (`paymentStatus=PAID`, `orderStatus=CANCELLED_BY_CUSTOMER`) لحد
+   ما أدمن يتصرف يدويًا؟ ده ممكن يكون فجوة حقيقية أو قرار متعمّد (المالك يحتاج مراجعة كل إلغاء) —
+   لازم يتحدد صراحة مش يتفترض.
+7. حماية "استرداد بعد الصرف (payout)" — هل `PayoutsService` (`payouts.service.ts`,
+   `linkOrderItemsForPayout`) بتتحقق من `has_complaint`/استرداد معلّق قبل ضم أرباح الطلب لدفعة صرف؟
+   لو حصل استرداد بعد الصرف، هل الفني ببساطة يبقى رصيده سالب (يتسوّى في الصرف الجاي) ولا فيه حماية
+   تانية؟
+8. بنية جدول `technician_order_cancellations` (migrations) — هل بتسجّل غرامة فعلية
+   (`fee_percentage`/`fee_amount_cents` أو زيه).
+
+**تعليمات صريحة لازم تتاخد بالحرف وقت بناء أي حل**: "Do not invent punitive policies. Use existing
+business rules where defined. Flag genuine policy decisions if none exist." — لو اتلقت فجوة حقيقية
+(زي نقطة 6 فوق لو فعلاً مفيش refund تلقائي)، الحل الصح غالبًا مش "اخترع سياسة استرداد تلقائي جديدة"
+غير موثقة — لازم إما (أ) تلاقي قاعدة عمل موجودة فعلاً بتغطيها ما اتوصلتش، أو (ب) توثّقها كقرار
+مطلوب من المالك في backlog وتسيبها، مش تقرر بنفسك.
+
+**لسه من غير**: تنفيذ أي كود، أي migration، أي اختبار لـ§20.7. الأدمن endpoint `POST
+/admin/orders/:id/refund` (صلاحية `refunds.issue`) موجود ومختبر (§20.6) — لو الحل المطلوب "الأدمن
+يقدر يرد يدويًا"، ده جاهز بالفعل؛ اللي محتاج تحقق هو هل ده كافي أم فيه تلقائية مفروضة ناقصة.
+
+### النقاط اللي لسه محتاجة تحقيق (§20.8 لحد §20.14) — صفر تحقيق اتعمل فيهم لحد دلوقتي
+
+§20.8 (تعليق صرف الفني وقت نزاع)، §20.9 (توضيح الصرف — عرض بنود دَين الكاش)، §20.10 (تحسين شاشات
+الأدمن)، §20.11 (ملخص مالي لكل طلب)، §20.12 (proof-of-work backend enforcement)، §20.13 (اختبار
+ثوابت A-N)، §20.14 (30 سيناريو PASS/PARTIAL/GAP) — كلهم زي ما هم من أول الجلسة، صفر تقدّم حقيقي.
+
+### Next exact action لأي سيشن جديدة
+
+1. اقرأ الـ8 نقاط فوق، ابدأ بيهم بالترتيب (ممكن subagent جديد بنفس الـprompt تقريبًا، أو تحقيق يدوي
+   مباشر لو الوقت متاح).
+2. لو لقيت فجوة حقيقية في نقطة 6 (إلغاء عميل قبل تعيين فني لطلب مدفوع إلكترونيًا)، الأرجح إن الحل
+   الصح هو استدعاء منطق شبيه بـ`refundSystemCancelledOrder()` (نفس نمط الـ3-phase safety) من جوّه
+   `OrdersService.cancel()` لما `paymentStatus=PAID` — بس اتأكد الأول مفيش قرار متعمّد موثّق ضد كده.
+3. بعد أي كود، اتّبع نفس الانضباط المتبع في §20.1-6: `tsc --noEmit` → `nest build` → `jest` الملف
+   الجديد → `jest` الـsuite كامل → توثيق في `docs/08` (نفس نمط "### تحديث تنفيذ §20 — بند N") +
+   README الموديول المتأثر → commit → push.
+4. مايتقفلش §20.7 في التتبّع (task #88) غير لما الـ8 نقاط اتحقّقت فعليًا (مش افتراض).
