@@ -540,8 +540,40 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 لكل نوع أصل (6 أنواع)، معاينة حية، رفع (multipart، Step-Up تلقائي عبر البنية فوق)، رجوع للـfallback.
 اتأكد حي في نفس تشغيلة Playwright فوق (الرفع نجح فعليًا بعد الـStep-Up).
 
-**لسه `NOT STARTED`** من §17: §17.14-15 (إنتاجية configurable، دفعات طوارئ)، §17.16 (critical_offer
-push)، §17.22 (بصمة Flutter)، §17.25-27 (مراجعة أمان نهائية). راجع task list السيشن (#62, #63, #65, #66).
+**§17.25-27 (مراجعة أمان — `DONE + AUTOMATED VERIFIED`، جزئي مركّز مش §25 كامل حرفيًا)**: مراجعة
+مركّزة على أحدث وأخطر كود اتبنى الجلسة دي (MFA/Step-Up/InstaPay/البراندنج) — مش كل بند من الـ~40
+سيناريو في §25 الأصلية بالحرف (ده كان محتاج وقت أكبر بكتير من فرصة "استمر بلا توقف" الحالية)، بس
+كل حاجة اتفحصت **باختبارات آلية حية ضد Postgres حقيقي أو حية عبر متصفح حقيقي**، مش "آمن من قراءة
+الكود بس" (طلب المالك صراحة):
+
+- **بَقّة حقيقية اتلقطت وانصلحت**: `WebAuthnService.consumeRecoveryCode()` كان فيه سباق حقيقي (race
+  condition) — `find()` بعدين `save()` عادي من غير قفل ولا شرط `WHERE used_at IS NULL` وقت الكتابة.
+  طلبين متزامنين بنفس كود الاسترجاع الصحيح كانوا الاتنين ممكن ينجحوا (read-read-write-write بدل
+  read-write ذرّي)، كاسرين ضمان "كود واحد = استخدام واحد بس" (بالظبط الفجوة اللي المالك طلب صراحة
+  نراجعها في §23: "recovery-code replay"). الإصلاح: UPDATE ذرّي بشرط `id + used_at IS NULL` (نفس
+  فلسفة `StepUpService.consume()` الموجودة بالفعل)، مع فحص `affected > 0` قبل ما نرجّع نجاح. اتثبت
+  بـ`security-regression.spec.ts`: 5 محاولات متزامنة حقيقية بنفس الكود → واحدة بس نجحت.
+- `StepUpService.consume()` اتفحص حيًا (مش افتراض): single-use تحت تزامن حقيقي ✓، مينفعش يُستهلك
+  بمعرّف مستخدم مختلف عن اللي اتصدر له (منع سرقة/استخدام عبر حسابات) ✓، توكن منتهي الصلاحية بيترفض ✓.
+- **Webhook replay/idempotency (§26)**: `finalizeGatewayWebhook()` مع نفس `external_event_id`
+  مرتين — الثانية no-op تمامًا (صفر معالجة، صفر صف مكرر في `webhook_events`)، اللوج بيأكّد
+  "webhook مكرر اتجاهل". اختبار جديد في `webhook-amount-verification.spec.ts`.
+- **InstaPay manual confirm idempotency**: اتأكد حيًا الجلسة اللي فاتت (ADR-0013 verification) —
+  نقر مزدوج بيرجع نفس الدفعة من غير أي أثر مالي إضافي (pessimistic_write + فحص PENDING جوّه القفل).
+- **Payment provider abstraction (§25 payments)**: توقيع HMAC مزوّر/متلاعب فيه/secret غلط/مفيش
+  hmac خالص — كل الحالات دي مغطاة بـ12 اختبار في `paymob-provider.service.spec.ts` (منها اختبار
+  "تلاعب بالمبلغ بعد حساب التوقيع" صراحة — يثبت التوقيع فعلاً بيغطي المبلغ مش بس شكل عام للحمولة).
+- **دفع قبل التوزيع (§25 dispatch race)**: اتأكد حيًا (ADR-0013 verification) — order_assignments
+  صفر قبل الدفع، بيتعمل فعليًا بس بعد تأكيد الدفع، مفيش مسار توزيع أي طلب `pending_payment`.
+- **Branding upload abuse (§25 file upload)**: SVG-متنكّر-كـPNG اترفض (magic bytes فعلية، مش
+  mimetype معلَن بس) — 12 اختبار في `branding-file-validator.spec.ts` + اتأكد حي عبر متصفح حقيقي
+  إن الرفع من غير صلاحية/Step-Up مايعديش خالص.
+
+**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.14-15 (إنتاجية configurable، دفعات طوارئ)، §17.16
+(critical_offer push + concurrency)، §17.22 (بصمة Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه
+(خصوصًا: enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
+permission-removal-mid-session لحيّ HTTP مش بس نظري، additional-work-payment-bypass لأن endpoint
+"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#62, #63, #65).
 
 ---
 
