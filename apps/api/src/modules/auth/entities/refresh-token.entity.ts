@@ -31,6 +31,18 @@ export class RefreshToken {
   @Column({ name: 'ip_address', type: 'inet', nullable: true })
   ipAddress: string | null;
 
+  // آخر مرة اتستخدم فيها التوكن ده فعليًا (refresh) — لشاشة الأجهزة/الجلسات (ADR-0011 §5).
+  @Column({ name: 'last_seen_at', type: 'timestamptz', nullable: true })
+  lastSeenAt: Date | null;
+
+  @Column({ name: 'user_agent', type: 'varchar', length: 255, nullable: true })
+  userAgent: string | null;
+
+  // إزاي المستخدم أثبت هويته وقت إصدار الجلسة دي (ADR-0011) — بينتقل لكل access token جديد وقت
+  // refresh() بدل ما يضيع.
+  @Column({ type: 'jsonb', default: () => `'["otp"]'` })
+  amr: ('otp' | 'webauthn')[];
+
   @Column({ name: 'is_revoked', type: 'boolean', default: false })
   isRevoked: boolean;
 

@@ -54,3 +54,123 @@
 خالص بيترفض بأمان (`UnauthorizedException`، مش استثناء غير متوقّع).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
+
+## MFA/Passkeys إجباري لكل الحسابات عالية الصلاحية — ADR-0011 Phase 1 (Backend كامل، 2026-08-13)
+
+طلب صريح من المالك بعد مراجعة أمان مفصّلة: أي حساب أدمن يقدر يشوف/يتحكم في الفلوس أو يغيّر
+Roles/Permissions **لازم** MFA (WebAuthn/Passkeys، مش SMS/OTP لوحدها) إجباري عليه — من البداية
+لكل الأدوار عالية الصلاحية دفعة واحدة، مش Super Admin بس. التصميم الكامل والبدائل اللي اتقيّمت
+ورُفضت موثّقة في `../../../../docs/adr/0011-admin-mfa-passkeys.md` — الملخص التنفيذي هنا.
+
+### التعريف الحي لـ"High-Privilege" — مش قايمة أدوار ثابتة
+
+`MfaPolicyService.userRequiresMfa()` بتفحص صلاحيات المستخدم الفعلية حية (`PermissionsService.
+getUserPermissionNames()`) ضد `MFA_REQUIRED_PERMISSIONS` (`refunds.issue`, `payouts.approve`,
+`orders.adjust_price`, `roles.manage`, `roles.grant_unrestricted`, `settings.manage`) — أو
+`is_super_admin` (بيتخطى فحص الصلاحيات بالكامل، ADR-0010). دور جديد يتمنح أي صلاحية من دول بعدين
+بيبقى ملزَم MFA فورًا من غير أي تعديل كود. اليوم ده بيغطي فعليًا `super_admin`، `finance`
+(`refunds.issue`+`payouts.approve`)، `ops_manager` (`orders.adjust_price`) — مؤكّد بفحص حي.
+
+**بَقّة حقيقية اتلقطت أثناء البناء (قبل أي اختبار حي)**: القايمة الأولى كانت فيها `payments.refund`
+— اسم صلاحية مش موجود في الكتالوج الفعلي خالص (الاسم الحقيقي `refunds.issue`، اتأكد بفحص جدول
+`permissions` مباشرة). كان النتيجة العملية إن دور بصلاحية `refunds.issue` بس (من غير `payouts.
+approve`) ميتفرضش عليه MFA رغم قدرته يعمل استرداد فلوس فعلي — اتصلحت قبل أي commit.
+
+### تسجيل الدخول — فرع MFA قبل إصدار التوكن النهائي
+
+`AuthService.login()` زي ما هو (OTP هو الخطوة الأولى لأي نوع حساب، صفر تغيير). بعد نجاح OTP، لو
+`userRequiresMfa()` رجعت `true`: مفيش تسجيل توكن نهائي — بدل كده `mfa_pending` JWT قصير (5 دقايق،
+`typ: 'mfa_pending'`، موقّع بـ`jwt.refreshSecret` الموجود بالفعل مش سرّ جديد) + `ceremony:
+'registration'` (أول مرة، مفيش Passkey لسه) أو `'authentication'` (عنده Passkey بالفعل). العميل
+بعدها بيكمّل ceremony الـWebAuthn المناسبة ضد `/auth/webauthn/*`، وبس لما تنجح فعليًا
+`AuthService.completeMfaLogin()` بتصدر التوكن الحقيقي بـ`amr: ['otp','webauthn']`.
+
+**دخول سريع يومي بـPasskey بس** (`POST /auth/webauthn/authentication/{options,verify}` من غير
+`mfa_session_token` خالص) — discoverable credential كامل، السيرفر بيعرف هوية المستخدم من
+`userHandle` الرد نفسه، **وبرضه بيتحقق `is_blocked`/`is_active` حي** (نفس طلب المالك بالحرف: راحة
+الدخول اليومي مش على حساب فحص حالة الحساب) — `amr: ['webauthn']`.
+
+### Step-up re-authentication — عملية حساسة تحتاج Passkey حديث فعلاً وقتها
+
+`StepUpToken` (Postgres، مش Redis — قرار أمني متعمّد، شوف تحت) TTL دقيقتين، single-use، استهلاك
+ذرّي بـ`UPDATE ... WHERE used_at IS NULL AND expires_at > now() RETURNING id`. العميل يطلب
+`POST /auth/webauthn/step-up/{options,verify}` (Passkey فعلي تاني، مش أي حاجة مخزّنة من الجلسة)،
+يستلم `step_up_token`، يبعته في هيدر `X-Step-Up-Token` للعملية الحساسة. `StepUpGuard` (5ه `APP_GUARD`
+عالمي جوّه `app.module.ts`، بعد `PermissionsGuard`) — no-op تمامًا إلا لو `@RequireStepUp()` موجود
+على الـmethod (نفس نمط `@RequirePermission`/`PermissionsGuard` بالحرف).
+
+**قرار أمني اتصحّح ذاتيًا قبل ما يتكتب أي كود**: التصميم الأول كان Redis لتتبّع استهلاك التوكن
+(أبسط، مفيش migration). لكن فلسفة `RedisCacheService` الموثّقة ("أي فشل Redis = safe cache miss")
+صح تمامًا لكاش أداء، **غلط وخطير** لفحص أمني single-use — انقطاع Redis كان هيخلي كل step-up token
+"يبان إنه متستخدمش قبل كده" = ثغرة إعادة استخدام حقيقية وقت بالظبط نفس نوع العطل اللي المشروع
+اتحرق منه قبل كده (فجوة BullMQ/Redis الموثّقة في `technicians/README.md`). التصحيح: `step_up_tokens`
+في Postgres — fail-closed (عطل DB بيمنع العملية الحساسة بالكامل، ده السلوك الآمن).
+
+`@RequireStepUp()` مُطبّق فعليًا على: `/auth/webauthn/credentials/:id` (مسح Passkey)،
+`/auth/sessions/revoke-all`، `/admin/users/:id/mfa/reset`، `/admin/orders/:id/refund`،
+`/admin/payouts/:id/{approve,complete}`، وكل الـendpoints المُغيّرة في role builder (`POST/PATCH/
+DELETE /admin/roles*`, `PUT /admin/roles/:id/permissions`, `POST/DELETE /admin/users/:userId/roles`).
+**قرار متعمّد بالاستبعاد**: `feature-flags` (`/admin/feature-flags/*`) اتقيّم واتأجّل — `feature_flags.
+manage` مش في `MFA_REQUIRED_PERMISSIONS`، فأدمن عنده الصلاحية دي بس (من غير أي صلاحية تانية من
+القايمة) ممكن يكون مسجّلش Passkey خالص — فرض step-up عليه كان هيقفله برّه الـendpoint نهائيًا
+(معندوش Passkey يثبت بيه step-up). نفس السبب استبعد `AdminEmployeesController.create()` رغم إنه
+نظريًا يقدر يمنح `super_admin` وقت الإنشاء (`initial_role_name` مش مقيّد) — فحص دقيق يميّز "موظف
+عادي" عن "منح super_admin" محتاج منطق service-layer إضافي مش مجرد decorator على الـcontroller،
+مؤجّل لمرحلة تانية وموثّق هنا كفجوة معروفة صراحة.
+
+### إدارة الأجهزة/الجلسات
+
+`refresh_tokens.device_id/device_name/device_platform` (موجودين من زمان، فاضيين) + أعمدة جديدة
+`last_seen_at`/`user_agent`/`amr` (JSONB، افتراضي `["otp"]`، بينتقل مع الجلسة عبر `refresh()` مش
+بيترجع لـotp بصمت). `GET /auth/sessions` (قايمة)، `DELETE /auth/sessions/:id` (إلغاء واحدة)،
+`POST /auth/sessions/revoke-all` (`@RequireStepUp()`). **قرار مرفوض بالاسم**: إعادة استخدام
+`user_devices` (موديول notifications، FCM push tokens) — دورة حياة مختلفة تمامًا، خلط المفهومين
+كان هيكسر منطق FCM الموجود ومختبر بالفعل.
+
+### الاسترجاع — OTP + recovery code سويًا، عاملين مستقلين، مفيش عامل ضعيف واحد كافي
+
+10 أكواد استرجاع (`XXXX-XXXX-XXXX`، bcrypt-hashed) بتتولّد مرة واحدة لحظة تسجيل أول Passkey للمستخدم
+وتتعرض مرة واحدة بس. `POST /auth/recovery/verify` (OTP + recovery code سويًا) — لو نجح: كل
+الـPasskeys/أكواد الاسترجاع القديمة بتتمسح بالكامل، كل الجلسات القديمة بتتلغي
+(`revokeAllUserTokens(..., 'mfa_recovery')`)، تصعيد أمني فوري لـ`super_admin` عبر
+`NotificationRoutingService.routeToRole('admin_mfa.recovery_used', ...)`، والرد بيرجع نفس شكل
+`mfa_required: true, ceremony: 'registration'` العادي — إجبار enrollment كامل تاني، مفيش رد خاص
+منفصل. لو الـ10 أكواد اتستهلكوا كلهم من غير استخدام: التعافي محتاج تدخّل يدوي من `super_admin`
+تاني عبر `POST /admin/users/:id/mfa/reset` (`roles.manage` + `@RequireStepUp()`، بيمسح
+`webauthn_credentials`/`admin_mfa_recovery_codes` بتاعة المستخدم المتأثر، مسجّل بـ`audit_logs`).
+
+### بَقّة حقيقية تانية اتلقطت واتصلحت أثناء الاختبار الحي (مش نظريًا)
+
+`MfaSessionTokenDto` المحلية في `webauthn.controller.ts` كانت `mfa_session_token?: string;` من غير
+أي decorator. الـ`ValidationPipe` العالمي شغّال بـ`whitelist: true, forbidNonWhitelisted: true` —
+class-validator/class-transformer بيتجاهلوا أي property من غير decorator خالص حتى لو متعرّفة على
+الكلاس، فالنتيجة كانت `property mfa_session_token should not exist` لأي طلب فعلي — الميزة كانت
+هتترفض 100% من أول استخدام حقيقي رغم إن كل الاختبارات النظرية/الكومبايل عدّت. اتلقطت بس لما اتعمل
+اختبار حي فعلي بـ`curl` ضد السيرفر شغال، مش بـ`tsc`/`jest`. الإصلاح: `@IsOptional() @IsString()`
+على الحقل، زي أي DTO تاني في المشروع.
+
+### اختبار حي (2026-08-13، ضد Postgres/Redis حقيقيين، حسابات أدمن حقيقية موجودة بالفعل)
+
+- تسجيل دخول حساب `finance` (`refunds.issue`+`payouts.approve`) → `mfa_required: true, ceremony:
+  'registration'` صح (مفيش Passkey لسه).
+- تسجيل دخول حساب `support_agent` (مفيهوش أي صلاحية من القايمة) → توكن عادي فورًا، `amr: ['otp']`،
+  صفر تغيير سلوكي.
+- `mfa_session_token` صحيح → `registration/options` بترجّع WebAuthn challenge حقيقي صالح
+  (`rp.id`, `pubKeyCredParams`, `authenticatorSelection.residentKey: 'required'`, إلخ).
+  `mfa_session_token` تالف/غير موجود → `AUTH_005` واضح في الحالتين.
+  (البَقّة فوق اتلقطت واتصلحت هنا بالظبط.)
+- `POST /auth/sessions/revoke-all` من غير هيدر `X-Step-Up-Token` → `AUTH_006` (`StepUpGuard`
+  شغّال فعليًا كـglobal guard).
+  `POST /admin/users/:userId/roles` بحساب مالوش `roles.manage` أصلاً → `AUTH_001` (فحص الصلاحية
+  بيسبق فحص step-up في ترتيب الـguards، زي المتوقع).
+- `GET /auth/sessions` مع `device_id`/`device_name`/`device_platform` مبعوتين وقت الدخول → متسجّلين
+  ومترجّعين صح، `last_seen_at` بيتحدّث للجلسات الجديدة.
+- تشغيل السيرفر كامل (`nest build` + `start:dev`) بعد الـwiring — لقطت فجوتين حقيقيتين في
+  DI (`AuthModule` مكنش بيصدّر `StepUpService`، فـ`StepUpGuard` كـ`APP_GUARD` عالمي في
+  `AppModule` كان مايلاقيهوش) — اتصلحوا فورًا (`exports: [AuthService, StepUpService]`).
+
+**نطاق مؤجّل صراحة لـPhase 2** (زي محرك التسعير: Backend يثبت الأول): واجهة `apps/admin` (تسجيل
+Passkey، شاشة الأجهزة/الجلسات، step-up prompt وقت العمليات الحساسة، شاشة عرض recovery codes مرة
+واحدة). Face ID/بصمة للعميل/الفني (`local_auth` Flutter) غير ذي صلة بالـADR ده خالص — تقنية مختلفة.
+اختبار WebAuthn ceremony الفعلية end-to-end (تسجيل/تحقق Passkey حقيقي) محتاج virtual authenticator
+(Playwright + CDP WebAuthn domain) أو جهاز فعلي — مؤجّل، مش جزء من الاختبار الحي اللي اتعمل هنا.

@@ -10,6 +10,9 @@ import { AuthService } from './auth.service';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User, UserType } from './entities/user.entity';
+import { MfaPolicyService } from './mfa-policy.service';
+import { NotificationRoutingService } from '../notifications/notification-routing.service';
+import { WebAuthnService } from './webauthn.service';
 
 // ريبوزيتوري وهمي في الذاكرة بديل TypeORM — كفاية عشان نختبر منطق auth.service لوحده
 class FakeRepository<T extends { id?: string }> {
@@ -129,6 +132,11 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(OtpCode), useValue: otpCodes },
         { provide: getRepositoryToken(RefreshToken), useValue: refreshTokens },
         { provide: DataSource, useValue: createFakeDataSource(users, refreshTokens) },
+        // MFA (ADR-0011) — الاختبارات هنا كلها لحسابات عادية (مش High-Privilege)، فـ
+        // userRequiresMfa بترجع false دايمًا وlogin() بيكمل مسار OTP العادي القديم زي ما هو.
+        { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
+        { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();
 
@@ -239,6 +247,9 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
         { provide: getRepositoryToken(RefreshToken), useValue: prodRefreshTokens },
         { provide: DataSource, useValue: createFakeDataSource(prodUsers, prodRefreshTokens) },
+        { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
+        { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
       ],
     }).compile();
     const prodService = moduleRef.get(AuthService);

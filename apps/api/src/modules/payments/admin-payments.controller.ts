@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestj
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -44,6 +45,7 @@ export class AdminPaymentsController {
 
   @Post('orders/:id/refund')
   @RequirePermission('refunds.issue')
+  @RequireStepUp()
   async refundOrder(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -55,6 +57,7 @@ export class AdminPaymentsController {
 
   @Post('payouts/:id/approve')
   @RequirePermission('payouts.approve')
+  @RequireStepUp()
   async approvePayout(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -76,6 +79,7 @@ export class AdminPaymentsController {
 
   @Post('payouts/:id/complete')
   @RequirePermission('payouts.approve')
+  @RequireStepUp()
   async completePayout(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

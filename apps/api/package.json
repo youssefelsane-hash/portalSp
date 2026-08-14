@@ -29,6 +29,7 @@
     "@nestjs/throttler": "^5.2.0",
     "@nestjs/typeorm": "^10.0.2",
     "@nestjs/websockets": "^10.4.22",
+    "@simplewebauthn/server": "^13.3.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^6.0.9",
     "class-transformer": "^0.5.1",

@@ -33,6 +33,18 @@ export const envValidationSchema = Joi.object({
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
 
+  // WebAuthn/Passkeys لدخول الأدمن (ADR-0011) — قيم localhost الافتراضية شغالة في التطوير بس،
+  // مرفوضة صراحة في الإنتاج (نفس فلسفة JWT secrets فوق) — لو نسيت تظبطهم، السيرفر يرفض يشتغل
+  // بدل ما WebAuthn يترفض بصمت من كل متصفح حقيقي.
+  WEBAUTHN_RP_NAME: Joi.string().default('صُنّاع — لوحة التحكم'),
+  WEBAUTHN_RP_ID: Joi.string()
+    .default('localhost')
+    .when('NODE_ENV', { is: 'production', then: Joi.string().invalid('localhost') }),
+  WEBAUTHN_ORIGIN: Joi.string()
+    .uri()
+    .default('http://localhost:3001')
+    .when('NODE_ENV', { is: 'production', then: Joi.string().uri().invalid('http://localhost:3001') }),
+
   REDIS_URL: Joi.string().uri().default('redis://localhost:6379'),
 
   // بوابة الدفع بالبطاقة (Paymob) — اختيارية عمداً، الكاش والمحفظة بيشتغلوا من غيرها.

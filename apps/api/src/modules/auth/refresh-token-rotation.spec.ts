@@ -53,6 +53,9 @@ describe('AuthService.refresh() — تدوير refresh token ذرّي تحت ت�
       configStub,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

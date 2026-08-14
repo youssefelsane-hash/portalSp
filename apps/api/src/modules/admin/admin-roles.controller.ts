@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put }
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -43,6 +44,7 @@ export class AdminRolesController {
 
   @Post('roles')
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async createRole(
     @CurrentUser() admin: JwtPayload,
     @Body() dto: CreateRoleDto,
@@ -53,6 +55,7 @@ export class AdminRolesController {
 
   @Patch('roles/:id')
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async updateRole(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -64,6 +67,7 @@ export class AdminRolesController {
 
   @Post('roles/:id/clone')
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async cloneRole(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -75,6 +79,7 @@ export class AdminRolesController {
 
   @Delete('roles/:id')
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async deleteRole(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
@@ -86,6 +91,7 @@ export class AdminRolesController {
 
   @Put('roles/:id/permissions')
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async setRolePermissions(
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

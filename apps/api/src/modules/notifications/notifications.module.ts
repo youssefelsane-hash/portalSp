@@ -94,6 +94,6 @@ import { NotificationsService } from './notifications.service';
     TechnicianCancellationNotificationListener,
     OrderAssistantAssignedManuallyNotificationListener,
   ],
-  exports: [NotificationsService, NotificationWorkflowService],
+  exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })
 export class NotificationsModule {}

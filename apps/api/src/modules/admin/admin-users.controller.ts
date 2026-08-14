@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserType } from '../auth/entities/user.entity';
@@ -27,6 +28,7 @@ export class AdminUsersController {
   @Post('users/:userId/roles')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async assignRole(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -39,6 +41,7 @@ export class AdminUsersController {
 
   @Delete('users/:userId/roles/:roleName')
   @RequirePermission('roles.manage')
+  @RequireStepUp()
   async revokeRole(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
