@@ -811,7 +811,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     value: 'card',
                     groupValue: _selectedPaymentMethod,
                     onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                    title: const Text('ادفع الآن بالبطاقة'),
+                    title: const Text('ادفع الآن بالبطاقة أو محفظة إلكترونية'),
                     subtitle: const Text('يبدأ البحث عن فني فورًا بعد ما الدفع يتأكّد'),
                   ),
                   RadioListTile<String?>(

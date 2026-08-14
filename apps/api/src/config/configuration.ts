@@ -97,6 +97,12 @@ export default () => ({
       secretKey: process.env.PAYMOB_SECRET_KEY,
       publicKey: process.env.PAYMOB_PUBLIC_KEY,
       integrationIdCard: process.env.PAYMOB_INTEGRATION_ID_CARD,
+      // docs/08 §19 بند 15 — "Mobile Wallet" الحقيقي (Vodafone Cash/Orange Money/إلخ عبر نفس
+      // حساب Paymob التاجر، مش حساب خارجي جديد). اختياري بالكامل — لو موجود بيتضاف لقايمة
+      // payment_methods في createPayment() جنب integrationIdCard، وPaymob's Unified Checkout
+      // بيعرض خيار المحفظة تلقائيًا في نفس صفحة الدفع (صفر منطق backend إضافي، صفر شاشة Flutter
+      // جديدة). تفاصيل الحصول على القيمة دي من Paymob dashboard: docs/03-external-integrations.md §1.
+      integrationIdMobileWallet: process.env.PAYMOB_INTEGRATION_ID_MOBILE_WALLET,
       iframeId: process.env.PAYMOB_IFRAME_ID,
       hmacSecret: process.env.PAYMOB_HMAC_SECRET,
     },

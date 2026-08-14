@@ -61,6 +61,8 @@ export const envValidationSchema = Joi.object({
   PAYMOB_SECRET_KEY: Joi.string().allow('').optional(),
   PAYMOB_PUBLIC_KEY: Joi.string().allow('').optional(),
   PAYMOB_INTEGRATION_ID_CARD: Joi.string().allow('').optional(),
+  // docs/08 §19 بند 15 — Mobile Wallet (Vodafone Cash/إلخ) عبر نفس حساب Paymob، اختياري بالكامل.
+  PAYMOB_INTEGRATION_ID_MOBILE_WALLET: Joi.string().allow('').optional(),
   PAYMOB_IFRAME_ID: Joi.string().allow('').optional(),
   PAYMOB_HMAC_SECRET: Joi.string().allow('').optional(),
 

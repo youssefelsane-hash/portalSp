@@ -1110,3 +1110,17 @@ points→value حقيقي أو تخفي Redeem بالكامل في V1". بناء
 مش ADR كامل (مش قرار schema/state-machine جوهري).
 
 `flutter analyze` نضيف (صفر أخطاء/تحذيرات جديدة).
+
+### تحديث تنفيذ §19 — بند 15 (Mobile Wallet خارجي — Vodafone Cash/إلخ) — ✅ `DONE + AUTOMATED VERIFIED`
+
+المالك لاحظ إن `/pay-with-wallet` محفظة داخلية للمنصة بس، مش محفظة إلكترونية مصرية خارجية حقيقية
+(Vodafone Cash وشبهها) كطريقة دفع قبل-التوزيع. اتضح إن الحل **مش محتاج بوابة/اعتماد خارجي جديد
+خالص** — Paymob (نفس حساب الكارت الموجود من زمان) بيدعم "Mobile Wallet" كـ integration type
+منفصل، وUnified Checkout بتاعه بيعرض خيار المحفظة تلقائيًا في نفس صفحة الدفع لو integration ID
+بتاعها موجود ضمن `payment_methods`. `PaymobProvider.createPayment()` بقى بيضيفها (env var جديد
+اختياري `PAYMOB_INTEGRATION_ID_MOBILE_WALLET`) — صفر endpoint جديد، صفر شاشة Flutter جديدة.
+تفاصيل كاملة في `apps/api/src/modules/payments/README.md` و`docs/03-external-integrations.md` §1.1.
+
+اتأكد بـ`paymob-provider.service.spec.ts` (2 اختبار جديد يثبتوا الإضافة اختيارية وregression-safe).
+`tsc` → `nest build` → `jest` (30 suite، 162 اختبار) عدّوا نضيف. `flutter analyze` نضيف بعد تحديث
+نص زرار "بطاقة" في `CreateOrderScreen` ليعكس إنه ممكن يشمل محفظة إلكترونية دلوقتي.
