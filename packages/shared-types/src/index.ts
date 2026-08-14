@@ -15,6 +15,7 @@ export * from './audit';
 export * from './feature-flags';
 export * from './geo';
 export * from './notification-routing';
+export * from './notification-type-configs';
 export * from './technician-companies';
 export * from './technician-levels';
 export * from './support-tickets';

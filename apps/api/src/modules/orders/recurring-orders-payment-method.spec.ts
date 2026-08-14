@@ -27,14 +27,31 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
     category: '',
   };
 
+  // is_active=false وقت الإنشاء عمدًا (مش true) — راجع sweepOwnTemplateOnly() تحت لسبب مفصّل
+  // (تضييق نافذة ظهور القالب لأي sweep() من ملف اختبار تاني شغّال بالتوازي على نفس القاعدة).
   async function insertTemplate(opts: { label: string; paymentMethod: 'card' | 'instapay' | null }) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [template] = await q(
       `INSERT INTO recurring_order_templates (customer_id, service_id, address_id, booking_mode, frequency, next_run_at, payment_method, is_active)
-       VALUES ($1,$2,$3,'individual','weekly', now() - interval '1 minute', $4, true) RETURNING id`,
+       VALUES ($1,$2,$3,'individual','weekly', now() - interval '1 minute', $4, false) RETURNING id`,
       [ids.customerProfile, ids.service, ids.address, opts.paymentMethod],
     );
     return template.id as string;
+  }
+
+  // نفس البَقّة الموثّقة في recurring-orders-generation-reliability.spec.ts بالحرف، بالاتجاه
+  // العكسي: القالب هنا لو اتسيب is_active=true من لحظة الإنشاء، ملف الاختبار التاني (اللي شغّال
+  // بالتوازي — jest worker process منفصل، نفس قاعدة البيانات الحقيقية) ممكن sweep() بتاعه يسبق
+  // sweep() بتاعنا ويعالج القالب ده الأول (نجاح فوري من createSpy الفلترة بتاعته)، فـcallsForThisTest()
+  // تحت هترجع صفر نداءات بدل واحد. القالب `is_active=false` طول الوقت إلا في اللحظة الفعلية
+  // لنداء sweep() بتاعنا نفسه.
+  async function sweepOwnTemplateOnly(templateId: string): Promise<void> {
+    await dataSource.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [templateId]);
+    try {
+      await service.sweep();
+    } finally {
+      await dataSource.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [templateId]);
+    }
   }
 
   beforeAll(async () => {
@@ -108,38 +125,51 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
     await dataSource.destroy();
   });
 
+  // sweep() بيدور على *كل* القوالب المستحقة في الجدول الحقيقي، مش بس اللي الاختبار ده عمله —
+  // لو ملف اختبار تاني (recurring-orders-generation-reliability.spec.ts مثلاً) شغّال بالتوازي
+  // (jest worker process منفصل، نفس قاعدة البيانات الحقيقية) وعنده قالب مستحق في نفس اللحظة،
+  // createSpy المشترك هنا هيتنادى منه كمان — بَقّة عزل اختبار حقيقية اتلقطت أثناء تشغيل الـsuite
+  // كامل (docs/08 §20). الفلترة بـservice_id (فريد لكل ملف اختبار عبر runId) بتعزل نداءات
+  // الاختبار ده بس، بغض النظر عن أي قوالب تانية اتسوّت في نفس sweep().
+  function callsForThisTest(): [string, CreateOrderDto][] {
+    return (createSpy.mock.calls as [string, CreateOrderDto][]).filter(([, dto]) => dto.service_id === ids.service);
+  }
+
   it('قالب بـpayment_method=card — الطلب المتولّد بيتطلب دفع كارت مسبق (payment_method بيوصل لـOrdersService.create())', async () => {
-    await insertTemplate({ label: `card-${runId}`, paymentMethod: 'card' });
+    const templateId = await insertTemplate({ label: `card-${runId}`, paymentMethod: 'card' });
     createSpy.mockClear();
 
-    await service.sweep();
+    await sweepOwnTemplateOnly(templateId);
 
-    expect(createSpy).toHaveBeenCalledTimes(1);
-    const [, dto] = createSpy.mock.calls[0] as [string, CreateOrderDto];
+    const calls = callsForThisTest();
+    expect(calls).toHaveLength(1);
+    const [, dto] = calls[0];
     expect(dto.payment_method).toBe('card');
     expect(dto.order_type).toBe(OrderType.RECURRING);
     expect(dto.booking_mode).toBe(BookingMode.INDIVIDUAL);
   });
 
   it('قالب بـpayment_method=instapay — نفس المنطق', async () => {
-    await insertTemplate({ label: `insta-${runId}`, paymentMethod: 'instapay' });
+    const templateId = await insertTemplate({ label: `insta-${runId}`, paymentMethod: 'instapay' });
     createSpy.mockClear();
 
-    await service.sweep();
+    await sweepOwnTemplateOnly(templateId);
 
-    expect(createSpy).toHaveBeenCalledTimes(1);
-    const [, dto] = createSpy.mock.calls[0] as [string, CreateOrderDto];
+    const calls = callsForThisTest();
+    expect(calls).toHaveLength(1);
+    const [, dto] = calls[0];
     expect(dto.payment_method).toBe('instapay');
   });
 
   it('قالب من غير payment_method (الافتراضي زي زمان) — CreateOrderDto مالوش payment_method خالص (regression: مفيش دفع مسبق كاذب)', async () => {
-    await insertTemplate({ label: `none-${runId}`, paymentMethod: null });
+    const templateId = await insertTemplate({ label: `none-${runId}`, paymentMethod: null });
     createSpy.mockClear();
 
-    await service.sweep();
+    await sweepOwnTemplateOnly(templateId);
 
-    expect(createSpy).toHaveBeenCalledTimes(1);
-    const [, dto] = createSpy.mock.calls[0] as [string, CreateOrderDto];
+    const calls = callsForThisTest();
+    expect(calls).toHaveLength(1);
+    const [, dto] = calls[0];
     expect(dto.payment_method).toBeUndefined();
   });
 });

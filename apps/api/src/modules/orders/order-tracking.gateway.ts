@@ -15,6 +15,7 @@ import {
 import { In, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { websocketCorsOriginHandler } from '../../common/websocket/websocket-cors.util';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -34,7 +35,7 @@ const ACTIVE_TRACKING_STATUSES = [
 
 // تتبع موقع الفني لحظياً — بيوقف تلقائي بمجرد ما الطلب يخرج من الحالات الفعّالة (اكتمل/اتلغى)،
 // عشان الفني ميفضلش متتبّع بعد ما يخلص شغل (§6 في الماستر بلان: "يقف بعد اكتمال الطلب")
-@WebSocketGateway({ namespace: 'tracking', cors: { origin: '*' } })
+@WebSocketGateway({ namespace: 'tracking', cors: { origin: websocketCorsOriginHandler } })
 export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(OrderTrackingGateway.name);
 
@@ -51,7 +52,10 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
     try {
-      const token = client.handshake.auth?.token ?? client.handshake.query?.token;
+      // docs/08 §19 بند 21 — نفس إصلاح ChatGateway.handleConnection() بالحرف: شيل query-string
+      // fallback (tracking_client.dart بيستخدم `auth` بس فعليًا)، JWT كامل مالوش داعي يظهر في
+      // access logs/عناوين المتصفح.
+      const token = client.handshake.auth?.token;
       if (!token || typeof token !== 'string') throw new Error('no token');
 
       const payload = await this.jwt.verifyAsync<JwtPayload>(token, {

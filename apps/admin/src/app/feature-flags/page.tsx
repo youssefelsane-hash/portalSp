@@ -155,6 +155,19 @@ export default function FeatureFlagsPage() {
       />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
+      {/* docs/08 §19 بند 23 — كانت فجوة حقيقية: الآلية (isEnabledForUser، kill switch، توزيع
+          نسبي، استهداف صريح) شغالة ومختبرة بالكامل، بس صفر كود في أي تطبيق (customer-app،
+          technician-app، أو حتى apps/admin نفسه) بينادي GET /feature-flags/:key/check أو
+          بيستخدم نتيجتها — تبديل فلاج هنا حاليًا مالوش أي أثر على أي مستخدم حقيقي. تحذير صريح
+          بدل ما الشاشة توهم الأدمن إنه بيتحكم في سلوك حي فعلي — نفس فلسفة "قواعد الاستخدام
+          (قريبًا)" في الشريط الجانبي (docs/08 §19 بند 22): وضوح بدل وهم. */}
+      <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+        ⚠️ الآلية هنا (تفعيل/تعطيل، نسبة التوزيع، الاستهداف الصريح) شغالة ومختبرة بالكامل في
+        الباك-إند، لكن حاليًا مفيش أي شاشة في التطبيقات (عميل/فني/أدمن) بتستهلك أي فلاج بتعمله —
+        يعني تبديل فلاج هنا دلوقتي مالوش أي تأثير حقيقي على أي مستخدم لحد ما كود فعلي يتربط بيه
+        (`GET /feature-flags/:key/check`).
+      </div>
+
       {showNew && (
         <Card className="mb-6">
           <CardContent className="pt-6">
