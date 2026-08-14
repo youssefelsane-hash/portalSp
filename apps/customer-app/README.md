@@ -147,6 +147,37 @@ notifyListeners();                                  // ٤. مبيتنفّذش �
 
 نفس خطوات البناء/التشغيل نجحت لـ`apps/technician-app` (نفس الإصلاح اتطبّق على `AuthRepository` بتاعه، نفس الكود بالحرف). الشاشة الأولى اللي ظهرت: **"التطبيق مش متاح على الجهاز ده — التطبيق ده بيتعامل مع بيانات مالية حساسة، ومش بيشتغل على أجهزة محاكاة (إيموليتور)."** — ده مش بَقّة، ده فحص أمان حقيقي (`compromised_device_screen.dart`) بيشتغل صح ويمنع التطبيق من العمل في بيئة افتراضية (Xvfb+headless بالنسبة له بيبان زي إيموليتور) — منطقي جدًا لتطبيق بيتعامل مع محفظة/أرباح فعلية. يمنعنا نكمّل اختبار تفاعلي أعمق لـ`apps/technician-app` في البيئة دي تحديدًا (بعكس `apps/customer-app`)، بس ده تأكيد إيجابي لضابط أمان شغال صح مش فجوة.
 
+## الدخول بالبصمة (docs/08 §17.22، بناء 2026-08-14)
+
+قرار عمل صريح من المالك — "أول مصادقة (OTP)، بعدين بصمة اختياري على جهاز موثوق للأجهزة العائدة".
+`local_auth` (جديد في `pubspec.yaml`) + `lib/core/biometric_auth_service.dart` جديد — **قفل جهاز
+محلي فوق الجلسة المحفوظة، مش بديل عن المصادقة الحقيقية**:
+
+- البصمة نفسها بتتحقق محليًا بالكامل عبر نظام التشغيل (`local_auth`، `biometricOnly: true`) —
+  التطبيق مايشوفش ولا يخزّن ولا ينقل أي قالب بيومتري خالص.
+- `AuthRepository.init()` بقى بيتفرّع: لو فيه `refresh_token` محفوظ **والبصمة مفعّلة** (إعداد
+  محلي في `flutter_secure_storage`، `baytak_biometric_enabled`)، بيوقّف قبل استخدام التوكن ويعرض
+  `BiometricUnlockScreen` (`_AuthGate` في `main.dart` بيتفحص `biometricUnlockPending` **قبل**
+  `isAuthenticated`) — جلسة محفوظة مش كافية لوحدها لدخول التطبيق لو البصمة مفعّلة، حتى لو الجهاز
+  نفسه مفتوح فعليًا. `unlockWithBiometrics()` بتكمّل باقي المنطق (refresh + fetchMe) بعد نجاح
+  البصمة بس. "استخدم رقم موبايلك بدلاً" بيوجّه لمسار OTP العادي من غير ما يمسح الجلسة المحفوظة.
+- تفعيل البصمة من `AccountScreen` (`SwitchListTile` جديد، بيظهر بس لو الجهاز فيه بصمة/Face ID
+  مسجّلة فعلاً) بيتطلب تأكيد بصمة فوري وقت التفعيل نفسه — مش مجرد تبديل switch، عشان نتأكد إن
+  اللي بيفعّلها هو صاحب البصمة المسجّلة على الجهاز فعلاً.
+- **الباك-إند يفضل السلطة النهائية دايمًا** — `unlockWithBiometrics()` بينادي `POST /auth/refresh`
+  زي ما هو بالظبط بعد نجاح البصمة، والـendpoint ده بالفعل بيرفض توكن ملغى/منتهي/حساب موقوف فورًا
+  (`AUTH_001`) بغض النظر عن نجاح البصمة محليًا — فشل مغلق حقيقي موجود من زمان، مش كود جديد.
+- `MainActivity.kt` بقى `FlutterFragmentActivity` (إجباري لـ`local_auth`/`BiometricPrompt` على
+  Android)، `AndroidManifest.xml`/`Info.plist` عندهم صلاحية/وصف البصمة المطلوبين.
+
+**فجوة موثّقة صراحة**: ربط مفتاح تخزين بيومتري (`kSecAccessControlBiometryCurrentSet` على iOS،
+`setInvalidatedByBiometricEnrollment` على Android) — إبطال تلقائي للتوكن المحفوظ لو بصمة/وجه جديد
+اتسجّل على الجهاز بعد تفعيل الميزة — محتاج كود native platform channel لكل منصة على حدة، برّه
+نطاق `local_auth`/`flutter_secure_storage` القياسيين. `flutter analyze`/`flutter build linux`
+الاتنين نضاف، بس التحقق الفعلي على جهاز حقيقي (هل BiometricPrompt/Face ID فعلاً بيظهر ويشتغل)
+مش ممكن في بيئة السيشن دي — **`IMPLEMENTED — DEVICE TEST PENDING`**، نفس تصنيف بصمة الأمان
+(`CompromisedDeviceScreen`) في `apps/technician-app`.
+
 ## نظام التصميم المشترك (docs/12، دفعة عاشرة 2026-08-13)
 
 `lib/design/` جديد — امتداد طبيعي لنظام التصميم اللي اتبنى في `apps/admin` (الدفعات 1-9، تفاصيل

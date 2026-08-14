@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_client.dart';
 import 'api_exception.dart';
+import 'biometric_auth_service.dart';
 import 'push_notification_service.dart';
 
 class BaytakUser {
@@ -32,12 +33,17 @@ class AuthRepository extends ChangeNotifier {
   String? _accessToken;
   BaytakUser? _user;
   bool _isLoading = true;
+  bool _biometricUnlockPending = false;
   Future<String>? _inFlightRefresh;
 
   String? get accessToken => _accessToken;
   BaytakUser? get user => _user;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _accessToken != null;
+  // docs/08 §17.22 — فيه جلسة محفوظة (refresh_token) بس البصمة مفعّلة ولسه ما أثبتناش هوية
+  // المستخدم بيها للدورة دي. _AuthGate بيتأكد من الحقل ده *قبل* isAuthenticated — جلسة محفوظة
+  // مش كافية لوحدها لدخول التطبيق لو البصمة مفعّلة.
+  bool get biometricUnlockPending => _biometricUnlockPending;
 
   // نفس بَقّة apps/admin بالظبط (راجع الـ README هناك): refresh_token بيتدوّر على كل استخدام،
   // وأي إعادة استخدام لتوكن اتلغى بتقفل كل جلسات المستخدم. الـ single-flight guard ده بيمنع
@@ -73,6 +79,19 @@ class AuthRepository extends ChangeNotifier {
 
   Future<void> init() async {
     try {
+      final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey);
+      if (storedRefreshToken == null) {
+        _accessToken = null;
+        _user = null;
+        return;
+      }
+      // docs/08 §17.22 — بصمة مفعّلة على الجهاز ده = مينفعش نستخدم الجلسة المحفوظة تلقائيًا،
+      // حتى لو الجهاز نفسه مفتوح فعليًا. _AuthGate هيعرض شاشة "افتح ببصمتك"، وunlockWithBiometrics()
+      // هي اللي هتكمّل باقي المنطق ده (refresh + fetchMe) بعد نجاح البصمة فعليًا.
+      if (await BiometricAuthService.isEnabled()) {
+        _biometricUnlockPending = true;
+        return;
+      }
       await _refresh();
       await _fetchMe();
       _registerPushDeviceInBackground();
@@ -83,6 +102,40 @@ class AuthRepository extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// بترجّع true لو الدخول نجح فعليًا (بصمة + refresh + fetchMe الاتلاتة). false لو أي خطوة فشلت
+  /// (بصمة اتلغت/فشلت، أو الباك-إند رفض الجلسة المحفوظة — حساب موقوف/جلسة ملغاة، fail-closed
+  /// حقيقي من `AuthService.refresh()` مش افتراض محلي) — الكولر (شاشة القفل) بيوجّه المستخدم
+  /// لمسار OTP العادي في الحالتين.
+  Future<bool> unlockWithBiometrics() async {
+    final authenticated = await BiometricAuthService.authenticate(reason: 'افتح صُنّاع ببصمتك');
+    if (!authenticated) return false;
+
+    _biometricUnlockPending = false;
+    _isLoading = true;
+    notifyListeners();
+    try {
+      await _refresh();
+      await _fetchMe();
+      _registerPushDeviceInBackground();
+      return true;
+    } catch (_) {
+      _accessToken = null;
+      _user = null;
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// "استخدم رقم موبايلك بدلاً" — بيقفل شاشة البصمة ويوديك لمسار OTP العادي (LoginScreen) من
+  /// غير ما يمسح الجلسة المحفوظة (لو المستخدم رجع بعدين ممكن يجرّب البصمة تاني بدل ما يتسجّل
+  /// خروج كامل قسرًا لمجرد إنه اختار يفضّل الرقم المرة دي).
+  void useOtpInsteadOfBiometrics() {
+    _biometricUnlockPending = false;
+    notifyListeners();
   }
 
   Future<void> _fetchMe() async {

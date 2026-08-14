@@ -5,6 +5,7 @@ import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
 import 'core/device_security.dart';
 import 'design/app_theme.dart';
+import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/domestic_worker/worker_home_screen.dart';
 import 'features/onboarding/onboarding_repository.dart';
@@ -65,6 +66,11 @@ class _AuthGate extends StatelessWidget {
     final auth = context.watch<AuthRepository>();
     if (auth.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    // docs/08 §17.22 — لازم يتفحص *قبل* isAuthenticated: جلسة محفوظة مش كافية لوحدها لو
+    // البصمة مفعّلة على الجهاز ده.
+    if (auth.biometricUnlockPending) {
+      return const BiometricUnlockScreen();
     }
     if (!auth.isAuthenticated) return const LoginScreen();
     // بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني، تفرّع بعد الدخول حسب

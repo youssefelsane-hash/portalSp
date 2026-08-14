@@ -649,10 +649,33 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
   الهاردوير الفعلي (heads-up حقيقي، لمس الأزرار، اهتزاز) مش قابل للاختبار في البيئة دي —
   `IMPLEMENTED — DEVICE TEST PENDING`، نفس تصنيف بصمة `apps/customer-app`.
 
-**لسه `NOT STARTED`/محتاج وقت أكبر**: §17.22 (بصمة Flutter)، وباقي سيناريوهات §25 اللي معطاش لسه
-(خصوصًا: enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
+**§17.22 (بصمة العميل/الفني) — `IMPLEMENTED — DEVICE TEST PENDING`** — تفاصيل كاملة في
+`apps/customer-app/README.md` و`apps/technician-app/README.md`. ملخص:
+- `local_auth` جديد في التطبيقين الاتنين (كود مستقل مكرر عمدًا، نفس اتفاقية المشروع). قفل جهاز
+  محلي فوق الجلسة المحفوظة — البصمة نفسها بتتحقق محليًا بالكامل عبر نظام التشغيل، **صفر تخزين/نقل
+  لأي قالب بيومتري** من التطبيق.
+- `AuthRepository.init()` بيتفرّع: جلسة محفوظة + بصمة مفعّلة → `BiometricUnlockScreen` قبل أي
+  استخدام للـ`refresh_token`، حتى لو الجهاز نفسه مفتوح فعليًا. "استخدم رقم موبايلك بدلاً" بيوجّه
+  لمسار OTP العادي (`useOtpInsteadOfBiometrics()`).
+- تفعيل البصمة (من شاشة الحساب/البروفايل) بيتطلب تأكيد بصمة فوري وقت التفعيل نفسه — مش تبديل
+  switch عادي، عشان نتأكد إن اللي بيفعّلها هو صاحب البصمة المسجّلة على الجهاز فعلاً.
+- **الباك-إند يفضل السلطة النهائية دايمًا (فشل مغلق حقيقي، مش كود جديد)**: بعد نجاح البصمة محليًا،
+  `unlockWithBiometrics()` بينادي `POST /auth/refresh` زي ما هو بالظبط — الـendpoint ده أصلاً
+  بيرفض توكن ملغى/منتهي/حساب موقوف فورًا (`AUTH_001`) بغض النظر عن البصمة، اتأكد ده من كود
+  `AuthService.refresh()` الموجود، مش اتبنى جديد.
+- `MainActivity.kt` (التطبيقين) بقى `FlutterFragmentActivity` (إجباري لـ`BiometricPrompt`)،
+  صلاحية/وصف البصمة اتضافوا لـ`AndroidManifest.xml`/`Info.plist`.
+- **فجوة موثّقة صراحة**: ربط مفتاح تخزين بيومتري حقيقي (`kSecAccessControlBiometryCurrentSet`
+  على iOS، `setInvalidatedByBiometricEnrollment` على Android — إبطال تلقائي للتوكن المحفوظ لو
+  بصمة/وجه جديد اتسجّل على الجهاز) محتاج كود native platform channel لكل منصة، برّه نطاق
+  `local_auth`/`flutter_secure_storage` القياسيين — اتأجّل عمدًا، موثّق صراحة مش نسيان.
+- `flutter analyze`/`flutter build linux` نضاف للتطبيقين الاتنين. التحقق الفعلي على جهاز حقيقي
+  (BiometricPrompt/Face ID فعلاً بيظهر ويشتغل) مش ممكن في بيئة السيشن دي.
+
+**لسه `NOT STARTED`/محتاج وقت أكبر**: باقي سيناريوهات §25 اللي معطاش لسه (خصوصًا:
+enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
 permission-removal-mid-session لحيّ HTTP مش بس نظري، additional-work-payment-bypass لأن endpoint
-"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#65).
+"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#66).
 
 ---
 

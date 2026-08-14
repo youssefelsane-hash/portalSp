@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>محتاجين موقعك عشان نحدد عنوانك بدقة على الخريطة.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>استخدم Face ID عشان تفتح صُنّاع بسرعة وأمان بدل ما تستنى كود التحقق كل مرة.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
