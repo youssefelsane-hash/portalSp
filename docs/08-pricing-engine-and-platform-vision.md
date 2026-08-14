@@ -994,3 +994,166 @@ unit test، 3 اختبارات): دلتا=صفر يسوّي تلقائيًا م�
 
 فجوة موثّقة صراحة، خارج نطاق هذا التنفيذ: تصميم UI جديد في apps/customer-app لشاشة "ادفع
 المبلغ الإضافي" — العميل هيشوف الفرق كـ"دفعة جديدة" في نفس شاشات الدفع الموجودة أصلاً.
+
+### تحديث تنفيذ §19 — بند 1 (Customer App: اختيار وسيلة الدفع + شاشة دفع قبل التأكيد) — ✅ `DONE + LIVE VERIFIED`
+
+`CreateOrderScreen` (`apps/customer-app/lib/features/orders/create_order_screen.dart`) بقى
+فيها قسم "طريقة الدفع" جديد (3 `RadioListTile<String?>`: دفع بعد الخدمة/بطاقة/InstaPay) بين
+كارت ملخص السعر ووصف المشكلة. `OrdersRepository.create()` بقت تبعت `payment_method` في الـbody
+لو العميل اختار كارت/InstaPay. لو الطلب الراجع `order_status == pending_payment` (ADR-0013)،
+الشاشة بتفتح فورًا شاشة الدفع المناسبة: `CardPaymentScreen` الموجودة أصلاً (صفر تعديل — نفس
+النمط اتستخدم زي ما هو) أو `InstaPayReferenceScreen` جديدة (نسخة من نمط `FawryReferenceScreen`
+بالحرف: رقم مرجعي + تعليمات، polling كل 2 ثانية × 5 محاولات على `GET /orders/:id` لحد
+`payment_status=='paid'`). `PaymentsRepository.payWithInstaPay()` جديدة. `order_detail_screen.dart`
+اتضاف له زرار InstaPay جنب Fawry الموجود، و`_payableOrderStatuses` اتوسّعت تشمل `pending_payment`
+(شبكة أمان لإعادة محاولة دفع فشل/اتترك في نص الطريق).
+
+**🔴 بَقّة حرجة حقيقية اتلقطت حيًا أثناء بناء الميزة دي (مش في UI الجديد نفسه — في state machine
+الباك-إند اللي كانت موجودة من زمان)**: `ORDER_TRANSITIONS[PENDING_PAYMENT]`
+(`apps/api/src/modules/orders/order-state-machine.ts`) معندهاش `CANCELLED_BY_CUSTOMER` خالص،
+رغم إن `PENDING_PAYMENT` مُدرجة صراحة في `CUSTOMER_CANCELLABLE_STATUSES` (بتقول إن العميل يقدر
+يلغيها). يعني أي عميل حقيقي بدأ دفع مسبق (كارت/InstaPay) وغيّر رأيه قبل ما يكمّل الدفع كان
+هيترفض بـ`ORDR_003`/409 "انتقال حالة غير مسموح" لو حاول يلغي — رغم إن الواجهة بتقوله إنه يقدر.
+البَقّة دي كانت **غير مرئية تمامًا** لكل الـ151 اختبار jest اللي كانت عدّية قبل كده (مفيش
+واحد فيهم اختبر إلغاء عميل لطلب `pending_payment`) ولمراجعة الكود الثابتة — اتلقطت بس لأن
+الاختبار الحي الجديد (`test_live/pending_payment_order_creation_live_test.dart`) حاول يعمل
+تنظيف طبيعي (`cancel` بعد التأكد إن `pay-with-card` بترفض بوضوح لعدم وجود بيانات Paymob في
+بيئة التطوير) ورجع `409` حقيقي غير متوقع. الإصلاح: إضافة `CANCELLED_BY_CUSTOMER` (زي
+`CANCELLED_BY_SYSTEM`/`EXPIRED` الموجودين أصلاً) لقايمة انتقالات `PENDING_PAYMENT`. اتضاف
+`order-state-machine.spec.ts` جديد (اختبار وحدة نقي، 3 اختبارات) — واحد منهم عام: بيتأكد إن
+**كل** حالة في `CUSTOMER_CANCELLABLE_STATUSES` فعلاً عندها `CANCELLED_BY_CUSTOMER` كانتقال
+مسموح، عشان يمنع تكرار نفس فئة البَقّة لأي حالة جديدة تتضاف مستقبلاً لأي من القايمتين بمفردها.
+
+اتأكد حيًا بالكامل: `flutter analyze` نضيف (صفر أخطاء/تحذيرات، الـ34 `info` عن
+`RadioListTile.groupValue` المهجورة موجودة بالفعل في الكود القديم مش إضافة جديدة)، اختبار
+Flutter حي كامل (`pending_payment_order_creation_live_test.dart` — عميل حقيقي جديد، طلب حقيقي
+كارت وInstaPay كل واحد بيرجع `pending_payment`، محاولة الدفع بترفض `503`/"مش متاح دلوقتي"
+بالظبط زي المتوقع لبيئة بلا بيانات اعتماد بوابة، والإلغاء بعدها بينجح — ده اللي كشف البَقّة
+وأثبت الإصلاح). `tsc --noEmit` → `nest build` → `jest` (29 suite، 154 اختبار، شامل
+`order-state-machine.spec.ts` الجديد) كلهم عدّوا نضيف.
+
+### تحديث تنفيذ §19 — بند 10 (Upload validation — magic-byte بدل mimetype المُعلَن) — ✅ `DONE + AUTOMATED VERIFIED`
+
+نمط `branding-file-validator.ts` (فحص magic bytes حقيقية، ADR-0014) اتعمم في
+`common/storage/file-signature-validator.ts` جديد (`assertFileSignatureMatches()` +
+`detectActualFileFormat()` — PNG/JPEG/WEBP/PDF) على كل مسارات الرفع اللي كانت بتثق في
+`file.mimetype` المُعلَن بس: order media، صور الشات، مستندات/شهادات الفني (PDF مدعوم هنا)،
+مرفقات الشكاوى — 5 مواقع في `technician-order-execution.controller.ts`/`chat.controller.ts`/
+`technicians.controller.ts` (موقعين)/`support.controller.ts`. كل موقع كان بس بيتحقق إن
+`file.mimetype` (قيمة سهلة التزوير، جايه من `Content-Type` header اللي الكلاينت بيتحكم فيه)
+موجودة في قايمة مسموحة — دلوقتي بيتحقق كمان إن أول بايتات الملف الحقيقية بتطابق النوع المُعلَن،
+فملف مش صورة/PDF خالص (أو نوع مختلف اتسمّى غلط عشان يعدّي الفلتر) بيترفض `400` بوضوح. تفاصيل
+كاملة (بما فيها ليه `branding-file-validator.ts` فضل منفصل عمدًا) في `apps/api/src/common/storage/README.md`.
+
+اتأكد بـ`file-signature-validator.spec.ts` (6 اختبارات وحدة نقية): كشف صحيح للأربع أنواع، رفض
+محتوى مجهول، رفض MIME خارج القايمة المسموحة، وسيناريو الهجوم بالحرف (ملف مزوَّر النوع، PDF
+متنكّر كصورة). `tsc --noEmit` → `nest build` → `jest` (30 suite، 160 اختبار) كلهم عدّوا نضيف.
+تحقق live-HTTP لكل الخمس endpoints مش اتعمل هنا (محتاج تجهيز مستخدمين/طلبات فعلية لكل مسار) —
+نفس منهجية التحقق المتّبعة في بند 9 (اختبار وحدة نقي للمنطق المشترك، التوصيل بالكنترولرات تبديل
+سطر واحد ميكانيكي مؤكَّد بـ`tsc`/قراءة كود مباشرة).
+
+### تحديث تنفيذ §19 — بند 11 (Push notifications — onMessage/onMessageOpenedApp/getInitialMessage/deep-link) — ✅ `IMPLEMENTED — DEVICE TEST PENDING`
+
+كانت فجوة موثّقة صراحة في تدقيق المالك: `PushNotificationService` في التطبيقين كان بيعمل بس
+Firebase init → إذن → توكن → `POST /devices` — صفر `onMessage`/`onMessageOpenedApp`/
+`getInitialMessage`، وعروض الطلب actionable (§17.16، اتقفلت في جلسة سابقة) كانت الوحيدة اللي
+عندها background handler + عرض محلي. يعني (أ) إشعار وصل والتطبيق foreground كان بيختفي بصمت
+تمامًا في التطبيقين الاتنين (حتى عروض الطلب actionable — `_showActionableNotificationIfNeeded`
+كانت بترجع فورًا لغير actionable من غير أي بديل)، و(ب) تاب على أي إشعار (foreground/background/
+cold-start) كان بيفتح التطبيق على الشاشة الافتراضية بلا ملاحة لمحتواه — تعليق `_handleNotificationAction`
+القديم في `apps/technician-app` كان بيقول ده صراحة ("لو حبينا نضيف navigation فعلي لاحقًا").
+
+**الإصلاح**: `core/deep_link_router.dart` جديد في التطبيقين (محدود عمدًا على أنماط `deep_link`
+الحقيقية اللي الباك-إند بيبعتها فعلاً — `grep -rn "deepLink:" apps/api/src/modules/notifications`
+— `/orders/:id` للعميل، `/technician/orders/:id`+`/technician/assistant-offers/:id` للفني).
+`flutter_local_notifications` جديد في `customer-app` (كان موجود بالفعل في `technician-app` من
+§17.16). `onMessage` بقى بيعرض إشعار محلي لكل الرسايل foreground (مش actionable بس زي زمان)،
+`onMessageOpenedApp`/`getInitialMessage`/تاب على الإشعار المحلي التلاتة بينادوا `handleDeepLink()`.
+تفاصيل كل تطبيق (بما فيها فجوة متبقية موثّقة صراحة وضيقة عمدًا — تاب على جسم إشعار actionable
+والتطبيق مقفول تمامًا، بيوصل لـbackground isolate بلا Navigator أصلاً) في
+`apps/customer-app/README.md` و`apps/technician-app/README.md`.
+
+اتأكد بـ`flutter analyze` نضيف على التطبيقين الاتنين (صفر أخطاء/تحذيرات جديدة). نفس تصنيف
+§17.16: `IMPLEMENTED — DEVICE TEST PENDING` — heads-up notification حقيقي/تاب فعلي على جهاز
+محتاج جهاز/إعداد Firebase حقيقي مش متاحين في بيئة السيشن دي.
+
+### تحديث تنفيذ §19 — بند 13 (Customer Support UI — نظام الشكاوى) — ✅ `DONE + LIVE VERIFIED`
+
+كانت فجوة موثّقة صراحة: نظام الشكاوى (`complaints` module — حالة/SLA/فئة/قرار حل/تعويض، مختلف
+عن شات الدعم العام اللي كان اتقفل في جلسة سابقة) كان له باك-إند وAdmin UI مختبرين حيًا من زمان،
+بس **صفر كود Dart في customer-app كان بينادي عليه خالص**. `apps/customer-app/lib/features/support/`
+جديد بالكامل — `SupportRepository` + `ComplaintCategory` enum + 3 شاشات (`ComplaintsScreen`،
+`FileComplaintScreen`، `ComplaintDetailScreen` بخيط رسائل ومرفقات). نقطتين دخول: "شكاويّي" في
+`AccountScreen`، وزرار "قدّم شكوى" في `OrderDetailScreen` (مربوط بالطلب تلقائيًا). تفاصيل كاملة
+في `apps/customer-app/README.md`.
+
+اتأكد حيًا بالكامل (`test_live/complaints_live_test.dart`): عميل حقيقي جديد، طلب حقيقي، شكوى
+مربوطة به فتحت صح (`complaint_status=open`)، ظهرت في القايمة والتفاصيل، رسالة اتبعتت ورجعت
+`sender_role=customer` صح، ومرفق (PNG حقيقي فعليًا — بند 10's `assertFileSignatureMatches` بقى
+شغال على نفس الـendpoint ده) اترفع بنجاح. `flutter analyze` نضيف (صفر أخطاء/تحذيرات).
+
+### تحديث تنفيذ §19 — بند 14 (Loyalty redemption) — ✅ `DONE — زرار الاستبدال اتشال عمدًا`
+
+`LoyaltyService.redeem()` (الباك-إند) بيعمل بس خصم رصيد + تسجيل معاملة — صفر تحويل فعلي لخصم
+على سعر أي طلب (مفيش سعر صرف نقطة↔جنيه معرَّف في القاموس أصلاً). تعليق المالك الصريح: "إما تعمل
+points→value حقيقي أو تخفي Redeem بالكامل في V1". بناء سعر صرف حقيقي **قرار تسعير تجاري** (نسبة
+نقطة/جنيه) مش قرار تقني — يحتاج قرار المالك الصريح، مش افتراض اعتباطي في سيشن تنفيذية. الحل
+الآمن الفوري المطبَّق: زرار "استبدال نقاط" و`LoyaltyRepository.redeem()` اتشالوا بالكامل من
+`apps/customer-app` (تفاصيل كاملة في `apps/customer-app/README.md`) — الرصيد وسجل المعاملات
+(قراءة فعلية صحيحة) فضلوا زي ما هم. `POST /loyalty/redeem` لسه شغال بالباك-إند (مفيش endpoint
+اتشال، بس صفر استهلاك ليه دلوقتي).
+
+**فجوة مفتوحة موثّقة صراحة، تحتاج قرار المالك قبل أي تنفيذ لاحق**: تصميم سعر صرف نقطة↔جنيه حقيقي
+(مثلاً: 100 نقطة = 1 جنيه) وربطه بمسار الدفع كخصم فعلي على `total_amount_cents` وقت إنشاء
+الطلب — نفس نمط `promo_code` تقريبًا بس مصدره رصيد نقاط بدل كود. لو المالك حدد الرقم، التنفيذ
+بسيط نسبيًا (امتداد `OrdersService.create()` + `redeem()` الموجودة أصلاً)، محتاج مراجعة قصيرة بس
+مش ADR كامل (مش قرار schema/state-machine جوهري).
+
+`flutter analyze` نضيف (صفر أخطاء/تحذيرات جديدة).
+
+### تحديث تنفيذ §19 — بند 15 (Mobile Wallet خارجي — Vodafone Cash/إلخ) — ✅ `DONE + AUTOMATED VERIFIED`
+
+المالك لاحظ إن `/pay-with-wallet` محفظة داخلية للمنصة بس، مش محفظة إلكترونية مصرية خارجية حقيقية
+(Vodafone Cash وشبهها) كطريقة دفع قبل-التوزيع. اتضح إن الحل **مش محتاج بوابة/اعتماد خارجي جديد
+خالص** — Paymob (نفس حساب الكارت الموجود من زمان) بيدعم "Mobile Wallet" كـ integration type
+منفصل، وUnified Checkout بتاعه بيعرض خيار المحفظة تلقائيًا في نفس صفحة الدفع لو integration ID
+بتاعها موجود ضمن `payment_methods`. `PaymobProvider.createPayment()` بقى بيضيفها (env var جديد
+اختياري `PAYMOB_INTEGRATION_ID_MOBILE_WALLET`) — صفر endpoint جديد، صفر شاشة Flutter جديدة.
+تفاصيل كاملة في `apps/api/src/modules/payments/README.md` و`docs/03-external-integrations.md` §1.1.
+
+اتأكد بـ`paymob-provider.service.spec.ts` (2 اختبار جديد يثبتوا الإضافة اختيارية وregression-safe).
+`tsc` → `nest build` → `jest` (30 suite، 162 اختبار) عدّوا نضيف. `flutter analyze` نضيف بعد تحديث
+نص زرار "بطاقة" في `CreateOrderScreen` ليعكس إنه ممكن يشمل محفظة إلكترونية دلوقتي.
+
+### تحديث تنفيذ §19 — بند 16 (Production config — فرض متغيرات launch-critical) — ✅ `DONE + AUTOMATED VERIFIED`
+
+المالك لاحظ إن `NODE_ENV=production` بيفرض JWT/CORS/WebAuthn بس مش `STORAGE_PROVIDER=s3` أو
+بيانات اعتماد SMS — يعني النظام كان يقدر يقلع "healthy" وهو لسه بيكتب على قرص محلي مؤقت (بيتمسح
+مع كل deploy) أو بلا أي قناة حقيقية لتسليم كود OTP (القناة الوحيدة الموجودة في الكود، `auth.service.ts`
+بيستخدم `NotificationChannel.SMS` بس، صفر بديل). `env.validation.ts` بقى بيرفض الإقلاع صراحة
+(fail-fast، نفس فلسفة JWT secrets الموجودة من زمان) لو `NODE_ENV=production` و`STORAGE_PROVIDER`
+لسه `local` (أو مش مُعدّة خالص)، أو `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_SMS_FROM_NUMBER`
+مش الثلاثة موجودين مع بعض.
+
+**بَقّة حقيقية أعمق اتلقطت أثناء البناء، خارج نطاق البند الأصلي بس نفس الفئة بالضبط**: أثناء كتابة
+اختبار وحدة لفحص `STORAGE_PROVIDER` الجديد، اكتشفت إن Joi's `.when(...then: Joi.string().invalid(x))`
+من غير `.required()` صريحة **بيتخطى القيمة الافتراضية (`.default()`) تمامًا** — لو المفتاح مش
+موجود خالص في الـenv (مش حتى `=localhost` صراحة)، Joi بيملأ الافتراضي مباشرة بلا ما يعيد فحصه ضد
+قيود الـ`then`. ده يعني `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` (اللي كانا مكتوبين بنفس النمط القديم
+من زمان) كانوا عندهم **نفس الفجوة بالحرف**: لو المتغيّرين دول اتسيبوا فاضيين تمامًا في الإنتاج
+(مش بس ما اتغيّروش من `localhost`)، السيرفر كان يقدر يقلع "healthy" بـWebAuthn شغال بقيم
+`localhost` حقيقية. اتصلحت بإضافة `.required()` صريحة لقيود الـthen في الاتنين — نفس التصحيح
+المطلوب لـ`STORAGE_PROVIDER` الجديد.
+
+اتأكد بـ`env.validation.spec.ts` جديد (8 اختبارات): env إنتاج كامل يعدّي، `STORAGE_PROVIDER=local`
+صراحة وغيابه تمامًا الاتنين بيترفضوا في الإنتاج، Twilio غايبة/جزئية بيترفضوا، `WEBAUTHN_RP_ID`/
+`WEBAUTHN_ORIGIN` غايبين تمامًا بيترفضوا (البَقّة المُكتشَفة)، وكل حاجة متسامحة في التطوير (مايكسرش
+دليل التشغيل المحلي). `tsc` → `nest build` → `jest` (31 suite، 170 اختبار) عدّوا نضيف — تأكيد
+إضافي إن السيرفر الحالي (`NODE_ENV=development`) لسه بيقلع صح بعد التغيير.
+
+**خارج نطاق هذا الإصلاح عمدًا**: صفر فرض على بيانات اعتماد Paymob/Firebase — دول قرارات منتج
+مشروعة (إطلاق cash-only أو بلا push مبدئيًا صالح تمامًا)، مش نفس فئة "القناة الوحيدة الإجبارية"
+زي SMS/storage. مشكلة `YOUR_GOOGLE_MAPS_API_KEY` placeholder في Flutter (نفس تدقيق المالك) خارج
+نطاق هذا الإصلاح كمان — التطبيقات ملهاش مفهوم "boot-time validation" زي NestJS's ConfigModule
+أصلاً (المفتاح بيتضمّن وقت الـbuild، مش runtime)، موثّق بالفعل في `docs/03-external-integrations.md`
+§5، وأي فحص build-time له هيتغطى في بند 18 (CI).

@@ -156,3 +156,21 @@ ADR-0013) كان بيفضل عالق في `WORK_COMPLETED` للأبد بمجرد
 **فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح**: تصميم UI جديد في `apps/customer-app` (Flutter)
 لشاشة "ادفع المبلغ الإضافي" مش جزء من هذا التغيير — العميل هيشوف الفرق كـ"دفعة جديدة" في نفس
 شاشات الدفع الموجودة أصلاً حاليًا.
+
+## Mobile Wallet (Vodafone Cash/إلخ) عبر Paymob — كانت فجوة موثّقة صراحة (docs/08 §19 بند 15)، اتقفلت معماريًا
+
+المالك لاحظ إن `/pay-with-wallet` الحالي محفظة داخلية للمنصة بس، مش محفظة إلكترونية مصرية خارجية
+حقيقية (Vodafone Cash وشبهها) كطريقة دفع قبل-التوزيع. الحل **مش محتاج بوابة/اعتماد جديد خالص** —
+Paymob (نفس حساب الكارت) بيدعم "Mobile Wallet" كـ integration type منفصل، وUnified Checkout
+بتاعه بيعرض خيار المحفظة تلقائيًا في نفس صفحة الدفع لو الـ integration ID بتاعها موجود ضمن
+`payment_methods` array. `PaymobProvider.createPayment()` (`paymob-provider.service.ts`) بقى
+بيضيف `integrationIdMobileWallet` (env var جديد `PAYMOB_INTEGRATION_ID_MOBILE_WALLET`، اختياري
+بالكامل) لقايمة `payment_methods` جنب الكارت لو موجودة — صفر endpoint جديد، صفر شاشة Flutter
+جديدة (نفس `pay-with-card`/`CardPaymentScreen`/WebView الموجودين أصلاً، Paymob نفسه بيوحّد
+اختيار طريقة الدفع في صفحة checkout واحدة). تفاصيل الحصول على القيمة من لوحة Paymob:
+`docs/03-external-integrations.md` §1.1.
+
+اتأكد بـ`paymob-provider.service.spec.ts` (2 اختبار جديد، mock لـ`fetch`): `payment_methods`
+بيحتوي بس integration الكارت لو المحفظة مش مُعدّة (regression — الإضافة اختيارية بالكامل ومتوافقة
+مع كل الإعدادات القديمة)، وبيحتوي الاتنين لو المحفظة مُعدّة. `tsc --noEmit` → `nest build` →
+`jest` (30 suite، 162 اختبار) كلهم عدّوا نضيف.

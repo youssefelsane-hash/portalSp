@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/auth_repository.dart';
+import 'core/deep_link_router.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
@@ -20,6 +21,7 @@ class BaytakApp extends StatelessWidget {
       child: MaterialApp(
         title: 'صُنّاع',
         debugShowCheckedModeBanner: false,
+        navigatorKey: rootNavigatorKey,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),

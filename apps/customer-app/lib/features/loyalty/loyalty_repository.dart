@@ -17,10 +17,8 @@ class LoyaltyRepository {
     return items.map(LoyaltyTransaction.fromJson).toList();
   }
 
-  // مفيش تحويل تلقائي للنقاط لخصم فعلي على الطلب — القاموس مالوش سعر صرف محدد للنقطة، فمش
-  // هنخترعه هنا. مجرد خصم رصيد وتسجيل معاملة (راجع تعليق RedeemLoyaltyPointsDto في الباك-إند).
-  Future<int> redeem(int points) async {
-    final data = await auth.authedRequest('POST', '/loyalty/redeem', body: {'points': points});
-    return data!['points_balance'] as int;
-  }
+  // docs/08 §19 بند 14 — redeem() اتشالت عمدًا من هنا (تفاصيل كاملة في loyalty_screen.dart):
+  // مفيش سعر صرف نقطة↔جنيه معرَّف في القاموس، فاستبدال حقيقي كان بيخصم رصيد العميل من غير أي
+  // قيمة ترجعله. POST /loyalty/redeem لسه موجود وشغال في الباك-إند (مش endpoint اتشال)، بس مفيش
+  // استهلاك ليه من هنا لحد ما يتحدد سعر صرف حقيقي.
 }

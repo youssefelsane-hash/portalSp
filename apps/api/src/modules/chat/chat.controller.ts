@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ChatGateway } from './chat.gateway';
@@ -69,9 +70,7 @@ export class ChatController {
     if (!file) {
       throw new BadRequestException('لازم ترفع ملف');
     }
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('نوع الملف غير مسموح — صور JPEG/PNG/WEBP بس');
-    }
+    assertFileSignatureMatches(file.buffer, file.mimetype, ALLOWED_MIME_TYPES);
 
     const message = await this.chatService.sendImageMessage(user.sub, id, file);
     const dto = toMessageResponseDto(message);

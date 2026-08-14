@@ -182,5 +182,47 @@ describe('PaymobProvider', () => {
         }),
       ).rejects.toThrow();
     });
+
+    // docs/08 §19 بند 15 — Mobile Wallet عبر نفس حساب Paymob (اختياري، additive).
+    const CREATE_PAYMENT_INPUT = {
+      paymentId: 'p1',
+      orderNumber: 'ORD-1',
+      amountCents: 1000,
+      currencyCode: 'EGP',
+      customerFirstName: 'a',
+      customerLastName: 'b',
+      customerEmail: 'a@b.com',
+      customerPhone: '+201000000000',
+    };
+
+    it('payment_methods بيحتوي بس integrationIdCard لو integrationIdMobileWallet مش مُعدّة (regression — الإضافة اختيارية)', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ client_secret: 'secret', intention_order_id: 1, status: 'pending' }),
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const provider = new PaymobProvider(fakeConfig(CONFIGURED_ENV));
+      await provider.createPayment(CREATE_PAYMENT_INPUT);
+
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as { payment_methods: number[] };
+      expect(body.payment_methods).toEqual([12345]);
+    });
+
+    it('payment_methods بيحتوي integrationIdCard وintegrationIdMobileWallet الاتنين لو المحفظة مُعدّة', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ client_secret: 'secret', intention_order_id: 1, status: 'pending' }),
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const provider = new PaymobProvider(
+        fakeConfig({ ...CONFIGURED_ENV, 'payments.paymob.integrationIdMobileWallet': '67890' }),
+      );
+      await provider.createPayment(CREATE_PAYMENT_INPUT);
+
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as { payment_methods: number[] };
+      expect(body.payment_methods).toEqual([12345, 67890]);
+    });
   });
 });

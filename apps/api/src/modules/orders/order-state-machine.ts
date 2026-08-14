@@ -9,8 +9,15 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.EXPIRED,
   ],
+  // بَقّة حقيقية اتلقطت حيًا (docs/08 §19 بند 1 — أول اختبار حي حقيقي لواجهة اختيار الدفع
+  // المسبق في customer-app): CANCELLED_BY_CUSTOMER كانت ناقصة من هنا رغم إن PENDING_PAYMENT
+  // مُدرجة صراحة في CUSTOMER_CANCELLABLE_STATUSES تحت — يعني العميل مايقدرش يلغي طلبه بنفسه لو
+  // بدأ دفع مسبق (كارت/InstaPay) وغيّر رأيه قبل ما يكمّل الدفع، بيترفض بـ"انتقال حالة غير مسموح"
+  // رغم إن الواجهة بتقوله إنه يقدر يلغي. اتأكدت البَقّة حيًا بـflutter test test_live فعلي
+  // (POST /orders/:id/cancel رجّع 409 لطلب pending_payment حقيقي).
   [OrderStatus.PENDING_PAYMENT]: [
     OrderStatus.SEARCHING_TECHNICIAN,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
     OrderStatus.CANCELLED_BY_SYSTEM,
     OrderStatus.EXPIRED,
   ],

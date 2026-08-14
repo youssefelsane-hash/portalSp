@@ -9,6 +9,9 @@ import '../addresses/models.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import '../catalog/pricing_field_widgets.dart';
+import '../payments/card_payment_screen.dart';
+import '../payments/instapay_reference_screen.dart';
+import '../payments/payments_repository.dart';
 import '../technicians/models.dart';
 import '../technicians/technicians_repository.dart';
 import 'models.dart';
@@ -50,6 +53,11 @@ class CreateOrderScreen extends StatefulWidget {
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
   late final TechniciansRepository _techniciansRepository;
+  late final PaymentsRepository _paymentsRepository;
+  // دفع قبل التوزيع (ADR-0013، docs/08 §19 بند 1) — null = الافتراضي القديم (دفع بعد الشغل).
+  // 'card'/'instapay' بس مدعومين هنا (نفس قيد CreateOrderDto.payment_method في الباك-إند —
+  // كاش/محفظة مالهمش معنى "قبل" التوزيع، دفعهم بيحصل بعد الشغل زي ما هو دايمًا).
+  String? _selectedPaymentMethod;
   final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
   final _promoController = TextEditingController();
@@ -105,6 +113,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
     _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
+    _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
     _selectedAddress = widget.initialAddress;
     if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
@@ -346,6 +355,32 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
   }
 
+  // دفع قبل التوزيع (docs/08 §19 بند 1) — بيفتح نفس شاشات الدفع المستخدمة أصلاً للدفع بعد
+  // الشغل (CardPaymentScreen/InstaPayReferenceScreen، order_detail_screen.dart) — صفر شاشة دفع
+  // جديدة مختلفة، نفس تجربة "افتح البوابة، أكّد، استنى" بالظبط.
+  Future<void> _startPrepayment(String orderId, String method) async {
+    try {
+      final idempotencyKey = _paymentsRepository.generateIdempotencyKey();
+      if (method == 'card') {
+        final redirectUrl = await _paymentsRepository.payWithCard(orderId, idempotencyKey);
+        if (!mounted) return;
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => CardPaymentScreen(orderId: orderId, redirectUrl: redirectUrl)),
+        );
+      } else if (method == 'instapay') {
+        final reference = await _paymentsRepository.payWithInstaPay(orderId, idempotencyKey);
+        if (!mounted) return;
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => InstaPayReferenceScreen(orderId: orderId, reference: reference)),
+        );
+      }
+    } on ApiException catch (err) {
+      // مش هيمنع الانتقال لـOrderDetailScreen — العميل يقدر يعيد المحاولة من هناك لو الأزرار
+      // موجودة، أو الطلب هيتلغى تلقائيًا لو ماكملش خلال المهلة (راجع تعليق _submit فوق).
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    }
+  }
+
   Future<void> _submit() async {
     if (_selectedAddress == null) {
       setState(() => _error = 'اختار عنوان الأول');
@@ -386,7 +421,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
+        paymentMethod: _selectedPaymentMethod,
       );
+      // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
+      // لشاشة الدفع فورًا (مش نسيبه يكتشف بنفسه) — التوزيع مش هيبدأ غير بعد ما الدفع يتأكد.
+      // فشل/إلغاء العميل لشاشة الدفع هنا مش نهاية العالم: الطلب فضل pending_payment،
+      // sweepPendingPayment() في الباك-إند هيلغيه تلقائيًا لو العميل ماكملش خلال المهلة
+      // (orders.payment_timeout_minutes) — مفيش طلب معلّق للأبد.
+      if (order.orderStatus == 'pending_payment' && _selectedPaymentMethod != null) {
+        await _startPrepayment(order.id, _selectedPaymentMethod!);
+      }
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),
@@ -748,6 +792,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: _buildPriceBreakdown(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('طريقة الدفع', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Card(
+              child: Column(
+                children: [
+                  RadioListTile<String?>(
+                    value: null,
+                    groupValue: _selectedPaymentMethod,
+                    onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+                    title: const Text('ادفع بعد الخدمة (زي العادة)'),
+                    subtitle: const Text('كاش أو من المحفظة بعد ما الفني يخلّص الشغل'),
+                  ),
+                  RadioListTile<String?>(
+                    value: 'card',
+                    groupValue: _selectedPaymentMethod,
+                    onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+                    title: const Text('ادفع الآن بالبطاقة أو محفظة إلكترونية'),
+                    subtitle: const Text('يبدأ البحث عن فني فورًا بعد ما الدفع يتأكّد'),
+                  ),
+                  RadioListTile<String?>(
+                    value: 'instapay',
+                    groupValue: _selectedPaymentMethod,
+                    onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+                    title: const Text('ادفع الآن بـ InstaPay'),
+                    subtitle: const Text('تحويل بكود مرجعي، تأكيد الفريق قد ياخد وقت أطول'),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),

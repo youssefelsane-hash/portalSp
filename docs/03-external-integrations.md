@@ -66,6 +66,32 @@ PAYMOB_HMAC_SECRET=<من الخطوة 5>
 
 الباك-إند والـ UI جاهزين بالكامل دلوقتي. `apps/customer-app` فيه `CardPaymentScreen` (زرار "ادفع بالبطاقة" في تفاصيل الطلب) بتفتح `redirect_url` في WebView — تفاصيل كاملة في `apps/customer-app/README.md`.
 
+### 1.1 Mobile Wallet (Vodafone Cash/Orange Money/إلخ) — عبر نفس حساب Paymob (docs/08 §19 بند 15)
+
+كانت فجوة موثّقة صراحة في تدقيق المالك: `/pay-with-wallet` الحالي محفظة داخلية للمنصة بس (رصيد
+العميل عندنا)، مش محفظة إلكترونية مصرية خارجية حقيقية (Vodafone Cash وشبهها) كـ pay-before-dispatch.
+الحل **مش محتاج حساب/اعتماد خارجي جديد** — Paymob (نفس الحساب اللي فوق) بيدعم "Mobile Wallets"
+كـ integration type منفصل عن الكارت، وUnified Checkout بتاعه بيعرض خيار المحفظة تلقائيًا في نفس
+صفحة الدفع لو الـ integration ID بتاعها موجود ضمن `payment_methods` — صفر منطق backend إضافي،
+صفر شاشة Flutter جديدة (نفس `CardPaymentScreen`/WebView الموجودة أصلاً).
+
+**الخطوات**:
+1. من **Developers → Payment Integrations** في نفس حساب Paymob: اعمل integration جديد لنوع
+   **Mobile Wallet** (منفصل عن Online Card اللي فوق) — هتاخد **Integration ID** رقمي تاني.
+2. أضف القيمة دي في `apps/api/.env`:
+   ```
+   PAYMOB_INTEGRATION_ID_MOBILE_WALLET=<الـ Integration ID بتاع Mobile Wallet>
+   ```
+3. إعادة تشغيل `apps/api` — `createPayment()` (`paymob-provider.service.ts`) هيضيفها تلقائيًا
+   لقايمة `payment_methods` جنب الكارت. متغيّر اختياري بالكامل — من غيره كل حاجة بتفضل شغالة زي
+   ما هي (regression-safe، مختبر بـ`paymob-provider.service.spec.ts`).
+
+**التأكد إنها اشتغلت**: بعد ملء القيمة، `POST /orders/:id/pay-with-card` (نفس الـendpoint —
+مفيش endpoint جديد لأن Paymob نفسه بيوحّد الاختيار في checkout page واحدة) المفروض يرجّع
+`redirect_url` لصفحة فيها خيار "بطاقة" و"محفظة إلكترونية" الاتنين — اختر المحفظة وأكمل بيانات
+تجريبية (Paymob بيوفر أرقام محافظ اختبار في Test Mode). باقي دورة التسوية (webhook، `WalletsService`،
+إلخ) نفسها بالحرف بغض النظر عن أي طريقة الدفع اللي العميل اختارها جوّه checkout page.
+
 ---
 
 ## 2. بوابة الدفع بكود مرجعي — FawryPay ("ادفع في أقرب فوري")

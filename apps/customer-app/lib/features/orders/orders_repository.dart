@@ -54,12 +54,18 @@ class OrdersRepository {
     // بس (CatalogRepository.estimateDuration()) بلا ما القيم دي تتسجّل على الطلب نفسه خالص.
     String? standardDataId,
     num? requestedUnits,
+    // دفع قبل التوزيع (ADR-0013 §3/§4، docs/08 §19 بند 1) — 'card' أو 'instapay' بس، أو null
+    // (الافتراضي القديم: دفع بعد الشغل زي زمان). لو اتبعت، الباك-إند بيرجّع الطلب بحالة
+    // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
+    // لشاشة الدفع فورًا بعد ده، التوزيع مش هيبدأ غير بعد ما الدفع يتأكد فعليًا.
+    String? paymentMethod,
   }) async {
     final data = await auth.authedRequest('POST', '/orders', body: {
       'service_id': serviceId,
       'address_id': addressId,
       if (standardDataId != null) 'standard_data_id': standardDataId,
       if (requestedUnits != null) 'requested_units': requestedUnits,
+      if (paymentMethod != null) 'payment_method': paymentMethod,
       // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
       'booking_mode': bookingMode.apiValue,
       if (problemDescription != null && problemDescription.isNotEmpty)

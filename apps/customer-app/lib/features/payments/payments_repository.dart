@@ -66,6 +66,30 @@ class PaymentsRepository {
     );
     return FawryReference.fromJson(data!);
   }
+
+  // InstaPay — تعليمات تحويل بالعربي + كود مرجعي، مفيش webhook خالص (ADR-0013 §7): موظف Finance
+  // بيأكّد الاستلام يدويًا عبر POST /admin/payments/:id/confirm-instapay. مفيش تاريخ انتهاء
+  // (بعكس Fawry) — الكود العميل لازم يذكره وقت التحويل عشان الموظف يقدر يربطه بالدفعة الصح.
+  Future<InstaPayReference> payWithInstaPay(String orderId, String idempotencyKey) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/pay-with-instapay',
+      extraHeaders: {'Idempotency-Key': idempotencyKey},
+    );
+    return InstaPayReference.fromJson(data!);
+  }
+}
+
+class InstaPayReference {
+  final String referenceCode;
+  final String instructionsAr;
+
+  InstaPayReference({required this.referenceCode, required this.instructionsAr});
+
+  factory InstaPayReference.fromJson(Map<String, dynamic> json) => InstaPayReference(
+        referenceCode: json['reference_code'] as String,
+        instructionsAr: json['instructions_ar'] as String,
+      );
 }
 
 class FawryReference {

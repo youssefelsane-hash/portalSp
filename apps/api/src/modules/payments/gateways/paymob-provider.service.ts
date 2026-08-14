@@ -88,6 +88,10 @@ export class PaymobProvider implements PaymentProvider {
   private readonly secretKey: string | undefined;
   private readonly publicKey: string | undefined;
   private readonly integrationIdCard: string | undefined;
+  // docs/08 §19 بند 15 — Mobile Wallet (Vodafone Cash/إلخ) عبر نفس حساب Paymob التاجر، اختياري
+  // بالكامل. لو موجودة، بتتضاف لقايمة payment_methods جنب الكارت في createPayment() — Paymob's
+  // Unified Checkout بيعرض خيار المحفظة تلقائيًا في نفس الصفحة، صفر منطق backend إضافي مطلوب.
+  private readonly integrationIdMobileWallet: string | undefined;
   private readonly hmacSecret: string | undefined;
 
   constructor(config: ConfigService) {
@@ -96,6 +100,7 @@ export class PaymobProvider implements PaymentProvider {
     this.secretKey = config.get<string>('payments.paymob.secretKey') || undefined;
     this.publicKey = config.get<string>('payments.paymob.publicKey') || undefined;
     this.integrationIdCard = config.get<string>('payments.paymob.integrationIdCard') || undefined;
+    this.integrationIdMobileWallet = config.get<string>('payments.paymob.integrationIdMobileWallet') || undefined;
     this.hmacSecret = config.get<string>('payments.paymob.hmacSecret') || undefined;
     this.isConfigured = Boolean(this.secretKey && this.publicKey && this.integrationIdCard && this.hmacSecret);
 
@@ -130,7 +135,10 @@ export class PaymobProvider implements PaymentProvider {
         body: JSON.stringify({
           amount: input.amountCents,
           currency: input.currencyCode,
-          payment_methods: [Number(this.integrationIdCard)],
+          payment_methods: [
+            Number(this.integrationIdCard),
+            ...(this.integrationIdMobileWallet ? [Number(this.integrationIdMobileWallet)] : []),
+          ],
           items: [{ name: `طلب ${input.orderNumber}`, amount: input.amountCents, description: `baytak — ${input.orderNumber}`, quantity: 1 }],
           billing_data: {
             first_name: input.customerFirstName || 'NA',

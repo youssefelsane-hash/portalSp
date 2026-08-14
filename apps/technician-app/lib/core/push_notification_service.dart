@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'api_client.dart';
+import 'deep_link_router.dart';
 
 // نفس المفتاح بالحرف المستخدم في auth_repository.dart — لازم يتطابق عشان الفعل من زرار الإشعار
 // (اللي بيشتغل من isolate خلفية منفصلة تمامًا، بلا أي وصول لحالة AuthRepository في الذاكرة) يقدر
@@ -18,6 +19,7 @@ const _secureStorage = FlutterSecureStorage();
 
 const _criticalOfferChannelId = 'critical_offer';
 const _actionRequiredChannelId = 'action_required';
+const _generalUpdatesChannelId = 'general_updates';
 
 final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
@@ -99,6 +101,13 @@ class PushNotificationService {
       importance: Importance.high,
       playSound: true,
     ));
+    await androidPlugin?.createNotificationChannel(const AndroidNotificationChannel(
+      _generalUpdatesChannelId,
+      'تحديثات عامة',
+      description: 'تقييمات، أرباح، وتحديثات تانية غير actionable',
+      importance: Importance.high,
+      playSound: true,
+    ));
   }
 
   static Future<void> registerCurrentDevice(
@@ -113,7 +122,10 @@ class PushNotificationService {
         // تكون مسجّلة قبل أي رسالة توصل فعليًا. بما إن التسجيل هنا بيحصل أول ما الفني يسجّل دخول
         // (ولازم يكون مسجّل دخول أصلاً عشان يستقبل عروض طلبات)، ده كافي عمليًا.
         FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-        FirebaseMessaging.onMessage.listen(_showActionableNotificationIfNeeded);
+        FirebaseMessaging.onMessage.listen(_onForegroundMessage);
+        // التطبيق كان في الخلفية (مش مقفول) والفني ضغط على إشعار OS-drawn عادي (غير actionable —
+        // ده بيتوصّل بـnotification block عادي، النظام بيعرضه تلقائي في الخلفية بلا أي كود منا).
+        FirebaseMessaging.onMessageOpenedApp.listen((message) => handleDeepLink(message.data['deep_link'] as String?));
       }
       final messaging = FirebaseMessaging.instance;
       final settings = await messaging.requestPermission();
@@ -128,15 +140,56 @@ class PushNotificationService {
         'fcm_token': token,
         'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
       });
+
+      // التطبيق كان مقفول تمامًا (cold start) والفني فتحه بالضغط على إشعار OS-drawn عادي.
+      final initialMessage = await messaging.getInitialMessage();
+      if (initialMessage != null) {
+        await handleDeepLink(initialMessage.data['deep_link'] as String?);
+      }
     } catch (err) {
       debugPrint('[push] فشل تسجيل جهاز إشعارات push (متوقع من غير إعداد Firebase حقيقي): $err');
     }
   }
 }
 
+/// docs/08 §19 بند 11 — رسالة foreground (التطبيق مفتوح فعلاً): FCM مابيعرضش notification tray
+/// تلقائي هنا حتى لو الرسالة عادية (`notification` block، مش data-only actionable) — لازم نبنيها
+/// يدوي وإلا توصل بصمت تمامًا. actionable بتاخد مسارها المعتاد (§17.16)، وغير actionable بتاخد
+/// إشعار محلي بسيط بلا أزرار.
+Future<void> _onForegroundMessage(RemoteMessage message) async {
+  if (message.data['actionable'] == 'true') {
+    await _showActionableNotificationIfNeeded(message);
+    return;
+  }
+  await _showPlainForegroundNotification(message);
+}
+
+Future<void> _showPlainForegroundNotification(RemoteMessage message) async {
+  final title = message.notification?.title;
+  final body = message.notification?.body;
+  if (title == null && body == null) return;
+
+  const androidDetails = AndroidNotificationDetails(
+    _generalUpdatesChannelId,
+    'تحديثات عامة',
+    importance: Importance.high,
+    priority: Priority.high,
+  );
+  const iosDetails = DarwinNotificationDetails();
+
+  await _localNotifications.show(
+    message.hashCode,
+    title,
+    body,
+    const NotificationDetails(android: androidDetails, iOS: iosDetails),
+    payload: jsonEncode(message.data),
+  );
+}
+
 /// docs/08 §17.16 — بيبني إشعار محلي بأزرار قبول/رفض حقيقية من حمولة FCM data-only. إشعارات
 /// عادية (informational مثلاً) بتوصل بـnotification block قياسي وبتتعامل تلقائيًا من نظام
-/// التشغيل، مفيش داعي نبنيها يدوي هنا (actionable=false بترجع فورًا).
+/// التشغيل لما التطبيق في الخلفية/مقفول — foreground بس محتاج `_showPlainForegroundNotification`
+/// فوق (actionable=false بترجع فورًا هنا لأنها مش مسؤوليتها).
 Future<void> _showActionableNotificationIfNeeded(RemoteMessage message) async {
   final data = message.data;
   if (data['actionable'] != 'true') return;
@@ -185,12 +238,19 @@ Future<void> _showActionableNotificationIfNeeded(RemoteMessage message) async {
 
 /// تاب على زرار قبول/رفض جوّه الإشعار نفسه — بتشتغل حتى لو التطبيق مقفول تمامًا (background
 /// isolate منفصل، بلا أي حالة AuthRepository في الذاكرة)، فمحتاجة تعيد بناء جلسة مصادقة من
-/// الصفر عبر refresh_token المحفوظ في flutter_secure_storage. مجرد تاب على جسم الإشعار (مش
-/// زرار) بيترك من غير فعل — deep_link موجود جوّه الـpayload لو حبينا نضيف navigation فعلي لاحقًا.
+/// الصفر عبر refresh_token المحفوظ في flutter_secure_storage.
+///
+/// **docs/08 §19 بند 11 — كانت فجوة موثّقة صراحة هنا بالحرف**: مجرد تاب على جسم الإشعار (مش
+/// زرار) كان بيترك من غير فعل خالص. دلوقتي بينادي `handleDeepLink()` (نفس المسار اللي
+/// `onMessageOpenedApp`/`getInitialMessage` بيستخدموه) — شغال فعليًا لما الإشعار ده إشعار محلي
+/// (foreground) والتطبيق لسه شغال وقت التاب، لأن الـisolate عنده Navigator حقيقي وقتها.
+/// **فجوة متبقية موثّقة صراحة، خارج نطاق ممكن التحقق منه هنا**: تاب على *جسم* إشعار actionable
+/// (مش زراره) والتطبيق مقفول تمامًا وقتها بيوصل لنفس الكود ده بس من background isolate منفصل —
+/// مفيش Navigator هناك أصلاً (isolate بلا UI)، فـ`handleDeepLink` بترجع بهدوء بلا أي فعل. محتاج
+/// حل مختلف (`getNotificationAppLaunchDetails()` وقت الإقلاع البارد) لو حبينا نغطيه — نفس القيد
+/// اللي أي محاولة اختبار حقيقي عليه محتاجة جهاز/emulator حقيقي أصلاً (موثّق في كل مكان تاني
+/// بيستخدم نفس القيد في الجلسة دي).
 void _handleNotificationAction(NotificationResponse response) {
-  final actionId = response.actionId;
-  if (actionId != 'accept' && actionId != 'reject') return;
-
   final payload = response.payload;
   if (payload == null) return;
 
@@ -198,6 +258,12 @@ void _handleNotificationAction(NotificationResponse response) {
   try {
     data = jsonDecode(payload) as Map<String, dynamic>;
   } catch (_) {
+    return;
+  }
+
+  final actionId = response.actionId;
+  if (actionId != 'accept' && actionId != 'reject') {
+    unawaited(handleDeepLink(data['deep_link'] as String?));
     return;
   }
 
