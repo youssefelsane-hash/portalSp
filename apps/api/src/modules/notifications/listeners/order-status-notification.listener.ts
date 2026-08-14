@@ -99,6 +99,22 @@ export class OrderStatusNotificationListener {
         await this.workflowService.resolve('order', event.orderId, 'approve_quote');
       }
 
+      // الطلب خرج من accepted (الفني بدأ يتحرك فعليًا، أو اتلغى/اتحول لإعادة اختيار) — تذكيرات
+      // scheduled_job بتاعة الموعد المستقبلي مالهاش معنى بعد كده (ADR-0012، docs/08 §15).
+      if (event.previousStatus === OrderStatus.ACCEPTED && event.newStatus !== OrderStatus.ACCEPTED) {
+        await this.workflowService.resolve('order', event.orderId, undefined, 'order_assigned_scheduled');
+      }
+
+      // العميل خرج من awaiting_technician_reselection (اختار فني بديل عبر request-rematch، أو
+      // لغى الطلب بالكامل) — يوقف تذكيرات action_required بتاعة اختيار الفني البديل مهما كانت
+      // الوجهة التالية (سياسة إلغاء الفني، docs/10 + ADR-0012).
+      if (
+        event.previousStatus === OrderStatus.AWAITING_TECHNICIAN_RESELECTION &&
+        event.newStatus !== OrderStatus.AWAITING_TECHNICIAN_RESELECTION
+      ) {
+        await this.workflowService.resolve('order', event.orderId, 'select_replacement_technician');
+      }
+
       // العميل رد على عرض السعر (وافق أو رفض) — order-items.service.ts بيبعت الفرق في event.reason.
       // الفني محتاج يعرف يكمل الشغل بأي نطاق، فمفيش رسالة IN_PROGRESS عامة كفاية هنا.
       if (

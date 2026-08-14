@@ -55,6 +55,11 @@ export class NotificationWorkflow {
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt: Date | null;
 
+  // الموعد المستهدف لـscheduled_job (orders.scheduled_at وقت الإنشاء) — checkpoints التذكير
+  // بتتحسب بالنسبة له (scheduled-job-checkpoints.util.ts)، مش فاصل ثابت زي action_required.
+  @Column({ name: 'target_at', type: 'timestamptz', nullable: true })
+  targetAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

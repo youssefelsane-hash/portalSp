@@ -14,6 +14,7 @@ import { Order } from '../orders/entities/order.entity';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { AdminNotificationRoutingController } from './admin-notification-routing.controller';
+import { AdminNotificationTypeConfigsController } from './admin-notification-type-configs.controller';
 import { NotificationRoutingRule } from './entities/notification-routing-rule.entity';
 import { NotificationTypeConfig } from './entities/notification-type-config.entity';
 import { NotificationWorkflow } from './entities/notification-workflow.entity';
@@ -40,6 +41,7 @@ import { TechnicianCancellationNotificationListener } from './listeners/technici
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
+import { NotificationTypeConfigService } from './notification-type-config.service';
 import { NotificationWorkflowReminderService } from './notification-workflow-reminder.service';
 import { NotificationWorkflowService } from './notification-workflow.service';
 import { NotificationsController } from './notifications.controller';
@@ -62,10 +64,11 @@ import { NotificationsService } from './notifications.service';
     SettingsModule,
     AuditModule,
   ],
-  controllers: [NotificationsController, AdminNotificationRoutingController],
+  controllers: [NotificationsController, AdminNotificationRoutingController, AdminNotificationTypeConfigsController],
   providers: [
     NotificationsService,
     NotificationRoutingService,
+    NotificationTypeConfigService,
     NotificationWorkflowService,
     NotificationWorkflowReminderService,
     LogOnlyNotificationDispatcher,

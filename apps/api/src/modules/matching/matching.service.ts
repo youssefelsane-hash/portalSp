@@ -435,7 +435,7 @@ export class MatchingService {
     });
 
     // بره الـ transaction عمداً — زي order.created، مفيش داعي حد يسمع بيانات مش مؤكّدة
-    this.events.emit(ORDER_ACCEPTED_EVENT, new OrderAcceptedEvent(order.id, order.customerId, profile.id));
+    this.events.emit(ORDER_ACCEPTED_EVENT, new OrderAcceptedEvent(order.id, order.customerId, profile.id, order.scheduledAt));
 
     return order;
   }
