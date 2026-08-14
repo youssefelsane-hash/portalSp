@@ -388,3 +388,31 @@
 `OrderDetailScreen` بيعرض كارت تحذيري لما `order_status=awaiting_technician_reselection` — زرارين: "دوّرلي تلقائيًا" (`requestRematch` بلا فني) أو "اختار فني بديل" (بيفتح `TechnicianSelectionScreen` نفسها بوضع جديد `onManualSelect` — إعادة استخدام الشاشة الموجودة أصلاً من اختيار الفني قبل الحجز، مش شاشة موازية). **فجوة صغيرة موثّقة صراحة كانت هنا، اتقفلت (2026-08-12)**: قايمة الفنيين في `TechnicianSelectionScreen` (`GET /services/:id/technicians`) بقى ليها `exclude_technician_id` اختياري (`ListTechniciansForServiceDto` → `catalog.controller.ts` → `TechniciansService.listForServiceBooking()`, شرط SQL إضافي `AND ($4::uuid IS NULL OR tp.id != $4)`) — العميل دلوقتي مش بيشوف الفني اللي لغى بالذات في قايمة إعادة الاختيار من الأساس، مش بس بيتم استبعاده وقت المطابقة بعد اختياره بالغلط. `order.requestedTechnicianId` (مُتاح للعميل عبر `requested_technician_id` في `OrderResponseDto` دلوقتي) هو المصدر لقيمة الاستبعاد دي في `apps/customer-app`.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
+
+## بَقّة مالية حقيقية اتلقطت واتصلحت — `cancel()` (إلغاء العميل) كان بيسيب طلب مدفوع مسبقًا بلا استرداد (docs/08 §20 بند 7)
+
+**البَقّة**: `cancel()` (إلغاء العميل، مختلف عن `technicianCancel()` فوق) كان بيغيّر `orderStatus` لـ
+`CANCELLED_BY_CUSTOMER` وياخد رسوم إلغاء (لو الطلب برّه النافذة المجانية) — بس صفر منطق استرداد لأي
+`paymentStatus`. يعني عميل لغى بنفسه طلب دفعه مسبقًا (كارت/InstaPay، ADR-0013) — حتى قبل ما فني
+يتعيّن أصلاً — كانت فلوسه تفضل معلّقة (`paymentStatus=PAID` على طلب ملغي نهائي) لحد ما أدمن يلاحظ
+بنفسه ويرد يدويًا عبر `POST /admin/orders/:id/refund`. نفس السيناريو المالي بالظبط كان بيتصرف صح
+تلقائيًا لو النظام (مش العميل) هو اللي لغى (`OrderAutoCancelService`، قسم فوق).
+
+**الإصلاح**: بعد الـtransaction اللي بيغيّر الحالة (خارجها عمدًا — نداء بوابة دفع خارجي حقيقي
+مايصحش يكون جوّه transaction ممكن ترجع لورا)، لو `paymentStatus === PAID`، بينادي
+`PaymentsService.refundCancelledPrepaidOrder(order.id, reasonNotes, 'customer_cancel')` (تعميم
+لدالة `refundSystemCancelledOrder()` القديمة — تفاصيل كاملة في `../payments/README.md`). فشل
+الاسترداد بيتلقط ويتسجّل `audit log` (`order.refund_failed_needs_manual_review`) بس مايكسرش تجربة
+إلغاء العميل — الطلب فضل ملغي صح حتى لو الاسترداد فشل واحتاج مراجعة يدوية (نفس فلسفة
+`OrderAutoCancelService`). **صفر عكس أرباح فني هنا مهما كانت الحالة** — `CUSTOMER_CANCELLABLE_STATUSES`
+مفيهاش ولا حالة ممكن يكون `settleAndComplete()` اتنفذ عليها (بتحصل بس عند `WORK_COMPLETED`)، فمفيش
+قيد محفظة فني يحتاج عكس أصلاً. رسوم الإلغاء (لو السبب `chargesFee`) قيد `PENALTY` مستقل تمامًا،
+واستمر يتحصّل زي ما هو من قبل — الاسترداد بيرجّع المبلغ **الكامل** اللي اتدفع للبوابة، الرسوم قيد
+منفصل بيتحصّل من محفظة العميل الداخلية (تفاصيل "قرار عمل مطلوب" حول تحصيل الرسوم دي في
+`../payments/README.md`).
+
+**الاختبار**: `orders-cancel-prepaid-refund.spec.ts` (4 اختبارات حية ضد Postgres حقيقي) — إلغاء طلب
+مدفوع في `SEARCHING_TECHNICIAN` وفي `ACCEPTED` (استرداد كامل في الحالتين، إثبات إن حالة التعيين
+مبتأثرش)، إلغاء طلب كاش غير مدفوع (صفر محاولة استرداد — رجريشن)، ونداء `cancel()` مرتين على نفس
+الطلب المدفوع (المحاولة التانية بترفض لأن الطلب نهائي، صف `refunds` واحد بس — idempotency).
+`tsc --noEmit`/`nest build`/38 suite (205 اختبار) عدّوا نضيف. صفر migration مطلوبة.

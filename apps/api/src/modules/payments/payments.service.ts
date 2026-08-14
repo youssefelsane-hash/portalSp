@@ -1180,17 +1180,33 @@ export class PaymentsService {
   }
 
   /**
-   * استرداد فوري لطلب اتلغى نظاميًا قبل ما فني يتحدد (docs/08 §19 بند 3+5) — بينادى من
-   * `OrderAutoCancelService` لما SEARCHING_TECHNICIAN مدفوعة مسبقًا (كارت/InstaPay، ADR-0013
-   * "PAY BEFORE DISPATCH") تتلغى تلقائيًا لعدم توفر فني خلال المهلة.
+   * استرداد فوري لطلب اتلغى (نظاميًا أو من العميل نفسه) قبل ما أي تسوية أرباح فني تحصل (docs/08
+   * §19 بند 3+5، وسّعت في §20.7 لتغطي إلغاء العميل نفسه). بتتنادى من مكانين: `OrderAutoCancelService`
+   * لما SEARCHING_TECHNICIAN مدفوعة مسبقًا (كارت/InstaPay، ADR-0013 "PAY BEFORE DISPATCH") تتلغى
+   * تلقائيًا لعدم توفر فني خلال المهلة، أو `OrdersService.cancel()` لما العميل نفسه يلغي طلب
+   * مدفوع مسبقًا من أي حالة في `CUSTOMER_CANCELLABLE_STATUSES` (قبل/بعد تعيين فني — المهم إن
+   * الشغل الفعلي (`IN_PROGRESS`) لسه ما بدأش).
+   *
+   * **بَقّة حقيقية اتلقطت في §20.7**: قبل الإصلاح ده، الدالة دي كانت مقفولة على
+   * `CANCELLED_BY_SYSTEM` بس — يعني عميل لغى بنفسه طلب مدفوع إلكترونيًا (كارت/InstaPay) قبل ما فني
+   * يتعيّن (أو بعد ما يتعيّن، قبل ما الشغل يبدأ) كانت فلوسه تفضل معلّقة (`paymentStatus=PAID` على
+   * طلب `CANCELLED_BY_CUSTOMER` نهائي) لحد ما أدمن يلاحظ ويرد يدويًا عبر `refundOrder()` — رغم إن
+   * نفس السيناريو المالي بالظبط (طلب مدفوع، اتلغى قبل أي تسوية فني، محتاج استرداد كامل) كان بيتصرف
+   * صح تلقائيًا لو النظام هو اللي لغى (timeout). الاتساق هنا مش سياسة جديدة مخترعة — نفس المبدأ
+   * الموجود بالفعل ("طلب مدفوع اتلغى بلا خدمة فعلية = فلوسه ترجع تلقائيًا") بيتطبّق على مين لغى،
+   * مش بس ليه.
    *
    * **مختلف عمدًا عن `refundOrder()`**: هناك الطلب لازم يكون COMPLETED/DISPUTED عشان ينتقل لحالة
    * REFUNDED نهائية (استرداد بعد خدمة اتقدّمت فعلاً أو نزاع). هنا الطلب **بالفعل** بقى
-   * CANCELLED_BY_SYSTEM — دي الحالة النهائية الصح اللي تحكي قصته الحقيقية (اتلغى، مش اتسلّم
-   * واترجعت فلوسه)، فمفيش انتقال orderStatus تاني مطلوب أو مسموح بيه (`ORDER_TRANSITIONS` مفيهاش
-   * CANCELLED_BY_SYSTEM → REFUNDED عمدًا) — بس `paymentStatus` لازم يتسجّل REFUNDED عشان يبان
-   * فعليًا إن الفلوس رجعت. مفيش عكس أرباح فني هنا: الفحص الدوري بيستهدف طلبات SEARCHING_TECHNICIAN
-   * بس (`technicianId` لسه null بالتعريف — مفيش فني اتعيّن أصلاً).
+   * CANCELLED_BY_SYSTEM/CANCELLED_BY_CUSTOMER — دي الحالة النهائية الصح اللي تحكي قصته الحقيقية
+   * (اتلغى، مش اتسلّم واترجعت فلوسه)، فمفيش انتقال orderStatus تاني مطلوب أو مسموح بيه
+   * (`ORDER_TRANSITIONS` مفيهاش أي منهم → REFUNDED عمدًا) — بس `paymentStatus` لازم يتسجّل
+   * REFUNDED عشان يبان فعليًا إن الفلوس رجعت. **مفيش عكس أرباح فني هنا مهما كانت الحالة**: تسوية
+   * أرباح الفني (`settleAndComplete()`) بتحصل بس عند `WORK_COMPLETED` (`PrepaidOrderSettlementListener`)،
+   * وده مستحيل يكون حصل قبل ما الطلب يوصل لأي حالة من `CUSTOMER_CANCELLABLE_STATUSES` أصلاً —
+   * فصفر قيد محفظة فني يحتاج عكس، بغض النظر عن هل فني كان متعيّن وقت الإلغاء ولا لأ. رسوم الإلغاء
+   * (لو السبب المُختار `chargesFee`) قيد مستقل تمامًا بيتحصّل من محفظة العميل الداخلية جوّه
+   * `OrdersService.cancel()` نفسها — الدالة دي مسؤولة بس عن استرداد المبلغ المدفوع فعليًا للبوابة.
    *
    * نفس نمط أمان الـ3 مراحل بتاع `refundOrder()` بالظبط (صف Refund PROCESSING قبل أي نداء خارجي،
    * النداء نفسه برّه أي transaction، تسجيل النتيجة في transaction منفصلة) — نفس السبب: نداء
@@ -1198,16 +1214,25 @@ export class PaymentsService {
    *
    * **Idempotent عمدًا**: بترجع `null` بهدوء (بلا استثناء) لو مفيش دفعة ناجحة أو لو فيه Refund
    * مسجّل بالفعل لنفس الدفعة — الفحص الدوري ممكن يعيد استدعاء نفس الطلب أكتر من مرة (نظريًا) لو
-   * `sweep()` اتأخر عليه بسبب مشكلة عابرة، فمفيش داعي يفشل بـexception يوقف بقية الدفعة.
+   * `sweep()` اتأخر عليه بسبب مشكلة عابرة، فمفيش داعي يفشل بـexception يوقف بقية الدفعة. نفس
+   * المنطق بيحمي إلغاء العميل من استرداد مزدوج لو `cancel()` اتنادى مرتين بالخطأ (idempotency-key
+   * مستوى الـHTTP request مش موجودة هنا، بس `idx_refunds_payment_id_unique` بيمنع صف Refund تاني
+   * فعليًا لنفس الدفعة).
    */
-  async refundSystemCancelledOrder(orderId: string, reasonNotes: string): Promise<Refund | null> {
+  async refundCancelledPrepaidOrder(
+    orderId: string,
+    reasonNotes: string,
+    triggeredBy: 'system_auto_cancel' | 'customer_cancel' = 'system_auto_cancel',
+  ): Promise<Refund | null> {
     const prepared = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
         .where('o.id = :orderId', { orderId })
         .getOne();
-      if (!order || order.orderStatus !== OrderStatus.CANCELLED_BY_SYSTEM) return null;
+      const isTerminallyCancelled =
+        order?.orderStatus === OrderStatus.CANCELLED_BY_SYSTEM || order?.orderStatus === OrderStatus.CANCELLED_BY_CUSTOMER;
+      if (!order || !isTerminallyCancelled) return null;
       if (order.paymentStatus !== OrderPaymentStatus.PAID) return null;
 
       const payment = await manager.findOne(Payment, {
@@ -1289,7 +1314,9 @@ export class PaymentsService {
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
             referenceId: refund.id,
-            descriptionAr: `استرجاع طلب ${order.orderNumber} — إلغاء نظامي`,
+            descriptionAr: `استرجاع طلب ${order.orderNumber} — ${
+              triggeredBy === 'customer_cancel' ? 'إلغاء العميل' : 'إلغاء نظامي'
+            }`,
             allowNegativeBalance: true,
           },
           manager,
@@ -1301,8 +1328,9 @@ export class PaymentsService {
 
       order.paymentStatus = OrderPaymentStatus.REFUNDED;
       await manager.save(order);
-      // orderStatus فضل CANCELLED_BY_SYSTEM عمدًا — مفيش صف OrderStatusHistory إضافي هنا،
-      // OrderAutoCancelService سجّل بالفعل صف الانتقال SEARCHING_TECHNICIAN → CANCELLED_BY_SYSTEM.
+      // orderStatus فضل CANCELLED_BY_SYSTEM/CANCELLED_BY_CUSTOMER عمدًا — مفيش صف
+      // OrderStatusHistory إضافي هنا، الكولر (OrderAutoCancelService أو OrdersService.cancel())
+      // سجّل بالفعل صف انتقال الحالة نفسه.
 
       return refund;
     });
@@ -1317,7 +1345,7 @@ export class PaymentsService {
         refund_id: finalRefund.id,
         amount_cents: finalRefund.amountCents,
         refund_status: finalRefund.refundStatus,
-        trigger: 'system_auto_cancel',
+        trigger: triggeredBy,
       },
     });
 

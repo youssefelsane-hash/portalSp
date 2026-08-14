@@ -137,9 +137,10 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     // متابعة يدوية.
     if (result.paymentStatus === OrderPaymentStatus.PAID) {
       try {
-        await this.paymentsService.refundSystemCancelledOrder(
+        await this.paymentsService.refundCancelledPrepaidOrder(
           result.id,
           `استرداد تلقائي — الطلب اتلغى نظاميًا لعدم توفر فني خلال ${minutes} دقيقة`,
+          'system_auto_cancel',
         );
       } catch (err) {
         this.logger.error(
