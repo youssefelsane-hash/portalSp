@@ -416,3 +416,26 @@
 مبتأثرش)، إلغاء طلب كاش غير مدفوع (صفر محاولة استرداد — رجريشن)، ونداء `cancel()` مرتين على نفس
 الطلب المدفوع (المحاولة التانية بترفض لأن الطلب نهائي، صف `refunds` واحد بس — idempotency).
 `tsc --noEmit`/`nest build`/38 suite (205 اختبار) عدّوا نضيف. صفر migration مطلوبة.
+
+## `GET /admin/orders/:id/financial-summary` — الملخص المالي لطلب واحد (docs/08 §20 بند 11)
+
+**الفجوة**: `platform_commission_cents`/`technician_earning_cents` محسوبين ومخزّنين على `orders` من
+زمان (docs/08 §20 بند 1) بس صفر endpoint كان بيرجّعهم لأي أدمن — `toOrderResponseDto()` كانت
+ماسكاهمش خالص. مفيش كمان أي طريقة تعرف وسيلة دفع أو تاريخ استرداد طلب معيّن من غير تفتيش يدوي في
+`/admin/wallets/:userId` (لو أصلاً عارف مين الفني/العميل).
+
+**الحل — لمّ الموجود بس، صفر حساب جديد**: `PaymentsService.getFinancialSummaryForOrder(orderId)`
+(جديدة، `payments.service.ts`) بترجّع `platformCommissionCents`/`technicianEarningCents`/
+`cancellationFeeCents` من صف الطلب نفسه + كل صفوف `payments`/`refunds` المرتبطة (`WHERE order_id`)،
+بلا أي حساب أو تعديل. اتنادت من `AdminOrdersController` مباشرة (`PaymentsService` مُصدَّرة من
+`PaymentsModule` أصلاً، `OrdersModule` بيستوردها من زمان — صفر حقن جديد على مستوى الموديول). DTO
+جديد `order-financial-summary-response.dto.ts` + نسخة مطابقة في `packages/shared-types`.
+
+معروض في `apps/admin` (`/orders/:id`) كارت "الملخص المالي" جديد — عمولة/أرباح، قايمة الدفعات (وسيلة
++ حالة + مبلغ)، وقايمة الاستردادات (لو فيه). صفر تعديل على كارت البيانات الموجود — كارت مستقل جنبه.
+
+**الاختبار**: `../payments/order-financial-summary.spec.ts` (اختبارين حيّين ضد Postgres حقيقي) —
+طلب حقيقي بعمولة/أرباح/رسوم إلغاء + دفعة + استرداد جزئي، الدالة رجّعت كل رقم بالظبط زي ما اتخزّن؛
+طلب غير موجود يترفض بوضوح (`ApiException`) بدل ما يرجّع بيانات فاضية بصمت. `tsc --noEmit`/
+`nest build`/40 suite (209 اختبار) عدّوا نضيف. صفر migration مطلوبة (صفر عمود جديد، البيانات كانت
+موجودة بالفعل).

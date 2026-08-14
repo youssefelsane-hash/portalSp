@@ -135,6 +135,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     const paymentsService = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
+      dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
       dataSource,

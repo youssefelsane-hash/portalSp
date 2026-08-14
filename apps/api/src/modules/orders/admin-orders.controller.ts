@@ -11,6 +11,7 @@ import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { AssignAssistantDto } from './dto/assign-assistant.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import { toOrderFinancialSummaryResponseDto } from './dto/order-financial-summary-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderPricingEvaluationResponseDto } from './dto/order-pricing-evaluation-response.dto';
@@ -22,6 +23,7 @@ import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
+import { PaymentsService } from '../payments/payments.service';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -31,6 +33,7 @@ export class AdminOrdersController {
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
+    private readonly paymentsService: PaymentsService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -53,6 +56,15 @@ export class AdminOrdersController {
       // مش صف واحد لأن نفس الطلب ممكن يتلغى من فني، يترجّع، ويتلغى من فني تاني.
       technician_cancellations: technicianCancellations.map(toTechnicianOrderCancellationResponseDto),
     };
+  }
+
+  // الملخص المالي لطلب واحد (docs/08 §20 بند 11) — كانت فجوة عرض حقيقية: عمولة المنصة/أرباح
+  // الفني محسوبة ومخزّنة على الطلب من زمان (docs/08 §20 بند 1) بس صفر endpoint كان بيرجّعها، ومفيش
+  // طريقة تعرف وسيلة الدفع أو تاريخ الاسترداد لطلب معيّن من غير تفتيش يدوي في /admin/wallets.
+  @Get(':id/financial-summary')
+  async getFinancialSummary(@Param('id', ParseUUIDPipe) id: string) {
+    const summary = await this.paymentsService.getFinancialSummaryForOrder(id);
+    return toOrderFinancialSummaryResponseDto(summary);
   }
 
   // كانت فجوة موثّقة: GET /technician/orders/:id/media مقصور على @Roles(TECHNICIAN) بس —

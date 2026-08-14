@@ -165,6 +165,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     return new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
+      dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
       dataSource,

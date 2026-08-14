@@ -40,6 +40,7 @@ export class PaymentsService {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(Payment) private readonly payments: Repository<Payment>,
+    @InjectRepository(Refund) private readonly refunds: Repository<Refund>,
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(WebhookEvent) private readonly webhookEvents: Repository<WebhookEvent>,
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -935,6 +936,38 @@ export class PaymentsService {
       { next_human_readable_number: string }[]
     >("SELECT next_human_readable_number('REF')");
     return number;
+  }
+
+  /**
+   * الملخص المالي لطلب واحد (docs/08 §20 بند 11) — كانت فجوة عرض حقيقية: `platform_commission_cents`/
+   * `technician_earning_cents` محسوبين ومخزّنين على الطلب من زمان (docs/08 §20 بند 1) بس مش معروضين
+   * لأي أدمن، ومفيش أي endpoint يرجّع وسيلة الدفع أو تاريخ الاسترداد لطلب معيّن — أدمن عايز يفهم
+   * "الطلب ده فلوسه راحت فين" كان لازم يفتح `/admin/wallets/:userId` منفصلة (لو عارف مين الفني)
+   * ويدوّر يدوي. الدالة دي بتلمّ اللي موجود بالفعل بس، صفر حساب جديد أو جدول جديد — نفس مبدأ §20's
+   * الحاكم ("لو الداتا موجودة، اربطها/اعرضها بس").
+   */
+  async getFinancialSummaryForOrder(orderId: string): Promise<{
+    platformCommissionCents: number;
+    technicianEarningCents: number;
+    cancellationFeeCents: number;
+    payments: Pick<Payment, 'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt'>[];
+    refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
+  }> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const [payments, refunds] = await Promise.all([
+      this.payments.find({ where: { orderId }, order: { initiatedAt: 'ASC' } }),
+      this.refunds.find({ where: { orderId }, order: { requestedAt: 'ASC' } }),
+    ]);
+    return {
+      platformCommissionCents: order.platformCommissionCents,
+      technicianEarningCents: order.technicianEarningCents,
+      cancellationFeeCents: order.cancellationFeeCents,
+      payments,
+      refunds,
+    };
   }
 
   /**

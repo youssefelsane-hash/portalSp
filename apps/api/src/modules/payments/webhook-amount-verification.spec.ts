@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Order } from '../orders/entities/order.entity';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
+import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
 
@@ -33,7 +34,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Order, Payment, User, WebhookEvent],
+      entities: [Order, Payment, Refund, User, WebhookEvent],
     });
     await dataSource.initialize();
 
@@ -43,6 +44,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     service = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
+      dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
       dataSource,
