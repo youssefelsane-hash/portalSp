@@ -32,6 +32,8 @@
 	<string>محتاجين نوصل لمكتبة الصور لو حبيت ترفع صورة محفوظة بدل ما تصوّر واحدة جديدة.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>محتاجين موقعك عشان نشاركه مع العميل وقت تنفيذ الطلب ونوصّلك لعنوانه.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>استخدم Face ID عشان تفتح صُنّاع بسرعة وأمان بدل ما تستنى كود التحقق كل مرة.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

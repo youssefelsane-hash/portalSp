@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/auth_repository.dart';
 import 'design/app_theme.dart';
+import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/catalog/booking_mode_screen.dart';
 
@@ -36,6 +37,11 @@ class _AuthGate extends StatelessWidget {
     final auth = context.watch<AuthRepository>();
     if (auth.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    // docs/08 §17.22 — لازم يتفحص *قبل* isAuthenticated: جلسة محفوظة مش كافية لوحدها لو
+    // البصمة مفعّلة على الجهاز ده.
+    if (auth.biometricUnlockPending) {
+      return const BiometricUnlockScreen();
     }
     return auth.isAuthenticated ? const BookingModeScreen() : const LoginScreen();
   }

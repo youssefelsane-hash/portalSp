@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/biometric_auth_service.dart';
 import '../onboarding/models.dart';
 import '../onboarding/onboarding_repository.dart';
 
@@ -21,12 +22,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
   TechnicianMe? _me;
   String? _error;
   bool _acting = false;
+  bool _biometricAvailable = false;
+  bool _biometricEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _repository = OnboardingRepository(context.read<AuthRepository>());
     _load();
+    _loadBiometricState();
+  }
+
+  Future<void> _loadBiometricState() async {
+    final available = await BiometricAuthService.isAvailable();
+    final enabled = await BiometricAuthService.isEnabled();
+    if (mounted) {
+      setState(() {
+        _biometricAvailable = available;
+        _biometricEnabled = enabled;
+      });
+    }
+  }
+
+  // docs/08 §17.22 — "بصمة اختياري على جهاز موثوق": تفعيلها بيتطلب تأكيد هوية فوري بالبصمة
+  // نفسها (مش مجرد تبديل switch)، عشان نتأكد إن اللي بيفعّلها فعلاً هو صاحب البصمة المسجّلة على
+  // الجهاز، مش حد لاقي الموبايل مفتوح وقلب الإعداد. تعطيلها مايحتاجش تأكيد (رجوع لمسار OTP بس).
+  Future<void> _toggleBiometric(bool wantEnabled) async {
+    if (!wantEnabled) {
+      await BiometricAuthService.setEnabled(false);
+      if (mounted) setState(() => _biometricEnabled = false);
+      return;
+    }
+    final confirmed = await BiometricAuthService.authenticate(reason: 'أكّد بصمتك عشان تفعّل الدخول بالبصمة');
+    if (!confirmed) return;
+    await BiometricAuthService.setEnabled(true);
+    if (mounted) setState(() => _biometricEnabled = true);
   }
 
   Future<void> _load() async {
@@ -141,6 +171,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
                       ),
+                      if (_biometricAvailable) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          child: SwitchListTile(
+                            secondary: const Icon(Icons.fingerprint),
+                            title: const Text('الدخول بالبصمة'),
+                            subtitle: const Text('افتح صُنّاع ببصمتك بدل ما تستنى كود التحقق كل مرة'),
+                            value: _biometricEnabled,
+                            onChanged: _toggleBiometric,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
       ),

@@ -94,6 +94,22 @@
 
 **فجوة موثّقة صراحة**: مفيش deep-link router حقيقي في التطبيق (تاب على جسم الإشعار نفسه، مش زرار، بيفتح التطبيق بس من غير navigation لشاشة الطلب تحديدًا — نفس الفجوة الموجودة من زمان في `apps/customer-app`/`apps/technician-app` الاتنين لكل أنواع الإشعارات، مش خاصة بالميزة دي). **التصنيف (نفس منهجية بصمة `apps/customer-app`)**: `IMPLEMENTED — DEVICE TEST PENDING` — الكود شغال ومتأكد بـ`flutter analyze`/`flutter build linux`، بس heads-up notification حقيقي/أزرار قابلة للمس فعليًا/اهتزاز على جهاز حقيقي محتاجين جهاز/إعداد Firebase حقيقي مش متاحين في بيئة السيشن دي. تفاصيل الباك-إند الكاملة (الأحداث، دورة التذكير، concurrency tests) في `apps/api/src/modules/notifications/README.md` و`apps/api/src/modules/matching/README.md`.
 
+## الدخول بالبصمة (docs/08 §17.22، بناء 2026-08-14)
+
+نفس الميزة والتصميم بالحرف زي `apps/customer-app` (كود مستقل مكرر عمدًا، تفاصيل كاملة هناك) —
+`local_auth` جديد، `lib/core/biometric_auth_service.dart` جديد، `AuthRepository.init()` بيتفرّع
+على `biometricUnlockPending` قبل `isAuthenticated`، `BiometricUnlockScreen` جديدة، تفعيل من
+`ProfileScreen` (`SwitchListTile` بيتطلب تأكيد بصمة فوري وقت التفعيل). `MainActivity.kt` بقى
+`FlutterFragmentActivity` (إجباري لـ`BiometricPrompt`)، صلاحية/وصف البصمة اتضافوا لـ
+`AndroidManifest.xml`/`Info.plist`.
+
+**فرق واحد عن `apps/customer-app`**: `_DeviceSecurityGate` (فحص root/jailbreak) بيفضل **قبل**
+`_AuthGate` بالكامل زي ما هو — فني على جهاز مخترق بيتوقف قبل حتى ما يشوف شاشة البصمة، مش بعدها.
+
+`flutter analyze`/`flutter build linux` نضاف. التحقق الفعلي على جهاز حقيقي (BiometricPrompt/Face ID
+فعلاً بيظهر ويشتغل) مش ممكن في بيئة السيشن دي — `IMPLEMENTED — DEVICE TEST PENDING`، نفس تصنيف
+`CompromisedDeviceScreen` وعرض الطلب actionable فوق.
+
 ## نظام التصميم المشترك (docs/12، دفعة عاشرة 2026-08-13)
 
 `lib/design/` جديد — نسخة مطابقة حرفيًا لنفس المجلد في `apps/customer-app` (تفاصيل كل ملف كاملة
