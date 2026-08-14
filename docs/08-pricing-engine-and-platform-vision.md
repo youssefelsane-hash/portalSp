@@ -1076,3 +1076,18 @@ cold-start) كان بيفتح التطبيق على الشاشة الافترا�
 اتأكد بـ`flutter analyze` نضيف على التطبيقين الاتنين (صفر أخطاء/تحذيرات جديدة). نفس تصنيف
 §17.16: `IMPLEMENTED — DEVICE TEST PENDING` — heads-up notification حقيقي/تاب فعلي على جهاز
 محتاج جهاز/إعداد Firebase حقيقي مش متاحين في بيئة السيشن دي.
+
+### تحديث تنفيذ §19 — بند 13 (Customer Support UI — نظام الشكاوى) — ✅ `DONE + LIVE VERIFIED`
+
+كانت فجوة موثّقة صراحة: نظام الشكاوى (`complaints` module — حالة/SLA/فئة/قرار حل/تعويض، مختلف
+عن شات الدعم العام اللي كان اتقفل في جلسة سابقة) كان له باك-إند وAdmin UI مختبرين حيًا من زمان،
+بس **صفر كود Dart في customer-app كان بينادي عليه خالص**. `apps/customer-app/lib/features/support/`
+جديد بالكامل — `SupportRepository` + `ComplaintCategory` enum + 3 شاشات (`ComplaintsScreen`،
+`FileComplaintScreen`، `ComplaintDetailScreen` بخيط رسائل ومرفقات). نقطتين دخول: "شكاويّي" في
+`AccountScreen`، وزرار "قدّم شكوى" في `OrderDetailScreen` (مربوط بالطلب تلقائيًا). تفاصيل كاملة
+في `apps/customer-app/README.md`.
+
+اتأكد حيًا بالكامل (`test_live/complaints_live_test.dart`): عميل حقيقي جديد، طلب حقيقي، شكوى
+مربوطة به فتحت صح (`complaint_status=open`)، ظهرت في القايمة والتفاصيل، رسالة اتبعتت ورجعت
+`sender_role=customer` صح، ومرفق (PNG حقيقي فعليًا — بند 10's `assertFileSignatureMatches` بقى
+شغال على نفس الـendpoint ده) اترفع بنجاح. `flutter analyze` نضيف (صفر أخطاء/تحذيرات).

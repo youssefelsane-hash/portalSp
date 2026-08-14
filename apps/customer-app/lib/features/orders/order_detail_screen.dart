@@ -12,6 +12,7 @@ import '../payments/payments_repository.dart';
 import '../ratings/google_review_prompt.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
+import '../support/file_complaint_screen.dart';
 import '../technicians/technician_profile_screen.dart';
 import '../technicians/technician_selection_screen.dart';
 import '../tracking/tracking_screen.dart';
@@ -741,6 +742,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ],
+                      // شكاوى الطلب (docs/08 §19 بند 13) — متاح على أي حالة (حتى بعد اكتمال/إلغاء
+                      // الطلب — العميل ممكن يشتكي من جودة شغل بعد ما خلص مثلاً)، مش مقيّد بحالة
+                      // معيّنة زي باقي الأزرار فوق.
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => FileComplaintScreen(orderId: order.id)),
+                        ),
+                        icon: const Icon(Icons.report_problem_outlined),
+                        label: const Text('قدّم شكوى عن الطلب ده'),
+                      ),
                     ],
                   ),
       ),
