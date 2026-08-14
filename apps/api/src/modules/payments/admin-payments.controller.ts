@@ -13,6 +13,7 @@ import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
 import {
   toAdminPayoutResponseDto,
+  toPaymentResponseDto,
   toPayoutOrderItemResponseDto,
   toPayoutResponseDto,
   toRefundResponseDto,
@@ -52,7 +53,26 @@ export class AdminPaymentsController {
     @Body() dto: RefundOrderDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toRefundResponseDto(await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, audit));
+    return toRefundResponseDto(
+      await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, dto.amount_cents, audit),
+    );
+  }
+
+  /**
+   * تأكيد إداري يدوي لدفعة InstaPay (ADR-0013 §7) — صلاحية مخصوصة `payments.confirm_manual`
+   * (Finance/Super Admin بس)، مش `refunds.issue` ولا أي صلاحية عامة. Idempotent فعليًا داخل
+   * PaymentsService.confirmInstaPayPayment() (قفل pessimistic_write + فحص PENDING جوّه القفل) —
+   * Audit كامل (الموظف/الوقت/المبلغ/الحالة قبل وبعد) بيتسجّل جوّه الخدمة نفسها.
+   */
+  @Post('payments/:id/confirm-instapay')
+  @RequirePermission('payments.confirm_manual')
+  async confirmInstaPayPayment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const payment = await this.paymentsService.confirmInstaPayPayment(user.sub, id, audit);
+    return toPaymentResponseDto(payment);
   }
 
   @Post('payouts/:id/approve')

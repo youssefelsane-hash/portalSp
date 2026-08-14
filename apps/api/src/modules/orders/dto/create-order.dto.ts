@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsDateString, IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode, OrderType } from '../entities/order.entity';
 
 export class CreateOrderDto {
@@ -98,4 +98,13 @@ export class CreateOrderDto {
   @IsNumber()
   @IsPositive()
   requested_units?: number;
+
+  // دفع قبل التوزيع (ADR-0013 §3/§4 — "PAY BEFORE DISPATCH") — اختياري بالكامل، لو مبعتش
+  // الطلب بيتوزّع فورًا زي السلوك الحالي (دفع بعد الشغل عبر collect-cash/pay-with-wallet/...).
+  // لو "card" أو "instapay"، الطلب بيتعمل PENDING_PAYMENT بدل SEARCHING_TECHNICIAN، والتوزيع
+  // بيتأجل لحد ما POST /orders/:id/pay-with-card أو pay-with-instapay يتأكد فعليًا. كاش/محفظة
+  // مالهمش داعي هنا — دفعهم بيحصل بعد اكتمال الشغل زي زمان، مش قبل التوزيع.
+  @IsOptional()
+  @IsIn(['card', 'instapay'])
+  payment_method?: 'card' | 'instapay';
 }

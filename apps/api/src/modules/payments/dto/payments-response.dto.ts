@@ -83,7 +83,13 @@ export interface CardPaymentResponseDto {
 export interface FawryReferenceResponseDto {
   payment: PaymentResponseDto;
   reference_number: string;
-  expires_at: string;
+  expires_at: string | null;
+}
+
+export interface InstaPayReferenceResponseDto {
+  payment: PaymentResponseDto;
+  reference_code: string;
+  instructions_ar: string;
 }
 
 export interface PayoutResponseDto {

@@ -62,4 +62,9 @@ export class Refund {
 
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt: Date | null;
+
+  // مرجع استرداد البوابة الحقيقي (مثلاً id استرداد Paymob) — null لو الاسترداد اتعمل عبر رصيد
+  // محفظة بس (مفيش بوابة اتحاول أصلاً، ADR-0013 §9). مضافة في migration 0093.
+  @Column({ name: 'provider_refund_id', type: 'varchar', length: 120, nullable: true })
+  providerRefundId: string | null;
 }

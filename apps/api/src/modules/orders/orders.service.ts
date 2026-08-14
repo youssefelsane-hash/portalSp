@@ -239,6 +239,12 @@ export class OrdersService {
     // هيشوف الطلب الحالي نفسه (نفس الـtransaction) ويحسبه غلط كإنه "مش أول طلب".
     const isNewCustomer = dto.promo_code ? await this.customerProfiles.isNewCustomer(customerProfile.id) : false;
 
+    // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — إعادة زيارة مجانية بالكامل (originalOrder) دايمًا
+    // بتتوزّع فورًا بغض النظر عن dto.payment_method (مفيش حاجة تتدفع أصلاً)، ونفس المنطق لو
+    // إجمالي الطلب صفر لأي سبب تاني (خصم كامل مثلاً) — دفع كارت/InstaPay بمبلغ صفر مالوش معنى.
+    // requiresPrepay النهائية بتتحدد بعد ما totalAmountCents يتحسب فعليًا جوّه الـtransaction تحت.
+    const requestedPrepayMethod = originalOrder ? undefined : dto.payment_method;
+
     const order = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
@@ -314,17 +320,6 @@ export class OrdersService {
         }
       }
 
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: null,
-          newStatus: OrderStatus.SEARCHING_TECHNICIAN,
-          changedByUserId: userId,
-          changedByRole: 'customer',
-          changeSource: OrderChangeSource.CUSTOMER,
-        }),
-      );
-
       // إضافات الكتالوج اللي العميل اختارها بنفسه وقت الحجز — is_customer_approved=true فوراً
       // (مختلف عن مسار awaiting_quote_approval في order-items.service.ts اللي الفني بيقترحه
       // أثناء الشغل ومحتاج موافقة لاحقة).
@@ -380,6 +375,27 @@ export class OrdersService {
         await manager.save(order);
       }
 
+      // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — بيتحدد هنا (بعد كل الخصومات، مش وقت إنشاء الصف
+      // فوق) عشان لو خصم كامل (كود/عمارة) خلّى الإجمالي صفر، الطلب يتوزّع فورًا زي أي طلب مجاني
+      // عادي بدل ما يعلّق PENDING_PAYMENT لمبلغ صفر مالوش معنى يتدفع. الطلب بيتسجّل SEARCHING_TECHNICIAN
+      // فوق مبدئيًا؛ لو requiresPrepay صح بيتحدّث هنا لـPENDING_PAYMENT قبل ما history الوحيدة تتسجّل.
+      const requiresPrepay = Boolean(requestedPrepayMethod) && order.totalAmountCents > 0;
+      if (requiresPrepay) {
+        order.orderStatus = OrderStatus.PENDING_PAYMENT;
+        await manager.save(order);
+      }
+
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus: null,
+          newStatus: order.orderStatus,
+          changedByUserId: userId,
+          changedByRole: 'customer',
+          changeSource: OrderChangeSource.CUSTOMER,
+        }),
+      );
+
       return order;
     });
 
@@ -388,6 +404,15 @@ export class OrdersService {
     // بره الـtransaction عمداً — تدقيق مش لازم يفشّل إنشاء الطلب لو فشل، ومحتاج order.id الحقيقي.
     if (estimate.pricing_evaluation_id) {
       await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, order.id);
+    }
+
+    // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — الطلب PENDING_PAYMENT: مفيش توزيع خالص لسه، فمفيش
+    // داعي نحسب dispatchDeferredUntil ولا نصدّر ORDER_CREATED_EVENT دلوقتي. التصدير بيحصل لاحقًا
+    // (نفس الحدث بالظبط، مع dispatchDeferredUntil محسوبة وقتها) من PaymentsService.emitPaymentConfirmedEvents()
+    // بعد ما الدفع (كارت/InstaPay) يتأكد فعليًا — طلب لسه مش مدفوع مش "اتعمل" فعليًا بالمعنى
+    // التجاري، ممكن ميتدفعش خالص. باقي أحداث النظام (إشعارات "طلبك اتسجّل"، إحصائيات) هتنتظر برضو.
+    if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
+      return order;
     }
 
     // تأجيل بث المطابقة لطلب مجدول "بعيد" (ADR-0009 بند 1-2، P0-9) — بيتحسب هنا بالظبط (مش وقت

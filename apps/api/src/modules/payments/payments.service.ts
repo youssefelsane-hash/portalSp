@@ -1,9 +1,10 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
+import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -18,8 +19,8 @@ import { User } from '../auth/entities/user.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { canTransition } from '../orders/order-state-machine';
-import { PAYMENT_GATEWAY, PaymentGateway } from './gateways/payment-gateway.interface';
-import { FAWRY_GATEWAY, FawryGateway } from './gateways/fawry-gateway.interface';
+import { computeDispatchDeferredUntil } from '../orders/deferred-dispatch.util';
+import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
 import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
@@ -29,6 +30,8 @@ import { WalletsService } from './wallets.service';
 import { PLATFORM_SYSTEM_USER_ID } from './entities/wallet.entity';
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
+// طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
+const PREPAY_METHODS = new Set([PaymentMethod.CARD, PaymentMethod.INSTAPAY]);
 
 @Injectable()
 export class PaymentsService {
@@ -50,8 +53,7 @@ export class PaymentsService {
     private readonly settingsService: SettingsService,
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
-    @Inject(PAYMENT_GATEWAY) private readonly paymentGateway: PaymentGateway,
-    @Inject(FAWRY_GATEWAY) private readonly fawryGateway: FawryGateway,
+    private readonly paymentProviders: PaymentProviderRegistry,
   ) {}
 
   /**
@@ -95,9 +97,19 @@ export class PaymentsService {
     return order;
   }
 
+  /**
+   * `PENDING_PAYMENT` (دفع قبل التوزيع، ADR-0013 §4) بيتقبل هنا كمان جنب PAYABLE_ORDER_STATUSES
+   * العادية (بعد اكتمال الشغل) — نفس آلية إنشاء الدفعة (Payment row + redirect/reference +
+   * انتظار webhook/تأكيد) بالظبط، الفرق بس في التسوية بعد النجاح (handlePaymentConfirmed تحت
+   * بتفرّق بين "يبدأ التوزيع" و"يقفل الطلب مكتمل"). كاش/محفظة عمليًا مش بيوصلوا PENDING_PAYMENT
+   * أصلاً (الطلب بيتعمل SEARCHING_TECHNICIAN فورًا لو payment_method مش كارت/InstaPay).
+   */
   private assertPayable(order: Order): void {
     if (order.paymentStatus === OrderPaymentStatus.PAID) {
       throw new ApiException(ErrorCode.PAY_003, 'الطلب مدفوع بالفعل', HttpStatus.CONFLICT);
+    }
+    if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
+      return;
     }
     if (!PAYABLE_ORDER_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
@@ -106,6 +118,45 @@ export class PaymentsService {
         HttpStatus.CONFLICT,
       );
     }
+  }
+
+  /**
+   * بتتنادى بعد ما دفع مسبق (كارت/InstaPay) يتأكد فعليًا (webhook ناجح أو تأكيد إداري لـInstaPay).
+   * بتفرّق بين حالتين مختلفتين جوهريًا كانت settleAndComplete وحدها بتخلطهم قبل كده (ADR-0013 §4):
+   * - الطلب PENDING_PAYMENT (لسه ما اتوزّعش) → يفضل مفتوح، بس ينتقل لـSEARCHING_TECHNICIAN
+   *   (التوزيع يبدأ بعدها مباشرة عبر ORDER_CREATED_EVENT، مش settleAndComplete اللي بتقفل الطلب).
+   * - الطلب WORK_COMPLETED/AWAITING_PAYMENT (المسار الحالي، دفع بعد اكتمال الشغل) → settleAndComplete
+   *   زي ما هي بالظبط، صفر تغيير سلوكي.
+   */
+  private async handlePaymentConfirmed(
+    manager: EntityManager,
+    order: Order,
+    paymentMethod: PaymentMethod,
+    changedByUserId: string,
+    changedByRole: 'customer' | 'system',
+  ): Promise<{ dispatchStarted: boolean }> {
+    if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
+      const previousStatus = order.orderStatus;
+      order.orderStatus = OrderStatus.SEARCHING_TECHNICIAN;
+      order.paymentStatus = OrderPaymentStatus.PAID;
+      order.paymentMethod = paymentMethod;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.SEARCHING_TECHNICIAN,
+          changedByUserId,
+          changedByRole: changedByRole === 'system' ? 'system' : 'customer',
+          changeSource: changedByRole === 'system' ? OrderChangeSource.SYSTEM : OrderChangeSource.CUSTOMER,
+          reason: 'الدفع اتأكد — التوزيع بدأ',
+        }),
+      );
+      return { dispatchStarted: true };
+    }
+
+    await this.settleAndComplete(manager, order, paymentMethod, changedByUserId, changedByRole === 'system' ? 'customer' : changedByRole);
+    return { dispatchStarted: false };
   }
 
   /**
@@ -343,39 +394,41 @@ export class PaymentsService {
   }
 
   /**
-   * العميل بيبدأ دفع بالبطاقة — بيرجّع رابط iframe مستضاف عند بوابة الدفع (Paymob افتراضياً،
-   * راجع gateways/paymob-gateway.service.ts) عشان الكلاينت يفتحه في WebView. الدفعة بتتسجّل
-   * `pending` فوراً؛ التأكيد الفعلي (نجاح/فشل) بييجي بعد كده عبر `POST /webhooks/paymob` —
-   * مفيش أي تسوية (settleAndComplete) بتحصل هنا، القفل النهائي بس لما البوابة تأكّد.
+   * نقطة دفع موحّدة لأي طريقة بتمر على PaymentProvider حقيقي (كارت/فوري/InstaPay — مش
+   * كاش/محفظة، دول ليهم مسار مباشر تمامًا). بتتعامل مع idempotency retry (نفس المفتاح، صف قديم
+   * pending/failed) وإنشاء دفعة جديدة، وبترجّع نتيجة CreatePaymentResult الخام عشان كل طريقة
+   * تستخرج منها الشكل اللي بتحتاجه (redirect_url لكارت، reference_code لفوري/InstaPay).
+   * `orderId` هنا اللي بيتحدد منه إن كان الطلب PENDING_PAYMENT (دفع قبل التوزيع، ADR-0013 §4)
+   * أو WORK_COMPLETED/AWAITING_PAYMENT (المسار العادي بعد الشغل) — assertPayable() بتقبل الاتنين.
    */
-  async payWithCard(userId: string, orderId: string, idempotencyKey: string): Promise<{ payment: Payment; redirectUrl: string }> {
+  private async payWithProvider(
+    userId: string,
+    orderId: string,
+    idempotencyKey: string,
+    method: PaymentMethod,
+  ): Promise<{ payment: Payment; result: import('./gateways/payment-provider.interface').CreatePaymentResult }> {
+    const provider = this.paymentProviders.getProvider(method);
+
     const existing = await this.payments.findOne({ where: { idempotencyKey } });
     if (existing) {
       if (existing.orderId !== orderId) {
         throw new ApiException(ErrorCode.PAY_003, 'مفتاح idempotency ده مستخدم قبل كده لطلب مختلف', HttpStatus.CONFLICT);
       }
-      const existingRedirectUrl = (existing.gatewayResponse as { redirect_url?: string } | null)?.redirect_url;
-      if (existingRedirectUrl) {
-        // نفس المفتاح ورابط دفع سابق لسه موجود — إعادة استخدامه (retry حقيقي idempotent)
-        return { payment: existing, redirectUrl: existingRedirectUrl };
+      const cachedResult = (existing.gatewayResponse as { cached_result?: unknown } | null)?.cached_result;
+      if (cachedResult) {
+        return {
+          payment: existing,
+          result: cachedResult as import('./gateways/payment-provider.interface').CreatePaymentResult,
+        };
       }
       if (existing.paymentStatus !== PaymentGatewayStatus.PENDING && existing.paymentStatus !== PaymentGatewayStatus.FAILED) {
-        // نجحت/اترفضت نهائياً بطريقة تانية (مستحيل عملياً هنا، لكن دفاع رخيص) — مش قابلة لإعادة المحاولة
         throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي في حالة نهائية بالفعل', HttpStatus.CONFLICT);
       }
-      // وصل هنا يعني: محاولة سابقة اتسجّلت بس نداء البوابة فشل قبل ما ياخد رابط (شبكة/بوابة واقعة) —
-      // بنعيد المحاولة بنفس صف الدفعة (مش بنعمل صف جديد)، عشان مايتضاعفش payment_number لكل retry.
-      return this.initiateGatewayCharge(existing);
+      return { payment: existing, result: await this.initiateProviderCharge(existing, method) };
     }
 
-    // فحص الإعداد الأول قبل ما نلمس الـ DB خالص — لو البوابة مش مُعدّة، أفضل نرفض فوراً بدل ما
-    // نسيب صف payment بحالة pending معلّق من غير redirect_url.
-    if (!this.paymentGateway.isConfigured) {
-      throw new ApiException(
-        ErrorCode.PAY_001,
-        'الدفع بالبطاقة مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
+    if (!provider.isConfigured) {
+      throw new ApiException(ErrorCode.PAY_001, `الدفع بـ${method} مش متاح دلوقتي — جرّب طريقة تانية`, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
@@ -389,30 +442,27 @@ export class PaymentsService {
       orderId: order.id,
       customerId: customerProfile.id,
       amountCents: order.totalAmountCents,
-      paymentMethod: PaymentMethod.CARD,
-      paymentGateway: this.paymentGateway.providerName,
+      paymentMethod: method,
+      paymentGateway: provider.providerKey,
       paymentStatus: PaymentGatewayStatus.PENDING,
       idempotencyKey,
     });
     await this.payments.save(payment);
 
-    return this.initiateGatewayCharge(payment);
+    return { payment, result: await this.initiateProviderCharge(payment, method) };
   }
 
   /**
    * بيتنادى (1) أول مرة فوراً بعد إنشاء صف الدفعة، و(2) لو retry بنفس Idempotency-Key لصف
-   * pending/failed قديم (نداء البوابة فشل قبل كده — شبكة/API واقعة، مش رفض دفع فعلي). بيعيد
-   * استخدام نفس صف الدفعة دايماً — أبداً مبيعملش صف تاني لنفس المفتاح، عشان الـ retry يبقى
-   * idempotent فعلاً مش مجرد تسمية. `payment.customerId` هو id بتاع customer_profiles (مش
-   * users) — لازم findByProfileIdOrThrow عشان نوصل لـ userId ونجيب بيانات الفوترة.
+   * pending/failed قديم. بيعيد استخدام نفس صف الدفعة دايماً — idempotent فعلاً مش مجرد تسمية.
    */
-  private async initiateGatewayCharge(payment: Payment): Promise<{ payment: Payment; redirectUrl: string }> {
-    if (!this.paymentGateway.isConfigured) {
-      throw new ApiException(
-        ErrorCode.PAY_001,
-        'الدفع بالبطاقة مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
+  private async initiateProviderCharge(
+    payment: Payment,
+    method: PaymentMethod,
+  ): Promise<import('./gateways/payment-provider.interface').CreatePaymentResult> {
+    const provider = this.paymentProviders.getProvider(method);
+    if (!provider.isConfigured) {
+      throw new ApiException(ErrorCode.PAY_001, `الدفع بـ${method} مش متاح دلوقتي — جرّب طريقة تانية`, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
@@ -424,7 +474,7 @@ export class PaymentsService {
 
     const [firstName, ...rest] = user.fullName.trim().split(/\s+/);
     try {
-      const gatewayResult = await this.paymentGateway.createCardPayment({
+      const result = await provider.createPayment({
         paymentId: payment.id,
         orderNumber: order.orderNumber,
         amountCents: payment.amountCents,
@@ -435,13 +485,16 @@ export class PaymentsService {
         customerPhone: user.phoneNumber,
       });
 
-      payment.gatewayResponse = { redirect_url: gatewayResult.redirectUrl, gateway_order_id: gatewayResult.gatewayOrderId };
+      if (result.kind === 'redirect' || result.kind === 'reference') {
+        payment.gatewayReference = result.providerReference;
+      }
+      payment.gatewayResponse = { cached_result: result };
       payment.paymentStatus = PaymentGatewayStatus.PENDING;
       await this.payments.save(payment);
-      return { payment, redirectUrl: gatewayResult.redirectUrl };
+      return result;
     } catch (err) {
       // نداء البوابة فشل (شبكة/API واقعة، مش رفض دفع من عميل حقيقي) — الدفعة بتفضل قابلة
-      // لإعادة المحاولة بنفس idempotency key (الفرع فوق في payWithCard بيتعامل معاها).
+      // لإعادة المحاولة بنفس idempotency key.
       payment.paymentStatus = PaymentGatewayStatus.FAILED;
       payment.failureCode = 'GATEWAY_REGISTRATION_FAILED';
       payment.failureMessage = err instanceof Error ? err.message : String(err);
@@ -451,100 +504,176 @@ export class PaymentsService {
   }
 
   /**
+   * العميل بيبدأ دفع بالبطاقة — بيرجّع رابط Unified Checkout عند Paymob (ADR-0013، Intention API)
+   * عشان الكلاينت يفتحه في WebView. الدفعة بتتسجّل `pending` فوراً؛ التأكيد الفعلي بييجي بعد كده
+   * عبر `POST /webhooks/paymob` — مفيش أي تسوية بتحصل هنا، القفل النهائي بس لما البوابة تأكّد.
+   */
+  async payWithCard(userId: string, orderId: string, idempotencyKey: string): Promise<{ payment: Payment; redirectUrl: string }> {
+    const { payment, result } = await this.payWithProvider(userId, orderId, idempotencyKey, PaymentMethod.CARD);
+    if (result.kind !== 'redirect') {
+      throw new Error('Paymob provider لازم يرجّع redirect دايماً — نتيجة غير متوقعة');
+    }
+    return { payment, redirectUrl: result.checkoutUrl };
+  }
+
+  /**
    * العميل بيطلب كود مرجعي FawryPay ("ادفع في أقرب فوري") — بيرجّع referenceNumber العميل
-   * بياخده لمنفذ فوري ويدفعه كاش فعلياً هناك. نفس فلسفة payWithCard بالظبط (idempotency retry،
-   * مفيش تسوية هنا خالص، التأكيد بعدين عبر POST /webhooks/fawry بس).
+   * بياخده لمنفذ فوري ويدفعه كاش فعلياً هناك. التأكيد بعدين عبر POST /webhooks/fawry بس.
    */
   async payWithFawryReference(
     userId: string,
     orderId: string,
     idempotencyKey: string,
-  ): Promise<{ payment: Payment; referenceNumber: string; expiresAt: Date }> {
-    const existing = await this.payments.findOne({ where: { idempotencyKey } });
-    if (existing) {
-      if (existing.orderId !== orderId) {
-        throw new ApiException(ErrorCode.PAY_003, 'مفتاح idempotency ده مستخدم قبل كده لطلب مختلف', HttpStatus.CONFLICT);
-      }
-      const existingRef = (existing.gatewayResponse as { reference_number?: string; expires_at?: string } | null);
-      if (existingRef?.reference_number) {
-        return { payment: existing, referenceNumber: existingRef.reference_number, expiresAt: new Date(existingRef.expires_at!) };
-      }
-      if (existing.paymentStatus !== PaymentGatewayStatus.PENDING && existing.paymentStatus !== PaymentGatewayStatus.FAILED) {
-        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي في حالة نهائية بالفعل', HttpStatus.CONFLICT);
-      }
-      return this.initiateFawryCharge(existing);
+  ): Promise<{ payment: Payment; referenceNumber: string; expiresAt: Date | null }> {
+    const { payment, result } = await this.payWithProvider(userId, orderId, idempotencyKey, PaymentMethod.FAWRY_REFERENCE);
+    if (result.kind !== 'reference') {
+      throw new Error('Fawry provider لازم يرجّع reference دايماً — نتيجة غير متوقعة');
     }
-
-    if (!this.fawryGateway.isConfigured) {
-      throw new ApiException(
-        ErrorCode.PAY_001,
-        'الدفع بكود فوري مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش أو الكارت',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
-    }
-
-    const order = await this.loadPayableOrderForCustomer(userId, orderId);
-    this.assertPayable(order);
-
-    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
-
-    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
-    const payment = this.payments.create({
-      paymentNumber,
-      orderId: order.id,
-      customerId: customerProfile.id,
-      amountCents: order.totalAmountCents,
-      paymentMethod: PaymentMethod.FAWRY_REFERENCE,
-      paymentGateway: this.fawryGateway.providerName,
-      paymentStatus: PaymentGatewayStatus.PENDING,
-      idempotencyKey,
-    });
-    await this.payments.save(payment);
-
-    return this.initiateFawryCharge(payment);
+    return { payment, referenceNumber: result.referenceCode, expiresAt: result.expiresAt };
   }
 
-  private async initiateFawryCharge(payment: Payment): Promise<{ payment: Payment; referenceNumber: string; expiresAt: Date }> {
-    if (!this.fawryGateway.isConfigured) {
-      throw new ApiException(
-        ErrorCode.PAY_001,
-        'الدفع بكود فوري مش متاح دلوقتي — جرّب الدفع بالمحفظة أو الكاش أو الكارت',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
+  /**
+   * InstaPay — مسبق الدفع بتأكيد يدوي بس (ADR-0013 §7). بيرجّع تعليمات التحويل، مفيش webhook
+   * تلقائي خالص — موظف Finance مُصرَّح له بس هو اللي بيأكّد الاستلام عبر confirmInstaPayPayment().
+   */
+  async payWithInstaPay(
+    userId: string,
+    orderId: string,
+    idempotencyKey: string,
+  ): Promise<{ payment: Payment; referenceCode: string; instructionsAr: string }> {
+    const { payment, result } = await this.payWithProvider(userId, orderId, idempotencyKey, PaymentMethod.INSTAPAY);
+    if (result.kind !== 'reference') {
+      throw new Error('InstaPay provider لازم يرجّع reference دايماً — نتيجة غير متوقعة');
     }
+    return { payment, referenceCode: result.referenceCode, instructionsAr: result.instructionsAr };
+  }
 
-    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
-    const user = await this.users.findOne({ where: { id: customerProfile.userId } });
-    const order = await this.orders.findOne({ where: { id: payment.orderId } });
-    if (!user || !order) {
-      throw new ApiException(ErrorCode.VAL_001, 'بيانات الدفعة غير مكتملة لإعادة المحاولة', HttpStatus.CONFLICT);
-    }
+  /**
+   * تأكيد إداري يدوي لدفعة InstaPay (ADR-0013 §7، صلاحية payments.confirm_manual مخصوصة —
+   * فرض جوّه AdminPaymentsController@RequirePermission). Idempotent فعليًا: قفل pessimistic_write
+   * على صف الدفعة + فحص PENDING جوّه القفل — نقر مزدوج/إعادة إرسال بيرجع نفس النتيجة بلا أثر مالي
+   * مكرر. Audit كامل (الموظف، الوقت، المبلغ، معرّف الطلب/الدفعة، الحالة قبل/بعد) في الكولر
+   * (admin-payments.controller.ts) بعد النجاح — نفس نمط refundOrder بالحرف.
+   */
+  async confirmInstaPayPayment(adminUserId: string, paymentId: string, meta?: AuditActorMeta): Promise<Payment> {
+    const previousStatus = (await this.payments.findOne({ where: { id: paymentId } }))?.paymentStatus ?? null;
 
-    try {
-      const gatewayResult = await this.fawryGateway.createReference({
-        paymentId: payment.id,
-        orderNumber: order.orderNumber,
-        amountCents: payment.amountCents,
-        customerName: user.fullName,
-        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
-        customerMobile: user.phoneNumber,
-      });
+    const { payment, dispatchInfo } = await this.dataSource.transaction(async (manager) => {
+      const lockedPayment = await manager
+        .createQueryBuilder(Payment, 'p')
+        .setLock('pessimistic_write')
+        .where('p.id = :paymentId', { paymentId })
+        .getOne();
+      if (!lockedPayment) {
+        throw new ApiException(ErrorCode.VAL_001, 'الدفعة غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      if (lockedPayment.paymentMethod !== PaymentMethod.INSTAPAY) {
+        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي مش InstaPay', HttpStatus.CONFLICT);
+      }
+      if (lockedPayment.paymentStatus !== PaymentGatewayStatus.PENDING) {
+        // Idempotency — نقر مزدوج/إعادة إرسال بيرجع نفس الدفعة من غير أي أثر مالي إضافي.
+        return { payment: lockedPayment, dispatchInfo: null };
+      }
 
-      payment.gatewayReference = gatewayResult.referenceNumber;
-      payment.gatewayResponse = {
-        reference_number: gatewayResult.referenceNumber,
-        expires_at: gatewayResult.expiresAt.toISOString(),
-        gateway_order_id: gatewayResult.gatewayOrderId,
+      lockedPayment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
+      lockedPayment.completedAt = new Date();
+      lockedPayment.collectedByUserId = adminUserId;
+      await manager.save(lockedPayment);
+
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId: lockedPayment.orderId })
+        .getOne();
+      if (!lockedOrder) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+
+      const { dispatchStarted } = await this.handlePaymentConfirmed(manager, lockedOrder, PaymentMethod.INSTAPAY, adminUserId, 'system');
+      return {
+        payment: lockedPayment,
+        dispatchInfo: {
+          dispatchStarted,
+          orderId: lockedOrder.id,
+          orderNumber: lockedOrder.orderNumber,
+          customerId: lockedOrder.customerId,
+          technicianId: lockedOrder.technicianId,
+          serviceId: lockedOrder.serviceId,
+        },
       };
-      payment.paymentStatus = PaymentGatewayStatus.PENDING;
-      await this.payments.save(payment);
-      return { payment, referenceNumber: gatewayResult.referenceNumber, expiresAt: gatewayResult.expiresAt };
-    } catch (err) {
-      payment.paymentStatus = PaymentGatewayStatus.FAILED;
-      payment.failureCode = 'GATEWAY_REGISTRATION_FAILED';
-      payment.failureMessage = err instanceof Error ? err.message : String(err);
-      await this.payments.save(payment);
-      throw err;
+    });
+
+    if (dispatchInfo) {
+      await this.emitPaymentConfirmedEvents(dispatchInfo);
+    }
+
+    // Audit كامل (§27/§7 من توجيه المالك) — الموظف، الوقت، المبلغ، معرّف الطلب/الدفعة، الحالة
+    // قبل/بعد. بيتسجّل حتى لو idempotent no-op (نقر مزدوج) عشان يبان في السجل إن محاولة تانية حصلت.
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'payment.instapay_confirmed_manually',
+      entityType: 'payment',
+      entityId: paymentId,
+      oldValues: { payment_status: previousStatus },
+      newValues: {
+        payment_status: payment.paymentStatus,
+        amount_cents: payment.amountCents,
+        order_id: payment.orderId,
+        reference: payment.gatewayReference,
+      },
+      meta,
+    });
+
+    return payment;
+  }
+
+  /** بعد نجاح handlePaymentConfirmed — بره أي transaction عمداً (نفس فلسفة باقي أحداث الموديول). */
+  private async emitPaymentConfirmedEvents(info: {
+    dispatchStarted: boolean;
+    orderId: string;
+    orderNumber: string;
+    customerId: string;
+    technicianId: string | null;
+    serviceId: string;
+  }): Promise<void> {
+    if (info.dispatchStarted) {
+      // دفع قبل التوزيع اتأكد — التوزيع يبدأ دلوقتي بالظبط زي OrdersService.create() العادية
+      // (نفس منطق تأجيل البث لطلب مجدول "بعيد"، ADR-0009).
+      const order = await this.orders.findOne({ where: { id: info.orderId } });
+      const leadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
+      const dispatchDeferredUntil = computeDispatchDeferredUntil({
+        scheduleSlotBooked: false,
+        scheduledAt: order?.scheduledAt ?? null,
+        leadHours,
+      });
+      await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(info.orderId, dispatchDeferredUntil));
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          info.orderId,
+          info.orderNumber,
+          OrderStatus.PENDING_PAYMENT,
+          OrderStatus.SEARCHING_TECHNICIAN,
+          info.customerId,
+          info.technicianId,
+        ),
+      );
+    } else {
+      if (info.technicianId) {
+        await this.technicianStatsService.enqueueRecalculation(info.technicianId, info.serviceId);
+      }
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          info.orderId,
+          info.orderNumber,
+          OrderStatus.WORK_COMPLETED,
+          OrderStatus.COMPLETED,
+          info.customerId,
+          info.technicianId,
+        ),
+      );
     }
   }
 
@@ -646,43 +775,36 @@ export class PaymentsService {
         payment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
         payment.completedAt = new Date();
 
-        // settleAndComplete's changedByUserId لازم يكون users.id (FK على order_status_history)،
+        // handlePaymentConfirmed's changedByUserId لازم يكون users.id (FK على order_status_history)،
         // بينما payment.customerId هو customer_profiles.id — نفس فخ الـ id المختلط اللي
         // اتصلح قبل كده في payWithCard/initiateGatewayCharge، هنا في مكان تاني في نفس الفلو.
         const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
 
-        const { orderId, orderNumber, customerId, technicianId, serviceId, previousStatus } = await this.dataSource.transaction(
-          async (manager) => {
-            await manager.save(payment);
-            const lockedOrder = await manager
-              .createQueryBuilder(Order, 'o')
-              .setLock('pessimistic_write')
-              .where('o.id = :orderId', { orderId: payment.orderId })
-              .getOne();
-            if (!lockedOrder) {
-              throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-            }
-            this.assertPayable(lockedOrder);
-            const previousStatus = lockedOrder.orderStatus;
-            await this.settleAndComplete(manager, lockedOrder, paymentMethod, customerProfile.userId, 'customer');
-            return {
-              orderId: lockedOrder.id,
-              orderNumber: lockedOrder.orderNumber,
-              customerId: lockedOrder.customerId,
-              technicianId: lockedOrder.technicianId,
-              serviceId: lockedOrder.serviceId,
-              previousStatus,
-            };
-          },
-        );
+        const dispatchInfo = await this.dataSource.transaction(async (manager) => {
+          await manager.save(payment);
+          const lockedOrder = await manager
+            .createQueryBuilder(Order, 'o')
+            .setLock('pessimistic_write')
+            .where('o.id = :orderId', { orderId: payment.orderId })
+            .getOne();
+          if (!lockedOrder) {
+            throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+          }
+          this.assertPayable(lockedOrder);
+          // بتفرّق بين "الطلب PENDING_PAYMENT، التوزيع لسه ما بدأش" و"الطلب WORK_COMPLETED
+          // العادي بعد الشغل" — نفس مسار confirmInstaPayPayment بالظبط (ADR-0013 §4).
+          const { dispatchStarted } = await this.handlePaymentConfirmed(manager, lockedOrder, paymentMethod, customerProfile.userId, 'customer');
+          return {
+            dispatchStarted,
+            orderId: lockedOrder.id,
+            orderNumber: lockedOrder.orderNumber,
+            customerId: lockedOrder.customerId,
+            technicianId: lockedOrder.technicianId,
+            serviceId: lockedOrder.serviceId,
+          };
+        });
 
-        if (technicianId) {
-          await this.technicianStatsService.enqueueRecalculation(technicianId, serviceId);
-        }
-        this.events.emit(
-          ORDER_STATUS_CHANGED_EVENT,
-          new OrderStatusChangedEvent(orderId, orderNumber, previousStatus, OrderStatus.COMPLETED, customerId, technicianId),
-        );
+        await this.emitPaymentConfirmedEvents(dispatchInfo);
       } else {
         payment.gatewayTransactionId = gatewayTransactionId;
         payment.paymentStatus = PaymentGatewayStatus.FAILED;
@@ -721,13 +843,18 @@ export class PaymentsService {
   }
 
   /**
-   * استرجاع كامل — بيعكس قيود المحفظة اللي اتعملت وقت الدفع (لو الدفع كان محفظة/كاش سُوّي عبر
-   * المنصة)، وبيرجّع الطلب لحالة refunded. مسموح بس لو الطلب مدفوع فعلاً.
+   * استرجاع كامل/جزئي (ADR-0013 §9) — بيحاول استرداد حقيقي عبر بوابة الدفع الأصلية الأول
+   * (Paymob مثلاً)، وبيرجع لـwallet credit بس للطرق اللي مش بتدعم استرداد حقيقي (كاش/محفظة/
+   * InstaPay/فوري). لو البوابة رفضت الاسترداد صراحة (رد نهائي، مش خطأ شبكة)، بيتسجّل
+   * refund_status=rejected بلا أي حركة فلوس — أبداً مبيتقالش "اترد" من غير ما الفلوس ترجع فعلاً.
+   * خطأ شبكة/داخلي غير متوقّع بيرمي الاستثناء عادي (transaction بترجع لورا، مفيش صف refund
+   * اتسجّل خالص) عشان الأدمن يقدر يعيد المحاولة — مش قفل دائم زي الرفض النهائي.
    */
   async refundOrder(
     performedByUserId: string,
     orderId: string,
     reasonNotes: string,
+    requestedAmountCents?: number,
     meta?: AuditActorMeta,
   ): Promise<Refund> {
     const refund = await this.dataSource.transaction(async (manager) => {
@@ -751,41 +878,98 @@ export class PaymentsService {
         throw new ApiException(ErrorCode.VAL_001, 'مفيش عملية دفع ناجحة لقى الطلب ده', HttpStatus.NOT_FOUND);
       }
 
+      // Phase 1 مبسّطة عمداً (ADR-0013 §9 + unique index idx_refunds_payment_id_unique): استرداد
+      // واحد أقصى لكل دفعة، سواء كامل أو جزئي — مفيش تراكم استردادات جزئية متعددة لسه.
       const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
       if (existingRefund) {
         throw new ApiException(ErrorCode.PAY_003, 'الطلب ده اترد قبل كده', HttpStatus.CONFLICT);
       }
 
-      if (!canTransition(order.orderStatus, OrderStatus.REFUNDED)) {
+      const amountCents = requestedAmountCents ?? payment.amountCents;
+      if (amountCents <= 0 || amountCents > payment.amountCents) {
+        throw new ApiException(ErrorCode.VAL_001, 'مبلغ الاسترداد غير صالح — لازم يكون بين 1 والمبلغ المدفوع', HttpStatus.BAD_REQUEST);
+      }
+      const isFull = amountCents === payment.amountCents;
+
+      // استرداد كامل بيغيّر حالة الطلب لـREFUNDED (نهائية) — لازم يمر بـcanTransition. استرداد
+      // جزئي مايغيّرش orderStatus خالص (الطلب يفضل COMPLETED/DISPUTED)، فمفيش داعي لفحص انتقال حالة.
+      if (isFull && !canTransition(order.orderStatus, OrderStatus.REFUNDED)) {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
+      if (!isFull && order.orderStatus !== OrderStatus.COMPLETED && order.orderStatus !== OrderStatus.DISPUTED) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب لازم يكون مكتمل أو متنازع عليه عشان يترد جزئيًا', HttpStatus.CONFLICT);
+      }
 
-      // إصلاح حقيقي (مراجعة booking flow الشاملة 2026-08-12) — PaymentGateway.interface.ts
-      // معندهوش أي دالة refund() خالص (Paymob مش المرحلة دي)، يعني refundMethod=ORIGINAL_METHOD
-      // كان بيتسجّل لمدفوعات الكارت/فوري مع refundStatus=COMPLETED **من غير أي حركة فلوس حقيقية
-      // خالص** — العميل كان بيتقال له "اترد" بس فلوسه ميرجعلوش لا في محفظته ولا في كارته. بَقّة
-      // مالية حقيقية، مش تصميم مقصود. الإصلاح المؤقت الصادق: كل الطرق بترجع credit للمحفظة فعليًا
-      // (زي الكاش بالظبط) لحد ما تكامل refund حقيقي مع البوابة يتبني — أفضل من رقم "مكتمل" كاذب.
+      const provider = this.paymentProviders.getProvider(payment.paymentMethod);
+      let refundMethod: RefundMethod;
+      let refundStatus: RefundStatus;
+      let providerRefundId: string | null = null;
+
+      if (provider.supportsRefund && payment.gatewayTransactionId) {
+        // نداء حقيقي للبوابة — لو رمى استثناء (شبكة/خطأ غير متوقّع) بيتصاعد زي ما هو، الـtransaction
+        // بترجع لورا ومفيش صف refund بيتسجّل خالص، فالأدمن يقدر يعيد المحاولة بأمان (مش رفض نهائي).
+        const providerResult = await provider.refund({
+          providerReference: payment.gatewayTransactionId,
+          amountCents,
+          reasonAr: reasonNotes,
+        });
+        if (providerResult.succeeded) {
+          refundMethod = RefundMethod.ORIGINAL_METHOD;
+          refundStatus = RefundStatus.COMPLETED;
+          providerRefundId = providerResult.providerRefundId;
+        } else {
+          // رد نهائي من البوابة نفسها (رفض صريح، مش خطأ شبكة) — ده قرار نهائي حسب تبسيط Phase 1،
+          // بيتسجّل rejected بلا أي حركة فلوس (مفيش استرداد حقيقي حصل، فمفيش داعي لعكس أي شيء).
+          const refundNumber = await this.nextRefundNumber(manager);
+          const rejectedRefund = manager.create(Refund, {
+            refundNumber,
+            paymentId: payment.id,
+            orderId: order.id,
+            amountCents,
+            refundType: isFull ? RefundType.FULL : RefundType.PARTIAL,
+            reasonNotes,
+            refundMethod: RefundMethod.ORIGINAL_METHOD,
+            refundStatus: RefundStatus.REJECTED,
+            requestedByUserId: performedByUserId,
+            approvedByUserId: performedByUserId,
+            requestedAt: new Date(),
+            approvedAt: new Date(),
+            completedAt: null,
+            providerRefundId: null,
+          });
+          await manager.save(rejectedRefund);
+          return rejectedRefund;
+        }
+      } else {
+        // مفيش استرداد حقيقي مدعوم لطريقة الدفع دي (كاش/محفظة/InstaPay/فوري) — نفس الإصلاح
+        // الصادق من قبل: wallet credit فعلي بدل رقم "مكتمل" كاذب من غير حركة فلوس.
+        refundMethod = RefundMethod.WALLET_CREDIT;
+        refundStatus = RefundStatus.COMPLETED;
+      }
+
       const refundNumber = await this.nextRefundNumber(manager);
       const refund = manager.create(Refund, {
         refundNumber,
         paymentId: payment.id,
         orderId: order.id,
-        amountCents: payment.amountCents,
-        refundType: RefundType.FULL,
+        amountCents,
+        refundType: isFull ? RefundType.FULL : RefundType.PARTIAL,
         reasonNotes,
-        refundMethod: RefundMethod.WALLET_CREDIT,
-        refundStatus: RefundStatus.COMPLETED,
+        refundMethod,
+        refundStatus,
         requestedByUserId: performedByUserId,
         approvedByUserId: performedByUserId,
         requestedAt: new Date(),
         approvedAt: new Date(),
         completedAt: new Date(),
+        providerRefundId,
       });
       await manager.save(refund);
 
-      // عكس تحويل أرباح الفني (لو اتسوّى) — الفني ماخدش الفلوس دي أصلاً بقى
-      if (order.technicianEarningCents > 0 && order.technicianId) {
+      // عكس تحويل أرباح الفني بنفس نسبة مبلغ الاسترداد من إجمالي الدفعة — الفني ماخدش الفلوس دي
+      // كاملة أصلاً لو الاسترداد جزئي.
+      const technicianReversalCents = Math.round((order.technicianEarningCents * amountCents) / payment.amountCents);
+      if (technicianReversalCents > 0 && order.technicianId) {
         const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
         const technicianWallet = await this.walletsService.getOrCreateWallet(
           technicianProfile.userId,
@@ -797,7 +981,7 @@ export class PaymentsService {
           {
             fromWalletId: technicianWallet.id,
             toWalletId: platformWallet.id,
-            amountCents: order.technicianEarningCents,
+            amountCents: technicianReversalCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
             referenceId: refund.id,
@@ -808,12 +992,10 @@ export class PaymentsService {
         );
       }
 
-      // الدفع بالمحفظة: فلوس العميل كانت فعلاً عند المنصة، فبترجعلها من هناك مباشرة.
-      // الدفع بالكاش/الكارت/فوري: مفيش فلوس دخلت محفظة المنصة مباشرة وقت الدفع نفسه، لكن
-      // المنصة قادرة ترجّع تعويض حقيقي للعميل في محفظته دايماً — ممول محاسبيًا من عكس أرباح
-      // الفني اللي فوق (نفس المبلغ بالظبط، بيحصل لكل طرق الدفع وقت settleAndComplete). كل
-      // الطرق بترجع فلوس حقيقية للعميل بنفس الآلية دلوقتي (مش بس الكاش زي ما كان قبل الإصلاح).
-      {
+      // wallet credit فعلي للعميل بس لو مفيش استرداد حقيقي حصل عند البوابة (WALLET_CREDIT fallback).
+      // لو استرداد حقيقي نجح عند البوابة (ORIGINAL_METHOD)، العميل بياخد فلوسه فعليًا في كارته/محفظته
+      // الخارجية مباشرة من البوابة — credit تاني هنا هيبقى استرداد مزدوج (بَقّة مالية، مش سلوك مقصود).
+      if (refundMethod === RefundMethod.WALLET_CREDIT) {
         const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
@@ -825,7 +1007,7 @@ export class PaymentsService {
           {
             fromWalletId: platformWallet.id,
             toWalletId: customerWallet.id,
-            amountCents: payment.amountCents,
+            amountCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
             referenceId: refund.id,
@@ -836,24 +1018,31 @@ export class PaymentsService {
         );
       }
 
-      payment.paymentStatus = PaymentGatewayStatus.REFUNDED;
+      payment.paymentStatus = isFull ? PaymentGatewayStatus.REFUNDED : PaymentGatewayStatus.PARTIALLY_REFUNDED;
       await manager.save(payment);
 
-      const previousStatus = order.orderStatus;
-      order.orderStatus = OrderStatus.REFUNDED;
-      order.paymentStatus = OrderPaymentStatus.REFUNDED;
-      await manager.save(order);
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus,
-          newStatus: OrderStatus.REFUNDED,
-          changedByUserId: performedByUserId,
-          changedByRole: 'admin',
-          changeSource: OrderChangeSource.ADMIN,
-          reason: reasonNotes,
-        }),
-      );
+      if (isFull) {
+        const previousStatus = order.orderStatus;
+        order.orderStatus = OrderStatus.REFUNDED;
+        order.paymentStatus = OrderPaymentStatus.REFUNDED;
+        await manager.save(order);
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: order.id,
+            previousStatus,
+            newStatus: OrderStatus.REFUNDED,
+            changedByUserId: performedByUserId,
+            changedByRole: 'admin',
+            changeSource: OrderChangeSource.ADMIN,
+            reason: reasonNotes,
+          }),
+        );
+      } else {
+        // استرداد جزئي — الطلب يفضل زي ما هو (COMPLETED/DISPUTED)، بس paymentStatus بيتحدّث
+        // عشان يبان في تاريخ الطلب إن جزء اترد.
+        order.paymentStatus = OrderPaymentStatus.PARTIALLY_REFUNDED;
+        await manager.save(order);
+      }
 
       return refund;
     });
@@ -861,10 +1050,18 @@ export class PaymentsService {
     await this.auditLog.record({
       actorUserId: performedByUserId,
       actorRole: 'admin',
-      action: 'order.refunded',
+      action: refund.refundStatus === RefundStatus.REJECTED ? 'order.refund_rejected' : 'order.refunded',
       entityType: 'order',
       entityId: orderId,
-      newValues: { refund_id: refund.id, amount_cents: refund.amountCents, reason_notes: reasonNotes },
+      newValues: {
+        refund_id: refund.id,
+        amount_cents: refund.amountCents,
+        refund_type: refund.refundType,
+        refund_method: refund.refundMethod,
+        refund_status: refund.refundStatus,
+        provider_refund_id: refund.providerRefundId,
+        reason_notes: reasonNotes,
+      },
       meta,
     });
     return refund;

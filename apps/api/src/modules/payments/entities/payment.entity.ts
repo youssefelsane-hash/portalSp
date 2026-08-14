@@ -10,6 +10,10 @@ export enum PaymentMethod {
   // ومتابَع عبر webhook زي الدفع بالبطاقة، عكس `cash` (اللي بيتحصّل يدوياً من الفني مباشرة).
   // مضافة في infra/migrations/0042_fawry_payment_method.sql.
   FAWRY_REFERENCE = 'fawry_reference',
+  // مسبق الدفع، تأكيد يدوي بس (ADR-0013 §7) — مفيش webhook تلقائي، موظف Finance بيأكّد الاستلام
+  // (`POST /admin/payments/:id/confirm-instapay`، صلاحية payments.confirm_manual مخصوصة).
+  // مضافة في infra/migrations/0091_instapay_payment_method.sql.
+  INSTAPAY = 'instapay',
 }
 
 export enum PaymentGatewayStatus {
@@ -20,6 +24,9 @@ export enum PaymentGatewayStatus {
   CANCELLED = 'cancelled',
   EXPIRED = 'expired',
   REFUNDED = 'refunded',
+  // استرداد جزئي حقيقي (ADR-0013 §9) — الدفعة لسه معتبرة "نجحت" جزئيًا، مش REFUNDED بالكامل.
+  // مضافة في infra/migrations/0094_payment_gateway_status_partially_refunded.sql.
+  PARTIALLY_REFUNDED = 'partially_refunded',
 }
 
 @Entity('payments')
