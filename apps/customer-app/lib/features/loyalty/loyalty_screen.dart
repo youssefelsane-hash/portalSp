@@ -9,6 +9,15 @@ import 'models.dart';
 // نقاط الولاء (docs/08) — كانت فجوة موثّقة صراحة: GET/POST /loyalty/* كانت شغالة ومختبرة في
 // الباك-إند من زمان بس مفيش شاشة في التطبيق كانت بتستخدمها — العميل مكانش يقدر يشوف رصيده
 // ولا يستبدل نقاطه خالص.
+//
+// **docs/08 §19 بند 14 — زرار "استبدال نقاط" اتشال عمدًا**: LoyaltyService.redeem() (الباك-إند)
+// كان بيعمل بس خصم رصيد + تسجيل معاملة — صفر تحويل فعلي لخصم على سعر أي طلب (مفيش سعر صرف
+// نقطة↔جنيه معرَّف أصلاً في القاموس، نفس القرار الموثّق في RedeemLoyaltyPointsDto بالباك-إند).
+// يعني العميل كان يقدر "يستبدل" نقاطه ويفقدها فعليًا من غير أي قيمة حقيقية يرجعله — تعليق المالك
+// الصريح (تدقيق §19): "إما تعمل points→value حقيقي أو تخفي Redeem بالكامل في V1". بناء سعر صرف
+// حقيقي قرار تسعير تجاري (نسبة نقطة/جنيه) مش تقني — يحتاج قرار المالك الصريح (وربما ADR لو
+// هيتربط بمحرك التسعير)، مش افتراض اعتباطي هنا. الحل الآمن الفوري: الرصيد وسجل المعاملات (القراءة
+// الفعلية، مفيدة وصحيحة) فضلوا زي ما هم، وزرار الاستبدال اتشال بالكامل لحد ما يتحدد سعر الصرف.
 class LoyaltyScreen extends StatefulWidget {
   const LoyaltyScreen({super.key});
 
@@ -21,7 +30,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
   int? _balance;
   List<LoyaltyTransaction>? _transactions;
   String? _error;
-  bool _redeeming = false;
 
   @override
   void initState() {
@@ -41,44 +49,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
       }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
-    }
-  }
-
-  Future<void> _openRedeemDialog() async {
-    final controller = TextEditingController();
-    final points = await showDialog<int>(
-      context: context,
-      builder: (context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('استبدال نقاط'),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(labelText: 'عدد النقاط', helperText: 'رصيدك الحالي: ${_balance ?? 0}'),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(int.tryParse(controller.text.trim())),
-              child: const Text('استبدال'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (points == null || points <= 0) return;
-    setState(() {
-      _redeeming = true;
-      _error = null;
-    });
-    try {
-      await _repository.redeem(points);
-      await _load();
-    } on ApiException catch (err) {
-      if (mounted) setState(() => _error = err.message);
-    } finally {
-      if (mounted) setState(() => _redeeming = false);
     }
   }
 
@@ -103,11 +73,11 @@ class _LoyaltyScreenState extends State<LoyaltyScreen> {
                             Text('رصيدك', style: Theme.of(context).textTheme.titleMedium),
                             const SizedBox(height: 8),
                             Text('$_balance نقطة', style: Theme.of(context).textTheme.headlineMedium),
-                            const SizedBox(height: 12),
-                            FilledButton.icon(
-                              onPressed: _redeeming ? null : _openRedeemDialog,
-                              icon: const Icon(Icons.redeem_outlined),
-                              label: const Text('استبدال نقاط'),
+                            const SizedBox(height: 8),
+                            Text(
+                              'نقاط تقديرية حالياً — برنامج استبدال النقاط بمزايا حقيقية جاي قريب',
+                              style: Theme.of(context).textTheme.bodySmall,
+                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
