@@ -1157,3 +1157,27 @@ points→value حقيقي أو تخفي Redeem بالكامل في V1". بناء
 نطاق هذا الإصلاح كمان — التطبيقات ملهاش مفهوم "boot-time validation" زي NestJS's ConfigModule
 أصلاً (المفتاح بيتضمّن وقت الـbuild، مش runtime)، موثّق بالفعل في `docs/03-external-integrations.md`
 §5، وأي فحص build-time له هيتغطى في بند 18 (CI).
+
+### تحديث تنفيذ §19 — بند 18 (CI — اختبار تطبيقات الـrelease فعليًا) — 🟡 `PARTIAL — DONE (flutter test) + فجوتين موثّقتين صراحة`
+
+`.github/workflows/ci.yml` (اتبنى في جلسة سابقة) كان بيغطي `tsc`/`nest build`/`jest` لـ`apps/api`،
+`tsc`/`next build` لـ`apps/admin`، و`flutter analyze` بس للتطبيقين — تمامًا زي ما المالك وصف
+("Flutter فقط flutter analyze. مفيش flutter test ولا build release"). اتضح إن `test/`
+(مختلف عن `test_live/` اللي محتاج backend حقيقي شغال، مش مناسب لـCI) فيه اختبارات وحدة/widget
+حقيقية بلا أي اعتماد خارجي (`catalog_models_test.dart` في customer-app، `widget_test.dart` في
+التطبيقين — `flutter_secure_storage`'s platform channel مموّه صح) — كانت موجودة من زمان بس
+محدّش كان بيشغّلها أوتوماتيك. `flutter test` step جديد اتضاف لـmatrix الفلاتر (نفس الأمر اللي
+اتأكد محليًا إنه بيعدّي، 3 اختبارات customer-app + 1 technician-app).
+
+**فجوتين متبقيتين موثّقتين صراحة في `ci.yml` نفسه (تعليق أعلى الملف) — خارج نطاق ممكن إغلاقه هنا**:
+1. **صفر بناء release APK/IPA حقيقي** — محتاج أسرار توقيع حقيقية (Android keystore/iOS
+   provisioning profile) مش متاحة في بيئة السيشن دي أصلاً، وبناء نسخة غير موقّعة مايكشفش نفس
+   فئة المشاكل اللي بند 17 (Android release signing، خلص بالفعل PR #88) بيحاول يمنعها.
+2. **صفر Admin automated browser suite** — مفيش ملفات Playwright/إلخ محفوظة في `apps/admin`
+   تشغّل أوتوماتيك على كل PR؛ المراجعة البصرية الموجودة (skill مراجعة UI/UX) مانوال بس، مش جزء
+   من الـCI pipeline. بناء suite حقيقي محتاج تشغيل Postgres/Redis/API/Next.js dev server كلهم
+   جوّه CI job واحد + كتابة سيناريوهات اختبار ذات معنى — نطاق منفصل وأكبر من تعديل workflow بسيط.
+
+اتأكد محليًا (`flutter test` في التطبيقين الاتنين، صفر فشل). تغيير `ci.yml` نفسه مش قابل للتشغيل
+الفعلي من جوّه بيئة السيشن دي (محتاج GitHub Actions runner حقيقي) — التحقق هنا مقصور على صحة
+الأوامر نفسها محليًا وصحة صيغة الـYAML، مش تشغيل فعلي للـworkflow.

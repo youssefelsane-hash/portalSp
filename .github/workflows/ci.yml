@@ -3,7 +3,13 @@ name: CI
 # كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): مفيش أي CI في المشروع رغم حجمه — كل PR
 # جديد ممكن يرجّع بَقّة قديمة اتصلحت من زمان من غير ما حد يلاحظ. الـworkflow ده بيغطي نفس
 # الأربع فحوصات اللي CLAUDE.md بيطلب تشغيلها يدوي قبل أي commit في apps/api، زائد بناء الأدمن
-# وflutter analyze للتطبيقين — نفس الأوامر بالحرف اللي بتتشغل يدوي حاليًا، هنا بس أوتوماتيك.
+# وflutter analyze+test للتطبيقين — نفس الأوامر بالحرف اللي بتتشغل يدوي حاليًا، هنا بس أوتوماتيك.
+#
+# فجوات موثّقة صراحة، خارج نطاق الـworkflow ده (docs/08 §19 بند 18، تفاصيل كاملة في
+# docs/08-pricing-engine-and-platform-vision.md): (أ) صفر بناء release APK/IPA حقيقي — محتاج
+# أسرار توقيع حقيقية (keystore/provisioning profile) مش متاحة هنا، وبناء غير موقّع مايكشفش
+# نفس فئة المشاكل. (ب) صفر Admin automated browser suite (Playwright/إلخ) — لسه معمول صراحة
+# مانوال بس (skill مراجعة بصرية)، مفيش ملفات اختبار محفوظة في المشروع تشغّل أوتوماتيك.
 
 on:
   pull_request:
@@ -123,3 +129,11 @@ jobs:
       - name: flutter analyze
         working-directory: apps/${{ matrix.app }}
         run: flutter analyze
+
+      # docs/08 §19 بند 18 — كانت فجوة موثّقة صراحة: CI كان بيغطي flutter analyze بس، صفر flutter
+      # test خالص. test/ (مختلف عن test_live/ اللي محتاج backend حقيقي شغال، مش مناسب لـCI) فيه
+      # اختبارات وحدة/widget حقيقية بلا أي اعتماد خارجي (flutter_secure_storage platform channel
+      # مموّه) — كانت موجودة من زمان بس محدّش كان بيشغّلها أوتوماتيك على كل PR.
+      - name: flutter test
+        working-directory: apps/${{ matrix.app }}
+        run: flutter test
