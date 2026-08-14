@@ -103,9 +103,17 @@ export class PaymentsService {
    * انتظار webhook/تأكيد) بالظبط، الفرق بس في التسوية بعد النجاح (handlePaymentConfirmed تحت
    * بتفرّق بين "يبدأ التوزيع" و"يقفل الطلب مكتمل"). كاش/محفظة عمليًا مش بيوصلوا PENDING_PAYMENT
    * أصلاً (الطلب بيتعمل SEARCHING_TECHNICIAN فورًا لو payment_method مش كارت/InstaPay).
+   *
+   * **إصلاح بَقّة حرجة (ADR-0015)**: كانت `paymentStatus === PAID` وحدها كافية للرفض — بس طلب
+   * مدفوع مسبقًا (كارت/InstaPay قبل التوزيع) بيوصل `paymentStatus=PAID` من لحظة تأكيد الدفع، قبل
+   * ما الفني يوصل حتى، فمفيش أي مسار تسوية كان يقدر يعدّي بعد اكتمال الشغل — الطلب يفضل عالق في
+   * WORK_COMPLETED للأبد (اتأكدت حيًا). التمييز الصح: `PAID` + `AWAITING_PAYMENT` معناها "فيه
+   * مبلغ إضافي (دلتا) لسه مستني تحصيل بعد بند إضافي اتوافق عليه بعد الدفع المسبق" — ده الحالة
+   * الوحيدة اللي `settleAlreadyPaidOrder()` تحت بتحط الطلب فيها، فمسموح بيها هنا. أي حالة تانية
+   * فيها `PAID` (يعني الطلب اتقفل خلاص عبر `settleAndComplete()`) تفضل مرفوضة زي زمان بالظبط.
    */
   private assertPayable(order: Order): void {
-    if (order.paymentStatus === OrderPaymentStatus.PAID) {
+    if (order.paymentStatus === OrderPaymentStatus.PAID && order.orderStatus !== OrderStatus.AWAITING_PAYMENT) {
       throw new ApiException(ErrorCode.PAY_003, 'الطلب مدفوع بالفعل', HttpStatus.CONFLICT);
     }
     if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
@@ -118,6 +126,30 @@ export class PaymentsService {
         HttpStatus.CONFLICT,
       );
     }
+  }
+
+  /**
+   * المبلغ المطلوب تحصيله دلوقتي فعليًا (ADR-0015) — مش دايمًا `order.totalAmountCents` بالكامل.
+   * لطلب عادي (`paymentStatus` لسه `UNPAID`) بيرجع الإجمالي كامل، صفر تغيير سلوكي عن زمان. لطلب
+   * مدفوع مسبقًا وصل `AWAITING_PAYMENT` (فيه دلتا مستنية بعد بند إضافي، `assertPayable()` فوق
+   * سمحت بيه تحديدًا للحالة دي)، بيرجع الفرق بين الإجمالي الحالي والمبلغ اللي فعلاً اتحصّل قبل
+   * التوزيع — تحصيل المبلغ الكامل تاني هنا كان هيبقى تحصيل مزدوج حقيقي.
+   */
+  private async amountOwedNow(order: Order, manager?: EntityManager): Promise<number> {
+    if (order.paymentStatus !== OrderPaymentStatus.PAID) {
+      return order.totalAmountCents;
+    }
+    const paymentsRepo = manager ? manager.getRepository(Payment) : this.payments;
+    const originalPayment = await paymentsRepo.findOne({
+      where: { orderId: order.id, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
+      order: { completedAt: 'ASC' },
+    });
+    if (!originalPayment) {
+      // دفاعي بحت — مفروض مستحيل عمليًا (paymentStatus=PAID لازم كان مسبوق بدفعة ناجحة)، لو حصل
+      // نرجّع صفر بدل ما نحصّل مبلغ عشوائي مش موثوق.
+      return 0;
+    }
+    return Math.max(0, order.totalAmountCents - originalPayment.amountCents);
   }
 
   /**
@@ -267,13 +299,16 @@ export class PaymentsService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
       }
       this.assertPayable(order);
+      // المبلغ المستحق دلوقتي (ADR-0015) — الإجمالي كامل للطلب العادي، أو الدلتا بس لو الطلب كان
+      // مدفوع مسبقًا ولسه مستني تحصيل بند إضافي (AWAITING_PAYMENT).
+      const owedNowCents = await this.amountOwedNow(order, manager);
 
       const paymentNumber = await this.nextPaymentNumber(manager);
       const payment = manager.create(Payment, {
         paymentNumber,
         orderId: order.id,
         customerId: order.customerId,
-        amountCents: order.totalAmountCents,
+        amountCents: owedNowCents,
         paymentMethod: PaymentMethod.CASH,
         paymentStatus: PaymentGatewayStatus.SUCCEEDED,
         idempotencyKey: `cash:${order.id}`, // كاش مالوش تكرار من الكلاينت أصلاً، بس بنحافظ على نفس العقد
@@ -333,13 +368,15 @@ export class PaymentsService {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       }
       this.assertPayable(lockedOrder);
+      // المبلغ المستحق دلوقتي (ADR-0015) — راجع تعليق collectCash فوق لنفس المنطق بالحرف.
+      const owedNowCents = await this.amountOwedNow(lockedOrder, manager);
 
       const paymentNumber = await this.nextPaymentNumber(manager);
       const payment = manager.create(Payment, {
         paymentNumber,
         orderId: lockedOrder.id,
         customerId: customerProfile.id,
-        amountCents: lockedOrder.totalAmountCents,
+        amountCents: owedNowCents,
         paymentMethod: PaymentMethod.WALLET,
         paymentStatus: PaymentGatewayStatus.SUCCEEDED,
         idempotencyKey,
@@ -351,12 +388,12 @@ export class PaymentsService {
       // إعادة زيارة تحت الضمان (docs/08 §7) مجانية بالكامل (totalAmountCents=0) — مفيش قيد
       // محفظة يتعمل خالص هنا (doubleEntry بترفض أي مبلغ صفر أو أقل بتصميمها)، بس لسه بيتسجّل
       // Payment وبتكمّل settleAndComplete تحت عشان الطلب يقفل صح ويوصل لحالة COMPLETED.
-      if (lockedOrder.totalAmountCents > 0) {
+      if (owedNowCents > 0) {
         await this.walletsService.doubleEntry(
           {
             fromWalletId: customerWallet.id,
             toWalletId: platformWallet.id,
-            amountCents: lockedOrder.totalAmountCents,
+            amountCents: owedNowCents,
             transactionType: WalletTxType.ADJUSTMENT,
             referenceType: 'payment',
             referenceId: payment.id,
@@ -433,6 +470,10 @@ export class PaymentsService {
 
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     this.assertPayable(order);
+    // المبلغ المستحق دلوقتي (ADR-0015) — راجع تعليق collectCash فوق لنفس المنطق بالحرف. صف
+    // الدفعة (Payment.amountCents) هو نفسه اللي التحقق من مبلغ الـwebhook بيقارن بيه لاحقًا
+    // (P0-7)، فمفيش تعديل إضافي مطلوب هناك — هيتحقق صح تلقائيًا ضد الدلتا مش الإجمالي الكامل.
+    const owedNowCents = await this.amountOwedNow(order);
 
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
@@ -441,7 +482,7 @@ export class PaymentsService {
       paymentNumber,
       orderId: order.id,
       customerId: customerProfile.id,
-      amountCents: order.totalAmountCents,
+      amountCents: owedNowCents,
       paymentMethod: method,
       paymentGateway: provider.providerKey,
       paymentStatus: PaymentGatewayStatus.PENDING,
@@ -1227,5 +1268,88 @@ export class PaymentsService {
     });
 
     return finalRefund;
+  }
+
+  /**
+   * ADR-0015 — بتتنادى من `PrepaidOrderSettlementListener` لما طلب يوصل `WORK_COMPLETED`.
+   * Idempotent وآمنة تُنادى لأي طلب: بترجع بهدوء (`null`، بلا استثناء) لو مش الحالة المستهدفة
+   * بالظبط — يشمل الطلب العادي (paymentStatus لسه UNPAID، هيكمل زي زمان عبر
+   * collectCash/payWithWallet/payWithProvider العاديين، الميثود دي متلمسوش خالص).
+   */
+  async settleAlreadyPaidOrder(orderId: string): Promise<void> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order) return null;
+      if (order.orderStatus !== OrderStatus.WORK_COMPLETED) return null;
+      if (order.paymentStatus !== OrderPaymentStatus.PAID) return null; // مش طلب مدفوع مسبقًا
+
+      const owedNowCents = await this.amountOwedNow(order, manager);
+      const previousStatus = order.orderStatus;
+
+      if (owedNowCents <= 0) {
+        // مفيش دلتا — الطلب كان مدفوع مسبقًا بالكامل، وخلص شغله بلا أي بند إضافي. تسوية فورية
+        // تلقائية بلا أي دفعة جديدة أو تدخل من حد — كده الطلب بيتصرف بالظبط زي ما كان المفروض
+        // من الأول (قبل البَقّة اللي ADR-0015 وثّقتها).
+        await this.settleAndComplete(
+          manager,
+          order,
+          (order.paymentMethod as PaymentMethod) ?? PaymentMethod.CARD,
+          PLATFORM_SYSTEM_USER_ID,
+          'system',
+        );
+        return { kind: 'settled' as const, order, previousStatus };
+      }
+
+      // فيه دلتا — بند إضافي اتوافق عليه بعد الدفع المسبق. الطلب بينتقل لـAWAITING_PAYMENT بس،
+      // مفيش توزيع أرباح ولا COMPLETED لسه — assertPayable() بقت تسمح بمحاولة تحصيل جديدة تحديدًا
+      // للحالة دي، وamountOwedNow() هترجع الدلتا بس (مش الإجمالي الكامل) لأي محاولة تحصيل جاية.
+      order.orderStatus = OrderStatus.AWAITING_PAYMENT;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.AWAITING_PAYMENT,
+          changedByUserId: PLATFORM_SYSTEM_USER_ID,
+          changedByRole: 'system',
+          changeSource: OrderChangeSource.SYSTEM,
+          reason: `دفع إضافي مطلوب — ${owedNowCents} قرش زيادة عن المبلغ المدفوع مسبقًا`,
+        }),
+      );
+      return { kind: 'awaiting_payment' as const, order, previousStatus, owedNowCents };
+    });
+
+    if (!result) return;
+
+    if (result.kind === 'settled') {
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.previousStatus,
+          OrderStatus.COMPLETED,
+          result.order.customerId,
+          result.order.technicianId,
+        ),
+      );
+    } else {
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.previousStatus,
+          OrderStatus.AWAITING_PAYMENT,
+          result.order.customerId,
+          result.order.technicianId,
+          `دفع إضافي مطلوب — ${result.owedNowCents} قرش`,
+        ),
+      );
+    }
   }
 }

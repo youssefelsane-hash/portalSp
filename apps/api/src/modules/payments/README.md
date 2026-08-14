@@ -116,3 +116,43 @@
 
 `tsc --noEmit`/`nest build`/الـ133 اختبار (23 suite) عدّوا نضيف — صفر تغيير سلوكي في المسارات
 اللي مش بتعدّي على بوابة حقيقية (كاش/محفظة/InstaPay/فوري، `WALLET_CREDIT` fallback زي ما هو).
+
+## تسوية الطلب المدفوع مسبقًا + الدفع الإضافي (ADR-0015) — بَقّة حرجة اتصلحت + بند 2 من docs/08 §19
+
+**البَقّة (اتأكدت حيًا بشكل قاطع قبل الإصلاح)**: أي طلب مدفوع مسبقًا (كارت/InstaPay قبل التوزيع،
+ADR-0013) كان بيفضل عالق في `WORK_COMPLETED` للأبد بمجرد ما الفني يخلّص الشغل. السبب:
+`assertPayable()` كانت بترفض أي تسوية (`collectCash`/`payWithWallet`/`payWithProvider`) لمجرد إن
+`paymentStatus === PAID` — وده صحيح من لحظة تأكيد الدفع المسبق، **قبل ما الفني يوصل حتى**، مش بعد
+اكتمال الشغل. طلب `work_completed`/`paid`/`card` حقيقي في Postgres جُرّب عليه `collectCash()`
+مباشرة ورجع `"الطلب مدفوع بالفعل"` — الفني ماياخدش أرباحه، الطلب مايوصلش `COMPLETED`، مفيش
+تقييم/ضمان/إغلاق شات تلقائي. تفاصيل الاكتشاف الكاملة في `docs/adr/0015-prepaid-order-settlement-and-additional-payment.md`.
+
+**الحل — 3 قطع مترابطة**:
+1. **`AWAITING_PAYMENT` اتفعّلت** (كانت في `order-state-machine.ts` من أول يوم بلا استخدام) —
+   معناها الجديد: "الشغل خلص، فيه دلتا (مبلغ إضافي بعد بند اتوافق عليه بعد الدفع المسبق) لسه
+   مستنية تحصيل".
+2. **`PrepaidOrderSettlementListener` جديد** — بيسمع `ORDER_STATUS_CHANGED_EVENT` (نفس نمط
+   `ScheduleSlotReleaseListener`)، ولو `newStatus=WORK_COMPLETED` وطلب مدفوع مسبقًا، بينادي
+   `PaymentsService.settleAlreadyPaidOrder(orderId)`: دلتا=صفر → تسوية تلقائية فورية بلا أي تدخل
+   (الطلب يقفل صح زي ما كان المفروض من الأول)؛ دلتا>صفر → انتقال `AWAITING_PAYMENT` بس، مفيش
+   توزيع أرباح لسه.
+3. **`assertPayable()` بقت تميّز**: `paymentStatus=PAID` مرفوضة **إلا** لو `orderStatus=AWAITING_PAYMENT`
+   تحديدًا — الحالة الوحيدة اللي فيها "مدفوع جزئيًا، لسه فيه باقي" ممكنة. `amountOwedNow(order)`
+   جديدة بترجع الدلتا بس (مش الإجمالي الكامل) للحالة دي، والثلاث دوال العامة (`collectCash`/
+   `payWithWallet`/`payWithProvider`) بتستخدمها بدل `order.totalAmountCents` الخام — **مفيش
+   endpoint جديد خالص**، نفس الأزرار الموجودة (دفع كارت/InstaPay/كاش/محفظة) بتشتغل صح تلقائيًا
+   للحالتين. تحقق مبلغ الـwebhook (P0-7) بيتحقق صح تلقائيًا ضد الدلتا برضه — بيقارن `payment.amountCents`
+   (اللي بقى الدلتا) مش `order.totalAmountCents`.
+
+**اتأكد حي بالكامل** (`prepaid-order-settlement.spec.ts`، 3 اختبارات، حساب عمولة حقيقي دقيق):
+دلتا=صفر → تسوية فورية، `COMPLETED`، عمولة 10% محسوبة صح، أرباح الفني اتحوّلت فعليًا لمحفظته
+(اتأكد بالرصيد الفعلي)، مفيش صف `Payment` جديد. دلتا>صفر → `AWAITING_PAYMENT` (idempotent —
+نداء تاني ماغيّرش حاجة)، `collectCash()` بعدها حصّل الدلتا بس (مش الإجمالي)، وبعد التحصيل
+`COMPLETED` بعمولة محسوبة من الإجمالي **الكامل** النهائي صح، ومحاولة تحصيل تالتة اترفضت (منع
+تحصيل مزدوج). طلب عادي (مش مدفوع مسبقًا) في `WORK_COMPLETED` — `settleAlreadyPaidOrder()` لا
+تفعل شيء خالص (regression، المسار العادي فضل زي زمان بالحرف). + `prepaid-order-settlement.listener.spec.ts`
+(3 اختبارات وحدة نقية) للـlistener نفسه.
+
+**فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح**: تصميم UI جديد في `apps/customer-app` (Flutter)
+لشاشة "ادفع المبلغ الإضافي" مش جزء من هذا التغيير — العميل هيشوف الفرق كـ"دفعة جديدة" في نفس
+شاشات الدفع الموجودة أصلاً حاليًا.
