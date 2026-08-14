@@ -569,6 +569,31 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
   mimetype معلَن بس) — 12 اختبار في `branding-file-validator.spec.ts` + اتأكد حي عبر متصفح حقيقي
   إن الرفع من غير صلاحية/Step-Up مايعديش خالص.
 
+**تحديث 2026-08-14 (لاحقًا نفس اليوم) — سدّ 2 من الفجوات المتبقية الموثّقة صراحة، حي عبر HTTP حقيقي
+مش guard-level بس**:
+- **`permission-removal-mid-session` — اتأكد حي عبر HTTP حقيقي (مش نظري خالص)**: سكريبت مؤقت
+  (اتشال بعد الاستخدام، مش ملف دائم) — مستخدم أدمن اختباري بدور فيه صلاحية واحدة بس
+  (`technician_productivity.view`)، دخول حقيقي (OTP)، `GET /admin/technician-productivity/:id`
+  نجح (`200`). سحب الصلاحية دي من الدور مباشرة في القاعدة (محاكاة أدمن بيستخدم role builder حي)
+  **بلا** أي تسجيل خروج/دخول جديد. **نفس الـaccess token بالظبط** على الطلب الجاي مباشرة → `403`
+  فورًا. اتأكد إن `PermissionsGuard`/`PermissionsService.hasPermission()` بيعملوا استعلام DB حي
+  في كل طلب (صفر cache للصلاحيات) — إبطال فوري حرفيًا، مش نظري من قراءة الكود.
+- **OTP brute-force cap — اتأكد حي**: 5 محاولات كود غلط متتالية على `/auth/register` (نفس آلية
+  `consumeOtp()` بتخدم login/register/recovery الثلاثة) رجّعوا `AUTH_003` (كود غلط) زي المتوقع،
+  والمحاولة السادسة **حتى بالكود الصح فعليًا** رجّعت `AUTH_004` (تجاوز الحد) — الحد (5 محاولات
+  لكل كود) بياخد مفعوله فعليًا، مش مجرد رقم في إعداد مالوش أي فحص فعلي.
+- **`session-revocation-mid-request` (حساب اتحظر/اتعطّل وسط الجلسة)**: مؤكّد بالفعل من سيشن سابقة
+  (`jwt-strategy-active-user-check.spec.ts`، بَقّة P0-6 كانت اتصلحت) — `JwtStrategy.validate()`
+  بيعمل استعلام DB حي على `is_blocked`/`is_active`/`deleted_at` في **كل طلب**، مش بس وقت الـrefresh.
+  مذكور هنا للتوثيق الكامل، مش شغل جديد.
+- **recovery-code brute-force**: مش اتعمله سكريبت اختبار منفصل — الحماية موجودة بالفعل عبر طبقتين
+  مستقلتين (throttle `5/دقيقة` على `/auth/recovery/verify` + entropy عالية لكود الاسترجاع نفسه
+  cryptographically-random، مش أرقام قابلة للتخمين) وده كافي دفاعيًا، بس **مفيش اختبار حي مخصوص
+  ليه** — فجوة صغيرة متبقية، موثّقة صراحة مش متجاهَلة.
+
+**لسه NOT STARTED من §25 الأصلية**: `additional-work-payment-bypass` — لسه محجوب لأن endpoint "شغل
+إضافي بعد الدفع" نفسه لسه NOT STARTED (§17 نقطة 1-13، بند منفصل تمامًا).
+
 **§17.14 (إنتاجية configurable، `DONE + LIVE VERIFIED`)** — موديول جديد `technician-productivity`،
 طبقة تسجيل موزون ثانية **بلا أي جدول/جمع بيانات جديد** — بيقرأ نفس صفوف `technician_kpi_snapshots`
 الموجودة بالفعل (مصدر الحقيقة الوحيد، صفر بيانات مصطنعة):
@@ -672,10 +697,12 @@ audit مفيد غير قابل للتغيير (الفاعل، الفعل، ال�
 - `flutter analyze`/`flutter build linux` نضاف للتطبيقين الاتنين. التحقق الفعلي على جهاز حقيقي
   (BiometricPrompt/Face ID فعلاً بيظهر ويشتغل) مش ممكن في بيئة السيشن دي.
 
-**لسه `NOT STARTED`/محتاج وقت أكبر**: باقي سيناريوهات §25 اللي معطاش لسه (خصوصًا:
-enumeration/brute-force على مسارات OTP/recovery، session-revocation-mid-request،
-permission-removal-mid-session لحيّ HTTP مش بس نظري، additional-work-payment-bypass لأن endpoint
-"شغل إضافي بعد الدفع" نفسه لسه NOT STARTED). راجع task list السيشن (#66).
+**لسه `NOT STARTED`/محتاج وقت أكبر**: `additional-work-payment-bypass` (endpoint "شغل إضافي بعد
+الدفع" نفسه لسه NOT STARTED، §17 نقطة 1-13)، اختبار حي مخصوص لـrecovery-code brute-force (الحماية
+موجودة — throttle + entropy عالية — بس بلا سكريبت اختبار مباشر ليها). باقي سيناريوهات §25 الأصلية
+(الـ~40 بند) لسه معملّهاش مراجعة شاملة حرفية — الجلسة دي غطّت أخطر/أحدث الكود بس (MFA/Step-Up/
+InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كاملة. راجع task list السيشن (تم إغلاق #66 بهذا
+النطاق المركّز).
 
 ---
 
