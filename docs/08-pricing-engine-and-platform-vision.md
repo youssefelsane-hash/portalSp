@@ -372,3 +372,15 @@
   صفر تذكير جديد اتبعت). `tsc`/`nest build`/`jest` عدّوا نضيف (92 اختبار، +4 جداد). تفاصيل كاملة
   في `apps/api/src/modules/notifications/README.md`. **متبقٍ صريح**: `critical_offer` actionable
   push، باقي حالات `action_required`، واجهة أدمن لـ`notification_type_configs`.
+- **2026-08-14 (فرع `hgotr7`)**: **§15 — `action_required` تاني اتقفل** (migration `0090`) —
+  اختيار فني بديل بعد إلغاء الفني (`docs/10`). التمييز `AUTO_REMATCH`/`MANUAL_RESELECTION_REQUIRED`
+  كان موجود بالفعل بس بيتشارك نفس `notification_type` بلا تكرار — نوع جديد منفصل
+  `order_technician_cancelled_manual_reselection` بس للحالة اللي العميل لازم يتصرف فيها،
+  `order_technician_cancelled` الأصلي فضل زي ما هو تمامًا لـ`AUTO_REMATCH` (صفر تغيير سلوكي).
+  اختبار حي كامل بدورتي طلب حقيقيتين: مسار `MANUAL_RESELECTION_REQUIRED` (`requested_technician_id`
+  محدد) → workflow حقيقي + إشعارين مرتبطين، اتحل فورًا لما العميل عمل `request-rematch`؛ مسار
+  `AUTO_REMATCH` (بث عادي) → صفر workflow جديد، نفس النوع القديم بالظبط — إثبات قاطع صفر تغيير
+  سلوكي. `tsc`/`nest build`/`jest` عدّوا نضيف. تفاصيل كاملة في
+  `apps/api/src/modules/notifications/README.md`. **متبقٍ صريح**: `critical_offer` actionable
+  push، دفع معلّق/رفع مستند/رد الدعم (`action_required` تالتة لسه محتاجة تصميم)، واجهة أدمن
+  لـ`notification_type_configs`.

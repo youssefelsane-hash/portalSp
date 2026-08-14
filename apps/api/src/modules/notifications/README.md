@@ -197,4 +197,38 @@ priority_tier` (بيتقرا لأول مرة فعليًا — كان جدول م
 - `tsc --noEmit`/`nest build`/`jest` الثلاثة عدّوا نضيف (92 اختبار، +4 جداد لـ
   `scheduled-job-checkpoints.util`).
 
+## `action_required` تاني — اختيار فني بديل بعد إلغاء الفني (migration `0090`، 2026-08-14)
+
+سياسة إلغاء الفني (`docs/10`) عندها مسارين مختلفين تمامًا لما فني يلغي طلب مقبول: `AUTO_REMATCH`
+(بث تلقائي لفني تاني — الطلب مش مرتبط بفني بعينه، أو الطلب طوارئ) و`MANUAL_RESELECTION_REQUIRED`
+(العميل اختار الفني ده بالاسم — `orders.requested_technician_id === technician_id` — فمفيش تعيين
+صامت لبديل، لازم يختار بنفسه). التمييز موجود بالفعل من زمان في `TechnicianCancellationNotification
+Listener` (`recoveryAction`)، بس الاتنين كانوا بياخدوا نفس `notification_type` (`order_technician_
+cancelled`) بدون أي تكرار حقيقي — بالظبط تصحيح المالك الصريح: "الرفض نفسه مش المهم، المهم هل
+العميل مطلوب منه يعمل حاجة".
+
+**الإصلاح**: نوع جديد منفصل `order_technician_cancelled_manual_reselection` (`action_required`،
+migration `0090`) بس للحالة اللي العميل لازم يتصرف فيها. `order_technician_cancelled` الأصلي فضل
+زي ما هو تمامًا لحالة `AUTO_REMATCH` (informational، صفر تغيير سلوكي). الـworkflow بيتحل
+(`resolve('order', orderId, 'select_replacement_technician')`) لما الطلب يخرج من
+`awaiting_technician_reselection` لأي وجهة — العميل اختار بديل عبر `POST /orders/:id/request-
+rematch`، أو لغى الطلب بالكامل.
+
+**اتأكد حي بالكامل عبر `curl` ضد الباك-إند الحقيقي** (عميل/فني حقيقيين، دورتي طلب كاملتين):
+- **مسار `MANUAL_RESELECTION_REQUIRED`** (طلب بـ`requested_technician_id`، نفس الفني قبل، لغى
+  بسبب من غير رسوم) → `order_status=awaiting_technician_reselection` صح، `notification_workflows`
+  جديد فعليًا (`action_type=select_replacement_technician`, `max_reminders=24` snapshot)،
+  إشعارين (`in_app` نجح، `push` فشل بأمان — مفيش جهاز مسجّل، مش استثناء يكسر الطلب) الاتنين
+  مرتبطين `workflow_id`. العميل عمل `request-rematch` → `resolved_at` اتحدد فورًا،
+  `next_reminder_at`→`NULL`، `reminder_count` فضل 0 (اتحل قبل أي تذكير يستحق).
+- **مسار `AUTO_REMATCH`** (طلب بلا `requested_technician_id`، فني اتقبل عن طريق البث العادي، لغى
+  بنفس السبب) → `order_status=searching_technician` صح، **صفر `notification_workflows` جديد**،
+  والإشعار المُرسَل لسه بنفس النوع القديم `order_technician_cancelled` (مش النوع الجديد) —
+  إثبات قاطع إن صفر تغيير سلوكي حصل فعليًا لهذا المسار، مش نظري.
+- `tsc --noEmit`/`nest build`/`jest` الثلاثة عدّوا نضيف (92 اختبار، صفر جداد — منطق التفريع نفسه
+  مغطّى بالاختبار الحي فوق، مفيش منطق حسابي جديد يستاهل unit test منفصل زي `checkpoints`).
+
+**متبقٍ صريح من `action_required`**: دفع معلّق، رفع مستند، رد الدعم — لسه محتاجين تصميم/قرار عمل
+قبل التوصيل، مش موجودين كـstate machine واضحة زي الحالتين اللي اتقفلوا.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
