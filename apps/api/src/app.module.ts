@@ -42,6 +42,7 @@ import { BuildingsModule } from './modules/buildings/buildings.module';
 import { DomesticWorkersModule } from './modules/domestic-workers/domestic-workers.module';
 import { AcademyModule } from './modules/academy/academy.module';
 import { OpsModule } from './modules/ops/ops.module';
+import { BrandingModule } from './modules/branding/branding.module';
 
 @Module({
   imports: [
@@ -113,6 +114,7 @@ import { OpsModule } from './modules/ops/ops.module';
     HealthModule,
     AcademyModule,
     OpsModule,
+    BrandingModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
