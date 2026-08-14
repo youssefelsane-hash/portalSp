@@ -36,14 +36,20 @@ export const envValidationSchema = Joi.object({
   // WebAuthn/Passkeys لدخول الأدمن (ADR-0011) — قيم localhost الافتراضية شغالة في التطوير بس،
   // مرفوضة صراحة في الإنتاج (نفس فلسفة JWT secrets فوق) — لو نسيت تظبطهم، السيرفر يرفض يشتغل
   // بدل ما WebAuthn يترفض بصمت من كل متصفح حقيقي.
+  // بَقّة حقيقية اتلقطت واتصلحت هنا (docs/08 §19 بند 16): `.when(...then: Joi.string().invalid(...))`
+  // من غير `.required()` صريحة في الـthen بتفشل تمنع القيمة الافتراضية (`.default()`) — Joi
+  // بيملأ الافتراضي مباشرة لمفتاح غايب بلا ما يعيد فحصه ضد قيود الـthen. يعني لو المتغيّر ده
+  // اتسيب فاضي تمامًا (مش متسجّل خالص، مش بس ='localhost' صراحة) في الإنتاج، السيرفر كان بيقلع
+  // "healthy" بـWebAuthn شغال بقيم localhost حقيقية — نفس فئة البَقّة اللي بند 16 بيعالجها
+  // لـSTORAGE_PROVIDER/Twilio. `.required()` في الـthen بيغلق الفجوة.
   WEBAUTHN_RP_NAME: Joi.string().default('صُنّاع — لوحة التحكم'),
   WEBAUTHN_RP_ID: Joi.string()
     .default('localhost')
-    .when('NODE_ENV', { is: 'production', then: Joi.string().invalid('localhost') }),
+    .when('NODE_ENV', { is: 'production', then: Joi.string().invalid('localhost').required() }),
   WEBAUTHN_ORIGIN: Joi.string()
     .uri()
     .default('http://localhost:3001')
-    .when('NODE_ENV', { is: 'production', then: Joi.string().uri().invalid('http://localhost:3001') }),
+    .when('NODE_ENV', { is: 'production', then: Joi.string().uri().invalid('http://localhost:3001').required() }),
 
   REDIS_URL: Joi.string().uri().default('redis://localhost:6379'),
 
@@ -78,7 +84,13 @@ export const envValidationSchema = Joi.object({
   INSTAPAY_RECIPIENT_NAME: Joi.string().allow('').optional(),
 
   // تخزين الملفات — 'local' افتراضي (تطوير)، 'S3' للإنتاج. تفاصيل كل قيمة: docs/03-external-integrations.md
-  STORAGE_PROVIDER: Joi.string().valid('local', 's3').default('local'),
+  // docs/08 §19 بند 16 — كان النظام يقدر يقلع "healthy" في الإنتاج وهو لسه بيكتب على قرص محلي
+  // (بيتمسح مع كل إعادة نشر/deploy جديد، ومش متاح لأكتر من instance واحدة خلف load balancer).
+  // مرفوض صراحة في NODE_ENV=production — نفس فلسفة JWT/CORS/WebAuthn فوق (fail-fast).
+  STORAGE_PROVIDER: Joi.string()
+    .valid('local', 's3')
+    .default('local')
+    .when('NODE_ENV', { is: 'production', then: Joi.string().invalid('local').required() }),
   STORAGE_LOCAL_DIR: Joi.string().default('./uploads'),
   S3_ENDPOINT: Joi.string().uri().allow('').optional(),
   S3_REGION: Joi.string().default('us-east-1'),
@@ -101,4 +113,21 @@ export const envValidationSchema = Joi.object({
   SMTP_USER: Joi.string().allow('').optional(),
   SMTP_PASSWORD: Joi.string().allow('').optional(),
   SMTP_FROM_EMAIL: Joi.string().allow('').optional(),
-});
+})
+  // docs/08 §19 بند 16 — بوابة SMS (Twilio) هي القناة الوحيدة لتسليم كود OTP في الكود الحالي
+  // (auth.service.ts، صفر بديل — لا WhatsApp ولا إيميل للـOTP). لو مش مُعدّة، السيرفر كان بيقلع
+  // "healthy" في الإنتاج والـOTP endpoints بترجع 200 بلا ما أي رقم حقيقي يستلم كود خالص — مفيش
+  // طريقة تانية لأي مستخدم حقيقي يسجّل دخول أو يعمل حساب. فحص عابر للحقول (مش .when() عادي لأن
+  // TWILIO_ACCOUNT_SID/AUTH_TOKEN/SMS_FROM_NUMBER التلاتة لازم يكونوا موجودين مع بعض).
+  .custom((value: Record<string, unknown>, helpers) => {
+    if (value.NODE_ENV === 'production') {
+      const hasTwilioSms = value.TWILIO_ACCOUNT_SID && value.TWILIO_AUTH_TOKEN && value.TWILIO_SMS_FROM_NUMBER;
+      if (!hasTwilioSms) {
+        return helpers.message({
+          custom:
+            'TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER الثلاثة لازم يكونوا موجودين في NODE_ENV=production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
+        });
+      }
+    }
+    return value;
+  });

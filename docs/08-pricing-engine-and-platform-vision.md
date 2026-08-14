@@ -1124,3 +1124,36 @@ points→value حقيقي أو تخفي Redeem بالكامل في V1". بناء
 اتأكد بـ`paymob-provider.service.spec.ts` (2 اختبار جديد يثبتوا الإضافة اختيارية وregression-safe).
 `tsc` → `nest build` → `jest` (30 suite، 162 اختبار) عدّوا نضيف. `flutter analyze` نضيف بعد تحديث
 نص زرار "بطاقة" في `CreateOrderScreen` ليعكس إنه ممكن يشمل محفظة إلكترونية دلوقتي.
+
+### تحديث تنفيذ §19 — بند 16 (Production config — فرض متغيرات launch-critical) — ✅ `DONE + AUTOMATED VERIFIED`
+
+المالك لاحظ إن `NODE_ENV=production` بيفرض JWT/CORS/WebAuthn بس مش `STORAGE_PROVIDER=s3` أو
+بيانات اعتماد SMS — يعني النظام كان يقدر يقلع "healthy" وهو لسه بيكتب على قرص محلي مؤقت (بيتمسح
+مع كل deploy) أو بلا أي قناة حقيقية لتسليم كود OTP (القناة الوحيدة الموجودة في الكود، `auth.service.ts`
+بيستخدم `NotificationChannel.SMS` بس، صفر بديل). `env.validation.ts` بقى بيرفض الإقلاع صراحة
+(fail-fast، نفس فلسفة JWT secrets الموجودة من زمان) لو `NODE_ENV=production` و`STORAGE_PROVIDER`
+لسه `local` (أو مش مُعدّة خالص)، أو `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_SMS_FROM_NUMBER`
+مش الثلاثة موجودين مع بعض.
+
+**بَقّة حقيقية أعمق اتلقطت أثناء البناء، خارج نطاق البند الأصلي بس نفس الفئة بالضبط**: أثناء كتابة
+اختبار وحدة لفحص `STORAGE_PROVIDER` الجديد، اكتشفت إن Joi's `.when(...then: Joi.string().invalid(x))`
+من غير `.required()` صريحة **بيتخطى القيمة الافتراضية (`.default()`) تمامًا** — لو المفتاح مش
+موجود خالص في الـenv (مش حتى `=localhost` صراحة)، Joi بيملأ الافتراضي مباشرة بلا ما يعيد فحصه ضد
+قيود الـ`then`. ده يعني `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` (اللي كانا مكتوبين بنفس النمط القديم
+من زمان) كانوا عندهم **نفس الفجوة بالحرف**: لو المتغيّرين دول اتسيبوا فاضيين تمامًا في الإنتاج
+(مش بس ما اتغيّروش من `localhost`)، السيرفر كان يقدر يقلع "healthy" بـWebAuthn شغال بقيم
+`localhost` حقيقية. اتصلحت بإضافة `.required()` صريحة لقيود الـthen في الاتنين — نفس التصحيح
+المطلوب لـ`STORAGE_PROVIDER` الجديد.
+
+اتأكد بـ`env.validation.spec.ts` جديد (8 اختبارات): env إنتاج كامل يعدّي، `STORAGE_PROVIDER=local`
+صراحة وغيابه تمامًا الاتنين بيترفضوا في الإنتاج، Twilio غايبة/جزئية بيترفضوا، `WEBAUTHN_RP_ID`/
+`WEBAUTHN_ORIGIN` غايبين تمامًا بيترفضوا (البَقّة المُكتشَفة)، وكل حاجة متسامحة في التطوير (مايكسرش
+دليل التشغيل المحلي). `tsc` → `nest build` → `jest` (31 suite، 170 اختبار) عدّوا نضيف — تأكيد
+إضافي إن السيرفر الحالي (`NODE_ENV=development`) لسه بيقلع صح بعد التغيير.
+
+**خارج نطاق هذا الإصلاح عمدًا**: صفر فرض على بيانات اعتماد Paymob/Firebase — دول قرارات منتج
+مشروعة (إطلاق cash-only أو بلا push مبدئيًا صالح تمامًا)، مش نفس فئة "القناة الوحيدة الإجبارية"
+زي SMS/storage. مشكلة `YOUR_GOOGLE_MAPS_API_KEY` placeholder في Flutter (نفس تدقيق المالك) خارج
+نطاق هذا الإصلاح كمان — التطبيقات ملهاش مفهوم "boot-time validation" زي NestJS's ConfigModule
+أصلاً (المفتاح بيتضمّن وقت الـbuild، مش runtime)، موثّق بالفعل في `docs/03-external-integrations.md`
+§5، وأي فحص build-time له هيتغطى في بند 18 (CI).
