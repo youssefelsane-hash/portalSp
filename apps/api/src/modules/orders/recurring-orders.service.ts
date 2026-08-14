@@ -1,6 +1,11 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, LessThanOrEqual, Repository } from 'typeorm';
+import {
+  RECURRING_TEMPLATE_GENERATION_FAILING_EVENT,
+  RecurringTemplateGenerationFailingEvent,
+} from '../../common/events/recurring-template-generation-failing.event';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -14,6 +19,11 @@ import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recu
 import { OrdersService } from './orders.service';
 
 const SWEEP_INTERVAL_MS = 60_000;
+
+// docs/08 §19 بند 20 — عدد محاولات إعادة توليد نفس الموعد (كل محاولة = دورة sweep، فحوالي 3
+// دقايق إجمالاً) قبل ما نستسلم ونعتبره "dead letter" — كافي لفشل مؤقت (DB/شبكة) يتعافى لوحده،
+// مش كتير لدرجة إن موعد فايت يفضل يتحاول للأبد وهو مستحيل ينجح (مثلاً عنوان اتمسح).
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 // آخر يوم فعلي في شهر (UTC) — بيتحسب بـ"اليوم صفر" من الشهر اللي بعده (خدعة JS Date معروفة).
 function lastDayOfUtcMonth(year: number, monthIndex0: number): number {
@@ -79,6 +89,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     private readonly catalogService: CatalogService,
     private readonly techniciansService: TechniciansService,
     private readonly ordersService: OrdersService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   onModuleInit(): void {
@@ -102,8 +113,8 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     // نفس فحص OrdersService.create() بالحرف — كانت فجوة حقيقية اتلقطت وقت بناء واجهة العميل:
     // مفيش تحقق هنا خالص، يعني العميل كان يقدر ينشئ قالب متكرر بـbooking_mode مش متاح للخدمة
     // (مثلاً "فرد" لخدمة بتدعم "فريق" بس) وياخد رد 200 ناجح — بعدين generateFromTemplate() كانت
-    // هتفشل بصمت كل موعد للأبد (next_run_at بيتحرك قدّام حتى لو الطلب الحقيقي فشل، بتصميم متعمد،
-    // راجع تعليق generateFromTemplate() تحت) من غير ما العميل ياخد أي تنبيه إنه القالب معطوب.
+    // هتفشل بصمت كل موعد (راجع تعليق generateFromTemplate()/recordFailure() تحت لتصميم إعادة
+    // المحاولة/dead-letter الحالي — docs/08 §19 بند 20) من غير ما العميل ياخد أي تنبيه.
     const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
     const bookingModeAllowed =
       bookingMode === BookingMode.INDIVIDUAL
@@ -141,8 +152,8 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   // للأدمن/التشغيل بس (docs/08 §32: وضوح الطلبات المتكررة) — كانت فجوة موثّقة صراحة: مفيش أي
-  // مسار للأدمن يشوف القوالب المتكررة خالص، فمينفعش يتابع/يشخّص قالب معطوب (مثلاً next_run_at
-  // بيتحرّك للأبد من غير ما يولّد طلب فعلي — راجع generateFromTemplate() فوق).
+  // مسار للأدمن يشوف القوالب المتكررة خالص، فمينفعش يتابع/يشخّص قالب معطوب (consecutive_failure_count/
+  // last_failure_reason/last_failed_at — راجع generateFromTemplate()/recordFailure() فوق).
   async listAllForAdmin(
     isActive: boolean | undefined,
     page: number,
@@ -196,12 +207,26 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * بيولّد طلب واحد ويحرّك next_run_at قدّام — مستقل عن نجاح/فشل إنشاء الطلب نفسه (لو فشل
-   * إنشاء الطلب لسبب مؤقت، next_run_at لسه بيتحرّك عشان القالب ميفضلش عالق يحاول يولّد نفس
-   * الموعد الفايت كل دقيقة للأبد — نفس فلسفة "مش هنعلّق على فشل مؤقت" في CLAUDE.md).
+   * بيحاول يولّد طلب واحد. **تصميم إعادة المحاولة (docs/08 §19 بند 20)**: كانت فجوة حقيقية —
+   * next_run_at كان بيتحرّك قدّام دايمًا مهما كان سبب الفشل، يعني فشل مؤقت (DB/شبكة لحظية) كان
+   * بيسقط الموعد ده نهائيًا بصمت من أول محاولة، وسطر log بس بيوثّقه (بيتغرق وسط باقي اللوجات،
+   * صفر تنبيه لحد). دلوقتي: لو فشل ومحاولاته المتتالية لسه تحت `MAX_CONSECUTIVE_FAILURES`،
+   * next_run_at **ميتحركش** — نفس الموعد هيتحاول تاني في دورة sweep الجاية (بعد دقيقة، كافي
+   * لأغلب الأعطال المؤقتة تتعافى). لو وصل للسقف، نعتبره "dead letter": next_run_at بيتحرك
+   * (تخطّي الموعد ده نهائيًا، عشان مش هيفضل يتحاول للأبد لو السبب دائم زي عنوان اتمسح)، والعدّاد
+   * بيرجع صفر لأول محاولة في الموعد الجاي، بس `last_failure_reason`/`last_failed_at` بيفضلوا
+   * محفوظين (مش بيتمسحوا غير لما توليد ينجح) عشان الأدمن يقدر يشخّص القالب المعطوب من
+   * `GET /admin/recurring-orders` — زائد إشعار فوري لـops_manager (نفس نمط تصعيد الطوارئ).
    */
   private async generateFromTemplate(template: RecurringOrderTemplate): Promise<boolean> {
-    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(template.customerId);
+    let customerProfile;
+    try {
+      customerProfile = await this.customerProfiles.findByProfileIdOrThrow(template.customerId);
+    } catch (err) {
+      await this.recordFailure(template, err);
+      return false;
+    }
+
     const createOrderDto: CreateOrderDto = {
       service_id: template.serviceId,
       address_id: template.addressId,
@@ -217,22 +242,40 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       payment_method: template.paymentMethod ?? undefined,
     };
 
-    let generatedOrderId: string | null = null;
     try {
       const order = await this.ordersService.create(customerProfile.userId, createOrderDto);
-      generatedOrderId = order.id;
+      template.nextRunAt = nextOccurrence(template.nextRunAt, template.frequency);
+      template.lastGeneratedOrderId = order.id;
+      template.consecutiveFailureCount = 0;
+      template.lastFailureReason = null;
+      template.lastFailedAt = null;
+      await this.templates.save(template);
+      return true;
     } catch (err) {
-      this.logger.error(
-        `فشل توليد طلب من القالب المتكرر ${template.id}`,
-        err instanceof Error ? err.stack : String(err),
+      await this.recordFailure(template, err);
+      return false;
+    }
+  }
+
+  private async recordFailure(template: RecurringOrderTemplate, err: unknown): Promise<void> {
+    const reason = err instanceof Error ? err.message : String(err);
+    this.logger.error(`فشل توليد طلب من القالب المتكرر ${template.id} (محاولة ${template.consecutiveFailureCount + 1})`, err instanceof Error ? err.stack : reason);
+
+    template.consecutiveFailureCount += 1;
+    template.lastFailureReason = reason;
+    template.lastFailedAt = new Date();
+
+    if (template.consecutiveFailureCount >= MAX_CONSECUTIVE_FAILURES) {
+      template.nextRunAt = nextOccurrence(template.nextRunAt, template.frequency);
+      const attempts = template.consecutiveFailureCount;
+      template.consecutiveFailureCount = 0;
+      this.eventEmitter.emit(
+        RECURRING_TEMPLATE_GENERATION_FAILING_EVENT,
+        new RecurringTemplateGenerationFailingEvent(template.id, template.customerId, attempts, reason),
       );
     }
+    // لو لسه تحت السقف: next_run_at ميتحركش عمدًا — نفس الموعد هيتحاول تاني في sweep() الجاية.
 
-    template.nextRunAt = nextOccurrence(template.nextRunAt, template.frequency);
-    if (generatedOrderId) {
-      template.lastGeneratedOrderId = generatedOrderId;
-    }
     await this.templates.save(template);
-    return generatedOrderId !== null;
   }
 }

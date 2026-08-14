@@ -39,6 +39,7 @@ import { OrderStatusNotificationListener } from './listeners/order-status-notifi
 import { PayoutCompletedRoutingListener } from './listeners/payout-completed-routing.listener';
 import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires-review-routing.listener';
 import { RatingSubmittedNotificationListener } from './listeners/rating-submitted-notification.listener';
+import { RecurringTemplateGenerationFailingRoutingListener } from './listeners/recurring-template-generation-failing-routing.listener';
 import { ReferralRewardNotificationListener } from './listeners/referral-reward-notification.listener';
 import { TechnicianCancellationNotificationListener } from './listeners/technician-cancellation-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
@@ -93,6 +94,7 @@ import { NotificationsService } from './notifications.service';
     PayoutCompletedRoutingListener,
     LowRatingRoutingListener,
     RatingSubmittedNotificationListener,
+    RecurringTemplateGenerationFailingRoutingListener,
     ReferralRewardNotificationListener,
     AssistantPersonalAssignedNotificationListener,
     AssistantOpportunityNotificationListener,

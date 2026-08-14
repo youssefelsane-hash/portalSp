@@ -48,6 +48,16 @@ export class RecurringOrderTemplate {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  // تتبّع موثوقية التوليد (docs/08 §19 بند 20) — راجع RecurringOrdersService.generateFromTemplate()
+  @Column({ name: 'consecutive_failure_count', type: 'integer', default: 0 })
+  consecutiveFailureCount: number;
+
+  @Column({ name: 'last_failure_reason', type: 'text', nullable: true })
+  lastFailureReason: string | null;
+
+  @Column({ name: 'last_failed_at', type: 'timestamptz', nullable: true })
+  lastFailedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
