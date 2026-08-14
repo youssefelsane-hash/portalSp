@@ -857,7 +857,17 @@ export class PaymentsService {
     requestedAmountCents?: number,
     meta?: AuditActorMeta,
   ): Promise<Refund> {
-    const refund = await this.dataSource.transaction(async (manager) => {
+    // بَقّة distributed-transaction حقيقية اتصلحت (docs/08 §19 بند 4): كان provider.refund()
+    // (نداء HTTP خارجي حقيقي لـPaymob) بينفّذ جوّه DB transaction واحدة مع باقي الكتابة. لو
+    // نجح فعليًا عند البوابة وبعدين خطوة تانية جوّه نفس الـtransaction فشلت (DB error عابر
+    // مثلاً)، Postgres يعمل rollback كامل — لكن الفلوس فعليًا اترجعت للعميل عند Paymob، ونظامنا
+    // مش عارف. الحل: تقسيم لتلات مراحل — (أ) DB transaction قصيرة بتسجّل صف Refund حالته
+    // PROCESSING **قبل** أي نداء خارجي (idx_refunds_payment_id_unique بيضمن صف واحد بس لكل
+    // دفعة، فأي محاولة تانية — متزامنة أو retry بعد فشل — هتلاقي الصف ده وترفض فورًا، صفر نداء
+    // مزدوج للبوابة ممكن يحصل)، (ب) النداء الخارجي نفسه **برّه** أي transaction، (ج) DB
+    // transaction قصيرة تانية منفصلة تمامًا بتسجّل النتيجة (نجح/اترفض) وتطبّق تأثيرات المحافظ —
+    // فمفيش أي سيناريو ممكن فيه استرداد حقيقي عند البوابة "يتراجع" بسبب فشل كتابة DB لاحقة.
+    const prepared = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -882,7 +892,13 @@ export class PaymentsService {
       // واحد أقصى لكل دفعة، سواء كامل أو جزئي — مفيش تراكم استردادات جزئية متعددة لسه.
       const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
       if (existingRefund) {
-        throw new ApiException(ErrorCode.PAY_003, 'الطلب ده اترد قبل كده', HttpStatus.CONFLICT);
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          existingRefund.refundStatus === RefundStatus.PROCESSING
+            ? 'محاولة استرداد سابقة لسه قيد التأكيد مع البوابة — راجع الطلب يدويًا (provider.reconcile) قبل إعادة المحاولة'
+            : 'الطلب ده اترد قبل كده',
+          HttpStatus.CONFLICT,
+        );
       }
 
       const amountCents = requestedAmountCents ?? payment.amountCents;
@@ -901,51 +917,7 @@ export class PaymentsService {
       }
 
       const provider = this.paymentProviders.getProvider(payment.paymentMethod);
-      let refundMethod: RefundMethod;
-      let refundStatus: RefundStatus;
-      let providerRefundId: string | null = null;
-
-      if (provider.supportsRefund && payment.gatewayTransactionId) {
-        // نداء حقيقي للبوابة — لو رمى استثناء (شبكة/خطأ غير متوقّع) بيتصاعد زي ما هو، الـtransaction
-        // بترجع لورا ومفيش صف refund بيتسجّل خالص، فالأدمن يقدر يعيد المحاولة بأمان (مش رفض نهائي).
-        const providerResult = await provider.refund({
-          providerReference: payment.gatewayTransactionId,
-          amountCents,
-          reasonAr: reasonNotes,
-        });
-        if (providerResult.succeeded) {
-          refundMethod = RefundMethod.ORIGINAL_METHOD;
-          refundStatus = RefundStatus.COMPLETED;
-          providerRefundId = providerResult.providerRefundId;
-        } else {
-          // رد نهائي من البوابة نفسها (رفض صريح، مش خطأ شبكة) — ده قرار نهائي حسب تبسيط Phase 1،
-          // بيتسجّل rejected بلا أي حركة فلوس (مفيش استرداد حقيقي حصل، فمفيش داعي لعكس أي شيء).
-          const refundNumber = await this.nextRefundNumber(manager);
-          const rejectedRefund = manager.create(Refund, {
-            refundNumber,
-            paymentId: payment.id,
-            orderId: order.id,
-            amountCents,
-            refundType: isFull ? RefundType.FULL : RefundType.PARTIAL,
-            reasonNotes,
-            refundMethod: RefundMethod.ORIGINAL_METHOD,
-            refundStatus: RefundStatus.REJECTED,
-            requestedByUserId: performedByUserId,
-            approvedByUserId: performedByUserId,
-            requestedAt: new Date(),
-            approvedAt: new Date(),
-            completedAt: null,
-            providerRefundId: null,
-          });
-          await manager.save(rejectedRefund);
-          return rejectedRefund;
-        }
-      } else {
-        // مفيش استرداد حقيقي مدعوم لطريقة الدفع دي (كاش/محفظة/InstaPay/فوري) — نفس الإصلاح
-        // الصادق من قبل: wallet credit فعلي بدل رقم "مكتمل" كاذب من غير حركة فلوس.
-        refundMethod = RefundMethod.WALLET_CREDIT;
-        refundStatus = RefundStatus.COMPLETED;
-      }
+      const goesThroughGateway = provider.supportsRefund && !!payment.gatewayTransactionId;
 
       const refundNumber = await this.nextRefundNumber(manager);
       const refund = manager.create(Refund, {
@@ -955,16 +927,61 @@ export class PaymentsService {
         amountCents,
         refundType: isFull ? RefundType.FULL : RefundType.PARTIAL,
         reasonNotes,
-        refundMethod,
-        refundStatus,
+        // مفيش استرداد حقيقي مدعوم لطريقة الدفع دي (كاش/محفظة/InstaPay/فوري) — نفس الإصلاح
+        // الصادق من قبل: wallet credit فعلي بدل رقم "مكتمل" كاذب من غير حركة فلوس. الحالة دي
+        // مفيش نداء خارجي خالص فبتتسجّل COMPLETED فورًا من هنا، برضه قبل أي كتابة محافظ (لو
+        // فشلت خطوة تانية بعدها، الصف بيفضل موجود وواضح إنه لسه مش مطبّق كامل).
+        refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
+        refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
         requestedByUserId: performedByUserId,
         approvedByUserId: performedByUserId,
         requestedAt: new Date(),
         approvedAt: new Date(),
-        completedAt: new Date(),
-        providerRefundId,
+        completedAt: goesThroughGateway ? null : new Date(),
+        providerRefundId: null,
       });
       await manager.save(refund);
+
+      return { order, payment, isFull, amountCents, goesThroughGateway, provider, refund };
+    });
+
+    const { order, payment, isFull, amountCents, goesThroughGateway, provider, refund } = prepared;
+
+    // المرحلة (ب) — برّه أي DB transaction تمامًا. صف الـrefund اتسجّل بالفعل PROCESSING فوق
+    // قبل النداء ده، فحتى لو الـprocess وقع دلوقتي بعد نجاح فعلي عند البوابة، فحص existingRefund
+    // فوق هيمنع أي محاولة استرداد تانية لنفس الدفعة (مفيش استرداد مزدوج ممكن يحصل) — بس الصف
+    // هيفضل PROCESSING محتاج مراجعة يدوية (provider.reconcile()) لقفله، موثّق كفجوة تشغيلية
+    // معروفة مش حل تلقائي كامل (خارج نطاق هذا الإصلاح، نفس تعليق reconcile() في الـinterface).
+    let providerSucceeded = true;
+    let providerRefundId: string | null = null;
+    if (goesThroughGateway) {
+      const providerResult = await provider.refund({
+        providerReference: payment.gatewayTransactionId!,
+        amountCents,
+        reasonAr: reasonNotes,
+      });
+      providerSucceeded = providerResult.succeeded;
+      providerRefundId = providerResult.succeeded ? providerResult.providerRefundId : null;
+    }
+
+    // المرحلة (ج) — DB transaction قصيرة منفصلة، بعد ما نتيجة البوابة بقت معروفة فعليًا.
+    const finalRefund = await this.dataSource.transaction(async (manager) => {
+      if (goesThroughGateway && !providerSucceeded) {
+        // رد نهائي من البوابة نفسها (رفض صريح، مش خطأ شبكة) — قرار نهائي حسب تبسيط Phase 1،
+        // بيتسجّل rejected بلا أي حركة فلوس (مفيش استرداد حقيقي حصل، فمفيش داعي لعكس أي شيء).
+        refund.refundStatus = RefundStatus.REJECTED;
+        await manager.save(refund);
+        return refund;
+      }
+
+      if (goesThroughGateway) {
+        refund.refundStatus = RefundStatus.COMPLETED;
+        refund.providerRefundId = providerRefundId;
+        refund.completedAt = new Date();
+        await manager.save(refund);
+      }
+      // لو !goesThroughGateway، refund كان بالفعل COMPLETED من المرحلة (أ) — مفيش نداء خارجي
+      // حصل خالص، فمفيش تحديث حالة مطلوب هنا.
 
       // عكس تحويل أرباح الفني بنفس نسبة مبلغ الاسترداد من إجمالي الدفعة — الفني ماخدش الفلوس دي
       // كاملة أصلاً لو الاسترداد جزئي.
@@ -995,7 +1012,7 @@ export class PaymentsService {
       // wallet credit فعلي للعميل بس لو مفيش استرداد حقيقي حصل عند البوابة (WALLET_CREDIT fallback).
       // لو استرداد حقيقي نجح عند البوابة (ORIGINAL_METHOD)، العميل بياخد فلوسه فعليًا في كارته/محفظته
       // الخارجية مباشرة من البوابة — credit تاني هنا هيبقى استرداد مزدوج (بَقّة مالية، مش سلوك مقصود).
-      if (refundMethod === RefundMethod.WALLET_CREDIT) {
+      if (refund.refundMethod === RefundMethod.WALLET_CREDIT) {
         const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
@@ -1050,20 +1067,20 @@ export class PaymentsService {
     await this.auditLog.record({
       actorUserId: performedByUserId,
       actorRole: 'admin',
-      action: refund.refundStatus === RefundStatus.REJECTED ? 'order.refund_rejected' : 'order.refunded',
+      action: finalRefund.refundStatus === RefundStatus.REJECTED ? 'order.refund_rejected' : 'order.refunded',
       entityType: 'order',
       entityId: orderId,
       newValues: {
-        refund_id: refund.id,
-        amount_cents: refund.amountCents,
-        refund_type: refund.refundType,
-        refund_method: refund.refundMethod,
-        refund_status: refund.refundStatus,
-        provider_refund_id: refund.providerRefundId,
+        refund_id: finalRefund.id,
+        amount_cents: finalRefund.amountCents,
+        refund_type: finalRefund.refundType,
+        refund_method: finalRefund.refundMethod,
+        refund_status: finalRefund.refundStatus,
+        provider_refund_id: finalRefund.providerRefundId,
         reason_notes: reasonNotes,
       },
       meta,
     });
-    return refund;
+    return finalRefund;
   }
 }
