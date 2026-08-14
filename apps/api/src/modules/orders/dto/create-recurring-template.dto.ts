@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode } from '../entities/order.entity';
 import { RecurringOrderFrequency } from '../entities/recurring-order-template.entity';
 
@@ -28,4 +28,10 @@ export class CreateRecurringTemplateDto {
   @IsString()
   @MaxLength(2000)
   problem_description?: string;
+
+  // دفع قبل التوزيع (ADR-0013) لكل طلب يتولّد من القالب ده — اختياري، لو مبعتش كل طلب متولّد
+  // بيدفع بعد الشغل زي زمان (كاش/محفظة). نفس قيود CreateOrderDto.payment_method بالظبط.
+  @IsOptional()
+  @IsIn(['card', 'instapay'])
+  payment_method?: 'card' | 'instapay';
 }

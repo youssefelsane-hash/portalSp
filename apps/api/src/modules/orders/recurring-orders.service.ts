@@ -128,6 +128,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requestedTechnicianId: dto.requested_technician_id ?? null,
       frequency: dto.frequency,
       problemDescription: dto.problem_description ?? null,
+      paymentMethod: dto.payment_method ?? null,
       nextRunAt: startsAt,
       isActive: true,
     });
@@ -208,6 +209,12 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       order_type: OrderType.RECURRING,
       requested_technician_id: template.requestedTechnicianId ?? undefined,
       problem_description: template.problemDescription ?? undefined,
+      // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة حقيقية: صفر payment_method هنا خالص،
+      // فكل طلب متولّد من قالب متكرر كان non-prepaid دايمًا مهما كان تفضيل العميل وقت إنشاء
+      // القالب. لو الطلب المتولّد بقى PENDING_PAYMENT، sweepPendingPayment() (docs/08 §19 بند
+      // 3+5 فوق) بيلغيه تلقائيًا لو العميل ماكملش الدفع خلال orders.payment_timeout_minutes —
+      // نفس الحماية بالظبط اللي بتتطبّق على أي طلب PENDING_PAYMENT عادي.
+      payment_method: template.paymentMethod ?? undefined,
     };
 
     let generatedOrderId: string | null = null;

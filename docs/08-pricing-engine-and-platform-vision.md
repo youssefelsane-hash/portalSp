@@ -916,3 +916,29 @@ InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كا�
 `REFUNDED`، صف `Refund` اتسجّل بالمبلغ والـ`providerRefundId` الصح)، وطلب `SEARCHING_TECHNICIAN`
 غير مدفوع (كاش) قديم يتلغى بلا أي محاولة استرداد كاذبة (regression). `tsc --noEmit` →
 `nest build` → `jest` كلهم عدّوا نضيف.
+
+### تحديث تنفيذ §19 — بند 6 (Recurring orders payment_method) — ✅ `DONE + AUTOMATED VERIFIED`
+
+`RecurringOrderTemplate` بقى عنده عمود `payment_method` اختياري (`card`/`instapay` بس، migration
+`0101`، `NULL` = دفع بعد الشغل زي زمان). `CreateRecurringTemplateDto` بقى بياخده (نفس قيد
+`CreateOrderDto.payment_method` بالظبط)، و`RecurringOrdersService.generateFromTemplate()` بقت
+بتمرّره لـ`CreateOrderDto` وقت توليد كل طلب — القالب المتكرر بقى يقدر فعليًا يطلب دفع قبل التوزيع
+لكل مناسبة متولّدة، بدل ما يكون non-prepaid دايمًا. الطلب المتولّد اللي بيحتاج دفع بيدخل
+`PENDING_PAYMENT` زي أي طلب عادي — وده يستفيد أوتوماتيك من `sweepPendingPayment()` (بند 3+5 فوق)
+لو العميل ماكملش الدفع، من غير أي كود إضافي.
+
+**فجوة حقيقية جديدة اتلقطت أثناء البناء، موثّقة صراحة (خارج نطاق بند 6 الضيق، محتاجة قرار/بناء
+منفصل)**: طلب عادي بيدخل `PENDING_PAYMENT` والعميل نفسه في التطبيق فاتح شاشة الدفع (فمفيش داعي
+لإشعار push — هو شايف الشاشة). لكن طلب متولّد من قالب متكرر بيدخل `PENDING_PAYMENT` **في الخلفية**
+(الفحص الدوري، مفيش عميل فاتح حاجة وقتها) — من غير إشعار push حقيقي "طلبك المتكرر محتاج تأكيد دفع"،
+العميل مش هيعرف خالص إن فيه طلب مستني، وهيتلغي تلقائيًا بصمت بعد `orders.payment_timeout_minutes`.
+مفيش أي كود إشعار زي ده موجود دلوقتي — `OrderStatusNotificationListener` بيعالج انتقالات حالة
+تانية، مش إنشاء `PENDING_PAYMENT` نفسه. **Business/UX Decision Required قبل البناء** — مش تقني بس
+(هل الإشعار push بس، ولا كمان email/SMS احتياطي؟ هل فيه grace period أطول للطلبات المتكررة تحديدًا؟).
+
+**اتأكد حي** (`recurring-orders-payment-method.spec.ts`، 3 اختبارات ضد Postgres حقيقي): قالب
+`payment_method=card` يولّد طلب بـ`payment_method='card'` فعليًا في الـDTO الواصل لـ
+`OrdersService.create()`، نفس الشيء لـ`instapay`، وقالب من غير `payment_method` بيولّد طلب
+بـ`payment_method=undefined` (regression — مفيش دفع مسبق كاذب على القوالب القديمة). النطاق مقصود
+وضيق: بيثبت وصول القيمة صح لحدود `OrdersService.create()`، مش بيعيد اختبار منطق `PENDING_PAYMENT`
+transition نفسه (ده مسؤولية `OrdersService.create()` منفصلة ومختبرة في مكان تاني بالفعل).

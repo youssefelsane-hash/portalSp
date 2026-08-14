@@ -8,6 +8,7 @@ export interface RecurringTemplateResponseDto {
   requested_technician_id: string | null;
   frequency: string;
   problem_description: string | null;
+  payment_method: 'card' | 'instapay' | null;
   next_run_at: string;
   last_generated_order_id: string | null;
   is_active: boolean;
@@ -23,6 +24,7 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     requested_technician_id: template.requestedTechnicianId,
     frequency: template.frequency,
     problem_description: template.problemDescription,
+    payment_method: template.paymentMethod,
     next_run_at: template.nextRunAt.toISOString(),
     last_generated_order_id: template.lastGeneratedOrderId,
     is_active: template.isActive,
