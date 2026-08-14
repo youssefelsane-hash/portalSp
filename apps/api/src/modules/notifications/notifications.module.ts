@@ -26,6 +26,7 @@ import { AssistantOpportunityNotificationListener } from './listeners/assistant-
 import { AssistantPersonalAssignedNotificationListener } from './listeners/assistant-personal-assigned-notification.listener';
 import { CashCollectedRoutingListener } from './listeners/cash-collected-routing.listener';
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
+import { EmergencyDispatchStrugglingRoutingListener } from './listeners/emergency-dispatch-struggling-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
@@ -100,6 +101,7 @@ import { NotificationsService } from './notifications.service';
     OrderAssistantAssignedManuallyNotificationListener,
     OrderOfferNotificationListener,
     OrderOfferResolutionListener,
+    EmergencyDispatchStrugglingRoutingListener,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })

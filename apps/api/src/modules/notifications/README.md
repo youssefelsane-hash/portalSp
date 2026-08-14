@@ -62,6 +62,8 @@
 
 - **`order.technician_cancelled`**: `TechnicianCancellationNotificationListener` جديد — سياسة إلغاء الفني (`docs/10`). حدث مخصوص `TECHNICIAN_ORDER_CANCELLED_EVENT` (مش `ORDER_STATUS_CHANGED_EVENT` العام، لأن الحالة الجديدة بعد الإلغاء — `searching_technician`/`awaiting_technician_reselection` — مش مميّزة كفاية لوحدها). العميل بياخد إشعار **متعدد القنوات** (`notifyMultiChannel([IN_APP, PUSH])` — "عالي الأولوية" بمعنى المشروع: مش in_app بس) بسبب آمن للعميل + deep link يفرّق بين "بندوّرلك تلقائي" و"اختار بديل بنفسك". الأدمن بياخد نسخة عبر `NotificationRoutingService.routeToRole()` الموجود أصلاً (قاعدة افتراضية جديدة `order.technician_cancelled → ops_manager`، migration 0071 — نفس نمط `order.emergency_created`). اتعمله اختبار حي: PUSH فشل بأمان (مفيش جهاز مسجّل للعميل التجريبي) وIN_APP نجح — الاتنين مسجّلين في `notifications` بحالة `delivery_status` مختلفة، مش استثناء يكسر الطلب. أدمن `ops_manager` استلم إشعار التوجيه فعليًا (اتنين مستخدمين مختلفين استلموه). تفاصيل كاملة في `../orders/README.md` § سياسة إلغاء الفني.
 
+- **`order.emergency_dispatch_struggling`** (docs/08 §17.15، migration `0098`): `EmergencyDispatchStrugglingRoutingListener` جديد — نفس نمط `order.emergency_created`/`order.technician_cancelled` بالحرف (`routeToRole()`، قاعدة افتراضية جديدة `→ ops_manager`). بيتصدّر من `MatchingService.dispatchNextRound()` (`../matching/`) مرة واحدة بس لكل طلب طوارئ، لما عدد جولات التوزيع يوصل لعتبة `matching.emergency_escalation_after_rounds`، قبل ما يوصل لسقف الجولات/الفنيين ويتلغي تلقائي — تفاصيل كاملة في `../matching/README.md` § تدرّج دفعات الطوارئ.
+
 ## تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — ✅ خلص
 
 كانت مؤجّلة عمدًا كـ`backlog` منفصل. مستوى القناة بس (push/sms/whatsapp/email)، مش لكل

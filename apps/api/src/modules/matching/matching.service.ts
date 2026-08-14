@@ -8,6 +8,10 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_ACCEPTED_EVENT, OrderAcceptedEvent } from '../../common/events/order-accepted.event';
 import { ORDER_OFFER_CREATED_EVENT, OrderOfferCreatedEvent } from '../../common/events/order-offer-created.event';
 import { ORDER_OFFER_RESOLVED_EVENT, OrderOfferResolvedEvent } from '../../common/events/order-offer-resolved.event';
+import {
+  ORDER_EMERGENCY_DISPATCH_STRUGGLING_EVENT,
+  OrderEmergencyDispatchStrugglingEvent,
+} from '../../common/events/order-emergency-dispatch-struggling.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
@@ -28,6 +32,15 @@ const MAX_ROUNDS_FALLBACK = 4;
 // هيكل الحجز الجديد (docs/06 §1.7، docs/07 الجزء ج) — "طوارئ": دفعة أكبر ("أول عشرة" بالحرف
 // من كلام المالك) + تجاهل فلتر is_available/is_on_duty في findEligibleTechnicians تحت.
 const EMERGENCY_BATCH_SIZE_FALLBACK = 10;
+// تدرّج دفعات الطوارئ (docs/08 §17.15) — دفعة أولى/تالية منفصلتين (قابل للتعديل بشكل مستقل)،
+// مهلة رد أقصر من الطلب العادي (استعجال حقيقي)، سقف أقصى لإجمالي الفنيين المتواصَل معاهم عبر
+// كل الجولات مجتمعة (مختلف عن matching.max_rounds — ده بيحدّ عدد *الجولات*، ده بيحدّ عدد
+// *الفنيين* الكلي، مفيد لو batch size كبير وعدد الجولات قليل)، وعتبة تصعيد للأدمن لو الطوارئ
+// بتاخد وقت أطول من المتوقع من غير ما تتلغي لسه.
+const EMERGENCY_SUBSEQUENT_BATCH_SIZE_FALLBACK = 10;
+const EMERGENCY_RESPONSE_TIMEOUT_SECONDS_FALLBACK = 20;
+const EMERGENCY_MAX_TECHNICIANS_CONTACTED_FALLBACK = 40;
+const EMERGENCY_ESCALATION_AFTER_ROUNDS_FALLBACK = 2;
 
 interface EligibleTechnicianRow {
   technician_id: string;
@@ -209,9 +222,42 @@ export class MatchingService {
       // هيكل الحجز الجديد (docs/06 §1.7) — "طوارئ" بتستخدم دفعة أكبر (افتراضي 10، "أول عشرة"
       // بالحرف من كلام المالك) وبتتجاهل فلتر التوافر العادي تمامًا (تفاصيل في findEligibleTechnicians).
       const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
-      const batchSize = isEmergency
-        ? await this.settingsService.getNumber('matching.emergency_batch_size', EMERGENCY_BATCH_SIZE_FALLBACK)
-        : await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+
+      // سقف أقصى لإجمالي الفنيين المتواصَل معاهم عبر كل الجولات (docs/08 §17.15، طوارئ بس) —
+      // مستقل عن matching.max_rounds (ده بيحدّ عدد *الجولات*، ده بيحدّ عدد *الفنيين* الكلي).
+      // بيتحسب قبل أي إدراج للجولة دي، فبيمثّل "اتصلنا بكام فني لحد دلوقتي فعلاً".
+      let techniciansContactedSoFar = 0;
+      let emergencyRemainingBudget: number | null = null;
+      if (isEmergency) {
+        techniciansContactedSoFar = await manager.count(OrderAssignment, { where: { orderId } });
+        const maxContacted = await this.settingsService.getNumber(
+          'matching.emergency_max_technicians_contacted',
+          EMERGENCY_MAX_TECHNICIANS_CONTACTED_FALLBACK,
+        );
+        emergencyRemainingBudget = maxContacted - techniciansContactedSoFar;
+        if (emergencyRemainingBudget <= 0) {
+          await this.cancelForNoTechnicians(order, manager);
+          return { kind: 'cancelled' as const, order };
+        }
+      }
+
+      // دفعة أولى/تالية منفصلتين (docs/08 §17.15) — الأدمن يقدر يخلّي أول دفعة أكبر (سرعة أولية)
+      // ودفعات لاحقة أصغر (أو العكس)، بلا افتراض إن الدفعتين لازم يبقوا بنفس الحجم.
+      let batchSize: number;
+      if (isEmergency) {
+        batchSize =
+          nextRound === 1
+            ? await this.settingsService.getNumber('matching.emergency_batch_size', EMERGENCY_BATCH_SIZE_FALLBACK)
+            : await this.settingsService.getNumber(
+                'matching.emergency_subsequent_batch_size',
+                EMERGENCY_SUBSEQUENT_BATCH_SIZE_FALLBACK,
+              );
+        if (emergencyRemainingBudget !== null) {
+          batchSize = Math.min(batchSize, emergencyRemainingBudget);
+        }
+      } else {
+        batchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+      }
       // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
       // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
       // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
@@ -240,10 +286,14 @@ export class MatchingService {
         return { kind: 'cancelled' as const, order };
       }
 
-      const responseTimeoutSeconds = await this.settingsService.getNumber(
-        'matching.response_timeout_seconds',
-        RESPONSE_TIMEOUT_SECONDS_FALLBACK,
-      );
+      // مهلة رد أقصر للطوارئ (docs/08 §17.15 — "عمر العرض") — استعجال حقيقي، مستقلة عن مهلة
+      // الطلب العادي تمامًا.
+      const responseTimeoutSeconds = isEmergency
+        ? await this.settingsService.getNumber(
+            'matching.emergency_response_timeout_seconds',
+            EMERGENCY_RESPONSE_TIMEOUT_SECONDS_FALLBACK,
+          )
+        : await this.settingsService.getNumber('matching.response_timeout_seconds', RESPONSE_TIMEOUT_SECONDS_FALLBACK);
       const now = new Date();
       const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
       const rows = candidates.map((c) =>
@@ -260,7 +310,30 @@ export class MatchingService {
       await manager.save(rows);
       this.logger.log(`جولة ${nextRound} — ${rows.length} فني لطلب ${order.orderNumber}`);
 
-      return { kind: 'dispatched' as const, order, nextRound, responseTimeoutSeconds, dispatched: rows.length, rows, isEmergency, sentAt: now, expiresAt };
+      // تصعيد للأدمن/الموظف (docs/08 §17.15 — "سياسة تصعيد") — مرة واحدة بس لكل طلب، لما عدد
+      // الجولات يوصل لعتبة قابلة للتعديل، قبل ما يوصل لسقف الجولات/الفنيين ويتلغي تلقائي.
+      let shouldEscalate = false;
+      if (isEmergency) {
+        const escalationAfterRounds = await this.settingsService.getNumber(
+          'matching.emergency_escalation_after_rounds',
+          EMERGENCY_ESCALATION_AFTER_ROUNDS_FALLBACK,
+        );
+        shouldEscalate = nextRound === escalationAfterRounds;
+      }
+
+      return {
+        kind: 'dispatched' as const,
+        order,
+        nextRound,
+        responseTimeoutSeconds,
+        dispatched: rows.length,
+        rows,
+        isEmergency,
+        sentAt: now,
+        expiresAt,
+        shouldEscalate,
+        techniciansContactedSoFar: techniciansContactedSoFar + rows.length,
+      };
     });
 
     if (result.kind === 'noop') {
@@ -269,6 +342,18 @@ export class MatchingService {
     if (result.kind === 'cancelled') {
       this.emitCancelledForNoTechnicians(result.order);
       return { dispatched: 0 };
+    }
+
+    if (result.shouldEscalate) {
+      this.events.emit(
+        ORDER_EMERGENCY_DISPATCH_STRUGGLING_EVENT,
+        new OrderEmergencyDispatchStrugglingEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.nextRound,
+          result.techniciansContactedSoFar,
+        ),
+      );
     }
 
     // بره الـ transaction عمداً (زي ORDER_ACCEPTED_EVENT) — مفيش داعي حد يسمع بيانات مش مؤكّدة.
