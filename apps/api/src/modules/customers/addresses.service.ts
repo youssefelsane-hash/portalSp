@@ -3,18 +3,51 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { GeoService } from '../geo/geo.service';
+import { Order, OrderStatus } from '../orders/entities/order.entity';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { Address } from './entities/address.entity';
 import { CustomerProfile } from './entities/customer-profile.entity';
+
+// الحالات النهائية بس — أي حالة تانية (بما فيها disputed) لسه "شغالة" من ناحية ارتباط العنوان
+// (docs/08 §22 بند 12).
+const TERMINAL_ORDER_STATUSES = [
+  OrderStatus.COMPLETED,
+  OrderStatus.CANCELLED_BY_CUSTOMER,
+  OrderStatus.CANCELLED_BY_TECHNICIAN,
+  OrderStatus.CANCELLED_BY_SYSTEM,
+  OrderStatus.EXPIRED,
+  OrderStatus.REFUNDED,
+];
 
 @Injectable()
 export class AddressesService {
   constructor(
     @InjectRepository(Address) private readonly addresses: Repository<Address>,
     @InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>,
+    @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly geoService: GeoService,
   ) {}
+
+  /** عناوين المستخدم اللي مرتبطة بطلب نشط دلوقتي — استعلام واحد لكل قايمة، مش N+1 لكل عنوان. */
+  async findAddressIdsWithActiveOrders(userId: string): Promise<Set<string>> {
+    const rows = await this.orders
+      .createQueryBuilder('o')
+      .select('DISTINCT o.address_id', 'address_id')
+      .innerJoin('customer_profiles', 'cp', 'cp.id = o.customer_id')
+      .where('cp.user_id = :userId', { userId })
+      .andWhere('o.order_status NOT IN (:...terminal)', { terminal: TERMINAL_ORDER_STATUSES })
+      .getRawMany<{ address_id: string }>();
+    return new Set(rows.map((r) => r.address_id));
+  }
+
+  hasActiveOrder(addressId: string): Promise<boolean> {
+    return this.orders
+      .createQueryBuilder('o')
+      .where('o.address_id = :addressId', { addressId })
+      .andWhere('o.order_status NOT IN (:...terminal)', { terminal: TERMINAL_ORDER_STATUSES })
+      .getExists();
+  }
 
   findAllForUser(userId: string): Promise<Address[]> {
     return this.addresses.find({ where: { userId }, order: { isDefault: 'DESC', createdAt: 'DESC' } });

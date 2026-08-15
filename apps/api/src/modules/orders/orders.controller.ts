@@ -10,6 +10,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { RequestRematchDto } from './dto/request-rematch.dto';
+import { RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
@@ -74,6 +75,16 @@ export class OrdersController {
     @Body() dto: CancelOrderDto,
   ) {
     return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto));
+  }
+
+  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك فعليًا، ونفس الفني المعيّن.
+  @Post(':id/reschedule')
+  async reschedule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RescheduleOrderDto,
+  ) {
+    return toOrderResponseDto(await this.ordersService.reschedule(user.sub, id, dto));
   }
 
   // سياسة إلغاء الفني (docs/10) — العميل بيستخدمها لما طلبه يبقى awaiting_technician_reselection

@@ -15,8 +15,10 @@ import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
 import '../support/support_contact_screen.dart';
+import '../technicians/models.dart' show ScheduleSlot;
 import '../technicians/technician_profile_screen.dart';
 import '../technicians/technician_selection_screen.dart';
+import '../technicians/technicians_repository.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
@@ -102,6 +104,62 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final uri = Uri(scheme: 'tel', path: phone);
     if (!await launchUrl(uri)) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر فتح تطبيق الاتصال')));
+    }
+  }
+
+  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك، لسلوت تاني لنفس الفني.
+  Future<void> _rescheduleOrder() async {
+    final order = _order;
+    if (order == null || order.technicianId == null) return;
+
+    List<ScheduleSlot> slots;
+    try {
+      final all = await TechniciansRepository(context.read<AuthRepository>()).fetchSchedule(order.technicianId!);
+      slots = all.where((s) => s.isAvailable).toList();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      return;
+    }
+    if (!mounted) return;
+    if (slots.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مفيش مواعيد تانية متاحة للفني ده دلوقتي')));
+      return;
+    }
+
+    final chosen = await showDialog<ScheduleSlot>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('اختار ميعاد جديد'),
+          content: SizedBox(
+            width: 400,
+            height: 300,
+            child: ListView.builder(
+              itemCount: slots.length,
+              itemBuilder: (context, i) {
+                final s = slots[i];
+                return ListTile(
+                  title: Text('${s.slotDate} — ${s.startTime.substring(0, 5)}'),
+                  onTap: () => Navigator.of(context).pop(s),
+                );
+              },
+            ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع'))],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+
+    try {
+      final updated = await _repository.reschedule(order.id, chosen.id);
+      if (mounted) {
+        setState(() => _order = updated);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — الفني اتبلّغ')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     }
   }
 
@@ -602,6 +660,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               ],
                             ),
                           ),
+                        ),
+                      ],
+                      if (order.technicianId != null &&
+                          (order.orderStatus == 'technician_assigned' || order.orderStatus == 'accepted')) ...[
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: _rescheduleOrder,
+                          icon: const Icon(Icons.event_repeat_outlined),
+                          label: const Text('غيّر ميعاد الزيارة'),
                         ),
                       ],
                       if (order.technicianId != null) ...[

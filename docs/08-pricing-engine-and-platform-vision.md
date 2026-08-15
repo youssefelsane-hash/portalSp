@@ -2482,3 +2482,26 @@ required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبلي�
 كامل، `REFUNDED` تلقائيًا من `refundOrder()` نفسها)؛ رفض حل طلب مش `DISPUTED` أصلاً. 46 suite / 254
 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين)/admin `tsc`+`eslint`+`next build`
 نضيفين.
+
+### تحديث تنفيذ §22 — بند 9-12 (إعادة جدولة موعد + حماية حجز مزدوج + تحذير تغيير العنوان) — ✅ `DONE + LIVE VERIFIED`
+
+**بند 9-11 (`MISSING`، اتقفل)**: `TechnicianScheduleService.rescheduleSlot()` جديدة — تحرير السلوت
+القديم وحجز الجديد ذرّيًا جوّه transaction واحدة، بتستخدم `bookSlot()` الذرّية **الموجودة بالفعل**
+(`UPDATE ... WHERE status='available'`) — **صفر كود حماية حجز مزدوج جديد**، إعادة استخدام كاملة.
+`OrdersService.reschedule()` متاحة بس قبل ما الفني يتحرّك فعليًا (`TECHNICIAN_ASSIGNED`/`ACCEPTED`)
+ولازم يكون نفس الفني. سجل تاريخ محفوظ (`order_status_history`) + إشعار فني عالي الوضوح (in_app+push،
+حدث مخصوص `ORDER_RESCHEDULED_EVENT` لأن الحالة مابتتغيّرش). **بند 11 (اختبارات تصادم مستهدفة)**:
+اختبار حي بـ`Promise.allSettled` على محاولتين متزامنتين لنفس السلوت — واحدة بس تنجح، اللي فشلت
+تفضل محتفظة بموعدها الأصلي (صفر خسارة صامتة، صفر حجز مزدوج).
+
+**بند 12 (`MISSING`، اتقفل)**: `AddressesService.hasActiveOrder()`/`findAddressIdsWithActiveOrders()`
+— أي طلب مش نهائي على العنوان بيتحسب "نشط" (بما فيه `disputed`). `has_active_order` بقى في
+`AddressResponseDto`. تحذير بصري بس (مش منع) — بانر برتقالي في شاشة التعديل + أيقونة تحذير في
+القايمة. **اكتشاف جانبي أثناء التنفيذ**: تعديل العنوان مكنش أصلاً feature موجودة في
+`apps/customer-app` (إضافة/حذف بس) — `PATCH /addresses/:id` كان صفر caller من التطبيق رغم إنه
+شغال ومختبر في الباك-إند من زمان. اتقفلت الفجوة دي كجزء من نفس الشغل (`AddressFormScreen` وضع
+تعديل + `AddressesRepository.update()`) عشان التحذير يكون له مكان يظهر فيه أصلاً.
+
+اتأكد بـ5 اختبار حي جديد (`reschedule-and-address-warning.spec.ts`، تفاصيل كاملة في
+`../orders/README.md` و`../customers/README.md`). 47 suite / 259 اختبار API عدّوا كاملين،
+`tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.

@@ -133,6 +133,12 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
+  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك، لسلوت تاني لنفس الفني.
+  Future<Order> reschedule(String orderId, String newSlotId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/reschedule', body: {'new_slot_id': newSlotId});
+    return Order.fromJson(data!);
+  }
+
   Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,

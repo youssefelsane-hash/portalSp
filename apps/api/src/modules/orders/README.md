@@ -519,3 +519,31 @@ required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبلي�
 البَقّة اللي اتصلحت في `wallets.adjust`/`payments.confirm_manual`/`settings.manage` مع بعض). تفاصيل
 كاملة + الاختبار الجديد (`../auth/mfa-step-up-enforcement.spec.ts`) في
 `../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".
+
+## إعادة الجدولة (docs/08 §22 بند 9-12، 2026-08-15)
+
+كانت فجوة موثّقة صراحة: `TechnicianScheduleService` بنيت للحجز الأولي بس (`bookSlot()`)، صفر طريقة
+"تحويل سلوت محجوز لسلوت تاني" — العميل اللي عايز يغيّر ميعاد طلب مقبول كان مضطر يلغي ويطلب تاني
+من الصفر (لو أصلاً الإلغاء متاح في حالته). `OrdersService.reschedule(userId, orderId, dto)` —
+متاحة بس قبل ما الفني يبدأ يتحرّك فعليًا (`TECHNICIAN_ASSIGNED`/`ACCEPTED`، مش `TECHNICIAN_ON_WAY`
+فما بعده)، ولازم السلوت الجديد يكون لنفس الفني المعيّن (تغيير الفني نفسه مسار مختلف تمامًا —
+`request-rematch`). الحماية من الحجز المزدوج **صفر كود إضافي** — `TechnicianScheduleService
+.rescheduleSlot()` بتستخدم `bookSlot()` الذرّية الموجودة من الأول (`UPDATE ... WHERE status=
+'available'`) جوّه transaction واحدة مع تحرير السلوت القديم، فلو الجديد اتحجز من عميل تاني بينهم،
+كل حاجة بترجع لورا (القديم يفضل زي ما هو، صفر خسارة موعد صامتة).
+
+`ORDER_RESCHEDULED_EVENT` (حدث مخصوص، مش `ORDER_STATUS_CHANGED_EVENT` — إعادة الجدولة ماتغيّرش
+`orderStatus` خالص) بيوصّل لإشعار عالي الوضوح للفني (in_app + push، `notifications/listeners/
+order-rescheduled-notification.listener.ts`) — "العميل غيّر ميعاد الطلب". سجل التاريخ محفوظ في
+`order_status_history` (صف بنفس الحالة قبل/بعد، `reason` فيه الموعد القديم والجديد).
+
+**`apps/customer-app`**: زرار "غيّر ميعاد الزيارة" في `order_detail_screen.dart` (يظهر بس في
+الحالتين المسموحتين) بيفتح قايمة السلوتات المتاحة للفني نفسه (`TechniciansRepository.fetchSchedule()`
+الموجودة بالفعل من تدفق الحجز الأصلي).
+
+اتأكد بـ5 اختبار حي جديد (`reschedule-and-address-warning.spec.ts`): إعادة جدولة ناجحة (القديم
+يرجع متاح، الجديد يتحجز، `scheduledAt` يتحدّث)؛ رفض بعد `technician_on_way`؛ **تصادم حجز حقيقي**
+(محاولتين متزامنتين `Promise.allSettled` على نفس السلوت — واحدة بس تنجح، اللي فشلت محتفظة بموعدها
+الأصلي، صفر حجز مزدوج صامت)؛ رفض سلوت فني تاني؛ `AddressesService.hasActiveOrder()` (تفاصيل في
+`../customers/README.md`). 47 suite / 259 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze`
+نضيفين.

@@ -11,6 +11,8 @@ class Address {
   final double latitude;
   final double longitude;
   final bool isDefault;
+  // العنوان ده مرتبط بطلب نشط دلوقتي (docs/08 §22 بند 12) — تحذير بسيط قبل التعديل، مش منع.
+  final bool hasActiveOrder;
 
   Address({
     required this.id,
@@ -25,6 +27,7 @@ class Address {
     required this.latitude,
     required this.longitude,
     required this.isDefault,
+    required this.hasActiveOrder,
   });
 
   factory Address.fromJson(Map<String, dynamic> json) => Address(
@@ -40,6 +43,7 @@ class Address {
         latitude: (json['latitude'] as num).toDouble(),
         longitude: (json['longitude'] as num).toDouble(),
         isDefault: json['is_default'] as bool,
+        hasActiveOrder: json['has_active_order'] as bool? ?? false,
       );
 
   String get displayTitle => label?.isNotEmpty == true ? label! : streetName;

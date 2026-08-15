@@ -7,6 +7,7 @@ import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_REMATCH_REQUESTED_EVENT, OrderRematchRequestedEvent } from '../../common/events/order-rematch-requested.event';
+import { ORDER_RESCHEDULED_EVENT, OrderRescheduledEvent } from '../../common/events/order-rescheduled.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { TECHNICIAN_ORDER_CANCELLED_EVENT, TechnicianOrderCancelledEvent } from '../../common/events/technician-order-cancelled.event';
 import { BuildingsService } from '../buildings/buildings.service';
@@ -37,6 +38,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
 import { FailedVisitReason, ReportFailedVisitDto } from './dto/report-failed-visit.dto';
+import { RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
@@ -60,6 +62,11 @@ const TEAM_SELF_CANCEL_ALLOWED_ROLES = new Set<TechnicianTeamRole>([
   TechnicianTeamRole.OWNER,
   TechnicianTeamRole.MANAGER,
 ]);
+
+// إعادة الجدولة (docs/08 §22 بند 9-12) متاحة بس قبل ما الفني يبدأ يتحرّك فعليًا — بعد
+// technician_on_way الموعد بقى واقعي (الفني في الطريق)، تغييره في اللحظة دي مش "إعادة جدولة" لطلب
+// مستقبلي، ده تصادم مع رحلة شغالة فعلاً.
+const RESCHEDULABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHNICIAN_ASSIGNED, OrderStatus.ACCEPTED]);
 
 const FAILED_VISIT_REASON_TO_COMPLAINT_CATEGORY: Record<FailedVisitReason, ComplaintCategory> = {
   [FailedVisitReason.CUSTOMER_NO_SHOW]: ComplaintCategory.NO_SHOW,
@@ -688,6 +695,74 @@ export class OrdersService {
           .catch(() => {});
       }
     }
+
+    return order;
+  }
+
+  /**
+   * إعادة جدولة الطلب لموعد تاني عند نفس الفني (docs/08 §22 بند 9-12) — تحرير السلوت القديم
+   * وحجز الجديد ذرّيًا جوّه transaction واحدة (TechnicianScheduleService.rescheduleSlot، بيستخدم
+   * bookSlot() الذرّية وراها) — لو السلوت الجديد اتحجز من عميل تاني بينهم، الحجز يفشل والقديم
+   * يترجع تلقائيًا (rollback)، صفر حجز مزدوج صامت ممكن يحصل بأي حال.
+   */
+  async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
+    const order = await this.findOneOwnedOrThrow(userId, orderId);
+
+    if (!RESCHEDULABLE_STATUSES.has(order.orderStatus)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تعيد جدولة الطلب والفني في حالة ${order.orderStatus}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (!order.technicianId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مفيهوش فني معيّن لسه', HttpStatus.CONFLICT);
+    }
+
+    const currentSlot = await this.scheduleService.findSlotForOrder(orderId);
+    if (!currentSlot) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش مرتبط بموعد محدد أصلاً', HttpStatus.CONFLICT);
+    }
+
+    const newSlot = await this.scheduleService.findAvailableSlotOrThrow(dto.new_slot_id);
+    if (newSlot.technicianId !== order.technicianId) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'السلوت الجديد لازم يكون لنفس الفني المعيّن على الطلب — تغيير الفني نفسه مسار مختلف',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const previousScheduledAt = order.scheduledAt;
+    const newScheduledAt = new Date(`${newSlot.slotDate}T${newSlot.startTime}Z`);
+
+    await this.dataSource.transaction(async (manager) => {
+      const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
+      if (!booked) {
+        throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
+      }
+      order.scheduledAt = newScheduledAt;
+      await manager.save(order);
+
+      // سجل تاريخ محفوظ (نفس orderStatus قبل وبعد — إعادة الجدولة ماتغيّرش حالة الطلب خالص، بس
+      // لازم يتسجّل كتغيير حقيقي مش يختفي بلا أثر).
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus: order.orderStatus,
+          newStatus: order.orderStatus,
+          changedByUserId: userId,
+          changedByRole: 'customer',
+          changeSource: OrderChangeSource.CUSTOMER,
+          reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}`,
+        }),
+      );
+    });
+
+    this.events.emit(
+      ORDER_RESCHEDULED_EVENT,
+      new OrderRescheduledEvent(order.id, order.orderNumber, order.technicianId, order.customerId, previousScheduledAt, newScheduledAt),
+    );
 
     return order;
   }

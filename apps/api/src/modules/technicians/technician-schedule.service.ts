@@ -102,6 +102,28 @@ export class TechnicianScheduleService {
     return (result.affected ?? 0) > 0;
   }
 
+  /** السلوت المحجوز حاليًا لطلب معيّن (لو موجود) — docs/08 §22 بند 9-12، بداية إعادة الجدولة. */
+  findSlotForOrder(orderId: string): Promise<TechnicianScheduleSlot | null> {
+    return this.slots.findOne({ where: { orderId, status: TechnicianScheduleSlotStatus.BOOKED } });
+  }
+
+  /**
+   * إعادة جدولة — تحرير السلوت القديم وحجز الجديد ذرّيًا جوّه نفس الـtransaction (docs/08 §22
+   * بند 9-12). لو حجز الجديد فشل (اتحجز من عميل تاني بينهم، أو اتشال)، الـcaller (OrdersService
+   * .reschedule) بيرمي ويرجع الـtransaction بالكامل — يعني تحرير القديم بيترول باك برضه، العميل
+   * ميخسرش موعده الأصلي بسبب محاولة إعادة جدولة فشلت. نفس ضمان "صفر حجز مزدوج صامت" اللي
+   * bookSlot() الذرّية بتوفره من الأساس.
+   */
+  async rescheduleSlot(orderId: string, newSlotId: string, manager: EntityManager): Promise<boolean> {
+    await manager
+      .createQueryBuilder()
+      .update(TechnicianScheduleSlot)
+      .set({ status: TechnicianScheduleSlotStatus.AVAILABLE, orderId: null })
+      .where('orderId = :orderId', { orderId })
+      .execute();
+    return this.bookSlot(newSlotId, orderId, manager);
+  }
+
   /** بيرجّع سلوت اتحجز لموقف — لو الطلب اتلغى مثلاً، السلوت يرجع متاح تاني. */
   async releaseSlotForOrder(orderId: string): Promise<void> {
     await this.slots

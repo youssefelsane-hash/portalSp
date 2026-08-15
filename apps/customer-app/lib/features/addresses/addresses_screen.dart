@@ -50,6 +50,13 @@ class _AddressesScreenState extends State<AddressesScreen> {
     }
   }
 
+  Future<void> _edit(Address address) async {
+    final updated = await Navigator.of(context).push<Address>(
+      MaterialPageRoute(builder: (_) => AddressFormScreen(repository: _repository, existingAddress: address)),
+    );
+    if (updated != null) await _load();
+  }
+
   Future<void> _remove(Address address) async {
     try {
       await _repository.remove(address.id);
@@ -92,7 +99,18 @@ class _AddressesScreenState extends State<AddressesScreen> {
                           return Card(
                             child: ListTile(
                               title: Text(address.displayTitle),
-                              subtitle: Text(address.streetName),
+                              subtitle: Row(
+                                children: [
+                                  Expanded(child: Text(address.streetName)),
+                                  // تحذير بسيط (docs/08 §22 بند 12) — العنوان ده مرتبط بطلب شغال
+                                  // دلوقتي، ظاهر قبل حتى ما العميل يفتح التعديل.
+                                  if (address.hasActiveOrder)
+                                    const Padding(
+                                      padding: EdgeInsets.only(right: 8),
+                                      child: Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
+                                    ),
+                                ],
+                              ),
                               trailing: widget.selectionMode
                                   ? null
                                   : IconButton(
@@ -101,7 +119,7 @@ class _AddressesScreenState extends State<AddressesScreen> {
                                     ),
                               onTap: widget.selectionMode
                                   ? () => Navigator.of(context).pop(address)
-                                  : null,
+                                  : () => _edit(address),
                             ),
                           );
                         },
