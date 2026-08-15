@@ -2861,5 +2861,36 @@ agents متعددة، مش كل ادّعاء بيبقى صح.
 
 **اتأكد**: `tsc --noEmit`/`nest build` (باك-إند)، `tsc --noEmit` (أدمن)، `flutter analyze` على
 التلات apps (صفر خطأ/تحذير جديد في الملفات المعدّلة، نفس عدد نقط الـinfo الموجودة من قبل بالظبط).
-باقي بنود §24 (شكاوى/دعم/تقييمات الفني في `apps/technician-app` — التطبيق مفيهوش شاشة خالص، أكّده
-2 agents مستقلين) لسه قيد التنفيذ — تفاصيلها في التحديث الجاي.
+
+### §24 — دفعة 3: شكاوى/دعم الفني في `apps/technician-app` (كانت التطبيق مفيهوش شاشة خالص) — ✅ `DONE + LIVE VERIFIED`
+
+**أكبر فجوة UI متبقية، أكّدها 2 agents بحث مستقلين تمامًا**: الباك-إند (`complaints` module) بيعتبر
+الفني طرف كامل من زمان (`@Roles(CUSTOMER, TECHNICIAN)` على كل endpoint في `support.controller.ts`)،
+بس `apps/technician-app` معندهاش ولا شاشة واحدة تستخدم أي منهم — فني مكانش يقدر يفتح شكوى، يرد
+على شكوى مفتوحة ضده، أو يشوف شكاويه من جوّه التطبيق أصلاً.
+
+اتقفلت: `apps/technician-app/lib/features/support/` جديد كامل — نفس بنية
+`apps/customer-app/lib/features/support/` بالحرف (نفس الـAPI contract تمامًا، الطرفين بيستخدموا
+نفس الـendpoints):
+- `models.dart`, `support_repository.dart` — نسخة مطابقة (نفس `ComplaintCategory`/`Complaint`/
+  `ComplaintMessage`/`ComplaintAttachment`).
+- `complaints_screen.dart` — قايمة شكاوي الفني + FAB "شكوى جديدة".
+- `file_complaint_screen.dart` — **فرق مقصود واحد عن نسخة العميل**: مفيش dropdown "اختار من
+  قايمة طلباتك" لأن `apps/technician-app` معندهاش endpoint يعرض كل الطلبات التاريخية للفني (بس
+  الطلب الشغال حاليًا) — شكوى عن طلب معيّن بتتفتح بـ`orderId` من `OrderExecutionScreen` نفسها،
+  شكوى عامة بلا طلب متاحة دايمًا من الـDrawer.
+- `complaint_detail_screen.dart` — نفس الشاشة، محاذاة الرسائل بقت `senderRole == 'technician'`
+  (بدل `'customer'`) عشان رسائل الفني نفسه تظهر على اليمين صح.
+
+**اتربطت في مكانين**: (أ) Drawer الرئيسي (`available_orders_screen.dart`) — عنصر "شكاويّي" جديد
+تحت مجموعة "الدعم والتدريب"، (ب) `OrderExecutionScreen`'s AppBar — زرار "قدّم شكوى عن الطلب ده"
+جديد بجانب زرار "اتصل بالدعم" الموجود، متاح على أي حالة (مطابق لنفس الزرار في
+`order_detail_screen.dart` بتاع العميل).
+
+**بَقّة حقيقية اتلقطت واتصلحت وقت التطوير**: `technician-app`'s `AuthRepository.authedUpload()`
+عنده `fields` (`Map<String, String>`) إجباري (عكس نسخة العميل اللي بلا الحقل ده) — `flutter
+analyze` لقط الخطأ فورًا (`missing_required_argument`)، اتصلح بـ`fields: const {}` (نفس نمط
+`chat_repository.dart`'s استخدام بالظبط).
+
+**اتأكد**: `flutter analyze` صفر خطأ (13 نقطة info، زيادة نقطة واحدة بس عن قبل — أسلوبية، نفس فئة
+الباقي)، `flutter test` عدّى كامل.

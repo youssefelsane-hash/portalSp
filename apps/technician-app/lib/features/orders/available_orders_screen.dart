@@ -17,6 +17,7 @@ import '../profile/profile_screen.dart';
 import '../progression/progression_screen.dart';
 import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
+import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
@@ -283,6 +284,13 @@ class _TechnicianDrawer extends StatelessWidget {
                 icon: Icons.support_agent_outlined,
                 label: 'تواصل مع الإدارة',
                 builder: (_) => const InternalChatListScreen(),
+              ),
+              // §24 — كانت فجوة موثّقة: صفر شاشة شكاوى في التطبيق ده رغم إن الباك-إند بيعتبر
+              // الفني طرف كامل في نظام الشكاوى من زمان.
+              _DrawerItem(
+                icon: Icons.report_problem_outlined,
+                label: 'شكاويّي',
+                builder: (_) => const ComplaintsScreen(),
               ),
               const Divider(height: 1),
               ListTile(

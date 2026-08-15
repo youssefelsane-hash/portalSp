@@ -8,6 +8,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../media/media_repository.dart' show MediaRepository, OrderMediaItem;
+import '../support/file_complaint_screen.dart';
 import '../support/support_contact_screen.dart';
 import '../tracking/tracking_client.dart';
 import 'models.dart';
@@ -397,6 +398,16 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               tooltip: 'اتصل بالدعم',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+              ),
+            ),
+            // §24 — كانت فجوة موثّقة: صفر طريقة يقدّم بيها الفني شكوى عن طلب معيّن من جوّه
+            // التطبيق، رغم إن الباك-إند بيدعم كده من زمان. متاح على أي حالة، مطابق لنفس الزرار
+            // في apps/customer-app's order_detail_screen.dart.
+            IconButton(
+              icon: const Icon(Icons.report_problem_outlined),
+              tooltip: 'قدّم شكوى عن الطلب ده',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => FileComplaintScreen(orderId: _order.id)),
               ),
             ),
           ],
