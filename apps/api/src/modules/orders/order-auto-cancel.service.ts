@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, LessThan, Repository } from 'typeorm';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PaymentsService } from '../payments/payments.service';
+import { PromoCodesService } from '../promotions/promo-codes.service';
 import { SettingsService } from '../settings/settings.service';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
@@ -33,11 +34,12 @@ const PAYMENT_TIMEOUT_MINUTES_FALLBACK = 15;
  * `PaymentsService.refundSystemCancelledOrder()` بعد الإلغاء مباشرة — مفيش عكس أرباح فني في
  * الحالة دي لأن مفيش فني اتعيّن أصلاً (technicianId=null بالتعريف وقت SEARCHING_TECHNICIAN).
  *
- * **فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح عمدًا**: لو الطلب استخدم promo code وقت الإنشاء،
- * `PromoCode.usedCount` بيتزوّد في `promo-codes.service.ts`'s `validateAndApply()` بس مفيش أي
- * decrement/release لاستخدام الكود ده في أي مسار إلغاء بالكامل (مش بس هنا — ولا في
- * `OrdersService.cancel()` ولا إلغاء الفني). ده قصور نظامي أوسع سابق على هذا التعديل، محتاج قرار
- * عمل منفصل (هل الاستخدام يترجع لو الطلب اتلغى بلا خدمة فعلية؟) مش جزء من بند 3+5 تحديدًا.
+ * **تحديث (§24 — تدقيق الاكتمال الداخلي، 2026-08-15)**: كانت فجوة موثّقة صراحة — `promo_codes.
+ * used_count`/`spent_cents` بيتزودوا وقت استخدام الكود بس مفيش أي decrement/release في أي مسار
+ * إلغاء. اتقفلت: `PromoCodesService.releaseUsage()` بينادى دلوقتي جوّه نفس transaction الإلغاء في
+ * المسارين هنا (`cancelIfStillSearching`, `cancelIfStillPendingPayment`) وكمان في
+ * `OrdersService.cancel()` و`AdminOrdersService.cancel()` — الأربعة مسارات اللي بتلغي الطلب نهائيًا
+ * فعلاً (إلغاء الفني الذاتي مستثنى عمدًا: الطلب بيرجع لمطابقة تلقائية، مش بيتلغي).
  */
 @Injectable()
 export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
@@ -50,6 +52,7 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
     private readonly paymentsService: PaymentsService,
+    private readonly promoCodesService: PromoCodesService,
   ) {}
 
   onModuleInit(): void {
@@ -110,6 +113,7 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
           reason: `إلغاء تلقائي — مفيش فني قبل الطلب خلال ${minutes} دقيقة`,
         }),
       );
+      await this.promoCodesService.releaseUsage(manager, order.id);
       return order;
     });
 
@@ -198,6 +202,7 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
           reason: `إلغاء تلقائي — الدفع ماتمش خلال ${minutes} دقيقة`,
         }),
       );
+      await this.promoCodesService.releaseUsage(manager, order.id);
       return order;
     });
 

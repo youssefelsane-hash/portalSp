@@ -26,6 +26,7 @@ import { AssistantOpportunityNotificationListener } from './listeners/assistant-
 import { AssistantPersonalAssignedNotificationListener } from './listeners/assistant-personal-assigned-notification.listener';
 import { CashCollectedRoutingListener } from './listeners/cash-collected-routing.listener';
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
+import { SupportChatMessageRoutingListener } from './listeners/support-chat-message-routing.listener';
 import { EmergencyDispatchStrugglingRoutingListener } from './listeners/emergency-dispatch-struggling-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
@@ -90,6 +91,7 @@ import { NotificationsService } from './notifications.service';
     OrderRescheduledNotificationListener,
     TechnicianVerificationNotificationListener,
     ComplaintFiledRoutingListener,
+    SupportChatMessageRoutingListener,
     EmergencyOrderRoutingListener,
     PayoutRequiresReviewRoutingListener,
     CashCollectedRoutingListener,

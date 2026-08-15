@@ -26,6 +26,11 @@ class OrderTrackingClient {
     required void Function(TrackingUpdate) onLocationUpdate,
     void Function(String message)? onError,
     void Function()? onJoined,
+    // §24 — كانت فجوة موثّقة (asymmetry حقيقي مع التطبيق الفني): technician_app بيستقبل
+    // order:status_changed ويعيد تحميل الشاشة، customer_app كان بيستقبل order:location_updated
+    // بس. نفس نمط technician-app/tracking_client.dart بالحرف — tracking:join مسموح لأي حالة طلب
+    // (order-tracking.gateway.ts's handleJoin بيتحقق من الملكية بس، مش order_status).
+    void Function(String previousStatus, String newStatus)? onOrderStatusChanged,
   }) {
     final socket = socket_io.io(
       '$_socketBaseUrl/tracking',
@@ -51,6 +56,10 @@ class OrderTrackingClient {
         latitude: (map['latitude'] as num).toDouble(),
         longitude: (map['longitude'] as num).toDouble(),
       ));
+    });
+    socket.on('order:status_changed', (data) {
+      final map = data as Map<dynamic, dynamic>;
+      onOrderStatusChanged?.call(map['previous_status'] as String, map['new_status'] as String);
     });
     socket.on('error', (data) {
       final map = data as Map<dynamic, dynamic>?;

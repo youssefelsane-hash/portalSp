@@ -41,6 +41,7 @@ export class TechnicianCertificatesService {
       issuerName: dto.issuer_name ?? null,
       issuedAt: dto.issued_at ?? null,
       fileUrl,
+      storageKey: key,
       displayOrder: existingCount,
     });
     return this.certificates.save(certificate);

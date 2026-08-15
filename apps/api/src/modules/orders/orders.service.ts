@@ -664,6 +664,9 @@ export class OrdersService {
         }),
       );
 
+      // ترجيع استخدام كود الخصم (لو الطلب استخدم واحد) — §24، راجع PromoCodesService.releaseUsage()
+      await this.promoCodesService.releaseUsage(manager, order.id);
+
       // رسوم الإلغاء بتتحصّل جوّه نفس الـ transaction — "الطلب اتلغى بس الرسوم متحصلتش" ميحصلش،
       // نفس فلسفة settleAndComplete في payments. allowNegativeBalance:true لأنها عقوبة مش دفع
       // اختياري (نفس نمط تعويض الشكاوى في support.service.ts).

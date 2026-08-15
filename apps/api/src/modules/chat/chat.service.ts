@@ -1,9 +1,14 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import {
+  SUPPORT_CHAT_MESSAGE_RECEIVED_EVENT,
+  SupportChatMessageReceivedEvent,
+} from '../../common/events/support-chat-message-received.event';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { PermissionsService } from '../admin/permissions.service';
 import { User, UserType } from '../auth/entities/user.entity';
@@ -36,6 +41,7 @@ export class ChatService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
     private readonly permissionsService: PermissionsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /** بيتصل بيها لما فني يقبل طلب — idempotent، مش هتعمل تريد لو الخيط موجود قبل كده. */
@@ -208,6 +214,25 @@ export class ChatService {
     }
   }
 
+  /**
+   * §24 — كانت فجوة موثّقة صراحة: صفر حدث بيتصدّر على رسالة شات جديدة (طلب/دعم على السوا)،
+   * فمفيش طريقة لتوجيه إشعار زي complaint.filed/payout.requires_review. هنا نطاق ضيّق عمدًا:
+   * شات الدعم العام (support_chat) بس، ولما المُرسِل هو العميل (مش رد الأدمن نفسه — عشان محدش
+   * يتصدّر له إشعار لرده الشخصي). أدمن مش متابع /support-chat مباشر كان عنده صفر إشارة إن
+   * عميل بينتظر رد.
+   */
+  private async emitIfSupportMessageFromCustomer(thread: ChatThread, senderUserId: string, preview: string): Promise<void> {
+    if (thread.threadType !== ChatThreadType.SUPPORT_CHAT) return;
+    const customerProfile = await this.customerProfiles.findOne({ where: { userId: senderUserId } });
+    if (!customerProfile || customerProfile.id !== thread.customerId) return; // مش العميل نفسه (أدمن بيرد)
+
+    const sender = await this.users.findOne({ where: { id: senderUserId } });
+    this.events.emit(
+      SUPPORT_CHAT_MESSAGE_RECEIVED_EVENT,
+      new SupportChatMessageReceivedEvent(thread.id, sender?.fullName ?? 'عميل', preview),
+    );
+  }
+
   async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {
     const thread = await this.getThreadForParticipant(userId, threadId);
     this.assertThreadOpen(thread);
@@ -224,6 +249,8 @@ export class ChatService {
 
     thread.lastMessageAt = message.createdAt;
     await this.threads.save(thread);
+
+    await this.emitIfSupportMessageFromCustomer(thread, userId, dto.content);
 
     return message;
   }
@@ -253,6 +280,8 @@ export class ChatService {
 
     thread.lastMessageAt = message.createdAt;
     await this.threads.save(thread);
+
+    await this.emitIfSupportMessageFromCustomer(thread, userId, '📷 صورة');
 
     return message;
   }

@@ -174,7 +174,7 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const certificate = await this.certificatesService.review(admin.sub, id, certificateId, dto, audit);
-    return toCertificateResponseDto(certificate);
+    return toCertificateResponseDto(certificate, this.storage);
   }
 
   // كانت فجوة موثّقة صراحة: تعيين مناطق عمل الفني كان يدوي عبر SQL مباشر تماماً.

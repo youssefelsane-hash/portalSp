@@ -69,6 +69,6 @@ export async function toAdminTechnicianDetailResponseDto(
   return {
     ...toAdminTechnicianResponseDto(profile, user),
     documents: await Promise.all(documents.map((d) => toTechnicianDocumentResponseDto(d, storage))),
-    certificates: certificates.map(toCertificateResponseDto),
+    certificates: await Promise.all(certificates.map((c) => toCertificateResponseDto(c, storage))),
   };
 }

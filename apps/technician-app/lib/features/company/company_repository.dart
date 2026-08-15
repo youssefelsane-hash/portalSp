@@ -55,4 +55,14 @@ class CompanyRepository {
   Future<void> removeStaff(String userId) async {
     await auth.authedRequest('DELETE', '/technician/company/staff/$userId');
   }
+
+  // §24 — كانت فجوة موثّقة: POST /technician/company/transfer-ownership موجود ومختبر بالباك-إند
+  // (المالك بس يقدر يستخدمها) بس صفر استدعاء له في التطبيق — المالك مالوش طريقة يسلّم الشركة
+  // إلا عبر API مباشر.
+  Future<StaffMember> transferOwnership(String newOwnerUserId) async {
+    final data = await auth.authedRequest('POST', '/technician/company/transfer-ownership', body: {
+      'new_owner_user_id': newOwnerUserId,
+    });
+    return StaffMember.fromJson(data!);
+  }
 }

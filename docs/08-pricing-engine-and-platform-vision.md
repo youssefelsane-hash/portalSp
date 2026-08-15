@@ -928,10 +928,16 @@ InstaPay/البراندنج/الصلاحيات/OTP)، مش قائمة §25 كا�
    Idempotent (بترجع `null` بهدوء لو مفيش دفعة/فيه Refund مسجّل بالفعل)، ومفيش عكس أرباح فني
    (الفحص بيستهدف طلبات مفيش فني اتعيّن عليها أصلاً).
 
-**فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح عمدًا** (مكتوبة كمان كتعليق في الكود نفسه): استخدام
-`promo_code` وقت إنشاء الطلب بيزوّد `PromoCode.usedCount` بس مفيش أي decrement/release ليه في أي
-مسار إلغاء بالكامل في النظام (مش بس هنا — ولا `OrdersService.cancel()` ولا إلغاء الفني). قصور
-نظامي أوسع سابق على هذا التعديل، محتاج قرار عمل منفصل (Business Decision Required).
+**تحديث (§24، 2026-08-15)**: كانت هنا فجوة موثّقة صراحة (استخدام `promo_code` وقت إنشاء الطلب بيزوّد
+`PromoCode.usedCount`/`spentCents` بس مفيش أي decrement/release ليه في أي مسار إلغاء بالكامل).
+اتقفلت: `PromoCodesService.releaseUsage()` (idempotent، append-only عبر `promo_code_usages.
+released_at` — migration `0109`) بينادى دلوقتي جوّه نفس transaction الإلغاء في الأربعة مسارات اللي
+بتلغي الطلب نهائيًا فعلاً: `OrdersService.cancel()`، `AdminOrdersService.cancel()`،
+`OrderAutoCancelService`'s `cancelIfStillSearching()`/`cancelIfStillPendingPayment()` (إلغاء الفني
+الذاتي مستثنى عمدًا — الطلب بيرجع لمطابقة تلقائية، مش بيتلغي نهائي). اختبار حي جديد
+(`promotions/promo-code-usage-release.spec.ts`، 3 اختبارات): استخدام الكود بيزوّد العدادات ثم
+الترجيع بيرجعها بالظبط لقيمتها الأصلية، استدعاء `releaseUsage()` مرتين على نفس الطلب idempotent
+(مفيش رصيد سالب)، طلب بلا كود خصم أصلاً بيرجع no-op آمن.
 
 **اتأكد حي** (`order-auto-cancel-pending-payment.spec.ts`، 3 اختبارات ضد Postgres حقيقي):
 طلب `PENDING_PAYMENT` قديم يتلغى بلا استرداد، طلب `SEARCHING_TECHNICIAN` مدفوع (كارت) قديم
@@ -2649,3 +2655,242 @@ _received_at`) بزرارين "إعادة محاولة التحصيل"/"تأكي
 **البَقّتين الأهم اللي اتلقطوا هذا الجلسة** (تفاصيل كاملة في قسم بند 31-32 فوق): "double admin edit"
 lost-update race في `resolveFailedVisit()`/`resolveCashHandoverDispute()`، وسباق `reschedule()` مع
 `depart()` — الاتنين ممكن كانوا يسيبوا الطلب بحالة غلط لو حصلوا فعليًا في production بلا الإصلاح ده.
+
+## §23. اختبار أمان دفاعي نهائي + إغلاق الـregression قبل الإطلاق (طلب صريح من المالك، 2026-08-15، فوق §22) — ✅ `CLOSED — SECURITY/REGRESSION READY`
+
+**النطاق**: طلب صريح ومحدد من المالك — "مفيش إضافة ميزات جديدة، مفيش تعديل UI، بس فحص أمان دفاعي
+شامل على كل المشروع في بيئة local/test، وregression نهائي قبل التجهيز للإطلاق." **قيد صريح
+اتاحترم بالكامل**: صفر اختبار هجومي ضد أي خدمة خارجية حقيقية أو production — كل الاختبار كان ضد
+`npm run start:dev` محلي + Postgres/Redis حقيقيين محليين + بيانات اختبار مُتحكم فيها بالكامل.
+
+### الاختبار الحي اللي اتعمل (curl + سكريبت bash ضد سيرفر محلي شغال فعليًا)
+
+- **Auth bypass**: بلا token → `401`. JWT عشوائي/تالف → `401`. تزوير `alg:none` (JWT بلا توقيع) →
+  اتأكد إن `jsonwebtoken`/`passport-jwt` بيرفضوه تلقائيًا (السلوك الافتراضي للمكتبة لما `secretOrKey`
+  string بسيط بلا `algorithms` override بيقصر القبول على HMAC بس) — راجع `jwt.strategy.ts`، صفر كود
+  إضافي لازم. refresh token مستخدم كـaccess token → مرفوض.
+- **RBAC bypass**: عميل/فني بيحاولوا يوصلوا لـ`/admin/orders`, `/admin/employees` → `403`. عميل
+  بيحاول `/technician/orders/available` → `403`.
+- **Admin privilege escalation**: `PATCH /admin/settings/:key` من توكن عميل → `401`/`403`. تسجيل ذاتي
+  بـ`user_type: "admin"` عبر `/auth/register` → مرفوض (`RegisterDto.user_type` مقيّد بـ`@IsIn([customer,
+  technician, domestic_worker])` — استحالة بنيوية مش فحص وقت التشغيل بس).
+- **IDOR** (orders/wallet/profile): اختبار حي كامل بتوكنين حقيقيين (owner + attacker) اتأكد منهم
+  بـSQL مباشر — GET/cancel/confirm-cash-handover/team-members/media كلهم بيرفضوا الـattacker بـ`404`
+  (مش `403` — تسريب وجود الطلب صفر). المحفظة (`/wallet`, `/wallet/transactions`) بنيويًا مستحيل يبقى
+  فيها IDOR — بتستنتج المستخدم من `@CurrentUser()` بس، صفر معامل user-id مقبول في أي مكان.
+- **Rate limiting**: الـglobal throttle (60 طلب/دقيقة) اتأكد إنه شغال فعليًا (سيرفر رفض حركة الاختبار
+  نفسها بـ`429` لما اتخطينا الحد). `/auth/otp/request` عنده throttle أضيق (5/دقيقة) اتأكد بمحاولات
+  متتالية سريعة → `429` ظهر زي المتوقع.
+- **OTP brute-force على verify**: 5 محاولات كود غلط متتالية، بعدين الكود الصح نفسه اترفض (cap على
+  المحاولات شغال).
+- **Malicious file upload**: محتوى ملف مزوّر (امتداد/MIME معلن مش مطابق للـmagic bytes الحقيقية) —
+  اترفض حي عبر `file-signature-validator.ts`/`branding-file-validator.ts` (فحص PNG/JPEG/WEBP/PDF
+  بالـmagic bytes، مش بس الامتداد أو الـContent-Type المعلن).
+- **Payment webhook forgery**: HMAC غلط على webhook Paymob مزوّر → اترفض داخليًا (`processing_status:
+  'failed'` مسجّل في `webhook_events`) رغم إن الاستجابة الخارجية بترجع `200` عمدًا (منع إعادة محاولة
+  الـgateway) — سلوك مقصود وموثّق مسبقًا، اتأكد منه مرة تانية هنا.
+
+### الاختبار عن طريق مراجعة الكود (مش هجوم حي — كود القراءة كفاية للتأكد)
+
+- **WebSocket auth**: `chat.gateway.ts` بيتحقق من `handshake.auth.token` بس (صفر fallback لـquery
+  string)، زائد فحص صلاحية منفصل لكل thread (`resolveParticipant()`) مستقل عن فحص الاتصال.
+  Authorization on connect ≠ authorization per-room، والاتنين موجودين.
+- **CORS**: `websocket-cors.util.ts` — دالة ديناميكية بتقرا `CORS_ORIGIN` وقت الاتصال الفعلي (مش وقت
+  تحميل الموديول)، مشتركة بين الـgateways التنين.
+- **CSRF**: صفر cookie-based session في المشروع كله (اتأكد بـgrep شامل) — البنية كلها Bearer
+  token/handshake auth، يعني نموذج هجوم CSRF التقليدي (اعتماد على credentials المتصفح التلقائية) مش
+  منطبق بنيويًا أصلًا.
+- **Path traversal في الـstorage**: كل مسار رفع بيبني الـkey بصيغة ثابتة
+  `<prefix>/<server-generated-id>/<uuid><extname(original)>` — المهاجم يقدر يأثر بس على substring
+  الامتداد، و`path.extname()` بنيويًا مايسمحش بتسريب `/` أو `..` منه.
+- **Admin controllers RBAC coverage**: فحص آلي (grep) على كل `@Controller('admin...` في المشروع كله
+  — صفر controller ناقصه `@Roles(UserType.ADMIN)` على مستوى الكلاس.
+- **Secrets/production defaults**: `env.validation.ts` (Joi schema) — أسرار JWT (≥32 حرف في prod،
+  يرفض قيم `.env.example` الافتراضية، الاتنين لازم يختلفوا)، `CORS_ORIGIN` إجباري في prod،
+  `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` ممنوع يبقوا localhost في prod، `STORAGE_PROVIDER` ممنوع يبقى
+  `local` في prod، بيانات Twilio التلاتة إجبارية مع بعض في prod (قناة الـOTP الوحيدة). كل ده كان
+  موجود ومطبّق من قبل، اتأكد منه هنا مرة تانية بلا تعديل.
+- **npm audit**: مراجعة كل تحذير بحسب قابلية الوصول الفعلية (reachability) مش بس وجوده في الشجرة —
+  `image-size` قابل للوصول لكنه محمي (magic-byte gate قبله)، `file-type`/`glob`/`tmp`/`webpack`/
+  `inquirer` غير قابلين للوصول (أدوات بناء بس)، `qs` غير قابل للوصول (مش بنستخدم `qs.stringify()`
+  المعرّض). صفر ثغرة HIGH قابلة للوصول وغير محمية. رفض عمدًا مسار `--force` (ترقية NestJS v11
+  الكبيرة) كخارج النطاق — مخاطرة regression عالية مقابل صفر ثغرة مؤكدة حاليًا.
+
+### النتيجة: صفر ثغرة حقيقية جديدة اتلقطت
+
+كل نقطة من قائمة المالك (auth bypass, RBAC bypass, IDOR, admin escalation, MFA/step-up bypass, JWT
+misuse, rate-limit, file upload, path traversal, WebSocket auth, CORS, secrets, webhook forgery,
+race conditions على الفلوس/الحالة) طلعت **دفاع موجود بالفعل وشغال** — إما بكود صريح أو ببنية مستحيل
+تُخترق أصلًا (زي الـwallet IDOR). **صفر كود اتغيّر في الجولة دي** — مفيش ثغرة مؤكدة تستاهل تعديل،
+وطبقًا لتعليمة المالك الصريحة ("متعدلش كود شغال لمجرد إنه ممكن نظريًا يتحسّن") متعملش أي تعديل تجميلي.
+
+MFA/step-up bypass، revoked/expired session، duplicate payment/refund/payout — دول متغطيين بالفعل
+بـ`security-regression.spec.ts` (recovery-code race, step-up race, single-use enforcement) و
+`jwt-strategy-active-user-check.spec.ts` (فحص `is_blocked`/`is_active`/`deleted_at` حي على كل
+request) اللي عدّوا كاملين في الـregression النهائي تحت — مش اختبار هجوم حي جديد الجولة دي، بس
+تأكيد إن التغطية الموجودة قايمة وشغالة.
+
+### الـregression النهائي (بوابة واحدة فقط، زي ما المالك طلب — مفيش إعادة تشغيل متكررة)
+
+- Backend: `npx tsc --noEmit` نضيف، `npx nest build` نضيف، `npx jest --runInBand` → **49 suite
+  عدّت / 49، 274 اختبار عدّوا / 274، exit code 0**. (تحذير Jest "did not exit" بعد الانتهاء —
+  connections BullMQ/Redis متسيبة مفتوحة بعد `afterAll`، نمط معروف وموثّق مسبقًا في المشروع، اتأكد
+  من الـPID إنه فضل مفتوح بس بلا نشاط حقيقي غير reconnect polling، اتقفل يدويًا — مش hang حقيقي ولا
+  فشل اختبار.)
+- Admin (`apps/admin`): `npm run build` نضيف بالكامل، صفر تحذير.
+- Customer Flutter: `flutter analyze` → صفر error/warning (43 نقطة `info` كلها موجودة من قبل —
+  `deprecated_member_use` بتاعة `RadioGroup` الجديدة في Flutter SDK و`use_null_aware_elements`
+  أسلوبية، صفر ملف Dart اتلمس في الجولة دي فمفيش نقطة جديدة). `flutter test` → كل الاختبارات عدّت.
+- Technician Flutter: نفس الشيء — `flutter analyze` صفر error/warning (12 نقطة info موجودة من قبل)،
+  `flutter test` عدّى كامل.
+- **Migration/schema consistency**: `node infra/migrations/migrate.js` ضد قاعدة الاختبار المحلية —
+  كل الـ108 ملف migration متطبقين والـchecksum (SHA-256) مطابق للملف الحالي على كل واحد فيهم — صفر
+  انحراف (drift)، صفر ملف اتعدّل بعد ما اتعمله commit.
+
+### الخلاصة
+
+صفر كود اتغيّر، صفر migration جديدة، صفر اختبار regression جديد لازم يتضاف (كل التغطية الموجودة
+كانت كافية وأثبتت نفسها حية). `git status` نضيف بعد التوثيق ده. **الفرع**: `claude/home-services-app-plan-v13gb2`.
+**القرار النهائي: `SECURITY/REGRESSION READY`** — صفر ثغرة حرجة/عالية الخطورة معروفة، صفر bug مالي،
+صفر authorization bypass، صفر regression جوهري باقي. تفعيل الخدمات الخارجية (Paymob/Twilio/FCM/S3/
+Google Maps/production DB-Redis/DNS-TLS/app-store signing) **لسه برّه النطاق عمدًا** — يجي بعد إغلاق
+الجولة دي بقرار صريح من المالك.
+
+## §24. تدقيق اكتمال المنتج الداخلي الشامل قبل تفعيل الخدمات الخارجية (طلب صريح من المالك، 2026-08-15، فوق §23) — 🔄 قيد التنفيذ
+
+**النطاق**: مطابقة شاملة بين `docs/01-master-plan.md` + كل التوثيق + الـREADMEs + الـ"فجوة موثّقة"
+markers (257 موقع) والكود الفعلي، عبر 20 مجال (طلبات/مطابقة/جيو، دفع/تسويات/سحوبات، إشعارات/شات/
+websockets، تقييمات/دعم/عروض، فنيين/شركات/كتالوج/تسعير، إعدادات/أمان/جوبز خلفية). الهدف: أي وظيفة
+منتج داخلية ناقصة/stub/مفصولة/موجودة بالباك-إند بس بلا UI عميل/فني/أدمن.
+
+**المنهجية**: 6 agents بحث متوازيين (`Explore`, read-only) — كل واحد غطّى مجال، قارن claims التوثيق
+بالكود الفعلي سطر سطر، فحص هل الـclient (أدمن/عميل/فني) فعليًا بينادي كل endpoint موجود بالباك-إند.
+
+**النتيجة**: أغلب الـ"فجوات الموثّقة" اتأكدت إنها قرارات منتج مؤجّلة عن وعي وسبب واضح (`ACCEPTABLE-
+DEFERRED`) — مش سهو. اللي فعلاً فجوة حقيقية (`GAP-*`) بيتقفل هنا بالترتيب: (1) صحة مالية (كود خصم،
+InstaPay، استرداد جزئي، تعديل محفظة يدوي) — أولوية قصوى زي ما المالك طلب صراحة، (2) ثقة/أمان (تعليق
+فني، بيانات مضلّلة زي quality_score الميت)، (3) فجوات ميكانيكية بسيطة بتكرر نمط موجود ومختبر بالفعل
+(رابط شهادات الفني، صفحة إعدادات نوع الإشعار)، (4) فجوات UI مؤكدة من أكتر من agent مستقل (الفني
+مفيهوش شاشة شكاوى/دعم خالص). تفاصيل كل بند وحالته في التحديثات الجزئية اللي هتتضاف تحت القسم ده أول
+ما تتقفل، بنفس أسلوب §20-§23.
+
+**قرارات استُبعدت عمدًا من نطاق التنفيذ** (قرار منتج مش هندسة، مطابق لمبدأ "متخترعش قرار المالك"):
+- Feature flags بلا مستهلك حقيقي — اتفحصت بعمق ولقينا القرار ده **متخذ فعلاً وموثّق** (§19 بند 23):
+  مفيش بناء استهلاك وهمي عمدًا، مع تحذير واضح للأدمن في الواجهة. مش فجوة، إعادة تأكيد بس.
+- تسوية promo code release مع فتح نافذة استخدام تلقائي عند إلغاء عميل — الإصلاح اتنفّذ (تحت)، بس
+  القرار الأوسع "هل نفتح نافذة زمنية لالغاء بلا رسوم؟" برّه النطاق، مش لازم له.
+- إشعار عميل عند طلب متكرر يدخل PENDING_PAYMENT بلا فتح تطبيق — شكل الإشعار الدقيق (push بس/push+SMS،
+  مهلة سماح) قرار UX محتاج المالك، مش هندسة بحتة — فضل مؤجّل زي ما كان.
+- Team aggregate productivity metric — صيغة التجميع نفسها قرار منتج، فضلت مؤجّلة.
+
+### §24 — دفعة 1: فجوات مالية/ثقة/ميكانيكية — ✅ `DONE + LIVE VERIFIED`
+
+**صحة مالية (أولوية قصوى زي ما المالك طلب صراحة)**:
+- **ترجيع استخدام كود الخصم عند الإلغاء** — فصّلت فوق (migration `0109`، `PromoCodesService.
+  releaseUsage()`، 3 اختبارات حية).
+- **تأكيد إداري لتحويل إنستاباي بقاله زرار** — `POST /admin/payments/:id/confirm-instapay` كان
+  موجود ومختبر من زمان (ADR-0013 §7) بس بلا أي واجهة أدمن — طريقة دفع حقيقية كانت مقفولة عمليًا.
+  زرار "تأكيد استلام تحويل إنستاباي" جديد على كل دفعة `instapay`+`pending` في `apps/admin/src/app/
+  orders/[id]/page.tsx`.
+- **استرداد جزئي بقاله مدخل مبلغ** — `POST /admin/orders/:id/refund` بيدعم `amount_cents` اختياري
+  من زمان (ADR-0013 §9) بس الواجهة كانت `PromptDialog` سبب بس (استرداد كامل دايمًا). فورم جديد:
+  مبلغ اختياري (فاضي = كامل) + سبب.
+- **تصحيح رصيد محفظة يدوي بقاله فورم** — `PATCH /admin/wallets/:userId/adjust` (`wallets.adjust`
+  + step-up) كان موجود ومختبر بس بلا واجهة — مكوّن مشترك جديد `WalletAdjustmentForm` (مبلغ/اتجاه/
+  سبب) على صفحتي `/customers/[userId]` و`/technicians/[id]`.
+
+**ثقة/أمان**:
+- **تعليق فني معتمد بقاله زرار** — `POST /admin/technicians/:id/suspend` كان موجود ومختبر بلا أي
+  واجهة تستخدمه — زرار "تعليق الفني" جديد على `/technicians/[id]` لما `verification_status=approved`.
+- **`quality_score` الميت اتشال من واجهة الأدمن** — عمود `technician_profiles.quality_score`
+  مفيهوش أي كاتب في الكود كله (قيمته دايمًا `0.00`)، نفس فئة `average_rating`/`cancelled_orders_
+  count` اللي اتصلحوا زمان بس ده محدّش لاحظه. اتشال من `/technicians/[id]` (متوسط التقييم الحقيقي
+  فضل زي ما هو) بدل اختراع صيغة حساب جديدة.
+
+**فجوات ميكانيكية (نفس نمط مطبّق ومختبر بالفعل على جداول شقيقة)**:
+- **`technician_certificates` presigned URL بقى بيتجدّد** — نفس نمط `storage_key`/`getUrl(key)`
+  اللي اتطبّق على `order_media`/`technician_documents`/`complaint_attachments` (migration `0102`)
+  بس اتسيبت الشهادات عمدًا وقتها — اتقفلت بمigration `0110` + تعديل `TechnicianCertificatesService.
+  add()`/`CertificateResponseDto` (بقت async) + تحديث الـ5 نداءات في الكنترولرز.
+- **soft-delete حساب عميل** — `admin/README.md` كان بيوصفها صراحة "نفس فجوة الموظفين بالظبط".
+  اتقفلت: `DELETE /admin/customers/:userId` جديد (نفس نمط `AdminEmployeesService.delete()` بلا سحب
+  أدوار RBAC لأن العملاء مالهمش). **اكتشاف إضافي وقت التنفيذ**: زرار الحذف كان ناقص من واجهة
+  الموظفين *نفسها* كمان رغم إن الـendpoint بتاعهم موجود ومختبر من زمان — اتقفلت الاتنين مع بعض
+  (`ConfirmDialog` على `/employees/[userId]` و`/customers/[userId]`).
+
+**اتأكد حي**: اختبار جديد `admin-customer-delete.spec.ts` (إلغاء توكنات + `is_active=false` +
+soft-delete على User وCustomerProfile + `getDetail()` بعد الحذف بيرمي). `tsc --noEmit` و`nest
+build` (باك-إند) و`tsc --noEmit` (أدمن) كلهم نضاف.
+
+### §24 — دفعة 2: تتبّع لحظي، إشعار شات الدعم، نقل ملكية الشركة، تقرير الإنتاجية — ✅ `DONE + LIVE VERIFIED`
+
+**تصحيح ادّعاء غلط من agent البحث قبل التنفيذ**: agent إشعارات/شات ادّعى إن صفحة أدمن
+`notification_type_configs` مش موجودة — فحص مباشر أثبت إنها **موجودة بالفعل وكاملة**
+(`apps/admin/src/app/notification-type-configs/page.tsx`، من `docs/08 §19 بند 22`، مربوطة في
+الـsidebar). اتجنّبنا بناء نسخة مكرّرة — درس مهم: التحقق المباشر قبل التنفيذ ضروري حتى بعد بحث
+agents متعددة، مش كل ادّعاء بيبقى صح.
+
+- **تتبّع لحظي لحالة الطلب في `apps/customer-app`** — كانت فجوة موثّقة (asymmetry حقيقي):
+  `technician-app`'s `TrackingClient` بيستقبل `order:status_changed` ويعيد تحميل الشاشة تلقائيًا،
+  `customer-app`'s نسخته كانت بتستقبل `order:location_updated` بس. اتقفلت: نفس النمط بالحرف —
+  `OrderTrackingClient.connect()` بقى بياخد `onOrderStatusChanged` اختياري، و`OrderDetailScreen`
+  بقت تنضم لغرفة الطلب (`order-tracking.gateway.ts`'s `handleJoin` بيتحقق من الملكية بس، مش
+  `order_status` — الانضمام مسموح لأي حالة) وتعمل `_load()` تلقائي عند أي تغيير حالة (on-way/
+  arrived/in-progress/completed/إلغاء أدمن) من غير ما العميل يخرج ويرجع أو يعمل pull-to-refresh.
+- **إشعار أدمن على رسالة شات دعم جديدة** — كانت فجوة موثّقة: صفر حدث بيتصدّر على رسالة شات
+  (طلب/دعم على السوا)، فمفيش توجيه زي `complaint.filed`/`payout.requires_review`. اتقفلت نطاق
+  ضيّق عمدًا: حدث جديد `chat.support_message_received` (migration `0111` بتزرع قاعدة توجيه
+  افتراضية لـ`support_agent`) بيتصدّر من `ChatService.sendMessage()`/`sendImageMessage()` **بس**
+  لما الخيط `support_chat` **و**المُرسِل هو العميل نفسه (مش رد الأدمن على رسالته — منطق واضح:
+  محدّش يتصدّرله إشعار لرده الشخصي). listener جديد `SupportChatMessageRoutingListener` بنفس نمط
+  `ComplaintFiledRoutingListener` بالحرف. 3 اختبارات حية (`support-chat-message-notification.spec.ts`):
+  رسالة عميل في خيط دعم → الحدث بيتصدّر، رد أدمن على نفس الخيط → مايتصدّرش، رسالة عميل في
+  `order_chat` (مش دعم عام) → مايتصدّرش.
+- **نقل ملكية شركة/فريق الفني بقاله زرار** — `POST /technician/company/transfer-ownership` كان
+  موجود ومختبر بالباك-إند (المالك بس) بلا أي استدعاء من `apps/technician-app` — المالك مالوش
+  طريقة يسلّم الشركة إلا عبر API مباشر. زرار جديد "نقل الملكية له" في قايمة كل عضو (ظاهر للمالك
+  بس)، تأكيد صريح قبل التنفيذ.
+- **تقرير الإنتاجية بقاله واجهة أدمن** — `GET /admin/technician-productivity/:technicianId`
+  (`technician_productivity.view`) كان موجود ومختبر (5 اختبار حي، Phase 1 حسابي بالكامل زي ما
+  موثّق في `technician-productivity/README.md`) بلا أي شاشة تعرضه — الأدمن مالوش طريقة يشوف
+  الدرجة/تفاصيل المقاييس غير نداء الـAPI مباشرة. قسم جديد "تقرير الإنتاجية" في `/technicians/[id]`
+  (تحميل عند الطلب — الحساب مش مخزّن، مفيش داعي يحصل تلقائي مع كل تحميل صفحة).
+- **توثيق `referrals/README.md` كان قديم** — كان لسه بيوصف "شاشة تسجيل عميل جديد مش موجودة" رغم
+  إن الفجوة دي اتقفلت في شغل لاحق (`login_screen.dart`'s `_isRegisterMode` كامل مع حقول كود
+  ترشيح) — اتأكد الادّعاء الجديد بقراءة الكود مباشرة قبل التصحيح، الملف اتحدّث ليعكس الواقع.
+
+**اتأكد**: `tsc --noEmit`/`nest build` (باك-إند)، `tsc --noEmit` (أدمن)، `flutter analyze` على
+التلات apps (صفر خطأ/تحذير جديد في الملفات المعدّلة، نفس عدد نقط الـinfo الموجودة من قبل بالظبط).
+
+### §24 — دفعة 3: شكاوى/دعم الفني في `apps/technician-app` (كانت التطبيق مفيهوش شاشة خالص) — ✅ `DONE + LIVE VERIFIED`
+
+**أكبر فجوة UI متبقية، أكّدها 2 agents بحث مستقلين تمامًا**: الباك-إند (`complaints` module) بيعتبر
+الفني طرف كامل من زمان (`@Roles(CUSTOMER, TECHNICIAN)` على كل endpoint في `support.controller.ts`)،
+بس `apps/technician-app` معندهاش ولا شاشة واحدة تستخدم أي منهم — فني مكانش يقدر يفتح شكوى، يرد
+على شكوى مفتوحة ضده، أو يشوف شكاويه من جوّه التطبيق أصلاً.
+
+اتقفلت: `apps/technician-app/lib/features/support/` جديد كامل — نفس بنية
+`apps/customer-app/lib/features/support/` بالحرف (نفس الـAPI contract تمامًا، الطرفين بيستخدموا
+نفس الـendpoints):
+- `models.dart`, `support_repository.dart` — نسخة مطابقة (نفس `ComplaintCategory`/`Complaint`/
+  `ComplaintMessage`/`ComplaintAttachment`).
+- `complaints_screen.dart` — قايمة شكاوي الفني + FAB "شكوى جديدة".
+- `file_complaint_screen.dart` — **فرق مقصود واحد عن نسخة العميل**: مفيش dropdown "اختار من
+  قايمة طلباتك" لأن `apps/technician-app` معندهاش endpoint يعرض كل الطلبات التاريخية للفني (بس
+  الطلب الشغال حاليًا) — شكوى عن طلب معيّن بتتفتح بـ`orderId` من `OrderExecutionScreen` نفسها،
+  شكوى عامة بلا طلب متاحة دايمًا من الـDrawer.
+- `complaint_detail_screen.dart` — نفس الشاشة، محاذاة الرسائل بقت `senderRole == 'technician'`
+  (بدل `'customer'`) عشان رسائل الفني نفسه تظهر على اليمين صح.
+
+**اتربطت في مكانين**: (أ) Drawer الرئيسي (`available_orders_screen.dart`) — عنصر "شكاويّي" جديد
+تحت مجموعة "الدعم والتدريب"، (ب) `OrderExecutionScreen`'s AppBar — زرار "قدّم شكوى عن الطلب ده"
+جديد بجانب زرار "اتصل بالدعم" الموجود، متاح على أي حالة (مطابق لنفس الزرار في
+`order_detail_screen.dart` بتاع العميل).
+
+**بَقّة حقيقية اتلقطت واتصلحت وقت التطوير**: `technician-app`'s `AuthRepository.authedUpload()`
+عنده `fields` (`Map<String, String>`) إجباري (عكس نسخة العميل اللي بلا الحقل ده) — `flutter
+analyze` لقط الخطأ فورًا (`missing_required_argument`)، اتصلح بـ`fields: const {}` (نفس نمط
+`chat_repository.dart`'s استخدام بالظبط).
+
+**اتأكد**: `flutter analyze` صفر خطأ (13 نقطة info، زيادة نقطة واحدة بس عن قبل — أسلوبية، نفس فئة
+الباقي)، `flutter test` عدّى كامل.

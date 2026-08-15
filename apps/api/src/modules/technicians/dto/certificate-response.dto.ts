@@ -1,3 +1,4 @@
+import { StorageService } from '../../../common/storage/storage.service';
 import { TechnicianCertificate } from '../entities/technician-certificate.entity';
 
 export interface CertificateResponseDto {
@@ -12,13 +13,19 @@ export interface CertificateResponseDto {
   created_at: string;
 }
 
-export function toCertificateResponseDto(certificate: TechnicianCertificate): CertificateResponseDto {
+// §24 — نفس نمط toTechnicianDocumentResponseDto (getUrl(key) طازة لو storageKey موجود، migration
+// 0110): كانت فجوة موثّقة صراحة، نفس بَقّة presigned URL بتموت بعد 7 أيام اللي اتصلحت لـ3 جداول
+// تانية (order_media/technician_documents/complaint_attachments) بس اتسيبت هنا عمدًا وقتها.
+export async function toCertificateResponseDto(
+  certificate: TechnicianCertificate,
+  storage: StorageService,
+): Promise<CertificateResponseDto> {
   return {
     id: certificate.id,
     title: certificate.title,
     issuer_name: certificate.issuerName,
     issued_at: certificate.issuedAt,
-    file_url: certificate.fileUrl,
+    file_url: certificate.storageKey ? await storage.getUrl(certificate.storageKey) : certificate.fileUrl,
     review_status: certificate.reviewStatus,
     rejection_reason: certificate.rejectionReason,
     reviewed_at: certificate.reviewedAt ? certificate.reviewedAt.toISOString() : null,
@@ -35,12 +42,15 @@ export interface PublicCertificateResponseDto {
   file_url: string;
 }
 
-export function toPublicCertificateResponseDto(certificate: TechnicianCertificate): PublicCertificateResponseDto {
+export async function toPublicCertificateResponseDto(
+  certificate: TechnicianCertificate,
+  storage: StorageService,
+): Promise<PublicCertificateResponseDto> {
   return {
     id: certificate.id,
     title: certificate.title,
     issuer_name: certificate.issuerName,
     issued_at: certificate.issuedAt,
-    file_url: certificate.fileUrl,
+    file_url: certificate.storageKey ? await storage.getUrl(certificate.storageKey) : certificate.fileUrl,
   };
 }

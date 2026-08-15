@@ -144,6 +144,29 @@ export class PromoCodesService {
     return { promoCode, discountCents };
   }
 
+  /**
+   * ترجيع استخدام كود خصم بعد إلغاء الطلب اللي استخدمه (§24 — كانت فجوة موثّقة صراحة: usedCount/
+   * spentCents بيتزودوا في validateAndApply() بس مفيش أي decrement في أي مسار إلغاء، فكود محدود
+   * الاستخدام كان ممكن "يخلص" بسبب طلبات اتلغت قبل أي خدمة فعلية). Idempotent (released_at IS NULL
+   * guard) وبقفل ذرّي على صف الاستخدام — آمن يتنادى من أي عدد مسارات إلغاء بلا خطر تكرار الترجيع.
+   * لازم يتنادى جوّه نفس transaction إلغاء الطلب (مش استدعاء منفصل).
+   */
+  async releaseUsage(manager: EntityManager, orderId: string): Promise<void> {
+    const usage = await manager
+      .createQueryBuilder(PromoCodeUsage, 'u')
+      .setLock('pessimistic_write')
+      .where('u.order_id = :orderId', { orderId })
+      .andWhere('u.released_at IS NULL')
+      .getOne();
+
+    if (!usage) return; // الطلب ده ماستخدمش كود خصم أصلاً، أو الاستخدام اترجع قبل كده
+
+    await manager.increment(PromoCode, { id: usage.promoCodeId }, 'usedCount', -1);
+    await manager.increment(PromoCode, { id: usage.promoCodeId }, 'spentCents', -usage.discountAppliedCents);
+    usage.releasedAt = new Date();
+    await manager.save(usage);
+  }
+
   // ── إدارة الأدمن ─────────────────────────────────────────────────────
 
   async create(adminUserId: string, dto: CreatePromoCodeDto, meta?: AuditActorMeta): Promise<PromoCode> {

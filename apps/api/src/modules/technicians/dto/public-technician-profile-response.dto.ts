@@ -1,3 +1,4 @@
+import { StorageService } from '../../../common/storage/storage.service';
 import { TechnicianProfile } from '../entities/technician-profile.entity';
 import { TechnicianPortfolioLink } from '../entities/technician-portfolio-link.entity';
 import { TechnicianCertificate } from '../entities/technician-certificate.entity';
@@ -30,19 +31,22 @@ export interface PublicTechnicianProfileResponseDto {
   certificates: PublicCertificateResponseDto[];
 }
 
-export function toPublicTechnicianProfileResponseDto(data: {
-  profile: TechnicianProfile;
-  fullName: string;
-  avatarUrl: string | null;
-  zones: { id: string; nameAr: string }[];
-  services: { id: string; nameAr: string; basePriceCents: number }[];
-  recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
-  onTimeRate: number | null;
-  avgArrivalMinutes: number | null;
-  avgCompletionMinutes: number | null;
-  portfolioLinks: TechnicianPortfolioLink[];
-  certificates: TechnicianCertificate[];
-}): PublicTechnicianProfileResponseDto {
+export async function toPublicTechnicianProfileResponseDto(
+  data: {
+    profile: TechnicianProfile;
+    fullName: string;
+    avatarUrl: string | null;
+    zones: { id: string; nameAr: string }[];
+    services: { id: string; nameAr: string; basePriceCents: number }[];
+    recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
+    onTimeRate: number | null;
+    avgArrivalMinutes: number | null;
+    avgCompletionMinutes: number | null;
+    portfolioLinks: TechnicianPortfolioLink[];
+    certificates: TechnicianCertificate[];
+  },
+  storage: StorageService,
+): Promise<PublicTechnicianProfileResponseDto> {
   const { profile } = data;
   const totalDecided = profile.completedOrdersCount + profile.cancelledOrdersCount;
   const cancellationRate = totalDecided > 0 ? Math.round((profile.cancelledOrdersCount / totalDecided) * 100) : null;
@@ -70,6 +74,6 @@ export function toPublicTechnicianProfileResponseDto(data: {
       created_at: r.createdAt.toISOString(),
     })),
     portfolio_links: data.portfolioLinks.map(toPortfolioLinkResponseDto),
-    certificates: data.certificates.map(toPublicCertificateResponseDto),
+    certificates: await Promise.all(data.certificates.map((c) => toPublicCertificateResponseDto(c, storage))),
   };
 }

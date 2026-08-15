@@ -19,6 +19,7 @@ import '../technicians/models.dart' show ScheduleSlot;
 import '../technicians/technician_profile_screen.dart';
 import '../technicians/technician_selection_screen.dart';
 import '../technicians/technicians_repository.dart';
+import '../tracking/tracking_client.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
@@ -63,6 +64,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   String? _cardIdempotencyKey;
   String? _fawryIdempotencyKey;
   String? _instapayIdempotencyKey;
+  // §24 — الشاشة كانت بتفضل عارضة الحالة القديمة لحد ما العميل يخرج ويرجع يدوي أو يعمل
+  // pull-to-refresh، رغم إن الفني/الأدمن ممكن يغيّروا حالة الطلب وهي مفتوحة (on-way/arrived/
+  // in-progress/completed/إلغاء أدمن). نفس آلية technician-app بالظبط — انضمام لغرفة الطلب
+  // (namespace /tracking) واستقبال order:status_changed، مفيش بنية تحتية إضافية.
+  final _trackingClient = OrderTrackingClient();
 
   @override
   void initState() {
@@ -72,6 +78,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     _ratingsRepository = RatingsRepository(auth);
     _paymentsRepository = PaymentsRepository(auth);
     _load();
+    final accessToken = auth.accessToken;
+    if (accessToken != null) {
+      _trackingClient.connect(
+        accessToken: accessToken,
+        orderId: widget.orderId,
+        onLocationUpdate: (_) {}, // الشاشة دي مالهاش خريطة — التتبع اللحظي بالموقع في TrackingScreen المنفصلة
+        onOrderStatusChanged: (previousStatus, newStatus) {
+          if (mounted) _load();
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _trackingClient.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {

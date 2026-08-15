@@ -121,4 +121,36 @@ export class AdminCustomersService {
 
     return toAdminCustomerResponseDto(profile, user);
   }
+
+  // §24 — كانت فجوة موثّقة صراحة (admin/README.md): "نفس فجوة الموظفين بالظبط" — soft-delete
+  // اتبنى للموظفين (AdminEmployeesService.delete()) بس اتسيبت العملاء من غيره بلا سبب مستقل.
+  // نفس النمط بالحرف، بس بلا سحب أدوار RBAC (العملاء مالهمش UserRole أصلاً، عكس الموظفين).
+  async delete(adminUserId: string, userId: string, meta?: AuditActorMeta): Promise<void> {
+    const profile = await this.findProfileOrThrow(userId);
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new ApiException(ErrorCode.VAL_001, 'العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.update(
+        RefreshToken,
+        { userId, isRevoked: false },
+        { isRevoked: true, revokedAt: new Date(), revokedReason: 'admin_delete' },
+      );
+      await manager.update(User, { id: userId }, { isActive: false });
+      await manager.softDelete(CustomerProfile, { id: profile.id });
+      await manager.softDelete(User, { id: userId });
+    });
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'customer.deleted',
+      entityType: 'user',
+      entityId: userId,
+      oldValues: { phone_number: user.phoneNumber, full_name: user.fullName },
+      meta,
+    });
+  }
 }

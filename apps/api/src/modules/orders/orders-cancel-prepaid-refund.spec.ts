@@ -178,7 +178,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       {} as never, // technicianCompaniesService
       {} as never, // scheduleService
       {} as never, // pricingEngineService
-      {} as never, // promoCodesService
+      { releaseUsage: async () => undefined } as never, // promoCodesService — الاختبار ده ملوش علاقة بأكواد الخصم
       {} as never, // buildingsService
       {} as never, // cancellationReasonsService
       {} as never, // walletsService
