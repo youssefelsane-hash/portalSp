@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../catalog/catalog_repository.dart';
@@ -94,18 +95,36 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // docs/08 §22 بند 1 — رقم تليفون الفني بيوصلنا بس بعد ما الباك-إند يتأكد إن الحجز اتأكد فعليًا،
+  // فمفيش داعي لأي فحص إضافي هنا غير فتح تطبيق الاتصال.
+  Future<void> _callTechnician(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (!await launchUrl(uri)) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر فتح تطبيق الاتصال')));
+    }
+  }
+
   Future<void> _approveQuote() async {
+    // الطلب مدفوع مسبقًا إلكترونيًا — العميل يختار وسيلة دفع الزيادة (docs/08 §22 بند 8): كاش
+    // (يتحصّل وقت الاكتمال) أو الدفع الإلكتروني (تحصيل فوري بالوسيلة المحفوظة). لطلب كاش عادي،
+    // الاختيار مالوش معنى أصلاً (الباك-إند بيتجاهله)، فمفيش داعي نعرض الاختيار خالص.
+    String paymentChoice = 'electronic';
+    if (_order?.paymentStatus == 'paid') {
+      final choice = await _showPaymentChoiceDialog();
+      if (choice == null) return; // العميل قفل الـdialog من غير ما يختار
+      paymentChoice = choice;
+    }
+
     setState(() => _decidingQuote = true);
     try {
-      final order = await _repository.approveQuote(widget.orderId);
+      final order = await _repository.approveQuote(widget.orderId, paymentChoice: paymentChoice);
       if (mounted) {
         setState(() {
           _order = order;
           _quoteItems = [];
         });
-        // طلب مدفوع مسبقًا إلكترونيًا (docs/08 §21) — الباك-إند بيحاول تحصيل الزيادة فورًا، بس
         // النتيجة النهائية بتتأكد لاحقًا (webhook)؛ رسالة بسيطة بس، صفر تفاصيل بوابة/دفع للعميل.
-        final message = order.paymentStatus == 'paid'
+        final message = paymentChoice == 'electronic' && order.paymentStatus == 'paid'
             ? 'تمت الموافقة على الزيادة — جاري تحصيل المبلغ'
             : 'تمت الموافقة — الفني هيكمل الشغل';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -115,6 +134,36 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     } finally {
       if (mounted) setState(() => _decidingQuote = false);
     }
+  }
+
+  Future<String?> _showPaymentChoiceDialog() {
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('اختار طريقة الدفع', style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop('cash'),
+                icon: const Text('💵', style: TextStyle(fontSize: 20)),
+                label: const Text('كاش'),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop('electronic'),
+                icon: const Text('💳', style: TextStyle(fontSize: 20)),
+                label: const Text('الدفع الإلكتروني'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _declineQuote() async {
@@ -521,6 +570,27 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
+                      if (order.technicianPhone != null) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.primaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Text('يفضل الاتصال بالفني لتأكيد تفاصيل الموعد.', textAlign: TextAlign.center),
+                                const SizedBox(height: 8),
+                                FilledButton.icon(
+                                  onPressed: () => _callTechnician(order.technicianPhone!),
+                                  icon: const Icon(Icons.call),
+                                  label: Text('اتصل بالفني${order.technicianName != null ? ' — ${order.technicianName}' : ''}'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                       if (order.technicianId != null) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(

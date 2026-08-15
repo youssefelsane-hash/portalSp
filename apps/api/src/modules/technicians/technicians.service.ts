@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
 import {
   TechnicianAssistantLinkStatus,
@@ -42,6 +43,7 @@ export class TechniciansService {
   constructor(
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     @InjectRepository(TechnicianCompany) private readonly technicianCompanies: Repository<TechnicianCompany>,
+    @InjectRepository(User) private readonly users: Repository<User>,
     private readonly portfolioLinksService: PortfolioLinksService,
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly auditLog: AuditLogService,
@@ -71,6 +73,17 @@ export class TechniciansService {
       throw new ApiException(ErrorCode.VAL_001, 'بروفايل الفني غير موجود', HttpStatus.NOT_FOUND);
     }
     return profile;
+  }
+
+  // اسم/تليفون الفني للعرض للعميل بعد تأكيد حجيز حقيقي (docs/08 §22 بند 1) — الكولر (orders.controller.ts)
+  // هو المسؤول عن فحص شرط الظهور (TECHNICIAN_CONTACT_VISIBLE_STATUSES) قبل ما ينادي الدالة دي أصلاً.
+  async findContactInfoOrThrow(profileId: string): Promise<{ name: string; phone: string }> {
+    const profile = await this.findByProfileIdOrThrow(profileId);
+    const user = await this.users.findOne({ where: { id: profile.userId } });
+    if (!user) {
+      throw new ApiException(ErrorCode.VAL_001, 'مستخدم الفني غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return { name: user.fullName, phone: user.phoneNumber };
   }
 
   async updateAvailability(userId: string, dto: UpdateAvailabilityDto): Promise<TechnicianProfile> {

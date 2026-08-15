@@ -128,9 +128,16 @@ export class OrderItemsService {
   }
 
   // العميل وافق على كل البنود المعلّقة دفعة واحدة — بيتضافوا لـ total_amount_cents (نفس العمود
-  // اللي مسارات الدفع الموجودة بالفعل بتستخدمه). لو الطلب مدفوع مسبقًا إلكترونيًا (ADR-0013/0015)،
-  // موافقة العميل بتطلق محاولة تحصيل فورية للدلتا (docs/08 §21) — الشغل يكمل بغض النظر عن النتيجة.
-  async approve(userId: string, orderId: string): Promise<{ order: Order; items: OrderItem[] }> {
+  // اللي مسارات الدفع الموجودة بالفعل بتستخدمه). لو الطلب مدفوع مسبقًا إلكترونيًا (ADR-0013/0015)
+  // **والعميل اختار electronic** (الافتراضي)، موافقة العميل بتطلق محاولة تحصيل فورية للدلتا
+  // (docs/08 §21) — الشغل يكمل بغض النظر عن النتيجة. لو اختار **cash** (docs/08 §22 بند 8)، صفر
+  // محاولة تحصيل إلكتروني — المبلغ يتجمّع في total_amount_cents ويتحصّل كاش وقت الاكتمال بالضبط
+  // زي أي طلب مختلط (نفس المسار المُختبر بالفعل في cash-settlement-direction.spec.ts "طلب مختلط").
+  async approve(
+    userId: string,
+    orderId: string,
+    paymentChoice: 'cash' | 'electronic' = 'electronic',
+  ): Promise<{ order: Order; items: OrderItem[] }> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
     // قفل pessimistic على الطلب + إعادة تحميل البنود المعلّقة **جوّه** نفس الـtransaction (docs/08
@@ -201,7 +208,7 @@ export class OrderItemsService {
     // نفس نمط الـ3 مراحل المستخدم في PaymentsService.refundOrder()). فشل هنا **ميرجّعش خطأ للعميل**
     // ولا بيرجع الموافقة اللي اتسجّلت بالفعل — المبلغ يفضل obligation مسجّل يتحصّل لاحقًا (completion
     // check أو retry يدوي)، الموافقة نفسها عملية منجزة بالفعل.
-    if (order.paymentStatus === OrderPaymentStatus.PAID) {
+    if (order.paymentStatus === OrderPaymentStatus.PAID && paymentChoice === 'electronic') {
       const batchId = pending[0].batchId;
       if (batchId) {
         try {

@@ -164,8 +164,15 @@ class OrdersRepository {
     return items.map(OrderItem.fromJson).toList();
   }
 
-  Future<Order> approveQuote(String orderId) async {
-    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/approve');
+  // paymentChoice بس ليه معنى لو الطلب مدفوع مسبقًا إلكترونيًا (order.paymentStatus == 'paid') —
+  // 'electronic' (افتراضي) بيطلق تحصيل فوري بوسيلة الدفع المحفوظة، 'cash' بيسيب المبلغ يتجمّع
+  // ويتحصّل كاش وقت الاكتمال (docs/08 §22 بند 8). للطلبات الكاش العادية القيمة دي متجاهلة تمامًا.
+  Future<Order> approveQuote(String orderId, {String paymentChoice = 'electronic'}) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/quote-items/approve',
+      body: {'payment_choice': paymentChoice},
+    );
     final orderJson = data!['order'] as Map<String, dynamic>;
     return Order.fromJson(orderJson);
   }

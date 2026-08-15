@@ -1,4 +1,4 @@
-import { CUSTOMER_CANCELLABLE_STATUSES, canTransition, ORDER_TRANSITIONS } from './order-state-machine';
+import { CUSTOMER_CANCELLABLE_STATUSES, TECHNICIAN_CONTACT_VISIBLE_STATUSES, canTransition, ORDER_TRANSITIONS } from './order-state-machine';
 import { OrderStatus } from './entities/order.entity';
 
 // اختبار وحدة نقي (بدون DB) — بيثبت إصلاح بَقّة حقيقية اتلقطت حيًا (docs/08 §19 بند 1):
@@ -22,5 +22,53 @@ describe('order-state-machine — اتساق CUSTOMER_CANCELLABLE_STATUSES مع 
     expect(ORDER_TRANSITIONS[OrderStatus.PENDING_PAYMENT]).toEqual(
       expect.arrayContaining([OrderStatus.SEARCHING_TECHNICIAN, OrderStatus.CANCELLED_BY_SYSTEM, OrderStatus.EXPIRED]),
     );
+  });
+});
+
+// docs/08 §22 بند 1 — تليفون الفني لازم يظهر للعميل بس بعد "تأكيد حجيز حقيقي" (الفني وافق فعليًا،
+// مش بس اتعيّن وينتظر قبوله). اختبار وحدة نقي بيثبت إن مجموعة الحالات دي بالظبط، صفر حالة سابقة
+// لـACCEPTED مسموحة (تسريب رقم فني لعميل قبل ما الفني يوافق أصلاً)، وصفر حالة إلغاء/نزاع نهائية.
+describe('order-state-machine — TECHNICIAN_CONTACT_VISIBLE_STATUSES (docs/08 §22 بند 1)', () => {
+  const preConfirmationStatuses = [
+    OrderStatus.DRAFT,
+    OrderStatus.PENDING_PAYMENT,
+    OrderStatus.SEARCHING_TECHNICIAN,
+    OrderStatus.TECHNICIAN_ASSIGNED, // الفني اتعيّن بس لسه ما وافقش — أهم حالة لازم تترفض
+  ];
+
+  it('صفر حالة "قبل التأكيد" موجودة في مجموعة الظهور — الفني المُعيّن (مش المُوافِق) لازم يترفض', () => {
+    for (const status of preConfirmationStatuses) {
+      expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(false);
+    }
+  });
+
+  it('صفر حالة إلغاء/نزاع/انتظار-إعادة-اختيار موجودة — الفني القديم متسربش بعد إلغاء/تنازع', () => {
+    const terminalOrDisputedStatuses = [
+      OrderStatus.CANCELLED_BY_CUSTOMER,
+      OrderStatus.CANCELLED_BY_TECHNICIAN,
+      OrderStatus.CANCELLED_BY_SYSTEM,
+      OrderStatus.EXPIRED,
+      OrderStatus.DISPUTED,
+      OrderStatus.REFUNDED,
+      OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+    ];
+    for (const status of terminalOrDisputedStatuses) {
+      expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(false);
+    }
+  });
+
+  it('ACCEPTED فصاعدًا (لحد الاكتمال) — الحالات اللي الفني ملتزم فيها فعليًا، لازم تظهر', () => {
+    for (const status of [
+      OrderStatus.ACCEPTED,
+      OrderStatus.TECHNICIAN_ON_WAY,
+      OrderStatus.TECHNICIAN_ARRIVED,
+      OrderStatus.IN_PROGRESS,
+      OrderStatus.AWAITING_QUOTE_APPROVAL,
+      OrderStatus.WORK_COMPLETED,
+      OrderStatus.AWAITING_PAYMENT,
+      OrderStatus.COMPLETED,
+    ]) {
+      expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(true);
+    }
   });
 });

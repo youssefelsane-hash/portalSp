@@ -2346,3 +2346,37 @@ payments/wallet، audit، RBAC، branding)، صفر إعادة بناء لحاج
 customer money"، "Do not weaken assertions to obtain green tests"، "We are closing the MVP, not
 reopening product development" — أي فجوة حقيقية تتقفل بأصغر حل نضيف يستخدم البنية الموجودة، مش تصميم
 موازي.
+
+### تحديث تنفيذ §22 — بند 1 (تليفون الفني للعميل بعد تأكيد حجيز حقيقي) — ✅ `DONE + LIVE VERIFIED`
+
+**الفحص الأول (بالفحص الفعلي، وثّقه subagent قبل أي كود)**: `OrderResponseDto` مفيهاش أي حقل تليفون
+خالص — `MISSING` تمامًا، مش بَقّة. **المُضاف**: `TECHNICIAN_CONTACT_VISIBLE_STATUSES` (`order-state-machine.ts`)
+— مجموعة الحالات اللي "تأكيد حجيز حقيقي" معناها فيها (الفني وافق فعليًا `ACCEPTED` فصاعدًا، مش
+`TECHNICIAN_ASSIGNED` اللي لسه قبل موافقته). `OrdersController.getOne()` (الملكية اتفحصت بالفعل عبر
+`findOneOwnedOrThrow()` الموجودة — IDOR محمي من الأساس) بيحسب الشرط ده **قبل** أي استعلام إضافي، ولو
+تحقق بينادي `TechniciansService.findContactInfoOrThrow()` (جديدة، بتجيب اسم/تليفون الفني من `users`
+عبر `technician_profiles.user_id`) ويمررهم لـ`toOrderResponseDto()`.
+
+اتأكد بـ`order-state-machine.spec.ts` (3 اختبار وحدة جديد) — صفر حالة "قبل التأكيد"
+(`TECHNICIAN_ASSIGNED` تحديدًا، أهم حالة) موجودة في مجموعة الظهور، صفر حالة إلغاء/نزاع، وكل الحالات
+من `ACCEPTED` لحد `COMPLETED` موجودة. `apps/customer-app`: كارت "اتصل بالفني" (`tel:` عبر
+`url_launcher` الموجود بالفعل) بيظهر بس لو `technician_phone` غير null — العميل مايشوفش زرار الاتصال
+أصلاً قبل التأكيد، مش زرار معطّل. `flutter analyze` نضيف.
+
+### تحديث تنفيذ §22 — بند 7+8 (أكتر من طلب شغل إضافي + اختيار وسيلة الدفع للزيادة) — ✅ `DONE + LIVE VERIFIED`
+
+**بند 7 (`ALREADY EXISTS`، اتأكد بس)**: دورة `propose()`/`approve()` بترجع الطلب لـ`in_progress`،
+واللي معدّى بيسمح بـ`propose()` تاني مستقل (`batch_id` جديد كل مرة). اتأكد باختبار حي جديد — دفعتين
+مستقلتين على نفس الطلب، صفر تعارض بينهم.
+
+**بند 8 (`MISSING`، اتقفل بأصغر حل)**: `ApproveQuoteItemsDto.payment_choice` (`'cash' | 'electronic'`،
+افتراضي `'electronic'` — صفر تغيير سلوكي لطلبات موجودة). لو العميل اختار `cash`، `OrderItemsService.approve()`
+بتتجاهل `attemptAdditionalWorkCharge()` بالكامل — المبلغ يتجمّع في `total_amount_cents` بس ويتحصّل
+كاش وقت الاكتمال (نفس مسار "الطلب المختلط" المُختبر بالفعل في §21، صفر كود تسوية جديد). خيار "وسيلة
+إلكترونية تانية" (§22 بند 8C) **مش متاح عمداً** — مفيش provider تاني بيدعم `chargeToken()` غير Paymob
+(نفس §21)، والتعليمات صراحة "Do NOT display payment methods the backend/provider cannot actually
+process". `apps/customer-app`: bottom-sheet بسيط ["💵 كاش"] / ["💳 الدفع الإلكتروني"] بيظهر بس لو
+الطلب مدفوع مسبقًا إلكترونيًا وقت الموافقة.
+
+اتأكد بـ2 اختبار حي جديد (كاش-اختيار + دفعتين مستقلتين) في `order-items-additional-work-payment.spec.ts`
+(7 اختبار إجمالي دلوقتي في الملف ده). 43 suite / 239 اختبار API عدّوا كاملين، `tsc`/`nest build` نضيفين.

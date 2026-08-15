@@ -53,11 +53,21 @@ export interface OrderResponseDto {
   estimated_duration_days: number | null;
   /** موجودة بس في مسارات تفاصيل الطلب الفردي (مش القوائم) — لخرائط التتبع/الملاحة. */
   address?: OrderAddressResponseDto;
+  /** رقم تليفون الفني (docs/08 §22 بند 1) — موجود بس بعد تأكيد حجيز حقيقي (TECHNICIAN_CONTACT_VISIBLE_STATUSES)،
+   * الكولر (orders.controller.ts) هو المسؤول عن حساب الشرط ده وتمرير القيمة، مش الدالة دي. */
+  technician_name?: string;
+  technician_phone?: string;
 }
 
 // address اختياري — القوائم (GET /orders، GET /admin/orders) بتفضل من غير join إضافي، مسارات
 // تفاصيل الطلب الفردي بس (GET /orders/:id، GET /technician/orders/:id|active) بتمرره.
-export function toOrderResponseDto(order: Order, address?: Address | null): OrderResponseDto {
+// technicianContact اختياري كمان — الكولر بيحسب شرط الظهور (TECHNICIAN_CONTACT_VISIBLE_STATUSES)
+// قبل ما يجيب البيانات أصلاً، فمفيش استعلام إضافي لو الطلب لسه مش وصل لحالة مسموحة.
+export function toOrderResponseDto(
+  order: Order,
+  address?: Address | null,
+  technicianContact?: { name: string; phone: string } | null,
+): OrderResponseDto {
   return {
     id: order.id,
     order_number: order.orderNumber,
@@ -99,5 +109,7 @@ export function toOrderResponseDto(order: Order, address?: Address | null): Orde
           latitude: address.location.coordinates[1],
         }
       : undefined,
+    technician_name: technicianContact?.name,
+    technician_phone: technicianContact?.phone,
   };
 }

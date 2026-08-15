@@ -5,6 +5,7 @@ import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.se
 import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
+import { ApproveQuoteItemsDto } from './dto/approve-quote-items.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
@@ -13,10 +14,12 @@ import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
+import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
+import { TechniciansService } from '../technicians/technicians.service';
 
 @Controller('orders')
 @Roles(UserType.CUSTOMER)
@@ -27,6 +30,7 @@ export class OrdersController {
     private readonly orderTeamService: OrderTeamService,
     private readonly orderMediaService: OrderMediaService,
     private readonly addressesService: AddressesService,
+    private readonly techniciansService: TechniciansService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -38,10 +42,18 @@ export class OrdersController {
 
   @Get(':id')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    // الملكية اتفحصت هنا (findOneOwnedOrThrow) — أي بيانات بعد السطر ده مضمون إنها لعميل صاحب
+    // الطلب فعلاً، بما فيها تليفون الفني (docs/08 §22 بند 1، حماية IDOR).
     const order = await this.ordersService.findOneOwnedOrThrow(user.sub, id);
     // العنوان بتاع العميل نفسه — findOwnedOrThrow بيتحقق من الملكية برضه (دفاع مزدوج رخيص)
     const address = await this.addressesService.findOwnedOrThrow(user.sub, order.addressId);
-    return toOrderResponseDto(order, address);
+    // تليفون الفني بيظهر بس بعد تأكيد حجيز حقيقي (الفني وافق فعليًا) — قبل كده صفر استعلام حتى
+    // (order.technicianId ممكن يبقى null أصلاً في الحالات المبكرة).
+    const technicianContact =
+      order.technicianId && TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
+        ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
+        : null;
+    return toOrderResponseDto(order, address, technicianContact);
   }
 
   @Post()
@@ -83,8 +95,12 @@ export class OrdersController {
   }
 
   @Post(':id/quote-items/approve')
-  async approveQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    const { order, items } = await this.orderItemsService.approve(user.sub, id);
+  async approveQuoteItems(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveQuoteItemsDto,
+  ) {
+    const { order, items } = await this.orderItemsService.approve(user.sub, id, dto.payment_choice ?? 'electronic');
     return { order: toOrderResponseDto(order), items: items.map(toOrderItemResponseDto) };
   }
 

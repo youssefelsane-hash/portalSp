@@ -103,6 +103,20 @@ export const ACTIVE_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.IN_PROGRESS,
 ];
 
+// الحالات اللي رقم تليفون الفني يظهر فيها للعميل (docs/08 §22 بند 1) — "تأكيد حجيز حقيقي" معناه
+// الفني وافق فعليًا (accepted)، مش بس اتعيّن وقاعد ينتظر قبوله (technician_assigned لسه قبلها).
+// نفس ACTIVE_TECHNICIAN_ORDER_STATUSES فوق + الحالات اللي بعد بدء الشغل (الفني لسه مرتبط بالطلب).
+export const TECHNICIAN_CONTACT_VISIBLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.ACCEPTED,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
+  OrderStatus.WORK_COMPLETED,
+  OrderStatus.AWAITING_PAYMENT,
+  OrderStatus.COMPLETED,
+]);
+
 export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   return ORDER_TRANSITIONS[from].includes(to);
 }
