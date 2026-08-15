@@ -78,6 +78,8 @@ class _CompanyScreenState extends State<CompanyScreen> {
     return role == 'owner' || role == 'manager';
   }
 
+  bool get _isOwner => _myMembership?.teamRole == 'owner';
+
   Future<void> _createCompany() async {
     final name = _createNameController.text.trim();
     if (name.isEmpty) return;
@@ -158,6 +160,35 @@ class _CompanyScreenState extends State<CompanyScreen> {
     });
     try {
       await _repository.updateStaffRole(member.userId, newRole);
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  // §24 — كانت فجوة موثّقة: نقل الملكية موجود ومختبر بالباك-إند (المالك بس) بلا أي زرار في
+  // الشاشة — المالك مالوش طريقة يسلّم الشركة لحد تاني غير API مباشر.
+  Future<void> _transferOwnership(StaffMember newOwner) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('نقل ملكية الشركة'),
+        content: Text('متأكد إنك عايز تنقل ملكية الشركة/الفريق لـ ${newOwner.fullName}؟ الإجراء ده مش هينعمل تلقائيًا.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('إلغاء')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('تأكيد النقل')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      await _repository.transferOwnership(newOwner.userId);
       await _load();
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -280,6 +311,8 @@ class _CompanyScreenState extends State<CompanyScreen> {
                       onSelected: (value) {
                         if (value == 'remove') {
                           _removeStaff(member);
+                        } else if (value == 'transfer_ownership') {
+                          _transferOwnership(member);
                         } else {
                           _changeStaffRole(member, value);
                         }
@@ -289,6 +322,7 @@ class _CompanyScreenState extends State<CompanyScreen> {
                           if (role != member.teamRole)
                             PopupMenuItem(value: role, child: Text('تغيير لـ ${teamRoleLabelsAr[role]}')),
                         const PopupMenuItem(value: 'remove', child: Text('إزالة من الفريق')),
+                        if (_isOwner) const PopupMenuItem(value: 'transfer_ownership', child: Text('نقل الملكية له')),
                       ],
                     )
                   : null,

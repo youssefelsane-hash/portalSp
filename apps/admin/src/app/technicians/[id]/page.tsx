@@ -27,6 +27,32 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS, NEXT_VERIFICATION_STEP } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 
+// §24 — كانت فجوة موثّقة: GET /admin/technician-productivity/:technicianId موجود ومختبر
+// (technician_productivity.view) من زمان بلا أي واجهة أدمن تعرضه — مش موجودة في @baytak/shared-types
+// (endpoint أدمن-بس ضيّق، مفيش داعي يتشارك مع Flutter)، فتعريف محلي هنا مطابق للباك-إند بالحرف
+// (technician-productivity.service.ts's ProductivityReport/ProductivityMetricBreakdown).
+interface ProductivityMetricBreakdown {
+  key: string;
+  label_ar: string;
+  enabled: boolean;
+  included: boolean;
+  exclusion_reason: string | null;
+  raw_value: number | null;
+  normalized_score: number | null;
+  weight_configured: number;
+  weight_applied: number | null;
+  sample_size: number;
+}
+
+interface ProductivityReport {
+  technician_id: string;
+  evaluation_period_months: number;
+  snapshots_found: number;
+  overall_score: number | null;
+  explanation: string;
+  breakdown: ProductivityMetricBreakdown[];
+}
+
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
@@ -46,6 +72,10 @@ export default function TechnicianDetailPage() {
 
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+
+  const [productivity, setProductivity] = useState<ProductivityReport | null>(null);
+  const [productivityError, setProductivityError] = useState<string | null>(null);
+  const [loadingProductivity, setLoadingProductivity] = useState(false);
 
   function loadWallet(userId: string) {
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
@@ -123,6 +153,19 @@ export default function TechnicianDetailPage() {
         body: JSON.stringify({ reason }),
       }),
     );
+  }
+
+  async function loadProductivity() {
+    setLoadingProductivity(true);
+    setProductivityError(null);
+    try {
+      const report = await authedFetch<ProductivityReport>(`/admin/technician-productivity/${id}`);
+      setProductivity(report);
+    } catch (err) {
+      setProductivityError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل تقرير الإنتاجية');
+    } finally {
+      setLoadingProductivity(false);
+    }
   }
 
   async function handleChangeLevel(e: FormEvent) {
@@ -660,6 +703,62 @@ export default function TechnicianDetailPage() {
                     ))}
                   </ul>
                 </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-center justify-between">
+            <CardTitle className="text-base">تقرير الإنتاجية</CardTitle>
+            <Button type="button" size="sm" variant="outline" disabled={loadingProductivity} onClick={loadProductivity}>
+              {loadingProductivity ? 'جاري التحميل…' : productivity ? 'تحديث' : 'عرض التقرير'}
+            </Button>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            {productivityError && <p className="text-destructive">{productivityError}</p>}
+            {!productivity && !productivityError && (
+              <p className="text-muted-foreground">تقرير الإنتاجية محسوب (مش مخزّن) من KPI الشهري — اضغط "عرض التقرير".</p>
+            )}
+            {productivity && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-semibold">
+                    {productivity.overall_score !== null ? productivity.overall_score.toFixed(2) : '—'}
+                  </span>
+                  <span className="text-muted-foreground">
+                    (فترة التقييم: {productivity.evaluation_period_months} شهر، {productivity.snapshots_found} سجل)
+                  </span>
+                </div>
+                <p className="text-muted-foreground">{productivity.explanation}</p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>المقياس</TableHead>
+                      <TableHead>الدرجة</TableHead>
+                      <TableHead>الوزن</TableHead>
+                      <TableHead>الحالة</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productivity.breakdown.map((metric) => (
+                      <TableRow key={metric.key}>
+                        <TableCell>{metric.label_ar}</TableCell>
+                        <TableCell>{metric.normalized_score !== null ? metric.normalized_score.toFixed(2) : '—'}</TableCell>
+                        <TableCell>{metric.weight_applied !== null ? metric.weight_applied : `(${metric.weight_configured})`}</TableCell>
+                        <TableCell>
+                          {!metric.enabled ? (
+                            <Badge variant="outline">معطّل</Badge>
+                          ) : metric.included ? (
+                            <Badge variant="secondary">مُحتسب</Badge>
+                          ) : (
+                            <Badge variant="outline">{metric.exclusion_reason ?? 'مستبعد'}</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </>
             )}
           </CardContent>

@@ -2820,6 +2820,46 @@ InstaPay، استرداد جزئي، تعديل محفظة يدوي) — أول�
 
 **اتأكد حي**: اختبار جديد `admin-customer-delete.spec.ts` (إلغاء توكنات + `is_active=false` +
 soft-delete على User وCustomerProfile + `getDetail()` بعد الحذف بيرمي). `tsc --noEmit` و`nest
-build` (باك-إند) و`tsc --noEmit` (أدمن) كلهم نضاف. باقي بنود §24 (واجهة `notification_type_
-configs`، شكاوى/دعم/تقييمات الفني في التطبيق، تتبّع لحظي للعميل، تحويل ملكية الشركة، إشعار أدمن
-لشات الدعم) لسه قيد التنفيذ — تفاصيلها في التحديث الجاي.
+build` (باك-إند) و`tsc --noEmit` (أدمن) كلهم نضاف.
+
+### §24 — دفعة 2: تتبّع لحظي، إشعار شات الدعم، نقل ملكية الشركة، تقرير الإنتاجية — ✅ `DONE + LIVE VERIFIED`
+
+**تصحيح ادّعاء غلط من agent البحث قبل التنفيذ**: agent إشعارات/شات ادّعى إن صفحة أدمن
+`notification_type_configs` مش موجودة — فحص مباشر أثبت إنها **موجودة بالفعل وكاملة**
+(`apps/admin/src/app/notification-type-configs/page.tsx`، من `docs/08 §19 بند 22`، مربوطة في
+الـsidebar). اتجنّبنا بناء نسخة مكرّرة — درس مهم: التحقق المباشر قبل التنفيذ ضروري حتى بعد بحث
+agents متعددة، مش كل ادّعاء بيبقى صح.
+
+- **تتبّع لحظي لحالة الطلب في `apps/customer-app`** — كانت فجوة موثّقة (asymmetry حقيقي):
+  `technician-app`'s `TrackingClient` بيستقبل `order:status_changed` ويعيد تحميل الشاشة تلقائيًا،
+  `customer-app`'s نسخته كانت بتستقبل `order:location_updated` بس. اتقفلت: نفس النمط بالحرف —
+  `OrderTrackingClient.connect()` بقى بياخد `onOrderStatusChanged` اختياري، و`OrderDetailScreen`
+  بقت تنضم لغرفة الطلب (`order-tracking.gateway.ts`'s `handleJoin` بيتحقق من الملكية بس، مش
+  `order_status` — الانضمام مسموح لأي حالة) وتعمل `_load()` تلقائي عند أي تغيير حالة (on-way/
+  arrived/in-progress/completed/إلغاء أدمن) من غير ما العميل يخرج ويرجع أو يعمل pull-to-refresh.
+- **إشعار أدمن على رسالة شات دعم جديدة** — كانت فجوة موثّقة: صفر حدث بيتصدّر على رسالة شات
+  (طلب/دعم على السوا)، فمفيش توجيه زي `complaint.filed`/`payout.requires_review`. اتقفلت نطاق
+  ضيّق عمدًا: حدث جديد `chat.support_message_received` (migration `0111` بتزرع قاعدة توجيه
+  افتراضية لـ`support_agent`) بيتصدّر من `ChatService.sendMessage()`/`sendImageMessage()` **بس**
+  لما الخيط `support_chat` **و**المُرسِل هو العميل نفسه (مش رد الأدمن على رسالته — منطق واضح:
+  محدّش يتصدّرله إشعار لرده الشخصي). listener جديد `SupportChatMessageRoutingListener` بنفس نمط
+  `ComplaintFiledRoutingListener` بالحرف. 3 اختبارات حية (`support-chat-message-notification.spec.ts`):
+  رسالة عميل في خيط دعم → الحدث بيتصدّر، رد أدمن على نفس الخيط → مايتصدّرش، رسالة عميل في
+  `order_chat` (مش دعم عام) → مايتصدّرش.
+- **نقل ملكية شركة/فريق الفني بقاله زرار** — `POST /technician/company/transfer-ownership` كان
+  موجود ومختبر بالباك-إند (المالك بس) بلا أي استدعاء من `apps/technician-app` — المالك مالوش
+  طريقة يسلّم الشركة إلا عبر API مباشر. زرار جديد "نقل الملكية له" في قايمة كل عضو (ظاهر للمالك
+  بس)، تأكيد صريح قبل التنفيذ.
+- **تقرير الإنتاجية بقاله واجهة أدمن** — `GET /admin/technician-productivity/:technicianId`
+  (`technician_productivity.view`) كان موجود ومختبر (5 اختبار حي، Phase 1 حسابي بالكامل زي ما
+  موثّق في `technician-productivity/README.md`) بلا أي شاشة تعرضه — الأدمن مالوش طريقة يشوف
+  الدرجة/تفاصيل المقاييس غير نداء الـAPI مباشرة. قسم جديد "تقرير الإنتاجية" في `/technicians/[id]`
+  (تحميل عند الطلب — الحساب مش مخزّن، مفيش داعي يحصل تلقائي مع كل تحميل صفحة).
+- **توثيق `referrals/README.md` كان قديم** — كان لسه بيوصف "شاشة تسجيل عميل جديد مش موجودة" رغم
+  إن الفجوة دي اتقفلت في شغل لاحق (`login_screen.dart`'s `_isRegisterMode` كامل مع حقول كود
+  ترشيح) — اتأكد الادّعاء الجديد بقراءة الكود مباشرة قبل التصحيح، الملف اتحدّث ليعكس الواقع.
+
+**اتأكد**: `tsc --noEmit`/`nest build` (باك-إند)، `tsc --noEmit` (أدمن)، `flutter analyze` على
+التلات apps (صفر خطأ/تحذير جديد في الملفات المعدّلة، نفس عدد نقط الـinfo الموجودة من قبل بالظبط).
+باقي بنود §24 (شكاوى/دعم/تقييمات الفني في `apps/technician-app` — التطبيق مفيهوش شاشة خالص، أكّده
+2 agents مستقلين) لسه قيد التنفيذ — تفاصيلها في التحديث الجاي.
