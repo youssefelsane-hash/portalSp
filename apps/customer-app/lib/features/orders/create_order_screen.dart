@@ -12,6 +12,7 @@ import '../catalog/pricing_field_widgets.dart';
 import '../payments/card_payment_screen.dart';
 import '../payments/instapay_reference_screen.dart';
 import '../payments/payments_repository.dart';
+import '../support/support_contact_screen.dart';
 import '../technicians/models.dart';
 import '../technicians/technicians_repository.dart';
 import 'models.dart';
@@ -581,6 +582,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
+              // مساعدة حجز بسيطة (docs/08 §22 addendum) — العميل ممكن مايعرفش يقيس الكمية دي
+              // (مساحة/عدد قطع إلخ)، مفيش محرك تسعير تاني هنا، بس مخرج بسيط لمكالمة/واتساب.
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+                  ),
+                  icon: const Icon(Icons.help_outline, size: 18),
+                  label: const Text('مش عارف تقيس؟ كلّمنا نساعدك'),
+                ),
+              ),
             ],
           ),
         ),

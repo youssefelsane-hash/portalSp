@@ -5,6 +5,7 @@ import '../addresses/models.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import '../catalog/pricing_field_widgets.dart';
+import '../support/support_contact_screen.dart';
 import '../technicians/technician_selection_screen.dart';
 
 // P0-10 (2026-08-13، مراجعة أمان/جودة شاملة) — كانت فجوة حقيقية موثّقة: لخدمات pricing_model=
@@ -147,14 +148,25 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                     onPressed: canContinue ? _continueToTechnicians : null,
                     child: const Text('متابعة — اختار الفني'),
                   ),
-                  if (_hasUnsupportedRequiredField)
+                  // مساعدة حجز بسيطة (docs/08 §22 addendum) — كانت فجوة حقيقية: النص ده كان بيقول
+                  // "كلم الدعم" بلا أي زرار فعلي وراه، العميل يقرأ التعليمة ومالوش طريقة ينفّذها.
+                  if (_hasUnsupportedRequiredField) ...[
                     const Padding(
                       padding: EdgeInsets.only(top: 8),
                       child: Text(
-                        'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه — كلم الدعم لإتمام الحجز',
+                        'الخدمة دي محتاجة تفاصيل (صور/موقع) مش مدعومة في التطبيق لسه',
                         style: TextStyle(color: Colors.red),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+                      ),
+                      icon: const Icon(Icons.support_agent_outlined),
+                      label: const Text('كلّمنا نكمّل الحجز يدويًا'),
+                    ),
+                  ],
                 ],
               ),
       ),
