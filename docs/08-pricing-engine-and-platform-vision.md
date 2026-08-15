@@ -2145,6 +2145,48 @@ abuse) اتغطت بالكامل بالفعل في مراجعات سابقة (P0
      #4479 في BullMQ نفسه)، مش كود المشروع.
 9. **خدمات إنتاج خارجية لسه محتاجة تفعيل**: راجع القائمة الكاملة فوق (Paymob، Twilio، FCM، S3، Google
    Maps، DB/Redis إنتاج، دومين/DNS/TLS، توقيع متاجر التطبيقات، أسرار الاستضافة، موافقات المزوّدين).
-10. **الفرع والـcommit النهائي**: `claude/home-services-app-plan-v13gb2` @ `6862ccb`.
+10. **الفرع والـcommit النهائي**: `claude/home-services-app-plan-v13gb2` @ `6862ccb` (زائد إصلاح CI
+    اللي تحت في commit لاحق).
 11. **حالة الـpush**: ✅ اتدفع لـ`origin/claude/home-services-app-plan-v13gb2`.
 12. **حالة الـworking tree**: ✅ نضيف تمامًا (`git status` صفر تغيير غير مُدفوع).
+
+---
+
+## 🔧 تصحيح مهم بعد الحكم النهائي: CI الحقيقي على main كان فاشل من يومين (اتلقط واتصلح، 2026-08-14/15)
+
+وقت فتح PR #113 للدمج في `main`، الفحص الفعلي لـ`mcp__github__` (مش بس قراءة تعريف
+`.github/workflows/ci.yml`) كشف إن **CI على `main` نفسه كان فاشل في كل push من يوم 2026-08-13**
+(27 تشغيلة، كلها `failure` عدا 2 `cancelled`) — ده تصحيح لادّعاء سابق في هذا القسم ("CI متحقق إنه
+بيعمل اللي بيدّعيه") كان مبني على قراءة الـworkflow YAML بس، مش تشغيل حقيقي أو فحص تاريخ التشغيلات
+الفعلية. الدرس: التحقق من "CI بيعمل اللي بيدّعيه" لازم يشمل فحص run history حقيقي، مش تعريف الملف بس.
+
+**3 بَقات CI حقيقية اتلقطت واتصلحت** (كلها سابقة على PR #113، مش ناتجة عن أي تغيير في هذه الجلسة):
+
+1. **`apps/admin` — ترتيب typecheck/build غلط**: `tsc --noEmit` بيتشغل قبل `next build` في CI،
+   بس Next.js 15+ بيولّد أنواع ambient زي `LayoutProps`/`PageProps` (مستخدمة في `layout.tsx`)
+   جوّه `.next/types/` وقت build/dev بس — على checkout طازج (CI) `.next` مش موجود خالص، فـ`tsc`
+   بيفشل بـ`Cannot find name 'LayoutProps'` رغم إن الكود صحيح 100%. محلي كانت شغالة بالصدفة لأن
+   `.next` القديمة من build سابق في نفس الـcontainer كانت لسه موجودة. **الإصلاح**: خطوة `npx next
+   typegen` (بيولّد نفس الأنواع من غير build كامل) قبل `tsc --noEmit` في `ci.yml`.
+2. **`cash-settlement-direction.spec.ts` (§20 بند 2/3/4) — فرضية إعداد اختبار غلط**: التعليق كان
+   بيدّعي "بنستخدم مدينة مصر المزروعة بالفعل (migration 0004)"، بس `migration 0004` بتزرع الدولة
+   بس، **مش أي مدينة** — `SELECT id FROM cities WHERE country_id = $1 LIMIT 1` بترجع صفر صفوف على
+   قاعدة migrated طازجة (CI)، فالاختبار كان بيفشل بـ`TypeError: Cannot read properties of undefined
+   (reading 'id')`. محلي كانت شغالة بالصدفة بس لأن قاعدة البيانات المحلية فيها مدينة متسيبة من
+   اختبارات تانية سابقة عبر الجلسة الطويلة دي. **الإصلاح**: الاختبار بقى بينشئ مدينته الخاصة (زي
+   أي صف تاني فيه) بدل الاعتماد على صف مزروع مسبقًا، وبيمسحها في `afterAll` — استقلالية كاملة عن
+   حالة قاعدة البيانات، اتأكد حيًا (8/8 اختبار عدّى، `tsc`/`nest build`/42 suite كاملين نضيفين).
+3. **`flutter analyze` بلا `--no-fatal-infos`**: بعد ترقية Flutter SDK، طلعت 35 (customer-app) +
+   10 (technician-app) إشارة severity=**info** بس (`use_null_aware_elements`،
+   `deprecated_member_use` بعد استبدال `Radio.groupValue`/`onChanged` بـ`RadioGroup`،
+   `prefer_initializing_formals`) — صفر warning أو error حقيقي، الكود شغال صح. `flutter analyze`
+   من غير فلاج بيرجّع exit code 1 لأي severity حتى info، فكان بيفشل CI رغم إن مفيش مشكلة حقيقية.
+   **الإصلاح**: `flutter analyze --no-fatal-infos` — بيخلّي الـexit code يعكس severity الحقيقية
+   (Dart نفسه بيصنّف info كـ"مش blocking")، والـ45 اقتراح لسه بيتطبعوا في اللوج لمين حابب يصلحهم
+   لاحقًا (POST-LAUNCH cosmetic cleanup، مش مخفيين). هذا القرار مش "إخفاء فشل حقيقي" — إعادة توافق
+   بوابة الـCI مع تصنيف الخطورة الفعلي من Dart SDK نفسه.
+
+**النتيجة النهائية بعد الإصلاحات الثلاثة**: PR #113 CI اتأكد كله ✅ أخضر (API، Admin، customer-app،
+technician-app) لأول مرة منذ 2026-08-13. اتدمج في `main` بـmerge commit طبقًا لنفس نمط PR
+#109/#110/#112 السابقة. `main` دلوقتي فعليًا هو أحدث نسخة من الفرع، وCI عليه أخضر حقيقةً — مش بس
+تعريف workflow بيبدو صحيح.

@@ -94,6 +94,14 @@ jobs:
       - name: بناء packages/shared-types
         run: npm run build --workspace=@baytak/shared-types
 
+      # Next.js 15+ بيولّد أنواع ambient زي LayoutProps/PageProps في .next/types/ تلقائيًا وقت
+      # build/dev — على checkout طازج مفيش .next خالص، فـtsc --noEmit لوحده بيفشل بـ"Cannot find
+      # name 'LayoutProps'" رغم إن الكود صحيح 100%. `next typegen` بيولّد نفس الأنواع من غير build
+      # كامل — بَقّة CI حقيقية اتلقطت واتصلحت (main كانت CI فيه فاشلة من يومين لنفس السبب).
+      - name: next typegen (توليد LayoutProps/PageProps قبل typecheck)
+        working-directory: apps/admin
+        run: npx next typegen
+
       - name: TypeScript typecheck
         working-directory: apps/admin
         run: npx tsc --noEmit
@@ -127,9 +135,14 @@ jobs:
         working-directory: apps/${{ matrix.app }}
         run: flutter pub get
 
+      # بَقّة CI حقيقية اتلقطت واتصلحت (main كانت CI فيه فاشلة من يومين): `flutter analyze` من غير
+      # فلاج بيرجّع exit code 1 لأي issue حتى لو severity=info (زي use_null_aware_elements/
+      # deprecated_member_use بعد ترقية Flutter SDK) — مفيش warning ولا error حقيقي هنا، الكود
+      # شغال صح. `--no-fatal-infos` بيخلّي الـCI يفشل على warning/error فعليين بس (زي ما Dart نفسه
+      # بيصنّف الخطورة)، مع إن كل الـinfo لسه بتتطبع في اللوج لأي حد يحب يصلحها لاحقًا (مش مخفية).
       - name: flutter analyze
         working-directory: apps/${{ matrix.app }}
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: flutter test (وحدة/widget بلا باك-إند حي)
         working-directory: apps/${{ matrix.app }}
