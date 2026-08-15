@@ -313,6 +313,35 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — بلاغ نزاع، مش قرار نهائي (بيودّي الطلب
+  // disputed لمراجعة أدمن حقيقية زي reportFailedVisit فوق بالحرف). Dialog من خطوتين (وصف + تأكيد
+  // صريح) عشان يمنع ضغطة غلط تعلّق الطلب من غير داعي.
+  Future<void> _reportCashNotReceived() async {
+    final description = await showDialog<String>(
+      context: context,
+      builder: (context) => const _CashNotReceivedDialog(),
+    );
+    if (description == null) return;
+
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      _order = await _repository.reportCashNotReceived(_order.id, description: description);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اتبعت البلاغ — الإدارة هتراجع وترجعلك')),
+        );
+        setState(() {});
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _runAction(String action) async {
     setState(() {
       _acting = true;
@@ -493,6 +522,18 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               const Text(
                 'لازم تصوّر صورة واحدة على الأقل بعد الشغل قبل ما تقدر تقفل الطلب',
                 style: TextStyle(color: Colors.orange),
+              ),
+            ],
+            // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو المفروض العميل يدفع كاش
+            // ("محتاج تحصيل") ومستلمتش الفلوس فعلاً، بلّغ بدل ما تقفل الطلب "حصّلت الكاش" كذب.
+            if ((_order.orderStatus == 'work_completed' || _order.orderStatus == 'awaiting_payment') &&
+                _order.paymentStatus != 'paid') ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _acting ? null : _reportCashNotReceived,
+                icon: const Icon(Icons.money_off_outlined, color: Colors.red),
+                label: const Text('لم أستلم الكاش', style: TextStyle(color: Colors.red)),
+                style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red)),
               ),
             ],
             const SizedBox(height: 24),
@@ -945,6 +986,98 @@ class _ReportFailedVisitDialogState extends State<_ReportFailedVisitDialog> {
             child: const Text('ابعت البلاغ'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — بلاغ حسّاس (ممكن يبقى نزاع مباشر مع
+// العميل)، فخطوتين بدل واحدة: وصف الموقف الأول، بعدين تأكيد صريح منفصل قبل الإرسال الفعلي —
+// نفس مبدأ "double-tap protection" بس للتأكيد البشري مش الشبكة.
+class _CashNotReceivedDialog extends StatefulWidget {
+  const _CashNotReceivedDialog();
+
+  @override
+  State<_CashNotReceivedDialog> createState() => _CashNotReceivedDialogState();
+}
+
+class _CashNotReceivedDialogState extends State<_CashNotReceivedDialog> {
+  final _descriptionController = TextEditingController();
+  String? _validationError;
+  bool _confirming = false;
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _goToConfirm() {
+    if (_descriptionController.text.trim().length < 10) {
+      setState(() => _validationError = 'اكتب توضيح مختصر (10 حروف على الأقل) عشان الإدارة تفهم الموقف');
+      return;
+    }
+    setState(() {
+      _validationError = null;
+      _confirming = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('لم أستلم الكاش'),
+        content: SizedBox(
+          width: 400,
+          child: _confirming
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text('متأكد إنك مستلمتش أي فلوس من العميل على الطلب ده؟'),
+                    SizedBox(height: 8),
+                    Text(
+                      'الطلب هيتوقف فورًا وهيتحول لشكوى تراجعها الإدارة — البلاغ ده بيتسجّل وبيوصل للعميل.',
+                      style: TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ],
+                )
+              : SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: _descriptionController,
+                        decoration: const InputDecoration(labelText: 'وضّح الموقف بالتفصيل'),
+                        maxLines: 3,
+                      ),
+                      if (_validationError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(_validationError!, style: const TextStyle(color: Colors.red)),
+                      ],
+                    ],
+                  ),
+                ),
+        ),
+        actions: _confirming
+            ? [
+                TextButton(
+                  onPressed: () => setState(() => _confirming = false),
+                  child: const Text('رجوع'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(_descriptionController.text.trim()),
+                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                  child: const Text('أكّد — مستلمتش الفلوس'),
+                ),
+              ]
+            : [
+                TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+                FilledButton(onPressed: _goToConfirm, child: const Text('التالي')),
+              ],
       ),
     );
   }

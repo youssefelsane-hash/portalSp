@@ -57,6 +57,12 @@ export interface OrderResponseDto {
    * الكولر (orders.controller.ts) هو المسؤول عن حساب الشرط ده وتمرير القيمة، مش الدالة دي. */
   technician_name?: string;
   technician_phone?: string;
+  /** تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل وحده مايسوّيش الطلب، بس
+   * لازم يظهر في الواجهة عشان العميل يعرف إنه أكّد بالفعل (يمنع تكرار الزرار). */
+  customer_cash_confirmed_at: string | null;
+  /** لو الفني بلّغ "لم أستلم" (نفس البند فوق) — الطلب بيبقى disputed، وده الحقل اللي يميّز نزاع
+   * الكاش عن نزاع الزيارة الفاشلة (resolveFailedVisit) لما order_status=disputed. */
+  technician_cash_not_received_at: string | null;
 }
 
 // address اختياري — القوائم (GET /orders، GET /admin/orders) بتفضل من غير join إضافي، مسارات
@@ -111,5 +117,9 @@ export function toOrderResponseDto(
       : undefined,
     technician_name: technicianContact?.name,
     technician_phone: technicianContact?.phone,
+    customer_cash_confirmed_at: order.customerCashConfirmedAt ? order.customerCashConfirmedAt.toISOString() : null,
+    technician_cash_not_received_at: order.technicianCashNotReceivedAt
+      ? order.technicianCashNotReceivedAt.toISOString()
+      : null,
   };
 }

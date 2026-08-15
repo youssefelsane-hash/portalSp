@@ -38,8 +38,10 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
 import { FailedVisitReason, ReportFailedVisitDto } from './dto/report-failed-visit.dto';
+import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
+import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
@@ -77,6 +79,10 @@ const FAILED_VISIT_REASON_TO_COMPLAINT_CATEGORY: Record<FailedVisitReason, Compl
 // الحالات اللي الفني يقدر يبلّغ منها عن زيارة فاشلة (docs/08 §22 بند 3) — وصل ولسه ما بدأش الشغل
 // (no-show كلاسيكي)، أو بدأ فعلاً وعرض شغل ضروري اترفض (required_work_rejected).
 const FAILED_VISIT_REPORTABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHNICIAN_ARRIVED, OrderStatus.IN_PROGRESS]);
+
+// نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط — الحالات اللي فيها كاش لسه مستحق
+// (docs/08 §22 بند 13-14).
+const CASH_HANDOVER_PAYABLE_STATUSES = new Set<OrderStatus>([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 
 @Injectable()
 export class OrdersService {
@@ -1478,5 +1484,147 @@ export class OrdersService {
     });
 
     return (await this.orders.findOne({ where: { id: orderId } }))!;
+  }
+
+  // ── تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) ────────────────────
+
+  /**
+   * العميل بيأكّد إنه سلّم الفلوس — تأكيد واحد بس من طرفين، مايسوّيش الطلب لوحده (collectCash()
+   * الموجودة هي تأكيد الفني، لسه لازم تتنادى منفصلة). Idempotent — نقر مزدوج/إعادة إرسال بيرجع
+   * نجاح من غير أي أثر إضافي (نفس مبدأ حماية النقر المزدوج، docs/08 §22 بند 27).
+   */
+  async confirmCashHandover(userId: string, orderId: string): Promise<Order> {
+    const order = await this.findOneOwnedOrThrow(userId, orderId);
+    if (!order.customerCashConfirmedAt) {
+      order.customerCashConfirmedAt = new Date();
+      await this.orders.save(order);
+    }
+    return order;
+  }
+
+  /**
+   * الفني بيبلّغ إنه ما استلمش الكاش — لو العميل كان أكّد التسليم قبل كده، ده نزاع حقيقي (تناقض
+   * بين الطرفين)، مش بلاغ عادي. في الحالتين، الطلب بيتحول DISPUTED ويوديه لمراجعة أدمن حقيقية
+   * (docs/08 §22 بند 13-14) — أبدًا مايتسوّاش صامت على التناقض.
+   */
+  async reportCashNotReceived(user: JwtPayload, orderId: string, dto: ReportCashNotReceivedDto): Promise<Order> {
+    const order = await this.findOwnedByTechnicianOrThrow(user.sub, orderId);
+
+    if (!CASH_HANDOVER_PAYABLE_STATUSES.has(order.orderStatus) || !canTransition(order.orderStatus, OrderStatus.DISPUTED)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تبلّغ عن عدم استلام كاش والطلب في حالة ${order.orderStatus}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const isConflict = order.customerCashConfirmedAt !== null;
+    const previousStatus = order.orderStatus;
+    await this.dataSource.transaction(async (manager) => {
+      order.technicianCashNotReceivedAt = new Date();
+      order.orderStatus = OrderStatus.DISPUTED;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.DISPUTED,
+          changedByUserId: user.sub,
+          changedByRole: 'technician',
+          changeSource: OrderChangeSource.TECHNICIAN,
+          reason: dto.description,
+        }),
+      );
+    });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, OrderStatus.DISPUTED, order.customerId, order.technicianId, dto.description),
+    );
+
+    try {
+      await this.supportService.fileComplaint(user, {
+        order_id: order.id,
+        category: ComplaintCategory.OTHER,
+        title: isConflict ? `نزاع تسليم كاش — العميل أكّد والفني قال العكس — طلب ${order.orderNumber}` : `الفني لم يستلم الكاش — طلب ${order.orderNumber}`,
+        description: dto.description,
+      });
+    } catch (err) {
+      this.logger.error(
+        `فشل تسجيل شكوى نزاع الكاش للطلب ${order.id} — الطلب فعلاً DISPUTED، محتاج مراجعة يدوية`,
+        err instanceof Error ? err.stack : err,
+      );
+    }
+
+    return order;
+  }
+
+  /**
+   * الأدمن بيحل نزاع تسليم الكاش بعد المراجعة — retry (الفني يعيد المحاولة، صفر تحصيل تلقائي) أو
+   * confirm_received (تسوية إدارية مباشرة، الأدمن راجع وقرر إن الكاش فعلاً اتحصّل).
+   */
+  async resolveCashHandoverDispute(
+    adminUserId: string,
+    orderId: string,
+    dto: ResolveCashDisputeDto,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (order.orderStatus !== OrderStatus.DISPUTED || !order.technicianCashNotReceivedAt) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الطلب ده مش نزاع تسليم كاش قيد المراجعة', HttpStatus.CONFLICT);
+    }
+
+    if (dto.outcome === CashDisputeOutcome.CONFIRM_RECEIVED) {
+      await this.paymentsService.adminConfirmCashReceived(adminUserId, orderId, meta);
+      return (await this.orders.findOne({ where: { id: orderId } }))!;
+    }
+
+    // retry — الطلب يرجع WORK_COMPLETED (زي ما كان قبل النزاع)، collectCash() تشتغل عادي تاني.
+    if (!canTransition(order.orderStatus, OrderStatus.WORK_COMPLETED)) {
+      throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
+    }
+    const previousStatus = order.orderStatus;
+    await this.dataSource.transaction(async (manager) => {
+      order.orderStatus = OrderStatus.WORK_COMPLETED;
+      order.customerCashConfirmedAt = null;
+      order.technicianCashNotReceivedAt = null;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.WORK_COMPLETED,
+          changedByUserId: adminUserId,
+          changedByRole: 'admin',
+          changeSource: OrderChangeSource.ADMIN,
+          reason: dto.admin_notes,
+        }),
+      );
+    });
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.cash_dispute_resolved_retry',
+      entityType: 'order',
+      entityId: order.id,
+      newValues: { outcome: 'retry', order_status: OrderStatus.WORK_COMPLETED },
+      meta,
+    });
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(
+        order.id,
+        order.orderNumber,
+        previousStatus,
+        OrderStatus.WORK_COMPLETED,
+        order.customerId,
+        order.technicianId,
+        dto.admin_notes,
+      ),
+    );
+    return order;
   }
 }

@@ -547,3 +547,51 @@ order-rescheduled-notification.listener.ts`) — "العميل غيّر ميعا
 الأصلي، صفر حجز مزدوج صامت)؛ رفض سلوت فني تاني؛ `AddressesService.hasActiveOrder()` (تفاصيل في
 `../customers/README.md`). 47 suite / 259 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze`
 نضيفين.
+
+## تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14، 2026-08-15)
+
+كانت فجوة موثّقة صراحة: `PaymentsService.collectCash()` (الفني بس، تأكيد واحد، بيسوّي الطلب فورًا
+عبر `settleAndComplete()`) مالوش أي طريقة العميل يأكّد بيها من جهته، ولا أي مسار لو الفني قال "مش
+مستلم" رغم إن العميل بيقول إنه سلّم — كان أول اختلاف بينهم بيتقفل بمكالمة تليفون يدوية بره النظام
+بالكامل. **`collectCash()` اتسابت زي ما هي من غير أي تعديل عمدًا** (مسار تسوية أساسي مختبر بكثافة،
+تغيير فيه مخاطرة انحدار مش لازمة) — التأكيد الثنائي اتضاف إضافيًا بس:
+
+- **`Order.customerCashConfirmedAt`** (migration 0108) — العميل يأكّد إنه سلّم الفلوس
+  (`POST /orders/:id/confirm-cash-handover`، `OrdersService.confirmCashHandover()`). **مجرد تسجيل
+  توقيت، صفر أثر على التسوية** — الطلب مايتسوّاش لوحده، ده إثبات حرفي إن تأكيد العميل وحده
+  مايكفيش. Idempotent (بيتجاهل التكرار لو اتأكد قبل كده) — نفس متطلب حماية الضغط المزدوج/إعادة
+  المحاولة الشبكية المعتاد في المشروع كله.
+- **`Order.technicianCashNotReceivedAt`** — الفني يبلّغ "لم أستلم" (`POST /technician/orders/:id
+  /cash-not-received`، `OrdersService.reportCashNotReceived()`). متاح بس على `WORK_COMPLETED`/
+  `AWAITING_PAYMENT` (نفس `PAYABLE_ORDER_STATUSES` في `PaymentsService`). الطلب يتحول `DISPUTED`
+  (نفس الحالة "تحت مراجعة الإدارة" اللي §22 بند 3-6 بيستخدمها لزيارة فاشلة — إعادة استخدام، مش
+  حالة جديدة)، وشكوى بتتسجّل تلقائيًا (`SupportService.fileComplaint`، `ComplaintCategory.OTHER`)
+  بعنوان بيفرّق بوضوح بين حالتين: "نزاع تسليم كاش" (لو العميل كان أكّد الاستلام قبل كده — تعارض
+  مباشر) أو "الفني لم يستلم الكاش" العادي (لو العميل ماأكّدش خالص).
+- **`PaymentsService.adminConfirmCashReceived()`** (جديد) — تسوية إدارية مباشرة، نفس بنية
+  `collectCash()` بالحرف (صف `Payment` بعده `settleAndComplete()`) بس بشرط `DISPUTED` +
+  `technicianCashNotReceivedAt IS NOT NULL` بدل `WORK_COMPLETED`/`AWAITING_PAYMENT`، وبمنطق
+  `changedByRole='system'` (قرار أدمن، مش عميل/فني — نفس نمط `confirmInstaPayPayment()`).
+- **`OrdersService.resolveCashHandoverDispute(adminUserId, orderId, dto)`** (`POST /admin/orders
+  /:id/resolve-cash-dispute`، صلاحية `orders.resolve_cash_dispute` + step-up MFA إجباري — نفس
+  مستوى حساسية `orders.resolve_failed_visit` بالحرف) — قرارين بس: `retry` (الطلب يرجع
+  `WORK_COMPLETED`، الأعلام الاتنين بترجع `null`، الفني يقدر يحاول `collectCash()` تاني عادي) أو
+  `confirm_received` (يفوّض لـ`adminConfirmCashReceived()` فوق — تسوية مالية فعلية). الشرط
+  `technicianCashNotReceivedAt !== null` بيفرّق نزاع الكاش ده عن نزاع الزيارة الفاشلة
+  (`resolveFailedVisit`) لما `order_status=disputed` — الاتنين بيستخدموا نفس الحالة، الأدمن بيعرف
+  إنه في أي واحدة من `order-response.dto.ts`'s `technician_cash_not_received_at`.
+
+**`apps/customer-app`**: زرار "دفعت الفلوس كاش للفني" في `order_detail_screen.dart` (جنب أزرار
+الدفع الإلكتروني، بيختفي ويتبدل برسالة "في انتظار تأكيد الفني" بعد التأكيد). **`apps/technician-app`**:
+زرار "لم أستلم الكاش" (أحمر، تحذيري) قرب زرار "حصّلت الكاش" — `Dialog` من خطوتين (وصف الموقف، بعدين
+تأكيد صريح منفصل "متأكد إنك مستلمتش أي فلوس؟") عشان يمنع ضغطة غلط تعلّق الطلب من غير داعي.
+**`apps/admin`**: قسم جديد في `orders/[id]/page.tsx` (يظهر بس لو `order_status=disputed &&
+technician_cash_not_received_at != null`) بزرارين "إعادة محاولة التحصيل" و"تأكيد استلام الفلوس
+فعليًا (إداري)".
+
+اتأكد بـ6 اختبار حي (`cash-handover-confirmation.spec.ts`): تأكيد العميل وحده مايسوّيش الطلب +
+idempotent؛ بلاغ الفني بلا تأكيد عميل سابق → `DISPUTED` + عنوان شكوى عادي؛ نفس البلاغ بعد تأكيد
+العميل → عنوان شكوى فيه "نزاع تسليم كاش" (تعارض)؛ `retry` يرجّع الطلب `WORK_COMPLETED` والأعلام
+`null`، وبعدها `collectCash()` عادي بينجح فعليًا (إثبات إن الرجوع حقيقي مش شكلي)؛ `confirm_received`
+يقفل الطلب `completed` بـ`Payment.collectedByUserId` = الأدمن؛ رفض حل طلب مش نزاع كاش. 48 suite /
+265 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.

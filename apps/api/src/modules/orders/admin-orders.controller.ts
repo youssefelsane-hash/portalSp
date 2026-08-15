@@ -25,6 +25,7 @@ import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
 import { ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
+import { ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { OrdersService } from './orders.service';
 import { PaymentsService } from '../payments/payments.service';
 
@@ -142,6 +143,21 @@ export class AdminOrdersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(await this.ordersService.resolveFailedVisit(admin.sub, id, dto, audit));
+  }
+
+  // نزاع تسليم كاش (docs/08 §22 بند 13-14) — قرار مالي محتمل (confirm_received)، نفس مستوى حساسية
+  // orders.resolve_failed_visit بالحرف (permission مخصوصة + step-up MFA، migration 0108).
+  @Post(':id/resolve-cash-dispute')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.resolve_cash_dispute')
+  @RequireStepUp()
+  async resolveCashDispute(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResolveCashDisputeDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(await this.ordersService.resolveCashHandoverDispute(admin.sub, id, dto, audit));
   }
 
   // الأدمن محتاج يشوف أعضاء الفريق (فريق "اعتماد" + مساعدين) عشان يعرف كام مساعد لسه ناقص قبل

@@ -77,6 +77,12 @@ export class OrdersController {
     return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto));
   }
 
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده.
+  @Post(':id/confirm-cash-handover')
+  async confirmCashHandover(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return toOrderResponseDto(await this.ordersService.confirmCashHandover(user.sub, id));
+  }
+
   // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك فعليًا، ونفس الفني المعيّن.
   @Post(':id/reschedule')
   async reschedule(

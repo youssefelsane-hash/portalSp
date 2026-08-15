@@ -88,6 +88,8 @@ export default function OrderDetailPage() {
   const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
   const [visitFeeEgp, setVisitFeeEgp] = useState('');
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
+  const [showCashDisputeConfirmForm, setShowCashDisputeConfirmForm] = useState(false);
+  const [cashDisputeNotes, setCashDisputeNotes] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -246,6 +248,48 @@ export default function OrderDetailPage() {
       setShowCancelWithFeeForm(false);
       setVisitFeeEgp('');
       setFailedVisitNotes('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — الطلب disputed بعد بلاغ الفني (cash-not-received)،
+  // بيتميّز عن نزاع الزيارة الفاشلة فوق بـtechnician_cash_not_received_at != null. retry يرجّع الطلب
+  // work_completed (يقدر يتحصّل تاني عادي)، confirm_received تسوية إدارية مباشرة (بيقفل الطلب completed).
+  async function handleResolveCashDisputeRetry() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-cash-dispute`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'retry', admin_notes: 'الأدمن قرر إعادة محاولة التحصيل بعد المراجعة' }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleResolveCashDisputeConfirmReceived(e: FormEvent) {
+    e.preventDefault();
+    if (cashDisputeNotes.trim().length < 5) {
+      window.alert('ملاحظات الأدمن لازم تكون 5 حروف على الأقل');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-cash-dispute`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'confirm_received', admin_notes: cashDisputeNotes }),
+      });
+      setShowCashDisputeConfirmForm(false);
+      setCashDisputeNotes('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -444,7 +488,7 @@ export default function OrderDetailPage() {
                 />
               </CardFooter>
             )}
-          {order.order_status === 'disputed' && (
+          {order.order_status === 'disputed' && !order.technician_cash_not_received_at && (
             <CardFooter className="flex-col items-stretch gap-3">
               <p className="text-sm text-muted-foreground">
                 الطلب ده بلاغ زيارة فاشلة (عدم حضور/رفض شغل ضروري) — راجع الشكوى المرتبطة في صفحة الدعم
@@ -496,6 +540,46 @@ export default function OrderDetailPage() {
                   )}
                   <Button type="submit" size="sm" variant="destructive" disabled={isSaving} className="w-fit">
                     تأكيد الإلغاء
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
+          {order.order_status === 'disputed' && order.technician_cash_not_received_at && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <p className="text-sm text-muted-foreground">
+                نزاع تسليم كاش — الفني بلّغ إنه ماستلمش الفلوس
+                {order.customer_cash_confirmed_at ? ' رغم إن العميل أكّد إنه سلّم (تعارض مباشر)' : ''}.
+                راجع الشكوى المرتبطة في صفحة الدعم قبل ما تقرر.
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" disabled={isSaving} onClick={handleResolveCashDisputeRetry}>
+                  إعادة محاولة التحصيل
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isSaving}
+                  onClick={() => setShowCashDisputeConfirmForm((s) => !s)}
+                >
+                  تأكيد استلام الفلوس فعليًا (إداري)
+                </Button>
+              </div>
+              {showCashDisputeConfirmForm && (
+                <form onSubmit={handleResolveCashDisputeConfirmReceived} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="cash_dispute_notes">ملاحظات المراجعة (إزاي اتأكد إن الفلوس استلمت فعلاً)</Label>
+                    <Input
+                      id="cash_dispute_notes"
+                      value={cashDisputeNotes}
+                      onChange={(e) => setCashDisputeNotes(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" size="sm" variant="destructive" disabled={isSaving} className="w-fit">
+                    تأكيد وتسوية الطلب
                   </Button>
                 </form>
               )}

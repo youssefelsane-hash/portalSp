@@ -15,6 +15,7 @@ import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
+import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { Order } from './entities/order.entity';
@@ -112,6 +113,17 @@ export class TechnicianOrderExecutionController {
     @Body() dto: ReportFailedVisitDto,
   ) {
     return this.toDto(await this.ordersService.reportFailedVisit(user, id, dto));
+  }
+
+  // "لم أستلم" الكاش (docs/08 §22 بند 13-14) — مسار الفني للتنازع، مش قرار نهائي فوري (بيودّي
+  // لمراجعة أدمن حقيقية عبر الشكوى + resolveCashHandoverDispute).
+  @Post(':id/cash-not-received')
+  async cashNotReceived(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportCashNotReceivedDto,
+  ) {
+    return this.toDto(await this.ordersService.reportCashNotReceived(user, id, dto));
   }
 
   @Post(':id/media')

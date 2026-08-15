@@ -408,6 +408,73 @@ export class PaymentsService {
     });
   }
 
+  /**
+   * تأكيد أدمن يدوي إن الكاش فعلاً اتحصّل — بعد مراجعة نزاع تسليم كاش (docs/08 §22 بند 13-14،
+   * OrdersService.resolveCashHandoverDispute outcome='confirm_received'). نفس منطق collectCash()
+   * بالحرف (Payment + settleAndComplete) بس من DISPUTED مش WORK_COMPLETED/AWAITING_PAYMENT،
+   * وبلا فحص ملكية فني (الأدمن مش الفني اللي بينفّذ هنا — الصلاحية والـstep-up MFA مفروضين على
+   * مستوى الـcontroller/OrdersService.resolveCashHandoverDispute).
+   */
+  async adminConfirmCashReceived(adminUserId: string, orderId: string, meta?: AuditActorMeta): Promise<Payment> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (order.orderStatus !== OrderStatus.DISPUTED || !order.technicianCashNotReceivedAt) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب ده مش نزاع تسليم كاش قيد المراجعة', HttpStatus.CONFLICT);
+      }
+      const owedNowCents = await this.amountOwedNow(order, manager);
+
+      const paymentNumber = await this.nextPaymentNumber(manager);
+      const payment = manager.create(Payment, {
+        paymentNumber,
+        orderId: order.id,
+        customerId: order.customerId,
+        amountCents: owedNowCents,
+        paymentMethod: PaymentMethod.CASH,
+        paymentStatus: PaymentGatewayStatus.SUCCEEDED,
+        idempotencyKey: `cash-admin-confirmed:${order.id}`,
+        completedAt: new Date(),
+        collectedByUserId: adminUserId,
+      });
+      await manager.save(payment);
+
+      const previousStatus = order.orderStatus;
+      await this.settleAndComplete(manager, order, PaymentMethod.CASH, adminUserId, 'system');
+
+      return { payment, order, previousStatus };
+    });
+
+    const { payment, order, previousStatus } = result;
+    if (order.technicianId) {
+      await this.technicianStatsService.enqueueRecalculation(order.technicianId, order.serviceId);
+    }
+    this.events.emit(
+      CASH_COLLECTED_EVENT,
+      new CashCollectedEvent(payment.id, order.id, order.orderNumber, payment.amountCents, adminUserId),
+    );
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, OrderStatus.COMPLETED, order.customerId, order.technicianId),
+    );
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.cash_dispute_resolved_confirmed',
+      entityType: 'order',
+      entityId: order.id,
+      newValues: { amount_cents: payment.amountCents },
+      meta,
+    });
+
+    return payment;
+  }
+
   /** العميل بيدفع من رصيد محفظته — لازم Idempotency-Key عشان لو نفس الطلب اتبعت مرتين بالغلط. */
   async payWithWallet(userId: string, orderId: string, idempotencyKey: string): Promise<Payment> {
     const existing = await this.payments.findOne({ where: { idempotencyKey } });

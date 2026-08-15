@@ -63,7 +63,8 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.DISPUTED,
   ],
   [OrderStatus.AWAITING_QUOTE_APPROVAL]: [OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_CUSTOMER],
-  [OrderStatus.WORK_COMPLETED]: [OrderStatus.AWAITING_PAYMENT, OrderStatus.COMPLETED],
+  // docs/08 §22 بند 13-14 — الفني بلّغ "لم أستلم" الكاش رغم إن الشغل خلص فعلاً.
+  [OrderStatus.WORK_COMPLETED]: [OrderStatus.AWAITING_PAYMENT, OrderStatus.COMPLETED, OrderStatus.DISPUTED],
   [OrderStatus.AWAITING_PAYMENT]: [OrderStatus.COMPLETED, OrderStatus.DISPUTED],
   [OrderStatus.COMPLETED]: [OrderStatus.DISPUTED, OrderStatus.REFUNDED],
   // docs/08 §22 بند 4-5 — حل الزيارة الفاشلة (OrdersService.resolveFailedVisit): "العميل عايز
@@ -77,6 +78,9 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.REFUNDED,
     OrderStatus.ACCEPTED,
     OrderStatus.CANCELLED_BY_CUSTOMER,
+    // docs/08 §22 بند 13-14 — نزاع تسليم كاش اتحل بـ"يعيد الفني المحاولة" (resolveCashHandoverDispute
+    // outcome=retry) — الطلب يرجع collectCash()-able زي ما كان قبل النزاع.
+    OrderStatus.WORK_COMPLETED,
   ],
   [OrderStatus.CANCELLED_BY_CUSTOMER]: [],
   [OrderStatus.CANCELLED_BY_TECHNICIAN]: [],

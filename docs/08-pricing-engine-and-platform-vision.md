@@ -2505,3 +2505,27 @@ required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبلي�
 اتأكد بـ5 اختبار حي جديد (`reschedule-and-address-warning.spec.ts`، تفاصيل كاملة في
 `../orders/README.md` و`../customers/README.md`). 47 suite / 259 اختبار API عدّوا كاملين،
 `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.
+
+### تحديث تنفيذ §22 — بند 13-14 (تسليم كاش بتأكيد الطرفين) — ✅ `DONE + LIVE VERIFIED`
+
+**`MISSING`، اتقفل**: `PaymentsService.collectCash()` (تأكيد الفني وحده، بيسوّي الطلب فورًا)
+اتسابت زي ما هي بلا أي تعديل عمدًا — مسار تسوية أساسي مختبر بكثافة، مش لازم مخاطرة انحدار فيه.
+التأكيد الثنائي اتضاف إضافيًا: `Order.customerCashConfirmedAt` (تأكيد العميل، مجرد توقيت، صفر أثر
+على التسوية — إثبات حرفي إن تأكيد العميل وحده مايسوّيش الطلب — idempotent) و
+`Order.technicianCashNotReceivedAt` (بلاغ الفني "لم أستلم"، الطلب يتحول `DISPUTED` — نفس الحالة
+اللي §22 بند 3-6 بيستخدمها لزيارة فاشلة، إعادة استخدام مش حالة جديدة — وشكوى تلقائية بعنوان بيفرّق
+بين "نزاع" (لو العميل كان أكّد قبل كده) و"بلاغ عادي"). تسوية إدارية جديدة:
+`PaymentsService.adminConfirmCashReceived()` (نفس بنية `collectCash()` بالحرف، شرط مختلف) +
+`OrdersService.resolveCashHandoverDispute()` (`retry` يرجّع الطلب `WORK_COMPLETED` قابل للتحصيل
+تاني عادي، أو `confirm_received` تسوية فعلية) — صلاحية `orders.resolve_cash_dispute` + step-up MFA
+إجباري (نفس مستوى حساسية `orders.resolve_failed_visit`/`payments.confirm_manual`).
+
+**`apps/customer-app`**: زرار "دفعت الفلوس كاش للفني" جنب أزرار الدفع الإلكتروني. **`apps/technician-app`**:
+زرار "لم أستلم الكاش" (أحمر) بـDialog من خطوتين (وصف ثم تأكيد صريح منفصل) — حماية من ضغطة غلط تعلّق
+الطلب. **`apps/admin`**: قسم جديد في تفاصيل الطلب (يظهر بس لو `disputed` + `technician_cash_not
+_received_at`) بزرارين "إعادة محاولة التحصيل"/"تأكيد استلام فعليًا (إداري)".
+
+اتأكد بـ6 اختبار حي جديد (`cash-handover-confirmation.spec.ts`، تفاصيل كاملة في `../orders/README.md`
+و`../payments/README.md`) — يغطي idempotency التأكيد، تفرقة عنوان الشكوى (نزاع/بلاغ عادي)، إثبات
+إن `retry` رجوع حقيقي (`collectCash()` بعده بينجح فعليًا)، و`confirm_received` يقفل الطلب بصح.
+48 suite / 265 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.

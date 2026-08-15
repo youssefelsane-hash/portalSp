@@ -53,6 +53,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _paying = false;
   bool _requestingRevisit = false;
   bool _requestingRematch = false;
+  bool _confirmingCashHandover = false;
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
@@ -562,6 +563,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد بس، الطلب مايتسوّاش من غير ما الفني
+  // (أو الأدمن لو حصل نزاع) يأكّد الاستلام الفعلي. زرار idempotent (الباك-إند بيتجاهل التكرار).
+  Future<void> _confirmCashHandover() async {
+    setState(() => _confirmingCashHandover = true);
+    try {
+      final order = await _repository.confirmCashHandover(widget.orderId);
+      if (mounted) {
+        setState(() => _order = order);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تمام، سجّلنا إنك سلّمت الفلوس ✅')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _confirmingCashHandover = false);
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   @override
@@ -829,6 +848,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           icon: const Icon(Icons.send_outlined),
                           label: const Text('ادفع عبر InstaPay'),
                         ),
+                        // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو العميل هيدفع كاش
+                        // في إيد الفني (مش من خلال التطبيق)، بعد ما يسلّم يضغط هنا يأكّد.
+                        const SizedBox(height: 8),
+                        if (order.customerCashConfirmedAt == null)
+                          OutlinedButton.icon(
+                            onPressed: _confirmingCashHandover ? null : _confirmCashHandover,
+                            icon: const Icon(Icons.money_outlined),
+                            label: _confirmingCashHandover
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Text('دفعت الفلوس كاش للفني'),
+                          )
+                        else
+                          Row(
+                            children: const [
+                              Icon(Icons.check_circle_outline, color: Colors.green, size: 18),
+                              SizedBox(width: 6),
+                              Expanded(child: Text('اتسجّل إنك سلّمت الكاش — في انتظار تأكيد الفني')),
+                            ],
+                          ),
                       ],
                       if (customerCancellableStatuses.contains(order.orderStatus)) ...[
                         const SizedBox(height: 16),

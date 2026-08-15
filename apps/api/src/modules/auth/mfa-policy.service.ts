@@ -25,6 +25,9 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // حل زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5، migration 0107) — رسوم + استرداد بقرار أدمن،
   // نفس مستوى حساسية orders.adjust_price بالظبط.
   'orders.resolve_failed_visit',
+  // حل نزاع تسليم كاش (docs/08 §22 بند 13-14، migration 0108) — تسوية مالية محتملة بقرار أدمن،
+  // نفس مستوى حساسية orders.resolve_failed_visit بالظبط.
+  'orders.resolve_cash_dispute',
 ] as const;
 
 @Injectable()

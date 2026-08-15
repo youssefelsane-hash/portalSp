@@ -139,6 +139,13 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده
+  // (الفني/الأدمن لسه محتاجين يأكدوا الاستلام الفعلي عبر collectCash/adminConfirmCashReceived).
+  Future<Order> confirmCashHandover(String orderId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/confirm-cash-handover');
+    return Order.fromJson(data!);
+  }
+
   Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,
