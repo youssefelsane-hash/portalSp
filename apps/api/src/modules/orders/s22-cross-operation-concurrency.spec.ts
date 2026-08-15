@@ -352,9 +352,15 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
 
   it('double admin edit — resolveFailedVisit(reschedule) و resolveFailedVisit(cancel_with_fee) على نفس نزاع الزيارة الفاشلة (طلب كاش) بالتزامن: واحد بس ينجح', async () => {
     const orderId = await insertOrder(`fv-race-${runId}`, OrderStatus.DISPUTED, { paymentStatus: 'pending' });
+    // §25.2 — reschedule بقى محتاج سلوت متاح فعلي (مش بس يرجّع ACCEPTED بالموعد القديم بصمت).
+    const newSlotId = await insertSlot(`fv-race-${runId}`, TechnicianScheduleSlotStatus.AVAILABLE, null, '16:00');
 
     const results = await Promise.allSettled([
-      ordersService.resolveFailedVisit(ids.adminA, orderId, { outcome: FailedVisitOutcome.RESCHEDULE, admin_notes: 'أدمن أ قرر يرجّع الطلب نشط' }),
+      ordersService.resolveFailedVisit(ids.adminA, orderId, {
+        outcome: FailedVisitOutcome.RESCHEDULE,
+        admin_notes: 'أدمن أ قرر يرجّع الطلب نشط',
+        new_slot_id: newSlotId,
+      }),
       ordersService.resolveFailedVisit(ids.adminB, orderId, {
         outcome: FailedVisitOutcome.CANCEL_WITH_FEE,
         admin_notes: 'أدمن ب قرر يلغي بالرسوم',

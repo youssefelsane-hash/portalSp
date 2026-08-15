@@ -8,6 +8,7 @@ import { AdminRolesController } from '../admin/admin-roles.controller';
 import { AdminUsersController } from '../admin/admin-users.controller';
 import { AdminSettingsController } from '../admin/admin-settings.controller';
 import { AdminBrandingController } from '../branding/admin-branding.controller';
+import { AdminDomesticWorkersController } from '../domestic-workers/admin-domestic-workers.controller';
 
 // اختبار وحدة بسيط (صفر Postgres/DI — قراءة metadata الـdecorators مباشرة) — بَقّة أمنية حقيقية
 // اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): mfa-policy.service.ts's
@@ -51,6 +52,8 @@ describe('كل endpoint بصلاحية من MFA_REQUIRED_PERMISSIONS لازم ي
     [AdminUsersController.prototype, 'assignRole', 'roles.manage', true],
     [AdminBrandingController.prototype, 'upload', 'branding.manage', true],
     [AdminBrandingController.prototype, 'remove', 'branding.manage', true],
+    [AdminDomesticWorkersController.prototype, 'approveEarning', 'domestic_workers.approve_earnings', true],
+    [AdminDomesticWorkersController.prototype, 'rejectEarning', 'domestic_workers.approve_earnings', true],
   ];
 
   it.each(cases)('%s.%s (صلاحية %s) — step-up مطلوب: %s', (controllerProto, methodName, expectedPermission, requiresStepUp) => {

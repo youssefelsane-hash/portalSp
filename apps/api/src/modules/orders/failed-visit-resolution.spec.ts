@@ -18,8 +18,10 @@ import { WebhookEvent } from '../payments/entities/webhook-event.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
+import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technicians/entities/technician-schedule-slot.entity';
 import { SettingsService } from '../settings/settings.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
@@ -48,6 +50,8 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     address: '',
     techUser: '',
     techProfile: '',
+    otherTechUser: '',
+    otherTechProfile: '',
   };
 
   const makeFakeProvider = (): PaymentProvider => ({
@@ -111,6 +115,23 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     return { orderId: order.id as string, orderNumber: order.order_number as string };
   }
 
+  async function insertSlot(opts: {
+    technicianId: string;
+    slotDate: string;
+    startTime: string;
+    endTime: string;
+    status: TechnicianScheduleSlotStatus;
+    orderId?: string;
+  }) {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [slot] = await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status, order_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [opts.technicianId, opts.slotDate, opts.startTime, opts.endTime, opts.status, opts.orderId ?? null],
+    );
+    return slot.id as string;
+  }
+
   async function insertSucceededPayment(orderId: string, label: string, amountCents: number) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(
@@ -142,6 +163,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
         Complaint,
         ComplaintMessage,
         ComplaintAttachment,
+        TechnicianScheduleSlot,
       ],
     });
     await dataSource.initialize();
@@ -200,6 +222,17 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     );
     ids.techProfile = techProfile.id;
 
+    const [otherTechUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
+      `+2030${runId}`.slice(0, 15),
+      `فني تاني اختبار ${runId}`,
+    ]);
+    ids.otherTechUser = otherTechUser.id;
+    const [otherTechProfile] = await q(
+      `INSERT INTO technician_profiles (user_id, technician_code, national_id_encrypted, years_of_experience, current_level) VALUES ($1,$2,'x',3,'new') RETURNING id`,
+      [ids.otherTechUser, `TCFV2${runId}`.slice(0, 20)],
+    );
+    ids.otherTechProfile = otherTechProfile.id;
+
     const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
@@ -213,6 +246,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
+    const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
 
     paymentsService = new PaymentsService(
@@ -262,7 +296,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       {} as never, // geoService
       techniciansService,
       {} as never, // technicianCompaniesService
-      {} as never, // scheduleService
+      scheduleService,
       {} as never, // pricingEngineService
       {} as never, // promoCodesService
       {} as never, // buildingsService
@@ -277,6 +311,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
 
   afterAll(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM technician_schedule_slots WHERE technician_id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
     await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
     await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
@@ -285,20 +320,35 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTFV-%`]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
+    await q(`DELETE FROM technician_profiles WHERE id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
+    await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.otherTechUser]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
     await dataSource.destroy();
   });
 
-  it('no-show من TECHNICIAN_ARRIVED → DISPUTED + شكوى NO_SHOW، وresolve(reschedule) يرجّعه ACCEPTED بنفس السعر', async () => {
+  it('no-show من TECHNICIAN_ARRIVED → DISPUTED + شكوى NO_SHOW، وresolve(reschedule) يحجز سلوت جديد حقيقي فعليًا (docs/08 §25.2)', async () => {
     const { orderId } = await insertOrder({
       label: `noshow-${runId}`,
       orderStatus: OrderStatus.TECHNICIAN_ARRIVED,
       paymentStatus: OrderPaymentStatus.PENDING,
       totalAmountCents: 30000,
+    });
+    const oldSlotId = await insertSlot({
+      technicianId: ids.techProfile,
+      slotDate: '2026-09-01',
+      startTime: '10:00',
+      endTime: '11:00',
+      status: TechnicianScheduleSlotStatus.BOOKED,
+      orderId,
+    });
+    const newSlotId = await insertSlot({
+      technicianId: ids.techProfile,
+      slotDate: '2026-09-03',
+      startTime: '14:00',
+      endTime: '15:00',
+      status: TechnicianScheduleSlotStatus.AVAILABLE,
     });
 
     const reported = await ordersService.reportFailedVisit(techUserPayload(), orderId, {
@@ -313,10 +363,59 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
 
     const resolved = await ordersService.resolveFailedVisit(ids.customerUser, orderId, {
       outcome: FailedVisitOutcome.RESCHEDULE,
-      admin_notes: 'العميل هيبقى موجود بكرة، نفس الطلب',
+      admin_notes: 'العميل هيبقى موجود يوم تاني، نفس الطلب',
+      new_slot_id: newSlotId,
     });
     expect(resolved.orderStatus).toBe(OrderStatus.ACCEPTED);
     expect(resolved.totalAmountCents).toBe(30000);
+    expect(resolved.scheduledAt?.toISOString()).toBe(new Date('2026-09-03T14:00:00Z').toISOString());
+
+    const oldSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOne({ where: { id: oldSlotId } });
+    expect(oldSlot?.status).toBe(TechnicianScheduleSlotStatus.AVAILABLE);
+    expect(oldSlot?.orderId).toBeNull();
+    const newSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOne({ where: { id: newSlotId } });
+    expect(newSlot?.status).toBe(TechnicianScheduleSlotStatus.BOOKED);
+    expect(newSlot?.orderId).toBe(orderId);
+  });
+
+  it('resolve(reschedule) من غير new_slot_id يترفض بوضوح — صفر "يرجع ACCEPTED بنفس الموعد القديم" بصمت', async () => {
+    const { orderId } = await insertOrder({
+      label: `noslot-${runId}`,
+      orderStatus: OrderStatus.DISPUTED,
+      paymentStatus: OrderPaymentStatus.PENDING,
+      totalAmountCents: 30000,
+    });
+    await expect(
+      ordersService.resolveFailedVisit(ids.customerUser, orderId, {
+        outcome: FailedVisitOutcome.RESCHEDULE,
+        admin_notes: 'محاولة من غير موعد جديد',
+      }),
+    ).rejects.toThrow();
+    const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.DISPUTED); // فضل معلّق، ماترجعش ACCEPTED بصمت
+  });
+
+  it('resolve(reschedule) بسلوت فني تاني يترفض — مينفعش تغيّر الفني نفسه من مسار حل النزاع', async () => {
+    const { orderId } = await insertOrder({
+      label: `wrongtech-${runId}`,
+      orderStatus: OrderStatus.DISPUTED,
+      paymentStatus: OrderPaymentStatus.PENDING,
+      totalAmountCents: 30000,
+    });
+    const otherTechSlotId = await insertSlot({
+      technicianId: ids.otherTechProfile,
+      slotDate: '2026-09-05',
+      startTime: '09:00',
+      endTime: '10:00',
+      status: TechnicianScheduleSlotStatus.AVAILABLE,
+    });
+    await expect(
+      ordersService.resolveFailedVisit(ids.customerUser, orderId, {
+        outcome: FailedVisitOutcome.RESCHEDULE,
+        admin_notes: 'محاولة بسلوت فني تاني',
+        new_slot_id: otherTechSlotId,
+      }),
+    ).rejects.toThrow();
   });
 
   it('required_work_rejected من IN_PROGRESS → DISPUTED + شكوى REQUIRED_WORK_REJECTED', async () => {

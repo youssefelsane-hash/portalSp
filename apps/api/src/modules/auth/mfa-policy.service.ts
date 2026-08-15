@@ -28,6 +28,9 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // حل نزاع تسليم كاش (docs/08 §22 بند 13-14، migration 0108) — تسوية مالية محتملة بقرار أدمن،
   // نفس مستوى حساسية orders.resolve_failed_visit بالظبط.
   'orders.resolve_cash_dispute',
+  // موافقة أرباح عمالة منزلية (docs/08 §25.1، migration 0112) — تحويل فلوس مباشر من محفظة
+  // المنصة لمحفظة الشغالة بقرار أدمن، نفس مستوى حساسية payouts.approve/wallets.adjust بالظبط.
+  'domestic_workers.approve_earnings',
 ] as const;
 
 @Injectable()

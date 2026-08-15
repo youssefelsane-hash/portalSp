@@ -488,8 +488,9 @@ Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`ord
 تصديق طرف واحد أعمى)، صلاحية مخصوصة `orders.resolve_failed_visit` (+ step-up MFA، نفس مستوى
 `orders.adjust_price`، migration 0107):
 - **`reschedule`**: `DISPUTED → ACCEPTED` (انتقال جديد) — نفس الطلب، نفس السعر، صفر تحصيل تاني.
-  تحديد موعد جديد تحديدًا (slot-based) هيتغطى في §22 بند 9-12 (مش مبني لسه) — دلوقتي الطلب بس
-  يرجع نشط يقدر الفني يعيد المحاولة منه.
+  **تحديث (docs/08 §25.2، 2026-08-15)**: `new_slot_id` بقى إجباري فعليًا — الطلب بيرجع نشط
+  بموعد جديد حقيقي متحقق من availability الفني (`TechnicianScheduleService`)، مش بنفس الموعد
+  القديم بصمت. تفاصيل كاملة تحت "إعادة الجدولة".
 - **`cancel_with_fee`**: طلب كاش (مفيش فلوس اتحصّلت أصلاً) → `DISPUTED → CANCELLED_BY_CUSTOMER`
   (انتقال جديد) **صفر رسوم دايمًا** — تعليمة صريحة، المنصة بتمتص تكلفة الفني للـMVP، صفر معاملة
   دفع وهمية. طلب مدفوع مسبقًا → رسوم زيارة (افتراضي `orders.no_show_visit_fee_cents`, migration
@@ -501,14 +502,16 @@ Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`ord
 **`apps/technician-app`**: زرار "زيارة فاشلة" (برتقالي، تحذيري) في `order_execution_screen.dart`
 يظهر بس في `technician_arrived`/`in_progress` — dialog بسبب مقفول (3 خيارات) + توضيح نصي إجباري.
 **`apps/admin`**: قسم "الطلب ده بلاغ زيارة فاشلة" في `orders/[id]/page.tsx` (يظهر بس لو
-`order_status=disputed`) — زرار "إعادة جدولة" فوري، أو فورم "العميل عايز يلغي" (رسوم اختيارية +
-ملاحظات مراجعة إجبارية).
+`order_status=disputed`) — زرار "إعادة جدولة" بيفتح slot picker حقيقي (docs/08 §25.2، تفاصيل تحت)،
+أو فورم "العميل عايز يلغي" (رسوم اختيارية + ملاحظات مراجعة إجبارية).
 
-**الاختبار**: `failed-visit-resolution.spec.ts` (7 اختبار حي) — no-show → reschedule بنفس السعر؛
-required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبليغ قبل الوصول (`ACCEPTED`)؛ كاش cancel_with_fee
-صفر رسوم/صفر معاملة دفع؛ مدفوع مسبقًا استرداد جزئي (رسوم مخصومة، الطلب يتلغي بعد الاسترداد)؛
-مدفوع مسبقًا برسوم صفر (استرداد كامل، `REFUNDED` تلقائيًا)؛ رفض حل طلب مش `DISPUTED`. 46 suite (254
-اختبار) عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.
+**الاختبار**: `failed-visit-resolution.spec.ts` (9 اختبار حي) — no-show → reschedule بسلوت جديد
+حقيقي محجوز والقديم بيترجع متاح (docs/08 §25.2)؛ رفض reschedule من غير `new_slot_id`؛ رفض
+reschedule بسلوت فني تاني؛ required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبليغ قبل الوصول
+(`ACCEPTED`)؛ كاش cancel_with_fee صفر رسوم/صفر معاملة دفع؛ مدفوع مسبقًا استرداد جزئي (رسوم مخصومة،
+الطلب يتلغي بعد الاسترداد)؛ مدفوع مسبقًا برسوم صفر (استرداد كامل، `REFUNDED` تلقائيًا)؛ رفض حل طلب
+مش `DISPUTED`. 53 suite (290 اختبار) عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين)
+نضيفين.
 
 ## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `adjustPrice` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
 
@@ -547,6 +550,12 @@ order-rescheduled-notification.listener.ts`) — "العميل غيّر ميعا
 الأصلي، صفر حجز مزدوج صامت)؛ رفض سلوت فني تاني؛ `AddressesService.hasActiveOrder()` (تفاصيل في
 `../customers/README.md`). 47 suite / 259 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze`
 نضيفين.
+
+**تحديث (docs/08 §25.2، 2026-08-15)**: نفس `TechnicianScheduleService.rescheduleSlot()`/
+`findAvailableSlotOrThrow()` هنا بالظبط بقوا مستخدمين كمان من `resolveFailedVisit(outcome=
+reschedule)` (الطلب `DISPUTED` بعد no-show) — صفر تكرار منطق، صفر مسار جديد. `GET
+/technicians/:id/schedule` (كانت `@Roles(CUSTOMER)` بس) بقت مفتوحة لـ`ADMIN` كمان
+(`../technicians/README.md`) عشان الأدمن يقدر يختار سلوت حقيقي وقت حل نزاع.
 
 ## تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14، 2026-08-15)
 

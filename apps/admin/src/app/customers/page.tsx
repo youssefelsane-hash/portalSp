@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { AdminCustomerResponseDto, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -37,8 +38,14 @@ export default function CustomersPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [blockedFilter, setBlockedFilter] = useState<'all' | 'blocked' | 'active'>('all');
-  const [phoneSearch, setPhoneSearch] = useState('');
+  const [phoneSearchInput, setPhoneSearchInput] = useState('');
+  const phoneSearch = useDebouncedValue(phoneSearchInput, 400);
   const [error, setError] = useState<string | null>(null);
+
+  // بحث حي كان بيبعت طلب لكل حرف — دلوقتي بيستنى الـuseDebouncedValue فوق (400ms) قبل ما يبعت.
+  useEffect(() => {
+    setPage(1);
+  }, [phoneSearch]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -75,11 +82,8 @@ export default function CustomersPage() {
         ))}
         <Input
           placeholder="بحث برقم الموبايل"
-          value={phoneSearch}
-          onChange={(e) => {
-            setPhoneSearch(e.target.value);
-            setPage(1);
-          }}
+          value={phoneSearchInput}
+          onChange={(e) => setPhoneSearchInput(e.target.value)}
           className="max-w-xs"
           dir="ltr"
         />

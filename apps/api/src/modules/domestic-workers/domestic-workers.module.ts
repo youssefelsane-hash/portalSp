@@ -7,16 +7,18 @@ import { SettingsModule } from '../settings/settings.module';
 import { AdminDomesticWorkersController } from './admin-domestic-workers.controller';
 import { DomesticWorkerBookingsController } from './domestic-worker-bookings.controller';
 import { DomesticWorkerBookingsService } from './domestic-worker-bookings.service';
+import { DomesticWorkerEarningApprovalsService } from './domestic-worker-earning-approvals.service';
 import { DomesticWorkerProfileListener } from './domestic-worker-profile.listener';
 import { DomesticWorkersController } from './domestic-workers.controller';
 import { DomesticWorkersService } from './domestic-workers.service';
 import { PublicDomesticWorkersController } from './public-domestic-workers.controller';
 import { DomesticWorkerBooking } from './entities/domestic-worker-booking.entity';
+import { DomesticWorkerEarningApproval } from './entities/domestic-worker-earning-approval.entity';
 import { DomesticWorkerProfile } from './entities/domestic-worker-profile.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DomesticWorkerProfile, DomesticWorkerBooking]),
+    TypeOrmModule.forFeature([DomesticWorkerProfile, DomesticWorkerBooking, DomesticWorkerEarningApproval]),
     CustomersModule,
     PaymentsModule,
     SettingsModule,
@@ -28,7 +30,7 @@ import { DomesticWorkerProfile } from './entities/domestic-worker-profile.entity
     AdminDomesticWorkersController,
     DomesticWorkerBookingsController,
   ],
-  providers: [DomesticWorkersService, DomesticWorkerBookingsService, DomesticWorkerProfileListener],
+  providers: [DomesticWorkersService, DomesticWorkerBookingsService, DomesticWorkerEarningApprovalsService, DomesticWorkerProfileListener],
   exports: [DomesticWorkersService, DomesticWorkerBookingsService],
 })
 export class DomesticWorkersModule {}
