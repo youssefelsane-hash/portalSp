@@ -104,12 +104,19 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    // بنستخدم دولة/مدينة مصر المزروعة بالفعل (migration 0004) بدل إنشاء صف جديد — countries.iso_code
+    // بنستخدم دولة مصر المزروعة بالفعل (migration 0004) بدل إنشاء صف جديد — countries.iso_code
     // عمودها VARCHAR(2) بس، فأي uniqueness scheme محلي (زي حرف من runId) عرضة للتصادم مع نفسه
     // بسرعة عبر تشغيلات متكررة؛ إعادة استخدام صف ثابت موجود أبسط وأضمن (مفيش إنشاء/حذف مطلوب له خالص).
+    // بَقّة حقيقية اتلقطت واتصلحت (تدقيق CI، 2026-08-15): migration 0004 بتزرع الدولة بس، مش أي
+    // مدينة — الافتراض القديم إن فيه مدينة "مزروعة بالفعل" كان غلط، وبيعدّي بالصدفة بس لو قاعدة
+    // البيانات المحلية فيها مدينة متسيبة من اختبار تاني سابق. على قاعدة migrated طازجة (CI) الـSELECT
+    // بيرجع صفر صفوف. الحل: ننشئ مدينة الاختبار بنفسنا زي أي صف تاني هنا، ونمسحها في afterAll.
     const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
     ids.country = country.id;
-    const [city] = await q(`SELECT id FROM cities WHERE country_id = $1 LIMIT 1`, [ids.country]);
+    const [city] = await q(
+      `INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [ids.country, `مدينة اختبار ${runId}`, `Test City ${runId}`, `test-city-csd-${runId}`],
+    );
     ids.city = city.id;
     const [zone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
       ids.city,
@@ -195,6 +202,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     service = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
+      dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
       dataSource,
@@ -237,7 +245,8 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     await q(`DELETE FROM services WHERE id IN ($1, $2)`, [ids.service20, ids.serviceZero]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    // country/city مش بتاعتنا (صفوف مصر/القاهرة المزروعة مسبقًا، مُعاد استخدامها بس) — مفيش حذف هنا عمدًا.
+    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+    // الدولة (مصر) مش بتاعتنا — صف ثابت مزروع مسبقًا (migration 0004)، مُعاد استخدامه بس، مفيش حذف هنا عمدًا.
     await dataSource.destroy();
   });
 

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/comm
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -39,8 +40,15 @@ export class AdminWalletController {
   // تصحيح محفظة يدوي (docs/08 §20 بند 5) — صلاحية أضيق من القراءة (wallets.adjust بدل
   // wallets.view، migration 0104) + MFA/step-up إجباري (MFA_REQUIRED_PERMISSIONS) لأنه تحويل
   // فلوس حقيقي بقرار أدمن مباشر، نفس مستوى حساسية refunds.issue/payouts.approve بالظبط.
+  //
+  // بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): التعليق فوق
+  // كان بيدّعي "MFA/step-up إجباري" بس `@RequireStepUp()` الفعلية متضافتش خالص — `StepUpGuard`
+  // (مسجّل global) بيبقى no-op تمامًا من غيرها، يعني جلسة مسروقة/مخترقة كانت تقدر تحوّل فلوس مباشرة
+  // من غير أي تأكيد Passkey حديث، رغم إن الحساب نفسه لازم MFA وقت الدخول. نفس الفئة بالظبط اتلقطت
+  // في `orders.adjust_price`/`payments.confirm_manual`/`settings.manage` — الأربعة اتصلحوا مع بعض.
   @Patch(':userId/adjust')
   @RequirePermission('wallets.adjust')
+  @RequireStepUp()
   async adjustWallet(
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,

@@ -135,6 +135,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     const paymentsService = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
+      dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
       dataSource,
@@ -156,6 +157,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     service = new OrdersService(
       dataSource.getRepository(Order),
       {} as never, // technicianOrderCancellations
+      {} as never, // orderMedia — مش متنادى في cancel()
       dataSource,
       { record: async () => undefined } as never, // auditLog
       {

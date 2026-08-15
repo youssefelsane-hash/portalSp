@@ -124,3 +124,13 @@ ADR-0010 — مفيش داعي منحها صراحة). اختبار regression �
 - **حاجات لسه ناقصة عمداً**: مفيش `PATCH /admin/customers/:userId` لتعديل البيانات (مفيش حقل واضح المفروض الأدمن يعدله غير الحظر نفسه — الاسم/الهاتف بييجوا من مسار OTP الذاتي)، ومفيش `DELETE`/soft-delete (نفس فجوة الموظفين بالظبط). حظر العميل هنا بيمنعه يدخل بس **مش** بيلغي طلباته الحالية (السلوك ده متعمد — لو فيه طلب شغال، الإلغاء له مسار تاني `admin-orders.service.ts`).
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §13.7 و `../../../../docs/01-master-plan.md` §2.4.
+
+## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `PATCH /admin/settings/:key` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
+
+`settings.manage` مُدرجة في `MFA_REQUIRED_PERMISSIONS` (`../auth/mfa-policy.service.ts`) بس
+`@RequireStepUp()` الفعلية متضافتش خالص على `admin-settings.controller.ts`'s `update` handler —
+`StepUpGuard` (global) كان no-op عليها، فجلسة أدمن مسروقة كانت تقدر تغيّر أي إعداد منصة حساس من
+غير أي تأكيد Passkey حديث. اتصلحت بإضافة `@RequireStepUp()` (نفس فئة البَقّة اللي اتصلحت في
+`wallets.adjust`/`orders.adjust_price`/`payments.confirm_manual`). تفاصيل كاملة + الاختبار الجديد
+(`../auth/mfa-step-up-enforcement.spec.ts`) في
+`../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".

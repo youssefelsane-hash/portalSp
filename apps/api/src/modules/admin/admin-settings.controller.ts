@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -25,8 +26,12 @@ export class AdminSettingsController {
     return toSettingResponseDto(await this.settingsService.getOrThrow(key));
   }
 
+  // بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): settings.manage
+  // مُدرجة في MFA_REQUIRED_PERMISSIONS بس @RequireStepUp() متضافتش — نفس الفئة اللي اتصلحت لـ
+  // wallets.adjust/orders.adjust_price/payments.confirm_manual.
   @Patch(':key')
   @RequirePermission('settings.manage')
+  @RequireStepUp()
   async update(
     @CurrentUser() admin: JwtPayload,
     @Param('key') key: string,

@@ -255,3 +255,16 @@ transactions` أصلاً append-only على مستوى الـDB (`REVOKE UPDATE,
 اتأكد بـ2 اختبار حي جديد في `cash-settlement-direction.spec.ts` (كاش + إلكتروني). دفعة إضافية لشغل زيادة
 (الاتجاه التاني) كانت مُختبرة حيًا بالفعل من قبل (`order_items`/`AWAITING_QUOTE_APPROVAL`، تفاصيل في
 `../orders/README.md`) — صفر كود جديد لأي من الاتجاهين، بند 6 كان تحقق/اختبار بس.
+
+## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `adjustWallet`/`confirmInstaPayPayment` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
+
+`wallets.adjust` و`payments.confirm_manual` مُدرجتين في `MFA_REQUIRED_PERMISSIONS`
+(`../auth/mfa-policy.service.ts`) بس `@RequireStepUp()` الفعلية متضافتش خالص على `PATCH
+/admin/wallets/:userId/adjust` (`admin-wallet.controller.ts`) ولا على `POST
+/admin/payments/:id/confirm-instapay` (`admin-payments.controller.ts`) — رغم إن كومنت الكود الأول
+كان بيدّعي صراحة "MFA/step-up إجباري". `StepUpGuard` (global) بيبقى no-op تمامًا من غير الـdecorator،
+يعني جلسة أدمن مسروقة كانت تقدر تحوّل فلوس محفظة أو تأكّد دفعة InstaPay يدويًا من غير أي تأكيد Passkey
+حديث. اتصلحت بإضافة `@RequireStepUp()` للاتنين (زائد نفس البَقّة على `orders.adjust_price` في
+`../orders/README.md` و`settings.manage` في `../admin/README.md` — أربع endpoints مع بعض). تفاصيل
+كاملة + الاختبار الجديد (`../auth/mfa-step-up-enforcement.spec.ts`) في
+`../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".

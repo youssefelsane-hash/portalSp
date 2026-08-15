@@ -432,6 +432,17 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ],
+            // إثبات إنجاز الشغل (docs/08 §20 بند 12، قرار مالك صريح) — الباك-إند بيرفض إنهاء
+            // الشغل من غير صورة after_photo واحدة على الأقل (order_execution_screen مش بيقدر يلفها).
+            // التلميح هنا استباقي بس — نفس فحص الباك-إند بالظبط (>=1 after_photo)، عشان الفني
+            // يعرف قبل ما يضغط الزرار ويتفاجئ برسالة خطأ.
+            if (nextAction == 'complete' && !(_media ?? []).any((m) => m.mediaType == 'after_photo')) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'لازم تصوّر صورة واحدة على الأقل بعد الشغل قبل ما تقدر تقفل الطلب',
+                style: TextStyle(color: Colors.orange),
+              ),
+            ],
             const SizedBox(height: 24),
             if (isDone)
               const Center(child: Text('الطلب اتقفل — شكراً على شغلك 👍'))

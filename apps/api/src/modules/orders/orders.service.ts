@@ -36,6 +36,7 @@ import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancel
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
+import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
@@ -60,6 +61,7 @@ export class OrdersService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(TechnicianOrderCancellation)
     private readonly technicianOrderCancellations: Repository<TechnicianOrderCancellation>,
+    @InjectRepository(OrderMedia) private readonly orderMedia: Repository<OrderMedia>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditLog: AuditLogService,
     private readonly customerProfiles: CustomerProfilesService,
@@ -1054,6 +1056,24 @@ export class OrdersService {
         `مينفعش تنتقل من ${order.orderStatus} لـ ${to}`,
         HttpStatus.CONFLICT,
       );
+    }
+
+    // إثبات إنجاز الشغل (docs/08 §20 بند 12، قرار مالك صريح 2026-08-14) — صورة after_photo واحدة
+    // على الأقل إجبارية قبل إنهاء الشغل، مفروضة هنا على الباك-إند (مش بس زرار الواجهة) عشان
+    // مينفعش يتلف عن طريق نداء الـendpoint مباشرة. عمداً بسيطة زي ما المالك طلب: عدد واحد بس،
+    // مفيش قواعد حسب نوع الخدمة أو توقيع عميل. برّه أي transaction — قراءة بس، الطلب لسه في حالته
+    // القديمة لحد ما الفحص يعدّي، فمفيش داعي تشارك قفل الطلب.
+    if (to === OrderStatus.WORK_COMPLETED) {
+      const afterPhotoCount = await this.orderMedia.count({
+        where: { orderId: order.id, mediaType: OrderMediaType.AFTER_PHOTO },
+      });
+      if (afterPhotoCount === 0) {
+        throw new ApiException(
+          ErrorCode.ORDR_005,
+          'لازم ترفع صورة واحدة على الأقل بعد الشغل قبل ما تقفل الطلب',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
     }
 
     const previousStatus = order.orderStatus;

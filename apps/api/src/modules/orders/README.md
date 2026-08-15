@@ -416,3 +416,62 @@
 مبتأثرش)، إلغاء طلب كاش غير مدفوع (صفر محاولة استرداد — رجريشن)، ونداء `cancel()` مرتين على نفس
 الطلب المدفوع (المحاولة التانية بترفض لأن الطلب نهائي، صف `refunds` واحد بس — idempotency).
 `tsc --noEmit`/`nest build`/38 suite (205 اختبار) عدّوا نضيف. صفر migration مطلوبة.
+
+## `GET /admin/orders/:id/financial-summary` — الملخص المالي لطلب واحد (docs/08 §20 بند 11)
+
+**الفجوة**: `platform_commission_cents`/`technician_earning_cents` محسوبين ومخزّنين على `orders` من
+زمان (docs/08 §20 بند 1) بس صفر endpoint كان بيرجّعهم لأي أدمن — `toOrderResponseDto()` كانت
+ماسكاهمش خالص. مفيش كمان أي طريقة تعرف وسيلة دفع أو تاريخ استرداد طلب معيّن من غير تفتيش يدوي في
+`/admin/wallets/:userId` (لو أصلاً عارف مين الفني/العميل).
+
+**الحل — لمّ الموجود بس، صفر حساب جديد**: `PaymentsService.getFinancialSummaryForOrder(orderId)`
+(جديدة، `payments.service.ts`) بترجّع `platformCommissionCents`/`technicianEarningCents`/
+`cancellationFeeCents` من صف الطلب نفسه + كل صفوف `payments`/`refunds` المرتبطة (`WHERE order_id`)،
+بلا أي حساب أو تعديل. اتنادت من `AdminOrdersController` مباشرة (`PaymentsService` مُصدَّرة من
+`PaymentsModule` أصلاً، `OrdersModule` بيستوردها من زمان — صفر حقن جديد على مستوى الموديول). DTO
+جديد `order-financial-summary-response.dto.ts` + نسخة مطابقة في `packages/shared-types`.
+
+معروض في `apps/admin` (`/orders/:id`) كارت "الملخص المالي" جديد — عمولة/أرباح، قايمة الدفعات (وسيلة
++ حالة + مبلغ)، وقايمة الاستردادات (لو فيه). صفر تعديل على كارت البيانات الموجود — كارت مستقل جنبه.
+
+**الاختبار**: `../payments/order-financial-summary.spec.ts` (اختبارين حيّين ضد Postgres حقيقي) —
+طلب حقيقي بعمولة/أرباح/رسوم إلغاء + دفعة + استرداد جزئي، الدالة رجّعت كل رقم بالظبط زي ما اتخزّن؛
+طلب غير موجود يترفض بوضوح (`ApiException`) بدل ما يرجّع بيانات فاضية بصمت. `tsc --noEmit`/
+`nest build`/40 suite (209 اختبار) عدّوا نضيف. صفر migration مطلوبة (صفر عمود جديد، البيانات كانت
+موجودة بالفعل).
+
+## إثبات إنجاز الشغل إجباري — صورة `after_photo` واحدة قبل `WORK_COMPLETED` (docs/08 §20 بند 12، قرار مالك نهائي 2026-08-14)
+
+**القرار**: عمداً بسيط لـMVP — صورة `after_photo` واحدة بس إجبارية قبل ما الفني يقدر يقفل الشغل،
+لكل الطلبات بلا استثناء (صفر قواعد حسب نوع الخدمة/الطوارئ)، صفر توقيع عميل، صفر إعداد قابل للتهيئة،
+صفر أثر رجعي على طلبات مكتملة بالفعل.
+
+**التنفيذ**: `transitionAsTechnician()` (الدالة المشتركة وراء `depart`/`arrive`/`start`/`complete`
+كلهم) — لو `to === WORK_COMPLETED` بس، بتعدّ صفوف `order_media` بـ`media_type='after_photo'`
+للطلب وترفض (`ErrorCode.ORDR_005`, `400`) لو صفر. الفحص قبل أي `transaction` (قراءة بس)، وجوّه
+الدالة المشتركة نفسها — يعني **مايتلفش** بنداء `POST /technician/orders/:id/complete` مباشرة (خارج
+Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`orders.module.ts` كانت مسجّلاها
+أصلاً في `TypeOrmModule.forFeature`، صفر تغيير موديول).
+
+**`apps/technician-app`**: تلميح استباقي في `order_execution_screen.dart` — لو الفعل الجاي
+`complete` ومفيش `after_photo` مرفوع لسه، سطر تحذير برتقالي فوق زرار "إنهاء الشغل" مباشرة (نفس فحص
+الباك-إند بالظبط). فشل النداء الفعلي (لو الفني تجاهل التلميح وضغط) بيظهر برسالة `ORDR_005` العربية
+الواضحة عبر نفس `_error`/`ApiException.message` pathway الموجود بالفعل لكل فعل تاني — صفر plumbing
+جديد. **صفر تعديل على زرار رفع الصور نفسه، صفر شاشة توقيع جديدة** — القرار رفضهم صراحة.
+
+**الاختبار**: `technician-complete-proof-of-work.spec.ts` (4 اختبارات حية، بتنادي
+`OrdersService.complete()` مباشرة — إثبات مباشر إن الفحص مايتلفش لو حد نادى الـendpoint بلا Flutter):
+إنهاء بلا `after_photo` يترفض (`ORDR_005`، الطلب يفضل `in_progress`)؛ صورة واحدة كافية (`work_completed`
+بنجاح)؛ أكتر من صورة مسموح (نفس النجاح، صفر حد أعلى)؛ `before_photo` بس مش كافي (النوع مهم مش أي
+صورة). `tsc --noEmit`/`nest build`/41 suite (213 اختبار) عدّوا نضيف. `flutter analyze` نضيف (صفر
+تحذير جديد). صفر migration (`order_media` موجودة من زمان، الفحص منطقي بس).
+
+## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `adjustPrice` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
+
+`orders.adjust_price` مُدرجة في `MFA_REQUIRED_PERMISSIONS` (`../auth/mfa-policy.service.ts`) بس
+`@RequireStepUp()` الفعلية متضافتش خالص على `PATCH /admin/orders/:id/adjust-price`
+(`admin-orders.controller.ts`) — يعني `StepUpGuard` (global) كان no-op عليها، فجلسة أدمن مسروقة
+كانت تقدر تعدّل سعر أي طلب من غير أي تأكيد Passkey حديث. اتصلحت بإضافة `@RequireStepUp()` (نفس فئة
+البَقّة اللي اتصلحت في `wallets.adjust`/`payments.confirm_manual`/`settings.manage` مع بعض). تفاصيل
+كاملة + الاختبار الجديد (`../auth/mfa-step-up-enforcement.spec.ts`) في
+`../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".

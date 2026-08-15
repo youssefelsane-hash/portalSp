@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import type {
   AdminTechnicianResponseDto,
   OrderDetailResponseDto,
+  OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMediaResponseDto,
   TeamMemberResponseDto,
@@ -54,6 +55,12 @@ import {
   isOrderCancellable,
   isOrderReassignable,
 } from '@/lib/order-labels';
+import {
+  PAYMENT_GATEWAY_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS_FULL,
+  REFUND_METHOD_LABELS,
+  REFUND_STATUS_LABELS,
+} from '@/lib/payments-labels';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
@@ -62,6 +69,7 @@ export default function OrderDetailPage() {
   const router = useRouter();
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
+  const [financialSummary, setFinancialSummary] = useState<OrderFinancialSummaryResponseDto | null>(null);
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
   const [quoteItems, setQuoteItems] = useState<OrderItemResponseDto[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +97,10 @@ export default function OrderDetailPage() {
     authedFetch<OrderItemResponseDto[]>(`/admin/orders/${id}/quote-items`)
       .then(setQuoteItems)
       .catch(() => setQuoteItems([]));
+    // الملخص المالي (docs/08 §20 بند 11) — مسار منفصل عمداً زي الصور وبنود العرض فوق
+    authedFetch<OrderFinancialSummaryResponseDto>(`/admin/orders/${id}/financial-summary`)
+      .then(setFinancialSummary)
+      .catch(() => setFinancialSummary(null));
     // تعيين مساعد يدوي بعد التصعيد (ADR-0008) — محتاجين نعرف كام مساعد اتعيّن فعلاً عشان
     // نعرف نعرض فورم التعيين ولا لأ (لو الأماكن اكتملت بالفعل، مفيش داعي نعرضه).
     authedFetch<TeamMemberResponseDto[]>(`/admin/orders/${id}/team-members`)
@@ -425,6 +437,66 @@ export default function OrderDetailPage() {
               )}
             </CardFooter>
           )}
+        </Card>
+
+        {/* الملخص المالي لكل طلب (docs/08 §20 بند 11) — كارت واحد واضح يجمع كل حاجة متبعثرة قبل
+            كده: عمولة/أرباح (كانت محسوبة بس مش معروضة خالص)، وسيلة/حالة كل دفعة، وأي استرداد. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">الملخص المالي</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            {!financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {financialSummary && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <p>عمولة المنصة: {formatEgp(financialSummary.platform_commission_cents)}</p>
+                  <p>أرباح الفني: {formatEgp(financialSummary.technician_earning_cents)}</p>
+                  {financialSummary.cancellation_fee_cents > 0 && (
+                    <p className="text-destructive">
+                      رسوم إلغاء: {formatEgp(financialSummary.cancellation_fee_cents)}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-1 font-medium">الدفعات ({financialSummary.payments.length})</p>
+                  {financialSummary.payments.length === 0 && (
+                    <p className="text-muted-foreground">مفيش دفعات مسجّلة لسه</p>
+                  )}
+                  {financialSummary.payments.length > 0 && (
+                    <ul className="flex flex-col gap-1">
+                      {financialSummary.payments.map((p) => (
+                        <li key={p.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
+                          <span>
+                            {PAYMENT_METHOD_LABELS_FULL[p.payment_method]} ·{' '}
+                            {PAYMENT_GATEWAY_STATUS_LABELS[p.payment_status]}
+                          </span>
+                          <span>{formatEgp(p.amount_cents)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {financialSummary.refunds.length > 0 && (
+                  <div>
+                    <p className="mb-1 font-medium">الاستردادات ({financialSummary.refunds.length})</p>
+                    <ul className="flex flex-col gap-1">
+                      {financialSummary.refunds.map((r) => (
+                        <li key={r.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
+                          <span>
+                            {REFUND_METHOD_LABELS[r.refund_method]} · {REFUND_STATUS_LABELS[r.refund_status]}
+                          </span>
+                          <span className="text-destructive">-{formatEgp(r.amount_cents)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
         </Card>
 
         {/* تعيين مساعد يدوي بعد التصعيد (ADR-0008) — بيظهر بس لو الطلب أصلاً محتاج مساعدين. */}
