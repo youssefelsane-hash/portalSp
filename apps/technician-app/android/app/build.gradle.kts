@@ -19,12 +19,17 @@ if (hasReleaseSigning) {
 
 android {
     namespace = "com.baytak.technician_app"
-    compileSdk = flutter.compileSdkVersion
+    // بَقّة CI حقيقية اتلقطت واتصلحت (2026-08-15): flutter.compileSdkVersion (36 حاليًا مع Flutter
+    // 3.44.9) أقل من اللي flutter_secure_storage محتاجه (37) — build فاشل بـ"CheckAarMetadata".
+    // 37 صريح هنا بدل الاعتماد على قيمة Flutter الافتراضية لحد ما SDK نفسه يترقّى.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications محتاج desugaring لمكتبات java.time على أجهزة API قديمة.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -66,6 +71,11 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    // مكتبة desugaring نفسها — مطلوبة عشان isCoreLibraryDesugaringEnabled فوق (flutter_local_notifications).
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {
