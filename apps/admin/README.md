@@ -221,6 +221,24 @@ RTL سليم). البيانات التجريبية المحقونة اتمسحت
 - **`middleware.ts` بقى `proxy.ts`، والدالة اسمها `proxy` مش `middleware`** — الاسم القديم deprecated. اتعمل التحويل هنا باستخدام الـ codemod الرسمي (`npx @next/codemod@canary middleware-to-proxy .`)، مش تخمين.
 - `useSearchParams()` محتاج `<Suspense>` boundary عشان الـ static prerendering ينجح في `next build` — لاحظناها لما الـ build فشل على `/login`.
 
+## بحث العملاء بقى debounced (§25.3، طلب مالك صريح 2026-08-15)
+
+تدقيق شامل عبر كل صفحات القوائم في `apps/admin` + الاتنين تطبيقي Flutter لقى حقل بحث حي واحد بس
+بلا debounce في المشروع كله: بحث رقم الموبايل في `/customers` — كان بيبعت request لكل حرف
+(`onChange` بينادي `authedFetchPaginated` مباشرة عن طريق dependency الـ`useEffect`). باقي فلاتر
+الصفحات التانية dropdowns/selects، مش نص حي، فمش داخلة في نفس المشكلة.
+
+**الإصلاح**: `useDebouncedValue()` جديد (`src/lib/use-debounced-value.ts`) — hook عام بسيط
+(`setTimeout`/`clearTimeout`، 400ms افتراضي)، مش مقصور على `/customers`. حقل الإدخال نفسه (`phoneSearchInput`)
+يفضل فوري بصريًا، الـ`useEffect` اللي بيبعت الطلب بيعتمد على النسخة المتأخرة (`phoneSearch`) بدل الخام.
+
+**اتعمله اختبار حي كامل عبر Playwright (`chromium` مباشر، صفر mocks)**: كتابة 8 حروف بسرعة (40ms
+بين كل حرف، أقل بكتير من نافذة الـ400ms) بعتت **صفر** طلبات أثناء الكتابة، وطلب **واحد بالظبط**
+بعد ما الكتابة وقفت — نتيجة البحث فلترت صح (20 من أصل 25 عميل تجريبي مطابقين لبادئة الرقم). مسح
+البحث رجّع القايمة كاملة (طلب واحد جديد، مش صفر — التفاعلية لسه شغالة). الترقيم بين الصفحات
+(`pagination`) اتأكد شغال بعد التعديل: صفحة 1 عرضت 20 صف، الضغط على "التالي" بعت طلب واحد فوري
+(مش debounced، صح بما إنه click مش keystroke) وعرض الـ5 المتبقيين صح.
+
 ## shadcn/ui بدون شبكة
 
 `ui.shadcn.com` محجوب بسياسة الشبكة في بيئة التطوير اللي اتبنى فيها المشروع ده (403 على CONNECT). المكوّنات في `src/components/ui/` اتكتبت يدوياً (مطابقة لمصدر shadcn المعروف: `button`, `input`, `label`, `card`) بدل ما نعتمد على `shadcn init`/`shadcn add` اللي بيكلموا الشبكة دي. لو الشبكة اتفتحت مستقبلاً، تقدر تستخدم `npx shadcn@latest add <component>` عادي — بس تأكد إنه مش هيكتب فوق الملفات دي بتنسيق مختلف.
