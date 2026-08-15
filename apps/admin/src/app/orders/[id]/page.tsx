@@ -33,6 +33,15 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   spare_part: 'قطعة غيار',
   extra_labor: 'أجرة إضافية',
 };
+
+// GET /technicians/:id/schedule (نسخة العميل — is_available بس، docs/08 §25.2 فتحها للأدمن كمان)
+interface ScheduleSlot {
+  id: string;
+  slot_date: string;
+  start_time: string;
+  end_time: string;
+  is_available: boolean;
+}
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -87,6 +96,12 @@ export default function OrderDetailPage() {
   const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
   const [visitFeeEgp, setVisitFeeEgp] = useState('');
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
+  // إعادة جدولة زيارة فاشلة (docs/08 §25.2) — لازم موعد جديد فعلي بيتحقق من availability الفني،
+  // مش زرار بيرجّع الطلب ACCEPTED بنفس الموعد القديم بصمت.
+  const [showRescheduleForm, setShowRescheduleForm] = useState(false);
+  const [availableSlots, setAvailableSlots] = useState<ScheduleSlot[] | null>(null);
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [rescheduleNotes, setRescheduleNotes] = useState('');
   const [showCashDisputeConfirmForm, setShowCashDisputeConfirmForm] = useState(false);
   const [cashDisputeNotes, setCashDisputeNotes] = useState('');
   const [showRefundForm, setShowRefundForm] = useState(false);
@@ -243,16 +258,49 @@ export default function OrderDetailPage() {
   }
 
   // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — الطلب disputed بعد بلاغ الفني (report-failed-visit)،
-  // الأدمن بيحل بعد المراجعة: reschedule (يرجع نشط بنفس السعر) أو cancel_with_fee (رسوم + استرداد
-  // الباقي لو مدفوع مسبقًا). نفس مستوى حساسية refund/adjust-price (step-up MFA).
-  async function handleResolveFailedVisitReschedule() {
+  // الأدمن بيحل بعد المراجعة: reschedule (موعد جديد فعلي، راجع docs/08 §25.2) أو cancel_with_fee
+  // (رسوم + استرداد الباقي لو مدفوع مسبقًا). نفس مستوى حساسية refund/adjust-price (step-up MFA).
+  //
+  // بَقّة حقيقية اتصلحت (§25.2، قرار مالك صريح 2026-08-15): الزرار كان بيبعت request فوري يرجّع
+  // الطلب ACCEPTED بنفس الموعد القديم بالظبط، صفر اختيار موعد جديد وصفر فحص availability —
+  // بالظبط زي ما الباك-إند كان بيقبله قبل الإصلاح. دلوقتي بيفتح فورم بيجيب سلوتات الفني المتاحة
+  // فعليًا (GET /technicians/:id/schedule، نفس الـendpoint اللي العميل بيستخدمه وقت الحجز الأصلي).
+  async function handleOpenRescheduleForm() {
+    setShowRescheduleForm((s) => !s);
+    if (availableSlots !== null || !order?.technician_id) return;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const to = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const slots = await authedFetch<ScheduleSlot[]>(
+        `/technicians/${order.technician_id}/schedule?from=${today}&to=${to}`,
+      );
+      setAvailableSlots(slots.filter((s) => s.is_available));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل جدول الفني');
+    }
+  }
+
+  async function handleResolveFailedVisitReschedule(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedSlotId) {
+      window.alert('لازم تختار موعد جديد من الجدول');
+      return;
+    }
+    if (rescheduleNotes.trim().length < 5) {
+      window.alert('ملاحظات المراجعة لازم تكون 5 حروف على الأقل');
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
       await authedFetch(`/admin/orders/${id}/resolve-failed-visit`, {
         method: 'POST',
-        body: JSON.stringify({ outcome: 'reschedule', admin_notes: 'الأدمن قرر إعادة جدولة الزيارة بعد المراجعة' }),
+        body: JSON.stringify({ outcome: 'reschedule', admin_notes: rescheduleNotes, new_slot_id: selectedSlotId }),
       });
+      setShowRescheduleForm(false);
+      setAvailableSlots(null);
+      setSelectedSlotId('');
+      setRescheduleNotes('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -547,7 +595,7 @@ export default function OrderDetailPage() {
                 قبل ما تقرر.
               </p>
               <div className="flex gap-2">
-                <Button type="button" size="sm" disabled={isSaving} onClick={handleResolveFailedVisitReschedule}>
+                <Button type="button" size="sm" disabled={isSaving} onClick={handleOpenRescheduleForm}>
                   العميل هيكمل — إعادة جدولة
                 </Button>
                 <Button
@@ -560,6 +608,50 @@ export default function OrderDetailPage() {
                   العميل عايز يلغي
                 </Button>
               </div>
+              {showRescheduleForm && (
+                <form onSubmit={handleResolveFailedVisitReschedule} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="new_slot_id">الموعد الجديد</Label>
+                    {availableSlots === null && <p className="text-xs text-muted-foreground">جاري تحميل جدول الفني…</p>}
+                    {availableSlots !== null && availableSlots.length === 0 && (
+                      <p className="text-xs text-destructive">مفيش سلوتات متاحة للفني ده حاليًا — لازم يضيف مواعيد فاضية الأول.</p>
+                    )}
+                    {availableSlots !== null && availableSlots.length > 0 && (
+                      <SelectNative
+                        id="new_slot_id"
+                        value={selectedSlotId}
+                        onChange={(e) => setSelectedSlotId(e.target.value)}
+                        required
+                      >
+                        <option value="">اختار موعد</option>
+                        {availableSlots.map((slot) => (
+                          <option key={slot.id} value={slot.id}>
+                            {slot.slot_date} — {slot.start_time.slice(0, 5)} إلى {slot.end_time.slice(0, 5)}
+                          </option>
+                        ))}
+                      </SelectNative>
+                    )}
+                  </div>
+                  <div>
+                    <Label htmlFor="reschedule_notes">ملاحظات المراجعة</Label>
+                    <Input
+                      id="reschedule_notes"
+                      value={rescheduleNotes}
+                      onChange={(e) => setRescheduleNotes(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isSaving || !availableSlots || availableSlots.length === 0}
+                    className="w-fit"
+                  >
+                    تأكيد إعادة الجدولة
+                  </Button>
+                </form>
+              )}
               {showCancelWithFeeForm && (
                 <form onSubmit={handleResolveFailedVisitCancelWithFee} className="flex flex-col gap-2">
                   <div>

@@ -11,7 +11,7 @@ import { TechniciansService } from './technicians.service';
 // بروفايل الفني العام — العميل يشوفه قبل الحجز (تصفّح) أو بعده (إعادة حجز/مراجعة). منفصل عن
 // GET /technician/me (خاص بالفني نفسه) وعن /admin/technicians/:id (إدارة). راجع technicians/README.md.
 @Controller('technicians')
-@Roles(UserType.CUSTOMER)
+@Roles(UserType.CUSTOMER, UserType.ADMIN)
 export class PublicTechniciansController {
   constructor(
     private readonly techniciansService: TechniciansService,
@@ -25,6 +25,8 @@ export class PublicTechniciansController {
   }
 
   // الجدول "أخضر/أحمر" (docs/08 §2) — is_available بس، مفيش order_id ولا ملاحظات داخلية.
+  // بَقّة أمنية سابقة/فجوة استخدام (docs/08 §25.2): كانت مقصورة على العميل — الأدمن محتاج نفس
+  // الجدول برضه عشان يقدر يختار سلوت حقيقي وقت حل نزاع "زيارة فاشلة" (resolveFailedVisit).
   @Get(':id/schedule')
   async getPublicSchedule(@Param('id', ParseUUIDPipe) id: string, @Query() query: ScheduleQueryDto) {
     const slots = await this.scheduleService.listForTechnician(id, query.from, query.to);

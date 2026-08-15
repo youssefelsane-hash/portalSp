@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min } from 'class-validator';
 
 // docs/08 §22 بند 4-5 — الأدمن بيقرر بعد المراجعة (مش تلقائي، مش بيصدّق طرف واحد أعمى):
 // reschedule = العميل عايز يكمل (نفس الطلب، نفس السعر، صفر تحصيل تاني)
@@ -23,4 +23,12 @@ export class ResolveFailedVisitDto {
   @IsString()
   @Length(5, 1000)
   admin_notes: string;
+
+  // إجباري فعليًا لو outcome=reschedule (يتفحص في الـservice، مش هنا، لأن الإجبارية شرطية
+  // حسب outcome) — بَقّة حقيقية اتصلحت (docs/08 §25.2، قرار مالك صريح 2026-08-15): "إعادة
+  // الجدولة" كانت بترجّع حالة الطلب لـACCEPTED بس من غير أي موعد جديد فعلي ولا فحص availability.
+  // السلوت لازم يكون لنفس الفني المعيّن على الطلب أصلاً — نفس فحص POST /orders/:id/reschedule.
+  @IsOptional()
+  @IsUUID()
+  new_slot_id?: string;
 }

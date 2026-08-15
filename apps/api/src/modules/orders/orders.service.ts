@@ -1369,10 +1369,32 @@ export class OrdersService {
       if (!canTransition(order.orderStatus, OrderStatus.ACCEPTED)) {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
+      // بَقّة حقيقية اتصلحت (docs/08 §25.2، قرار مالك صريح 2026-08-15): "إعادة الجدولة" كانت
+      // بترجّع الطلب لـACCEPTED بس — نفس الموعد القديم بالظبط، صفر اختيار موعد جديد، صفر فحص
+      // availability. دلوقتي `new_slot_id` إجباري فعليًا هنا — نفس فحوصات POST /orders/:id/reschedule
+      // بالحرف (السلوت لازم يكون لنفس الفني ومتاح فعلاً)، جوّه نفس transaction قفل الـdispute.
+      if (!dto.new_slot_id) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تختار موعد جديد (new_slot_id) لإعادة الجدولة', HttpStatus.BAD_REQUEST);
+      }
+      const newSlot = await this.scheduleService.findAvailableSlotOrThrow(dto.new_slot_id);
+      if (newSlot.technicianId !== order.technicianId) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'السلوت الجديد لازم يكون لنفس الفني المعيّن على الطلب',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       const previousStatus = order.orderStatus;
+      const previousScheduledAt = order.scheduledAt;
+      const newScheduledAt = new Date(`${newSlot.slotDate}T${newSlot.startTime}Z`);
       await this.dataSource.transaction(async (manager) => {
         const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
+        const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
+        if (!booked) {
+          throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
+        }
         fresh.orderStatus = OrderStatus.ACCEPTED;
+        fresh.scheduledAt = newScheduledAt;
         await manager.save(fresh);
         await manager.save(
           manager.create(OrderStatusHistory, {
@@ -1382,7 +1404,7 @@ export class OrdersService {
             changedByUserId: adminUserId,
             changedByRole: 'admin',
             changeSource: OrderChangeSource.ADMIN,
-            reason: dto.admin_notes,
+            reason: `${dto.admin_notes} — موعد جديد: ${newScheduledAt.toISOString()}`,
           }),
         );
       });
@@ -1392,7 +1414,7 @@ export class OrdersService {
         action: 'order.failed_visit_resolved',
         entityType: 'order',
         entityId: order.id,
-        newValues: { outcome: 'reschedule', order_status: OrderStatus.ACCEPTED },
+        newValues: { outcome: 'reschedule', order_status: OrderStatus.ACCEPTED, new_scheduled_at: newScheduledAt.toISOString() },
         meta,
       });
       this.events.emit(
@@ -1406,6 +1428,10 @@ export class OrdersService {
           order.technicianId,
           dto.admin_notes,
         ),
+      );
+      this.events.emit(
+        ORDER_RESCHEDULED_EVENT,
+        new OrderRescheduledEvent(order.id, order.orderNumber, order.technicianId, order.customerId, previousScheduledAt, newScheduledAt),
       );
       // القفل والكتابة الفعلية حصلوا على fresh (نسخة مقفولة جوّه الـtransaction)، مش order —
       // بنرجّع قراءة طازة من الـDB بدل order القديمة عشان القيمة المرجّعة تطابق الحالة الحقيقية

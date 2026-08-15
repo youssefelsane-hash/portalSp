@@ -3056,6 +3056,40 @@ release قبل الموافقة."
 اختيار السلوت المستخدم في تدفق الحجز الأصلي لو موجود جاهز في `apps/admin`، وإلا قايمة بسيطة من
 `GET /technicians/:id/schedule/available-slots` الموجود بالفعل).
 
+**✅ اتنفّذ واتأكد حيًا (2026-08-15)**:
+- `ResolveFailedVisitDto.new_slot_id` (اختياري في الـDTO، إجباري فعليًا في الـservice لو
+  `outcome=reschedule`). `orders.service.ts`'s `resolveFailedVisit()`: بيتحقق
+  `scheduleService.findAvailableSlotOrThrow(new_slot_id)` + `newSlot.technicianId ===
+  order.technicianId` قبل أي كتابة، وبعدين جوّه نفس الـtransaction اللي بتقفل الطلب (pessimistic
+  lock موجود بالفعل من §22 بند 31-32) بينادي `scheduleService.rescheduleSlot()` (بترجّع السلوت
+  القديم `available` وتحجز الجديد ذرّيًا — نفس دالة `/orders/:id/reschedule` بالحرف، صفر تكرار
+  منطق)، وتحدّث `scheduledAt` بالموعد الحقيقي الجديد. بيبعت `ORDER_RESCHEDULED_EVENT` كمان (زائد
+  `ORDER_STATUS_CHANGED_EVENT` الموجود) عشان العميل/الفني ياخدوا إشعار بالموعد الجديد الحقيقي —
+  نفس الإشعار اللي إعادة الجدولة العادية بتبعته.
+- `GET /technicians/:id/schedule` (كانت مقصورة على `@Roles(CUSTOMER)`) بقت مفتوحة لـ`ADMIN` كمان
+  (`public-technicians.controller.ts`) — الأدمن محتاج نفس الجدول عشان يختار سلوت حقيقي.
+- `apps/admin/orders/[id]/page.tsx`: زرار "إعادة جدولة" بقى بيفتح فورم (مش submit فوري) — بيجيب
+  جدول الفني (`GET /technicians/:id/schedule`)، بيفلتر `is_available` بس، `<select>` بالتواريخ/
+  الأوقات الحقيقية، + حقل ملاحظات مراجعة إجباري (كان نص ثابت مبرمج مسبقًا). التأكيد بيبعت
+  `new_slot_id` الحقيقي.
+- **اختبار حي كامل على 3 مستويات**:
+  1. **Backend (Jest ضد Postgres حقيقي)**: `failed-visit-resolution.spec.ts` — سلوت قديم `booked`
+     يترجع `available`، سلوت جديد يتحجز `booked` بالطلب الصح، `scheduledAt` يطابق السلوت الجديد
+     بالظبط؛ محاولة من غير `new_slot_id` تترفض ولا ترجّع الطلب `ACCEPTED` بصمت؛ محاولة بسلوت فني
+     تاني تترفض. `s22-cross-operation-concurrency.spec.ts`'s سباق `reschedule` ضد `cancel_with_fee`
+     اتحدّث ليتماشى مع `new_slot_id` الإجباري ولسه بيعدّي (واحد بس ينجح، صفر lost update).
+  2. **واجهة حية عبر Playwright حقيقي** (`chromium` مباشر، بيانات تجريبية حقيقية — طلب `disputed`
+     حقيقي، سلوت قديم `booked` مرتبط بيه، سلوت جديد `available`): فتح الفورم جاب جدول الفني الحقيقي
+     فعليًا (`GET /technicians/:id/schedule`)، القايمة المنسدلة عرضت السلوت المتاح الوحيد بالتاريخ/
+     الوقت الصح (استبعدت السلوت القديم المحجوز صح)، والتأكيد بعت `new_slot_id` الصحيح في جسم الطلب.
+  3. **تأكيد إضافي غير مقصود لكنه مفيد**: أدمن اختبار بلا أي دور (عمدًا، لتفادي تعقيد تسجيل
+     Passkey لحساب `super_admin`) حاول يأكّد — اترفض `403`/`AUTH_001` برسالة عربية واضحة ("دورك
+     الإداري مش مديك صلاحية العملية دي")، لأن `orders.resolve_failed_visit` أصلاً مُدرجة في
+     `MFA_REQUIRED_PERMISSIONS` من قبل (§22). ده أثبت إن بوابة RBAC/step-up الموجودة شغالة صح على
+     الـendpoint المُعدّل، مش انكسرت بالتعديل.
+- `tsc --noEmit`/`nest build`/53 suite (290 اختبار) عدّوا نضيف. `apps/admin`: `tsc --noEmit`/
+  `next build` عدّوا نضيف.
+
 ### 25.3 — Debounce للبحث
 
 **النص الأصلي**: "بما إنه بيعدله بالفعل، يتأكد فقط إن البحث لا يرسل request مع كل حرف، ويعمل
@@ -3086,5 +3120,5 @@ CI fixes قبل كده في نفس الجلسة دي.
 عرضت 20 صف، الضغط على "التالي" بعت طلب فوري واحد (مش debounced، صح بما إنه click) وعرض الـ5
 الباقيين صح. `tsc --noEmit`/`next build` عدّوا نضيف. `apps/admin/README.md` فيه التفاصيل الكاملة.
 
-**أولوية التنفيذ**: 25.1 (مالي، الأهم، ✅ خلص) → 25.2 (تجربة مستخدم حرجة، 🔄 الجاي) → 25.3 (تحسين
-بسيط، ✅ خلص). الثلاثة مستقلين عن بعض، صفر تداخل كود.
+**أولوية التنفيذ**: 25.1 (مالي، الأهم، ✅ خلص) → 25.2 (تجربة مستخدم حرجة، ✅ خلص) → 25.3 (تحسين
+بسيط، ✅ خلص). الثلاثة اتنفّذوا واتأكدوا حيًا، صفر تداخل كود. **§25 CLOSED (3/3، 2026-08-15).**
