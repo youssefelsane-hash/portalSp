@@ -2649,3 +2649,103 @@ _received_at`) بزرارين "إعادة محاولة التحصيل"/"تأكي
 **البَقّتين الأهم اللي اتلقطوا هذا الجلسة** (تفاصيل كاملة في قسم بند 31-32 فوق): "double admin edit"
 lost-update race في `resolveFailedVisit()`/`resolveCashHandoverDispute()`، وسباق `reschedule()` مع
 `depart()` — الاتنين ممكن كانوا يسيبوا الطلب بحالة غلط لو حصلوا فعليًا في production بلا الإصلاح ده.
+
+## §23. اختبار أمان دفاعي نهائي + إغلاق الـregression قبل الإطلاق (طلب صريح من المالك، 2026-08-15، فوق §22) — ✅ `CLOSED — SECURITY/REGRESSION READY`
+
+**النطاق**: طلب صريح ومحدد من المالك — "مفيش إضافة ميزات جديدة، مفيش تعديل UI، بس فحص أمان دفاعي
+شامل على كل المشروع في بيئة local/test، وregression نهائي قبل التجهيز للإطلاق." **قيد صريح
+اتاحترم بالكامل**: صفر اختبار هجومي ضد أي خدمة خارجية حقيقية أو production — كل الاختبار كان ضد
+`npm run start:dev` محلي + Postgres/Redis حقيقيين محليين + بيانات اختبار مُتحكم فيها بالكامل.
+
+### الاختبار الحي اللي اتعمل (curl + سكريبت bash ضد سيرفر محلي شغال فعليًا)
+
+- **Auth bypass**: بلا token → `401`. JWT عشوائي/تالف → `401`. تزوير `alg:none` (JWT بلا توقيع) →
+  اتأكد إن `jsonwebtoken`/`passport-jwt` بيرفضوه تلقائيًا (السلوك الافتراضي للمكتبة لما `secretOrKey`
+  string بسيط بلا `algorithms` override بيقصر القبول على HMAC بس) — راجع `jwt.strategy.ts`، صفر كود
+  إضافي لازم. refresh token مستخدم كـaccess token → مرفوض.
+- **RBAC bypass**: عميل/فني بيحاولوا يوصلوا لـ`/admin/orders`, `/admin/employees` → `403`. عميل
+  بيحاول `/technician/orders/available` → `403`.
+- **Admin privilege escalation**: `PATCH /admin/settings/:key` من توكن عميل → `401`/`403`. تسجيل ذاتي
+  بـ`user_type: "admin"` عبر `/auth/register` → مرفوض (`RegisterDto.user_type` مقيّد بـ`@IsIn([customer,
+  technician, domestic_worker])` — استحالة بنيوية مش فحص وقت التشغيل بس).
+- **IDOR** (orders/wallet/profile): اختبار حي كامل بتوكنين حقيقيين (owner + attacker) اتأكد منهم
+  بـSQL مباشر — GET/cancel/confirm-cash-handover/team-members/media كلهم بيرفضوا الـattacker بـ`404`
+  (مش `403` — تسريب وجود الطلب صفر). المحفظة (`/wallet`, `/wallet/transactions`) بنيويًا مستحيل يبقى
+  فيها IDOR — بتستنتج المستخدم من `@CurrentUser()` بس، صفر معامل user-id مقبول في أي مكان.
+- **Rate limiting**: الـglobal throttle (60 طلب/دقيقة) اتأكد إنه شغال فعليًا (سيرفر رفض حركة الاختبار
+  نفسها بـ`429` لما اتخطينا الحد). `/auth/otp/request` عنده throttle أضيق (5/دقيقة) اتأكد بمحاولات
+  متتالية سريعة → `429` ظهر زي المتوقع.
+- **OTP brute-force على verify**: 5 محاولات كود غلط متتالية، بعدين الكود الصح نفسه اترفض (cap على
+  المحاولات شغال).
+- **Malicious file upload**: محتوى ملف مزوّر (امتداد/MIME معلن مش مطابق للـmagic bytes الحقيقية) —
+  اترفض حي عبر `file-signature-validator.ts`/`branding-file-validator.ts` (فحص PNG/JPEG/WEBP/PDF
+  بالـmagic bytes، مش بس الامتداد أو الـContent-Type المعلن).
+- **Payment webhook forgery**: HMAC غلط على webhook Paymob مزوّر → اترفض داخليًا (`processing_status:
+  'failed'` مسجّل في `webhook_events`) رغم إن الاستجابة الخارجية بترجع `200` عمدًا (منع إعادة محاولة
+  الـgateway) — سلوك مقصود وموثّق مسبقًا، اتأكد منه مرة تانية هنا.
+
+### الاختبار عن طريق مراجعة الكود (مش هجوم حي — كود القراءة كفاية للتأكد)
+
+- **WebSocket auth**: `chat.gateway.ts` بيتحقق من `handshake.auth.token` بس (صفر fallback لـquery
+  string)، زائد فحص صلاحية منفصل لكل thread (`resolveParticipant()`) مستقل عن فحص الاتصال.
+  Authorization on connect ≠ authorization per-room، والاتنين موجودين.
+- **CORS**: `websocket-cors.util.ts` — دالة ديناميكية بتقرا `CORS_ORIGIN` وقت الاتصال الفعلي (مش وقت
+  تحميل الموديول)، مشتركة بين الـgateways التنين.
+- **CSRF**: صفر cookie-based session في المشروع كله (اتأكد بـgrep شامل) — البنية كلها Bearer
+  token/handshake auth، يعني نموذج هجوم CSRF التقليدي (اعتماد على credentials المتصفح التلقائية) مش
+  منطبق بنيويًا أصلًا.
+- **Path traversal في الـstorage**: كل مسار رفع بيبني الـkey بصيغة ثابتة
+  `<prefix>/<server-generated-id>/<uuid><extname(original)>` — المهاجم يقدر يأثر بس على substring
+  الامتداد، و`path.extname()` بنيويًا مايسمحش بتسريب `/` أو `..` منه.
+- **Admin controllers RBAC coverage**: فحص آلي (grep) على كل `@Controller('admin...` في المشروع كله
+  — صفر controller ناقصه `@Roles(UserType.ADMIN)` على مستوى الكلاس.
+- **Secrets/production defaults**: `env.validation.ts` (Joi schema) — أسرار JWT (≥32 حرف في prod،
+  يرفض قيم `.env.example` الافتراضية، الاتنين لازم يختلفوا)، `CORS_ORIGIN` إجباري في prod،
+  `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` ممنوع يبقوا localhost في prod، `STORAGE_PROVIDER` ممنوع يبقى
+  `local` في prod، بيانات Twilio التلاتة إجبارية مع بعض في prod (قناة الـOTP الوحيدة). كل ده كان
+  موجود ومطبّق من قبل، اتأكد منه هنا مرة تانية بلا تعديل.
+- **npm audit**: مراجعة كل تحذير بحسب قابلية الوصول الفعلية (reachability) مش بس وجوده في الشجرة —
+  `image-size` قابل للوصول لكنه محمي (magic-byte gate قبله)، `file-type`/`glob`/`tmp`/`webpack`/
+  `inquirer` غير قابلين للوصول (أدوات بناء بس)، `qs` غير قابل للوصول (مش بنستخدم `qs.stringify()`
+  المعرّض). صفر ثغرة HIGH قابلة للوصول وغير محمية. رفض عمدًا مسار `--force` (ترقية NestJS v11
+  الكبيرة) كخارج النطاق — مخاطرة regression عالية مقابل صفر ثغرة مؤكدة حاليًا.
+
+### النتيجة: صفر ثغرة حقيقية جديدة اتلقطت
+
+كل نقطة من قائمة المالك (auth bypass, RBAC bypass, IDOR, admin escalation, MFA/step-up bypass, JWT
+misuse, rate-limit, file upload, path traversal, WebSocket auth, CORS, secrets, webhook forgery,
+race conditions على الفلوس/الحالة) طلعت **دفاع موجود بالفعل وشغال** — إما بكود صريح أو ببنية مستحيل
+تُخترق أصلًا (زي الـwallet IDOR). **صفر كود اتغيّر في الجولة دي** — مفيش ثغرة مؤكدة تستاهل تعديل،
+وطبقًا لتعليمة المالك الصريحة ("متعدلش كود شغال لمجرد إنه ممكن نظريًا يتحسّن") متعملش أي تعديل تجميلي.
+
+MFA/step-up bypass، revoked/expired session، duplicate payment/refund/payout — دول متغطيين بالفعل
+بـ`security-regression.spec.ts` (recovery-code race, step-up race, single-use enforcement) و
+`jwt-strategy-active-user-check.spec.ts` (فحص `is_blocked`/`is_active`/`deleted_at` حي على كل
+request) اللي عدّوا كاملين في الـregression النهائي تحت — مش اختبار هجوم حي جديد الجولة دي، بس
+تأكيد إن التغطية الموجودة قايمة وشغالة.
+
+### الـregression النهائي (بوابة واحدة فقط، زي ما المالك طلب — مفيش إعادة تشغيل متكررة)
+
+- Backend: `npx tsc --noEmit` نضيف، `npx nest build` نضيف، `npx jest --runInBand` → **49 suite
+  عدّت / 49، 274 اختبار عدّوا / 274، exit code 0**. (تحذير Jest "did not exit" بعد الانتهاء —
+  connections BullMQ/Redis متسيبة مفتوحة بعد `afterAll`، نمط معروف وموثّق مسبقًا في المشروع، اتأكد
+  من الـPID إنه فضل مفتوح بس بلا نشاط حقيقي غير reconnect polling، اتقفل يدويًا — مش hang حقيقي ولا
+  فشل اختبار.)
+- Admin (`apps/admin`): `npm run build` نضيف بالكامل، صفر تحذير.
+- Customer Flutter: `flutter analyze` → صفر error/warning (43 نقطة `info` كلها موجودة من قبل —
+  `deprecated_member_use` بتاعة `RadioGroup` الجديدة في Flutter SDK و`use_null_aware_elements`
+  أسلوبية، صفر ملف Dart اتلمس في الجولة دي فمفيش نقطة جديدة). `flutter test` → كل الاختبارات عدّت.
+- Technician Flutter: نفس الشيء — `flutter analyze` صفر error/warning (12 نقطة info موجودة من قبل)،
+  `flutter test` عدّى كامل.
+- **Migration/schema consistency**: `node infra/migrations/migrate.js` ضد قاعدة الاختبار المحلية —
+  كل الـ108 ملف migration متطبقين والـchecksum (SHA-256) مطابق للملف الحالي على كل واحد فيهم — صفر
+  انحراف (drift)، صفر ملف اتعدّل بعد ما اتعمله commit.
+
+### الخلاصة
+
+صفر كود اتغيّر، صفر migration جديدة، صفر اختبار regression جديد لازم يتضاف (كل التغطية الموجودة
+كانت كافية وأثبتت نفسها حية). `git status` نضيف بعد التوثيق ده. **الفرع**: `claude/home-services-app-plan-v13gb2`.
+**القرار النهائي: `SECURITY/REGRESSION READY`** — صفر ثغرة حرجة/عالية الخطورة معروفة، صفر bug مالي،
+صفر authorization bypass، صفر regression جوهري باقي. تفعيل الخدمات الخارجية (Paymob/Twilio/FCM/S3/
+Google Maps/production DB-Redis/DNS-TLS/app-store signing) **لسه برّه النطاق عمدًا** — يجي بعد إغلاق
+الجولة دي بقرار صريح من المالك.
