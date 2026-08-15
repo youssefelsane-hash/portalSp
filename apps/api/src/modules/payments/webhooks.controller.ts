@@ -33,6 +33,24 @@ export class WebhooksController {
   @HttpCode(HttpStatus.OK)
   async handlePaymobWebhook(@Body() body: Record<string, unknown>, @Query('hmac') hmac: string | undefined) {
     const provider = this.paymentProviders.getByProviderKey('paymob');
+
+    // حدث "حفظ كارت" (docs/08 §21) — حمولة مختلفة تمامًا عن TRANSACTION، بيتفحص الأول لأن
+    // verifyWebhook() العادية مبنية على شكل حمولة TRANSACTION ومش هتعرف تتعامل مع النوع ده.
+    const cardSaveResult = provider.verifyCardSaveWebhook(body, hmac);
+    if (cardSaveResult) {
+      await this.paymentsService.finalizeCardSaveWebhook(
+        cardSaveResult.externalEventId,
+        'paymob',
+        body,
+        cardSaveResult.signatureValid,
+        cardSaveResult.providerToken,
+        cardSaveResult.maskedPan,
+        cardSaveResult.cardBrand,
+        cardSaveResult.customerEmail,
+      );
+      return { received: true };
+    }
+
     let result: ReturnType<typeof provider.verifyWebhook>;
     try {
       result = provider.verifyWebhook(body, hmac);

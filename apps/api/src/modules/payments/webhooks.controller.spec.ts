@@ -19,7 +19,9 @@ describe('WebhooksController — لا يبتلع أخطاء داخلية غير 
   };
 
   function makeRegistry(verifyWebhook: jest.Mock) {
-    const paymobProvider = { verifyWebhook };
+    // verifyCardSaveWebhook بترجع null دايمًا هنا — مفيش حدث حفظ كارت في اختبارات الملف ده،
+    // كل الحمولات TRANSACTION عادية (docs/08 §21).
+    const paymobProvider = { verifyWebhook, verifyCardSaveWebhook: jest.fn(() => null) };
     return { getByProviderKey: jest.fn(() => paymobProvider) };
   }
 

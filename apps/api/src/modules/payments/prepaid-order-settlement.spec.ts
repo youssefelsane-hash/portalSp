@@ -204,6 +204,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       { record: async () => undefined } as never, // auditLog
       { emit: () => undefined } as never, // events
       {} as never, // paymentProviders — مش متنادى (collectCash بس هنا)
+      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
     );
   });
 

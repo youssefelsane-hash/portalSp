@@ -4,6 +4,7 @@ import { Payment } from '../entities/payment.entity';
 import { Payout } from '../entities/payout.entity';
 import { PayoutOrderItem } from '../entities/payout-order-item.entity';
 import { Refund } from '../entities/refund.entity';
+import { SavedPaymentMethod } from '../entities/saved-payment-method.entity';
 
 export interface WalletResponseDto {
   balance_cents: number;
@@ -61,6 +62,8 @@ export interface PaymentResponseDto {
   payment_method: string;
   payment_status: string;
   completed_at: string | null;
+  /** null = دفعة الطلب الأصلية، غير null = محاولة تحصيل شغل إضافي (docs/08 §21). */
+  order_item_batch_id: string | null;
 }
 
 export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
@@ -72,6 +75,27 @@ export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
     payment_method: payment.paymentMethod,
     payment_status: payment.paymentStatus,
     completed_at: payment.completedAt ? payment.completedAt.toISOString() : null,
+    order_item_batch_id: payment.orderItemBatchId,
+  };
+}
+
+export interface SavedPaymentMethodResponseDto {
+  id: string;
+  provider: string;
+  card_brand: string | null;
+  masked_pan: string | null;
+  is_default: boolean;
+  created_at: string;
+}
+
+export function toSavedPaymentMethodResponseDto(method: SavedPaymentMethod): SavedPaymentMethodResponseDto {
+  return {
+    id: method.id,
+    provider: method.provider,
+    card_brand: method.cardBrand,
+    masked_pan: method.maskedPan,
+    is_default: method.isDefault,
+    created_at: method.createdAt.toISOString(),
   };
 }
 

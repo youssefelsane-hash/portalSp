@@ -54,6 +54,11 @@ export class OrderItem {
   @Column({ name: 'receipt_photo_url', type: 'text', nullable: true })
   receiptPhotoUrl: string | null;
 
+  // بنود اقترحوا مع بعض في نفس نداء propose() بيشاركوا batch_id — عشان موافقة العميل تعامَل
+  // كـ"طلب واحد" (docs/08 §21) — obligation دفع واحد، مش بند منفصل لكل عنصر.
+  @Column({ name: 'batch_id', type: 'uuid', nullable: true })
+  batchId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

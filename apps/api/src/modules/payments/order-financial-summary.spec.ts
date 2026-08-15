@@ -119,6 +119,7 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
     );
   });
 

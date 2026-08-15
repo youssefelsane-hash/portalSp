@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import {
   CaptureResult,
+  CardSaveWebhookResult,
+  ChargeTokenInput,
+  ChargeTokenResult,
   CreatePaymentInput,
   CreatePaymentResult,
   PaymentOperationNotSupportedError,
@@ -62,6 +65,35 @@ interface PaymobTransactionInquiryResponse {
   amount_cents: number;
 }
 
+interface PaymobEcommerceOrderResponse {
+  id: number;
+}
+
+interface PaymobPaymentKeyResponse {
+  token: string;
+}
+
+interface PaymobPayResponse {
+  id?: number;
+  success?: boolean;
+  pending?: boolean;
+  data?: { message?: string };
+}
+
+// حدث "حفظ كارت" (Save Card / Token) — حمولة مختلفة تمامًا عن TRANSACTION، بيوصل منفصل بعد نجاح
+// دفع فيه العميل وافق يحفظ كارته (Unified Checkout بتعرض الخيار ده تلقائيًا لو الـintegration
+// مُعدّة تسمح بالتوكينة عند Paymob — صفر تحكم منا في ظهور الخيار نفسه).
+interface PaymobTokenWebhookObj {
+  id: number;
+  token: string;
+  masked_pan?: string;
+  card_subtype?: string;
+  merchant_id?: number;
+  created_at?: string;
+  email?: string;
+  order_id?: number;
+}
+
 /**
  * تكامل حقيقي مع Paymob Accept عبر **Intention API** (ADR-0013 — ترقية من الـflow القديم
  * auth/order/payment_key المهجور، حسب طلب صريح من المالك "follow the current recommended
@@ -81,6 +113,7 @@ export class PaymobProvider implements PaymentProvider {
   readonly supportsRefund = true;
   readonly supportsVoid = true;
   readonly supportsCapture = true;
+  readonly supportsTokenization: boolean;
   private readonly logger = new Logger('PaymentProvider(paymob)');
 
   private readonly baseUrl: string;
@@ -103,6 +136,9 @@ export class PaymobProvider implements PaymentProvider {
     this.integrationIdMobileWallet = config.get<string>('payments.paymob.integrationIdMobileWallet') || undefined;
     this.hmacSecret = config.get<string>('payments.paymob.hmacSecret') || undefined;
     this.isConfigured = Boolean(this.secretKey && this.publicKey && this.integrationIdCard && this.hmacSecret);
+    // نفس شرط isConfigured بالظبط — تحصيل التوكن محتاج نفس مفاتيح إنشاء الدفعة الأصلية (secretKey
+    // + apiKey لـlegacyAuthToken() + integrationIdCard)، صفر إعداد إضافي مطلوب.
+    this.supportsTokenization = this.isConfigured;
 
     if (!this.isConfigured) {
       this.logger.warn(
@@ -347,5 +383,140 @@ export class PaymobProvider implements PaymentProvider {
   async reconcile(providerReference: string): Promise<ReconcileResult> {
     const status = await this.getPaymentStatus(providerReference);
     return { status: status.status, amountCents: status.amountCents };
+  }
+
+  /**
+   * تحصيل شغل إضافي معتمد بوسيلة دفع محفوظة (docs/08 §21) — merchant-initiated (MOTO)، بلا
+   * redirect/تفاعل عميل. تسلسل Paymob الكلاسيكي المعروف (auth_token → ecommerce order →
+   * payment_key → pay بـsource.subtype=TOKEN)، مختلف عمداً عن Intention API المستخدمة في
+   * createPayment() فوق (الـIntention مبنية لـredirect/checkout، مش لشحن توكن محفوظ سيرفر-side).
+   * **تنبيه صريح (نفس نمط توثيق باقي الملف ده)**: التسلسل ده مبني على أفضل معرفة موثّقة لـPaymob
+   * بلا وصول لـdocs.paymob.com (محجوب هنا) — لازم يتأكد بمعاملة اختبار حقيقية واحدة على حساب
+   * Paymob فعلي قبل تفعيل الحفظ في الإنتاج.
+   */
+  async chargeToken(input: ChargeTokenInput): Promise<ChargeTokenResult> {
+    if (!this.isConfigured || !this.apiKey) {
+      throw new PaymentOperationNotSupportedError(this.providerKey, 'chargeToken (مش مُعدّة)');
+    }
+    try {
+      const authToken = await this.legacyAuthToken();
+
+      const orderRes = await fetch(`${this.baseUrl}/api/ecommerce/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_token: authToken,
+          delivery_needed: false,
+          amount_cents: input.amountCents,
+          currency: input.currencyCode,
+          merchant_order_id: input.paymentId, // نفس دور special_reference في createPayment() — بيوصل في merchant_order_id وقت webhook التأكيد
+          items: [],
+        }),
+      });
+      if (!orderRes.ok) {
+        throw new Error(`Paymob ecommerce order فشل: ${orderRes.status} ${await orderRes.text()}`);
+      }
+      const order = (await orderRes.json()) as PaymobEcommerceOrderResponse;
+
+      const keyRes = await fetch(`${this.baseUrl}/api/acceptance/payment_keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_token: authToken,
+          amount_cents: input.amountCents,
+          expiration: 3600,
+          order_id: order.id,
+          billing_data: {
+            first_name: input.customerFirstName || 'NA',
+            last_name: input.customerLastName || 'NA',
+            email: input.customerEmail,
+            phone_number: input.customerPhone,
+            apartment: 'NA',
+            floor: 'NA',
+            street: 'NA',
+            building: 'NA',
+            city: 'NA',
+            country: 'EG',
+            state: 'NA',
+          },
+          currency: input.currencyCode,
+          integration_id: Number(this.integrationIdCard),
+        }),
+      });
+      if (!keyRes.ok) {
+        throw new Error(`Paymob payment key فشل: ${keyRes.status} ${await keyRes.text()}`);
+      }
+      const paymentKey = (await keyRes.json()) as PaymobPaymentKeyResponse;
+
+      const payRes = await fetch(`${this.baseUrl}/api/acceptance/payments/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: { identifier: input.providerToken, subtype: 'TOKEN' },
+          payment_token: paymentKey.token,
+        }),
+      });
+      const body = (await payRes.json().catch(() => ({}))) as PaymobPayResponse;
+      if (!payRes.ok || body.success === false) {
+        return {
+          succeeded: false,
+          providerReference: body.id ? String(body.id) : null,
+          failureReason: body.data?.message ?? `Paymob token charge رفض: ${payRes.status}`,
+        };
+      }
+      return { succeeded: body.success === true, providerReference: body.id ? String(body.id) : null, failureReason: null };
+    } catch (err) {
+      this.logger.error('فشل تحصيل بوسيلة دفع محفوظة (chargeToken) Paymob', err instanceof Error ? err.stack : err);
+      return { succeeded: false, providerReference: null, failureReason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * حساب HMAC لحدث "حفظ كارت" (TOKEN) — ترتيب حقول مختلف عن computeHmac() فوق (شكل حمولة مختلف
+   * تمامًا). **الترتيب هنا أفضل معرفة موثّقة بلا وصول لـdocs.paymob.com، غير مؤكد ضد حساب حقيقي —
+   * لازم تأكيد بمعاملة اختبار واحدة قبل تفعيل الحفظ في الإنتاج** (نفس التنبيه فوق).
+   */
+  verifyCardSaveWebhook(rawPayload: Record<string, unknown>, signature: string | undefined): CardSaveWebhookResult | null {
+    const payload = rawPayload as { type?: string; obj?: PaymobTokenWebhookObj };
+    if (payload?.type !== 'TOKEN' || !payload.obj?.token) {
+      return null; // مش حدث حفظ كارت أصلاً — الكولر يرجع لـverifyWebhook العادي
+    }
+    const obj = payload.obj;
+
+    const failResult = (reason: string): CardSaveWebhookResult => {
+      this.logger.warn(`حدث حفظ كارت اترفض: ${reason}`);
+      return { signatureValid: false, externalEventId: String(obj.id), providerToken: '', maskedPan: null, cardBrand: null, customerEmail: null };
+    };
+
+    if (!this.isConfigured || !this.hmacSecret || !signature) {
+      return failResult('لا توجد بوابة دفع مُعدّة');
+    }
+
+    const fields = [
+      obj.card_subtype ?? '',
+      obj.created_at ?? '',
+      obj.email ?? '',
+      String(obj.id),
+      obj.masked_pan ?? '',
+      String(obj.merchant_id ?? ''),
+      String(obj.order_id ?? ''),
+    ].join('');
+    const expectedHmac = createHmac('sha512', this.hmacSecret).update(fields).digest('hex');
+    const expectedBuf = Buffer.from(expectedHmac, 'hex');
+    const actualBuf = Buffer.from(signature, 'hex');
+    const signatureValid = expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf);
+
+    if (!signatureValid) {
+      return failResult('توقيع HMAC غير صحيح لحدث حفظ الكارت');
+    }
+
+    return {
+      signatureValid: true,
+      externalEventId: String(obj.id),
+      providerToken: obj.token,
+      maskedPan: obj.masked_pan ?? null,
+      cardBrand: obj.card_subtype ?? null,
+      customerEmail: obj.email ?? null,
+    };
   }
 }

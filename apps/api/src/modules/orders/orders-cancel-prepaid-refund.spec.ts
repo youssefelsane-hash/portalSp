@@ -41,6 +41,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     supportsRefund: true,
     supportsVoid: false,
     supportsCapture: false,
+    supportsTokenization: false,
     async createPayment() {
       throw new Error('not used in this test');
     },
@@ -61,6 +62,12 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
     },
     async reconcile() {
       throw new Error('not used in this test');
+    },
+    async chargeToken() {
+      throw new Error('not used in this test');
+    },
+    verifyCardSaveWebhook() {
+      return null;
     },
   });
 
@@ -150,6 +157,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       { record: async () => undefined } as never, // auditLog
       { emit: () => undefined } as never, // events
       { getProvider: () => makeFakeProvider() } as never, // paymentProviders
+      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
     );
 
     // OrdersService.cancel() الحقيقية — بس التبعيات اللي فعليًا بتتنادى في المسار ده (طلب بلا

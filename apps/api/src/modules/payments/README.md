@@ -268,3 +268,36 @@ transactions` أصلاً append-only على مستوى الـDB (`REVOKE UPDATE,
 `../orders/README.md` و`settings.manage` في `../admin/README.md` — أربع endpoints مع بعض). تفاصيل
 كاملة + الاختبار الجديد (`../auth/mfa-step-up-enforcement.spec.ts`) في
 `../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".
+
+## طريقة دفع محفوظة (tokenized) + تحصيل فوري لشغل إضافي إلكتروني — docs/08 §21
+
+تصحيح تدفّق مركّز قبل تجميد الكود: موافقة العميل على زيادة سعر إلكترونية (كارت/InstaPay مسبق الدفع)
+بقت بتطلق محاولة تحصيل فورية بوسيلة دفع محفوظة، بدل ما تستنى لحد اكتمال الشغل. **قاعدة أمان صريحة**:
+`payment_methods` (migration `0105`) بيخزّن الـtoken اللي بترجّعه Paymob + بيانات آمنة للعرض بس (آخر
+4 أرقام/نوع الكارت) — أبداً رقم كارت خام أو CVV.
+
+- **`PaymentProvider` interface** بقى فيه `supportsTokenization`/`chargeToken()`/`verifyCardSaveWebhook()`
+  — Paymob بس بيدعمها فعليًا (`PaymobProvider.chargeToken()`: تسلسل كلاسيكي `auth_token → ecommerce
+  order → payment_key → pay بـsource.subtype=TOKEN`، مختلف عمداً عن Intention API المستخدمة لبدء الدفع
+  العادي). باقي الـproviders (كاش/محفظة/InstaPay/فوري) بيرفضوا `chargeToken()` بوضوح.
+- **`SavedPaymentMethodsService`** + `GET/PATCH/DELETE /payment-methods` (العميل بس) — قايمة/تعيين
+  افتراضي/حذف. صفر endpoint لإضافة كارت يدويًا عمداً — الحفظ تلقائي عبر ويب-هوك `TOKEN` من Paymob
+  (حمولة مختلفة تمامًا عن `TRANSACTION`، `WebhooksController` بيفحصها الأول قبل المسار العادي).
+- **`OrderItemsService.approve()`**: قفل `pessimistic_write` على الطلب جوّه نفس الـtransaction —
+  كانت فجوة تزامن حقيقية (موافقتين متزامنتين يقدروا يضيفوا نفس المبلغ مرتين لـ`total_amount_cents`).
+  لو الطلب مدفوع مسبقًا، `PaymentsService.attemptAdditionalWorkCharge()` بتتنادى **برّه** الـtransaction
+  (نفس نمط الـ3 مراحل في `refundOrder()`) — `Payment` منفصل قابل للتتبع بـ`order_item_batch_id`، فشل
+  الشحن مايوقفش الموافقة ولا يرجّع خطأ للعميل، المبلغ يفضل obligation مسجّل.
+- **`finalizeGatewayWebhook()`** بقت بتفرّق بين دفعة الطلب الأصلية ودفعة شغل إضافي — التأكيد التاني
+  (`finalizeAdditionalWorkPayment()`) **مايستدعيش** `settleAndComplete`/`handlePaymentConfirmed` خالص
+  (الطلب لسه شغال، مش بيقفل).
+
+**2 بَقّة حقيقية اتلقطت أثناء البناء**: (1) أول نسخة سجّلت الدفعة `PROCESSING` بعد النداء المتزامن —
+اتصادمت مع فحص idempotency القديم في `finalizeGatewayWebhook()` (`!== PENDING → IGNORED`)، فالويب-هوك
+الحقيقي كان بيتجاهل والدفعة تفضل عالقة للأبد. الإصلاح: `PENDING` (نفس اتفاقية `payWithCard`)، مش حالة
+جديدة. (2) `amountOwedNow()` كانت بتاخد **أول** دفعة ناجحة بس (`completedAt ASC`) وتطرحها من الإجمالي
+— غلط دلوقتي إن تحصيل شغل إضافي ممكن ينجح **قبل** اكتمال الشغل، فكان ممكن يتجاهل تحصيل ناجح ويطلب
+المبلغ تاني وقت الاكتمال (تحصيل مزدوج). الإصلاح: مجموع كل الدفعات الناجحة، مش أولها بس.
+
+اتأكد بـ`../orders/order-items-additional-work-payment.spec.ts` (5 اختبار حي) — تفاصيل كاملة في
+`docs/08-pricing-engine-and-platform-vision.md` §21.

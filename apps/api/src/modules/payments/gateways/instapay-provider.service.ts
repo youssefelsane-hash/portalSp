@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { SettingsService } from '../../settings/settings.service';
 import {
   CaptureResult,
+  CardSaveWebhookResult,
+  ChargeTokenInput,
+  ChargeTokenResult,
   CreatePaymentInput,
   CreatePaymentResult,
   PaymentOperationNotSupportedError,
@@ -30,6 +33,7 @@ export class InstaPayProvider implements PaymentProvider {
   readonly supportsRefund = false; // استرداد InstaPay = wallet credit fallback، نفس الكاش
   readonly supportsVoid = false;
   readonly supportsCapture = false;
+  readonly supportsTokenization = false;
 
   private readonly ipaAddress: string | undefined;
   private readonly recipientName: string | undefined;
@@ -85,5 +89,13 @@ export class InstaPayProvider implements PaymentProvider {
 
   reconcile(_providerReference: string): Promise<ReconcileResult> {
     throw new PaymentOperationNotSupportedError(this.providerKey, 'reconcile — تأكيد يدوي بس');
+  }
+
+  chargeToken(_input: ChargeTokenInput): Promise<ChargeTokenResult> {
+    throw new PaymentOperationNotSupportedError(this.providerKey, 'chargeToken — مفيش وسيلة دفع محفوظة لـInstaPay');
+  }
+
+  verifyCardSaveWebhook(): CardSaveWebhookResult | null {
+    return null;
   }
 }

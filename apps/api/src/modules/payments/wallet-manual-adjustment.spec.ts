@@ -137,6 +137,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       { record: async () => undefined } as never,
       { emit: () => undefined } as never,
       {} as never,
+      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
     );
   });
 

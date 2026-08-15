@@ -88,12 +88,50 @@ export class PaymentOperationNotSupportedError extends Error {
   }
 }
 
+// تحصيل شغل إضافي معتمد بوسيلة دفع محفوظة (docs/08 §21) — merchant-initiated (MOTO)، بلا أي
+// تفاعل عميل مباشر (العميل وافق على الزيادة، مش بيدخل بيانات كارت تاني). خطوة واحدة متزامنة عند
+// البوابة، بس النتيجة النهائية بتتأكد بس عبر webhook لاحقًا (§13 "provider callback هو مصدر
+// الحقيقة") — succeeded هنا مجرد مؤشر أولي، مش قرار نهائي.
+export interface ChargeTokenInput {
+  /** id الدفعة عندنا (payments.id) — نفس دور paymentId في CreatePaymentInput، بيوصل في merchant_order_id. */
+  paymentId: string;
+  orderNumber: string;
+  amountCents: number;
+  currencyCode: string;
+  providerToken: string;
+  customerFirstName: string;
+  customerLastName: string;
+  customerEmail: string;
+  customerPhone: string;
+}
+
+export interface ChargeTokenResult {
+  /** نجاح النداء المتزامن بس — مش تأكيد نهائي. لو false، الدفعة تتسجّل failed فورًا (بلا webhook مستنى). */
+  succeeded: boolean;
+  providerReference: string | null;
+  failureReason: string | null;
+}
+
+// حدث "تم حفظ كارت" من البوابة — منفصل عن WebhookVerificationResult (شكل حمولة مختلف تمامًا، مفيش
+// paymentId/succeeded/amountCents منطقيين هنا). null = الحمولة دي مش حدث حفظ كارت أصلاً.
+export interface CardSaveWebhookResult {
+  signatureValid: boolean;
+  externalEventId: string;
+  providerToken: string;
+  maskedPan: string | null;
+  cardBrand: string | null;
+  /** إيميل العميل عند البوابة — طريقة الربط بحساب العميل عندنا (users.email)، البوابة مفيهاش payments.id هنا. */
+  customerEmail: string | null;
+}
+
 export interface PaymentProvider {
   readonly providerKey: string;
   readonly isConfigured: boolean;
   readonly supportsRefund: boolean;
   readonly supportsVoid: boolean;
   readonly supportsCapture: boolean;
+  /** بيدعم شحن مبلغ لاحق على وسيلة دفع محفوظة (tokenized) بلا تدخّل عميل مباشر. */
+  readonly supportsTokenization: boolean;
 
   createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult>;
   /** بيتحقق من التوقيع ويفك تشفير حمولة الـwebhook — مزامن تماماً (حساب توقيع بس، مفيش I/O). */
@@ -106,4 +144,8 @@ export interface PaymentProvider {
   capture(providerReference: string, amountCents: number): Promise<CaptureResult>;
   /** استعلام مباشر لحالة معاملة معلّقة — لو الـwebhook متأخر أو مش موثوق. */
   reconcile(providerReference: string): Promise<ReconcileResult>;
+  /** يرمي PaymentOperationNotSupportedError لو !supportsTokenization. */
+  chargeToken(input: ChargeTokenInput): Promise<ChargeTokenResult>;
+  /** بيرجّع null لو الحمولة مش حدث حفظ كارت (النوع مختلف) — الكولر يرجع لـverifyWebhook العادي. */
+  verifyCardSaveWebhook(rawPayload: Record<string, unknown>, signature: string | undefined): CardSaveWebhookResult | null;
 }
