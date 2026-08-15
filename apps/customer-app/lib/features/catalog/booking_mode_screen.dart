@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_repository.dart';
 import '../account/account_screen.dart';
-import '../chat/chat_screen.dart';
 import '../domestic_workers/domestic_workers_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
+import '../support/support_contact_screen.dart';
 import 'categories_screen.dart';
 import 'models.dart';
 
@@ -54,11 +54,12 @@ class BookingModeScreen extends StatelessWidget {
                 },
               ),
             ),
+            // نقطة وصول واحدة لكل طرق التواصل مع الدعم (اتصال/واتساب/شات) — docs/08 §22 بند 15-19.
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ChatScreen.support()),
+                MaterialPageRoute(builder: (_) => const SupportContactScreen()),
               ),
             ),
             // قطاع الخدمات المنزلية (docs/08 §12, ADR-0004) — كانت فجوة موثّقة صراحة: الباك-إند

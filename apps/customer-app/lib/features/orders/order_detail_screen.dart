@@ -14,6 +14,7 @@ import '../ratings/google_review_prompt.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
+import '../support/support_contact_screen.dart';
 import '../technicians/technician_profile_screen.dart';
 import '../technicians/technician_selection_screen.dart';
 import '../tracking/tracking_screen.dart';
@@ -511,7 +512,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text(order != null ? 'طلب ${order.orderNumber}' : 'تفاصيل الطلب')),
+        appBar: AppBar(
+          title: Text(order != null ? 'طلب ${order.orderNumber}' : 'تفاصيل الطلب'),
+          actions: [
+            // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
+            IconButton(
+              icon: const Icon(Icons.support_agent_outlined),
+              tooltip: 'تواصل مع الدعم',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+              ),
+            ),
+          ],
+        ),
         body: _error != null
             ? Center(child: Text(_error!))
             : order == null

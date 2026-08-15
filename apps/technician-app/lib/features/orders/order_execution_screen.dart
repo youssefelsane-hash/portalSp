@@ -8,6 +8,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../media/media_repository.dart' show MediaRepository, OrderMediaItem;
+import '../support/support_contact_screen.dart';
 import '../tracking/tracking_client.dart';
 import 'models.dart';
 import 'order.dart';
@@ -330,7 +331,19 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text('طلب ${_order.orderNumber}')),
+        appBar: AppBar(
+          title: Text('طلب ${_order.orderNumber}'),
+          actions: [
+            // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
+            IconButton(
+              icon: const Icon(Icons.support_agent_outlined),
+              tooltip: 'اتصل بالدعم',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+              ),
+            ),
+          ],
+        ),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
