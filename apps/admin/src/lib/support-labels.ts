@@ -10,6 +10,7 @@ export const COMPLAINT_CATEGORY_LABELS: Record<ComplaintCategory, string> = {
   incomplete_work: 'شغل ناقص',
   safety_concern: 'مخاوف أمان',
   fraud: 'احتيال',
+  required_work_rejected: 'رفض شغل ضروري لإتمام الطلب',
   other: 'أخرى',
 };
 

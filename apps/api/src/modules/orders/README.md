@@ -467,6 +467,49 @@ Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`ord
 صورة). `tsc --noEmit`/`nest build`/41 suite (213 اختبار) عدّوا نضيف. `flutter analyze` نضيف (صفر
 تحذير جديد). صفر migration (`order_media` موجودة من زمان، الفحص منطقي بس).
 
+## زيارة فاشلة/عدم حضور (docs/08 §22 بند 3-6، 2026-08-15)
+
+كانت فجوة موثّقة صراحة تمامًا: صفر آلية للفني يبلّغ إن الزيارة فشلت (العميل مش موجود، أو رفض شغل
+ضروري لإتمام الطلب صح) — الخيارات المتاحة كانت بس `complete()` (كذب — الشغل ما اكتملش) أو
+`technicianCancel()` (إلغاء نهائي بلا مراجعة). إعادة استخدام كاملة للبنية الموجودة — `DISPUTED`
+(حالة موجودة أصلاً في state machine) + `Complaint` (`support` module، فئة `NO_SHOW` موجودة، فئة
+جديدة `REQUIRED_WORK_REJECTED` اتضافت) + `PaymentsService.refundOrder()` الموجودة (استرداد جزئي/كامل)
+— **صفر جدول جديد**.
+
+**التدفق**: `OrdersService.reportFailedVisit(user, orderId, dto)` — الفني بيبلّغ من `TECHNICIAN_ARRIVED`
+(no-show كلاسيكي) أو `IN_PROGRESS` (شغل ضروري اترفض)، الطلب يتحول `DISPUTED` (انتقالين جدد في
+`order-state-machine.ts`: `TECHNICIAN_ARRIVED → DISPUTED`، `IN_PROGRESS → DISPUTED` كانت موجودة
+أصلاً) وشكوى بتتسجّل تلقائيًا (`SupportService.fileComplaint()`، `filedByUserId`=الفني،
+`againstUserId`=العميل تلقائيًا — نفس منطق `fileComplaint()` الموجود). فشل تسجيل الشكوى بيتلقّط
+ويتسجّل بس **مايرجّعش** الطلب لحالته القديمة (الطلب فعلاً محتاج يتوقف الآن، نفس فلسفة
+`attemptAdditionalWorkCharge`).
+
+`OrdersService.resolveFailedVisit(adminUserId, orderId, dto)` — الأدمن بيحل بعد مراجعة حقيقية (مش
+تصديق طرف واحد أعمى)، صلاحية مخصوصة `orders.resolve_failed_visit` (+ step-up MFA، نفس مستوى
+`orders.adjust_price`، migration 0107):
+- **`reschedule`**: `DISPUTED → ACCEPTED` (انتقال جديد) — نفس الطلب، نفس السعر، صفر تحصيل تاني.
+  تحديد موعد جديد تحديدًا (slot-based) هيتغطى في §22 بند 9-12 (مش مبني لسه) — دلوقتي الطلب بس
+  يرجع نشط يقدر الفني يعيد المحاولة منه.
+- **`cancel_with_fee`**: طلب كاش (مفيش فلوس اتحصّلت أصلاً) → `DISPUTED → CANCELLED_BY_CUSTOMER`
+  (انتقال جديد) **صفر رسوم دايمًا** — تعليمة صريحة، المنصة بتمتص تكلفة الفني للـMVP، صفر معاملة
+  دفع وهمية. طلب مدفوع مسبقًا → رسوم زيارة (افتراضي `orders.no_show_visit_fee_cents`, migration
+  0107, قابل للتعديل من الأدمن) بتتخصم من الاسترداد (مش تحصيل إضافي منفصل) عبر `refundOrder()`
+  الموجودة بالفعل (بتدعم استرداد جزئي، وبتنقل الطلب `REFUNDED` تلقائيًا لو الاسترداد كامل). استرداد
+  جزئي (فيه رسوم) بيسيب الطلب `DISPUTED` — `resolveFailedVisit()` بتقفله يدويًا لـ`CANCELLED_BY_CUSTOMER`
+  بعدها.
+
+**`apps/technician-app`**: زرار "زيارة فاشلة" (برتقالي، تحذيري) في `order_execution_screen.dart`
+يظهر بس في `technician_arrived`/`in_progress` — dialog بسبب مقفول (3 خيارات) + توضيح نصي إجباري.
+**`apps/admin`**: قسم "الطلب ده بلاغ زيارة فاشلة" في `orders/[id]/page.tsx` (يظهر بس لو
+`order_status=disputed`) — زرار "إعادة جدولة" فوري، أو فورم "العميل عايز يلغي" (رسوم اختيارية +
+ملاحظات مراجعة إجبارية).
+
+**الاختبار**: `failed-visit-resolution.spec.ts` (7 اختبار حي) — no-show → reschedule بنفس السعر؛
+required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبليغ قبل الوصول (`ACCEPTED`)؛ كاش cancel_with_fee
+صفر رسوم/صفر معاملة دفع؛ مدفوع مسبقًا استرداد جزئي (رسوم مخصومة، الطلب يتلغي بعد الاسترداد)؛
+مدفوع مسبقًا برسوم صفر (استرداد كامل، `REFUNDED` تلقائيًا)؛ رفض حل طلب مش `DISPUTED`. 46 suite (254
+اختبار) عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.
+
 ## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `adjustPrice` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
 
 `orders.adjust_price` مُدرجة في `MFA_REQUIRED_PERMISSIONS` (`../auth/mfa-policy.service.ts`) بس
@@ -476,3 +519,79 @@ Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`ord
 البَقّة اللي اتصلحت في `wallets.adjust`/`payments.confirm_manual`/`settings.manage` مع بعض). تفاصيل
 كاملة + الاختبار الجديد (`../auth/mfa-step-up-enforcement.spec.ts`) في
 `../../../../docs/08-pricing-engine-and-platform-vision.md` قسم "تدقيق جاهزية الإطلاق النهائي — أمان".
+
+## إعادة الجدولة (docs/08 §22 بند 9-12، 2026-08-15)
+
+كانت فجوة موثّقة صراحة: `TechnicianScheduleService` بنيت للحجز الأولي بس (`bookSlot()`)، صفر طريقة
+"تحويل سلوت محجوز لسلوت تاني" — العميل اللي عايز يغيّر ميعاد طلب مقبول كان مضطر يلغي ويطلب تاني
+من الصفر (لو أصلاً الإلغاء متاح في حالته). `OrdersService.reschedule(userId, orderId, dto)` —
+متاحة بس قبل ما الفني يبدأ يتحرّك فعليًا (`TECHNICIAN_ASSIGNED`/`ACCEPTED`، مش `TECHNICIAN_ON_WAY`
+فما بعده)، ولازم السلوت الجديد يكون لنفس الفني المعيّن (تغيير الفني نفسه مسار مختلف تمامًا —
+`request-rematch`). الحماية من الحجز المزدوج **صفر كود إضافي** — `TechnicianScheduleService
+.rescheduleSlot()` بتستخدم `bookSlot()` الذرّية الموجودة من الأول (`UPDATE ... WHERE status=
+'available'`) جوّه transaction واحدة مع تحرير السلوت القديم، فلو الجديد اتحجز من عميل تاني بينهم،
+كل حاجة بترجع لورا (القديم يفضل زي ما هو، صفر خسارة موعد صامتة).
+
+`ORDER_RESCHEDULED_EVENT` (حدث مخصوص، مش `ORDER_STATUS_CHANGED_EVENT` — إعادة الجدولة ماتغيّرش
+`orderStatus` خالص) بيوصّل لإشعار عالي الوضوح للفني (in_app + push، `notifications/listeners/
+order-rescheduled-notification.listener.ts`) — "العميل غيّر ميعاد الطلب". سجل التاريخ محفوظ في
+`order_status_history` (صف بنفس الحالة قبل/بعد، `reason` فيه الموعد القديم والجديد).
+
+**`apps/customer-app`**: زرار "غيّر ميعاد الزيارة" في `order_detail_screen.dart` (يظهر بس في
+الحالتين المسموحتين) بيفتح قايمة السلوتات المتاحة للفني نفسه (`TechniciansRepository.fetchSchedule()`
+الموجودة بالفعل من تدفق الحجز الأصلي).
+
+اتأكد بـ5 اختبار حي جديد (`reschedule-and-address-warning.spec.ts`): إعادة جدولة ناجحة (القديم
+يرجع متاح، الجديد يتحجز، `scheduledAt` يتحدّث)؛ رفض بعد `technician_on_way`؛ **تصادم حجز حقيقي**
+(محاولتين متزامنتين `Promise.allSettled` على نفس السلوت — واحدة بس تنجح، اللي فشلت محتفظة بموعدها
+الأصلي، صفر حجز مزدوج صامت)؛ رفض سلوت فني تاني؛ `AddressesService.hasActiveOrder()` (تفاصيل في
+`../customers/README.md`). 47 suite / 259 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze`
+نضيفين.
+
+## تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14، 2026-08-15)
+
+كانت فجوة موثّقة صراحة: `PaymentsService.collectCash()` (الفني بس، تأكيد واحد، بيسوّي الطلب فورًا
+عبر `settleAndComplete()`) مالوش أي طريقة العميل يأكّد بيها من جهته، ولا أي مسار لو الفني قال "مش
+مستلم" رغم إن العميل بيقول إنه سلّم — كان أول اختلاف بينهم بيتقفل بمكالمة تليفون يدوية بره النظام
+بالكامل. **`collectCash()` اتسابت زي ما هي من غير أي تعديل عمدًا** (مسار تسوية أساسي مختبر بكثافة،
+تغيير فيه مخاطرة انحدار مش لازمة) — التأكيد الثنائي اتضاف إضافيًا بس:
+
+- **`Order.customerCashConfirmedAt`** (migration 0108) — العميل يأكّد إنه سلّم الفلوس
+  (`POST /orders/:id/confirm-cash-handover`، `OrdersService.confirmCashHandover()`). **مجرد تسجيل
+  توقيت، صفر أثر على التسوية** — الطلب مايتسوّاش لوحده، ده إثبات حرفي إن تأكيد العميل وحده
+  مايكفيش. Idempotent (بيتجاهل التكرار لو اتأكد قبل كده) — نفس متطلب حماية الضغط المزدوج/إعادة
+  المحاولة الشبكية المعتاد في المشروع كله.
+- **`Order.technicianCashNotReceivedAt`** — الفني يبلّغ "لم أستلم" (`POST /technician/orders/:id
+  /cash-not-received`، `OrdersService.reportCashNotReceived()`). متاح بس على `WORK_COMPLETED`/
+  `AWAITING_PAYMENT` (نفس `PAYABLE_ORDER_STATUSES` في `PaymentsService`). الطلب يتحول `DISPUTED`
+  (نفس الحالة "تحت مراجعة الإدارة" اللي §22 بند 3-6 بيستخدمها لزيارة فاشلة — إعادة استخدام، مش
+  حالة جديدة)، وشكوى بتتسجّل تلقائيًا (`SupportService.fileComplaint`، `ComplaintCategory.OTHER`)
+  بعنوان بيفرّق بوضوح بين حالتين: "نزاع تسليم كاش" (لو العميل كان أكّد الاستلام قبل كده — تعارض
+  مباشر) أو "الفني لم يستلم الكاش" العادي (لو العميل ماأكّدش خالص).
+- **`PaymentsService.adminConfirmCashReceived()`** (جديد) — تسوية إدارية مباشرة، نفس بنية
+  `collectCash()` بالحرف (صف `Payment` بعده `settleAndComplete()`) بس بشرط `DISPUTED` +
+  `technicianCashNotReceivedAt IS NOT NULL` بدل `WORK_COMPLETED`/`AWAITING_PAYMENT`، وبمنطق
+  `changedByRole='system'` (قرار أدمن، مش عميل/فني — نفس نمط `confirmInstaPayPayment()`).
+- **`OrdersService.resolveCashHandoverDispute(adminUserId, orderId, dto)`** (`POST /admin/orders
+  /:id/resolve-cash-dispute`، صلاحية `orders.resolve_cash_dispute` + step-up MFA إجباري — نفس
+  مستوى حساسية `orders.resolve_failed_visit` بالحرف) — قرارين بس: `retry` (الطلب يرجع
+  `WORK_COMPLETED`، الأعلام الاتنين بترجع `null`، الفني يقدر يحاول `collectCash()` تاني عادي) أو
+  `confirm_received` (يفوّض لـ`adminConfirmCashReceived()` فوق — تسوية مالية فعلية). الشرط
+  `technicianCashNotReceivedAt !== null` بيفرّق نزاع الكاش ده عن نزاع الزيارة الفاشلة
+  (`resolveFailedVisit`) لما `order_status=disputed` — الاتنين بيستخدموا نفس الحالة، الأدمن بيعرف
+  إنه في أي واحدة من `order-response.dto.ts`'s `technician_cash_not_received_at`.
+
+**`apps/customer-app`**: زرار "دفعت الفلوس كاش للفني" في `order_detail_screen.dart` (جنب أزرار
+الدفع الإلكتروني، بيختفي ويتبدل برسالة "في انتظار تأكيد الفني" بعد التأكيد). **`apps/technician-app`**:
+زرار "لم أستلم الكاش" (أحمر، تحذيري) قرب زرار "حصّلت الكاش" — `Dialog` من خطوتين (وصف الموقف، بعدين
+تأكيد صريح منفصل "متأكد إنك مستلمتش أي فلوس؟") عشان يمنع ضغطة غلط تعلّق الطلب من غير داعي.
+**`apps/admin`**: قسم جديد في `orders/[id]/page.tsx` (يظهر بس لو `order_status=disputed &&
+technician_cash_not_received_at != null`) بزرارين "إعادة محاولة التحصيل" و"تأكيد استلام الفلوس
+فعليًا (إداري)".
+
+اتأكد بـ6 اختبار حي (`cash-handover-confirmation.spec.ts`): تأكيد العميل وحده مايسوّيش الطلب +
+idempotent؛ بلاغ الفني بلا تأكيد عميل سابق → `DISPUTED` + عنوان شكوى عادي؛ نفس البلاغ بعد تأكيد
+العميل → عنوان شكوى فيه "نزاع تسليم كاش" (تعارض)؛ `retry` يرجّع الطلب `WORK_COMPLETED` والأعلام
+`null`، وبعدها `collectCash()` عادي بينجح فعليًا (إثبات إن الرجوع حقيقي مش شكلي)؛ `confirm_received`
+يقفل الطلب `completed` بـ`Payment.collectedByUserId` = الأدمن؛ رفض حل طلب مش نزاع كاش. 48 suite /
+265 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.

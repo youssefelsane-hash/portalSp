@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../catalog/catalog_repository.dart';
@@ -13,8 +14,11 @@ import '../ratings/google_review_prompt.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
+import '../support/support_contact_screen.dart';
+import '../technicians/models.dart' show ScheduleSlot;
 import '../technicians/technician_profile_screen.dart';
 import '../technicians/technician_selection_screen.dart';
+import '../technicians/technicians_repository.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
@@ -49,6 +53,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _paying = false;
   bool _requestingRevisit = false;
   bool _requestingRematch = false;
+  bool _confirmingCashHandover = false;
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
@@ -94,22 +99,131 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // docs/08 §22 بند 1 — رقم تليفون الفني بيوصلنا بس بعد ما الباك-إند يتأكد إن الحجز اتأكد فعليًا،
+  // فمفيش داعي لأي فحص إضافي هنا غير فتح تطبيق الاتصال.
+  Future<void> _callTechnician(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    if (!await launchUrl(uri)) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر فتح تطبيق الاتصال')));
+    }
+  }
+
+  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك، لسلوت تاني لنفس الفني.
+  Future<void> _rescheduleOrder() async {
+    final order = _order;
+    if (order == null || order.technicianId == null) return;
+
+    List<ScheduleSlot> slots;
+    try {
+      final all = await TechniciansRepository(context.read<AuthRepository>()).fetchSchedule(order.technicianId!);
+      slots = all.where((s) => s.isAvailable).toList();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      return;
+    }
+    if (!mounted) return;
+    if (slots.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مفيش مواعيد تانية متاحة للفني ده دلوقتي')));
+      return;
+    }
+
+    final chosen = await showDialog<ScheduleSlot>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('اختار ميعاد جديد'),
+          content: SizedBox(
+            width: 400,
+            height: 300,
+            child: ListView.builder(
+              itemCount: slots.length,
+              itemBuilder: (context, i) {
+                final s = slots[i];
+                return ListTile(
+                  title: Text('${s.slotDate} — ${s.startTime.substring(0, 5)}'),
+                  onTap: () => Navigator.of(context).pop(s),
+                );
+              },
+            ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع'))],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+
+    try {
+      final updated = await _repository.reschedule(order.id, chosen.id);
+      if (mounted) {
+        setState(() => _order = updated);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — الفني اتبلّغ')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    }
+  }
+
   Future<void> _approveQuote() async {
+    // الطلب مدفوع مسبقًا إلكترونيًا — العميل يختار وسيلة دفع الزيادة (docs/08 §22 بند 8): كاش
+    // (يتحصّل وقت الاكتمال) أو الدفع الإلكتروني (تحصيل فوري بالوسيلة المحفوظة). لطلب كاش عادي،
+    // الاختيار مالوش معنى أصلاً (الباك-إند بيتجاهله)، فمفيش داعي نعرض الاختيار خالص.
+    String paymentChoice = 'electronic';
+    if (_order?.paymentStatus == 'paid') {
+      final choice = await _showPaymentChoiceDialog();
+      if (choice == null) return; // العميل قفل الـdialog من غير ما يختار
+      paymentChoice = choice;
+    }
+
     setState(() => _decidingQuote = true);
     try {
-      final order = await _repository.approveQuote(widget.orderId);
+      final order = await _repository.approveQuote(widget.orderId, paymentChoice: paymentChoice);
       if (mounted) {
         setState(() {
           _order = order;
           _quoteItems = [];
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت الموافقة — الفني هيكمل الشغل')));
+        // النتيجة النهائية بتتأكد لاحقًا (webhook)؛ رسالة بسيطة بس، صفر تفاصيل بوابة/دفع للعميل.
+        final message = paymentChoice == 'electronic' && order.paymentStatus == 'paid'
+            ? 'تمت الموافقة على الزيادة — جاري تحصيل المبلغ'
+            : 'تمت الموافقة — الفني هيكمل الشغل';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _decidingQuote = false);
     }
+  }
+
+  Future<String?> _showPaymentChoiceDialog() {
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('اختار طريقة الدفع', style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop('cash'),
+                icon: const Text('💵', style: TextStyle(fontSize: 20)),
+                label: const Text('كاش'),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop('electronic'),
+                icon: const Text('💳', style: TextStyle(fontSize: 20)),
+                label: const Text('الدفع الإلكتروني'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _declineQuote() async {
@@ -449,6 +563,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد بس، الطلب مايتسوّاش من غير ما الفني
+  // (أو الأدمن لو حصل نزاع) يأكّد الاستلام الفعلي. زرار idempotent (الباك-إند بيتجاهل التكرار).
+  Future<void> _confirmCashHandover() async {
+    setState(() => _confirmingCashHandover = true);
+    try {
+      final order = await _repository.confirmCashHandover(widget.orderId);
+      if (mounted) {
+        setState(() => _order = order);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تمام، سجّلنا إنك سلّمت الفلوس ✅')));
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _confirmingCashHandover = false);
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   @override
@@ -457,7 +589,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text(order != null ? 'طلب ${order.orderNumber}' : 'تفاصيل الطلب')),
+        appBar: AppBar(
+          title: Text(order != null ? 'طلب ${order.orderNumber}' : 'تفاصيل الطلب'),
+          actions: [
+            // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
+            IconButton(
+              icon: const Icon(Icons.support_agent_outlined),
+              tooltip: 'تواصل مع الدعم',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+              ),
+            ),
+          ],
+        ),
         body: _error != null
             ? Center(child: Text(_error!))
             : order == null
@@ -516,6 +660,36 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           ),
                         ),
                       ),
+                      if (order.technicianPhone != null) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          color: Theme.of(context).colorScheme.primaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Text('يفضل الاتصال بالفني لتأكيد تفاصيل الموعد.', textAlign: TextAlign.center),
+                                const SizedBox(height: 8),
+                                FilledButton.icon(
+                                  onPressed: () => _callTechnician(order.technicianPhone!),
+                                  icon: const Icon(Icons.call),
+                                  label: Text('اتصل بالفني${order.technicianName != null ? ' — ${order.technicianName}' : ''}'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (order.technicianId != null &&
+                          (order.orderStatus == 'technician_assigned' || order.orderStatus == 'accepted')) ...[
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: _rescheduleOrder,
+                          icon: const Icon(Icons.event_repeat_outlined),
+                          label: const Text('غيّر ميعاد الزيارة'),
+                        ),
+                      ],
                       if (order.technicianId != null) ...[
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
@@ -674,6 +848,25 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                           icon: const Icon(Icons.send_outlined),
                           label: const Text('ادفع عبر InstaPay'),
                         ),
+                        // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو العميل هيدفع كاش
+                        // في إيد الفني (مش من خلال التطبيق)، بعد ما يسلّم يضغط هنا يأكّد.
+                        const SizedBox(height: 8),
+                        if (order.customerCashConfirmedAt == null)
+                          OutlinedButton.icon(
+                            onPressed: _confirmingCashHandover ? null : _confirmCashHandover,
+                            icon: const Icon(Icons.money_outlined),
+                            label: _confirmingCashHandover
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Text('دفعت الفلوس كاش للفني'),
+                          )
+                        else
+                          Row(
+                            children: const [
+                              Icon(Icons.check_circle_outline, color: Colors.green, size: 18),
+                              SizedBox(width: 6),
+                              Expanded(child: Text('اتسجّل إنك سلّمت الكاش — في انتظار تأكيد الفني')),
+                            ],
+                          ),
                       ],
                       if (customerCancellableStatuses.contains(order.orderStatus)) ...[
                         const SizedBox(height: 16),

@@ -107,6 +107,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      dataSource.getRepository(User),
       {} as never, // portfolioLinksService — مش متنادى في findByUserIdOrThrow
       {} as never, // certificatesService
       { record: async () => undefined } as unknown as AuditLogService,
@@ -136,6 +137,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
       {} as never, // walletsService
       {} as never, // settingsService
       {} as never, // paymentsService
+      {} as never, // supportService
       { emit: () => undefined } as never, // events
     );
   });

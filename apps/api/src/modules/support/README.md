@@ -35,4 +35,11 @@
 - اتعمله اختبار حي كامل: عميل فتح تذكرة (`TKT-2026-000001`)، أدمن `super_admin` عيّنها لنفسه (`first_response_at` اتسجّل)، نقلها `in_progress`، محاولة رجوعها لـ `open` اترفضت 409 بوضوح، نقلها `resolved` (`resolved_at` اتسجّل)، العميل قيّمها 4/5 بنجاح، محاولة يقيّم تاني اترفضت 409، فني مش صاحبها اترفض 403 من `GET`، أدمن `support_agent` (عنده `support_tickets.manage`) قفلها بنجاح، أدمن `finance` (مالوش الصلاحية) اترفض 403، ومحاولة نقل تذكرة `closed` لأي حالة اترفضت 409 (نهائية فعلاً).
 - **واجهة `apps/admin` (`/support-tickets`, `/support-tickets/:id`) — كانت فجوة موثّقة، اتقفلت**: قايمة بفلتر حالة + تفاصيل (البيانات، تعيين لموظف عبر قايمة منسدلة من `GET /admin/employees?is_active=true`، أزرار تحويل حالة مبنية على `TICKET_ALLOWED_TRANSITIONS` مطابقة بالحرف لـ`ALLOWED_TRANSITIONS` في `support-tickets.service.ts`). مفيش أي تعديل باك-إند — كل الـ`GET/PATCH` endpoints كانت موجودة ومختبرة بالكامل من زمان. **ملحوظة تصميم**: تفاصيل التذكرة بتتقرا من `GET /support-tickets/:id` (مش `/admin/support-tickets/:id`) لأن كنترولر الإدارة نفسه معندوش `GET /:id` — نفس الـ endpoint العام مفتوح للأدمن أصلاً (`@Roles(CUSTOMER, TECHNICIAN, ADMIN)`). **اتعمله اختبار حي كامل عبر Playwright**: تذكرة جديدة اتفتحت (`TKT-2026-000002`) عبر الـ API مباشرة (مفيش شاشة عميل لتذاكر الدعم لسه)، ظهرت في القايمة، تعيينها لموظف نجح، تحويلها `in_progress` ثم `resolved` نجح، زرار "إعادة فتح" ظهر صح بدل "قيد المعالجة" — الحالة النهائية اتأكدت مباشرة من `support_tickets` في الـ DB (`ticket_status='resolved'`, `assigned_to_user_id`/`first_response_at`/`resolved_at` كلهم مسجّلين).
 
+## تصنيف شكوى جديد: `required_work_rejected` (docs/08 §22 بند 6، migration 0107)
+
+العميل رفض شغل الفني وصفه كضروري لإتمام الطلب صح — مختلف عن `no_show` (العميل مش موجود خالص).
+مُستخدم برمجيًا بس عبر `OrdersService.reportFailedVisit()` (`../orders/README.md` § زيارة فاشلة) —
+مش خيار متاح في فورم الشكوى اليدوي بتاع العميل (`apps/customer-app/file_complaint_screen.dart`)
+لأن العميل مش هيبلّغ عن نفسه. `SEVERITY_BY_CATEGORY` بقى `high` (نفس `no_show`).
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

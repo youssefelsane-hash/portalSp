@@ -133,6 +133,19 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
+  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك، لسلوت تاني لنفس الفني.
+  Future<Order> reschedule(String orderId, String newSlotId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/reschedule', body: {'new_slot_id': newSlotId});
+    return Order.fromJson(data!);
+  }
+
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده
+  // (الفني/الأدمن لسه محتاجين يأكدوا الاستلام الفعلي عبر collectCash/adminConfirmCashReceived).
+  Future<Order> confirmCashHandover(String orderId) async {
+    final data = await auth.authedRequest('POST', '/orders/$orderId/confirm-cash-handover');
+    return Order.fromJson(data!);
+  }
+
   Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,
@@ -164,8 +177,15 @@ class OrdersRepository {
     return items.map(OrderItem.fromJson).toList();
   }
 
-  Future<Order> approveQuote(String orderId) async {
-    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/approve');
+  // paymentChoice بس ليه معنى لو الطلب مدفوع مسبقًا إلكترونيًا (order.paymentStatus == 'paid') —
+  // 'electronic' (افتراضي) بيطلق تحصيل فوري بوسيلة الدفع المحفوظة، 'cash' بيسيب المبلغ يتجمّع
+  // ويتحصّل كاش وقت الاكتمال (docs/08 §22 بند 8). للطلبات الكاش العادية القيمة دي متجاهلة تمامًا.
+  Future<Order> approveQuote(String orderId, {String paymentChoice = 'electronic'}) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/quote-items/approve',
+      body: {'payment_choice': paymentChoice},
+    );
     final orderJson = data!['order'] as Map<String, dynamic>;
     return Order.fromJson(orderJson);
   }

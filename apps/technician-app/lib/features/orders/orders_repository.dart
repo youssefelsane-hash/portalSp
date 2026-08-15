@@ -96,6 +96,29 @@ class OrdersRepository {
     await authRepository.authedRequest('POST', '/technician/orders/$orderId/collect-cash');
   }
 
+  // زيارة فاشلة/عدم حضور (docs/08 §22 بند 3+6) — الفني بيوقف بدل ما يكمّل شغل غير مصرّح أو
+  // يقفل "مكتمل" كاذبة. الطلب يتحول disputed ويوديه لمراجعة أدمن حقيقية.
+  Future<Order> reportFailedVisit(String orderId, {required String reason, required String description}) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/report-failed-visit',
+      body: {'reason': reason, 'description': description},
+    );
+    return Order.fromJson(data!);
+  }
+
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — الفني بيبلّغ إنه ماستلمش الفلوس (رغم إن
+  // العميل ممكن يكون أكّد إنه سلّم). الطلب يتحول disputed برضه، مراجعة أدمن حقيقية (نفس نمط
+  // reportFailedVisit فوق) بدل ما نديله قرار نهائي فوري.
+  Future<Order> reportCashNotReceived(String orderId, {required String description}) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/cash-not-received',
+      body: {'description': description},
+    );
+    return Order.fromJson(data!);
+  }
+
   // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (قطعة غيار/أجرة إضافية)، الطلب
   // بيتحول awaiting_quote_approval لحد ما العميل يوافق/يرفض من apps/customer-app.
   Future<Order> proposeQuoteItems(String orderId, List<Map<String, dynamic>> items) async {

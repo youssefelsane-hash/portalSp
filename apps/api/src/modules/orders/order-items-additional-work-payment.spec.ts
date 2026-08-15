@@ -175,6 +175,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      dataSource.getRepository(User),
       {} as never,
       {} as never,
       {} as unknown as AuditLogService,
@@ -351,6 +352,46 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
     const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
     expect(addlPayment).toBeUndefined(); // صفر محاولة دفع خالص
+  });
+
+  it('العميل اختار الدفع كاش للمبلغ الإضافي — صفر محاولة تحصيل إلكتروني، الدلتا تتجمّع في total_amount_cents بس (docs/08 §22 بند 8)', async () => {
+    const orderId = await insertPrepaidOrder(`cashchoice-${runId}`, 100000);
+    await orderItemsService.propose(ids.techUser, orderId, [
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة اختارها العميل كاش', quantity: 1, unit_price_cents: 12000 },
+    ]);
+    const { order } = await orderItemsService.approve(ids.customerUser, orderId, 'cash');
+    expect(order.totalAmountCents).toBe(112000);
+    expect(order.orderStatus).toBe(OrderStatus.IN_PROGRESS);
+
+    const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
+    const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
+    expect(addlPayment).toBeUndefined(); // صفر محاولة دفع إلكتروني خالص لما العميل يختار كاش
+
+    // الدلتا لسه جزء من amountOwedNow (مش اختفت) — هتتحصّل كاش وقت الاكتمال زي أي طلب مختلط
+    const owed = await amountOwedNowFor(orderId);
+    expect(owed).toBe(12000);
+  });
+
+  it('أكتر من طلب شغل إضافي مستقل على نفس الطلب — كل دفعة قابلة للتتبع لوحدها (docs/08 §22 بند 7)', async () => {
+    const orderId = await insertPrepaidOrder(`multibatch-${runId}`, 100000);
+
+    await orderItemsService.propose(ids.techUser, orderId, [
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة أولى', quantity: 1, unit_price_cents: 5000 },
+    ]);
+    const first = await orderItemsService.approve(ids.customerUser, orderId, 'cash');
+    expect(first.order.totalAmountCents).toBe(105000);
+
+    // دورة تانية مستقلة — الطلب رجع in_progress بعد الموافقة الأولى، فالفني يقدر يقترح تاني
+    await orderItemsService.propose(ids.techUser, orderId, [
+      { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'أجرة إضافية تانية', quantity: 1, unit_price_cents: 7000 },
+    ]);
+    const second = await orderItemsService.approve(ids.customerUser, orderId, 'cash');
+    expect(second.order.totalAmountCents).toBe(112000); // 100000 + 5000 + 7000، صفر تعارض بين الدفعتين
+
+    const allItems = await dataSource.getRepository(OrderItem).find({ where: { orderId } });
+    const batchIds = new Set(allItems.map((i) => i.batchId));
+    expect(batchIds.size).toBe(2); // دفعتين مستقلتين فعلاً، مش دفعة واحدة اتلخبطت
+    expect(allItems.every((i) => i.isCustomerApproved)).toBe(true);
   });
 
   it('idempotencyKey فريد على مستوى الـDB — محاولتين لنفس batchId يترفض تانيهم بوضوح (§12، حماية إضافية تحت مستوى القفل)', async () => {

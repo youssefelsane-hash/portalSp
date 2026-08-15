@@ -55,6 +55,13 @@ class Order {
   // سياسة إلغاء الفني (docs/10) — لو الطلب awaiting_technician_reselection، بيشاور على الفني
   // اللي لغى بالذات (اتسيب عمدًا بعد الإلغاء) عشان نستبعده من قايمة اختيار البديل.
   final String? requestedTechnicianId;
+  // رقم تليفون الفني (docs/08 §22 بند 1) — موجود بس بعد تأكيد حجيز حقيقي، الباك-إند هو المسؤول
+  // الوحيد عن شرط الظهور (order-state-machine.ts's TECHNICIAN_CONTACT_VISIBLE_STATUSES).
+  final String? technicianName;
+  final String? technicianPhone;
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل وحده، مايسوّيش الطلب لوحده.
+  final String? customerCashConfirmedAt;
+  final String? technicianCashNotReceivedAt;
 
   Order({
     required this.id,
@@ -81,6 +88,10 @@ class Order {
     this.requiredAssistants,
     this.estimatedDurationDays,
     this.requestedTechnicianId,
+    this.technicianName,
+    this.technicianPhone,
+    this.customerCashConfirmedAt,
+    this.technicianCashNotReceivedAt,
   });
 
   bool get isUnderWarranty =>
@@ -113,6 +124,10 @@ class Order {
         requiredAssistants: json['required_assistants'] as int?,
         estimatedDurationDays: json['estimated_duration_days'] as int?,
         requestedTechnicianId: json['requested_technician_id'] as String?,
+        technicianName: json['technician_name'] as String?,
+        technicianPhone: json['technician_phone'] as String?,
+        customerCashConfirmedAt: json['customer_cash_confirmed_at'] as String?,
+        technicianCashNotReceivedAt: json['technician_cash_not_received_at'] as String?,
       );
 }
 

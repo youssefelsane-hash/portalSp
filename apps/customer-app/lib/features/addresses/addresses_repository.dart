@@ -40,6 +40,32 @@ class AddressesRepository {
     return Address.fromJson(data!);
   }
 
+  // تعديل عنوان موجود (docs/08 §22 بند 12) — نفس حقول create() تقريبًا، كلها اختيارية هنا
+  // (الباك-إند بيحدّث بس اللي اتبعت).
+  Future<Address> update(
+    String addressId, {
+    String? cityId,
+    String? areaId,
+    String? streetName,
+    double? latitude,
+    double? longitude,
+    String? label,
+    String? buildingNumber,
+    String? landmark,
+  }) async {
+    final data = await auth.authedRequest('PATCH', '/addresses/$addressId', body: {
+      if (cityId != null) 'city_id': cityId,
+      if (areaId != null) 'area_id': areaId,
+      if (streetName != null) 'street_name': streetName,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+      if (label != null) 'label': label,
+      if (buildingNumber != null) 'building_number': buildingNumber,
+      if (landmark != null) 'landmark': landmark,
+    });
+    return Address.fromJson(data!);
+  }
+
   Future<void> remove(String addressId) async {
     await auth.authedRequest('DELETE', '/addresses/$addressId');
   }

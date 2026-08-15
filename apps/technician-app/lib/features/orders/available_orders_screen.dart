@@ -17,6 +17,7 @@ import '../profile/profile_screen.dart';
 import '../progression/progression_screen.dart';
 import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
+import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
@@ -271,6 +272,13 @@ class _TechnicianDrawer extends StatelessWidget {
               const Divider(height: 1),
               const _DrawerGroupLabel('الدعم والتدريب'),
               _DrawerItem(icon: Icons.school_outlined, label: 'الأكاديمية', builder: (_) => const AcademyScreen()),
+              // اتصال/واتساب مباشر مع خدمة العملاء (docs/08 §22 بند 15-19) — منفصل عن
+              // "تواصل مع الإدارة" (شات داخلي) تحت.
+              _DrawerItem(
+                icon: Icons.call_outlined,
+                label: 'اتصل بالدعم',
+                builder: (_) => const SupportContactScreen(),
+              ),
               _DrawerItem(
                 icon: Icons.support_agent_outlined,
                 label: 'تواصل مع الإدارة',

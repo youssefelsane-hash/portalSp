@@ -85,6 +85,11 @@ export default function OrderDetailPage() {
   const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
   const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
+  const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
+  const [visitFeeEgp, setVisitFeeEgp] = useState('');
+  const [failedVisitNotes, setFailedVisitNotes] = useState('');
+  const [showCashDisputeConfirmForm, setShowCashDisputeConfirmForm] = useState(false);
+  const [cashDisputeNotes, setCashDisputeNotes] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -195,6 +200,96 @@ export default function OrderDetailPage() {
       setShowAdjustPriceForm(false);
       setNewTotalEgp('');
       setAdjustPriceReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — الطلب disputed بعد بلاغ الفني (report-failed-visit)،
+  // الأدمن بيحل بعد المراجعة: reschedule (يرجع نشط بنفس السعر) أو cancel_with_fee (رسوم + استرداد
+  // الباقي لو مدفوع مسبقًا). نفس مستوى حساسية refund/adjust-price (step-up MFA).
+  async function handleResolveFailedVisitReschedule() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-failed-visit`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'reschedule', admin_notes: 'الأدمن قرر إعادة جدولة الزيارة بعد المراجعة' }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleResolveFailedVisitCancelWithFee(e: FormEvent) {
+    e.preventDefault();
+    if (failedVisitNotes.trim().length < 5) {
+      window.alert('ملاحظات الأدمن لازم تكون 5 حروف على الأقل');
+      return;
+    }
+    const feeCents = visitFeeEgp.trim() === '' ? undefined : Math.round(Number(visitFeeEgp) * 100);
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-failed-visit`, {
+        method: 'POST',
+        body: JSON.stringify({
+          outcome: 'cancel_with_fee',
+          ...(feeCents !== undefined ? { visit_fee_cents: feeCents } : {}),
+          admin_notes: failedVisitNotes,
+        }),
+      });
+      setShowCancelWithFeeForm(false);
+      setVisitFeeEgp('');
+      setFailedVisitNotes('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — الطلب disputed بعد بلاغ الفني (cash-not-received)،
+  // بيتميّز عن نزاع الزيارة الفاشلة فوق بـtechnician_cash_not_received_at != null. retry يرجّع الطلب
+  // work_completed (يقدر يتحصّل تاني عادي)، confirm_received تسوية إدارية مباشرة (بيقفل الطلب completed).
+  async function handleResolveCashDisputeRetry() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-cash-dispute`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'retry', admin_notes: 'الأدمن قرر إعادة محاولة التحصيل بعد المراجعة' }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleResolveCashDisputeConfirmReceived(e: FormEvent) {
+    e.preventDefault();
+    if (cashDisputeNotes.trim().length < 5) {
+      window.alert('ملاحظات الأدمن لازم تكون 5 حروف على الأقل');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-cash-dispute`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'confirm_received', admin_notes: cashDisputeNotes }),
+      });
+      setShowCashDisputeConfirmForm(false);
+      setCashDisputeNotes('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -393,6 +488,103 @@ export default function OrderDetailPage() {
                 />
               </CardFooter>
             )}
+          {order.order_status === 'disputed' && !order.technician_cash_not_received_at && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <p className="text-sm text-muted-foreground">
+                الطلب ده بلاغ زيارة فاشلة (عدم حضور/رفض شغل ضروري) — راجع الشكوى المرتبطة في صفحة الدعم
+                قبل ما تقرر.
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" disabled={isSaving} onClick={handleResolveFailedVisitReschedule}>
+                  العميل هيكمل — إعادة جدولة
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isSaving}
+                  onClick={() => setShowCancelWithFeeForm((s) => !s)}
+                >
+                  العميل عايز يلغي
+                </Button>
+              </div>
+              {showCancelWithFeeForm && (
+                <form onSubmit={handleResolveFailedVisitCancelWithFee} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="visit_fee_egp">رسوم الزيارة (جنيه) — اختياري، افتراضي من الإعدادات</Label>
+                    <Input
+                      id="visit_fee_egp"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      dir="ltr"
+                      value={visitFeeEgp}
+                      onChange={(e) => setVisitFeeEgp(e.target.value)}
+                      placeholder="مثال: 50"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="failed_visit_notes">ملاحظات المراجعة</Label>
+                    <Input
+                      id="failed_visit_notes"
+                      value={failedVisitNotes}
+                      onChange={(e) => setFailedVisitNotes(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  {order.payment_status !== 'paid' && (
+                    <p className="text-xs text-muted-foreground">
+                      طلب كاش — صفر رسوم دايمًا (المنصة بتمتص تكلفة الفني)، الرسوم فوق هتتجاهل.
+                    </p>
+                  )}
+                  <Button type="submit" size="sm" variant="destructive" disabled={isSaving} className="w-fit">
+                    تأكيد الإلغاء
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
+          {order.order_status === 'disputed' && order.technician_cash_not_received_at && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <p className="text-sm text-muted-foreground">
+                نزاع تسليم كاش — الفني بلّغ إنه ماستلمش الفلوس
+                {order.customer_cash_confirmed_at ? ' رغم إن العميل أكّد إنه سلّم (تعارض مباشر)' : ''}.
+                راجع الشكوى المرتبطة في صفحة الدعم قبل ما تقرر.
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" disabled={isSaving} onClick={handleResolveCashDisputeRetry}>
+                  إعادة محاولة التحصيل
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isSaving}
+                  onClick={() => setShowCashDisputeConfirmForm((s) => !s)}
+                >
+                  تأكيد استلام الفلوس فعليًا (إداري)
+                </Button>
+              </div>
+              {showCashDisputeConfirmForm && (
+                <form onSubmit={handleResolveCashDisputeConfirmReceived} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="cash_dispute_notes">ملاحظات المراجعة (إزاي اتأكد إن الفلوس استلمت فعلاً)</Label>
+                    <Input
+                      id="cash_dispute_notes"
+                      value={cashDisputeNotes}
+                      onChange={(e) => setCashDisputeNotes(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" size="sm" variant="destructive" disabled={isSaving} className="w-fit">
+                    تأكيد وتسوية الطلب
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
           {order.payment_status !== 'paid' && (
             <CardFooter className="flex-col items-stretch gap-3">
               <Button
@@ -467,12 +659,22 @@ export default function OrderDetailPage() {
                   {financialSummary.payments.length > 0 && (
                     <ul className="flex flex-col gap-1">
                       {financialSummary.payments.map((p) => (
-                        <li key={p.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
-                          <span>
-                            {PAYMENT_METHOD_LABELS_FULL[p.payment_method]} ·{' '}
-                            {PAYMENT_GATEWAY_STATUS_LABELS[p.payment_status]}
-                          </span>
-                          <span>{formatEgp(p.amount_cents)}</span>
+                        <li key={p.id} className="flex flex-col gap-0.5 border-b pb-1 text-xs last:border-0">
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {PAYMENT_METHOD_LABELS_FULL[p.payment_method]} ·{' '}
+                              {PAYMENT_GATEWAY_STATUS_LABELS[p.payment_status]}
+                              {p.order_item_batch_id && (
+                                <span className="ms-1 rounded bg-muted px-1 py-0.5 text-muted-foreground">
+                                  دفعة شغل إضافي معتمد
+                                </span>
+                              )}
+                            </span>
+                            <span>{formatEgp(p.amount_cents)}</span>
+                          </div>
+                          {p.payment_status === 'failed' && p.failure_message && (
+                            <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
+                          )}
                         </li>
                       ))}
                     </ul>

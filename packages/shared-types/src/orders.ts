@@ -63,6 +63,10 @@ export interface OrderResponseDto {
   required_technicians: number | null;
   required_assistants: number | null;
   estimated_duration_days: number | null;
+  /** تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — يميّز نزاع الكاش عن نزاع الزيارة الفاشلة
+   * لما order_status=disputed (technician_cash_not_received_at != null = نزاع كاش). */
+  customer_cash_confirmed_at: string | null;
+  technician_cash_not_received_at: string | null;
 }
 
 export interface OrderStatusHistoryResponseDto {

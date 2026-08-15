@@ -195,6 +195,15 @@ export class Order {
   @Column({ name: 'paid_at', type: 'timestamptz', nullable: true })
   paidAt: Date | null;
 
+  // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14، migration 0108) — العميل بيأكّد إنه سلّم
+  // الفلوس، الفني بيأكّد الاستلام منفصل (collectCash() الموجودة هي التأكيد ده). لو الفني قال
+  // "لم أستلم" رغم إن العميل أكّد، ده نزاع حقيقي بيوديه لمراجعة أدمن (Complaint + resolveCashHandoverDispute).
+  @Column({ name: 'customer_cash_confirmed_at', type: 'timestamptz', nullable: true })
+  customerCashConfirmedAt: Date | null;
+
+  @Column({ name: 'technician_cash_not_received_at', type: 'timestamptz', nullable: true })
+  technicianCashNotReceivedAt: Date | null;
+
   @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
   closedAt: Date | null;
 

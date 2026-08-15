@@ -301,3 +301,22 @@ transactions` أصلاً append-only على مستوى الـDB (`REVOKE UPDATE,
 
 اتأكد بـ`../orders/order-items-additional-work-payment.spec.ts` (5 اختبار حي) — تفاصيل كاملة في
 `docs/08-pricing-engine-and-platform-vision.md` §21.
+
+**وضوح الأدمن**: `GET /admin/orders/:id/financial-summary` الموجود (docs/08 §20 بند 11) بقى بيرجّع
+`order_item_batch_id`/`failure_code`/`failure_message` لكل دفعة — الأدمن يقدر يميّز دفعة الشغل
+الإضافي عن الأصلية ويشوف سبب أي فشل مباشرة (`apps/admin/src/app/orders/[id]/page.tsx`). واجهة
+الفني ببساطة "تم الدفع"/"جاري المعالجة" لسه مؤجّلة عمداً — تفاصيل السبب والفرصة المتاحة لاحقًا في
+docs/08 §21 بند 8.
+
+## `adminConfirmCashReceived()` — تسوية إدارية لنزاع تسليم كاش (docs/08 §22 بند 13-14، 2026-08-15)
+
+`collectCash()` (الفني بس، تأكيد واحد) اتسابت زي ما هي عمدًا — بدل ما نعدّل مسار تسوية أساسي
+مختبر بكثافة، اتضاف تأكيد ثنائي إضافي على `Order` (`customerCashConfirmedAt`/
+`technicianCashNotReceivedAt`، migration 0108) وتسوية إدارية منفصلة كل تفاصيلها في
+`../orders/README.md`'s "تسليم كاش بتأكيد الطرفين". `adminConfirmCashReceived(adminUserId,
+orderId, meta?)` هنا هي نفس بنية `collectCash()` بالحرف (صف `Payment` بـ`idempotencyKey:
+cash-admin-confirmed:${orderId}`، بعده `settleAndComplete(manager, order, CASH, adminUserId,
+'system')`) — بس مشروطة بـ`DISPUTED` + `technicianCashNotReceivedAt IS NOT NULL` (مش
+`WORK_COMPLETED`/`AWAITING_PAYMENT`)، وبيتنادى عليها بس من `OrdersService
+.resolveCashHandoverDispute()` (صلاحية `orders.resolve_cash_dispute` + step-up MFA، نفس مستوى
+حساسية `payments.confirm_manual` بالحرف — مُدرجة في `MFA_REQUIRED_PERMISSIONS`).

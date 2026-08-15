@@ -246,3 +246,11 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 في `technician-stats.processor.ts` (`completed_orders_count`/`cancelled_orders_count`/
 `technician_services.completed_count` — الأعمدة المخزّنة اللي بتتحدّث دوريًا) — كلهم اتصلحوا
 بإضافة `AND deleted_at IS NULL`.
+
+## إعادة الجدولة (docs/08 §22 بند 9-12، 2026-08-15)
+
+`TechnicianScheduleService.rescheduleSlot(orderId, newSlotId, manager)` — تحرير السلوت القديم
+وحجز الجديد ذرّيًا جوّه transaction واحدة (بيستخدم `bookSlot()` الذرّية الموجودة وراها) — لو حجز
+الجديد فشل (اتحجز من عميل تاني بينهم)، التحرير القديم بيترول باك تلقائيًا (نفس الـtransaction)،
+صفر خسارة صامتة لموعد العميل الأصلي وصفر حجز مزدوج للفني ممكن يحصل بأي حال. مُستخدم من
+`OrdersService.reschedule()` (`../orders/README.md`).

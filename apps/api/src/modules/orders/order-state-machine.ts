@@ -52,6 +52,10 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.CANCELLED_BY_TECHNICIAN,
     OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+    // زيارة فاشلة — الفني وصل والعميل مش موجود/رافض يفتح (docs/08 §22 بند 3). مختلف عن
+    // CANCELLED_BY_TECHNICIAN (قرار نهائي من الفني بلا مراجعة) — ده بيوديه لمراجعة أدمن حقيقية
+    // (OrdersService.reportFailedVisit → resolveFailedVisit) قبل أي قرار نهائي على الطلب/الفلوس.
+    OrderStatus.DISPUTED,
   ],
   [OrderStatus.IN_PROGRESS]: [
     OrderStatus.AWAITING_QUOTE_APPROVAL,
@@ -59,10 +63,25 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.DISPUTED,
   ],
   [OrderStatus.AWAITING_QUOTE_APPROVAL]: [OrderStatus.IN_PROGRESS, OrderStatus.CANCELLED_BY_CUSTOMER],
-  [OrderStatus.WORK_COMPLETED]: [OrderStatus.AWAITING_PAYMENT, OrderStatus.COMPLETED],
+  // docs/08 §22 بند 13-14 — الفني بلّغ "لم أستلم" الكاش رغم إن الشغل خلص فعلاً.
+  [OrderStatus.WORK_COMPLETED]: [OrderStatus.AWAITING_PAYMENT, OrderStatus.COMPLETED, OrderStatus.DISPUTED],
   [OrderStatus.AWAITING_PAYMENT]: [OrderStatus.COMPLETED, OrderStatus.DISPUTED],
   [OrderStatus.COMPLETED]: [OrderStatus.DISPUTED, OrderStatus.REFUNDED],
-  [OrderStatus.DISPUTED]: [OrderStatus.COMPLETED, OrderStatus.REFUNDED],
+  // docs/08 §22 بند 4-5 — حل الزيارة الفاشلة (OrdersService.resolveFailedVisit): "العميل عايز
+  // يكمل" → ACCEPTED (نفس الطلب، نفس السعر، الفني يعيد المحاولة من غير أي تحصيل تاني). "العميل
+  // عايز يلغي وطلبه كاش (صفر فلوس اتحصّلت أصلاً)" → CANCELLED_BY_CUSTOMER مباشرة بلا استرداد
+  // (المنصة بتمتص تكلفة الفني، مفيش فلوس عميل نتخيلها). لو الطلب مدفوع مسبقًا، refundOrder()
+  // الموجودة بالفعل بتنقل الطلب لـREFUNDED تلقائيًا لو الاسترداد كامل (بدون رسوم زيارة) — الانتقال
+  // ده مُدرج أصلاً تحت مباشرة.
+  [OrderStatus.DISPUTED]: [
+    OrderStatus.COMPLETED,
+    OrderStatus.REFUNDED,
+    OrderStatus.ACCEPTED,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
+    // docs/08 §22 بند 13-14 — نزاع تسليم كاش اتحل بـ"يعيد الفني المحاولة" (resolveCashHandoverDispute
+    // outcome=retry) — الطلب يرجع collectCash()-able زي ما كان قبل النزاع.
+    OrderStatus.WORK_COMPLETED,
+  ],
   [OrderStatus.CANCELLED_BY_CUSTOMER]: [],
   [OrderStatus.CANCELLED_BY_TECHNICIAN]: [],
   [OrderStatus.CANCELLED_BY_SYSTEM]: [],
@@ -102,6 +121,20 @@ export const ACTIVE_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.TECHNICIAN_ARRIVED,
   OrderStatus.IN_PROGRESS,
 ];
+
+// الحالات اللي رقم تليفون الفني يظهر فيها للعميل (docs/08 §22 بند 1) — "تأكيد حجيز حقيقي" معناه
+// الفني وافق فعليًا (accepted)، مش بس اتعيّن وقاعد ينتظر قبوله (technician_assigned لسه قبلها).
+// نفس ACTIVE_TECHNICIAN_ORDER_STATUSES فوق + الحالات اللي بعد بدء الشغل (الفني لسه مرتبط بالطلب).
+export const TECHNICIAN_CONTACT_VISIBLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  OrderStatus.ACCEPTED,
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
+  OrderStatus.WORK_COMPLETED,
+  OrderStatus.AWAITING_PAYMENT,
+  OrderStatus.COMPLETED,
+]);
 
 export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   return ORDER_TRANSITIONS[from].includes(to);

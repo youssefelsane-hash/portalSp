@@ -52,6 +52,7 @@ describe('AssistantMatchingService.accept() — قبول مزدوج متزامن
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       {} as never,
+      {} as never, // usersRepo — مش متنادى في المسار المُختبر هنا
       {} as never,
       {} as never,
       {} as never,

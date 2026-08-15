@@ -17,9 +17,12 @@ export interface AddressResponseDto {
   delivery_notes: string | null;
   is_default: boolean;
   is_verified: boolean;
+  // العنوان ده مرتبط بطلب نشط دلوقتي (docs/08 §22 بند 12) — التطبيق بيعرض تحذير بسيط قبل ما
+  // العميل يعدّل، عشان مايغيّرش مكان وصول الفني لطلب شغال من غير ما ياخد باله.
+  has_active_order: boolean;
 }
 
-export function toAddressResponseDto(address: Address): AddressResponseDto {
+export function toAddressResponseDto(address: Address, hasActiveOrder = false): AddressResponseDto {
   const [lng, lat] = address.location.coordinates;
   return {
     id: address.id,
@@ -38,5 +41,6 @@ export function toAddressResponseDto(address: Address): AddressResponseDto {
     delivery_notes: address.deliveryNotes,
     is_default: address.isDefault,
     is_verified: address.isVerified,
+    has_active_order: hasActiveOrder,
   };
 }

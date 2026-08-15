@@ -169,6 +169,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      dataSource.getRepository(User),
       {} as never, // portfolioLinksService
       {} as never, // certificatesService
       {} as unknown as AuditLogService,

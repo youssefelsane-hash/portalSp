@@ -64,4 +64,20 @@
 من غير `AND deleted_at IS NULL` — نفس فئة البَقّة الموثّقة في `../technicians/README.md` و
 `../buildings/README.md`. الإصلاح: `AND deleted_at IS NULL` على نفس الاستعلام.
 
+## تحذير تغيير عنوان مرتبط بطلب نشط (docs/08 §22 بند 12، 2026-08-15)
+
+كانت فجوة موثّقة صراحة: `AddressesService.update()` بتعدّل صف `addresses` مباشرة — أي طلب (نشط أو
+قديم) بيشاور على نفس الصف عبر `order_id → address_id` (FK، مش نسخة منفصلة)، فتعديل العنوان كان
+بيغيّر مكان وصول الفني لطلب شغال من غير أي تنبيه للعميل. الحل تحذير بسيط قبل الحفظ، مش منع
+التعديل: `AddressesService.hasActiveOrder(addressId)` / `findAddressIdsWithActiveOrders(userId)`
+(استعلام واحد لكل قايمة، مش N+1) — أي حالة طلب مش نهائية (`completed`/`cancelled_*`/`expired`/
+`refunded`) بتتحسب "نشطة"، بما فيها `disputed`. `AddressResponseDto` بقى فيه `has_active_order`
+(`GET /addresses` و`PATCH /addresses/:id` الاتنين).
+
+**`apps/customer-app`**: كانت فجوة أكبر ("تعديل عنوان" مكنش موجود خالص كميزة — `PATCH /addresses/:id`
+صفر caller من التطبيق، إضافة بس كانت متاحة) — اتقفلت كجزء من نفس الشغل: `AddressFormScreen` بقى
+يدعم وضع تعديل (`existingAddress` param، pre-fill + `update()` بدل `create()`)، `addresses_screen.dart`
+الضغط على عنوان بيفتح التعديل (كان مفيهوش أي إجراء)، وبانر تحذير برتقالي واضح لو `has_active_order`
++ أيقونة تحذير صغيرة في القايمة نفسها قبل حتى ما العميل يفتح التعديل.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

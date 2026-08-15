@@ -12,8 +12,11 @@ export class AddressesController {
 
   @Get()
   async list(@CurrentUser() user: JwtPayload) {
-    const addresses = await this.addressesService.findAllForUser(user.sub);
-    return addresses.map(toAddressResponseDto);
+    const [addresses, activeAddressIds] = await Promise.all([
+      this.addressesService.findAllForUser(user.sub),
+      this.addressesService.findAddressIdsWithActiveOrders(user.sub),
+    ]);
+    return addresses.map((address) => toAddressResponseDto(address, activeAddressIds.has(address.id)));
   }
 
   @Post()
@@ -27,7 +30,8 @@ export class AddressesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAddressDto,
   ) {
-    return toAddressResponseDto(await this.addressesService.update(user.sub, id, dto));
+    const updated = await this.addressesService.update(user.sub, id, dto);
+    return toAddressResponseDto(updated, await this.addressesService.hasActiveOrder(updated.id));
   }
 
   @Delete(':id')

@@ -14,6 +14,8 @@ import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
+import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
+import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { Order } from './entities/order.entity';
@@ -100,6 +102,28 @@ export class TechnicianOrderExecutionController {
   @Post(':id/complete')
   async complete(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.toDto(await this.ordersService.complete(user.sub, id));
+  }
+
+  // زيارة فاشلة/عدم حضور (docs/08 §22 بند 3+6) — الفني بيوقف بدل ما يكمّل شغل غير مصرّح أو يقفل
+  // الطلب "مكتمل" كاذبة، ويوديه لمراجعة أدمن حقيقية.
+  @Post(':id/report-failed-visit')
+  async reportFailedVisit(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportFailedVisitDto,
+  ) {
+    return this.toDto(await this.ordersService.reportFailedVisit(user, id, dto));
+  }
+
+  // "لم أستلم" الكاش (docs/08 §22 بند 13-14) — مسار الفني للتنازع، مش قرار نهائي فوري (بيودّي
+  // لمراجعة أدمن حقيقية عبر الشكوى + resolveCashHandoverDispute).
+  @Post(':id/cash-not-received')
+  async cashNotReceived(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReportCashNotReceivedDto,
+  ) {
+    return this.toDto(await this.ordersService.reportCashNotReceived(user, id, dto));
   }
 
   @Post(':id/media')

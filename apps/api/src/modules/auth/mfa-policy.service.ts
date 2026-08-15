@@ -22,6 +22,12 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // تصحيح محفظة يدوي (docs/08 §20 بند 5، migration 0104) — تحويل فلوس مباشر بقرار أدمن بلا أي
   // نظام تلقائي يتحقق منه، نفس مستوى حساسية refunds.issue/payouts.approve بالظبط.
   'wallets.adjust',
+  // حل زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5، migration 0107) — رسوم + استرداد بقرار أدمن،
+  // نفس مستوى حساسية orders.adjust_price بالظبط.
+  'orders.resolve_failed_visit',
+  // حل نزاع تسليم كاش (docs/08 §22 بند 13-14، migration 0108) — تسوية مالية محتملة بقرار أدمن،
+  // نفس مستوى حساسية orders.resolve_failed_visit بالظبط.
+  'orders.resolve_cash_dispute',
 ] as const;
 
 @Injectable()

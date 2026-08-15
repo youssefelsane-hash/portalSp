@@ -48,6 +48,7 @@ const SEVERITY_BY_CATEGORY: Record<ComplaintCategory, ComplaintSeverity> = {
   [ComplaintCategory.FRAUD]: ComplaintSeverity.CRITICAL,
   [ComplaintCategory.DAMAGE_TO_PROPERTY]: ComplaintSeverity.CRITICAL,
   [ComplaintCategory.NO_SHOW]: ComplaintSeverity.HIGH,
+  [ComplaintCategory.REQUIRED_WORK_REJECTED]: ComplaintSeverity.HIGH,
   [ComplaintCategory.OVERCHARGING]: ComplaintSeverity.HIGH,
   [ComplaintCategory.RUDE_BEHAVIOR]: ComplaintSeverity.HIGH,
   [ComplaintCategory.POOR_QUALITY]: ComplaintSeverity.MEDIUM,

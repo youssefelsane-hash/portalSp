@@ -10,6 +10,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
+import { SupportModule } from '../support/support.module';
 import { TechniciansModule } from '../technicians/technicians.module';
 import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AdminCancellationReasonsController } from './admin-cancellation-reasons.controller';
@@ -57,6 +58,7 @@ import { RecurringOrderTemplate } from './entities/recurring-order-template.enti
     PromotionsModule,
     SettingsModule,
     PaymentsModule,
+    SupportModule,
     AuditModule,
     BuildingsModule,
     JwtModule.register({}),

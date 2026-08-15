@@ -35,6 +35,7 @@ import { OrderCreatedNotificationListener } from './listeners/order-created-noti
 import { OrderOfferNotificationListener } from './listeners/order-offer-notification.listener';
 import { OrderOfferResolutionListener } from './listeners/order-offer-resolution.listener';
 import { OrderReassignedNotificationListener } from './listeners/order-reassigned-notification.listener';
+import { OrderRescheduledNotificationListener } from './listeners/order-rescheduled-notification.listener';
 import { OrderStatusNotificationListener } from './listeners/order-status-notification.listener';
 import { PayoutCompletedRoutingListener } from './listeners/payout-completed-routing.listener';
 import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires-review-routing.listener';
@@ -86,6 +87,7 @@ import { NotificationsService } from './notifications.service';
     OrderAcceptedNotificationListener,
     OrderStatusNotificationListener,
     OrderReassignedNotificationListener,
+    OrderRescheduledNotificationListener,
     TechnicianVerificationNotificationListener,
     ComplaintFiledRoutingListener,
     EmergencyOrderRoutingListener,

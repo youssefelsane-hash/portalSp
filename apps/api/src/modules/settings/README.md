@@ -16,4 +16,6 @@
 - **`orders.auto_cancel_after_minutes` — كانت فجوة موثّقة ("مزروع بس مش مستخدم")، اتقفلت**: تفاصيل الميزة الكاملة (فحص دوري مستقل عن BullMQ، السبب، والاختبار الحي) في `../orders/README.md`.
 - **`orders.cancellation_free_window_min` — كانت فجوة موثّقة، اتقفلت**: منطق رسوم الإلغاء حسب نافذة زمنية (`cancellation_reasons` + `cancellation_fee_cents`) اتبنى بالكامل — تفاصيل كاملة والاختبار الحي في `../orders/README.md`.
 
+- **بيانات تواصل خدمة العملاء (docs/08 §22 بند 15-19) — كانت فجوة موثّقة صراحة، اتقفلت بصفر جدول جديد**: `migration 0106` بتزرع 5 إعدادات `support.*` (`enabled`, `phone_number`, `whatsapp_number`, `email`, `help_url`, كلهم `group_name='support'`, `is_public=true`) — التعديل عبر `PATCH /admin/settings/:key` الموجود بالفعل (`settings.manage` + MFA step-up + audit، صفر كود إضافي). `SupportContactController` (`@Public() GET /settings/support-contact`، نفس فلسفة `BrandingController`) بيعمل التحقق الأمني لـ deep link (whatsapp أرقام بس، `help_url` لازم `https://`) قبل ما يرجّعهم للتطبيقات — تفاصيل كاملة في `support-contact.controller.ts` و`support-contact.controller.spec.ts`.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §11.2 و `../../../../docs/01-master-plan.md` §2.4.
