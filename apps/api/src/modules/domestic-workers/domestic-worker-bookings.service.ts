@@ -11,6 +11,7 @@ import { SettingsService } from '../settings/settings.service';
 import { CancelWorkerBookingDto } from './dto/cancel-worker-booking.dto';
 import { CreateWorkerBookingDto } from './dto/create-worker-booking.dto';
 import { DomesticWorkerBooking, DomesticWorkerBookingStatus, DomesticWorkerBookingType } from './entities/domestic-worker-booking.entity';
+import { DomesticWorkerEarningApproval, DomesticWorkerEarningApprovalStatus } from './entities/domestic-worker-earning-approval.entity';
 import { DomesticWorkerProfile, DomesticWorkerVerificationStatus } from './entities/domestic-worker-profile.entity';
 import { DomesticWorkersService } from './domestic-workers.service';
 
@@ -33,6 +34,7 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
   constructor(
     @InjectRepository(DomesticWorkerBooking) private readonly bookings: Repository<DomesticWorkerBooking>,
     @InjectRepository(DomesticWorkerProfile) private readonly profiles: Repository<DomesticWorkerProfile>,
+    @InjectRepository(DomesticWorkerEarningApproval) private readonly earningApprovals: Repository<DomesticWorkerEarningApproval>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly customerProfiles: CustomerProfilesService,
     private readonly addressesService: AddressesService,
@@ -140,8 +142,11 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
 
   /**
    * الشغالة/المربية بتأكّد الحجز → تحصيل السعر فورًا من محفظة العميل لمحفظة المنصة (زي
-   * payWithWallet بالظبط)، وأرباحها بتتحوّل فورًا كمان (بالساعة: العمولة بتتحصّل مرة واحدة هنا
-   * لأن مفيش "اكتمال" منفصل ماليًا؛ شهري: أول شهر بيتحصّل هنا، الباقي عبر sweep()).
+   * payWithWallet بالظبط). **أرباح الشغالة نفسها متتحوّلش هنا خالص** (docs/08 §25.1، قرار مالك
+   * صريح 2026-08-15) — بالساعة بتدخل طابور الموافقة بعد `completeHourly()` (اكتمال الزيارة
+   * الفعلي)؛ شهري (مفيش إشارة "الشهر اتخدم" منفصلة عن التجديد في النظام الحالي) بتدخل الطابور هنا
+   * وفي كل تجديد (`tryRenew`) — بس برضه pending مش رصيد قابل للصرف فورًا، راجع
+   * DomesticWorkerEarningApprovalsService.approve() للمسار الوحيد اللي بيحرّك الفلوس فعليًا.
    */
   async confirm(userId: string, bookingId: string): Promise<DomesticWorkerBooking> {
     const { booking, worker } = await this.findOwnedByWorkerOrThrow(userId, bookingId);
@@ -150,7 +155,13 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     }
 
     const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(booking.customerId);
-    await this.chargeCustomerAndPayWorker(booking, customerProfile.userId, worker.userId);
+    if (booking.bookingType === DomesticWorkerBookingType.HOURLY) {
+      // بالساعة: تحصيل العميل بس هنا — أرباح الشغالة لسه معندهاش استحقاق قبل ما تخلّص الزيارة فعليًا.
+      await this.chargeCustomer(booking, customerProfile.userId);
+    } else {
+      // شهري: مفيش إشارة "الشهر اتخدم" منفصلة، فالاستحقاق بيتسجّل pending هنا (مش balanceCents مباشرة).
+      await this.chargeCustomerAndCreatePendingEarning(booking, customerProfile.userId, worker.userId);
+    }
 
     const now = new Date();
     booking.status = booking.bookingType === DomesticWorkerBookingType.HOURLY
@@ -163,22 +174,42 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     return this.bookings.save(booking);
   }
 
-  /**
-   * خصم من محفظة العميل + إيداع لمحفظة الشغالة (بعد خصم عمولة المنصة) — جوّه transaction واحدة.
-   *
-   * **كانت بَقّة حقيقية**: نداءين منفصلين لـ`doubleEntry()` من غير `manager` مشترك — لو الأول
-   * (خصم العميل) نجح والتاني (إيداع الشغالة) فشل (خطأ DB عابر مثلاً)، العميل بيتخصم منه فعليًا
-   * والشغالة ما بتاخدش فلوسها، من غير أي rollback. الإصلاح: الاتنين جوّه نفس `dataSource.transaction`
-   * زي `PaymentsService.settleAndComplete()` بالظبط — فشل أي طرف بيرجع الاتنين.
-   */
-  private async chargeCustomerAndPayWorker(booking: DomesticWorkerBooking, customerUserId: string, workerUserId: string): Promise<void> {
+  private async commissionSplit(priceCents: number): Promise<{ platformCommissionCents: number; workerEarningCents: number }> {
     const commissionPercentage = await this.commissionPercentage();
-    const platformCommissionCents = Math.round((booking.priceCents * commissionPercentage) / 100);
-    const workerEarningCents = booking.priceCents - platformCommissionCents;
+    const platformCommissionCents = Math.round((priceCents * commissionPercentage) / 100);
+    return { platformCommissionCents, workerEarningCents: priceCents - platformCommissionCents };
+  }
 
+  /** خصم من محفظة العميل لمحفظة المنصة بس — صفر تحويل لأي شغالة هنا. */
+  private async chargeCustomer(booking: DomesticWorkerBooking, customerUserId: string): Promise<void> {
     const customerWallet = await this.walletsService.getOrCreateWallet(customerUserId, WalletOwnerType.CUSTOMER);
     const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-    const workerWallet = await this.walletsService.getOrCreateWallet(workerUserId, WalletOwnerType.DOMESTIC_WORKER);
+
+    await this.dataSource.transaction((manager) =>
+      this.walletsService.doubleEntry(
+        {
+          fromWalletId: customerWallet.id,
+          toWalletId: platformWallet.id,
+          amountCents: booking.priceCents,
+          transactionType: WalletTxType.ADJUSTMENT,
+          referenceType: 'domestic_worker_booking',
+          referenceId: booking.id,
+          descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
+        },
+        manager,
+      ),
+    );
+  }
+
+  /**
+   * خصم العميل + تسجيل استحقاق الشغالة كـ"pending" جوّه transaction واحدة (نفس درس البَقّة
+   * القديمة — الاتنين لازم يفشلوا أو ينجحوا مع بعض، مش نداءين منفصلين). صفر تحويل مباشر لمحفظة
+   * الشغالة هنا — بس صف طابور موافقة، راجع docs/08 §25.1.
+   */
+  private async chargeCustomerAndCreatePendingEarning(booking: DomesticWorkerBooking, customerUserId: string, workerUserId: string): Promise<void> {
+    const { workerEarningCents } = await this.commissionSplit(booking.priceCents);
+    const customerWallet = await this.walletsService.getOrCreateWallet(customerUserId, WalletOwnerType.CUSTOMER);
+    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
 
     await this.dataSource.transaction(async (manager) => {
       await this.walletsService.doubleEntry(
@@ -195,26 +226,19 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       );
 
       if (workerEarningCents > 0) {
-        await this.walletsService.doubleEntry(
-          {
-            fromWalletId: platformWallet.id,
-            toWalletId: workerWallet.id,
+        await manager.getRepository(DomesticWorkerEarningApproval).save(
+          manager.getRepository(DomesticWorkerEarningApproval).create({
+            bookingId: booking.id,
+            workerUserId,
             amountCents: workerEarningCents,
-            transactionType: WalletTxType.ORDER_EARNING,
-            referenceType: 'domestic_worker_booking',
-            referenceId: booking.id,
-            descriptionAr: `أرباح حجز خدمة منزلية ${booking.bookingNumber}`,
-            // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود — نفس السبب بالحرف في
-            // payments.service.ts's settleAndComplete (تحويل أرباح الفني).
-            allowNegativeBalance: true,
-          },
-          manager,
+            status: DomesticWorkerEarningApprovalStatus.PENDING,
+          }),
         );
       }
     });
   }
 
-  /** الشغالة بتقفل حجز بالساعة بعد ما تخلّص الزيارة — مفيش تحصيل هنا (اتحصّل وقت التأكيد). */
+  /** الشغالة بتقفل حجز بالساعة بعد ما تخلّص الزيارة — هنا بس (اكتمال حقيقي) بيتسجّل استحقاقها كـ"pending". */
   async completeHourly(userId: string, bookingId: string): Promise<DomesticWorkerBooking> {
     const { booking, worker } = await this.findOwnedByWorkerOrThrow(userId, bookingId);
     if (booking.bookingType !== DomesticWorkerBookingType.HOURLY) {
@@ -223,12 +247,28 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     if (booking.status !== DomesticWorkerBookingStatus.CONFIRMED) {
       throw new ApiException(ErrorCode.VAL_001, 'الحجز لازم يكون مؤكّد الأول', HttpStatus.CONFLICT);
     }
-    booking.status = DomesticWorkerBookingStatus.COMPLETED;
-    booking.completedAt = new Date();
-    await this.bookings.save(booking);
 
-    worker.completedBookingsCount += 1;
-    await this.profiles.save(worker);
+    const { workerEarningCents } = await this.commissionSplit(booking.priceCents);
+
+    await this.dataSource.transaction(async (manager) => {
+      booking.status = DomesticWorkerBookingStatus.COMPLETED;
+      booking.completedAt = new Date();
+      await manager.save(booking);
+
+      worker.completedBookingsCount += 1;
+      await manager.save(worker);
+
+      if (workerEarningCents > 0) {
+        await manager.getRepository(DomesticWorkerEarningApproval).save(
+          manager.getRepository(DomesticWorkerEarningApproval).create({
+            bookingId: booking.id,
+            workerUserId: worker.userId,
+            amountCents: workerEarningCents,
+            status: DomesticWorkerEarningApprovalStatus.PENDING,
+          }),
+        );
+      }
+    });
 
     return booking;
   }
@@ -292,7 +332,7 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(booking.customerId);
 
     try {
-      await this.chargeCustomerAndPayWorker(booking, customerProfile.userId, worker.userId);
+      await this.chargeCustomerAndCreatePendingEarning(booking, customerProfile.userId, worker.userId);
       booking.currentPeriodEndAt = addMonths(booking.currentPeriodEndAt ?? new Date(), 1);
       await this.bookings.save(booking);
       return true;
