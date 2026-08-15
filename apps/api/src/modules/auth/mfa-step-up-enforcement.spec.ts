@@ -39,6 +39,8 @@ describe('كل endpoint بصلاحية من MFA_REQUIRED_PERMISSIONS لازم ي
     [AdminPaymentsController.prototype, 'completePayout', 'payouts.approve', true],
     [AdminPaymentsController.prototype, 'confirmInstaPayPayment', 'payments.confirm_manual', true],
     [AdminOrdersController.prototype, 'adjustPrice', 'orders.adjust_price', true],
+    [AdminOrdersController.prototype, 'resolveFailedVisit', 'orders.resolve_failed_visit', true],
+    [AdminOrdersController.prototype, 'resolveCashDispute', 'orders.resolve_cash_dispute', true],
     [AdminWalletController.prototype, 'adjustWallet', 'wallets.adjust', true],
     [AdminSettingsController.prototype, 'update', 'settings.manage', true],
     [AdminRolesController.prototype, 'createRole', 'roles.manage', true],
