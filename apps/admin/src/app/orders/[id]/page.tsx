@@ -467,12 +467,22 @@ export default function OrderDetailPage() {
                   {financialSummary.payments.length > 0 && (
                     <ul className="flex flex-col gap-1">
                       {financialSummary.payments.map((p) => (
-                        <li key={p.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
-                          <span>
-                            {PAYMENT_METHOD_LABELS_FULL[p.payment_method]} ·{' '}
-                            {PAYMENT_GATEWAY_STATUS_LABELS[p.payment_status]}
-                          </span>
-                          <span>{formatEgp(p.amount_cents)}</span>
+                        <li key={p.id} className="flex flex-col gap-0.5 border-b pb-1 text-xs last:border-0">
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {PAYMENT_METHOD_LABELS_FULL[p.payment_method]} ·{' '}
+                              {PAYMENT_GATEWAY_STATUS_LABELS[p.payment_status]}
+                              {p.order_item_batch_id && (
+                                <span className="ms-1 rounded bg-muted px-1 py-0.5 text-muted-foreground">
+                                  دفعة شغل إضافي معتمد
+                                </span>
+                              )}
+                            </span>
+                            <span>{formatEgp(p.amount_cents)}</span>
+                          </div>
+                          {p.payment_status === 'failed' && p.failure_message && (
+                            <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
+                          )}
                         </li>
                       ))}
                     </ul>

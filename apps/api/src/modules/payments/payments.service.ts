@@ -1157,7 +1157,10 @@ export class PaymentsService {
     platformCommissionCents: number;
     technicianEarningCents: number;
     cancellationFeeCents: number;
-    payments: Pick<Payment, 'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt'>[];
+    payments: Pick<
+      Payment,
+      'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt' | 'orderItemBatchId' | 'failureCode' | 'failureMessage'
+    >[];
     refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
   }> {
     const order = await this.orders.findOne({ where: { id: orderId } });

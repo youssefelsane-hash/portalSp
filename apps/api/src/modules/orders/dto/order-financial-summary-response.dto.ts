@@ -9,6 +9,10 @@ export interface OrderPaymentSummaryDto {
   payment_status: PaymentGatewayStatus;
   amount_cents: number;
   completed_at: string | null;
+  /** غير null = محاولة تحصيل شغل إضافي معتمد (docs/08 §21)، مش دفعة الطلب الأصلية. */
+  order_item_batch_id: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
 }
 
 export interface OrderRefundSummaryDto {
@@ -32,7 +36,10 @@ export function toOrderFinancialSummaryResponseDto(summary: {
   platformCommissionCents: number;
   technicianEarningCents: number;
   cancellationFeeCents: number;
-  payments: Pick<Payment, 'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt'>[];
+  payments: Pick<
+    Payment,
+    'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt' | 'orderItemBatchId' | 'failureCode' | 'failureMessage'
+  >[];
   refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
 }): OrderFinancialSummaryResponseDto {
   return {
@@ -45,6 +52,9 @@ export function toOrderFinancialSummaryResponseDto(summary: {
       payment_status: p.paymentStatus,
       amount_cents: p.amountCents,
       completed_at: p.completedAt ? p.completedAt.toISOString() : null,
+      order_item_batch_id: p.orderItemBatchId,
+      failure_code: p.failureCode,
+      failure_message: p.failureMessage,
     })),
     refunds: summary.refunds.map((r) => ({
       id: r.id,

@@ -103,7 +103,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           _order = order;
           _quoteItems = [];
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت الموافقة — الفني هيكمل الشغل')));
+        // طلب مدفوع مسبقًا إلكترونيًا (docs/08 §21) — الباك-إند بيحاول تحصيل الزيادة فورًا، بس
+        // النتيجة النهائية بتتأكد لاحقًا (webhook)؛ رسالة بسيطة بس، صفر تفاصيل بوابة/دفع للعميل.
+        final message = order.paymentStatus == 'paid'
+            ? 'تمت الموافقة على الزيادة — جاري تحصيل المبلغ'
+            : 'تمت الموافقة — الفني هيكمل الشغل';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));

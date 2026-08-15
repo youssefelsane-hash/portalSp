@@ -60,6 +60,10 @@ export interface OrderPaymentSummaryDto {
   payment_status: PaymentGatewayStatus;
   amount_cents: number;
   completed_at: string | null;
+  // غير null = محاولة تحصيل شغل إضافي معتمد (docs/08 §21)، مش دفعة الطلب الأصلية.
+  order_item_batch_id: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
 }
 
 export interface OrderRefundSummaryDto {
