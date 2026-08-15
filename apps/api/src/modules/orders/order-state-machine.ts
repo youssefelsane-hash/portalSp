@@ -52,6 +52,10 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
     OrderStatus.CANCELLED_BY_TECHNICIAN,
     OrderStatus.SEARCHING_TECHNICIAN,
     OrderStatus.AWAITING_TECHNICIAN_RESELECTION,
+    // زيارة فاشلة — الفني وصل والعميل مش موجود/رافض يفتح (docs/08 §22 بند 3). مختلف عن
+    // CANCELLED_BY_TECHNICIAN (قرار نهائي من الفني بلا مراجعة) — ده بيوديه لمراجعة أدمن حقيقية
+    // (OrdersService.reportFailedVisit → resolveFailedVisit) قبل أي قرار نهائي على الطلب/الفلوس.
+    OrderStatus.DISPUTED,
   ],
   [OrderStatus.IN_PROGRESS]: [
     OrderStatus.AWAITING_QUOTE_APPROVAL,
@@ -62,7 +66,18 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.WORK_COMPLETED]: [OrderStatus.AWAITING_PAYMENT, OrderStatus.COMPLETED],
   [OrderStatus.AWAITING_PAYMENT]: [OrderStatus.COMPLETED, OrderStatus.DISPUTED],
   [OrderStatus.COMPLETED]: [OrderStatus.DISPUTED, OrderStatus.REFUNDED],
-  [OrderStatus.DISPUTED]: [OrderStatus.COMPLETED, OrderStatus.REFUNDED],
+  // docs/08 §22 بند 4-5 — حل الزيارة الفاشلة (OrdersService.resolveFailedVisit): "العميل عايز
+  // يكمل" → ACCEPTED (نفس الطلب، نفس السعر، الفني يعيد المحاولة من غير أي تحصيل تاني). "العميل
+  // عايز يلغي وطلبه كاش (صفر فلوس اتحصّلت أصلاً)" → CANCELLED_BY_CUSTOMER مباشرة بلا استرداد
+  // (المنصة بتمتص تكلفة الفني، مفيش فلوس عميل نتخيلها). لو الطلب مدفوع مسبقًا، refundOrder()
+  // الموجودة بالفعل بتنقل الطلب لـREFUNDED تلقائيًا لو الاسترداد كامل (بدون رسوم زيارة) — الانتقال
+  // ده مُدرج أصلاً تحت مباشرة.
+  [OrderStatus.DISPUTED]: [
+    OrderStatus.COMPLETED,
+    OrderStatus.REFUNDED,
+    OrderStatus.ACCEPTED,
+    OrderStatus.CANCELLED_BY_CUSTOMER,
+  ],
   [OrderStatus.CANCELLED_BY_CUSTOMER]: [],
   [OrderStatus.CANCELLED_BY_TECHNICIAN]: [],
   [OrderStatus.CANCELLED_BY_SYSTEM]: [],

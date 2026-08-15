@@ -85,6 +85,9 @@ export default function OrderDetailPage() {
   const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
   const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
+  const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
+  const [visitFeeEgp, setVisitFeeEgp] = useState('');
+  const [failedVisitNotes, setFailedVisitNotes] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -195,6 +198,54 @@ export default function OrderDetailPage() {
       setShowAdjustPriceForm(false);
       setNewTotalEgp('');
       setAdjustPriceReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — الطلب disputed بعد بلاغ الفني (report-failed-visit)،
+  // الأدمن بيحل بعد المراجعة: reschedule (يرجع نشط بنفس السعر) أو cancel_with_fee (رسوم + استرداد
+  // الباقي لو مدفوع مسبقًا). نفس مستوى حساسية refund/adjust-price (step-up MFA).
+  async function handleResolveFailedVisitReschedule() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-failed-visit`, {
+        method: 'POST',
+        body: JSON.stringify({ outcome: 'reschedule', admin_notes: 'الأدمن قرر إعادة جدولة الزيارة بعد المراجعة' }),
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleResolveFailedVisitCancelWithFee(e: FormEvent) {
+    e.preventDefault();
+    if (failedVisitNotes.trim().length < 5) {
+      window.alert('ملاحظات الأدمن لازم تكون 5 حروف على الأقل');
+      return;
+    }
+    const feeCents = visitFeeEgp.trim() === '' ? undefined : Math.round(Number(visitFeeEgp) * 100);
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/resolve-failed-visit`, {
+        method: 'POST',
+        body: JSON.stringify({
+          outcome: 'cancel_with_fee',
+          ...(feeCents !== undefined ? { visit_fee_cents: feeCents } : {}),
+          admin_notes: failedVisitNotes,
+        }),
+      });
+      setShowCancelWithFeeForm(false);
+      setVisitFeeEgp('');
+      setFailedVisitNotes('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -393,6 +444,63 @@ export default function OrderDetailPage() {
                 />
               </CardFooter>
             )}
+          {order.order_status === 'disputed' && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <p className="text-sm text-muted-foreground">
+                الطلب ده بلاغ زيارة فاشلة (عدم حضور/رفض شغل ضروري) — راجع الشكوى المرتبطة في صفحة الدعم
+                قبل ما تقرر.
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" disabled={isSaving} onClick={handleResolveFailedVisitReschedule}>
+                  العميل هيكمل — إعادة جدولة
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isSaving}
+                  onClick={() => setShowCancelWithFeeForm((s) => !s)}
+                >
+                  العميل عايز يلغي
+                </Button>
+              </div>
+              {showCancelWithFeeForm && (
+                <form onSubmit={handleResolveFailedVisitCancelWithFee} className="flex flex-col gap-2">
+                  <div>
+                    <Label htmlFor="visit_fee_egp">رسوم الزيارة (جنيه) — اختياري، افتراضي من الإعدادات</Label>
+                    <Input
+                      id="visit_fee_egp"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      dir="ltr"
+                      value={visitFeeEgp}
+                      onChange={(e) => setVisitFeeEgp(e.target.value)}
+                      placeholder="مثال: 50"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="failed_visit_notes">ملاحظات المراجعة</Label>
+                    <Input
+                      id="failed_visit_notes"
+                      value={failedVisitNotes}
+                      onChange={(e) => setFailedVisitNotes(e.target.value)}
+                      minLength={5}
+                      required
+                    />
+                  </div>
+                  {order.payment_status !== 'paid' && (
+                    <p className="text-xs text-muted-foreground">
+                      طلب كاش — صفر رسوم دايمًا (المنصة بتمتص تكلفة الفني)، الرسوم فوق هتتجاهل.
+                    </p>
+                  )}
+                  <Button type="submit" size="sm" variant="destructive" disabled={isSaving} className="w-fit">
+                    تأكيد الإلغاء
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
           {order.payment_status !== 'paid' && (
             <CardFooter className="flex-col items-stretch gap-3">
               <Button

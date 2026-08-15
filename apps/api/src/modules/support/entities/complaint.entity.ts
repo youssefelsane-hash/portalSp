@@ -10,6 +10,9 @@ export enum ComplaintCategory {
   INCOMPLETE_WORK = 'incomplete_work',
   SAFETY_CONCERN = 'safety_concern',
   FRAUD = 'fraud',
+  // العميل رفض شغل الفني وصفه كضروري لإتمام الطلب صح (docs/08 §22 بند 6) — مختلف عن NO_SHOW
+  // (العميل مش موجود خالص). migration 0107 (ALTER TYPE complaint_category ADD VALUE).
+  REQUIRED_WORK_REJECTED = 'required_work_rejected',
   OTHER = 'other',
 }
 

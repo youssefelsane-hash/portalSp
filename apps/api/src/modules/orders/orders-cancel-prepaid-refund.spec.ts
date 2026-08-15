@@ -184,6 +184,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       {} as never, // walletsService
       {} as never, // settingsService
       paymentsService,
+      {} as never, // supportService
       { emit: () => undefined } as never, // events
     );
   });

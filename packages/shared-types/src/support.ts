@@ -9,6 +9,7 @@ export type ComplaintCategory =
   | 'incomplete_work'
   | 'safety_concern'
   | 'fraud'
+  | 'required_work_rejected'
   | 'other';
 
 export type ComplaintSeverity = 'low' | 'medium' | 'high' | 'critical';

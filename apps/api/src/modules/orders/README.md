@@ -467,6 +467,49 @@ Flutter تمامًا). `OrderMedia` repo اتحقنت في `OrdersService` (`ord
 صورة). `tsc --noEmit`/`nest build`/41 suite (213 اختبار) عدّوا نضيف. `flutter analyze` نضيف (صفر
 تحذير جديد). صفر migration (`order_media` موجودة من زمان، الفحص منطقي بس).
 
+## زيارة فاشلة/عدم حضور (docs/08 §22 بند 3-6، 2026-08-15)
+
+كانت فجوة موثّقة صراحة تمامًا: صفر آلية للفني يبلّغ إن الزيارة فشلت (العميل مش موجود، أو رفض شغل
+ضروري لإتمام الطلب صح) — الخيارات المتاحة كانت بس `complete()` (كذب — الشغل ما اكتملش) أو
+`technicianCancel()` (إلغاء نهائي بلا مراجعة). إعادة استخدام كاملة للبنية الموجودة — `DISPUTED`
+(حالة موجودة أصلاً في state machine) + `Complaint` (`support` module، فئة `NO_SHOW` موجودة، فئة
+جديدة `REQUIRED_WORK_REJECTED` اتضافت) + `PaymentsService.refundOrder()` الموجودة (استرداد جزئي/كامل)
+— **صفر جدول جديد**.
+
+**التدفق**: `OrdersService.reportFailedVisit(user, orderId, dto)` — الفني بيبلّغ من `TECHNICIAN_ARRIVED`
+(no-show كلاسيكي) أو `IN_PROGRESS` (شغل ضروري اترفض)، الطلب يتحول `DISPUTED` (انتقالين جدد في
+`order-state-machine.ts`: `TECHNICIAN_ARRIVED → DISPUTED`، `IN_PROGRESS → DISPUTED` كانت موجودة
+أصلاً) وشكوى بتتسجّل تلقائيًا (`SupportService.fileComplaint()`، `filedByUserId`=الفني،
+`againstUserId`=العميل تلقائيًا — نفس منطق `fileComplaint()` الموجود). فشل تسجيل الشكوى بيتلقّط
+ويتسجّل بس **مايرجّعش** الطلب لحالته القديمة (الطلب فعلاً محتاج يتوقف الآن، نفس فلسفة
+`attemptAdditionalWorkCharge`).
+
+`OrdersService.resolveFailedVisit(adminUserId, orderId, dto)` — الأدمن بيحل بعد مراجعة حقيقية (مش
+تصديق طرف واحد أعمى)، صلاحية مخصوصة `orders.resolve_failed_visit` (+ step-up MFA، نفس مستوى
+`orders.adjust_price`، migration 0107):
+- **`reschedule`**: `DISPUTED → ACCEPTED` (انتقال جديد) — نفس الطلب، نفس السعر، صفر تحصيل تاني.
+  تحديد موعد جديد تحديدًا (slot-based) هيتغطى في §22 بند 9-12 (مش مبني لسه) — دلوقتي الطلب بس
+  يرجع نشط يقدر الفني يعيد المحاولة منه.
+- **`cancel_with_fee`**: طلب كاش (مفيش فلوس اتحصّلت أصلاً) → `DISPUTED → CANCELLED_BY_CUSTOMER`
+  (انتقال جديد) **صفر رسوم دايمًا** — تعليمة صريحة، المنصة بتمتص تكلفة الفني للـMVP، صفر معاملة
+  دفع وهمية. طلب مدفوع مسبقًا → رسوم زيارة (افتراضي `orders.no_show_visit_fee_cents`, migration
+  0107, قابل للتعديل من الأدمن) بتتخصم من الاسترداد (مش تحصيل إضافي منفصل) عبر `refundOrder()`
+  الموجودة بالفعل (بتدعم استرداد جزئي، وبتنقل الطلب `REFUNDED` تلقائيًا لو الاسترداد كامل). استرداد
+  جزئي (فيه رسوم) بيسيب الطلب `DISPUTED` — `resolveFailedVisit()` بتقفله يدويًا لـ`CANCELLED_BY_CUSTOMER`
+  بعدها.
+
+**`apps/technician-app`**: زرار "زيارة فاشلة" (برتقالي، تحذيري) في `order_execution_screen.dart`
+يظهر بس في `technician_arrived`/`in_progress` — dialog بسبب مقفول (3 خيارات) + توضيح نصي إجباري.
+**`apps/admin`**: قسم "الطلب ده بلاغ زيارة فاشلة" في `orders/[id]/page.tsx` (يظهر بس لو
+`order_status=disputed`) — زرار "إعادة جدولة" فوري، أو فورم "العميل عايز يلغي" (رسوم اختيارية +
+ملاحظات مراجعة إجبارية).
+
+**الاختبار**: `failed-visit-resolution.spec.ts` (7 اختبار حي) — no-show → reschedule بنفس السعر؛
+required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبليغ قبل الوصول (`ACCEPTED`)؛ كاش cancel_with_fee
+صفر رسوم/صفر معاملة دفع؛ مدفوع مسبقًا استرداد جزئي (رسوم مخصومة، الطلب يتلغي بعد الاسترداد)؛
+مدفوع مسبقًا برسوم صفر (استرداد كامل، `REFUNDED` تلقائيًا)؛ رفض حل طلب مش `DISPUTED`. 46 suite (254
+اختبار) عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.
+
 ## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `adjustPrice` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
 
 `orders.adjust_price` مُدرجة في `MFA_REQUIRED_PERMISSIONS` (`../auth/mfa-policy.service.ts`) بس

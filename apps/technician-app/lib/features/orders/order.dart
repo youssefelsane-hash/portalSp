@@ -67,6 +67,7 @@ const Map<String, String> technicianOrderStatusLabelsAr = {
   'work_completed': 'الشغل خلص — محتاج تحصيل',
   'awaiting_payment': 'في انتظار الدفع',
   'completed': 'اتقفل',
+  'disputed': 'متوقف — بانتظار مراجعة الإدارة',
 };
 
 // الفعل الجاي المتاح لكل حالة — null يعني مفيش فعل تنفيذي جاي (لازم تحصيل كاش أو دفع العميل،

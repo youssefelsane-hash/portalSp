@@ -137,6 +137,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
       {} as never, // walletsService
       {} as never, // settingsService
       {} as never, // paymentsService
+      {} as never, // supportService
       { emit: () => undefined } as never, // events
     );
   });

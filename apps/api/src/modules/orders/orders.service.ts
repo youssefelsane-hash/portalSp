@@ -1,9 +1,10 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
+import { JwtPayload } from '../auth/types/authenticated-request';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_REMATCH_REQUESTED_EVENT, OrderRematchRequestedEvent } from '../../common/events/order-rematch-requested.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
@@ -15,9 +16,12 @@ import { CatalogService } from '../catalog/catalog.service';
 import { GeoService } from '../geo/geo.service';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
+import { PaymentGatewayStatus } from '../payments/entities/payment.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
+import { ComplaintCategory } from '../support/entities/complaint.entity';
+import { SupportService } from '../support/support.service';
 import { TechnicianTeamRole } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
@@ -32,6 +36,8 @@ import { RequestRematchDto } from './dto/request-rematch.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
+import { FailedVisitReason, ReportFailedVisitDto } from './dto/report-failed-visit.dto';
+import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
@@ -55,8 +61,20 @@ const TEAM_SELF_CANCEL_ALLOWED_ROLES = new Set<TechnicianTeamRole>([
   TechnicianTeamRole.MANAGER,
 ]);
 
+const FAILED_VISIT_REASON_TO_COMPLAINT_CATEGORY: Record<FailedVisitReason, ComplaintCategory> = {
+  [FailedVisitReason.CUSTOMER_NO_SHOW]: ComplaintCategory.NO_SHOW,
+  [FailedVisitReason.REQUIRED_WORK_REJECTED]: ComplaintCategory.REQUIRED_WORK_REJECTED,
+  [FailedVisitReason.OTHER]: ComplaintCategory.OTHER,
+};
+
+// الحالات اللي الفني يقدر يبلّغ منها عن زيارة فاشلة (docs/08 §22 بند 3) — وصل ولسه ما بدأش الشغل
+// (no-show كلاسيكي)، أو بدأ فعلاً وعرض شغل ضروري اترفض (required_work_rejected).
+const FAILED_VISIT_REPORTABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHNICIAN_ARRIVED, OrderStatus.IN_PROGRESS]);
+
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(TechnicianOrderCancellation)
@@ -78,6 +96,7 @@ export class OrdersService {
     private readonly walletsService: WalletsService,
     private readonly settingsService: SettingsService,
     private readonly paymentsService: PaymentsService,
+    private readonly supportService: SupportService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -1125,5 +1144,264 @@ export class OrdersService {
     return this.transitionAsTechnician(userId, orderId, OrderStatus.WORK_COMPLETED, (order, now) => {
       order.workCompletedAt = now;
     });
+  }
+
+  // ── زيارة فاشلة/عدم حضور (docs/08 §22 بند 3-6) ──────────────────────────
+
+  /**
+   * الفني بيبلّغ إن الزيارة فشلت — العميل مش موجود خالص، أو رفض شغل ضروري لإتمام الطلب صح.
+   * "الفني بيوقف، مفيش شغل غير مصرّح، مفيش completed كاذبة" — الطلب بيتحول DISPUTED (نفس حالة
+   * النزاع الموجودة بالفعل) وبيوديه لمراجعة أدمن حقيقية عبر resolveFailedVisit تحت، مش قرار نهائي
+   * فوري بيصدّق طرف واحد أعمى.
+   */
+  async reportFailedVisit(user: JwtPayload, orderId: string, dto: ReportFailedVisitDto): Promise<Order> {
+    const order = await this.findOwnedByTechnicianOrThrow(user.sub, orderId);
+
+    if (!FAILED_VISIT_REPORTABLE_STATUSES.has(order.orderStatus) || !canTransition(order.orderStatus, OrderStatus.DISPUTED)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تبلّغ عن زيارة فاشلة والطلب في حالة ${order.orderStatus}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const previousStatus = order.orderStatus;
+    await this.dataSource.transaction(async (manager) => {
+      order.orderStatus = OrderStatus.DISPUTED;
+      await manager.save(order);
+
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus,
+          newStatus: OrderStatus.DISPUTED,
+          changedByUserId: user.sub,
+          changedByRole: 'technician',
+          changeSource: OrderChangeSource.TECHNICIAN,
+          reason: dto.description,
+        }),
+      );
+    });
+
+    this.events.emit(
+      ORDER_STATUS_CHANGED_EVENT,
+      new OrderStatusChangedEvent(
+        order.id,
+        order.orderNumber,
+        previousStatus,
+        OrderStatus.DISPUTED,
+        order.customerId,
+        order.technicianId,
+        dto.description,
+      ),
+    );
+
+    // انتقال الحالة عملية منجزة بالفعل (الطلب فعلاً محتاج يتوقف الآن) — فشل تسجيل الشكوى بيتلقّط
+    // ويتسجّل بس مايرجّعش الطلب لحالته القديمة، نفس فلسفة attemptAdditionalWorkCharge (docs/08 §21).
+    try {
+      await this.supportService.fileComplaint(user, {
+        order_id: order.id,
+        category: FAILED_VISIT_REASON_TO_COMPLAINT_CATEGORY[dto.reason],
+        title: `زيارة فاشلة — طلب ${order.orderNumber}`,
+        description: dto.description,
+      });
+    } catch (err) {
+      this.logger.error(
+        `فشل تسجيل شكوى الزيارة الفاشلة للطلب ${order.id} — الطلب فعلاً DISPUTED، محتاج مراجعة يدوية`,
+        err instanceof Error ? err.stack : err,
+      );
+    }
+
+    return order;
+  }
+
+  /**
+   * الأدمن بيحل الزيارة الفاشلة بعد المراجعة (مش تلقائي، مش تصديق طرف واحد أعمى — docs/08 §22 بند 4-5).
+   * reschedule: نفس الطلب يرجع نشط (ACCEPTED) بنفس السعر، صفر تحصيل تاني — الفني يعيد المحاولة.
+   * cancel_with_fee: رسوم زيارة اختيارية (افتراضي orders.no_show_visit_fee_cents) + استرداد الباقي
+   * لو الطلب مدفوع مسبقًا فقط. الطلبات الكاش (المنصة ماسكتش فلوس أصلاً) صفر رسوم دايمًا — المنصة
+   * بتمتص تكلفة الفني للـMVP، مفيش فلوس عميل بنتخيلها ولا معاملة دفع وهمية.
+   */
+  async resolveFailedVisit(
+    adminUserId: string,
+    orderId: string,
+    dto: ResolveFailedVisitDto,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (order.orderStatus !== OrderStatus.DISPUTED) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الطلب لازم يكون متنازع عليه عشان يتحل كزيارة فاشلة', HttpStatus.CONFLICT);
+    }
+
+    if (dto.outcome === FailedVisitOutcome.RESCHEDULE) {
+      if (!canTransition(order.orderStatus, OrderStatus.ACCEPTED)) {
+        throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
+      }
+      const previousStatus = order.orderStatus;
+      await this.dataSource.transaction(async (manager) => {
+        order.orderStatus = OrderStatus.ACCEPTED;
+        await manager.save(order);
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: order.id,
+            previousStatus,
+            newStatus: OrderStatus.ACCEPTED,
+            changedByUserId: adminUserId,
+            changedByRole: 'admin',
+            changeSource: OrderChangeSource.ADMIN,
+            reason: dto.admin_notes,
+          }),
+        );
+      });
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'order.failed_visit_resolved',
+        entityType: 'order',
+        entityId: order.id,
+        newValues: { outcome: 'reschedule', order_status: OrderStatus.ACCEPTED },
+        meta,
+      });
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          order.id,
+          order.orderNumber,
+          previousStatus,
+          OrderStatus.ACCEPTED,
+          order.customerId,
+          order.technicianId,
+          dto.admin_notes,
+        ),
+      );
+      return order;
+    }
+
+    // cancel_with_fee — الطلبات الكاش (مفيش فلوس اتحصّلت أصلاً) صفر رسوم دايمًا، بغض النظر عن
+    // visit_fee_cents اللي الأدمن بعتها — تعليمة صريحة، مش نسيان.
+    if (order.paymentStatus !== OrderPaymentStatus.PAID) {
+      if (!canTransition(order.orderStatus, OrderStatus.CANCELLED_BY_CUSTOMER)) {
+        throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
+      }
+      const previousStatus = order.orderStatus;
+      await this.dataSource.transaction(async (manager) => {
+        order.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
+        order.cancelledAt = new Date();
+        order.cancelledByUserId = adminUserId;
+        await manager.save(order);
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: order.id,
+            previousStatus,
+            newStatus: OrderStatus.CANCELLED_BY_CUSTOMER,
+            changedByUserId: adminUserId,
+            changedByRole: 'admin',
+            changeSource: OrderChangeSource.ADMIN,
+            reason: `${dto.admin_notes} — طلب كاش، صفر رسوم (المنصة بتمتص تكلفة الفني)`,
+          }),
+        );
+      });
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'order.failed_visit_resolved',
+        entityType: 'order',
+        entityId: order.id,
+        newValues: { outcome: 'cancel_with_fee', payment_method: 'cash', fee_cents: 0, order_status: OrderStatus.CANCELLED_BY_CUSTOMER },
+        meta,
+      });
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          order.id,
+          order.orderNumber,
+          previousStatus,
+          OrderStatus.CANCELLED_BY_CUSTOMER,
+          order.customerId,
+          order.technicianId,
+          dto.admin_notes,
+        ),
+      );
+      return order;
+    }
+
+    // مدفوع مسبقًا — رسوم الزيارة بتتخصم من الاسترداد (مش تحصيل إضافي منفصل)، والباقي يترد
+    // عبر PaymentsService.refundOrder() الموجودة بالفعل (تدعم استرداد جزئي، وبتنقل الطلب لـREFUNDED
+    // تلقائيًا لو الاسترداد كامل — تفاصيل كاملة في تعليق order-state-machine.ts).
+    const feeCents = dto.visit_fee_cents ?? (await this.settingsService.getNumber('orders.no_show_visit_fee_cents', 5000));
+    const summary = await this.paymentsService.getFinancialSummaryForOrder(orderId);
+    const succeededPayments = summary.payments.filter((p) => p.paymentStatus === PaymentGatewayStatus.SUCCEEDED);
+    const latestPayment = succeededPayments[succeededPayments.length - 1];
+    if (!latestPayment) {
+      throw new ApiException(ErrorCode.VAL_001, 'مفيش عملية دفع ناجحة لقى الطلب ده', HttpStatus.CONFLICT);
+    }
+    const clampedFeeCents = Math.min(feeCents, latestPayment.amountCents);
+    const refundAmountCents = latestPayment.amountCents - clampedFeeCents;
+
+    if (refundAmountCents > 0) {
+      await this.paymentsService.refundOrder(
+        adminUserId,
+        orderId,
+        `${dto.admin_notes} — رسوم زيارة فاشلة ${clampedFeeCents} قرش مخصومة`,
+        refundAmountCents,
+        meta,
+      );
+    }
+
+    // استرداد كامل (فوق) بيحوّل الطلب REFUNDED تلقائيًا جوّه refundOrder() نفسها. استرداد جزئي
+    // (فيه رسوم) أو صفر استرداد (الرسوم غطّت كل المبلغ) بيسيبوا الطلب DISPUTED — لازم نقفله يدويًا هنا.
+    const reloaded = await this.orders.findOne({ where: { id: orderId } });
+    if (reloaded && reloaded.orderStatus === OrderStatus.DISPUTED) {
+      const previousStatus = reloaded.orderStatus;
+      await this.dataSource.transaction(async (manager) => {
+        reloaded.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
+        reloaded.cancelledAt = new Date();
+        reloaded.cancelledByUserId = adminUserId;
+        await manager.save(reloaded);
+        await manager.save(
+          manager.create(OrderStatusHistory, {
+            orderId: reloaded.id,
+            previousStatus,
+            newStatus: OrderStatus.CANCELLED_BY_CUSTOMER,
+            changedByUserId: adminUserId,
+            changedByRole: 'admin',
+            changeSource: OrderChangeSource.ADMIN,
+            reason: dto.admin_notes,
+          }),
+        );
+      });
+      this.events.emit(
+        ORDER_STATUS_CHANGED_EVENT,
+        new OrderStatusChangedEvent(
+          reloaded.id,
+          reloaded.orderNumber,
+          previousStatus,
+          OrderStatus.CANCELLED_BY_CUSTOMER,
+          reloaded.customerId,
+          reloaded.technicianId,
+          dto.admin_notes,
+        ),
+      );
+    }
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.failed_visit_resolved',
+      entityType: 'order',
+      entityId: order.id,
+      newValues: {
+        outcome: 'cancel_with_fee',
+        payment_method: 'prepaid',
+        fee_cents: clampedFeeCents,
+        refund_amount_cents: refundAmountCents,
+      },
+      meta,
+    });
+
+    return (await this.orders.findOne({ where: { id: orderId } }))!;
   }
 }

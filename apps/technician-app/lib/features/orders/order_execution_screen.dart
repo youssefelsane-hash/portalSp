@@ -285,6 +285,34 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  // زيارة فاشلة/عدم حضور (docs/08 §22 بند 3+6) — بديل صريح لـ"اتفاق" الفني قدام الطلب: بدل ما
+  // يكمّل شغل مش مصرّح أو يقفل الطلب "مكتمل" كاذبة، بيوقف ويوديه لمراجعة أدمن حقيقية.
+  Future<void> _reportFailedVisit() async {
+    final result = await showDialog<_FailedVisitResult>(
+      context: context,
+      builder: (context) => const _ReportFailedVisitDialog(),
+    );
+    if (result == null) return;
+
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      _order = await _repository.reportFailedVisit(_order.id, reason: result.reason, description: result.description);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اتبعت البلاغ — الإدارة هتراجع وترجعلك')),
+        );
+        setState(() {});
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _runAction(String action) async {
     setState(() {
       _acting = true;
@@ -443,6 +471,17 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               Text(
                 _cancellationPolicy!.reasonIfNot!,
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            ],
+            // زيارة فاشلة (docs/08 §22 بند 3+6) — العميل مش موجود، أو رفض شغل ضروري لإتمام الطلب
+            // صح. متاح بس وقت الوجود الفعلي على العنوان أو أثناء الشغل، مش في أي حالة تانية.
+            if (_order.orderStatus == 'technician_arrived' || _order.orderStatus == 'in_progress') ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _acting ? null : _reportFailedVisit,
+                icon: const Icon(Icons.report_problem_outlined, color: Colors.orange),
+                label: const Text('زيارة فاشلة (العميل مش موجود / رفض شغل ضروري)', style: TextStyle(color: Colors.orange)),
+                style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.orange)),
               ),
             ],
             // إثبات إنجاز الشغل (docs/08 §20 بند 12، قرار مالك صريح) — الباك-إند بيرفض إنهاء
@@ -812,6 +851,101 @@ class _CancelOrderDialogState extends State<_CancelOrderDialog> {
         const SizedBox(height: 12),
         const Text('متأكد إنك عايز تلغي الطلب ده؟ الخطوة دي مش هترجع.'),
       ],
+    );
+  }
+}
+
+class _FailedVisitResult {
+  final String reason;
+  final String description;
+
+  _FailedVisitResult({required this.reason, required this.description});
+}
+
+// أسباب مقفولة (مطابقة لـFailedVisitReason في report-failed-visit.dto.ts) — مش نص حر بالكامل،
+// عشان الأدمن يقدر يفلتر ويقيس (docs/08 §22 بند 3).
+const Map<String, String> _failedVisitReasonLabelsAr = {
+  'customer_no_show': 'العميل مش موجود / مش بيرد',
+  'required_work_rejected': 'العميل رفض شغل ضروري لإتمام الطلب صح',
+  'other': 'سبب تاني',
+};
+
+class _ReportFailedVisitDialog extends StatefulWidget {
+  const _ReportFailedVisitDialog();
+
+  @override
+  State<_ReportFailedVisitDialog> createState() => _ReportFailedVisitDialogState();
+}
+
+class _ReportFailedVisitDialogState extends State<_ReportFailedVisitDialog> {
+  String _reason = 'customer_no_show';
+  final _descriptionController = TextEditingController();
+  String? _validationError;
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_descriptionController.text.trim().length < 10) {
+      setState(() => _validationError = 'اكتب توضيح مختصر (10 حروف على الأقل) عشان الإدارة تفهم الموقف');
+      return;
+    }
+    Navigator.of(context).pop(_FailedVisitResult(reason: _reason, description: _descriptionController.text.trim()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('زيارة فاشلة'),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('السبب:'),
+                for (final entry in _failedVisitReasonLabelsAr.entries)
+                  RadioListTile<String>(
+                    value: entry.key,
+                    groupValue: _reason,
+                    onChanged: (v) => setState(() => _reason = v!),
+                    title: Text(entry.value),
+                    dense: true,
+                  ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _descriptionController,
+                  decoration: const InputDecoration(labelText: 'وضّح الموقف بالتفصيل'),
+                  maxLines: 3,
+                ),
+                if (_validationError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_validationError!, style: const TextStyle(color: Colors.red)),
+                ],
+                const SizedBox(height: 12),
+                const Text(
+                  'الطلب هيتوقف والإدارة هتراجع الموقف وترجعلك — مش هيتحصّل ولا يتقفل لحد ما المراجعة تخلص.',
+                  style: TextStyle(color: Colors.orange, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+          FilledButton(
+            onPressed: _submit,
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('ابعت البلاغ'),
+          ),
+        ],
+      ),
     );
   }
 }

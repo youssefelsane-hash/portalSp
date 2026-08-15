@@ -2438,3 +2438,47 @@ process". `apps/customer-app`: bottom-sheet بسيط ["💵 كاش"] / ["💳 ا
 (صفر تحويل خاطئ بين `string`/`number` في نتيجة الـraw SQL). 45 suite / 247 اختبار API عدّوا كاملين،
 `tsc`/`nest build` نضيفين. **صفر كود جديد في الميزة نفسها** — اختبار تحقق بس، مطابق تمامًا لتعليمة
 "لو already correct, اتأكد واسيبها".
+
+### تحديث تنفيذ §22 — بند 3-6 (زيارة فاشلة/عدم حضور: بلاغ + مراجعة أدمن + إعادة جدولة/إلغاء برسوم + رفض شغل ضروري) — ✅ `DONE + LIVE VERIFIED`
+
+**الفحص الأول**: `MISSING` تمامًا — صفر آلية للفني يبلّغ إن الزيارة فشلت. الخيارات المتاحة كانت
+بس `complete()` (كذب — الشغل ما اكتملش) أو `technicianCancel()` (إلغاء نهائي بلا مراجعة أدمن).
+الحل بالكامل إعادة استخدام بنية موجودة — صفر جدول جديد:
+
+- **`DISPUTED`** (حالة موجودة أصلاً في `order-state-machine.ts`) هي حالة "زيارة فاشلة تحت المراجعة".
+  3 انتقالات جديدة بس: `TECHNICIAN_ARRIVED → DISPUTED` (no-show قبل بدء الشغل)، `DISPUTED → ACCEPTED`
+  (نتيجة "إعادة جدولة")، `DISPUTED → CANCELLED_BY_CUSTOMER` (نتيجة "إلغاء" لطلب كاش ما اتحصّلش).
+  (`IN_PROGRESS → DISPUTED` و`DISPUTED → REFUNDED`/`COMPLETED` كانوا موجودين أصلاً).
+- **`Complaint`** (`support` module) — فئة `NO_SHOW` موجودة، فئة جديدة `REQUIRED_WORK_REJECTED`
+  اتضافت (`ALTER TYPE complaint_category ADD VALUE`, migration 0107). `OrdersService.reportFailedVisit()`
+  بيسجّل شكوى تلقائيًا عبر `SupportService.fileComplaint()` الموجودة (`filedByUserId`=الفني،
+  `againstUserId`=العميل تلقائيًا).
+- **`PaymentsService.refundOrder()`** الموجودة (تدعم استرداد جزئي/كامل من §20/§21) — رسوم الزيارة
+  بتتخصم من الاسترداد مباشرة، صفر تحصيل إضافي منفصل.
+
+**التدفق الكامل**: الفني (`POST /technician/orders/:id/report-failed-visit`، سبب مقفول: `customer_no_show`
+| `required_work_rejected` | `other` + توضيح نصي) بيوقف الطلب بدل ما يكمّل شغل غير مصرّح أو يقفله
+"مكتمل" كاذبة — الطلب `DISPUTED` + شكوى مسجّلة. الأدمن (`POST /admin/orders/:id/resolve-failed-visit`،
+صلاحية مخصوصة `orders.resolve_failed_visit` + step-up MFA — نفس مستوى `orders.adjust_price`) بيحل
+بعد مراجعة حقيقية (مش تصديق طرف واحد أعمى):
+- **`reschedule`**: نفس الطلب يرجع نشط (`ACCEPTED`) بنفس السعر، صفر تحصيل تاني. تحديد موعد جديد
+  تحديدًا (slot-based، تصادم جدول) هيتغطى في §22 بند 9-12 (لسه مش مبني) — دلوقتي الحد الأدنى المطلوب
+  فعليًا: الطلب يرجع نشط، الفني يقدر يعيد المحاولة.
+- **`cancel_with_fee`**: طلب كاش (المنصة ماسكتش فلوس أصلاً) → **صفر رسوم دايمًا** بغض النظر عن أي
+  قيمة الأدمن بعتها — تعليمة صريحة، المنصة بتمتص تكلفة الفني للـMVP، صفر معاملة دفع وهمية. طلب
+  مدفوع مسبقًا → رسوم زيارة قابلة للإعداد (`orders.no_show_visit_fee_cents`, migration 0107،
+  افتراضي 50 جنيه) بتتخصم من الاسترداد عبر `refundOrder()`.
+
+**`apps/technician-app`**: زرار "زيارة فاشلة" (برتقالي تحذيري) في `order_execution_screen.dart`،
+يظهر بس وقت الوجود الفعلي (`technician_arrived`) أو أثناء الشغل (`in_progress`) — dialog بسبب مقفول
++ توضيح نصي إجباري (10 حروف أقل). **`apps/admin`**: قسم مخصوص في `orders/[id]/page.tsx` يظهر بس
+لو `order_status=disputed` — زرار "إعادة جدولة" فوري، أو فورم "العميل عايز يلغي" (رسوم اختيارية،
+افتراضي من الإعدادات + ملاحظات مراجعة إجبارية).
+
+اتأكد بـ7 اختبار حي جديد (`failed-visit-resolution.spec.ts`): no-show → reschedule بنفس السعر بالظبط؛
+required_work_rejected → شكوى بالتصنيف الصح؛ رفض تبليغ قبل الوصول (`ACCEPTED`)؛ كاش cancel_with_fee
+صفر رسوم/صفر معاملة دفع فعليًا (تحقق `payments.length === 0`)؛ مدفوع مسبقًا استرداد جزئي (رسوم
+مخصومة بالظبط، الطلب يتلغي `CANCELLED_BY_CUSTOMER` بعد الاسترداد)؛ مدفوع مسبقًا برسوم صفر (استرداد
+كامل، `REFUNDED` تلقائيًا من `refundOrder()` نفسها)؛ رفض حل طلب مش `DISPUTED` أصلاً. 46 suite / 254
+اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين)/admin `tsc`+`eslint`+`next build`
+نضيفين.

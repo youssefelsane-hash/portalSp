@@ -24,6 +24,8 @@ import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
+import { ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
+import { OrdersService } from './orders.service';
 import { PaymentsService } from '../payments/payments.service';
 
 @Controller('admin/orders')
@@ -31,6 +33,7 @@ import { PaymentsService } from '../payments/payments.service';
 export class AdminOrdersController {
   constructor(
     private readonly adminOrdersService: AdminOrdersService,
+    private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
@@ -124,6 +127,21 @@ export class AdminOrdersController {
     return toOrderResponseDto(
       await this.adminOrdersService.adjustPrice(admin.sub, id, dto.new_total_amount_cents, dto.reason, audit),
     );
+  }
+
+  // زيارة فاشلة/عدم حضور (docs/08 §22 بند 4-5) — قرار مالي (رسوم + استرداد)، نفس مستوى حساسية
+  // orders.adjust_price بالحرف (permission مخصوصة + step-up MFA، migration 0107).
+  @Post(':id/resolve-failed-visit')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.resolve_failed_visit')
+  @RequireStepUp()
+  async resolveFailedVisit(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ResolveFailedVisitDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(await this.ordersService.resolveFailedVisit(admin.sub, id, dto, audit));
   }
 
   // الأدمن محتاج يشوف أعضاء الفريق (فريق "اعتماد" + مساعدين) عشان يعرف كام مساعد لسه ناقص قبل
