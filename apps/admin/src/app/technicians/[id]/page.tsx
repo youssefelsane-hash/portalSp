@@ -16,6 +16,7 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
+import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -46,14 +47,18 @@ export default function TechnicianDetailPage() {
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
 
+  function loadWallet(userId: string) {
+    authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
+      .then(setWallet)
+      .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
+  }
+
   function load() {
     authedFetch<AdminTechnicianDetailResponseDto>(`/admin/technicians/${id}`)
       .then((data) => {
         setDetail(data);
         setSelectedLevel(data.current_level);
-        authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${data.user_id}`)
-          .then(setWallet)
-          .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
+        loadWallet(data.user_id);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل بيانات الفني'));
   }
@@ -106,6 +111,18 @@ export default function TechnicianDetailPage() {
     );
     setShowRejectForm(false);
     setRejectReason('');
+  }
+
+  // §24 — كانت فجوة موثّقة: POST /admin/technicians/:id/suspend موجود ومختبر حي (technicians.approve
+  // + audit كامل) بس صفر زرار له في أي شاشة — أدمن مالوش طريقة يعلّق فني معتمد بالفعل من الواجهة،
+  // فجوة ثقة/أمان حقيقية (الرجوع من suspended لـapproved/rejected شغال بالفعل بنفس زراير الاعتماد/الرفض).
+  async function handleSuspend(reason: string) {
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/suspend`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    );
   }
 
   async function handleChangeLevel(e: FormEvent) {
@@ -228,7 +245,9 @@ export default function TechnicianDetailPage() {
           <CardContent className="flex flex-col gap-2 text-sm">
             <p dir="ltr" className="text-muted-foreground">{detail.phone_number}</p>
             <p>سنين خبرة: {detail.years_of_experience}</p>
-            <p>نقاط الجودة: {detail.quality_score.toFixed(2)}</p>
+            {/* §24 — quality_score اتشالت من هنا: عمود ميت مالوش أي كاتب في الكود كله (قيمته
+                دايمًا 0.00)، نفس فئة average_rating/cancelled_orders_count اللي اتصلحوا زمان —
+                بس ده محدّش لاحظه. متوسط التقييم تحت ده الرقم الحقيقي البديل. */}
             <p>متوسط التقييم: {detail.average_rating.toFixed(2)} ({detail.total_ratings_count} تقييم)</p>
             <p>طلبات مكتملة: {detail.completed_orders_count} · ملغاة: {detail.cancelled_orders_count}</p>
             <p>متاح دلوقتي: {detail.is_available ? 'أيوة' : 'لأ'} · في الخدمة: {detail.is_on_duty ? 'أيوة' : 'لأ'}</p>
@@ -272,6 +291,24 @@ export default function TechnicianDetailPage() {
                   </Button>
                 </form>
               )}
+            </CardFooter>
+          )}
+          {detail.verification_status === 'approved' && (
+            <CardFooter>
+              <PromptDialog
+                trigger={
+                  <Button variant="destructive" disabled={isSaving}>
+                    تعليق الفني
+                  </Button>
+                }
+                title="تعليق الفني"
+                description="الفني هيتمنع من استلام طلبات جديدة لحد ما يتراجع القرار (اعتماد تاني) من هنا."
+                label="سبب التعليق"
+                minLength={5}
+                confirmLabel="تعليق"
+                destructive
+                onConfirm={handleSuspend}
+              />
             </CardFooter>
           )}
         </Card>
@@ -576,8 +613,9 @@ export default function TechnicianDetailPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">المحفظة</CardTitle>
+            <WalletAdjustmentForm userId={detail.user_id} onAdjusted={() => loadWallet(detail.user_id)} />
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
             {walletError && <p className="text-destructive">{walletError}</p>}

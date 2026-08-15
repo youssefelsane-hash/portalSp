@@ -7,11 +7,13 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
 import { formatEgp } from '@/lib/format';
 
 const TIER_LABELS: Record<CustomerTier, string> = {
@@ -43,12 +45,16 @@ export default function CustomerDetailPage() {
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل بيانات العميل'));
   }
 
-  useEffect(() => {
-    if (isLoading) return;
-    load();
+  function loadWallet() {
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
       .then(setWallet)
       .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
+  }
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+    loadWallet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, userId]);
 
@@ -80,6 +86,21 @@ export default function CustomerDetailPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // §24 — كانت فجوة موثّقة صراحة: DELETE /admin/customers/:userId مش موجود أصلاً (نفس فجوة
+  // الموظفين اللي كانت الأداة الوحيدة block، اتقفلت الاتنين مع بعض). حذف دائم، فالتوجيه للقايمة
+  // بعد النجاح مباشرة.
+  async function handleDelete() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/customers/${userId}`, { method: 'DELETE' });
+      router.push('/customers');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
       setIsSaving(false);
     }
   }
@@ -208,6 +229,17 @@ export default function CustomerDetailPage() {
                 حظر العميل
               </Button>
             )}
+            <ConfirmDialog
+              trigger={
+                <Button type="button" variant="destructive" disabled={isSaving}>
+                  حذف الحساب
+                </Button>
+              }
+              title="حذف حساب العميل نهائيًا"
+              description="ده حذف دائم — الحساب مش هيقدر يسجّل دخول تاني، ومفيش استرجاع بعد كده."
+              confirmLabel="حذف نهائي"
+              onConfirm={handleDelete}
+            />
           </CardFooter>
           {showBlockForm && (
             <form onSubmit={handleBlock} className="border-t px-6 py-4">
@@ -228,8 +260,9 @@ export default function CustomerDetailPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="text-base">المحفظة</CardTitle>
+            <WalletAdjustmentForm userId={userId} onAdjusted={loadWallet} />
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
             {walletError && <p className="text-destructive">{walletError}</p>}

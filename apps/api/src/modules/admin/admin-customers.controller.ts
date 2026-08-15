@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -45,5 +45,17 @@ export class AdminCustomersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return this.customersService.unblock(admin.sub, userId, audit);
+  }
+
+  // §24 — كانت فجوة موثّقة صراحة: soft-delete اتبنى للموظفين بس مش للعملاء رغم نفس الحاجة بالظبط.
+  @Delete(':userId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('customers.manage')
+  delete(
+    @CurrentUser() admin: JwtPayload,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.customersService.delete(admin.sub, userId, audit);
   }
 }

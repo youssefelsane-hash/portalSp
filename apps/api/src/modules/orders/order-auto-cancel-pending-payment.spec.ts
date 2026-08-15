@@ -200,6 +200,7 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + استرداد تل
       settingsService,
       { emit: () => undefined } as never,
       paymentsService,
+      { releaseUsage: async () => undefined } as never, // promoCodesService — الاختبار ده ملوش علاقة بأكواد الخصم
     );
   });
 

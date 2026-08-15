@@ -19,4 +19,8 @@ export class PromoCodeUsage {
 
   @CreateDateColumn({ name: 'used_at', type: 'timestamptz' })
   usedAt: Date;
+
+  // NULL = الاستخدام لسه سارٍ. متسجّل = الطلب اتلغى وردّينا رصيد الكود (migration 0109).
+  @Column({ name: 'released_at', type: 'timestamptz', nullable: true })
+  releasedAt: Date | null;
 }

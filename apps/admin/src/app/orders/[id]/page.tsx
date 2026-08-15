@@ -37,7 +37,6 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
-import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -90,6 +89,9 @@ export default function OrderDetailPage() {
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
   const [showCashDisputeConfirmForm, setShowCashDisputeConfirmForm] = useState(false);
   const [cashDisputeNotes, setCashDisputeNotes] = useState('');
+  const [showRefundForm, setShowRefundForm] = useState(false);
+  const [refundAmountEgp, setRefundAmountEgp] = useState('');
+  const [refundReason, setRefundReason] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -164,14 +166,46 @@ export default function OrderDetailPage() {
   // بس مفيش زرار ليه في أي شاشة — نفس فئة فجوة "endpoint إداري من غير واجهة" اللي ظهرت في
   // /customers, /support, /payouts. مطابق تماماً لشروط payments.service.ts's refundOrder():
   // payment_status=paid + order_status في completed/disputed بس (canTransition(..., REFUNDED)).
-  async function handleRefund(reason: string) {
+  //
+  // §24 تحديث: كان الزرار بيبعت استرجاع كامل بس (PromptDialog سبب بس) — الباك-إند بيدعم
+  // amount_cents اختياري لاسترداد جزئي (ADR-0013 §9) من زمان بلا أي مدخل في الواجهة يوصله. فورم
+  // زي adjust-price/cancel-with-fee: مبلغ فاضي = استرجاع كامل (السلوك الافتراضي زي ما هو).
+  async function handleRefund(e: FormEvent) {
+    e.preventDefault();
+    if (refundReason.trim().length < 2) {
+      window.alert('سبب الاسترجاع لازم يكون حرفين على الأقل');
+      return;
+    }
+    const amountCents = refundAmountEgp.trim() === '' ? undefined : Math.round(Number(refundAmountEgp) * 100);
+    if (amountCents !== undefined && (!Number.isFinite(amountCents) || amountCents < 1)) {
+      window.alert('مبلغ الاسترجاع لازم يكون رقم أكبر من صفر');
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
       await authedFetch(`/admin/orders/${id}/refund`, {
         method: 'POST',
-        body: JSON.stringify({ reason_notes: reason }),
+        body: JSON.stringify({ reason_notes: refundReason, ...(amountCents !== undefined ? { amount_cents: amountCents } : {}) }),
       });
+      setShowRefundForm(false);
+      setRefundAmountEgp('');
+      setRefundReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // §24 — تأكيد إداري يدوي لتحويل إنستاباي (ADR-0013 §7) — الباك-إند idempotent بالفعل (قفل
+  // pessimistic_write + فحص PENDING جوّه القفل)، فمفيش داعي confirm dialog إضافي هنا.
+  async function handleConfirmInstaPay(paymentId: string) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/payments/${paymentId}/confirm-instapay`, { method: 'POST' });
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -472,20 +506,38 @@ export default function OrderDetailPage() {
           )}
           {order.payment_status === 'paid' &&
             (order.order_status === 'completed' || order.order_status === 'disputed') && (
-              <CardFooter>
-                <PromptDialog
-                  trigger={
-                    <Button variant="destructive" disabled={isSaving}>
-                      استرجاع المبلغ
+              <CardFooter className="flex-col items-stretch gap-3">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={isSaving}
+                  onClick={() => setShowRefundForm((s) => !s)}
+                >
+                  استرجاع المبلغ
+                </Button>
+                {showRefundForm && (
+                  <form onSubmit={handleRefund} className="flex flex-col gap-2">
+                    <div>
+                      <Label htmlFor="refund_amount_egp">مبلغ الاسترجاع (جنيه) — اختياري، فاضي = استرجاع كامل</Label>
+                      <Input
+                        id="refund_amount_egp"
+                        type="number"
+                        min={0.01}
+                        step="0.01"
+                        value={refundAmountEgp}
+                        onChange={(e) => setRefundAmountEgp(e.target.value)}
+                        placeholder={`الكامل: ${(order.total_amount_cents / 100).toFixed(2)} ج.م.`}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="refund_reason">سبب الاسترجاع</Label>
+                      <Input id="refund_reason" value={refundReason} onChange={(e) => setRefundReason(e.target.value)} minLength={2} required />
+                    </div>
+                    <Button type="submit" size="sm" variant="destructive" disabled={isSaving}>
+                      تأكيد الاسترجاع
                     </Button>
-                  }
-                  title="استرجاع المبلغ"
-                  label="سبب الاسترجاع"
-                  minLength={2}
-                  confirmLabel="استرجاع"
-                  destructive
-                  onConfirm={handleRefund}
-                />
+                  </form>
+                )}
               </CardFooter>
             )}
           {order.order_status === 'disputed' && !order.technician_cash_not_received_at && (
@@ -674,6 +726,21 @@ export default function OrderDetailPage() {
                           </div>
                           {p.payment_status === 'failed' && p.failure_message && (
                             <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
+                          )}
+                          {/* §24 — كانت فجوة موثّقة: POST /admin/payments/:id/confirm-instapay موجود ومختبر
+                              من زمان (ADR-0013 §7) بس صفر زرار له في أي شاشة — إنستاباي طريقة دفع حقيقية
+                              كانت مقفولة عمليًا بلا واجهة أدمن تقفل الدورة. */}
+                          {p.payment_method === 'instapay' && p.payment_status === 'pending' && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="self-start"
+                              disabled={isSaving}
+                              onClick={() => handleConfirmInstaPay(p.id)}
+                            >
+                              تأكيد استلام تحويل إنستاباي
+                            </Button>
                           )}
                         </li>
                       ))}

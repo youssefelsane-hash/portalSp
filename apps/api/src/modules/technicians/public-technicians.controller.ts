@@ -1,6 +1,7 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { ScheduleQueryDto } from './dto/schedule-query.dto';
 import { toPublicScheduleSlotResponseDto } from './dto/schedule-slot-response.dto';
 import { toPublicTechnicianProfileResponseDto } from './dto/public-technician-profile-response.dto';
@@ -15,11 +16,12 @@ export class PublicTechniciansController {
   constructor(
     private readonly techniciansService: TechniciansService,
     private readonly scheduleService: TechnicianScheduleService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Get(':id/profile')
   async getPublicProfile(@Param('id', ParseUUIDPipe) id: string) {
-    return toPublicTechnicianProfileResponseDto(await this.techniciansService.getPublicProfile(id));
+    return toPublicTechnicianProfileResponseDto(await this.techniciansService.getPublicProfile(id), this.storage);
   }
 
   // الجدول "أخضر/أحمر" (docs/08 §2) — is_available بس، مفيش order_id ولا ملاحظات داخلية.

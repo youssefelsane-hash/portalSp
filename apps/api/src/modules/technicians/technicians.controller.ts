@@ -190,7 +190,7 @@ export class TechniciansController {
   async listCertificates(@CurrentUser() user: JwtPayload) {
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     const certificates = await this.certificatesService.listForTechnician(profile.id);
-    return certificates.map(toCertificateResponseDto);
+    return Promise.all(certificates.map((c) => toCertificateResponseDto(c, this.storage)));
   }
 
   @Post('certificates')
@@ -212,7 +212,7 @@ export class TechniciansController {
 
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     const certificate = await this.certificatesService.add(profile.id, dto, file);
-    return toCertificateResponseDto(certificate);
+    return toCertificateResponseDto(certificate, this.storage);
   }
 
   @Delete('certificates/:id')

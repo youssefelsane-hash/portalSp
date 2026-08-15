@@ -22,6 +22,12 @@ export class TechnicianCertificate {
   @Column({ name: 'file_url', type: 'text' })
   fileUrl: string;
 
+  // مفتاح التخزين (§24 — نفس نمط technician_documents، migration 0110) — لو موجود، getUrl(key)
+  // بيتستخدم وقت القراءة بدل file_url الثابت (اللي بيموت بصمت بعد 7 أيام على S3 presigned URL).
+  // NULL لأي صف قديم قبل الإصلاح.
+  @Column({ name: 'storage_key', type: 'text', nullable: true })
+  storageKey: string | null;
+
   @Column({
     name: 'review_status',
     type: 'enum',

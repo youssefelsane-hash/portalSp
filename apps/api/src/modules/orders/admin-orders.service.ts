@@ -11,6 +11,7 @@ import {
   OrderAssistantAssignedManuallyEvent,
 } from '../../common/events/order-assistant-assigned-manually.event';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -58,6 +59,7 @@ export class AdminOrdersService {
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
     private readonly pricingEngineService: PricingEngineService,
+    private readonly promoCodesService: PromoCodesService,
   ) {}
 
   async list(
@@ -139,6 +141,8 @@ export class AdminOrdersService {
           reason,
         }),
       );
+
+      await this.promoCodesService.releaseUsage(manager, order.id);
     });
 
     this.events.emit(

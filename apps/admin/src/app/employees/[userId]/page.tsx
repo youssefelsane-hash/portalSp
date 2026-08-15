@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -128,6 +129,21 @@ export default function EmployeeDetailPage() {
     }
   }
 
+  // §24 — DELETE /admin/employees/:userId موجود ومختبر من زمان (soft-delete دائم، عكس block
+  // القابل للرجوع) بس صفر زرار له في أي شاشة أدمن — الأداة الوحيدة كانت block. حذف دائم، مفيش
+  // restore، فالتوجيه للقايمة بعد النجاح مباشرة (نفس نمط /roles/[id]).
+  async function handleDelete() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/employees/${userId}`, { method: 'DELETE' });
+      router.push('/employees');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+      setIsSaving(false);
+    }
+  }
+
   if (error && !detail) {
     return (
       <AppShell>
@@ -211,6 +227,17 @@ export default function EmployeeDetailPage() {
                   حظر
                 </Button>
               )}
+              <ConfirmDialog
+                trigger={
+                  <Button type="button" variant="destructive" disabled={isSaving}>
+                    حذف الحساب
+                  </Button>
+                }
+                title="حذف حساب الموظف نهائيًا"
+                description="ده حذف دائم — الحساب مش هيقدر يسجّل دخول تاني، ومفيش استرجاع بعد كده."
+                confirmLabel="حذف نهائي"
+                onConfirm={handleDelete}
+              />
             </CardFooter>
           </form>
 
