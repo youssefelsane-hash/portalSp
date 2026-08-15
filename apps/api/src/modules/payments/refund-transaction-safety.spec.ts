@@ -40,6 +40,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     supportsRefund: true,
     supportsVoid: false,
     supportsCapture: false,
+    supportsTokenization: false,
     async createPayment() {
       throw new Error('not used in this test');
     },
@@ -73,6 +74,12 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     },
     async reconcile() {
       throw new Error('not used in this test');
+    },
+    async chargeToken() {
+      throw new Error('not used in this test');
+    },
+    verifyCardSaveWebhook() {
+      return null;
     },
   });
 
@@ -180,6 +187,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       { record: async () => undefined } as never, // auditLog — نداء واحد بسيط بس
       { emit: () => undefined } as never, // events
       { getProvider: () => provider } as never, // paymentProviders — الـfake provider بتاعنا
+      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
     );
   }
 

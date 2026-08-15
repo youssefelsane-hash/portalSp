@@ -3,6 +3,9 @@ import { SettingsService } from '../../settings/settings.service';
 import { FAWRY_GATEWAY, FawryGateway } from './fawry-gateway.interface';
 import {
   CaptureResult,
+  CardSaveWebhookResult,
+  ChargeTokenInput,
+  ChargeTokenResult,
   CreatePaymentInput,
   CreatePaymentResult,
   PaymentOperationNotSupportedError,
@@ -30,6 +33,7 @@ export class FawryProvider implements PaymentProvider {
   readonly supportsRefund = false; // مفيش refund API موثّق لكود فوري المرجعي — wallet credit fallback
   readonly supportsVoid = false;
   readonly supportsCapture = false;
+  readonly supportsTokenization = false;
 
   constructor(
     @Inject(FAWRY_GATEWAY) private readonly fawryGateway: FawryGateway,
@@ -98,5 +102,13 @@ export class FawryProvider implements PaymentProvider {
 
   reconcile(_providerReference: string): Promise<ReconcileResult> {
     throw new PaymentOperationNotSupportedError(this.providerKey, 'reconcile');
+  }
+
+  chargeToken(_input: ChargeTokenInput): Promise<ChargeTokenResult> {
+    throw new PaymentOperationNotSupportedError(this.providerKey, 'chargeToken — مفيش وسيلة دفع محفوظة لفوري');
+  }
+
+  verifyCardSaveWebhook(): CardSaveWebhookResult | null {
+    return null;
   }
 }

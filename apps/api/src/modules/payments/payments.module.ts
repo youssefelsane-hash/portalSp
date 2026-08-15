@@ -13,11 +13,13 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminWalletController } from './admin-wallet.controller';
 import { PaymentsController } from './payments.controller';
+import { SavedPaymentMethodsController } from './saved-payment-methods.controller';
 import { TechnicianPaymentsController } from './technician-payments.controller';
 import { WalletController } from './wallet.controller';
 import { WebhooksController } from './webhooks.controller';
 import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
+import { SavedPaymentMethodsService } from './saved-payment-methods.service';
 import { WalletsService } from './wallets.service';
 import { WalletProvisioningListener } from './wallet-provisioning.listener';
 import { PrepaidOrderSettlementListener } from './prepaid-order-settlement.listener';
@@ -33,6 +35,7 @@ import { Payment } from './entities/payment.entity';
 import { Payout } from './entities/payout.entity';
 import { PayoutOrderItem } from './entities/payout-order-item.entity';
 import { Refund } from './entities/refund.entity';
+import { SavedPaymentMethod } from './entities/saved-payment-method.entity';
 import { Wallet } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
@@ -46,6 +49,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
       Refund,
       Payout,
       PayoutOrderItem,
+      SavedPaymentMethod,
       Order,
       OrderStatusHistory,
       User,
@@ -62,6 +66,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
   controllers: [
     WalletController,
     PaymentsController,
+    SavedPaymentMethodsController,
     TechnicianPaymentsController,
     AdminPaymentsController,
     AdminWalletController,
@@ -71,6 +76,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     WalletsService,
     PaymentsService,
     PayoutsService,
+    SavedPaymentMethodsService,
     WalletProvisioningListener,
     PrepaidOrderSettlementListener,
     // بوابة Fawry الأصلية (كود مرجعي فوري) — لسه محقونة مباشرة، FawryProvider بيغلّفها بس

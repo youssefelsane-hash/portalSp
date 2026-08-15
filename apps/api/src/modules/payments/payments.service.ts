@@ -4,6 +4,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
+import {
+  ADDITIONAL_WORK_PAYMENT_RESOLVED_EVENT,
+  AdditionalWorkPaymentResolvedEvent,
+} from '../../common/events/additional-work-payment.event';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
@@ -28,6 +32,7 @@ import { WalletOwnerType } from './entities/wallet.entity';
 import { WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletsService } from './wallets.service';
 import { PLATFORM_SYSTEM_USER_ID } from './entities/wallet.entity';
+import { SavedPaymentMethodsService } from './saved-payment-methods.service';
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
@@ -55,6 +60,7 @@ export class PaymentsService {
     private readonly auditLog: AuditLogService,
     private readonly events: EventEmitter2,
     private readonly paymentProviders: PaymentProviderRegistry,
+    private readonly savedPaymentMethods: SavedPaymentMethodsService,
   ) {}
 
   /**
@@ -136,21 +142,29 @@ export class PaymentsService {
    * سمحت بيه تحديدًا للحالة دي)، بيرجع الفرق بين الإجمالي الحالي والمبلغ اللي فعلاً اتحصّل قبل
    * التوزيع — تحصيل المبلغ الكامل تاني هنا كان هيبقى تحصيل مزدوج حقيقي.
    */
+  /**
+   * **إصلاح بَقّة حقيقية (docs/08 §21)**: كانت بتاخد بس أول دفعة ناجحة (`completedAt ASC`) وتطرحها
+   * من `totalAmountCents` — صح لما أقصى دفعتين ممكنتين للطلب (الأصلية + دلتا واحدة بعدها)، بس غلط
+   * دلوقتي إن محاولة تحصيل شغل إضافي إلكتروني ممكن تنجح **قبل** اكتمال الشغل (docs/08 §21 بند 5) —
+   * لو نجحت، الطلب ممكن يبقى عنده أكتر من دفعة ناجحة قبل ما يوصل حتى لنقطة فحص الاكتمال، ودالة
+   * "أول دفعة بس" كانت هتتجاهل التحصيل الإضافي الناجح ده وتطلب المبلغ تاني (تحصيل مزدوج حقيقي).
+   * الإصلاح: مجموع **كل** الدفعات الناجحة للطلب، مش أولها بس.
+   */
   private async amountOwedNow(order: Order, manager?: EntityManager): Promise<number> {
     if (order.paymentStatus !== OrderPaymentStatus.PAID) {
       return order.totalAmountCents;
     }
     const paymentsRepo = manager ? manager.getRepository(Payment) : this.payments;
-    const originalPayment = await paymentsRepo.findOne({
+    const succeededPayments = await paymentsRepo.find({
       where: { orderId: order.id, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
-      order: { completedAt: 'ASC' },
     });
-    if (!originalPayment) {
+    if (succeededPayments.length === 0) {
       // دفاعي بحت — مفروض مستحيل عمليًا (paymentStatus=PAID لازم كان مسبوق بدفعة ناجحة)، لو حصل
       // نرجّع صفر بدل ما نحصّل مبلغ عشوائي مش موثوق.
       return 0;
     }
-    return Math.max(0, order.totalAmountCents - originalPayment.amountCents);
+    const totalCollectedCents = succeededPayments.reduce((sum, p) => sum + p.amountCents, 0);
+    return Math.max(0, order.totalAmountCents - totalCollectedCents);
   }
 
   /**
@@ -866,7 +880,12 @@ export class PaymentsService {
     }
 
     try {
-      if (succeeded) {
+      if (payment.orderItemBatchId) {
+        // تأكيد دفع شغل إضافي (docs/08 §21) — الطلب لسه شغال (مش بيقفل هنا)، فمايستدعيش
+        // assertPayable()/handlePaymentConfirmed() خالص (كانوا هيرفضوا بوضوح لطلب IN_PROGRESS).
+        // نفس حماية دفعة الطلب الأصلية فوق (dedup، توقيع، مطابقة مبلغ) سرت عليه بالفعل قبل السطر ده.
+        await this.finalizeAdditionalWorkPayment(payment, succeeded, gatewayTransactionId, failureReason);
+      } else if (succeeded) {
         payment.gatewayTransactionId = gatewayTransactionId;
         payment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
         payment.completedAt = new Date();
@@ -922,6 +941,194 @@ export class PaymentsService {
       this.logger.error(`فشل معالجة webhook ${externalEventId}`, err instanceof Error ? err.stack : err);
       throw err;
     }
+  }
+
+  /**
+   * حدث "حفظ كارت" من البوابة (docs/08 §21) — حمولة/معنى مختلف تمامًا عن finalizeGatewayWebhook()
+   * (مفيش payment.id نربط بيه، الربط بحساب العميل عندنا عبر الإيميل). idempotent بنفس آلية
+   * webhook_events.external_event_id، وupsertToken() نفسها idempotent كمان (provider+token unique).
+   */
+  async finalizeCardSaveWebhook(
+    externalEventId: string,
+    provider: string,
+    rawPayload: Record<string, unknown>,
+    signatureValid: boolean,
+    providerToken: string,
+    maskedPan: string | null,
+    cardBrand: string | null,
+    customerEmail: string | null,
+  ): Promise<void> {
+    const alreadyProcessed = await this.webhookEvents.findOne({ where: { externalEventId } });
+    if (alreadyProcessed) {
+      this.logger.log(`webhook حفظ كارت مكرر اتجاهل: ${externalEventId}`);
+      return;
+    }
+
+    const webhookEvent = this.webhookEvents.create({
+      provider,
+      eventType: 'TOKEN',
+      externalEventId,
+      payload: rawPayload,
+      signatureValid,
+      processingStatus: WebhookProcessingStatus.RECEIVED,
+    });
+    await this.webhookEvents.save(webhookEvent);
+
+    if (!signatureValid || !customerEmail) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+      webhookEvent.errorMessage = !signatureValid ? 'توقيع غير صحيح — الحدث اتجاهل' : 'مفيش إيميل عميل في حدث حفظ الكارت';
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      return;
+    }
+
+    const user = await this.users.findOne({ where: { email: customerEmail } });
+    if (!user) {
+      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
+      webhookEvent.errorMessage = `مفيش مستخدم عندنا بالإيميل ${customerEmail}`;
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+      return;
+    }
+
+    try {
+      const customerProfile = await this.customerProfiles.findByUserIdOrThrow(user.id);
+      await this.savedPaymentMethods.upsertToken({
+        customerId: customerProfile.id,
+        provider,
+        providerToken,
+        cardBrand,
+        maskedPan,
+      });
+      webhookEvent.processingStatus = WebhookProcessingStatus.PROCESSED;
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+    } catch (err) {
+      // مستخدم موجود بس مش عميل (نادر جدًا، دفاعي بحت) — تجاهل واعي، مش خطأ داخلي حقيقي.
+      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
+      webhookEvent.errorMessage = err instanceof Error ? err.message : String(err);
+      webhookEvent.processedAt = new Date();
+      await this.webhookEvents.save(webhookEvent);
+    }
+  }
+
+  /**
+   * تأكيد نتيجة تحصيل شغل إضافي (docs/08 §21) — الطلب لسه شغال (مايستدعيش settleAndComplete/
+   * handlePaymentConfirmed خالص، عكس دفعة الطلب الأصلية). بس تحديث حالة الدفعة + بث حدث بسيط
+   * للإشعار. `succeeded` هنا فعلاً مصدر الحقيقة النهائي (§13) — أول مرة الدفعة تتسجّل SUCCEEDED
+   * فعليًا، مش وقت attemptAdditionalWorkCharge() (اللي بتسجّلها processing بس).
+   */
+  private async finalizeAdditionalWorkPayment(
+    payment: Payment,
+    succeeded: boolean,
+    gatewayTransactionId: string,
+    failureReason: string | null,
+  ): Promise<void> {
+    payment.gatewayTransactionId = gatewayTransactionId;
+    if (succeeded) {
+      payment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
+      payment.completedAt = new Date();
+    } else {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'GATEWAY_DECLINED';
+      payment.failureMessage = failureReason;
+      payment.failedAt = new Date();
+    }
+    await this.payments.save(payment);
+
+    this.events.emit(
+      ADDITIONAL_WORK_PAYMENT_RESOLVED_EVENT,
+      new AdditionalWorkPaymentResolvedEvent(payment.id, payment.orderId, '', payment.amountCents, payment.customerId, succeeded),
+    );
+  }
+
+  /**
+   * تحصيل فوري لشغل إضافي معتمد إلكترونيًا (docs/08 §21) — بتتنادى من OrderItemsService.approve()
+   * فور ما العميل يوافق، لو الطلب مدفوع مسبقًا. **الشغل يكمل بغض النظر عن نتيجة المحاولة دي** —
+   * لو مفيش وسيلة دفع محفوظة أو المحاولة فشلت، المبلغ يفضل obligation مسجّل (Payment=failed)،
+   * هيتحصّل عبر amountOwedNow()/AWAITING_PAYMENT الموجودة وقت اكتمال الشغل زي أي دلتا تانية
+   * (ADR-0015) — صفر فقدان للمبلغ المستحق مهما كانت نتيجة المحاولة الفورية.
+   */
+  async attemptAdditionalWorkCharge(orderId: string, batchId: string, amountCents: number): Promise<void> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) return; // دفاعي — مستحيل عمليًا (الكولر لسه ماسك نفس الطلب)
+
+    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+    const user = await this.users.findOne({ where: { id: customerProfile.userId } });
+    if (!user) return; // دفاعي بحت
+
+    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
+    const payment = this.payments.create({
+      paymentNumber,
+      orderId: order.id,
+      customerId: customerProfile.id,
+      amountCents,
+      paymentMethod: PaymentMethod.CARD,
+      paymentGateway: 'paymob',
+      paymentStatus: PaymentGatewayStatus.PENDING,
+      // idempotency على مستوى الدفعة نفسها — batchId فريد لكل موافقة (§12: "one approved price
+      // request must create exactly one financial obligation"). unique constraint على العمود ده
+      // بيمنع أي محاولة إنشاء صف تاني لنفس الدفعة حتى لو attemptAdditionalWorkCharge() اتنادت مرتين بالغلط.
+      idempotencyKey: `addl-work:${batchId}`,
+      orderItemBatchId: batchId,
+    });
+    await this.payments.save(payment);
+
+    const savedMethod = await this.savedPaymentMethods.findDefaultForCustomer(customerProfile.id);
+    if (!savedMethod) {
+      // §18 — مفيش وسيلة دفع محفوظة، مفيش نداء بوابة أصلاً. المبلغ يفضل obligation واضح (failed)
+      // بدل ما يختفي أو يتحصّل غلط.
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'NO_SAVED_PAYMENT_METHOD';
+      payment.failureMessage = 'مفيش وسيلة دفع محفوظة للعميل';
+      payment.failedAt = new Date();
+      await this.payments.save(payment);
+      return;
+    }
+
+    const provider = this.paymentProviders.getByProviderKey(savedMethod.provider);
+    if (!provider.supportsTokenization) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'TOKENIZATION_NOT_SUPPORTED';
+      payment.failureMessage = `${savedMethod.provider} مش بيدعم التحصيل التلقائي بوسيلة محفوظة`;
+      payment.failedAt = new Date();
+      await this.payments.save(payment);
+      return;
+    }
+
+    const [firstName, ...rest] = user.fullName.trim().split(/\s+/);
+    try {
+      const result = await provider.chargeToken({
+        paymentId: payment.id,
+        orderNumber: order.orderNumber,
+        amountCents,
+        currencyCode: 'EGP',
+        providerToken: savedMethod.providerToken,
+        customerFirstName: firstName || 'NA',
+        customerLastName: rest.join(' ') || 'NA',
+        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerPhone: user.phoneNumber,
+      });
+      if (result.succeeded) {
+        // بتفضل PENDING عمداً (مش PROCESSING) — نفس اتفاقية payWithCard/initiateProviderCharge
+        // بالحرف: PENDING يعني "البوابة قبلت النداء، مستنية تأكيد webhook نهائي" (§13)، وده الشرط
+        // اللي finalizeGatewayWebhook() بيفحصه (`paymentStatus !== PENDING` = already-processed
+        // idempotency guard) — استخدام PROCESSING هنا كان هيخلي أي webhook تأكيد يتجاهل بالغلط
+        // كـ"already processed" قبل ما يوصل لمنطق finalizeAdditionalWorkPayment() أصلاً.
+        if (result.providerReference) payment.gatewayTransactionId = result.providerReference;
+      } else {
+        payment.paymentStatus = PaymentGatewayStatus.FAILED;
+        payment.failureCode = 'GATEWAY_DECLINED';
+        payment.failureMessage = result.failureReason;
+        payment.failedAt = new Date();
+      }
+    } catch (err) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = 'GATEWAY_CALL_FAILED';
+      payment.failureMessage = err instanceof Error ? err.message : String(err);
+      payment.failedAt = new Date();
+    }
+    await this.payments.save(payment);
   }
 
   private async nextPaymentNumber(manager: EntityManager): Promise<string> {

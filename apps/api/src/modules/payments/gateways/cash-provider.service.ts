@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
   CaptureResult,
+  CardSaveWebhookResult,
+  ChargeTokenInput,
+  ChargeTokenResult,
   CreatePaymentInput,
   CreatePaymentResult,
   PaymentOperationNotSupportedError,
@@ -26,9 +29,18 @@ export class CashProvider implements PaymentProvider {
   readonly supportsRefund = false;
   readonly supportsVoid = false;
   readonly supportsCapture = false;
+  readonly supportsTokenization = false;
 
   createPayment(_input: CreatePaymentInput): Promise<CreatePaymentResult> {
     throw new PaymentOperationNotSupportedError(this.providerKey, 'createPayment — الكاش بيتسجّل مباشرة في PaymentsService.collectCash()');
+  }
+
+  chargeToken(_input: ChargeTokenInput): Promise<ChargeTokenResult> {
+    throw new PaymentOperationNotSupportedError(this.providerKey, 'chargeToken — مفيش وسيلة دفع محفوظة للكاش');
+  }
+
+  verifyCardSaveWebhook(): CardSaveWebhookResult | null {
+    return null;
   }
 
   verifyWebhook(): WebhookVerificationResult {

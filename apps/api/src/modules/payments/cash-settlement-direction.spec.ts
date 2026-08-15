@@ -220,6 +220,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       // refundOrder() بترجع false دايمًا وprovider.refund() مايتنادىش أصلاً هنا؛ supportsRefund=false
       // كافي عشان الفحص يعدّي بأمان.
       { getProvider: () => ({ supportsRefund: false, refund: async () => ({ succeeded: false }) }) } as never,
+      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
     );
   });
 

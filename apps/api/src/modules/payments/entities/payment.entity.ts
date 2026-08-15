@@ -95,4 +95,10 @@ export class Payment {
 
   @Column({ name: 'collected_by_user_id', type: 'uuid', nullable: true })
   collectedByUserId: string | null;
+
+  // مربوطة بدفعة order_items.batch_id لو دي محاولة تحصيل شغل إضافي (docs/08 §21) — null للدفعة
+  // الأصلية للطلب. finalizeGatewayWebhook() بيستخدمه عشان يعرف يوجّه صح (مايستدعيش settleAndComplete
+  // للدفعات دي — الطلب لسه شغال، مش بيقفل).
+  @Column({ name: 'order_item_batch_id', type: 'uuid', nullable: true })
+  orderItemBatchId: string | null;
 }
