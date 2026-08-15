@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -126,6 +126,32 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
     }
     return order;
+  }
+
+  // قفل تشاؤمي + إعادة تحقق DISPUTED جوّه transaction الكتابة نفسها — يمنع "double admin edit"
+  // (docs/08 §22 بند 31-32). بَقّة حقيقية اتلقطت حية: resolveFailedVisit/resolveCashHandoverDispute
+  // كانوا بيقروا الطلب بـfindOne() عادي (من غير قفل) قبل الـtransaction وبعدين يكتبوا نفس الـobject
+  // القديم جوّها (manager.save(order)) — لو أدمن تاني حل نفس النزاع في نفس اللحظة (مثلاً reschedule
+  // وcancel_with_fee على نفس الطلب)، الكتابة اللي بتكمل تانية كانت بتغلب الأولى بكامل الحالة
+  // القديمة (lost update)، حتى لو الأول فعلاً نجح وسوّى الطلب. نفس نمط adminConfirmCashReceived/
+  // refundOrder() الموجود بالفعل (pessimistic_write جوّه الـtransaction اللي بتكتب فعليًا).
+  private async lockDisputedOrderForUpdate(manager: EntityManager, orderId: string, orderNumber: string): Promise<Order> {
+    const fresh = await manager
+      .createQueryBuilder(Order, 'o')
+      .setLock('pessimistic_write')
+      .where('o.id = :orderId', { orderId })
+      .getOne();
+    if (!fresh) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (fresh.orderStatus !== OrderStatus.DISPUTED) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `الطلب ${orderNumber} اتحل بالفعل من إجراء تاني — رجّع الصفحة وشوف الحالة الحالية`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    return fresh;
   }
 
   async create(userId: string, dto: CreateOrderDto): Promise<Order> {
@@ -747,16 +773,34 @@ export class OrdersService {
       if (!booked) {
         throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
       }
-      order.scheduledAt = newScheduledAt;
-      await manager.save(order);
+
+      // قفل تشاؤمي + إعادة تحقق تحت القفل قبل الكتابة (docs/08 §22 بند 31-32) — بَقّة حقيقية
+      // اتلقطت حية: لو الفني بدأ يتحرّك فعليًا (depart()) في نفس اللحظة، save(order) هنا كان
+      // هيكتب كل أعمدة الـobject القديم اللي في الذاكرة (بما فيهم order_status='accepted' القديمة)
+      // فوق التغيير الحقيقي، يعني يرجّع الطلب "accepted" كذب رغم إن الفني فعليًا في الطريق.
+      // بنجيب نسخة طازة تحت قفل ونكتب scheduled_at عليها هي بس (مش order القديمة).
+      const fresh = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!fresh || !RESCHEDULABLE_STATUSES.has(fresh.orderStatus)) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'حالة الطلب اتغيّرت (الفني بدأ يتحرّك مثلاً) — مينفعش تعيد الجدولة دلوقتي',
+          HttpStatus.CONFLICT,
+        );
+      }
+      fresh.scheduledAt = newScheduledAt;
+      await manager.save(fresh);
 
       // سجل تاريخ محفوظ (نفس orderStatus قبل وبعد — إعادة الجدولة ماتغيّرش حالة الطلب خالص، بس
       // لازم يتسجّل كتغيير حقيقي مش يختفي بلا أثر).
       await manager.save(
         manager.create(OrderStatusHistory, {
           orderId: order.id,
-          previousStatus: order.orderStatus,
-          newStatus: order.orderStatus,
+          previousStatus: fresh.orderStatus,
+          newStatus: fresh.orderStatus,
           changedByUserId: userId,
           changedByRole: 'customer',
           changeSource: OrderChangeSource.CUSTOMER,
@@ -764,6 +808,7 @@ export class OrdersService {
         }),
       );
     });
+    order.scheduledAt = newScheduledAt;
 
     this.events.emit(
       ORDER_RESCHEDULED_EVENT,
@@ -1323,8 +1368,9 @@ export class OrdersService {
       }
       const previousStatus = order.orderStatus;
       await this.dataSource.transaction(async (manager) => {
-        order.orderStatus = OrderStatus.ACCEPTED;
-        await manager.save(order);
+        const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
+        fresh.orderStatus = OrderStatus.ACCEPTED;
+        await manager.save(fresh);
         await manager.save(
           manager.create(OrderStatusHistory, {
             orderId: order.id,
@@ -1358,7 +1404,10 @@ export class OrdersService {
           dto.admin_notes,
         ),
       );
-      return order;
+      // القفل والكتابة الفعلية حصلوا على fresh (نسخة مقفولة جوّه الـtransaction)، مش order —
+      // بنرجّع قراءة طازة من الـDB بدل order القديمة عشان القيمة المرجّعة تطابق الحالة الحقيقية
+      // بالظبط (نفس بَقّة "lost update on the return value" اللي docs/08 §22 بند 31-32 لقطها).
+      return (await this.orders.findOne({ where: { id: orderId } }))!;
     }
 
     // cancel_with_fee — الطلبات الكاش (مفيش فلوس اتحصّلت أصلاً) صفر رسوم دايمًا، بغض النظر عن
@@ -1369,10 +1418,11 @@ export class OrdersService {
       }
       const previousStatus = order.orderStatus;
       await this.dataSource.transaction(async (manager) => {
-        order.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
-        order.cancelledAt = new Date();
-        order.cancelledByUserId = adminUserId;
-        await manager.save(order);
+        const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
+        fresh.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
+        fresh.cancelledAt = new Date();
+        fresh.cancelledByUserId = adminUserId;
+        await manager.save(fresh);
         await manager.save(
           manager.create(OrderStatusHistory, {
             orderId: order.id,
@@ -1406,8 +1456,14 @@ export class OrdersService {
           dto.admin_notes,
         ),
       );
-      return order;
+      // القفل والكتابة الفعلية حصلوا على fresh — بنرجّع قراءة طازة من الـDB بدل order القديمة.
+      return (await this.orders.findOne({ where: { id: orderId } }))!;
     }
+
+    // إعادة تحقق تحت قفل حقيقي قبل ما نكمّل — يقفل نفس فجوة "double admin edit" اللي فرعي
+    // reschedule/cancel_with_fee (كاش) فوق اتصلحوا بيها، من غير ما نمسك القفل عبر نداء الشبكة
+    // الخارجي لـrefundOrder() تحت (نفس قاعدة المشروع: صفر قفل DB ممسوك وقت نداء خارجي).
+    await this.dataSource.transaction((manager) => this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber));
 
     // مدفوع مسبقًا — رسوم الزيارة بتتخصم من الاسترداد (مش تحصيل إضافي منفصل)، والباقي يترد
     // عبر PaymentsService.refundOrder() الموجودة بالفعل (تدعم استرداد جزئي، وبتنقل الطلب لـREFUNDED
@@ -1434,26 +1490,37 @@ export class OrdersService {
 
     // استرداد كامل (فوق) بيحوّل الطلب REFUNDED تلقائيًا جوّه refundOrder() نفسها. استرداد جزئي
     // (فيه رسوم) أو صفر استرداد (الرسوم غطّت كل المبلغ) بيسيبوا الطلب DISPUTED — لازم نقفله يدويًا هنا.
+    // الفلوس فعليًا اترجعت للعميل (refundOrder() نجحت فوق) بغض النظر عن نتيجة القفل ده — فلو إجراء
+    // تاني (أدمن تاني) قفل النزاع في نفس اللحظة، ده مش سبب نرجّع خطأ للمستخدم بعد ما الفلوس
+    // اترجعت فعلاً؛ بس تحذير في اللوج (docs/08 §22 بند 31-32، نفس مبدأ "صفر فشل صامت بس بلا تعليق العملية الحقيقية").
     const reloaded = await this.orders.findOne({ where: { id: orderId } });
     if (reloaded && reloaded.orderStatus === OrderStatus.DISPUTED) {
       const previousStatus = reloaded.orderStatus;
-      await this.dataSource.transaction(async (manager) => {
-        reloaded.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
-        reloaded.cancelledAt = new Date();
-        reloaded.cancelledByUserId = adminUserId;
-        await manager.save(reloaded);
-        await manager.save(
-          manager.create(OrderStatusHistory, {
-            orderId: reloaded.id,
-            previousStatus,
-            newStatus: OrderStatus.CANCELLED_BY_CUSTOMER,
-            changedByUserId: adminUserId,
-            changedByRole: 'admin',
-            changeSource: OrderChangeSource.ADMIN,
-            reason: dto.admin_notes,
-          }),
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, reloaded.orderNumber);
+          fresh.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
+          fresh.cancelledAt = new Date();
+          fresh.cancelledByUserId = adminUserId;
+          await manager.save(fresh);
+          await manager.save(
+            manager.create(OrderStatusHistory, {
+              orderId: reloaded.id,
+              previousStatus,
+              newStatus: OrderStatus.CANCELLED_BY_CUSTOMER,
+              changedByUserId: adminUserId,
+              changedByRole: 'admin',
+              changeSource: OrderChangeSource.ADMIN,
+              reason: dto.admin_notes,
+            }),
+          );
+        });
+      } catch (err) {
+        this.logger.warn(
+          `resolveFailedVisit: الاسترداد نجح للطلب ${orderId} بس تقفيل الحالة فشل (تعارض مع إجراء تاني على الأرجح) — ${err instanceof Error ? err.message : err}`,
         );
-      });
+        return (await this.orders.findOne({ where: { id: orderId } }))!;
+      }
       this.events.emit(
         ORDER_STATUS_CHANGED_EVENT,
         new OrderStatusChangedEvent(
@@ -1588,10 +1655,14 @@ export class OrdersService {
     }
     const previousStatus = order.orderStatus;
     await this.dataSource.transaction(async (manager) => {
-      order.orderStatus = OrderStatus.WORK_COMPLETED;
-      order.customerCashConfirmedAt = null;
-      order.technicianCashNotReceivedAt = null;
-      await manager.save(order);
+      const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
+      if (!fresh.technicianCashNotReceivedAt) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب ده مش نزاع تسليم كاش قيد المراجعة', HttpStatus.CONFLICT);
+      }
+      fresh.orderStatus = OrderStatus.WORK_COMPLETED;
+      fresh.customerCashConfirmedAt = null;
+      fresh.technicianCashNotReceivedAt = null;
+      await manager.save(fresh);
       await manager.save(
         manager.create(OrderStatusHistory, {
           orderId: order.id,
@@ -1625,6 +1696,8 @@ export class OrdersService {
         dto.admin_notes,
       ),
     );
-    return order;
+    // القفل والكتابة الفعلية حصلوا على fresh (جوّه lockDisputedOrderForUpdate) — بنرجّع قراءة
+    // طازة من الـDB بدل order القديمة عشان القيمة المرجّعة تطابق الحالة الحقيقية بالظبط.
+    return (await this.orders.findOne({ where: { id: orderId } }))!;
   }
 }

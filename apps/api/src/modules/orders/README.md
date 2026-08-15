@@ -595,3 +595,28 @@ idempotent؛ بلاغ الفني بلا تأكيد عميل سابق → `DISPUT
 `null`، وبعدها `collectCash()` عادي بينجح فعليًا (إثبات إن الرجوع حقيقي مش شكلي)؛ `confirm_received`
 يقفل الطلب `completed` بـ`Payment.collectedByUserId` = الأدمن؛ رفض حل طلب مش نزاع كاش. 48 suite /
 265 اختبار API عدّوا كاملين، `tsc`/`nest build`/`flutter analyze` (التطبيقين) نضيفين.
+
+## بَقّتين تزامن حقيقيتين اتلقطوا واتصلحوا — "double admin edit" + سباق reschedule()/depart() (docs/08 §22 بند 31-32، 2026-08-15)
+
+`resolveFailedVisit()`/`resolveCashHandoverDispute()` (بندين 3-6/13-14) كانوا بيقروا الطلب
+بـ`findOne()` عادي من غير قفل، وبعدين يكتبوا نفس الـobject القديم جوّه transaction — لو أدمنين
+حلّوا نفس النزاع بالتزامن، الكتابة اللي بتكمل تانية كانت بتغلب الأولى بحالتها القديمة كاملة (lost
+update)، ممكن تسيب طلب مسوّى ماليًا عالق بحالة غلط. الإصلاح: `lockDisputedOrderForUpdate()` helper
+جديد (`pessimistic_write` + إعادة تحقق `DISPUTED` تحت القفل نفسه) — نفس نمط `adminConfirmCashReceived()`/
+`refundOrder()` الموجود بالفعل، مطبّق على الفروع التلاتة (`reschedule`, `cancel_with_fee` كاش،
+`retry`) زائد إعادة تحقق مقفولة قصيرة قبل نداء `refundOrder()` الخارجي (بلا ما نمسك القفل عبر
+الشبكة). نفس فئة البَقّة اتلقطت في `reschedule()` (بند 9-12) — كانت بتكتب `scheduledAt` فوق أي
+تغيير حالة حصل بالتزامن (لو الفني `depart()` في نفس اللحظة، الطلب كان يرجع "accepted" كذب رغم إنه
+فعليًا في الطريق) — نفس الإصلاح، `transitionAsTechnician()` (مسار pre-existing مختبر بكثافة)
+اتسابت زي ما هي عمدًا (نفس منطق `collectCash()`).
+
+**بَقّة تانية اتلقطت أثناء إصلاح الأولى**: بعد إضافة القفل، الكتابة الحقيقية بقت على نسخة `fresh`
+مش على `order` (القيمة المرجّعة للكولر) — الـDB كانت بتتصلح صح بس القيمة المرجّعة فضلت قديمة (كشفتها
+اختبارات موجودة فشلت فورًا). الإصلاح: رجوع لقراءة طازة من الـDB بدل الاعتماد على object قديم في
+الذاكرة، نفس نمط `CONFIRM_RECEIVED` الموجود بالفعل.
+
+اتأكد بـ7 اختبار حي جديد (`s22-cross-operation-concurrency.spec.ts`): "double admin edit" على نزاع
+زيارة فاشلة (`reschedule` ضد `cancel_with_fee` بالتزامن) وعلى نزاع كاش (`retry` ضد `confirm_received`
+بالتزامن) — واحد بس ينجح في الاتنين، صفر تسوية يتيمة؛ سباق `reschedule()` ضد `depart()`؛ 4 اختبار
+IDOR حي (عميل/فني تاني مايقدروش يوصلوا لطلب مش بتاعهم عبر الـendpoints الجديدة). 49 suite / 274
+اختبار API عدّوا كاملين، `tsc`/`nest build` نضيفين.
