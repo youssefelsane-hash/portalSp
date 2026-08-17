@@ -14,6 +14,25 @@ const MIME_TO_FORMAT: Record<string, DetectedFileFormat> = {
   'application/pdf': 'pdf',
 };
 
+const FORMAT_TO_EXTENSION: Record<DetectedFileFormat, string> = {
+  png: '.png',
+  jpeg: '.jpg',
+  webp: '.webp',
+  pdf: '.pdf',
+};
+
+/**
+ * Script 2 Part G (finding #36) — الامتداد المُخزَّن مع المفتاح كان بيتاخد من `file.originalname`
+ * مباشرة (`extname()`)، رغم إن magic bytes بتتحقق قبله. ملف حقيقي محتواه PNG باسم `x.html` كان
+ * هيتخزّن بمفتاح ينتهي بـ`.html` رغم إن `assertFileSignatureMatches` عدّاه كـPNG صحيح. الامتداد
+ * دلوقتي مُشتَق من نفس magic-byte detection الموثوق فيه، مش من اسم الملف المُعلَن — لازم يتنادَى
+ * بعد `assertFileSignatureMatches` (أو مع نفس buffer) عشان يضمن تطابق فعلي.
+ */
+export function safeExtensionForFile(buffer: Buffer): string {
+  const format = detectActualFileFormat(buffer);
+  return format ? FORMAT_TO_EXTENSION[format] : '';
+}
+
 export function detectActualFileFormat(buffer: Buffer): DetectedFileFormat | null {
   if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     return 'png';

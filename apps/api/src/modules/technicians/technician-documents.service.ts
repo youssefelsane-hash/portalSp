@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UploadDocumentDto } from './dto/upload-document.dto';
@@ -27,7 +27,7 @@ export class TechnicianDocumentsService {
   async upload(userId: string, dto: UploadDocumentDto, file: IncomingFile): Promise<TechnicianDocument> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
 
-    const key = `technician-documents/${profile.id}/${randomUUID()}${extname(file.originalname)}`;
+    const key = `technician-documents/${profile.id}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
     const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
 
     const document = this.documents.create({

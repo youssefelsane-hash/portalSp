@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -38,7 +38,7 @@ export class OrderMediaService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
 
-    const key = `orders/${orderId}/${randomUUID()}${extname(file.originalname)}`;
+    const key = `orders/${orderId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
     const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
 
     const media = this.orderMedia.create({

@@ -2,7 +2,7 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
@@ -32,7 +32,7 @@ export class TechnicianCertificatesService {
       );
     }
 
-    const key = `technician-certificates/${technicianId}/${randomUUID()}${extname(file.originalname)}`;
+    const key = `technician-certificates/${technicianId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
     const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
 
     const certificate = this.certificates.create({
