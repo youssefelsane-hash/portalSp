@@ -109,6 +109,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _durationError;
   Timer? _durationDebounce;
 
+  // Script 2 Part I (findings #46/#47/#48) — فاضية لحد ما /payment-channels يرد؛ زرار "ادفع بعد
+  // الخدمة" (value: null) دايمًا ظاهر بغض النظر عن القيمة دي لأنه مش بيعتمد على أي provider خارجي.
+  Set<String> _availablePaymentMethods = {};
+
   @override
   void initState() {
     super.initState();
@@ -125,6 +129,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _loadStandardData();
     }
     if (_selectedAddress != null) _refreshPreview();
+    _loadAvailablePaymentMethods();
+  }
+
+  // فشل الجلب هنا مش خطير — بيسيب _availablePaymentMethods فاضية، يعني خياري الدفع الإلكتروني
+  // مش هيظهروا (بدل ما يظهروا ويترفضوا لاحقًا)، و"ادفع بعد الخدمة" يفضل شغال عادي دايمًا.
+  Future<void> _loadAvailablePaymentMethods() async {
+    try {
+      final methods = await _repository.fetchAvailablePaymentMethods();
+      if (!mounted) return;
+      setState(() {
+        _availablePaymentMethods = methods;
+        // نادرة (نفس finding #48: البوابة اتقفلت والعميل الشاشة فاتحة قدامه) — نرجّع افتراضي آمن.
+        if (_selectedPaymentMethod != null && !methods.contains(_selectedPaymentMethod)) {
+          _selectedPaymentMethod = null;
+        }
+      });
+    } catch (_) {
+      // صامت عمدًا — نفس فلسفة كل مكان تاني في المشروع: فشل خدمة/endpoint ثانوي ميوقفش الشاشة.
+    }
   }
 
   @override
@@ -821,20 +844,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     title: const Text('ادفع بعد الخدمة (زي العادة)'),
                     subtitle: const Text('كاش أو من المحفظة بعد ما الفني يخلّص الشغل'),
                   ),
-                  RadioListTile<String?>(
-                    value: 'card',
-                    groupValue: _selectedPaymentMethod,
-                    onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                    title: const Text('ادفع الآن بالبطاقة أو محفظة إلكترونية'),
-                    subtitle: const Text('يبدأ البحث عن فني فورًا بعد ما الدفع يتأكّد'),
-                  ),
-                  RadioListTile<String?>(
-                    value: 'instapay',
-                    groupValue: _selectedPaymentMethod,
-                    onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                    title: const Text('ادفع الآن بـ InstaPay'),
-                    subtitle: const Text('تحويل بكود مرجعي، تأكيد الفريق قد ياخد وقت أطول'),
-                  ),
+                  if (_availablePaymentMethods.contains('card'))
+                    RadioListTile<String?>(
+                      value: 'card',
+                      groupValue: _selectedPaymentMethod,
+                      onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+                      title: const Text('ادفع الآن بالبطاقة أو محفظة إلكترونية'),
+                      subtitle: const Text('يبدأ البحث عن فني فورًا بعد ما الدفع يتأكّد'),
+                    ),
+                  if (_availablePaymentMethods.contains('instapay'))
+                    RadioListTile<String?>(
+                      value: 'instapay',
+                      groupValue: _selectedPaymentMethod,
+                      onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+                      title: const Text('ادفع الآن بـ InstaPay'),
+                      subtitle: const Text('تحويل بكود مرجعي، تأكيد الفريق قد ياخد وقت أطول'),
+                    ),
                 ],
               ),
             ),

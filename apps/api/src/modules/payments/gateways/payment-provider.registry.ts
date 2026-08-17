@@ -54,4 +54,16 @@ export class PaymentProviderRegistry {
     }
     return provider;
   }
+
+  /**
+   * Script 2 Part I (findings #46/#47) — العميل كان بيشوف كل طرق الدفع في التطبيق بغض النظر عن
+   * إعداد الباك-إند الفعلي (Paymob/Fawry ممكن يكونوا مش مُفعّلين)، فيختار طريقة الباك-إند
+   * هيرفضها في آخر خطوة. صفر أسرار/إعدادات بترجع هنا عمدًا — isConfigured بس (boolean).
+   */
+  listAll(): { method: PaymentMethod; isConfigured: boolean }[] {
+    return Array.from(this.byMethod.entries()).map(([method, provider]) => ({
+      method,
+      isConfigured: provider.isConfigured,
+    }));
+  }
 }

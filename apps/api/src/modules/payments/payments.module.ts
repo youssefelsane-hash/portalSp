@@ -12,6 +12,7 @@ import { OrderStatusHistory } from '../orders/entities/order-status-history.enti
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminWalletController } from './admin-wallet.controller';
+import { PaymentChannelsController } from './payment-channels.controller';
 import { PaymentsController } from './payments.controller';
 import { SavedPaymentMethodsController } from './saved-payment-methods.controller';
 import { TechnicianPaymentsController } from './technician-payments.controller';
@@ -69,6 +70,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
   controllers: [
     WalletController,
     PaymentsController,
+    PaymentChannelsController,
     SavedPaymentMethodsController,
     TechnicianPaymentsController,
     AdminPaymentsController,

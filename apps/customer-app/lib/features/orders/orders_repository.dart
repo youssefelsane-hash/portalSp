@@ -24,6 +24,14 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
+  // Script 2 Part I (findings #46/#47/#48) — كانت شاشة اختيار طريقة الدفع بتعرض 'card'/'instapay'
+  // دايمًا بغض النظر عن كون Paymob/InstaPay مُعدّين في الباك-إند فعليًا، فالعميل كان يقدر يختار
+  // طريقة الباك-إند هيرفضها بعد ما البحث عن فني يبدأ. بيرجّع set بالطرق المتاحة فعليًا بس.
+  Future<Set<String>> fetchAvailablePaymentMethods() async {
+    final items = await auth.authedRequestList('/payment-channels');
+    return items.where((item) => item['is_available'] == true).map((item) => item['method'] as String).toSet();
+  }
+
   Future<Order> create({
     required String serviceId,
     required String addressId,
