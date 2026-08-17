@@ -19,7 +19,7 @@ import {
 import { DeviceMetadataDto } from './dto/device-metadata.dto';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { User } from './entities/user.entity';
+import { User, UserType } from './entities/user.entity';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -28,6 +28,10 @@ import { MfaPolicyService } from './mfa-policy.service';
 import { WebAuthnService } from './webauthn.service';
 import { RecoveryVerifyDto } from './dto/recovery-verify.dto';
 import { NotificationRoutingService } from '../notifications/notification-routing.service';
+import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { DomesticWorkerProfile } from '../domestic-workers/entities/domestic-worker-profile.entity';
+import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 
 export interface TokenPair {
   access_token: string;
@@ -81,17 +85,30 @@ export class AuthService {
     const expiryMinutes = this.config.get<number>('otp.expiryMinutes')!;
     const maxAttempts = this.config.get<number>('otp.maxAttempts')!;
 
-    const otp = this.otpCodes.create({
-      phoneNumber: dto.phone_number,
-      codeHash,
-      purpose: dto.purpose,
-      attemptsCount: 0,
-      maxAttempts,
-      isUsed: false,
-      expiresAt: new Date(Date.now() + expiryMinutes * 60_000),
-      requestIp,
+    await this.dataSource.transaction(async (manager) => {
+      // Serialize resends for the same challenge so two concurrent requests cannot
+      // both leave a valid code behind. Only the newest issued code remains usable.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+        dto.phone_number,
+        dto.purpose,
+      ]);
+      const otpCodes = manager.getRepository(OtpCode);
+      await otpCodes.update(
+        { phoneNumber: dto.phone_number, purpose: dto.purpose, isUsed: false },
+        { isUsed: true, usedAt: new Date() },
+      );
+      const otp = otpCodes.create({
+        phoneNumber: dto.phone_number,
+        codeHash,
+        purpose: dto.purpose,
+        attemptsCount: 0,
+        maxAttempts,
+        isUsed: false,
+        expiresAt: new Date(Date.now() + expiryMinutes * 60_000),
+        requestIp,
+      });
+      await otpCodes.save(otp);
     });
-    await this.otpCodes.save(otp);
 
     // بَقّة أمنية حقيقية اتصلحت (مراجعة أمان شاملة 2026-08-13، P0-4): اللوج ده كان بيسجّل الكود
     // نفسه دايماً بلا شرط — مقبول تمامًا للتطوير/الاختبار المحلي (نفس فلسفة كل تكامل خارجي تاني
@@ -134,82 +151,110 @@ export class AuthService {
 
   /** بيتحقق من الكود، يزوّد العدّاد، ويرجّع صف الـ OTP المطابق أو يرمي AUTH_003/AUTH_004. */
   private async consumeOtp(phoneNumber: string, code: string, purpose: OtpPurpose): Promise<OtpCode> {
-    const otp = await this.otpCodes.findOne({
-      where: { phoneNumber, purpose, isUsed: false },
-      order: { createdAt: 'DESC' },
-    });
+    const result = await this.dataSource.transaction((manager) =>
+      this.consumeOtpLocked(phoneNumber, code, purpose, manager),
+    );
+    if (result instanceof ApiException) throw result;
+    return result;
+  }
+
+  /** Expected validation failures are returned, not thrown, so attempt increments can commit. */
+  private async consumeOtpLocked(
+    phoneNumber: string,
+    code: string,
+    purpose: OtpPurpose,
+    manager: EntityManager,
+  ): Promise<OtpCode | ApiException> {
+    const otp = await manager
+      .createQueryBuilder(OtpCode, 'otp')
+      .setLock('pessimistic_write')
+      .where('otp.phoneNumber = :phoneNumber', { phoneNumber })
+      .andWhere('otp.purpose = :purpose', { purpose })
+      .andWhere('otp.isUsed = false')
+      .orderBy('otp.createdAt', 'DESC')
+      .getOne();
 
     if (!otp || otp.expiresAt.getTime() < Date.now()) {
-      throw new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح أو منتهي', HttpStatus.BAD_REQUEST);
+      return new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح أو منتهي', HttpStatus.BAD_REQUEST);
     }
 
     if (otp.attemptsCount >= otp.maxAttempts) {
-      throw new ApiException(ErrorCode.AUTH_004, 'تجاوزت عدد المحاولات، اطلب كود جديد', HttpStatus.TOO_MANY_REQUESTS);
+      return new ApiException(
+        ErrorCode.AUTH_004,
+        'تجاوزت عدد المحاولات، اطلب كود جديد',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     const isMatch = await bcrypt.compare(code, otp.codeHash);
     if (!isMatch) {
       otp.attemptsCount += 1;
-      await this.otpCodes.save(otp);
-      throw new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح', HttpStatus.BAD_REQUEST);
+      await manager.save(otp);
+      return new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح', HttpStatus.BAD_REQUEST);
     }
 
     otp.isUsed = true;
     otp.usedAt = new Date();
-    await this.otpCodes.save(otp);
+    await manager.save(otp);
     return otp;
   }
 
   // ── تسجيل / دخول ─────────────────────────────────────────────────────
 
-  private async generateUniqueReferralCode(): Promise<string> {
+  private async generateUniqueReferralCode(manager?: EntityManager): Promise<string> {
+    const users = manager ? manager.getRepository(User) : this.users;
     for (let attempt = 0; attempt < MAX_REFERRAL_CODE_ATTEMPTS; attempt++) {
       let code = '';
       const bytes = randomBytes(REFERRAL_CODE_LENGTH);
       for (let i = 0; i < REFERRAL_CODE_LENGTH; i++) {
         code += REFERRAL_CODE_ALPHABET[bytes[i] % REFERRAL_CODE_ALPHABET.length];
       }
-      const existing = await this.users.findOne({ where: { referralCode: code } });
+      const existing = await users.findOne({ where: { referralCode: code } });
       if (!existing) return code;
     }
     throw new Error('فشل توليد كود ترشيح فريد بعد عدة محاولات');
   }
 
   async register(dto: RegisterDto, ip: string | null): Promise<TokenPair> {
-    await this.consumeOtp(dto.phone_number, dto.otp_code, OtpPurpose.REGISTER);
+    const registration = await this.dataSource.transaction(async (manager) => {
+      const otp = await this.consumeOtpLocked(dto.phone_number, dto.otp_code, OtpPurpose.REGISTER, manager);
+      if (otp instanceof ApiException) return { error: otp };
 
-    const existing = await this.users.findOne({ where: { phoneNumber: dto.phone_number } });
-    if (existing) {
-      throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مسجل قبل كده، سجّل دخول بدل كده', HttpStatus.CONFLICT);
-    }
-
-    // نظام الترشيحات: كود الترشيح عمود على users نفسها فبنتعامل معاه هنا مباشرة (حدود الموديولات)،
-    // إنشاء صف referrals المعلّق بيحصل في referrals module لما يستقبل REFERRAL_REGISTERED_EVENT تحت.
-    let referrer: User | null = null;
-    if (dto.referral_code) {
-      referrer = await this.users.findOne({ where: { referralCode: dto.referral_code.toUpperCase() } });
-      if (!referrer) {
-        throw new ApiException(ErrorCode.VAL_001, 'كود الترشيح غير صحيح', HttpStatus.BAD_REQUEST);
+      const users = manager.getRepository(User);
+      const existing = await users.findOne({ where: { phoneNumber: dto.phone_number } });
+      if (existing) {
+        throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مسجل قبل كده، سجّل دخول بدل كده', HttpStatus.CONFLICT);
       }
-    }
-    const referralCode = await this.generateUniqueReferralCode();
 
-    // ملاحظة حدود الموديول: auth بيتحكم في users بس. إنشاء customer_profiles/technician_profiles
-    // مسؤولية موديولات customers/technicians (بيتعملوا على حدث "user.registered" لما يتبنوا).
-    const user = this.users.create({
-      phoneNumber: dto.phone_number,
-      phoneVerifiedAt: new Date(),
-      fullName: dto.full_name,
-      userType: dto.user_type,
-      preferredLanguage: 'ar',
-      isActive: true,
-      isBlocked: false,
-      referralCode,
-      referredByUserId: referrer?.id ?? null,
+      let referrer: User | null = null;
+      if (dto.referral_code) {
+        referrer = await users.findOne({ where: { referralCode: dto.referral_code.toUpperCase() } });
+        if (!referrer) {
+          throw new ApiException(ErrorCode.VAL_001, 'كود الترشيح غير صحيح', HttpStatus.BAD_REQUEST);
+        }
+      }
+      const referralCode = await this.generateUniqueReferralCode(manager);
+      const user = users.create({
+        phoneNumber: dto.phone_number,
+        phoneVerifiedAt: new Date(),
+        fullName: dto.full_name,
+        userType: dto.user_type,
+        preferredLanguage: 'ar',
+        isActive: true,
+        isBlocked: false,
+        referralCode,
+        referredByUserId: referrer?.id ?? null,
+      });
+      await users.save(user);
+      await this.provisionAccountBaseline(user, manager);
+      const tokens = await this.issueTokenPair(user, ip, ['otp'], undefined, manager);
+      return { user, referrer, tokens };
     });
-    await this.users.save(user);
+    if ('error' in registration) throw registration.error;
+    const { user, referrer, tokens } = registration;
 
-    // async مقصودة: مفيش استنى — لو listener فشل في إنشاء البروفايل، ميقفلش تسجيل المستخدم نفسه
+    // Baseline records are already durable. Existing listeners remain idempotent compatibility hooks;
+    // secondary welcome/referral effects are emitted only after the account transaction commits.
     this.events.emit(
       USER_REGISTERED_EVENT,
       new UserRegisteredEvent(user.id, user.userType, user.phoneNumber, user.fullName),
@@ -226,7 +271,34 @@ export class AuthService {
       );
     }
 
-    return this.issueTokenPair(user, ip, ['otp']);
+    return tokens;
+  }
+
+  private async provisionAccountBaseline(user: User, manager: EntityManager): Promise<void> {
+    let walletOwnerType: WalletOwnerType;
+    if (user.userType === UserType.CUSTOMER) {
+      await manager.getRepository(CustomerProfile).save({ userId: user.id });
+      walletOwnerType = WalletOwnerType.CUSTOMER;
+    } else if (user.userType === UserType.TECHNICIAN) {
+      const [{ next_technician_code: technicianCode }] = await manager.query<{ next_technician_code: string }[]>(
+        'SELECT next_technician_code()',
+      );
+      await manager.getRepository(TechnicianProfile).save({ userId: user.id, technicianCode });
+      walletOwnerType = WalletOwnerType.TECHNICIAN;
+    } else {
+      const [{ next_human_readable_number: workerCode }] = await manager.query<
+        { next_human_readable_number: string }[]
+      >("SELECT next_human_readable_number('DW')");
+      await manager.getRepository(DomesticWorkerProfile).save({ userId: user.id, workerCode });
+      walletOwnerType = WalletOwnerType.DOMESTIC_WORKER;
+    }
+    await manager.getRepository(Wallet).save({ ownerUserId: user.id, ownerType: walletOwnerType });
+  }
+
+  private assertUserAvailable(user: User): void {
+    if (!user.isActive || user.isBlocked) {
+      throw new ApiException(ErrorCode.AUTH_001, user.blockedReason ?? 'الحساب غير متاح', HttpStatus.FORBIDDEN);
+    }
   }
 
   async login(dto: VerifyOtpDto, ip: string | null): Promise<LoginResult> {
@@ -236,9 +308,7 @@ export class AuthService {
     if (!user) {
       throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مش مسجل، سجّل حساب جديد الأول', HttpStatus.NOT_FOUND);
     }
-    if (user.isBlocked) {
-      throw new ApiException(ErrorCode.AUTH_001, user.blockedReason ?? 'حسابك موقوف', HttpStatus.FORBIDDEN);
-    }
+    this.assertUserAvailable(user);
 
     user.lastLoginAt = new Date();
     user.lastLoginIp = ip;
@@ -282,7 +352,11 @@ export class AuthService {
 
   /** بتتنادى من WebAuthnController بعد ما ceremony الدخول (OTP+Passkey) تنجح فعليًا. */
   async completeMfaLogin(userId: string, ip: string | null, device?: DeviceMetadataDto): Promise<TokenPair> {
-    const user = await this.users.findOneOrFail({ where: { id: userId } });
+    const user = await this.users.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
+    }
+    this.assertUserAvailable(user);
     return this.issueTokenPair(user, ip, ['otp', 'webauthn'], device);
   }
 
@@ -292,9 +366,7 @@ export class AuthService {
     if (!user) {
       throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
     }
-    if (user.isBlocked) {
-      throw new ApiException(ErrorCode.AUTH_001, user.blockedReason ?? 'حسابك موقوف', HttpStatus.FORBIDDEN);
-    }
+    this.assertUserAvailable(user);
     user.lastLoginAt = new Date();
     user.lastLoginIp = ip;
     await this.users.save(user);
@@ -315,9 +387,7 @@ export class AuthService {
     if (!user) {
       throw new ApiException(ErrorCode.VAL_001, 'الرقم ده مش مسجل', HttpStatus.NOT_FOUND);
     }
-    if (user.isBlocked) {
-      throw new ApiException(ErrorCode.AUTH_001, user.blockedReason ?? 'حسابك موقوف', HttpStatus.FORBIDDEN);
-    }
+    this.assertUserAvailable(user);
 
     const recoveryValid = await this.webAuthn.consumeRecoveryCode(user.id, dto.recovery_code);
     if (!recoveryValid) {
@@ -423,7 +493,7 @@ export class AuthService {
       }
 
       const user = await manager.findOne(User, { where: { id: existing.userId } });
-      if (!user || user.isBlocked) {
+      if (!user || user.isBlocked || !user.isActive) {
         throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح', HttpStatus.UNAUTHORIZED);
       }
 

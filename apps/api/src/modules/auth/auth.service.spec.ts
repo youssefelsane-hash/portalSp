@@ -13,6 +13,10 @@ import { User, UserType } from './entities/user.entity';
 import { MfaPolicyService } from './mfa-policy.service';
 import { NotificationRoutingService } from '../notifications/notification-routing.service';
 import { WebAuthnService } from './webauthn.service';
+import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { DomesticWorkerProfile } from '../domestic-workers/entities/domestic-worker-profile.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 
 // ريبوزيتوري وهمي في الذاكرة بديل TypeORM — كفاية عشان نختبر منطق auth.service لوحده
 class FakeRepository<T extends { id?: string }> {
@@ -61,7 +65,15 @@ class FakeRepository<T extends { id?: string }> {
 // manager يقدر يخدم نفس النداءات (createQueryBuilder/update/findOne/save/getRepository) بالظبط
 // اللي auth.service.ts بينادّيها. مش محاكاة TypeORM عامة — مبنية على نفس نداءات الكود الفعلي بس،
 // زي فلسفة FakeRepository فوق بالحرف.
-function createFakeDataSource(users: FakeRepository<User>, refreshTokens: FakeRepository<RefreshToken>): DataSource {
+function createFakeDataSource(
+  users: FakeRepository<User>,
+  otpCodes: FakeRepository<OtpCode>,
+  refreshTokens: FakeRepository<RefreshToken>,
+): DataSource {
+  const customerProfiles = new FakeRepository<CustomerProfile>();
+  const technicianProfiles = new FakeRepository<TechnicianProfile>();
+  const domesticWorkerProfiles = new FakeRepository<DomesticWorkerProfile>();
+  const wallets = new FakeRepository<Wallet>();
   const manager = {
     createQueryBuilder: (entity: unknown) => {
       let whereParams: Record<string, unknown> = {};
@@ -71,9 +83,28 @@ function createFakeDataSource(users: FakeRepository<User>, refreshTokens: FakeRe
           whereParams = params;
           return qb;
         },
+        andWhere: (_cond: string, params?: Record<string, unknown>) => {
+          Object.assign(whereParams, params);
+          return qb;
+        },
+        orderBy: () => qb,
         getOne: async () => {
-          if (entity !== RefreshToken) return null;
-          return refreshTokens.rows.find((r) => r.tokenHash === whereParams.tokenHash) ?? null;
+          if (entity === RefreshToken) {
+            return refreshTokens.rows.find((r) => r.tokenHash === whereParams.tokenHash) ?? null;
+          }
+          if (entity === OtpCode) {
+            return (
+              otpCodes.rows
+                .filter(
+                  (otp) =>
+                    otp.phoneNumber === whereParams.phoneNumber &&
+                    otp.purpose === whereParams.purpose &&
+                    !otp.isUsed,
+                )
+                .at(-1) ?? null
+            );
+          }
+          return null;
         },
       };
       return qb;
@@ -85,8 +116,22 @@ function createFakeDataSource(users: FakeRepository<User>, refreshTokens: FakeRe
       if (entity === User) return users.findOne(options as { where: Partial<User> });
       return null;
     },
-    save: async (entity: RefreshToken) => refreshTokens.save(entity),
-    getRepository: (entity: unknown) => (entity === RefreshToken ? refreshTokens : users),
+    save: async (entity: RefreshToken | OtpCode) =>
+      'tokenHash' in entity ? refreshTokens.save(entity) : otpCodes.save(entity),
+    query: async (sql: string) => {
+      if (sql.includes('next_technician_code')) return [{ next_technician_code: 'TECH-TEST-1' }];
+      if (sql.includes('next_human_readable_number')) return [{ next_human_readable_number: 'DW-TEST-1' }];
+      return [];
+    },
+    getRepository: (entity: unknown) => {
+      if (entity === RefreshToken) return refreshTokens;
+      if (entity === OtpCode) return otpCodes;
+      if (entity === CustomerProfile) return customerProfiles;
+      if (entity === TechnicianProfile) return technicianProfiles;
+      if (entity === DomesticWorkerProfile) return domesticWorkerProfiles;
+      if (entity === Wallet) return wallets;
+      return users;
+    },
   };
   return { transaction: async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager) } as unknown as DataSource;
 }
@@ -131,7 +176,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: users },
         { provide: getRepositoryToken(OtpCode), useValue: otpCodes },
         { provide: getRepositoryToken(RefreshToken), useValue: refreshTokens },
-        { provide: DataSource, useValue: createFakeDataSource(users, refreshTokens) },
+        { provide: DataSource, useValue: createFakeDataSource(users, otpCodes, refreshTokens) },
         // MFA (ADR-0011) — الاختبارات هنا كلها لحسابات عادية (مش High-Privilege)، فـ
         // userRequiresMfa بترجع false دايمًا وlogin() بيكمل مسار OTP العادي القديم زي ما هو.
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
@@ -246,7 +291,10 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: prodUsers },
         { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
         { provide: getRepositoryToken(RefreshToken), useValue: prodRefreshTokens },
-        { provide: DataSource, useValue: createFakeDataSource(prodUsers, prodRefreshTokens) },
+        {
+          provide: DataSource,
+          useValue: createFakeDataSource(prodUsers, new FakeRepository<OtpCode>(), prodRefreshTokens),
+        },
         { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
         { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
         { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
