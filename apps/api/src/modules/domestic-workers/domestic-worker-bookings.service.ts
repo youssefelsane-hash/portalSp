@@ -1,9 +1,10 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, LessThanOrEqual, Repository } from 'typeorm';
+import { DataSource, EntityManager, LessThanOrEqual, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
+import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
@@ -154,24 +155,41 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       throw new ApiException(ErrorCode.VAL_001, 'الحجز مش في حالة انتظار تأكيد', HttpStatus.CONFLICT);
     }
 
-    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(booking.customerId);
-    if (booking.bookingType === DomesticWorkerBookingType.HOURLY) {
-      // بالساعة: تحصيل العميل بس هنا — أرباح الشغالة لسه معندهاش استحقاق قبل ما تخلّص الزيارة فعليًا.
-      await this.chargeCustomer(booking, customerProfile.userId);
-    } else {
-      // شهري: مفيش إشارة "الشهر اتخدم" منفصلة، فالاستحقاق بيتسجّل pending هنا (مش balanceCents مباشرة).
-      await this.chargeCustomerAndCreatePendingEarning(booking, customerProfile.userId, worker.userId);
-    }
+    const split = await this.commissionSplit(booking.priceCents);
+    return this.dataSource.transaction(async (manager) => {
+      const lockedBooking = await manager
+        .createQueryBuilder(DomesticWorkerBooking, 'booking')
+        .setLock('pessimistic_write')
+        .where('booking.id = :bookingId', { bookingId })
+        .getOne();
+      if (!lockedBooking || lockedBooking.status !== DomesticWorkerBookingStatus.PENDING_CONFIRMATION) {
+        throw new ApiException(ErrorCode.VAL_001, 'الحجز مش في حالة انتظار تأكيد', HttpStatus.CONFLICT);
+      }
+      const customerProfile = await manager.getRepository(CustomerProfile).findOne({ where: { id: lockedBooking.customerId } });
+      if (!customerProfile) {
+        throw new ApiException(ErrorCode.VAL_001, 'ملف العميل غير موجود', HttpStatus.NOT_FOUND);
+      }
 
-    const now = new Date();
-    booking.status = booking.bookingType === DomesticWorkerBookingType.HOURLY
-      ? DomesticWorkerBookingStatus.CONFIRMED
-      : DomesticWorkerBookingStatus.ACTIVE;
-    booking.confirmedAt = now;
-    if (booking.bookingType === DomesticWorkerBookingType.MONTHLY_LIVE_IN) {
-      booking.currentPeriodEndAt = addMonths(booking.scheduledAt.getTime() > now.getTime() ? booking.scheduledAt : now, 1);
-    }
-    return this.bookings.save(booking);
+      const now = new Date();
+      if (lockedBooking.bookingType === DomesticWorkerBookingType.HOURLY) {
+        await this.chargeCustomerInTransaction(manager, lockedBooking, customerProfile.userId);
+        lockedBooking.status = DomesticWorkerBookingStatus.CONFIRMED;
+      } else {
+        const periodEnd = addMonths(lockedBooking.scheduledAt.getTime() > now.getTime() ? lockedBooking.scheduledAt : now, 1);
+        await this.chargeCustomerAndCreatePendingEarningInTransaction(
+          manager,
+          lockedBooking,
+          customerProfile.userId,
+          worker.userId,
+          split.workerEarningCents,
+          `monthly:${periodEnd.toISOString()}`,
+        );
+        lockedBooking.status = DomesticWorkerBookingStatus.ACTIVE;
+        lockedBooking.currentPeriodEndAt = periodEnd;
+      }
+      lockedBooking.confirmedAt = now;
+      return manager.save(lockedBooking);
+    });
   }
 
   private async commissionSplit(priceCents: number): Promise<{ platformCommissionCents: number; workerEarningCents: number }> {
@@ -181,23 +199,24 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
   }
 
   /** خصم من محفظة العميل لمحفظة المنصة بس — صفر تحويل لأي شغالة هنا. */
-  private async chargeCustomer(booking: DomesticWorkerBooking, customerUserId: string): Promise<void> {
-    const customerWallet = await this.walletsService.getOrCreateWallet(customerUserId, WalletOwnerType.CUSTOMER);
-    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-
-    await this.dataSource.transaction((manager) =>
-      this.walletsService.doubleEntry(
-        {
-          fromWalletId: customerWallet.id,
-          toWalletId: platformWallet.id,
-          amountCents: booking.priceCents,
-          transactionType: WalletTxType.ADJUSTMENT,
-          referenceType: 'domestic_worker_booking',
-          referenceId: booking.id,
-          descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
-        },
-        manager,
-      ),
+  private async chargeCustomerInTransaction(
+    manager: EntityManager,
+    booking: DomesticWorkerBooking,
+    customerUserId: string,
+  ): Promise<void> {
+    const customerWallet = await this.walletsService.getOrCreateWallet(customerUserId, WalletOwnerType.CUSTOMER, manager);
+    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+    await this.walletsService.doubleEntry(
+      {
+        fromWalletId: customerWallet.id,
+        toWalletId: platformWallet.id,
+        amountCents: booking.priceCents,
+        transactionType: WalletTxType.ADJUSTMENT,
+        referenceType: 'domestic_worker_booking',
+        referenceId: booking.id,
+        descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
+      },
+      manager,
     );
   }
 
@@ -206,36 +225,26 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
    * القديمة — الاتنين لازم يفشلوا أو ينجحوا مع بعض، مش نداءين منفصلين). صفر تحويل مباشر لمحفظة
    * الشغالة هنا — بس صف طابور موافقة، راجع docs/08 §25.1.
    */
-  private async chargeCustomerAndCreatePendingEarning(booking: DomesticWorkerBooking, customerUserId: string, workerUserId: string): Promise<void> {
-    const { workerEarningCents } = await this.commissionSplit(booking.priceCents);
-    const customerWallet = await this.walletsService.getOrCreateWallet(customerUserId, WalletOwnerType.CUSTOMER);
-    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-
-    await this.dataSource.transaction(async (manager) => {
-      await this.walletsService.doubleEntry(
-        {
-          fromWalletId: customerWallet.id,
-          toWalletId: platformWallet.id,
-          amountCents: booking.priceCents,
-          transactionType: WalletTxType.ADJUSTMENT,
-          referenceType: 'domestic_worker_booking',
-          referenceId: booking.id,
-          descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
-        },
-        manager,
+  private async chargeCustomerAndCreatePendingEarningInTransaction(
+    manager: EntityManager,
+    booking: DomesticWorkerBooking,
+    customerUserId: string,
+    workerUserId: string,
+    workerEarningCents: number,
+    sourceKey: string,
+  ): Promise<void> {
+    await this.chargeCustomerInTransaction(manager, booking, customerUserId);
+    if (workerEarningCents > 0) {
+      await manager.getRepository(DomesticWorkerEarningApproval).save(
+        manager.getRepository(DomesticWorkerEarningApproval).create({
+          bookingId: booking.id,
+          workerUserId,
+          sourceKey,
+          amountCents: workerEarningCents,
+          status: DomesticWorkerEarningApprovalStatus.PENDING,
+        }),
       );
-
-      if (workerEarningCents > 0) {
-        await manager.getRepository(DomesticWorkerEarningApproval).save(
-          manager.getRepository(DomesticWorkerEarningApproval).create({
-            bookingId: booking.id,
-            workerUserId,
-            amountCents: workerEarningCents,
-            status: DomesticWorkerEarningApprovalStatus.PENDING,
-          }),
-        );
-      }
-    });
+    }
   }
 
   /** الشغالة بتقفل حجز بالساعة بعد ما تخلّص الزيارة — هنا بس (اكتمال حقيقي) بيتسجّل استحقاقها كـ"pending". */
@@ -250,41 +259,77 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
 
     const { workerEarningCents } = await this.commissionSplit(booking.priceCents);
 
-    await this.dataSource.transaction(async (manager) => {
-      booking.status = DomesticWorkerBookingStatus.COMPLETED;
-      booking.completedAt = new Date();
-      await manager.save(booking);
+    const completedBooking = await this.dataSource.transaction(async (manager) => {
+      const lockedBooking = await manager
+        .createQueryBuilder(DomesticWorkerBooking, 'booking')
+        .setLock('pessimistic_write')
+        .where('booking.id = :bookingId', { bookingId })
+        .getOne();
+      if (!lockedBooking || lockedBooking.status !== DomesticWorkerBookingStatus.CONFIRMED) {
+        throw new ApiException(ErrorCode.VAL_001, 'الحجز لازم يكون مؤكّد الأول', HttpStatus.CONFLICT);
+      }
+      lockedBooking.status = DomesticWorkerBookingStatus.COMPLETED;
+      lockedBooking.completedAt = new Date();
+      await manager.save(lockedBooking);
 
-      worker.completedBookingsCount += 1;
-      await manager.save(worker);
+      const lockedWorker = await manager
+        .createQueryBuilder(DomesticWorkerProfile, 'worker')
+        .setLock('pessimistic_write')
+        .where('worker.id = :workerId', { workerId: worker.id })
+        .getOneOrFail();
+      lockedWorker.completedBookingsCount += 1;
+      await manager.save(lockedWorker);
 
       if (workerEarningCents > 0) {
         await manager.getRepository(DomesticWorkerEarningApproval).save(
           manager.getRepository(DomesticWorkerEarningApproval).create({
-            bookingId: booking.id,
+            bookingId: lockedBooking.id,
             workerUserId: worker.userId,
+            sourceKey: 'hourly-completion',
             amountCents: workerEarningCents,
             status: DomesticWorkerEarningApprovalStatus.PENDING,
           }),
         );
       }
+      return lockedBooking;
     });
 
-    return booking;
+    return completedBooking;
   }
 
   async cancel(userId: string, bookingId: string, dto: CancelWorkerBookingDto): Promise<DomesticWorkerBooking> {
-    const booking = await this.findOwnedByCustomerOrThrow(userId, bookingId);
-    if (booking.status === DomesticWorkerBookingStatus.COMPLETED || booking.status === DomesticWorkerBookingStatus.CANCELLED) {
-      throw new ApiException(ErrorCode.VAL_001, 'الحجز ده مش قابل للإلغاء دلوقتي', HttpStatus.CONFLICT);
-    }
-    // مفيش استرداد جزئي في v1 لو الحجز اتأكد بالفعل (اتحصّل فعلاً) — قرار متعمّد، سياسة استرداد
-    // مفصّلة مش موجودة في المصدر الأصلي لهذا القطاع تحديداً، نفس منطق عدم اختراع أرقام غير موثّقة.
-    booking.status = DomesticWorkerBookingStatus.CANCELLED;
-    booking.cancelledAt = new Date();
-    booking.cancellationReason = dto.reason ?? null;
-    booking.autoRenew = false;
-    return this.bookings.save(booking);
+    const ownedBooking = await this.findOwnedByCustomerOrThrow(userId, bookingId);
+    return this.dataSource.transaction(async (manager) => {
+      const booking = await manager
+        .createQueryBuilder(DomesticWorkerBooking, 'booking')
+        .setLock('pessimistic_write')
+        .where('booking.id = :bookingId', { bookingId: ownedBooking.id })
+        .getOne();
+      if (!booking || booking.status === DomesticWorkerBookingStatus.COMPLETED || booking.status === DomesticWorkerBookingStatus.CANCELLED) {
+        throw new ApiException(ErrorCode.VAL_001, 'الحجز ده مش قابل للإلغاء دلوقتي', HttpStatus.CONFLICT);
+      }
+
+      const pendingApprovals = await manager
+        .createQueryBuilder(DomesticWorkerEarningApproval, 'approval')
+        .setLock('pessimistic_write')
+        .where('approval.booking_id = :bookingId', { bookingId: booking.id })
+        .andWhere('approval.status = :status', { status: DomesticWorkerEarningApprovalStatus.PENDING })
+        .orderBy('approval.id', 'ASC')
+        .getMany();
+      for (const approval of pendingApprovals) {
+        approval.status = DomesticWorkerEarningApprovalStatus.INVALIDATED;
+        approval.rejectionReason = `أُلغي الحجز قبل اعتماد الاستحقاق${dto.reason ? `: ${dto.reason}` : ''}`;
+        approval.reviewedAt = new Date();
+        await manager.save(approval);
+      }
+
+      // مفيش استرداد جزئي في v1 لو الحجز اتأكد بالفعل؛ لكن أي استحقاق لم يُعتمد يُبطل ذريًا.
+      booking.status = DomesticWorkerBookingStatus.CANCELLED;
+      booking.cancelledAt = new Date();
+      booking.cancellationReason = dto.reason ?? null;
+      booking.autoRenew = false;
+      return manager.save(booking);
+    });
   }
 
   async sweep(): Promise<{ renewed: number; expired: number }> {
@@ -300,7 +345,7 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     });
     let renewed = 0;
     for (const booking of dueForRenewal) {
-      const ok = await this.tryRenew(booking);
+      const ok = await this.tryRenew(booking.id, booking.currentPeriodEndAt!, now);
       if (ok) renewed++;
     }
 
@@ -314,32 +359,89 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
         currentPeriodEndAt: LessThanOrEqual(now),
       },
     });
+    let expired = 0;
     for (const booking of dueForExpiry) {
-      booking.status = DomesticWorkerBookingStatus.COMPLETED;
-      booking.completedAt = now;
-      await this.bookings.save(booking);
+      const result = await this.bookings
+        .createQueryBuilder()
+        .update(DomesticWorkerBooking)
+        .set({ status: DomesticWorkerBookingStatus.COMPLETED, completedAt: now })
+        .where('id = :id', { id: booking.id })
+        .andWhere('status = :status', { status: DomesticWorkerBookingStatus.ACTIVE })
+        .andWhere('auto_renew = false')
+        .andWhere('current_period_end_at <= :now', { now })
+        .execute();
+      expired += result.affected ?? 0;
     }
-    if (renewed > 0 || dueForExpiry.length > 0) {
-      this.logger.log(`حجوزات الخدمات المنزلية: ${renewed} تجديد ناجح، ${dueForExpiry.length} عقد انتهى`);
+    if (renewed > 0 || expired > 0) {
+      this.logger.log(`حجوزات الخدمات المنزلية: ${renewed} تجديد ناجح، ${expired} عقد انتهى`);
     }
-    return { renewed, expired: dueForExpiry.length };
+    return { renewed, expired };
   }
 
-  /** فشل التجديد (رصيد غير كافٍ عادة) بيوقف auto_renew — مفيش إعادة محاولة لا نهائية، نفس أي اشتراك حقيقي. */
-  private async tryRenew(booking: DomesticWorkerBooking): Promise<boolean> {
-    const worker = await this.profiles.findOne({ where: { id: booking.workerId } });
-    if (!worker) return false;
-    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(booking.customerId);
-
+  /** فشل دفع/بيانات نهائي يوقف التجديد؛ خطأ بنية عابر يظل مستحقًا كي تعيده الدورة التالية. */
+  private async tryRenew(bookingId: string, expectedPeriodEnd: Date, now: Date): Promise<boolean> {
+    const commissionPercentage = await this.commissionPercentage();
     try {
-      await this.chargeCustomerAndCreatePendingEarning(booking, customerProfile.userId, worker.userId);
-      booking.currentPeriodEndAt = addMonths(booking.currentPeriodEndAt ?? new Date(), 1);
-      await this.bookings.save(booking);
-      return true;
+      return await this.dataSource.transaction(async (manager) => {
+        const booking = await manager
+          .createQueryBuilder(DomesticWorkerBooking, 'booking')
+          .setLock('pessimistic_write')
+          .where('booking.id = :bookingId', { bookingId })
+          .getOne();
+        if (
+          !booking ||
+          booking.status !== DomesticWorkerBookingStatus.ACTIVE ||
+          booking.bookingType !== DomesticWorkerBookingType.MONTHLY_LIVE_IN ||
+          !booking.autoRenew ||
+          !booking.currentPeriodEndAt ||
+          booking.currentPeriodEndAt.getTime() !== expectedPeriodEnd.getTime() ||
+          booking.currentPeriodEndAt.getTime() > now.getTime()
+        ) {
+          return false;
+        }
+
+        const worker = await manager.getRepository(DomesticWorkerProfile).findOne({ where: { id: booking.workerId } });
+        const customerProfile = await manager.getRepository(CustomerProfile).findOne({ where: { id: booking.customerId } });
+        if (!worker || !customerProfile) {
+          throw new ApiException(ErrorCode.VAL_001, 'بيانات طرفي الحجز غير مكتملة', HttpStatus.CONFLICT);
+        }
+        const platformCommissionCents = Math.round((booking.priceCents * commissionPercentage) / 100);
+        const nextPeriodEnd = addMonths(booking.currentPeriodEndAt, 1);
+        await this.chargeCustomerAndCreatePendingEarningInTransaction(
+          manager,
+          booking,
+          customerProfile.userId,
+          worker.userId,
+          booking.priceCents - platformCommissionCents,
+          `monthly:${nextPeriodEnd.toISOString()}`,
+        );
+        booking.currentPeriodEndAt = nextPeriodEnd;
+        await manager.save(booking);
+        return true;
+      });
     } catch (err) {
-      this.logger.warn(`فشل تجديد حجز ${booking.bookingNumber} — إيقاف auto_renew: ${err instanceof Error ? err.message : err}`);
-      booking.autoRenew = false;
-      await this.bookings.save(booking);
+      const terminalBusinessFailure = err instanceof ApiException;
+      this.logger.warn(
+        `فشل تجديد حجز ${bookingId} — ${terminalBusinessFailure ? 'إيقاف auto_renew' : 'سيُعاد في الدورة التالية'}: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+      if (!terminalBusinessFailure) return false;
+      await this.dataSource.transaction(async (manager) => {
+        const booking = await manager
+          .createQueryBuilder(DomesticWorkerBooking, 'booking')
+          .setLock('pessimistic_write')
+          .where('booking.id = :bookingId', { bookingId })
+          .getOne();
+        if (
+          booking?.status === DomesticWorkerBookingStatus.ACTIVE &&
+          booking.autoRenew &&
+          booking.currentPeriodEndAt?.getTime() === expectedPeriodEnd.getTime()
+        ) {
+          booking.autoRenew = false;
+          await manager.save(booking);
+        }
+      });
       return false;
     }
   }

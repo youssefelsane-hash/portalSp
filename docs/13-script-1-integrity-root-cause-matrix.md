@@ -275,3 +275,54 @@ Verification performed against the shared TEST infrastructure:
 - Admin build could not start because this workspace does not have the `next`
   executable installed; the API build and TypeScript checks cover the changed
   backend, while the admin header change remains source-reviewed.
+
+## Phase 5 — Domestic-worker financial flows
+
+### Shared invariant
+
+One service period creates at most one pending earning and at most one later
+wallet credit. Cancellation, admin decisions, and monthly renewal all serialize
+on the booking row, then lock narrower rows in one consistent order. A cron
+tick is only a discovery mechanism; the database transaction owns the claim.
+
+### Findings verified before modification
+
+| Script section | Current evidence | Status |
+| --- | --- | --- |
+| 46 — earning approval race | `approve()` read the approval without a lock, then credited before saving the terminal state. Two requests could both pass `pending`. `reject()` was not transactional. | `NOT FIXED` |
+| 47 — admin earning UI | The API endpoints existed, but `/domestic-workers` only reviewed worker profiles. There was no UI to inspect or decide earning approvals. | `NOT FIXED` |
+| 48 — cancelled booking | `cancel()` changed only the booking. Existing pending earnings stayed approvable, and `approve()` did not validate booking state. | `NOT FIXED` |
+| 49 — multi-instance renewal | Every API instance selected the same due bookings, charged in a separate transaction, then moved `current_period_end_at` afterward without locking. | `NOT FIXED` |
+
+### Implementation and verification record — 2026-08-17
+
+All Phase 5 findings 46-49 are now `VERIFIED FIXED`:
+
+- Migration `0117_domestic_worker_flow_integrity.sql` adds durable source keys,
+  a per-booking/source unique index, and the terminal `invalidated` state.
+- Approve and reject lock booking then approval and recheck state. Approval
+  commits its wallet entry and terminal state together; cancellation uses the
+  same lock order and invalidates every pending earning in its transaction.
+- Confirmation, hourly completion, and renewal now combine booking state,
+  charge, earning creation, and period movement at the appropriate atomic
+  boundary. Two schedulers may discover the same row, but only the holder that
+  still sees the expected period cursor can renew it.
+- The permission-gated `/domestic-worker-earnings` admin screen exposes source,
+  booking, worker, amount, previous decision actor/time/reason, and guarded
+  approve/reject actions with the existing automatic MFA step-up flow.
+- The previous orphan was a Jest process for this suite. The test unnecessarily
+  created a real Redis client for one constant setting. It now uses a
+  deterministic settings stub and destroys its PostgreSQL DataSource in a
+  `finally` block. The stale PID was terminated; the repaired suite exits
+  normally under `--detectOpenHandles`.
+
+Verification performed against shared TEST:
+
+- Migration runner verified checksums through `0116` and applied `0117`.
+- `domestic-worker-earning-approval.spec.ts`: 8 PostgreSQL tests passed,
+  including approve races, terminal-decision race, cancellation invalidation,
+  two simultaneous renewal sweeps, and retry after a transient infrastructure
+  rollback.
+- API `npm run build` passed. Admin typecheck could not run meaningfully because
+  the checked-out workspace lacks its declared Next/React/type dependencies;
+  this pre-existing dependency gap produces project-wide module errors.

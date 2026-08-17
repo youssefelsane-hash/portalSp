@@ -1,14 +1,11 @@
 import { DataSource } from 'typeorm';
 import { ApiException } from '../../common/exceptions/api.exception';
-import { RedisCacheService } from '../../common/cache/redis-cache.service';
-import { AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { PLATFORM_SYSTEM_USER_ID, Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
-import { Setting } from '../settings/entities/setting.entity';
 import { SettingsService } from '../settings/settings.service';
 import { DomesticWorkerBookingsService } from './domestic-worker-bookings.service';
 import { DomesticWorkerEarningApprovalsService } from './domestic-worker-earning-approvals.service';
@@ -22,12 +19,12 @@ import { DomesticWorkerProfile } from './entities/domestic-worker-profile.entity
 // وبعد الاكتمال بتدخل "pending"، ومتترجعش رصيد فعلي إلا بموافقة أدمن — مفروضة من الباك-إند نفسه
 // (فحص حالة صريح بيمنع موافقة/رفض مزدوج)، مش مجرد زرار واجهة.
 describe('طابور موافقة أرباح العمالة المنزلية — pending لحد موافقة أدمن (docs/08 §25.1)', () => {
+  jest.setTimeout(30_000);
+
   let dataSource: DataSource;
   let bookingsService: DomesticWorkerBookingsService;
   let approvalsService: DomesticWorkerEarningApprovalsService;
   let walletsService: WalletsService;
-  let cache: RedisCacheService;
-  let previousCommissionSettingJson: string | null = null;
 
   const runId = Date.now().toString(36);
   const DOMESTIC_WORKER_COMMISSION_PERCENTAGE = 15;
@@ -38,6 +35,7 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     workerProfile: '',
     adminUser: '',
   };
+  const bookingIds: string[] = [];
 
   async function insertHourlyBooking(label: string, priceCents: number): Promise<string> {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -53,6 +51,25 @@ describe('طابور موافقة أرباح العمالة المنزلية —
        RETURNING id`,
       [`TESTDWEA-${label}`.slice(0, 24), ids.customerProfile, ids.workerProfile, ids.customerUser, priceCents],
     );
+    bookingIds.push(row.id as string);
+    return row.id as string;
+  }
+
+  async function insertMonthlyBooking(label: string, priceCents: number, dueForRenewal = false): Promise<string> {
+    const [row] = await dataSource.query(
+      `INSERT INTO domestic_worker_bookings
+         (booking_number, customer_id, worker_id, address_id, specialty, booking_type, scheduled_at,
+          auto_renew, current_period_end_at, price_cents, status, confirmed_at)
+       VALUES ($1,$2,$3,
+         (SELECT id FROM addresses WHERE user_id = $4 LIMIT 1),
+         'live_in_maid_monthly', 'monthly_live_in', now() + interval '1 day',
+         $5, CASE WHEN $5 THEN now() - interval '1 day' ELSE NULL END, $6,
+         CASE WHEN $5 THEN 'active'::domestic_worker_booking_status ELSE 'pending_confirmation'::domestic_worker_booking_status END,
+         CASE WHEN $5 THEN now() - interval '1 month' ELSE NULL END)
+       RETURNING id`,
+      [`TESTDWEA-${label}`.slice(0, 24), ids.customerProfile, ids.workerProfile, ids.customerUser, dueForRenewal, priceCents],
+    );
+    bookingIds.push(row.id as string);
     return row.id as string;
   }
 
@@ -69,7 +86,7 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, CustomerProfile, Wallet, WalletTransaction, Setting, DomesticWorkerBooking, DomesticWorkerProfile, DomesticWorkerEarningApproval],
+      entities: [User, CustomerProfile, Wallet, WalletTransaction, DomesticWorkerBooking, DomesticWorkerProfile, DomesticWorkerEarningApproval],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -103,37 +120,10 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     );
     ids.adminUser = adminUser.id;
 
-    const [existingCommissionSetting] = await q(`SELECT value::text AS value_json FROM settings WHERE key = $1`, [
-      'commission.domestic_worker_percentage',
-    ]);
-    previousCommissionSettingJson = (existingCommissionSetting?.value_json as string | undefined) ?? null;
-    await q(
-      `INSERT INTO settings (key, value, value_type, group_name, description, is_public, updated_by_user_id)
-       VALUES ($1, $2::jsonb, 'number', 'domestic_workers', $3, false, $4)
-       ON CONFLICT (key) DO UPDATE
-       SET value = EXCLUDED.value,
-           value_type = EXCLUDED.value_type,
-           group_name = EXCLUDED.group_name,
-           description = EXCLUDED.description,
-           is_public = EXCLUDED.is_public,
-           updated_by_user_id = EXCLUDED.updated_by_user_id,
-           updated_at = now()`,
-      [
-        'commission.domestic_worker_percentage',
-        JSON.stringify(DOMESTIC_WORKER_COMMISSION_PERCENTAGE),
-        'تثبيت عمولة الخدمات المنزلية داخل الاختبار عشان يفضل حتمي على بيئة TEST المشتركة',
-        ids.adminUser,
-      ],
-    );
-    await q(
-      `UPDATE settings
-       SET updated_by_user_id = NULL, updated_at = now()
-       WHERE key = $1 AND value::text = $2`,
-      ['commission.domestic_worker_percentage', previousCommissionSettingJson ?? 'null'],
-    );
-
-    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
-    const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
+    // The integration test does not need a real Redis client for one deterministic setting.
+    const settingsService = {
+      getNumber: async () => DOMESTIC_WORKER_COMMISSION_PERCENTAGE,
+    } as unknown as SettingsService;
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const workersService = new DomesticWorkersService(dataSource.getRepository(DomesticWorkerProfile), { record: async () => undefined } as never);
@@ -163,28 +153,32 @@ describe('طابور موافقة أرباح العمالة المنزلية —
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM domestic_worker_earning_approvals WHERE worker_user_id = $1`, [ids.workerUser]);
-    await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`, [
-      ids.workerUser,
-      ids.customerUser,
-    ]);
-    await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.workerUser, ids.customerUser]);
-    await q(`DELETE FROM domestic_worker_bookings WHERE customer_id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM domestic_worker_profiles WHERE id = $1`, [ids.workerProfile]);
-    await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    if (previousCommissionSettingJson === null) {
-      await q(`DELETE FROM settings WHERE key = $1`, ['commission.domestic_worker_percentage']);
-    } else {
-      await q(`UPDATE settings SET value = $2::jsonb, updated_by_user_id = NULL, updated_at = now() WHERE key = $1`, [
-        'commission.domestic_worker_percentage',
-        previousCommissionSettingJson,
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(
+        `DELETE FROM wallet_transactions
+         WHERE reference_type IN ('domestic_worker_booking', 'domestic_worker_earning_approval')
+           AND (
+             reference_id = ANY($1::uuid[])
+             OR reference_id IN (
+               SELECT id FROM domestic_worker_earning_approvals WHERE worker_user_id = $2
+             )
+           )`,
+        [bookingIds, ids.workerUser],
+      );
+      await q(`DELETE FROM domestic_worker_earning_approvals WHERE worker_user_id = $1`, [ids.workerUser]);
+      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`, [
+        ids.workerUser,
+        ids.customerUser,
       ]);
-    }
-    await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.workerUser, ids.adminUser]);
-    cache?.onModuleDestroy();
-    if (dataSource.isInitialized) {
+      await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.workerUser, ids.customerUser]);
+      await q(`DELETE FROM domestic_worker_bookings WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM domestic_worker_profiles WHERE id = $1`, [ids.workerProfile]);
+      await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.workerUser, ids.adminUser]);
+    } finally {
       await dataSource.destroy();
     }
   });
@@ -206,25 +200,25 @@ describe('طابور موافقة أرباح العمالة المنزلية —
 
     const approval = await pendingApprovalForBooking(bookingId);
     expect(approval?.status).toBe(DomesticWorkerEarningApprovalStatus.PENDING);
+    expect(approval?.sourceKey).toBe('hourly-completion');
     expect(approval?.amountCents).toBe(25500); // 30000 - 15% عمولة افتراضية
     expect(await workerWalletBalance()).toBe(0);
   });
 
-  it('موافقة الأدمن: الاستحقاق بيتحول رصيد قابل للصرف فعليًا — وموافقة تانية على نفس الصف ترفض (409)، صفر مضاعفة', async () => {
+  it('approve×approve: طلب واحد فقط يحوّل الاستحقاق إلى رصيد، والثاني يرى الحالة النهائية', async () => {
     const bookingId = await insertHourlyBooking('approve', 20000);
     await bookingsService.confirm(ids.workerUser, bookingId);
     await bookingsService.completeHourly(ids.workerUser, bookingId);
     const approval = await pendingApprovalForBooking(bookingId);
 
-    const approved = await approvalsService.approve(ids.adminUser, approval!.id);
-    expect(approved.status).toBe(DomesticWorkerEarningApprovalStatus.APPROVED);
-    expect(approved.reviewedByUserId).toBe(ids.adminUser);
-    expect(approved.reviewedAt).not.toBeNull();
-    const balanceAfterFirstApproval = await workerWalletBalance();
-    expect(balanceAfterFirstApproval).toBe(17000); // 20000 - 15%
-
-    await expect(approvalsService.approve(ids.adminUser, approval!.id)).rejects.toThrow(ApiException);
-    expect(await workerWalletBalance()).toBe(balanceAfterFirstApproval); // صفر مضاعفة
+    const balanceBefore = await workerWalletBalance();
+    const outcomes = await Promise.allSettled([
+      approvalsService.approve(ids.adminUser, approval!.id),
+      approvalsService.approve(ids.adminUser, approval!.id),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    expect(await workerWalletBalance()).toBe(balanceBefore + 17000); // 20000 - 15%
   });
 
   it('رفض الأدمن: الاستحقاق بيتقفل rejected بسبب موثّق — صفر تحويل لمحفظة الشغالة', async () => {
@@ -241,5 +235,85 @@ describe('طابور موافقة أرباح العمالة المنزلية —
 
     // مينفعش توافق على صف اترفض بالفعل
     await expect(approvalsService.approve(ids.adminUser, approval!.id)).rejects.toThrow(ApiException);
+  });
+
+  it('approve×reject: قرار نهائي واحد فقط يفوز ولا يمكن أن تنفصل حالة الصف عن أثر المحفظة', async () => {
+    const bookingId = await insertHourlyBooking('decision-race', 10000);
+    await bookingsService.confirm(ids.workerUser, bookingId);
+    await bookingsService.completeHourly(ids.workerUser, bookingId);
+    const approval = await pendingApprovalForBooking(bookingId);
+    const balanceBefore = await workerWalletBalance();
+
+    const outcomes = await Promise.allSettled([
+      approvalsService.approve(ids.adminUser, approval!.id),
+      approvalsService.reject(ids.adminUser, approval!.id, 'قرار رفض متزامن'),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const persisted = await pendingApprovalForBooking(bookingId);
+    expect([DomesticWorkerEarningApprovalStatus.APPROVED, DomesticWorkerEarningApprovalStatus.REJECTED]).toContain(
+      persisted?.status,
+    );
+    expect(await workerWalletBalance()).toBe(
+      balanceBefore + (persisted?.status === DomesticWorkerEarningApprovalStatus.APPROVED ? 8500 : 0),
+    );
+  });
+
+  it('إلغاء حجز شهري يبطل الاستحقاق pending ذريًا، وصفحة أدمن قديمة لا تستطيع اعتماده', async () => {
+    const bookingId = await insertMonthlyBooking('cancel-invalidates', 30000);
+    await bookingsService.confirm(ids.workerUser, bookingId);
+    const approval = await pendingApprovalForBooking(bookingId);
+    expect(approval?.status).toBe(DomesticWorkerEarningApprovalStatus.PENDING);
+
+    await bookingsService.cancel(ids.customerUser, bookingId, { reason: 'إلغاء قبل اعتماد الاستحقاق' });
+    const invalidated = await pendingApprovalForBooking(bookingId);
+    expect(invalidated?.status).toBe(DomesticWorkerEarningApprovalStatus.INVALIDATED);
+    await expect(approvalsService.approve(ids.adminUser, approval!.id)).rejects.toThrow(ApiException);
+  });
+
+  it('نسختان من sweep تجددان الفترة المستحقة مرة واحدة فقط وتنتجان استحقاقًا واحدًا', async () => {
+    const bookingId = await insertMonthlyBooking('renew-race', 12000, true);
+    const balanceBefore = Number(
+      (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
+    );
+    const before = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
+
+    const sweeps = await Promise.all([bookingsService.sweep(), bookingsService.sweep()]);
+    expect(sweeps.reduce((sum, result) => sum + result.renewed, 0)).toBe(1);
+
+    const after = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
+    expect(after.currentPeriodEndAt!.getTime()).toBeGreaterThan(before.currentPeriodEndAt!.getTime());
+    const approvals = await dataSource.getRepository(DomesticWorkerEarningApproval).find({ where: { bookingId } });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].sourceKey).toBe(`monthly:${after.currentPeriodEndAt!.toISOString()}`);
+    const customerBalance = Number(
+      (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
+    );
+    expect(customerBalance).toBe(balanceBefore - 12000);
+  });
+
+  it('عطل بنية عابر يرجع transaction كاملة ويظل قابلًا للاسترداد في الدورة التالية', async () => {
+    const bookingId = await insertMonthlyBooking('renew-recovery', 9000, true);
+    const before = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
+    const balanceBefore = Number(
+      (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
+    );
+    const failure = jest.spyOn(walletsService, 'doubleEntry').mockRejectedValueOnce(new Error('transient database failure'));
+
+    const failedSweep = await bookingsService.sweep();
+    failure.mockRestore();
+    expect(failedSweep.renewed).toBe(0);
+    const afterFailure = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
+    expect(afterFailure.autoRenew).toBe(true);
+    expect(afterFailure.currentPeriodEndAt?.getTime()).toBe(before.currentPeriodEndAt?.getTime());
+    expect(await dataSource.getRepository(DomesticWorkerEarningApproval).count({ where: { bookingId } })).toBe(0);
+
+    // The next scheduler tick can safely retry the same durable period cursor.
+    const recoveredSweep = await bookingsService.sweep();
+    expect(recoveredSweep.renewed).toBe(1);
+    expect(await dataSource.getRepository(DomesticWorkerEarningApproval).count({ where: { bookingId } })).toBe(1);
+    const balanceAfter = Number(
+      (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
+    );
+    expect(balanceAfter).toBe(balanceBefore - 9000);
   });
 });
