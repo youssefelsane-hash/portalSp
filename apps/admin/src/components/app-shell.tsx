@@ -17,6 +17,7 @@ import {
   ClipboardList,
   DollarSign,
   GraduationCap,
+  HandCoins,
   Home as HomeIcon,
   ImageIcon,
   KeyRound,
@@ -103,6 +104,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'المالية',
     items: [
       { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
+      {
+        href: '/domestic-worker-earnings',
+        label: 'اعتماد أرباح الخدمات المنزلية',
+        icon: HandCoins,
+        permission: 'domestic_workers.approve_earnings',
+      },
       { href: '/promotions', label: 'أكواد الخصم', icon: Tag },
     ],
   },

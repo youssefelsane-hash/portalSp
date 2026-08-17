@@ -17,12 +17,14 @@ const STATUS_LABELS_AR: Record<TechnicianReferralBonusStatus, string> = {
   credited: 'مستحقة',
   revoked: 'ملغاة',
   rejected_suspicious: 'مرفوضة (مشبوهة)',
+  manual_review: 'مراجعة يدوية',
 };
 
 const STATUS_BADGE_VARIANT: Record<TechnicianReferralBonusStatus, 'default' | 'destructive' | 'outline'> = {
   credited: 'default',
   revoked: 'outline',
   rejected_suspicious: 'destructive',
+  manual_review: 'destructive',
 };
 
 function formatEgp(cents: number) {
@@ -59,9 +61,10 @@ export default function TechnicianReferralsPage() {
       if (b.status === 'credited') acc.credited += b.bonus_amount_cents;
       if (b.status === 'revoked') acc.revoked += b.bonus_amount_cents;
       if (b.status === 'rejected_suspicious') acc.rejected += b.bonus_amount_cents;
+      if (b.status === 'manual_review') acc.manualReview += 1;
       return acc;
     },
-    { credited: 0, revoked: 0, rejected: 0 },
+    { credited: 0, revoked: 0, rejected: 0, manualReview: 0 },
   );
 
   return (
@@ -69,7 +72,7 @@ export default function TechnicianReferralsPage() {
       <PageHeader title="ترشيح QR الفني" actions={<p className="text-sm text-muted-foreground">{total} سجل</p>} />
       {error && <p className="mb-4 text-destructive">{error}</p>}
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">إجمالي مستحقة (هذه الصفحة)</p>
@@ -88,6 +91,12 @@ export default function TechnicianReferralsPage() {
             <p className="text-lg font-semibold">{formatEgp(totals.rejected)}</p>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">تحتاج مراجعة يدوية</p>
+            <p className="text-lg font-semibold">{totals.manualReview} سجل</p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -98,6 +107,7 @@ export default function TechnicianReferralsPage() {
             <option value="credited">مستحقة</option>
             <option value="revoked">ملغاة</option>
             <option value="rejected_suspicious">مرفوضة (مشبوهة)</option>
+            <option value="manual_review">مراجعة يدوية</option>
           </SelectNative>
         </CardHeader>
         <CardContent>

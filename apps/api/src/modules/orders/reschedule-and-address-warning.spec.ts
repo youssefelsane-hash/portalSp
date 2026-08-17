@@ -33,6 +33,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
   let ordersService: OrdersService;
   let addressesService: AddressesService;
   let scheduleService: TechnicianScheduleService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -147,7 +148,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     );
     ids.techProfile = techProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -206,19 +207,33 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     );
   });
 
+  afterEach(async () => {
+    // Every test owns its fixture. Release the Phase 7 one-active-order resource before the next
+    // case while preserving each assertion's state for the duration of that case.
+    if (dataSource?.isInitialized) {
+      await dataSource.query(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
+      await dataSource.query(`UPDATE orders SET technician_id = NULL WHERE order_number LIKE $1`, [`TESTRSC-%`]);
+    }
+  });
+
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRSC-%`]);
-    await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTRSC-%`]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await dataSource.destroy();
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRSC-%`]);
+      await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTRSC-%`]);
+      // Includes the isolated address-warning fixture even if that test failed before local cleanup.
+      await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    } finally {
+      cache?.onModuleDestroy();
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('إعادة جدولة ناجحة — السلوت القديم يرجع متاح، الجديد يتحجز، scheduledAt يتحدّث', async () => {
@@ -248,7 +263,9 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
 
   it('تصادم حجز — محاولتين متزامنتين على نفس السلوت الجديد، واحدة بس تنجح، صفر حجز مزدوج صامت', async () => {
     const orderAId = await insertOrder(`race-a-${runId}`, OrderStatus.ACCEPTED);
-    const orderBId = await insertOrder(`race-b-${runId}`, OrderStatus.ACCEPTED);
+    // `technician_assigned` is reschedulable but does not consume the one-active-work slot yet,
+    // so this fixture can still exercise the schedule-row race without violating migration 0118.
+    const orderBId = await insertOrder(`race-b-${runId}`, OrderStatus.TECHNICIAN_ASSIGNED);
     const slotAOld = await insertSlot('race-a-old', TechnicianScheduleSlotStatus.BOOKED, orderAId, '09:00');
     const slotBOld = await insertSlot('race-b-old', TechnicianScheduleSlotStatus.BOOKED, orderBId, '10:00');
     const contestedSlotId = await insertSlot('race-contested', TechnicianScheduleSlotStatus.AVAILABLE, null, '16:00');

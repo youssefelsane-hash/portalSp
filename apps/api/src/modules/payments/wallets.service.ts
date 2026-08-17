@@ -26,17 +26,28 @@ export class WalletsService {
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
-  async getOrCreateWallet(userId: string, ownerType: WalletOwnerType): Promise<Wallet> {
-    const existing = await this.wallets.findOne({ where: { ownerUserId: userId } });
+  async getOrCreateWallet(userId: string, ownerType: WalletOwnerType, manager?: EntityManager): Promise<Wallet> {
+    const repository = manager?.getRepository(Wallet) ?? this.wallets;
+    const existing = await repository.findOne({ where: { ownerUserId: userId } });
     if (existing) return existing;
 
-    const wallet = this.wallets.create({ ownerUserId: userId, ownerType, currencyCode: 'EGP' });
-    await this.wallets.save(wallet);
+    await repository
+      .createQueryBuilder()
+      .insert()
+      .into(Wallet)
+      .values({ ownerUserId: userId, ownerType, currencyCode: 'EGP' })
+      .orIgnore()
+      .execute();
+
+    const wallet = await repository.findOne({ where: { ownerUserId: userId } });
+    if (!wallet) {
+      throw new ApiException(ErrorCode.VAL_001, 'تعذر إنشاء المحفظة', HttpStatus.CONFLICT);
+    }
     return wallet;
   }
 
-  async findByUserIdOrThrow(userId: string): Promise<Wallet> {
-    const wallet = await this.wallets.findOne({ where: { ownerUserId: userId } });
+  async findByUserIdOrThrow(userId: string, manager?: EntityManager): Promise<Wallet> {
+    const wallet = await (manager?.getRepository(Wallet) ?? this.wallets).findOne({ where: { ownerUserId: userId } });
     if (!wallet) {
       throw new ApiException(ErrorCode.VAL_001, 'المحفظة غير موجودة', HttpStatus.NOT_FOUND);
     }
@@ -74,6 +85,7 @@ export class WalletsService {
   private async doubleEntryWithManager(
     params: DoubleEntryParams,
     manager: EntityManager,
+    allowFrozenWallets = false,
   ): Promise<{ debit: WalletTransaction; credit: WalletTransaction }> {
     if (params.amountCents <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'المبلغ لازم يكون أكبر من صفر', HttpStatus.BAD_REQUEST);
@@ -104,10 +116,10 @@ export class WalletsService {
 
     const fromWallet = first.id === params.fromWalletId ? first : second;
     const toWallet = first.id === params.toWalletId ? first : second;
-    if (fromWallet.isFrozen) {
+    if (fromWallet.isFrozen && !allowFrozenWallets) {
       throw new ApiException(ErrorCode.PAY_002, fromWallet.frozenReason ?? 'المحفظة مجمّدة', HttpStatus.FORBIDDEN);
     }
-    if (toWallet.isFrozen) {
+    if (toWallet.isFrozen && !allowFrozenWallets) {
       throw new ApiException(ErrorCode.PAY_002, 'محفظة الطرف التاني مجمّدة', HttpStatus.FORBIDDEN);
     }
     if (!params.allowNegativeBalance && fromWallet.balanceCents < params.amountCents) {
@@ -172,26 +184,83 @@ export class WalletsService {
     manager?: EntityManager,
   ): Promise<{ debit: WalletTransaction; credit: WalletTransaction }> {
     const run = async (txManager: EntityManager) => {
+      const locked = new Map<string, WalletTransaction>();
+      for (const transactionId of [original.debit.id, original.credit.id].sort()) {
+        const transaction = await txManager
+          .createQueryBuilder(WalletTransaction, 'transaction')
+          .setLock('pessimistic_write')
+          .where('transaction.id = :transactionId', { transactionId })
+          .getOne();
+        if (!transaction) {
+          throw new ApiException(ErrorCode.VAL_001, 'القيد الأصلي غير موجود', HttpStatus.NOT_FOUND);
+        }
+        locked.set(transaction.id, transaction);
+      }
+
+      const originalDebit = locked.get(original.debit.id)!;
+      const originalCredit = locked.get(original.credit.id)!;
+      if (
+        originalDebit.direction !== WalletTxDirection.DEBIT ||
+        originalCredit.direction !== WalletTxDirection.CREDIT ||
+        originalDebit.amountCents !== originalCredit.amountCents ||
+        originalDebit.walletId === originalCredit.walletId ||
+        originalDebit.referenceType !== originalCredit.referenceType ||
+        originalDebit.referenceId !== originalCredit.referenceId
+      ) {
+        throw new ApiException(ErrorCode.VAL_001, 'القيدان الأصليان لا يمثلان قيدًا مزدوجًا متسقًا', HttpStatus.CONFLICT);
+      }
+      if (originalDebit.isReversed || originalCredit.isReversed) {
+        if (
+          !originalDebit.isReversed ||
+          !originalCredit.isReversed ||
+          !originalDebit.reversalTransactionId ||
+          !originalCredit.reversalTransactionId
+        ) {
+          throw new ApiException(ErrorCode.VAL_001, 'حالة عكس القيد غير متسقة وتحتاج مراجعة', HttpStatus.CONFLICT);
+        }
+        const debit = await txManager.findOne(WalletTransaction, {
+          where: { id: originalDebit.reversalTransactionId },
+        });
+        const credit = await txManager.findOne(WalletTransaction, {
+          where: { id: originalCredit.reversalTransactionId },
+        });
+        if (!debit || !credit) {
+          throw new ApiException(ErrorCode.VAL_001, 'قيد العكس المسجل غير موجود', HttpStatus.CONFLICT);
+        }
+        if (
+          debit.direction !== WalletTxDirection.DEBIT ||
+          credit.direction !== WalletTxDirection.CREDIT ||
+          debit.amountCents !== originalDebit.amountCents ||
+          credit.amountCents !== originalCredit.amountCents ||
+          debit.walletId !== originalCredit.walletId ||
+          credit.walletId !== originalDebit.walletId
+        ) {
+          throw new ApiException(ErrorCode.VAL_001, 'قيد العكس المسجل غير متسق وتحتاج حالته مراجعة', HttpStatus.CONFLICT);
+        }
+        return { debit, credit };
+      }
+
       const reversed = await this.doubleEntryWithManager(
         {
-          fromWalletId: original.credit.walletId,
-          toWalletId: original.debit.walletId,
-          amountCents: original.debit.amountCents,
+          fromWalletId: originalCredit.walletId,
+          toWalletId: originalDebit.walletId,
+          amountCents: originalDebit.amountCents,
           transactionType: WalletTxType.ADJUSTMENT,
-          referenceType: original.debit.referenceType ?? 'reversal',
-          referenceId: original.debit.referenceId ?? original.debit.id,
+          referenceType: originalDebit.referenceType ?? 'reversal',
+          referenceId: originalDebit.referenceId ?? originalDebit.id,
           descriptionAr: `عكس قيد: ${reasonAr}`,
           performedByUserId: performedByUserId ?? null,
           allowNegativeBalance: true, // العكس لازم ينجح دايماً — مينفعش رصيد ناقص يمنع تصحيح غلطة
         },
         txManager,
+        true,
       );
 
-      await txManager.update(WalletTransaction, original.debit.id, {
+      await txManager.update(WalletTransaction, originalDebit.id, {
         isReversed: true,
         reversalTransactionId: reversed.debit.id,
       });
-      await txManager.update(WalletTransaction, original.credit.id, {
+      await txManager.update(WalletTransaction, originalCredit.id, {
         isReversed: true,
         reversalTransactionId: reversed.credit.id,
       });

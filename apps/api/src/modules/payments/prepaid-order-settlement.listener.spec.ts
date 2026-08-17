@@ -39,4 +39,14 @@ describe('PrepaidOrderSettlementListener', () => {
 
     await expect(listener.handleOrderStatusChanged(makeEvent(OrderStatus.WORK_COMPLETED))).resolves.toBeUndefined();
   });
+
+  it('sweep يعيد بناء الحدث من الحالة الدائمة بدفعة محدودة', async () => {
+    const reconcile = jest.fn(async () => 2);
+    const listener = new PrepaidOrderSettlementListener({
+      reconcilePrepaidWorkCompleted: reconcile,
+    } as unknown as PaymentsService);
+
+    await expect(listener.sweep()).resolves.toBe(2);
+    expect(reconcile).toHaveBeenCalledWith(25);
+  });
 });

@@ -212,8 +212,16 @@ export class SupportService {
     dto: ResolveComplaintDto,
     meta?: AuditActorMeta,
   ): Promise<Complaint> {
+    const filerWalletOwnerType =
+      (await this.resolveUserTypeOf((await this.findOrThrow(complaintId)).filedByUserId)) === UserType.TECHNICIAN
+        ? WalletOwnerType.TECHNICIAN
+        : WalletOwnerType.CUSTOMER;
     const result = await this.dataSource.transaction(async (manager) => {
-      const complaint = await manager.findOne(Complaint, { where: { id: complaintId } });
+      const complaint = await manager
+        .createQueryBuilder(Complaint, 'complaint')
+        .setLock('pessimistic_write')
+        .where('complaint.id = :complaintId', { complaintId })
+        .getOne();
       if (!complaint) {
         throw new ApiException(ErrorCode.VAL_001, 'الشكوى غير موجودة', HttpStatus.NOT_FOUND);
       }
@@ -228,12 +236,12 @@ export class SupportService {
 
       const compensationCents = dto.compensation_cents ?? 0;
       if (compensationCents > 0) {
-        const filerWalletOwnerType =
-          (await this.resolveUserTypeOf(complaint.filedByUserId)) === UserType.TECHNICIAN
-            ? WalletOwnerType.TECHNICIAN
-            : WalletOwnerType.CUSTOMER;
-        const filerWallet = await this.walletsService.getOrCreateWallet(complaint.filedByUserId, filerWalletOwnerType);
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const filerWallet = await this.walletsService.getOrCreateWallet(
+          complaint.filedByUserId,
+          filerWalletOwnerType,
+          manager,
+        );
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
         await this.walletsService.doubleEntry(
           {
@@ -257,22 +265,24 @@ export class SupportService {
       complaint.resolvedAt = new Date();
       complaint.resolvedByUserId = adminUserId;
       await manager.save(complaint);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'complaint.resolved',
+          entityType: 'complaint',
+          entityId: complaint.id,
+          oldValues: { complaint_status: previousStatus },
+          newValues: {
+            complaint_status: complaint.complaintStatus,
+            resolution_type: complaint.resolutionType,
+            compensation_cents: complaint.compensationCents,
+          },
+          meta,
+        },
+        manager,
+      );
       return { complaint, previousStatus };
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'complaint.resolved',
-      entityType: 'complaint',
-      entityId: result.complaint.id,
-      oldValues: { complaint_status: result.previousStatus },
-      newValues: {
-        complaint_status: result.complaint.complaintStatus,
-        resolution_type: result.complaint.resolutionType,
-        compensation_cents: result.complaint.compensationCents,
-      },
-      meta,
     });
     return result.complaint;
   }
@@ -283,58 +293,84 @@ export class SupportService {
     dto: RejectComplaintDto,
     meta?: AuditActorMeta,
   ): Promise<Complaint> {
-    const complaint = await this.findOrThrow(complaintId);
-    if (!canTransitionComplaint(complaint.complaintStatus, ComplaintStatus.REJECTED)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `مينفعش ترفض شكوى في حالة ${complaint.complaintStatus}`,
-        HttpStatus.CONFLICT,
+    const result = await this.dataSource.transaction(async (manager) => {
+      const complaint = await manager
+        .createQueryBuilder(Complaint, 'complaint')
+        .setLock('pessimistic_write')
+        .where('complaint.id = :complaintId', { complaintId })
+        .getOne();
+      if (!complaint) {
+        throw new ApiException(ErrorCode.VAL_001, 'الشكوى غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      if (!canTransitionComplaint(complaint.complaintStatus, ComplaintStatus.REJECTED)) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `مينفعش ترفض شكوى في حالة ${complaint.complaintStatus}`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      const previousStatus = complaint.complaintStatus;
+      complaint.complaintStatus = ComplaintStatus.REJECTED;
+      complaint.resolutionNotes = dto.resolution_notes;
+      complaint.resolvedAt = new Date();
+      complaint.resolvedByUserId = adminUserId;
+      await manager.save(complaint);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'complaint.rejected',
+          entityType: 'complaint',
+          entityId: complaint.id,
+          oldValues: { complaint_status: previousStatus },
+          newValues: {
+            complaint_status: complaint.complaintStatus,
+            resolution_notes: complaint.resolutionNotes,
+          },
+          meta,
+        },
+        manager,
       );
-    }
-    const previousStatus = complaint.complaintStatus;
-    complaint.complaintStatus = ComplaintStatus.REJECTED;
-    complaint.resolutionNotes = dto.resolution_notes;
-    complaint.resolvedAt = new Date();
-    complaint.resolvedByUserId = adminUserId;
-    await this.complaints.save(complaint);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'complaint.rejected',
-      entityType: 'complaint',
-      entityId: complaint.id,
-      oldValues: { complaint_status: previousStatus },
-      newValues: { complaint_status: complaint.complaintStatus, resolution_notes: complaint.resolutionNotes },
-      meta,
+      return { complaint, previousStatus };
     });
-    return complaint;
+    return result.complaint;
   }
 
   async close(adminUserId: string, complaintId: string, meta?: AuditActorMeta): Promise<Complaint> {
-    const complaint = await this.findOrThrow(complaintId);
-    if (!canTransitionComplaint(complaint.complaintStatus, ComplaintStatus.CLOSED)) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `مينفعش تقفل شكوى في حالة ${complaint.complaintStatus} — لازم تتحل أو تترفض الأول`,
-        HttpStatus.CONFLICT,
+    return this.dataSource.transaction(async (manager) => {
+      const complaint = await manager
+        .createQueryBuilder(Complaint, 'complaint')
+        .setLock('pessimistic_write')
+        .where('complaint.id = :complaintId', { complaintId })
+        .getOne();
+      if (!complaint) {
+        throw new ApiException(ErrorCode.VAL_001, 'الشكوى غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      if (!canTransitionComplaint(complaint.complaintStatus, ComplaintStatus.CLOSED)) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `مينفعش تقفل شكوى في حالة ${complaint.complaintStatus} — لازم تتحل أو تترفض الأول`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      const previousStatus = complaint.complaintStatus;
+      complaint.complaintStatus = ComplaintStatus.CLOSED;
+      await manager.save(complaint);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'complaint.closed',
+          entityType: 'complaint',
+          entityId: complaint.id,
+          oldValues: { complaint_status: previousStatus },
+          newValues: { complaint_status: complaint.complaintStatus },
+          meta,
+        },
+        manager,
       );
-    }
-    const previousStatus = complaint.complaintStatus;
-    complaint.complaintStatus = ComplaintStatus.CLOSED;
-    await this.complaints.save(complaint);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'complaint.closed',
-      entityType: 'complaint',
-      entityId: complaint.id,
-      oldValues: { complaint_status: previousStatus },
-      newValues: { complaint_status: complaint.complaintStatus },
-      meta,
+      return complaint;
     });
-    return complaint;
   }
 
   /**
@@ -349,29 +385,40 @@ export class SupportService {
     dto: UpdateComplaintSeverityDto,
     meta?: AuditActorMeta,
   ): Promise<Complaint> {
-    const complaint = await this.findOrThrow(complaintId);
-    if (complaint.complaintStatus === ComplaintStatus.CLOSED) {
-      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تعدّل تصنيف شكوى مقفولة', HttpStatus.CONFLICT);
-    }
-    const previousSeverity = complaint.severity;
-    if (previousSeverity === dto.severity) {
-      throw new ApiException(ErrorCode.VAL_001, 'التصنيف ده نفس التصنيف الحالي أصلاً', HttpStatus.CONFLICT);
-    }
-    complaint.severity = dto.severity;
-    complaint.slaDueAt = new Date(Date.now() + SLA_HOURS_BY_SEVERITY[dto.severity] * 60 * 60 * 1000);
-    await this.complaints.save(complaint);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'complaint.severity_updated',
-      entityType: 'complaint',
-      entityId: complaint.id,
-      oldValues: { severity: previousSeverity },
-      newValues: { severity: complaint.severity, sla_due_at: complaint.slaDueAt.toISOString() },
-      meta,
+    return this.dataSource.transaction(async (manager) => {
+      const complaint = await manager
+        .createQueryBuilder(Complaint, 'complaint')
+        .setLock('pessimistic_write')
+        .where('complaint.id = :complaintId', { complaintId })
+        .getOne();
+      if (!complaint) {
+        throw new ApiException(ErrorCode.VAL_001, 'الشكوى غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      if (complaint.complaintStatus === ComplaintStatus.CLOSED) {
+        throw new ApiException(ErrorCode.VAL_001, 'مينفعش تعدّل تصنيف شكوى مقفولة', HttpStatus.CONFLICT);
+      }
+      const previousSeverity = complaint.severity;
+      if (previousSeverity === dto.severity) {
+        throw new ApiException(ErrorCode.VAL_001, 'التصنيف ده نفس التصنيف الحالي أصلاً', HttpStatus.CONFLICT);
+      }
+      complaint.severity = dto.severity;
+      complaint.slaDueAt = new Date(Date.now() + SLA_HOURS_BY_SEVERITY[dto.severity] * 60 * 60 * 1000);
+      await manager.save(complaint);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'complaint.severity_updated',
+          entityType: 'complaint',
+          entityId: complaint.id,
+          oldValues: { severity: previousSeverity },
+          newValues: { severity: complaint.severity, sla_due_at: complaint.slaDueAt.toISOString() },
+          meta,
+        },
+        manager,
+      );
+      return complaint;
     });
-    return complaint;
   }
 
   private async resolveUserTypeOf(userId: string): Promise<UserType> {

@@ -59,7 +59,7 @@ export class AdminPaymentsController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toRefundResponseDto(
-      await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, dto.amount_cents, audit),
+      await this.paymentsService.refundOrder(user.sub, id, dto.reason_notes, dto.amount_cents, audit, dto.payment_id),
     );
   }
 

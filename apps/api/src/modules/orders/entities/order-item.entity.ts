@@ -10,6 +10,14 @@ export enum OrderItemType {
   EXTRA_LABOR = 'extra_labor',
 }
 
+// حالة proposal مستقلة عن `isCustomerApproved` القديم: الرفض لازم يظل دليلاً قابلاً للعرض
+// والمراجعة، وليس DELETE يمحو ما عرضه الفني على العميل.
+export enum AdditionalWorkProposalStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  DECLINED = 'declined',
+}
+
 @Entity('order_items')
 export class OrderItem {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
@@ -47,6 +55,15 @@ export class OrderItem {
 
   @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
+
+  @Column({ name: 'proposal_status', type: 'varchar', length: 16, default: AdditionalWorkProposalStatus.PENDING })
+  proposalStatus: AdditionalWorkProposalStatus;
+
+  @Column({ name: 'declined_at', type: 'timestamptz', nullable: true })
+  declinedAt: Date | null;
+
+  @Column({ name: 'declined_by_user_id', type: 'uuid', nullable: true })
+  declinedByUserId: string | null;
 
   @Column({ name: 'added_by_user_id', type: 'uuid' })
   addedByUserId: string;

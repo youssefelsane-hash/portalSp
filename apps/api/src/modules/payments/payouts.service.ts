@@ -203,37 +203,54 @@ export class PayoutsService {
     return payout;
   }
 
-  async adminApprove(adminUserId: string, payoutId: string, meta?: AuditActorMeta): Promise<Payout> {
-    const payout = await this.findOrThrow(payoutId);
-    if (payout.payoutStatus !== PayoutStatus.UNDER_REVIEW) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `مينفعش توافق على صرف في حالة ${payout.payoutStatus}`,
-        HttpStatus.CONFLICT,
-      );
+  private async lockPayoutOrThrow(manager: EntityManager, payoutId: string): Promise<Payout> {
+    const payout = await manager
+      .createQueryBuilder(Payout, 'payout')
+      .setLock('pessimistic_write')
+      .where('payout.id = :payoutId', { payoutId })
+      .getOne();
+    if (!payout) {
+      throw new ApiException(ErrorCode.VAL_001, 'طلب الصرف غير موجود', HttpStatus.NOT_FOUND);
     }
-    const previousStatus = payout.payoutStatus;
-    payout.payoutStatus = PayoutStatus.APPROVED;
-    payout.reviewedAt = new Date();
-    payout.reviewedByUserId = adminUserId;
-    await this.payouts.save(payout);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payout.approved',
-      entityType: 'payout',
-      entityId: payout.id,
-      oldValues: { payout_status: previousStatus },
-      newValues: { payout_status: payout.payoutStatus, amount_cents: payout.amountCents },
-      meta,
-    });
     return payout;
+  }
+
+  async adminApprove(adminUserId: string, payoutId: string, meta?: AuditActorMeta): Promise<Payout> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const payout = await this.lockPayoutOrThrow(manager, payoutId);
+      if (payout.payoutStatus !== PayoutStatus.UNDER_REVIEW) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `مينفعش توافق على صرف في حالة ${payout.payoutStatus}`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      const previousStatus = payout.payoutStatus;
+      payout.payoutStatus = PayoutStatus.APPROVED;
+      payout.reviewedAt = new Date();
+      payout.reviewedByUserId = adminUserId;
+      await manager.save(payout);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payout.approved',
+          entityType: 'payout',
+          entityId: payout.id,
+          oldValues: { payout_status: previousStatus },
+          newValues: { payout_status: payout.payoutStatus, amount_cents: payout.amountCents },
+          meta,
+        },
+        manager,
+      );
+      return { payout, previousStatus };
+    });
+    return result.payout;
   }
 
   async adminReject(adminUserId: string, payoutId: string, reason: string, meta?: AuditActorMeta): Promise<Payout> {
     const result = await this.dataSource.transaction(async (manager) => {
-      const payout = await this.findOrThrow(payoutId, manager);
+      const payout = await this.lockPayoutOrThrow(manager, payoutId);
       if (payout.payoutStatus === PayoutStatus.COMPLETED || payout.payoutStatus === PayoutStatus.REJECTED) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -251,25 +268,27 @@ export class PayoutsService {
       payout.reviewedAt = new Date();
       payout.reviewedByUserId = adminUserId;
       await manager.save(payout);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payout.rejected',
+          entityType: 'payout',
+          entityId: payout.id,
+          oldValues: { payout_status: previousStatus },
+          newValues: { payout_status: payout.payoutStatus, reason },
+          meta,
+        },
+        manager,
+      );
       return { payout, previousStatus };
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payout.rejected',
-      entityType: 'payout',
-      entityId: result.payout.id,
-      oldValues: { payout_status: result.previousStatus },
-      newValues: { payout_status: result.payout.payoutStatus, reason },
-      meta,
     });
     return result.payout;
   }
 
   async adminComplete(adminUserId: string, payoutId: string, meta?: AuditActorMeta): Promise<Payout> {
     const result = await this.dataSource.transaction(async (manager) => {
-      const payout = await this.findOrThrow(payoutId, manager);
+      const payout = await this.lockPayoutOrThrow(manager, payoutId);
       if (payout.payoutStatus !== PayoutStatus.APPROVED) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -291,18 +310,20 @@ export class PayoutsService {
       payout.completedAt = new Date();
       payout.reviewedByUserId = payout.reviewedByUserId ?? adminUserId;
       await manager.save(payout);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payout.completed',
+          entityType: 'payout',
+          entityId: payout.id,
+          oldValues: { payout_status: previousStatus },
+          newValues: { payout_status: payout.payoutStatus, net_amount_cents: payout.netAmountCents },
+          meta,
+        },
+        manager,
+      );
       return { payout, previousStatus };
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payout.completed',
-      entityType: 'payout',
-      entityId: result.payout.id,
-      oldValues: { payout_status: result.previousStatus },
-      newValues: { payout_status: result.payout.payoutStatus, net_amount_cents: result.payout.netAmountCents },
-      meta,
     });
 
     this.events.emit(

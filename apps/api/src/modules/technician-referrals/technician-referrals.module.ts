@@ -17,6 +17,7 @@ import { TechnicianReferralCapturedListener } from './listeners/technician-refer
 import { TechnicianReferralOrderStatusListener } from './listeners/technician-referral-order-status.listener';
 import { MeTechnicianReferralController } from './me-technician-referral.controller';
 import { TechnicianReferralsController } from './technician-referrals.controller';
+import { TechnicianReferralRecoveryService } from './technician-referral-recovery.service';
 import { TechnicianReferralsService } from './technician-referrals.service';
 
 @Module({
@@ -37,7 +38,12 @@ import { TechnicianReferralsService } from './technician-referrals.service';
     TechniciansModule,
   ],
   controllers: [TechnicianReferralsController, MeTechnicianReferralController, AdminTechnicianReferralsController],
-  providers: [TechnicianReferralsService, TechnicianReferralCapturedListener, TechnicianReferralOrderStatusListener],
+  providers: [
+    TechnicianReferralsService,
+    TechnicianReferralRecoveryService,
+    TechnicianReferralCapturedListener,
+    TechnicianReferralOrderStatusListener,
+  ],
   exports: [TechnicianReferralsService],
 })
 export class TechnicianReferralsModule {}

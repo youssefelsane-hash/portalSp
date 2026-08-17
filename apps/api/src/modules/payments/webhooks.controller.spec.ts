@@ -48,7 +48,7 @@ describe('WebhooksController — لا يبتلع أخطاء داخلية غير 
       gatewayResult.externalEventId,
       gatewayResult.eventType,
       'paymob',
-      {},
+      { __baytak_delivery_hmac: 'hmac-value' },
       gatewayResult.signatureValid,
       gatewayResult.paymentId,
       gatewayResult.succeeded,

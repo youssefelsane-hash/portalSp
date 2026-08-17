@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderItemsService } from './order-items.service';
 import { Order, OrderStatus } from './entities/order.entity';
-import { OrderItem, OrderItemType } from './entities/order-item.entity';
+import { AdditionalWorkProposalStatus, OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from '../payments/entities/payment.entity';
@@ -41,6 +41,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   let orderItemsService: OrderItemsService;
   let paymentsService: PaymentsService;
   let savedPaymentMethods: SavedPaymentMethodsService;
+  let cache: RedisCacheService;
   let fakeChargeTokenResult: { succeeded: boolean; providerReference: string | null; failureReason: string | null };
 
   const runId = Date.now().toString(36);
@@ -160,7 +161,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     );
     ids.techProfile = techProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),
@@ -227,21 +228,44 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     );
   });
 
+  beforeEach(async () => {
+    if (!dataSource?.isInitialized || !ids.customerProfile) return;
+    // Each scenario owns a separate order; retire the previous fixture so the
+    // production one-active-order-per-technician invariant remains exercised.
+    await dataSource.query(
+      `UPDATE orders
+       SET order_status = 'completed'
+       WHERE customer_id = $1
+         AND order_number LIKE 'TESTAWP-%'
+         AND order_status IN (
+           'accepted', 'technician_on_way', 'technician_arrived', 'in_progress',
+           'awaiting_quote_approval', 'work_completed', 'awaiting_payment'
+         )`,
+      [ids.customerProfile],
+    );
+  });
+
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAWP-%`]);
-    await q(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAWP-%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAWP-%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTAWP-%`]);
-    await q(`DELETE FROM payment_methods WHERE customer_id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await dataSource.destroy();
+    try {
+      await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-awp-%${runId}%`]);
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM payment_methods WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    } finally {
+      cache?.onModuleDestroy();
+      await dataSource.destroy();
+    }
   });
 
   it('مفيش وسيلة دفع محفوظة — المحاولة تفشل فورًا بـobligation واضح، المبلغ يفضل مستحق (§10/§18)', async () => {
@@ -341,7 +365,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     expect(owed).toBe(0); // مفيش أي تأثير مالي مزدوج من إعادة إرسال نفس الحدث
   });
 
-  it('العميل رفض البنود — صفر تأثير مالي، صفر محاولة دفع (§2)', async () => {
+  it('العميل رفض البنود — صفر تأثير مالي وصفر محاولة دفع، مع بقاء الدليل المرفوض قابلًا للمراجعة (§2)', async () => {
     const orderId = await insertPrepaidOrder(`declined-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
       { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة مرفوضة', quantity: 1, unit_price_cents: 20000 },
@@ -352,6 +376,12 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
     const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
     expect(addlPayment).toBeUndefined(); // صفر محاولة دفع خالص
+
+    const [declined] = await dataSource.getRepository(OrderItem).find({ where: { orderId } });
+    expect(declined).toBeDefined();
+    expect(declined.proposalStatus).toBe(AdditionalWorkProposalStatus.DECLINED);
+    expect(declined.declinedAt).not.toBeNull();
+    expect(declined.declinedByUserId).toBe(ids.customerUser);
   });
 
   it('العميل اختار الدفع كاش للمبلغ الإضافي — صفر محاولة تحصيل إلكتروني، الدلتا تتجمّع في total_amount_cents بس (docs/08 §22 بند 8)', async () => {
@@ -402,5 +432,52 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
 
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId, orderItemBatchId: batchId } });
     expect(payments.length).toBe(1); // صف واحد بس اتسجّل، مش اتنين
+  });
+
+  it('propose × propose المتزامن يسمح بـbatch معلّق واحد فقط ويرجع تعارض نطاق واضح للطلب الآخر', async () => {
+    const orderId = await insertPrepaidOrder(`propose-race-${runId}`, 100000);
+    const results = await Promise.allSettled([
+      orderItemsService.propose(ids.techUser, orderId, [
+        { item_type: OrderItemType.SPARE_PART, name_ar: 'اقتراح متزامن أ', quantity: 1, unit_price_cents: 5000 },
+      ]),
+      orderItemsService.propose(ids.techUser, orderId, [
+        { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'اقتراح متزامن ب', quantity: 1, unit_price_cents: 7000 },
+      ]),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    const pending = await dataSource.getRepository(OrderItem).find({
+      where: { orderId, proposalStatus: AdditionalWorkProposalStatus.PENDING },
+    });
+    expect(pending).toHaveLength(1);
+    expect(new Set(pending.map((item) => item.batchId)).size).toBe(1);
+  });
+
+  it('approve × decline المتزامن يختار قرارًا نهائيًا واحدًا، من دون حذف أو total_amount متناقض', async () => {
+    const orderId = await insertPrepaidOrder(`decision-race-${runId}`, 100000);
+    await orderItemsService.propose(ids.techUser, orderId, [
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'بند قرار متزامن', quantity: 1, unit_price_cents: 9000 },
+    ]);
+
+    const results = await Promise.allSettled([
+      orderItemsService.approve(ids.customerUser, orderId, 'cash'),
+      orderItemsService.decline(ids.customerUser, orderId),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    const [item] = await dataSource.getRepository(OrderItem).find({ where: { orderId } });
+    expect(item).toBeDefined();
+    expect(order.orderStatus).toBe(OrderStatus.IN_PROGRESS);
+    if (item.proposalStatus === AdditionalWorkProposalStatus.APPROVED) {
+      expect(order.totalAmountCents).toBe(109000);
+      expect(item.isCustomerApproved).toBe(true);
+    } else {
+      expect(item.proposalStatus).toBe(AdditionalWorkProposalStatus.DECLINED);
+      expect(order.totalAmountCents).toBe(100000);
+      expect(item.isCustomerApproved).toBe(false);
+    }
   });
 });

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -25,6 +25,7 @@ export class AdminPromotionsController {
     private readonly loyaltyService: LoyaltyService,
     private readonly auditLog: AuditLogService,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   @Post('promo-codes')
@@ -64,16 +65,21 @@ export class AdminPromotionsController {
     if (!user) {
       throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
     }
-    const transaction = await this.loyaltyService.earn(userId, dto.points, LoyaltySource.MANUAL);
-
-    await this.auditLog.record({
-      actorUserId: admin.sub,
-      actorRole: 'admin',
-      action: 'loyalty.manual_credit',
-      entityType: 'customer_loyalty',
-      entityId: userId,
-      newValues: { points_credited: dto.points, balance_after: transaction.balanceAfter },
-      meta: audit,
+    const transaction = await this.dataSource.transaction(async (manager) => {
+      const earned = await this.loyaltyService.earn(userId, dto.points, LoyaltySource.MANUAL, null, null, manager);
+      await this.auditLog.record(
+        {
+          actorUserId: admin.sub,
+          actorRole: 'admin',
+          action: 'loyalty.manual_credit',
+          entityType: 'customer_loyalty',
+          entityId: userId,
+          newValues: { points_credited: dto.points, balance_after: earned.balanceAfter },
+          meta: audit,
+        },
+        manager,
+      );
+      return earned;
     });
     return { user_id: userId, points_balance: transaction.balanceAfter };
   }

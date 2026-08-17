@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, EntityManager, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 import { ListAuditLogsQueryDto } from './dto/list-audit-logs-query.dto';
 
@@ -28,13 +28,14 @@ export class AuditLogService {
   constructor(@InjectRepository(AuditLog) private readonly auditLogs: Repository<AuditLog>) {}
 
   /**
-   * مبيرميش استثناء أبداً — تسجيل التدقيق مهم بس مينفعش يفشّل عملية إدارية حقيقية (صرف
-   * فلوس اتوافق عليه، طلب اترفض) لمجرد إن كتابة السجل نفسها فشلت. أي فشل بيتسجّل في اللوج
-   * بس عشان يتلاحظ، مش يتجاهل بصمت.
+   * Calls that pass a transaction manager make the audit row part of the business transaction.
+   * Those failures must propagate so a sensitive operation can never commit without its audit.
+   * Legacy/non-sensitive standalone callers retain best-effort logging behavior.
    */
-  async record(params: RecordAuditLogParams): Promise<void> {
+  async record(params: RecordAuditLogParams, manager?: EntityManager): Promise<void> {
     try {
-      const entry = this.auditLogs.create({
+      const repository = manager ? manager.getRepository(AuditLog) : this.auditLogs;
+      const entry = repository.create({
         actorUserId: params.actorUserId,
         actorRole: params.actorRole,
         actorIp: params.meta?.ip ?? null,
@@ -46,8 +47,9 @@ export class AuditLogService {
         userAgent: params.meta?.userAgent ?? null,
         requestId: params.meta?.requestId ?? null,
       });
-      await this.auditLogs.save(entry);
+      await repository.save(entry);
     } catch (err) {
+      if (manager) throw err;
       this.logger.error(
         `فشل تسجيل audit log للعملية ${params.action} على ${params.entityType}:${params.entityId}`,
         err instanceof Error ? err.stack : err,

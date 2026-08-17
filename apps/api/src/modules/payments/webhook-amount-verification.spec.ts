@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Order } from '../orders/entities/order.entity';
@@ -29,6 +30,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     payment: '',
   };
   const EXPECTED_AMOUNT_CENTS = 50000;
+  const extraPaymentIds: string[] = [];
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -50,12 +52,12 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
       dataSource,
       {} as never,
       {} as never,
+      { findByProfileIdOrThrow: async () => ({ id: ids.customerProfile, userId: ids.customerUser }) } as never,
       {} as never,
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
-      {} as never,
+      { getNumber: async (_key: string, fallback: number) => fallback } as never,
       {} as never,
       {} as never,
       {} as never,
@@ -124,7 +126,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
   beforeEach(async () => {
     // كل it() بيعمل الدفعة بتاعته من الصفر (pending) عشان الاختبارات تفضل مستقلة عن بعض.
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    if (ids.payment) await q(`DELETE FROM webhook_events WHERE true`);
+    if (ids.payment) await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`%${runId}`]);
     const [payment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key)
        VALUES ($1,$2,$3,$4,'card','pending',$5) RETURNING id`,
@@ -135,22 +137,29 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
 
   afterEach(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM webhook_events WHERE true`);
+    await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`%${runId}`]);
+    for (const paymentId of extraPaymentIds.splice(0)) {
+      await q(`DELETE FROM payments WHERE id = $1`, [paymentId]);
+    }
     await q(`DELETE FROM payments WHERE id = $1`, [ids.payment]);
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
+    } finally {
+      if (dataSource.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('مبلغ الـwebhook أقل من المتوقع: الحدث يترفض بأمان، الدفعة تفضل pending — كان الثغرة', async () => {
@@ -173,8 +182,34 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     expect(payment?.paymentStatus).toBe(PaymentGatewayStatus.PENDING);
 
     const events = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId: `evt-mismatch-${runId}` } });
-    expect(events[0]?.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(events[0]?.processingStatus).toBe(WebhookProcessingStatus.MANUAL_REVIEW);
     expect(events[0]?.errorMessage).toContain('مايطابقش');
+  });
+
+  it('PROCESSING عالق عند آخر محاولة ينتقل صراحةً إلى manual_review بدل التعليق للأبد', async () => {
+    const externalEventId = `evt-exhausted-${runId}`;
+    const [insertedEvent] = await dataSource.query(
+      `INSERT INTO webhook_events
+         (provider, event_type, external_event_id, payload, signature_valid, processing_status,
+          retry_count, processing_started_at)
+       VALUES ('paymob','TRANSACTION',$1,'{}'::jsonb,true,'processing',5,now() - interval '10 minutes')
+       RETURNING id`,
+      [externalEventId],
+    );
+
+    await service.recoverWebhookEvent(insertedEvent.id);
+
+    const event = await dataSource.getRepository(WebhookEvent).findOneByOrFail({
+      provider: 'paymob',
+      externalEventId,
+    });
+    expect(event.processingStatus).toBe(WebhookProcessingStatus.MANUAL_REVIEW);
+    expect(event.processingStartedAt).toBeNull();
+    expect(event.nextRetryAt).toBeNull();
+    expect(event.errorMessage).toContain('exhausted retry limit');
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: ids.payment })).paymentStatus).toBe(
+      PaymentGatewayStatus.PENDING,
+    );
   });
 
   it('مبلغ الـwebhook مطابق تمامًا: الفحص بيعدّي (مايترفضش بسبب المبلغ)', async () => {
@@ -202,7 +237,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     expect(events[0]?.errorMessage).not.toContain('مايطابقش');
   });
 
-  it('نفس external_event_id بيتبعت مرتين (retry شائع من بوابات الدفع): المرة التانية no-op تمامًا — regression §26 (financial idempotency)', async () => {
+  it('نفس external_event_id بيتبعت مرتين قبل موعد recovery: المرة التانية no-op بلا أثر مالي مكرر', async () => {
     const externalEventId = `evt-replay-${runId}`;
     // أول نداء — هيفشل داخليًا (اعتماديات مموّهة، زي أي اختبار تاني هنا) لكن المهم إن صف
     // webhook_events اتسجّل قبل الفشل.
@@ -213,13 +248,143 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     const eventsAfterFirst = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId } });
     expect(eventsAfterFirst.length).toBe(1);
 
-    // نداء تاني بنفس external_event_id — لازم يرجع فورًا من غير ما يحاول يعالج تاني خالص (مفيش
-    // throw، مفيش صف جديد) — ده اللي بيمنع بوابة دفع بتعيد إرسال نفس الحدث من تسبيب أي أثر مضاعف.
+    // نداء تاني قبل next_retry_at يرجع فورًا بلا صف جديد. إعادة المحاولة الفعلية يملكها recovery
+    // المحدود بعد backoff، وليس كل delivery سريع من المزوّد.
     await expect(
       service.finalizeGatewayWebhook(externalEventId, 'TRANSACTION', 'paymob', { fake: true }, true, ids.payment, true, null, 'gw-txn-3', PaymentMethod.CARD, EXPECTED_AMOUNT_CENTS),
     ).resolves.toBeUndefined();
 
     const eventsAfterSecond = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId } });
     expect(eventsAfterSecond.length).toBe(1); // صف واحد بس، مش اتنين
+  });
+
+  it('حدث FAILED يعاد بنفس الهوية بعد backoff ويُعالج مرة واحدة لما تصبح الدفعة متاحة', async () => {
+    const externalEventId = `evt-recover-${runId}`;
+    const delayedPaymentId = randomUUID();
+    extraPaymentIds.push(delayedPaymentId);
+
+    // أول delivery وصل قبل ظهور صف الدفعة (تعطل/تأخر محلي عابر)، فلا يصبح processed كذبًا.
+    await service.finalizeGatewayWebhook(
+      externalEventId,
+      'TRANSACTION',
+      'paymob',
+      { fake: true },
+      true,
+      delayedPaymentId,
+      false,
+      'declined by provider',
+      'gw-recover',
+      PaymentMethod.CARD,
+    );
+    const failedEvent = await dataSource.getRepository(WebhookEvent).findOne({ where: { provider: 'paymob', externalEventId } });
+    expect(failedEvent?.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(failedEvent?.nextRetryAt).not.toBeNull();
+
+    // نفس payment_id يظهر بعد ذلك؛ لا نغيّر هوية الحدث أو نحاكي event جديد.
+    await dataSource.query(
+      `INSERT INTO payments (id, payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,'card','pending',$6)`,
+      [
+        delayedPaymentId,
+        `PAYREC-${runId}`.slice(0, 24),
+        ids.order,
+        ids.customerProfile,
+        EXPECTED_AMOUNT_CENTS,
+        `idem-recover-${runId}`,
+      ],
+    );
+    await dataSource.query(
+      `UPDATE webhook_events SET next_retry_at = now() WHERE provider = 'paymob' AND external_event_id = $1`,
+      [externalEventId],
+    );
+
+    await service.finalizeGatewayWebhook(
+      externalEventId,
+      'TRANSACTION',
+      'paymob',
+      { fake: true },
+      true,
+      delayedPaymentId,
+      false,
+      'declined by provider',
+      'gw-recover',
+      PaymentMethod.CARD,
+    );
+
+    const recoveredEvent = await dataSource.getRepository(WebhookEvent).findOne({ where: { provider: 'paymob', externalEventId } });
+    const delayedPayment = await dataSource.getRepository(Payment).findOne({ where: { id: delayedPaymentId } });
+    expect(recoveredEvent?.processingStatus).toBe(WebhookProcessingStatus.PROCESSED);
+    expect(recoveredEvent?.retryCount).toBe(2);
+    expect(delayedPayment?.paymentStatus).toBe(PaymentGatewayStatus.FAILED);
+  });
+
+  it('نفس external_event_id من بوابتين مختلفتين لا يتصادم: الهوية provider-scoped', async () => {
+    const externalEventId = `numeric-reference-${runId}`;
+
+    await Promise.all([
+      service.finalizeGatewayWebhook(
+        externalEventId,
+        'TRANSACTION',
+        'paymob',
+        { fake: 'paymob' },
+        true,
+        null,
+        false,
+        'لا توجد دفعة',
+        'paymob-txn',
+        PaymentMethod.CARD,
+      ),
+      service.finalizeGatewayWebhook(
+        externalEventId,
+        'TRANSACTION',
+        'fawry',
+        { fake: 'fawry' },
+        true,
+        null,
+        false,
+        'لا توجد دفعة',
+        'fawry-txn',
+        PaymentMethod.FAWRY_REFERENCE,
+      ),
+    ]);
+
+    const events = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId } });
+    expect(events).toHaveLength(2);
+    expect(new Set(events.map((event) => event.provider))).toEqual(new Set(['paymob', 'fawry']));
+    expect(events.every((event) => event.processingStatus === WebhookProcessingStatus.IGNORED)).toBe(true);
+  });
+
+  it('delivery متزامن لنفس الحدث ينتج صفًا واحدًا فقط ومعالجة واحدة قابلة للمراجعة', async () => {
+    const externalEventId = `evt-concurrent-${runId}`;
+    await Promise.all([
+      service.finalizeGatewayWebhook(
+        externalEventId,
+        'TRANSACTION',
+        'paymob',
+        { fake: true },
+        true,
+        null,
+        false,
+        'لا توجد دفعة',
+        'gw-concurrent',
+        PaymentMethod.CARD,
+      ),
+      service.finalizeGatewayWebhook(
+        externalEventId,
+        'TRANSACTION',
+        'paymob',
+        { fake: true },
+        true,
+        null,
+        false,
+        'لا توجد دفعة',
+        'gw-concurrent',
+        PaymentMethod.CARD,
+      ),
+    ]);
+
+    const events = await dataSource.getRepository(WebhookEvent).find({ where: { provider: 'paymob', externalEventId } });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.processingStatus).toBe(WebhookProcessingStatus.IGNORED);
   });
 });

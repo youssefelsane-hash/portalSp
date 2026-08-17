@@ -38,6 +38,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
   let dataSource: DataSource;
   let ordersService: OrdersService;
   let paymentsService: PaymentsService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -223,7 +224,8 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     ids.techProfile = techProfile.id;
 
     const [otherTechUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
-      `+2030${runId}`.slice(0, 15),
+      // Keep this suite's namespace distinct from parallel order suites that can share Date.now().
+      `+2998${runId}`.slice(0, 15),
       `فني تاني اختبار ${runId}`,
     ]);
     ids.otherTechUser = otherTechUser.id;
@@ -233,7 +235,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     );
     ids.otherTechProfile = otherTechProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -309,23 +311,41 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     );
   });
 
+  afterEach(async () => {
+    // Phase 7 permits only one active order per technician. Cases in this suite are independent,
+    // so release the shared technician resource before the next fixture is inserted.
+    if (dataSource?.isInitialized) {
+      await dataSource.query(`UPDATE orders SET technician_id = NULL WHERE order_number LIKE $1`, [`TESTFV-%`]);
+    }
+  });
+
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM technician_schedule_slots WHERE technician_id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
-    await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM wallet_transactions WHERE reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTFV-%`]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.otherTechUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await dataSource.destroy();
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      const technicianIds = [ids.techProfile, ids.otherTechProfile].filter(Boolean);
+      const userIds = [ids.customerUser, ids.techUser, ids.otherTechUser].filter(Boolean);
+      if (technicianIds.length > 0) {
+        await q(`DELETE FROM technician_schedule_slots WHERE technician_id = ANY($1::uuid[])`, [technicianIds]);
+      }
+      await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM wallet_transactions WHERE reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
+      await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTFV-%`]);
+      if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      if (technicianIds.length > 0) {
+        await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [technicianIds]);
+      }
+      if (userIds.length > 0) await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [userIds]);
+      if (ids.service) await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      if (ids.category) await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      if (ids.zone) await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    } finally {
+      cache?.onModuleDestroy();
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('no-show من TECHNICIAN_ARRIVED → DISPUTED + شكوى NO_SHOW، وresolve(reschedule) يحجز سلوت جديد حقيقي فعليًا (docs/08 §25.2)', async () => {

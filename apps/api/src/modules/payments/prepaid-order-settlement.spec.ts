@@ -36,6 +36,7 @@ import { RedisCacheService } from '../../common/cache/redis-cache.service';
 describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب المدفوع مسبقًا (ADR-0015)', () => {
   let dataSource: DataSource;
   let service: PaymentsService;
+  let cache: RedisCacheService;
 
   const runId = Date.now().toString(36);
   const ids = {
@@ -154,7 +155,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
     );
     ids.techProfile = techProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),
@@ -210,25 +211,35 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
   });
 
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTPPS-%${runId}%`]);
-    await q(`DELETE FROM wallet_transactions WHERE reference_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTPPS-%${runId}%`]);
-    await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTPPS-%${runId}%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTPPS-%${runId}%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTPPS-%${runId}%`]);
-    await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM loyalty_transactions WHERE user_id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
-    await dataSource.destroy();
+    try {
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(
+        `DELETE FROM wallet_transactions
+         WHERE reference_id IN (SELECT id FROM orders WHERE customer_id = $1)
+            OR wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($2, $3))`,
+        [ids.customerProfile, ids.techUser, ids.customerUser],
+      );
+      await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM loyalty_transactions WHERE user_id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
+    } finally {
+      cache.onModuleDestroy();
+      await dataSource.destroy();
+    }
   });
 
   it('طلب مدفوع مسبقًا بالكامل (مفيش بند إضافي، دلتا=صفر): تسوية تلقائية فورية — COMPLETED + أرباح الفني اتحوّلت', async () => {
@@ -249,6 +260,28 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
 
     const techWallet = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
     expect(Number(techWallet[0].balance_cents)).toBe(27000);
+  });
+
+  it('فقد event بعد commit يُسترد من PostgreSQL، ونسختا sweep لا تكرران التسوية', async () => {
+    const orderId = await insertPrepaidWorkCompletedOrder(`r-${runId}`, 30000, 30000);
+    const [beforeRow] = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
+    const balanceBefore = beforeRow ? Number(beforeRow.balance_cents) : 0;
+
+    await Promise.all([
+      service.reconcilePrepaidWorkCompleted(25),
+      service.reconcilePrepaidWorkCompleted(25),
+    ]);
+
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(order.orderStatus).toBe(OrderStatus.COMPLETED);
+    expect(order.paymentStatus).toBe(OrderPaymentStatus.PAID);
+    const [afterRow] = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
+    expect(Number(afterRow.balance_cents) - balanceBefore).toBe(27000);
+    expect(
+      await dataSource.getRepository(OrderStatusHistory).count({
+        where: { orderId, newStatus: OrderStatus.COMPLETED },
+      }),
+    ).toBe(1);
   });
 
   it('طلب مدفوع مسبقًا بس فيه بند إضافي اتوافق عليه بعدين (دلتا>صفر): ينتقل لـAWAITING_PAYMENT بلا تسوية فورية، وبعد تحصيل الدلتا يقفل صح', async () => {

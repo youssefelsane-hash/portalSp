@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -8,7 +8,11 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { UserDevice } from '../notifications/entities/user-device.entity';
 import { Order } from '../orders/entities/order.entity';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
-import { WalletTransaction, WalletTxType } from '../payments/entities/wallet-transaction.entity';
+import {
+  WalletTransaction,
+  WalletTxDirection,
+  WalletTxType,
+} from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
@@ -41,6 +45,7 @@ export class TechnicianReferralsService {
     @InjectRepository(CustomerProfile) private readonly customerProfiles: Repository<CustomerProfile>,
     @InjectRepository(UserDevice) private readonly userDevices: Repository<UserDevice>,
     @InjectRepository(WalletTransaction) private readonly walletTransactions: Repository<WalletTransaction>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly settingsService: SettingsService,
     private readonly walletsService: WalletsService,
     private readonly auditLog: AuditLogService,
@@ -92,160 +97,352 @@ export class TechnicianReferralsService {
     return { accepted: 1, work_completed: 2, completed: 3 }[status];
   }
 
-  /** بتتنادى من TechnicianReferralOrderStatusListener على أي ORDER_STATUS_CHANGED_EVENT. */
-  async evaluateOrderForBonus(orderId: string, newStatus: string): Promise<void> {
-    if (!(await this.settingsService.getBoolean('referral_qr.enabled', true))) return;
+  /** Rebuilds the source row left by the pre-Phase-4 credit-then-save crash window. */
+  private async recoverLegacyWalletEffect(
+    manager: EntityManager,
+    order: Order,
+    technician: TechnicianProfile,
+    customerUserId: string,
+  ): Promise<TechnicianReferralBonus | null> {
+    const originals = await manager.find(WalletTransaction, {
+      where: {
+        referenceType: 'technician_referral_bonus',
+        referenceId: order.id,
+        transactionType: WalletTxType.REFERRAL_REWARD,
+      },
+    });
+    if (originals.length === 0) return null;
 
-    const minStatus = (await this.settingsService.getString('referral_qr.qualifying_min_order_status', 'completed')) as QualifyingStatus;
-    if (!['accepted', 'work_completed', 'completed'].includes(newStatus)) return;
-    if (this.rankOf(newStatus as QualifyingStatus) < this.rankOf(minStatus)) return;
-
-    // idempotency: order_id UNIQUE على الجدول — لو اتعالج قبل كده (أي انتقال حالة تاني وصل
-    // للعتبة أو أعلى منها) منعمل حاجة تاني.
-    const existingBonus = await this.bonuses.findOne({ where: { orderId } });
-    if (existingBonus) return;
-
-    const order = await this.orders.findOne({ where: { id: orderId } });
-    if (!order) return;
-    const customerProfile = await this.customerProfiles.findOne({ where: { id: order.customerId } });
-    if (!customerProfile) return;
-
-    const attribution = await this.attributions.findOne({ where: { customerUserId: customerProfile.userId } });
-    if (!attribution) return; // العميل ده مش عميل ترشيح فني أصلاً
-
-    const rewardMode = (await this.settingsService.getString('referral_qr.reward_mode', 'first_order_only')) as RewardMode;
-    if (rewardMode === 'first_order_only') {
-      const priorCredited = await this.bonuses.count({
-        where: { technicianId: attribution.technicianId, customerUserId: customerProfile.userId, status: TechnicianReferralBonusStatus.CREDITED },
-      });
-      if (priorCredited > 0) return; // أول طلب مؤهّل اتكافأ عليه الفني بالفعل
+    const debit = originals.find((entry) => entry.direction === WalletTxDirection.DEBIT);
+    const credit = originals.find((entry) => entry.direction === WalletTxDirection.CREDIT);
+    if (
+      originals.length !== 2 ||
+      !debit ||
+      !credit ||
+      debit.amountCents !== credit.amountCents ||
+      debit.isReversed !== credit.isReversed
+    ) {
+      return manager.save(
+        manager.create(TechnicianReferralBonus, {
+          technicianId: technician.id,
+          customerUserId,
+          orderId: order.id,
+          bonusAmountCents: Math.max(0, ...originals.map((entry) => entry.amountCents)),
+          status: TechnicianReferralBonusStatus.MANUAL_REVIEW,
+          rejectionReason: `قيود مكافأة قديمة غير متسقة: ${originals.length} قيد، debit=${!!debit}، credit=${!!credit}`,
+          creditedAt: null,
+          customerDeviceId: null,
+        }),
+      );
     }
 
-    const minOrderAmount = await this.settingsService.getNumber('referral_qr.min_order_amount_cents', 0);
-    if (minOrderAmount > 0 && order.totalAmountCents < minOrderAmount) return;
+    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+    const technicianWallet = await this.walletsService.findByUserIdOrThrow(technician.userId, manager);
+    if (debit.walletId !== platformWallet.id || credit.walletId !== technicianWallet.id) {
+      return manager.save(
+        manager.create(TechnicianReferralBonus, {
+          technicianId: technician.id,
+          customerUserId,
+          orderId: order.id,
+          bonusAmountCents: 0,
+          status: TechnicianReferralBonusStatus.MANUAL_REVIEW,
+          rejectionReason: 'أطراف قيد مكافأة الترشيح القديمة غير متطابقة وتحتاج مراجعة يدوية',
+          creditedAt: null,
+          customerDeviceId: null,
+        }),
+      );
+    }
 
-    const bonusAmount = await this.settingsService.getNumber('referral_qr.bonus_amount_cents', 5000);
+    const wasReversed = debit.isReversed && credit.isReversed;
+    if (wasReversed && (!debit.reversalTransactionId || !credit.reversalTransactionId)) {
+      return manager.save(
+        manager.create(TechnicianReferralBonus, {
+          technicianId: technician.id,
+          customerUserId,
+          orderId: order.id,
+          bonusAmountCents: 0,
+          status: TechnicianReferralBonusStatus.MANUAL_REVIEW,
+          rejectionReason: 'قيد مكافأة قديم معلّم كمعكوس بلا مراجع العكس وتحتاج حالته مراجعة يدوية',
+          creditedAt: null,
+          customerDeviceId: null,
+        }),
+      );
+    }
 
-    // ── فحوصات مضادة لإساءة الاستخدام — بترفض المكافأة (rejected_suspicious) مش الطلب نفسه ──
-    let rejectionReason: string | null = null;
-    const customerDevice = await this.userDevices.findOne({ where: { userId: customerProfile.userId, isActive: true } });
+    return manager.save(
+      manager.create(TechnicianReferralBonus, {
+        technicianId: technician.id,
+        customerUserId,
+        orderId: order.id,
+        bonusAmountCents: debit.amountCents,
+        status: wasReversed ? TechnicianReferralBonusStatus.REVOKED : TechnicianReferralBonusStatus.CREDITED,
+        rejectionReason: null,
+        creditedAt: credit.createdAt,
+        revokedAt: wasReversed ? new Date() : null,
+        revokedReason: wasReversed ? 'استرداد سجل مكافأة قديم معكوس بالفعل' : null,
+        walletDebitTxId: debit.id,
+        walletCreditTxId: credit.id,
+        customerDeviceId: null,
+      }),
+    );
+  }
 
-    const rejectDuplicateDevice = await this.settingsService.getBoolean('referral_qr.reject_duplicate_device', true);
-    if (rejectDuplicateDevice && customerDevice) {
-      // مقارنة بلقطات مخزّنة على مكافآت سابقة لنفس الفني، مش استعلام حي على user_devices —
-      // device_id عمود UNIQUE عالميًا هناك (ملكية الجهاز بتتنقل بين المستخدمين، مش سجل تاريخي)،
-      // فمقارنة حية كانت هتفشل تكتشف أي حاجة دايمًا (بَقّة حقيقية اتلقطت وقت الاختبار الحي: فني
-      // سجّل جهاز، عميل جديد سجّل نفس الـdevice_id، الملكية اتنقلت بصمت للعميل فالمقارنة الحية
-      // رجعت "مفيش تطابق" رغم إنه نفس الجهاز بالظبط). اللقطة الدائمة على صف المكافأة نفسه هي
-      // اللي بتخلي الاكتشاف ممكن حتى بعد ما الجهاز يتنقل لمستخدم تالت أو رابع.
-      const priorBonusFromSameDevice = await this.bonuses.findOne({
-        where: { technicianId: attribution.technicianId, customerDeviceId: customerDevice.deviceId },
+  /** بتتنادى من TechnicianReferralOrderStatusListener على أي ORDER_STATUS_CHANGED_EVENT. */
+  async evaluateOrderForBonus(orderId: string, newStatus: string): Promise<void> {
+    const [enabled, minStatusValue, rewardModeValue, minOrderAmount, bonusAmount, rejectDuplicateDevice, cooldownMinutes, monthlyCap] =
+      await Promise.all([
+        this.settingsService.getBoolean('referral_qr.enabled', true),
+        this.settingsService.getString('referral_qr.qualifying_min_order_status', 'completed'),
+        this.settingsService.getString('referral_qr.reward_mode', 'first_order_only'),
+        this.settingsService.getNumber('referral_qr.min_order_amount_cents', 0),
+        this.settingsService.getNumber('referral_qr.bonus_amount_cents', 5000),
+        this.settingsService.getBoolean('referral_qr.reject_duplicate_device', true),
+        this.settingsService.getNumber('referral_qr.min_minutes_between_bonuses', 0),
+        this.settingsService.getNumber('referral_qr.max_monthly_bonus_cents_per_technician', 0),
+      ]);
+    if (!enabled) return;
+
+    const minStatus = minStatusValue as QualifyingStatus;
+    const rewardMode = rewardModeValue as RewardMode;
+    if (!['accepted', 'work_completed', 'completed'].includes(newStatus)) return;
+    if (this.rankOf(newStatus as QualifyingStatus) < this.rankOf(minStatus)) return;
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order || !['accepted', 'work_completed', 'completed'].includes(order.orderStatus)) return null;
+      if (this.rankOf(order.orderStatus as QualifyingStatus) < this.rankOf(minStatus)) return null;
+
+      if (await manager.findOne(TechnicianReferralBonus, { where: { orderId } })) return null;
+      const customerProfile = await manager.findOne(CustomerProfile, { where: { id: order.customerId } });
+      if (!customerProfile) return null;
+      const attribution = await manager
+        .createQueryBuilder(TechnicianReferralAttribution, 'attribution')
+        .setLock('pessimistic_write')
+        .where('attribution.customer_user_id = :customerUserId', { customerUserId: customerProfile.userId })
+        .getOne();
+      if (!attribution) return null;
+      const technician = await manager
+        .createQueryBuilder(TechnicianProfile, 'technician')
+        .setLock('pessimistic_write')
+        .where('technician.id = :technicianId', { technicianId: attribution.technicianId })
+        .getOne();
+      if (!technician) return null;
+
+      const legacyBonus = await this.recoverLegacyWalletEffect(
+        manager,
+        order,
+        technician,
+        customerProfile.userId,
+      );
+      if (legacyBonus) {
+        if (legacyBonus.status === TechnicianReferralBonusStatus.REVOKED) {
+          await this.auditLog.record(
+            {
+              actorUserId: null,
+              actorRole: 'system',
+              action: 'technician_referral.bonus_revoked',
+              entityType: 'technician_referral_bonus',
+              entityId: legacyBonus.id,
+              newValues: { status: 'revoked', recovered_legacy_effect: true },
+            },
+            manager,
+          );
+          return null;
+        }
+        if (legacyBonus.status === TechnicianReferralBonusStatus.MANUAL_REVIEW) {
+          await this.auditLog.record(
+            {
+              actorUserId: null,
+              actorRole: 'system',
+              action: 'technician_referral.bonus_manual_review',
+              entityType: 'technician_referral_bonus',
+              entityId: legacyBonus.id,
+              newValues: { reason: legacyBonus.rejectionReason, recovered_legacy_effect: true },
+            },
+            manager,
+          );
+          return {
+            bonus: legacyBonus,
+            technician,
+            rejectionReason: legacyBonus.rejectionReason,
+            credited: false,
+          };
+        }
+        await this.auditLog.record(
+          {
+            actorUserId: null,
+            actorRole: 'system',
+            action: 'technician_referral.bonus_credited',
+            entityType: 'technician_referral_bonus',
+            entityId: legacyBonus.id,
+            newValues: {
+              technician_id: legacyBonus.technicianId,
+              order_id: orderId,
+              bonus_amount_cents: legacyBonus.bonusAmountCents,
+              recovered_legacy_effect: true,
+            },
+          },
+          manager,
+        );
+        return { bonus: legacyBonus, technician, rejectionReason: null, credited: true };
+      }
+
+      let rejectionReason: string | null = null;
+      if (rewardMode === 'first_order_only') {
+        const priorCredited = await manager.count(TechnicianReferralBonus, {
+          where: {
+            technicianId: attribution.technicianId,
+            customerUserId: customerProfile.userId,
+            status: TechnicianReferralBonusStatus.CREDITED,
+          },
+        });
+        if (priorCredited > 0) {
+          rejectionReason = 'سبق احتساب مكافأة أول طلب مؤهل لهذا العميل';
+        }
+      }
+      if (minOrderAmount > 0 && order.totalAmountCents < minOrderAmount && !rejectionReason) {
+        rejectionReason = `قيمة الطلب أقل من الحد الأدنى للمكافأة (${minOrderAmount} قرش)`;
+      }
+
+      const customerDevice = await manager.findOne(UserDevice, {
+        where: { userId: customerProfile.userId, isActive: true },
       });
-      if (priorBonusFromSameDevice && priorBonusFromSameDevice.customerUserId !== customerProfile.userId) {
-        rejectionReason = 'نفس الجهاز استُخدم قبل كده لعميل مختلف اتكافأ عليه الفني ده — احتمال حسابات وهمية';
-      } else {
-        const technician = await this.technicianProfiles.findOne({ where: { id: attribution.technicianId } });
-        if (technician) {
-          const technicianDevice = await this.userDevices.findOne({ where: { userId: technician.userId, isActive: true } });
-          if (technicianDevice && technicianDevice.deviceId === customerDevice.deviceId) {
+      if (rejectDuplicateDevice && customerDevice && !rejectionReason) {
+        const priorBonusFromSameDevice = await manager.findOne(TechnicianReferralBonus, {
+          where: { technicianId: attribution.technicianId, customerDeviceId: customerDevice.deviceId },
+        });
+        if (priorBonusFromSameDevice && priorBonusFromSameDevice.customerUserId !== customerProfile.userId) {
+          rejectionReason = 'نفس الجهاز استُخدم قبل كده لعميل مختلف اتكافأ عليه الفني ده — احتمال حسابات وهمية';
+        } else {
+          const technicianDevice = await manager.findOne(UserDevice, {
+            where: { userId: technician.userId, isActive: true },
+          });
+          if (technicianDevice?.deviceId === customerDevice.deviceId) {
             rejectionReason = 'نفس جهاز الفني حاليًا — احتمال ترشيح ذاتي بحساب عميل وهمي';
           }
         }
       }
-    }
 
-    const cooldownMinutes = await this.settingsService.getNumber('referral_qr.min_minutes_between_bonuses', 0);
-    if (cooldownMinutes > 0 && !rejectionReason) {
-      const lastCredited = await this.bonuses.findOne({
-        where: { technicianId: attribution.technicianId, status: TechnicianReferralBonusStatus.CREDITED },
-        order: { creditedAt: 'DESC' },
-      });
-      if (lastCredited?.creditedAt) {
-        const minutesSince = (Date.now() - lastCredited.creditedAt.getTime()) / 60_000;
-        if (minutesSince < cooldownMinutes) {
-          rejectionReason = `أقل من فترة التهدئة المسموحة (${cooldownMinutes} دقيقة) من آخر مكافأة`;
+      if (cooldownMinutes > 0 && !rejectionReason) {
+        const lastCredited = await manager.findOne(TechnicianReferralBonus, {
+          where: { technicianId: attribution.technicianId, status: TechnicianReferralBonusStatus.CREDITED },
+          order: { creditedAt: 'DESC' },
+        });
+        if (lastCredited?.creditedAt) {
+          const minutesSince = (Date.now() - lastCredited.creditedAt.getTime()) / 60_000;
+          if (minutesSince < cooldownMinutes) {
+            rejectionReason = `أقل من فترة التهدئة المسموحة (${cooldownMinutes} دقيقة) من آخر مكافأة`;
+          }
         }
       }
-    }
 
-    const monthlyCap = await this.settingsService.getNumber('referral_qr.max_monthly_bonus_cents_per_technician', 0);
-    if (monthlyCap > 0 && !rejectionReason) {
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
-      const monthTotal = await this.bonuses
-        .createQueryBuilder('b')
-        .select('COALESCE(SUM(b.bonus_amount_cents), 0)', 'total')
-        .where('b.technician_id = :technicianId', { technicianId: attribution.technicianId })
-        .andWhere('b.status = :status', { status: TechnicianReferralBonusStatus.CREDITED })
-        .andWhere('b.credited_at >= :monthStart', { monthStart })
-        .getRawOne<{ total: string }>();
-      const currentTotal = Number(monthTotal?.total ?? 0);
-      if (currentTotal + bonusAmount > monthlyCap) {
-        rejectionReason = `تجاوز الحد الأقصى الشهري للمكافآت (${monthlyCap} قرش)`;
+      if (monthlyCap > 0 && !rejectionReason) {
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const monthTotal = await manager
+          .createQueryBuilder(TechnicianReferralBonus, 'bonus')
+          .select('COALESCE(SUM(bonus.bonus_amount_cents), 0)', 'total')
+          .where('bonus.technician_id = :technicianId', { technicianId: attribution.technicianId })
+          .andWhere('bonus.status = :status', { status: TechnicianReferralBonusStatus.CREDITED })
+          .andWhere('bonus.credited_at >= :monthStart', { monthStart })
+          .getRawOne<{ total: string }>();
+        if (Number(monthTotal?.total ?? 0) + bonusAmount > monthlyCap) {
+          rejectionReason = `تجاوز الحد الأقصى الشهري للمكافآت (${monthlyCap} قرش)`;
+        }
       }
-    }
 
-    if (rejectionReason) {
-      await this.bonuses.insert({
+      const bonus = manager.create(TechnicianReferralBonus, {
         technicianId: attribution.technicianId,
         customerUserId: customerProfile.userId,
         orderId,
         bonusAmountCents: bonusAmount,
-        status: TechnicianReferralBonusStatus.REJECTED_SUSPICIOUS,
+        status: rejectionReason
+          ? TechnicianReferralBonusStatus.REJECTED_SUSPICIOUS
+          : TechnicianReferralBonusStatus.CREDITED,
         rejectionReason,
+        creditedAt: rejectionReason ? null : new Date(),
         customerDeviceId: customerDevice?.deviceId ?? null,
       });
-      this.logger.warn(`مكافأة ترشيح مرفوضة للفني ${attribution.technicianId} على الطلب ${orderId}: ${rejectionReason}`);
+      await manager.save(bonus);
+      if (rejectionReason) {
+        await this.auditLog.record(
+          {
+            actorUserId: null,
+            actorRole: 'system',
+            action: 'technician_referral.bonus_rejected',
+            entityType: 'technician_referral_bonus',
+            entityId: bonus.id,
+            newValues: {
+              technician_id: bonus.technicianId,
+              order_id: orderId,
+              rejection_reason: rejectionReason,
+            },
+          },
+          manager,
+        );
+        return { bonus, technician, rejectionReason, credited: false };
+      }
+
+      const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+      const technicianWallet = await this.walletsService.getOrCreateWallet(
+        technician.userId,
+        WalletOwnerType.TECHNICIAN,
+        manager,
+      );
+      const { debit, credit } = await this.walletsService.doubleEntry(
+        {
+          fromWalletId: platformWallet.id,
+          toWalletId: technicianWallet.id,
+          amountCents: bonusAmount,
+          transactionType: WalletTxType.REFERRAL_REWARD,
+          referenceType: 'technician_referral_bonus',
+          referenceId: bonus.id,
+          descriptionAr: `مكافأة ترشيح عميل — طلب #${order.orderNumber ?? orderId.slice(0, 8)}`,
+          allowNegativeBalance: true,
+        },
+        manager,
+      );
+      bonus.walletDebitTxId = debit.id;
+      bonus.walletCreditTxId = credit.id;
+      await manager.save(bonus);
+      await this.auditLog.record(
+        {
+          actorUserId: null,
+          actorRole: 'system',
+          action: 'technician_referral.bonus_credited',
+          entityType: 'technician_referral_bonus',
+          entityId: bonus.id,
+          newValues: {
+            technician_id: bonus.technicianId,
+            order_id: orderId,
+            bonus_amount_cents: bonus.bonusAmountCents,
+          },
+        },
+        manager,
+      );
+      return { bonus, technician, rejectionReason: null, credited: true };
+    });
+
+    if (!result) return;
+    if (!result.credited) {
+      this.logger.warn(
+        `مكافأة ترشيح مرفوضة للفني ${result.bonus.technicianId} على الطلب ${orderId}: ${result.rejectionReason}`,
+      );
       return;
     }
 
-    // ── القيد المالي — نفس نمط أي مكافأة تانية في المشروع (platform wallet كمصدر) ──
-    const technician = await this.technicianProfiles.findOne({ where: { id: attribution.technicianId } });
-    if (!technician) return;
-    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-    const technicianWallet = await this.walletsService.getOrCreateWallet(technician.userId, WalletOwnerType.TECHNICIAN);
-
-    const { debit, credit } = await this.walletsService.doubleEntry({
-      fromWalletId: platformWallet.id,
-      toWalletId: technicianWallet.id,
-      amountCents: bonusAmount,
-      transactionType: WalletTxType.REFERRAL_REWARD,
-      referenceType: 'technician_referral_bonus',
-      referenceId: orderId,
-      descriptionAr: `مكافأة ترشيح عميل — طلب #${order.orderNumber ?? orderId.slice(0, 8)}`,
-      allowNegativeBalance: true,
-    });
-
-    const bonus = await this.bonuses.save(
-      this.bonuses.create({
-        technicianId: attribution.technicianId,
-        customerUserId: customerProfile.userId,
-        orderId,
-        bonusAmountCents: bonusAmount,
-        status: TechnicianReferralBonusStatus.CREDITED,
-        creditedAt: new Date(),
-        walletDebitTxId: debit.id,
-        walletCreditTxId: credit.id,
-        customerDeviceId: customerDevice?.deviceId ?? null,
-      }),
-    );
-
-    await this.auditLog.record({
-      actorUserId: null,
-      actorRole: 'system',
-      action: 'technician_referral.bonus_credited',
-      entityType: 'technician_referral_bonus',
-      entityId: bonus.id,
-      newValues: { technician_id: attribution.technicianId, order_id: orderId, bonus_amount_cents: bonusAmount },
-    });
+    const { bonus, technician } = result;
 
     await this.notificationsService
       .notify({
         userId: technician.userId,
         notificationType: 'technician_referral.bonus_credited',
         titleAr: 'مكافأة ترشيح جديدة! 🎉',
-        bodyAr: `اتحسبلك مكافأة ${(bonusAmount / 100).toFixed(0)} ج.م. عشان عميل رشّحته حجز خدمة.`,
+        bodyAr: `اتحسبلك مكافأة ${(bonus.bonusAmountCents / 100).toFixed(0)} ج.م. عشان عميل رشّحته حجز خدمة.`,
         referenceType: 'technician_referral_bonus',
         referenceId: bonus.id,
       })
@@ -254,29 +451,50 @@ export class TechnicianReferralsService {
 
   /** بتتنادى لما طلب اتلغى/استرد بعد ما مكافأة اتحسبت عليه بالفعل. */
   async revokeBonusForOrder(orderId: string, reason: string): Promise<void> {
-    const bonus = await this.bonuses.findOne({ where: { orderId, status: TechnicianReferralBonusStatus.CREDITED } });
-    if (!bonus) return;
-
-    const debit = bonus.walletDebitTxId ? await this.walletTransactions.findOne({ where: { id: bonus.walletDebitTxId } }) : null;
-    const credit = bonus.walletCreditTxId ? await this.walletTransactions.findOne({ where: { id: bonus.walletCreditTxId } }) : null;
-    if (debit && credit) {
-      await this.walletsService.reverseDoubleEntry({ debit, credit }, `إلغاء مكافأة ترشيح — ${reason}`);
-    }
-
-    bonus.status = TechnicianReferralBonusStatus.REVOKED;
-    bonus.revokedAt = new Date();
-    bonus.revokedReason = reason;
-    await this.bonuses.save(bonus);
-
-    await this.auditLog.record({
-      actorUserId: null,
-      actorRole: 'system',
-      action: 'technician_referral.bonus_revoked',
-      entityType: 'technician_referral_bonus',
-      entityId: bonus.id,
-      oldValues: { status: 'credited' },
-      newValues: { status: 'revoked', reason },
+    const bonus = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .withDeleted()
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order) return null;
+      const lockedBonus = await manager
+        .createQueryBuilder(TechnicianReferralBonus, 'bonus')
+        .setLock('pessimistic_write')
+        .where('bonus.order_id = :orderId', { orderId })
+        .getOne();
+      if (!lockedBonus || lockedBonus.status !== TechnicianReferralBonusStatus.CREDITED) return null;
+      if (!lockedBonus.walletDebitTxId || !lockedBonus.walletCreditTxId) {
+        throw new ApiException(ErrorCode.VAL_001, 'مكافأة الترشيح بلا قيود محفظة مكتملة', HttpStatus.CONFLICT);
+      }
+      const debit = await manager.findOneByOrFail(WalletTransaction, { id: lockedBonus.walletDebitTxId });
+      const credit = await manager.findOneByOrFail(WalletTransaction, { id: lockedBonus.walletCreditTxId });
+      await this.walletsService.reverseDoubleEntry(
+        { debit, credit },
+        `إلغاء مكافأة ترشيح — ${reason}`,
+        undefined,
+        manager,
+      );
+      lockedBonus.status = TechnicianReferralBonusStatus.REVOKED;
+      lockedBonus.revokedAt = new Date();
+      lockedBonus.revokedReason = reason;
+      await manager.save(lockedBonus);
+      await this.auditLog.record(
+        {
+          actorUserId: null,
+          actorRole: 'system',
+          action: 'technician_referral.bonus_revoked',
+          entityType: 'technician_referral_bonus',
+          entityId: lockedBonus.id,
+          oldValues: { status: 'credited' },
+          newValues: { status: 'revoked', reason },
+        },
+        manager,
+      );
+      return lockedBonus;
     });
+    if (!bonus) return;
 
     const technician = await this.technicianProfiles.findOne({ where: { id: bonus.technicianId } });
     if (technician) {
@@ -291,6 +509,112 @@ export class TechnicianReferralsService {
         })
         .catch(() => undefined);
     }
+  }
+
+  /** Replays missed reward/revoke events from durable order and attribution state. */
+  async reconcilePendingBonuses(limit = 25): Promise<number> {
+    const boundedLimit = Math.max(1, Math.floor(limit));
+    const legacyOrphans = await this.dataSource.query<{
+      id: string;
+      order_status: string;
+      deleted_at: Date | null;
+    }[]>(
+      `SELECT DISTINCT o.id, o.order_status, o.deleted_at
+       FROM orders o
+       JOIN wallet_transactions wt
+         ON wt.reference_type = 'technician_referral_bonus'
+        AND wt.reference_id = o.id
+        AND wt.transaction_type = 'referral_reward'
+       LEFT JOIN technician_referral_bonuses b ON b.order_id = o.id
+       WHERE b.id IS NULL
+       ORDER BY o.id ASC
+       LIMIT $1`,
+      [boundedLimit],
+    );
+    for (const order of legacyOrphans) {
+      const recovered = await this.recoverLegacyBonusRecord(order.id);
+      if (
+        recovered?.status === TechnicianReferralBonusStatus.CREDITED &&
+        (order.deleted_at !== null ||
+          ['cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'refunded'].includes(
+            order.order_status,
+          ))
+      ) {
+        await this.revokeBonusForOrder(
+          order.id,
+          order.deleted_at
+            ? 'استرداد قيد قديم بعد حذف الطلب منطقيًا'
+            : `استرداد قيد قديم بعد أن أصبح الطلب ${order.order_status}`,
+        );
+      }
+    }
+
+    const afterLegacy = boundedLimit - legacyOrphans.length;
+    if (afterLegacy <= 0) return legacyOrphans.length;
+    const revocations = await this.dataSource.query<{ id: string; order_status: string }[]>(
+      `SELECT o.id, o.order_status
+       FROM orders o
+       JOIN technician_referral_bonuses b ON b.order_id = o.id AND b.status = 'credited'
+       WHERE o.deleted_at IS NULL
+         AND o.order_status IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'refunded')
+       ORDER BY o.updated_at ASC, o.id ASC
+       LIMIT $1`,
+      [afterLegacy],
+    );
+    for (const order of revocations) {
+      await this.revokeBonusForOrder(order.id, `استرداد دوري بعد أن أصبح الطلب ${order.order_status}`);
+    }
+
+    const remaining = afterLegacy - revocations.length;
+    if (remaining <= 0 || !(await this.settingsService.getBoolean('referral_qr.enabled', true))) {
+      return legacyOrphans.length + revocations.length;
+    }
+    const rewards = await this.dataSource.query<{ id: string; order_status: string }[]>(
+      `SELECT o.id, o.order_status
+       FROM orders o
+       JOIN customer_profiles cp ON cp.id = o.customer_id
+       JOIN technician_referral_attributions a ON a.customer_user_id = cp.user_id
+       LEFT JOIN technician_referral_bonuses b ON b.order_id = o.id
+       WHERE o.deleted_at IS NULL
+         AND o.order_status IN ('accepted', 'work_completed', 'completed')
+         AND b.id IS NULL
+       ORDER BY o.updated_at ASC, o.id ASC
+       LIMIT $1`,
+      [remaining],
+    );
+    for (const order of rewards) {
+      await this.evaluateOrderForBonus(order.id, order.order_status);
+    }
+    return legacyOrphans.length + revocations.length + rewards.length;
+  }
+
+  private async recoverLegacyBonusRecord(orderId: string): Promise<TechnicianReferralBonus | null> {
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .withDeleted()
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order) return null;
+      const existing = await manager.findOne(TechnicianReferralBonus, { where: { orderId } });
+      if (existing) return existing;
+      const customerProfile = await manager.findOne(CustomerProfile, { where: { id: order.customerId } });
+      if (!customerProfile) return null;
+      const attribution = await manager
+        .createQueryBuilder(TechnicianReferralAttribution, 'attribution')
+        .setLock('pessimistic_write')
+        .where('attribution.customer_user_id = :customerUserId', { customerUserId: customerProfile.userId })
+        .getOne();
+      if (!attribution) return null;
+      const technician = await manager
+        .createQueryBuilder(TechnicianProfile, 'technician')
+        .setLock('pessimistic_write')
+        .where('technician.id = :technicianId', { technicianId: attribution.technicianId })
+        .getOne();
+      if (!technician) return null;
+      return this.recoverLegacyWalletEffect(manager, order, technician, customerProfile.userId);
+    });
   }
 
   async getTechnicianSummary(technicianId: string): Promise<TechnicianReferralSummary> {

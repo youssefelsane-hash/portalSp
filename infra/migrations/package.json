@@ -4,7 +4,8 @@
   "private": true,
   "description": "مُشغّل الـ SQL migrations لقاعدة بيانات baytak — مصدر الحقيقة الوحيد لبنية الجداول",
   "scripts": {
-    "migrate": "node migrate.js"
+    "migrate": "node migrate.js",
+    "check:script1": "node check-script1-invariants.js"
   },
   "dependencies": {
     "pg": "^8.11.5"

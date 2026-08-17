@@ -1,9 +1,12 @@
-import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, DeleteDateColumn, Entity, JoinColumn, ManyToOne, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import { User } from '../../auth/entities/user.entity';
+import { DomesticWorkerBooking } from './domestic-worker-booking.entity';
 
 export enum DomesticWorkerEarningApprovalStatus {
   PENDING = 'pending',
   APPROVED = 'approved',
   REJECTED = 'rejected',
+  INVALIDATED = 'invalidated',
 }
 
 // طابور موافقة أرباح العمالة المنزلية (docs/08 §25.1، قرار مالك صريح 2026-08-15) — مطابق لـ
@@ -20,6 +23,9 @@ export class DomesticWorkerEarningApproval {
 
   @Column({ name: 'worker_user_id', type: 'uuid' })
   workerUserId: string;
+
+  @Column({ name: 'source_key', type: 'varchar', length: 120 })
+  sourceKey: string;
 
   @Column({ name: 'amount_cents', type: 'integer' })
   amountCents: number;
@@ -49,4 +55,16 @@ export class DomesticWorkerEarningApproval {
 
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
+
+  @ManyToOne(() => DomesticWorkerBooking)
+  @JoinColumn({ name: 'booking_id' })
+  booking?: DomesticWorkerBooking;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: 'worker_user_id' })
+  workerUser?: User;
+
+  @ManyToOne(() => User)
+  @JoinColumn({ name: 'reviewed_by_user_id' })
+  reviewedByUser?: User | null;
 }

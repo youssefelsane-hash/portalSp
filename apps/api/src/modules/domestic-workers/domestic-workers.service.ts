@@ -108,32 +108,42 @@ export class DomesticWorkersService {
   }
 
   async review(adminUserId: string, workerId: string, dto: ReviewWorkerDto, meta?: AuditActorMeta): Promise<DomesticWorkerProfile> {
-    const profile = await this.findByIdOrThrow(workerId);
-    if (profile.verificationStatus !== DomesticWorkerVerificationStatus.PENDING) {
-      throw new ApiException(ErrorCode.VAL_001, 'البروفايل ده اترجع عليه قبل كده', HttpStatus.CONFLICT);
-    }
+    return this.profiles.manager.transaction(async (manager) => {
+      const profile = await manager
+        .createQueryBuilder(DomesticWorkerProfile, 'worker')
+        .setLock('pessimistic_write')
+        .where('worker.id = :workerId', { workerId })
+        .getOne();
+      if (!profile) {
+        throw new ApiException(ErrorCode.VAL_001, 'مقدمة الخدمة غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      if (profile.verificationStatus !== DomesticWorkerVerificationStatus.PENDING) {
+        throw new ApiException(ErrorCode.VAL_001, 'البروفايل ده اترجع عليه قبل كده', HttpStatus.CONFLICT);
+      }
 
-    const previousStatus = profile.verificationStatus;
-    profile.verificationStatus = dto.status;
-    profile.verificationNotes = dto.status === DomesticWorkerVerificationStatus.REJECTED ? (dto.notes ?? null) : null;
-    if (dto.status === DomesticWorkerVerificationStatus.APPROVED) {
-      profile.approvedAt = new Date();
-      profile.approvedByUserId = adminUserId;
-    }
-    await this.profiles.save(profile);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'domestic_worker.reviewed',
-      entityType: 'domestic_worker_profile',
-      entityId: profile.id,
-      oldValues: { verification_status: previousStatus },
-      newValues: { verification_status: profile.verificationStatus },
-      meta,
+      const previousStatus = profile.verificationStatus;
+      profile.verificationStatus = dto.status;
+      profile.verificationNotes = dto.status === DomesticWorkerVerificationStatus.REJECTED ? (dto.notes ?? null) : null;
+      if (dto.status === DomesticWorkerVerificationStatus.APPROVED) {
+        profile.approvedAt = new Date();
+        profile.approvedByUserId = adminUserId;
+      }
+      await manager.save(profile);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'domestic_worker.reviewed',
+          entityType: 'domestic_worker_profile',
+          entityId: profile.id,
+          oldValues: { verification_status: previousStatus },
+          newValues: { verification_status: profile.verificationStatus },
+          meta,
+        },
+        manager,
+      );
+      return profile;
     });
-
-    return profile;
   }
 
   /** تصفّح العميل — معتمدين ومتاحين بس، فلترة بتخصص اختيارية، ترتيب بالتقييم ثم القرب (نفس فلسفة §3). */

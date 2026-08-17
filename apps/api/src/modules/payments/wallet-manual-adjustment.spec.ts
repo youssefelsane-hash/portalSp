@@ -9,6 +9,7 @@ import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
+import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WalletsService } from './wallets.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
@@ -29,6 +30,7 @@ import { LoyaltyTransaction } from '../promotions/entities/loyalty-transaction.e
 import { SettingsService } from '../settings/settings.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت تصحيح المحفظة اليدوي الجديد (docs/08 §20 بند 5): كانت
@@ -38,9 +40,12 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
   let dataSource: DataSource;
   let service: PaymentsService;
   let walletsService: WalletsService;
+  let auditLog: AuditLogService;
+  let cache: RedisCacheService;
+  let platformBalanceBefore = 0;
 
   const runId = Date.now().toString(36);
-  const ids = { techUser: '', techProfile: '', adminUser: '' };
+  const ids = { techUser: '', techProfile: '', adminUser: '', walletRaceUser: '' };
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -55,6 +60,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
         OrderStatusHistory,
         Wallet,
         WalletTransaction,
+        WalletAdjustment,
         ServiceCategory,
         Service,
         ServiceZonePricing,
@@ -67,6 +73,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
         CustomerProfile,
         LoyaltyTransaction,
         Setting,
+        AuditLog,
       ],
     });
     await dataSource.initialize();
@@ -87,8 +94,13 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       [`+2025${runId}`.slice(0, 15), `أدمن تصحيح ${runId}`],
     );
     ids.adminUser = adminUser.id;
+    const [walletRaceUser] = await q(
+      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
+      [`+2026${runId}`.slice(0, 15), `عميل محفظة متزامنة ${runId}`],
+    );
+    ids.walletRaceUser = walletRaceUser.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),
@@ -113,8 +125,11 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
 
-    await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM);
+    platformBalanceBefore = (
+      await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM)
+    ).balanceCents;
     // الفني لازم يبقى عنده محفظة موجودة فعلاً — adminAdjustWallet بيستخدم findByUserIdOrThrow
     // (مش getOrCreateWallet) عشان الأدمن يقدر يصحّح رصيد فني حقيقي عنده معاملات بالفعل، مش ينشئ
     // محفظة جديدة بالغلط لمستخدم مالوش نشاط مالي أصلاً.
@@ -135,7 +150,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       { enqueueRecalculation: async () => undefined } as never,
       loyaltyService,
       settingsService,
-      { record: async () => undefined } as never,
+      auditLog,
       { emit: () => undefined } as never,
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
@@ -143,15 +158,26 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    // القيود على محفظة المنصة (اللي طرفها التاني تحصيل/تصحيح الفني ده) بتتمسح بالـperformed_by_user_id
-    // أولاً — الفني نفسه بيتمسح بعده بالـwallet_id، ومحفظة المنصة الشير مع كل الاختبارات التانية تفضل زي ما هي.
-    await q(`DELETE FROM wallet_transactions WHERE performed_by_user_id = $1`, [ids.adminUser]);
-    await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
-    await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.adminUser]);
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
+      // القيود على محفظة المنصة (اللي طرفها التاني تحصيل/تصحيح الفني ده) بتتمسح بالـperformed_by_user_id
+      // أولاً — الفني نفسه بيتمسح بعده بالـwallet_id، ومحفظة المنصة الشير مع كل الاختبارات التانية تفضل زي ما هي.
+      await q(`DELETE FROM wallet_adjustments WHERE actor_user_id = $1`, [ids.adminUser]);
+      await q(`DELETE FROM wallet_transactions WHERE performed_by_user_id = $1`, [ids.adminUser]);
+      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
+      await q(`UPDATE wallets SET balance_cents = $1 WHERE owner_user_id = $2`, [
+        platformBalanceBefore,
+        PLATFORM_SYSTEM_USER_ID,
+      ]);
+      await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.walletRaceUser]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.techUser, ids.adminUser, ids.walletRaceUser]);
+    } finally {
+      cache?.onModuleDestroy();
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('تصحيح كاش غلط (تحصيل اتسجّل 1000 والصح 900) — قيد جديد فرقه 100 بس، مش تعديل القيد القديم', async () => {
@@ -164,12 +190,20 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       referenceType: 'order',
       referenceId: randomUUID(),
       descriptionAr: 'تحصيل أصلي (محاكاة)',
+      performedByUserId: ids.adminUser,
       allowNegativeBalance: true, // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود
     });
     const balanceAfterOriginal = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
     expect(balanceAfterOriginal).toBe(100000);
 
-    const result = await service.adminAdjustWallet(ids.adminUser, ids.techUser, 10000, 'debit', 'تصحيح: التحصيل الصح 900 مش 1000');
+    const result = await service.adminAdjustWallet(
+      ids.adminUser,
+      ids.techUser,
+      10000,
+      'debit',
+      'تصحيح: التحصيل الصح 900 مش 1000',
+      `cash-correction-${runId}`,
+    );
 
     expect(result.newBalanceCents).toBe(90000); // 1000 - 100 = 900
 
@@ -194,7 +228,181 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
 
   it('تصحيح لصالح الفني (credit) — رصيده بيزيد بالظبط بقيمة التصحيح', async () => {
     const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
-    const result = await service.adminAdjustWallet(ids.adminUser, ids.techUser, 5000, 'credit', 'تعويض إداري');
+    const result = await service.adminAdjustWallet(
+      ids.adminUser,
+      ids.techUser,
+      5000,
+      'credit',
+      'تعويض إداري',
+      `admin-compensation-${runId}`,
+    );
     expect(result.newBalanceCents - before).toBe(5000);
+  });
+
+  it('retry متزامن بنفس Idempotency-Key ينشئ adjustment وقيدًا مزدوجًا واحدًا فقط', async () => {
+    const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+    const key = `concurrent-adjustment-${runId}`;
+    const [first, second] = await Promise.all([
+      service.adminAdjustWallet(ids.adminUser, ids.techUser, 7000, 'credit', 'تعويض شبكي متكرر', key),
+      service.adminAdjustWallet(ids.adminUser, ids.techUser, 7000, 'credit', 'تعويض شبكي متكرر', key),
+    ]);
+
+    expect(first.newBalanceCents).toBe(second.newBalanceCents);
+    expect(first.newBalanceCents - before).toBe(7000);
+    const adjustmentRows = await dataSource.getRepository(WalletAdjustment).find({
+      where: { actorUserId: ids.adminUser, idempotencyKey: key },
+    });
+    expect(adjustmentRows).toHaveLength(1);
+    const ledgerRows = await dataSource.getRepository(WalletTransaction).find({
+      where: { referenceType: 'admin_adjustment', referenceId: adjustmentRows[0].id },
+    });
+    expect(ledgerRows).toHaveLength(2);
+  });
+
+  it('ينشئ محفظة واحدة فقط عند طلب إنشائها بالتزامن', async () => {
+    const wallets = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        walletsService.getOrCreateWallet(ids.walletRaceUser, WalletOwnerType.CUSTOMER),
+      ),
+    );
+
+    expect(new Set(wallets.map((wallet) => wallet.id)).size).toBe(1);
+    expect(await dataSource.getRepository(Wallet).count({ where: { ownerUserId: ids.walletRaceUser } })).toBe(1);
+  });
+
+  it('يرجع التصحيح كله عند فشل بعد القيد ثم يسمح بإعادة المحاولة مرة واحدة', async () => {
+    const key = `adjustment-crash-retry-${runId}`;
+    const beforeBalance = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+    const beforeLedgerCount = await dataSource.getRepository(WalletTransaction).count({
+      where: { performedByUserId: ids.adminUser },
+    });
+    const originalDoubleEntry = walletsService.doubleEntry.bind(walletsService);
+    const failure = jest
+      .spyOn(walletsService, 'doubleEntry')
+      .mockImplementationOnce(async (params, manager) => {
+        await originalDoubleEntry(params, manager);
+        throw new Error('failure after ledger effect');
+      });
+
+    try {
+      await expect(
+        service.adminAdjustWallet(
+          ids.adminUser,
+          ids.techUser,
+          6100,
+          'credit',
+          'اختبار rollback ثم retry',
+          key,
+        ),
+      ).rejects.toThrow('failure after ledger effect');
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(beforeBalance);
+    expect(await dataSource.getRepository(WalletAdjustment).count({
+      where: { actorUserId: ids.adminUser, idempotencyKey: key },
+    })).toBe(0);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { performedByUserId: ids.adminUser },
+    })).toBe(beforeLedgerCount);
+
+    await service.adminAdjustWallet(
+      ids.adminUser,
+      ids.techUser,
+      6100,
+      'credit',
+      'اختبار rollback ثم retry',
+      key,
+    );
+    const adjustment = await dataSource.getRepository(WalletAdjustment).findOneByOrFail({
+      actorUserId: ids.adminUser,
+      idempotencyKey: key,
+    });
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - beforeBalance).toBe(6100);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'admin_adjustment', referenceId: adjustment.id },
+    })).toBe(2);
+  });
+
+  it('يرجع التصحيح المالي إذا فشل التدقيق ثم يعيد العملية والتدقيق مرة واحدة', async () => {
+    const key = `adjustment-audit-retry-${runId}`;
+    const beforeBalance = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated atomic audit failure'));
+
+    try {
+      await expect(
+        service.adminAdjustWallet(ids.adminUser, ids.techUser, 6200, 'credit', 'اختبار ذرية التدقيق', key),
+      ).rejects.toThrow('simulated atomic audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(beforeBalance);
+    expect(await dataSource.getRepository(WalletAdjustment).count({
+      where: { actorUserId: ids.adminUser, idempotencyKey: key },
+    })).toBe(0);
+
+    await service.adminAdjustWallet(ids.adminUser, ids.techUser, 6200, 'credit', 'اختبار ذرية التدقيق', key);
+    const adjustment = await dataSource.getRepository(WalletAdjustment).findOneByOrFail({
+      actorUserId: ids.adminUser,
+      idempotencyKey: key,
+    });
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - beforeBalance).toBe(6200);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'admin_adjustment', referenceId: adjustment.id },
+    })).toBe(2);
+    expect(await dataSource.getRepository(AuditLog).count({
+      where: { action: 'wallet.adjusted', entityId: adjustment.id },
+    })).toBe(1);
+  });
+
+  it('يعكس القيد مرة واحدة عند التكرار والتزامن ويعيد نفس قيدي العكس بعد اكتماله', async () => {
+    const referenceId = randomUUID();
+    const platformWallet = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    const technicianWallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const beforeBalance = technicianWallet.balanceCents;
+    const original = await walletsService.doubleEntry({
+      fromWalletId: platformWallet.id,
+      toWalletId: technicianWallet.id,
+      amountCents: 4321,
+      transactionType: WalletTxType.BONUS,
+      referenceType: 'wallet_reversal_integrity',
+      referenceId,
+      descriptionAr: 'قيد لاختبار عكس متزامن',
+      performedByUserId: ids.adminUser,
+      allowNegativeBalance: true,
+    });
+    await dataSource.query(`UPDATE wallets SET is_frozen = true, frozen_reason = 'reversal integrity test' WHERE id = $1`, [
+      technicianWallet.id,
+    ]);
+
+    let concurrent: Awaited<ReturnType<WalletsService['reverseDoubleEntry']>>[];
+    let alreadyReversed: Awaited<ReturnType<WalletsService['reverseDoubleEntry']>>;
+    try {
+      concurrent = await Promise.all([
+        walletsService.reverseDoubleEntry(original, 'عكس متزامن', ids.adminUser),
+        walletsService.reverseDoubleEntry(original, 'عكس متزامن', ids.adminUser),
+      ]);
+      alreadyReversed = await walletsService.reverseDoubleEntry(original, 'إعادة بعد الاكتمال', ids.adminUser);
+    } finally {
+      await dataSource.query(`UPDATE wallets SET is_frozen = false, frozen_reason = NULL WHERE id = $1`, [
+        technicianWallet.id,
+      ]);
+    }
+
+    expect(concurrent[0].debit.id).toBe(concurrent[1].debit.id);
+    expect(concurrent[0].credit.id).toBe(concurrent[1].credit.id);
+    expect(alreadyReversed.debit.id).toBe(concurrent[0].debit.id);
+    expect(alreadyReversed.credit.id).toBe(concurrent[0].credit.id);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(beforeBalance);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'wallet_reversal_integrity', referenceId },
+    })).toBe(4);
+    const reloaded = await dataSource.getRepository(WalletTransaction).findByIds([
+      original.debit.id,
+      original.credit.id,
+    ]);
+    expect(reloaded.every((entry) => entry.isReversed && entry.reversalTransactionId)).toBe(true);
   });
 });

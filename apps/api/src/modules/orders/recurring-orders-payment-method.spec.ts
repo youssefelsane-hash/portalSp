@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -18,13 +19,14 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
   let service: RecurringOrdersService;
   let createSpy: jest.Mock;
 
-  const runId = Date.now().toString(36);
+  const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = {
     customerUser: '',
     customerProfile: '',
     service: '',
     address: '',
     category: '',
+    fakeOrder: '',
   };
 
   // is_active=false وقت الإنشاء عمدًا (مش true) — راجع sweepOwnTemplateOnly() تحت لسبب مفصّل
@@ -46,11 +48,19 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
   // تحت هترجع صفر نداءات بدل واحد. القالب `is_active=false` طول الوقت إلا في اللحظة الفعلية
   // لنداء sweep() بتاعنا نفسه.
   async function sweepOwnTemplateOnly(templateId: string): Promise<void> {
-    await dataSource.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [templateId]);
+    const runner = dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.query(`SELECT pg_advisory_lock($1)`, [71_208_019]);
     try {
-      await service.sweep();
+      await runner.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [templateId]);
+      try {
+        await service.sweep();
+      } finally {
+        await runner.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [templateId]);
+      }
     } finally {
-      await dataSource.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [templateId]);
+      await runner.query(`SELECT pg_advisory_unlock($1)`, [71_208_019]);
+      await runner.release();
     }
   }
 
@@ -99,6 +109,7 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
        VALUES ($1,$2,$3,$4,'draft',0,0) RETURNING id`,
       [`TESTROT-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address],
     );
+    ids.fakeOrder = fakeOrder.id;
 
     createSpy = jest.fn(async (_userId: string, _dto: CreateOrderDto) => ({ id: fakeOrder.id as string }) as Order);
 
@@ -114,15 +125,22 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
   });
 
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM orders WHERE order_number = $1`, [`TESTROT-${runId}`.slice(0, 24)]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await dataSource.destroy();
+    try {
+      if (ids.customerProfile) await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
+      if (ids.fakeOrder) {
+        await q(`UPDATE recurring_order_templates SET last_generated_order_id = NULL WHERE last_generated_order_id = $1`, [ids.fakeOrder]);
+        await q(`DELETE FROM orders WHERE id = $1`, [ids.fakeOrder]);
+      }
+      if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      if (ids.customerUser) await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      if (ids.service) await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      if (ids.category) await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+    } finally {
+      await dataSource.destroy();
+    }
   });
 
   // sweep() بيدور على *كل* القوالب المستحقة في الجدول الحقيقي، مش بس اللي الاختبار ده عمله —

@@ -50,6 +50,8 @@ import { ComplaintAttachment } from '../support/entities/complaint-attachment.en
 describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـendpoints الجديدة', () => {
   let dataSource: DataSource;
   let ordersService: OrdersService;
+  let scheduleService: TechnicianScheduleService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -232,7 +234,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
     ]);
     ids.adminB = adminB.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -260,7 +262,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       {} as unknown as AuditLogService,
     );
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
-    const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
+    scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
 
     const paymentsService = new PaymentsService(
@@ -323,7 +325,21 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
     );
   });
 
+  afterEach(async () => {
+    if (!dataSource?.isInitialized) return;
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
+    await q(
+      `UPDATE orders
+       SET order_status = 'completed'
+       WHERE order_number LIKE $1
+         AND order_status IN ('accepted', 'technician_on_way', 'technician_arrived', 'in_progress')`,
+      [`TS22C-%`],
+    );
+  });
+
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TS22C-%`]);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TS22C-%`]);
@@ -347,6 +363,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    cache.onModuleDestroy();
     await dataSource.destroy();
   }, 30000);
 
@@ -449,6 +466,19 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       // depart() فشلت (سباق رفضها reschedule() بعد ما قفلت الصف) — الطلب يفضل accepted، وده تمام.
       expect(finalOrder.orderStatus).toBe(OrderStatus.ACCEPTED);
     }
+  });
+
+  it('فقد event تحرير الموعد يُسترد من حالة الطلب الملغي الدائمة', async () => {
+    const orderId = await insertOrder(`slot-recovery-${runId}`, OrderStatus.CANCELLED_BY_CUSTOMER);
+    const slotId = await insertSlot('cancelled-recovery', TechnicianScheduleSlotStatus.BOOKED, orderId, '13:00');
+
+    expect(await scheduleService.reconcileReleasedSlots(25)).toBeGreaterThanOrEqual(1);
+    const [slot] = await dataSource.query(
+      `SELECT status, order_id FROM technician_schedule_slots WHERE id = $1`,
+      [slotId],
+    );
+    expect(slot.status).toBe(TechnicianScheduleSlotStatus.AVAILABLE);
+    expect(slot.order_id).toBeNull();
   });
 
   it('IDOR — عميل تاني مايقدرش يأكّد تسليم كاش على طلب مش بتاعه', async () => {

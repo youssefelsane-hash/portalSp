@@ -3,7 +3,7 @@ import { PaymentsService } from './payments.service';
 import { Order, OrderStatus, OrderPaymentStatus } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
-import { Refund, RefundStatus } from './entities/refund.entity';
+import { Refund, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import type { PaymentProvider, RefundResult } from './gateways/payment-provider.interface';
@@ -83,17 +83,22 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     },
   });
 
-  async function insertPaidOrderAndPayment(label: string, gatewayTxnId: string) {
+  async function insertPaidOrderAndPayment(
+    label: string,
+    gatewayTxnId: string,
+    amountCents = PAID_AMOUNT_CENTS,
+    totalAmountCents = amountCents,
+  ) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
        VALUES ($1,$2,$3,$4,$5,'completed','paid',$6,0) RETURNING id`,
-      [`TESTRF-${label}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, PAID_AMOUNT_CENTS],
+      [`TESTRF-${label}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, totalAmountCents],
     );
     const [payment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, gateway_transaction_id, completed_at)
        VALUES ($1,$2,$3,$4,'card','succeeded',$5,$6, now()) RETURNING id`,
-      [`PAYRF-${label}`.slice(0, 24), order.id, ids.customerProfile, PAID_AMOUNT_CENTS, `idem-rf-${label}-${Math.random()}`, gatewayTxnId],
+      [`PAYRF-${label}`.slice(0, 24), order.id, ids.customerProfile, amountCents, `idem-rf-${label}-${Math.random()}`, gatewayTxnId],
     );
     return { orderId: order.id as string, paymentId: payment.id as string };
   }
@@ -251,7 +256,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     );
   });
 
-  it('البوابة رفضت أول محاولة (الطلب يفضل PAID)، محاولة تانية تلاقي الصف REJECTED وترفض برضه — منع تكرار المحاولة على نفس الدفعة', async () => {
+  it('البوابة رفضت أول محاولة: الرفض لا يحجز أي مبلغ، لذلك يمكن إعادة المحاولة لاحقًا بأمان', async () => {
     const gatewayTxnId = `gw-double-${runId}`;
     const { orderId } = await insertPaidOrderAndPayment(`dbl-${runId}`, gatewayTxnId);
     service = buildService(makeFakeProvider('reject'));
@@ -259,6 +264,104 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     const first = await service.refundOrder(ids.customerUser, orderId, 'استرداد أول');
     expect(first.refundStatus).toBe(RefundStatus.REJECTED);
 
-    await expect(service.refundOrder(ids.customerUser, orderId, 'استرداد تاني')).rejects.toThrow('اترد قبل كده');
+    const retry = await service.refundOrder(ids.customerUser, orderId, 'استرداد تاني');
+    expect(retry.refundStatus).toBe(RefundStatus.REJECTED);
+  });
+
+  it('دفعات الخدمة والعمل الإضافي لا تُختار بالتخمين: يتطلب paymentId ثم لا يصبح الطلب REFUNDED إلا بعد استرداد المكوّنين', async () => {
+    const { orderId, paymentId: basePaymentId } = await insertPaidOrderAndPayment(
+      `split-${runId}`,
+      `gw-base-${runId}`,
+      30000,
+      40000,
+    );
+    const [additionalPayment] = await dataSource.query(
+      `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, gateway_transaction_id, completed_at)
+       VALUES ($1,$2,$3,10000,'card','succeeded',$4,$5,now()) RETURNING id`,
+      [
+        `PAYRF-ADD-${runId}`.slice(0, 24),
+        orderId,
+        ids.customerProfile,
+        `idem-rf-add-${runId}-${Math.random()}`,
+        `gw-add-${runId}`,
+      ],
+    );
+    service = buildService(makeFakeProvider('succeed'));
+
+    await expect(service.refundOrder(ids.customerUser, orderId, 'استرداد بلا دفعة')).rejects.toThrow(
+      'أكثر من دفعة قابلة للاسترداد',
+    );
+
+    const additionalRefund = await service.refundOrder(
+      ids.customerUser,
+      orderId,
+      'استرداد العمل الإضافي',
+      undefined,
+      undefined,
+      additionalPayment.id,
+    );
+    expect(additionalRefund.refundStatus).toBe(RefundStatus.COMPLETED);
+
+    let order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.COMPLETED);
+    expect(order?.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_REFUNDED);
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: additionalPayment.id })).paymentStatus).toBe(
+      PaymentGatewayStatus.REFUNDED,
+    );
+
+    await service.refundOrder(ids.customerUser, orderId, 'استرداد الدفعة الأساسية', undefined, undefined, basePaymentId);
+    order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
+    expect(order?.orderStatus).toBe(OrderStatus.REFUNDED);
+    expect(order?.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
+  });
+
+  it('يدعم استردادات جزئية متراكمة ولا يسمح بتجاوز المتبقي أو سباق طلبين فوقه', async () => {
+    const { orderId, paymentId } = await insertPaidOrderAndPayment(`partial-${runId}`, `gw-partial-${runId}`);
+    service = buildService(makeFakeProvider('succeed'));
+
+    const first = await service.refundOrder(ids.customerUser, orderId, 'استرداد جزئي أول', 10000, undefined, paymentId);
+    const second = await service.refundOrder(ids.customerUser, orderId, 'استرداد جزئي ثانٍ', 5000, undefined, paymentId);
+    expect(first.refundStatus).toBe(RefundStatus.COMPLETED);
+    expect(second.refundStatus).toBe(RefundStatus.COMPLETED);
+    await expect(service.refundOrder(ids.customerUser, orderId, 'تجاوز المتبقي', 16000, undefined, paymentId)).rejects.toThrow(
+      'المبلغ المتبقي',
+    );
+
+    const payment = await dataSource.getRepository(Payment).findOneByOrFail({ id: paymentId });
+    expect(payment.paymentStatus).toBe(PaymentGatewayStatus.PARTIALLY_REFUNDED);
+
+    const { orderId: concurrentOrderId, paymentId: concurrentPaymentId } = await insertPaidOrderAndPayment(
+      `race-${runId}`,
+      `gw-race-${runId}`,
+    );
+    const results = await Promise.allSettled([
+      service.refundOrder(ids.customerUser, concurrentOrderId, 'سباق استرداد أ', 20000, undefined, concurrentPaymentId),
+      service.refundOrder(ids.customerUser, concurrentOrderId, 'سباق استرداد ب', 20000, undefined, concurrentPaymentId),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    const [sum] = await dataSource.query(
+      `SELECT COALESCE(SUM(amount_cents), 0)::int AS amount_cents FROM refunds WHERE payment_id = $1 AND refund_status IN ('processing', 'completed')`,
+      [concurrentPaymentId],
+    );
+    expect(sum.amount_cents).toBe(20000);
+  });
+
+  it('RefundType يصف الصف نفسه: 10000 ثم 20000 من دفعة 30000 كلاهما PARTIAL رغم إغلاق المتبقي', async () => {
+    const { orderId, paymentId } = await insertPaidOrderAndPayment(`type-${runId}`, `gw-type-${runId}`);
+    service = buildService(makeFakeProvider('succeed'));
+
+    const first = await service.refundOrder(ids.customerUser, orderId, 'جزء أول', 10000, undefined, paymentId);
+    const second = await service.refundOrder(ids.customerUser, orderId, 'إغلاق المتبقي', 20000, undefined, paymentId);
+
+    expect(first.refundType).toBe(RefundType.PARTIAL);
+    expect(second.refundType).toBe(RefundType.PARTIAL);
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: paymentId })).paymentStatus).toBe(
+      PaymentGatewayStatus.REFUNDED,
+    );
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(order.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
+    expect(order.orderStatus).toBe(OrderStatus.REFUNDED);
   });
 });

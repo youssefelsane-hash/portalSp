@@ -120,6 +120,8 @@ export const ACTIVE_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.TECHNICIAN_ON_WAY,
   OrderStatus.TECHNICIAN_ARRIVED,
   OrderStatus.IN_PROGRESS,
+  // The technician still owns the in-progress job while the customer decides on extra work.
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
 ];
 
 // الحالات اللي رقم تليفون الفني يظهر فيها للعميل (docs/08 §22 بند 1) — "تأكيد حجيز حقيقي" معناه

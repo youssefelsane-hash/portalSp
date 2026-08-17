@@ -169,9 +169,13 @@ export class PromoCodesService {
 
   // ── إدارة الأدمن ─────────────────────────────────────────────────────
 
-  async create(adminUserId: string, dto: CreatePromoCodeDto, meta?: AuditActorMeta): Promise<PromoCode> {
+  private async createWithRepository(
+    repository: Repository<PromoCode>,
+    adminUserId: string,
+    dto: CreatePromoCodeDto,
+  ): Promise<PromoCode> {
     const code = dto.code.toUpperCase();
-    const existing = await this.promoCodes.findOne({ where: { code } });
+    const existing = await repository.findOne({ where: { code } });
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الكود ده مستخدم قبل كده', HttpStatus.CONFLICT);
     }
@@ -181,7 +185,7 @@ export class PromoCodesService {
       throw new ApiException(ErrorCode.VAL_001, 'تاريخ الانتهاء لازم يكون بعد تاريخ البداية', HttpStatus.BAD_REQUEST);
     }
 
-    const promoCode = this.promoCodes.create({
+    const promoCode = repository.create({
       code,
       nameAr: dto.name_ar,
       discountType: dto.discount_type,
@@ -199,18 +203,40 @@ export class PromoCodesService {
       budgetCents: dto.budget_cents ?? null,
       restrictedToUserId: dto.restricted_to_user_id ?? null,
     });
-    await this.promoCodes.save(promoCode);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'promo_code.created',
-      entityType: 'promo_code',
-      entityId: promoCode.id,
-      newValues: { code: promoCode.code, discount_type: promoCode.discountType, discount_value: promoCode.discountValue },
-      meta,
-    });
+    await repository.save(promoCode);
     return promoCode;
+  }
+
+  async createInTransaction(manager: EntityManager, adminUserId: string, dto: CreatePromoCodeDto): Promise<PromoCode> {
+    return this.createWithRepository(manager.getRepository(PromoCode), adminUserId, dto);
+  }
+
+  async create(adminUserId: string, dto: CreatePromoCodeDto, meta?: AuditActorMeta): Promise<PromoCode> {
+    return this.promoCodes.manager.transaction(async (manager) => {
+      const promoCode = await this.createWithRepository(manager.getRepository(PromoCode), adminUserId, dto);
+      await this.recordCreatedAudit(adminUserId, promoCode, meta, manager);
+      return promoCode;
+    });
+  }
+
+  async recordCreatedAudit(
+    adminUserId: string,
+    promoCode: PromoCode,
+    meta?: AuditActorMeta,
+    manager?: EntityManager,
+  ): Promise<void> {
+    await this.auditLog.record(
+      {
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'promo_code.created',
+        entityType: 'promo_code',
+        entityId: promoCode.id,
+        newValues: { code: promoCode.code, discount_type: promoCode.discountType, discount_value: promoCode.discountValue },
+        meta,
+      },
+      manager,
+    );
   }
 
   async list(query: ListPromoCodesQueryDto): Promise<{ items: PromoCode[]; meta: { page: number; per_page: number; total: number } }> {
@@ -226,22 +252,31 @@ export class PromoCodesService {
   }
 
   async deactivate(id: string, adminUserId: string, meta?: AuditActorMeta): Promise<PromoCode> {
-    const promoCode = await this.promoCodes.findOne({ where: { id } });
-    if (!promoCode) {
-      throw new ApiException(ErrorCode.VAL_001, 'كود الخصم غير موجود', HttpStatus.NOT_FOUND);
-    }
-    promoCode.isActive = false;
-    await this.promoCodes.save(promoCode);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'promo_code.deactivated',
-      entityType: 'promo_code',
-      entityId: promoCode.id,
-      newValues: { code: promoCode.code, is_active: false },
-      meta,
+    return this.promoCodes.manager.transaction(async (manager) => {
+      const promoCode = await manager
+        .createQueryBuilder(PromoCode, 'promo')
+        .setLock('pessimistic_write')
+        .where('promo.id = :id', { id })
+        .andWhere('promo.deleted_at IS NULL')
+        .getOne();
+      if (!promoCode) {
+        throw new ApiException(ErrorCode.VAL_001, 'كود الخصم غير موجود', HttpStatus.NOT_FOUND);
+      }
+      promoCode.isActive = false;
+      await manager.save(promoCode);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'promo_code.deactivated',
+          entityType: 'promo_code',
+          entityId: promoCode.id,
+          newValues: { code: promoCode.code, is_active: false },
+          meta,
+        },
+        manager,
+      );
+      return promoCode;
     });
-    return promoCode;
   }
 }

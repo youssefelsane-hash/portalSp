@@ -18,7 +18,7 @@ import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
-import { TechnicianLevelsService } from '../technicians/technician-levels.service';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 
@@ -68,7 +68,7 @@ export class MatchingService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
-    private readonly technicianLevelsService: TechnicianLevelsService,
+    private readonly assignmentGuard: TechnicianAssignmentGuardService,
     private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
     @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue<RoundExpiredJobData>,
@@ -437,9 +437,10 @@ export class MatchingService {
    */
   async accept(userId: string, orderId: string): Promise<Order> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const levelConfig = await this.technicianLevelsService.getOrThrow(profile.currentLevel);
 
     const order = await this.dataSource.transaction(async (manager) => {
+      // Technician is the shared resource across different orders, so lock it before the order.
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
       const order = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
@@ -452,31 +453,7 @@ export class MatchingService {
       if (order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتاخد من فني تاني أو مبقاش متاح', HttpStatus.CONFLICT);
       }
-      // حد قرار المستوى (technician_level_config.decision_limit_cents) — طلب أكبر من حد الفني
-      // محتاج مستوى أعلى يقبله؛ NULL = بلا حد (المستويات العليا)
-      if (levelConfig.decisionLimitCents !== null && order.totalAmountCents > levelConfig.decisionLimitCents) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          `قيمة الطلب أعلى من حد القبول المسموح لمستواك (${levelConfig.decisionLimitCents / 100} جنيه) — لازم ترقية مستوى`,
-          HttpStatus.FORBIDDEN,
-        );
-      }
-
-      // دفاع تاني بعد استبعاد findEligibleTechnicians في dispatchNextRound — بيغطي حالات مش
-      // مغطّاة هناك (تعيين يدوي من الأدمن، أو سباق فني بيقبل عرضين اتبعتوا قبل ما أي حد يتقفل).
-      // بَقّة حقيقية اتلقطت واتصلحت (تفاصيل كاملة في findEligibleTechnicians فوق): فني عنده طلب
-      // نشط بالفعل كان يقدر يقبل طلب تاني، وده كان بيكسر افتراض "طلب نشط واحد بس" في
-      // order-tracking.gateway.ts و`GET /technician/orders/active`.
-      const existingActiveOrder = await manager.findOne(Order, {
-        where: { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES) },
-      });
-      if (existingActiveOrder) {
-        throw new ApiException(
-          ErrorCode.ORDR_003,
-          'عندك طلب نشط بالفعل — لازم تخلّصه الأول قبل ما تقبل طلب جديد',
-          HttpStatus.CONFLICT,
-        );
-      }
+      await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
 
       const assignment = await manager.findOne(OrderAssignment, {
         where: { orderId, technicianId: profile.id, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },

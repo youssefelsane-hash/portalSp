@@ -29,9 +29,11 @@ function WalletAdjustmentForm({ userId, onAdjusted }: { userId: string; onAdjust
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState('');
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
+    if (next) setIdempotencyKey(crypto.randomUUID());
     if (!next) {
       setAmountEgp('');
       setReason('');
@@ -55,6 +57,7 @@ function WalletAdjustmentForm({ userId, onAdjusted }: { userId: string; onAdjust
     try {
       await authedFetch(`/admin/wallets/${userId}/adjust`, {
         method: 'PATCH',
+        headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({ amount_cents: amountCents, direction, reason_ar: reason.trim() }),
       });
       handleOpenChange(false);

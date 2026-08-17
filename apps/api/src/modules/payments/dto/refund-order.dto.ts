@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, Length, Min } from 'class-validator';
 
 export class RefundOrderDto {
   @IsString()
@@ -10,4 +10,10 @@ export class RefundOrderDto {
   @IsInt()
   @Min(1)
   amount_cents?: number;
+
+  // في الطلبات ذات الدفعة الواحدة يظل اختياريًا للحفاظ على التوافق. إذا كانت هناك دفعات
+  // خدمة/عمل إضافي متعددة، ترفض الخدمة الطلب بدونه بدل تخمين أي دفعة يقصدها الأدمن.
+  @IsOptional()
+  @IsUUID()
+  payment_id?: string;
 }

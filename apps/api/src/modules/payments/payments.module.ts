@@ -23,6 +23,7 @@ import { SavedPaymentMethodsService } from './saved-payment-methods.service';
 import { WalletsService } from './wallets.service';
 import { WalletProvisioningListener } from './wallet-provisioning.listener';
 import { PrepaidOrderSettlementListener } from './prepaid-order-settlement.listener';
+import { WebhookRecoveryService } from './webhook-recovery.service';
 import { FAWRY_GATEWAY } from './gateways/fawry-gateway.interface';
 import { FawryGatewayService } from './gateways/fawry-gateway.service';
 import { CashProvider } from './gateways/cash-provider.service';
@@ -38,6 +39,7 @@ import { Refund } from './entities/refund.entity';
 import { SavedPaymentMethod } from './entities/saved-payment-method.entity';
 import { Wallet } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
+import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 
 @Module({
@@ -45,6 +47,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     TypeOrmModule.forFeature([
       Wallet,
       WalletTransaction,
+      WalletAdjustment,
       Payment,
       Refund,
       Payout,
@@ -79,6 +82,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     SavedPaymentMethodsService,
     WalletProvisioningListener,
     PrepaidOrderSettlementListener,
+    WebhookRecoveryService,
     // بوابة Fawry الأصلية (كود مرجعي فوري) — لسه محقونة مباشرة، FawryProvider بيغلّفها بس
     // (ADR-0013). لو مفيش env vars مُعدّة، isConfigured بيبقى false وبيرفض بوضوح.
     { provide: FAWRY_GATEWAY, useClass: FawryGatewayService },
