@@ -41,6 +41,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
   let orderItemsService: OrderItemsService;
   let paymentsService: PaymentsService;
   let savedPaymentMethods: SavedPaymentMethodsService;
+  let cache: RedisCacheService;
   let fakeChargeTokenResult: { succeeded: boolean; providerReference: string | null; failureReason: string | null };
 
   const runId = Date.now().toString(36);
@@ -160,7 +161,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     );
     ids.techProfile = techProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),
@@ -241,6 +242,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    cache.onModuleDestroy();
     await dataSource.destroy();
   });
 
