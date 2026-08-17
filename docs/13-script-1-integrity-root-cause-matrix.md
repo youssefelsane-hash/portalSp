@@ -326,3 +326,35 @@ Verification performed against shared TEST:
 - API `npm run build` passed. Admin typecheck could not run meaningfully because
   the checked-out workspace lacks its declared Next/React/type dependencies;
   this pre-existing dependency gap produces project-wide module errors.
+
+## Phase 6 — Payout transition integrity
+
+### Shared invariant
+
+The payout row serializes every admin transition. Its terminal state and the
+reserved-wallet action must commit in the same transaction. Existing wallet
+locks and reserved-balance checks remain the source of truth for the ledger.
+
+### Findings verified before modification
+
+| Script section | Current evidence | Status |
+| --- | --- | --- |
+| 50 — approve versus reject | Approve read and saved outside a transaction. Reject used a transaction but read the payout without a row lock, so stale transitions could diverge from reservation release. | `NOT FIXED` |
+| 51 — payout complete | `finalizePayout()` already locked wallets in deterministic order and rejected insufficient reservation, but `adminComplete()` did not lock/re-read the payout transition row. | `PARTIAL` |
+
+### Implementation and verification record — 2026-08-17
+
+Both Phase 6 findings are now `VERIFIED FIXED`:
+
+- A single `lockPayoutOrThrow()` path performs `FOR UPDATE` and is used by
+  approve, reject, and complete. Approve now runs in a transaction; reject and
+  complete retain their existing atomic wallet effects.
+- `WalletsService.finalizePayout()` was deliberately not rewritten. Its ordered
+  wallet locks, reserved-balance validation, and double-entry withdrawal remain
+  intact behind the newly serialized payout transition.
+- The PostgreSQL payout suite now has five passing tests: repeated rejection,
+  direct double release, approve×reject coherence, complete×complete exactly
+  once, and complete×reject terminal coherence. The test no longer creates an
+  unnecessary Redis client and destroys PostgreSQL in `finally`.
+- API `npm run build` passed, and the suite exited normally under
+  `--detectOpenHandles`.

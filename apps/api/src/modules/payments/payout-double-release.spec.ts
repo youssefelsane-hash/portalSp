@@ -9,32 +9,47 @@ import { User } from '../auth/entities/user.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechniciansService } from '../technicians/technicians.service';
-import { Setting } from '../settings/entities/setting.entity';
 import { SettingsService } from '../settings/settings.service';
-import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { AuditLogService } from '../audit/audit-log.service';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت واتصلحت في docs/08 §20 بند 9:
 // WalletsService.releaseReservation() (بتنادى من PayoutsService.adminReject()) كانت بتطرح
 // amountCents من reserved_balance_cents من غير أي فحص إن المحجوز كافٍ — عكس finalizePayout()
 // اللي عندها نفس الفحص بالظبط. لو adminReject() اتنادت مرتين على نفس الصرف (double-click/إعادة
-// محاولة)، الفني كان بياخد المبلغ مرتين (فلوس بتتخلق من العدم). بما إن lockWallet() بيسلسل أي
-// نداءين متزامنين على قفل واحد، نداءين متتاليين (await) بينتجوا بالظبط نفس النتيجة اللي كانت
-// هتحصل لو النداءين اتنافسوا حقيقي على القفل — مفيش داعي Promise.all لإثبات الثغرة.
-describe('PayoutsService.adminReject() — منع تكرار إلغاء الحجز (docs/08 §20 بند 9)', () => {
+// محاولة)، الفني كان بياخد المبلغ مرتين (فلوس بتتخلق من العدم). اختبارات المرحلة السادسة تحت
+// تضيف سباقات Promise.all حقيقية بين كل انتقالات الأدمن وتثبت تطابق الحالة مع الرصيد المحجوز.
+describe('Payout transitions — serialized state and reserved-wallet integrity', () => {
+  jest.setTimeout(30_000);
+
   let dataSource: DataSource;
   let payoutsService: PayoutsService;
   let walletsService: WalletsService;
-  let cache: RedisCacheService;
 
   const runId = Date.now().toString(36);
   const ids = { techUser: '', techProfile: '', adminUser: '' };
+
+  async function createReviewPayout(amountCents = 150000): Promise<Payout> {
+    await walletsService.doubleEntry({
+      fromWalletId: (await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID)).id,
+      toWalletId: (await walletsService.findByUserIdOrThrow(ids.techUser)).id,
+      amountCents,
+      transactionType: WalletTxType.ORDER_EARNING,
+      referenceType: 'payout_phase6_test',
+      referenceId: ids.techProfile,
+      descriptionAr: `أرباح محاكاة لاختبار انتقال الصرف ${runId}`,
+      allowNegativeBalance: true,
+    });
+    return payoutsService.requestPayout(ids.techUser, {
+      amount_cents: amountCents,
+      payout_method: PayoutMethod.BANK_TRANSFER,
+    });
+  }
 
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Payout, PayoutOrderItem, Wallet, WalletTransaction, User, TechnicianProfile, TechnicianCompany, Setting],
+      entities: [Payout, PayoutOrderItem, Wallet, WalletTransaction, User, TechnicianProfile, TechnicianCompany],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -55,8 +70,13 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
     );
     ids.adminUser = adminUser.id;
 
-    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
-    const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
+    const settingsService = {
+      getNumber: async (key: string, fallback: number) => {
+        if (key === 'payouts.min_amount_cents') return 20000;
+        if (key === 'payouts.auto_approve_limit_cents') return 100000;
+        return fallback;
+      },
+    } as unknown as SettingsService;
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
@@ -86,15 +106,24 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM payout_order_items WHERE payout_id IN (SELECT id FROM payouts WHERE technician_id = $1)`, [ids.techProfile]);
-    await q(`DELETE FROM payouts WHERE technician_id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
-    await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.adminUser]);
-    cache.onModuleDestroy();
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(
+        `DELETE FROM wallet_transactions
+         WHERE reference_type = 'payout_phase6_test'
+            OR (reference_type = 'payout' AND reference_id IN (SELECT id FROM payouts WHERE technician_id = $1))`,
+        [ids.techProfile],
+      );
+      await q(`DELETE FROM payout_order_items WHERE payout_id IN (SELECT id FROM payouts WHERE technician_id = $1)`, [ids.techProfile]);
+      await q(`DELETE FROM payouts WHERE technician_id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
+      await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.adminUser]);
+    } finally {
+      await dataSource.destroy();
+    }
   });
 
   it('نداء adminReject() مرتين على نفس الصرف — التاني بيترفض، صفر تكرار في إرجاع الفلوس', async () => {
@@ -102,21 +131,7 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
     // الافتراضي — عشان الصرف يبقى UNDER_REVIEW ويحتاج adminReject/adminApprove صريح)
     // 1500ج — فوق حد أقل صرف 200ج الافتراضي **وفوق** حد الموافقة التلقائية 1000ج الافتراضي
     // (AUTO_APPROVE_LIMIT_CENTS_FALLBACK) — لازم الصرف يبقى UNDER_REVIEW عشان adminReject ينطبق.
-    await walletsService.doubleEntry({
-      fromWalletId: (await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID)).id,
-      toWalletId: (await walletsService.findByUserIdOrThrow(ids.techUser)).id,
-      amountCents: 150000,
-      transactionType: WalletTxType.ORDER_EARNING,
-      referenceType: 'order',
-      referenceId: ids.techProfile,
-      descriptionAr: 'أرباح محاكاة لاختبار الصرف',
-      allowNegativeBalance: true,
-    });
-
-    const payout = await payoutsService.requestPayout(ids.techUser, {
-      amount_cents: 150000,
-      payout_method: PayoutMethod.BANK_TRANSFER,
-    });
+    const payout = await createReviewPayout();
     expect(payout.payoutStatus).toBe(PayoutStatus.UNDER_REVIEW);
 
     const walletAfterRequest = await walletsService.findByUserIdOrThrow(ids.techUser);
@@ -161,5 +176,77 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
         'المبلغ المحجوز أقل من مبلغ الحجز المطلوب إلغاؤه',
       );
     });
+  });
+
+  it('approve×reject: الحالة النهائية تظل متسقة دائمًا مع الرصيد المحجوز', async () => {
+    const payout = await createReviewPayout();
+    const before = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const outcomes = await Promise.allSettled([
+      payoutsService.adminApprove(ids.adminUser, payout.id),
+      payoutsService.adminReject(ids.adminUser, payout.id, 'رفض متزامن مع الموافقة'),
+    ]);
+    expect(outcomes.some((outcome) => outcome.status === 'fulfilled')).toBe(true);
+
+    const persisted = await dataSource.getRepository(Payout).findOneByOrFail({ id: payout.id });
+    const wallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    if (persisted.payoutStatus === PayoutStatus.APPROVED) {
+      expect(wallet.reservedBalanceCents).toBe(before.reservedBalanceCents);
+      expect(wallet.balanceCents).toBe(before.balanceCents);
+    } else {
+      expect(persisted.payoutStatus).toBe(PayoutStatus.REJECTED);
+      expect(wallet.reservedBalanceCents).toBe(before.reservedBalanceCents - payout.amountCents);
+      expect(wallet.balanceCents).toBe(before.balanceCents + payout.amountCents);
+    }
+  });
+
+  it('complete×complete: finalizePayout المحمي يخرج المبلغ مرة واحدة فقط', async () => {
+    const payout = await createReviewPayout();
+    await payoutsService.adminApprove(ids.adminUser, payout.id);
+    const before = await walletsService.findByUserIdOrThrow(ids.techUser);
+
+    const outcomes = await Promise.allSettled([
+      payoutsService.adminComplete(ids.adminUser, payout.id),
+      payoutsService.adminComplete(ids.adminUser, payout.id),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const persisted = await dataSource.getRepository(Payout).findOneByOrFail({ id: payout.id });
+    expect(persisted.payoutStatus).toBe(PayoutStatus.COMPLETED);
+    const wallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    expect(wallet.reservedBalanceCents).toBe(before.reservedBalanceCents - payout.netAmountCents);
+    expect(wallet.balanceCents).toBe(before.balanceCents);
+    const [{ count }] = await dataSource.query(
+      `SELECT count(*)::int AS count FROM wallet_transactions
+       WHERE wallet_id = $1 AND reference_type = 'payout' AND reference_id = $2 AND direction = 'debit'`,
+      [wallet.id, payout.id],
+    );
+    expect(count).toBe(1);
+  });
+
+  it('complete×reject: فائز طرفي واحد، إما خروج نهائي أو تحرير كامل بلا حالة هجينة', async () => {
+    const payout = await createReviewPayout();
+    await payoutsService.adminApprove(ids.adminUser, payout.id);
+    const before = await walletsService.findByUserIdOrThrow(ids.techUser);
+
+    const outcomes = await Promise.allSettled([
+      payoutsService.adminComplete(ids.adminUser, payout.id),
+      payoutsService.adminReject(ids.adminUser, payout.id, 'رفض متزامن مع الإكمال'),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const persisted = await dataSource.getRepository(Payout).findOneByOrFail({ id: payout.id });
+    const wallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const [{ count }] = await dataSource.query(
+      `SELECT count(*)::int AS count FROM wallet_transactions
+       WHERE wallet_id = $1 AND reference_type = 'payout' AND reference_id = $2 AND direction = 'debit'`,
+      [wallet.id, payout.id],
+    );
+    if (persisted.payoutStatus === PayoutStatus.COMPLETED) {
+      expect(count).toBe(1);
+      expect(wallet.balanceCents).toBe(before.balanceCents);
+    } else {
+      expect(persisted.payoutStatus).toBe(PayoutStatus.REJECTED);
+      expect(count).toBe(0);
+      expect(wallet.balanceCents).toBe(before.balanceCents + payout.amountCents);
+    }
+    expect(wallet.reservedBalanceCents).toBe(before.reservedBalanceCents - payout.amountCents);
   });
 });
