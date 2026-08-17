@@ -151,4 +151,25 @@ export class NotificationWorkflowService {
       this.logger.error(`فشل acknowledge notification_workflow ${workflowId}`, err instanceof Error ? err.stack : err);
     }
   }
+
+  /**
+   * Script 2 Part E (finding #26) — markRead() الفردي بيعمل acknowledgeById() صح، لكن
+   * markAllRead() كانت بتعمل bulk UPDATE على notifications بس (read_at) من غير ما تلمس
+   * notification_workflows خالص — يعني نظام التذكيرات كان فاضل يفكّر إن المستخدم لسه معملش قراءة،
+   * ويبعت تذكيرات لحاجة هو شافها فعلاً. دفعة واحدة، محدودة بعدد workflow IDs المُمرّرة (bounded
+   * batch — نفس فلسفة Part O، مش full-table scan).
+   */
+  async acknowledgeByIds(workflowIds: string[]): Promise<void> {
+    if (workflowIds.length === 0) return;
+    try {
+      await this.workflows
+        .createQueryBuilder()
+        .update(NotificationWorkflow)
+        .set({ acknowledgedAt: new Date() })
+        .where('id IN (:...workflowIds) AND acknowledged_at IS NULL', { workflowIds })
+        .execute();
+    } catch (err) {
+      this.logger.error(`فشل acknowledge دفعة notification_workflows (${workflowIds.length})`, err instanceof Error ? err.stack : err);
+    }
+  }
 }

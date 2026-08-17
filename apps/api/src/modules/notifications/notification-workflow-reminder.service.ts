@@ -10,6 +10,10 @@ import { isWithinQuietHours, nextTimeOutsideQuietHours } from './quiet-hours.uti
 import { computeScheduledJobCheckpoints } from './scheduled-job-checkpoints.util';
 
 const SWEEP_INTERVAL_MS = 60_000;
+// Script 2 Part E (finding #27) — لو notify() فشلت فعليًا (استثناء غير متوقع، مش "failed delivery"
+// عادي لأن notify() نفسها بترجع دايمًا Notification محفوظ ومابترميش)، مينفعش الـreminder ده يُحسب
+// كـ"استُهلك" من الحصة (reminder_count) ولا يستنى دورة تذكير كاملة قبل المحاولة تاني.
+const FAILED_ATTEMPT_RETRY_MS = 2 * 60_000;
 const ACTION_REQUIRED_REMINDER_INTERVAL_MINUTES_FALLBACK = 60;
 const SCHEDULED_JOB_AFTER_MINUTES_FALLBACK = 60;
 const SCHEDULED_JOB_DAY_BEFORE_HOUR_UTC_FALLBACK = 8;
@@ -167,22 +171,55 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
       workflow.nextReminderAt = nextAt;
       await manager.save(workflow);
 
-      return { workflow };
+      return { workflow, claimedReminderCount: workflow.reminderCount };
     });
 
     if (!decision) return false;
 
-    await this.notificationsService.notify({
-      userId: decision.workflow.userId,
-      notificationType: decision.workflow.notificationType,
-      titleAr: decision.workflow.titleAr,
-      bodyAr: decision.workflow.bodyAr,
-      deepLink: decision.workflow.deepLink ?? undefined,
-      referenceType: decision.workflow.entityType ?? undefined,
-      referenceId: decision.workflow.entityId ?? undefined,
-      workflowId: decision.workflow.id,
-    });
+    try {
+      await this.notificationsService.notify({
+        userId: decision.workflow.userId,
+        notificationType: decision.workflow.notificationType,
+        titleAr: decision.workflow.titleAr,
+        bodyAr: decision.workflow.bodyAr,
+        deepLink: decision.workflow.deepLink ?? undefined,
+        referenceType: decision.workflow.entityType ?? undefined,
+        referenceId: decision.workflow.entityId ?? undefined,
+        workflowId: decision.workflow.id,
+      });
+    } catch (err) {
+      // notify() بتلقّط فشل بوابات الإرسال داخليًا وبترجع Notification بحالة failed من غيرها ترمي
+      // — استثناء بيوصل هنا معناه فشل حقيقي غير متوقع (مثلاً DB) في إنشاء الصف نفسه، مش "فشل
+      // إرسال" عادي. الـreminder ده اتحسب فعلاً في الترانزاكشن فوق كـclaim ذري (يمنع sweep تاني
+      // يعالج نفس الصف بالتوازي) — نرجّعه هنا (decrement + إعادة جدولة قريبة) بدل ما يُهدر لحد
+      // الدورة الكاملة الجاية أو يستهلك من max_reminders من غير أي تسليم فعلي.
+      this.logger.error(`فشل إرسال تذكير workflow ${decision.workflow.id} — هيتعاد المحاولة قريبًا`, err instanceof Error ? err.stack : err);
+      await this.revertFailedAttempt(decision.workflow.id, decision.claimedReminderCount);
+      return false;
+    }
 
     return true;
+  }
+
+  // claimedReminderCount هو نفس القيمة اللي التزامنا اتعمّد بيها (مقارنة عدد صحيح دقيقة، عكس
+  // مقارنة Date.getTime() اللي ممكن تختلف بعد round-trip من/لـPostgres) — لو حد تاني عدّلها
+  // تاني (claim تاني اتعمل، أو اتحلت) ما نلمسهوش، مش نفس المحاولة اللي فشلت.
+  private async revertFailedAttempt(workflowId: string, claimedReminderCount: number): Promise<void> {
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const workflow = await manager
+          .createQueryBuilder(NotificationWorkflow, 'w')
+          .setLock('pessimistic_write')
+          .where('w.id = :workflowId', { workflowId })
+          .getOne();
+        if (!workflow || workflow.resolvedAt || workflow.reminderCount !== claimedReminderCount) return;
+
+        workflow.reminderCount = Math.max(0, workflow.reminderCount - 1);
+        workflow.nextReminderAt = new Date(Date.now() + FAILED_ATTEMPT_RETRY_MS);
+        await manager.save(workflow);
+      });
+    } catch (err) {
+      this.logger.error(`فشل تراجع محاولة تذكير فاشلة ${workflowId}`, err instanceof Error ? err.stack : err);
+    }
   }
 }

@@ -219,13 +219,24 @@ export class NotificationsService {
     return notification;
   }
 
+  // Script 2 Part E (finding #26) — كانت بتقلب read_at بس بدون ما تعتمد (acknowledge) الـ
+  // workflows المرتبطة، فنظام التذكيرات كان بيفضل يبعت تذكيرات لإشعارات المستخدم قراها فعلاً
+  // عن طريق "قرا الكل". `.returning(['workflow_id'])` بيرجّع نفس الدفعة اللي اتحدّثت فقط —
+  // مفيش استعلام إضافي منفصل.
   async markAllRead(userId: string): Promise<number> {
     const result = await this.notifications
       .createQueryBuilder()
       .update(Notification)
       .set({ readAt: new Date(), deliveryStatus: NotificationDeliveryStatus.READ })
       .where('user_id = :userId AND read_at IS NULL', { userId })
+      .returning(['workflowId'])
       .execute();
+
+    const workflowIds = (result.raw as Array<{ workflow_id: string | null }>)
+      .map((row) => row.workflow_id)
+      .filter((id): id is string => id !== null);
+    await this.workflowService.acknowledgeByIds(workflowIds);
+
     return result.affected ?? 0;
   }
 
