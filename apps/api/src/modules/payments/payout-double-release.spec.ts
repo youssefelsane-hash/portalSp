@@ -25,6 +25,7 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
   let dataSource: DataSource;
   let payoutsService: PayoutsService;
   let walletsService: WalletsService;
+  let cache: RedisCacheService;
 
   const runId = Date.now().toString(36);
   const ids = { techUser: '', techProfile: '', adminUser: '' };
@@ -54,7 +55,7 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
     );
     ids.adminUser = adminUser.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -92,6 +93,7 @@ describe('PayoutsService.adminReject() — منع تكرار إلغاء الحج
     await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
     await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
     await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.adminUser]);
+    cache.onModuleDestroy();
     await dataSource.destroy();
   });
 

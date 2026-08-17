@@ -26,8 +26,11 @@ describe('طابور موافقة أرباح العمالة المنزلية —
   let bookingsService: DomesticWorkerBookingsService;
   let approvalsService: DomesticWorkerEarningApprovalsService;
   let walletsService: WalletsService;
+  let cache: RedisCacheService;
+  let previousCommissionSettingJson: string | null = null;
 
   const runId = Date.now().toString(36);
+  const DOMESTIC_WORKER_COMMISSION_PERCENTAGE = 15;
   const ids = {
     customerUser: '',
     customerProfile: '',
@@ -100,7 +103,36 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     );
     ids.adminUser = adminUser.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    const [existingCommissionSetting] = await q(`SELECT value::text AS value_json FROM settings WHERE key = $1`, [
+      'commission.domestic_worker_percentage',
+    ]);
+    previousCommissionSettingJson = (existingCommissionSetting?.value_json as string | undefined) ?? null;
+    await q(
+      `INSERT INTO settings (key, value, value_type, group_name, description, is_public, updated_by_user_id)
+       VALUES ($1, $2::jsonb, 'number', 'domestic_workers', $3, false, $4)
+       ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value,
+           value_type = EXCLUDED.value_type,
+           group_name = EXCLUDED.group_name,
+           description = EXCLUDED.description,
+           is_public = EXCLUDED.is_public,
+           updated_by_user_id = EXCLUDED.updated_by_user_id,
+           updated_at = now()`,
+      [
+        'commission.domestic_worker_percentage',
+        JSON.stringify(DOMESTIC_WORKER_COMMISSION_PERCENTAGE),
+        'تثبيت عمولة الخدمات المنزلية داخل الاختبار عشان يفضل حتمي على بيئة TEST المشتركة',
+        ids.adminUser,
+      ],
+    );
+    await q(
+      `UPDATE settings
+       SET updated_by_user_id = NULL, updated_at = now()
+       WHERE key = $1 AND value::text = $2`,
+      ['commission.domestic_worker_percentage', previousCommissionSettingJson ?? 'null'],
+    );
+
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
@@ -142,8 +174,19 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     await q(`DELETE FROM domestic_worker_profiles WHERE id = $1`, [ids.workerProfile]);
     await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+    if (previousCommissionSettingJson === null) {
+      await q(`DELETE FROM settings WHERE key = $1`, ['commission.domestic_worker_percentage']);
+    } else {
+      await q(`UPDATE settings SET value = $2::jsonb, updated_by_user_id = NULL, updated_at = now() WHERE key = $1`, [
+        'commission.domestic_worker_percentage',
+        previousCommissionSettingJson,
+      ]);
+    }
     await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.workerUser, ids.adminUser]);
-    await dataSource.destroy();
+    cache?.onModuleDestroy();
+    if (dataSource.isInitialized) {
+      await dataSource.destroy();
+    }
   });
 
   it('تأكيد حجز بالساعة: العميل بيتخصم بس — صفر أرباح pending وصفر رصيد للشغالة قبل الاكتمال', async () => {

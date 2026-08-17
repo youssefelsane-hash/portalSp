@@ -14,6 +14,7 @@ describe('SupportContactController.getSupportContact() — تحقق أمان dee
   let controller: SupportContactController;
   let settingsService: SettingsService;
   let testAdminId: string;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
 
   beforeAll(async () => {
@@ -30,7 +31,7 @@ describe('SupportContactController.getSupportContact() — تحقق أمان dee
     );
     testAdminId = admin.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const auditLogStub = { record: async () => undefined } as unknown as AuditLogService;
     settingsService = new SettingsService(dataSource.getRepository(Setting), auditLogStub, cache);
     controller = new SupportContactController(settingsService);
@@ -44,6 +45,7 @@ describe('SupportContactController.getSupportContact() — تحقق أمان dee
     );
     await dataSource.query(`UPDATE settings SET value = 'false'::jsonb, updated_by_user_id = NULL WHERE key = 'support.enabled'`);
     await dataSource.query(`DELETE FROM users WHERE id = $1`, [testAdminId]);
+    cache.onModuleDestroy();
     await dataSource.destroy();
   });
 

@@ -36,6 +36,7 @@ import { RedisCacheService } from '../../common/cache/redis-cache.service';
 describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب المدفوع مسبقًا (ADR-0015)', () => {
   let dataSource: DataSource;
   let service: PaymentsService;
+  let cache: RedisCacheService;
 
   const runId = Date.now().toString(36);
   const ids = {
@@ -154,7 +155,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
     );
     ids.techProfile = techProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),
@@ -228,6 +229,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
     await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
+    cache.onModuleDestroy();
     await dataSource.destroy();
   });
 

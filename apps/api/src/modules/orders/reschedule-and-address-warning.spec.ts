@@ -33,6 +33,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
   let ordersService: OrdersService;
   let addressesService: AddressesService;
   let scheduleService: TechnicianScheduleService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -147,7 +148,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     );
     ids.techProfile = techProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -218,6 +219,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    cache.onModuleDestroy();
     await dataSource.destroy();
   });
 
