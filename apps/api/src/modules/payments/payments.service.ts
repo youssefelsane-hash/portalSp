@@ -1978,6 +1978,34 @@ export class PaymentsService {
     }
   }
 
+  /** Rebuilds a missed WORK_COMPLETED event from durable order state in a bounded batch. */
+  async reconcilePrepaidWorkCompleted(batchSize = 25): Promise<number> {
+    const candidates = await this.orders.find({
+      select: ['id'],
+      where: {
+        orderStatus: OrderStatus.WORK_COMPLETED,
+        paymentStatus: OrderPaymentStatus.PAID,
+      },
+      order: { updatedAt: 'ASC' },
+      take: Math.max(1, Math.floor(batchSize)),
+    });
+
+    let processed = 0;
+    for (const candidate of candidates) {
+      try {
+        // The method locks and rechecks the order, so multiple app instances can sweep safely.
+        await this.settleAlreadyPaidOrder(candidate.id);
+        processed++;
+      } catch (error) {
+        this.logger.error(
+          `فشل استرداد تسوية الطلب المدفوع مسبقًا ${candidate.id}`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
+    }
+    return processed;
+  }
+
   /**
    * تصحيح محفظة يدوي (docs/08 §20 بند 5) — كانت فجوة حقيقية: `AdminWalletController` قراءة بس
    * (GET)، صفر مسار لأدمن/مالية يصحّح رصيد فني (مثلاً الفني سجّل تحصيل كاش غلط، الصح أقل).

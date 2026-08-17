@@ -184,7 +184,9 @@ ADR-0013) كان بيفضل عالق في `WORK_COMPLETED` للأبد بمجرد
    `ScheduleSlotReleaseListener`)، ولو `newStatus=WORK_COMPLETED` وطلب مدفوع مسبقًا، بينادي
    `PaymentsService.settleAlreadyPaidOrder(orderId)`: دلتا=صفر → تسوية تلقائية فورية بلا أي تدخل
    (الطلب يقفل صح زي ما كان المفروض من الأول)؛ دلتا>صفر → انتقال `AWAITING_PAYMENT` بس، مفيش
-   توزيع أرباح لسه.
+   توزيع أرباح لسه. listener الفوري مش نقطة الفشل الوحيدة: فحص PostgreSQL محدود (25 طلبًا كل
+   دقيقة) يعيد اكتشاف `WORK_COMPLETED + PAID` وينادي نفس الدالة المقفولة/idempotent. crash بعد
+   commit وقبل event، أو نسختان تنفذان الفحص معًا، ينتجان تسوية واحدة فقط.
 3. **`assertPayable()` بقت تميّز**: `paymentStatus=PAID` مرفوضة **إلا** لو `orderStatus=AWAITING_PAYMENT`
    تحديدًا — الحالة الوحيدة اللي فيها "مدفوع جزئيًا، لسه فيه باقي" ممكنة. `amountOwedNow(order)`
    جديدة بترجع الدلتا بس (مش الإجمالي الكامل) للحالة دي، والثلاث دوال العامة (`collectCash`/
@@ -193,14 +195,14 @@ ADR-0013) كان بيفضل عالق في `WORK_COMPLETED` للأبد بمجرد
    للحالتين. تحقق مبلغ الـwebhook (P0-7) بيتحقق صح تلقائيًا ضد الدلتا برضه — بيقارن `payment.amountCents`
    (اللي بقى الدلتا) مش `order.totalAmountCents`.
 
-**اتأكد حي بالكامل** (`prepaid-order-settlement.spec.ts`، 3 اختبارات، حساب عمولة حقيقي دقيق):
+**اتأكد حي بالكامل** (`prepaid-order-settlement.spec.ts`، 4 اختبارات، حساب عمولة حقيقي دقيق):
 دلتا=صفر → تسوية فورية، `COMPLETED`، عمولة 10% محسوبة صح، أرباح الفني اتحوّلت فعليًا لمحفظته
 (اتأكد بالرصيد الفعلي)، مفيش صف `Payment` جديد. دلتا>صفر → `AWAITING_PAYMENT` (idempotent —
 نداء تاني ماغيّرش حاجة)، `collectCash()` بعدها حصّل الدلتا بس (مش الإجمالي)، وبعد التحصيل
 `COMPLETED` بعمولة محسوبة من الإجمالي **الكامل** النهائي صح، ومحاولة تحصيل تالتة اترفضت (منع
 تحصيل مزدوج). طلب عادي (مش مدفوع مسبقًا) في `WORK_COMPLETED` — `settleAlreadyPaidOrder()` لا
 تفعل شيء خالص (regression، المسار العادي فضل زي زمان بالحرف). + `prepaid-order-settlement.listener.spec.ts`
-(3 اختبارات وحدة نقية) للـlistener نفسه.
+(4 اختبارات وحدة نقية) للـlistener نفسه، منها إثبات استدعاء recovery بحد 25.
 
 **فجوة موثّقة صراحة، خارج نطاق هذا الإصلاح**: تصميم UI جديد في `apps/customer-app` (Flutter)
 لشاشة "ادفع المبلغ الإضافي" مش جزء من هذا التغيير — العميل هيشوف الفرق كـ"دفعة جديدة" في نفس

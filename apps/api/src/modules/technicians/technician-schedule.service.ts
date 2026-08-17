@@ -143,6 +143,34 @@ export class TechnicianScheduleService {
       .where('orderId = :orderId', { orderId })
       .execute();
   }
+
+  /** Rebuilds missed release events from durable order state without an unbounded scan. */
+  async reconcileReleasedSlots(batchSize = 25): Promise<number> {
+    const rows = await this.slots.query(
+      `WITH candidates AS (
+         SELECT slot.id
+         FROM technician_schedule_slots slot
+         JOIN orders o ON o.id = slot.order_id
+         WHERE slot.status = 'booked'
+           AND slot.deleted_at IS NULL
+           AND (
+             o.order_status IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system')
+             OR o.order_status = 'awaiting_technician_reselection'
+             OR (o.order_status = 'searching_technician' AND o.requested_technician_id IS DISTINCT FROM slot.technician_id)
+             OR (o.technician_id IS NOT NULL AND o.technician_id IS DISTINCT FROM slot.technician_id)
+           )
+         ORDER BY slot.created_at
+         LIMIT $1
+       )
+       UPDATE technician_schedule_slots slot
+       SET status = 'available', order_id = NULL, updated_at = now()
+       FROM candidates
+       WHERE slot.id = candidates.id
+       RETURNING slot.id`,
+      [Math.max(1, Math.floor(batchSize))],
+    );
+    return rows.length;
+  }
 }
 
 function normalizeTime(value: string): string {

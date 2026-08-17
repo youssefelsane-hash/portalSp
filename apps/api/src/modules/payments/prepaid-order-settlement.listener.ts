@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { OrderStatus } from '../orders/entities/order.entity';
@@ -9,10 +9,27 @@ import { PaymentsService } from './payments.service';
 // وإلا يفضل عالق للأبد (البَقّة الحرجة اللي ADR-0015 وثّقها). settleAlreadyPaidOrder() نفسها
 // idempotent وآمنة تُنادى لأي طلب (بترجع فورًا لو مش الحالة دي)، فمفيش داعي فحص هنا غير newStatus.
 @Injectable()
-export class PrepaidOrderSettlementListener {
+export class PrepaidOrderSettlementListener implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrepaidOrderSettlementListener.name);
+  private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly paymentsService: PaymentsService) {}
+
+  onModuleInit(): void {
+    this.timer = setInterval(() => {
+      this.sweep().catch((error) =>
+        this.logger.error('فشل فحص تسويات الطلبات المدفوعة مسبقًا', error instanceof Error ? error.stack : error),
+      );
+    }, 60_000);
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+  }
+
+  sweep(): Promise<number> {
+    return this.paymentsService.reconcilePrepaidWorkCompleted(25);
+  }
 
   @OnEvent(ORDER_STATUS_CHANGED_EVENT)
   async handleOrderStatusChanged(event: OrderStatusChangedEvent): Promise<void> {
@@ -20,11 +37,9 @@ export class PrepaidOrderSettlementListener {
     try {
       await this.paymentsService.settleAlreadyPaidOrder(event.orderId);
     } catch (err) {
-      // مبيرميش استثناء يوقف بقية معالجة الحدث — نفس فلسفة onModuleInit's catch في
-      // order-auto-cancel.service.ts. فشل هنا (DB عابر مثلاً) محتاج مراجعة يدوية، بس مايكسرش
-      // تجربة الفني (الطلب فضل WORK_COMPLETED، مش عالق بصمت — الأدمن يقدر يشوفه).
+      // لا نوقف بقية المستمعين؛ sweep قاعدة البيانات سيعيد بناء الحدث المفقود في دورة لاحقة.
       this.logger.error(
-        `فشل تسوية طلب مدفوع مسبقًا ${event.orderId} بعد اكتمال الشغل — محتاج مراجعة يدوية`,
+        `فشل تسوية طلب مدفوع مسبقًا ${event.orderId} بعد اكتمال الشغل — سيعاد تلقائيًا`,
         err instanceof Error ? err.stack : err,
       );
     }

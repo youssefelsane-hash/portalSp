@@ -50,6 +50,7 @@ import { ComplaintAttachment } from '../support/entities/complaint-attachment.en
 describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـendpoints الجديدة', () => {
   let dataSource: DataSource;
   let ordersService: OrdersService;
+  let scheduleService: TechnicianScheduleService;
   let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
@@ -261,7 +262,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       {} as unknown as AuditLogService,
     );
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
-    const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
+    scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
 
     const paymentsService = new PaymentsService(
@@ -465,6 +466,19 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       // depart() فشلت (سباق رفضها reschedule() بعد ما قفلت الصف) — الطلب يفضل accepted، وده تمام.
       expect(finalOrder.orderStatus).toBe(OrderStatus.ACCEPTED);
     }
+  });
+
+  it('فقد event تحرير الموعد يُسترد من حالة الطلب الملغي الدائمة', async () => {
+    const orderId = await insertOrder(`slot-recovery-${runId}`, OrderStatus.CANCELLED_BY_CUSTOMER);
+    const slotId = await insertSlot('cancelled-recovery', TechnicianScheduleSlotStatus.BOOKED, orderId, '13:00');
+
+    expect(await scheduleService.reconcileReleasedSlots(25)).toBeGreaterThanOrEqual(1);
+    const [slot] = await dataSource.query(
+      `SELECT status, order_id FROM technician_schedule_slots WHERE id = $1`,
+      [slotId],
+    );
+    expect(slot.status).toBe(TechnicianScheduleSlotStatus.AVAILABLE);
+    expect(slot.order_id).toBeNull();
   });
 
   it('IDOR — عميل تاني مايقدرش يأكّد تسليم كاش على طلب مش بتاعه', async () => {

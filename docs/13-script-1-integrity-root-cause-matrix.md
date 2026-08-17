@@ -398,3 +398,37 @@ All Phase 7 findings 52-57 are now `VERIFIED FIXED`:
   reassign, busy-admin rejection, overlapping and adjacent slots,
   complete×complete, reschedule×depart, and existing cross-operation/IDOR
   regressions. The process exited normally in about six seconds.
+
+## Phase 8 — Cross-cutting proof and durable recovery
+
+### Shared invariant
+
+Financial truth must be demonstrable after feature tests finish, and a
+committed critical state may not depend on one in-process event delivery. The
+proof is bounded, repeatable, read-only, and fails on persisted violations
+rather than trusting HTTP status or mocks.
+
+### Implementation and verification record — 2026-08-17
+
+- A late-success proof starts with a persisted `PROCESSING` payment carrying
+  the unknown-provider-outcome marker, applies the verified webhook on real
+  PostgreSQL, and proves one settlement and one technician earning. A second
+  provider event for the same payment is `IGNORED` with no second ledger effect.
+- Prepaid order settlement and schedule-slot release retain their immediate
+  listeners, but each now has a bounded PostgreSQL recovery sweep. Both reuse
+  the existing idempotent/locked primitive and are safe across app instances.
+- `infra/migrations/check-script1-invariants.js` is a read-only post-integration
+  gate. It checks ledger arithmetic, reserved balances, refund totals/effects,
+  earning/referral/payout/adjustment ledger links, and additional-work batch
+  attribution; any sample violation exits non-zero.
+- `docs/14-script-1-final-financial-proof.md` maps scenarios A-J to real test
+  evidence and records durability, audit, security, performance, error
+  semantics, client compatibility, and external-test limitations.
+- Recovery tests passed on real PostgreSQL: two simultaneous prepaid sweeps
+  create one settlement/history effect, and a booked slot whose cancellation
+  event was missed is released from durable order state. The listener unit
+  proof also passes, and Jest exits normally under `--detectOpenHandles`.
+- The final bounded matrix passed 17 suites and 81 tests on PostgreSQL TEST;
+  the API build passed, all migrations through `0118` had matching checksums,
+  and the nine invariant queries passed after fixture cleanup. Repository lint
+  could not start because the workspace does not install an `eslint` binary.

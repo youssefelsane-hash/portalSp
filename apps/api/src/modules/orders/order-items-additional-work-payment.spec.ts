@@ -228,22 +228,44 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     );
   });
 
+  beforeEach(async () => {
+    if (!dataSource?.isInitialized || !ids.customerProfile) return;
+    // Each scenario owns a separate order; retire the previous fixture so the
+    // production one-active-order-per-technician invariant remains exercised.
+    await dataSource.query(
+      `UPDATE orders
+       SET order_status = 'completed'
+       WHERE customer_id = $1
+         AND order_number LIKE 'TESTAWP-%'
+         AND order_status IN (
+           'accepted', 'technician_on_way', 'technician_arrived', 'in_progress',
+           'awaiting_quote_approval', 'work_completed', 'awaiting_payment'
+         )`,
+      [ids.customerProfile],
+    );
+  });
+
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAWP-%`]);
-    await q(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAWP-%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTAWP-%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTAWP-%`]);
-    await q(`DELETE FROM payment_methods WHERE customer_id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    cache.onModuleDestroy();
-    await dataSource.destroy();
+    try {
+      await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-awp-%${runId}%`]);
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM payment_methods WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    } finally {
+      cache?.onModuleDestroy();
+      await dataSource.destroy();
+    }
   });
 
   it('مفيش وسيلة دفع محفوظة — المحاولة تفشل فورًا بـobligation واضح، المبلغ يفضل مستحق (§10/§18)', async () => {

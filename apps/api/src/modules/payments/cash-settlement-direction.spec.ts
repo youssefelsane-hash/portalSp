@@ -5,7 +5,7 @@ import { OrderStatusHistory } from '../orders/entities/order-status-history.enti
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
-import { WebhookEvent } from './entities/webhook-event.entity';
+import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletsService } from './wallets.service';
@@ -235,6 +235,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       `DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`,
       [ids.techUser, ids.customerUser],
     );
+    await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-csd-%${runId}%`]);
     await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
     await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
     await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCSD-%`]);
@@ -314,6 +315,64 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     const creditTx = txs.find((t) => t.direction === 'credit');
     expect(creditTx?.transactionType).toBe(WalletTxType.ORDER_EARNING);
     expect(creditTx?.amountCents).toBe(80000);
+  });
+
+  it('timeout ثم webhook ناجح متأخر يصحح PROCESSING مرة واحدة ولا يطلب دفعًا ثانيًا', async () => {
+    const orderId = await insertWorkCompletedOrder(`late-webhook-${runId}`, 100000, ids.service20);
+    const [payment] = await dataSource.query(
+      `INSERT INTO payments
+         (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status,
+          idempotency_key, failure_code, failure_message)
+       VALUES ($1,$2,$3,100000,'card','processing',$4,
+               'GATEWAY_REGISTRATION_OUTCOME_UNKNOWN','gateway timeout')
+       RETURNING id`,
+      [`PAYCSD-late-${runId}`.slice(0, 24), orderId, ids.customerProfile, `idem-csd-late-${runId}`],
+    );
+    const balanceBefore = await techWalletBalance();
+
+    await service.finalizeGatewayWebhook(
+      `evt-csd-late-${runId}`,
+      'TRANSACTION',
+      'paymob',
+      { scenario: 'late-success-after-timeout' },
+      true,
+      payment.id,
+      true,
+      null,
+      `gw-csd-late-${runId}`,
+      PaymentMethod.CARD,
+      100000,
+    );
+
+    const settledPayment = await dataSource.getRepository(Payment).findOneByOrFail({ id: payment.id });
+    const settledOrder = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(settledPayment.paymentStatus).toBe(PaymentGatewayStatus.SUCCEEDED);
+    expect(settledPayment.gatewayTransactionId).toBe(`gw-csd-late-${runId}`);
+    expect(settledOrder.orderStatus).toBe(OrderStatus.COMPLETED);
+    expect(settledOrder.paymentStatus).toBe(OrderPaymentStatus.PAID);
+    expect((await techWalletBalance()) - balanceBefore).toBe(80000);
+
+    // Provider retries with another event id for the same payment: payment state is the second
+    // idempotency boundary, so the duplicate becomes IGNORED without a second ledger effect.
+    await service.finalizeGatewayWebhook(
+      `evt-csd-late-duplicate-${runId}`,
+      'TRANSACTION',
+      'paymob',
+      { scenario: 'duplicate-late-success' },
+      true,
+      payment.id,
+      true,
+      null,
+      `gw-csd-late-${runId}`,
+      PaymentMethod.CARD,
+      100000,
+    );
+    expect((await techWalletBalance()) - balanceBefore).toBe(80000);
+    const duplicateEvent = await dataSource.getRepository(WebhookEvent).findOneByOrFail({
+      provider: 'paymob',
+      externalEventId: `evt-csd-late-duplicate-${runId}`,
+    });
+    expect(duplicateEvent.processingStatus).toBe(WebhookProcessingStatus.IGNORED);
   });
 
   it('طلب مختلط — دفع مسبق إلكتروني (كارت) + دلتا كاش بعد بند إضافي (ADR-0015) — المنصة بتدفع الفرق بس، مش نصيب الفني كامل', async () => {
