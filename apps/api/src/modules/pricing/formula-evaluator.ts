@@ -26,6 +26,8 @@ const ALLOWED_NODE_TYPES = new Set<FormulaNode['type']>([
   'min',
   'max',
   'round',
+  'ceil',
+  'floor',
   'if',
 ]);
 
@@ -97,9 +99,11 @@ export function validateFormulaNode(node: unknown, depth = 0): void {
       validateFormulaNode(candidate.percent, depth + 1);
       return;
     case 'round':
+    case 'ceil':
+    case 'floor':
       validateFormulaNode(candidate.value, depth + 1);
       if (candidate.decimals !== undefined && typeof candidate.decimals !== 'number') {
-        rejectFormula('round.decimals لازم يكون رقم لو موجود');
+        rejectFormula(`${candidate.type}.decimals لازم يكون رقم لو موجود`);
       }
       return;
     case 'if':
@@ -256,6 +260,18 @@ export function evaluateFormulaNode(node: FormulaNode, context: FormulaEvaluatio
       const value = evaluateFormulaNode(node.value, context);
       const factor = 10 ** (node.decimals ?? 0);
       return Math.round(value * factor) / factor;
+    }
+
+    case 'ceil': {
+      const value = evaluateFormulaNode(node.value, context);
+      const factor = 10 ** (node.decimals ?? 0);
+      return Math.ceil(value * factor) / factor;
+    }
+
+    case 'floor': {
+      const value = evaluateFormulaNode(node.value, context);
+      const factor = 10 ** (node.decimals ?? 0);
+      return Math.floor(value * factor) / factor;
     }
 
     case 'if':

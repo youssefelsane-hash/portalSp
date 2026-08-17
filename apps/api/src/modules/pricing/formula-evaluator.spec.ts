@@ -88,6 +88,25 @@ describe('formula-evaluator', () => {
       expect(evaluateFormulaNode({ type: 'max', operands: [{ type: 'literal', value: 5 }, { type: 'literal', value: 2 }] }, context())).toBe(5);
       expect(evaluateFormulaNode({ type: 'round', value: { type: 'literal', value: 12.678 }, decimals: 1 }, context())).toBe(12.7);
     });
+
+    // Script 2 Part H (finding #43) — ceil()/floor() جداد جنب round()، لسياسة "أي جزء من الوحدة
+    // يُحسب وحدة كاملة" اللي round() العادية معندهاش طريقة تعبّر عنها.
+    it('ceil بيقرّب لأعلى دايمًا حتى لو الكسر صغير (سياسة "أي جزء = وحدة كاملة")', () => {
+      expect(evaluateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 5.01 } }, context())).toBe(6);
+      expect(evaluateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 5 } }, context())).toBe(5);
+      expect(evaluateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 12.34 }, decimals: 1 }, context())).toBe(12.4);
+    });
+
+    it('floor بيقرّب لأسفل دايمًا', () => {
+      expect(evaluateFormulaNode({ type: 'floor', value: { type: 'literal', value: 5.99 } }, context())).toBe(5);
+      expect(evaluateFormulaNode({ type: 'floor', value: { type: 'literal', value: 12.34 }, decimals: 1 }, context())).toBe(12.3);
+    });
+
+    it('ceil/floor مسموحين في validateFormulaNode زي round بالظبط', () => {
+      expect(() => validateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 1 } })).not.toThrow();
+      expect(() => validateFormulaNode({ type: 'floor', value: { type: 'literal', value: 1 } })).not.toThrow();
+      expect(() => validateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 1 }, decimals: 'x' })).toThrow();
+    });
   });
 
   describe('evaluateFormulaNode — مراجع (field_ref/constant_ref/lookup_ref)', () => {
