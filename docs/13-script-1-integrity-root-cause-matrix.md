@@ -194,3 +194,84 @@ that exact approved batch.
 - `order-items-additional-work-payment.spec.ts` ran against shared PostgreSQL
   TEST with nine passing cases, including proposal race, approve/decline race,
   retained decline evidence, batch-to-payment mapping, and sequential batches.
+
+## Phase 4 — Wallet, referrals, and compensation
+
+### Shared invariant
+
+One logical reward, reversal, adjustment, or complaint decision may create at
+most one financial effect. The business source row and its wallet/promo effect
+must either commit together or remain durably eligible for recovery. Quotas and
+"first only" policies are decisions made under the smallest shared-resource
+lock, not pre-transaction observations.
+
+### Findings verified before modification
+
+| Script section | Current evidence | Status |
+| --- | --- | --- |
+| 36 — referral milestone race | `ReferralsService.handleOrderCompleted()` saves a completed referral, counts completed rows, then creates a promo code without locking the referrer scope. Concurrent milestone completions can both observe the same count or skip a milestone. | `NOT FIXED` |
+| 37 — non-durable referral event | Order completion reaches referrals only through an in-process `EventEmitter2` listener which catches and logs failure. There is no database sweep for a committed completed order whose referral listener never ran. | `NOT FIXED` |
+| 38 — lazy referral-code generation | `getMyReferralInfo()` generates a code and performs an unconditional user update. The unique column prevents two rows sharing a code, but two requests can return different codes and the losing response may not match the persisted value. | `PARTIAL` |
+| 39 — wallet credit plus bonus record | `TechnicianReferralsService.evaluateOrderForBonus()` commits `WalletsService.doubleEntry()` first and saves `technician_referral_bonuses` afterward. A crash between the two loses the business source record and makes retry capable of crediting again. | `NOT FIXED` |
+| 40 — referral reversal once | `revokeBonusForOrder()` reads a credited bonus and reverses its wallet transactions before changing bonus status, with no bonus-row or original-ledger-row lock. Two callers can both reverse. | `NOT FIXED` |
+| 41 — monthly referral limit | The monthly sum and subsequent credit are separate operations without a technician-scoped lock. Concurrent rewards can both pass the cap. | `NOT FIXED` |
+| 42 — admin wallet adjustment | Dedicated permission, mandatory step-up, actor, direction, amount, reason, double-entry transaction, and audit already exist. There is no logical operation/idempotency key, so a retry repeats the adjustment. | `PARTIAL` |
+| 43 — complaint double resolve | Compensation and complaint state commit in one transaction, but the complaint is read without `FOR UPDATE`. Two resolving transactions can both pass the state check and compensate. | `NOT FIXED` |
+| 44 — complaint resolve versus reject | `reject()` is outside the resolving transaction and neither path locks the complaint. A rejection can overwrite a compensated resolution. | `NOT FIXED` |
+| 45 — first-order-only technician referral | The credited-count check is not serialized at the attribution/customer scope. Two qualifying orders for the same referred customer can both pass before either bonus is visible. | `NOT FIXED` |
+
+### Coherent architectural correction
+
+The Phase 4 implementation unit will reuse the existing double-entry ledger,
+transactions, row locks, settings, and periodic database-sweep pattern:
+
+1. Make ledger reversal idempotent under locks on the original transaction
+   pair, and persist each manual adjustment as a uniquely keyed business
+   operation whose ledger effect commits in the same transaction.
+2. Serialize technician-referral policy at the technician and attribution
+   rows; perform quota checks, bonus persistence, and double-entry credit in
+   one transaction. Reversal locks the bonus and original ledger pair.
+3. Lock the complaint row before either terminal decision; compensation and
+   the winning decision remain one transaction.
+4. Serialize standard referral completion at the referred/referrer rows and
+   create the milestone promo in the same transaction. A bounded database
+   sweep reconciles pending referrals backed by completed orders, so an
+   interrupted in-process event is recoverable.
+5. Make lazy referral-code assignment a conditional database update and return
+   only the value that is actually persisted.
+
+### Implementation and verification record — 2026-08-17
+
+All Phase 4 findings 36-45 are now `VERIFIED FIXED`:
+
+- Migration `0116_wallet_referral_compensation_integrity.sql` adds durable
+  `wallet_adjustments` and `referral_rewards` business-source records, unique
+  operation identities, historical referral-promo backfill where identity can
+  be proven, and a bounded referral recovery setting.
+- Manual wallet adjustment requires `Idempotency-Key` from admin UI through
+  controller and commits its source row plus double entry together. Reusing a
+  key with another payload returns `409`; a true retry returns the original
+  ledger result.
+- `WalletsService.reverseDoubleEntry()` locks/reloads both originals and is
+  idempotent. Technician referral evaluation locks order, attribution, and
+  technician, then commits quota decision, bonus row, and wallet effect in one
+  transaction. Revoke locks the bonus and original ledger pair.
+- Complaint resolve/reject both use a pessimistic complaint-row lock and a
+  post-lock state recheck. Compensation remains in the winning transaction.
+- Standard referral completion locks referral/referrer, links each milestone
+  to one promo in the same transaction, conditionally assigns legacy referral
+  codes, and uses a PostgreSQL sweep to recover missed in-process events.
+
+Verification performed against the shared TEST infrastructure:
+
+- Migration runner verified checksums for migrations `0001` through `0115`
+  and applied `0116` successfully.
+- Eight PostgreSQL/Redis-backed suites passed under `--detectOpenHandles`: 32
+  tests covering failure rollback, concurrent first-order and monthly-cap
+  rewards, duplicate reversal, duplicate wallet adjustment, complaint terminal
+  races, missed-event recovery, milestone races, lazy code assignment, and
+  neighboring refund/cash/payout/promo regressions.
+- API `npm run build`, `npx tsc --noEmit`, and `git diff --check` passed.
+- Admin build could not start because this workspace does not have the `next`
+  executable installed; the API build and TypeScript checks cover the changed
+  backend, while the admin header change remains source-reviewed.

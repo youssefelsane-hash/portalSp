@@ -45,17 +45,27 @@
 
 1. `enabled` setting + رتبة الحالة الجديدة ≥ رتبة `qualifying_min_order_status`
    (`accepted=1 < work_completed=2 < completed=3`).
-2. Idempotency: صف موجود بالفعل لنفس `order_id` (UNIQUE) → توقف فورًا.
-3. فيه إسناد (`technician_referral_attributions`) لعميل الطلب ده؟
+2. يقفل الطلب ويعيد فحص حالته الحالية، ثم يقفل attribution والفني بترتيب ثابت.
+3. Idempotency: صف موجود بالفعل لنفس `order_id` (UNIQUE) → توقف فورًا.
 4. `reward_mode='first_order_only'` → فيه مكافأة `credited` سابقة لنفس زوج (فني، عميل)؟
 5. `min_order_amount_cents`.
 6. فحوصات مكافحة الاحتيال بالترتيب (أي رفض بيسجّل صف `rejected_suspicious` ومبيلمسش المحفظة):
    جهاز مكرر → تهدئة زمنية → سقف شهري.
-7. لو عدّى كل ده: `WalletsService.doubleEntry()` (محفظة المنصة → محفظة الفني،
-   `WalletTxType.REFERRAL_REWARD`)، صف `credited`، `audit_logs`، إشعار (best-effort).
+7. لو عدّى كل ده: صف bonus و`WalletsService.doubleEntry()` (محفظة المنصة → محفظة الفني،
+   `WalletTxType.REFERRAL_REWARD`) يتحفظوا في transaction واحدة، ثم audit وإشعار best-effort.
 
 **الإلغاء** (`revokeBonusForOrder`, على `cancelled`/`refunded`): بيلاقي صف `credited` لنفس
-الطلب، `WalletsService.reverseDoubleEntry()`، يقلب الحالة لـ`revoked`، audit + إشعار.
+الطلب ويقفله، `WalletsService.reverseDoubleEntry()` تقفل القيدين الأصليين وتعيد نفس العكس لو سبق،
+ويقلب الحالة لـ`revoked` في نفس transaction، ثم audit + إشعار.
+
+## تقوية النزاهة المالية والتزامن (Script 1 Phase 4، migration 0116)
+
+قبل 0116 كان wallet credit يـcommit أولًا ثم صف bonus في عملية ثانية؛ crash بينهما يترك مالًا بلا
+مصدر، وretry يقدر يضيفه ثانية. كذلك `first_order_only` والحد الشهري كانا read-then-write، والـrevoke
+كان بلا قفل. الآن قفل الفني يسلسل quota/cooldown، وقفل attribution يسلسل سياسة أول طلب، والbonus
+والledger أثر واحد ذري. `technician-referral-financial-integrity.spec.ts` أثبت على PostgreSQL حقيقي:
+rollback كامل عند failure injection، فائز واحد لطلبين first-order، عدم تجاوز cap بطلبين متزامنين،
+وعكس واحد فقط لنداءي revoke متزامنين.
 
 ## بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي — فحص الجهاز المكرر كان بلا أي أثر فعلي
 
@@ -92,6 +102,6 @@
 
 مفيش. كل ما طُلب مبني: backend + migration + admin UI + technician-app UI + customer-app UI
 (تسجيل جديد + شاشة "عندي كود ترشيح" للعميل الحالي) + إشعارات + audit log + محفظة (double-entry
-+ idempotent عبر `order_id` UNIQUE) + صلاحيات (قراءة أدمن مفتوحة، مفيش endpoints تعديل تحتاج
+وidempotent عبر `order_id` UNIQUE والأقفال/transaction) + صلاحيات (قراءة أدمن مفتوحة، مفيش endpoints تعديل تحتاج
 صلاحية لأنه مفيش تعديل يدوي أصلاً) + اختبار حي شامل (الترتيب أعلاه) بما فيه اختبار سلبي
 (جهاز مكرر مرفوض فعليًا بصفر أثر على المحفظة).

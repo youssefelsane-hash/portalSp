@@ -9,6 +9,7 @@ import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
+import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WalletsService } from './wallets.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
@@ -56,6 +57,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
         OrderStatusHistory,
         Wallet,
         WalletTransaction,
+        WalletAdjustment,
         ServiceCategory,
         Service,
         ServiceZonePricing,
@@ -147,6 +149,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     // القيود على محفظة المنصة (اللي طرفها التاني تحصيل/تصحيح الفني ده) بتتمسح بالـperformed_by_user_id
     // أولاً — الفني نفسه بيتمسح بعده بالـwallet_id، ومحفظة المنصة الشير مع كل الاختبارات التانية تفضل زي ما هي.
+    await q(`DELETE FROM wallet_adjustments WHERE actor_user_id = $1`, [ids.adminUser]);
     await q(`DELETE FROM wallet_transactions WHERE performed_by_user_id = $1`, [ids.adminUser]);
     await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id = $1)`, [ids.techUser]);
     await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
@@ -171,7 +174,14 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     const balanceAfterOriginal = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
     expect(balanceAfterOriginal).toBe(100000);
 
-    const result = await service.adminAdjustWallet(ids.adminUser, ids.techUser, 10000, 'debit', 'تصحيح: التحصيل الصح 900 مش 1000');
+    const result = await service.adminAdjustWallet(
+      ids.adminUser,
+      ids.techUser,
+      10000,
+      'debit',
+      'تصحيح: التحصيل الصح 900 مش 1000',
+      `cash-correction-${runId}`,
+    );
 
     expect(result.newBalanceCents).toBe(90000); // 1000 - 100 = 900
 
@@ -196,7 +206,34 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
 
   it('تصحيح لصالح الفني (credit) — رصيده بيزيد بالظبط بقيمة التصحيح', async () => {
     const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
-    const result = await service.adminAdjustWallet(ids.adminUser, ids.techUser, 5000, 'credit', 'تعويض إداري');
+    const result = await service.adminAdjustWallet(
+      ids.adminUser,
+      ids.techUser,
+      5000,
+      'credit',
+      'تعويض إداري',
+      `admin-compensation-${runId}`,
+    );
     expect(result.newBalanceCents - before).toBe(5000);
+  });
+
+  it('retry متزامن بنفس Idempotency-Key ينشئ adjustment وقيدًا مزدوجًا واحدًا فقط', async () => {
+    const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+    const key = `concurrent-adjustment-${runId}`;
+    const [first, second] = await Promise.all([
+      service.adminAdjustWallet(ids.adminUser, ids.techUser, 7000, 'credit', 'تعويض شبكي متكرر', key),
+      service.adminAdjustWallet(ids.adminUser, ids.techUser, 7000, 'credit', 'تعويض شبكي متكرر', key),
+    ]);
+
+    expect(first.newBalanceCents).toBe(second.newBalanceCents);
+    expect(first.newBalanceCents - before).toBe(7000);
+    const adjustmentRows = await dataSource.getRepository(WalletAdjustment).find({
+      where: { actorUserId: ids.adminUser, idempotencyKey: key },
+    });
+    expect(adjustmentRows).toHaveLength(1);
+    const ledgerRows = await dataSource.getRepository(WalletTransaction).find({
+      where: { referenceType: 'admin_adjustment', referenceId: adjustmentRows[0].id },
+    });
+    expect(ledgerRows).toHaveLength(2);
   });
 });

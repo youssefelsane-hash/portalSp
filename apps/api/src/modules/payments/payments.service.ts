@@ -29,7 +29,8 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
 import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
 import { WalletOwnerType } from './entities/wallet.entity';
-import { WalletTxType } from './entities/wallet-transaction.entity';
+import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
+import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WalletsService } from './wallets.service';
 import { PLATFORM_SYSTEM_USER_ID } from './entities/wallet.entity';
 import { SavedPaymentMethodsService } from './saved-payment-methods.service';
@@ -1992,34 +1993,84 @@ export class PaymentsService {
     amountCents: number,
     direction: 'credit' | 'debit',
     reasonAr: string,
+    idempotencyKey: string,
     meta?: AuditActorMeta,
   ): Promise<{ debit: unknown; credit: unknown; newBalanceCents: number }> {
-    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-    const targetWallet = await this.walletsService.findByUserIdOrThrow(targetUserId);
+    const result = await this.dataSource.transaction(async (manager) => {
+      const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+      const targetWallet = await this.walletsService.findByUserIdOrThrow(targetUserId, manager);
 
-    const entry = await this.walletsService.doubleEntry({
-      fromWalletId: direction === 'credit' ? platformWallet.id : targetWallet.id,
-      toWalletId: direction === 'credit' ? targetWallet.id : platformWallet.id,
-      amountCents,
-      transactionType: WalletTxType.ADJUSTMENT,
-      referenceType: 'admin_adjustment',
-      referenceId: adminUserId,
-      descriptionAr: reasonAr,
-      performedByUserId: adminUserId,
-      allowNegativeBalance: true, // تصحيح إداري واعي — مينفعش يترفض برصيد "غير كافٍ"
+      const inserted = await manager.query<{ id: string }[]>(
+        `INSERT INTO wallet_adjustments
+           (actor_user_id, target_user_id, target_wallet_id, idempotency_key, amount_cents, direction, reason_ar)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (actor_user_id, idempotency_key) DO NOTHING
+         RETURNING id`,
+        [adminUserId, targetUserId, targetWallet.id, idempotencyKey, amountCents, direction, reasonAr],
+      );
+
+      const adjustment = inserted[0]
+        ? await manager.findOneByOrFail(WalletAdjustment, { id: inserted[0].id })
+        : await manager.findOneByOrFail(WalletAdjustment, { actorUserId: adminUserId, idempotencyKey });
+
+      if (
+        adjustment.targetUserId !== targetUserId ||
+        adjustment.targetWalletId !== targetWallet.id ||
+        adjustment.amountCents !== amountCents ||
+        adjustment.direction !== direction ||
+        adjustment.reasonAr !== reasonAr
+      ) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'Idempotency-Key مستخدم قبل كده لعملية تصحيح مختلفة',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      if (!inserted[0]) {
+        if (!adjustment.walletDebitTxId || !adjustment.walletCreditTxId) {
+          throw new ApiException(ErrorCode.VAL_001, 'عملية التصحيح السابقة غير مكتملة', HttpStatus.CONFLICT);
+        }
+        const debit = await manager.findOneByOrFail(WalletTransaction, { id: adjustment.walletDebitTxId });
+        const credit = await manager.findOneByOrFail(WalletTransaction, { id: adjustment.walletCreditTxId });
+        const targetEntry = debit.walletId === targetWallet.id ? debit : credit;
+        return { debit, credit, newBalanceCents: targetEntry.balanceAfterCents, adjustment, created: false };
+      }
+
+      const entry = await this.walletsService.doubleEntry(
+        {
+          fromWalletId: direction === 'credit' ? platformWallet.id : targetWallet.id,
+          toWalletId: direction === 'credit' ? targetWallet.id : platformWallet.id,
+          amountCents,
+          transactionType: WalletTxType.ADJUSTMENT,
+          referenceType: 'admin_adjustment',
+          referenceId: adjustment.id,
+          descriptionAr: reasonAr,
+          performedByUserId: adminUserId,
+          allowNegativeBalance: true,
+        },
+        manager,
+      );
+
+      adjustment.walletDebitTxId = entry.debit.id;
+      adjustment.walletCreditTxId = entry.credit.id;
+      await manager.save(adjustment);
+      const targetEntry = entry.debit.walletId === targetWallet.id ? entry.debit : entry.credit;
+      return { ...entry, newBalanceCents: targetEntry.balanceAfterCents, adjustment, created: true };
     });
 
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'wallet.adjusted',
-      entityType: 'wallet',
-      entityId: targetWallet.id,
-      newValues: { target_user_id: targetUserId, amount_cents: amountCents, direction, reason_ar: reasonAr },
-      meta,
-    });
+    if (result.created) {
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'wallet.adjusted',
+        entityType: 'wallet_adjustment',
+        entityId: result.adjustment.id,
+        newValues: { target_user_id: targetUserId, amount_cents: amountCents, direction, reason_ar: reasonAr },
+        meta,
+      });
+    }
 
-    const reloaded = await this.walletsService.findByUserIdOrThrow(targetUserId);
-    return { debit: entry.debit, credit: entry.credit, newBalanceCents: reloaded.balanceCents };
+    return { debit: result.debit, credit: result.credit, newBalanceCents: result.newBalanceCents };
   }
 }

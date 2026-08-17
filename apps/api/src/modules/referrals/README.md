@@ -36,25 +36,24 @@
 `ReferralOrderCompletedListener` مشترك في `ORDER_STATUS_CHANGED_EVENT` (نفس الحدث اللي
 `payments.service.ts` بيصدره من الـ 3 نقاط الوحيدة لإتمام الدفع: `collectCash`/`payWithWallet`/
 webhook البطاقة الناجح). لما `newStatus === completed`:
-1. `ReferralsService.handleOrderCompleted()` بيشيك: العميل ده اتترشّح ولسه معلّق؟
-2. لو أيوه، بيتأكد إن ده **أول طلب مكتمل فعلي** ليه (`COUNT(*)` مباشر على `orders` — مش
-   `customer_profiles.completed_orders_count`، حتى بعد ما العمود ده بقى بيتحدّث فعليًا
-   بمهمة خلفية مجدولة، `customers/README.md`، §"بَقّة حقيقية اتلقطت واتصلحت". السبب: العمود
-   بيتحدّث async بعد commit التسوية (queue job)، فمفيش ضمان إنه اتحدّث لحظة `handleOrderCompleted`
-   بيتنادى — `COUNT(*)` المباشر هنا فعليًا داخل نفس handler الحدث، فمضمون يكون دقيق فورًا).
-3. لو أول طلب فعلاً → الترشيح يتقفل `completed`، وعدّاد المُرشِّح (`COUNT` مباشر على
-   `referrals`) بيتحسب.
-4. لو العدّاد وصل لمضاعف `referral.required_referrals_per_reward` → `issueReward()` بتصدر كود
-   خصم عبر `PromoCodesService.create()` الموجود أصلاً (بحساب `PLATFORM_SYSTEM_USER_ID` كـ"الأدمن"
-   المُصدر — نفس الحساب النظامي المستخدم في تسويات المحفظة)، وتصدر `REFERRAL_REWARD_EARNED_EVENT`.
+1. `ReferralsService.handleOrderCompleted()` يعيد قراءة الطلب المكتمل ثم يقفل صف referral المعلق.
+2. يقفل صف المُرشِّح أيضًا، وهو أصغر scope مشترك بين إحالاته، فيسلسل العدّاد والميلستون من غير
+   global lock.
+3. يقفل referral كـ`completed`، ولو العدّاد وصل لمضاعف الإعداد يصدر كود الخصم عبر
+   `PromoCodesService.createInTransaction()` ويحفظ `referral_rewards` بهوية
+   `(referrer_user_id, milestone_count)` فريدة في نفس transaction.
+4. بعد الـcommit فقط يصدر `REFERRAL_REWARD_EARNED_EVENT` للإشعار.
 5. `ReferralRewardNotificationListener` (في `notifications` module) بيستقبل الحدث ويبعت إشعار
    `in_app` للمُرشِّح فيه الكود والقيمة — نفس نمط `welcome-notification.listener.ts`.
 
-**اختياري عن قصد إن ده بره transaction التسوية**: على عكس نقاط الولاء (`loyalty.earn()` جوّه نفس
-transaction الدفع)، اكتمال الترشيح وإصدار المكافأة بيحصلوا بعد commit التسوية (عبر الحدث)،
-مش جواها. القرار ده مقصود: المكافأة نظام تحفيزي إضافي، مش جزء من سلامة الدفع المالي نفسه —
-فشل هنا (لو حصل) ميرجّعش الدفع ولا يوقف الطلب، بس بيتسجّل في اللوج (`try/catch` في الـ listener،
-نفس نمط كل listeners تانية في المشروع).
+**استرداد durable (Script 1 Phase 4، migration 0116):** اكتمال الطلب يظل مستقلًا عن المكافأة ولا
+يرجع للخلف لو listener فشل، لكن `ReferralRecoveryService` يفحص PostgreSQL كل دقيقة. يعيد إنشاء أي
+صف referral فاته حدث التسجيل من `users.referred_by_user_id`، ثم يعالج referrals المعلقة التي لها
+طلب مكتمل. لو إصدار promo فشل، transaction referral نفسها ترجع `pending` وتبقى قابلة للمحاولة.
+أكثر من instance آمن لأن قرار claim تحت أقفال الصفوف والهوية الفريدة، وليس EventEmitter.
+
+التوليد الكسول لكود الحسابات القديمة أصبح conditional `UPDATE ... WHERE referral_code IS NULL`؛
+طلبان متزامنان يرجعان فقط الكود المخزن فعليًا، لا كودًا خاسرًا ظهر في response ثم استُبدل.
 
 ## ثغرة أمنية اتقفلت — كود المكافأة بقى مقفول على المُرشِّح نفسه بس (migration 0067)
 

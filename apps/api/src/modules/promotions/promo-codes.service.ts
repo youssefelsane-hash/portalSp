@@ -169,9 +169,13 @@ export class PromoCodesService {
 
   // ── إدارة الأدمن ─────────────────────────────────────────────────────
 
-  async create(adminUserId: string, dto: CreatePromoCodeDto, meta?: AuditActorMeta): Promise<PromoCode> {
+  private async createWithRepository(
+    repository: Repository<PromoCode>,
+    adminUserId: string,
+    dto: CreatePromoCodeDto,
+  ): Promise<PromoCode> {
     const code = dto.code.toUpperCase();
-    const existing = await this.promoCodes.findOne({ where: { code } });
+    const existing = await repository.findOne({ where: { code } });
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الكود ده مستخدم قبل كده', HttpStatus.CONFLICT);
     }
@@ -181,7 +185,7 @@ export class PromoCodesService {
       throw new ApiException(ErrorCode.VAL_001, 'تاريخ الانتهاء لازم يكون بعد تاريخ البداية', HttpStatus.BAD_REQUEST);
     }
 
-    const promoCode = this.promoCodes.create({
+    const promoCode = repository.create({
       code,
       nameAr: dto.name_ar,
       discountType: dto.discount_type,
@@ -199,8 +203,22 @@ export class PromoCodesService {
       budgetCents: dto.budget_cents ?? null,
       restrictedToUserId: dto.restricted_to_user_id ?? null,
     });
-    await this.promoCodes.save(promoCode);
+    await repository.save(promoCode);
+    return promoCode;
+  }
 
+  async createInTransaction(manager: EntityManager, adminUserId: string, dto: CreatePromoCodeDto): Promise<PromoCode> {
+    return this.createWithRepository(manager.getRepository(PromoCode), adminUserId, dto);
+  }
+
+  async create(adminUserId: string, dto: CreatePromoCodeDto, meta?: AuditActorMeta): Promise<PromoCode> {
+    const promoCode = await this.createWithRepository(this.promoCodes, adminUserId, dto);
+
+    await this.recordCreatedAudit(adminUserId, promoCode, meta);
+    return promoCode;
+  }
+
+  async recordCreatedAudit(adminUserId: string, promoCode: PromoCode, meta?: AuditActorMeta): Promise<void> {
     await this.auditLog.record({
       actorUserId: adminUserId,
       actorRole: 'admin',
@@ -210,7 +228,6 @@ export class PromoCodesService {
       newValues: { code: promoCode.code, discount_type: promoCode.discountType, discount_value: promoCode.discountValue },
       meta,
     });
-    return promoCode;
   }
 
   async list(query: ListPromoCodesQueryDto): Promise<{ items: PromoCode[]; meta: { page: number; per_page: number; total: number } }> {

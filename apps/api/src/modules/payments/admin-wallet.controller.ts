@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -53,8 +53,21 @@ export class AdminWalletController {
     @CurrentUser() admin: JwtPayload,
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: AdjustWalletDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @AuditContext() audit: AuditMeta,
   ) {
-    return this.paymentsService.adminAdjustWallet(admin.sub, userId, dto.amount_cents, dto.direction, dto.reason_ar, audit);
+    const operationKey = idempotencyKey?.trim();
+    if (!operationKey || operationKey.length > 120) {
+      throw new BadRequestException('Idempotency-Key header مطلوب وبحد أقصى 120 حرف');
+    }
+    return this.paymentsService.adminAdjustWallet(
+      admin.sub,
+      userId,
+      dto.amount_cents,
+      dto.direction,
+      dto.reason_ar,
+      operationKey,
+      audit,
+    );
   }
 }

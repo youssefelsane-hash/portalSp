@@ -39,6 +39,7 @@ import { Refund } from './entities/refund.entity';
 import { SavedPaymentMethod } from './entities/saved-payment-method.entity';
 import { Wallet } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
+import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 
 @Module({
@@ -46,6 +47,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     TypeOrmModule.forFeature([
       Wallet,
       WalletTransaction,
+      WalletAdjustment,
       Payment,
       Refund,
       Payout,

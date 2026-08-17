@@ -255,7 +255,7 @@ migration — تصحيح منطق فقط.
 transactions` أصلاً append-only على مستوى الـDB (`REVOKE UPDATE, DELETE`، migration 0008)، فالمطلوب
 كان بس مسار كتابة واعي بدل ما يبقى صفر إمكانية تصحيح خالص.
 
-`PaymentsService.adminAdjustWallet(adminUserId, targetUserId, amountCents, direction, reasonAr, meta)`
+`PaymentsService.adminAdjustWallet(adminUserId, targetUserId, amountCents, direction, reasonAr, idempotencyKey, meta)`
 — بيعيد استخدام `walletsService.doubleEntry()` بـ`WalletTxType.ADJUSTMENT` (نفس النوع المستخدم أصلاً
 لبونص الـKPI وغرامات الإلغاء)، `allowNegativeBalance: true`، وبيسجّل audit log. `PATCH
 /admin/wallets/:userId/adjust` — صلاحية `wallets.adjust` (migration 0104، أضيق من `wallets.view`،
@@ -263,9 +263,16 @@ transactions` أصلاً append-only على مستوى الـDB (`REVOKE UPDATE,
 `refunds.issue`/`payouts.approve` لأنه تحويل فلوس مباشر بقرار أدمن بلا أي تحقق تلقائي. `reason_ar`
 إجباري (5-500 حرف) — كل تصحيح لازم سبب موثّق.
 
-اتأكد بـ`wallet-manual-adjustment.spec.ts` (اختبارين حيّين) — بيعيد مثال المالك بالحرف (1000 أصلي،
+**تقوية Script 1 Phase 4 (migration 0116):** الـendpoint يتطلب `Idempotency-Key`، وكل عملية لها
+صف `wallet_adjustments` فريد على `(actor_user_id, idempotency_key)` مربوط بالقيدين. الـclaim والقيد
+المزدوج يتعملوا في transaction واحدة؛ retry أو double click يرجع نفس القيد و`balance_after` المسجل
+بدون تحريك المال مرة ثانية، وإعادة المفتاح مع payload مختلف تترفض `409`. `reverseDoubleEntry()`
+نفسها بقت تقفل القيدين الأصليين وتعيد العكس الموجود لو اتنادت بالتوازي بدل إنشاء عكسين.
+
+اتأكد بـ`wallet-manual-adjustment.spec.ts` (3 اختبارات حيّة) — بيعيد مثال المالك بالحرف (1000 أصلي،
 تصحيح -100، فعلي 900) ويتحقق إن القيد الأصلي فضل بلا تغيير تمامًا وإن فيه قيد `ADJUSTMENT` منفصل
-بقيمة الفرق بس، موثّق فيه مين عمل التصحيح وليه.
+بقيمة الفرق بس، موثّق فيه مين عمل التصحيح وليه، ويشغّل retry متزامن بنفس المفتاح ويثبت صف عملية
+واحد وقيدًا مزدوجًا واحدًا فقط.
 
 ## استرداد جزئي = تصحيح سعر نهائي لأقل — صفر كود جديد لازم، فحص رياضي + اختبار فقط (docs/08 §20 بند 6)
 
