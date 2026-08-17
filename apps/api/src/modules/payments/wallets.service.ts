@@ -85,6 +85,7 @@ export class WalletsService {
   private async doubleEntryWithManager(
     params: DoubleEntryParams,
     manager: EntityManager,
+    allowFrozenWallets = false,
   ): Promise<{ debit: WalletTransaction; credit: WalletTransaction }> {
     if (params.amountCents <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'المبلغ لازم يكون أكبر من صفر', HttpStatus.BAD_REQUEST);
@@ -115,10 +116,10 @@ export class WalletsService {
 
     const fromWallet = first.id === params.fromWalletId ? first : second;
     const toWallet = first.id === params.toWalletId ? first : second;
-    if (fromWallet.isFrozen) {
+    if (fromWallet.isFrozen && !allowFrozenWallets) {
       throw new ApiException(ErrorCode.PAY_002, fromWallet.frozenReason ?? 'المحفظة مجمّدة', HttpStatus.FORBIDDEN);
     }
-    if (toWallet.isFrozen) {
+    if (toWallet.isFrozen && !allowFrozenWallets) {
       throw new ApiException(ErrorCode.PAY_002, 'محفظة الطرف التاني مجمّدة', HttpStatus.FORBIDDEN);
     }
     if (!params.allowNegativeBalance && fromWallet.balanceCents < params.amountCents) {
@@ -198,6 +199,16 @@ export class WalletsService {
 
       const originalDebit = locked.get(original.debit.id)!;
       const originalCredit = locked.get(original.credit.id)!;
+      if (
+        originalDebit.direction !== WalletTxDirection.DEBIT ||
+        originalCredit.direction !== WalletTxDirection.CREDIT ||
+        originalDebit.amountCents !== originalCredit.amountCents ||
+        originalDebit.walletId === originalCredit.walletId ||
+        originalDebit.referenceType !== originalCredit.referenceType ||
+        originalDebit.referenceId !== originalCredit.referenceId
+      ) {
+        throw new ApiException(ErrorCode.VAL_001, 'القيدان الأصليان لا يمثلان قيدًا مزدوجًا متسقًا', HttpStatus.CONFLICT);
+      }
       if (originalDebit.isReversed || originalCredit.isReversed) {
         if (
           !originalDebit.isReversed ||
@@ -216,6 +227,16 @@ export class WalletsService {
         if (!debit || !credit) {
           throw new ApiException(ErrorCode.VAL_001, 'قيد العكس المسجل غير موجود', HttpStatus.CONFLICT);
         }
+        if (
+          debit.direction !== WalletTxDirection.DEBIT ||
+          credit.direction !== WalletTxDirection.CREDIT ||
+          debit.amountCents !== originalDebit.amountCents ||
+          credit.amountCents !== originalCredit.amountCents ||
+          debit.walletId !== originalCredit.walletId ||
+          credit.walletId !== originalDebit.walletId
+        ) {
+          throw new ApiException(ErrorCode.VAL_001, 'قيد العكس المسجل غير متسق وتحتاج حالته مراجعة', HttpStatus.CONFLICT);
+        }
         return { debit, credit };
       }
 
@@ -232,6 +253,7 @@ export class WalletsService {
           allowNegativeBalance: true, // العكس لازم ينجح دايماً — مينفعش رصيد ناقص يمنع تصحيح غلطة
         },
         txManager,
+        true,
       );
 
       await txManager.update(WalletTransaction, originalDebit.id, {

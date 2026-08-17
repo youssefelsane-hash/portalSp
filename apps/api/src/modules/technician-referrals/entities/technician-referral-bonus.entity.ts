@@ -4,6 +4,7 @@ export enum TechnicianReferralBonusStatus {
   CREDITED = 'credited',
   REVOKED = 'revoked',
   REJECTED_SUSPICIOUS = 'rejected_suspicious',
+  MANUAL_REVIEW = 'manual_review',
 }
 
 // مطابق لـ infra/migrations/0082_technician_qr_referral.sql

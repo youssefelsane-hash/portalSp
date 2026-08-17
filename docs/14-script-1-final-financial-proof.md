@@ -37,13 +37,19 @@ Critical truth is stored before or with its effect:
 - Payments, refunds, payouts, wallet adjustments, earnings, complaint
   compensation, and referral bonuses commit source state with their local
   financial effect or retain a recoverable non-terminal state.
-- Webhooks and standard referrals have bounded database recovery sweeps.
+- Webhooks, standard referrals, and technician QR referrals have bounded
+  database recovery sweeps.
 - A base-order payment webhook records its post-commit effects payload and
   stage in the financial transaction. Failed delivery resumes from that stage
   without rerunning settlement, and exhausted stale claims are terminalized as
   `MANUAL_REVIEW` for operator action.
 - Prepaid settlement and schedule release now have bounded database sweeps in
   addition to immediate `EventEmitter` listeners.
+- Technician QR bonus, wallet double entry, and normal policy decision commit
+  together. The recovery sweep also recognizes the pre-Phase-4 order-referenced
+  ledger shape: it rebuilds the source without crediting twice, reverses it when
+  the order is terminal/deleted, and terminalizes a malformed historical pair
+  as admin-visible `manual_review` instead of retrying forever.
 - Matching round jobs use stable job IDs after enqueue. If initial dispatch is
   missed, order timeout/auto-cancel preserves financial truth and refunds a
   prepaid order; complete event-to-queue outbox coverage remains Script 2.
@@ -79,11 +85,15 @@ payment to `REFUNDED`.
 ## Database And Performance
 
 Migrations were preflighted against existing TEST data. The migration runner
-verifies immutable SHA-256 checksums; migrations through `0119` are recorded
-with matching checksums. Locks are scoped to order, technician, payout, wallet,
-or business-source rows. Refund completion rereads aggregate payment state
-while holding the order lock. Recovery scans use indexed predicates and
-batches of 25; there are no global locks or unbounded retries.
+verifies immutable SHA-256 checksums; migrations through `0120` are recorded
+with matching checksums. TEST initially carried an older checksum for `0119`;
+a read-only catalog check proved its enum, columns, defaults, and check
+constraint exactly matched committed `0119`, then a conditional one-row
+baseline correction was applied before the runner reverified `0001`-`0120` and
+applied `0120`. Locks are scoped to order, technician, payout, wallet, or
+business-source rows. Refund completion rereads aggregate payment state while
+holding the order lock. Recovery scans use indexed predicates and batches of
+25; there are no global locks or unbounded retries.
 
 The post-suite invariant gate verifies:
 
@@ -106,6 +116,11 @@ The post-suite invariant gate verifies:
 - Admin frontend dependencies are absent in this workspace, so its full Next.js
   build cannot run here. API build/typecheck and changed backend tests are the
   authoritative verification for this phase.
+- Migration `0118` deliberately fails rather than guessing if a pre-upgrade
+  production database already contains duplicate active technician assignments
+  or overlapping schedule slots. TEST preflight found zero of both; production
+  rollout must run the same read-only preflight and reconcile any legacy rows
+  before applying the constraint.
 
 ## Completion Report
 
@@ -129,13 +144,15 @@ gate after fixture cleanup.
 
 **Temporary data cleaned:** Yes.
 
-**Final automated verification:** 26 suites / 132 tests passed with
+**Final automated verification:** 27 suites / 145 tests passed with
 `--detectOpenHandles` and exited normally; API build/typecheck passed;
-migrations `0001`-`0119` had matching checksums; and all nine post-suite
+migrations `0001`-`0120` had matching checksums; and all nine post-suite
 invariants passed. The reproduced Jest hang came from a legacy suite whose
 failed cleanup skipped `DataSource.destroy()`; fixture isolation plus `finally`
 cleanup removed the open PostgreSQL `TCPWRAP`. Lint was unavailable because no
-`eslint` executable is installed in this workspace.
+`eslint` executable is installed in this workspace. Shared-types typecheck also
+passed; admin typecheck could not start meaningfully because Next/React/Radix
+dependencies and declarations are absent project-wide.
 
 **Status:** `VERIFIED DONE`, subject to the explicit external-provider and
 frontend dependency limitations above.

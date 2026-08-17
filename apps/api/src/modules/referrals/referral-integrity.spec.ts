@@ -12,6 +12,7 @@ import { ReferralsService } from './referrals.service';
 describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
   let dataSource: DataSource;
   let service: ReferralsService;
+  let promoCodes: PromoCodesService;
   const runId = Date.now().toString(36);
   const ids = {
     city: '',
@@ -67,7 +68,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     );
     ids.legacyUser = legacy.id;
 
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < 6; index++) {
       const [user] = await q(
         `INSERT INTO users (phone_number, full_name, user_type, referred_by_user_id)
          VALUES ($1,$2,'customer',$3) RETURNING id`,
@@ -88,7 +89,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
       ids.referred.push({ user: user.id, profile: profile.id, address: address.id, order: order.id });
     }
 
-    const promoCodes = new PromoCodesService(
+    promoCodes = new PromoCodesService(
       dataSource.getRepository(PromoCode),
       dataSource.getRepository(PromoCodeUsage),
       { record: async () => undefined } as never,
@@ -113,21 +114,25 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM referral_rewards WHERE referrer_user_id = $1`, [ids.referrer]);
-    await q(`DELETE FROM promo_codes WHERE restricted_to_user_id = $1`, [ids.referrer]);
-    await q(`DELETE FROM referrals WHERE referrer_user_id = $1`, [ids.referrer]);
-    await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids.referred.map((item) => item.order)]);
-    await q(`DELETE FROM addresses WHERE id = ANY($1::uuid[])`, [ids.referred.map((item) => item.address)]);
-    await q(`DELETE FROM customer_profiles WHERE id = ANY($1::uuid[])`, [ids.referred.map((item) => item.profile)]);
-    await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [
-      [ids.referrer, ids.legacyUser, ...ids.referred.map((item) => item.user)],
-    ]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM referral_rewards WHERE referrer_user_id = $1`, [ids.referrer]);
+      await q(`DELETE FROM promo_codes WHERE restricted_to_user_id = $1`, [ids.referrer]);
+      await q(`DELETE FROM referrals WHERE referrer_user_id = $1`, [ids.referrer]);
+      await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids.referred.map((item) => item.order)]);
+      await q(`DELETE FROM addresses WHERE id = ANY($1::uuid[])`, [ids.referred.map((item) => item.address)]);
+      await q(`DELETE FROM customer_profiles WHERE id = ANY($1::uuid[])`, [ids.referred.map((item) => item.profile)]);
+      await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [
+        [ids.referrer, ids.legacyUser, ...ids.referred.map((item) => item.user)],
+      ]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+    } finally {
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('recovers missed registration/completion events and issues one durable milestone reward', async () => {
@@ -144,10 +149,10 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
 
   it('serializes simultaneous milestone completions at the referrer scope', async () => {
     await Promise.all(
-      ids.referred.slice(2).map((item) => service.createPendingReferral(ids.referrer, item.user)),
+      ids.referred.slice(2, 4).map((item) => service.createPendingReferral(ids.referrer, item.user)),
     );
     await Promise.all(
-      ids.referred.slice(2).map((item) => service.handleOrderCompleted(item.profile, item.order)),
+      ids.referred.slice(2, 4).map((item) => service.handleOrderCompleted(item.profile, item.order)),
     );
     const rewards = await dataSource.getRepository(ReferralReward).find({
       where: { referrerUserId: ids.referrer },
@@ -155,6 +160,60 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     });
     expect(rewards.map((reward) => reward.milestoneCount)).toEqual([2, 4]);
     expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(2);
+  });
+
+  it('rolls back a failed milestone issue and reconciliation delivers the reward exactly once', async () => {
+    const fifth = ids.referred[4];
+    const sixth = ids.referred[5];
+    await service.createPendingReferral(ids.referrer, fifth.user);
+    await service.createPendingReferral(ids.referrer, sixth.user);
+    await service.handleOrderCompleted(fifth.profile, fifth.order);
+
+    const originalCreate = promoCodes.createInTransaction.bind(promoCodes);
+    const failure = jest
+      .spyOn(promoCodes, 'createInTransaction')
+      .mockImplementationOnce(async (manager, adminUserId, dto) => {
+        await originalCreate(manager, adminUserId, dto);
+        throw new Error('failure after reward qualification');
+      });
+    try {
+      await expect(service.handleOrderCompleted(sixth.profile, sixth.order)).rejects.toThrow(
+        'failure after reward qualification',
+      );
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await dataSource.getRepository(Referral).findOneByOrFail({ referredUserId: sixth.user })).status).toBe(
+      ReferralStatus.PENDING,
+    );
+    expect(await dataSource.getRepository(ReferralReward).count({
+      where: { referrerUserId: ids.referrer, milestoneCount: 6 },
+    })).toBe(0);
+    expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(2);
+
+    expect(await service.reconcilePending(10)).toBe(1);
+    expect(await dataSource.getRepository(ReferralReward).count({
+      where: { referrerUserId: ids.referrer, milestoneCount: 6 },
+    })).toBe(1);
+    expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
+    expect(await service.reconcilePending(10)).toBe(0);
+  });
+
+  it('treats the same completed referral event twice as an idempotent replay', async () => {
+    const sixth = ids.referred[5];
+    await Promise.all([
+      service.handleOrderCompleted(sixth.profile, sixth.order),
+      service.handleOrderCompleted(sixth.profile, sixth.order),
+    ]);
+
+    expect(await dataSource.getRepository(Referral).count({
+      where: { referredUserId: sixth.user, status: ReferralStatus.COMPLETED },
+    })).toBe(1);
+    expect(await dataSource.getRepository(ReferralReward).count({
+      where: { referrerUserId: ids.referrer, milestoneCount: 6 },
+    })).toBe(1);
+    expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
   });
 
   it('returns only the referral code actually persisted during concurrent lazy assignment', async () => {

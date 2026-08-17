@@ -1,6 +1,6 @@
 // ترشيح QR للفني (docs/11 §1) — مطابق لـ
 // apps/api/src/modules/technician-referrals/dto/technician-referral-response.dto.ts.
-export type TechnicianReferralBonusStatus = 'credited' | 'revoked' | 'rejected_suspicious';
+export type TechnicianReferralBonusStatus = 'credited' | 'revoked' | 'rejected_suspicious' | 'manual_review';
 
 export interface TechnicianReferralBonusResponseDto {
   id: string;

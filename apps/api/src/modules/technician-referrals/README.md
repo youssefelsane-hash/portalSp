@@ -58,14 +58,21 @@
 الطلب ويقفله، `WalletsService.reverseDoubleEntry()` تقفل القيدين الأصليين وتعيد نفس العكس لو سبق،
 ويقلب الحالة لـ`revoked` في نفس transaction، ثم audit + إشعار.
 
-## تقوية النزاهة المالية والتزامن (Script 1 Phase 4، migration 0116)
+## تقوية النزاهة المالية والتزامن (Script 1 Phase 4، migrations 0116 و0120)
 
 قبل 0116 كان wallet credit يـcommit أولًا ثم صف bonus في عملية ثانية؛ crash بينهما يترك مالًا بلا
 مصدر، وretry يقدر يضيفه ثانية. كذلك `first_order_only` والحد الشهري كانا read-then-write، والـrevoke
 كان بلا قفل. الآن قفل الفني يسلسل quota/cooldown، وقفل attribution يسلسل سياسة أول طلب، والbonus
-والledger أثر واحد ذري. `technician-referral-financial-integrity.spec.ts` أثبت على PostgreSQL حقيقي:
-rollback كامل عند failure injection، فائز واحد لطلبين first-order، عدم تجاوز cap بطلبين متزامنين،
-وعكس واحد فقط لنداءي revoke متزامنين.
+والledger أثر واحد ذري. `TechnicianReferralRecoveryService` يفحص PostgreSQL كل دقيقة ويستعيد حدث
+منح أو إلغاء ضاع بعد commit. كما يتعرف على crash القديم الذي ترك قيدي محفظة بمرجع `order_id` قبل
+حفظ صف bonus: يعيد بناء المصدر من نفس القيدين بلا credit جديد، ثم يعكسهما إذا كان الطلب أصبح نهائيًا.
+القيد القديم غير القابل للمطابقة ينتقل مرة واحدة إلى `manual_review` (migration 0120) ويظهر في فلتر
+ولوحة الأدمن بدل إسقاط sweep إلى الأبد. الـworker يمسح الـinterval في `onModuleDestroy`.
+
+`technician-referral-financial-integrity.spec.ts` أثبت 9 حالات على PostgreSQL حقيقي: rollback كامل عند
+failure injection، فائز واحد لطلبين first-order، عدم تجاوز cap بطلبين متزامنين، عكس واحد فقط لنداءي
+revoke، missed-event recovery، reward×terminal/revoke، استرجاع legacy بلا تكرار، استرجاعه وعكسه بعد
+refund، وإنهاء القيد الناقص في `manual_review`.
 
 ## بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي — فحص الجهاز المكرر كان بلا أي أثر فعلي
 
@@ -90,7 +97,8 @@ rollback كامل عند failure injection، فائز واحد لطلبين firs
 
 قراءة فقط (مفيش أي إجراء يدوي من الأدمن على المكافآت — القرار كله آلي حسب الإعدادات، مطابق
 لما طلبه المالك: "Backend هو مصدر الحقيقة"). فلاتر: `status`, `technician_id`, صفحات.
-لوحة `/technician-referrals` في `apps/admin` بتعرض جدول + إجمالي لكل حالة (مستحقة/ملغاة/مرفوضة).
+لوحة `/technician-referrals` في `apps/admin` بتعرض جدول + إجمالي لكل حالة
+(مستحقة/ملغاة/مرفوضة/مراجعة يدوية)، وفلترًا مباشرًا للحالات الأربع.
 
 ## الفني (`GET /technician/referrals`)
 

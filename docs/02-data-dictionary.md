@@ -606,6 +606,19 @@ external_reference VARCHAR(120) NULL
 id, payout_id FK, order_id FK, earning_cents INTEGER, commission_cents INTEGER
 ```
 
+### 7.7 `wallet_adjustments` (تصحيح إداري append-only)
+
+```sql
+id UUID PK, actor_user_id UUID FK, target_user_id UUID FK, target_wallet_id UUID FK,
+idempotency_key VARCHAR(120), amount_cents INTEGER CHECK (> 0),
+direction VARCHAR(10),                    -- credit | debit
+reason_ar TEXT,
+wallet_debit_tx_id UUID FK NULL, wallet_credit_tx_id UUID FK NULL,
+created_at,
+UNIQUE (actor_user_id, idempotency_key),
+CHECK (قيدا المحفظة إما كلاهما NULL أو كلاهما موجود)
+```
+
 ---
 
 ## 8. التقييم والشكاوى والدعم
@@ -753,6 +766,39 @@ id, user_id FK, points_amount INTEGER, direction ENUM,   -- earn | redeem | expi
 source ENUM,                            -- order | referral | review | promotion | manual
 reference_id UUID NULL, balance_after INTEGER, expires_at TIMESTAMPTZ NULL, created_at
 ```
+
+### 10.4 `referral_rewards` (مصدر مكافأة الترشيح العادي)
+
+```sql
+id UUID PK, referrer_user_id UUID FK,
+milestone_count INTEGER CHECK (> 0), promo_code_id UUID FK UNIQUE,
+created_at,
+UNIQUE (referrer_user_id, milestone_count)
+```
+
+### 10.5 `technician_referral_attributions`
+
+```sql
+id UUID PK, technician_id UUID FK, customer_user_id UUID FK UNIQUE,
+referral_token VARCHAR(20), attributed_at, created_at, updated_at
+```
+
+### 10.6 `technician_referral_bonuses`
+
+```sql
+id UUID PK, technician_id UUID FK, customer_user_id UUID FK,
+order_id UUID FK UNIQUE, bonus_amount_cents INTEGER,
+status VARCHAR(20),
+  -- credited | revoked | rejected_suspicious | manual_review
+rejection_reason TEXT NULL, customer_device_id VARCHAR(128) NULL,
+credited_at, revoked_at, revoked_reason,
+wallet_debit_tx_id UUID FK NULL, wallet_credit_tx_id UUID FK NULL,
+created_at, updated_at
+```
+
+`manual_review` حالة terminal للاسترداد الآلي: تُستخدم فقط عندما يجد recovery أثر محفظة قديمًا
+بمرجع الطلب ولا يستطيع إثبات زوج debit/credit متسق. لا ينشئ النظام حركة مالية جديدة لهذه الحالة،
+وتظهر صراحة في لوحة الأدمن للمراجعة البشرية.
 
 ---
 

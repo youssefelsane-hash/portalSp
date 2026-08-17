@@ -51,6 +51,8 @@ webhook البطاقة الناجح). لما `newStatus === completed`:
 صف referral فاته حدث التسجيل من `users.referred_by_user_id`، ثم يعالج referrals المعلقة التي لها
 طلب مكتمل. لو إصدار promo فشل، transaction referral نفسها ترجع `pending` وتبقى قابلة للمحاولة.
 أكثر من instance آمن لأن قرار claim تحت أقفال الصفوف والهوية الفريدة، وليس EventEmitter.
+اختبار PostgreSQL يحقن failure بعد إنشاء promo داخل transaction، فيثبت rollback الإحالة والكود معًا،
+ثم يثبت أن sweep يصدر milestone واحدة فقط وأن إعادة نفس completion event لا تكررها.
 
 التوليد الكسول لكود الحسابات القديمة أصبح conditional `UPDATE ... WHERE referral_code IS NULL`؛
 طلبان متزامنان يرجعان فقط الكود المخزن فعليًا، لا كودًا خاسرًا ظهر في response ثم استُبدل.

@@ -52,7 +52,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
       dataSource,
       {} as never,
       {} as never,
-      {} as never,
+      { findByProfileIdOrThrow: async () => ({ id: ids.customerProfile, userId: ids.customerUser }) } as never,
       {} as never,
       {} as never,
       {} as never,
@@ -126,7 +126,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
   beforeEach(async () => {
     // كل it() بيعمل الدفعة بتاعته من الصفر (pending) عشان الاختبارات تفضل مستقلة عن بعض.
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    if (ids.payment) await q(`DELETE FROM webhook_events WHERE true`);
+    if (ids.payment) await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`%${runId}`]);
     const [payment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key)
        VALUES ($1,$2,$3,$4,'card','pending',$5) RETURNING id`,
@@ -137,7 +137,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
 
   afterEach(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM webhook_events WHERE true`);
+    await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`%${runId}`]);
     for (const paymentId of extraPaymentIds.splice(0)) {
       await q(`DELETE FROM payments WHERE id = $1`, [paymentId]);
     }
@@ -145,17 +145,21 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
+    } finally {
+      if (dataSource.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('مبلغ الـwebhook أقل من المتوقع: الحدث يترفض بأمان، الدفعة تفضل pending — كان الثغرة', async () => {

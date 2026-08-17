@@ -1,10 +1,10 @@
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { UserDevice } from '../notifications/entities/user-device.entity';
 import { Order } from '../orders/entities/order.entity';
 import { PLATFORM_SYSTEM_USER_ID, Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
-import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
+import { WalletTransaction, WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianReferralAttribution } from './entities/technician-referral-attribution.entity';
@@ -15,6 +15,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
   let dataSource: DataSource;
   let service: TechnicianReferralsService;
   let walletsService: WalletsService;
+  let platformBalanceBefore = 0;
   const runId = Date.now().toString(36);
   const ids = {
     city: '',
@@ -26,7 +27,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
     customers: [] as Array<{ user: string; profile: string; address: string }>,
     orders: [] as string[],
   };
-  const settings = new Map<string, boolean | number | string>([
+  const defaultSettings = new Map<string, boolean | number | string>([
     ['referral_qr.enabled', true],
     ['referral_qr.qualifying_min_order_status', 'completed'],
     ['referral_qr.reward_mode', 'first_order_only'],
@@ -36,6 +37,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
     ['referral_qr.min_minutes_between_bonuses', 0],
     ['referral_qr.max_monthly_bonus_cents_per_technician', 0],
   ]);
+  const settings = new Map(defaultSettings);
 
   async function createOrder(customerIndex: number, label: string): Promise<string> {
     const customer = ids.customers[customerIndex];
@@ -103,7 +105,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
     );
     ids.techProfile = techProfile.id;
 
-    for (let index = 0; index < 3; index++) {
+    for (let index = 0; index < 5; index++) {
       const [user] = await q(
         `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
         [`+2072${runId}${index}`.slice(0, 15), `عميل إحالة ${index} ${runId}`],
@@ -127,6 +129,9 @@ describe('Technician referral Phase 4 financial integrity', () => {
       dataSource.getRepository(WalletTransaction),
       dataSource,
     );
+    platformBalanceBefore = (
+      await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM)
+    ).balanceCents;
     const settingsService = {
       getBoolean: async (key: string, fallback: boolean) => (settings.get(key) as boolean | undefined) ?? fallback,
       getString: async (key: string, fallback: string) => (settings.get(key) as string | undefined) ?? fallback,
@@ -148,33 +153,49 @@ describe('Technician referral Phase 4 financial integrity', () => {
     );
   });
 
+  beforeEach(() => {
+    settings.clear();
+    for (const [key, value] of defaultSettings) settings.set(key, value);
+  });
+
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(
-      `UPDATE technician_referral_bonuses
-       SET wallet_debit_tx_id = NULL, wallet_credit_tx_id = NULL
-       WHERE technician_id = $1`,
-      [ids.techProfile],
-    );
-    await q(
-      `DELETE FROM wallet_transactions
-       WHERE reference_type = 'technician_referral_bonus'
-         AND reference_id IN (SELECT id FROM technician_referral_bonuses WHERE technician_id = $1)`,
-      [ids.techProfile],
-    );
-    await q(`DELETE FROM technician_referral_bonuses WHERE technician_id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM technician_referral_attributions WHERE technician_id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
-    await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids.orders]);
-    await q(`DELETE FROM addresses WHERE user_id = ANY($1::uuid[])`, [ids.customers.map((item) => item.user)]);
-    await q(`DELETE FROM customer_profiles WHERE id = ANY($1::uuid[])`, [ids.customers.map((item) => item.profile)]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.techUser, ...ids.customers.map((item) => item.user)]]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(
+        `UPDATE technician_referral_bonuses
+         SET wallet_debit_tx_id = NULL, wallet_credit_tx_id = NULL
+         WHERE technician_id = $1`,
+        [ids.techProfile],
+      );
+      await q(
+        `DELETE FROM wallet_transactions
+         WHERE reference_type = 'technician_referral_bonus'
+           AND (
+             reference_id IN (SELECT id FROM technician_referral_bonuses WHERE technician_id = $1)
+             OR reference_id = ANY($2::uuid[])
+           )`,
+        [ids.techProfile, ids.orders],
+      );
+      await q(`UPDATE wallets SET balance_cents = $1 WHERE owner_user_id = $2`, [
+        platformBalanceBefore,
+        PLATFORM_SYSTEM_USER_ID,
+      ]);
+      await q(`DELETE FROM technician_referral_bonuses WHERE technician_id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM technician_referral_attributions WHERE technician_id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.techUser]);
+      await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [ids.orders]);
+      await q(`DELETE FROM addresses WHERE user_id = ANY($1::uuid[])`, [ids.customers.map((item) => item.user)]);
+      await q(`DELETE FROM customer_profiles WHERE id = ANY($1::uuid[])`, [ids.customers.map((item) => item.profile)]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.techUser, ...ids.customers.map((item) => item.user)]]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+    } finally {
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('rolls back the bonus source row when the wallet effect cannot be created', async () => {
@@ -199,9 +220,10 @@ describe('Technician referral Phase 4 financial integrity', () => {
     const bonuses = await dataSource.getRepository(TechnicianReferralBonus).find({
       where: { technicianId: ids.techProfile, customerUserId: ids.customers[0].user },
     });
-    expect(bonuses.filter((bonus) => bonus.status === TechnicianReferralBonusStatus.CREDITED)).toHaveLength(1);
+    const creditedBonus = bonuses.filter((bonus) => bonus.status === TechnicianReferralBonusStatus.CREDITED);
+    expect(creditedBonus).toHaveLength(1);
     expect(await dataSource.getRepository(WalletTransaction).count({
-      where: { referenceType: 'technician_referral_bonus', referenceId: bonuses[0].id },
+      where: { referenceType: 'technician_referral_bonus', referenceId: creditedBonus[0].id },
     })).toBe(2);
   });
 
@@ -216,9 +238,9 @@ describe('Technician referral Phase 4 financial integrity', () => {
       service.evaluateOrderForBonus(secondOrder, 'completed'),
     ]);
     const bonuses = await dataSource.getRepository(TechnicianReferralBonus).find({
-      where: { technicianId: ids.techProfile },
+      where: { orderId: In([firstOrder, secondOrder]) },
     });
-    expect(bonuses.filter((bonus) => bonus.status === TechnicianReferralBonusStatus.CREDITED)).toHaveLength(2);
+    expect(bonuses.filter((bonus) => bonus.status === TechnicianReferralBonusStatus.CREDITED)).toHaveLength(1);
     expect(bonuses.filter((bonus) => bonus.status === TechnicianReferralBonusStatus.REJECTED_SUSPICIOUS)).toHaveLength(1);
     expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5000);
   });
@@ -238,5 +260,138 @@ describe('Technician referral Phase 4 financial integrity', () => {
     expect(await dataSource.getRepository(WalletTransaction).count({
       where: { referenceType: 'technician_referral_bonus', referenceId: bonus.id },
     })).toBe(4);
+  });
+
+  it('recovers a missed qualifying-order event once from durable order and attribution state', async () => {
+    await service.reconcilePendingBonuses(25);
+    const orderId = await createOrder(3, 'missed-event');
+    const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+
+    await service.reconcilePendingBonuses(25);
+    const bonus = await dataSource.getRepository(TechnicianReferralBonus).findOneByOrFail({ orderId });
+    expect(bonus.status).toBe(TechnicianReferralBonusStatus.CREDITED);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5000);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'technician_referral_bonus', referenceId: bonus.id },
+    })).toBe(2);
+
+    await service.reconcilePendingBonuses(25);
+    expect(await dataSource.getRepository(TechnicianReferralBonus).count({ where: { orderId } })).toBe(1);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5000);
+  });
+
+  it('keeps reward versus terminal transition/revoke financially coherent under concurrency', async () => {
+    settings.set('referral_qr.reward_mode', 'every_order');
+    const orderId = await createOrder(4, 'reward-revoke');
+    const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+
+    await Promise.all([
+      service.evaluateOrderForBonus(orderId, 'completed'),
+      (async () => {
+        await dataSource.transaction(async (manager) => {
+          const order = await manager
+            .createQueryBuilder(Order, 'order')
+            .setLock('pessimistic_write')
+            .where('order.id = :orderId', { orderId })
+            .getOneOrFail();
+          order.orderStatus = 'refunded' as Order['orderStatus'];
+          await manager.save(order);
+        });
+        await service.revokeBonusForOrder(orderId, 'انتقال نهائي متزامن');
+      })(),
+    ]);
+
+    const bonus = await dataSource.getRepository(TechnicianReferralBonus).findOne({ where: { orderId } });
+    expect(bonus === null || bonus.status === TechnicianReferralBonusStatus.REVOKED).toBe(true);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(before);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'technician_referral_bonus', referenceId: bonus?.id ?? orderId },
+    })).toBe(bonus ? 4 : 0);
+  });
+
+  it('rebuilds a durable bonus after the legacy credit-before-save crash without crediting twice', async () => {
+    const orderId = await createOrder(4, 'legacy-orphan');
+    const platformWallet = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    const technicianWallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const before = technicianWallet.balanceCents;
+    const legacy = await walletsService.doubleEntry({
+      fromWalletId: platformWallet.id,
+      toWalletId: technicianWallet.id,
+      amountCents: 5300,
+      transactionType: WalletTxType.REFERRAL_REWARD,
+      referenceType: 'technician_referral_bonus',
+      referenceId: orderId,
+      descriptionAr: 'محاكاة crash قديم بعد القيد وقبل سجل المكافأة',
+      allowNegativeBalance: true,
+    });
+
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5300);
+    await service.reconcilePendingBonuses(25);
+    const recovered = await dataSource.getRepository(TechnicianReferralBonus).findOneByOrFail({ orderId });
+    expect(recovered.status).toBe(TechnicianReferralBonusStatus.CREDITED);
+    expect(recovered.bonusAmountCents).toBe(5300);
+    expect(recovered.walletDebitTxId).toBe(legacy.debit.id);
+    expect(recovered.walletCreditTxId).toBe(legacy.credit.id);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5300);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'technician_referral_bonus', referenceId: orderId },
+    })).toBe(2);
+
+    await service.reconcilePendingBonuses(25);
+    expect(await dataSource.getRepository(TechnicianReferralBonus).count({ where: { orderId } })).toBe(1);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5300);
+  });
+
+  it('recovers and reverses a legacy orphan whose order became refunded before the sweep', async () => {
+    const orderId = await createOrder(3, 'legacy-terminal');
+    const platformWallet = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    const technicianWallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const before = technicianWallet.balanceCents;
+    const legacy = await walletsService.doubleEntry({
+      fromWalletId: platformWallet.id,
+      toWalletId: technicianWallet.id,
+      amountCents: 5400,
+      transactionType: WalletTxType.REFERRAL_REWARD,
+      referenceType: 'technician_referral_bonus',
+      referenceId: orderId,
+      descriptionAr: 'قيد قديم سبق انتقال الطلب النهائي',
+      allowNegativeBalance: true,
+    });
+    await dataSource.query(`UPDATE orders SET order_status = 'refunded', deleted_at = now() WHERE id = $1`, [orderId]);
+
+    await service.reconcilePendingBonuses(25);
+    const recovered = await dataSource.getRepository(TechnicianReferralBonus).findOneByOrFail({ orderId });
+    expect(recovered.status).toBe(TechnicianReferralBonusStatus.REVOKED);
+    expect(recovered.walletDebitTxId).toBe(legacy.debit.id);
+    expect(recovered.walletCreditTxId).toBe(legacy.credit.id);
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(before);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'technician_referral_bonus', referenceId: orderId },
+    })).toBe(4);
+  });
+
+  it('terminates malformed legacy recovery in manual review instead of retrying forever', async () => {
+    const orderId = await createOrder(2, 'legacy-manual');
+    const platformWallet = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+    const technicianWallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const legacy = await walletsService.doubleEntry({
+      fromWalletId: platformWallet.id,
+      toWalletId: technicianWallet.id,
+      amountCents: 5500,
+      transactionType: WalletTxType.REFERRAL_REWARD,
+      referenceType: 'technician_referral_bonus',
+      referenceId: orderId,
+      descriptionAr: 'قيد قديم ناقص يحتاج مراجعة',
+      allowNegativeBalance: true,
+    });
+    await dataSource.getRepository(WalletTransaction).delete(legacy.debit.id);
+
+    await service.reconcilePendingBonuses(25);
+    const manual = await dataSource.getRepository(TechnicianReferralBonus).findOneByOrFail({ orderId });
+    expect(manual.status).toBe(TechnicianReferralBonusStatus.MANUAL_REVIEW);
+    expect(manual.bonusAmountCents).toBe(5500);
+    expect(manual.rejectionReason).toContain('غير متسقة');
+    expect(await service.reconcilePendingBonuses(25)).toBe(0);
+    expect(await dataSource.getRepository(TechnicianReferralBonus).count({ where: { orderId } })).toBe(1);
   });
 });

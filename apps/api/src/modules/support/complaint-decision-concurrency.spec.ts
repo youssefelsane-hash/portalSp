@@ -18,6 +18,7 @@ describe('SupportService complaint terminal decision concurrency', () => {
   let dataSource: DataSource;
   let walletsService: WalletsService;
   let service: SupportService;
+  let platformBalanceBefore = 0;
   const runId = Date.now().toString(36);
   const ids = { customerUser: '', customerProfile: '', adminA: '', adminB: '', complaints: [] as string[] };
 
@@ -63,7 +64,9 @@ describe('SupportService complaint terminal decision concurrency', () => {
       dataSource.getRepository(WalletTransaction),
       dataSource,
     );
-    await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM);
+    platformBalanceBefore = (
+      await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM)
+    ).balanceCents;
     await walletsService.getOrCreateWallet(ids.customerUser, WalletOwnerType.CUSTOMER);
     service = new SupportService(
       dataSource.getRepository(Complaint),
@@ -81,15 +84,23 @@ describe('SupportService complaint terminal decision concurrency', () => {
   });
 
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM wallet_transactions WHERE reference_type = 'complaint' AND reference_id = ANY($1::uuid[])`, [
-      ids.complaints,
-    ]);
-    await q(`DELETE FROM complaints WHERE id = ANY($1::uuid[])`, [ids.complaints]);
-    await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.customerUser, ids.adminA, ids.adminB]]);
-    await dataSource.destroy();
+    if (!dataSource?.isInitialized) return;
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM wallet_transactions WHERE reference_type = 'complaint' AND reference_id = ANY($1::uuid[])`, [
+        ids.complaints,
+      ]);
+      await q(`UPDATE wallets SET balance_cents = $1 WHERE owner_user_id = $2`, [
+        platformBalanceBefore,
+        PLATFORM_SYSTEM_USER_ID,
+      ]);
+      await q(`DELETE FROM complaints WHERE id = ANY($1::uuid[])`, [ids.complaints]);
+      await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.customerUser, ids.adminA, ids.adminB]]);
+    } finally {
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('allows exactly one compensated resolve under concurrent admins', async () => {
@@ -139,5 +150,47 @@ describe('SupportService complaint terminal decision concurrency', () => {
       expect(balanceDelta).toBe(0);
       expect(ledgerCount).toBe(0);
     }
+  });
+
+  it('rolls back a wallet effect if complaint persistence fails and retries exactly once', async () => {
+    const complaintId = await createComplaint('wallet-effect-rollback');
+    const before = (await walletsService.findByUserIdOrThrow(ids.customerUser)).balanceCents;
+    const originalDoubleEntry = walletsService.doubleEntry.bind(walletsService);
+    const failure = jest
+      .spyOn(walletsService, 'doubleEntry')
+      .mockImplementationOnce(async (params, manager) => {
+        await originalDoubleEntry(params, manager);
+        throw new Error('failure after complaint wallet effect');
+      });
+
+    try {
+      await expect(
+        service.resolve(ids.adminA, complaintId, {
+          resolution_type: ComplaintResolutionType.PARTIAL_REFUND,
+          resolution_notes: 'تعويض مع اختبار rollback',
+          compensation_cents: 7300,
+        }),
+      ).rejects.toThrow('failure after complaint wallet effect');
+    } finally {
+      failure.mockRestore();
+    }
+
+    const rolledBack = await dataSource.getRepository(Complaint).findOneByOrFail({ id: complaintId });
+    expect(rolledBack.complaintStatus).toBe(ComplaintStatus.OPEN);
+    expect(rolledBack.compensationCents).toBe(0);
+    expect((await walletsService.findByUserIdOrThrow(ids.customerUser)).balanceCents).toBe(before);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'complaint', referenceId: complaintId },
+    })).toBe(0);
+
+    await service.resolve(ids.adminA, complaintId, {
+      resolution_type: ComplaintResolutionType.PARTIAL_REFUND,
+      resolution_notes: 'تعويض مع اختبار rollback',
+      compensation_cents: 7300,
+    });
+    expect((await walletsService.findByUserIdOrThrow(ids.customerUser)).balanceCents - before).toBe(7300);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'complaint', referenceId: complaintId },
+    })).toBe(2);
   });
 });
