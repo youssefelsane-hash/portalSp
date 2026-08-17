@@ -10,6 +10,7 @@ import { MATCHING_ROUNDS_QUEUE } from './matching-rounds.queue';
 import { MatchingDeferredDispatchProcessor } from './matching-deferred-dispatch.processor';
 import { MATCHING_DISPATCH_QUEUE } from './matching-dispatch.queue';
 import { MatchingService } from './matching.service';
+import { MatchingRecoveryService } from './matching-recovery.service';
 import { OrderDispatchListener } from './order-dispatch.listener';
 import { OrderRematchListener } from './order-rematch.listener';
 import { TechnicianOrdersController } from './technician-orders.controller';
@@ -37,6 +38,7 @@ import { OrderAssignment } from './entities/order-assignment.entity';
   controllers: [TechnicianOrdersController],
   providers: [
     MatchingService,
+    MatchingRecoveryService,
     OrderDispatchListener,
     OrderRematchListener,
     MatchingRoundExpiryProcessor,

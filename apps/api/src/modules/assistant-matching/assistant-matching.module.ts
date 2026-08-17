@@ -6,6 +6,7 @@ import { TechniciansModule } from '../technicians/technicians.module';
 import { Order } from '../orders/entities/order.entity';
 import { OrderTeamMember } from '../orders/entities/order-team-member.entity';
 import { AssistantMatchingService } from './assistant-matching.service';
+import { AssistantMatchingRecoveryService } from './assistant-matching-recovery.service';
 import { AssistantOffersController } from './assistant-matching.controller';
 import { AssistantOfferExpiryProcessor } from './assistant-offer-expiry.processor';
 import { ASSISTANT_MATCHING_QUEUE } from './assistant-matching.queue';
@@ -24,7 +25,12 @@ import { OrderAcceptedAssistantMatchingListener } from './order-accepted-assista
     BullModule.registerQueue({ name: ASSISTANT_MATCHING_QUEUE }),
   ],
   controllers: [AssistantOffersController],
-  providers: [AssistantMatchingService, OrderAcceptedAssistantMatchingListener, AssistantOfferExpiryProcessor],
+  providers: [
+    AssistantMatchingService,
+    AssistantMatchingRecoveryService,
+    OrderAcceptedAssistantMatchingListener,
+    AssistantOfferExpiryProcessor,
+  ],
   exports: [AssistantMatchingService],
 })
 export class AssistantMatchingModule {}

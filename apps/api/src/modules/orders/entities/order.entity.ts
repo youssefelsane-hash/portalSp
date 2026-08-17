@@ -113,6 +113,14 @@ export class Order {
   @Column({ name: 'scheduled_at', type: 'timestamptz', nullable: true })
   scheduledAt: Date | null;
 
+  // Durable identity of an automatically generated recurring occurrence. Both
+  // columns are null for ordinary orders and unique together for recurring jobs.
+  @Column({ name: 'recurring_template_id', type: 'uuid', nullable: true })
+  recurringTemplateId: string | null;
+
+  @Column({ name: 'recurring_occurrence_at', type: 'timestamptz', nullable: true })
+  recurringOccurrenceAt: Date | null;
+
   @Column({ name: 'estimated_price_cents', type: 'integer', nullable: true })
   estimatedPriceCents: number | null;
 

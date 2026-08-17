@@ -21,6 +21,7 @@ export class PrepaidOrderSettlementListener implements OnModuleInit, OnModuleDes
         this.logger.error('فشل فحص تسويات الطلبات المدفوعة مسبقًا', error instanceof Error ? error.stack : error),
       );
     }, 60_000);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {

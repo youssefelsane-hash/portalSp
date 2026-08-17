@@ -31,6 +31,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   register(@Body() dto: RegisterDto, @Req() req: Request) {
     return this.authService.register(dto, clientIp(req));
   }
@@ -38,6 +39,7 @@ export class AuthController {
   @Public()
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   login(@Body() dto: VerifyOtpDto, @Req() req: Request) {
     return this.authService.login(dto, clientIp(req));
   }

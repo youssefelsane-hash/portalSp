@@ -29,6 +29,7 @@ export class WebhookRecoveryService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => {
       this.sweep().catch((err) => this.logger.error('فشل فحص استرداد webhooks', err instanceof Error ? err.stack : err));
     }, SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -36,10 +37,10 @@ export class WebhookRecoveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sweep(): Promise<number> {
-    const batchSize = Math.max(
+    const batchSize = Math.min(100, Math.max(
       1,
       Math.floor(await this.settingsService.getNumber('payments.webhook_recovery_batch_size', RECOVERY_BATCH_SIZE_FALLBACK)),
-    );
+    ));
     const staleMinutes = Math.max(
       1,
       await this.settingsService.getNumber('payments.webhook_processing_stale_minutes', PROCESSING_STALE_MINUTES_FALLBACK),

@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { BuildingsModule } from '../buildings/buildings.module';
@@ -37,6 +36,7 @@ import { OrderItem } from './entities/order-item.entity';
 import { OrderMedia } from './entities/order-media.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { RealtimeSecurityModule } from '../../common/websocket/realtime-security.module';
 
 @Module({
   imports: [
@@ -61,7 +61,7 @@ import { RecurringOrderTemplate } from './entities/recurring-order-template.enti
     SupportModule,
     AuditModule,
     BuildingsModule,
-    JwtModule.register({}),
+    RealtimeSecurityModule,
   ],
   controllers: [
     OrdersController,

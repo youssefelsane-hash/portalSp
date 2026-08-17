@@ -206,6 +206,21 @@ export class MatchingService {
         return { kind: 'noop' as const };
       }
 
+      // Reconciliation and duplicate process-local events may call this method
+      // concurrently. The order lock serializes them; this reread prevents the
+      // second caller from creating another round while the first round is live.
+      const liveAssignments = await manager
+        .createQueryBuilder(OrderAssignment, 'assignment')
+        .where('assignment.orderId = :orderId', { orderId })
+        .andWhere('assignment.assignmentStatus IN (:...statuses)', {
+          statuses: [AssignmentStatus.SENT, AssignmentStatus.VIEWED],
+        })
+        .andWhere('assignment.expiresAt > :now', { now: new Date() })
+        .getCount();
+      if (liveAssignments > 0) {
+        return { kind: 'noop' as const };
+      }
+
       const { max } = (await manager
         .createQueryBuilder(OrderAssignment, 'a')
         .select('MAX(a.assignmentRound)', 'max')

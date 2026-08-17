@@ -154,7 +154,11 @@ export class OrdersService {
     return fresh;
   }
 
-  async create(userId: string, dto: CreateOrderDto): Promise<Order> {
+  async create(
+    userId: string,
+    dto: CreateOrderDto,
+    recurringIdentity?: { templateId: string; scheduledFor: Date },
+  ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
@@ -338,6 +342,8 @@ export class OrdersService {
           : dto.scheduled_at
             ? new Date(dto.scheduled_at)
             : null,
+        recurringTemplateId: recurringIdentity?.templateId ?? null,
+        recurringOccurrenceAt: recurringIdentity?.scheduledFor ?? null,
         // إعادة الزيارة بتفضّل نفس الفني الأصلي دايماً، وسلوت الجدولة (لو اتحجز) بيحدد فني
         // السلوت نفسه — requested_technician_id بتاع الـ dto بيتجاهَل هنا عمداً في الحالتين.
         requestedTechnicianId: originalOrder

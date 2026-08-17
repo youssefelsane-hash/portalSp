@@ -2,6 +2,24 @@
 
 التسجيل، OTP، JWT + refresh token rotation، RBAC. جداول: users, otp_codes, refresh_tokens, roles, permissions, role_permissions, user_roles (قاموس §2).
 
+## Script 2: OTP والتسجيل الذري
+
+- إصدار كود بديل يأخذ advisory lock حسب `(phone_number, purpose)`، يبطل كل الأكواد السابقة، ثم
+  ينشئ كودًا واحدًا أحدث داخل transaction. استهلاك الكود يقفل أحدث صف غير مستخدم بـ
+  `SELECT ... FOR UPDATE`، لذلك لا يمكن لطلبين متزامنين النجاح بنفس الكود.
+- المحاولة الخاطئة ترجع كـنتيجة متوقعة من داخل transaction ثم يُرمى خطأ API بعد الـcommit؛ بذلك
+  لا يعمل الاستثناء rollback لزيادة `attempts_count`. الحد الأقصى يظل فعالًا حتى تحت التزامن.
+- التسجيل يستهلك OTP الصحيح وينشئ `users` والبروفايل الخاص بالنوع والمحفظة وrefresh token في
+  transaction واحدة. فشل أي خطوة يرجع الجميع، بما في ذلك استهلاك OTP، فلا يوجد حساب نشط ناقص.
+- أرقام الهاتف تُحوّل إلى E.164 قبل التحقق في جميع DTOs الخاصة بالطلب والتسجيل والدخول والاسترجاع.
+  التسجيل والدخول لهما rate limits صريحة، وكود OTP لا يظهر مطلقًا في production logs.
+- كل مسارات إصدار جلسة (`login`, `passwordless`, إكمال MFA، و`refresh`) ترفض الحساب غير النشط أو
+  المحظور. التحقق من sockets النشطة واستدعاء الفصل الفوري موثق ويُنفذ في مرحلة realtime التالية.
+
+الإثبات الحي في `otp-registration-integrity.spec.ts`: reuse، wrong-attempt concurrency، resend ×
+verify، expiry، rollback بحقن فشل، baseline لكل الأنواع، ورفض الحساب غير النشط. الفهرس الجزئي
+`idx_otp_codes_latest_unused` مضاف في migration `0122`.
+
 - **`DELETE /auth/me` (`deleteMe`)**: حذف الحساب الذاتي — إلغاء كل التوكنات، `is_active=false`، بعدين `softDelete` على `users`. نفس التسلسل ده اتّبعته `AdminEmployeesService.delete()` (`../admin/admin-employees.service.ts`) لحذف حساب موظف، وده اللي كشف بَقّة حقيقية موثّقة تحت.
 - **بَقّة حقيقية اتلقطت واتصلحت (`infra/migrations/0035`)**: `users_phone_number_key`/`users_email_key`/`users_referral_code_key` كانوا `UNIQUE` عادي على العمود كله (من `0003_auth.sql`) — بيشمل الصفوف المحذوفة (`deleted_at IS NOT NULL`)، عكس `idx_users_phone_number`/`idx_users_referral_code` (من نفس الملف) اللي كانوا partial بالفعل (`WHERE deleted_at IS NULL`). النتيجة: أي حساب اتعمله `softDelete` (سواء عبر `deleteMe` الذاتي أو حذف موظف من الإدارة) كان بيقفل رقمه/إيميله للأبد — أي تسجيل جديد بنفس القيمة بيرمي `duplicate key violation` خام (500) بدل رفض نضيف. اتصلحت باستبدال الثلاث قيود بـ partial unique index واحد لكل عمود. اتأكد الإصلاح حياً عبر `../admin/README.md` (قسم إدارة الموظفين).
 - **إرسال OTP بـ SMS حقيقي — كان `TODO` ثابت من أول يوم ("بيتسجل بس في اللوج للتطوير المحلي")، اتقفل**: `AuthService.requestOtp()` بقى بينادي `TwilioSmsDispatcher` (`common/notifications/`, نفس البوابة اللي `notifications` موديول بيستخدمها لقنوات SMS العادية) بعد ما يسجّل الكود في اللوج زي ما هو — الاتنين مع بعض عمداً، مش بديل واحد للتاني: اللوج المحلي فاضل موجود دايماً عشان الاختبارات الحية والتطوير المحلي يقدروا يقرأوا الكود من غير SMS حقيقي، وSMS الحقيقي بيتحاول لو `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_SMS_FROM_NUMBER` مظبوطين. فشل الإرسال (بوابة مش مظبوطة أو خطأ شبكة) بيتسجّل تحذير بس ومبيرمّيش الطلب — العميل لسه يقدر يكمل. اتأكد حياً: `POST /auth/otp/request` رجّع `200` عادي، اللوج المحلي فيه الكود زي ما هو دايماً، وسجّل تحذير واضح "لا توجد بوابة SMS مُعدّة" (Twilio مش مظبوط في البيئة دي) من غير ما يأثر على نجاح الطلب أو على أي اختبار حي تاني في المشروع كله (كلهم بيعتمدوا على قراءة اللوج ده بالظبط).

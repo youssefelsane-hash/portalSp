@@ -12,6 +12,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { User, UserType } from '../auth/entities/user.entity';
+import { RealtimeAccessService } from '../../common/websocket/realtime-access.service';
 
 // اختبار حي ضد Postgres حقيقي + اتصال WebSocket حقيقي (مش mock) — بيثبت إصلاح فجوة موثّقة
 // صراحة (docs/08 §19 بند 21): "room-ownership-after-reconnect" — كان مفيش أي اختبار خالص لـ
@@ -146,8 +147,13 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
       dataSource.getRepository(Order),
       customerProfilesService,
       techniciansService,
-      jwt,
-      configStub,
+      new RealtimeAccessService(dataSource.getRepository(User), jwt, configStub),
+      {
+        register: jest.fn(),
+        unregister: jest.fn(),
+        disconnectUser: jest.fn(),
+        consumeRateLimit: jest.fn().mockReturnValue(true),
+      } as never,
     );
 
     httpServer = createServer();
@@ -155,10 +161,9 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
     const nsp = ioServer.of('/tracking');
     gateway.server = nsp as never;
     nsp.on('connection', (socket) => {
-      void gateway.handleConnection(socket as never).then(() => {
-        socket.on('tracking:join', (body: { order_id: string }) => {
-          void gateway.handleJoin(socket as never, body);
-        });
+      const authentication = gateway.handleConnection(socket as never);
+      socket.on('tracking:join', (body: { order_id: string }) => {
+        void authentication.then(() => gateway.handleJoin(socket as never, body));
       });
       socket.on('disconnect', () => gateway.handleDisconnect(socket as never));
     });
@@ -257,5 +262,24 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
 
   it('بلا توكن خالص — السيرفر بيرفضه ويقطع الاتصال', async () => {
     await expectRejectedByServer(undefined);
+  });
+
+  it('توكن سليم تشفيرياً لحساب محظور يترفض من حالة DB الحية', async () => {
+    await dataSource.query(`UPDATE users SET is_blocked = true WHERE id = $1`, [ids.ownerUser]);
+    try {
+      await expectRejectedByServer(signToken(ids.ownerUser, UserType.CUSTOMER));
+    } finally {
+      await dataSource.query(`UPDATE users SET is_blocked = false WHERE id = $1`, [ids.ownerUser]);
+    }
+  });
+
+  it('يرفض الانضمام لحالة منتهية ويعيد الحالة authoritative عند reconnect', async () => {
+    await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [ids.order]);
+    const client = await connectClient(signToken(ids.ownerUser, UserType.CUSTOMER));
+    client.emit('tracking:join', { order_id: ids.order });
+    const payload = await waitForEvent<{ code: string }>(client, 'error');
+    expect(payload.code).toBe('VAL_001');
+    client.disconnect();
+    await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [ids.order]);
   });
 });

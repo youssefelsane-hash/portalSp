@@ -77,6 +77,11 @@ expires_at        TIMESTAMPTZ   NOT NULL
 request_ip        INET          NULL
 created_at
 ```
+**فهارس:** `(phone_number, purpose, is_used)`, `expires_at`، وفهرس جزئي
+`(phone_number, purpose, created_at DESC) WHERE is_used = false` لاختيار أحدث challenge ذريًا.
+
+**Invariant:** يوجد كود واحد حديث قابل للاستهلاك لكل `(phone_number, purpose)`، واستهلاكه single-use
+حتى مع الطلبات المتزامنة. المحاولات الخاطئة تُثبت ولا تتراجع مع استجابة الرفض.
 
 ### 2.3 `refresh_tokens`
 

@@ -16,6 +16,7 @@ const AUTO_CANCEL_MINUTES_FALLBACK = 20;
 // قيمة افتراضية تطويرية آمنة أقصر من مهلة البحث عن فني عمدًا — مفيش داعي الطلب يفضل حاجز
 // نافذة توزيع لفني وهو أصلاً مدفوعش لسه.
 const PAYMENT_TIMEOUT_MINUTES_FALLBACK = 15;
+const SWEEP_BATCH_SIZE = 25;
 
 /**
  * كانت فجوة موثّقة صراحة في settings/README.md: `orders.auto_cancel_after_minutes` كان مزروع
@@ -59,6 +60,7 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => {
       this.sweep().catch((err) => this.logger.error('فشل sweep الإلغاء التلقائي', err instanceof Error ? err.stack : err));
     }, SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -72,6 +74,8 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     const staleOrders = await this.orders.find({
       select: ['id'],
       where: { orderStatus: OrderStatus.SEARCHING_TECHNICIAN, placedAt: LessThan(cutoff) },
+      order: { placedAt: 'ASC' },
+      take: SWEEP_BATCH_SIZE,
     });
 
     let cancelledCount = 0;
@@ -167,6 +171,8 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     const staleOrders = await this.orders.find({
       select: ['id'],
       where: { orderStatus: OrderStatus.PENDING_PAYMENT, placedAt: LessThan(cutoff) },
+      order: { placedAt: 'ASC' },
+      take: SWEEP_BATCH_SIZE,
     });
 
     let cancelledCount = 0;

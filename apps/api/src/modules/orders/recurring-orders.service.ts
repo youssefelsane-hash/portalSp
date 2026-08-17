@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, LessThanOrEqual, Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import {
   RECURRING_TEMPLATE_GENERATION_FAILING_EVENT,
   RecurringTemplateGenerationFailingEvent,
@@ -19,11 +19,30 @@ import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recu
 import { OrdersService } from './orders.service';
 
 const SWEEP_INTERVAL_MS = 60_000;
+const SWEEP_BATCH_SIZE = 25;
+const CLAIM_LEASE_MS = 5 * 60_000;
 
 // docs/08 §19 بند 20 — عدد محاولات إعادة توليد نفس الموعد (كل محاولة = دورة sweep، فحوالي 3
 // دقايق إجمالاً) قبل ما نستسلم ونعتبره "dead letter" — كافي لفشل مؤقت (DB/شبكة) يتعافى لوحده،
 // مش كتير لدرجة إن موعد فايت يفضل يتحاول للأبد وهو مستحيل ينجح (مثلاً عنوان اتمسح).
 const MAX_CONSECUTIVE_FAILURES = 3;
+const RETRY_BACKOFF_MS = [30_000, 2 * 60_000, 5 * 60_000] as const;
+
+type ClaimedOccurrence = {
+  id: string;
+  templateId: string;
+  scheduledFor: Date;
+  attemptCount: number;
+  recoveredStaleClaim: boolean;
+};
+
+type ClaimedOccurrenceRow = {
+  id: string;
+  template_id: string;
+  scheduled_for: Date;
+  attempt_count: number;
+  previous_status: string;
+};
 
 // آخر يوم فعلي في شهر (UTC) — بيتحسب بـ"اليوم صفر" من الشهر اللي بعده (خدعة JS Date معروفة).
 function lastDayOfUtcMonth(year: number, monthIndex0: number): number {
@@ -96,6 +115,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => {
       this.sweep().catch((err) => this.logger.error('فشل sweep الطلبات المتكررة', err instanceof Error ? err.stack : err));
     }, SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -191,14 +211,12 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sweep(): Promise<number> {
-    const dueTemplates = await this.templates.find({
-      where: { isActive: true, nextRunAt: LessThanOrEqual(new Date()) },
-    });
+    await this.materializeDueOccurrences(SWEEP_BATCH_SIZE);
+    const occurrences = await this.claimOccurrences(SWEEP_BATCH_SIZE);
 
     let generatedCount = 0;
-    for (const template of dueTemplates) {
-      const generated = await this.generateFromTemplate(template);
-      if (generated) generatedCount++;
+    for (const occurrence of occurrences) {
+      if (await this.processOccurrence(occurrence)) generatedCount++;
     }
     if (generatedCount > 0) {
       this.logger.log(`الطلبات المتكررة: ${generatedCount} طلب اتولّد تلقائيًا`);
@@ -206,24 +224,117 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     return generatedCount;
   }
 
-  /**
-   * بيحاول يولّد طلب واحد. **تصميم إعادة المحاولة (docs/08 §19 بند 20)**: كانت فجوة حقيقية —
-   * next_run_at كان بيتحرّك قدّام دايمًا مهما كان سبب الفشل، يعني فشل مؤقت (DB/شبكة لحظية) كان
-   * بيسقط الموعد ده نهائيًا بصمت من أول محاولة، وسطر log بس بيوثّقه (بيتغرق وسط باقي اللوجات،
-   * صفر تنبيه لحد). دلوقتي: لو فشل ومحاولاته المتتالية لسه تحت `MAX_CONSECUTIVE_FAILURES`،
-   * next_run_at **ميتحركش** — نفس الموعد هيتحاول تاني في دورة sweep الجاية (بعد دقيقة، كافي
-   * لأغلب الأعطال المؤقتة تتعافى). لو وصل للسقف، نعتبره "dead letter": next_run_at بيتحرك
-   * (تخطّي الموعد ده نهائيًا، عشان مش هيفضل يتحاول للأبد لو السبب دائم زي عنوان اتمسح)، والعدّاد
-   * بيرجع صفر لأول محاولة في الموعد الجاي، بس `last_failure_reason`/`last_failed_at` بيفضلوا
-   * محفوظين (مش بيتمسحوا غير لما توليد ينجح) عشان الأدمن يقدر يشخّص القالب المعطوب من
-   * `GET /admin/recurring-orders` — زائد إشعار فوري لـops_manager (نفس نمط تصعيد الطوارئ).
-   */
-  private async generateFromTemplate(template: RecurringOrderTemplate): Promise<boolean> {
+  private async materializeDueOccurrences(limit: number): Promise<void> {
+    await this.templates.manager.query(
+      `WITH due AS (
+         SELECT id, next_run_at
+         FROM recurring_order_templates
+         WHERE is_active = true AND deleted_at IS NULL AND next_run_at <= now()
+         ORDER BY next_run_at, id
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       INSERT INTO recurring_order_occurrences (template_id, scheduled_for)
+       SELECT id, next_run_at FROM due
+       ON CONFLICT (template_id, scheduled_for) DO NOTHING`,
+      [limit],
+    );
+  }
+
+  private async claimOccurrences(limit: number): Promise<ClaimedOccurrence[]> {
+    const result = await this.templates.manager.query<ClaimedOccurrenceRow[] | [ClaimedOccurrenceRow[], number]>(
+      `WITH candidates AS (
+         SELECT id, status AS previous_status
+         FROM recurring_order_occurrences
+         WHERE (
+           status IN ('pending', 'failed')
+           AND next_attempt_at <= now()
+           AND attempt_count < $2
+         ) OR (
+           status = 'processing'
+           AND claimed_at <= now() - ($3::integer * interval '1 millisecond')
+         )
+         ORDER BY scheduled_for, id
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       UPDATE recurring_order_occurrences occurrence
+       SET status = 'processing',
+           attempt_count = CASE
+             WHEN candidates.previous_status = 'processing' THEN occurrence.attempt_count
+             ELSE occurrence.attempt_count + 1
+           END,
+           claimed_at = now(),
+           updated_at = now()
+       FROM candidates
+       WHERE occurrence.id = candidates.id
+       RETURNING occurrence.id,
+                 occurrence.template_id,
+                 occurrence.scheduled_for,
+                 occurrence.attempt_count,
+                 candidates.previous_status`,
+      [limit, MAX_CONSECUTIVE_FAILURES, CLAIM_LEASE_MS],
+    );
+    // TypeORM's PostgreSQL runner returns UPDATE ... RETURNING as
+    // [rows, affectedCount], unlike SELECT/INSERT which return rows directly.
+    const rows = Array.isArray(result[0]) ? result[0] : (result as ClaimedOccurrenceRow[]);
+
+    return rows.map((row) => {
+      const scheduledFor = new Date(row.scheduled_for);
+      if (Number.isNaN(scheduledFor.getTime())) {
+        throw new Error(`Invalid recurring occurrence claim row: ${JSON.stringify(row)}`);
+      }
+      return {
+        id: row.id,
+        templateId: row.template_id,
+        scheduledFor,
+        attemptCount: Number(row.attempt_count),
+        recoveredStaleClaim: row.previous_status === 'processing',
+      };
+    });
+  }
+
+  private async findGeneratedOrder(occurrence: ClaimedOccurrence): Promise<{ id: string } | null> {
+    const [order] = await this.templates.manager.query<Array<{ id: string }>>(
+      `SELECT id
+       FROM orders
+       WHERE recurring_template_id = $1 AND recurring_occurrence_at = $2
+       LIMIT 1`,
+      [occurrence.templateId, occurrence.scheduledFor],
+    );
+    return order ?? null;
+  }
+
+  private async processOccurrence(occurrence: ClaimedOccurrence): Promise<boolean> {
+    const existingOrder = await this.findGeneratedOrder(occurrence);
+    if (existingOrder) {
+      await this.completeOccurrence(occurrence, existingOrder.id);
+      return true;
+    }
+
+    const template = await this.templates.findOne({ where: { id: occurrence.templateId } });
+    if (!template || !template.isActive) {
+      await this.templates.manager.query(
+        `UPDATE recurring_order_occurrences
+         SET status = 'cancelled', claimed_at = NULL, updated_at = now()
+         WHERE id = $1 AND status = 'processing'`,
+        [occurrence.id],
+      );
+      return false;
+    }
+
+    // A crashed final attempt is never executed again. It can still be completed
+    // above if the order commit happened before the worker died.
+    if (occurrence.recoveredStaleClaim && occurrence.attemptCount >= MAX_CONSECUTIVE_FAILURES) {
+      await this.recordFailure(occurrence, template, new Error('انتهت مهلة آخر محاولة توليد قبل تسجيل النتيجة'));
+      return false;
+    }
+
     let customerProfile;
     try {
       customerProfile = await this.customerProfiles.findByProfileIdOrThrow(template.customerId);
     } catch (err) {
-      await this.recordFailure(template, err);
+      await this.recordFailure(occurrence, template, err);
       return false;
     }
 
@@ -243,39 +354,111 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     };
 
     try {
-      const order = await this.ordersService.create(customerProfile.userId, createOrderDto);
-      template.nextRunAt = nextOccurrence(template.nextRunAt, template.frequency);
-      template.lastGeneratedOrderId = order.id;
-      template.consecutiveFailureCount = 0;
-      template.lastFailureReason = null;
-      template.lastFailedAt = null;
-      await this.templates.save(template);
+      const order = await this.ordersService.create(customerProfile.userId, createOrderDto, {
+        templateId: occurrence.templateId,
+        scheduledFor: occurrence.scheduledFor,
+      });
+      await this.completeOccurrence(occurrence, order.id);
       return true;
     } catch (err) {
-      await this.recordFailure(template, err);
+      // OrdersService emits critical dispatch only after its DB transaction. If
+      // that post-commit step fails, the unique occurrence identity lets this
+      // worker acknowledge the already durable order instead of creating another.
+      const committedOrder = await this.findGeneratedOrder(occurrence);
+      if (committedOrder) {
+        await this.completeOccurrence(occurrence, committedOrder.id);
+        return true;
+      }
+      await this.recordFailure(occurrence, template, err);
       return false;
     }
   }
 
-  private async recordFailure(template: RecurringOrderTemplate, err: unknown): Promise<void> {
+  private async completeOccurrence(occurrence: ClaimedOccurrence, orderId: string): Promise<void> {
+    await this.templates.manager.transaction(async (manager) => {
+      const template = await manager
+        .createQueryBuilder(RecurringOrderTemplate, 'template')
+        .setLock('pessimistic_write')
+        .where('template.id = :templateId', { templateId: occurrence.templateId })
+        .getOne();
+      if (!template) return;
+
+      await manager.query(
+        `UPDATE recurring_order_occurrences
+         SET status = 'completed', order_id = $2, completed_at = now(),
+             claimed_at = NULL, last_error = NULL, updated_at = now()
+         WHERE id = $1 AND status = 'processing'`,
+        [occurrence.id, orderId],
+      );
+
+      if (template.nextRunAt.getTime() === occurrence.scheduledFor.getTime()) {
+        template.nextRunAt = nextOccurrence(occurrence.scheduledFor, template.frequency);
+        template.lastGeneratedOrderId = orderId;
+        template.consecutiveFailureCount = 0;
+        template.lastFailureReason = null;
+        template.lastFailedAt = null;
+        await manager.save(template);
+      }
+    });
+  }
+
+  private async recordFailure(
+    occurrence: ClaimedOccurrence,
+    template: RecurringOrderTemplate,
+    err: unknown,
+  ): Promise<void> {
     const reason = err instanceof Error ? err.message : String(err);
-    this.logger.error(`فشل توليد طلب من القالب المتكرر ${template.id} (محاولة ${template.consecutiveFailureCount + 1})`, err instanceof Error ? err.stack : reason);
+    this.logger.error(
+      `فشل توليد طلب من القالب المتكرر ${template.id} (محاولة ${occurrence.attemptCount})`,
+      err instanceof Error ? err.stack : reason,
+    );
 
-    template.consecutiveFailureCount += 1;
-    template.lastFailureReason = reason;
-    template.lastFailedAt = new Date();
+    const exhausted = occurrence.attemptCount >= MAX_CONSECUTIVE_FAILURES;
+    await this.templates.manager.transaction(async (manager) => {
+      const lockedTemplate = await manager
+        .createQueryBuilder(RecurringOrderTemplate, 'template')
+        .setLock('pessimistic_write')
+        .where('template.id = :templateId', { templateId: occurrence.templateId })
+        .getOne();
+      if (!lockedTemplate) return;
 
-    if (template.consecutiveFailureCount >= MAX_CONSECUTIVE_FAILURES) {
-      template.nextRunAt = nextOccurrence(template.nextRunAt, template.frequency);
-      const attempts = template.consecutiveFailureCount;
-      template.consecutiveFailureCount = 0;
+      if (exhausted) {
+        await manager.query(
+          `UPDATE recurring_order_occurrences
+           SET status = 'manual_review', claimed_at = NULL, last_error = $2, updated_at = now()
+           WHERE id = $1 AND status = 'processing'`,
+          [occurrence.id, reason],
+        );
+        if (lockedTemplate.nextRunAt.getTime() === occurrence.scheduledFor.getTime()) {
+          lockedTemplate.nextRunAt = nextOccurrence(occurrence.scheduledFor, lockedTemplate.frequency);
+        }
+        lockedTemplate.consecutiveFailureCount = 0;
+      } else {
+        const retryAt = new Date(Date.now() + RETRY_BACKOFF_MS[Math.min(occurrence.attemptCount - 1, RETRY_BACKOFF_MS.length - 1)]);
+        await manager.query(
+          `UPDATE recurring_order_occurrences
+           SET status = 'failed', claimed_at = NULL, next_attempt_at = $2,
+               last_error = $3, updated_at = now()
+           WHERE id = $1 AND status = 'processing'`,
+          [occurrence.id, retryAt, reason],
+        );
+        lockedTemplate.consecutiveFailureCount = occurrence.attemptCount;
+      }
+      lockedTemplate.lastFailureReason = reason;
+      lockedTemplate.lastFailedAt = new Date();
+      await manager.save(lockedTemplate);
+    });
+
+    if (exhausted) {
       this.eventEmitter.emit(
         RECURRING_TEMPLATE_GENERATION_FAILING_EVENT,
-        new RecurringTemplateGenerationFailingEvent(template.id, template.customerId, attempts, reason),
+        new RecurringTemplateGenerationFailingEvent(
+          template.id,
+          template.customerId,
+          occurrence.attemptCount,
+          reason,
+        ),
       );
     }
-    // لو لسه تحت السقف: next_run_at ميتحركش عمدًا — نفس الموعد هيتحاول تاني في sweep() الجاية.
-
-    await this.templates.save(template);
   }
 }

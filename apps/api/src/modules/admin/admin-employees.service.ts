@@ -185,6 +185,18 @@ export class AdminEmployeesService {
       }
       await this.assertManagerIsAdmin(dto.manager_user_id);
     }
+    if (dto.is_active === false) {
+      if (userId === adminUserId) {
+        throw new ApiException(ErrorCode.VAL_001, 'مينفعش تعطل حسابك انت', HttpStatus.BAD_REQUEST);
+      }
+      if (await this.permissionsService.isLastSuperAdmin(userId)) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'مينفعش تعطل آخر حساب super_admin في النظام',
+          HttpStatus.CONFLICT,
+        );
+      }
+    }
 
     const oldValues = {
       department: profile.department,
@@ -193,16 +205,28 @@ export class AdminEmployeesService {
       is_active: profile.isActive,
     };
 
-    if (dto.full_name !== undefined) user.fullName = dto.full_name;
-    if (dto.department !== undefined) profile.department = dto.department;
-    if (dto.title !== undefined) profile.title = dto.title;
-    if (dto.manager_user_id !== undefined) profile.managerUserId = dto.manager_user_id;
-    if (dto.hire_date !== undefined) profile.hireDate = dto.hire_date;
-    if (dto.notes !== undefined) profile.notes = dto.notes;
-    if (dto.is_active !== undefined) profile.isActive = dto.is_active;
+    await this.dataSource.transaction(async (manager) => {
+      if (dto.full_name !== undefined) user.fullName = dto.full_name;
+      if (dto.department !== undefined) profile.department = dto.department;
+      if (dto.title !== undefined) profile.title = dto.title;
+      if (dto.manager_user_id !== undefined) profile.managerUserId = dto.manager_user_id;
+      if (dto.hire_date !== undefined) profile.hireDate = dto.hire_date;
+      if (dto.notes !== undefined) profile.notes = dto.notes;
+      if (dto.is_active !== undefined) {
+        profile.isActive = dto.is_active;
+        user.isActive = dto.is_active;
+      }
 
-    await this.users.save(user);
-    await this.profiles.save(profile);
+      await manager.save(user);
+      await manager.save(profile);
+      if (dto.is_active === false) {
+        await manager.update(
+          RefreshToken,
+          { userId, isRevoked: false },
+          { isRevoked: true, revokedAt: new Date(), revokedReason: 'employee_deactivated' },
+        );
+      }
+    });
 
     await this.auditLog.record({
       actorUserId: adminUserId,
@@ -247,9 +271,8 @@ export class AdminEmployeesService {
       user.blockedAt = new Date();
       await manager.save(user);
 
-      // سحب كل الأدوار وإلغاء كل التوكنات النشطة — تعطيل فوري مقدر (باستثناء نافذة الـ access
-      // token القديم الغير منتهي، أقصاها 15 دقيقة — خاصية معمارية موجودة مسبقاً في JwtStrategy
-      // اللي بتتحقق بس من التوقيع والانتهاء، مش من القاعدة في كل طلب. موثّق في README مش مُصلَّح هنا.
+      // سحب كل الأدوار وإلغاء كل refresh tokens. JwtStrategy وRealtimeAccessService يفحصان
+      // حالة users الحية، وmigration 0123 تفصل sockets القائمة فور commit للحظر.
       await manager.delete(UserRole, { userId });
       await manager.update(RefreshToken, { userId, isRevoked: false }, { isRevoked: true, revokedAt: new Date(), revokedReason: 'admin_block' });
     });

@@ -1,7 +1,10 @@
 import { IsIn, IsOptional, IsPhoneNumber, IsString, Length } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { normalizePhoneNumber } from '../../../common/utils/phone-number';
 import { UserType } from '../entities/user.entity';
 
 export class RegisterDto {
+  @Transform(({ value }) => normalizePhoneNumber(value))
   @IsPhoneNumber(undefined)
   phone_number: string;
 

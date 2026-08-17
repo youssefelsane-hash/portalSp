@@ -18,6 +18,7 @@ const MEMBER_TYPE_TEAM_MEMBER = 'team_member';
 const MIN_SAMPLE_SIZE_FALLBACK = 5;
 const MIN_CHANGE_PERCENTAGE_FALLBACK = 5;
 const SUGGESTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000; // ساعة — مش وقتي زي matching، فحص دوري بطيء كافي
+const SWEEP_BATCH_SIZE = 25;
 
 /**
  * محرك الإنتاجية الذاتي التعلّم — مرحلة 2 (docs/06 §3.9، migration 0077). كانت فجوة موثّقة
@@ -53,6 +54,7 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
         this.logger.error('فشل توليد اقتراحات الإنتاجية', err instanceof Error ? err.stack : err),
       );
     }, SUGGESTION_SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -82,8 +84,10 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
       const actualTechnicians = 1 + members.filter((m) => m.memberType === MEMBER_TYPE_TEAM_MEMBER).length;
       const actualAssistants = members.filter((m) => m.memberType === MEMBER_TYPE_ASSISTANT).length;
 
-      await this.actuals.save(
-        this.actuals.create({
+      await this.actuals
+        .createQueryBuilder()
+        .insert()
+        .values({
           serviceStandardDataId: order.standardDataId,
           orderId: order.id,
           actualUnits: order.requestedUnits,
@@ -91,8 +95,9 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
           actualTechnicians,
           actualAssistants,
           source: ProductivityActualSource.SYSTEM_AUTO,
-        }),
-      );
+        })
+        .orIgnore()
+        .execute();
     } catch (err) {
       this.logger.error(`فشل التقاط observation إنتاجية للطلب ${orderId}`, err instanceof Error ? err.stack : err);
     }
@@ -106,13 +111,14 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
    * standard_data لو عندها اقتراح `pending` لسه — مفيش اقتراحات متراكمة لنفس الصف.
    */
   async generateSuggestions(): Promise<number> {
+    await this.reconcileCompletedOrderActuals(SWEEP_BATCH_SIZE);
     const minSampleSize = await this.settingsService.getNumber('productivity_learning.min_sample_size', MIN_SAMPLE_SIZE_FALLBACK);
     const minChangePercentage = await this.settingsService.getNumber(
       'productivity_learning.min_change_percentage',
       MIN_CHANGE_PERCENTAGE_FALLBACK,
     );
 
-    const rows = await this.standardData.find({ where: { isActive: true } });
+    const rows = await this.standardData.find({ where: { isActive: true }, order: { id: 'ASC' }, take: SWEEP_BATCH_SIZE });
     let created = 0;
 
     for (const row of rows) {
@@ -158,20 +164,45 @@ export class ProductivityLearningService implements OnModuleInit, OnModuleDestro
 
       const confidence = this.confidenceScore(normalizedRates, median);
 
-      await this.suggestions.save(
-        this.suggestions.create({
+      const inserted = await this.suggestions
+        .createQueryBuilder()
+        .insert()
+        .values({
           serviceStandardDataId: row.id,
           currentProductivityPerDay: row.productivityPerDay,
           suggestedProductivityPerDay: median.toFixed(2),
           sampleSize: normalizedRates.length,
           confidenceScore: confidence.toFixed(3),
-        }),
-      );
-      created += 1;
+        })
+        .orIgnore()
+        .returning(['id'])
+        .execute();
+      if ((inserted.raw as Array<{ id: string }>).length > 0) created += 1;
     }
 
     if (created > 0) this.logger.log(`اتولّد ${created} اقتراح إنتاجية جديد`);
     return created;
+  }
+
+  async reconcileCompletedOrderActuals(limit = SWEEP_BATCH_SIZE): Promise<number> {
+    const rows = await this.orders.query<Array<{ id: string }>>(
+      `SELECT orders.id
+       FROM orders
+       WHERE orders.order_status = 'completed'
+         AND orders.standard_data_id IS NOT NULL
+         AND orders.requested_units IS NOT NULL
+         AND orders.work_started_at IS NOT NULL
+         AND orders.work_completed_at IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM service_productivity_actuals actual
+           WHERE actual.order_id = orders.id AND actual.source = 'system_auto'
+         )
+       ORDER BY orders.closed_at NULLS LAST, orders.id
+       LIMIT $1`,
+      [Math.max(1, Math.min(limit, SWEEP_BATCH_SIZE))],
+    );
+    for (const row of rows) await this.captureFromCompletedOrder(row.id);
+    return rows.length;
   }
 
   private median(sorted: number[]): number {

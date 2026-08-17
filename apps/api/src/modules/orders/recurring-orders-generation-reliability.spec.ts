@@ -98,10 +98,14 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
-      if (ids.customerProfile) await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
+      if (ids.template) await q(`DELETE FROM recurring_order_occurrences WHERE template_id = $1`, [ids.template]);
+      if (ids.template) {
+        await q(`UPDATE recurring_order_templates SET last_generated_order_id = NULL WHERE id = $1`, [ids.template]);
+      }
       // بتتنضّف هنا بس (مش داخل كل it) عشان لو it فشلت (assertion throw) قبل ما توصل لسطر الحذف
       // بتاعها، مفيش صف orders يتيم يمنع حذف addresses تحت (FK) — نفس درس "نضّف في afterAll دايمًا".
       if (ids.address) await q(`DELETE FROM orders WHERE address_id = $1`, [ids.address]);
+      if (ids.customerProfile) await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
       if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       if (ids.customerUser) await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
@@ -125,6 +129,12 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
     await runner.connect();
     await runner.query(`SELECT pg_advisory_lock($1)`, [71_208_019]);
     try {
+      await runner.query(
+        `UPDATE recurring_order_occurrences
+         SET next_attempt_at = now() - interval '1 second'
+         WHERE template_id = $1 AND status = 'failed'`,
+        [ids.template],
+      );
       await runner.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [ids.template]);
       try {
         await service.sweep();
@@ -148,6 +158,18 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
       last_failure_reason: string | null;
       last_failed_at: Date | null;
     };
+  }
+
+  async function loadLatestOccurrence(): Promise<{ status: string; attempt_count: number; last_error: string | null }> {
+    const [row] = await dataSource.query(
+      `SELECT status, attempt_count, last_error
+       FROM recurring_order_occurrences
+       WHERE template_id = $1
+       ORDER BY scheduled_for DESC
+       LIMIT 1`,
+      [ids.template],
+    );
+    return row;
   }
 
   it('فشل مؤقت (تحت السقف) — next_run_at ميتحركش، consecutive_failure_count بيزيد، صفر إشعار', async () => {
@@ -188,6 +210,11 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
     // last_failure_reason/last_failed_at بيفضلوا محفوظين حتى بعد الـdead-letter — دليل تشخيصي للأدمن
     expect(after.last_failure_reason).toBe('فشل ثالث ونهائي');
     expect(after.last_failed_at).not.toBeNull();
+    await expect(loadLatestOccurrence()).resolves.toMatchObject({
+      status: 'manual_review',
+      attempt_count: 3,
+      last_error: 'فشل ثالث ونهائي',
+    });
     expect(emitSpy).toHaveBeenCalledTimes(1);
     const [eventName, eventPayload] = emitSpy.mock.calls[0] as [string, { attempts: number; reason: string }];
     expect(eventName).toBe('orders.recurring_template_generation_failing');
