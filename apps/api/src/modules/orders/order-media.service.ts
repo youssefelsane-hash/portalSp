@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { TechniciansService } from '../technicians/technicians.service';
 import { Order } from './entities/order.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
@@ -39,19 +40,19 @@ export class OrderMediaService {
     }
 
     const key = `orders/${orderId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const media = this.orderMedia.create({
-      orderId,
-      uploadedByUserId: userId,
-      mediaType,
-      fileUrl,
-      storageKey: key,
-      fileSizeBytes: file.size,
-      caption: caption ?? null,
+    return uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      const media = this.orderMedia.create({
+        orderId,
+        uploadedByUserId: userId,
+        mediaType,
+        fileUrl,
+        storageKey: key,
+        fileSizeBytes: file.size,
+        caption: caption ?? null,
+      });
+      await this.orderMedia.save(media);
+      return media;
     });
-    await this.orderMedia.save(media);
-    return media;
   }
 
   listForOrder(orderId: string): Promise<OrderMedia[]> {

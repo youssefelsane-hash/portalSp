@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { COMPLAINT_FILED_EVENT, ComplaintFiledEvent } from '../../common/events/complaint-filed.event';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
@@ -435,17 +436,17 @@ export class SupportService {
     const complaint = await this.getForUser(user, complaintId);
 
     const key = `complaints/${complaint.id}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const attachment = this.attachments.create({
-      complaintId: complaint.id,
-      fileUrl,
-      storageKey: key,
-      fileType: file.mimetype,
-      uploadedByUserId: user.sub,
+    return uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      const attachment = this.attachments.create({
+        complaintId: complaint.id,
+        fileUrl,
+        storageKey: key,
+        fileType: file.mimetype,
+        uploadedByUserId: user.sub,
+      });
+      await this.attachments.save(attachment);
+      return attachment;
     });
-    await this.attachments.save(attachment);
-    return attachment;
   }
 
   async listAttachments(user: JwtPayload, complaintId: string): Promise<ComplaintAttachment[]> {

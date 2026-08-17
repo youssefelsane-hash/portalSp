@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
@@ -278,18 +279,19 @@ export class ChatService {
     this.assertThreadOpen(thread);
 
     const key = `chat/${threadId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const message = this.messages.create({
-      threadId,
-      senderUserId: userId,
-      messageType: ChatMessageType.IMAGE,
-      content: null,
-      fileUrl,
-      isRead: false,
-      isFlagged: false,
+    const message = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      const msg = this.messages.create({
+        threadId,
+        senderUserId: userId,
+        messageType: ChatMessageType.IMAGE,
+        content: null,
+        fileUrl,
+        isRead: false,
+        isFlagged: false,
+      });
+      await this.messages.save(msg);
+      return msg;
     });
-    await this.messages.save(message);
 
     thread.lastMessageAt = message.createdAt;
     await this.threads.save(thread);

@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { AddCertificateDto } from './dto/add-certificate.dto';
 import { ReviewCertificateDto } from './dto/review-certificate.dto';
@@ -33,18 +34,18 @@ export class TechnicianCertificatesService {
     }
 
     const key = `technician-certificates/${technicianId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const certificate = this.certificates.create({
-      technicianId,
-      title: dto.title,
-      issuerName: dto.issuer_name ?? null,
-      issuedAt: dto.issued_at ?? null,
-      fileUrl,
-      storageKey: key,
-      displayOrder: existingCount,
+    return uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, (fileUrl) => {
+      const certificate = this.certificates.create({
+        technicianId,
+        title: dto.title,
+        issuerName: dto.issuer_name ?? null,
+        issuedAt: dto.issued_at ?? null,
+        fileUrl,
+        storageKey: key,
+        displayOrder: existingCount,
+      });
+      return this.certificates.save(certificate);
     });
-    return this.certificates.save(certificate);
   }
 
   listForTechnician(technicianId: string): Promise<TechnicianCertificate[]> {

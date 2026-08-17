@@ -16,6 +16,7 @@ describe('getUrl(key) — تعميم النمط على order_media/technician_do
   function fakeStorage(expectedKey: string, freshUrl: string): StorageService {
     return {
       save: jest.fn(),
+      delete: jest.fn(),
       getUrl: jest.fn(async (key: string) => {
         expect(key).toBe(expectedKey);
         return freshUrl;

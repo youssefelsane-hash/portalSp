@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageService } from './storage.service';
 
@@ -75,5 +75,15 @@ export class S3StorageService implements StorageService {
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: this.urlExpirySeconds,
     });
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    } catch (err) {
+      // نفس فلسفة كل مكان تاني: فشل تنظيف (compensating action) نفسه بيتلقّط ويتسجّل بس، مش
+      // بيرمي — الملف اليتيم هيفضل موجود لحد تنظيف يدوي/دوري، مش أخطر من إخفاء الفشل الأصلي.
+      this.logger.error(`فشل حذف الملف اليتيم ${key}`, err instanceof Error ? err.stack : err);
+    }
   }
 }
