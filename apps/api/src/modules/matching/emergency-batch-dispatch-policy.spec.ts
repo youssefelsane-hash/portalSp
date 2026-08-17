@@ -63,6 +63,15 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
     await cache.del(`settings:${key}`);
   };
 
+  const expireRound = async (round: number) => {
+    await dataSource.query(
+      `UPDATE order_assignments
+       SET expires_at = NOW() - INTERVAL '1 second'
+       WHERE order_id = $1 AND assignment_round = $2`,
+      [ids.order, round],
+    );
+  };
+
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
@@ -232,6 +241,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
     // هنا يبقى إجمالي الفنيين المتواصَل معاهم لسه دلوقتي 2 (من الجولة الأولى) — الميزانية
     // المتبقية = 4-2=2، فالدفعة التالية (المطلوبة 3) بتتقصّ لـ2 فعليًا، مش بترفض تمامًا ولا
     // بتتجاهل السقف. الجولة دي كمان هي عتبة التصعيد (emergency_escalation_after_rounds=2).
+    await expireRound(1);
     const result = await matchingService.dispatchNextRound(ids.order);
     expect(result.dispatched).toBe(2);
 
@@ -253,6 +263,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
   });
 
   it('الجولة التالتة: الميزانية خلصت (4/4) فالطلب بيتلغي فورًا بدل ما يبعت لأي فني تاني', async () => {
+    await expireRound(2);
     const result = await matchingService.dispatchNextRound(ids.order);
     expect(result.dispatched).toBe(0);
 
