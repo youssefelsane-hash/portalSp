@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
 
 export enum WebhookProcessingStatus {
   RECEIVED = 'received',
@@ -8,10 +8,10 @@ export enum WebhookProcessingStatus {
   IGNORED = 'ignored',
 }
 
-// الجدول ده موجود في الشيما من أول يوم (infra/migrations/0011_system.sql، قاموس §11.3) —
-// مفيش أي كود كان بيستخدمه لحد دلوقتي (فجوة موثّقة في payments/README.md). الـ entity هنا أول
-// استهلاك حقيقي ليه، وقت ربط بوابة Paymob.
+// سجل delivery خارجي مستقل عن Payment: يحتفظ بالهوية وحالة المعالجة حتى يمكن منع التكرار
+// واسترداد الفشل العابر من غير افتراض أن إعادة إرسال webhook تعني عملية مالية جديدة.
 @Entity('webhook_events')
+@Index('uq_webhook_events_provider_external_event', ['provider', 'externalEventId'], { unique: true })
 export class WebhookEvent {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
   id: string;
@@ -22,9 +22,9 @@ export class WebhookEvent {
   @Column({ name: 'event_type', type: 'varchar', length: 80 })
   eventType: string;
 
-  // فريد عبر كل الأحداث — ده اللي بيمنع معالجة نفس الحدث مرتين لو البوابة أعادت إرسال نفس
-  // الـ webhook (شائع جداً، كل بوابات الدفع بتعمل retry لو مستحملتش رد 200 بسرعة كفاية).
-  @Column({ name: 'external_event_id', type: 'varchar', length: 120, unique: true })
+  // فريد داخل provider بعينه فقط؛ قد تستخدم بوابتان نفس المرجع الخارجي من غير أن يكونا نفس
+  // الحدث. القيد المركب مع provider يمنع التكرار الحقيقي من نفس البوابة.
+  @Column({ name: 'external_event_id', type: 'varchar', length: 120 })
   externalEventId: string;
 
   @Column({ name: 'payload', type: 'jsonb' })
@@ -50,6 +50,16 @@ export class WebhookEvent {
 
   @Column({ name: 'retry_count', type: 'smallint', default: 0 })
   retryCount: number;
+
+  // وقت امتلاك محاولة المعالجة للحدث. منفصل عن processedAt لأن الأخير لا يُكتب إلا لما الحدث
+  // يوصل لحالة نهائية، بينما المحاولة قد تتوقف/ينهار الـprocess في منتصفها وتحتاج recovery.
+  @Column({ name: 'processing_started_at', type: 'timestamptz', nullable: true })
+  processingStartedAt: Date | null;
+
+  // الموعد التالي المسموح فيه لمحاولة recovery المحدودة. null مع FAILED يعني الحد الأقصى
+  // للمحاولات انتهى ويحتاج الحدث مراجعة تشغيلية، وليس retry لا نهائيًا.
+  @Column({ name: 'next_retry_at', type: 'timestamptz', nullable: true })
+  nextRetryAt: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

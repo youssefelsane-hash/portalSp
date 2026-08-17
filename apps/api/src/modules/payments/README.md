@@ -29,8 +29,8 @@
 - **`gateways/payment-gateway.interface.ts`**: واجهة قابلة للتبديل، نفس فلسفة `StorageService`/`NotificationDispatcher` بالحرف — `createCardPayment()` (تسجيل عملية + رابط iframe) و`verifyAndParseWebhook()` (تحقق توقيع + فك تشفير حمولة، مزامن تماماً، مفيش I/O).
 - **`gateways/paymob-gateway.service.ts`**: تطبيق حقيقي مطابق لعقد Paymob Accept API v1 — مصادقة (`/api/auth/tokens`) → تسجيل طلب (`/api/ecommerce/orders`، `merchant_order_id` = `payments.id` عندنا، ده اللي بيربط رد الـ webhook بالدفعة الصح) → طلب مفتاح دفع (`/api/acceptance/payment_keys`) → رابط iframe مستضاف. `isConfigured` بيبقى `false` تلقائياً لو أي env var من الأربعة ناقص (`PAYMOB_API_KEY`/`PAYMOB_INTEGRATION_ID_CARD`/`PAYMOB_IFRAME_ID`/`PAYMOB_HMAC_SECRET`) — الدفع بالبطاقة بيرفض بوضوح (`PAY_001`, 503) بدل ما ينهار أو يتظاهر بالنجاح، والكاش/المحفظة يفضلوا شغالين عادي.
 - **HMAC-SHA512 مطابق حرفياً لتوثيق Paymob الرسمي** (`computeHmac()` جوّه `paymob-gateway.service.ts`) — concatenation بترتيب ثابت لـ20 حقل من كائن الـ transaction، `timingSafeEqual` للمقارنة (مش `==` عادية، عشان مايسربش معلومة توقيت). **7 اختبارات وحدة حقيقية** (`paymob-gateway.service.spec.ts`) بتتأكد: توقيع صحيح يتقبل ويستخرج كل الحقول صح، توقيع غلط/متلاعب فيه (حتى تغيير حقل واحد زي `amount_cents` بعد حساب التوقيع) يترفض، secret غلط يترفض، بوابة مش مُعدّة ترفض فوراً من غير أي نداء شبكة.
-- **`POST /orders/:id/pay-with-card`**: نفس نمط `pay-with-wallet` بالظبط — `Idempotency-Key` إجباري. بيسجّل `payments` بحالة `pending` **بعد** التأكد إن البوابة مُعدّة (مش قبل — لو مُعدّة بس نداء الشبكة فشل، نفس صف الدفعة بيتحدّث لـ`failed` وبيتقبل retry بنفس المفتاح على **نفس الصف** بدل ما يتكرر `payment_number` لكل محاولة)، وبيرجّع `redirect_url` للكلاينت يفتحه في WebView. **مفيش أي تسوية بتحصل هنا خالص** — القفل النهائي بس لما البوابة تأكّد عبر الـ webhook.
-- **`POST /webhooks/paymob`** (`@Public()`، الأمان بالكامل عبر HMAC مش JWT): بيسجّل كل حدث في `webhook_events` (الجدول ده موجود في الشيما من `0011_system.sql` بس مفيش أي كود كان بيستخدمه لحد دلوقتي — أول استهلاك حقيقي ليه هنا) مع `external_event_id UNIQUE` بيمنع معالجة نفس الحدث مرتين (بوابات الدفع بتعيد إرسال الـ webhook لو مستحملتش رد سريع بما فيه الكفاية — شائع جداً). لو التوقيع صح والدفع نجح، بيعدّي بنفس `settleAndComplete()` اللي `collectCash`/`payWithWallet` بيستخدموه — نقطة تسوية واحدة للنظام كله، الدفع بالبطاقة مش استثناء. بيرجع `200` دايماً (حتى لو الحدث اترفض/اتجاهل) عشان مايخليش البوابة تعيد إرسال حدث احنا فعلاً قررنا فيه بوعي.
+- **`POST /orders/:id/pay-with-card`**: نفس نمط `pay-with-wallet` بالظبط — `Idempotency-Key` إجباري. بيسجّل `payments` بحالة `pending` بعد التأكد إن البوابة مُعدّة، وبيرجّع `redirect_url` للكلاينت يفتحه في WebView. لو نداء إنشاء عملية الدفع انقطع أو انتهى بـtimeout، الدفعة تتحول إلى `processing` مع `GATEWAY_REGISTRATION_OUTCOME_UNKNOWN` بدل `failed`: ما نعرفش وقتها هل البوابة أنشأت عملية فعلًا، فإعادة نفس create قد تسبب تحصيلًا مزدوجًا. القرار النهائي يظل للـwebhook الموقّع أو reconciliation، وليس تخمين التطبيق.
+- **`POST /webhooks/paymob`** (`@Public()`، الأمان بالكامل عبر HMAC مش JWT): هوية الحدث دلوقتي `(provider, external_event_id)` (migration `0113`) — نفس المرجع من Paymob وFawry لا يتصادم، وإعادة نفس الحدث من نفس البوابة تظل idempotent. التوقيع غير الصحيح لا يحجز هوية الحدث أصلاً، فيمنع محاولة مزورة من تعطيل delivery صحيح لاحق. لو التوقيع صح والدفع نجح، بيعدّي بنفس `settleAndComplete()` اللي `collectCash`/`payWithWallet` بيستخدموه — نقطة تسوية واحدة للنظام كله، الدفع بالبطاقة مش استثناء.
 - **بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي (باستخدام env vars مؤقتة وwebhook مُوقّع يدوياً بنفس خوارزمية Paymob)**: أول نسخة من `finalizeGatewayWebhook` كانت بتبعت `payment.customerId` (ده `customer_profiles.id`) مباشرة كـ`changedByUserId` لـ`settleAndComplete()` (اللي محتاج `users.id` فعلياً — FK على `order_status_history.changed_by_user_id`) — نفس فخ الـ id المختلط اللي اتوثّق قبل كده في نفس الملف (راجع "بَقّة مالية حقيقية خطيرة" تحت)، بس هنا كان بيفشل بوضوح (FK violation) بدل ما يحوّل فلوس لحد غلط، لأن `customer_profiles.id` مش موجود أصلاً في جدول `users`. اتصلح بإضافة `customerProfiles.findByProfileIdOrThrow(payment.customerId)` قبل نداء `settleAndComplete` واستخدام `customerProfile.userId` الصح. اتأكد الإصلاح حياً: طلب حقيقي دفع بالبطاقة (صف `pending` اتحقن يدوياً بمحاكاة تسجيل ناجح عند البوابة، لأن مفيش إنترنت خارجي هنا لنداء Paymob الحقيقي) → webhook موقّع صح بـ`success=true` → الطلب اتقفل `completed`/`paid`، العمولة اتحسبت صح (30000 = 4500 منصة + 25500 فني)، وقيد `wallet_transactions` مزدوج ظهر صح. إعادة إرسال **نفس** الـ webhook (retry شائع من كل البوابات) اتجاهلت تماماً — صفر تكرار في `webhook_events` أو `wallet_transactions`. توقيع بمقارنة حروف كبيرة/صغيرة غلط (`True`/`False` بدل `true`/`false`) اترفض بوضوح، يثبت إن التحقق فعلاً حساس لتنسيق القيم مش شكلي بس.
 - **بَقّة أمنية/مالية حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-7)**: `finalizeGatewayWebhook`
   كانت بتثق في `succeeded=true` من البوابة وتسوّي الطلب بالكامل من غير أي مقارنة بين المبلغ اللي
@@ -54,11 +54,20 @@
   `5xx` حقيقي، فالبوابة تعيد المحاولة تلقائيًا (سلوكها القياسي). اختبار وحدة في
   `webhooks.controller.spec.ts` بيثبت الفرق: حمولة غير صالحة → `200`، `finalizeGatewayWebhook`
   بترمي → الكنترولر يسيب الخطأ يتصاعد (مش بيبتلعه)، قرار واعي عادي → `200` زي المتوقع.
-  **فجوة متبقية موثّقة صراحة عمدًا (مش P0، خارج نطاق هذا الإصلاح)**: فحص "الحدث اتعالج قبل كده"
-  في `finalizeGatewayWebhook()` بيعتبر أي صف `webhook_events` موجود (بما فيه `FAILED` بسبب خطأ
-  داخلي عابر) "اتعالج"، فحتى لو البوابة أعادت نفس الحدث بعد الـ`5xx`، إعادة المحاولة دي مش هتؤدي
-  فعليًا لمحاولة تسوية تانية. حل كامل (تمييز "قرار واعي نهائي" عن "فشل عابر قابل لإعادة المحاولة"
-  في نموذج بيانات `webhook_events` نفسه) نطاق أوسع من P0-8 المطلوب، مؤجّل عمدًا.
+  **إصلاح Script 1 — دورة حياة قابلة للاسترداد (migration `0113`)**: `webhook_events` بقى له
+  claim ذري بـ`INSERT ... ON CONFLICT`، فلا يوجد `find ثم insert` قابل للسباق. `processed` و`ignored`
+  حالتان نهائيتان؛ `failed` فشل قابل للإعادة فقط عند `next_retry_at` ضمن حد محاولات مضبوط، و`processing`
+  يقدر worker يسترده لو العملية علقت. `WebhookRecoveryService` بيفحص كل دقيقة من غير اعتماد على
+  Redis/BullMQ، ويعيد التحقق من توقيع delivery قبل أي أثر مالي؛ Paymob يحتفظ بـHMAC query مع الحمولة
+  المعتمدة لهذا الغرض. backoff والحد الأقصى وحجم الدفعة وقِدم المحاولة كلها إعدادات `payments.webhook_*`
+  قابلة للمراجعة، لا أرقام مخفية في الكود. الأحداث القديمة التي لا تملك HMAC قابلًا لإعادة التحقق لا
+  تتنفذ تلقائيًا وتبقى ظاهرة للمراجعة اليدوية.
+
+  **تحقق TEST حقيقي (2026-08-17)**: migration `0113` اتطبقت بعد تحقق checksum على PostgreSQL
+  الاختبار. `webhook-amount-verification.spec.ts` مرّ بـ6 حالات ضد قاعدة حقيقية: رفض مبلغ غير
+  مطابق، duplicate، delivery متزامن، event-id متشابه بين بوابتين، واسترداد حدث `FAILED` بنفس
+  الهوية بعد backoff. السجلات تستخدم prefixes فريدة وتتُنظّف عبر hooks الاختبار. مفيش تحصيل Paymob
+  حقيقي اتعمل في الاختبار، لأن التحقق يغطي مسار الحفظ/التزامن/الاسترداد بدون إنشاء charge لعميل.
 - ~~لسه من غير: بوابة Fawry~~ — **اتقفلت جزئياً**: `FawryGatewayService` (كود مرجعي "ادفع في أقرب فوري"، `payment_method=fawry_reference` — `infra/migrations/0042_fawry_payment_method.sql`) اتبنى كـ provider منفصل تماماً جنب `PAYMENT_GATEWAY` (Paymob) بدون ما يلمس أي كود موجود، بالظبط زي ما كان متوقّع. تفاصيل معمارية كاملة (بما فيها الفرق الجوهري عن Paymob: مفيش redirect_url/iframe خالص، رد كود مرجعي يتدفع كاش في منفذ فوري) تحت في قسم مخصوص. **⚠️ تحذير صريح**: توقيع الطلبات/الـ webhook (`computeChargeSignature`/`computeWebhookSignature` في `gateways/fawry-gateway.service.ts`) مبني على أفضل فهم موثّق للعقد الرسمي، **لسه محتاج تحقق مباشر ضد sandbox FawryPay حقيقي قبل أي استخدام إنتاجي بفلوس حقيقية** — تفاصيل كاملة في `docs/03-external-integrations.md` § FawryPay.
 - ~~لسه من غير: `payout_order_items`~~ — **اتقفلت**، تفاصيل كاملة في `../payouts/README.md`.
 - لسه من غير: اشتراكات (S7 في الماستر بلان الأصلي بيقصد بيه اشتراكات أطول). تفاصيل الحصول على حساب Paymob/FawryPay حقيقي ومكان كل قيمة: `docs/03-external-integrations.md`.
@@ -80,11 +89,12 @@
 
 **الإصلاح**: `refundOrder()` بقت 3 مراحل منفصلة:
 1. **(أ) DB transaction قصيرة** — تحقق + قفل (`pessimistic_write` على الطلب) + تسجيل صف `Refund`
-   بحالة `PROCESSING` **قبل** أي نداء خارجي. `idx_refunds_payment_id_unique` (ADR-0013 §9) بيضمن
+   بحالة `PROCESSING` **قبل** أي نداء خارجي أو قيد مالي محلي. `idx_refunds_payment_id_unique` (ADR-0013 §9) بيضمن
    صف واحد بس لكل دفعة، فأي محاولة تانية (متزامنة أو retry) هتلاقي الصف ده وترفض فورًا.
 2. **(ب) النداء الخارجي نفسه** — برّه أي transaction تمامًا.
-3. **(ج) DB transaction قصيرة تانية منفصلة** — بعد ما نتيجة البوابة بقت معروفة فعليًا، تسجيل
-   النتيجة (`COMPLETED`/`REJECTED`) + تأثيرات المحافظ + تحديث حالة الطلب/الدفعة.
+3. **(ج) DB transaction قصيرة تانية منفصلة** — بعد ما نتيجة البوابة بقت معروفة فعليًا، تطبيق
+   تأثيرات المحافظ + تحديث حالة الطلب/الدفعة ثم تسجيل `COMPLETED` في نفس الـtransaction. حتى
+   `wallet_credit` (الذي لا يحتاج بوابة) لا يصبح `COMPLETED` إلا بعد نجاح تحويل الرصيد نفسه.
 
 لو الـprocess وقع بعد نجاح فعلي عند البوابة وقبل المرحلة (ج)، صف الـ`Refund` يفضل `PROCESSING`
 (مش ضايع، ومش rollback) — أي محاولة استرداد تانية لنفس الدفعة بترفض فورًا برسالة واضحة، بدل ما

@@ -33,6 +33,9 @@ export class WebhooksController {
   @HttpCode(HttpStatus.OK)
   async handlePaymobWebhook(@Body() body: Record<string, unknown>, @Query('hmac') hmac: string | undefined) {
     const provider = this.paymentProviders.getByProviderKey('paymob');
+    // نحتفظ بتوقيع delivery مع الحمولة المعتمدة فقط، ليقدر recovery يعيد التحقق من نفس الحدث
+    // بعد crash. لا يُرسل هذا الحقل للبوابة ولا يدخل في حساب HMAC نفسه.
+    const persistedPayload = { ...body, __baytak_delivery_hmac: hmac };
 
     // حدث "حفظ كارت" (docs/08 §21) — حمولة مختلفة تمامًا عن TRANSACTION، بيتفحص الأول لأن
     // verifyWebhook() العادية مبنية على شكل حمولة TRANSACTION ومش هتعرف تتعامل مع النوع ده.
@@ -41,7 +44,7 @@ export class WebhooksController {
       await this.paymentsService.finalizeCardSaveWebhook(
         cardSaveResult.externalEventId,
         'paymob',
-        body,
+        persistedPayload,
         cardSaveResult.signatureValid,
         cardSaveResult.providerToken,
         cardSaveResult.maskedPan,
@@ -66,7 +69,7 @@ export class WebhooksController {
       result.externalEventId,
       result.eventType,
       'paymob',
-      body,
+      persistedPayload,
       result.signatureValid,
       result.paymentId,
       result.succeeded,

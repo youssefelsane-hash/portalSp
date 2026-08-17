@@ -37,6 +37,8 @@ import { SavedPaymentMethodsService } from './saved-payment-methods.service';
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
 const PREPAY_METHODS = new Set([PaymentMethod.CARD, PaymentMethod.INSTAPAY]);
+const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
+const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
 
 @Injectable()
 export class PaymentsService {
@@ -594,6 +596,15 @@ export class PaymentsService {
           result: cachedResult as import('./gateways/payment-provider.interface').CreatePaymentResult,
         };
       }
+      if (existing.paymentStatus === PaymentGatewayStatus.PROCESSING) {
+        // فشل/timeout تسجيل العملية عند البوابة لا يثبت أن البوابة لم تنشئها. لا نرسل إنشاءً
+        // ثانيًا بنفس المفتاح لأن ده قد يخلق تحصيلين؛ ننتظر الـ webhook أو reconciliation.
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          'نتيجة محاولة الدفع السابقة لسه قيد التحقق عند البوابة — لا تعيد الدفع الآن',
+          HttpStatus.CONFLICT,
+        );
+      }
       if (existing.paymentStatus !== PaymentGatewayStatus.PENDING && existing.paymentStatus !== PaymentGatewayStatus.FAILED) {
         throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي في حالة نهائية بالفعل', HttpStatus.CONFLICT);
       }
@@ -670,10 +681,11 @@ export class PaymentsService {
       await this.payments.save(payment);
       return result;
     } catch (err) {
-      // نداء البوابة فشل (شبكة/API واقعة، مش رفض دفع من عميل حقيقي) — الدفعة بتفضل قابلة
-      // لإعادة المحاولة بنفس idempotency key.
-      payment.paymentStatus = PaymentGatewayStatus.FAILED;
-      payment.failureCode = 'GATEWAY_REGISTRATION_FAILED';
+      // انقطاع الشبكة أو timeout في إنشاء العملية لا يثبت أن البوابة لم تنشئ intention/charge.
+      // PROCESSING معناها "النتيجة الخارجية غير محسومة"، فتمنع إرسال إنشاء ثانٍ حتى يصل webhook
+      // موثّق أو تدخل عملية reconciliation. FAILED محجوزة لرفض/فشل تؤكده البوابة نفسها.
+      payment.paymentStatus = PaymentGatewayStatus.PROCESSING;
+      payment.failureCode = 'GATEWAY_REGISTRATION_OUTCOME_UNKNOWN';
       payment.failureMessage = err instanceof Error ? err.message : String(err);
       await this.payments.save(payment);
       throw err;
@@ -855,8 +867,101 @@ export class PaymentsService {
   }
 
   /**
+   * Claim ذري للـ webhook: الـ INSERT/UPDATE نفسه هو ضمان التزامن، وليس find ثم insert. الحدث
+   * النهائي (processed/ignored) لا يُعاد فتحه، بينما received/failed فقط يمكن امتلاكهم لمحاولة
+   * جديدة ضمن الحد المضبوط. هذا يسمح للـ provider retry أن يعالج فشلًا حقيقيًا بلا أثر مالي مكرر.
+   */
+  private async claimWebhookEvent(
+    provider: string,
+    eventType: string,
+    externalEventId: string,
+    payload: Record<string, unknown>,
+    signatureValid: boolean,
+    recoverStaleProcessing = false,
+  ): Promise<WebhookEvent | null> {
+    const maxAttempts = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_recovery_max_attempts', WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK),
+    );
+    const staleMinutes = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_processing_stale_minutes', 5),
+    );
+
+    const eventId = await this.dataSource.transaction(async (manager) => {
+      const rows = (await manager.query(
+        `INSERT INTO webhook_events
+          (provider, event_type, external_event_id, payload, signature_valid, processing_status, retry_count, processing_started_at)
+         VALUES ($1, $2, $3, $4, $5, 'processing', 1, now())
+         ON CONFLICT (provider, external_event_id) DO UPDATE
+           SET processing_status = 'processing',
+               retry_count = webhook_events.retry_count + 1,
+               processing_started_at = now(),
+               next_retry_at = NULL,
+               processed_at = NULL,
+               error_message = NULL
+         WHERE (webhook_events.processing_status = 'received'
+            OR (webhook_events.processing_status = 'failed'
+                AND webhook_events.next_retry_at IS NOT NULL
+                AND webhook_events.next_retry_at <= now())
+            OR ($7 = true
+                AND webhook_events.processing_status = 'processing'
+                AND webhook_events.processing_started_at < now() - ($8 * interval '1 minute')))
+           AND webhook_events.retry_count < $6
+         RETURNING id`,
+        [provider, eventType, externalEventId, JSON.stringify(payload), signatureValid, maxAttempts, recoverStaleProcessing, staleMinutes],
+      )) as Array<{ id: string }>;
+      return rows[0]?.id ?? null;
+    });
+
+    if (!eventId) return null;
+    return this.webhookEvents.findOne({ where: { id: eventId } });
+  }
+
+  private async markWebhookIgnored(webhookEvent: WebhookEvent, message: string): Promise<void> {
+    webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
+    webhookEvent.errorMessage = message;
+    webhookEvent.nextRetryAt = null;
+    webhookEvent.processingStartedAt = null;
+    webhookEvent.processedAt = new Date();
+    await this.webhookEvents.save(webhookEvent);
+  }
+
+  private async markWebhookProcessed(webhookEvent: WebhookEvent): Promise<void> {
+    webhookEvent.processingStatus = WebhookProcessingStatus.PROCESSED;
+    webhookEvent.errorMessage = null;
+    webhookEvent.nextRetryAt = null;
+    webhookEvent.processingStartedAt = null;
+    webhookEvent.processedAt = new Date();
+    await this.webhookEvents.save(webhookEvent);
+  }
+
+  private async markWebhookFailed(webhookEvent: WebhookEvent, message: string, retryable = true): Promise<void> {
+    const maxAttempts = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_recovery_max_attempts', WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK),
+    );
+    const baseDelaySeconds = Math.max(
+      1,
+      await this.settingsService.getNumber(
+        'payments.webhook_recovery_base_delay_seconds',
+        WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK,
+      ),
+    );
+    const canRetry = retryable && webhookEvent.retryCount < maxAttempts;
+    const delaySeconds = baseDelaySeconds * 2 ** Math.max(0, webhookEvent.retryCount - 1);
+
+    webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+    webhookEvent.errorMessage = message;
+    webhookEvent.processingStartedAt = null;
+    webhookEvent.nextRetryAt = canRetry ? new Date(Date.now() + delaySeconds * 1000) : null;
+    webhookEvent.processedAt = null;
+    await this.webhookEvents.save(webhookEvent);
+  }
+
+  /**
    * بيتنادى من WebhooksController بعد ما يتحقق التوقيع مسبقاً. بيسجّل الحدث في webhook_events
-   * (حماية من معالجة مكررة عبر external_event_id UNIQUE)، وبعدين لو نجحت العملية بيعدّي بنفس
+   * (حماية من معالجة مكررة عبر `(provider, external_event_id)` UNIQUE)، وبعدين لو نجحت العملية بيعدّي بنفس
    * مسار settleAndComplete اللي collectCash/payWithWallet بيستخدموه — نفس نقطة التسوية الوحيدة
    * للنظام كله، الدفع بالبطاقة/الكود المرجعي مش استثناء. `paymentMethod` بيتحدد حسب البوابة
    * المستدعية (CARD لـ Paymob، FAWRY_REFERENCE لـ Fawry) عشان يتسجّل صح في order_status_history/audit.
@@ -873,57 +978,45 @@ export class PaymentsService {
     gatewayTransactionId: string,
     paymentMethod: PaymentMethod = PaymentMethod.CARD,
     webhookAmountCents: number | null = null,
+    recoverStaleProcessing = false,
   ): Promise<void> {
-    const alreadyProcessed = await this.webhookEvents.findOne({ where: { externalEventId } });
-    if (alreadyProcessed) {
-      // نفس الحدث اتبعت تاني (retry شائع من كل بوابات الدفع) — رجّع نجاح من غير أي معالجة تانية.
-      this.logger.log(`webhook مكرر اتجاهل: ${externalEventId} (اتعالج قبل كده)`);
-      return;
-    }
-
-    const webhookEvent = this.webhookEvents.create({
-      provider,
-      eventType,
-      externalEventId,
-      payload: rawPayload,
-      signatureValid,
-      processingStatus: WebhookProcessingStatus.RECEIVED,
-    });
-    await this.webhookEvents.save(webhookEvent);
-
     if (!signatureValid) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
-      webhookEvent.errorMessage = 'توقيع غير صحيح — الحدث اتجاهل';
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      // حدث بتوقيع غير صحيح لا يدخل سجل الهوية نفسه؛ عدم السماح له بحجز external_event_id يمنع
+      // حمولة مزوّرة تعرف رقمًا متوقعًا من تعطيل الحدث الصحيح الذي قد يصل لاحقًا.
       this.logger.warn(`webhook برد توقيع غلط اترفض: ${externalEventId}`);
       return;
     }
 
+    const webhookEvent = await this.claimWebhookEvent(
+      provider,
+      eventType,
+      externalEventId,
+      rawPayload,
+      signatureValid,
+      recoverStaleProcessing,
+    );
+    if (!webhookEvent) {
+      // processed/ignored نهائي، أو محاولة أخرى تملكت الحدث الآن. في الحالتين الـ provider يأخذ
+      // 200 بلا أثر مالي ثانٍ؛ الفحص الدوري يعالج processing العالق لو انهار مالك المحاولة.
+      this.logger.log(`webhook مكرر أو قيد المعالجة: ${provider}:${externalEventId}`);
+      return;
+    }
+
     if (!paymentId) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
-      webhookEvent.errorMessage = 'مفيش payment_id في الحمولة';
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookIgnored(webhookEvent, 'مفيش payment_id في الحمولة');
       return;
     }
 
     const payment = await this.payments.findOne({ where: { id: paymentId } });
     if (!payment) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
-      webhookEvent.errorMessage = `دفعة غير موجودة: ${paymentId}`;
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookFailed(webhookEvent, `دفعة غير موجودة: ${paymentId}`);
       return;
     }
 
-    if (payment.paymentStatus !== PaymentGatewayStatus.PENDING) {
+    if (payment.paymentStatus !== PaymentGatewayStatus.PENDING && payment.paymentStatus !== PaymentGatewayStatus.PROCESSING) {
       // اتعالجت قبل كده (idempotency على مستوى الدفعة نفسها، مش بس external_event_id) —
       // ممكن يحصل لو نفس البوابة بعتت حدثين بمعرّفين مختلفين لنفس العملية.
-      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
-      webhookEvent.errorMessage = `الدفعة already في حالة ${payment.paymentStatus}`;
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookIgnored(webhookEvent, `الدفعة already في حالة ${payment.paymentStatus}`);
       return;
     }
 
@@ -936,10 +1029,11 @@ export class PaymentsService {
      * طلب بمبلغ أقل من قيمته الحقيقية. الفحص هنا مستقل عن HMAC عمداً — طبقة حماية إضافية، مش بديل.
      */
     if (succeeded && webhookAmountCents !== null && webhookAmountCents !== payment.amountCents) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
-      webhookEvent.errorMessage = `المبلغ في الـwebhook (${webhookAmountCents}) مايطابقش المبلغ المتوقع (${payment.amountCents}) — الحدث اترفض بأمان`;
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookFailed(
+        webhookEvent,
+        `المبلغ في الـwebhook (${webhookAmountCents}) مايطابقش المبلغ المتوقع (${payment.amountCents}) — الحدث اترفض بأمان`,
+        false,
+      );
       this.logger.error(
         `webhook برد مبلغ غير متطابق اترفض: ${externalEventId} — دفعة ${paymentId} متوقّع ${payment.amountCents} ووصل ${webhookAmountCents}`,
       );
@@ -997,14 +1091,9 @@ export class PaymentsService {
         // مفيش تغيير في حالة الطلب — العميل يقدر يعيد المحاولة (بطاقة تانية، محفظة، كاش)
       }
 
-      webhookEvent.processingStatus = WebhookProcessingStatus.PROCESSED;
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookProcessed(webhookEvent);
     } catch (err) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
-      webhookEvent.errorMessage = err instanceof Error ? err.message : String(err);
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookFailed(webhookEvent, err instanceof Error ? err.message : String(err));
       this.logger.error(`فشل معالجة webhook ${externalEventId}`, err instanceof Error ? err.stack : err);
       throw err;
     }
@@ -1024,37 +1113,34 @@ export class PaymentsService {
     maskedPan: string | null,
     cardBrand: string | null,
     customerEmail: string | null,
+    recoverStaleProcessing = false,
   ): Promise<void> {
-    const alreadyProcessed = await this.webhookEvents.findOne({ where: { externalEventId } });
-    if (alreadyProcessed) {
-      this.logger.log(`webhook حفظ كارت مكرر اتجاهل: ${externalEventId}`);
+    if (!signatureValid) {
+      this.logger.warn(`webhook حفظ كارت بتوقيع غير صحيح اترفض: ${externalEventId}`);
       return;
     }
 
-    const webhookEvent = this.webhookEvents.create({
+    const webhookEvent = await this.claimWebhookEvent(
       provider,
-      eventType: 'TOKEN',
+      'TOKEN',
       externalEventId,
-      payload: rawPayload,
+      rawPayload,
       signatureValid,
-      processingStatus: WebhookProcessingStatus.RECEIVED,
-    });
-    await this.webhookEvents.save(webhookEvent);
+      recoverStaleProcessing,
+    );
+    if (!webhookEvent) {
+      this.logger.log(`webhook حفظ كارت مكرر أو قيد المعالجة: ${provider}:${externalEventId}`);
+      return;
+    }
 
-    if (!signatureValid || !customerEmail) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
-      webhookEvent.errorMessage = !signatureValid ? 'توقيع غير صحيح — الحدث اتجاهل' : 'مفيش إيميل عميل في حدث حفظ الكارت';
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+    if (!customerEmail) {
+      await this.markWebhookIgnored(webhookEvent, 'مفيش إيميل عميل في حدث حفظ الكارت');
       return;
     }
 
     const user = await this.users.findOne({ where: { email: customerEmail } });
     if (!user) {
-      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
-      webhookEvent.errorMessage = `مفيش مستخدم عندنا بالإيميل ${customerEmail}`;
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookIgnored(webhookEvent, `مفيش مستخدم عندنا بالإيميل ${customerEmail}`);
       return;
     }
 
@@ -1067,16 +1153,72 @@ export class PaymentsService {
         cardBrand,
         maskedPan,
       });
-      webhookEvent.processingStatus = WebhookProcessingStatus.PROCESSED;
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      await this.markWebhookProcessed(webhookEvent);
     } catch (err) {
-      // مستخدم موجود بس مش عميل (نادر جدًا، دفاعي بحت) — تجاهل واعي، مش خطأ داخلي حقيقي.
-      webhookEvent.processingStatus = WebhookProcessingStatus.IGNORED;
-      webhookEvent.errorMessage = err instanceof Error ? err.message : String(err);
-      webhookEvent.processedAt = new Date();
-      await this.webhookEvents.save(webhookEvent);
+      // فشل قاعدة البيانات/التوكن قابل للاسترداد؛ لا نحوله لـ ignored لمجرد أن المحاولة الأولى
+      // فشلت، لأن مزوّد الدفع لن يرسل أثرًا ماليًا ثانيًا عند إعادة معالجة نفس حدث الحفظ.
+      await this.markWebhookFailed(webhookEvent, err instanceof Error ? err.message : String(err));
+      throw err;
     }
+  }
+
+  /**
+   * يعيد تشغيل حدث محفوظ بعد فشل/انقطاع process. التحقق من التوقيع يُعاد من الحمولة المحفوظة
+   * نفسها؛ صف قديم لا يحمل توقيع Paymob لا يُخمّن له توقيع ولا يُعاد تشغيله تلقائيًا، ويظل
+   * ظاهرًا للمراجعة التشغيلية بدل تنفيذ قرار مالي على بيانات غير مكتملة.
+   */
+  async recoverWebhookEvent(webhookEventId: string): Promise<void> {
+    const event = await this.webhookEvents.findOne({ where: { id: webhookEventId } });
+    if (!event || !event.signatureValid) return;
+
+    const { __baytak_delivery_hmac: persistedHmac, ...rawPayload } = event.payload as Record<string, unknown>;
+    const hmac = typeof persistedHmac === 'string' ? persistedHmac : undefined;
+    const provider = this.paymentProviders.getByProviderKey(event.provider);
+
+    if (event.provider === 'paymob' && !hmac) {
+      this.logger.warn(`webhook قديم بلا توقيع محفوظ يحتاج مراجعة يدوية: ${event.provider}:${event.externalEventId}`);
+      return;
+    }
+
+    if (event.eventType === 'TOKEN') {
+      const parsed = provider.verifyCardSaveWebhook(rawPayload, hmac);
+      if (!parsed?.signatureValid) {
+        this.logger.warn(`تعذر إعادة التحقق من webhook حفظ الكارت: ${event.provider}:${event.externalEventId}`);
+        return;
+      }
+      await this.finalizeCardSaveWebhook(
+        parsed.externalEventId,
+        event.provider,
+        event.payload,
+        parsed.signatureValid,
+        parsed.providerToken,
+        parsed.maskedPan,
+        parsed.cardBrand,
+        parsed.customerEmail,
+        true,
+      );
+      return;
+    }
+
+    const parsed = provider.verifyWebhook(rawPayload, hmac);
+    if (!parsed.signatureValid) {
+      this.logger.warn(`تعذر إعادة التحقق من webhook دفع: ${event.provider}:${event.externalEventId}`);
+      return;
+    }
+    await this.finalizeGatewayWebhook(
+      parsed.externalEventId,
+      parsed.eventType,
+      event.provider,
+      event.payload,
+      parsed.signatureValid,
+      parsed.paymentId,
+      parsed.succeeded,
+      parsed.failureReason,
+      parsed.gatewayTransactionId,
+      event.provider === 'fawry' ? PaymentMethod.FAWRY_REFERENCE : PaymentMethod.CARD,
+      parsed.amountCents,
+      true,
+    );
   }
 
   /**
@@ -1267,11 +1409,12 @@ export class PaymentsService {
     // نجح فعليًا عند البوابة وبعدين خطوة تانية جوّه نفس الـtransaction فشلت (DB error عابر
     // مثلاً)، Postgres يعمل rollback كامل — لكن الفلوس فعليًا اترجعت للعميل عند Paymob، ونظامنا
     // مش عارف. الحل: تقسيم لتلات مراحل — (أ) DB transaction قصيرة بتسجّل صف Refund حالته
-    // PROCESSING **قبل** أي نداء خارجي (idx_refunds_payment_id_unique بيضمن صف واحد بس لكل
-    // دفعة، فأي محاولة تانية — متزامنة أو retry بعد فشل — هتلاقي الصف ده وترفض فورًا، صفر نداء
-    // مزدوج للبوابة ممكن يحصل)، (ب) النداء الخارجي نفسه **برّه** أي transaction، (ج) DB
-    // transaction قصيرة تانية منفصلة تمامًا بتسجّل النتيجة (نجح/اترفض) وتطبّق تأثيرات المحافظ —
-    // فمفيش أي سيناريو ممكن فيه استرداد حقيقي عند البوابة "يتراجع" بسبب فشل كتابة DB لاحقة.
+    // PROCESSING **قبل** أي نداء خارجي أو أثر مالي (idx_refunds_payment_id_unique بيضمن صف واحد
+    // بس لكل دفعة، فأي محاولة تانية — متزامنة أو retry بعد فشل — هتلاقي الصف ده وترفض فورًا،
+    // صفر نداء مزدوج للبوابة ممكن يحصل)، (ب) النداء الخارجي نفسه **برّه** أي transaction، (ج)
+    // DB transaction قصيرة تانية منفصلة تمامًا تطبّق أثر المال ثم تسجّل COMPLETED. حتى مسار
+    // wallet-credit بلا بوابة يظل PROCESSING بين (أ) و(ج): crash في المنتصف يصبح قابلًا
+    // للمراجعة، لا استردادًا مكتملًا كذبًا.
     const prepared = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
@@ -1333,16 +1476,15 @@ export class PaymentsService {
         refundType: isFull ? RefundType.FULL : RefundType.PARTIAL,
         reasonNotes,
         // مفيش استرداد حقيقي مدعوم لطريقة الدفع دي (كاش/محفظة/InstaPay/فوري) — نفس الإصلاح
-        // الصادق من قبل: wallet credit فعلي بدل رقم "مكتمل" كاذب من غير حركة فلوس. الحالة دي
-        // مفيش نداء خارجي خالص فبتتسجّل COMPLETED فورًا من هنا، برضه قبل أي كتابة محافظ (لو
-        // فشلت خطوة تانية بعدها، الصف بيفضل موجود وواضح إنه لسه مش مطبّق كامل).
+        // الصادق من قبل: wallet credit فعلي بدل رقم "مكتمل" كاذب من غير حركة فلوس. يظل الصف
+        // PROCESSING حتى القيد المزدوج في المرحلة (ج) ينجح داخل transaction واحدة معه.
         refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
-        refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
+        refundStatus: RefundStatus.PROCESSING,
         requestedByUserId: performedByUserId,
         approvedByUserId: performedByUserId,
         requestedAt: new Date(),
         approvedAt: new Date(),
-        completedAt: goesThroughGateway ? null : new Date(),
+        completedAt: null,
         providerRefundId: null,
       });
       await manager.save(refund);
@@ -1378,15 +1520,6 @@ export class PaymentsService {
         await manager.save(refund);
         return refund;
       }
-
-      if (goesThroughGateway) {
-        refund.refundStatus = RefundStatus.COMPLETED;
-        refund.providerRefundId = providerRefundId;
-        refund.completedAt = new Date();
-        await manager.save(refund);
-      }
-      // لو !goesThroughGateway، refund كان بالفعل COMPLETED من المرحلة (أ) — مفيش نداء خارجي
-      // حصل خالص، فمفيش تحديث حالة مطلوب هنا.
 
       // عكس تحويل أرباح الفني بنفس نسبة مبلغ الاسترداد من إجمالي الدفعة — الفني ماخدش الفلوس دي
       // كاملة أصلاً لو الاسترداد جزئي.
@@ -1439,6 +1572,13 @@ export class PaymentsService {
           manager,
         );
       }
+
+      // لا نعلن اكتمال الاسترداد إلا بعد نجاح كل أثر مالي محلي في نفس الـtransaction. أي استثناء
+      // قبل هذا السطر يرجع transaction بالكامل ويترك صف PROCESSING الأصلي للمراجعة/reconciliation.
+      refund.refundStatus = RefundStatus.COMPLETED;
+      refund.providerRefundId = goesThroughGateway ? providerRefundId : null;
+      refund.completedAt = new Date();
+      await manager.save(refund);
 
       payment.paymentStatus = isFull ? PaymentGatewayStatus.REFUNDED : PaymentGatewayStatus.PARTIALLY_REFUNDED;
       await manager.save(payment);
