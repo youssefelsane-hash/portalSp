@@ -20,6 +20,7 @@ export class ReferralRecoveryService implements OnModuleInit, OnModuleDestroy {
         this.logger.error('فشل استرداد أحداث الترشيح', err instanceof Error ? err.stack : err),
       );
     }, SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -27,10 +28,10 @@ export class ReferralRecoveryService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sweep(): Promise<number> {
-    const batchSize = Math.max(
+    const batchSize = Math.min(100, Math.max(
       1,
       Math.floor(await this.settingsService.getNumber('referral.recovery_batch_size', 25)),
-    );
+    ));
     const processed = await this.referralsService.reconcilePending(batchSize);
     if (processed > 0) this.logger.log(`استرداد الترشيحات: تمت مراجعة ${processed} إحالة معلقة`);
     return processed;

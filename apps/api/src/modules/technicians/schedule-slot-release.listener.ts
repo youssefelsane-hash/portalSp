@@ -32,6 +32,7 @@ export class ScheduleSlotReleaseListener implements OnModuleInit, OnModuleDestro
         this.logger.error('فشل فحص تحرير مواعيد الطلبات', error instanceof Error ? error.stack : error),
       );
     }, 60_000);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {

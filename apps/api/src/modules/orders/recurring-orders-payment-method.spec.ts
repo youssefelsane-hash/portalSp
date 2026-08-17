@@ -128,11 +128,18 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
-      if (ids.customerProfile) await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
+      if (ids.customerProfile) {
+        await q(
+          `DELETE FROM recurring_order_occurrences
+           WHERE template_id IN (SELECT id FROM recurring_order_templates WHERE customer_id = $1)`,
+          [ids.customerProfile],
+        );
+      }
       if (ids.fakeOrder) {
         await q(`UPDATE recurring_order_templates SET last_generated_order_id = NULL WHERE last_generated_order_id = $1`, [ids.fakeOrder]);
         await q(`DELETE FROM orders WHERE id = $1`, [ids.fakeOrder]);
       }
+      if (ids.customerProfile) await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
       if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       if (ids.customerUser) await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { MatchingService } from './matching.service';
 import { Order } from '../orders/entities/order.entity';
+import { OrderAssignment } from './entities/order-assignment.entity';
 
 // اختبار حي ضد Postgres حقيقي (نفس فلسفة المشروع: مفيش mocks لاستعلامات SQL خام) — بيثبت
 // إصلاح البَقّة الموثّقة: استعلام استبعاد "الفني عنده طلب نشط بالفعل" في findEligibleTechnicians()
@@ -12,6 +13,7 @@ import { Order } from '../orders/entities/order.entity';
 describe('MatchingService — استبعاد طلب soft-deleted من فحص "الفني مشغول" (regression)', () => {
   let dataSource: DataSource;
   let matchingService: MatchingService;
+  let queueAdd: jest.Mock;
 
   const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = {
@@ -26,27 +28,30 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     customerProfile: '',
     address: '',
     blockingOrder: '',
+    recoveredOrder: '',
   };
 
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
+      entities: [Order, OrderAssignment],
     });
     await dataSource.initialize();
 
     // matching.service.ts's findEligibleTechnicians() بتستخدم this.dataSource بس (التبعيات
     // التانية في الـconstructor مش مُستخدمة في الدالة دي) — نفس نمط FakeRepository في
         // auth.service.spec.ts، تركيب يدوي خفيف بدل تشغيل موديول NestJS كامل.
+    queueAdd = jest.fn().mockResolvedValue(undefined);
     matchingService = new MatchingService(
-      {} as never,
-      {} as never,
+      dataSource.getRepository(OrderAssignment),
+      dataSource.getRepository(Order),
       dataSource,
       {} as never,
       {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
+      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never,
+      { emit: jest.fn() } as never,
+      { add: queueAdd } as never,
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -136,6 +141,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     try {
+      if (ids.recoveredOrder) await q(`DELETE FROM order_assignments WHERE order_id = $1`, [ids.recoveredOrder]);
+      if (ids.recoveredOrder) await q(`DELETE FROM orders WHERE id = $1`, [ids.recoveredOrder]);
       if (ids.blockingOrder) await q(`DELETE FROM orders WHERE id = $1`, [ids.blockingOrder]);
       if (ids.technicianProfile) {
         await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.technicianProfile]);
@@ -175,6 +182,33 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
 
     // نرجّع الحالة الأصلية عشان اختبار تاني (لو اتعاد تشغيله) يلاقي نفس السطر الأول.
+    await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
+  });
+
+  it('نداءا recovery متتاليان لنفس الطلب لا ينشئان جولتين بينما العرض الأول ما زال حيًا', async () => {
+    await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
+    const [order] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', now())
+       RETURNING id`,
+      [`REC-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    ids.recoveredOrder = order.id;
+
+    await matchingService.dispatchNextRound(ids.recoveredOrder);
+    await matchingService.dispatchNextRound(ids.recoveredOrder);
+
+    const [state] = await dataSource.query(
+      `SELECT count(*)::integer AS assignment_count,
+              max(assignment_round)::integer AS max_round
+       FROM order_assignments
+       WHERE order_id = $1`,
+      [ids.recoveredOrder],
+    );
+    expect(state).toEqual({ assignment_count: 1, max_round: 1 });
+    expect(queueAdd).toHaveBeenCalledTimes(1);
+
     await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
   });
 });

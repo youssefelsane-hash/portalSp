@@ -46,18 +46,21 @@ export class ChatService {
 
   /** بيتصل بيها لما فني يقبل طلب — idempotent، مش هتعمل تريد لو الخيط موجود قبل كده. */
   async createThreadForOrder(orderId: string, customerId: string, technicianId: string): Promise<ChatThread> {
-    const existing = await this.threads.findOne({ where: { orderId } });
-    if (existing) return existing;
-
-    const thread = this.threads.create({
-      orderId,
-      threadType: ChatThreadType.ORDER_CHAT,
-      customerId,
-      technicianId,
-      isActive: true,
-    });
-    await this.threads.save(thread);
-    this.logger.log(`chat thread اتعمل لطلب ${orderId}`);
+    const inserted = await this.threads
+      .createQueryBuilder()
+      .insert()
+      .values({
+        orderId,
+        threadType: ChatThreadType.ORDER_CHAT,
+        customerId,
+        technicianId,
+        isActive: true,
+      })
+      .orIgnore()
+      .returning(['id'])
+      .execute();
+    const thread = await this.threads.findOneOrFail({ where: { orderId } });
+    if ((inserted.raw as Array<{ id: string }>).length > 0) this.logger.log(`chat thread اتعمل لطلب ${orderId}`);
     return thread;
   }
 
@@ -204,6 +207,7 @@ export class ChatService {
   async scheduleCloseForOrder(orderId: string): Promise<void> {
     const thread = await this.threads.findOne({ where: { orderId } });
     if (!thread) return; // الطلب ممكن يخلص من غير ما فني يقبل أصلاً (نادر) — مفيش خيط يتقفل
+    if (thread.closesAt) return;
     thread.closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await this.threads.save(thread);
   }

@@ -18,6 +18,7 @@ import { DomesticWorkersService } from './domestic-workers.service';
 
 const SWEEP_INTERVAL_MS = 60_000;
 const COMMISSION_PERCENTAGE_FALLBACK = 15;
+const SWEEP_BATCH_SIZE = 25;
 
 /**
  * حجوزات قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — دفع حقيقي عبر WalletsService.doubleEntry
@@ -48,6 +49,7 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     this.timer = setInterval(() => {
       this.sweep().catch((err) => this.logger.error('فشل sweep تجديد حجوزات الخدمات المنزلية', err instanceof Error ? err.stack : err));
     }, SWEEP_INTERVAL_MS);
+    this.timer.unref?.();
   }
 
   onModuleDestroy(): void {
@@ -342,6 +344,8 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
         autoRenew: true,
         currentPeriodEndAt: LessThanOrEqual(now),
       },
+      order: { currentPeriodEndAt: 'ASC' },
+      take: SWEEP_BATCH_SIZE,
     });
     let renewed = 0;
     for (const booking of dueForRenewal) {
@@ -358,6 +362,8 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
         autoRenew: false,
         currentPeriodEndAt: LessThanOrEqual(now),
       },
+      order: { currentPeriodEndAt: 'ASC' },
+      take: SWEEP_BATCH_SIZE,
     });
     let expired = 0;
     for (const booking of dueForExpiry) {

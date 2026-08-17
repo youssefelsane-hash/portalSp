@@ -29,10 +29,10 @@ export class TechnicianReferralRecoveryService implements OnModuleInit, OnModule
   }
 
   async sweep(): Promise<number> {
-    const batchSize = Math.max(
+    const batchSize = Math.min(100, Math.max(
       1,
       Math.floor(await this.settingsService.getNumber('referral.recovery_batch_size', 25)),
-    );
+    ));
     const processed = await this.technicianReferralsService.reconcilePendingBonuses(batchSize);
     if (processed > 0) {
       this.logger.log(`استرداد ترشيحات الفنيين: تمت مراجعة ${processed} طلب`);

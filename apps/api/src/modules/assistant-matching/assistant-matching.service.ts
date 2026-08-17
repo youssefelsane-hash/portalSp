@@ -122,18 +122,29 @@ export class AssistantMatchingService {
     if (lead.assistantLinkStatus === TechnicianAssistantLinkStatus.APPROVED && lead.assistantTechnicianId) {
       const eligible = await this.isCandidateEligible(lead.assistantTechnicianId, order);
       if (eligible) {
-        await this.teamMembers.save(
-          this.teamMembers.create({
+        const inserted = await this.teamMembers
+          .createQueryBuilder()
+          .insert()
+          .values({
             orderId,
             technicianId: lead.assistantTechnicianId,
             roleLabel: 'مساعد',
             memberType: MEMBER_TYPE_ASSISTANT,
             addedByTechnicianId: lead.id,
-          }),
-        );
-        filled += 1;
-        this.logger.log(`مساعد شخصي اتعيّن مباشرة لطلب ${order.orderNumber} (أولوية 1)`);
-        this.events.emit(ASSISTANT_PERSONAL_ASSIGNED_EVENT, new AssistantPersonalAssignedEvent(orderId, lead.assistantTechnicianId));
+          })
+          .orIgnore()
+          .returning(['id'])
+          .execute();
+        if (inserted.identifiers.length > 0) {
+          filled += 1;
+          this.logger.log(`مساعد شخصي اتعيّن مباشرة لطلب ${order.orderNumber} (أولوية 1)`);
+          this.events.emit(
+            ASSISTANT_PERSONAL_ASSIGNED_EVENT,
+            new AssistantPersonalAssignedEvent(orderId, lead.assistantTechnicianId),
+          );
+        } else {
+          filled = await this.filledSlotsCount(orderId);
+        }
       }
     }
 
@@ -215,19 +226,26 @@ export class AssistantMatchingService {
     const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
 
     for (const c of candidates) {
-      const offer = await this.offers.save(
-        this.offers.create({
+      const inserted = await this.offers
+        .createQueryBuilder()
+        .insert()
+        .values({
           orderId: order.id,
           assistantTechnicianId: c.technician_id,
           offerStatus: AssistantOfferStatus.SENT,
           sentAt: now,
           expiresAt,
-        }),
-      );
-      this.events.emit(
-        ASSISTANT_OPPORTUNITY_OFFERED_EVENT,
-        new AssistantOpportunityOfferedEvent(offer.id, order.id, c.technician_id),
-      );
+        })
+        .orIgnore()
+        .returning(['id'])
+        .execute();
+      const offerId = (inserted.raw as Array<{ id: string }>)[0]?.id;
+      if (offerId) {
+        this.events.emit(
+          ASSISTANT_OPPORTUNITY_OFFERED_EVENT,
+          new AssistantOpportunityOfferedEvent(offerId, order.id, c.technician_id),
+        );
+      }
     }
 
     await this.queue.add(
