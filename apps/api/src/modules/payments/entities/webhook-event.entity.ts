@@ -6,6 +6,12 @@ export enum WebhookProcessingStatus {
   PROCESSED = 'processed',
   FAILED = 'failed',
   IGNORED = 'ignored',
+  MANUAL_REVIEW = 'manual_review',
+}
+
+export enum WebhookProcessingStage {
+  FINANCIAL = 'financial',
+  EFFECTS = 'effects',
 }
 
 // سجل delivery خارجي مستقل عن Payment: يحتفظ بالهوية وحالة المعالجة حتى يمكن منع التكرار
@@ -50,6 +56,15 @@ export class WebhookEvent {
 
   @Column({ name: 'retry_count', type: 'smallint', default: 0 })
   retryCount: number;
+
+  @Column({ name: 'processing_stage', type: 'varchar', length: 20, default: WebhookProcessingStage.FINANCIAL })
+  processingStage: WebhookProcessingStage;
+
+  @Column({ name: 'effects_payload', type: 'jsonb', nullable: true })
+  effectsPayload: Record<string, unknown> | null;
+
+  @Column({ name: 'effects_delivered_at', type: 'timestamptz', nullable: true })
+  effectsDeliveredAt: Date | null;
 
   // وقت امتلاك محاولة المعالجة للحدث. منفصل عن processedAt لأن الأخير لا يُكتب إلا لما الحدث
   // يوصل لحالة نهائية، بينما المحاولة قد تتوقف/ينهار الـprocess في منتصفها وتحتاج recovery.

@@ -1,11 +1,16 @@
 import { DataSource } from 'typeorm';
+import { ORDER_STATUS_CHANGED_EVENT } from '../../common/events/order-status-changed.event';
 import { PaymentsService } from './payments.service';
 import { Order, OrderPaymentStatus, OrderStatus } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
-import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
+import {
+  WebhookEvent,
+  WebhookProcessingStage,
+  WebhookProcessingStatus,
+} from './entities/webhook-event.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletsService } from './wallets.service';
@@ -41,6 +46,8 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   let service: PaymentsService;
   let walletsService: WalletsService;
   let cache: RedisCacheService;
+  let failStatusEventForOrderId: string | null = null;
+  let deliveredStatusEvents = 0;
 
   const runId = Date.now().toString(36);
   const ids = {
@@ -217,7 +224,17 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       loyaltyService,
       settingsService,
       { record: async () => undefined } as never,
-      { emit: () => undefined } as never,
+      {
+        emit: (eventName: string, event: { orderId?: string }) => {
+          if (eventName !== ORDER_STATUS_CHANGED_EVENT || !event.orderId) return false;
+          if (event.orderId === failStatusEventForOrderId) {
+            failStatusEventForOrderId = null;
+            throw new Error('simulated post-commit event failure');
+          }
+          deliveredStatusEvents++;
+          return true;
+        },
+      } as never,
       // paymentProviders — cash/wallet مالهمش gatewayTransactionId خالص، فـgoesThroughGateway في
       // refundOrder() بترجع false دايمًا وprovider.refund() مايتنادىش أصلاً هنا؛ supportsRefund=false
       // كافي عشان الفحص يعدّي بأمان.
@@ -375,6 +392,87 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     expect(duplicateEvent.processingStatus).toBe(WebhookProcessingStatus.IGNORED);
   });
 
+  it('فشل event بعد commit يُسترد من checkpoint دائم بلا إعادة التسوية المالية', async () => {
+    const orderId = await insertWorkCompletedOrder(`effects-recovery-${runId}`, 100000, ids.service20);
+    const [payment] = await dataSource.query(
+      `INSERT INTO payments
+         (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key)
+       VALUES ($1,$2,$3,100000,'card','processing',$4)
+       RETURNING id`,
+      [`PAYCSD-eff-${runId}`.slice(0, 24), orderId, ids.customerProfile, `idem-csd-eff-${runId}`],
+    );
+    const externalEventId = `evt-csd-effects-${runId}`;
+    const balanceBefore = await techWalletBalance();
+    deliveredStatusEvents = 0;
+    failStatusEventForOrderId = orderId;
+
+    await expect(
+      service.finalizeGatewayWebhook(
+        externalEventId,
+        'TRANSACTION',
+        'paymob',
+        { scenario: 'post-commit-effect-failure' },
+        true,
+        payment.id,
+        true,
+        null,
+        `gw-csd-effects-${runId}`,
+        PaymentMethod.CARD,
+        100000,
+      ),
+    ).rejects.toThrow('simulated post-commit event failure');
+
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: payment.id })).paymentStatus).toBe(
+      PaymentGatewayStatus.SUCCEEDED,
+    );
+    expect((await dataSource.getRepository(Order).findOneByOrFail({ id: orderId })).orderStatus).toBe(OrderStatus.COMPLETED);
+    const failedEvent = await dataSource.getRepository(WebhookEvent).findOneByOrFail({ provider: 'paymob', externalEventId });
+    expect(failedEvent.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(failedEvent.processingStage).toBe(WebhookProcessingStage.EFFECTS);
+    expect(failedEvent.signatureValid).toBe(true);
+    expect(failedEvent.retryCount).toBe(1);
+    expect(failedEvent.effectsPayload).toEqual(expect.objectContaining({ orderId }));
+    expect(deliveredStatusEvents).toBe(0);
+    expect((await techWalletBalance()) - balanceBefore).toBe(80000);
+    expect(
+      await dataSource.getRepository(WalletTransaction).count({ where: { referenceType: 'order', referenceId: orderId } }),
+    ).toBe(2);
+
+    await dataSource.query(`UPDATE webhook_events SET next_retry_at = now() - interval '1 second' WHERE id = $1`, [failedEvent.id]);
+    expect(
+      await dataSource.query(
+        `SELECT id FROM webhook_events WHERE id = $1 AND processing_status = 'failed' AND next_retry_at <= now()`,
+        [failedEvent.id],
+      ),
+    ).toHaveLength(1);
+    await service.recoverWebhookEvent(failedEvent.id);
+
+    const recoveredEvent = await dataSource.getRepository(WebhookEvent).findOneByOrFail({ provider: 'paymob', externalEventId });
+    expect(recoveredEvent.processingStatus).toBe(WebhookProcessingStatus.PROCESSED);
+    expect(recoveredEvent.effectsDeliveredAt).not.toBeNull();
+    expect(deliveredStatusEvents).toBe(1);
+    expect((await techWalletBalance()) - balanceBefore).toBe(80000);
+    expect(
+      await dataSource.getRepository(WalletTransaction).count({ where: { referenceType: 'order', referenceId: orderId } }),
+    ).toBe(2);
+
+    await service.finalizeGatewayWebhook(
+      externalEventId,
+      'TRANSACTION',
+      'paymob',
+      { scenario: 'post-commit-effect-failure' },
+      true,
+      payment.id,
+      true,
+      null,
+      `gw-csd-effects-${runId}`,
+      PaymentMethod.CARD,
+      100000,
+      true,
+    );
+    expect(deliveredStatusEvents).toBe(1);
+  });
+
   it('طلب مختلط — دفع مسبق إلكتروني (كارت) + دلتا كاش بعد بند إضافي (ADR-0015) — المنصة بتدفع الفرق بس، مش نصيب الفني كامل', async () => {
     // 10000 مقدّم كارت + 2000 دلتا كاش = 12000 إجمالي. عمولة 20% = 2400. أرباح الفني = 9600.
     // الفني ماسك 2000 كاش بس من الـ9600 المفروضة له — المنصة تدفعله الفرق (7600) بس، مش الـ9600 كاملة.
@@ -488,6 +586,89 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
 
     const techBalanceAfterRefund = await techWalletBalance();
     expect(techBalanceAfterRefund).toBe(techBalanceBefore); // رجع لنفس القيمة قبل التسوية بالظبط
+  });
+
+  it('استرداد دفعتين مختلفتين بالتوازي يجمع حالة الطلب مرة واحدة بلا lost update أو عكس مزدوج', async () => {
+    const orderId = await insertWorkCompletedOrder(`refund-two-payments-${runId}`, 100000, ids.service20);
+    const payments = await dataSource.query(
+      `INSERT INTO payments
+         (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status,
+          idempotency_key, completed_at)
+       VALUES
+         ($1,$2,$3,60000,'wallet','succeeded',$4,now()),
+         ($5,$2,$3,40000,'wallet','succeeded',$6,now())
+       RETURNING id, amount_cents`,
+      [
+        `PAYCSD-2A-${runId}`.slice(0, 24),
+        orderId,
+        ids.customerProfile,
+        `idem-csd-2a-${runId}`,
+        `PAYCSD-2B-${runId}`.slice(0, 24),
+        `idem-csd-2b-${runId}`,
+      ],
+    );
+    const techBalanceBefore = await techWalletBalance();
+    const [customerBeforeRow] = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [
+      ids.customerUser,
+    ]);
+    const customerBalanceBefore = customerBeforeRow ? Number(customerBeforeRow.balance_cents) : 0;
+
+    await dataSource.transaction(async (manager) => {
+      const order = await manager.findOneOrFail(Order, { where: { id: orderId } });
+      await (service as unknown as { settleAndComplete: (...args: unknown[]) => Promise<Order> }).settleAndComplete(
+        manager,
+        order,
+        PaymentMethod.WALLET,
+        ids.customerUser,
+        'customer',
+      );
+    });
+    expect((await techWalletBalance()) - techBalanceBefore).toBe(80000);
+
+    const outcomes = await Promise.allSettled([
+      service.refundOrder(ids.customerUser, orderId, 'استرداد الدفعة أ', undefined, undefined, payments[0].id),
+      service.refundOrder(ids.customerUser, orderId, 'استرداد الدفعة ب', undefined, undefined, payments[1].id),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(2);
+
+    const persistedPayments = await dataSource.getRepository(Payment).find({ where: { orderId } });
+    expect(persistedPayments).toHaveLength(2);
+    expect(persistedPayments.every((payment) => payment.paymentStatus === PaymentGatewayStatus.REFUNDED)).toBe(true);
+    const refunds = await dataSource.getRepository(Refund).find({ where: { orderId } });
+    expect(refunds).toHaveLength(2);
+    expect(refunds.reduce((sum, refund) => sum + refund.amountCents, 0)).toBe(100000);
+
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(order.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
+    expect(order.orderStatus).toBe(OrderStatus.REFUNDED);
+    expect(
+      await dataSource.getRepository(OrderStatusHistory).count({ where: { orderId, newStatus: OrderStatus.REFUNDED } }),
+    ).toBe(1);
+
+    const refundTxs = await dataSource.query(
+      `SELECT wt.reference_id, wt.direction, wt.amount_cents, w.owner_type
+       FROM wallet_transactions wt
+       JOIN wallets w ON w.id = wt.wallet_id
+       WHERE wt.reference_type = 'refund'
+         AND wt.reference_id = ANY($1::uuid[])`,
+      [refunds.map((refund) => refund.id)],
+    );
+    expect(refundTxs).toHaveLength(8); // two balanced entries for earning reversal + two for customer credit per refund
+    expect(
+      refundTxs
+        .filter((tx: { owner_type: string; direction: string }) => tx.owner_type === 'technician' && tx.direction === 'debit')
+        .reduce((sum: number, tx: { amount_cents: number }) => sum + Number(tx.amount_cents), 0),
+    ).toBe(80000);
+    expect(
+      refundTxs
+        .filter((tx: { owner_type: string; direction: string }) => tx.owner_type === 'customer' && tx.direction === 'credit')
+        .reduce((sum: number, tx: { amount_cents: number }) => sum + Number(tx.amount_cents), 0),
+    ).toBe(100000);
+    expect(await techWalletBalance()).toBe(techBalanceBefore);
+    const [customerAfterRow] = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [
+      ids.customerUser,
+    ]);
+    expect(Number(customerAfterRow.balance_cents) - customerBalanceBefore).toBe(100000);
   });
 
   // §20 بند 6 — تغيير السعر النهائي لأقل (المثال أ من طلب المالك): مفيش مسار منفصل مطلوب، إعادة

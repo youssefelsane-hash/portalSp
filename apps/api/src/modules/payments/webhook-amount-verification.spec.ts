@@ -178,8 +178,34 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
     expect(payment?.paymentStatus).toBe(PaymentGatewayStatus.PENDING);
 
     const events = await dataSource.getRepository(WebhookEvent).find({ where: { externalEventId: `evt-mismatch-${runId}` } });
-    expect(events[0]?.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(events[0]?.processingStatus).toBe(WebhookProcessingStatus.MANUAL_REVIEW);
     expect(events[0]?.errorMessage).toContain('مايطابقش');
+  });
+
+  it('PROCESSING عالق عند آخر محاولة ينتقل صراحةً إلى manual_review بدل التعليق للأبد', async () => {
+    const externalEventId = `evt-exhausted-${runId}`;
+    const [insertedEvent] = await dataSource.query(
+      `INSERT INTO webhook_events
+         (provider, event_type, external_event_id, payload, signature_valid, processing_status,
+          retry_count, processing_started_at)
+       VALUES ('paymob','TRANSACTION',$1,'{}'::jsonb,true,'processing',5,now() - interval '10 minutes')
+       RETURNING id`,
+      [externalEventId],
+    );
+
+    await service.recoverWebhookEvent(insertedEvent.id);
+
+    const event = await dataSource.getRepository(WebhookEvent).findOneByOrFail({
+      provider: 'paymob',
+      externalEventId,
+    });
+    expect(event.processingStatus).toBe(WebhookProcessingStatus.MANUAL_REVIEW);
+    expect(event.processingStartedAt).toBeNull();
+    expect(event.nextRetryAt).toBeNull();
+    expect(event.errorMessage).toContain('exhausted retry limit');
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: ids.payment })).paymentStatus).toBe(
+      PaymentGatewayStatus.PENDING,
+    );
   });
 
   it('مبلغ الـwebhook مطابق تمامًا: الفحص بيعدّي (مايترفضش بسبب المبلغ)', async () => {

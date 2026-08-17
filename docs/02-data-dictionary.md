@@ -795,10 +795,14 @@ warranty.default_days               = 14
 ### 11.3 `webhook_events` (كل رد من بوابة الدفع يتسجل)
 
 ```sql
-id, provider VARCHAR(40), event_type VARCHAR(80), external_event_id VARCHAR(120) UNIQUE,
+id, provider VARCHAR(40), event_type VARCHAR(80), external_event_id VARCHAR(120),
 payload JSONB, signature_valid BOOLEAN,
-processing_status ENUM,               -- received | processing | processed | failed | ignored
-processed_at TIMESTAMPTZ, error_message TEXT, retry_count SMALLINT
+processing_status ENUM,               -- received | processing | processed | failed | ignored | manual_review
+processing_stage VARCHAR(20),          -- financial | effects
+effects_payload JSONB NULL, effects_delivered_at TIMESTAMPTZ NULL,
+processed_at TIMESTAMPTZ, processing_started_at TIMESTAMPTZ,
+next_retry_at TIMESTAMPTZ, error_message TEXT, retry_count SMALLINT,
+UNIQUE(provider, external_event_id)
 ```
 
 ### 11.4 `feature_flags`

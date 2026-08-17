@@ -25,10 +25,10 @@ The gate is read-only and exits non-zero when it finds a violation.
 | D — complaint double resolve | `complaint-decision-concurrency.spec.ts` | One terminal complaint decision and at most one compensation double entry. |
 | E — referral duplicate qualification | `referral-integrity.spec.ts`, `technician-referral-financial-integrity.spec.ts` | Unique source/milestone records and one wallet or promo effect. |
 | F — technician double acquisition | `matching-accept-concurrency.spec.ts` | One active assignment for one technician, enforced again by a partial unique index. |
-| G — webhook crash | `webhook-amount-verification.spec.ts`, `webhook-recovery.service.spec.ts` | Failed/stale event stays recoverable; retry processes one provider-scoped event once. |
+| G — webhook crash | `webhook-amount-verification.spec.ts`, `webhook-recovery.service.spec.ts`, `cash-settlement-direction.spec.ts` | Failed/stale event stays recoverable; exhausted stale work becomes `MANUAL_REVIEW`; committed settlement checkpoints pending effects so recovery delivers them without settling twice. |
 | H — wallet refund crash | `refund-transaction-safety.spec.ts` | Refund remains `PROCESSING`; it cannot appear `COMPLETED` before the wallet credit commits. |
 | I — wallet adjustment retry | `wallet-manual-adjustment.spec.ts` | One source row and one double entry for a repeated idempotency key. |
-| J — multiple partial refunds | `refund-transaction-safety.spec.ts` | Both legitimate partial rows persist and reserved/completed sum never exceeds the payment. |
+| J — multiple partial refunds | `refund-transaction-safety.spec.ts`, `cash-settlement-direction.spec.ts` | Legitimate partial rows persist and never exceed the payment; concurrent refunds of different payments serialize final order aggregation without duplicate earning reversal. |
 
 ## Durable Effects
 
@@ -38,6 +38,10 @@ Critical truth is stored before or with its effect:
   compensation, and referral bonuses commit source state with their local
   financial effect or retain a recoverable non-terminal state.
 - Webhooks and standard referrals have bounded database recovery sweeps.
+- A base-order payment webhook records its post-commit effects payload and
+  stage in the financial transaction. Failed delivery resumes from that stage
+  without rerunning settlement, and exhausted stale claims are terminalized as
+  `MANUAL_REVIEW` for operator action.
 - Prepaid settlement and schedule release now have bounded database sweeps in
   addition to immediate `EventEmitter` listeners.
 - Matching round jobs use stable job IDs after enqueue. If initial dispatch is
@@ -67,13 +71,19 @@ are translated from PostgreSQL `23P01`; assignment races are serialized before
 the unique constraint is reached. The shared error envelope and response DTOs
 remain compatible with current clients, so no UX redesign is introduced.
 
+`RefundType.FULL` is a per-row classification: the refund row must equal the
+payment's original amount. A 20,000 refund after an earlier 10,000 refund on a
+30,000 payment is `PARTIAL`, although it clears the balance and moves the
+payment to `REFUNDED`.
+
 ## Database And Performance
 
 Migrations were preflighted against existing TEST data. The migration runner
-verifies immutable SHA-256 checksums, and migration `0118` is recorded with a
-matching checksum. Locks are scoped to order, technician, payout, wallet, or
-business-source rows. Recovery scans use indexed predicates and batches of 25;
-there are no global locks, unbounded retries, or per-row retry queues.
+verifies immutable SHA-256 checksums; migrations through `0119` are recorded
+with matching checksums. Locks are scoped to order, technician, payout, wallet,
+or business-source rows. Refund completion rereads aggregate payment state
+while holding the order lock. Recovery scans use indexed predicates and
+batches of 25; there are no global locks or unbounded retries.
 
 The post-suite invariant gate verifies:
 
@@ -90,8 +100,9 @@ The post-suite invariant gate verifies:
   reconciliation/manual review; the provider contract cannot safely infer an
   external refund result without a provider reference lookup.
 - A complete transactional outbox for every notification and workflow event is
-  intentionally deferred to Script 2. Script 1 critical financial truth is
-  atomic or recoverable, and best-effort delivery does not mutate that truth.
+  intentionally deferred to Script 2. The payment-confirmation webhook effects
+  covered here are durably resumable; unrelated best-effort delivery remains
+  outside that checkpoint and does not mutate financial truth.
 - Admin frontend dependencies are absent in this workspace, so its full Next.js
   build cannot run here. API build/typecheck and changed backend tests are the
   authoritative verification for this phase.
@@ -118,10 +129,13 @@ gate after fixture cleanup.
 
 **Temporary data cleaned:** Yes.
 
-**Final automated verification:** 17 suites / 81 tests passed with
-`--detectOpenHandles`; API build passed; migrations `0001`-`0118` and all nine
-post-suite invariants passed. Lint was unavailable because no `eslint`
-executable is installed in this workspace.
+**Final automated verification:** 26 suites / 132 tests passed with
+`--detectOpenHandles` and exited normally; API build/typecheck passed;
+migrations `0001`-`0119` had matching checksums; and all nine post-suite
+invariants passed. The reproduced Jest hang came from a legacy suite whose
+failed cleanup skipped `DataSource.destroy()`; fixture isolation plus `finally`
+cleanup removed the open PostgreSQL `TCPWRAP`. Lint was unavailable because no
+`eslint` executable is installed in this workspace.
 
 **Status:** `VERIFIED DONE`, subject to the explicit external-provider and
 frontend dependency limitations above.

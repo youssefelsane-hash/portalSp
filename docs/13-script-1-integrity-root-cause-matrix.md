@@ -432,3 +432,33 @@ rather than trusting HTTP status or mocks.
   the API build passed, all migrations through `0118` had matching checksums,
   and the nine invariant queries passed after fixture cleanup. Repository lint
   could not start because the workspace does not install an `eslint` binary.
+
+### Pull-request review hardening — 2026-08-17
+
+- Stale webhook rows that have already exhausted their retry budget now move
+  from `PROCESSING` to the explicit terminal `MANUAL_REVIEW` state. Recovery
+  clears the abandoned ownership marker instead of repeatedly selecting an
+  event that can no longer be claimed.
+- Base-order payment confirmation stores an `effects` checkpoint and its
+  replay payload in the webhook row inside the same transaction as financial
+  settlement. If post-commit delivery fails, recovery claims only the effects
+  stage; it never repeats payment settlement, earning creation, or ledger
+  writes. A delivered timestamp makes concurrent/repeated recovery idempotent.
+- Refund Phase C now locks and rereads the order before recomputing aggregate
+  payment state. Concurrent full refunds against different payments therefore
+  cannot lose the final `REFUNDED` order transition or duplicate the earning
+  reversal.
+- `RefundType.FULL` describes one refund row whose amount equals the payment's
+  original amount. A later refund that merely clears the remaining balance is
+  `PARTIAL`; payment and order status still become `REFUNDED` when cumulative
+  completed refunds equal the payment/order total.
+- Migration `0119_webhook_resumable_effects.sql` adds the manual-review enum
+  value and durable webhook effects checkpoint. PostgreSQL regressions cover
+  exhausted stale recovery, failed post-commit delivery, two-payment refund
+  concurrency, and the refund-type rule.
+- The final branch-wide Script 1 matrix passed 26 suites and 132 tests under
+  `--detectOpenHandles`. Two older order suites were updated to release their
+  Phase 7 technician/schedule fixtures after each case and to destroy Redis and
+  PostgreSQL in `finally`; this removed the reproduced `TCPWRAP` Jest hang.
+- The migration runner verified matching checksums through `0119`, and all nine
+  read-only Script 1 financial invariant queries passed after test cleanup.

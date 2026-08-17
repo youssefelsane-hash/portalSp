@@ -310,24 +310,35 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
     );
   });
 
+  afterEach(async () => {
+    // Phase 7 permits only one active order per technician. Cases in this suite are independent,
+    // so release the shared technician resource before the next fixture is inserted.
+    if (dataSource?.isInitialized) {
+      await dataSource.query(`UPDATE orders SET technician_id = NULL WHERE order_number LIKE $1`, [`TESTFV-%`]);
+    }
+  });
+
   afterAll(async () => {
-    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM technician_schedule_slots WHERE technician_id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
-    await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
-    await q(`DELETE FROM wallet_transactions WHERE reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTFV-%`]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.otherTechUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    cache.onModuleDestroy();
-    await dataSource.destroy();
+    try {
+      const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM technician_schedule_slots WHERE technician_id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
+      await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM wallet_transactions WHERE reference_type = 'refund' AND reference_id IN (SELECT id FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TESTFV-%`]);
+      await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTFV-%`]);
+      await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTFV-%`]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id IN ($1, $2)`, [ids.techProfile, ids.otherTechProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.otherTechUser]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+    } finally {
+      cache?.onModuleDestroy();
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('no-show من TECHNICIAN_ARRIVED → DISPUTED + شكوى NO_SHOW، وresolve(reschedule) يحجز سلوت جديد حقيقي فعليًا (docs/08 §25.2)', async () => {

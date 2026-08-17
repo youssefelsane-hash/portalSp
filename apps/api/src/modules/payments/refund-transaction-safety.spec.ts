@@ -3,7 +3,7 @@ import { PaymentsService } from './payments.service';
 import { Order, OrderStatus, OrderPaymentStatus } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
-import { Refund, RefundStatus } from './entities/refund.entity';
+import { Refund, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import type { PaymentProvider, RefundResult } from './gateways/payment-provider.interface';
@@ -346,5 +346,22 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       [concurrentPaymentId],
     );
     expect(sum.amount_cents).toBe(20000);
+  });
+
+  it('RefundType يصف الصف نفسه: 10000 ثم 20000 من دفعة 30000 كلاهما PARTIAL رغم إغلاق المتبقي', async () => {
+    const { orderId, paymentId } = await insertPaidOrderAndPayment(`type-${runId}`, `gw-type-${runId}`);
+    service = buildService(makeFakeProvider('succeed'));
+
+    const first = await service.refundOrder(ids.customerUser, orderId, 'جزء أول', 10000, undefined, paymentId);
+    const second = await service.refundOrder(ids.customerUser, orderId, 'إغلاق المتبقي', 20000, undefined, paymentId);
+
+    expect(first.refundType).toBe(RefundType.PARTIAL);
+    expect(second.refundType).toBe(RefundType.PARTIAL);
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: paymentId })).paymentStatus).toBe(
+      PaymentGatewayStatus.REFUNDED,
+    );
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(order.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
+    expect(order.orderStatus).toBe(OrderStatus.REFUNDED);
   });
 });

@@ -27,7 +27,11 @@ import { computeDispatchDeferredUntil } from '../orders/deferred-dispatch.util';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
-import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
+import {
+  WebhookEvent,
+  WebhookProcessingStage,
+  WebhookProcessingStatus,
+} from './entities/webhook-event.entity';
 import { WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletAdjustment } from './entities/wallet-adjustment.entity';
@@ -40,6 +44,15 @@ const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.
 const PREPAY_METHODS = new Set([PaymentMethod.CARD, PaymentMethod.INSTAPAY]);
 const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
 const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
+
+type PaymentConfirmedEffects = {
+  dispatchStarted: boolean;
+  orderId: string;
+  orderNumber: string;
+  customerId: string;
+  technicianId: string | null;
+  serviceId: string;
+};
 
 @Injectable()
 export class PaymentsService {
@@ -815,14 +828,7 @@ export class PaymentsService {
   }
 
   /** بعد نجاح handlePaymentConfirmed — بره أي transaction عمداً (نفس فلسفة باقي أحداث الموديول). */
-  private async emitPaymentConfirmedEvents(info: {
-    dispatchStarted: boolean;
-    orderId: string;
-    orderNumber: string;
-    customerId: string;
-    technicianId: string | null;
-    serviceId: string;
-  }): Promise<void> {
+  private async emitPaymentConfirmedEvents(info: PaymentConfirmedEffects): Promise<void> {
     if (info.dispatchStarted) {
       // دفع قبل التوزيع اتأكد — التوزيع يبدأ دلوقتي بالظبط زي OrdersService.create() العادية
       // (نفس منطق تأجيل البث لطلب مجدول "بعيد"، ADR-0009).
@@ -863,6 +869,18 @@ export class PaymentsService {
     }
   }
 
+  /** Delivers only the durable post-commit stage; it never re-enters financial settlement. */
+  private async deliverPaymentConfirmedEffects(webhookEvent: WebhookEvent): Promise<void> {
+    const info = webhookEvent.effectsPayload as PaymentConfirmedEffects | null;
+    if (webhookEvent.processingStage !== WebhookProcessingStage.EFFECTS || !info?.orderId) {
+      throw new Error('webhook effects checkpoint is missing or invalid');
+    }
+
+    await this.emitPaymentConfirmedEvents(info);
+    webhookEvent.effectsDeliveredAt = new Date();
+    await this.markWebhookProcessed(webhookEvent);
+  }
+
   /**
    * Claim ذري للـ webhook: الـ INSERT/UPDATE نفسه هو ضمان التزامن، وليس find ثم insert. الحدث
    * النهائي (processed/ignored) لا يُعاد فتحه، بينما received/failed فقط يمكن امتلاكهم لمحاولة
@@ -886,6 +904,24 @@ export class PaymentsService {
     );
 
     const eventId = await this.dataSource.transaction(async (manager) => {
+      if (recoverStaleProcessing) {
+        const exhausted = (await manager.query(
+          `UPDATE webhook_events
+           SET processing_status = 'manual_review',
+               processing_started_at = NULL,
+               next_retry_at = NULL,
+               error_message = COALESCE(error_message, 'stale processing exhausted retry limit')
+           WHERE provider = $1
+             AND external_event_id = $2
+             AND processing_status = 'processing'
+             AND processing_started_at < now() - ($4 * interval '1 minute')
+             AND retry_count >= $3
+           RETURNING id`,
+          [provider, externalEventId, maxAttempts, staleMinutes],
+        )) as Array<{ id: string }>;
+        if (exhausted.length > 0) return null;
+      }
+
       const rows = (await manager.query(
         `INSERT INTO webhook_events
           (provider, event_type, external_event_id, payload, signature_valid, processing_status, retry_count, processing_started_at)
@@ -913,6 +949,97 @@ export class PaymentsService {
 
     if (!eventId) return null;
     return this.webhookEvents.findOne({ where: { id: eventId } });
+  }
+
+  /** Claims a persisted effects checkpoint directly; no provider payload is re-ingested. */
+  private async claimWebhookEffects(webhookEventId: string): Promise<WebhookEvent | null> {
+    const maxAttempts = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_recovery_max_attempts', WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK),
+    );
+    const staleMinutes = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_processing_stale_minutes', 5),
+    );
+
+    const eventId = await this.dataSource.transaction(async (manager) => {
+      const event = await manager
+        .createQueryBuilder(WebhookEvent, 'event')
+        .setLock('pessimistic_write')
+        .where('event.id = :webhookEventId', { webhookEventId })
+        .getOne();
+      if (!event || event.processingStage !== WebhookProcessingStage.EFFECTS) return null;
+
+      const now = new Date();
+      const staleBefore = new Date(now.getTime() - staleMinutes * 60 * 1000);
+      const staleProcessing =
+        event.processingStatus === WebhookProcessingStatus.PROCESSING &&
+        event.processingStartedAt !== null &&
+        event.processingStartedAt < staleBefore;
+
+      if (staleProcessing && event.retryCount >= maxAttempts) {
+        event.processingStatus = WebhookProcessingStatus.MANUAL_REVIEW;
+        event.processingStartedAt = null;
+        event.nextRetryAt = null;
+        event.errorMessage ||= 'stale effects delivery exhausted retry limit';
+        await manager.save(event);
+        return null;
+      }
+
+      const retryableFailure =
+        event.processingStatus === WebhookProcessingStatus.FAILED &&
+        event.nextRetryAt !== null &&
+        event.nextRetryAt <= now;
+      if ((!retryableFailure && !staleProcessing) || event.retryCount >= maxAttempts) return null;
+
+      event.processingStatus = WebhookProcessingStatus.PROCESSING;
+      event.retryCount += 1;
+      event.processingStartedAt = now;
+      event.nextRetryAt = null;
+      event.processedAt = null;
+      event.errorMessage = null;
+      await manager.save(event);
+      return event.id;
+    });
+
+    if (!eventId) return null;
+    return this.webhookEvents.findOne({ where: { id: eventId } });
+  }
+
+  /** Recovery must terminalize an exhausted stale owner before provider parsing can short-circuit. */
+  private async terminalizeExhaustedStaleWebhookEvent(webhookEventId: string): Promise<boolean> {
+    const maxAttempts = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_recovery_max_attempts', WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK),
+    );
+    const staleMinutes = Math.max(
+      1,
+      await this.settingsService.getNumber('payments.webhook_processing_stale_minutes', 5),
+    );
+
+    return this.dataSource.transaction(async (manager) => {
+      const event = await manager
+        .createQueryBuilder(WebhookEvent, 'event')
+        .setLock('pessimistic_write')
+        .where('event.id = :webhookEventId', { webhookEventId })
+        .getOne();
+      if (
+        !event ||
+        event.processingStatus !== WebhookProcessingStatus.PROCESSING ||
+        event.processingStartedAt === null ||
+        event.processingStartedAt >= new Date(Date.now() - staleMinutes * 60 * 1000) ||
+        event.retryCount < maxAttempts
+      ) {
+        return false;
+      }
+
+      event.processingStatus = WebhookProcessingStatus.MANUAL_REVIEW;
+      event.processingStartedAt = null;
+      event.nextRetryAt = null;
+      event.errorMessage ||= 'stale processing exhausted retry limit';
+      await manager.save(event);
+      return true;
+    });
   }
 
   private async markWebhookIgnored(webhookEvent: WebhookEvent, message: string): Promise<void> {
@@ -948,7 +1075,9 @@ export class PaymentsService {
     const canRetry = retryable && webhookEvent.retryCount < maxAttempts;
     const delaySeconds = baseDelaySeconds * 2 ** Math.max(0, webhookEvent.retryCount - 1);
 
-    webhookEvent.processingStatus = WebhookProcessingStatus.FAILED;
+    webhookEvent.processingStatus = canRetry
+      ? WebhookProcessingStatus.FAILED
+      : WebhookProcessingStatus.MANUAL_REVIEW;
     webhookEvent.errorMessage = message;
     webhookEvent.processingStartedAt = null;
     webhookEvent.nextRetryAt = canRetry ? new Date(Date.now() + delaySeconds * 1000) : null;
@@ -996,6 +1125,17 @@ export class PaymentsService {
       // processed/ignored نهائي، أو محاولة أخرى تملكت الحدث الآن. في الحالتين الـ provider يأخذ
       // 200 بلا أثر مالي ثانٍ؛ الفحص الدوري يعالج processing العالق لو انهار مالك المحاولة.
       this.logger.log(`webhook مكرر أو قيد المعالجة: ${provider}:${externalEventId}`);
+      return;
+    }
+
+    if (webhookEvent.processingStage === WebhookProcessingStage.EFFECTS) {
+      try {
+        await this.deliverPaymentConfirmedEffects(webhookEvent);
+      } catch (err) {
+        await this.markWebhookFailed(webhookEvent, err instanceof Error ? err.message : String(err));
+        this.logger.error(`فشل استرداد آثار webhook ${externalEventId}`, err instanceof Error ? err.stack : err);
+        throw err;
+      }
       return;
     }
 
@@ -1067,7 +1207,7 @@ export class PaymentsService {
           // بتفرّق بين "الطلب PENDING_PAYMENT، التوزيع لسه ما بدأش" و"الطلب WORK_COMPLETED
           // العادي بعد الشغل" — نفس مسار confirmInstaPayPayment بالظبط (ADR-0013 §4).
           const { dispatchStarted } = await this.handlePaymentConfirmed(manager, lockedOrder, paymentMethod, customerProfile.userId, 'customer');
-          return {
+          const effects: PaymentConfirmedEffects = {
             dispatchStarted,
             orderId: lockedOrder.id,
             orderNumber: lockedOrder.orderNumber,
@@ -1075,9 +1215,20 @@ export class PaymentsService {
             technicianId: lockedOrder.technicianId,
             serviceId: lockedOrder.serviceId,
           };
+          await manager.query(
+            `UPDATE webhook_events
+             SET processing_stage = $2, effects_payload = $3::jsonb, effects_delivered_at = NULL
+             WHERE id = $1`,
+            [webhookEvent.id, WebhookProcessingStage.EFFECTS, JSON.stringify(effects)],
+          );
+          return effects;
         });
 
-        await this.emitPaymentConfirmedEvents(dispatchInfo);
+        webhookEvent.processingStage = WebhookProcessingStage.EFFECTS;
+        webhookEvent.effectsPayload = dispatchInfo;
+        webhookEvent.effectsDeliveredAt = null;
+        await this.deliverPaymentConfirmedEffects(webhookEvent);
+        return;
       } else {
         payment.gatewayTransactionId = gatewayTransactionId;
         payment.paymentStatus = PaymentGatewayStatus.FAILED;
@@ -1166,7 +1317,23 @@ export class PaymentsService {
    */
   async recoverWebhookEvent(webhookEventId: string): Promise<void> {
     const event = await this.webhookEvents.findOne({ where: { id: webhookEventId } });
-    if (!event || !event.signatureValid) return;
+    if (!event) return;
+    if (await this.terminalizeExhaustedStaleWebhookEvent(event.id)) return;
+    if (!event.signatureValid) return;
+
+    // Financial truth was already committed with this checkpoint. Claim and replay only the
+    // durable effects payload; provider parsing and settlement must not run a second time.
+    if (event.processingStage === WebhookProcessingStage.EFFECTS) {
+      const claimed = await this.claimWebhookEffects(event.id);
+      if (!claimed) return;
+      try {
+        await this.deliverPaymentConfirmedEffects(claimed);
+      } catch (err) {
+        await this.markWebhookFailed(claimed, err instanceof Error ? err.message : String(err));
+        throw err;
+      }
+      return;
+    }
 
     const { __baytak_delivery_hmac: persistedHmac, ...rawPayload } = event.payload as Record<string, unknown>;
     const hmac = typeof persistedHmac === 'string' ? persistedHmac : undefined;
@@ -1486,7 +1653,10 @@ export class PaymentsService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      const isFull = amountCents === remainingAmountCents;
+      const clearsRemainingPayment = amountCents === remainingAmountCents;
+      // RefundType describes this row, not the cumulative payment result. A 20,000 row after an
+      // earlier 10,000 refund is still PARTIAL for an original 30,000 payment.
+      const refundRowIsFull = amountCents === payment.amountCents;
 
       // "كامل" هنا يعني كامل *الدفعـة*، وليس بالضرورة كامل الطلب. الطلب قد يتكوّن من
       // دفعة الخدمة الأساسية ودفعة/دفعات عمل إضافي منفصلة. لا نغلقه REFUNDED قبل اكتمال
@@ -1537,7 +1707,7 @@ export class PaymentsService {
         paymentId: payment.id,
         orderId: order.id,
         amountCents,
-        refundType: isFull ? RefundType.FULL : RefundType.PARTIAL,
+        refundType: refundRowIsFull ? RefundType.FULL : RefundType.PARTIAL,
         reasonNotes,
         // مفيش استرداد حقيقي مدعوم لطريقة الدفع دي (كاش/محفظة/InstaPay/فوري) — نفس الإصلاح
         // الصادق من قبل: wallet credit فعلي بدل رقم "مكتمل" كاذب من غير حركة فلوس. يظل الصف
@@ -1553,10 +1723,10 @@ export class PaymentsService {
       });
       await manager.save(refund);
 
-      return { order, payment, isFull, amountCents, goesThroughGateway, provider, refund };
+      return { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund };
     });
 
-    const { order, payment, isFull, amountCents, goesThroughGateway, provider, refund } = prepared;
+    const { payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
 
     // المرحلة (ب) — برّه أي DB transaction تمامًا. صف الـrefund اتسجّل بالفعل PROCESSING فوق
     // قبل النداء ده، فحتى لو الـprocess وقع دلوقتي بعد نجاح فعلي عند البوابة، فحص existingRefund
@@ -1577,20 +1747,40 @@ export class PaymentsService {
 
     // المرحلة (ج) — DB transaction قصيرة منفصلة، بعد ما نتيجة البوابة بقت معروفة فعليًا.
     const finalRefund = await this.dataSource.transaction(async (manager) => {
+      // Different payments of one order can finish their external calls concurrently. Serialize
+      // the durable aggregation here, then reread every row used for status and ledger decisions.
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOneOrFail();
+      const lockedRefund = await manager
+        .createQueryBuilder(Refund, 'r')
+        .setLock('pessimistic_write')
+        .where('r.id = :refundId', { refundId: refund.id })
+        .getOneOrFail();
+      const lockedPayment = await manager
+        .createQueryBuilder(Payment, 'p')
+        .setLock('pessimistic_write')
+        .where('p.id = :paymentId', { paymentId: payment.id })
+        .getOneOrFail();
+
       if (goesThroughGateway && !providerSucceeded) {
         // رد نهائي من البوابة نفسها (رفض صريح، مش خطأ شبكة) — قرار نهائي حسب تبسيط Phase 1،
         // بيتسجّل rejected بلا أي حركة فلوس (مفيش استرداد حقيقي حصل، فمفيش داعي لعكس أي شيء).
-        refund.refundStatus = RefundStatus.REJECTED;
-        await manager.save(refund);
-        return refund;
+        lockedRefund.refundStatus = RefundStatus.REJECTED;
+        await manager.save(lockedRefund);
+        return lockedRefund;
       }
 
       // عكس أرباح الفني يُوزَّع على إجمالي الطلب، لا على الدفعـة المحددة: دفعة العمل الإضافي
       // قد تكون أصغر من قيمة الطلب، والقسمة على payment.amountCents كانت تعكس أرباح الطلب كله
       // عند استرداد تلك الدفعة وحدها.
-      const technicianReversalCents = Math.round((order.technicianEarningCents * amountCents) / order.totalAmountCents);
-      if (technicianReversalCents > 0 && order.technicianId) {
-        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
+      const technicianReversalCents = Math.round(
+        (lockedOrder.technicianEarningCents * amountCents) / lockedOrder.totalAmountCents,
+      );
+      if (technicianReversalCents > 0 && lockedOrder.technicianId) {
+        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(lockedOrder.technicianId);
         const technicianWallet = await this.walletsService.getOrCreateWallet(
           technicianProfile.userId,
           WalletOwnerType.TECHNICIAN,
@@ -1604,8 +1794,8 @@ export class PaymentsService {
             amountCents: technicianReversalCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
-            referenceId: refund.id,
-            descriptionAr: `استرجاع أرباح طلب ${order.orderNumber}`,
+            referenceId: lockedRefund.id,
+            descriptionAr: `استرجاع أرباح طلب ${lockedOrder.orderNumber}`,
             allowNegativeBalance: true, // ممكن الفني يكون صرف الفلوس دي بالفعل — الدين ده هيتسوّى في الصرف الجاي
           },
           manager,
@@ -1615,8 +1805,8 @@ export class PaymentsService {
       // wallet credit فعلي للعميل بس لو مفيش استرداد حقيقي حصل عند البوابة (WALLET_CREDIT fallback).
       // لو استرداد حقيقي نجح عند البوابة (ORIGINAL_METHOD)، العميل بياخد فلوسه فعليًا في كارته/محفظته
       // الخارجية مباشرة من البوابة — credit تاني هنا هيبقى استرداد مزدوج (بَقّة مالية، مش سلوك مقصود).
-      if (refund.refundMethod === RefundMethod.WALLET_CREDIT) {
-        const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+      if (lockedRefund.refundMethod === RefundMethod.WALLET_CREDIT) {
+        const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(lockedOrder.customerId);
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
           WalletOwnerType.CUSTOMER,
@@ -1630,8 +1820,8 @@ export class PaymentsService {
             amountCents,
             transactionType: WalletTxType.REFUND,
             referenceType: 'refund',
-            referenceId: refund.id,
-            descriptionAr: `استرجاع طلب ${order.orderNumber}`,
+            referenceId: lockedRefund.id,
+            descriptionAr: `استرجاع طلب ${lockedOrder.orderNumber}`,
             allowNegativeBalance: true,
           },
           manager,
@@ -1640,17 +1830,19 @@ export class PaymentsService {
 
       // لا نعلن اكتمال الاسترداد إلا بعد نجاح كل أثر مالي محلي في نفس الـtransaction. أي استثناء
       // قبل هذا السطر يرجع transaction بالكامل ويترك صف PROCESSING الأصلي للمراجعة/reconciliation.
-      refund.refundStatus = RefundStatus.COMPLETED;
-      refund.providerRefundId = goesThroughGateway ? providerRefundId : null;
-      refund.completedAt = new Date();
-      await manager.save(refund);
+      lockedRefund.refundStatus = RefundStatus.COMPLETED;
+      lockedRefund.providerRefundId = goesThroughGateway ? providerRefundId : null;
+      lockedRefund.completedAt = new Date();
+      await manager.save(lockedRefund);
 
-      payment.paymentStatus = isFull ? PaymentGatewayStatus.REFUNDED : PaymentGatewayStatus.PARTIALLY_REFUNDED;
-      await manager.save(payment);
+      lockedPayment.paymentStatus = clearsRemainingPayment
+        ? PaymentGatewayStatus.REFUNDED
+        : PaymentGatewayStatus.PARTIALLY_REFUNDED;
+      await manager.save(lockedPayment);
 
       const financialPayments = await manager.find(Payment, {
         where: {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           paymentStatus: In([
             PaymentGatewayStatus.SUCCEEDED,
             PaymentGatewayStatus.PARTIALLY_REFUNDED,
@@ -1660,7 +1852,7 @@ export class PaymentsService {
         select: ['id', 'amountCents'],
       });
       const completedRefunds = await manager.find(Refund, {
-        where: { orderId: order.id, refundStatus: RefundStatus.COMPLETED },
+        where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
         select: ['paymentId', 'amountCents'],
       });
       const completedByPayment = new Map<string, number>();
@@ -1677,29 +1869,31 @@ export class PaymentsService {
         );
 
       if (orderFullyRefunded) {
-        const previousStatus = order.orderStatus;
-        order.orderStatus = OrderStatus.REFUNDED;
-        order.paymentStatus = OrderPaymentStatus.REFUNDED;
-        await manager.save(order);
-        await manager.save(
-          manager.create(OrderStatusHistory, {
-            orderId: order.id,
-            previousStatus,
-            newStatus: OrderStatus.REFUNDED,
-            changedByUserId: performedByUserId,
-            changedByRole: 'admin',
-            changeSource: OrderChangeSource.ADMIN,
-            reason: reasonNotes,
-          }),
-        );
+        if (lockedOrder.orderStatus !== OrderStatus.REFUNDED) {
+          const previousStatus = lockedOrder.orderStatus;
+          lockedOrder.orderStatus = OrderStatus.REFUNDED;
+          lockedOrder.paymentStatus = OrderPaymentStatus.REFUNDED;
+          await manager.save(lockedOrder);
+          await manager.save(
+            manager.create(OrderStatusHistory, {
+              orderId: lockedOrder.id,
+              previousStatus,
+              newStatus: OrderStatus.REFUNDED,
+              changedByUserId: performedByUserId,
+              changedByRole: 'admin',
+              changeSource: OrderChangeSource.ADMIN,
+              reason: reasonNotes,
+            }),
+          );
+        }
       } else {
         // استرداد جزئي — الطلب يفضل زي ما هو (COMPLETED/DISPUTED)، بس paymentStatus بيتحدّث
         // عشان يبان في تاريخ الطلب إن جزء اترد.
-        order.paymentStatus = OrderPaymentStatus.PARTIALLY_REFUNDED;
-        await manager.save(order);
+        lockedOrder.paymentStatus = OrderPaymentStatus.PARTIALLY_REFUNDED;
+        await manager.save(lockedOrder);
       }
 
-      return refund;
+      return lockedRefund;
     });
 
     await this.auditLog.record({
