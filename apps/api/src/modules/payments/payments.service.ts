@@ -459,6 +459,19 @@ export class PaymentsService {
       const previousStatus = order.orderStatus;
       await this.settleAndComplete(manager, order, PaymentMethod.CASH, adminUserId, 'system');
 
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.cash_dispute_resolved_confirmed',
+          entityType: 'order',
+          entityId: order.id,
+          newValues: { amount_cents: payment.amountCents },
+          meta,
+        },
+        manager,
+      );
+
       return { payment, order, previousStatus };
     });
 
@@ -474,16 +487,6 @@ export class PaymentsService {
       ORDER_STATUS_CHANGED_EVENT,
       new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, OrderStatus.COMPLETED, order.customerId, order.technicianId),
     );
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.cash_dispute_resolved_confirmed',
-      entityType: 'order',
-      entityId: order.id,
-      newValues: { amount_cents: payment.amountCents },
-      meta,
-    });
-
     return payment;
   }
 
@@ -769,8 +772,28 @@ export class PaymentsService {
       if (lockedPayment.paymentMethod !== PaymentMethod.INSTAPAY) {
         throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي مش InstaPay', HttpStatus.CONFLICT);
       }
+      const recordAudit = () =>
+        this.auditLog.record(
+          {
+            actorUserId: adminUserId,
+            actorRole: 'admin',
+            action: 'payment.instapay_confirmed_manually',
+            entityType: 'payment',
+            entityId: paymentId,
+            oldValues: { payment_status: previousStatus },
+            newValues: {
+              payment_status: lockedPayment.paymentStatus,
+              amount_cents: lockedPayment.amountCents,
+              order_id: lockedPayment.orderId,
+              reference: lockedPayment.gatewayReference,
+            },
+            meta,
+          },
+          manager,
+        );
       if (lockedPayment.paymentStatus !== PaymentGatewayStatus.PENDING) {
         // Idempotency — نقر مزدوج/إعادة إرسال بيرجع نفس الدفعة من غير أي أثر مالي إضافي.
+        await recordAudit();
         return { payment: lockedPayment, dispatchInfo: null };
       }
 
@@ -789,6 +812,7 @@ export class PaymentsService {
       }
 
       const { dispatchStarted } = await this.handlePaymentConfirmed(manager, lockedOrder, PaymentMethod.INSTAPAY, adminUserId, 'system');
+      await recordAudit();
       return {
         payment: lockedPayment,
         dispatchInfo: {
@@ -805,24 +829,6 @@ export class PaymentsService {
     if (dispatchInfo) {
       await this.emitPaymentConfirmedEvents(dispatchInfo);
     }
-
-    // Audit كامل (§27/§7 من توجيه المالك) — الموظف، الوقت، المبلغ، معرّف الطلب/الدفعة، الحالة
-    // قبل/بعد. بيتسجّل حتى لو idempotent no-op (نقر مزدوج) عشان يبان في السجل إن محاولة تانية حصلت.
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payment.instapay_confirmed_manually',
-      entityType: 'payment',
-      entityId: paymentId,
-      oldValues: { payment_status: previousStatus },
-      newValues: {
-        payment_status: payment.paymentStatus,
-        amount_cents: payment.amountCents,
-        order_id: payment.orderId,
-        reference: payment.gatewayReference,
-      },
-      meta,
-    });
 
     return payment;
   }
@@ -1764,12 +1770,37 @@ export class PaymentsService {
         .setLock('pessimistic_write')
         .where('p.id = :paymentId', { paymentId: payment.id })
         .getOneOrFail();
+      const recordRefundAudit = () =>
+        this.auditLog.record(
+          {
+            actorUserId: performedByUserId,
+            actorRole: 'admin',
+            action:
+              lockedRefund.refundStatus === RefundStatus.REJECTED
+                ? 'order.refund_rejected'
+                : 'order.refunded',
+            entityType: 'order',
+            entityId: orderId,
+            newValues: {
+              refund_id: lockedRefund.id,
+              amount_cents: lockedRefund.amountCents,
+              refund_type: lockedRefund.refundType,
+              refund_method: lockedRefund.refundMethod,
+              refund_status: lockedRefund.refundStatus,
+              provider_refund_id: lockedRefund.providerRefundId,
+              reason_notes: reasonNotes,
+            },
+            meta,
+          },
+          manager,
+        );
 
       if (goesThroughGateway && !providerSucceeded) {
         // رد نهائي من البوابة نفسها (رفض صريح، مش خطأ شبكة) — قرار نهائي حسب تبسيط Phase 1،
         // بيتسجّل rejected بلا أي حركة فلوس (مفيش استرداد حقيقي حصل، فمفيش داعي لعكس أي شيء).
         lockedRefund.refundStatus = RefundStatus.REJECTED;
         await manager.save(lockedRefund);
+        await recordRefundAudit();
         return lockedRefund;
       }
 
@@ -1893,25 +1924,8 @@ export class PaymentsService {
         await manager.save(lockedOrder);
       }
 
+      await recordRefundAudit();
       return lockedRefund;
-    });
-
-    await this.auditLog.record({
-      actorUserId: performedByUserId,
-      actorRole: 'admin',
-      action: finalRefund.refundStatus === RefundStatus.REJECTED ? 'order.refund_rejected' : 'order.refunded',
-      entityType: 'order',
-      entityId: orderId,
-      newValues: {
-        refund_id: finalRefund.id,
-        amount_cents: finalRefund.amountCents,
-        refund_type: finalRefund.refundType,
-        refund_method: finalRefund.refundMethod,
-        refund_status: finalRefund.refundStatus,
-        provider_refund_id: finalRefund.providerRefundId,
-        reason_notes: reasonNotes,
-      },
-      meta,
     });
     return finalRefund;
   }
@@ -2022,9 +2036,30 @@ export class PaymentsService {
     }
 
     const finalRefund = await this.dataSource.transaction(async (manager) => {
+      const recordRefundAudit = () =>
+        this.auditLog.record(
+          {
+            actorUserId: PLATFORM_SYSTEM_USER_ID,
+            actorRole: 'system',
+            action:
+              refund.refundStatus === RefundStatus.REJECTED
+                ? 'order.refund_rejected'
+                : 'order.refunded',
+            entityType: 'order',
+            entityId: orderId,
+            newValues: {
+              refund_id: refund.id,
+              amount_cents: refund.amountCents,
+              refund_status: refund.refundStatus,
+              trigger: triggeredBy,
+            },
+          },
+          manager,
+        );
       if (goesThroughGateway && !providerSucceeded) {
         refund.refundStatus = RefundStatus.REJECTED;
         await manager.save(refund);
+        await recordRefundAudit();
         return refund;
       }
 
@@ -2069,21 +2104,8 @@ export class PaymentsService {
       // OrderStatusHistory إضافي هنا، الكولر (OrderAutoCancelService أو OrdersService.cancel())
       // سجّل بالفعل صف انتقال الحالة نفسه.
 
+      await recordRefundAudit();
       return refund;
-    });
-
-    await this.auditLog.record({
-      actorUserId: PLATFORM_SYSTEM_USER_ID,
-      actorRole: 'system',
-      action: finalRefund.refundStatus === RefundStatus.REJECTED ? 'order.refund_rejected' : 'order.refunded',
-      entityType: 'order',
-      entityId: orderId,
-      newValues: {
-        refund_id: finalRefund.id,
-        amount_cents: finalRefund.amountCents,
-        refund_status: finalRefund.refundStatus,
-        trigger: triggeredBy,
-      },
     });
 
     return finalRefund;
@@ -2277,21 +2299,21 @@ export class PaymentsService {
       adjustment.walletDebitTxId = entry.debit.id;
       adjustment.walletCreditTxId = entry.credit.id;
       await manager.save(adjustment);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'wallet.adjusted',
+          entityType: 'wallet_adjustment',
+          entityId: adjustment.id,
+          newValues: { target_user_id: targetUserId, amount_cents: amountCents, direction, reason_ar: reasonAr },
+          meta,
+        },
+        manager,
+      );
       const targetEntry = entry.debit.walletId === targetWallet.id ? entry.debit : entry.credit;
       return { ...entry, newBalanceCents: targetEntry.balanceAfterCents, adjustment, created: true };
     });
-
-    if (result.created) {
-      await this.auditLog.record({
-        actorUserId: adminUserId,
-        actorRole: 'admin',
-        action: 'wallet.adjusted',
-        entityType: 'wallet_adjustment',
-        entityId: result.adjustment.id,
-        newValues: { target_user_id: targetUserId, amount_cents: amountCents, direction, reason_ar: reasonAr },
-        meta,
-      });
-    }
 
     return { debit: result.debit, credit: result.credit, newBalanceCents: result.newBalanceCents };
   }

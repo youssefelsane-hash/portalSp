@@ -128,11 +128,11 @@ export class ReferralsService {
           promoCodeId: promo.id,
         }),
       );
+      await this.promoCodesService.recordCreatedAudit(PLATFORM_SYSTEM_USER_ID, promo, undefined, manager);
       return { referrerUserId: referral.referrerUserId, completedCount, promo };
     });
 
     if (!result) return;
-    await this.promoCodesService.recordCreatedAudit(PLATFORM_SYSTEM_USER_ID, result.promo);
     this.events.emit(
       REFERRAL_REWARD_EARNED_EVENT,
       new ReferralRewardEarnedEvent(result.referrerUserId, result.promo.code, rewardValueEgp, result.completedCount),

@@ -18,7 +18,7 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
   let emitSpy: jest.Mock;
   let setBehaviorForThisTemplate: (fn: () => Promise<{ id: string }>) => void;
 
-  const runId = Date.now().toString(36);
+  const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = { customerUser: '', customerProfile: '', service: '', address: '', category: '', template: '' };
 
   beforeAll(async () => {
@@ -95,17 +95,21 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
   });
 
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
-    // بتتنضّف هنا بس (مش داخل كل it) عشان لو it فشلت (assertion throw) قبل ما توصل لسطر الحذف
-    // بتاعها، مفيش صف orders يتيم يمنع حذف addresses تحت (FK) — نفس درس "نضّف في afterAll دايمًا".
-    await q(`DELETE FROM orders WHERE address_id = $1`, [ids.address]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await dataSource.destroy();
+    try {
+      if (ids.customerProfile) await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
+      // بتتنضّف هنا بس (مش داخل كل it) عشان لو it فشلت (assertion throw) قبل ما توصل لسطر الحذف
+      // بتاعها، مفيش صف orders يتيم يمنع حذف addresses تحت (FK) — نفس درس "نضّف في afterAll دايمًا".
+      if (ids.address) await q(`DELETE FROM orders WHERE address_id = $1`, [ids.address]);
+      if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      if (ids.customerUser) await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      if (ids.service) await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      if (ids.category) await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+    } finally {
+      await dataSource.destroy();
+    }
   });
 
   // sweep() الحقيقية بتدور على *كل* القوالب المستحقة في الجدول، مش قالب معيّن — لو ملف اختبار
@@ -117,11 +121,19 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
   // مش العكس). الحل: القالب `is_active=false` طول الوقت إلا في اللحظة الفعلية لنداء sweep()
   // بتاعنا نفسه — نافذة الظهور لأي sweep() تانية بتتقلّص لأجزاء من الثانية بدل عمر الملف كله.
   async function sweepOwnTemplateOnly(): Promise<void> {
-    await dataSource.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [ids.template]);
+    const runner = dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.query(`SELECT pg_advisory_lock($1)`, [71_208_019]);
     try {
-      await service.sweep();
+      await runner.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [ids.template]);
+      try {
+        await service.sweep();
+      } finally {
+        await runner.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [ids.template]);
+      }
     } finally {
-      await dataSource.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [ids.template]);
+      await runner.query(`SELECT pg_advisory_unlock($1)`, [71_208_019]);
+      await runner.release();
     }
   }
 

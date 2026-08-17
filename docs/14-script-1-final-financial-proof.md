@@ -61,9 +61,18 @@ effort. Their loss does not alter ledger, payment, assignment, or order truth.
 
 Human-sensitive paths retain actor, resource, before/after state, reason, and
 financial amount in the existing audit log: refunds, payout decisions, earning
-decisions, wallet adjustments, complaint decisions, admin reassignment, and
-manual payment confirmation. Automated rewards retain durable source rows and
-ledger references rather than pretending to be human audit actions.
+decisions, wallet adjustments, complaint decisions, admin order decisions,
+technician cancellation penalties, promotions/loyalty, and manual payment
+confirmation. These mandatory rows use the same transaction manager as the
+business write; audit failure rolls the operation back. Automated standard and
+QR referral rewards likewise commit their system audit with their durable source
+row and financial/promo effect.
+
+Fault injection proves this contract for adjustment, compensation, payout,
+standard referral, and QR referral paths: the first attempt leaves no money,
+terminal source state, or audit; retry creates the business effect and exactly
+one audit. Standalone best-effort audit is retained only for legacy or
+non-transactional non-financial calls.
 
 Controllers continue to enforce authentication, role, exact permission,
 ownership where applicable, DTO amount validation, and existing MFA step-up
@@ -85,15 +94,16 @@ payment to `REFUNDED`.
 ## Database And Performance
 
 Migrations were preflighted against existing TEST data. The migration runner
-verifies immutable SHA-256 checksums; migrations through `0120` are recorded
-with matching checksums. TEST initially carried an older checksum for `0119`;
-a read-only catalog check proved its enum, columns, defaults, and check
-constraint exactly matched committed `0119`, then a conditional one-row
-baseline correction was applied before the runner reverified `0001`-`0120` and
-applied `0120`. Locks are scoped to order, technician, payout, wallet, or
-business-source rows. Refund completion rereads aggregate payment state while
-holding the order lock. Recovery scans use indexed predicates and batches of
-25; there are no global locks or unbounded retries.
+verifies immutable SHA-256 checksums; migrations through `0121` are recorded
+with matching checksums. The final gate also applied all 121 migrations to an
+empty PostgreSQL database, reran the nine Script 1 invariants there, and
+verified the installed `uq_orders_one_active_per_technician` definition and
+the `0121` SHA-256 checksum. Migration `0121` found zero legacy active-resource
+conflicts in TEST and replaced the technician partial unique index while
+preserving the old index until the stronger one existed. Locks are scoped to
+order, technician, payout, wallet, or business-source rows. Refund completion
+rereads aggregate payment state while holding the order lock. Recovery scans
+use indexed predicates and batches of 25; there are no unbounded retries.
 
 The post-suite invariant gate verifies:
 
@@ -116,8 +126,9 @@ The post-suite invariant gate verifies:
 - Admin frontend dependencies are absent in this workspace, so its full Next.js
   build cannot run here. API build/typecheck and changed backend tests are the
   authoritative verification for this phase.
-- Migration `0118` deliberately fails rather than guessing if a pre-upgrade
-  production database already contains duplicate active technician assignments
+- Migrations `0118` and `0121` deliberately fail rather than guessing if a pre-upgrade
+  production database already contains duplicate active technician assignments,
+  including a job in `awaiting_quote_approval`,
   or overlapping schedule slots. TEST preflight found zero of both; production
   rollout must run the same read-only preflight and reconcile any legacy rows
   before applying the constraint.
@@ -144,14 +155,20 @@ gate after fixture cleanup.
 
 **Temporary data cleaned:** Yes.
 
-**Final automated verification:** 27 suites / 145 tests passed with
-`--detectOpenHandles` and exited normally; API build/typecheck passed;
-migrations `0001`-`0120` had matching checksums; and all nine post-suite
-invariants passed. The reproduced Jest hang came from a legacy suite whose
-failed cleanup skipped `DataSource.destroy()`; fixture isolation plus `finally`
-cleanup removed the open PostgreSQL `TCPWRAP`. Lint was unavailable because no
-`eslint` executable is installed in this workspace. Shared-types typecheck also
-passed; admin typecheck could not start meaningfully because Next/React/Radix
+**Final automated verification:** the exact CI-style parallel command passed
+61 suites / 362 tests and exited normally. The same 61 suites / 362 tests
+passed serially with `--detectOpenHandles`, with no reported handle. API build
+and TypeScript passed; the shared TEST runner verified matching checksums
+through `0121`; a blank database accepted all 121 migrations; and all nine
+invariants passed against both databases. The reproduced CI failures combined
+non-unique parallel fixtures, cleanup paths that could skip
+`DataSource.destroy()`, cross-suite recurring-template sweeps, and a recovery
+interval that was neither `unref()`'d nor represented by a lifecycle-safe unit
+test. UUID fixtures, guarded `finally` cleanup, a PostgreSQL advisory fixture
+lock, and an unreferenced async interval removed both the assertion failures
+and Jest force-exit. Lint remains unavailable because no `eslint` executable is
+installed in this workspace. Shared-types typecheck also passed earlier in the
+gate; admin typecheck could not start meaningfully because Next/React/Radix
 dependencies and declarations are absent project-wide.
 
 **Status:** `VERIFIED DONE`, subject to the explicit external-provider and

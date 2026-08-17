@@ -98,18 +98,20 @@ export class DomesticWorkerEarningApprovalsService {
       approval.reviewedByUserId = adminUserId;
       approval.reviewedAt = new Date();
       await manager.save(approval);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'domestic_worker_earning.approved',
+          entityType: 'domestic_worker_earning_approval',
+          entityId: approval.id,
+          oldValues: { status: DomesticWorkerEarningApprovalStatus.PENDING },
+          newValues: { status: approval.status, amount_cents: approval.amountCents },
+          meta,
+        },
+        manager,
+      );
       return approval;
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'domestic_worker_earning.approved',
-      entityType: 'domestic_worker_earning_approval',
-      entityId: result.id,
-      oldValues: { status: DomesticWorkerEarningApprovalStatus.PENDING },
-      newValues: { status: result.status, amount_cents: result.amountCents },
-      meta,
     });
     return result;
   }
@@ -129,18 +131,21 @@ export class DomesticWorkerEarningApprovalsService {
       lockedApproval.rejectionReason = reason;
       lockedApproval.reviewedByUserId = adminUserId;
       lockedApproval.reviewedAt = new Date();
-      return manager.save(lockedApproval);
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'domestic_worker_earning.rejected',
-      entityType: 'domestic_worker_earning_approval',
-      entityId: approval.id,
-      oldValues: { status: DomesticWorkerEarningApprovalStatus.PENDING },
-      newValues: { status: approval.status, reason },
-      meta,
+      await manager.save(lockedApproval);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'domestic_worker_earning.rejected',
+          entityType: 'domestic_worker_earning_approval',
+          entityId: lockedApproval.id,
+          oldValues: { status: DomesticWorkerEarningApprovalStatus.PENDING },
+          newValues: { status: lockedApproval.status, reason },
+          meta,
+        },
+        manager,
+      );
+      return lockedApproval;
     });
     return approval;
   }

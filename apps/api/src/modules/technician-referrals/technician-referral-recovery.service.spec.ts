@@ -6,7 +6,6 @@ describe('TechnicianReferralRecoveryService', () => {
   let service: TechnicianReferralRecoveryService;
 
   beforeEach(() => {
-    jest.useFakeTimers();
     reconcilePendingBonuses.mockReset().mockResolvedValue(2);
     getNumber.mockReset().mockResolvedValue(7);
     service = new TechnicianReferralRecoveryService(
@@ -17,7 +16,7 @@ describe('TechnicianReferralRecoveryService', () => {
 
   afterEach(() => {
     service.onModuleDestroy();
-    jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it('uses the configured bounded batch for an explicit sweep', async () => {
@@ -26,13 +25,31 @@ describe('TechnicianReferralRecoveryService', () => {
     expect(reconcilePendingBonuses).toHaveBeenCalledWith(7);
   });
 
-  it('clears its interval on module destroy', async () => {
+  it('runs the scheduled sweep and clears its interval on module destroy', async () => {
+    const timer = { unref: jest.fn() } as unknown as NodeJS.Timeout;
+    let scheduledSweep: (() => Promise<void>) | undefined;
+    jest.spyOn(global, 'setInterval').mockImplementation(((callback: () => Promise<void>) => {
+      scheduledSweep = callback;
+      return timer;
+    }) as typeof setInterval);
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
+
     service.onModuleInit();
-    await jest.advanceTimersByTimeAsync(60_000);
+    await scheduledSweep?.();
     expect(reconcilePendingBonuses).toHaveBeenCalledTimes(1);
 
     service.onModuleDestroy();
-    await jest.advanceTimersByTimeAsync(120_000);
-    expect(reconcilePendingBonuses).toHaveBeenCalledTimes(1);
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+  });
+
+  it('does not keep the Node process alive solely for its recovery interval', () => {
+    const timer = { unref: jest.fn() } as unknown as NodeJS.Timeout;
+    jest.spyOn(global, 'setInterval').mockReturnValue(timer);
+    jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
+
+    service.onModuleInit();
+
+    expect(timer.unref).toHaveBeenCalledTimes(1);
   });
 });

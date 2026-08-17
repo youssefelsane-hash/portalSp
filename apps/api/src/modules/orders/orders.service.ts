@@ -1075,8 +1075,12 @@ export class OrdersService {
       );
 
       if (feeCents > 0) {
-        const technicianWallet = await this.walletsService.getOrCreateWallet(technicianProfile.userId, WalletOwnerType.TECHNICIAN);
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const technicianWallet = await this.walletsService.getOrCreateWallet(
+          technicianProfile.userId,
+          WalletOwnerType.TECHNICIAN,
+          manager,
+        );
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
         await this.walletsService.doubleEntry(
           {
             fromWalletId: technicianWallet.id,
@@ -1092,29 +1096,31 @@ export class OrdersService {
         );
       }
 
+      await this.auditLog.record(
+        {
+          actorUserId: userId,
+          actorRole: 'technician',
+          action: 'order.technician_cancelled',
+          entityType: 'order',
+          entityId: lockedOrder.id,
+          newValues: {
+            order_number: lockedOrder.orderNumber,
+            cancellation_reason_id: cancellationReason.id,
+            reason_text: dto.reason ?? null,
+            elapsed_seconds_after_acceptance: elapsedSecondsAfterAcceptance,
+            within_policy_window: true,
+            booking_mode: lockedOrder.bookingMode,
+            recovery_action: recoveryAction,
+            fee_cents: feeCents,
+          },
+        },
+        manager,
+      );
+
       order.orderStatus = lockedOrder.orderStatus;
       order.technicianId = lockedOrder.technicianId;
       order.assignedAt = lockedOrder.assignedAt;
       order.requestedTechnicianId = lockedOrder.requestedTechnicianId;
-    });
-
-    // حدث audit كامل — بيظهر تلقائيًا في /audit-log الموجودة في apps/admin، صفر شاشة جديدة.
-    await this.auditLog.record({
-      actorUserId: userId,
-      actorRole: 'technician',
-      action: 'order.technician_cancelled',
-      entityType: 'order',
-      entityId: order.id,
-      newValues: {
-        order_number: order.orderNumber,
-        cancellation_reason_id: cancellationReason.id,
-        reason_text: dto.reason ?? null,
-        elapsed_seconds_after_acceptance: elapsedSecondsAfterAcceptance,
-        within_policy_window: true,
-        booking_mode: order.bookingMode,
-        recovery_action: recoveryAction,
-        fee_cents: feeCents,
-      },
     });
 
     this.events.emit(

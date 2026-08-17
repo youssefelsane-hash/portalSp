@@ -238,8 +238,32 @@ export class TechnicianReferralsService {
         customerProfile.userId,
       );
       if (legacyBonus) {
-        if (legacyBonus.status === TechnicianReferralBonusStatus.REVOKED) return null;
+        if (legacyBonus.status === TechnicianReferralBonusStatus.REVOKED) {
+          await this.auditLog.record(
+            {
+              actorUserId: null,
+              actorRole: 'system',
+              action: 'technician_referral.bonus_revoked',
+              entityType: 'technician_referral_bonus',
+              entityId: legacyBonus.id,
+              newValues: { status: 'revoked', recovered_legacy_effect: true },
+            },
+            manager,
+          );
+          return null;
+        }
         if (legacyBonus.status === TechnicianReferralBonusStatus.MANUAL_REVIEW) {
+          await this.auditLog.record(
+            {
+              actorUserId: null,
+              actorRole: 'system',
+              action: 'technician_referral.bonus_manual_review',
+              entityType: 'technician_referral_bonus',
+              entityId: legacyBonus.id,
+              newValues: { reason: legacyBonus.rejectionReason, recovered_legacy_effect: true },
+            },
+            manager,
+          );
           return {
             bonus: legacyBonus,
             technician,
@@ -247,6 +271,22 @@ export class TechnicianReferralsService {
             credited: false,
           };
         }
+        await this.auditLog.record(
+          {
+            actorUserId: null,
+            actorRole: 'system',
+            action: 'technician_referral.bonus_credited',
+            entityType: 'technician_referral_bonus',
+            entityId: legacyBonus.id,
+            newValues: {
+              technician_id: legacyBonus.technicianId,
+              order_id: orderId,
+              bonus_amount_cents: legacyBonus.bonusAmountCents,
+              recovered_legacy_effect: true,
+            },
+          },
+          manager,
+        );
         return { bonus: legacyBonus, technician, rejectionReason: null, credited: true };
       }
 
@@ -328,7 +368,24 @@ export class TechnicianReferralsService {
         customerDeviceId: customerDevice?.deviceId ?? null,
       });
       await manager.save(bonus);
-      if (rejectionReason) return { bonus, technician, rejectionReason, credited: false };
+      if (rejectionReason) {
+        await this.auditLog.record(
+          {
+            actorUserId: null,
+            actorRole: 'system',
+            action: 'technician_referral.bonus_rejected',
+            entityType: 'technician_referral_bonus',
+            entityId: bonus.id,
+            newValues: {
+              technician_id: bonus.technicianId,
+              order_id: orderId,
+              rejection_reason: rejectionReason,
+            },
+          },
+          manager,
+        );
+        return { bonus, technician, rejectionReason, credited: false };
+      }
 
       const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
       const technicianWallet = await this.walletsService.getOrCreateWallet(
@@ -352,6 +409,21 @@ export class TechnicianReferralsService {
       bonus.walletDebitTxId = debit.id;
       bonus.walletCreditTxId = credit.id;
       await manager.save(bonus);
+      await this.auditLog.record(
+        {
+          actorUserId: null,
+          actorRole: 'system',
+          action: 'technician_referral.bonus_credited',
+          entityType: 'technician_referral_bonus',
+          entityId: bonus.id,
+          newValues: {
+            technician_id: bonus.technicianId,
+            order_id: orderId,
+            bonus_amount_cents: bonus.bonusAmountCents,
+          },
+        },
+        manager,
+      );
       return { bonus, technician, rejectionReason: null, credited: true };
     });
 
@@ -364,19 +436,6 @@ export class TechnicianReferralsService {
     }
 
     const { bonus, technician } = result;
-
-    await this.auditLog.record({
-      actorUserId: null,
-      actorRole: 'system',
-      action: 'technician_referral.bonus_credited',
-      entityType: 'technician_referral_bonus',
-      entityId: bonus.id,
-      newValues: {
-        technician_id: bonus.technicianId,
-        order_id: orderId,
-        bonus_amount_cents: bonus.bonusAmountCents,
-      },
-    });
 
     await this.notificationsService
       .notify({
@@ -420,19 +479,22 @@ export class TechnicianReferralsService {
       lockedBonus.status = TechnicianReferralBonusStatus.REVOKED;
       lockedBonus.revokedAt = new Date();
       lockedBonus.revokedReason = reason;
-      return manager.save(lockedBonus);
+      await manager.save(lockedBonus);
+      await this.auditLog.record(
+        {
+          actorUserId: null,
+          actorRole: 'system',
+          action: 'technician_referral.bonus_revoked',
+          entityType: 'technician_referral_bonus',
+          entityId: lockedBonus.id,
+          oldValues: { status: 'credited' },
+          newValues: { status: 'revoked', reason },
+        },
+        manager,
+      );
+      return lockedBonus;
     });
     if (!bonus) return;
-
-    await this.auditLog.record({
-      actorUserId: null,
-      actorRole: 'system',
-      action: 'technician_referral.bonus_revoked',
-      entityType: 'technician_referral_bonus',
-      entityId: bonus.id,
-      oldValues: { status: 'credited' },
-      newValues: { status: 'revoked', reason },
-    });
 
     const technician = await this.technicianProfiles.findOne({ where: { id: bonus.technicianId } });
     if (technician) {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { MatchingService } from './matching.service';
 import { Order } from '../orders/entities/order.entity';
@@ -12,7 +13,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   let dataSource: DataSource;
   let matchingService: MatchingService;
 
-  const runId = Date.now().toString(36);
+  const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = {
     country: '',
     city: '',
@@ -50,10 +51,8 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة اختبار ${runId}`, `Test Country ${runId}`, 'T' + runId.slice(0, 1).toUpperCase(), '+000', 'EGP'],
-    );
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The matching integration fixture requires the seeded EG country');
     ids.country = country.id;
 
     const [city] = await q(
@@ -134,21 +133,26 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   });
 
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM orders WHERE id = $1`, [ids.blockingOrder]);
-    await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.technicianProfile]);
-    await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.technicianProfile]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technicianProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.technicianUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
-    await dataSource.destroy();
+    try {
+      if (ids.blockingOrder) await q(`DELETE FROM orders WHERE id = $1`, [ids.blockingOrder]);
+      if (ids.technicianProfile) {
+        await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.technicianProfile]);
+        await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.technicianProfile]);
+      }
+      if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      if (ids.customerUser) await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      if (ids.technicianProfile) await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technicianProfile]);
+      if (ids.technicianUser) await q(`DELETE FROM users WHERE id = $1`, [ids.technicianUser]);
+      if (ids.service) await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      if (ids.category) await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      if (ids.zone) await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      if (ids.city) await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+    } finally {
+      await dataSource.destroy();
+    }
   });
 
   const findCandidates = () => {

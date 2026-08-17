@@ -15,11 +15,12 @@ export class TechnicianReferralRecoveryService implements OnModuleInit, OnModule
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(() => {
-      this.sweep().catch((err) =>
+    this.timer = setInterval(async () => {
+      await this.sweep().catch((err) =>
         this.logger.error('فشل استرداد مكافآت ترشيح الفنيين', err instanceof Error ? err.stack : err),
       );
     }, SWEEP_INTERVAL_MS);
+    this.timer.unref();
   }
 
   onModuleDestroy(): void {

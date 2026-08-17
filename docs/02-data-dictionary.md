@@ -455,6 +455,11 @@ disputed               → فيه نزاع مفتوح
 refunded               → تم الاسترجاع
 ```
 
+**مورد الفني النشط:** الحالات `accepted`, `technician_on_way`, `technician_arrived`,
+`in_progress`, و`awaiting_quote_approval` تحجز فنيًا واحدًا لنفس الطلب. الانتظار على قرار عرض
+السعر لا يحرر الفني؛ `work_completed` وما بعدها تحرره. المؤشر الجزئي
+`uq_orders_one_active_per_technician` يفرض طلبًا واحدًا فقط من هذه الحالات لكل فني.
+
 ### 6.3 `order_status_history` (سجل كل تغيير — إلزامي)
 
 ```sql

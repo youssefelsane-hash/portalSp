@@ -1,4 +1,10 @@
-import { CUSTOMER_CANCELLABLE_STATUSES, TECHNICIAN_CONTACT_VISIBLE_STATUSES, canTransition, ORDER_TRANSITIONS } from './order-state-machine';
+import {
+  ACTIVE_TECHNICIAN_ORDER_STATUSES,
+  CUSTOMER_CANCELLABLE_STATUSES,
+  TECHNICIAN_CONTACT_VISIBLE_STATUSES,
+  canTransition,
+  ORDER_TRANSITIONS,
+} from './order-state-machine';
 import { OrderStatus } from './entities/order.entity';
 
 // اختبار وحدة نقي (بدون DB) — بيثبت إصلاح بَقّة حقيقية اتلقطت حيًا (docs/08 §19 بند 1):
@@ -70,5 +76,19 @@ describe('order-state-machine — TECHNICIAN_CONTACT_VISIBLE_STATUSES (docs/08 �
     ]) {
       expect(TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(status)).toBe(true);
     }
+  });
+});
+
+describe('order-state-machine — active technician resource', () => {
+  it('keeps the technician busy while an in-progress job waits for quote approval', () => {
+    expect(ACTIVE_TECHNICIAN_ORDER_STATUSES).toContain(OrderStatus.AWAITING_QUOTE_APPROVAL);
+    expect(canTransition(OrderStatus.IN_PROGRESS, OrderStatus.AWAITING_QUOTE_APPROVAL)).toBe(true);
+    expect(canTransition(OrderStatus.AWAITING_QUOTE_APPROVAL, OrderStatus.IN_PROGRESS)).toBe(true);
+  });
+
+  it('releases the active-work resource once field work is complete', () => {
+    expect(ACTIVE_TECHNICIAN_ORDER_STATUSES).not.toContain(OrderStatus.WORK_COMPLETED);
+    expect(ACTIVE_TECHNICIAN_ORDER_STATUSES).not.toContain(OrderStatus.AWAITING_PAYMENT);
+    expect(ACTIVE_TECHNICIAN_ORDER_STATUSES).not.toContain(OrderStatus.COMPLETED);
   });
 });

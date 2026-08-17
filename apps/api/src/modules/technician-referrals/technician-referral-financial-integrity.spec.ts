@@ -10,11 +10,14 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { TechnicianReferralAttribution } from './entities/technician-referral-attribution.entity';
 import { TechnicianReferralBonus, TechnicianReferralBonusStatus } from './entities/technician-referral-bonus.entity';
 import { TechnicianReferralsService } from './technician-referrals.service';
+import { AuditLogService } from '../audit/audit-log.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 describe('Technician referral Phase 4 financial integrity', () => {
   let dataSource: DataSource;
   let service: TechnicianReferralsService;
   let walletsService: WalletsService;
+  let auditLog: AuditLogService;
   let platformBalanceBefore = 0;
   const runId = Date.now().toString(36);
   const ids = {
@@ -66,6 +69,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
         TechnicianProfile,
         TechnicianReferralAttribution,
         TechnicianReferralBonus,
+        AuditLog,
       ],
     });
     await dataSource.initialize();
@@ -137,6 +141,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
       getString: async (key: string, fallback: string) => (settings.get(key) as string | undefined) ?? fallback,
       getNumber: async (key: string, fallback: number) => (settings.get(key) as number | undefined) ?? fallback,
     };
+    auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
     service = new TechnicianReferralsService(
       dataSource.getRepository(TechnicianReferralAttribution),
       dataSource.getRepository(TechnicianReferralBonus),
@@ -148,7 +153,7 @@ describe('Technician referral Phase 4 financial integrity', () => {
       dataSource,
       settingsService as never,
       walletsService,
-      { record: async () => undefined } as never,
+      auditLog,
       { notify: async () => undefined } as never,
     );
   });
@@ -162,6 +167,12 @@ describe('Technician referral Phase 4 financial integrity', () => {
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(
+        `DELETE FROM audit_logs
+         WHERE entity_type = 'technician_referral_bonus'
+           AND entity_id IN (SELECT id FROM technician_referral_bonuses WHERE technician_id = $1)`,
+        [ids.techProfile],
+      );
       await q(
         `UPDATE technician_referral_bonuses
          SET wallet_debit_tx_id = NULL, wallet_credit_tx_id = NULL
@@ -210,6 +221,32 @@ describe('Technician referral Phase 4 financial integrity', () => {
     await dataSource.query(`UPDATE wallets SET is_frozen = false, frozen_reason = NULL WHERE id = $1`, [technicianWallet.id]);
   });
 
+  it('rolls back reward money when audit persistence fails and retries with one audit', async () => {
+    settings.set('referral_qr.reward_mode', 'every_order');
+    const orderId = await createOrder(1, 'audit-rollback');
+    const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated bonus audit failure'));
+
+    try {
+      await expect(service.evaluateOrderForBonus(orderId, 'completed')).rejects.toThrow('simulated bonus audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect(await dataSource.getRepository(TechnicianReferralBonus).findOne({ where: { orderId } })).toBeNull();
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(before);
+
+    await service.evaluateOrderForBonus(orderId, 'completed');
+    const bonus = await dataSource.getRepository(TechnicianReferralBonus).findOneByOrFail({ orderId });
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - before).toBe(5000);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'technician_referral_bonus', referenceId: bonus.id },
+    })).toBe(2);
+    expect(await dataSource.getRepository(AuditLog).count({
+      where: { action: 'technician_referral.bonus_credited', entityId: bonus.id },
+    })).toBe(1);
+  });
+
   it('serializes two first-order-only rewards for the same customer', async () => {
     const firstOrder = await createOrder(0, 'first-a');
     const secondOrder = await createOrder(0, 'first-b');
@@ -229,7 +266,14 @@ describe('Technician referral Phase 4 financial integrity', () => {
 
   it('enforces the monthly cap atomically for two different customers', async () => {
     settings.set('referral_qr.reward_mode', 'every_order');
-    settings.set('referral_qr.max_monthly_bonus_cents_per_technician', 10000);
+    const [{ total }] = await dataSource.query(
+      `SELECT COALESCE(SUM(bonus_amount_cents), 0)::int AS total
+       FROM technician_referral_bonuses
+       WHERE technician_id = $1 AND status = 'credited'
+         AND credited_at >= date_trunc('month', now())`,
+      [ids.techProfile],
+    );
+    settings.set('referral_qr.max_monthly_bonus_cents_per_technician', Number(total) + 5000);
     const firstOrder = await createOrder(1, 'cap-a');
     const secondOrder = await createOrder(2, 'cap-b');
     const before = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;

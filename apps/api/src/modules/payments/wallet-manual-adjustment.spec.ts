@@ -30,6 +30,7 @@ import { LoyaltyTransaction } from '../promotions/entities/loyalty-transaction.e
 import { SettingsService } from '../settings/settings.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت تصحيح المحفظة اليدوي الجديد (docs/08 §20 بند 5): كانت
@@ -39,6 +40,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
   let dataSource: DataSource;
   let service: PaymentsService;
   let walletsService: WalletsService;
+  let auditLog: AuditLogService;
   let cache: RedisCacheService;
   let platformBalanceBefore = 0;
 
@@ -71,6 +73,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
         CustomerProfile,
         LoyaltyTransaction,
         Setting,
+        AuditLog,
       ],
     });
     await dataSource.initialize();
@@ -122,6 +125,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
+    auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
 
     platformBalanceBefore = (
       await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM)
@@ -146,7 +150,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       { enqueueRecalculation: async () => undefined } as never,
       loyaltyService,
       settingsService,
-      { record: async () => undefined } as never,
+      auditLog,
       { emit: () => undefined } as never,
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
@@ -157,6 +161,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM audit_logs WHERE actor_user_id = $1`, [ids.adminUser]);
       // القيود على محفظة المنصة (اللي طرفها التاني تحصيل/تصحيح الفني ده) بتتمسح بالـperformed_by_user_id
       // أولاً — الفني نفسه بيتمسح بعده بالـwallet_id، ومحفظة المنصة الشير مع كل الاختبارات التانية تفضل زي ما هي.
       await q(`DELETE FROM wallet_adjustments WHERE actor_user_id = $1`, [ids.adminUser]);
@@ -318,6 +323,38 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     expect(await dataSource.getRepository(WalletTransaction).count({
       where: { referenceType: 'admin_adjustment', referenceId: adjustment.id },
     })).toBe(2);
+  });
+
+  it('يرجع التصحيح المالي إذا فشل التدقيق ثم يعيد العملية والتدقيق مرة واحدة', async () => {
+    const key = `adjustment-audit-retry-${runId}`;
+    const beforeBalance = (await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents;
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated atomic audit failure'));
+
+    try {
+      await expect(
+        service.adminAdjustWallet(ids.adminUser, ids.techUser, 6200, 'credit', 'اختبار ذرية التدقيق', key),
+      ).rejects.toThrow('simulated atomic audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents).toBe(beforeBalance);
+    expect(await dataSource.getRepository(WalletAdjustment).count({
+      where: { actorUserId: ids.adminUser, idempotencyKey: key },
+    })).toBe(0);
+
+    await service.adminAdjustWallet(ids.adminUser, ids.techUser, 6200, 'credit', 'اختبار ذرية التدقيق', key);
+    const adjustment = await dataSource.getRepository(WalletAdjustment).findOneByOrFail({
+      actorUserId: ids.adminUser,
+      idempotencyKey: key,
+    });
+    expect((await walletsService.findByUserIdOrThrow(ids.techUser)).balanceCents - beforeBalance).toBe(6200);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'admin_adjustment', referenceId: adjustment.id },
+    })).toBe(2);
+    expect(await dataSource.getRepository(AuditLog).count({
+      where: { action: 'wallet.adjusted', entityId: adjustment.id },
+    })).toBe(1);
   });
 
   it('يعكس القيد مرة واحدة عند التكرار والتزامن ويعيد نفس قيدي العكس بعد اكتماله', async () => {

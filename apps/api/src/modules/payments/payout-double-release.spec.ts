@@ -11,6 +11,7 @@ import { TechnicianCompany } from '../technicians/entities/technician-company.en
 import { TechniciansService } from '../technicians/technicians.service';
 import { SettingsService } from '../settings/settings.service';
 import { AuditLogService } from '../audit/audit-log.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت واتصلحت في docs/08 §20 بند 9:
 // WalletsService.releaseReservation() (بتنادى من PayoutsService.adminReject()) كانت بتطرح
@@ -24,6 +25,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
   let dataSource: DataSource;
   let payoutsService: PayoutsService;
   let walletsService: WalletsService;
+  let auditLog: AuditLogService;
 
   const runId = Date.now().toString(36);
   const ids = { techUser: '', techProfile: '', adminUser: '' };
@@ -49,7 +51,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Payout, PayoutOrderItem, Wallet, WalletTransaction, User, TechnicianProfile, TechnicianCompany],
+      entities: [Payout, PayoutOrderItem, Wallet, WalletTransaction, User, TechnicianProfile, TechnicianCompany, AuditLog],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -90,6 +92,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
 
     await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM);
     await walletsService.getOrCreateWallet(ids.techUser, WalletOwnerType.TECHNICIAN);
+    auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
 
     payoutsService = new PayoutsService(
       dataSource.getRepository(Payout),
@@ -99,7 +102,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
       dataSource,
       techniciansService,
       walletsService,
-      { record: async () => undefined } as unknown as AuditLogService,
+      auditLog,
       settingsService,
       { emit: () => undefined } as never,
     );
@@ -109,6 +112,12 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(
+        `DELETE FROM audit_logs
+         WHERE entity_type = 'payout'
+           AND entity_id IN (SELECT id FROM payouts WHERE technician_id = $1)`,
+        [ids.techProfile],
+      );
       await q(
         `DELETE FROM wallet_transactions
          WHERE reference_type = 'payout_phase6_test'
@@ -248,5 +257,35 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
       expect(wallet.balanceCents).toBe(before.balanceCents + payout.amountCents);
     }
     expect(wallet.reservedBalanceCents).toBe(before.reservedBalanceCents - payout.amountCents);
+  });
+
+  it('rolls back payout rejection when audit persistence fails, then releases funds once on retry', async () => {
+    const payout = await createReviewPayout(160000);
+    const before = await walletsService.findByUserIdOrThrow(ids.techUser);
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated payout audit failure'));
+
+    try {
+      await expect(
+        payoutsService.adminReject(ids.adminUser, payout.id, 'اختبار فشل سجل التدقيق'),
+      ).rejects.toThrow('simulated payout audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await dataSource.getRepository(Payout).findOneByOrFail({ id: payout.id })).payoutStatus).toBe(
+      PayoutStatus.UNDER_REVIEW,
+    );
+    const rolledBackWallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    expect(rolledBackWallet.balanceCents).toBe(before.balanceCents);
+    expect(rolledBackWallet.reservedBalanceCents).toBe(before.reservedBalanceCents);
+    expect(await dataSource.getRepository(AuditLog).count({ where: { entityId: payout.id } })).toBe(0);
+
+    await payoutsService.adminReject(ids.adminUser, payout.id, 'اختبار فشل سجل التدقيق');
+    const retriedWallet = await walletsService.findByUserIdOrThrow(ids.techUser);
+    expect(retriedWallet.balanceCents).toBe(before.balanceCents + payout.amountCents);
+    expect(retriedWallet.reservedBalanceCents).toBe(before.reservedBalanceCents - payout.amountCents);
+    expect(await dataSource.getRepository(AuditLog).count({
+      where: { action: 'payout.rejected', entityId: payout.id },
+    })).toBe(1);
   });
 });

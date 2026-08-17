@@ -13,11 +13,14 @@ import {
 } from './entities/complaint.entity';
 import { ComplaintMessage } from './entities/complaint-message.entity';
 import { SupportService } from './support.service';
+import { AuditLogService } from '../audit/audit-log.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 describe('SupportService complaint terminal decision concurrency', () => {
   let dataSource: DataSource;
   let walletsService: WalletsService;
   let service: SupportService;
+  let auditLog: AuditLogService;
   let platformBalanceBefore = 0;
   const runId = Date.now().toString(36);
   const ids = { customerUser: '', customerProfile: '', adminA: '', adminB: '', complaints: [] as string[] };
@@ -37,7 +40,17 @@ describe('SupportService complaint terminal decision concurrency', () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, CustomerProfile, Order, Wallet, WalletTransaction, Complaint, ComplaintMessage, ComplaintAttachment],
+      entities: [
+        User,
+        CustomerProfile,
+        Order,
+        Wallet,
+        WalletTransaction,
+        Complaint,
+        ComplaintMessage,
+        ComplaintAttachment,
+        AuditLog,
+      ],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -68,6 +81,7 @@ describe('SupportService complaint terminal decision concurrency', () => {
       await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM)
     ).balanceCents;
     await walletsService.getOrCreateWallet(ids.customerUser, WalletOwnerType.CUSTOMER);
+    auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
     service = new SupportService(
       dataSource.getRepository(Complaint),
       dataSource.getRepository(ComplaintMessage),
@@ -77,7 +91,7 @@ describe('SupportService complaint terminal decision concurrency', () => {
       {} as never,
       { findByUserIdOrThrow: async () => Promise.reject(new Error('not a technician')) } as never,
       walletsService,
-      { record: async () => undefined } as never,
+      auditLog,
       { emit: () => undefined } as never,
       {} as never,
     );
@@ -87,6 +101,9 @@ describe('SupportService complaint terminal decision concurrency', () => {
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM audit_logs WHERE entity_type = 'complaint' AND entity_id = ANY($1::uuid[])`, [
+        ids.complaints,
+      ]);
       await q(`DELETE FROM wallet_transactions WHERE reference_type = 'complaint' AND reference_id = ANY($1::uuid[])`, [
         ids.complaints,
       ]);
@@ -192,5 +209,39 @@ describe('SupportService complaint terminal decision concurrency', () => {
     expect(await dataSource.getRepository(WalletTransaction).count({
       where: { referenceType: 'complaint', referenceId: complaintId },
     })).toBe(2);
+  });
+
+  it('rolls back complaint compensation when its audit fails and retries with one durable audit', async () => {
+    const complaintId = await createComplaint('audit-rollback');
+    const before = (await walletsService.findByUserIdOrThrow(ids.customerUser)).balanceCents;
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated complaint audit failure'));
+    const dto = {
+      resolution_type: ComplaintResolutionType.PARTIAL_REFUND,
+      resolution_notes: 'تعويض مع تدقيق ذري',
+      compensation_cents: 8100,
+    };
+
+    try {
+      await expect(service.resolve(ids.adminA, complaintId, dto)).rejects.toThrow('simulated complaint audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await dataSource.getRepository(Complaint).findOneByOrFail({ id: complaintId })).complaintStatus).toBe(
+      ComplaintStatus.OPEN,
+    );
+    expect((await walletsService.findByUserIdOrThrow(ids.customerUser)).balanceCents).toBe(before);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'complaint', referenceId: complaintId },
+    })).toBe(0);
+
+    await service.resolve(ids.adminA, complaintId, dto);
+    expect((await walletsService.findByUserIdOrThrow(ids.customerUser)).balanceCents - before).toBe(8100);
+    expect(await dataSource.getRepository(WalletTransaction).count({
+      where: { referenceType: 'complaint', referenceId: complaintId },
+    })).toBe(2);
+    expect(await dataSource.getRepository(AuditLog).count({
+      where: { action: 'complaint.resolved', entityId: complaintId },
+    })).toBe(1);
   });
 });

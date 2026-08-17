@@ -8,11 +8,14 @@ import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ReferralReward } from './entities/referral-reward.entity';
 import { Referral, ReferralStatus } from './entities/referral.entity';
 import { ReferralsService } from './referrals.service';
+import { AuditLogService } from '../audit/audit-log.service';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 
 describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
   let dataSource: DataSource;
   let service: ReferralsService;
   let promoCodes: PromoCodesService;
+  let auditLog: AuditLogService;
   const runId = Date.now().toString(36);
   const ids = {
     city: '',
@@ -28,7 +31,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, CustomerProfile, Order, Referral, ReferralReward, PromoCode, PromoCodeUsage],
+      entities: [User, CustomerProfile, Order, Referral, ReferralReward, PromoCode, PromoCodeUsage, AuditLog],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -68,11 +71,11 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     );
     ids.legacyUser = legacy.id;
 
-    for (let index = 0; index < 6; index++) {
+    for (let index = 0; index < 8; index++) {
       const [user] = await q(
         `INSERT INTO users (phone_number, full_name, user_type, referred_by_user_id)
          VALUES ($1,$2,'customer',$3) RETURNING id`,
-        [`+2077${runId}${index}`.slice(0, 15), `عميل referral ${index} ${runId}`, ids.referrer],
+        [`+2077${runId}${index}`.slice(0, 15), `عميل referral ${index} ${runId}`, index < 6 ? ids.referrer : null],
       );
       const [profile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [user.id]);
       const [address] = await q(
@@ -89,10 +92,11 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
       ids.referred.push({ user: user.id, profile: profile.id, address: address.id, order: order.id });
     }
 
+    auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
     promoCodes = new PromoCodesService(
       dataSource.getRepository(PromoCode),
       dataSource.getRepository(PromoCodeUsage),
-      { record: async () => undefined } as never,
+      auditLog,
     );
     const settings = {
       getNumber: async (key: string, fallback: number) =>
@@ -117,6 +121,12 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     if (!dataSource?.isInitialized) return;
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(
+        `DELETE FROM audit_logs
+         WHERE entity_type = 'promo_code'
+           AND entity_id IN (SELECT id FROM promo_codes WHERE restricted_to_user_id = $1)`,
+        [ids.referrer],
+      );
       await q(`DELETE FROM referral_rewards WHERE referrer_user_id = $1`, [ids.referrer]);
       await q(`DELETE FROM promo_codes WHERE restricted_to_user_id = $1`, [ids.referrer]);
       await q(`DELETE FROM referrals WHERE referrer_user_id = $1`, [ids.referrer]);
@@ -214,6 +224,41 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
       where: { referrerUserId: ids.referrer, milestoneCount: 6 },
     })).toBe(1);
     expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
+  });
+
+  it('rolls back a qualified reward when audit persistence fails and reconciles it exactly once', async () => {
+    const seventh = ids.referred[6];
+    const eighth = ids.referred[7];
+    await service.createPendingReferral(ids.referrer, seventh.user);
+    await service.createPendingReferral(ids.referrer, eighth.user);
+    await service.handleOrderCompleted(seventh.profile, seventh.order);
+
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated referral audit failure'));
+    try {
+      await expect(service.handleOrderCompleted(eighth.profile, eighth.order)).rejects.toThrow(
+        'simulated referral audit failure',
+      );
+    } finally {
+      failure.mockRestore();
+    }
+
+    expect((await dataSource.getRepository(Referral).findOneByOrFail({ referredUserId: eighth.user })).status).toBe(
+      ReferralStatus.PENDING,
+    );
+    expect(await dataSource.getRepository(ReferralReward).count({
+      where: { referrerUserId: ids.referrer, milestoneCount: 8 },
+    })).toBe(0);
+    expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
+
+    expect(await service.reconcilePending(10)).toBe(1);
+    const reward = await dataSource.getRepository(ReferralReward).findOneByOrFail({
+      referrerUserId: ids.referrer,
+      milestoneCount: 8,
+    });
+    expect(await dataSource.getRepository(AuditLog).count({
+      where: { action: 'promo_code.created', entityId: reward.promoCodeId },
+    })).toBe(1);
+    expect(await service.reconcilePending(10)).toBe(0);
   });
 
   it('returns only the referral code actually persisted during concurrent lazy assignment', async () => {

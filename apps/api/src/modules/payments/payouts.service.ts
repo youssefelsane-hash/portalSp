@@ -230,18 +230,20 @@ export class PayoutsService {
       payout.reviewedAt = new Date();
       payout.reviewedByUserId = adminUserId;
       await manager.save(payout);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payout.approved',
+          entityType: 'payout',
+          entityId: payout.id,
+          oldValues: { payout_status: previousStatus },
+          newValues: { payout_status: payout.payoutStatus, amount_cents: payout.amountCents },
+          meta,
+        },
+        manager,
+      );
       return { payout, previousStatus };
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payout.approved',
-      entityType: 'payout',
-      entityId: result.payout.id,
-      oldValues: { payout_status: result.previousStatus },
-      newValues: { payout_status: result.payout.payoutStatus, amount_cents: result.payout.amountCents },
-      meta,
     });
     return result.payout;
   }
@@ -266,18 +268,20 @@ export class PayoutsService {
       payout.reviewedAt = new Date();
       payout.reviewedByUserId = adminUserId;
       await manager.save(payout);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payout.rejected',
+          entityType: 'payout',
+          entityId: payout.id,
+          oldValues: { payout_status: previousStatus },
+          newValues: { payout_status: payout.payoutStatus, reason },
+          meta,
+        },
+        manager,
+      );
       return { payout, previousStatus };
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payout.rejected',
-      entityType: 'payout',
-      entityId: result.payout.id,
-      oldValues: { payout_status: result.previousStatus },
-      newValues: { payout_status: result.payout.payoutStatus, reason },
-      meta,
     });
     return result.payout;
   }
@@ -306,18 +310,20 @@ export class PayoutsService {
       payout.completedAt = new Date();
       payout.reviewedByUserId = payout.reviewedByUserId ?? adminUserId;
       await manager.save(payout);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payout.completed',
+          entityType: 'payout',
+          entityId: payout.id,
+          oldValues: { payout_status: previousStatus },
+          newValues: { payout_status: payout.payoutStatus, net_amount_cents: payout.netAmountCents },
+          meta,
+        },
+        manager,
+      );
       return { payout, previousStatus };
-    });
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payout.completed',
-      entityType: 'payout',
-      entityId: result.payout.id,
-      oldValues: { payout_status: result.previousStatus },
-      newValues: { payout_status: result.payout.payoutStatus, net_amount_cents: result.payout.netAmountCents },
-      meta,
     });
 
     this.events.emit(

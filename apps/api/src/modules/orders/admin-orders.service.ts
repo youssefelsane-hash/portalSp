@@ -157,6 +157,19 @@ export class AdminOrdersService {
       );
 
       await this.promoCodesService.releaseUsage(manager, lockedOrder.id);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.cancelled_by_admin',
+          entityType: 'order',
+          entityId: lockedOrder.id,
+          oldValues: { order_status: previousStatus },
+          newValues: { order_status: OrderStatus.CANCELLED_BY_SYSTEM, reason },
+          meta,
+        },
+        manager,
+      );
       return lockedOrder;
     });
 
@@ -172,17 +185,6 @@ export class AdminOrdersService {
         reason,
       ),
     );
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.cancelled_by_admin',
-      entityType: 'order',
-      entityId: cancelledOrder.id,
-      oldValues: { order_status: previousStatus },
-      newValues: { order_status: OrderStatus.CANCELLED_BY_SYSTEM, reason },
-      meta,
-    });
 
     return cancelledOrder;
   }
@@ -274,6 +276,19 @@ export class AdminOrdersService {
           reason: 'تعيين يدوي من الإدارة',
         }),
       );
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.reassigned_by_admin',
+          entityType: 'order',
+          entityId: order.id,
+          oldValues: { order_status: previousStatus, technician_id: previousTechnicianId },
+          newValues: { order_status: order.orderStatus, technician_id: technician.id },
+          meta,
+        },
+        manager,
+      );
       return { order, previousStatus, previousTechnicianId };
     });
 
@@ -281,17 +296,6 @@ export class AdminOrdersService {
       ORDER_REASSIGNED_EVENT,
       new OrderReassignedEvent(result.order.id, result.order.orderNumber, technician.id),
     );
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.reassigned_by_admin',
-      entityType: 'order',
-      entityId: result.order.id,
-      oldValues: { order_status: result.previousStatus, technician_id: result.previousTechnicianId },
-      newValues: { order_status: result.order.orderStatus, technician_id: technician.id },
-      meta,
-    });
 
     return result.order;
   }
@@ -303,41 +307,51 @@ export class AdminOrdersService {
     reason: string,
     meta?: AuditActorMeta,
   ): Promise<Order> {
-    const order = await this.findOrThrow(orderId);
-    if (order.paymentStatus === OrderPaymentStatus.PAID) {
-      throw new ApiException(
-        ErrorCode.ORDR_003,
-        'الطلب اتدفع بالفعل — مينفعش تعدّل السعر مباشرة، لازم يعدّي من مسار استرداد/تحصيل إضافي',
-        HttpStatus.CONFLICT,
-      );
-    }
-    if (PRICE_LOCKED_STATUSES.has(order.orderStatus)) {
-      throw new ApiException(
-        ErrorCode.ORDR_003,
-        `مينفعش تعدّل سعر الطلب وهو في حالة ${order.orderStatus}`,
-        HttpStatus.CONFLICT,
-      );
-    }
-    if (newTotalAmountCents === order.totalAmountCents) {
-      throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد نفس السعر الحالي', HttpStatus.CONFLICT);
-    }
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.ORDR_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (order.paymentStatus === OrderPaymentStatus.PAID) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الطلب اتدفع بالفعل — مينفعش تعدّل السعر مباشرة، لازم يعدّي من مسار استرداد/تحصيل إضافي',
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (PRICE_LOCKED_STATUSES.has(order.orderStatus)) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          `مينفعش تعدّل سعر الطلب وهو في حالة ${order.orderStatus}`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (newTotalAmountCents === order.totalAmountCents) {
+        throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد نفس السعر الحالي', HttpStatus.CONFLICT);
+      }
 
-    const previousTotal = order.totalAmountCents;
-    order.totalAmountCents = newTotalAmountCents;
-    await this.orders.save(order);
-
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'order.price_adjusted_by_admin',
-      entityType: 'order',
-      entityId: order.id,
-      oldValues: { total_amount_cents: previousTotal },
-      newValues: { total_amount_cents: newTotalAmountCents, reason },
-      meta,
+      const previousTotal = order.totalAmountCents;
+      order.totalAmountCents = newTotalAmountCents;
+      await manager.save(order);
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.price_adjusted_by_admin',
+          entityType: 'order',
+          entityId: order.id,
+          oldValues: { total_amount_cents: previousTotal },
+          newValues: { total_amount_cents: newTotalAmountCents, reason },
+          meta,
+        },
+        manager,
+      );
+      return order;
     });
-
-    return order;
   }
 
   // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية (ADR-0008، يمتد ADR-0007 §7 اللي أجّل

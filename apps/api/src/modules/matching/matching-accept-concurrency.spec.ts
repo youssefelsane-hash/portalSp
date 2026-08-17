@@ -279,7 +279,8 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
     const [{ count }] = await dataSource.query(
       `SELECT count(*)::int AS count FROM orders
-       WHERE technician_id = $1 AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress')`,
+       WHERE technician_id = $1
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
       [ids.technicianAProfile],
     );
     expect(count).toBe(1);
@@ -288,7 +289,8 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
   it('قبول فني × إعادة تعيين أدمن: المؤشر والعرض المقبول ينتميان لفائز واحد', async () => {
     await dataSource.query(
       `UPDATE orders SET order_status = 'completed'
-       WHERE technician_id IN ($1,$2) AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress')`,
+       WHERE technician_id IN ($1,$2)
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
       [ids.technicianAProfile, ids.technicianBProfile],
     );
     const orderId = await insertOrder('accept-admin');
@@ -313,7 +315,8 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
   it('الأدمن لا يتجاوز أهلية المورد: إعادة التعيين لفني عنده طلب نشط ترفض', async () => {
     await dataSource.query(
       `UPDATE orders SET order_status = 'completed'
-       WHERE technician_id = $1 AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress')`,
+       WHERE technician_id = $1
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
       [ids.technicianBProfile],
     );
     await insertOrder('busy-tech', ids.technicianBProfile, OrderStatus.ACCEPTED);
@@ -321,5 +324,40 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     await expect(adminOrdersService.reassign(ids.adminUser, targetOrder, ids.technicianBProfile)).rejects.toThrow(
       'الفني عنده طلب نشط بالفعل',
     );
+  });
+
+  it('عرض سعر معلّق يفضل ماسك مورد الفني أمام القبول وإعادة التعيين والكتابة المباشرة', async () => {
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'completed'
+       WHERE technician_id = $1
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
+      [ids.technicianBProfile],
+    );
+    const quoteOrder = await insertOrder(
+      'quote-busy',
+      ids.technicianBProfile,
+      OrderStatus.AWAITING_QUOTE_APPROVAL,
+    );
+
+    const acceptTarget = await insertOrder('quote-accept-target');
+    await insertAssignment(acceptTarget, ids.technicianBProfile);
+    await expect(matchingService.accept(ids.technicianBUser, acceptTarget)).rejects.toThrow(
+      'الفني عنده طلب نشط بالفعل',
+    );
+
+    const reassignTarget = await insertOrder('quote-reassign-target');
+    await expect(
+      adminOrdersService.reassign(ids.adminUser, reassignTarget, ids.technicianBProfile),
+    ).rejects.toThrow('الفني عنده طلب نشط بالفعل');
+
+    await expect(
+      dataSource.query(
+        `UPDATE orders SET technician_id = $1, order_status = 'accepted' WHERE id = $2`,
+        [ids.technicianBProfile, reassignTarget],
+      ),
+    ).rejects.toMatchObject({ code: '23505', constraint: 'uq_orders_one_active_per_technician' });
+
+    await dataSource.query(`UPDATE orders SET order_status = 'in_progress' WHERE id = $1`, [quoteOrder]);
+    await dataSource.query(`UPDATE orders SET order_status = 'awaiting_quote_approval' WHERE id = $1`, [quoteOrder]);
   });
 });

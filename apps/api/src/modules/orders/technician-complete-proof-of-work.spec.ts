@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
@@ -17,7 +18,7 @@ import { User } from '../auth/entities/user.entity';
 describe('OrdersService.complete() — إثبات إنجاز الشغل إجباري (docs/08 §20 بند 12)', () => {
   let dataSource: DataSource;
   let service: OrdersService;
-  const runId = Date.now().toString(36);
+  const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = {
     country: '',
     city: '',
@@ -36,7 +37,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, placed_at, work_started_at)
        VALUES ($1,$2,$3,$4,$5,$6,'in_progress','unpaid',20000, now(), now()) RETURNING id`,
-      [`TESTPOW-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone],
+      [`TESTPOW-${runId}-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone],
     );
     return order.id as string;
   }
@@ -50,10 +51,8 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة اختبار ${runId}`, `Test Country ${runId}`, 'P' + runId.slice(0, 1).toUpperCase(), '+004', 'EGP'],
-    );
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The proof-of-work integration fixture requires the seeded EG country');
     ids.country = country.id;
     const [city] = await q(
       `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
@@ -143,7 +142,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
   });
 
   afterEach(async () => {
-    if (!dataSource?.isInitialized) return;
+    if (!dataSource?.isInitialized || !ids.customerProfile) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
     await q(`DELETE FROM order_media WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
@@ -153,19 +152,27 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
-    await q(`DELETE FROM order_media WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
-    await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
-    await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
-    await dataSource.destroy();
+    try {
+      if (ids.customerProfile) {
+        await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+        await q(`DELETE FROM order_media WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+        await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      }
+      if (ids.address) await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      if (ids.customerProfile) await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      if (ids.techProfile) await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      if (ids.techUser && ids.customerUser) {
+        await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
+      } else if (ids.techUser || ids.customerUser) {
+        await q(`DELETE FROM users WHERE id = $1`, [ids.techUser || ids.customerUser]);
+      }
+      if (ids.service) await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      if (ids.category) await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      if (ids.zone) await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      if (ids.city) await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+    } finally {
+      await dataSource.destroy();
+    }
   });
 
   it('إنهاء الشغل من غير after_photo يترفض بوضوح (ORDR_005)، الطلب يفضل in_progress', async () => {
