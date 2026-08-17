@@ -487,4 +487,49 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
     expect(order?.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_REFUNDED);
   });
+
+  it('استرداد دفعة عمل إضافي أصغر يعكس حصتها من إجمالي أرباح الطلب فقط، ثم يقفل الطلب بعد استرداد الدفعة الأساسية أيضًا', async () => {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    const [order] = await q(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES ($1,$2,$3,$4,$5,$6,'completed','paid',120000,96000) RETURNING id`,
+      [
+        `TESTCSD-component-${runId}`.slice(0, 24),
+        ids.customerProfile,
+        ids.techProfile,
+        ids.service20,
+        ids.address,
+        ids.zone,
+      ],
+    );
+    const [basePayment] = await q(
+      `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
+       VALUES ($1,$2,$3,100000,'wallet','succeeded',$4,now()) RETURNING id`,
+      [`PAYCSD-base-${runId}`.slice(0, 24), order.id, ids.customerProfile, `idem-csd-base-${runId}`],
+    );
+    const [additionalPayment] = await q(
+      `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
+       VALUES ($1,$2,$3,20000,'wallet','succeeded',$4,now()) RETURNING id`,
+      [`PAYCSD-add-${runId}`.slice(0, 24), order.id, ids.customerProfile, `idem-csd-add-${runId}`],
+    );
+
+    const techBalanceBefore = await techWalletBalance();
+    await service.refundOrder(ids.customerUser, order.id, 'استرداد بند عمل إضافي', undefined, undefined, additionalPayment.id);
+
+    // 20,000 / 120,000 من أرباح الفني 96,000 = 16,000 فقط. القسمة على مبلغ الدفعة (20,000)
+    // كانت ستعكس 96,000 كاملة — بَقّة مالية جوهرية.
+    expect((await techWalletBalance()) - techBalanceBefore).toBe(-16000);
+    let reloadedOrder = await dataSource.getRepository(Order).findOneByOrFail({ id: order.id });
+    expect(reloadedOrder.orderStatus).toBe(OrderStatus.COMPLETED);
+    expect(reloadedOrder.paymentStatus).toBe(OrderPaymentStatus.PARTIALLY_REFUNDED);
+    expect((await dataSource.getRepository(Payment).findOneByOrFail({ id: additionalPayment.id })).paymentStatus).toBe(
+      PaymentGatewayStatus.REFUNDED,
+    );
+
+    await service.refundOrder(ids.customerUser, order.id, 'استرداد الدفعة الأساسية', undefined, undefined, basePayment.id);
+    reloadedOrder = await dataSource.getRepository(Order).findOneByOrFail({ id: order.id });
+    expect(reloadedOrder.orderStatus).toBe(OrderStatus.REFUNDED);
+    expect(reloadedOrder.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
+    expect((await techWalletBalance()) - techBalanceBefore).toBe(-96000);
+  });
 });

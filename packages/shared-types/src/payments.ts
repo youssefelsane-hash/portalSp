@@ -30,6 +30,8 @@ export interface PayoutOrderItemResponseDto {
 
 export interface RefundOrderBody {
   reason_notes: string;
+  amount_cents?: number;
+  payment_id?: string;
 }
 
 // مطابق لـ apps/api/src/modules/payments/entities/payment.entity.ts — الملخص المالي لكل طلب

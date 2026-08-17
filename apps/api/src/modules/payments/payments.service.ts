@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
 import {
@@ -280,12 +280,8 @@ export class PaymentsService {
     //   enum WalletTxType من زمان بلا أي استخدام حقيقي، أول استهلاك ليها هنا).
     // - net = 0 → مفيش حركة مطلوبة خالص (الفني ماسك بالظبط نصيبه العادل، نادر بس ممكن).
     //
-    // **إثبات إن refundOrder() (تحت) ماحتاجش أي تعديل مقابل**: صيغة عكس أرباح الفني هناك
-    // (`technicianReversalCents = round(technicianEarningCents * refundAmount / paymentAmount)`)
-    // بتعمل نفس اتجاه الخصم (فني→منصة) دايمًا، بغض النظر عن كانت آخر حركة ائتمان أو خصم — وده
-    // بالظبط الصح رياضيًا: لو الفني كان مديون (كاش)، الاسترداد بيزوّد الدين (لازم يرجّع الأصل
-    // كامل مش بس العمولة)؛ لو كان دائن (إلكتروني)، الاسترداد بيعكس الائتمان زي زمان. اتأكد
-    // بالحساب اليدوي الكامل لسيناريوهات كاش/إلكتروني/مختلط قبل التنفيذ (docs/08 §20).
+    // `refundOrder()` يطبّق عكس الأرباح متناسبًا مع إجمالي الطلب، لا الدفعـة المختارة وحدها؛
+    // ده ضروري للدفعات الإضافية الصغيرة حتى يظل العكس متسقًا مع التسوية المركّبة هنا.
     if (order.technicianId) {
       const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
       const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
@@ -1403,15 +1399,16 @@ export class PaymentsService {
     reasonNotes: string,
     requestedAmountCents?: number,
     meta?: AuditActorMeta,
+    paymentId?: string,
   ): Promise<Refund> {
     // بَقّة distributed-transaction حقيقية اتصلحت (docs/08 §19 بند 4): كان provider.refund()
     // (نداء HTTP خارجي حقيقي لـPaymob) بينفّذ جوّه DB transaction واحدة مع باقي الكتابة. لو
     // نجح فعليًا عند البوابة وبعدين خطوة تانية جوّه نفس الـtransaction فشلت (DB error عابر
     // مثلاً)، Postgres يعمل rollback كامل — لكن الفلوس فعليًا اترجعت للعميل عند Paymob، ونظامنا
     // مش عارف. الحل: تقسيم لتلات مراحل — (أ) DB transaction قصيرة بتسجّل صف Refund حالته
-    // PROCESSING **قبل** أي نداء خارجي أو أثر مالي (idx_refunds_payment_id_unique بيضمن صف واحد
-    // بس لكل دفعة، فأي محاولة تانية — متزامنة أو retry بعد فشل — هتلاقي الصف ده وترفض فورًا،
-    // صفر نداء مزدوج للبوابة ممكن يحصل)، (ب) النداء الخارجي نفسه **برّه** أي transaction، (ج)
+    // PROCESSING **قبل** أي نداء خارجي أو أثر مالي. كل محاولة بتحجز المبلغ المتبقي للدفعـة داخل
+    // قفل الطلب؛ ده يسمح باستردادات جزئية متراكمة، وفي نفس الوقت يمنع تجاوز إجمالي الدفعة أو
+    // نداءين متزامنين لنفس الجزء المالي. (ب) النداء الخارجي نفسه **برّه** أي transaction، (ج)
     // DB transaction قصيرة تانية منفصلة تمامًا تطبّق أثر المال ثم تسجّل COMPLETED. حتى مسار
     // wallet-credit بلا بوابة يظل PROCESSING بين (أ) و(ج): crash في المنتصف يصبح قابلًا
     // للمراجعة، لا استردادًا مكتملًا كذبًا.
@@ -1424,43 +1421,109 @@ export class PaymentsService {
       if (!order) {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       }
-      if (order.paymentStatus !== OrderPaymentStatus.PAID) {
+      if (order.paymentStatus !== OrderPaymentStatus.PAID && order.paymentStatus !== OrderPaymentStatus.PARTIALLY_REFUNDED) {
         throw new ApiException(ErrorCode.PAY_003, 'الطلب لازم يكون مدفوع الأول عشان يترد', HttpStatus.CONFLICT);
       }
 
-      const payment = await manager.findOne(Payment, {
-        where: { orderId, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
+      const refundablePayments = await manager.find(Payment, {
+        where: {
+          orderId,
+          paymentStatus: In([PaymentGatewayStatus.SUCCEEDED, PaymentGatewayStatus.PARTIALLY_REFUNDED]),
+        },
         order: { completedAt: 'DESC' },
       });
+      const payment = paymentId
+        ? refundablePayments.find((candidate) => candidate.id === paymentId)
+        : refundablePayments.length === 1
+          ? refundablePayments[0]
+          : null;
       if (!payment) {
-        throw new ApiException(ErrorCode.VAL_001, 'مفيش عملية دفع ناجحة لقى الطلب ده', HttpStatus.NOT_FOUND);
+        if (!paymentId && refundablePayments.length > 1) {
+          throw new ApiException(
+            ErrorCode.PAY_003,
+            'الطلب فيه أكثر من دفعة قابلة للاسترداد — ابعت payment_id لتحديد الدفعة المقصودة',
+            HttpStatus.CONFLICT,
+          );
+        }
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          paymentId ? 'الدفعة المحددة غير قابلة للاسترداد لهذا الطلب' : 'مفيش عملية دفع قابلة للاسترداد للطلب ده',
+          HttpStatus.NOT_FOUND,
+        );
       }
 
-      // Phase 1 مبسّطة عمداً (ADR-0013 §9 + unique index idx_refunds_payment_id_unique): استرداد
-      // واحد أقصى لكل دفعة، سواء كامل أو جزئي — مفيش تراكم استردادات جزئية متعددة لسه.
-      const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
-      if (existingRefund) {
+      // PROCESSING يحجز المبلغ أيضًا: لا يمكن إنشاء refund جديد بينما نتيجة نداء سابق للبوابة
+      // غير مؤكدة، وإلا صار ممكنًا إرسال مبلغ زائد أو استرداد مزدوج خارجيًا.
+      const refundsForPayment = await manager.find(Refund, {
+        where: { paymentId: payment.id },
+        select: ['amountCents', 'refundStatus'],
+      });
+      if (refundsForPayment.some((candidate) => candidate.refundStatus === RefundStatus.PROCESSING)) {
         throw new ApiException(
           ErrorCode.PAY_003,
-          existingRefund.refundStatus === RefundStatus.PROCESSING
-            ? 'محاولة استرداد سابقة لسه قيد التأكيد مع البوابة — راجع الطلب يدويًا (provider.reconcile) قبل إعادة المحاولة'
-            : 'الطلب ده اترد قبل كده',
+          'محاولة استرداد سابقة لسه قيد التأكيد مع البوابة — راجع الطلب يدويًا (provider.reconcile) قبل إعادة المحاولة',
+          HttpStatus.CONFLICT,
+        );
+      }
+      const reservedAmountCents = refundsForPayment
+        .filter((candidate) => candidate.refundStatus === RefundStatus.COMPLETED || candidate.refundStatus === RefundStatus.PROCESSING)
+        .reduce((total, candidate) => total + candidate.amountCents, 0);
+      const remainingAmountCents = payment.amountCents - reservedAmountCents;
+      if (remainingAmountCents <= 0) {
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          'لا يوجد مبلغ متبقٍ قابل للاسترداد لهذه الدفعة — راجع أي استرداد قيد التأكيد أولًا',
           HttpStatus.CONFLICT,
         );
       }
 
-      const amountCents = requestedAmountCents ?? payment.amountCents;
-      if (amountCents <= 0 || amountCents > payment.amountCents) {
-        throw new ApiException(ErrorCode.VAL_001, 'مبلغ الاسترداد غير صالح — لازم يكون بين 1 والمبلغ المدفوع', HttpStatus.BAD_REQUEST);
+      const amountCents = requestedAmountCents ?? remainingAmountCents;
+      if (amountCents <= 0 || amountCents > remainingAmountCents) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'مبلغ الاسترداد غير صالح — لازم يكون بين 1 والمبلغ المتبقي من الدفعة',
+          HttpStatus.BAD_REQUEST,
+        );
       }
-      const isFull = amountCents === payment.amountCents;
+      const isFull = amountCents === remainingAmountCents;
 
-      // استرداد كامل بيغيّر حالة الطلب لـREFUNDED (نهائية) — لازم يمر بـcanTransition. استرداد
-      // جزئي مايغيّرش orderStatus خالص (الطلب يفضل COMPLETED/DISPUTED)، فمفيش داعي لفحص انتقال حالة.
-      if (isFull && !canTransition(order.orderStatus, OrderStatus.REFUNDED)) {
+      // "كامل" هنا يعني كامل *الدفعـة*، وليس بالضرورة كامل الطلب. الطلب قد يتكوّن من
+      // دفعة الخدمة الأساسية ودفعة/دفعات عمل إضافي منفصلة. لا نغلقه REFUNDED قبل اكتمال
+      // استرداد كل المكوّنات المالية فعليًا.
+      const financialPayments = await manager.find(Payment, {
+        where: {
+          orderId,
+          paymentStatus: In([
+            PaymentGatewayStatus.SUCCEEDED,
+            PaymentGatewayStatus.PARTIALLY_REFUNDED,
+            PaymentGatewayStatus.REFUNDED,
+          ]),
+        },
+        select: ['id', 'amountCents'],
+      });
+      const completedRefunds = await manager.find(Refund, {
+        where: { orderId, refundStatus: RefundStatus.COMPLETED },
+        select: ['paymentId', 'amountCents'],
+      });
+      const completedByPayment = new Map<string, number>();
+      for (const completedRefund of completedRefunds) {
+        completedByPayment.set(
+          completedRefund.paymentId,
+          (completedByPayment.get(completedRefund.paymentId) ?? 0) + completedRefund.amountCents,
+        );
+      }
+      const willFullyRefundOrder = financialPayments.length > 0 && financialPayments.every((financialPayment) => {
+        const alreadyCompleted = completedByPayment.get(financialPayment.id) ?? 0;
+        const currentAmount = financialPayment.id === payment.id ? amountCents : 0;
+        return alreadyCompleted + currentAmount >= financialPayment.amountCents;
+      });
+
+      // استرداد كل مكوّنات الطلب فقط هو اللي بيغيّر حالته لـREFUNDED (نهائية) — لازم يمر
+      // بـcanTransition. استرداد دفعة واحدة من طلب مركّب يظل جزئيًا على مستوى الطلب.
+      if (willFullyRefundOrder && !canTransition(order.orderStatus, OrderStatus.REFUNDED)) {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
-      if (!isFull && order.orderStatus !== OrderStatus.COMPLETED && order.orderStatus !== OrderStatus.DISPUTED) {
+      if (!willFullyRefundOrder && order.orderStatus !== OrderStatus.COMPLETED && order.orderStatus !== OrderStatus.DISPUTED) {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب لازم يكون مكتمل أو متنازع عليه عشان يترد جزئيًا', HttpStatus.CONFLICT);
       }
 
@@ -1521,9 +1584,10 @@ export class PaymentsService {
         return refund;
       }
 
-      // عكس تحويل أرباح الفني بنفس نسبة مبلغ الاسترداد من إجمالي الدفعة — الفني ماخدش الفلوس دي
-      // كاملة أصلاً لو الاسترداد جزئي.
-      const technicianReversalCents = Math.round((order.technicianEarningCents * amountCents) / payment.amountCents);
+      // عكس أرباح الفني يُوزَّع على إجمالي الطلب، لا على الدفعـة المحددة: دفعة العمل الإضافي
+      // قد تكون أصغر من قيمة الطلب، والقسمة على payment.amountCents كانت تعكس أرباح الطلب كله
+      // عند استرداد تلك الدفعة وحدها.
+      const technicianReversalCents = Math.round((order.technicianEarningCents * amountCents) / order.totalAmountCents);
       if (technicianReversalCents > 0 && order.technicianId) {
         const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(order.technicianId);
         const technicianWallet = await this.walletsService.getOrCreateWallet(
@@ -1583,7 +1647,35 @@ export class PaymentsService {
       payment.paymentStatus = isFull ? PaymentGatewayStatus.REFUNDED : PaymentGatewayStatus.PARTIALLY_REFUNDED;
       await manager.save(payment);
 
-      if (isFull) {
+      const financialPayments = await manager.find(Payment, {
+        where: {
+          orderId: order.id,
+          paymentStatus: In([
+            PaymentGatewayStatus.SUCCEEDED,
+            PaymentGatewayStatus.PARTIALLY_REFUNDED,
+            PaymentGatewayStatus.REFUNDED,
+          ]),
+        },
+        select: ['id', 'amountCents'],
+      });
+      const completedRefunds = await manager.find(Refund, {
+        where: { orderId: order.id, refundStatus: RefundStatus.COMPLETED },
+        select: ['paymentId', 'amountCents'],
+      });
+      const completedByPayment = new Map<string, number>();
+      for (const completedRefund of completedRefunds) {
+        completedByPayment.set(
+          completedRefund.paymentId,
+          (completedByPayment.get(completedRefund.paymentId) ?? 0) + completedRefund.amountCents,
+        );
+      }
+      const orderFullyRefunded =
+        financialPayments.length > 0 &&
+        financialPayments.every(
+          (financialPayment) => (completedByPayment.get(financialPayment.id) ?? 0) >= financialPayment.amountCents,
+        );
+
+      if (orderFullyRefunded) {
         const previousStatus = order.orderStatus;
         order.orderStatus = OrderStatus.REFUNDED;
         order.paymentStatus = OrderPaymentStatus.REFUNDED;

@@ -143,17 +143,25 @@ implicit "latest payment" selection may silently reverse unrelated earnings.
 | Script section | Current evidence | Status |
 | --- | --- | --- |
 | 22 — completion follows money | `refundOrder()` created a wallet-credit fallback as `COMPLETED` in its preparation transaction, while the customer-wallet credit occurred later in a separate transaction. A crash between them left a false completion. The row now starts `PROCESSING`, and completion is saved only after local effects in the final transaction. | `VERIFIED FIXED` — build and the real PostgreSQL refund-transaction suite passed. |
-| 23 — source allocation | The current endpoint selects the latest successful payment, then calculates reversal using `order.technicianEarningCents / payment.amountCents`. A full refund of a smaller additional-work payment can therefore reverse earnings from the whole order. | `NOT FIXED` |
-| 24 — order vs payment state | `isFull` currently means full refund of the selected payment and transitions the whole order to `REFUNDED`. This is wrong when another paid component remains. | `NOT FIXED` |
-| 25 — multiple partial refunds | Migration `0092` intentionally has `UNIQUE refunds(payment_id)` and the service rejects any existing refund. Product rules have not yet established whether multiple partial refunds must be enabled for this product. | `OWNER DECISION REQUIRED` |
-| 26–27 — traceability and concurrency | `Refund` already records payment, order, amount, reason, method, provider reference, actors, and timestamps, and the order lock plus per-payment uniqueness prevents concurrent duplicate refunds. It does not model a component-specific allocation or cumulative partial-refund balance. | `PARTIAL` |
+| 23 — source allocation | A refund now accepts `payment_id`; for a multi-component order it is required rather than selecting the latest payment. Technician reversal is proportional to `order.totalAmountCents`, so a smaller additional-work component cannot reverse the whole order's earnings. | `VERIFIED FIXED` |
+| 24 — order vs payment state | A payment becomes `REFUNDED` only when its own cumulative completed refunds reach its amount. The order changes to `REFUNDED` only after every paid component reaches that condition. | `VERIFIED FIXED` |
+| 25 — multiple partial refunds | Migration `0114_cumulative_refunds_per_payment.sql` replaces the old per-payment unique index with a `(payment_id, refund_status)` index. `PROCESSING` and `COMPLETED` amounts reserve balance under the order lock; `REJECTED` amounts do not. | `VERIFIED FIXED` |
+| 26–27 — traceability and concurrency | Every row remains tied to `payment_id`, `order_id`, actors, reason, amount, provider reference, and timestamps. The locked order plus cumulative reservation prevents concurrent requests from exceeding a payment's refundable balance. | `VERIFIED FIXED` |
 
-### Required product decision before safe Phase 2 completion
+### Implementation and verification record — 2026-08-17
 
-The existing refund endpoint accepts only an order ID and optional amount; it
-does not name the payment/component to refund. For a multi-component order,
-selecting the latest payment or splitting the requested amount automatically
-would invent a financial policy. Phase 2 needs an owner decision on whether
-the API should require a `payment_id`, or whether a defined allocation policy
-is desired. Until then, the branch preserves the current public contract and
-does not introduce a guessed allocation rule.
+The branch chooses the conservative compatible policy: `payment_id` stays
+optional for an order with exactly one refundable component, but is required
+with a clear `409` for multiple components. It never guesses an allocation.
+
+- `0114_cumulative_refunds_per_payment.sql` removes the obsolete unique refund
+  index and adds a lookup index for per-payment lifecycle/reconciliation.
+- `refundOrder()` permits cumulative partial refunds only up to the remaining
+  amount. A pending provider result reserves its amount; a definitive provider
+  rejection reserves nothing and may be retried.
+- The endpoint now exposes optional `payment_id` in both API DTO and shared
+  type. Existing single-payment clients remain compatible.
+- `refund-transaction-safety.spec.ts` ran against shared PostgreSQL TEST with
+  six passing cases: durable processing, provider rejection/retry, provider
+  exception protection, explicit component selection, order-state aggregation,
+  cumulative partial refunds, and a concurrent over-refund race.
