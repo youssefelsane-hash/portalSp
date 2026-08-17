@@ -324,7 +324,21 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
     );
   });
 
+  afterEach(async () => {
+    if (!dataSource?.isInitialized) return;
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
+    await q(
+      `UPDATE orders
+       SET order_status = 'completed'
+       WHERE order_number LIKE $1
+         AND order_status IN ('accepted', 'technician_on_way', 'technician_arrived', 'in_progress')`,
+      [`TS22C-%`],
+    );
+  });
+
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM complaints WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TS22C-%`]);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TS22C-%`]);

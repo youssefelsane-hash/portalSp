@@ -13,7 +13,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevelConfig } from '../technicians/entities/technician-level-config.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
-import { TechnicianLevelsService } from '../technicians/technician-levels.service';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
@@ -82,7 +82,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
       {} as never,
       {} as never,
     );
-    const technicianLevelsService = new TechnicianLevelsService(dataSource.getRepository(TechnicianLevelConfig), {} as never);
+    const assignmentGuard = new TechnicianAssignmentGuardService();
 
     events = new EventEmitter2();
     events.on(ORDER_OFFER_CREATED_EVENT, () => {
@@ -97,7 +97,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
       dataSource.getRepository(Order),
       dataSource,
       techniciansService,
-      technicianLevelsService,
+      assignmentGuard,
       settingsService,
       events,
       { add: async () => undefined } as never,

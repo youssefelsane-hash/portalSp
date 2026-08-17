@@ -13,7 +13,7 @@ import {
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
-import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
@@ -56,6 +56,7 @@ export class AdminOrdersService {
     @InjectRepository(OrderTeamMember) private readonly teamMembers: Repository<OrderTeamMember>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly techniciansService: TechniciansService,
+    private readonly assignmentGuard: TechnicianAssignmentGuardService,
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
     private readonly pricingEngineService: PricingEngineService,
@@ -124,15 +125,27 @@ export class AdminOrdersService {
     }
 
     const previousStatus = order.orderStatus;
-    await this.dataSource.transaction(async (manager) => {
-      order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
-      order.cancelledAt = new Date();
-      order.cancelledByUserId = adminUserId;
-      await manager.save(order);
+    const cancelledOrder = await this.dataSource.transaction(async (manager) => {
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (
+        !lockedOrder ||
+        lockedOrder.orderStatus !== previousStatus ||
+        !canTransition(lockedOrder.orderStatus, OrderStatus.CANCELLED_BY_SYSTEM)
+      ) {
+        throw new ApiException(ErrorCode.ORDR_003, 'حالة الطلب اتغيّرت بالفعل — حاول تاني', HttpStatus.CONFLICT);
+      }
+      lockedOrder.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
+      lockedOrder.cancelledAt = new Date();
+      lockedOrder.cancelledByUserId = adminUserId;
+      await manager.save(lockedOrder);
 
       await manager.save(
         manager.create(OrderStatusHistory, {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           previousStatus,
           newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
           changedByUserId: adminUserId,
@@ -142,18 +155,19 @@ export class AdminOrdersService {
         }),
       );
 
-      await this.promoCodesService.releaseUsage(manager, order.id);
+      await this.promoCodesService.releaseUsage(manager, lockedOrder.id);
+      return lockedOrder;
     });
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
       new OrderStatusChangedEvent(
-        order.id,
-        order.orderNumber,
+        cancelledOrder.id,
+        cancelledOrder.orderNumber,
         previousStatus,
         OrderStatus.CANCELLED_BY_SYSTEM,
-        order.customerId,
-        order.technicianId,
+        cancelledOrder.customerId,
+        cancelledOrder.technicianId,
         reason,
       ),
     );
@@ -163,13 +177,13 @@ export class AdminOrdersService {
       actorRole: 'admin',
       action: 'order.cancelled_by_admin',
       entityType: 'order',
-      entityId: order.id,
+      entityId: cancelledOrder.id,
       oldValues: { order_status: previousStatus },
       newValues: { order_status: OrderStatus.CANCELLED_BY_SYSTEM, reason },
       meta,
     });
 
-    return order;
+    return cancelledOrder;
   }
 
   async reassign(
@@ -178,27 +192,40 @@ export class AdminOrdersService {
     newTechnicianProfileId: string,
     meta?: AuditActorMeta,
   ): Promise<Order> {
-    const order = await this.findOrThrow(orderId);
-    if (!REASSIGNABLE_STATUSES.has(order.orderStatus)) {
+    const snapshot = await this.findOrThrow(orderId);
+    if (!REASSIGNABLE_STATUSES.has(snapshot.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
-        `مينفعش تعيّن فني يدوي والطلب في حالة ${order.orderStatus} — التعيين متاح قبل ما أي فني يقبل الطلب بس`,
+        `مينفعش تعيّن فني يدوي والطلب في حالة ${snapshot.orderStatus} — التعيين متاح قبل ما أي فني يقبل الطلب بس`,
         HttpStatus.CONFLICT,
       );
     }
 
     const technician = await this.techniciansService.findByProfileIdOrThrow(newTechnicianProfileId);
-    if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
-      throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
-    }
-    if (order.technicianId === technician.id) {
+    if (snapshot.technicianId === technician.id) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده معيّن للفني ده بالفعل', HttpStatus.CONFLICT);
     }
 
-    const previousStatus = order.orderStatus;
-    const now = new Date();
-    await this.dataSource.transaction(async (manager) => {
-      order.technicianId = technician.id;
+    const result = await this.dataSource.transaction(async (manager) => {
+      // نفس ترتيب MatchingService.accept(): المورد المشترك (الفني) أولًا، ثم الطلب.
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technician.id);
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order || !REASSIGNABLE_STATUSES.has(order.orderStatus)) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتغير أو اتقبله فني بالفعل', HttpStatus.CONFLICT);
+      }
+      if (order.technicianId === lockedTechnician.id) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده معيّن للفني ده بالفعل', HttpStatus.CONFLICT);
+      }
+      await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
+
+      const previousStatus = order.orderStatus;
+      const previousTechnicianId = order.technicianId;
+      const now = new Date();
+      order.technicianId = lockedTechnician.id;
 
       // كانت فجوة موثّقة: التعيين اليدوي مكانش بيلغي عروض الجولة الأصلية (sent/viewed) لباقي
       // الفنيين المرشحين — فني تاني كان يفضل شايف الطلب في GET /technician/orders/available
@@ -246,22 +273,26 @@ export class AdminOrdersService {
           reason: 'تعيين يدوي من الإدارة',
         }),
       );
+      return { order, previousStatus, previousTechnicianId };
     });
 
-    this.events.emit(ORDER_REASSIGNED_EVENT, new OrderReassignedEvent(order.id, order.orderNumber, technician.id));
+    this.events.emit(
+      ORDER_REASSIGNED_EVENT,
+      new OrderReassignedEvent(result.order.id, result.order.orderNumber, technician.id),
+    );
 
     await this.auditLog.record({
       actorUserId: adminUserId,
       actorRole: 'admin',
       action: 'order.reassigned_by_admin',
       entityType: 'order',
-      entityId: order.id,
-      oldValues: { order_status: previousStatus, technician_id: null },
-      newValues: { order_status: order.orderStatus, technician_id: technician.id },
+      entityId: result.order.id,
+      oldValues: { order_status: result.previousStatus, technician_id: result.previousTechnicianId },
+      newValues: { order_status: result.order.orderStatus, technician_id: technician.id },
       meta,
     });
 
-    return order;
+    return result.order;
   }
 
   async adjustPrice(

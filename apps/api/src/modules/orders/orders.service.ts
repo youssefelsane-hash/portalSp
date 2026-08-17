@@ -644,17 +644,30 @@ export class OrdersService {
     }
 
     const previousStatus = order.orderStatus;
-    await this.dataSource.transaction(async (manager) => {
-      order.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
-      order.cancelledAt = new Date();
-      order.cancelledByUserId = userId;
-      order.cancellationReasonId = cancellationReasonId;
-      order.cancellationFeeCents = feeCents;
-      await manager.save(order);
+    const cancelledOrder = await this.dataSource.transaction(async (manager) => {
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (
+        !lockedOrder ||
+        lockedOrder.orderStatus !== previousStatus ||
+        !CUSTOMER_CANCELLABLE_STATUSES.has(lockedOrder.orderStatus) ||
+        !canTransition(lockedOrder.orderStatus, OrderStatus.CANCELLED_BY_CUSTOMER)
+      ) {
+        throw new ApiException(ErrorCode.ORDR_003, 'حالة الطلب اتغيّرت بالفعل — حاول تاني', HttpStatus.CONFLICT);
+      }
+      lockedOrder.orderStatus = OrderStatus.CANCELLED_BY_CUSTOMER;
+      lockedOrder.cancelledAt = new Date();
+      lockedOrder.cancelledByUserId = userId;
+      lockedOrder.cancellationReasonId = cancellationReasonId;
+      lockedOrder.cancellationFeeCents = feeCents;
+      await manager.save(lockedOrder);
 
       await manager.save(
         manager.create(OrderStatusHistory, {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           previousStatus,
           newStatus: OrderStatus.CANCELLED_BY_CUSTOMER,
           changedByUserId: userId,
@@ -665,14 +678,14 @@ export class OrdersService {
       );
 
       // ترجيع استخدام كود الخصم (لو الطلب استخدم واحد) — §24، راجع PromoCodesService.releaseUsage()
-      await this.promoCodesService.releaseUsage(manager, order.id);
+      await this.promoCodesService.releaseUsage(manager, lockedOrder.id);
 
       // رسوم الإلغاء بتتحصّل جوّه نفس الـ transaction — "الطلب اتلغى بس الرسوم متحصلتش" ميحصلش،
       // نفس فلسفة settleAndComplete في payments. allowNegativeBalance:true لأنها عقوبة مش دفع
       // اختياري (نفس نمط تعويض الشكاوى في support.service.ts).
       if (feeCents > 0) {
-        const customerWallet = await this.walletsService.getOrCreateWallet(userId, WalletOwnerType.CUSTOMER);
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const customerWallet = await this.walletsService.getOrCreateWallet(userId, WalletOwnerType.CUSTOMER, manager);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
         await this.walletsService.doubleEntry(
           {
             fromWalletId: customerWallet.id,
@@ -680,24 +693,25 @@ export class OrdersService {
             amountCents: feeCents,
             transactionType: WalletTxType.PENALTY,
             referenceType: 'order',
-            referenceId: order.id,
-            descriptionAr: `رسوم إلغاء طلب ${order.orderNumber}`,
+            referenceId: lockedOrder.id,
+            descriptionAr: `رسوم إلغاء طلب ${lockedOrder.orderNumber}`,
             allowNegativeBalance: true,
           },
           manager,
         );
       }
+      return lockedOrder;
     });
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
       new OrderStatusChangedEvent(
-        order.id,
-        order.orderNumber,
+        cancelledOrder.id,
+        cancelledOrder.orderNumber,
         previousStatus,
         OrderStatus.CANCELLED_BY_CUSTOMER,
-        order.customerId,
-        order.technicianId,
+        cancelledOrder.customerId,
+        cancelledOrder.technicianId,
         dto.reason ?? null,
       ),
     );
@@ -710,10 +724,10 @@ export class OrdersService {
     // مايصحش يكون جوّه transaction ممكن ترجع لورا (تفاصيل الأمان الكاملة في
     // PaymentsService.refundCancelledPrepaidOrder()). فشل الاسترداد هنا بيتلقط ويتسجّل بس
     // مايكسرش تجربة العميل — الطلب فضل ملغي صح حتى لو الاسترداد فشل واحتاج مراجعة يدوية.
-    if (order.paymentStatus === OrderPaymentStatus.PAID) {
+    if (cancelledOrder.paymentStatus === OrderPaymentStatus.PAID) {
       try {
         await this.paymentsService.refundCancelledPrepaidOrder(
-          order.id,
+          cancelledOrder.id,
           `استرداد تلقائي — العميل لغى طلب مدفوع مسبقًا قبل بدء الشغل${dto.reason ? `: ${dto.reason}` : ''}`,
           'customer_cancel',
         );
@@ -724,14 +738,14 @@ export class OrdersService {
             actorRole: 'customer',
             action: 'order.refund_failed_needs_manual_review',
             entityType: 'order',
-            entityId: order.id,
-            newValues: { order_number: order.orderNumber, error: err instanceof Error ? err.message : String(err) },
+            entityId: cancelledOrder.id,
+            newValues: { order_number: cancelledOrder.orderNumber, error: err instanceof Error ? err.message : String(err) },
           })
           .catch(() => {});
       }
     }
 
-    return order;
+    return cancelledOrder;
   }
 
   /**
@@ -1225,15 +1239,28 @@ export class OrdersService {
     }
 
     const previousStatus = order.orderStatus;
-    await this.dataSource.transaction(async (manager) => {
+    const transitionedOrder = await this.dataSource.transaction(async (manager) => {
+      const lockedOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (
+        !lockedOrder ||
+        lockedOrder.technicianId !== order.technicianId ||
+        lockedOrder.orderStatus !== previousStatus ||
+        !canTransition(lockedOrder.orderStatus, to)
+      ) {
+        throw new ApiException(ErrorCode.ORDR_003, 'حالة الطلب اتغيّرت بالفعل — حاول تاني', HttpStatus.CONFLICT);
+      }
       const now = new Date();
-      order.orderStatus = to;
-      applyTimestamp(order, now);
-      await manager.save(order);
+      lockedOrder.orderStatus = to;
+      applyTimestamp(lockedOrder, now);
+      await manager.save(lockedOrder);
 
       await manager.save(
         manager.create(OrderStatusHistory, {
-          orderId: order.id,
+          orderId: lockedOrder.id,
           previousStatus,
           newStatus: to,
           changedByUserId: userId,
@@ -1241,14 +1268,22 @@ export class OrdersService {
           changeSource: OrderChangeSource.TECHNICIAN,
         }),
       );
+      return lockedOrder;
     });
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
-      new OrderStatusChangedEvent(order.id, order.orderNumber, previousStatus, to, order.customerId, order.technicianId),
+      new OrderStatusChangedEvent(
+        transitionedOrder.id,
+        transitionedOrder.orderNumber,
+        previousStatus,
+        to,
+        transitionedOrder.customerId,
+        transitionedOrder.technicianId,
+      ),
     );
 
-    return order;
+    return transitionedOrder;
   }
 
   depart(userId: string, orderId: string): Promise<Order> {

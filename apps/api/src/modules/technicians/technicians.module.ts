@@ -26,6 +26,7 @@ import { TECHNICIAN_STATS_QUEUE } from './technician-stats.queue';
 import { TechnicianStatsRecalculationListener } from './technician-stats-recalculation.listener';
 import { TechnicianStatsService } from './technician-stats.service';
 import { TechnicianScheduleService } from './technician-schedule.service';
+import { TechnicianAssignmentGuardService } from './technician-assignment-guard.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
@@ -80,9 +81,17 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianStatsProcessor,
     TechnicianStatsRecalculationListener,
     TechnicianScheduleService,
+    TechnicianAssignmentGuardService,
     ScheduleSlotReleaseListener,
     storageServiceProvider,
   ],
-  exports: [TechniciansService, TechnicianCompaniesService, TechnicianLevelsService, TechnicianStatsService, TechnicianScheduleService],
+  exports: [
+    TechniciansService,
+    TechnicianCompaniesService,
+    TechnicianLevelsService,
+    TechnicianStatsService,
+    TechnicianScheduleService,
+    TechnicianAssignmentGuardService,
+  ],
 })
 export class TechniciansModule {}

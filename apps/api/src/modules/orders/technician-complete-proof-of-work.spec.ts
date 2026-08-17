@@ -142,7 +142,16 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
     );
   });
 
+  afterEach(async () => {
+    if (!dataSource?.isInitialized) return;
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+    await q(`DELETE FROM order_media WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+    await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+  });
+
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
     await q(`DELETE FROM order_media WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
@@ -209,5 +218,31 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
     );
 
     await expect(service.complete(ids.techUser, orderId)).rejects.toMatchObject({ code: 'ORDR_005' });
+  });
+
+  it('سباق complete × complete ينجّح انتقال واحد ويسجل history واحدة فقط', async () => {
+    const orderId = await insertInProgressOrder('complete-race');
+    await dataSource.getRepository(OrderMedia).save(
+      dataSource.getRepository(OrderMedia).create({
+        orderId,
+        uploadedByUserId: ids.techUser,
+        mediaType: OrderMediaType.AFTER_PHOTO,
+        fileUrl: 'https://example.test/after-race.jpg',
+      }),
+    );
+
+    const results = await Promise.allSettled([
+      service.complete(ids.techUser, orderId),
+      service.complete(ids.techUser, orderId),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    const finalOrder = await dataSource.getRepository(Order).findOneOrFail({ where: { id: orderId } });
+    expect(finalOrder.orderStatus).toBe(OrderStatus.WORK_COMPLETED);
+    const historyCount = await dataSource.getRepository(OrderStatusHistory).count({
+      where: { orderId, newStatus: OrderStatus.WORK_COMPLETED },
+    });
+    expect(historyCount).toBe(1);
   });
 });

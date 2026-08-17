@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, EntityManager, Repository } from 'typeorm';
+import { Between, EntityManager, QueryFailedError, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from './entities/technician-schedule-slot.entity';
@@ -17,14 +17,17 @@ export class TechnicianScheduleService {
       throw new ApiException(ErrorCode.VAL_001, 'وقت النهاية لازم يكون بعد وقت البداية', HttpStatus.BAD_REQUEST);
     }
 
-    // فحص التداخل مع سلوتات موجودة لنفس اليوم — مفيش DB constraint (راجع تعليق migration 0058
-    // للسبب: بيحتاج امتداد btree_gist اتجنبناه في أول نسخة)، الفحص هنا بس. المخاطرة مقبولة لأن
-    // الفني هو المالك الوحيد لجدوله (كتابة من عميل واحد، مش سباق متعدد الأطراف زي حجز الطلبات).
+    // فحص سريع لرسالة UX واضحة. Migration 0118's exclusion constraint هو الضمان الحقيقي تحت السباق.
     const existingSameDay = await this.slots.find({
       where: { technicianId: technicianProfileId, slotDate: dto.slot_date },
     });
+    const startTime = normalizeTime(dto.start_time);
+    const endTime = normalizeTime(dto.end_time);
     const overlaps = existingSameDay.some(
-      (existing) => existing.deletedAt === null && dto.start_time < existing.endTime && dto.end_time > existing.startTime,
+      (existing) =>
+        existing.deletedAt === null &&
+        startTime < normalizeTime(existing.endTime) &&
+        endTime > normalizeTime(existing.startTime),
     );
     if (overlaps) {
       throw new ApiException(ErrorCode.VAL_001, 'السلوت ده بيتداخل مع سلوت موجود بالفعل في نفس اليوم', HttpStatus.CONFLICT);
@@ -38,8 +41,15 @@ export class TechnicianScheduleService {
       status: dto.status ?? TechnicianScheduleSlotStatus.AVAILABLE,
       notesAr: dto.notes_ar ?? null,
     });
-    await this.slots.save(slot);
-    return slot;
+    try {
+      await this.slots.save(slot);
+      return slot;
+    } catch (error) {
+      if (error instanceof QueryFailedError && (error.driverError as { code?: string }).code === '23P01') {
+        throw new ApiException(ErrorCode.VAL_001, 'السلوت ده بيتداخل مع سلوت موجود بالفعل في نفس اليوم', HttpStatus.CONFLICT);
+      }
+      throw error;
+    }
   }
 
   listForTechnician(technicianProfileId: string, from?: string, to?: string): Promise<TechnicianScheduleSlot[]> {
@@ -133,4 +143,8 @@ export class TechnicianScheduleService {
       .where('orderId = :orderId', { orderId })
       .execute();
   }
+}
+
+function normalizeTime(value: string): string {
+  return /^\d{2}:\d{2}$/.test(value) ? `${value}:00` : value;
 }

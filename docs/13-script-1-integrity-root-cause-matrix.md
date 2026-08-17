@@ -358,3 +358,43 @@ Both Phase 6 findings are now `VERIFIED FIXED`:
   unnecessary Redis client and destroys PostgreSQL in `finally`.
 - API `npm run build` passed, and the suite exited normally under
   `--detectOpenHandles`.
+
+## Phase 7 — Assignment and schedule concurrency
+
+### Shared invariant
+
+A technician is a shared resource across orders. Every assignment writer uses
+the same eligibility policy and lock order, while PostgreSQL prevents both a
+second active order and overlapping schedule intervals. An order transition
+commits its state, timestamps, and history as one serialized decision.
+
+### Findings verified before modification
+
+| Script section | Current evidence | Status |
+| --- | --- | --- |
+| 52 — technician shared resource | Acceptance locked only each order, so the same technician could accept two different orders concurrently after both prechecks passed. | `NOT FIXED` |
+| 53 — admin reassign eligibility | Admin reassignment checked technician existence but did not apply the matching service/zone/availability/decision-limit/active-work policy. | `NOT FIXED` |
+| 54 — accept versus reassign | Acceptance and reassignment did not share resource locking or one eligibility primitive, allowing competing writers to make decisions from different snapshots. | `NOT FIXED` |
+| 55 — schedule overlap | `createSlot()` used a select-before-insert overlap check without a database constraint. | `NOT FIXED` |
+| 56 — order transition races | Technician transitions and customer/admin cancellation validated an object read before their write transaction, so two legal transitions could both write history from the same old state. | `NOT FIXED` |
+| 57 — concurrency proof | Same-order accept had coverage, but same-technician/different-order, accept×reassign, overlapping slot creation, and transition-history races were missing. | `PARTIAL` |
+
+### Implementation and verification record — 2026-08-17
+
+All Phase 7 findings 52-57 are now `VERIFIED FIXED`:
+
+- Migration `0118_assignment_schedule_concurrency.sql` adds a partial unique
+  index for one active order per technician and a half-open PostgreSQL
+  exclusion constraint for non-overlapping technician schedule slots.
+- `TechnicianAssignmentGuardService` locks the technician resource and applies
+  one eligibility policy to both technician acceptance and admin reassignment.
+  Both paths then lock the order and atomically align its technician pointer,
+  accepted assignment, state transitions, and history.
+- Technician execution transitions and customer/admin cancellation now lock
+  and reread the order, validate the expected state and actor, and persist the
+  transition plus history in the same transaction.
+- Four real PostgreSQL suites passed under `--detectOpenHandles`: 18 tests for
+  same-order accept, same-technician/different-order accept, accept×admin
+  reassign, busy-admin rejection, overlapping and adjacent slots,
+  complete×complete, reschedule×depart, and existing cross-operation/IDOR
+  regressions. The process exited normally in about six seconds.
