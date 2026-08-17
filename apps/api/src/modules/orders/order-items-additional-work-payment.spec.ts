@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderItemsService } from './order-items.service';
 import { Order, OrderStatus } from './entities/order.entity';
-import { OrderItem, OrderItemType } from './entities/order-item.entity';
+import { AdditionalWorkProposalStatus, OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from '../payments/entities/payment.entity';
@@ -341,7 +341,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     expect(owed).toBe(0); // مفيش أي تأثير مالي مزدوج من إعادة إرسال نفس الحدث
   });
 
-  it('العميل رفض البنود — صفر تأثير مالي، صفر محاولة دفع (§2)', async () => {
+  it('العميل رفض البنود — صفر تأثير مالي وصفر محاولة دفع، مع بقاء الدليل المرفوض قابلًا للمراجعة (§2)', async () => {
     const orderId = await insertPrepaidOrder(`declined-${runId}`, 100000);
     await orderItemsService.propose(ids.techUser, orderId, [
       { item_type: OrderItemType.SPARE_PART, name_ar: 'قطعة مرفوضة', quantity: 1, unit_price_cents: 20000 },
@@ -352,6 +352,12 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId } });
     const addlPayment = payments.find((p) => p.orderItemBatchId !== null);
     expect(addlPayment).toBeUndefined(); // صفر محاولة دفع خالص
+
+    const [declined] = await dataSource.getRepository(OrderItem).find({ where: { orderId } });
+    expect(declined).toBeDefined();
+    expect(declined.proposalStatus).toBe(AdditionalWorkProposalStatus.DECLINED);
+    expect(declined.declinedAt).not.toBeNull();
+    expect(declined.declinedByUserId).toBe(ids.customerUser);
   });
 
   it('العميل اختار الدفع كاش للمبلغ الإضافي — صفر محاولة تحصيل إلكتروني، الدلتا تتجمّع في total_amount_cents بس (docs/08 §22 بند 8)', async () => {
@@ -402,5 +408,52 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
 
     const payments = await dataSource.getRepository(Payment).find({ where: { orderId, orderItemBatchId: batchId } });
     expect(payments.length).toBe(1); // صف واحد بس اتسجّل، مش اتنين
+  });
+
+  it('propose × propose المتزامن يسمح بـbatch معلّق واحد فقط ويرجع تعارض نطاق واضح للطلب الآخر', async () => {
+    const orderId = await insertPrepaidOrder(`propose-race-${runId}`, 100000);
+    const results = await Promise.allSettled([
+      orderItemsService.propose(ids.techUser, orderId, [
+        { item_type: OrderItemType.SPARE_PART, name_ar: 'اقتراح متزامن أ', quantity: 1, unit_price_cents: 5000 },
+      ]),
+      orderItemsService.propose(ids.techUser, orderId, [
+        { item_type: OrderItemType.EXTRA_LABOR, name_ar: 'اقتراح متزامن ب', quantity: 1, unit_price_cents: 7000 },
+      ]),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    const pending = await dataSource.getRepository(OrderItem).find({
+      where: { orderId, proposalStatus: AdditionalWorkProposalStatus.PENDING },
+    });
+    expect(pending).toHaveLength(1);
+    expect(new Set(pending.map((item) => item.batchId)).size).toBe(1);
+  });
+
+  it('approve × decline المتزامن يختار قرارًا نهائيًا واحدًا، من دون حذف أو total_amount متناقض', async () => {
+    const orderId = await insertPrepaidOrder(`decision-race-${runId}`, 100000);
+    await orderItemsService.propose(ids.techUser, orderId, [
+      { item_type: OrderItemType.SPARE_PART, name_ar: 'بند قرار متزامن', quantity: 1, unit_price_cents: 9000 },
+    ]);
+
+    const results = await Promise.allSettled([
+      orderItemsService.approve(ids.customerUser, orderId, 'cash'),
+      orderItemsService.decline(ids.customerUser, orderId),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+
+    const order = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    const [item] = await dataSource.getRepository(OrderItem).find({ where: { orderId } });
+    expect(item).toBeDefined();
+    expect(order.orderStatus).toBe(OrderStatus.IN_PROGRESS);
+    if (item.proposalStatus === AdditionalWorkProposalStatus.APPROVED) {
+      expect(order.totalAmountCents).toBe(109000);
+      expect(item.isCustomerApproved).toBe(true);
+    } else {
+      expect(item.proposalStatus).toBe(AdditionalWorkProposalStatus.DECLINED);
+      expect(order.totalAmountCents).toBe(100000);
+      expect(item.isCustomerApproved).toBe(false);
+    }
   });
 });

@@ -165,3 +165,32 @@ with a clear `409` for multiple components. It never guesses an allocation.
   six passing cases: durable processing, provider rejection/retry, provider
   exception protection, explicit component selection, order-state aggregation,
   cumulative partial refunds, and a concurrent over-refund race.
+
+## Phase 3 — Additional-work lifecycle and concurrency
+
+### Shared invariant
+
+The existing product flow supports sequential additional-work batches, with
+only one customer-visible proposal open per order. A customer decision is
+terminal and preserves the proposal evidence. Any payment is attributable to
+that exact approved batch.
+
+### Implementation and verification record — 2026-08-17
+
+- `0115_additional_work_proposal_lifecycle.sql` adds `pending`, `approved`, and
+  `declined` lifecycle state plus decline actor/time to `order_items`; it
+  migrates already-approved rows safely and retains declined evidence instead
+  of deleting it.
+- `propose()`, `approve()`, and `decline()` now lock and reread the order inside
+  their transactions. A proposal race yields one winner and a normal domain
+  conflict; approve versus decline likewise has exactly one terminal result.
+- Approval asserts a single pending `batch_id` before calculating or charging
+  its amount. Sequential batches remain supported, but no code can aggregate
+  multiple open batches then attach the charge to an arbitrary first one.
+- Proposal rows are immutable through the exposed API; therefore the customer
+  approves the exact item/price snapshot that was created. Price zero remains
+  supported for legitimate free remediation/goodwill items; it creates an
+  auditable approved/declined proposal but no additional money obligation.
+- `order-items-additional-work-payment.spec.ts` ran against shared PostgreSQL
+  TEST with nine passing cases, including proposal race, approve/decline race,
+  retained decline evidence, batch-to-payment mapping, and sequential batches.

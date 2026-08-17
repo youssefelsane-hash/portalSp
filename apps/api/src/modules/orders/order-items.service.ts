@@ -10,7 +10,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { QuoteItemDto } from './dto/propose-quote-items.dto';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
-import { OrderItem } from './entities/order-item.entity';
+import { AdditionalWorkProposalStatus, OrderItem } from './entities/order-item.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
 
@@ -69,21 +69,29 @@ export class OrderItemsService {
   // in_progress → awaiting_quote_approval بس). لو فيه بنود معلّقة من قبل (نظرياً مستحيل هنا لأن
   // الحالة مش هتبقى in_progress لو فيه بنود معلّقة أصلاً)، بيترفض بوضوح برضه عن طريق canTransition.
   async propose(userId: string, orderId: string, items: QuoteItemDto[]): Promise<{ order: Order; items: OrderItem[] }> {
-    const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
-
-    if (!canTransition(order.orderStatus, OrderStatus.AWAITING_QUOTE_APPROVAL)) {
-      throw new ApiException(
-        ErrorCode.ORDR_003,
-        `مينفعش تقترح عرض سعر والطلب في حالة ${order.orderStatus}`,
-        HttpStatus.CONFLICT,
-      );
-    }
-
-    const previousStatus = order.orderStatus;
+    const technicianProfile = await this.techniciansService.findByUserIdOrThrow(userId);
     // كل بنود نداء propose() الواحد بيشاركوا batch_id واحد (docs/08 §21) — عشان موافقة العميل
     // عليهم تعامَل كـ"طلب واحد" (obligation دفع واحد)، مش N بند منفصل.
     const batchId = randomUUID();
-    const created = await this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
+      // القفل وإعادة قراءة الحالة هنا، مش قبل transaction: طلبا propose متزامنان لا يمكنهما
+      // كلاهما رؤية IN_PROGRESS وإنشاء دفعتين مفتوحتين.
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId AND o.technician_id = :technicianId', { orderId, technicianId: technicianProfile.id })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+      }
+      if (!canTransition(order.orderStatus, OrderStatus.AWAITING_QUOTE_APPROVAL)) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          `مينفعش تقترح عرض سعر والطلب في حالة ${order.orderStatus}`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      const previousStatus = order.orderStatus;
       const rows = items.map((item) =>
         manager.create(OrderItem, {
           orderId: order.id,
@@ -95,6 +103,9 @@ export class OrderItemsService {
           unitPriceCents: item.unit_price_cents,
           totalPriceCents: Math.round(item.quantity * item.unit_price_cents),
           isCustomerApproved: false,
+          proposalStatus: AdditionalWorkProposalStatus.PENDING,
+          declinedAt: null,
+          declinedByUserId: null,
           addedByUserId: userId,
           batchId,
         }),
@@ -116,8 +127,10 @@ export class OrderItemsService {
         }),
       );
 
-      return rows;
+      return { order, rows, previousStatus };
     });
+
+    const { order, rows: created, previousStatus } = result;
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
@@ -158,16 +171,34 @@ export class OrderItemsService {
         throw new ApiException(ErrorCode.ORDR_003, 'مفيش عرض سعر مستني الموافقة لهذا الطلب', HttpStatus.CONFLICT);
       }
 
-      const pending = await manager.find(OrderItem, { where: { orderId, isCustomerApproved: false } });
+      const pending = await manager.find(OrderItem, {
+        where: { orderId, proposalStatus: AdditionalWorkProposalStatus.PENDING },
+      });
       if (pending.length === 0) {
         throw new ApiException(ErrorCode.ORDR_003, 'مفيش بنود معلّقة للموافقة عليها', HttpStatus.CONFLICT);
       }
+
+      // التصميم الحالي يدعم batches متتابعة، وليس batches مفتوحة متوازية. التحقق يمنع أي
+      // بيانات تالفة أو مسار مستقبلي من تجميع مبلغ عدة batches ثم نسبته إلى pending[0].
+      const pendingBatchIds = [...new Set(pending.map((item) => item.batchId))];
+      if (pendingBatchIds.length !== 1 || !pendingBatchIds[0]) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'بيانات عرض السعر غير متسقة — لازم يكون للطلب المعلّق batch واحد محدد',
+          HttpStatus.CONFLICT,
+        );
+      }
+      const batchId = pendingBatchIds[0];
 
       const addedCents = pending.reduce((sum, item) => sum + item.totalPriceCents, 0);
       const previousStatus = order.orderStatus;
       const now = new Date();
 
-      await manager.update(OrderItem, { id: In(pending.map((i) => i.id)) }, { isCustomerApproved: true, approvedAt: now });
+      await manager.update(
+        OrderItem,
+        { id: In(pending.map((i) => i.id)) },
+        { isCustomerApproved: true, approvedAt: now, proposalStatus: AdditionalWorkProposalStatus.APPROVED },
+      );
 
       order.totalAmountCents += addedCents;
       order.orderStatus = OrderStatus.IN_PROGRESS;
@@ -186,10 +217,10 @@ export class OrderItemsService {
         }),
       );
 
-      return { order, pending, addedCents, previousStatus };
+      return { order, pending, batchId, addedCents, previousStatus };
     });
 
-    const { order, pending, addedCents, previousStatus } = result;
+    const { order, pending, batchId, addedCents, previousStatus } = result;
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,
@@ -209,42 +240,58 @@ export class OrderItemsService {
     // ولا بيرجع الموافقة اللي اتسجّلت بالفعل — المبلغ يفضل obligation مسجّل يتحصّل لاحقًا (completion
     // check أو retry يدوي)، الموافقة نفسها عملية منجزة بالفعل.
     if (order.paymentStatus === OrderPaymentStatus.PAID && paymentChoice === 'electronic') {
-      const batchId = pending[0].batchId;
-      if (batchId) {
-        try {
-          await this.paymentsService.attemptAdditionalWorkCharge(order.id, batchId, addedCents);
-        } catch (err) {
-          this.logger.error(
-            `فشل محاولة تحصيل شغل إضافي للطلب ${order.id} (دفعة ${batchId}) — المبلغ يفضل obligation مسجّل`,
-            err instanceof Error ? err.stack : err,
-          );
-        }
+      try {
+        await this.paymentsService.attemptAdditionalWorkCharge(order.id, batchId, addedCents);
+      } catch (err) {
+        this.logger.error(
+          `فشل محاولة تحصيل شغل إضافي للطلب ${order.id} (دفعة ${batchId}) — المبلغ يفضل obligation مسجّل`,
+          err instanceof Error ? err.stack : err,
+        );
       }
     }
 
     return { order, items: await this.listForOrder(orderId) };
   }
 
-  // العميل رفض البنود المقترحة — بيتشالوا نهائي (مفيش عمود "مرفوض" في order_items أصلاً،
-  // القرار المتعمّد هنا: بدل ما نضيف migration لعمود جديد لسيناريو مش موصوف بالتفصيل في القاموس،
-  // بنسجّل لقطة كاملة بالبنود المرفوضة في order_status_history.metadata (سجل تدقيق كافي) ونشيلهم
-  // من order_items — الشغل بيكمل بنفس النطاق الأساسي بس من غير أي تأثير على total_amount_cents.
+  // العميل يرفض البنود المقترحة مع الاحتفاظ بها كدليل lifecycle مستقل؛ لا DELETE لعرض مالي رآه
+  // العميل. الشغل يكمل بنفس النطاق الأساسي ومن دون أثر على total_amount_cents.
   // إلغاء الطلب بالكامل (لو العميل مش عايز يكمل خالص) مسار منفصل: state machine بتسمح
   // awaiting_quote_approval → cancelled_by_customer، واتضافت للفعل في CUSTOMER_CANCELLABLE_STATUSES
   // عشان تستخدم OrdersService.cancel() الموجودة (نفس منطق رسوم الإلغاء) بدل ما نكرره هنا.
   async decline(userId: string, orderId: string): Promise<{ order: Order }> {
-    const order = await this.findOwnedByCustomerOrThrow(userId, orderId);
-    if (order.orderStatus !== OrderStatus.AWAITING_QUOTE_APPROVAL) {
-      throw new ApiException(ErrorCode.ORDR_003, 'مفيش عرض سعر مستني الموافقة لهذا الطلب', HttpStatus.CONFLICT);
-    }
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
 
-    const pending = await this.orderItems.find({ where: { orderId, isCustomerApproved: false } });
-    const previousStatus = order.orderStatus;
-
-    await this.dataSource.transaction(async (manager) => {
-      if (pending.length > 0) {
-        await manager.delete(OrderItem, { id: In(pending.map((i) => i.id)) });
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId AND o.customer_id = :customerId', { orderId, customerId: customerProfile.id })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       }
+      if (order.orderStatus !== OrderStatus.AWAITING_QUOTE_APPROVAL) {
+        throw new ApiException(ErrorCode.ORDR_003, 'مفيش عرض سعر مستني الموافقة لهذا الطلب', HttpStatus.CONFLICT);
+      }
+
+      const pending = await manager.find(OrderItem, {
+        where: { orderId, proposalStatus: AdditionalWorkProposalStatus.PENDING },
+      });
+      if (pending.length === 0) {
+        throw new ApiException(ErrorCode.ORDR_003, 'مفيش بنود معلّقة للرفض لهذا الطلب', HttpStatus.CONFLICT);
+      }
+      const previousStatus = order.orderStatus;
+      const now = new Date();
+
+      await manager.update(
+        OrderItem,
+        { id: In(pending.map((i) => i.id)) },
+        {
+          proposalStatus: AdditionalWorkProposalStatus.DECLINED,
+          declinedAt: now,
+          declinedByUserId: userId,
+        },
+      );
 
       order.orderStatus = OrderStatus.IN_PROGRESS;
       await manager.save(order);
@@ -261,7 +308,10 @@ export class OrderItemsService {
           metadata: { declined_items: pending.map((i) => ({ name_ar: i.nameAr, total_price_cents: i.totalPriceCents })) },
         }),
       );
+      return { order, pending, previousStatus };
     });
+
+    const { order, pending, previousStatus } = result;
 
     this.events.emit(
       ORDER_STATUS_CHANGED_EVENT,

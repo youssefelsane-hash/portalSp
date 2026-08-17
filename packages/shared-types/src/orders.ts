@@ -211,6 +211,8 @@ export interface OrderItemResponseDto {
   unit_price_cents: number;
   total_price_cents: number;
   is_customer_approved: boolean;
+  proposal_status: 'pending' | 'approved' | 'declined';
   approved_at: string | null;
+  declined_at: string | null;
   created_at: string;
 }

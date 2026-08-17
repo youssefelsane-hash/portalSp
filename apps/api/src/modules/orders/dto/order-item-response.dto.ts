@@ -10,7 +10,9 @@ export interface OrderItemResponseDto {
   unit_price_cents: number;
   total_price_cents: number;
   is_customer_approved: boolean;
+  proposal_status: string;
   approved_at: string | null;
+  declined_at: string | null;
   created_at: string;
 }
 
@@ -25,7 +27,9 @@ export function toOrderItemResponseDto(item: OrderItem): OrderItemResponseDto {
     unit_price_cents: item.unitPriceCents,
     total_price_cents: item.totalPriceCents,
     is_customer_approved: item.isCustomerApproved,
+    proposal_status: item.proposalStatus,
     approved_at: item.approvedAt ? item.approvedAt.toISOString() : null,
+    declined_at: item.declinedAt ? item.declinedAt.toISOString() : null,
     created_at: item.createdAt.toISOString(),
   };
 }
