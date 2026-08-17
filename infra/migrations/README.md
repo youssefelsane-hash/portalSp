@@ -38,6 +38,10 @@ legacy يفشل migration كاملة داخل transaction ويترك حماية 
 بدأت سلسلة Script 2 بالملف `0122_auth_otp_integrity.sql`: فهرس جزئي لاختيار أحدث OTP غير مستخدم
 بكفاءة أثناء قفل الصف، مع بقاء migration `0003` ثابتة بلا تعديل.
 
+`0123_realtime_access_revocation.sql` يضيف triggers على حالة المستخدم وعضوية الأدوار وصلاحياتها.
+كل تغيير committed ينشر user id عبر PostgreSQL `NOTIFY`؛ كل API instance يستمع ويفصل sockets
+الخاصة بالمستخدم فورًا. الاتصال اللاحق يظل محميًا بفحص DB حي، فلا يعتمد الأمان على حفظ الإشعار.
+
 ## التشغيل محلياً
 
 ```bash

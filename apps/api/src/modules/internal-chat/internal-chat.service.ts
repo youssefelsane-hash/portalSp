@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { User, UserType } from '../auth/entities/user.entity';
 import { SendInternalMessageDto } from './dto/send-internal-message.dto';
@@ -31,6 +31,12 @@ function assertAllowedPair(userA: User, userB: User): void {
   }
 }
 
+function assertAvailable(user: User): void {
+  if (!user.isActive || user.isBlocked) {
+    throw new ApiException(ErrorCode.AUTH_001, 'الحساب غير متاح للشات الداخلي', HttpStatus.FORBIDDEN);
+  }
+}
+
 @Injectable()
 export class InternalChatService {
   constructor(
@@ -44,6 +50,7 @@ export class InternalChatService {
     if (!me) {
       throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
     }
+    assertAvailable(me);
 
     // أدمن: يقدر يكلم أي أدمن تاني أو أي فني. فني: يقدر يكلم أي أدمن بس (مش فني تاني).
     const allowedTypes = me.userType === UserType.ADMIN ? [UserType.ADMIN, UserType.TECHNICIAN] : [UserType.ADMIN];
@@ -51,6 +58,8 @@ export class InternalChatService {
       .createQueryBuilder('u')
       .where('u.user_type IN (:...types)', { types: allowedTypes })
       .andWhere('u.id != :userId', { userId })
+      .andWhere('u.is_active = true')
+      .andWhere('u.is_blocked = false')
       .orderBy('u.full_name', 'ASC')
       .getMany();
 
@@ -69,6 +78,8 @@ export class InternalChatService {
     if (!me || !peer) {
       throw new ApiException(ErrorCode.VAL_001, 'المستخدم غير موجود', HttpStatus.NOT_FOUND);
     }
+    assertAvailable(me);
+    assertAvailable(peer);
     assertAllowedPair(me, peer);
 
     // .toLowerCase() دفاعي — الترتيب لازم يطابق مقارنة uuid في الـ CHECK constraint بالظبط
@@ -150,6 +161,13 @@ export class InternalChatService {
 
   async sendMessage(userId: string, threadId: string, dto: SendInternalMessageDto): Promise<InternalMessage> {
     const thread = await this.getThreadForParticipant(userId, threadId);
+    const users = await this.users.findBy({
+      id: In([thread.participantAUserId, thread.participantBUserId]),
+    });
+    if (users.length !== 2) {
+      throw new ApiException(ErrorCode.AUTH_001, 'أحد أطراف المحادثة غير متاح', HttpStatus.FORBIDDEN);
+    }
+    users.forEach(assertAvailable);
 
     const message = this.messages.create({
       threadId,

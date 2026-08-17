@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { AdminModule } from '../admin/admin.module';
@@ -14,12 +13,13 @@ import { OrderChatThreadListener } from './order-chat-thread.listener';
 import { OrderCompletedChatCloseListener } from './order-completed-chat-close.listener';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatThread } from './entities/chat-thread.entity';
+import { RealtimeSecurityModule } from '../../common/websocket/realtime-security.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ChatThread, ChatMessage, CustomerProfile, TechnicianProfile, User]),
-    JwtModule.register({}),
     AdminModule,
+    RealtimeSecurityModule,
   ],
   controllers: [ChatController, AdminChatController],
   providers: [ChatService, ChatGateway, OrderChatThreadListener, OrderCompletedChatCloseListener, storageServiceProvider],

@@ -5,11 +5,12 @@
 **الحالة: شغال (S6).**
 
 - الخيط (`chat_thread`) بيتعمل تلقائياً لما الفني يقبل الطلب — مستمع لحدث `order.accepted` من `matching` (بره الـ transaction، زي كل الأحداث التانية في المشروع)، مش استدعاء مباشر.
-- `ChatGateway` (WebSocket, namespace `/chat`): الاتصال لازم يحمل نفس JWT access token المستخدم في REST (`handshake.auth.token`). `chat:join` بيتحقق إن المستخدم فعلاً طرف في الخيط (عميل أو فني) قبل ما يخليه يدخل الـ room، و`chat:send` بيبعت `chat:message_received` لكل الأطراف فوراً.
+- `ChatGateway` (WebSocket, namespace `/chat`): الاتصال لازم يحمل JWT صحيحًا وحسابًا نشطًا حيًا من DB. `chat:join` و`chat:send` يعيدان الفحص، وكل payload له DTO صارم. سحب صلاحية دعم أو حظر/تعطيل الحساب يفصل sockets القائمة على كل instances عبر PostgreSQL `LISTEN/NOTIFY` (migration `0123`)، فلا يبقى أدمن داخل room قديمة بعد سحب `support_tickets.manage`.
 - `contact-info-detector.ts`: كشف عملي (regex) لمحاولات تبادل أرقام موبايل — بيعلّم الرسالة (`is_flagged`) بدل ما يرفضها، عشان رسائل شرعية فيها أرقام (عناوين، مواعيد) متتحظرش.
 - `GET/POST /chat/threads/:id/messages`: نفس الوظيفة عبر REST لو الكلاينت مش عايز WebSocket.
 - **`GET /chat/orders/:orderId/thread` — endpoint جديد، كانت فجوة موثّقة صراحة اتقفلت**: مفيش كان طريقة للكلاينت (`customer-app`/`technician-app`) يكتشف الـ `thread_id` بتاع طلب معيّن — `createThreadForOrder` بيتنادى تلقائياً بس النتيجة (الـ `thread_id`) ماكانتش بترجع لحد. الـ endpoint الجديد ده بيرجّع `404` صريح ("مفيش محادثة للطلب ده لسه") لو الفني لسه ما قبلش، و`403` لو المستخدم مش طرف في الطلب. اتضاف `ThreadResponseDto` مقابل، وGET الأصلي اتنقل من `chat/threads/:id/messages` لتحت `@Controller('chat')` موحّد (بدل `chat/threads`) عشان يستوعب المسار الجديد `chat/orders/:orderId/thread` بجانب `chat/threads/:id/messages` القديم بنفس الشكل بالظبط.
 - اتعمله اختبار end-to-end فعلي بعميلين WebSocket حقيقيين (مش mock): رسالة عادية وصلت للطرفين فوراً وهي `is_flagged:false`، ورسالة فيها رقم موبايل مصري وصلت وهي `is_flagged:true`، وطرف تالت مش صاحب الخيط اترفض بـ 403 لما حاول يوصله عبر REST. اتعمله كمان اختبار حي تاني من جوّه `customer-app` (`test_live/chat_live_test.dart`): طلب حقيقي قبل القبول رجّع `404` صريح على `GET /chat/orders/:id/thread`، بعد القبول رجّع الـ thread الصح، عميل وفني حقيقيين اتصلوا بـ WebSocket وتبادلوا رسالتين حقيقيتين لحظياً، وتاريخ الرسائل عبر REST طابق بالظبط.
+- الشاشات في تطبيقي العميل والفني تعمل dedupe بالـ`message.id`، لذلك REST echo أو إعادة بث نفس الرسالة لا يكررها. `chat:joined` يعيد `is_active` و`last_message_at` كمرساة reconnect، بينما التاريخ الكامل يظل من REST لأنه مصدر الحقيقة.
 - `support_chat` (شات الدعم العام) — تفاصيل كاملة في القسم تحت.
 
 ## صور/مرفقات في الرسائل (`message_type=image`, `file_url`) — كانت فجوة موثّقة، اتقفلت
