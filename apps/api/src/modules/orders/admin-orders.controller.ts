@@ -10,7 +10,9 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminOrdersService } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
+import { AdminRescheduleOrderDto } from './dto/admin-reschedule-order.dto';
 import { AssignAssistantDto } from './dto/assign-assistant.dto';
+import { AddCrewMemberDto, RemoveCrewMemberDto, ReplaceCrewMemberDto } from './dto/admin-crew-member.dto';
 import { CreateOrderForCustomerDto } from './dto/create-order-for-customer.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { toOrderFinancialSummaryResponseDto } from './dto/order-financial-summary-response.dto';
@@ -137,6 +139,22 @@ export class AdminOrdersController {
     return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
   }
 
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس POST /orders/:id/reschedule (مقصور
+  // على العميل صاحب الطلب)، ده لأي طلب. نفس آلية الحجز الذرّي بالحرف (OrdersService.rescheduleCore
+  // المشتركة)، مفيش تكرار منطق. مفيش step-up MFA هنا (بعكس adjust-price/resolve-failed-visit
+  // تحت) — تغيير موعد مش قرار مالي، نفس مستوى حساسية reassign فوقها بالظبط.
+  @Post(':id/reschedule')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.reschedule')
+  async rescheduleByAdmin(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminRescheduleOrderDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(await this.ordersService.rescheduleByAdmin(admin.sub, id, dto.new_slot_id, dto.reason, audit));
+  }
+
   // بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): orders.adjust_price
   // مُدرجة في MFA_REQUIRED_PERMISSIONS (mfa-policy.service.ts) بس @RequireStepUp() الفعلية
   // متضافتش خالص — جلسة مسروقة كانت تقدر تعدّل سعر أي طلب من غير أي تأكيد Passkey حديث.
@@ -205,6 +223,59 @@ export class AdminOrdersController {
   ) {
     return toOrderResponseDto(
       await this.adminOrdersService.assignAssistant(admin.sub, id, dto.technician_id, audit),
+    );
+  }
+
+  // إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) — كانت فجوة موثّقة صراحة:
+  // OrderTeamService.addMember()/removeMember() مقصورين على الفني القائد بس. صلاحية مخصصة
+  // (orders.manage_crew، migration 0132)، أعرض من assign_assistant (أي دور طاقم، مش "مساعد" بس).
+  @Post(':id/team-members')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.manage_crew')
+  async addCrewMember(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddCrewMemberDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.adminOrdersService.addCrewMember(admin.sub, id, dto.technician_id, dto.role_label, audit),
+    );
+  }
+
+  @Post(':id/team-members/:memberId/remove')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.manage_crew')
+  async removeCrewMember(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Body() dto: RemoveCrewMemberDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.adminOrdersService.removeCrewMember(admin.sub, id, memberId, dto.reason, audit);
+  }
+
+  @Post(':id/team-members/:memberId/replace')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.manage_crew')
+  async replaceCrewMember(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Body() dto: ReplaceCrewMemberDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.adminOrdersService.replaceCrewMember(
+        admin.sub,
+        id,
+        memberId,
+        dto.new_technician_id,
+        dto.reason,
+        dto.role_label,
+        audit,
+      ),
     );
   }
 }

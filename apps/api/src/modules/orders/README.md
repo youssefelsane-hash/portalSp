@@ -685,3 +685,121 @@ IDOR حي (عميل/فني تاني مايقدروش يوصلوا لطلب مش 
 اتعمل لها اختبار حي بمتصفح فعلي — نفس قيد WebAuthn MFA لتسجيل دخول الأدمن في بيئة الـsandbox.
 `tsc`/`eslint`/`next build` كلهم نضاف، والـtypes متطابقة بالحرف مع رد الباك-إند الحقيقي المتحقق
 منه بالـcurl فوق.
+
+## إدارة طاقم الطلب من الأدمن (Crew Editing، Script 4 §22-29 و§38-41، 2026-08-18)
+
+كانت فجوة موثّقة صراحة: `OrderTeamService.addMember()`/`removeMember()` مقصورين على الفني القائد
+بس (`technician-leader-ownership-gated`، شوف السكشن فوق "توزيع أدوار الفريق داخل الطلب الواحد")،
+و`AdminOrdersService.assignAssistant()` مقصور على شغل "مساعد" بس (ADR-0008). مفيش أي مسار أدمن
+لإدارة أعضاء الطاقم العاديين (`member_type='team_member'`) — لو فني اعتذر آخر لحظة أو الطاقم ناقص،
+مفيش أداة تشغيلية غير الدخول على الداتابيز يدويًا.
+
+**صلاحية مخصصة (`orders.manage_crew`, migration `0132`)**: نفس نمط `orders.assign_assistant` في
+`0076` — ممنوحة لـ`super_admin` **و**`ops_manager`، مش قاصرة على `super_admin` زي
+`orders.create_for_customer` فوق. الفرق المتعمّد: دي عملية تشغيلية يومية (حل نقص طاقم، استبدال
+عضو غاب)، مش قرار بهوية عميل زي إنشاء طلب.
+
+**فرق متعمّد عن `OrderTeamService` (الفني القائد)**: `validateCrewCandidateOrThrow` في
+`AdminOrdersService` **مبيتحققش من تطابق الشركة** (`company_id`) بين الفني الجديد وقائد الطلب —
+بعكس `OrderTeamService.addMember()` اللي بيرفض صراحة أي فني من شركة مختلفة. القرار: الأدمن أداة
+تشغيلية استثنائية (حل نقص طاقم بأي فني معتمد متاح)، مش مقيّد بحدود تنظيمية الفريق العادي. باقي
+الشروط نفسها: `booking_mode='team'` بس، الفني لازم `verification_status='approved'`، مش قائد
+الطلب بالفعل، مش عضو مضاف بالفعل، وتحت `MAX_TEAM_MEMBERS_PER_ORDER` (15، نفس الحد المستخدم في
+`OrderTeamService`، بقى `export`ed من هناك بدل تكراره).
+
+**3 endpoints جديدة** تحت `orders.manage_crew`:
+- `POST /admin/orders/:id/team-members` — إضافة عضو (`technician_id` + `role_label`).
+- `POST /admin/orders/:id/team-members/:memberId/remove` — إزالة، `reason` إلزامي (5-500 حرف).
+  بيرجع `{ crewShortage: boolean }` — مؤشر عددي بسيط (`remaining + 1 < order.required_technicians`،
+  الـ`+1` بيمثّل قائد الطلب اللي مش صف في `order_team_members`) لتحذير الأدمن فورًا لو العدد بقى
+  أقل من `required_technicians` (snapshot محرك الإنتاجية وقت الحجز) — **صفر تطابق أدوار دقيق**،
+  مفيش تعقّب لأي دور تحديدًا نقص، العدد الكلي بس.
+- `POST /admin/orders/:id/team-members/:memberId/replace` — استبدال ذرّي: `new_technician_id` +
+  `reason` إلزاميين، `role_label` اختياري (لو مش مبعوت بياخد دور العضو القديم). الاستبدال بالكامل
+  جوّه `dataSource.transaction()` واحدة (حذف القديم + إضافة الجديد سوا) — صفر نافذة زمنية يفضل
+  فيها الطلب من غير العضو ده خالص. **حماية سباق**: العضو القديم بيتقرا تاني *جوّه* الترانزاكشن
+  (مش بس الاعتماد على الفحص المبدئي فوقها) عشان لو حد شاله بالتوازي بين الفحص والتنفيذ.
+
+**إشعارات**: حدث عام جديد `OrderCrewChangedEvent` (`order.crew_changed`، `added`/`removed`/`replaced`)
+— بعكس `OrderAssistantAssignedManuallyEvent` المقصور على "مساعد" بس. الفرق المتعمّد: العضو المُضاف
+**ميوافقش** على الإضافة (زي "معاه مساعد؟" — القرار للفني القائد أو الأدمن، مش للمضاف)، فالحدث ده
+إشعار بس، صفر انتظار قرار. `OrderCrewChangedNotificationListener` بيبعت للفني المتأثر (المضاف
+و/أو المشال حسب نوع التغيير).
+
+**كل عملية بتسجّل `audit_logs`** (`order.crew_member_added`/`_removed`/`_replaced`) بـ
+`oldValues`/`newValues` كاملين — بديل عن soft-delete على `order_team_members` (الجدول فاضل
+hard-delete زي ما هو، الاتفاقية الموجودة من `0060`، الـaudit trail كافي لحفظ التاريخ).
+
+**اختبار حي كامل**:
+- **jest** (`admin-crew-management.spec.ts`, 14 اختبار، ضد Postgres حقيقي): إضافة ناجحة + 5 حالات
+  رفض (مش team mode، فني مش معتمد، الفني هو القائد، عضو مكرر، تجاوز الحد الأقصى)، إزالة ناجحة +
+  `crewShortage` صح في الحالتين (كافي/ناقص) + رفض عضو مش موجود، استبدال ناجح (مع/من غير
+  `role_label` override) + رفض (نفس الفني، عضو مش موجود)، وتأكيد إطلاق `ORDER_CREW_CHANGED_EVENT`.
+- **curl مباشر ضد dev server حقيقي** (نفس تقنية JWT-signing بـ`JWT_ACCESS_SECRET` المستخدمة في
+  قسم Call Center فوق): إضافة عضو حقيقية (audit log + DB تحقق)، تعارض عضو مكرر (409)، تحقق
+  `class-validator` على `reason` القصير (400) لكل من remove وreplace، استبدال ناجح (DB تحقق
+  `technician_id`/`role_label` بعد الاستبدال)، إزالة ناجحة مع `crewShortage=true` صح (required=3،
+  بعد الإزالة العدد الكلي 1)، ورفض بدون توكن (401). بيانات الاختبار اتنضّفت بالكامل من الداتابيز
+  بعد التحقق (بما فيها `notifications` و`addresses` اللي الحذف الأول اتعثّر عليهم بسبب ترتيب FK).
+
+RBAC (403 لدور من غير `orders.manage_crew`) اتبني على نفس `PermissionsGuard` المستخدم في عشرات
+endpoints تانية اتعمل لها اختبار حي قبل كده — مش اتعمل اختبار حي منفصل ليه هنا (وقت الجلسة)، بس
+نفس آلية الحارس بالحرف.
+
+**apps/admin**: كارت "طاقم الطلب" جديد في `/orders/[id]` (بيظهر بس لطلبات `booking_mode='team'`)
+— قايمة الأعضاء الحاليين (بعكس كارت "المساعدين" الموجود من قبل اللي بيفلتر `member_type='assistant'`
+بس، الكارت الجديد ده لـ`member_type='team_member'` العاديين)، مع 3 إجراءات مقفولة خلف
+`hasPermission('orders.manage_crew')`: إضافة عضو (فورم منسدل من نفس قايمة الفنيين المعتمدين
+المستخدمة في فورم تعيين المساعد)، إزالة (فورم مضمّن جوّه الصف بسبب إلزامي)، واستبدال (فورم مضمّن
+تاني، فني جديد + سبب إلزامي + دور اختياري). تحذير `crewShortage` بيتعرض فورًا فوق القايمة لو
+الإزالة الأخيرة سيّبت العدد أقل من `required_technicians`. أنواع `AddCrewMemberBody`/
+`RemoveCrewMemberBody`/`RemoveCrewMemberResponseDto`/`ReplaceCrewMemberBody` جديدة في
+`packages/shared-types/src/orders.ts` (مطابقة بالحرف لـ`admin-crew-member.dto.ts`). **فجوة موثّقة
+صراحة**: مش اتعمل لها اختبار حي بمتصفح فعلي — نفس قيد WebAuthn MFA لتسجيل دخول الأدمن في بيئة
+الـsandbox، مذكور في قسم Call Center فوق بالتفصيل. `tsc`/`eslint`/`next build` كلهم نضاف.
+
+## إعادة جدولة عامة من الأدمن (Script 4 Part K §42، 2026-08-18)
+
+كانت فجوة موثّقة صراحة: `OrdersService.reschedule()` (شوف قسم "إعادة الجدولة docs/08 §22 بند
+9-12" فوق) مقصور على العميل صاحب الطلب بس (`findOneOwnedOrThrow`) — استخدام تشغيلي حقيقي غير
+مغطّى: العميل يتصل بخدمة العملاء يطلب تأجيل الموعد، الموظف بيحتاج ينفذها نيابة عنه بدل الدخول
+على الداتابيز يدويًا.
+
+**إعادة استخدام بدل تكرار**: منطق الحجز الذرّي (release القديم + book الجديد جوّه transaction
+واحدة، مع القفل التشاؤمي وإعادة التحقق تحت القفل ضد سباق depart()) اتفصل في method خاص
+`rescheduleCore()` بيتنادى من الاتنين — `reschedule()` (العميل) و`rescheduleByAdmin()` (الأدمن)
+الجديدة. صفر duplicate logic، الفرق بس هوية المنفّذ (`changedByRole`/`changeSource` في
+`order_status_history`) + سبب إلزامي (5-500 حرف، `AdminRescheduleOrderDto`) + سطر تدقيق إضافي
+(`order.rescheduled_by_admin`) — العميل مش مطلوب منه سبب لما بيعيد جدولة طلبه هو.
+
+**صلاحية مخصصة (`orders.reschedule`, migration `0133`)**: نفس نمط `orders.assign_assistant`/
+`orders.manage_crew` — ممنوحة لـ`super_admin` و`ops_manager`، عملية تشغيلية يومية. **مفيش
+step-up MFA** (بعكس `orders.adjust_price`/`orders.resolve_failed_visit`) — تغيير موعد مش قرار
+مالي، نفس مستوى حساسية `orders.reassign` بالظبط.
+
+**`POST /admin/orders/:id/reschedule`** — `{new_slot_id, reason}`. نفس قيود العميل بالحرف
+(الحالة لازم تكون `accepted`/`technician_assigned`، السلوت الجديد لازم يكون لنفس الفني المعيّن).
+
+**requote/scope-change**: تم التأكد إن ده مش فجوة فعلية — الـworkflow الهيكلي موجود بالفعل ومختبر
+من سيشنز سابقة (`OrderItemsService.propose()`/`approve()`/`decline()`، حالة `AWAITING_QUOTE_
+APPROVAL`، شوف قسم "عرض السعر أثناء التنفيذ" فوق). الأدمن عنده بالفعل رؤية قراءة (`GET
+/admin/orders/:id/quote-items`، كارت "بنود العرض" في `apps/admin`) — مفيش حاجة إضافية اتلقطت
+تحتاج بناء هنا.
+
+**اختبار حي كامل**:
+- **jest** (امتداد لـ`reschedule-and-address-warning.spec.ts`، describe block جديد
+  `rescheduleByAdmin()`): إعادة جدولة ناجحة بغض النظر عن هوية العميل + تأكيد `audit_logs`
+  (spy حقيقي على `AuditLogService.record`) + `order_status_history` (`changed_by_role='admin'`،
+  `change_source='admin'`، السبب متضمّن في النص)، رفض طلب مش موجود، ورفض بعد ما الفني يتحرّك
+  فعليًا (`technician_on_way`) — نفس قيد العميل بالحرف، صفر audit log بيتسجّل لما العملية ترفض.
+- **curl مباشر ضد dev server حقيقي**: تحقق `class-validator` على `reason` القصير (400)، إعادة
+  جدولة ناجحة (DB تحقق `scheduled_at`/سلوت جديد `booked`)، تحقق `audit_logs` و
+  `order_status_history` كاملين، ورفض بدون توكن (401). بيانات الاختبار اتنضّفت بالكامل (بما فيها
+  `chat_threads` اللي اتعمل تلقائي — الحذف الأول اتعثّر عليه بسبب ترتيب FK، نفس الدرس المتكرر).
+
+**apps/admin**: زرار "إعادة جدولة الموعد" جديد في `/orders/[id]` (بيظهر بس لو `isOrderReschedulable
+(order.order_status) && hasPermission('orders.reschedule')` — `isOrderReschedulable` helper جديد
+في `order-labels.ts` مطابق حرفيًا لـ`RESCHEDULABLE_STATUSES` في الباك-إند). فورم مستقل عن فورم
+"resolve-failed-visit" الموجود من قبل (سياقين مختلفين تمامًا رغم استخدام نفس `GET /technicians/:id/
+schedule` لجلب المواعيد المتاحة). **فجوة موثّقة صراحة**: مش اتعمل لها اختبار حي بمتصفح فعلي — نفس
+قيد WebAuthn MFA. `tsc`/`eslint`/`next build` كلهم نضاف.

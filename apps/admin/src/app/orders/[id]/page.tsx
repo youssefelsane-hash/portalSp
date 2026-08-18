@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import type {
@@ -9,6 +9,7 @@ import type {
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMediaResponseDto,
+  RemoveCrewMemberResponseDto,
   TeamMemberResponseDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -62,6 +63,7 @@ import {
   paymentStatusTone,
   isOrderCancellable,
   isOrderReassignable,
+  isOrderReschedulable,
 } from '@/lib/order-labels';
 import {
   PAYMENT_GATEWAY_STATUS_LABELS,
@@ -73,7 +75,7 @@ import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
   const router = useRouter();
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
@@ -107,6 +109,27 @@ export default function OrderDetailPage() {
   const [showRefundForm, setShowRefundForm] = useState(false);
   const [refundAmountEgp, setRefundAmountEgp] = useState('');
   const [refundReason, setRefundReason] = useState('');
+
+  // إدارة طاقم الطلب من الأدمن (Script 4 §22-29, §38-41) — منفصل عن teamMembers/المساعدين فوق
+  // (member_type='assistant')، ده للأعضاء العاديين (member_type='team_member') في طلب "اعتماد".
+  const [showAddCrewForm, setShowAddCrewForm] = useState(false);
+  const [crewTechnicianId, setCrewTechnicianId] = useState('');
+  const [crewRoleLabel, setCrewRoleLabel] = useState('');
+  const [removingCrewMemberId, setRemovingCrewMemberId] = useState<string | null>(null);
+  const [removeCrewReason, setRemoveCrewReason] = useState('');
+  const [replacingCrewMemberId, setReplacingCrewMemberId] = useState<string | null>(null);
+  const [replaceCrewTechnicianId, setReplaceCrewTechnicianId] = useState('');
+  const [replaceCrewReason, setReplaceCrewReason] = useState('');
+  const [replaceCrewRoleLabel, setReplaceCrewRoleLabel] = useState('');
+  const [crewShortageWarning, setCrewShortageWarning] = useState(false);
+
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس فورم إعادة الجدولة فوق (مقصور على
+  // outcome='reschedule' بتاع resolve-failed-visit)، ده لأي طلب reschedulable بغض النظر عن أي
+  // زيارة فاشلة. state منفصل عمدًا عشان الفورمين يفضلوا مستقلين (سياقين مختلفين تمامًا).
+  const [showAdminRescheduleForm, setShowAdminRescheduleForm] = useState(false);
+  const [adminRescheduleSlots, setAdminRescheduleSlots] = useState<ScheduleSlot[] | null>(null);
+  const [adminRescheduleSlotId, setAdminRescheduleSlotId] = useState('');
+  const [adminRescheduleReason, setAdminRescheduleReason] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -402,6 +425,117 @@ export default function OrderDetailPage() {
     }
   }
 
+  // إدارة طاقم الطلب من الأدمن (Script 4 §22-29, §38-41) — كانت فجوة موثّقة صراحة: مفيش مسار
+  // أدمن لإدارة أعضاء الطاقم العاديين (بعكس المساعدين فوق اللي عندهم مسار من زمان).
+  async function handleAddCrewMember(e: FormEvent) {
+    e.preventDefault();
+    if (!crewTechnicianId || !crewRoleLabel) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/team-members`, {
+        method: 'POST',
+        body: JSON.stringify({ technician_id: crewTechnicianId, role_label: crewRoleLabel }),
+      });
+      setShowAddCrewForm(false);
+      setCrewTechnicianId('');
+      setCrewRoleLabel('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleRemoveCrewMember(e: FormEvent, memberId: string) {
+    e.preventDefault();
+    if (!removeCrewReason) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result = await authedFetch<RemoveCrewMemberResponseDto>(`/admin/orders/${id}/team-members/${memberId}/remove`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: removeCrewReason }),
+      });
+      setCrewShortageWarning(result.crewShortage);
+      setRemovingCrewMemberId(null);
+      setRemoveCrewReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleReplaceCrewMember(e: FormEvent, memberId: string) {
+    e.preventDefault();
+    if (!replaceCrewTechnicianId || !replaceCrewReason) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/team-members/${memberId}/replace`, {
+        method: 'POST',
+        body: JSON.stringify({
+          new_technician_id: replaceCrewTechnicianId,
+          reason: replaceCrewReason,
+          ...(replaceCrewRoleLabel ? { role_label: replaceCrewRoleLabel } : {}),
+        }),
+      });
+      setReplacingCrewMemberId(null);
+      setReplaceCrewTechnicianId('');
+      setReplaceCrewReason('');
+      setReplaceCrewRoleLabel('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // عضو طاقم عادي (اعتماد/فريق) بعكس المساعد (member_type='assistant', مساره منفصل فوق).
+  const crewMembers = teamMembers.filter((m) => m.member_type !== 'assistant');
+
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — نفس endpoint جدول الفني المستخدم في
+  // فورم resolve-failed-visit فوق (GET /technicians/:id/schedule)، بس مسار تنفيذ مختلف كليًا
+  // (POST /admin/orders/:id/reschedule بدل resolve-failed-visit).
+  async function handleOpenAdminRescheduleForm() {
+    setShowAdminRescheduleForm((s) => !s);
+    if (adminRescheduleSlots !== null || !order?.technician_id) return;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const to = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const slots = await authedFetch<ScheduleSlot[]>(`/technicians/${order.technician_id}/schedule?from=${today}&to=${to}`);
+      setAdminRescheduleSlots(slots.filter((s) => s.is_available));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل جدول الفني');
+    }
+  }
+
+  async function handleAdminReschedule(e: FormEvent) {
+    e.preventDefault();
+    if (!adminRescheduleSlotId || adminRescheduleReason.trim().length < 5) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/reschedule`, {
+        method: 'POST',
+        body: JSON.stringify({ new_slot_id: adminRescheduleSlotId, reason: adminRescheduleReason }),
+      });
+      setShowAdminRescheduleForm(false);
+      setAdminRescheduleSlots(null);
+      setAdminRescheduleSlotId('');
+      setAdminRescheduleReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   if (error && !order) {
     return (
       <AppShell>
@@ -547,6 +681,58 @@ export default function OrderDetailPage() {
                   )}
                   <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
                     تأكيد إعادة التعيين
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
+          {/* إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — مستقلة عن isOrderCancellable
+              فوق (accepted مش cancellable لكنها reschedulable). استخدام تشغيلي: العميل يتصل
+              يطلب تأجيل الميعاد، الموظف بينفذها نيابة عنه. */}
+          {isOrderReschedulable(order.order_status) && hasPermission('orders.reschedule') && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <Button type="button" variant="outline" disabled={isSaving} onClick={handleOpenAdminRescheduleForm}>
+                إعادة جدولة الموعد
+              </Button>
+              {showAdminRescheduleForm && (
+                <form onSubmit={handleAdminReschedule} className="flex flex-col gap-2">
+                  <Label htmlFor="admin_reschedule_slot">الموعد الجديد</Label>
+                  {adminRescheduleSlots === null && <p className="text-xs text-muted-foreground">جاري تحميل جدول الفني…</p>}
+                  {adminRescheduleSlots !== null && adminRescheduleSlots.length === 0 && (
+                    <p className="text-xs text-muted-foreground">مفيش مواعيد متاحة للفني ده حاليًا</p>
+                  )}
+                  {adminRescheduleSlots !== null && adminRescheduleSlots.length > 0 && (
+                    <SelectNative
+                      id="admin_reschedule_slot"
+                      value={adminRescheduleSlotId}
+                      onChange={(e) => setAdminRescheduleSlotId(e.target.value)}
+                      required
+                    >
+                      <option value="" disabled>
+                        اختار موعد
+                      </option>
+                      {adminRescheduleSlots.map((slot) => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.slot_date} — {slot.start_time.slice(0, 5)} إلى {slot.end_time.slice(0, 5)}
+                        </option>
+                      ))}
+                    </SelectNative>
+                  )}
+                  <Label htmlFor="admin_reschedule_reason">سبب إعادة الجدولة</Label>
+                  <Input
+                    id="admin_reschedule_reason"
+                    value={adminRescheduleReason}
+                    onChange={(e) => setAdminRescheduleReason(e.target.value)}
+                    required
+                    minLength={5}
+                    maxLength={500}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isSaving || !adminRescheduleSlotId || adminRescheduleReason.trim().length < 5}
+                  >
+                    تأكيد إعادة الجدولة
                   </Button>
                 </form>
               )}
@@ -929,6 +1115,216 @@ export default function OrderDetailPage() {
                     )}
                     <Button type="submit" size="sm" disabled={isSaving || !assistantTechnicianId}>
                       تأكيد التعيين
+                    </Button>
+                  </form>
+                )}
+              </CardFooter>
+            )}
+          </Card>
+        )}
+
+        {/* إدارة طاقم الطلب من الأدمن (Script 4 §22-29, §38-41) — بيظهر بس لطلبات "اعتماد" (فريق). */}
+        {order.booking_mode === 'team' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">طاقم الطلب ({crewMembers.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {crewShortageWarning && (
+                <p className="mb-3 text-sm text-destructive">
+                  تحذير: عدد الطاقم بعد آخر تغيير أقل من المطلوب ({order.required_technicians ?? '—'}).
+                </p>
+              )}
+              {crewMembers.length === 0 ? (
+                <EmptyState title="مفيش أعضاء طاقم مضافين لسه" />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>الاسم</TableHead>
+                      <TableHead>الدور</TableHead>
+                      <TableHead>اتضاف إمتى</TableHead>
+                      {hasPermission('orders.manage_crew') && <TableHead>إجراءات</TableHead>}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {crewMembers.map((member) => (
+                      <Fragment key={member.id}>
+                        <TableRow>
+                          <TableCell>{member.full_name}</TableCell>
+                          <TableCell>{member.role_label}</TableCell>
+                          <TableCell>{new Date(member.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                          {hasPermission('orders.manage_crew') && (
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setRemovingCrewMemberId((cur) => (cur === member.id ? null : member.id));
+                                    setReplacingCrewMemberId(null);
+                                    setRemoveCrewReason('');
+                                  }}
+                                >
+                                  إزالة
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setReplacingCrewMemberId((cur) => (cur === member.id ? null : member.id));
+                                    setRemovingCrewMemberId(null);
+                                    setReplaceCrewTechnicianId('');
+                                    setReplaceCrewReason('');
+                                    setReplaceCrewRoleLabel('');
+                                    if (!approvedTechnicians) loadApprovedTechnicians();
+                                  }}
+                                >
+                                  استبدال
+                                </Button>
+                              </div>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                        {removingCrewMemberId === member.id && (
+                          <TableRow>
+                            <TableCell colSpan={4}>
+                              <form onSubmit={(e) => handleRemoveCrewMember(e, member.id)} className="flex flex-col gap-2">
+                                <Label htmlFor={`remove_reason_${member.id}`}>سبب الإزالة</Label>
+                                <Input
+                                  id={`remove_reason_${member.id}`}
+                                  value={removeCrewReason}
+                                  onChange={(e) => setRemoveCrewReason(e.target.value)}
+                                  required
+                                  minLength={5}
+                                  maxLength={500}
+                                />
+                                <div className="flex gap-2">
+                                  <Button type="submit" size="sm" variant="destructive" disabled={isSaving || removeCrewReason.length < 5}>
+                                    تأكيد الإزالة
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setRemovingCrewMemberId(null);
+                                      setRemoveCrewReason('');
+                                    }}
+                                  >
+                                    إلغاء
+                                  </Button>
+                                </div>
+                              </form>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {replacingCrewMemberId === member.id && (
+                          <TableRow>
+                            <TableCell colSpan={4}>
+                              <form onSubmit={(e) => handleReplaceCrewMember(e, member.id)} className="flex flex-col gap-2">
+                                <Label htmlFor={`replace_tech_${member.id}`}>الفني الجديد</Label>
+                                {!approvedTechnicians ? (
+                                  <p className="text-sm text-muted-foreground">بيحمّل قايمة الفنيين…</p>
+                                ) : (
+                                  <SelectNative
+                                    id={`replace_tech_${member.id}`}
+                                    value={replaceCrewTechnicianId}
+                                    onChange={(e) => setReplaceCrewTechnicianId(e.target.value)}
+                                    required
+                                  >
+                                    <option value="" disabled>
+                                      اختار فني
+                                    </option>
+                                    {approvedTechnicians.map((tech) => (
+                                      <option key={tech.id} value={tech.id}>
+                                        {tech.full_name} ({tech.technician_code})
+                                      </option>
+                                    ))}
+                                  </SelectNative>
+                                )}
+                                <Label htmlFor={`replace_role_${member.id}`}>الدور (اختياري، هياخد دور العضو القديم لو فاضي)</Label>
+                                <Input
+                                  id={`replace_role_${member.id}`}
+                                  value={replaceCrewRoleLabel}
+                                  onChange={(e) => setReplaceCrewRoleLabel(e.target.value)}
+                                  maxLength={100}
+                                />
+                                <Label htmlFor={`replace_reason_${member.id}`}>سبب الاستبدال</Label>
+                                <Input
+                                  id={`replace_reason_${member.id}`}
+                                  value={replaceCrewReason}
+                                  onChange={(e) => setReplaceCrewReason(e.target.value)}
+                                  required
+                                  minLength={5}
+                                  maxLength={500}
+                                />
+                                <div className="flex gap-2">
+                                  <Button type="submit" size="sm" disabled={isSaving || !replaceCrewTechnicianId || replaceCrewReason.length < 5}>
+                                    تأكيد الاستبدال
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setReplacingCrewMemberId(null);
+                                      setReplaceCrewTechnicianId('');
+                                      setReplaceCrewReason('');
+                                      setReplaceCrewRoleLabel('');
+                                    }}
+                                  >
+                                    إلغاء
+                                  </Button>
+                                </div>
+                              </form>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+            {hasPermission('orders.manage_crew') && (
+              <CardFooter className="flex-col items-stretch gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit"
+                  disabled={isSaving}
+                  onClick={() => {
+                    setShowAddCrewForm((s) => !s);
+                    if (!approvedTechnicians) loadApprovedTechnicians();
+                  }}
+                >
+                  إضافة عضو طاقم
+                </Button>
+                {showAddCrewForm && (
+                  <form onSubmit={handleAddCrewMember} className="flex flex-col gap-2">
+                    <Label htmlFor="crew_technician_id">الفني</Label>
+                    {!approvedTechnicians ? (
+                      <p className="text-sm text-muted-foreground">بيحمّل قايمة الفنيين…</p>
+                    ) : (
+                      <SelectNative id="crew_technician_id" value={crewTechnicianId} onChange={(e) => setCrewTechnicianId(e.target.value)} required>
+                        <option value="" disabled>
+                          اختار فني
+                        </option>
+                        {approvedTechnicians.map((tech) => (
+                          <option key={tech.id} value={tech.id}>
+                            {tech.full_name} ({tech.technician_code})
+                          </option>
+                        ))}
+                      </SelectNative>
+                    )}
+                    <Label htmlFor="crew_role_label">الدور</Label>
+                    <Input id="crew_role_label" value={crewRoleLabel} onChange={(e) => setCrewRoleLabel(e.target.value)} required minLength={2} maxLength={100} />
+                    <Button type="submit" size="sm" disabled={isSaving || !crewTechnicianId || !crewRoleLabel}>
+                      تأكيد الإضافة
                     </Button>
                   </form>
                 )}
