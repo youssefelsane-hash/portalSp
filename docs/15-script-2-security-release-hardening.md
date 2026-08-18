@@ -213,12 +213,45 @@ finding #54 بيطلب checklist إطلاق واضح لكل تكامل خارج�
   التسعير الديناميكي، اللي معندهوش حد صريح على مستوى الحقل لكن محكوم بالحد العام ده. مفيش عمل
   إضافي مطلوب — كل الحدود المهمة موجودة فعلاً.
 
+**2026-08-18 (استكمال سابع) — Part N: مصفوفة الأمان الكاملة، بلا توقف:**
+
+مرور صريح على كل بند في قايمة Part N الأصلية، وتصنيفه: مغطّى باختبار موجود، مغطّى باختبار جديد،
+أو قرار تصميم واعي موثّق (مش فجوة):
+
+| البند | الحالة |
+|---|---|
+| Unauthenticated access | ✅ اختبار جديد (`auth-guards.spec.ts`) + `order-tracking-gateway-ownership.spec.ts` (WS) |
+| Wrong role | ✅ اختبار جديد — **كان فجوة حقيقية**: `RolesGuard` نفسه مفهوش أي اختبار مباشر من قبل رغم إنه الحارس الأساسي لكل الـcontrollers |
+| Wrong owner (BOLA) | ✅ `order-media-authorization.spec.ts` + اختبارات سابقة (orders/matching) |
+| Blocked user | ✅ 5 specs موجودة (Phase A/P0-6) |
+| Suspended technician | ✅ `verification_status='approved'` filter مختبر في 3 specs (matching) |
+| Revoked Admin permission | ✅ 6 specs موجودة (Phase B + RBAC) |
+| Stale WebSocket | ✅ Phase B (3 specs — status/reconnect handling) |
+| Malformed coordinates | ✅ `realtime-payload-security.spec.ts` (NaN/Infinity/type coercion/out-of-range/حقول زايدة كلها مغطاة) |
+| Malformed UUID | ✅ بنيويًا — `ParseUUIDPipe` (NestJS، مُختبر من فريق Nest نفسه) مُطبّق على كل `:id` param عبر الكونترولرز |
+| NaN price value / Infinity | ✅ اتصلحت واتاختبرت هالجلسة (Part H #42/44) |
+| Duplicate/Concurrent/Expired OTP | ✅ Phase A (`otp-registration-integrity.spec.ts`) |
+| Duplicate recurring worker | ✅ Script 1 + مراجعة Phase C/D (occurrence claims) |
+| Duplicate notification worker | ✅ `pessimistic_write` claim مختبر (`notification-workflow-reminder`) |
+| Storage upload then DB failure | ✅ Part G (`uploadWithOrphanCleanup` unit tests) |
+| Unauthorized attachment read | ✅ Part G (`order-media-authorization.spec.ts` + مراجعة باقي المسارات) |
+| Provider disabled during checkout | ✅ Part I (`/payment-channels`، مُختبر حيًا) |
+| Production missing API URL | ✅ Part J (`assertProductionApiConfig` tests) |
+| Production missing Firebase | ⚪ قرار تصميم واعي — الإشعارات push قناة best-effort موثّقة صراحة (log-only لو مش مُعدّة)، عكس SMS OTP اللي هو القناة الحرجة الوحيدة ومفروض إجباري fail-fast. مش فجوة، اتفاق فلسفي متّسق مع باقي المشروع. |
+| Release signing missing | ✅ نمط موثّق (`docs/03 §7`)، مراجَع في Part J |
+
+**النتيجة**: بند واحد كان فجوة اختبار حقيقية (Wrong role — `RolesGuard` بلا اختبار مباشر رغم
+مركزيته)، انصلح بـ8 اختبارات جديدة (`common/guards/auth-guards.spec.ts`) تغطي `RolesGuard` (سماح
+بلا `@Roles`، سماح بدور مطابق، رفض 403 لدور غلط) و`JwtAuthGuard.handleRequest` (رفض 401 بلا
+توكن، تفريق `TokenExpiredError` عن توكن غير صالح تمامًا، قبول يوزر صالح). باقي البنود كلها إما
+مغطاة باختبارات موجودة فعلاً أو قرار تصميم واعي موثّق صراحة.
+
 **الحالة الحقيقية دلوقتي (Part-by-part)**: A ✅ B ✅ C ✅ (مراجَعة) D ✅ (مراجَعة) E ✅✅ (كاملة،
 #26-30 كلها) F ✅ G ✅✅ (كاملة، #34-39/41 كلها) H ✅✅ (كاملة، #42-45 كلها، #42 بَقّة حقيقية
 اتصلحت) I ✅ (#46-48) J ✅ (#50، #49/51-53 مراجَعة وموجودة من قبل) L ✅ (مراجَعة، موجودة من قبل)
 M ✅✅✅ (كاملة، #63-67 كلها، #63 مُصلّحة بَقّة حرجة) K ✅✅ (checklist كامل #54-58، فجوة حقيقية
-واحدة اتوثّقت: رقم Twilio الألماني). **N (مصفوفة أمان كاملة) وO (أداء) وP (المراجعة الذاتية
-النهائية الكاملة) لسه محتاجين مرور صريح.**
+واحدة اتوثّقت: رقم Twilio الألماني) N ✅✅ (مصفوفة كاملة، فجوة اختبار حقيقية واحدة اتصلحت —
+RolesGuard). **O (أداء) وP (المراجعة الذاتية النهائية الكاملة) لسه محتاجين مرور صريح.**
 
 ## Phase A — Authentication, session, and account integrity
 
