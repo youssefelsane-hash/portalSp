@@ -409,6 +409,10 @@ export default function ServiceDetailPage() {
       commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
+      search_keywords: (form.get('search_keywords') as string)
+        .split(',')
+        .map((k) => k.trim())
+        .filter((k) => k.length > 0),
     };
     setIsSaving(true);
     setError(null);
@@ -465,6 +469,19 @@ export default function ServiceDetailPage() {
             <Input id="svc_desc" name="short_description_ar" defaultValue={service.short_description_ar ?? ''} />
             <Label htmlFor="svc_full_desc">وصف كامل</Label>
             <Textarea id="svc_full_desc" name="full_description_ar" defaultValue={service.full_description_ar ?? ''} rows={2} />
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة)</Label>
+              <Input
+                id="svc_search_keywords"
+                name="search_keywords"
+                defaultValue={service.search_keywords.join(', ')}
+                placeholder="مثال: سخان مياه, تسريب حوض, صرف مسدود"
+              />
+              <p className="text-sm text-muted-foreground">
+                دي المرادفات/الكلمات العامية اللي العميل بيكتبها في مربّع البحث (customer-app/customer-web) —
+                البحث مش بالذكاء الاصطناعي، لازم كل خدمة تتحط لها كلماتها يدويًا هنا.
+              </p>
+            </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
               <SelectNative id="svc_pricing_model" name="pricing_model" defaultValue={service.pricing_model} className="max-w-xs">

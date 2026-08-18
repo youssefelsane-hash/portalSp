@@ -200,6 +200,7 @@ export class AdminCatalogService {
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
       launchPhase: dto.launch_phase ?? 1,
+      searchKeywords: dto.search_keywords ?? [],
     });
     await this.services.save(service);
 
@@ -246,6 +247,7 @@ export class AdminCatalogService {
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;
     if (dto.launch_phase !== undefined) service.launchPhase = dto.launch_phase;
+    if (dto.search_keywords !== undefined) service.searchKeywords = dto.search_keywords;
     if (dto.is_active !== undefined) service.isActive = dto.is_active;
     await this.services.save(service);
 

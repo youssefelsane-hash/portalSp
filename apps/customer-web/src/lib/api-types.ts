@@ -1,0 +1,102 @@
+// أنواع مطابقة لعقد الـAPI الحقيقي (docs/02-data-dictionary.md) — نسخة محلية بدل الاعتماد على
+// @baytak/shared-types (تفادي تعقيد workspace linking لأول نسخة من customer-web، نفس فلسفة
+// customer-app الـFlutter اللي عندها نماذجها الخاصة بدل codegen مشترك). أي تعديل في عقد الباك-إند
+// لازم ينعكس هنا يدويًا.
+
+export interface ApiEnvelope<T> {
+  success: boolean;
+  data: T | null;
+  meta: unknown;
+  error: { code: string; message: string } | null;
+  request_id: string;
+}
+
+export interface TokenPair {
+  access_token: string;
+  refresh_token: string;
+  expires_in_seconds: number;
+}
+
+export interface UserResponseDto {
+  id: string;
+  phone_number: string;
+  phone_verified: boolean;
+  email: string | null;
+  full_name: string;
+  avatar_url: string | null;
+  user_type: string;
+  preferred_language: string;
+  created_at: string;
+}
+
+export interface ServiceCategoryDto {
+  id: string;
+  parent_category_id: string | null;
+  name_ar: string;
+  name_en: string;
+  slug: string;
+  icon_url: string | null;
+  is_featured: boolean;
+}
+
+export interface ServiceDto {
+  id: string;
+  category_id: string;
+  name_ar: string;
+  name_en: string | null;
+  short_description_ar: string | null;
+  full_description_ar: string | null;
+  pricing_model: 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote' | 'formula';
+  base_price_cents: number;
+  inspection_fee_cents: number;
+  min_price_cents: number | null;
+  max_price_cents: number | null;
+  unit_name_ar: string | null;
+  estimated_duration_minutes: number | null;
+  warranty_days: number;
+  requires_photos: boolean;
+  allows_scheduling: boolean;
+  allows_emergency: boolean;
+  allows_individual: boolean;
+  allows_team: boolean;
+}
+
+export interface PricingFieldOptionDto {
+  value: string;
+  label_ar: string;
+}
+
+export interface PricingFieldDto {
+  id: string;
+  field_key: string;
+  label_ar: string;
+  field_type: string;
+  unit_ar: string | null;
+  is_required: boolean;
+  display_order: number;
+  options: PricingFieldOptionDto[] | null;
+  min_value: number | null;
+  max_value: number | null;
+}
+
+export interface PriceEstimateDto {
+  base_price_cents: number;
+  inspection_fee_cents: number;
+  surge_multiplier: number;
+  level_price_multiplier: number;
+  estimated_total_cents: number;
+  emergency_surcharge_cents: number;
+  emergency_sla_minutes: number | null;
+  min_price_cents: number | null;
+  max_price_cents: number | null;
+  pricing_evaluation_id: string | null;
+  estimated_duration_days: number | null;
+}
+
+// AddressDto الصحيح موجود في geo-addresses.ts (مطابق لـ AddressResponseDto الحقيقي بالباك-إند).
+// OrderDto الكامل موجود في orders.ts (مطابق لـ OrderResponseDto بالحرف).
+
+export interface PaymentChannelDto {
+  method: 'cash' | 'wallet' | 'card' | 'instapay' | 'fawry_reference';
+  is_available: boolean;
+}

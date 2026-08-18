@@ -62,6 +62,7 @@ export interface AdminServiceResponseDto {
   display_order: number;
   is_active: boolean;
   launch_phase: number;
+  search_keywords: string[];
   created_at: string;
 }
 
@@ -90,6 +91,7 @@ export interface CreateServiceBody {
   commission_percentage?: number;
   display_order?: number;
   launch_phase?: number;
+  search_keywords?: string[];
 }
 
 export interface UpdateServiceBody extends Partial<CreateServiceBody> {

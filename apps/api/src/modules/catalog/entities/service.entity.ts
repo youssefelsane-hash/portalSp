@@ -101,6 +101,11 @@ export class Service {
   @Column({ name: 'launch_phase', type: 'smallint', default: 1 })
   launchPhase: number;
 
+  // Script 3 §7/§12 — مرادفات/عبارات عامية للبحث بلغة طبيعية (بديل بسيط عن AI classification،
+  // migration 0129).
+  @Column({ name: 'search_keywords', type: 'text', array: true, default: () => "'{}'" })
+  searchKeywords: string[];
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

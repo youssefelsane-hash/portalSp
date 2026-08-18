@@ -5,7 +5,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { CatalogService } from './catalog.service';
 import { toServiceAddonResponseDto } from './dto/admin-catalog-response.dto';
 import { EstimateDurationDto } from './dto/estimate-duration.dto';
-import { EstimateQueryDto, ListServicesDto } from './dto/list-services.dto';
+import { EstimateQueryDto, ListServicesDto, SearchServicesDto } from './dto/list-services.dto';
 import { ListTechniciansForServiceDto } from './dto/list-technicians-for-service.dto';
 import { toServiceCategoryResponseDto, toServiceResponseDto } from './dto/service-response.dto';
 import { PricingModel } from './entities/service.entity';
@@ -29,6 +29,15 @@ export class CatalogController {
   @Get('services')
   async listServices(@Query() query: ListServicesDto) {
     const services = await this.catalogService.findServices(query.category_id, query.booking_mode);
+    return services.map(toServiceResponseDto);
+  }
+
+  // Script 3 §7/§12 — لازم تتسجّل قبل services/:id (وإلا "search" هتتفسّر كـid وترفض بـUUID
+  // parse error). بحث بلغة طبيعية بسيطة (aliases/substring) — راجع catalogService.searchServices().
+  @Public()
+  @Get('services/search')
+  async searchServices(@Query() query: SearchServicesDto) {
+    const services = await this.catalogService.searchServices(query.q);
     return services.map(toServiceResponseDto);
   }
 

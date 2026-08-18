@@ -6,12 +6,10 @@ import 'catalog_repository.dart';
 import 'models.dart';
 import 'services_screen.dart';
 
+// Script 3 §32/§35 — كانت الشاشة دي محتاجة bookingMode مُختار مسبقًا (BookingModeScreen، محذوفة
+// دلوقتي). العميل بيتصفح الفئات مباشرة من HomeScreen، ووضع الحجز بيتقرر بعد اختيار خدمة معيّنة.
 class CategoriesScreen extends StatefulWidget {
-  // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره في BookingModeScreen، بيتمرر
-  // كامل لـ ServicesScreen عشان يفلتر GET /services?booking_mode=...
-  final BookingMode bookingMode;
-
-  const CategoriesScreen({super.key, required this.bookingMode});
+  const CategoriesScreen({super.key});
 
   @override
   State<CategoriesScreen> createState() => _CategoriesScreenState();
@@ -42,7 +40,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text(widget.bookingMode.labelAr)),
+        appBar: AppBar(title: const Text('الفئات')),
         body: _error != null
             ? Center(child: Text(_error!))
             : _categories == null
@@ -63,9 +61,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                           return Card(
                             child: InkWell(
                               onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => ServicesScreen(category: category, bookingMode: widget.bookingMode),
-                                ),
+                                MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
                               ),
                               child: Center(
                                 child: Padding(

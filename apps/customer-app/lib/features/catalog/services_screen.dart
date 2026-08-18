@@ -2,18 +2,19 @@ import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
-import '../orders/create_order_screen.dart';
-import '../orders/job_details_screen.dart';
 import '../support/support_contact_screen.dart';
-import '../technicians/technician_selection_screen.dart';
+import 'catalog_navigation.dart';
 import 'catalog_repository.dart';
 import 'models.dart';
 
+// Script 3 §32/§35 — كانت الشاشة دي تفلتر بـbookingMode مُختار مسبقًا (قبل ما العميل يشوف
+// الخدمات أصلاً). دلوقتي بتعرض كل خدمات الفئة بغض النظر عن الوضع، ووضع الحجز بيتقرر بعد اختيار
+// خدمة معيّنة (catalog_navigation.dart's navigateToServiceBooking) وبس لو الخدمة فعلاً بتدعم
+// أكتر من وضع.
 class ServicesScreen extends StatefulWidget {
   final ServiceCategory category;
-  final BookingMode bookingMode;
 
-  const ServicesScreen({super.key, required this.category, required this.bookingMode});
+  const ServicesScreen({super.key, required this.category});
 
   @override
   State<ServicesScreen> createState() => _ServicesScreenState();
@@ -32,10 +33,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
 
   Future<void> _load() async {
     try {
-      final services = await _repository.fetchServices(
-        categoryId: widget.category.id,
-        bookingMode: widget.bookingMode,
-      );
+      final services = await _repository.fetchServices(categoryId: widget.category.id);
       if (mounted) setState(() => _services = services);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -74,7 +72,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                             child: Center(
                               child: EmptyState(
                                 icon: Icons.build_outlined,
-                                title: 'مفيش خدمات "${widget.bookingMode.labelAr}" في الفئة دي دلوقتي',
+                                title: 'مفيش خدمات في "${widget.category.nameAr}" دلوقتي',
                               ),
                             ),
                           ),
@@ -106,23 +104,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                           : _formatEgp(service.basePriceCents),
                                       style: Theme.of(context).textTheme.titleMedium,
                                     ),
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        // اختيار الفني قبل الحجز (docs/08 §3) بس للحجز الفردي —
-                                        // "اعتماد" (team) ليها اختيار شركة/فريق منفصل جوّه
-                                        // CreateOrderScreen نفسها، و"طوارئ" بتتوزّع تلقائيًا
-                                        // بالكامل (مفيش وقت لاختيار يدوي). P0-10 (2026-08-13) —
-                                        // خدمات formula تحديدًا لازم تجمع تفاصيل الشغل
-                                        // (JobDetailsScreen) *قبل* قايمة الفنيين، وإلا القايمة
-                                        // بتعرض كل الفنيين بلا سعر نهائي (محتاج field_values
-                                        // يتحسب).
-                                        builder: (_) => widget.bookingMode != BookingMode.individual
-                                            ? CreateOrderScreen(service: service, bookingMode: widget.bookingMode)
-                                            : service.pricingModel == 'formula'
-                                                ? JobDetailsScreen(service: service)
-                                                : TechnicianSelectionScreen(service: service),
-                                      ),
-                                    ),
+                                    onTap: () => navigateToServiceBooking(context, service),
                                   ),
                                 );
                               },
