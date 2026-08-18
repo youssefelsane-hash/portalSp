@@ -1,0 +1,15 @@
+{
+  "name": "صُنّاع — خدمات منزلية موثوقة",
+  "short_name": "صُنّاع",
+  "description": "احجز صنايعي معتمد لأي شغلانة في البيت — سعر واضح، تتبّع لحظي، دفع آمن.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#2f5aa6",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

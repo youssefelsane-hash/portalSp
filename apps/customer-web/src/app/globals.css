@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/* نفس القيم الدلالية المستخدمة في apps/customer-app/lib/design/app_theme.dart وapps/admin —
+   هوية بصرية موحّدة عبر المنصات الثلاث (§71: SONNA3 brand palette، مش استنساخ Thumbtack/Angi). */
+:root {
+  --background: #f7f8fa;
+  --foreground: #14171f;
+  --surface: #ffffff;
+  --surface-variant: #eef1f6;
+  --border: #dde2ea;
+  --primary: #2f5aa6;
+  --primary-foreground: #ffffff;
+  --success: #3c8b4a;
+  --warning: #c98a1f;
+  --danger: #c0392b;
+  --info: #3d62a6;
+  --muted: #6b7280;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-variant: var(--surface-variant);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-tajawal);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f1115;
+    --foreground: #eef1f6;
+    --surface: #171a21;
+    --surface-variant: #1f232c;
+    --border: #2a2f3a;
+    --primary: #7fa6e0;
+    --primary-foreground: #0f1115;
+    --success: #6fbf7a;
+    --warning: #e0ac4e;
+    --danger: #e07a6b;
+    --info: #87a9de;
+    --muted: #9aa3b2;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-tajawal), Tahoma, sans-serif;
+}

@@ -67,6 +67,7 @@ export interface AdminServiceResponseDto {
   display_order: number;
   is_active: boolean;
   launch_phase: number;
+  search_keywords: string[];
   created_at: string;
 }
 
@@ -98,6 +99,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     display_order: service.displayOrder,
     is_active: service.isActive,
     launch_phase: service.launchPhase,
+    search_keywords: service.searchKeywords,
     created_at: service.createdAt.toISOString(),
   };
 }

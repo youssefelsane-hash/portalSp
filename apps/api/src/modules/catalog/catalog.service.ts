@@ -119,20 +119,41 @@ export class CatalogService {
   // "المياه بتنزل من تحت الحوض" فمش لازم يعرف مصطلح "سباكة" أصلاً. ILIKE substring على الاسم/
   // الوصف + مطابقة على search_keywords (migration 0129) — مطابقة الاسم المباشرة أولاً، بعدين
   // الكلمات المفتاحية. حد أقصى 20 نتيجة (بند 67 — مفيش batch عملاقة).
+  // بحث بلغة طبيعية بلا AI (docs/16 §7) — العميل بيكتب جملة كاملة ("المياه بتنزل من تحت الحوض")
+  // مش كلمة مفتاحية واحدة، فمطابقة الجملة كلها كـsubstring واحد ضد كلمات مفتاحية قصيرة ("تسريب
+  // حوض") كانت بترجع صفر نتائج فعليًا (بَقّة حقيقية اتلقطت وقت اختبار حي بمتصفح — راجع docs/16
+  // للتفاصيل). الحل: نفصّل الجملة لكلمات ونطابق أي خدمة بتحتوي أي كلمة منها، ونرتّب حسب عدد
+  // الكلمات المتطابقة تنازليًا (أكتر تطابق = أعلى) — مطابقة بسيطة صراحةً، مش فهم لغوي حقيقي.
   async searchServices(query: string): Promise<Service[]> {
     const trimmed = query.trim();
     if (trimmed.length < 2) return [];
-    const pattern = `%${trimmed}%`;
-    return this.services
-      .createQueryBuilder('service')
-      .where('service.is_active = true')
-      .andWhere(
-        '(service.name_ar ILIKE :pattern OR service.short_description_ar ILIKE :pattern OR EXISTS (SELECT 1 FROM unnest(service.search_keywords) kw WHERE kw ILIKE :pattern))',
-        { pattern },
-      )
-      .orderBy('(service.name_ar ILIKE :prefixPattern)', 'DESC')
+    // شيل "ال" التعريف من أول الكلمة لو موجودة — "الحوض" لازم يطابق كلمة مفتاحية "حوض" (نفس
+    // الكلمة بالمعنى، بَقّة حقيقية اتلقطت وقت اختبار حي: "الحوض" ماكانتش بتطابق "حوض" كـsubstring).
+    const stripArticle = (w: string) => (w.startsWith('ال') && w.length > 3 ? w.slice(2) : w);
+    const rawWords = trimmed
+      .split(/\s+/)
+      .filter((w) => w.length >= 2)
+      .slice(0, 8);
+    const words = rawWords.length > 0 ? rawWords : [trimmed];
+    const searchWords = Array.from(new Set(words.flatMap((w) => [w, stripArticle(w)])));
+
+    const qb = this.services.createQueryBuilder('service').where('service.is_active = true');
+
+    const matchConditions = searchWords.map((word, i) => {
+      const key = `searchWord${i}`;
+      qb.setParameter(key, `%${word}%`);
+      return `(service.name_ar ILIKE :${key} OR service.short_description_ar ILIKE :${key} OR EXISTS (SELECT 1 FROM unnest(service.search_keywords) kw WHERE kw ILIKE :${key}))`;
+    });
+
+    qb.andWhere(`(${matchConditions.join(' OR ')})`);
+    qb.addSelect(`(${matchConditions.map((c) => `(CASE WHEN ${c} THEN 1 ELSE 0 END)`).join(' + ')})`, 'match_score');
+    qb.setParameter('prefixPattern', `${trimmed}%`);
+    qb.addSelect('(service.name_ar ILIKE :prefixPattern)', 'is_prefix_match');
+
+    return qb
+      .orderBy('is_prefix_match', 'DESC')
+      .addOrderBy('match_score', 'DESC')
       .addOrderBy('service.display_order', 'ASC')
-      .setParameter('prefixPattern', `${trimmed}%`)
       .limit(20)
       .getMany();
   }

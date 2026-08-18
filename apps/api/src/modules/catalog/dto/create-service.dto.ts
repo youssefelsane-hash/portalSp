@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -125,4 +127,13 @@ export class CreateServiceDto {
   @Min(1)
   @Max(32767)
   launch_phase?: number;
+
+  // بحث بلغة طبيعية بلا AI (docs/16 §7، migration 0129) — مرادفات/كلمات عامية العميل ممكن
+  // يكتبها بدل الاسم الرسمي (مثلاً "سخان مياه" لخدمة "صيانة سخانات"). GIN index على العمود ده.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  search_keywords?: string[];
 }

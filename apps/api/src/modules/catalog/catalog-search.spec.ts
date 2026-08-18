@@ -83,6 +83,21 @@ describe('CatalogService.searchServices() — بحث بلغة طبيعية بس�
     expect(results.map((s) => s.id)).not.toContain(ids.wiringService);
   });
 
+  // بَقّة حقيقية اتلقطت باختبار حي بمتصفح (Playwright) بعد أول تنفيذ: الاختبار فوق بيبعت كلمة
+  // واحدة بس ("حوض")، مش الجملة الكاملة اللي في وصفه — الجملة الكاملة كانت بترجع صفر نتائج فعليًا
+  // لأن المطابقة القديمة كانت substring واحد للجملة كلها ضد كلمة مفتاحية قصيرة. اتصلحت بتقسيم
+  // الجملة لكلمات + إزالة "ال" التعريف قبل المطابقة. الاختبار ده بيتأكد من السيناريو الحقيقي فعليًا.
+  it('الجملة الكاملة بالحرف ("المياه بتنزل من تحت الحوض") بتلاقي الخدمة — مش كلمة واحدة مقتطعة', async () => {
+    const results = await service.searchServices('المياه بتنزل من تحت الحوض');
+    expect(results.map((s) => s.id)).toContain(ids.leakService);
+    expect(results.map((s) => s.id)).not.toContain(ids.wiringService);
+  });
+
+  it('"ال" التعريف قبل كلمة مفتاحية ("الحوض") بتتشال قبل المطابقة', async () => {
+    const results = await service.searchServices('الحوض');
+    expect(results.map((s) => s.id)).toContain(ids.leakService);
+  });
+
   it('بحث بجزء من عبارة كاملة ("مية بتنزل") بيلاقي نفس الخدمة عبر substring على الكلمة المفتاحية', async () => {
     const results = await service.searchServices('بتنزل');
     expect(results.map((s) => s.id)).toContain(ids.leakService);
