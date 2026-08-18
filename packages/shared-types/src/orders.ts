@@ -196,6 +196,26 @@ export interface AssignAssistantBody {
   technician_id: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/admin-crew-member.dto.ts (Script 4 §22-29, §38-41)
+export interface AddCrewMemberBody {
+  technician_id: string;
+  role_label: string;
+}
+
+export interface RemoveCrewMemberBody {
+  reason: string;
+}
+
+export interface RemoveCrewMemberResponseDto {
+  crewShortage: boolean;
+}
+
+export interface ReplaceCrewMemberBody {
+  new_technician_id: string;
+  reason: string;
+  role_label?: string;
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts وentities/cancellation-reason.entity.ts
 export type CancellationAppliesTo = 'customer' | 'technician' | 'admin';
 
