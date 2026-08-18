@@ -685,3 +685,64 @@ IDOR حي (عميل/فني تاني مايقدروش يوصلوا لطلب مش 
 اتعمل لها اختبار حي بمتصفح فعلي — نفس قيد WebAuthn MFA لتسجيل دخول الأدمن في بيئة الـsandbox.
 `tsc`/`eslint`/`next build` كلهم نضاف، والـtypes متطابقة بالحرف مع رد الباك-إند الحقيقي المتحقق
 منه بالـcurl فوق.
+
+## إدارة طاقم الطلب من الأدمن (Crew Editing، Script 4 §22-29 و§38-41، 2026-08-18)
+
+كانت فجوة موثّقة صراحة: `OrderTeamService.addMember()`/`removeMember()` مقصورين على الفني القائد
+بس (`technician-leader-ownership-gated`، شوف السكشن فوق "توزيع أدوار الفريق داخل الطلب الواحد")،
+و`AdminOrdersService.assignAssistant()` مقصور على شغل "مساعد" بس (ADR-0008). مفيش أي مسار أدمن
+لإدارة أعضاء الطاقم العاديين (`member_type='team_member'`) — لو فني اعتذر آخر لحظة أو الطاقم ناقص،
+مفيش أداة تشغيلية غير الدخول على الداتابيز يدويًا.
+
+**صلاحية مخصصة (`orders.manage_crew`, migration `0132`)**: نفس نمط `orders.assign_assistant` في
+`0076` — ممنوحة لـ`super_admin` **و**`ops_manager`، مش قاصرة على `super_admin` زي
+`orders.create_for_customer` فوق. الفرق المتعمّد: دي عملية تشغيلية يومية (حل نقص طاقم، استبدال
+عضو غاب)، مش قرار بهوية عميل زي إنشاء طلب.
+
+**فرق متعمّد عن `OrderTeamService` (الفني القائد)**: `validateCrewCandidateOrThrow` في
+`AdminOrdersService` **مبيتحققش من تطابق الشركة** (`company_id`) بين الفني الجديد وقائد الطلب —
+بعكس `OrderTeamService.addMember()` اللي بيرفض صراحة أي فني من شركة مختلفة. القرار: الأدمن أداة
+تشغيلية استثنائية (حل نقص طاقم بأي فني معتمد متاح)، مش مقيّد بحدود تنظيمية الفريق العادي. باقي
+الشروط نفسها: `booking_mode='team'` بس، الفني لازم `verification_status='approved'`، مش قائد
+الطلب بالفعل، مش عضو مضاف بالفعل، وتحت `MAX_TEAM_MEMBERS_PER_ORDER` (15، نفس الحد المستخدم في
+`OrderTeamService`، بقى `export`ed من هناك بدل تكراره).
+
+**3 endpoints جديدة** تحت `orders.manage_crew`:
+- `POST /admin/orders/:id/team-members` — إضافة عضو (`technician_id` + `role_label`).
+- `POST /admin/orders/:id/team-members/:memberId/remove` — إزالة، `reason` إلزامي (5-500 حرف).
+  بيرجع `{ crewShortage: boolean }` — مؤشر عددي بسيط (`remaining + 1 < order.required_technicians`،
+  الـ`+1` بيمثّل قائد الطلب اللي مش صف في `order_team_members`) لتحذير الأدمن فورًا لو العدد بقى
+  أقل من `required_technicians` (snapshot محرك الإنتاجية وقت الحجز) — **صفر تطابق أدوار دقيق**،
+  مفيش تعقّب لأي دور تحديدًا نقص، العدد الكلي بس.
+- `POST /admin/orders/:id/team-members/:memberId/replace` — استبدال ذرّي: `new_technician_id` +
+  `reason` إلزاميين، `role_label` اختياري (لو مش مبعوت بياخد دور العضو القديم). الاستبدال بالكامل
+  جوّه `dataSource.transaction()` واحدة (حذف القديم + إضافة الجديد سوا) — صفر نافذة زمنية يفضل
+  فيها الطلب من غير العضو ده خالص. **حماية سباق**: العضو القديم بيتقرا تاني *جوّه* الترانزاكشن
+  (مش بس الاعتماد على الفحص المبدئي فوقها) عشان لو حد شاله بالتوازي بين الفحص والتنفيذ.
+
+**إشعارات**: حدث عام جديد `OrderCrewChangedEvent` (`order.crew_changed`، `added`/`removed`/`replaced`)
+— بعكس `OrderAssistantAssignedManuallyEvent` المقصور على "مساعد" بس. الفرق المتعمّد: العضو المُضاف
+**ميوافقش** على الإضافة (زي "معاه مساعد؟" — القرار للفني القائد أو الأدمن، مش للمضاف)، فالحدث ده
+إشعار بس، صفر انتظار قرار. `OrderCrewChangedNotificationListener` بيبعت للفني المتأثر (المضاف
+و/أو المشال حسب نوع التغيير).
+
+**كل عملية بتسجّل `audit_logs`** (`order.crew_member_added`/`_removed`/`_replaced`) بـ
+`oldValues`/`newValues` كاملين — بديل عن soft-delete على `order_team_members` (الجدول فاضل
+hard-delete زي ما هو، الاتفاقية الموجودة من `0060`، الـaudit trail كافي لحفظ التاريخ).
+
+**اختبار حي كامل**:
+- **jest** (`admin-crew-management.spec.ts`, 14 اختبار، ضد Postgres حقيقي): إضافة ناجحة + 5 حالات
+  رفض (مش team mode، فني مش معتمد، الفني هو القائد، عضو مكرر، تجاوز الحد الأقصى)، إزالة ناجحة +
+  `crewShortage` صح في الحالتين (كافي/ناقص) + رفض عضو مش موجود، استبدال ناجح (مع/من غير
+  `role_label` override) + رفض (نفس الفني، عضو مش موجود)، وتأكيد إطلاق `ORDER_CREW_CHANGED_EVENT`.
+- **curl مباشر ضد dev server حقيقي** (نفس تقنية JWT-signing بـ`JWT_ACCESS_SECRET` المستخدمة في
+  قسم Call Center فوق): إضافة عضو حقيقية (audit log + DB تحقق)، تعارض عضو مكرر (409)، تحقق
+  `class-validator` على `reason` القصير (400) لكل من remove وreplace، استبدال ناجح (DB تحقق
+  `technician_id`/`role_label` بعد الاستبدال)، إزالة ناجحة مع `crewShortage=true` صح (required=3،
+  بعد الإزالة العدد الكلي 1)، ورفض بدون توكن (401). بيانات الاختبار اتنضّفت بالكامل من الداتابيز
+  بعد التحقق (بما فيها `notifications` و`addresses` اللي الحذف الأول اتعثّر عليهم بسبب ترتيب FK).
+
+**فجوة موثّقة صراحة**: صفر UI في `apps/admin` لسه — الـ3 endpoints شغالة وموثّقة بس مفيش شاشة
+لاستخدامها، الأدمن محتاج curl/Postman دلوقتي. RBAC (403 لدور من غير `orders.manage_crew`) اتبني
+على نفس `PermissionsGuard` المستخدم في عشرات endpoints تانية اتعمل لها اختبار حي قبل كده — مش
+اتعمل اختبار حي منفصل ليه هنا (وقت الجلسة)، بس نفس آلية الحارس بالحرف.
