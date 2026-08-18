@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { DataSource, EntityManager, LessThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { isProductionLikeEnv } from '../../config/env.validation';
 import { NotificationChannel } from '../notifications/entities/notification.entity';
 import { TwilioSmsDispatcher } from '../../common/notifications/twilio-sms-dispatcher.service';
 import { parseDurationToMs } from '../../common/utils/duration';
@@ -110,12 +111,15 @@ export class AuthService {
       await otpCodes.save(otp);
     });
 
-    // بَقّة أمنية حقيقية اتصلحت (مراجعة أمان شاملة 2026-08-13، P0-4): اللوج ده كان بيسجّل الكود
-    // نفسه دايماً بلا شرط — مقبول تمامًا للتطوير/الاختبار المحلي (نفس فلسفة كل تكامل خارجي تاني
-    // في المشروع، Paymob/S3/إلخ)، لكن خطر حقيقي في Production — أي حد عنده access للوجز يقدر
-    // ياخد أي كود OTP ويدخل أي حساب. الكود الفعلي بقى يظهر بس لو NODE_ENV≠production؛ في
-    // Production بيتسجّل رقم موبايل مقنّع (أول 5 أرقام + آخر رقمين بس) بلا الكود خالص.
-    if (this.config.get<string>('nodeEnv') !== 'production') {
+    // بَقّة أمنية حقيقية اتصلحت (مراجعة أمان شاملة 2026-08-13، P0-4؛ وسّعت 2026-08-18 Script 2
+    // Part M finding #63): اللوج ده كان بيسجّل الكود نفسه دايماً بلا شرط — مقبول تمامًا للتطوير/
+    // الاختبار المحلي (نفس فلسفة كل تكامل خارجي تاني في المشروع، Paymob/S3/إلخ)، لكن خطر حقيقي
+    // في أي بيئة حقيقية — أي حد عنده access للوجز يقدر ياخد أي كود OTP ويدخل أي حساب. الفحص كان
+    // `!== 'production'` بس، يعني staging (النشر الفعلي الحقيقي على Railway وقت اكتشاف البَقّة
+    // دي) كان بيسجّل الكود الخام كامل. دلوقتي allow-list صريح (development/test بس بيشوفوا الكود
+    // الخام) بدل deny-list — أي قيمة NODE_ENV مستقبلية غير متوقعة بتقع في الجانب الآمن (مقنّع)
+    // تلقائيًا بدل العكس.
+    if (!isProductionLikeEnv(this.config.get<string>('nodeEnv'))) {
       // eslint-disable-next-line no-console
       console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
     } else {

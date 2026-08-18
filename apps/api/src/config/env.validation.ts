@@ -1,5 +1,16 @@
 import * as Joi from 'joi';
 
+// Script 2 Part M (finding #63، اتكشفت أثناء مراجعة Part G) — بَقّة أمنية حقيقية وخطيرة: كل
+// فحوصات fail-fast تحت دي كانت بتتفحص ضد 'production' بس. النشر الفعلي الحقيقي (Railway) شغال
+// بـNODE_ENV=staging (مش production) — قرار تشغيلي سابق مش له علاقة بصلاحية البيانات/الأسرار
+// (كلها حقيقية ومُفعّلة). ده معناه كل الحمايات دي كانت متخطّاة فعليًا على البيئة الحقيقية اللي
+// بيستخدمها مستخدمين حقيقيين: أخطرهم كود OTP الخام بيتسجل في اللوج بوضوح (auth.service.ts) —
+// أي حد عنده access للوجز يقدر ياخد كود أي مستخدم حقيقي ويدخل حسابه. 'staging' هنا مش بيئة QA
+// معزولة ببيانات وهمية، دي نفس البنية اللي بتخدم مستخدمين حقيقيين، فلازم تتعامل بنفس صرامة
+// 'production' في كل فحوصات الأمان دي.
+const PRODUCTION_LIKE_ENV = Joi.valid('staging', 'production');
+export const isProductionLikeEnv = (nodeEnv: string | undefined): boolean => nodeEnv === 'staging' || nodeEnv === 'production';
+
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'staging', 'production', 'test').default('development'),
   PORT: Joi.number().default(3000),
@@ -7,28 +18,28 @@ export const envValidationSchema = Joi.object({
 
   DATABASE_URL: Joi.string().uri().required(),
 
-  // في الإنتاج (NODE_ENV=production) بس: طول أدنى أعلى (32 بدل 16) ورفض صريح للقيم الافتراضية
-  // الموجودة في .env.example — عشان لو حد نسي يستبدلها وقت النشر الحقيقي، السيرفر يرفض يشتغل
-  // من الأول (fail-fast) بدل ما يشتغل بسر ضعيف/معروف مسبقاً. في التطوير/الاختبار القيم
-  // الافتراضية من .env.example لسه شغالة عادي (نفس دليل التشغيل المحلي في README.md الرئيسي).
+  // في staging/production بس: طول أدنى أعلى (32 بدل 16) ورفض صريح للقيم الافتراضية الموجودة في
+  // .env.example — عشان لو حد نسي يستبدلها وقت النشر الحقيقي، السيرفر يرفض يشتغل من الأول
+  // (fail-fast) بدل ما يشتغل بسر ضعيف/معروف مسبقاً. في التطوير/الاختبار القيم الافتراضية من
+  // .env.example لسه شغالة عادي (نفس دليل التشغيل المحلي في README.md الرئيسي).
   JWT_ACCESS_SECRET: Joi.string()
     .min(16)
     .required()
-    .when('NODE_ENV', { is: 'production', then: Joi.string().min(32).invalid('change-me-access-secret') }),
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-access-secret') }),
   JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
   JWT_REFRESH_SECRET: Joi.string()
     .min(16)
     .required()
     .invalid(Joi.ref('JWT_ACCESS_SECRET')) // نفس السر لـaccess وrefresh يلغي فائدة فصلهم بالكامل
-    .when('NODE_ENV', { is: 'production', then: Joi.string().min(32).invalid('change-me-refresh-secret') }),
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-refresh-secret') }),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
 
   // قائمة أصول (origins) مسموح لها بنداء الـAPI من متصفح، مفصولة بفاصلة — راجع الشرح الكامل في
-  // main.ts. فاضي/غير موجود = مفتوح للكل (`*`)، مقبول في التطوير بس مرفوض صراحة في الإنتاج.
+  // main.ts. فاضي/غير موجود = مفتوح للكل (`*`)، مقبول في التطوير بس مرفوض صراحة في staging/production.
   CORS_ORIGIN: Joi.string()
     .allow('')
     .optional()
-    .when('NODE_ENV', { is: 'production', then: Joi.string().min(1).required() }),
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(1).required() }),
 
   OTP_EXPIRY_MINUTES: Joi.number().default(5),
   OTP_MAX_ATTEMPTS: Joi.number().default(5),
@@ -45,11 +56,11 @@ export const envValidationSchema = Joi.object({
   WEBAUTHN_RP_NAME: Joi.string().default('صُنّاع — لوحة التحكم'),
   WEBAUTHN_RP_ID: Joi.string()
     .default('localhost')
-    .when('NODE_ENV', { is: 'production', then: Joi.string().invalid('localhost').required() }),
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().invalid('localhost').required() }),
   WEBAUTHN_ORIGIN: Joi.string()
     .uri()
     .default('http://localhost:3001')
-    .when('NODE_ENV', { is: 'production', then: Joi.string().uri().invalid('http://localhost:3001').required() }),
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().uri().invalid('http://localhost:3001').required() }),
 
   REDIS_URL: Joi.string().uri().default('redis://localhost:6379'),
 
@@ -86,11 +97,11 @@ export const envValidationSchema = Joi.object({
   // تخزين الملفات — 'local' افتراضي (تطوير)، 'S3' للإنتاج. تفاصيل كل قيمة: docs/03-external-integrations.md
   // docs/08 §19 بند 16 — كان النظام يقدر يقلع "healthy" في الإنتاج وهو لسه بيكتب على قرص محلي
   // (بيتمسح مع كل إعادة نشر/deploy جديد، ومش متاح لأكتر من instance واحدة خلف load balancer).
-  // مرفوض صراحة في NODE_ENV=production — نفس فلسفة JWT/CORS/WebAuthn فوق (fail-fast).
+  // مرفوض صراحة في staging/production — نفس فلسفة JWT/CORS/WebAuthn فوق (fail-fast).
   STORAGE_PROVIDER: Joi.string()
     .valid('local', 's3')
     .default('local')
-    .when('NODE_ENV', { is: 'production', then: Joi.string().invalid('local').required() }),
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().invalid('local').required() }),
   STORAGE_LOCAL_DIR: Joi.string().default('./uploads'),
   S3_ENDPOINT: Joi.string().uri().allow('').optional(),
   S3_REGION: Joi.string().default('us-east-1'),
@@ -120,12 +131,12 @@ export const envValidationSchema = Joi.object({
   // طريقة تانية لأي مستخدم حقيقي يسجّل دخول أو يعمل حساب. فحص عابر للحقول (مش .when() عادي لأن
   // TWILIO_ACCOUNT_SID/AUTH_TOKEN/SMS_FROM_NUMBER التلاتة لازم يكونوا موجودين مع بعض).
   .custom((value: Record<string, unknown>, helpers) => {
-    if (value.NODE_ENV === 'production') {
+    if (isProductionLikeEnv(value.NODE_ENV as string | undefined)) {
       const hasTwilioSms = value.TWILIO_ACCOUNT_SID && value.TWILIO_AUTH_TOKEN && value.TWILIO_SMS_FROM_NUMBER;
       if (!hasTwilioSms) {
         return helpers.message({
           custom:
-            'TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER الثلاثة لازم يكونوا موجودين في NODE_ENV=production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
+            'TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_SMS_FROM_NUMBER الثلاثة لازم يكونوا موجودين في staging/production — بوابة SMS هي القناة الوحيدة لتسليم كود OTP، من غيرها مفيش مستخدم حقيقي يقدر يسجّل دخول',
         });
       }
     }

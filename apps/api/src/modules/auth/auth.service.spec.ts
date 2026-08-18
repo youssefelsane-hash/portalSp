@@ -309,4 +309,56 @@ describe('AuthService', () => {
 
     expect(loggedWithRawCode).toBe(false);
   });
+
+  // Script 2 Part M (finding #63) — نفس بَقّة P0-4 بالحرف لكن اتكشفت من زاوية تانية: الفحص كان
+  // `nodeEnv !== 'production'` بس، يعني NODE_ENV=staging (النشر الفعلي الحقيقي على Railway وقت
+  // اكتشاف البَقّة دي — قرار تشغيلي سابق، مش بيئة QA ببيانات وهمية) كان بيسجّل كود OTP الخام
+  // كامل لمستخدمين حقيقيين. نفس بنية الاختبار فوق بالظبط، بس nodeEnv: 'staging'.
+  it('في staging برضه مايتسجلش كود OTP الفعلي في اللوج خالص — نفس ثغرة P0-4 من زاوية NODE_ENV=staging', async () => {
+    const stagingUsers = new FakeRepository<User>();
+    const stagingRefreshTokens = new FakeRepository<RefreshToken>();
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        JwtService,
+        TwilioSmsDispatcher,
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) => {
+              const values: Record<string, unknown> = {
+                nodeEnv: 'staging',
+                'otp.expiryMinutes': 5,
+                'otp.maxAttempts': 5,
+                'jwt.accessSecret': 'test-access-secret-0123456789',
+                'jwt.accessExpiresIn': '15m',
+                'jwt.refreshSecret': 'test-refresh-secret-0123456789',
+                'jwt.refreshExpiresIn': '30d',
+              };
+              return values[key];
+            },
+          },
+        },
+        { provide: getRepositoryToken(User), useValue: stagingUsers },
+        { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
+        { provide: getRepositoryToken(RefreshToken), useValue: stagingRefreshTokens },
+        {
+          provide: DataSource,
+          useValue: createFakeDataSource(stagingUsers, new FakeRepository<OtpCode>(), stagingRefreshTokens),
+        },
+        { provide: MfaPolicyService, useValue: { userRequiresMfa: jest.fn().mockResolvedValue(false) } },
+        { provide: WebAuthnService, useValue: { hasAnyCredential: jest.fn().mockResolvedValue(false) } },
+        { provide: NotificationRoutingService, useValue: { routeToRole: jest.fn() } },
+      ],
+    }).compile();
+    const stagingService = moduleRef.get(AuthService);
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    await stagingService.requestOtp({ phone_number: '+201001234567', purpose: OtpPurpose.REGISTER }, null);
+    const loggedWithRawCode = logSpy.mock.calls.some((call) => /\[OTP\].*→\s*\d{6}/.test(String(call[0])));
+    logSpy.mockRestore();
+
+    expect(loggedWithRawCode).toBe(false);
+  });
 });

@@ -84,3 +84,58 @@ describe('envValidationSchema — docs/08 §19 بند 16 (fail-fast للإعدا
     expect(error).toBeUndefined();
   });
 });
+
+// Script 2 Part M (finding #63) — بَقّة حقيقية خطيرة اتلقطت أثناء مراجعة Part G: كل الفحوصات فوق
+// كانت بتتفحص ضد NODE_ENV==='production' بس، لكن النشر الفعلي الحقيقي (Railway) شغال فعلاً
+// بـNODE_ENV=staging — قرار تشغيلي سابق (راجع docs/15)، مش بيئة QA معزولة ببيانات وهمية. يعني
+// كل حمايات fail-fast دي (بما فيها STORAGE_PROVIDER≠local وTwilio SMS الإجبارية) كانت متخطّاة
+// فعليًا على البيئة الحقيقية اللي بيستخدمها مستخدمين حقيقيين. الاختبارات دي بتثبت إن 'staging'
+// بقى بنفس صرامة 'production' تمامًا لكل فحص.
+describe('envValidationSchema — staging لازم يتفحص بنفس صرامة production (Script 2 Part M finding #63)', () => {
+  const MINIMAL_VALID_STAGING_ENV = { ...MINIMAL_VALID_PRODUCTION_ENV, NODE_ENV: 'staging' };
+
+  it('env staging كامل (كل القيم الحرجة مُعدّة) بيعدّي بلا أي خطأ', () => {
+    const { error } = envValidationSchema.validate(MINIMAL_VALID_STAGING_ENV, { allowUnknown: true });
+    expect(error).toBeUndefined();
+  });
+
+  it('STORAGE_PROVIDER=local في staging يترفض — نفس فحص production بالحرف', () => {
+    const { error } = envValidationSchema.validate(
+      { ...MINIMAL_VALID_STAGING_ENV, STORAGE_PROVIDER: 'local' },
+      { allowUnknown: true },
+    );
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('STORAGE_PROVIDER');
+  });
+
+  it('مفيش بيانات اعتماد Twilio SMS في staging يترفض — نفس فحص production بالحرف', () => {
+    const env = { ...MINIMAL_VALID_STAGING_ENV };
+    delete (env as Record<string, unknown>).TWILIO_ACCOUNT_SID;
+    delete (env as Record<string, unknown>).TWILIO_AUTH_TOKEN;
+    delete (env as Record<string, unknown>).TWILIO_SMS_FROM_NUMBER;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('TWILIO');
+  });
+
+  it('JWT secrets قصيرة/افتراضية في staging يترفضوا — نفس فحص production بالحرف', () => {
+    const { error } = envValidationSchema.validate(
+      { ...MINIMAL_VALID_STAGING_ENV, JWT_ACCESS_SECRET: 'change-me-access-secret'.padEnd(32, 'x') },
+      { allowUnknown: true },
+    );
+    expect(error).toBeUndefined(); // padEnd يخليها طويلة بما يكفي وغير مطابقة للقيمة المرفوضة بالظبط — فحص سلبي (تأكيد الشرط شغال، مش خطأ)
+    const rejected = envValidationSchema.validate(
+      { ...MINIMAL_VALID_STAGING_ENV, JWT_ACCESS_SECRET: 'short' },
+      { allowUnknown: true },
+    );
+    expect(rejected.error).toBeDefined();
+  });
+
+  it('WEBAUTHN_RP_ID مش مُعدّة خالص في staging يترفض — نفس فحص production بالحرف', () => {
+    const env = { ...MINIMAL_VALID_STAGING_ENV };
+    delete (env as Record<string, unknown>).WEBAUTHN_RP_ID;
+    const { error } = envValidationSchema.validate(env, { allowUnknown: true });
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('WEBAUTHN_RP_ID');
+  });
+});
