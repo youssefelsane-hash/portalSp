@@ -170,6 +170,7 @@ export class AssistantMatchingService {
       SELECT tp.id AS technician_id
       FROM technician_profiles tp
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+        AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1

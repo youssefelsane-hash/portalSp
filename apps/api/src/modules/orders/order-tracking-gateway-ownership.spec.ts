@@ -136,6 +136,8 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       {} as never,
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       dataSource.getRepository(User),
       {} as never,
       {} as never,

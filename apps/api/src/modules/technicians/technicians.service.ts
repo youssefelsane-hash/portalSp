@@ -5,6 +5,8 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
+import { Service } from '../catalog/entities/service.entity';
+import { TechnicianService, TechnicianServiceVerificationStatus } from '../catalog/entities/technician-service.entity';
 import {
   TechnicianAssistantLinkStatus,
   TechnicianLevel,
@@ -12,6 +14,7 @@ import {
   TechnicianTeamRole,
 } from './entities/technician-profile.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
+import { SelfDeclareServiceDto } from './dto/self-declare-service.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
@@ -43,6 +46,8 @@ export class TechniciansService {
   constructor(
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     @InjectRepository(TechnicianCompany) private readonly technicianCompanies: Repository<TechnicianCompany>,
+    @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
+    @InjectRepository(Service) private readonly services: Repository<Service>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly portfolioLinksService: PortfolioLinksService,
     private readonly certificatesService: TechnicianCertificatesService,
@@ -99,6 +104,112 @@ export class TechniciansService {
     if (dto.bio !== undefined) profile.bio = dto.bio;
     await this.technicianProfiles.save(profile);
     return profile;
+  }
+
+  // ── تصريح مهارات ذاتي (Script 4 §2-7) ──────────────────────────────
+  // الفني ≠ مجرد technician=true — لازم نعرف بالظبط إيه الشغل المسموح له يستلمه. الفني بيختار
+  // خدمة من الكتالوج الديناميكي الموجود بالفعل، بس التصريح لوحده مايديهوش أهلية مطابقة فورية —
+  // بيدخل طابور مراجعة أدمن (pending_verification) لحد ما يتاعتمد. matching.service.ts وباقي
+  // مواقع أهلية المطابقة بتتحقق من verification_status='approved' صراحةً (راجع matching/README.md).
+
+  async listMyServices(userId: string): Promise<TechnicianService[]> {
+    const profile = await this.findByUserIdOrThrow(userId);
+    return this.technicianServices.find({ where: { technicianId: profile.id }, order: { createdAt: 'DESC' } });
+  }
+
+  async declareService(userId: string, dto: SelfDeclareServiceDto): Promise<TechnicianService> {
+    const profile = await this.findByUserIdOrThrow(userId);
+    const service = await this.services.findOne({ where: { id: dto.service_id } });
+    if (!service || !service.isActive) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة غير موجودة أو متوقفة', HttpStatus.NOT_FOUND);
+    }
+
+    const existing = await this.technicianServices.findOne({
+      where: { technicianId: profile.id, serviceId: dto.service_id },
+    });
+    if (existing) {
+      // رفض قديم — الفني يقدر يعيد التصريح (نفس الصف، مش تكرار). أي حالة تانية (معتمد/تحت
+      // المراجعة/موقوف) قرار قائم بالفعل، مينفعش يتصرّح بيه تاني.
+      if (existing.verificationStatus !== TechnicianServiceVerificationStatus.REJECTED) {
+        throw new ApiException(ErrorCode.VAL_001, 'عندك طلب/اعتماد قائم بالفعل لنفس الخدمة دي', HttpStatus.CONFLICT);
+      }
+      const previousStatus = existing.verificationStatus;
+      existing.skillLevel = dto.skill_level ?? existing.skillLevel;
+      existing.verificationStatus = TechnicianServiceVerificationStatus.PENDING_VERIFICATION;
+      existing.isSelfDeclared = true;
+      existing.isActive = false;
+      existing.rejectionReason = null;
+      existing.reviewedByUserId = null;
+      existing.reviewedAt = null;
+      await this.technicianServices.save(existing);
+
+      await this.auditLog.record({
+        actorUserId: userId,
+        actorRole: 'technician',
+        action: 'technician_service.re_declared',
+        entityType: 'technician_service',
+        entityId: existing.id,
+        oldValues: { verification_status: previousStatus },
+        newValues: { verification_status: existing.verificationStatus, service_id: dto.service_id },
+      });
+      return existing;
+    }
+
+    const row = this.technicianServices.create({
+      technicianId: profile.id,
+      serviceId: dto.service_id,
+      skillLevel: dto.skill_level,
+      isActive: false,
+      isSelfDeclared: true,
+      verificationStatus: TechnicianServiceVerificationStatus.PENDING_VERIFICATION,
+    });
+    await this.technicianServices.save(row);
+
+    await this.auditLog.record({
+      actorUserId: userId,
+      actorRole: 'technician',
+      action: 'technician_service.declared',
+      entityType: 'technician_service',
+      entityId: row.id,
+      newValues: { service_id: dto.service_id, skill_level: row.skillLevel },
+    });
+    return row;
+  }
+
+  private async findMyServiceOrThrow(userId: string, technicianServiceId: string): Promise<TechnicianService> {
+    const profile = await this.findByUserIdOrThrow(userId);
+    const row = await this.technicianServices.findOne({ where: { id: technicianServiceId } });
+    if (!row || row.technicianId !== profile.id) {
+      throw new ApiException(ErrorCode.VAL_001, 'التصريح غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return row;
+  }
+
+  // سحب تصريح (Script 4 §7 — "إزالة/إيقاف مهارة لازم يأثّر على المطابقة المستقبلية بس ما يبطلش
+  // طلبات نشطة بالفعل"). طلب لسه تحت المراجعة أو مرفوض: حذف فعلي (مفيش تاريخ قيّم يستاهل يتحفظ).
+  // خدمة معتمدة بالفعل: تعطيل بس (is_active=false)، مش حذف — نفس فلسفة is_active الموجودة من زمان،
+  // وسجل الاعتماد التاريخي يفضل موجود للتدقيق.
+  async withdrawService(userId: string, technicianServiceId: string): Promise<void> {
+    const row = await this.findMyServiceOrThrow(userId, technicianServiceId);
+    if (row.verificationStatus === TechnicianServiceVerificationStatus.SUSPENDED) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي موقوفة من الإدارة — تواصل مع الدعم', HttpStatus.FORBIDDEN);
+    }
+
+    if (row.verificationStatus === TechnicianServiceVerificationStatus.APPROVED) {
+      row.isActive = false;
+      await this.technicianServices.save(row);
+    } else {
+      await this.technicianServices.delete({ id: row.id });
+    }
+
+    await this.auditLog.record({
+      actorUserId: userId,
+      actorRole: 'technician',
+      action: 'technician_service.withdrawn',
+      entityType: 'technician_service',
+      entityId: row.id,
+      oldValues: { verification_status: row.verificationStatus },
+    });
   }
 
   // ── "معاه مساعد؟" (docs/06 §3.7) ────────────────────────────────────

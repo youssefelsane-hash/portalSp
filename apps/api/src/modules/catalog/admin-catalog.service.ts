@@ -23,7 +23,7 @@ import { ServiceProductivityActual } from './entities/service-productivity-actua
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
-import { TechnicianService } from './entities/technician-service.entity';
+import { TechnicianService, TechnicianServiceVerificationStatus } from './entities/technician-service.entity';
 
 @Injectable()
 export class AdminCatalogService {
@@ -387,14 +387,44 @@ export class AdminCatalogService {
     const existing = await this.technicianServices.findOne({
       where: { serviceId, technicianId: dto.technician_id },
     });
+    // تعيين مباشر من الأدمن = اعتماد فوري (نفس السلوك التاريخي، صفر تغيير على المسار ده). لو
+    // الفني كان له تصريح ذاتي معلّق/مرفوض/موقوف لنفس الخدمة (Script 4 §2-7)، الأدمن يقدر
+    // يعتمده مباشرة من هنا بدل ما يوصله لطريق مسدود — نفس الصف بيترقّى، مش تكرار.
     if (existing) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده متأهّل للخدمة دي بالفعل', HttpStatus.CONFLICT);
+      if (existing.verificationStatus === TechnicianServiceVerificationStatus.APPROVED) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني ده متأهّل للخدمة دي بالفعل', HttpStatus.CONFLICT);
+      }
+      const previousStatus = existing.verificationStatus;
+      if (dto.skill_level) existing.skillLevel = dto.skill_level;
+      existing.verificationStatus = TechnicianServiceVerificationStatus.APPROVED;
+      existing.isActive = true;
+      existing.rejectionReason = null;
+      existing.reviewedByUserId = adminUserId;
+      existing.reviewedAt = new Date();
+      await this.technicianServices.save(existing);
+
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'technician_service.assigned',
+        entityType: 'service',
+        entityId: serviceId,
+        oldValues: { technician_id: dto.technician_id, verification_status: previousStatus },
+        newValues: { technician_id: dto.technician_id, skill_level: existing.skillLevel, verification_status: existing.verificationStatus },
+        meta,
+      });
+      return existing;
     }
 
     const assignment = this.technicianServices.create({
       serviceId,
       technicianId: dto.technician_id,
       skillLevel: dto.skill_level,
+      verificationStatus: TechnicianServiceVerificationStatus.APPROVED,
+      isActive: true,
+      isSelfDeclared: false,
+      reviewedByUserId: adminUserId,
+      reviewedAt: new Date(),
     });
     await this.technicianServices.save(assignment);
 

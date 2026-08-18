@@ -78,3 +78,36 @@ export interface AssignTechnicianZoneBody {
   service_zone_id: string;
   is_primary?: boolean;
 }
+
+// تصريح مهارات ذاتي (Script 4 §2-7) — مطابق لـ
+// apps/api/src/modules/technicians/dto/technician-service-response.dto.ts.
+export type TechnicianServiceVerificationStatus = 'pending_verification' | 'approved' | 'rejected' | 'suspended';
+
+export interface TechnicianServiceResponseDto {
+  id: string;
+  service_id: string;
+  skill_level: 'beginner' | 'standard' | 'expert';
+  verification_status: TechnicianServiceVerificationStatus;
+  is_self_declared: boolean;
+  is_active: boolean;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+// نسخة طابور المراجعة (GET /admin/technicians/service-declarations) — بأسماء الفني/الخدمة
+// محلولة، مش UUIDs خام (بيتحسبوا بـjoin واحد في admin-technicians.service.ts، صفر N+1).
+export interface AdminTechnicianServiceDeclarationResponseDto extends TechnicianServiceResponseDto {
+  technician_id: string;
+  technician_code: string;
+  technician_full_name: string;
+  service_name_ar: string;
+}
+
+export interface ApproveTechnicianServiceBody {
+  skill_level?: 'beginner' | 'standard' | 'expert';
+}
+
+export interface RejectTechnicianServiceBody {
+  reason: string;
+}

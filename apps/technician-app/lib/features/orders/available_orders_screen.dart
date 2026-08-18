@@ -19,6 +19,7 @@ import '../profile/profile_screen.dart';
 import '../progression/progression_screen.dart';
 import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
+import '../skills/skills_screen.dart';
 import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
@@ -398,6 +399,12 @@ class _TechnicianDrawer extends StatelessWidget {
                 icon: Icons.person_outline,
                 label: 'بروفايلي',
                 builder: (_) => const ProfileScreen(),
+              ),
+              // تصريح مهارات ذاتي (Script 4 §2-7) — كانت فجوة موثّقة صراحة.
+              _DrawerItem(
+                icon: Icons.build_outlined,
+                label: 'مهاراتي',
+                builder: (_) => const SkillsScreen(),
               ),
               _DrawerItem(
                 icon: Icons.groups_outlined,

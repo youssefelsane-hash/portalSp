@@ -240,10 +240,15 @@ npm test
 
 **فجوة موثّقة صراحة (Script 4، 2026-08-18)**: `npx jest` الافتراضي (parallel workers) بيفشل أحيانًا
 بـ`QueryFailedError` (FK violation) في `afterAll` cleanup لملفات مختلفة كل مرة (اتشاف مع
-`cash-settlement-direction.spec.ts`، `referral-integrity.spec.ts`، `recurring-orders-concurrency.spec.ts`
-في تشغيلات متتالية مختلفة) — مش بَقّة في منطق التطبيق ولا في أي ملف اختبار بعينه (كل ملف بينجح
-لوحده)، ده تضارب DB مشترك بين الـworkers المتوازيين اللي بتشتغل على نفس Postgres instance. **الحل
-المؤكد**: `npx jest --runInBand` (تسلسلي) بيعدّي 79/79 نضيف دايمًا. لو `npx jest` العادي فشل، جرّب
-`--runInBand` قبل ما تفترض بَقّة حقيقية.
+`cash-settlement-direction.spec.ts`، `recurring-orders-concurrency.spec.ts` في تشغيلات متتالية
+مختلفة) — تضارب DB مشترك بين الـworkers المتوازيين. **جرّب `npx jest --runInBand` الأول** لو
+الافتراضي فشل — بيقفل فئة الفشل دي غالبًا، بس **مش ضمانة مطلقة**: `referral-integrity.spec.ts`
+بالذات لوحظ بيفشل أحيانًا (4 من 6 اختبارات، تجميع assertions معتمد على "rejects.toThrow()" بيرجع
+resolved بدل rejected) حتى في `--runInBand` (تسلسلي، مفيش تضارب workers ممكن) — وبينجح 6/6 لو
+اتعاد فورًا بعد كده بلا أي تعديل. الاختبارات دي بتحقن فشل عبر `jest.spyOn(...).mockRejectedValueOnce(...)`
+وبتفترض ترتيب تنفيذ متزامن دقيق بين استدعاءات متتالية — الشك الحالي (مش مؤكد بعد): تسريب
+promise غير منتظر بين اختبارات نفس الملف بيخلّي microtask queue تتزحلق أحيانًا. **مش لمسناه في
+Script 4** (صفر تغيير في موديول `referrals`) — فجوة موثّقة قائمة بذاتها تحتاج تحقيق منفصل، مش حل
+سريع هنا. لو شفت الفشل ده، أعد التشغيل مرة قبل ما تفترض بَقّة حقيقية في تغييرك.
 
 مرجع كامل: `../../docs/01-master-plan.md`, `../../docs/02-data-dictionary.md` §13

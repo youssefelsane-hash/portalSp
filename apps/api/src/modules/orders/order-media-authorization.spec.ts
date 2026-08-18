@@ -125,6 +125,8 @@ describe('OrderMediaService — حدود تفويض المرفقات (Script 2 P
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       dataSource.getRepository(User),
       {} as never,
       {} as never,

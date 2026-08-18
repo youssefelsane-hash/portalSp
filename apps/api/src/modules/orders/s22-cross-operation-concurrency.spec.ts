@@ -239,6 +239,8 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       dataSource.getRepository(User),
       {} as never,
       {} as never,

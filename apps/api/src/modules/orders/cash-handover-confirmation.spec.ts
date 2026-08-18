@@ -163,6 +163,8 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       dataSource.getRepository(User),
       {} as never,
       {} as never,
