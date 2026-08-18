@@ -520,9 +520,20 @@ export class AdminOrdersService {
       throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
     }
 
-    await this.teamMembers.save(
-      this.teamMembers.create({ orderId, technicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
-    );
+    // Script 4 Part Q — سباق حقيقي ممكن: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي
+    // بالظبط، الفحص فوق (validateCrewCandidateOrThrow) مش ذرّي. الـUNIQUE constraint في الداتابيز
+    // (order_id, technician_id، migration 0060) هو خط الدفاع الأخير اللي بيمنع صف مكرر فعليًا —
+    // هنا بس بنحوّل خطأ الداتابيز الخام لنفس رسالة 409 الواضحة اللي الفحص العادي بيرجّعها.
+    try {
+      await this.teamMembers.save(
+        this.teamMembers.create({ orderId, technicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+      );
+    } catch (err) {
+      if (this.isUniqueViolation(err)) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
+      }
+      throw err;
+    }
 
     this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'added', technicianId, null));
     await this.auditLog.record({
@@ -600,9 +611,18 @@ export class AdminOrdersService {
       }
       const roleLabel = roleLabelOverride ?? existing.roleLabel;
       await repo.remove(existing);
-      await repo.save(
-        repo.create({ orderId, technicianId: newTechnicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
-      );
+      // نفس حماية addCrewMember فوق — سباق ممكن: الفني الجديد بقى عضو بالفعل (إضافة متزامنة)
+      // بين التحقق فوق (validateCrewCandidateOrThrow) وهنا.
+      try {
+        await repo.save(
+          repo.create({ orderId, technicianId: newTechnicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+        );
+      } catch (err) {
+        if (this.isUniqueViolation(err)) {
+          throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد بقى عضو في فريق الطلب بالفعل (سباق تعديل متزامن)', HttpStatus.CONFLICT);
+        }
+        throw err;
+      }
       return existing;
     });
 
@@ -618,5 +638,11 @@ export class AdminOrdersService {
       meta,
     });
     return order;
+  }
+
+  // نفس نمط RatingsService.isUniqueViolation() بالحرف — خطأ Postgres الخام (23505) بيتحوّل
+  // لرسالة 409 واضحة بدل ما يتسرّب كـ500 عام.
+  private isUniqueViolation(err: unknown): boolean {
+    return typeof err === 'object' && err !== null && 'code' in err && (err as { code: unknown }).code === '23505';
   }
 }

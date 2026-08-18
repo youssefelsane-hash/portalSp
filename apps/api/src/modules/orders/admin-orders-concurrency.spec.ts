@@ -1,0 +1,229 @@
+import { DataSource } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AuditLogService } from '../audit/audit-log.service';
+import { AdminOrdersService } from './admin-orders.service';
+import { Order, BookingMode, OrderStatus } from './entities/order.entity';
+import { OrderStatusHistory } from './entities/order-status-history.entity';
+import { OrderTeamMember } from './entities/order-team-member.entity';
+import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
+import { User } from '../auth/entities/user.entity';
+import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
+import { OrderAssignment } from '../matching/entities/order-assignment.entity';
+
+// اختبار حي ضد Postgres حقيقي — تزامن عمليات الأدمن الجديدة (Script 4 Part Q). زوج سيناريوهات
+// من الجدول المطلوب صراحة: "Two Admins reassign same order" و"Crew add × crew remove" (مقاربة
+// أقرب: إضافة نفس الفني بالتوازي من أدمنين، النتيجة المتوقعة عضو واحد بس مش صف مكرر).
+describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
+  let dataSource: DataSource;
+  let adminOrdersService: AdminOrdersService;
+  const runId = Date.now().toString(36);
+  const ids = {
+    zone: '',
+    service: '',
+    customerProfile: '',
+    address: '',
+    adminUserA: '',
+    adminUserB: '',
+    leaderProfile: '',
+    technicianAProfile: '',
+    technicianBProfile: '',
+  };
+  const users: string[] = [];
+
+  async function q(sql: string, params?: unknown[]) {
+    return dataSource.query(sql, params);
+  }
+
+  async function makeTechnician(label: string, opts: { companyId?: string | null } = {}) {
+    const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
+      `+2047${runId}${label}`.slice(0, 15),
+      `فني تزامن ${label} ${runId}`,
+    ]);
+    users.push(user.id);
+    const [profile] = await q(
+      `INSERT INTO technician_profiles
+         (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, verification_status, is_available, is_on_duty, current_location, company_id)
+       VALUES ($1,$2,'x',3,'new','approved',true,true,ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography,$3) RETURNING id`,
+      [user.id, `TCCC${label}${runId}`.slice(0, 20), opts.companyId ?? null],
+    );
+    const profileId = profile.id as string;
+    await q(`INSERT INTO technician_services (technician_id, service_id, is_active) VALUES ($1,$2,true)`, [profileId, ids.service]);
+    await q(`INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`, [profileId, ids.zone]);
+    return profileId;
+  }
+
+  async function insertOrder(
+    label: string,
+    opts: { bookingMode: BookingMode; technicianId: string | null; orderStatus: OrderStatus },
+  ) {
+    const [order] = await q(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',10000,0,$8) RETURNING id`,
+      [`TESTCC-${label}`.slice(0, 24), ids.customerProfile, opts.technicianId, ids.service, ids.address, ids.zone, opts.orderStatus, opts.bookingMode],
+    );
+    return order.id as string;
+  }
+
+  beforeAll(async () => {
+    dataSource = new DataSource({
+      type: 'postgres',
+      url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
+      entities: [Order, OrderStatusHistory, OrderTeamMember, TechnicianOrderCancellation, User, TechnicianProfile, TechnicianCompany, OrderAssignment],
+    });
+    await dataSource.initialize();
+
+    const [zone] = await q(`SELECT id FROM service_zones LIMIT 1`);
+    ids.zone = zone.id;
+    const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`, [
+      `فئة تزامن ${runId}`,
+      `Concurrency Category ${runId}`,
+      `test-cc-cat-${runId}`,
+    ]);
+    const [service] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
+       VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
+      [category.id, `خدمة تزامن ${runId}`, `test-cc-svc-${runId}`],
+    );
+    ids.service = service.id;
+
+    const [customerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type, email) VALUES ($1,$2,'customer',$3) RETURNING id`, [
+      `+2048${runId}`.slice(0, 15),
+      `عميل تزامن ${runId}`,
+      `customer-cc-${runId}@test.local`,
+    ]);
+    users.push(customerUser.id);
+    const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [customerUser.id]);
+    ids.customerProfile = customerProfile.id;
+    const [address] = await q(
+      `INSERT INTO addresses (user_id, street_name, location) VALUES ($1,$2, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
+      [customerUser.id, `شارع تزامن ${runId}`],
+    );
+    ids.address = address.id;
+
+    const [adminUserA] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`, [
+      `+2049${runId}A`.slice(0, 15),
+      `أدمن تزامن أ ${runId}`,
+    ]);
+    users.push(adminUserA.id);
+    ids.adminUserA = adminUserA.id;
+    const [adminUserB] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`, [
+      `+2049${runId}B`.slice(0, 15),
+      `أدمن تزامن ب ${runId}`,
+    ]);
+    users.push(adminUserB.id);
+    ids.adminUserB = adminUserB.id;
+
+    ids.leaderProfile = await makeTechnician('leader');
+    ids.technicianAProfile = await makeTechnician('a');
+    ids.technicianBProfile = await makeTechnician('b');
+
+    const techniciansService = new TechniciansService(
+      dataSource.getRepository(TechnicianProfile),
+      dataSource.getRepository(TechnicianCompany),
+      {} as never,
+      {} as never,
+      dataSource.getRepository(User),
+      {} as never,
+      {} as never,
+      {} as unknown as AuditLogService,
+      {} as never,
+    );
+
+    adminOrdersService = new AdminOrdersService(
+      dataSource.getRepository(Order),
+      dataSource.getRepository(OrderStatusHistory),
+      dataSource.getRepository(TechnicianOrderCancellation),
+      dataSource.getRepository(OrderTeamMember),
+      dataSource,
+      techniciansService,
+      new TechnicianAssignmentGuardService(), // حقيقية — صفر stub، عشان نفس منطق الأهلية الفعلي يتنفّذ تحت السباق
+      new EventEmitter2(),
+      { record: async () => undefined } as unknown as AuditLogService,
+      {} as never, // pricingEngineService — مش متنادى في reassign/crew
+      {} as never, // promoCodesService
+    );
+  });
+
+  afterAll(async () => {
+    try {
+      await q(`DELETE FROM order_team_members WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCC-%`]);
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCC-%`]);
+      await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCC-%`]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM technician_services WHERE technician_id = ANY($1)`, [
+        [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile],
+      ]);
+      await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [
+        [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile],
+      ]);
+      await q(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [
+        [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile],
+      ]);
+      if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+    } finally {
+      if (dataSource?.isInitialized) await dataSource.destroy();
+    }
+  });
+
+  it('سباق حقيقي: أدمنين اتنين بيحاولوا يعيّنوا فنيين مختلفين لنفس الطلب بالتوازي — واحد بس ينجح', async () => {
+    const orderId = await insertOrder(`reassign-race-${runId}`, {
+      bookingMode: BookingMode.INDIVIDUAL,
+      technicianId: null,
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+    });
+
+    const results = await Promise.allSettled([
+      adminOrdersService.reassign(ids.adminUserA, orderId, ids.technicianAProfile),
+      adminOrdersService.reassign(ids.adminUserB, orderId, ids.technicianBProfile),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+
+    // الحالة النهائية في الداتابيز لازم تكون فني واحد بس (اللي فاز بالقفل)، مش الاتنين ولا صفر.
+    const [finalOrder] = await q(`SELECT technician_id, order_status FROM orders WHERE id = $1`, [orderId]);
+    expect([ids.technicianAProfile, ids.technicianBProfile]).toContain(finalOrder.technician_id);
+    expect(finalOrder.order_status).toBe('accepted');
+
+    // reassign() الناجح بيعدّي بمرحلتين (searching_technician→technician_assigned→accepted) في
+    // نفس الترانزاكشن، فسطرين تاريخ متوقعين للفايز — مش سطر واحد. المهم إن الخاسر صفر سطور
+    // (الترانزاكشن كامل اترجع بالكامل، مفيش أثر جزئي من المحاولة اللي فشلت).
+    const history = await q(`SELECT count(*)::int AS c FROM order_status_history WHERE order_id = $1`, [orderId]);
+    expect(history[0].c).toBe(2);
+  });
+
+  it('سباق حقيقي: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي — واحد بس ينجح، التاني يرجع 409 نضيف (مش 500 خام)', async () => {
+    const orderId = await insertOrder(`crew-add-race-${runId}`, {
+      bookingMode: BookingMode.TEAM,
+      technicianId: ids.leaderProfile,
+      orderStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+    });
+
+    const results = await Promise.allSettled([
+      adminOrdersService.addCrewMember(ids.adminUserA, orderId, ids.technicianAProfile, 'دور أ'),
+      adminOrdersService.addCrewMember(ids.adminUserB, orderId, ids.technicianAProfile, 'دور ب'),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+    // مهم: الرفض لازم يكون رسالة ApiException نضيفة (409 "مضاف بالفعل") مش QueryFailedError خام
+    // بتسرّب كـ500 — ده بالظبط الإصلاح اللي اتعمل في addCrewMember() (isUniqueViolation catch).
+    expect(String(rejected[0].reason)).toContain('مضاف بالفعل');
+
+    // صف واحد بس في order_team_members — الـUNIQUE constraint منع الصف المكرر فعليًا.
+    const members = await q(`SELECT count(*)::int AS c FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
+      orderId,
+      ids.technicianAProfile,
+    ]);
+    expect(members[0].c).toBe(1);
+  });
+});
