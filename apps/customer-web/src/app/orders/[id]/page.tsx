@@ -329,7 +329,12 @@ function ChatSection({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    getThreadForOrder(authedFetch, orderId).then((t) => setThreadId(t.id));
+    // بَقّة حقيقية اتلقطت باختبار حي: مفيش thread للطلب لسه (قبل تعيين فني، أو طلب اتلغى قبل ما
+    // يتعيّنله فني خالص) بيرجع 404 متوقّع من الباك-إند — ده مش خطأ يستاهل console noise، ببساطة
+    // مفيش شات نعرضه (الشرط `if (!threadId) return null` تحت بيتعامل معاه بصمت).
+    getThreadForOrder(authedFetch, orderId)
+      .then((t) => setThreadId(t.id))
+      .catch(() => setThreadId(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 

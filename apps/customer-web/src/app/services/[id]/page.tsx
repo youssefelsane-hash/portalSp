@@ -256,16 +256,23 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 </div>
               </label>
             ))}
-            <button
-              type="button"
-              onClick={() => {
-                setShowNewAddressForm((v) => !v);
-                setSelectedAddressId(null);
-              }}
-              className="text-sm text-primary hover:underline"
-            >
-              + عنوان جديد
-            </button>
+            {/* بَقّة حقيقية اتلقطت باختبار حي بمتصفح: الزرار ده toggle، وللعميل الجديد (صفر عناوين)
+                الفورم بيتفتح تلقائيًا (useEffect فوق) — فلو الزرار فضل ظاهر بنفس النص "+ عنوان
+                جديد"، دوسة عليه بتقفل الفورم المفتوح أصلاً من غير أي بديل واضح (مفيش عنوان تاني
+                يتختار). نخفي الزرار خالص لو مفيش عناوين محفوظة أصلاً، ونغيّر نصه لـ"إلغاء" لو
+                الفورم مفتوح فعلاً (عميل عنده عناوين واختار يضيف واحد جديد). */}
+            {addresses.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewAddressForm((v) => !v);
+                  setSelectedAddressId(null);
+                }}
+                className="text-sm text-primary hover:underline"
+              >
+                {showNewAddressForm ? 'إلغاء' : '+ عنوان جديد'}
+              </button>
+            )}
             {showNewAddressForm && (
               <NewAddressForm
                 authedFetch={authedFetch}
