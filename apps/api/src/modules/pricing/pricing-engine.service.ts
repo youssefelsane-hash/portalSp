@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { evaluateFormulaNode, FormulaEvaluationContext } from './formula-evaluator';
+import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload } from './formula-evaluator';
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
@@ -32,62 +32,11 @@ export class PricingEngineService {
     rawFieldValues: Record<string, string | number | boolean>,
     orderId?: string,
   ): Promise<PricingEvaluationResult & { evaluationId: string | null }> {
-    const fields = await this.fieldsService.listForService(serviceId);
-    const activeFields = fields.filter((f) => f.isActive);
-    const fieldValues = this.validateAndNormalizeFieldValues(activeFields, rawFieldValues);
-
-    const rules = await this.rulesService.listCurrentRulesForService(serviceId);
-    const constants = new Map<string, ConstantRulePayload>();
-    const lookupTables = new Map<string, LookupTableRulePayload>();
-    let finalPricePayload: FinalPriceFormulaPayload | null = null;
-
-    for (const rule of rules) {
-      if (rule.ruleType === PricingRuleType.CONSTANT) {
-        constants.set(rule.ruleKey, rule.payload as ConstantRulePayload);
-      } else if (rule.ruleType === PricingRuleType.LOOKUP_TABLE) {
-        lookupTables.set(rule.ruleKey, rule.payload as LookupTableRulePayload);
-      } else if (rule.ruleType === PricingRuleType.FORMULA && rule.ruleKey === 'final_price') {
-        finalPricePayload = rule.payload as FinalPriceFormulaPayload;
-      }
-    }
-
+    const { fieldValues, context, finalPricePayload } = await this.prepareEvaluation(serviceId, rawFieldValues);
     if (!finalPricePayload) {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مفيهاش معادلة تسعير سارية دلوقتي', HttpStatus.CONFLICT);
     }
-
-    const context: FormulaEvaluationContext = { fieldValues, constants, lookupTables };
-    const priceCents = Math.round(evaluateFormulaNode(finalPricePayload.price_cents, context));
-
-    // Script 2 Part H (finding #44) — حراسة أخيرة على السعر النهائي قبل ما يوصل لأي مكان بيحدد
-    // مبلغ حقيقي يتحصّل من العميل. field_ref (formula-evaluator.ts) بترفض القيم الغير رقمية
-    // دلوقتي، لكن ده حماية إضافية ضد أي مسار حسابي تاني (lookup/constant بقيمة متطرفة، قسمة على
-    // رقم قريب من صفر) ممكن نظريًا ينتج Infinity أو سعر سالب من غير ما يمر بـfield_ref خالص —
-    // بدل ما نسيب Postgres يرمي "invalid input syntax for type integer" خام لو القيمة NaN وقت
-    // الإدراج (orders.total_amount_cents integer)، بنرفض هنا برسالة واضحة.
-    if (!Number.isFinite(priceCents) || priceCents < 0) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'معادلة التسعير أنتجت سعرًا غير صالح لهذه المدخلات — راجع بيانات الخدمة',
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
-    }
-
-    const evalOptional = (node: FormulaNode | undefined): number | null =>
-      node !== undefined ? evaluateFormulaNode(node, context) : null;
-
-    const requiresAssistantRaw = evalOptional(finalPricePayload.requires_assistant);
-    const suitableForEmergencyRaw = evalOptional(finalPricePayload.suitable_for_emergency);
-
-    const result: PricingEvaluationResult = {
-      priceCents,
-      minPriceCents: evalOptional(finalPricePayload.min_price_cents),
-      maxPriceCents: evalOptional(finalPricePayload.max_price_cents),
-      estimatedDurationDays: evalOptional(finalPricePayload.estimated_duration_days),
-      requiredTechnicians: evalOptional(finalPricePayload.required_technicians),
-      requiredAssistants: evalOptional(finalPricePayload.required_assistants),
-      requiresAssistant: requiresAssistantRaw !== null ? requiresAssistantRaw !== 0 : null,
-      suitableForEmergency: suitableForEmergencyRaw !== null ? suitableForEmergencyRaw !== 0 : null,
-    };
+    const result = this.computeResult(finalPricePayload, context);
 
     // تسجيل للتدقيق (docs/08 §1.3) — بره أي transaction، فشله ميعطلش رجوع السعر للعميل، نفس
     // فلسفة AuditLogService.record() (تسجيل التدقيق مهم بس مش أهم من العملية نفسها). الصف ده هو
@@ -112,6 +61,99 @@ export class PricingEngineService {
     }
 
     return { ...result, evaluationId };
+  }
+
+  /**
+   * معاينة/اختبار — بدون أي كتابة في الداتابيز (لا service_pricing_evaluations ولا أي تدقيق).
+   * Script 4 §47-48 (Price Engine Admin Authoring UX) — كانت فجوة موثّقة صراحة: المعاينة
+   * الوحيدة الموجودة (evaluate() فوق) بتقرا القواعد **المحفوظة فعليًا** في الداتابيز، يعني
+   * الأدمن مضطر يحفظ التعديل (يخليه ساري لكل عميل حقيقي فورًا) الأول قبل ما يقدر يعاين نتيجته —
+   * بالظبط عكس المطلوب ("قبل النشر"). الحل: نفس محرك الحساب بالحرف، بس formula_payload ممكن
+   * يتبعت override من غير ما يتخزن — لو مبعوتش، بيقرا القاعدة الحية الحالية (نفس سلوك evaluate()
+   * تمامًا، مفيد لتشغيل حالات اختبار محفوظة ضد الوضع الحالي بدون تعديل).
+   */
+  async evaluateDraft(
+    serviceId: string,
+    rawFieldValues: Record<string, string | number | boolean>,
+    formulaPayloadOverride?: Record<string, unknown>,
+  ): Promise<PricingEvaluationResult> {
+    const { context, finalPricePayload } = await this.prepareEvaluation(serviceId, rawFieldValues);
+    let payload: FinalPriceFormulaPayload | null;
+    if (formulaPayloadOverride) {
+      validateFinalPriceFormulaPayload(formulaPayloadOverride);
+      payload = formulaPayloadOverride as unknown as FinalPriceFormulaPayload;
+    } else {
+      payload = finalPricePayload;
+    }
+    if (!payload) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مفيهاش معادلة تسعير سارية دلوقتي', HttpStatus.CONFLICT);
+    }
+    return this.computeResult(payload, context);
+  }
+
+  private async prepareEvaluation(
+    serviceId: string,
+    rawFieldValues: Record<string, string | number | boolean>,
+  ): Promise<{
+    fieldValues: Record<string, string | number | boolean>;
+    context: FormulaEvaluationContext;
+    finalPricePayload: FinalPriceFormulaPayload | null;
+  }> {
+    const fields = await this.fieldsService.listForService(serviceId);
+    const activeFields = fields.filter((f) => f.isActive);
+    const fieldValues = this.validateAndNormalizeFieldValues(activeFields, rawFieldValues);
+
+    const rules = await this.rulesService.listCurrentRulesForService(serviceId);
+    const constants = new Map<string, ConstantRulePayload>();
+    const lookupTables = new Map<string, LookupTableRulePayload>();
+    let finalPricePayload: FinalPriceFormulaPayload | null = null;
+
+    for (const rule of rules) {
+      if (rule.ruleType === PricingRuleType.CONSTANT) {
+        constants.set(rule.ruleKey, rule.payload as ConstantRulePayload);
+      } else if (rule.ruleType === PricingRuleType.LOOKUP_TABLE) {
+        lookupTables.set(rule.ruleKey, rule.payload as LookupTableRulePayload);
+      } else if (rule.ruleType === PricingRuleType.FORMULA && rule.ruleKey === 'final_price') {
+        finalPricePayload = rule.payload as FinalPriceFormulaPayload;
+      }
+    }
+
+    return { fieldValues, context: { fieldValues, constants, lookupTables }, finalPricePayload };
+  }
+
+  private computeResult(finalPricePayload: FinalPriceFormulaPayload, context: FormulaEvaluationContext): PricingEvaluationResult {
+    const priceCents = Math.round(evaluateFormulaNode(finalPricePayload.price_cents, context));
+
+    // Script 2 Part H (finding #44) — حراسة أخيرة على السعر النهائي قبل ما يوصل لأي مكان بيحدد
+    // مبلغ حقيقي يتحصّل من العميل. field_ref (formula-evaluator.ts) بترفض القيم الغير رقمية
+    // دلوقتي، لكن ده حماية إضافية ضد أي مسار حسابي تاني (lookup/constant بقيمة متطرفة، قسمة على
+    // رقم قريب من صفر) ممكن نظريًا ينتج Infinity أو سعر سالب من غير ما يمر بـfield_ref خالص —
+    // بدل ما نسيب Postgres يرمي "invalid input syntax for type integer" خام لو القيمة NaN وقت
+    // الإدراج (orders.total_amount_cents integer)، بنرفض هنا برسالة واضحة.
+    if (!Number.isFinite(priceCents) || priceCents < 0) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'معادلة التسعير أنتجت سعرًا غير صالح لهذه المدخلات — راجع بيانات الخدمة',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    const evalOptional = (node: FormulaNode | undefined): number | null =>
+      node !== undefined ? evaluateFormulaNode(node, context) : null;
+
+    const requiresAssistantRaw = evalOptional(finalPricePayload.requires_assistant);
+    const suitableForEmergencyRaw = evalOptional(finalPricePayload.suitable_for_emergency);
+
+    return {
+      priceCents,
+      minPriceCents: evalOptional(finalPricePayload.min_price_cents),
+      maxPriceCents: evalOptional(finalPricePayload.max_price_cents),
+      estimatedDurationDays: evalOptional(finalPricePayload.estimated_duration_days),
+      requiredTechnicians: evalOptional(finalPricePayload.required_technicians),
+      requiredAssistants: evalOptional(finalPricePayload.required_assistants),
+      requiresAssistant: requiresAssistantRaw !== null ? requiresAssistantRaw !== 0 : null,
+      suitableForEmergency: suitableForEmergencyRaw !== null ? suitableForEmergencyRaw !== 0 : null,
+    };
   }
 
   /**

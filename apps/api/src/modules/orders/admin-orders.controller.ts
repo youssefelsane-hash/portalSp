@@ -22,6 +22,7 @@ import { toOrderPricingEvaluationResponseDto } from './dto/order-pricing-evaluat
 import { toOrderResponseDto } from './dto/order-response.dto';
 import { toTechnicianOrderCancellationResponseDto } from './dto/technician-order-cancellation-response.dto';
 import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-response.dto';
+import { toOrderTimelineEventResponseDto } from './dto/order-timeline-event-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
@@ -113,6 +114,16 @@ export class AdminOrdersController {
   async listQuoteItems(@Param('id', ParseUUIDPipe) id: string) {
     const items = await this.orderItemsService.listForOrder(id);
     return items.map(toOrderItemResponseDto);
+  }
+
+  // Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32) — كانت فجوة موثّقة صراحة: audit log
+  // (/audit-log page منفصلة تمامًا)، status_history (كارت في getDetail فوق)، order_assignments
+  // (مفيش عرض إداري خالص قبل كده)، وtechnician_order_cancellations (كارت منفصل في getDetail)
+  // كل واحد بيتعرض لوحده. صفر صلاحية إضافية (نفس listTeamMembers/listMedia/listQuoteItems فوق
+  // — قراءة بس، أي أدمن).
+  @Get(':id/timeline')
+  async getTimeline(@Param('id', ParseUUIDPipe) id: string) {
+    return (await this.adminOrdersService.getTimeline(id)).map(toOrderTimelineEventResponseDto);
   }
 
   @Post(':id/cancel')

@@ -1,4 +1,4 @@
-import type { OrderStatus } from '@baytak/shared-types';
+import type { OrderStatus, OrderTimelineEventSource } from '@baytak/shared-types';
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   draft: 'مسودة',
@@ -57,6 +57,22 @@ const RESCHEDULABLE_STATUSES: OrderStatus[] = ['accepted', 'technician_assigned'
 
 export function isOrderReschedulable(status: OrderStatus): boolean {
   return RESCHEDULABLE_STATUSES.includes(status);
+}
+
+// Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32) — 4 مصادر أحداث كانت كل واحدة في كارت
+// لوحدها، هنا بيتلوّنوا بألوان `StatusChip` الدلالية عشان يتفرّقوا بصريًا في القايمة الزمنية الواحدة.
+export const TIMELINE_SOURCE_LABELS: Record<OrderTimelineEventSource, string> = {
+  status_history: 'تغيير حالة',
+  audit_log: 'سجل تدقيق',
+  assignment: 'عرض مطابقة',
+  technician_cancellation: 'إلغاء فني',
+};
+
+export function timelineEventSourceTone(source: OrderTimelineEventSource): 'success' | 'warning' | 'danger' | 'info' | 'neutral' {
+  if (source === 'technician_cancellation') return 'danger';
+  if (source === 'audit_log') return 'warning';
+  if (source === 'assignment') return 'neutral';
+  return 'info';
 }
 
 const CANCELLED_STATUSES: OrderStatus[] = [

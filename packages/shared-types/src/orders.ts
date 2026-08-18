@@ -222,6 +222,21 @@ export interface AdminRescheduleOrderBody {
   reason: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/order-timeline-event-response.dto.ts
+// (Script 4 Part G §30-32)
+export type OrderTimelineEventSource = 'status_history' | 'audit_log' | 'assignment' | 'technician_cancellation';
+
+export interface OrderTimelineEventResponseDto {
+  id: string;
+  timestamp: string;
+  source: OrderTimelineEventSource;
+  title: string;
+  detail: Record<string, unknown> | null;
+  actor_user_id: string | null;
+  actor_full_name: string | null;
+  actor_user_type: string | null;
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts وentities/cancellation-reason.entity.ts
 export type CancellationAppliesTo = 'customer' | 'technician' | 'admin';
 

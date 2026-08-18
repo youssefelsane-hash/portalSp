@@ -9,6 +9,7 @@ import type {
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMediaResponseDto,
+  OrderTimelineEventResponseDto,
   RemoveCrewMemberResponseDto,
   TeamMemberResponseDto,
 } from '@baytak/shared-types';
@@ -64,6 +65,8 @@ import {
   isOrderCancellable,
   isOrderReassignable,
   isOrderReschedulable,
+  TIMELINE_SOURCE_LABELS,
+  timelineEventSourceTone,
 } from '@/lib/order-labels';
 import {
   PAYMENT_GATEWAY_STATUS_LABELS,
@@ -82,6 +85,7 @@ export default function OrderDetailPage() {
   const [financialSummary, setFinancialSummary] = useState<OrderFinancialSummaryResponseDto | null>(null);
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
   const [quoteItems, setQuoteItems] = useState<OrderItemResponseDto[]>([]);
+  const [timeline, setTimeline] = useState<OrderTimelineEventResponseDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
@@ -151,6 +155,10 @@ export default function OrderDetailPage() {
     authedFetch<TeamMemberResponseDto[]>(`/admin/orders/${id}/team-members`)
       .then(setTeamMembers)
       .catch(() => setTeamMembers([]));
+    // Timeline موحّد (Script 4 Part G §30-32) — مسار منفصل عمداً زي باقي المصادر الثانوية فوق.
+    authedFetch<OrderTimelineEventResponseDto[]>(`/admin/orders/${id}/timeline`)
+      .then(setTimeline)
+      .catch(() => setTimeline([]));
   }
 
   useEffect(() => {
@@ -579,6 +587,50 @@ export default function OrderDetailPage() {
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      {/* Timeline موحّد (Script 4 Part G §30-32) — جنب كروت "تاريخ الحالة"/"إلغاءات الفني"
+          المتخصصة تحت، مش بديل عنهم. القيمة المضافة: بيورّي audit_log وorder_assignments كمان
+          (مفيش كارت كان بيعرضهم في صفحة الطلب أصلاً) في نفس التسلسل الزمني. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">Timeline — كل الأحداث بترتيب زمني ({timeline.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {timeline.length === 0 ? (
+            <EmptyState title="مفيش أحداث مسجّلة لسه" />
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {timeline.map((event) => {
+                const reason = event.detail?.reason;
+                const reasonText = event.detail?.reason_text;
+                const actorTypeLabel =
+                  event.actor_user_type === 'admin' ? 'أدمن' : event.actor_user_type === 'technician' ? 'فني' : event.actor_user_type;
+                return (
+                  <li key={`${event.source}-${event.id}`} className="flex flex-col gap-1 border-r-2 border-muted pr-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusChip tone={timelineEventSourceTone(event.source)}>{TIMELINE_SOURCE_LABELS[event.source]}</StatusChip>
+                      <span className="text-sm">{event.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(event.timestamp).toLocaleString('ar-EG-u-nu-latn')}
+                      {event.actor_full_name && (
+                        <>
+                          {' — '}
+                          {event.actor_full_name} ({actorTypeLabel})
+                        </>
+                      )}
+                    </p>
+                    {typeof reason === 'string' && reason && <p className="text-xs text-muted-foreground">السبب: {reason}</p>}
+                    {typeof reasonText === 'string' && reasonText && (
+                      <p className="text-xs text-muted-foreground">ملاحظات: {reasonText}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>

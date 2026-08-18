@@ -77,4 +77,64 @@
 
 خدمة تجريبية "محارة" (`pricing_model=formula`) اتعملت بـ4 حقول (`wall_type` dropdown، `area`، `thickness_cm` dropdown، `floor` اختياري) + قاعدتين (lookup table لسعر المتر حسب النوع، ثابت لرسوم الدور) + معادلة نهائية مطابقة تمامًا لمثال `docs/08` §1.8. `POST /services/:id/evaluate-price` بـ`{area:120, wall_type:external, thickness_cm:"3", floor:7}` رجّع **`price_cents: 23270`** — مطابق تمامًا للحساب اليدوي `(120×165×1.15)+500=23270`. اختبار تاني (`area:150, wall_type:internal, thickness_cm:"2", floor:2`) رجّع `21000` (من غير مكافآت السمك/الدور) — صح. محاولة حفظ معادلة خبيثة (`{"type":"eval",...}`) اترفضت بوضوح بـ`VAL_001` من غير ما تمس القاعدة الصحيحة الموجودة (اتأكد بإعادة تقييم السعر بعد المحاولة الفاشلة ورجوع نفس القيمة الصح). الخدمة التجريبية اتمسحت بعد التأكد (بيانات اختبار مش حقيقية).
 
+### مرحلة 4 — ✅ خلصت (2026-08-18) — Script 4 Part L §47-50: معاينة مسوّدة قبل النشر + حالات اختبار محفوظة
+
+كانت فجوة موثّقة صراحة اتكشفت وقت مراجعة Script 4 من الأول: قسم "معاينة واختبار السعر" (مرحلة 2)
+كان بينادي `POST /services/:id/evaluate-price` — نفس الـendpoint اللي التطبيقات الحقيقية بتستخدمه،
+يعني بيقرا القاعدة **المحفوظة فعليًا** بس. عمليًا: الأدمن بيعدّل المعادلة في `FormulaTreeEditor`،
+لازم يحفظ (`PUT /admin/services/:id/pricing-rules` — يخلي التعديل ساري لأي عميل حقيقي فورًا) الأول
+قبل ما يقدر يشوف نتيجته — بالظبط عكس §47 ("Before publishing: allow Admin to enter sample inputs").
+
+**الحل — `PricingEngineService.evaluateDraft()`**: نفس محرك الحساب بالحرف (`computeResult()`
+مشترك، اتفصل من `evaluate()` الأصلية بدون تغيير سلوكها)، بس `formula_payload` اختياري بيتبعت
+كـoverride بدل ما يتقرا من الداتابيز — **صفر كتابة** (لا `service_pricing_evaluations` ولا أي
+تدقيق). لو مبعوتش، بيقرا القاعدة الحية الحالية (نفس سلوك `evaluate()` تمامًا، مفيد لتشغيل حالات
+اختبار محفوظة ضد الوضع الحالي بدون أي تعديل). فحص شكل الـoverride بنفس `validateFinalPriceFormulaPayload`
+المستخدمة وقت الحفظ الحقيقي (اتفصلت من `pricing-rules.service.ts` لـ`formula-evaluator.ts`
+عشان تتشارك بين المسارين، صفر تكرار منطق أمان).
+
+- **`POST /admin/services/:id/pricing/evaluate-draft`** — `{field_values, formula_payload?}`.
+  `pricing-builder.tsx`'s `handlePreview()` بقى بيبعت الـ`payload` state الحالي (اللي لسه بيتعدّل
+  في المحرر، ممكن يكون متغيّر ولسه مش محفوظ) بدل ما يعتمد على القاعدة المحفوظة — زرار "احسب
+  السعر" دلوقتي بيعاين *المسوّدة الفعلية* مش آخر نسخة محفوظة.
+
+- **حالات اختبار محفوظة (§48، `service_pricing_rule_tests`, migration `0134`)** — "المدخلات دي
+  لازم تنتج السعر ده بالظبط". `PricingRuleTestsService.runAll(serviceId, formulaPayloadOverride?)`
+  بتشغّل كل الحالات المحفوظة لخدمة معيّنة ضد القاعدة الحية أو مسوّدة (نفس `evaluateDraft()`)، بترجّع
+  `{actual_price_cents, passed, error}` لكل حالة — فشل حالة واحدة (مثلاً حقل مطلوب ناقص) ما بيوقفش
+  باقي الحالات. زرار "احفظ كحالة اختبار" جنب زرار المعاينة بياخد مدخلات المعاينة الحالية كنقطة بداية
+  سريعة. زرار "شغّل كل الحالات ضد المسوّدة الحالية" بيشغّلهم ضد `payload` الحالي — يقدر الأدمن
+  يتأكد إن تعديله اللي لسه بيعمله (مش محفوظ لسه) ما كسرش أي سيناريو معروف قبل ما يحفظ، بالظبط
+  زي المطلوب في §48 ("When formula changes: run tests. Do not silently publish broken pricing").
+
+- **§49 (draft/publish versioning) — تم التأكد إنها مش فجوة فعلية، صفر بناء إضافي**: النظام
+  عنده بالفعل آلية "جدولة مستقبلية" (`valid_from`/`valid_until` في `PricingRulesService.upsert()`،
+  نفس نمط `upsertZonePricing`) — تعديل بتاريخ سريان مستقبلي بيقفل الصف الحالي عند لحظة السريان
+  الجديدة ويفتح صف جديد، من غير ما يمس السعر الساري دلوقتي خالص. وشرط §49 الأهم ("Existing
+  confirmed orders retain their pricing snapshot") متحقق بالفعل من مرحلة 1 (`evaluationId` +
+  `service_pricing_evaluations` — كل طلب مربوط بصف تقييم ثابت، تعديل القواعد بعد كده ميغيّرش
+  السعر المتفق عليه). بناء جدول "draft/published" منفصل كان هيكرر آلية موجودة تحل نفس المشكلة
+  فعليًا — قرار متعمّد بعدم البناء، مش سهو.
+
+- **§50 (RBAC granularity) — تم التأكد إنها مش فجوة فعلية**: "القراءة" (`GET
+  .../pricing-fields`, `GET .../pricing-rules`, `GET .../pricing-tests`) مفتوحة لأي أدمن بالفعل
+  (صفر `@RequirePermission`) — أي موظف يقدر يشوف تسعير خدمة من غير ما يقدر يعدّله. "التعديل"
+  (`POST`/`PUT`/`DELETE` على الحقول/القواعد/حالات الاختبار، وكمان `evaluate-draft`/`run` — لازم
+  تعديل تقدر تعاينه/تختبره) مقفولة خلف `catalog.manage`. الفرق بين "edit draft" و"publish" مالوش
+  معنى فعلي هنا (مفيش "draft" منفصل عن "published" — راجع §49 فوق)، فمفيش صلاحية تالتة مطلوبة.
+
+**اختبار حي كامل**:
+- **jest** (`pricing-draft-preview.spec.ts`, 6 اختبارات، ضد Postgres حقيقي): `evaluateDraft()`
+  بدون override بيرجع نفس نتيجة القاعدة الحية وصفر كتابة، مع override بيقيّم المسوّدة (سعر مختلف
+  تمامًا) والقاعدة الحية تفضل زي ما هي، رفض override غير صالح (نفس فحص الحفظ الحقيقي)، CRUD كامل
+  لحالات الاختبار + `runAll()` (حالة ناجحة وفاشلة معًا)، `runAll()` مع override بيشغّل ضد مسوّدة
+  مش القاعدة الحية، ورفض حذف حالة مش موجودة.
+- **curl مباشر ضد dev server حقيقي**: خدمة formula حقيقية، `evaluate-draft` بدون/مع override
+  (تحقق DB إن القاعدة الحية اتفضلت زي ما هي)، إنشاء/تشغيل/حذف حالات اختبار حقيقية (تحقق
+  `audit_logs`: `pricing_rule_test.created`×2، `pricing_rule_test.deleted`)، ورفض بدون توكن
+  (401). بيانات الاختبار اتنضّفت بالكامل.
+
+`npx tsc --noEmit`، `npx nest build`، `npx jest --runInBand` (83/83 suites، 486/486 tests) +
+`tsc`/`eslint`/`next build` لـ`apps/admin` كلهم ناجحين.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md`، `../../../../docs/01-master-plan.md` §2.4، `../../../../docs/08-pricing-engine-and-platform-vision.md`، `../../../../docs/adr/0001-dynamic-pricing-engine.md`.
