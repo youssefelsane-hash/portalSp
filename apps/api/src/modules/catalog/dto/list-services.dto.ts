@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
 
 // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختار منهم قبل ما يشوف الخدمات.
@@ -22,6 +22,14 @@ export class ListServicesDto {
   @IsOptional()
   @IsIn(BOOKING_MODE_FILTER_VALUES)
   booking_mode?: BookingModeFilter;
+}
+
+// Script 3 §7/§67 — بحث بلغة طبيعية، محدود الطول (مفيش استعلام نصي عملاق).
+export class SearchServicesDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  q: string;
 }
 
 export class EstimateQueryDto {

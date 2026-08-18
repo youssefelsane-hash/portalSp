@@ -8,6 +8,10 @@ export interface ServiceCategoryResponseDto {
   name_en: string;
   slug: string;
   icon_url: string | null;
+  // Script 3 §14 — مستخدم في Home screen عشان يعرض فئات شائعة حقيقية (مُعدّة من الأدمن)، مش
+  // فبركة "شائع" بدون بيانات حقيقية. العمود موجود من migration 0006 القديمة، مش مُعرَّض للعميل
+  // قبل كده.
+  is_featured: boolean;
 }
 
 export function toServiceCategoryResponseDto(category: ServiceCategory): ServiceCategoryResponseDto {
@@ -18,6 +22,7 @@ export function toServiceCategoryResponseDto(category: ServiceCategory): Service
     name_en: category.nameEn,
     slug: category.slug,
     icon_url: category.iconUrl,
+    is_featured: category.isFeatured,
   };
 }
 

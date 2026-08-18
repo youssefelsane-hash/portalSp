@@ -115,6 +115,28 @@ export class CatalogService {
     });
   }
 
+  // Script 3 §7/§12 — بحث بلغة طبيعية بسيطة (aliases/synonyms/substring، مش AI). العميل بيكتب
+  // "المياه بتنزل من تحت الحوض" فمش لازم يعرف مصطلح "سباكة" أصلاً. ILIKE substring على الاسم/
+  // الوصف + مطابقة على search_keywords (migration 0129) — مطابقة الاسم المباشرة أولاً، بعدين
+  // الكلمات المفتاحية. حد أقصى 20 نتيجة (بند 67 — مفيش batch عملاقة).
+  async searchServices(query: string): Promise<Service[]> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return [];
+    const pattern = `%${trimmed}%`;
+    return this.services
+      .createQueryBuilder('service')
+      .where('service.is_active = true')
+      .andWhere(
+        '(service.name_ar ILIKE :pattern OR service.short_description_ar ILIKE :pattern OR EXISTS (SELECT 1 FROM unnest(service.search_keywords) kw WHERE kw ILIKE :pattern))',
+        { pattern },
+      )
+      .orderBy('(service.name_ar ILIKE :prefixPattern)', 'DESC')
+      .addOrderBy('service.display_order', 'ASC')
+      .setParameter('prefixPattern', `${trimmed}%`)
+      .limit(20)
+      .getMany();
+  }
+
   async findServiceOrThrow(id: string): Promise<Service> {
     const service = await this.services.findOne({ where: { id, isActive: true } });
     if (!service) {
