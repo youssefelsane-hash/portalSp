@@ -64,7 +64,7 @@ export default function SecurityCenterPage() {
 }
 
 function SecurityCenterView() {
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const searchParams = useSearchParams();
   const actorUserId = searchParams.get('actor_user_id');
 
@@ -83,7 +83,13 @@ function SecurityCenterView() {
     if (severityFilter) params.set('severity', severityFilter);
     if (statusFilter) params.set('status', statusFilter);
     if (actorUserId) params.set('actor_user_id', actorUserId);
-    authedFetch<{ items: SecurityEventDto[] }>(`/admin/security/events?${params.toString()}`)
+    // مهم: /admin/security/events مُقسّم صفحات (ResponseInterceptor في apps/api بيفكّ {items, meta}
+    // تلقائي — data بيرجع array الصفوف مباشرة + meta بيتصعّد لمستوى الـenvelope). authedFetch()
+    // العادي بيرجّع envelope.data زي ما هي (array خام هنا)، فـres.items كانت دايمًا undefined —
+    // بَقّة حقيقية اتلقطت بمتصفح حي (Script 6 Part 23): الصفحة كانت بتكسر بالكامل (PAGEERROR:
+    // "Cannot read properties of undefined (reading 'length')") لحظة ما events.length اتنادت.
+    // authedFetchPaginated() هو الصح لأي endpoint بالشكل ده — نفس النمط المستخدم في /employees.
+    authedFetchPaginated<SecurityEventDto>(`/admin/security/events?${params.toString()}`)
       .then((res) => setEvents(res.items))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الأحداث'));
   }

@@ -204,6 +204,62 @@ allow-list لأدوار بعينها لازم نصممها/نصونها — ال
 فعل بعينه بتفاصيله في `employee_daily_activity` (التفاصيل الكاملة في `audit_logs` الموجود
 بالفعل، تحت نفس ضوابط الوصول القديمة، مش جدول جديد هنا).
 
+## Script 6 Part 23 — تدقيق حي كامل لكل مسارات الأمان في apps/admin (بعد الشك المعلن إن الشغل "مش شغال فعليًا")
+
+طلب صريح: "لا تفترض إن الـSecurity backend كامل لمجرد إن الـmigrations/services/tests موجودة —
+لازم تتأكد من الـAdmin UI نفسه حي." الفحص اتعمل بمتصفح Chromium حقيقي (Playwright) + تسجيل دخول
+OTP حقيقي (دور مؤقت `sec_center_tester_tmp` بصلاحيات `audit.view`/`security.*`/`employees.activity.
+view`/`employees.sessions.view` بس — **بلا** أي صلاحية من `MFA_REQUIRED_PERMISSIONS`، فتسجيل الدخول
+عدّى بـOTP بس من غير WebAuthn، غير super_admin الحقيقي اللي دايمًا محتاج Passkey) — كل بيانات
+الاختبار (المستخدم/الدور/الأحداث/الجلسات) اتنضّفت بالكامل بعد الفحص.
+
+| المسار | الحالة | ملاحظات |
+|---|---|---|
+| `/audit-log` | ✅ شغال | فلترة/pagination شغالين، بيانات حقيقية ظاهرة. |
+| `/security` (الأمان والأجهزة) | ✅ شغال | جلسات حقيقية + Passkeys، إلغاء جلسة شغال. |
+| `/security-center` (القايمة) | ❌ كان معطوب → ✅ اتصلح | **بَقّة حقيقية**: الصفحة كانت بتكسر بالكامل (شاشة بيضاء تقريبًا، `PAGEERROR: Cannot read properties of undefined (reading 'length')`) — راجع التفصيل تحت. |
+| `/security-center/:id` (تفاصيل) | ✅ شغال | acknowledge/investigate/resolve/notes الأربعة اتأكدوا حي (curl + متصفح)، حالة الـ403 (صلاحية ناقصة) بترجع رسالة عربية نضيفة مش كراش. |
+| `/employees` | ✅ شغال | |
+| `/employees/:userId` (تفاصيل موظف) | ⚠️ بادچ التنبيهات كان مكسور بصمت → ✅ اتصلح | راجع التفصيل تحت — الصفحة نفسها ما كانتش بتكسر، بس البادچ الأحمر "X تنبيه أمني مفتوح" ما كانش بيظهر أبداً حتى لو فيه تنبيهات حقيقية مفتوحة. |
+| `/employees/workforce` | ✅ شغال | heartbeat حي من `auth-context.tsx` بيتحدّث فعليًا (اتأكد بمتصفح: "وقت العمل الفعلي" زاد من دقيقة لدقيقة أثناء التصفح). |
+| deep link موظف → مركز الأمان (`?actor_user_id=`) | ✅ شغال بعد الإصلاح | اتأكد بالنقر الفعلي على البادچ في متصفح حي — بيوصل للقايمة مفلترة صح. |
+| deep link إشعار → `/security-center/:id` | ✅ شغال | اتأكد من صف `notifications` الحقيقي وقت اختبار Script 5 نفسه، وأعيد التأكيد هنا. |
+
+### البَقّة الأولى (الأخطر): `/security-center` بتكسر بالكامل — DTO mismatch
+
+**السبب الجذري**: `GET /admin/security/events` مُقسّم صفحات — `ResponseInterceptor` في `apps/api`
+بيكتشف شكل `{items, meta}` اللي بيرجّعه `SecurityEventsService.list()` تلقائيًا وبيفكّه: `envelope.
+data` بيبقى الـarray مباشرة، و`envelope.meta` بيتصعّد لمستوى الـenvelope (نفس نمط كل endpoint
+مُقسّم صفحات تاني في المشروع، زي `/admin/employees`). الصفحة كانت بتستخدم `authedFetch<{ items:
+SecurityEventDto[] }>(...)` (بيرجّع `envelope.data` زي ما هي — array خام) بدل `authedFetchPaginated
+<SecurityEventDto>(...)` (بيركّب `{items, meta}` صح من الاتنين) — يعني `res.items` كانت دايمًا
+`undefined`، و`events.length` بعدها بيرمي `TypeError` غير ممسوك، فـNext.js بيعرض شاشة خطأ فارغة
+تقريبًا. **اتلقطت بمتصفح حي بس** — الـcurl لوحده ما كانش يكشفها (الـAPI response نفسه سليم 100%،
+المشكلة في طريقة استهلاكه في الفرونت). الإصلاح: `apps/admin/src/app/security-center/page.tsx`
+يستخدم `authedFetchPaginated` دلوقتي.
+
+### البَقّة التانية: بادچ "تنبيه أمني مفتوح" في تفاصيل الموظف بيفشل بصمت
+
+نفس فئة البَقّة بالظبط، بس في `apps/admin/src/app/employees/[userId]/page.tsx` — `authedFetch<{
+meta: { total: number } }>(...)` على نفس الـendpoint المُقسّم صفحات. الفرق إن هنا الاستدعاء
+داخل `.then()` جوّه `Promise` بـ`.catch(() => setOpenAlertsCount(null))` — فالـ`TypeError` (`res.
+meta` = `undefined`) اتبلع بصمت بدل ما يكسر الصفحة، والنتيجة كانت **صمت مش كراش**: البادچ الأحمر
+ما كان بيظهرش أبداً حتى لو فيه تنبيهات أمنية حقيقية مفتوحة على الموظف ده — بالظبط النوع من
+"blank/missing state من غير أي سبب ظاهر" اللي Part 23 بيحذّر منه. الإصلاح: نفس التبديل لـ
+`authedFetchPaginated`. اتأكد حي: البادچ ظهر صح وربط لـ`/security-center?actor_user_id=...` نجح.
+
+### بَقّة أمنية حقيقية إضافية: تسريب `tokenHash` من `GET /admin/workforce/employees/:userId/sessions`
+
+اكتُشفت أثناء نفس الفحص (مش عن طريق المتصفح، عن طريق مقارنة استجابة الـcurl الخام بـ`EmployeeSessionDto`
+في `@baytak/shared-types`): `AdminWorkforceController.listSessions()` كان بيرجّع كيان `RefreshToken`
+الخام مباشرة — بما فيه `tokenHash` (مُجزّأ، مش التوكن الخام نفسه، لكن برضه مفيش داعي يوصل الواجهة
+خالص) وأعمدة داخلية زيادة (`userId`, `deviceId`, `userAgent`, `expiresAt`) مش في الـDTO المُعلن أصلاً.
+الإصلاح: `dto/employee-session-response.dto.ts` جديد (`toEmployeeSessionResponseDto()`) بيرجّع
+بالظبط شكل `EmployeeSessionDto` — نفس نمط `toAuditLogResponseDto()` الموجود.
+
+**كل الإصلاحات التلاتة اتأكدت حيًا** (curl + Playwright ضد dev server + Postgres حقيقيين، مش
+mocks) — لقطات شاشة من الفحص الحي متاحة وقت التنفيذ، مش محفوظة في الـrepo (بيانات اختبار مؤقتة).
+
 ## فجوات موثّقة صراحة (باقي عمل Script 5)
 
 - **Retention/archival (Part 22)**: صفر حذف تلقائي — قرار عمل محتاج تأكيد المالك (احتفاظ قانوني/
