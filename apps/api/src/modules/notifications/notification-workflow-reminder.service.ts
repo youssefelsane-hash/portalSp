@@ -10,6 +10,13 @@ import { isWithinQuietHours, nextTimeOutsideQuietHours } from './quiet-hours.uti
 import { computeScheduledJobCheckpoints } from './scheduled-job-checkpoints.util';
 
 const SWEEP_INTERVAL_MS = 60_000;
+// Script 2 Part O — نفس SWEEP_BATCH_SIZE بالحرف زي OrderAutoCancelService (order-auto-cancel.service.ts)،
+// نفس السبب: sweep() كانت بتحمّل كل الـworkflows المستحقة بلا حد أقصى (`.find()` من غير `take`) —
+// لو تراكمت الآلاف (بعد انقطاع Redis طويل مثلاً، أو نمو عضوي في القاعدة)، تيك واحد كل 60 ثانية
+// كان ممكن يحمّل آلاف الصفوف في الذاكرة ويعالجهم كلهم متتاليين، وده بالظبط "full-table
+// reconciliation scan"/"gigantic notification batch" اللي Part O بيحذّر منهم صراحة. الدفعة
+// المتبقية بتتاخد في التيك اللي بعده تلقائيًا (مفيش فقدان، بس معالجة تدريجية).
+const SWEEP_BATCH_SIZE = 25;
 // Script 2 Part E (finding #27) — لو notify() فشلت فعليًا (استثناء غير متوقع، مش "failed delivery"
 // عادي لأن notify() نفسها بترجع دايمًا Notification محفوظ ومابترميش)، مينفعش الـreminder ده يُحسب
 // كـ"استُهلك" من الحصة (reminder_count) ولا يستنى دورة تذكير كاملة قبل المحاولة تاني.
@@ -56,6 +63,8 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
     const due = await this.workflows.find({
       select: ['id'],
       where: { nextReminderAt: LessThanOrEqual(new Date()) },
+      order: { nextReminderAt: 'ASC' },
+      take: SWEEP_BATCH_SIZE,
     });
 
     let sentCount = 0;

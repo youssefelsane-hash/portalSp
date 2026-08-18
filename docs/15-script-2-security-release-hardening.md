@@ -246,12 +246,39 @@ finding #54 بيطلب checklist إطلاق واضح لكل تكامل خارج�
 توكن، تفريق `TokenExpiredError` عن توكن غير صالح تمامًا، قبول يوزر صالح). باقي البنود كلها إما
 مغطاة باختبارات موجودة فعلاً أو قرار تصميم واعي موثّق صراحة.
 
+**2026-08-18 (استكمال تامن) — Part O: فحص الأداء، بلا توقف — بَقّة حقيقية اتلقطت واتصلحت:**
+
+مراجعة صريحة لكل عامل خلفية/reconciliation دخل مع Script 2 ضد قائمة Part O (DB query على كل
+heartbeat، global locks، full-table scan، unbounded queue، unlimited retries، دفعة عملاقة):
+
+- **بَقّة حقيقية**: `NotificationWorkflowReminderService.sweep()` كانت بتحمّل **كل** الـworkflows
+  المستحقة بلا حد أقصى (`.find()` من غير `take`) كل 60 ثانية — بالظبط "full-table reconciliation
+  scan"/"gigantic notification batch" اللي Part O بيحذّر منهم صراحة. الأخطر إنها مخالفة لنمط
+  مُتبع فعلاً في نفس الكودبيز: `OrderAutoCancelService.sweep()` (نفس البنية، نفس الغرض، حتى
+  التعليق بيقول "بالظبط نفس قرار OrderAutoCancelService") عندها `take: SWEEP_BATCH_SIZE` (25)
+  من زمان، لكن `NotificationWorkflowReminderService` اتبنت بعدها ونسيت تطبّق نفس النمط. الإصلاح:
+  أضيف `SWEEP_BATCH_SIZE = 25` + `take`/`order: { nextReminderAt: 'ASC' }` — الدفعة المتبقية
+  بتتاخد تلقائيًا في التيك اللي بعده (مفيش فقدان، معالجة تدريجية عادلة الأقدم-الأول). فهرس
+  `idx_notification_workflows_pending_reminders` (migration 0087) بالفعل partial index على
+  `next_reminder_at WHERE resolved_at IS NULL` — يدعم الاستعلام المحدود ده كفاءة من غير migration
+  جديدة.
+- **باقي العمال اتفحصوا وسليمين**: `webhook_events` claim (payments.service.ts) upsert لصف واحد
+  لكل webhook حقيقي وارد (مش batch scan)، مع `retry_count < N` (bounded retries). BullMQ
+  processors (matching-round-expiry، assistant-offer-expiry) كل واحد Scoped لـ`orderId` واحد
+  (حجم طبيعي صغير، مش full-table). `technician-stats`/`customer-stats` processors كل واحد
+  scoped بـWHERE على entity واحد. `recurring-orders.service.ts`'s `.find()` scoped بـcustomerId
+  واحد. Realtime revocation (Phase B) push-based عبر PostgreSQL NOTIFY، مش DB query لكل حزمة
+  websocket.
+- اختبارات `notification-acknowledgement.spec.ts` الحية (اللي بتنادي `processOne` مباشرة) عدّت
+  من غير أي تغيير سلوك بعد الإصلاح — التعديل محصور في `sweep()` نفسها.
+
 **الحالة الحقيقية دلوقتي (Part-by-part)**: A ✅ B ✅ C ✅ (مراجَعة) D ✅ (مراجَعة) E ✅✅ (كاملة،
 #26-30 كلها) F ✅ G ✅✅ (كاملة، #34-39/41 كلها) H ✅✅ (كاملة، #42-45 كلها، #42 بَقّة حقيقية
 اتصلحت) I ✅ (#46-48) J ✅ (#50، #49/51-53 مراجَعة وموجودة من قبل) L ✅ (مراجَعة، موجودة من قبل)
 M ✅✅✅ (كاملة، #63-67 كلها، #63 مُصلّحة بَقّة حرجة) K ✅✅ (checklist كامل #54-58، فجوة حقيقية
 واحدة اتوثّقت: رقم Twilio الألماني) N ✅✅ (مصفوفة كاملة، فجوة اختبار حقيقية واحدة اتصلحت —
-RolesGuard). **O (أداء) وP (المراجعة الذاتية النهائية الكاملة) لسه محتاجين مرور صريح.**
+RolesGuard) O ✅✅ (فحص كامل، بَقّة حقيقية واحدة اتصلحت — sweep() الإشعارات من غير حد أقصى).
+**P (المراجعة الذاتية النهائية الكاملة + FINAL SCRIPT 2 RELEASE GATE) هو الجزء الأخير المتبقي.**
 
 ## Phase A — Authentication, session, and account integrity
 
