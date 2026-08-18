@@ -131,13 +131,80 @@ Script 5 كلها، فالحدث الأمني ما كانش بيتسجّل خا�
 `employees.activity.view`, `employees.sessions.view` — كلهم `super_admin` بس افتراضيًا (نفس نمط
 `employees.manage`)، قابلين للتوسيع لاحقًا عبر باني الأدوار الديناميكي (ADR-0010) بلا كود جديد.
 
+## لوحة القوى العاملة (Part 2/9، `apps/admin/src/app/employees/workforce/page.tsx`)
+
+استهلاك عرض بس فوق `GET /admin/workforce/summary` الموجود (`getWorkforceSummary()` فوق) —
+صفر منطق جديد في الباك-إند لده. جدول واحد: كل موظف عنده `employee_profiles` + حالة حضوره + وقت
+عمله الفعلي اليوم + عدد أفعاله + أفعاله الحساسة المرفوضة + تنبيهاته المفتوحة (رابط مباشر لـ
+`/security-center?actor_user_id=...`). كارت مختصر في `/employees` (خلف `employees.activity.view`).
+
+## كشف رفض متكرر / تجميع تنبيهات (Part 10) — تصعيدين منفصلين
+
+الـdedup الأساسي فوق (نفس `actor+event_type+action`) بيجمّع الصف بس، مبيصعّدش severity ولا بيبعت
+تنبيه تاني. ده كان فجوة حقيقية: موظف بيحاول نفس الفعل الممنوع 20 مرة كان بيولّد صف واحد بـseverity
+ثابتة زي أول مرة بالظبط — إشارة "بيصر" مفقودة بالكامل. اتحل بتصعيدين مختلفين في
+`SecurityEventsService.recordDenial()`:
+
+1. **تصعيد نفس الحدث** — أول مرة `occurrence_count` يوصل لعتبة (`security.repeated_denial_escalate_
+   threshold`، افتراضي 5) والـseverity لسه INFO/WARNING → بيتصعّد لـHIGH، وبيتبعت
+   `SECURITY_EVENT_CREATED_EVENT` تاني (مش بس أول إنشاء) عشان Super Admin ياخد تنبيه فعلي، مش
+   بس يشوفه لو فتح Security Center بنفسه.
+2. **تجميع عبر أفعال مختلفة** (`checkRepeatedDenialBurst()`، method خاصة جديدة) — نفس الفاعل عنده
+   N حدث أمني *مفتوح* (أي `event_type`/`action`، مش لازم نفس الفعل) خلال نافذة قصيرة
+   (`security.repeated_denial_burst_threshold`/`_window_seconds`، افتراضي 5/900) → حدث
+   `REPEATED_PERMISSION_DENIAL` CRITICAL جديد تجميعي (مستبعد من عدّ نفسه — منعاً لحلقة).
+
+**القرار السياقي (Part 10 — "Call Center's high customer-profile access ≠ suspicious")**: الكشف
+كله denial-based (403 حقيقي بس)، مش access-volume-based. موظف Call Center بيعمل مئات "عرض
+بروفايل عميل" ناجحة (200) يوميًا — دي مصرّح بيها أصلاً، مش هتوصل لـ`recordDenial()` خالص. مفيش
+allow-list لأدوار بعينها لازم نصممها/نصونها — التصنيف نفسه هو الحماية من false-positive.
+
+اختبار حي كامل (`security-events-repeated-denial.spec.ts`، 2 سيناريو ضد Postgres حقيقي): (أ) نفس
+الفعل يترفض 5 مرات → صف واحد، severity WARNING→HIGH عند العتبة بالظبط. (ب) 5 أفعال مختلفة لنفس
+الفاعل خلال النافذة → حدث `REPEATED_PERMISSION_DENIAL` CRITICAL واحد (مش 5).
+
+## اختبارات سباق صريحة (Part 20 A-E، `security-concurrency.spec.ts`)
+
+5 سيناريوهات، كل واحد `Promise.allSettled` حقيقي (مش تتابع) ضد Postgres حي:
+
+- **A — heartbeat متزامن** (5 نداء بالتوازي لنفس المستخدم): `ON CONFLICT (user_id, activity_date)
+  DO UPDATE` بيحمي من duplicate rows — اتأكد: صف واحد بس بعد الـ5 نداءات.
+- **B — recordDenial متزامن** لنفس `(actor+event_type+action)`: فجوة موثّقة صراحة (سباق نادر ممكن
+  يخلّي صفين بدل واحد لو الاتنين نداء وصلوا قبل ما أول UPDATE يتسجّل) — **الضمان الفعلي مش "صف
+  واحد دايمًا" لكن "صفر فقدان بيانات"**: مجموع `occurrence_count` عبر كل الصفوف اتأكد = 5 بالظبط
+  في كل تشغيلة، بصرف النظر عن عدد الصفوف.
+- **C — إلغاء نفس الجلسة بالتوازي** (3 نداء): `UPDATE...WHERE is_revoked=false` شرطي — واحد بس
+  بينجح (`affected=1`)، الباقي بيترفض 404 صريح (مش "double revoke" صامت).
+- **D — أدمنين مختلفين بيحلّوا نفس التنبيه بالتوازي** (نفس Part 20 اختبار E الأصلي): واحد بس بينجح،
+  الباقي 409 — الحماية اللي اتصلحت أصلاً وقت بَقّة الـtuple فوق.
+- **E — محاولات تصعيد ذاتي متزامنة** (5 نداء بالتوازي): الضمان الأمني الحرج مش عدد الأحداث بالظبط
+  — **صفر نجاح مهما كان السباق**. الاختبار بيتحقق من الـ5 كلهم اترفضوا 403 وصفر تغيير دور نهائي،
+  مش من عدد صفوف `security_events` (نفس منطق B — ممكن صف أو أكتر، الحماية الجوهرية مكانها تاني).
+
+## مراجعة أداء (Part 21) — indexes وbounded queries
+
+- `idx_security_events_dedup_lookup (actor_user_id, event_type, action, status, last_occurred_at
+  DESC)` (migration `0135`) كافي لـ`recordDenial()` (dedup) **و**`checkRepeatedDenialBurst()`
+  (الاستعلامين بادئين بـ`actor_user_id =`) رغم إن كشف التجميع بيستخدم `event_type != ...` (مش
+  قابل لتضييق بالإندكس مباشرة) — العمود الأول (`actor_user_id`) كافي لتحديد نطاق صفوف الفاعل
+  الواحد بس، وعدد الأحداث المفتوحة لأي فاعل واحد محدود بطبيعته (لو وصل لآلاف يبقى ده نفسه مؤشر
+  أخطر بكتير من أي مشكلة أداء). `EXPLAIN ANALYZE` اتأكد محليًا: تكلفة تنفيذ <1ms.
+- `getWorkforceSummary()` bounded بعدد موظفي الأدمن (`WHERE u.user_type='admin'`) مش أي جدول
+  ضخم — الـsubqueries المرتبطة (`refresh_tokens`/`security_events` لكل صف) بتستخدم
+  `idx_refresh_tokens_user_id`/`idx_security_events_target_user` الموجودين أصلاً.
+- **صفر query جديد على كل heartbeat غير اللي موجود بالفعل** (نفس فحص Script 2 Part O) —
+  `heartbeat()` استعلامين بس (SELECT + UPDATE/INSERT واحد)، مفيش N+1.
+
+## مراجعة خصوصية (Part 3/9) — تأكيد الالتزام بالقيود الصريحة
+
+الالتزام اتفحص عبر كل كود الموديول ده (`recordDenial`, `heartbeat`, `getWorkforceSummary`, DTOs):
+**صفر** تسجيل keystroke/screenshot/محتوى شاشة/محتوى شات — `attempted_value` بيسجّل بس قيمة
+توضيحية صغيرة (زي `{"attempted_role": "super_admin"}` أو `{"distinct_denials_in_window": 5}`)،
+صفر أسرار/توكنات خام فيها. `active_seconds`/`actions_count` أرقام تجميعية بس — مفيش تسجيل *أي*
+فعل بعينه بتفاصيله في `employee_daily_activity` (التفاصيل الكاملة في `audit_logs` الموجود
+بالفعل، تحت نفس ضوابط الوصول القديمة، مش جدول جديد هنا).
+
 ## فجوات موثّقة صراحة (باقي عمل Script 5)
 
 - **Retention/archival (Part 22)**: صفر حذف تلقائي — قرار عمل محتاج تأكيد المالك (احتفاظ قانوني/
   تجاري)، موثّق في ADR-0016 كفجوة مؤجلة عمدًا، مش هيُخترع.
-- **Repeated-denial detection السياقي (Part 8 §18، Part 17)**: الـdedup الحالي بيجمّع أي تكرار
-  مطابق، بس صفر "كشف نمط" واعي بالسياق (زي "Call Center بيشوف بروفايلات كتير طبيعي، لكن يحاول
-  يعتمد صرف مش طبيعي") — لسه مطلوب بناؤه.
-- **Security Center UI + Workforce UI extensions (Part 7/8/11/12)**: لسه مطلوب في `apps/admin`.
-- **Concurrency tests صريحة (Part 20 A-E)**: dedup/resolve اتأكدوا منطقيًا (اختبار #2/#4 فوق)، بس
-  صفر اختبار `Promise.allSettled` صريح لسباق حقيقي على `resolve()`/`recordDenial()` لسه.
