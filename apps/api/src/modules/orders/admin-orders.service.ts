@@ -10,6 +10,7 @@ import {
   ORDER_ASSISTANT_ASSIGNED_MANUALLY_EVENT,
   OrderAssistantAssignedManuallyEvent,
 } from '../../common/events/order-assistant-assigned-manually.event';
+import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
@@ -18,7 +19,8 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { MAX_TEAM_MEMBERS_PER_ORDER } from './order-team.service';
+import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
@@ -416,6 +418,139 @@ export class AdminOrdersService {
       meta,
     });
 
+    return order;
+  }
+
+  // ── إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) ────────────────────────
+  // كانت فجوة موثّقة صراحة: OrderTeamService.addMember()/removeMember() مقصورين على الفني
+  // القائد بس (technician-leader-ownership-gated)، assignAssistant() فوق مقصور على شغل
+  // "مساعد" بس. صلاحية مخصصة (orders.manage_crew، migration 0132) — عملية تشغيلية يومية
+  // زي orders.assign_assistant، مش قرار super_admin بس.
+
+  private async validateCrewCandidateOrThrow(order: Order, technicianProfileId: string): Promise<void> {
+    if (order.bookingMode !== BookingMode.TEAM) {
+      throw new ApiException(ErrorCode.VAL_001, 'إدارة طاقم الفريق متاحة بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
+    }
+    const technician = await this.techniciansService.findByProfileIdOrThrow(technicianProfileId);
+    if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
+      throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
+    }
+    if (order.technicianId === technician.id) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل', HttpStatus.CONFLICT);
+    }
+    const alreadyMember = await this.teamMembers.findOne({ where: { orderId: order.id, technicianId: technician.id } });
+    if (alreadyMember) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
+    }
+  }
+
+  /** إضافة عضو طاقم (Ops حل نقص طاقم، مش شغل "مساعد" بالضرورة — راجع assignAssistant فوق للمساعد تحديدًا). */
+  async addCrewMember(adminUserId: string, orderId: string, technicianId: string, roleLabel: string, meta?: AuditActorMeta): Promise<Order> {
+    const order = await this.findOrThrow(orderId);
+    await this.validateCrewCandidateOrThrow(order, technicianId);
+
+    const existingCount = await this.teamMembers.count({ where: { orderId } });
+    if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
+      throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
+    }
+
+    await this.teamMembers.save(
+      this.teamMembers.create({ orderId, technicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+    );
+
+    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'added', technicianId, null));
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.crew_member_added',
+      entityType: 'order',
+      entityId: orderId,
+      newValues: { technician_id: technicianId, role_label: roleLabel },
+      meta,
+    });
+    return order;
+  }
+
+  /** إزالة عضو طاقم — سبب إلزامي (Script 4 §38-41: "require appropriate state, reason, authorization"). */
+  async removeCrewMember(adminUserId: string, orderId: string, memberId: string, reason: string, meta?: AuditActorMeta): Promise<{ crewShortage: boolean }> {
+    const order = await this.findOrThrow(orderId);
+    const member = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
+    if (!member) {
+      throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
+    }
+    await this.teamMembers.remove(member);
+
+    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'removed', null, member.technicianId));
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.crew_member_removed',
+      entityType: 'order',
+      entityId: orderId,
+      oldValues: { technician_id: member.technicianId, role_label: member.roleLabel, member_type: member.memberType },
+      newValues: { reason },
+      meta,
+    });
+
+    // جاهزية الطاقم (Script 4 §22-29: "don't silently show ready" لو الطاقم نقص) — required_technicians
+    // هو snapshot محرك الإنتاجية وقت الحجز (orders.service.ts)، مفيش تعقّب لدور محدد بعد، فده
+    // مؤشر عددي بسيط بس (العدد الكلي بعد الإزالة مقابل المطلوب) مش تطابق أدوار دقيق.
+    const remaining = await this.teamMembers.count({ where: { orderId } });
+    const crewShortage = order.requiredTechnicians != null && remaining + 1 < order.requiredTechnicians;
+    return { crewShortage };
+  }
+
+  /**
+   * استبدال عضو طاقم كـworkflow واحد متماسك (Script 4 §38-41): قفل → تحقق قديم → تحقق جديد →
+   * إغلاق القديم وفتح الجديد ذرّيًا → تدقيق واحد بربط العضوين → إشعار الاتنين. ترانزاكشن واحدة
+   * عشان مفيش نافذة زمنية يفضل فيها الطلب من غير العضو ده خالص (لا القديم ولا الجديد).
+   */
+  async replaceCrewMember(
+    adminUserId: string,
+    orderId: string,
+    memberId: string,
+    newTechnicianId: string,
+    reason: string,
+    roleLabelOverride: string | undefined,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
+    const order = await this.findOrThrow(orderId);
+    const existingMember = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
+    if (!existingMember) {
+      throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (newTechnicianId === existingMember.technicianId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد نفس الفني القديم', HttpStatus.BAD_REQUEST);
+    }
+    await this.validateCrewCandidateOrThrow(order, newTechnicianId);
+
+    const oldMember = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(OrderTeamMember);
+      // إعادة قراءة جوّه الترانزاكشن (مش الاعتماد على existingMember المقروء فوق) — يحمي من
+      // سباق حذف/استبدال متزامن على نفس العضو بين التحقق فوق والتنفيذ هنا.
+      const existing = await repo.findOne({ where: { id: memberId, orderId } });
+      if (!existing) {
+        throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود (اتشال قبل كده)', HttpStatus.NOT_FOUND);
+      }
+      const roleLabel = roleLabelOverride ?? existing.roleLabel;
+      await repo.remove(existing);
+      await repo.save(
+        repo.create({ orderId, technicianId: newTechnicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+      );
+      return existing;
+    });
+
+    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'replaced', newTechnicianId, oldMember.technicianId));
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.crew_member_replaced',
+      entityType: 'order',
+      entityId: orderId,
+      oldValues: { technician_id: oldMember.technicianId, role_label: oldMember.roleLabel },
+      newValues: { technician_id: newTechnicianId, reason },
+      meta,
+    });
     return order;
   }
 }

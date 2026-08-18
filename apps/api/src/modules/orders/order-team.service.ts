@@ -8,7 +8,7 @@ import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 
-const MAX_TEAM_MEMBERS_PER_ORDER = 15;
+export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
 
 /**
  * توزيع أدوار الفريق داخل الطلب الواحد (docs/08 §5) — إضافي بحت فوق orders.technician_id
