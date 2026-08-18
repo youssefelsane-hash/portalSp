@@ -9,6 +9,7 @@ export interface CreateOrderBody {
   address_id: string;
   booking_mode?: 'individual' | 'team' | 'emergency';
   requested_technician_company_id?: string;
+  requested_technician_id?: string;
   problem_description?: string;
   customer_notes?: string;
   scheduled_at?: string;

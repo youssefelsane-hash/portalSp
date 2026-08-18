@@ -27,20 +27,30 @@ npm run dev   # http://localhost:3002
 - **الحجز**: `src/app/services/[id]/page.tsx` — صفحة واحدة شاملة (حقول ديناميكية لخدمات
   formula، عناوين، جدولة، مراجعة، دفع) بدل wizard متعدد الصفحات، عشان نفس فلسفة
   `CreateOrderScreen` في Flutter (تدفق تدريجي داخل شاشة واحدة).
-- **الطلبات**: `src/app/orders/` — سجل + شاشة طلب نشط (حالة إنسانية، شات، إلغاء، موافقة على شغل
+- **الطلبات**: `src/app/orders/` — سجل + شاشة طلب نشط (حالة إنسانية، شات حي، إلغاء، موافقة على شغل
   إضافي).
+- **الشات real-time**: `src/lib/chat-socket.ts` — Socket.IO حقيقي على نفس namespace/أحداث
+  `chat.gateway.ts` بالحرف (`chat:join`/`chat:message_received`/`chat:send`)، نفس القناة اللي
+  `apps/customer-app`'s `chat_client.dart` بيستخدمها بالظبط. تاريخ الرسايل REST مرة واحدة وقت
+  الفتح، بعد كده كله لحظي عبر السوكيت — مفيش نظام شات تاني منفصل.
+- **اختيار الموقع بالخريطة**: `src/components/map-picker.tsx` — Leaflet + OpenStreetMap tiles
+  (بلا مفتاح API)، دوس/اسحب لتحديد `latitude`/`longitude` الحقيقيين بدل إدخال رقمي يدوي.
+- **اختيار الفني قبل الحجز**: `src/lib/technicians.ts` + قسم "مين يعمل الشغل؟" في
+  `services/[id]/page.tsx` — "خلي صُنّاع يختار" (افتراضي/أساسي) مقابل "اختار بنفسك" (ثانوي، بيفتح
+  قايمة فنيين حقيقية بالسعر والتقييم لكل واحد، `GET /services/:id/technicians`) — مطابق لبند
+  32-35 من سبيسفيكيشن Script 3 بالحرف.
 
 ## فجوات موثّقة صراحة (مش سهو)
 
-- **الشات real-time**: بولينج كل 5 ثواني (`src/app/orders/[id]/page.tsx`'s `ChatSection`)، مش
-  WebSocket حقيقي زي الموبايل (Socket.IO). نفس الـREST endpoints بالظبط، بس من غير بث لحظي.
-- **اختيار الموقع بالخريطة**: إدخال `latitude`/`longitude` يدوي في فورم العنوان الجديد
-  (`services/[id]/page.tsx`'s `NewAddressForm`) — مفيش map picker حقيقي بعد.
-- **اختيار الفني قبل الحجز**: الموبايل عنده شاشة بحث/مقارنة فنيين كاملة (`apps/customer-app`)،
-  الويب لسه بيعتمد على المطابقة التلقائية بس (auto-match). لو العميل محتاج يختار فني بعينه، محتاج
-  الموبايل حاليًا.
 - **@baytak/shared-types**: مش مستخدمة هنا عمدًا (أنواع محلية في `src/lib/api-types.ts` بدل كده) —
   تفادي تعقيد workspace linking لأول نسخة، نفس فلسفة `apps/customer-app`'s نماذج Dart المستقلة.
   أي تعديل في عقد الباك-إند لازم ينعكس هنا يدويًا.
+- **بلاطات الخريطة (map tiles) في بيئة التطوير الحالية**: `tile.openstreetmap.org` اتحجب فعليًا في
+  بيئة الـsandbox بتاعة الـagent وقت الاختبار الحي (بروكسي صارم، `ERR_TUNNEL_CONNECTION_FAILED`) —
+  اتأكد إن ده قيد الشبكة بتاع بيئة الاختبار نفسها (`curl "$HTTPS_PROXY/__agentproxy/status"`)، مش
+  بَقّة كود: تفاعل الخريطة (كليك/سحب/التقاط الإحداثيات) اتأكد حي بالكامل والماركر بيتحط صح، بس
+  الخلفية المرئية (البلاطات) فاضية سوداء/رمادية في السكرين شوت في البيئة دي بس. متصفح حقيقي غير
+  مقيّد (المستخدم النهائي) هيحمّل البلاطات عادي، `tile.openstreetmap.org` خدمة عامة قياسية بلا
+  مفتاح.
 
 تفاصيل كاملة إضافية: `docs/16-script-3-customer-ux-delta-report.md`.

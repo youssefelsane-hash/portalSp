@@ -19,6 +19,7 @@ import {
   CancellationReasonDto,
 } from '@/lib/orders';
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
+import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
 
 // ترتيب رحلة الطلب الطبيعية للعرض كخط زمني — الحالات الاستثنائية (إلغاء/نزاع) بتتعرض لوحدها.
@@ -45,7 +46,7 @@ const TERMINAL_BAD_STATUSES = new Set([
 export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading, authedFetch } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, authedFetch, accessToken } = useAuth();
 
   const [order, setOrder] = useState<OrderResponseDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +147,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         <CancelSection authedFetch={authedFetch} orderId={order.id} onCancelled={setOrder} />
       )}
 
-      <ChatSection authedFetch={authedFetch} orderId={order.id} />
+      <ChatSection authedFetch={authedFetch} orderId={order.id} accessToken={accessToken} />
     </div>
   );
 }
@@ -318,15 +319,18 @@ function CancelSection({
 function ChatSection({
   authedFetch,
   orderId,
+  accessToken,
 }: {
   authedFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
   orderId: string;
-  }) {
+  accessToken: string | null;
+}) {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageDto[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [live, setLive] = useState(false);
+  const clientRef = useRef<ChatSocketClient | null>(null);
 
   useEffect(() => {
     // بَقّة حقيقية اتلقطت باختبار حي: مفيش thread للطلب لسه (قبل تعيين فني، أو طلب اتلغى قبل ما
@@ -338,26 +342,44 @@ function ChatSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
+  // شات حي عبر WebSocket (نفس القناة اللي الموبايل بيستخدمها بالضبط، chat.gateway.ts) — تاريخ
+  // الرسايل بـREST مرة واحدة، الرسايل الجديدة بتوصل فورًا عبر السوكيت بدل بولينج (كان فجوة موثّقة).
   useEffect(() => {
-    if (!threadId) return;
-    const load = () => listMessages(authedFetch, threadId).then(setMessages);
-    load();
-    // بولينج بسيط كل 5 ثواني — WebSocket حقيقي للشات في الويب فجوة موثّقة (docs/16)، الموبايل
-    // بيستخدم Socket.IO فعليًا، الويب بيعتمد على نفس REST endpoints بس من غير بث لحظي دلوقتي.
-    pollRef.current = setInterval(load, 5000);
+    if (!threadId || !accessToken) return;
+    listMessages(authedFetch, threadId).then(setMessages);
+
+    const client = new ChatSocketClient();
+    clientRef.current = client;
+    client.connect({
+      accessToken,
+      threadId,
+      onJoined: () => setLive(true),
+      onMessageReceived: (msg) => setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg])),
+      onError: () => setLive(false),
+    });
+
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      client.disconnect();
+      clientRef.current = null;
+      setLive(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId]);
+  }, [threadId, accessToken]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!threadId || !text.trim()) return;
+    const content = text.trim();
     setSending(true);
     try {
-      const msg = await sendMessage(authedFetch, threadId, text.trim());
-      setMessages((prev) => [...prev, msg]);
+      if (live && clientRef.current) {
+        // عبر السوكيت — الرسالة هترجع تاني عبر chat:message_received (بث للغرفة كلها بما فيها
+        // المرسل نفسه)، فمش محتاجين نضيفها للـstate يدويًا هنا (تجنّب تكرارها).
+        clientRef.current.sendMessage(threadId, content);
+      } else {
+        const msg = await sendMessage(authedFetch, threadId, content);
+        setMessages((prev) => [...prev, msg]);
+      }
       setText('');
     } finally {
       setSending(false);
@@ -368,7 +390,10 @@ function ChatSection({
 
   return (
     <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-      <h2 className="mb-3 font-semibold">الشات</h2>
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="font-semibold">الشات</h2>
+        {live && <span className="h-2 w-2 rounded-full bg-success" title="متصل الآن" />}
+      </div>
       <div className="max-h-64 space-y-2 overflow-y-auto">
         {messages.length === 0 ? (
           <p className="text-sm text-muted">مفيش رسايل لسه</p>
