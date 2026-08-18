@@ -13,9 +13,10 @@ import { RequestRematchDto } from './dto/request-rematch.dto';
 import { RescheduleOrderDto } from './dto/reschedule-order.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
-import { toOrderResponseDto } from './dto/order-response.dto';
+import { OrderResponseDto, toOrderResponseDto } from './dto/order-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
+import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
@@ -46,10 +47,18 @@ export class OrdersController {
     // الملكية اتفحصت هنا (findOneOwnedOrThrow) — أي بيانات بعد السطر ده مضمون إنها لعميل صاحب
     // الطلب فعلاً، بما فيها تليفون الفني (docs/08 §22 بند 1، حماية IDOR).
     const order = await this.ordersService.findOneOwnedOrThrow(user.sub, id);
-    // العنوان بتاع العميل نفسه — findOwnedOrThrow بيتحقق من الملكية برضه (دفاع مزدوج رخيص)
-    const address = await this.addressesService.findOwnedOrThrow(user.sub, order.addressId);
-    // تليفون الفني بيظهر بس بعد تأكيد حجيز حقيقي (الفني وافق فعليًا) — قبل كده صفر استعلام حتى
-    // (order.technicianId ممكن يبقى null أصلاً في الحالات المبكرة).
+    return this.enrichedResponse(user.sub, order);
+  }
+
+  // بَقّة حقيقية اتلقطت باختبار حي بمتصفح (apps/customer-web): كل الـmutations تحت (cancel،
+  // confirm-cash-handover، reschedule، request-rematch، quote-items approve/decline) كانت بترجّع
+  // toOrderResponseDto(order) من غير address/technicianContact — بعكس getOne() اللي بيبعتهم.
+  // العميل/الفني (apps/customer-app عندها نفس الـbug بالحرف في order_detail_screen.dart's
+  // _confirmCashHandover) بيستبدلوا الـstate المحلي بالرد ده مباشرة، فالعنوان ورقم الفني كانوا
+  // بيختفوا من الشاشة فورًا بعد أي فعل (مش بس تسليم الكاش) لحد ما العميل يعمل refresh يدوي.
+  // الحل: helper واحد بيجيب نفس الإثراء اللي getOne() بيعمله، يتستخدم بعد كل mutation.
+  private async enrichedResponse(userId: string, order: Order): Promise<OrderResponseDto> {
+    const address = await this.addressesService.findOwnedOrThrow(userId, order.addressId);
     const technicianContact =
       order.technicianId && TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
         ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
@@ -59,7 +68,7 @@ export class OrdersController {
 
   @Post()
   async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateOrderDto) {
-    return toOrderResponseDto(await this.ordersService.create(user.sub, dto));
+    return this.enrichedResponse(user.sub, await this.ordersService.create(user.sub, dto));
   }
 
   // معاينة السعر الكامل قبل التأكيد (docs/08 §1/§2) — read-only، نفس منطق create() بالحرف.
@@ -74,13 +83,13 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelOrderDto,
   ) {
-    return toOrderResponseDto(await this.ordersService.cancel(user.sub, id, dto));
+    return this.enrichedResponse(user.sub, await this.ordersService.cancel(user.sub, id, dto));
   }
 
   // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده.
   @Post(':id/confirm-cash-handover')
   async confirmCashHandover(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return toOrderResponseDto(await this.ordersService.confirmCashHandover(user.sub, id));
+    return this.enrichedResponse(user.sub, await this.ordersService.confirmCashHandover(user.sub, id));
   }
 
   // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك فعليًا، ونفس الفني المعيّن.
@@ -90,7 +99,7 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RescheduleOrderDto,
   ) {
-    return toOrderResponseDto(await this.ordersService.reschedule(user.sub, id, dto));
+    return this.enrichedResponse(user.sub, await this.ordersService.reschedule(user.sub, id, dto));
   }
 
   // سياسة إلغاء الفني (docs/10) — العميل بيستخدمها لما طلبه يبقى awaiting_technician_reselection
@@ -101,7 +110,7 @@ export class OrdersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RequestRematchDto,
   ) {
-    return toOrderResponseDto(await this.ordersService.requestRematch(user.sub, id, dto));
+    return this.enrichedResponse(user.sub, await this.ordersService.requestRematch(user.sub, id, dto));
   }
 
   // كانت فجوة موثّقة صراحة (S7): مسار عرض السعر أثناء الشغل — الفني يقترح، العميل يوافق/يرفض.
@@ -118,13 +127,13 @@ export class OrdersController {
     @Body() dto: ApproveQuoteItemsDto,
   ) {
     const { order, items } = await this.orderItemsService.approve(user.sub, id, dto.payment_choice ?? 'electronic');
-    return { order: toOrderResponseDto(order), items: items.map(toOrderItemResponseDto) };
+    return { order: await this.enrichedResponse(user.sub, order), items: items.map(toOrderItemResponseDto) };
   }
 
   @Post(':id/quote-items/decline')
   async declineQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const { order } = await this.orderItemsService.decline(user.sub, id);
-    return toOrderResponseDto(order);
+    return this.enrichedResponse(user.sub, order);
   }
 
   // كانت فجوة موثّقة صراحة (docs/08 §9) — تقييم متقدم بيدعم ربط صور "بعد التنفيذ" الموجودة

@@ -13,6 +13,8 @@ import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
+import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
+import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { ReviewCertificateDto } from './dto/review-certificate.dto';
 import { SuspendTechnicianDto } from './dto/suspend-technician.dto';
@@ -34,6 +36,60 @@ export class AdminTechniciansController {
   async list(@Query() query: ListTechniciansQueryDto) {
     const { items, meta } = await this.adminTechniciansService.list(query);
     return { items: items.map(({ profile, user }) => toAdminTechnicianResponseDto(profile, user)), meta };
+  }
+
+  // طابور مراجعة تصريحات المهارات الذاتية (Script 4 §2-7) — راجع فوق تعليق نفس القسم في
+  // admin-technicians.service.ts. مسار مستقل بريفكس مختلف (`service-declarations`) عشان ميتصادمش
+  // مع `:id` أدناه.
+  @Get('service-declarations')
+  @RequirePermission('technicians.approve')
+  async listServiceDeclarations() {
+    const items = await this.adminTechniciansService.listPendingServiceDeclarationsWithNames();
+    return items.map(({ row, technicianCode, technicianFullName, serviceNameAr }) => ({
+      ...toTechnicianServiceResponseDto(row, { includeTechnicianId: true }),
+      technician_code: technicianCode,
+      technician_full_name: technicianFullName,
+      service_name_ar: serviceNameAr,
+    }));
+  }
+
+  @Post('service-declarations/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async approveServiceDeclaration(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveTechnicianServiceDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.adminTechniciansService.approveServiceDeclaration(admin.sub, id, dto, audit);
+    return toTechnicianServiceResponseDto(row);
+  }
+
+  @Post('service-declarations/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async rejectServiceDeclaration(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectTechnicianServiceDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.adminTechniciansService.rejectServiceDeclaration(admin.sub, id, dto.reason, audit);
+    return toTechnicianServiceResponseDto(row);
+  }
+
+  @Post('service-declarations/:id/suspend')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async suspendServiceDeclaration(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectTechnicianServiceDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.adminTechniciansService.suspendServiceDeclaration(admin.sub, id, dto.reason, audit);
+    return toTechnicianServiceResponseDto(row);
   }
 
   @Get(':id')

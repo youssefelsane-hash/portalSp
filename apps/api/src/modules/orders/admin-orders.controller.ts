@@ -11,6 +11,7 @@ import { AdminOrdersService } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { AssignAssistantDto } from './dto/assign-assistant.dto';
+import { CreateOrderForCustomerDto } from './dto/create-order-for-customer.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { toOrderFinancialSummaryResponseDto } from './dto/order-financial-summary-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
@@ -60,6 +61,29 @@ export class AdminOrdersController {
       // سياسة إلغاء الفني (docs/10) — قايمة فاضية لو الطلب ده معملوش أي فني إلغاء ذاتي. مصفوفة
       // مش صف واحد لأن نفس الطلب ممكن يتلغى من فني، يترجّع، ويتلغى من فني تاني.
       technician_cancellations: technicianCancellations.map(toTechnicianOrderCancellationResponseDto),
+    };
+  }
+
+  // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). صلاحية مخصصة (orders.create_for_customer)
+  // مش ممنوحة تلقائيًا لكل أدمن — راجع migration 0131. نفس OrdersService.create() الحقيقي بالحرف
+  // (نفس التحقق/التسعير/الجدولة)، الفرق الوحيد هو مين "العميل" اللي بيتحسب منه customer_id.
+  @Post('for-customer')
+  @RequirePermission('orders.create_for_customer')
+  async createForCustomer(
+    @CurrentUser() admin: JwtPayload,
+    @Body() dto: CreateOrderForCustomerDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { customer_user_id, ...createDto } = dto;
+    const order = await this.ordersService.create(customer_user_id, createDto, undefined, {
+      adminUserId: admin.sub,
+      meta: audit,
+    });
+    return {
+      ...toOrderResponseDto(order),
+      customer_user_id,
+      created_by_admin_user_id: admin.sub,
+      source_channel: order.sourceChannel,
     };
   }
 

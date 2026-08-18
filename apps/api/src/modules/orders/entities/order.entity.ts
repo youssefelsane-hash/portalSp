@@ -245,6 +245,12 @@ export class Order {
   @Column({ name: 'source_channel', type: 'enum', enum: OrderSourceChannel, enumName: 'order_source_channel', nullable: true })
   sourceChannel: OrderSourceChannel | null;
 
+  // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37، migration 0131). null = طلب عادي
+  // (العميل نفسه أنشأه). موجود لو موظف مركز اتصال أنشأه — الطلب لسه بيتملك للعميل نفسه
+  // (customer_id) دايمًا، العمود ده بس للتدقيق (مين ضغط الزرار نيابة عنه).
+  @Column({ name: 'created_by_admin_user_id', type: 'uuid', nullable: true })
+  createdByAdminUserId: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

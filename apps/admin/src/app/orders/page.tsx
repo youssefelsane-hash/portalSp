@@ -34,7 +34,7 @@ const QUICK_FILTERS: { value: OrderStatus | 'all'; label: string }[] = [
 ];
 
 export default function OrdersPage() {
-  const { isLoading, authedFetchPaginated } = useAuth();
+  const { isLoading, authedFetchPaginated, hasPermission } = useAuth();
   const [orders, setOrders] = useState<OrderResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -57,7 +57,17 @@ export default function OrdersPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الطلبات" />
+      <PageHeader
+        title="الطلبات"
+        actions={
+          // Call Center (Script 4 §33-37) — صلاحية مخصصة، مش زرار ظاهر لكل أدمن.
+          hasPermission('orders.create_for_customer') ? (
+            <Link href="/orders/create-for-customer">
+              <Button>إنشاء طلب نيابة عن عميل</Button>
+            </Link>
+          ) : undefined
+        }
+      />
 
       <div className="mb-4 flex gap-2">
         {QUICK_FILTERS.map((filter) => (

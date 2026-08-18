@@ -44,6 +44,7 @@ import { RatingSubmittedNotificationListener } from './listeners/rating-submitte
 import { RecurringTemplateGenerationFailingRoutingListener } from './listeners/recurring-template-generation-failing-routing.listener';
 import { ReferralRewardNotificationListener } from './listeners/referral-reward-notification.listener';
 import { TechnicianCancellationNotificationListener } from './listeners/technician-cancellation-notification.listener';
+import { TechnicianServiceVerificationNotificationListener } from './listeners/technician-service-verification-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
@@ -90,6 +91,7 @@ import { NotificationsService } from './notifications.service';
     OrderReassignedNotificationListener,
     OrderRescheduledNotificationListener,
     TechnicianVerificationNotificationListener,
+    TechnicianServiceVerificationNotificationListener,
     ComplaintFiledRoutingListener,
     SupportChatMessageRoutingListener,
     EmergencyOrderRoutingListener,

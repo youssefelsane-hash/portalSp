@@ -41,6 +41,7 @@ export class TechnicianAssignmentGuardService {
          EXISTS (
            SELECT 1 FROM technician_services
            WHERE technician_id = $1 AND service_id = $2 AND is_active = true
+             AND verification_status = 'approved'
          ) AS has_service,
          EXISTS (
            SELECT 1 FROM technician_zones

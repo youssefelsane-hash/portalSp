@@ -14,6 +14,7 @@ import {
   Building,
   Building2,
   CalendarClock,
+  ClipboardCheck,
   ClipboardList,
   DollarSign,
   GraduationCap,
@@ -78,6 +79,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'الفنيين',
     items: [
       { href: '/technicians', label: 'الفنيين', icon: Wrench },
+      {
+        href: '/technicians/service-declarations',
+        label: 'طابور تصريحات المهارات',
+        icon: ClipboardCheck,
+        permission: 'technicians.approve',
+      },
       { href: '/technician-companies', label: 'شركات/فرق الفنيين', icon: Building2 },
       { href: '/technician-levels', label: 'سياسة مستويات الفنيين', icon: Star },
       { href: '/technician-referrals', label: 'ترشيح QR الفني', icon: QrCode },

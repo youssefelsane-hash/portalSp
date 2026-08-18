@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User } from '../auth/entities/user.entity';
+import { CustomersModule } from '../customers/customers.module';
 import { Order } from '../orders/entities/order.entity';
 import { Payout } from '../payments/entities/payout.entity';
 import { Rating } from '../ratings/entities/rating.entity';
@@ -46,6 +47,9 @@ import { PermissionsService } from './permissions.service';
     ]),
     AuditModule,
     SettingsModule,
+    // Call Center — عناوين العميل قبل إنشاء طلب نيابة عنه (Script 4 §33-37). CustomersModule
+    // مالوش أي استيراد لـAdminModule، فمفيش خطر دائرية (نفس نمط TechniciansModule/CatalogModule).
+    CustomersModule,
   ],
   controllers: [
     AdminReportsController,

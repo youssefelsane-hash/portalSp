@@ -106,6 +106,8 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       dataSource.getRepository(User),
       {} as never, // portfolioLinksService — مش متنادى في findByUserIdOrThrow
       {} as never, // certificatesService

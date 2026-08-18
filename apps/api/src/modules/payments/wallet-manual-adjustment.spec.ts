@@ -115,6 +115,8 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       dataSource.getRepository(User),
       {} as never,
       {} as never,

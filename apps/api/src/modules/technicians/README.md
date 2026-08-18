@@ -254,3 +254,84 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 الجديد فشل (اتحجز من عميل تاني بينهم)، التحرير القديم بيترول باك تلقائيًا (نفس الـtransaction)،
 صفر خسارة صامتة لموعد العميل الأصلي وصفر حجز مزدوج للفني ممكن يحصل بأي حال. مُستخدم من
 `OrdersService.reschedule()` (`../orders/README.md`).
+
+## زرار أونلاين/أوفلاين — Script 4 §8 (2026-08-18)
+
+كانت فجوة موثّقة صراحة (اكتشفتها مراجعة Script 4 التحضيرية): `PATCH /technician/availability`
+كان مبني ومختبر بالكامل من زمان (`is_available`/`is_on_duty`، راجع السطر التاسع فوق)، بس **مفيش
+شاشة في `apps/technician-app` كانت بتناديه خالص** — الفني مالوش أي طريقة يوقف/يبدأ استقبال طلبات
+جديدة غير إن الأدمن يلمسها له. الفجوة كانت UI بحتة، صفر شغل backend مطلوب غير حاجة واحدة صغيرة:
+`TechnicianProfileResponseDto` (بروفايل الفني الذاتي) كان ناقص `is_on_duty` رغم إن
+`admin-technician-response.dto.ts` (بروفايل نفس الفني من عين الأدمن) بيرجّعه من زمان — اتضاف هنا
+(`dto/technician-profile-response.dto.ts`).
+
+**قرار تصميم**: زرار واحد مش اتنين. فحصت كل مكان بيقرر أهلية المطابقة
+(`matching.service.ts:137`, `technician-assignment-guard.service.ts:29`,
+`assistant-matching.service.ts` مرتين) ولقيت `is_available`و`is_on_duty` شرط "و" معًا في كل
+واحدة منهم من غير أي فرق دلالي مفيد للفني نفسه — فمفيش داعي لتوجيهين، الزرار بيبدّل الاتنين مع
+بعض دايمًا عبر نداء واحد.
+
+**التنفيذ**: `AvailableOrdersScreen` (الشاشة الرئيسية للفني بعد تسجيل الدخول، `main.dart`'s
+`_VerificationGate`) بقى فيها `_DutyToggleBar` أعلى قايمة الطلبات المتاحة مباشرة — أهم فعل تشغيلي
+على الشاشة، مش داخل بروفايل ثانوي. `OnboardingRepository.setOnDuty()` جديدة بتنادي
+`PATCH /technician/availability` بـ`{is_available, is_on_duty}` الاتنين بنفس القيمة.
+
+**اختبار حي**: اتعمل login حقيقي بالفني المزروع (`+201055501234`, `TECH-000011`) عبر OTP الحقيقي،
+`PATCH .../availability` اتنادى بـ`false` ثم `true` والقيمتين اتأكدوا في `technician_profiles`
+مباشرة بـ`psql` مش بس رد الـAPI (`is_available`/`is_on_duty` رجعوا `f`/`f` ثم `t`/`t` في الجدول
+فعلاً). `flutter analyze` و`flutter test` (5/5) عدّوا نضيف على `apps/technician-app`.
+
+**فشل آمن متعمّد**: `_loadMe()` بتلبّس الفشل بـ`ApiException` صامت — الشريط بيختفي بس، مش بيمنع
+عرض قايمة الطلبات المتاحة العادية (نفس فلسفة `_VerificationGate` في `main.dart`).
+
+## تصريح مهارات ذاتي + موافقة أدمن — Script 4 §2-7 (2026-08-18)
+
+كانت فجوة موثّقة صراحة (Script 4 Part B): الفني ≠ مجرد `technician=true` — لازم نعرف بالظبط إيه
+الشغل المسموح له يستلمه. `technician_services` كان 100% معيّن من الأدمن يدوياً
+(`AdminCatalogService.assignTechnician()`)، صفر مسار للفني يطلب خدمة بنفسه.
+
+**Schema (`infra/migrations/0130_technician_service_self_declaration.sql`)**: أضاف
+`verification_status` (`pending_verification`/`approved`/`rejected`/`suspended`)،
+`is_self_declared`، `rejection_reason`، `reviewed_by_user_id`، `reviewed_at` لـ`technician_services`.
+Default `approved` للصفوف الموجودة وأي تعيين أدمن جديد (`assignTechnician()` اتعدّل يحطها صراحة) —
+صفر خطر ترحيل، صفر مطالبة رجعية بإعادة اعتماد شغل شغّال بالفعل. `DECLARED`/`PENDING_VERIFICATION`
+اتدمجوا في حالة واحدة (`pending_verification`) — نفس فلسفة الحالات الوسيطة في
+`technician-verification-state-machine.ts` (مفيش endpoint حقيقي يفرّق بينهم لسه).
+
+**أهلية المطابقة (non-negotiable, server-side)**: `matching.service.ts`،
+`assistant-matching.service.ts`، `technician-assignment-guard.service.ts` التلاتة اتعدّلوا يضيفوا
+`AND verification_status = 'approved'` صراحة جنب `is_active = true` الموجود من زمان — دفاع مزدوج
+(is_active وحده كافي فعليًا بحكم البناء، بس صريح أوضح وأقوى ضد أي تغيير مستقبلي).
+
+**الفني (`technicians.controller.ts`)**: `GET/POST/DELETE /technician/services` —
+`declareService()` بيرفض تصريح مكرر لخدمة `pending`/`approved`/`suspended` بالفعل (409)، بس بيسمح
+بإعادة التصريح لو الحالة `rejected` (نفس الصف بيترقّى لـ`pending_verification` تاني، مش تكرار).
+`withdrawService()`: `pending`/`rejected` → حذف فعلي (مفيش تاريخ يستاهل)، `approved` → تعطيل بس
+(`is_active=false`، السجل التاريخي فاضل)، `suspended` → 403 (قرار أدمن، الفني ميقدرش يلمسه).
+
+**الأدمن (`admin-technicians.controller.ts`, صلاحية `technicians.approve` — نفس صلاحية اعتماد
+الفني نفسه، قرار مشابه بالطبيعة، مفيش namespace جديد)**:
+`GET /admin/technicians/service-declarations` (طابور كل التصريحات المعلّقة عبر كل الفنيين، بأسماء
+محلولة بـjoin واحد صفر N+1)، `POST .../:id/approve|reject|suspend`. `assignTechnician()` (التعيين
+المباشر القديم) اتعدّل كمان: لو الفني عنده تصريح ذاتي `pending`/`rejected`/`suspended` لنفس
+الخدمة، الأدمن يقدر يعتمده مباشرة من هنا (نفس الصف بيترقّى) بدل ما يوصل لطريق مسدود.
+
+**apps/admin**: صفحة جديدة `/technicians/service-declarations` (طابور + اعتماد/رفض بسبب عبر
+`PromptDialog` الموحّد). **apps/technician-app**: شاشة "مهاراتي" جديدة (`features/skills/`) —
+فئة → خدمة (هرمي، نفس الكتالوج الديناميكي اللي العميل بيشوفه، `@Public()` endpoints بالحرف، صفر
+كتالوج تاني منفصل للفني) → تصريح، مع StatusChip لكل حالة وسبب الرفض/الإيقاف لو موجود.
+
+**إشعار (`technician_service.verification_changed` event)**: نفس نمط
+`technician.verification_changed` بالحرف — بينبّه بس على القرارات النهائية (اعتماد/رفض/إيقاف).
+
+**اختبار حي**: `technician-service-self-declaration.spec.ts` (9 اختبارات، Postgres حقيقي) —
+الدورة كاملة (تصريح→pending→اعتماد→أهلية فعلية في نفس استعلام matching.service.ts الحقيقي)،
+تصريح مكرر مرفوض، رفض بسبب + إعادة تصريح، توقيف خدمة معتمدة بيشيلها من الأهلية فورًا، سحب فني
+لتصريح فني تاني مرفوض (IDOR)، ونسخة الأسماء المحلولة لواجهة الأدمن. اتأكد كمان حي بـcurl حقيقي
+(الفني المزروع TECH-000011: تصريح → `pending_verification`/`is_active=false` في الرد، الرد
+اتنضّف بعدين من الداتابيز). **فجوة موثّقة صراحة**: واجهة الأدمن (`/technicians/service-declarations`)
+اتبنت واتأكد بناؤها (`tsc`+`eslint`+`next build` نضاف، Route ظهر في الـmanifest) بس مش اتعمل لها
+اختبار حي كامل بمتصفح — تسجيل دخول الأدمن في بيئة الـsandbox دي محجوز ببوابة WebAuthn MFA حقيقية
+(مفيش حساب أدمن مسجّل فيها من قبل، وتسجيل بصمة WebAuthn جديدة عبر curl مش ممكن فعليًا). التحقق
+البديل المتناسب: نفس الـSQL اللي الصفحة هتستخدمه (join الأسماء) اتغطى باختبار جزء من نفس السبك
+الحي فوق.

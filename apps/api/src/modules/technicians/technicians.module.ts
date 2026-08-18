@@ -6,6 +6,11 @@ import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { GeoModule } from '../geo/geo.module';
 import { SettingsModule } from '../settings/settings.module';
+// Script 4 §2-7 — تصريح مهارات ذاتي: نفس نمط استيراد Order/OrderTeamMember جوّه CatalogModule
+// (كيان من موديول تاني بلا استيراد دائري). CatalogModule بيستورد TechniciansModule أصلاً، فمينفعش
+// العكس — الحل: تسجيل الكيانين هنا مباشرة بدل استيراد CatalogModule كامل.
+import { Service } from '../catalog/entities/service.entity';
+import { TechnicianService } from '../catalog/entities/technician-service.entity';
 import { AdminTechnicianCompaniesController } from './admin-technician-companies.controller';
 import { AdminTechnicianLevelsController } from './admin-technician-levels.controller';
 import { AdminTechniciansController } from './admin-technicians.controller';
@@ -52,6 +57,8 @@ import { TechnicianZone } from './entities/technician-zone.entity';
       TechnicianPortfolioLink,
       TechnicianCertificate,
       TechnicianScheduleSlot,
+      TechnicianService,
+      Service,
       User,
     ]),
     AuditModule,

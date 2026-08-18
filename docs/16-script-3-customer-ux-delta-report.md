@@ -181,3 +181,74 @@ flags على مستوى الخدمة موجودة ومُعرّضة بالفعل)
    لأن المطابقة (`matching.service.ts`) مبتلاقيش حد يوزّع عليه. الاختبار فوق أكّد إن الحالة دي
    بتتعرض صح وبوضوح للعميل (حالة حمراء "اتلغى تلقائياً" مش شاشة بيضا أو تعليق) — سلوك النظام صح،
    نقص بيانات بيئة الاختبار بس مش بَقّة كود.
+
+## 15. إقفال الفجوات المتبقية المُفصح عنها في `apps/customer-web/README.md` (بعد طلب صريح "كمّل السكريبت كامل")
+
+- **شات حي عبر WebSocket بدل البولينج** — `src/lib/chat-socket.ts` عميل Socket.IO مطابق لـ
+  `chat_client.dart` بالحرف (نفس namespace/أحداث)، مُدمج في `ChatSection` (`orders/[id]/page.tsx`)
+  — تاريخ REST مرة واحدة، بعد كده لحظي بالكامل عبر السوكيت، fallback لـREST `sendMessage()` لو
+  السوكيت مش متصل. الاتصال بيستخدم نفس `chat.gateway.ts` (namespace `/chat`، JWT في
+  `handshake.auth.token`) اللي الموبايل بيستخدمه بالظبط — صفر نظام شات تاني.
+- **اختيار الفني قبل الحجز** — قسم "مين يعمل الشغل؟" بعد اختيار العنوان مباشرة في
+  `services/[id]/page.tsx`: "خلي صُنّاع يختار" (افتراضي) مقابل "اختار بنفسك" (بيفتح قايمة فنيين
+  حقيقية من `GET /services/:id/technicians?address_id=...`، بالاسم/التقييم/المسافة/السعر النهائي
+  لكل واحد). لو العميل اختار فني بعينه، `requested_technician_id` بيتبعت مع `POST /orders` —
+  نفس التفضيل اللي `apps/customer-app`'s `TechnicianSelectionScreen` بيستخدمه، مش endpoint جديد.
+- **اختيار الموقع بالخريطة** — `src/components/map-picker.tsx`: Leaflet + OpenStreetMap tiles
+  (بلا مفتاح API، بلا اعتماد على أي حساب خارجي)، دوس/اسحب لتحديد الإحداثيات بدل إدخال أرقام يدوي.
+  اتأكد حي بمتصفح فعلي: الكليك بيحط ماركر صح والإحداثيات بتترسل صح لـ`POST /addresses` (Playwright
+  screenshot يوضح الماركر). بلاطات الخريطة (الصور نفسها) ما ظهرتش في سكرين شوت الاختبار **بسبب
+  بروكسي بيئة الـsandbox بتاعة الـagent اللي بيحجب `tile.openstreetmap.org`** (اتأكد عبر
+  `curl "$HTTPS_PROXY/__agentproxy/status"` — `connect_rejected` لمضيفين مش في allowlist البيئة) —
+  ده قيد شبكة بيئة الاختبار نفسها، مش بَقّة كود؛ متصفح المستخدم النهائي الحقيقي هيحمّل البلاطات
+  عادي (خدمة عامة قياسية بيستخدمها ملايين المواقع بلا مفتاح).
+
+مع إقفال التلاتة دول، كل الفجوات المُفصح عنها سابقًا في README اتقفلت ما عدا `@baytak/shared-types`
+(قرار نطاق واعٍ، مش فجوة تقنية) و"اختيار فني بديل بعد رفض/إلغاء" (مش جزء من §32-35 الأساسي، برضه
+موجود على الموبايل بس مش على الويب — نطاق مستقبلي، مش Script 3 الأساسي).
+
+**فحوصات نهائية بعد الإقفال**: `tsc`/`build`/`lint` نضاف لـ`apps/customer-web` بعد كل إضافة من
+التلاتة. `apps/api` مالوش أي تعديل في الجولة دي (كل الشغل عميل-سايد)، فسويت الاختبارات (79/79
+suite، 451/451 اختبار) لسه سارية من الجولة اللي فاتت. اختبار حي كامل بمتصفح (تسجيل حقيقي → صفحة
+الخدمة → عنوان جديد بالخريطة الحقيقية → قسم اختيار الفني ظاهر وبيرجّع "مفيش فنيين متاحين" (صح، صفر
+فنيين مسجّلين في قاعدة التطوير) → حفظ الطلب) نجح بالكامل، لقطات شاشة موثّقة.
+
+## 16. زرع فني حقيقي كامل + إصلاح بَقّة حقيقية في `apps/api` (backend، تؤثر على الموبايل كمان)
+
+عشان نختبر المسارات المتبقية (تعيين فني فعلي، الشات الحي بthread حقيقي، تسليم الكاش) اختبار حي
+كامل مش mocked، اتعمل زرع فني حقيقي في قاعدة التطوير عبر الـAPI الحقيقي نفسه (مش SQL خام اختراعي):
+تسجيل حساب `user_type=technician` حقيقي (بيعمل `technician_profiles` تلقائيًا عبر
+`technician-profile.listener.ts`)، بعدين `UPDATE` مباشر بس على 3 حقول (`verification_status`،
+`is_available`/`is_on_duty`، `current_location`) + إضافة صف `technician_services`
+و`technician_zones` (الجداول دي مالهاش endpoint تسجيل ذاتي للفني لسه، فالإدخال المباشر هنا نطاق
+اختبار دلوقتي مقصود، مش قرار إنتاج). النتيجة: رحلة حجز كاملة حقيقية نجحت — `GET
+/services/:id/technicians` رجّع الفني الحقيقي بالمسافة/التقييم/السعر، `POST /orders` مع
+`requested_technician_id` بعت offer فعلي (`order_assignments`)، `POST
+/technician/orders/:id/accept` قبله، `depart`/`arrive`/`start`/`complete` (بعد رفع صورة حقيقية
+لـR2 storage) كلهم اشتغلوا، والشات الحي عبر WebSocket (بند 15) اتأكد بالكامل: نقطة خضرا "متصل
+الآن"، رسالة اتبعتت من العميل واترجعت فورًا عبر `chat:message_received` وظهرت في الواجهة — round
+trip كامل حقيقي، مش mock.
+
+**بَقّة حقيقية خطيرة اتلقطت أثناء اختبار تأكيد تسليم الكاش**: بعد ما العميل يدوس "أكّد استلام الشغل
+وتسليم الكاش"، قسمي "العنوان" و"الفني" (الاسم/التليفون) كانوا بيختفوا فورًا من الشاشة من غير أي
+سبب واضح. السبب الجذري في `apps/api/src/modules/orders/orders.controller.ts`: `getOne()` بس هي
+اللي كانت بتجيب `address`/`technicianContact` وتبعتهم لـ`toOrderResponseDto()` — كل الـmutations
+التانية (`cancel`، `confirm-cash-handover`، `reschedule`، `request-rematch`،
+`quote-items/approve`، `quote-items/decline`، وحتى `create()` نفسها) كانت بترجّع
+`toOrderResponseDto(order)` من غيرهم بالمرّة. **البَقّة دي مش خاصة بـcustomer-web** —
+`apps/customer-app`'s `order_detail_screen.dart`'s `_confirmCashHandover()` (وبقية الشاشات
+المشابهة) بتستبدل الـstate المحلي بالرد مباشرة (`setState(() => _order = order)`)، فنفس الاختفاء
+كان (ولسه) بيحصل على الموبايل بالظبط لأي حد بيستخدم أي زرار فعل على شاشة تفاصيل الطلب — مش بَقّة
+جديدة، بَقّة موجودة من الأول اتلقطت بالصدفة أثناء اختبار Script 3.
+
+**الإصلاح**: `private enrichedResponse(userId, order)` helper واحد في `OrdersController` بيعمل
+نفس اللي `getOne()` كانت بتعمله (`AddressesService.findOwnedOrThrow` + فحص
+`TECHNICIAN_CONTACT_VISIBLE_STATUSES` قبل `TechniciansService.findContactInfoOrThrow`)، واتستخدم
+بدل `toOrderResponseDto(order)` المباشرة في كل الـ7 endpoints فوق. اتأكد حي: `POST /orders` و`POST
+/orders/:id/cancel` بيرجّعوا `address` دلوقتي (كان `null`/غير موجود قبل كده)، والشاشة في
+`apps/customer-web` فضلت عارضة العنوان بعد الإلغاء (لقطة شاشة). `apps/api`: `tsc`/`nest
+build`/جيت الاختبارات كامل (79/79 suite، 451/451 اختبار) — صفر تراجع. مفيش اختبار تلقائي جديد
+مُضاف لـ`OrdersController` نفسه (فجوة مفتوحة بصراحة): `OrdersService` عندها 19 dependency
+مُحقنة، ومفيش نمط موجود في المشروع لتشغيل controller كامل ضد Postgres حي (كل الاختبارات الحالية
+إما mocked بالكامل أو بتاختبر service واحد بسيط مباشرة) — بناء نمط جديد بالكامل لإصلاح واحد
+مخاطرة مش متناسبة، فالتحقق اعتمد على اختبار حي مباشر (curl + متصفح، موثّق فوق) بدل كده.

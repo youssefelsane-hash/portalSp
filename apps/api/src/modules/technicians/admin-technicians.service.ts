@@ -10,9 +10,16 @@ import {
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
+import { Service } from '../catalog/entities/service.entity';
+import { TechnicianService, TechnicianServiceVerificationStatus } from '../catalog/entities/technician-service.entity';
+import {
+  TECHNICIAN_SERVICE_VERIFICATION_CHANGED_EVENT,
+  TechnicianServiceVerificationChangedEvent,
+} from '../../common/events/technician-service-verification-changed.event';
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
+import { ApproveTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { DocumentReviewStatus, TechnicianDocument } from './entities/technician-document.entity';
 import { TechnicianLevelChangeType, TechnicianLevelHistory } from './entities/technician-level-history.entity';
@@ -32,6 +39,8 @@ export class AdminTechniciansService {
     @InjectRepository(TechnicianDocument) private readonly documents: Repository<TechnicianDocument>,
     @InjectRepository(TechnicianLevelHistory) private readonly levelHistory: Repository<TechnicianLevelHistory>,
     @InjectRepository(TechnicianZone) private readonly technicianZones: Repository<TechnicianZone>,
+    @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
+    @InjectRepository(Service) private readonly services: Repository<Service>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
@@ -438,5 +447,184 @@ export class AdminTechniciansService {
       meta,
     });
     return profile;
+  }
+
+  // ── طابور مراجعة تصريحات المهارات الذاتية (Script 4 §2-7) ───────────────────────
+  // نفس صلاحية اعتماد الفني (technicians.approve) — قرار مشابه بالطبيعة (هل الفني ده مؤهّل
+  // لكذا؟)، مش محتاج namespace صلاحيات جديد.
+
+  listPendingServiceDeclarations(): Promise<TechnicianService[]> {
+    return this.technicianServices.find({
+      where: { verificationStatus: TechnicianServiceVerificationStatus.PENDING_VERIFICATION },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  // نسخة غنية بالأسماء لواجهة الأدمن (apps/admin) — استعلام واحد بـjoins بدل N+1 (Part X: صفر
+  // N+1 في شاشات الأدمن). technician_services مالوش علاقات @ManyToOne معرّفة على الـentity،
+  // فـraw query عبر manager أبسط من إضافة علاقات جديدة لغرض عرض بس.
+  async listPendingServiceDeclarationsWithNames(): Promise<
+    { row: TechnicianService; technicianCode: string; technicianFullName: string; serviceNameAr: string }[]
+  > {
+    const rows = await this.technicianServices.manager.query<
+      { id: string; technician_code: string; full_name: string; service_name_ar: string }[]
+    >(
+      `SELECT ts.id, tp.technician_code, u.full_name, s.name_ar AS service_name_ar
+       FROM technician_services ts
+       JOIN technician_profiles tp ON tp.id = ts.technician_id
+       JOIN users u ON u.id = tp.user_id
+       JOIN services s ON s.id = ts.service_id
+       WHERE ts.verification_status = 'pending_verification'
+       ORDER BY ts.created_at ASC`,
+    );
+    if (rows.length === 0) return [];
+    const declarations = await this.technicianServices.find({ where: { id: In(rows.map((r) => r.id)) } });
+    const byId = new Map(declarations.map((d) => [d.id, d]));
+    return rows
+      .map((r) => {
+        const row = byId.get(r.id);
+        if (!row) return null;
+        return { row, technicianCode: r.technician_code, technicianFullName: r.full_name, serviceNameAr: r.service_name_ar };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }
+
+  private async findTechnicianServiceOrThrow(id: string): Promise<TechnicianService> {
+    const row = await this.technicianServices.findOne({ where: { id } });
+    if (!row) {
+      throw new ApiException(ErrorCode.VAL_001, 'التصريح غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return row;
+  }
+
+  private async emitServiceVerificationChanged(
+    row: TechnicianService,
+    previousStatus: TechnicianServiceVerificationStatus,
+    reason: string | null,
+  ): Promise<void> {
+    const [profile, service] = await Promise.all([
+      this.findProfileOrThrow(row.technicianId),
+      this.services.findOne({ where: { id: row.serviceId } }),
+    ]);
+    this.events.emit(
+      TECHNICIAN_SERVICE_VERIFICATION_CHANGED_EVENT,
+      new TechnicianServiceVerificationChangedEvent(
+        row.id,
+        profile.userId,
+        service?.nameAr ?? 'خدمة',
+        previousStatus,
+        row.verificationStatus,
+        reason,
+      ),
+    );
+  }
+
+  async approveServiceDeclaration(
+    adminUserId: string,
+    id: string,
+    dto: ApproveTechnicianServiceDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianService> {
+    const row = await this.findTechnicianServiceOrThrow(id);
+    if (
+      row.verificationStatus !== TechnicianServiceVerificationStatus.PENDING_VERIFICATION &&
+      row.verificationStatus !== TechnicianServiceVerificationStatus.SUSPENDED
+    ) {
+      throw new ApiException(ErrorCode.VAL_001, 'التصريح ده مش في حالة تسمح بالاعتماد', HttpStatus.CONFLICT);
+    }
+
+    const previousStatus = row.verificationStatus;
+    row.verificationStatus = TechnicianServiceVerificationStatus.APPROVED;
+    row.isActive = true;
+    row.rejectionReason = null;
+    if (dto.skill_level) row.skillLevel = dto.skill_level;
+    row.reviewedByUserId = adminUserId;
+    row.reviewedAt = new Date();
+    await this.technicianServices.save(row);
+
+    await this.emitServiceVerificationChanged(row, previousStatus, null);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_service.approved',
+      entityType: 'technician_service',
+      entityId: row.id,
+      oldValues: { verification_status: previousStatus },
+      newValues: { verification_status: row.verificationStatus, skill_level: row.skillLevel },
+      meta,
+    });
+    return row;
+  }
+
+  async rejectServiceDeclaration(
+    adminUserId: string,
+    id: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianService> {
+    const row = await this.findTechnicianServiceOrThrow(id);
+    if (row.verificationStatus !== TechnicianServiceVerificationStatus.PENDING_VERIFICATION) {
+      throw new ApiException(ErrorCode.VAL_001, 'التصريح ده مش تحت المراجعة', HttpStatus.CONFLICT);
+    }
+
+    const previousStatus = row.verificationStatus;
+    row.verificationStatus = TechnicianServiceVerificationStatus.REJECTED;
+    row.isActive = false;
+    row.rejectionReason = reason;
+    row.reviewedByUserId = adminUserId;
+    row.reviewedAt = new Date();
+    await this.technicianServices.save(row);
+
+    await this.emitServiceVerificationChanged(row, previousStatus, reason);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_service.rejected',
+      entityType: 'technician_service',
+      entityId: row.id,
+      oldValues: { verification_status: previousStatus },
+      newValues: { verification_status: row.verificationStatus, rejection_reason: reason },
+      meta,
+    });
+    return row;
+  }
+
+  // إيقاف خدمة معتمدة بالفعل (§7 — "إزالة/إيقاف مهارة لازم يأثّر على المطابقة المستقبلية، مش
+  // يبطل طلبات نشطة"). matching.service.ts بيفلتر verification_status='approved' بس، فالفني
+  // بيتشال أوتوماتيك من مطابقات جديدة فور التعليق — أي طلب شغال بالفعل مش متأثر.
+  async suspendServiceDeclaration(
+    adminUserId: string,
+    id: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianService> {
+    const row = await this.findTechnicianServiceOrThrow(id);
+    if (row.verificationStatus !== TechnicianServiceVerificationStatus.APPROVED) {
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش توقف تصريح مش معتمد أصلاً', HttpStatus.CONFLICT);
+    }
+
+    const previousStatus = row.verificationStatus;
+    row.verificationStatus = TechnicianServiceVerificationStatus.SUSPENDED;
+    row.isActive = false;
+    row.rejectionReason = reason;
+    row.reviewedByUserId = adminUserId;
+    row.reviewedAt = new Date();
+    await this.technicianServices.save(row);
+
+    await this.emitServiceVerificationChanged(row, previousStatus, reason);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_service.suspended',
+      entityType: 'technician_service',
+      entityId: row.id,
+      oldValues: { verification_status: previousStatus },
+      newValues: { verification_status: row.verificationStatus, reason },
+      meta,
+    });
+    return row;
   }
 }

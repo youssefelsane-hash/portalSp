@@ -37,6 +37,8 @@ import { AddPortfolioLinkDto } from './dto/add-portfolio-link.dto';
 import { AddCertificateDto } from './dto/add-certificate.dto';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { RequestAssistantDto } from './dto/request-assistant.dto';
+import { SelfDeclareServiceDto } from './dto/self-declare-service.dto';
+import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
@@ -103,6 +105,27 @@ export class TechniciansController {
   @Patch('profile')
   async updateProfile(@CurrentUser() user: JwtPayload, @Body() dto: UpdateTechnicianProfileDto) {
     return toTechnicianProfileResponseDto(await this.techniciansService.updateProfile(user.sub, dto));
+  }
+
+  // تصريح مهارات ذاتي (Script 4 §2-7) — كانت فجوة موثّقة صراحة: technician_services كان 100%
+  // معيّن من الأدمن، الفني مالوش أي مسار يطلب خدمة بنفسه. التصريح لوحده مايديش أهلية مطابقة
+  // فورية (verification_status='pending_verification') — راجع technicians.service.ts.
+  @Get('services')
+  async listMyServices(@CurrentUser() user: JwtPayload) {
+    const rows = await this.techniciansService.listMyServices(user.sub);
+    return rows.map((row) => toTechnicianServiceResponseDto(row));
+  }
+
+  @Post('services')
+  async declareService(@CurrentUser() user: JwtPayload, @Body() dto: SelfDeclareServiceDto) {
+    return toTechnicianServiceResponseDto(await this.techniciansService.declareService(user.sub, dto));
+  }
+
+  @Delete('services/:id')
+  @HttpCode(HttpStatus.OK)
+  async withdrawService(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.techniciansService.withdrawService(user.sub, id);
+    return { id, withdrawn: true };
   }
 
   @Post('location')

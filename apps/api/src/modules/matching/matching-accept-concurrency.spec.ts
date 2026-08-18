@@ -74,6 +74,8 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       {} as never,
+      {} as never, // technicianServicesRepo
+      {} as never, // servicesRepo
       {} as never, // usersRepo — مش متنادى في المسار المُختبر هنا
       {} as never,
       {} as never,

@@ -158,6 +158,11 @@ export class OrdersService {
     userId: string,
     dto: CreateOrderDto,
     recurringIdentity?: { templateId: string; scheduledFor: Date },
+    // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). userId هنا يفضل userId العميل
+    // نفسه دايمًا (الطلب بيتملك للعميل، مش للموظف) — الفرق الوحيد هو الحقل ده، بيحدد source_channel
+    // + created_by_admin_user_id للتدقيق. AdminOrdersController هو المسؤول عن التحقق من الصلاحية
+    // (orders.create_for_customer) قبل ما ينادي هنا أصلاً.
+    callCenterContext?: { adminUserId: string; meta?: AuditActorMeta },
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
@@ -368,7 +373,8 @@ export class OrdersService {
         // work_completed للأبد. doubleEntry بمحفظة اتحصّن ضد مبلغ صفر تحديداً لأجل الحالة دي.
         paymentStatus: OrderPaymentStatus.UNPAID,
         placedAt: now,
-        sourceChannel: OrderSourceChannel.CUSTOMER_APP,
+        sourceChannel: callCenterContext ? OrderSourceChannel.CALL_CENTER : OrderSourceChannel.CUSTOMER_APP,
+        createdByAdminUserId: callCenterContext?.adminUserId ?? null,
         // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
         standardDataId: durationEstimate ? dto.standard_data_id! : null,
         requiredTechnicians: durationEstimate?.assigned_technicians ?? null,
@@ -472,6 +478,20 @@ export class OrdersService {
     // بره الـtransaction عمداً — تدقيق مش لازم يفشّل إنشاء الطلب لو فشل، ومحتاج order.id الحقيقي.
     if (estimate.pricing_evaluation_id) {
       await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, order.id);
+    }
+
+    // Call Center — تدقيق الإنشاء نيابة عن العميل (Script 4 §37) — بره الـtransaction عمداً
+    // (نفس فلسفة linkEvaluationToOrder فوق: تدقيق مش لازم يفشّل إنشاء الطلب لو فشل).
+    if (callCenterContext) {
+      await this.auditLog.record({
+        actorUserId: callCenterContext.adminUserId,
+        actorRole: 'admin',
+        action: 'order.created_for_customer',
+        entityType: 'order',
+        entityId: order.id,
+        newValues: { customer_id: customerProfile.id, customer_user_id: userId, service_id: service.id },
+        meta: callCenterContext.meta,
+      });
     }
 
     // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — الطلب PENDING_PAYMENT: مفيش توزيع خالص لسه، فمفيش

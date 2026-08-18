@@ -29,3 +29,25 @@ export interface CreditLoyaltyBody {
 export interface BlockCustomerBody {
   reason: string;
 }
+
+// مطابق لـ apps/api/src/modules/customers/dto/address-response.dto.ts — Call Center (Script 4
+// §33-37) بيستخدمها لعرض عناوين العميل قبل إنشاء طلب نيابة عنه (GET /admin/customers/:userId/addresses).
+export interface AddressResponseDto {
+  id: string;
+  label: string | null;
+  city_id: string | null;
+  area_id: string | null;
+  street_name: string;
+  building_number: string | null;
+  floor_number: string | null;
+  apartment_number: string | null;
+  landmark: string | null;
+  latitude: number;
+  longitude: number;
+  contact_name: string | null;
+  contact_phone: string | null;
+  delivery_notes: string | null;
+  is_default: boolean;
+  is_verified: boolean;
+  has_active_order: boolean;
+}

@@ -9,7 +9,9 @@ import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
 import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
 import { createOrder, formatEgp } from '@/lib/orders';
+import { fetchTechniciansForService, TechnicianBookingListItemDto } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
+import { MapPicker } from '@/components/map-picker';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
 const BOOKING_MODE_LABELS: Record<BookingMode, string> = {
@@ -50,6 +52,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [addresses, setAddresses] = useState<AddressDto[] | null>(null);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showNewAddressForm, setShowNewAddressForm] = useState(false);
+
+  // اختيار الفني قبل الحجز (Script 3 §32-35) — "خلي صُنّاع يختار" افتراضي/أساسي، "اختار بنفسك"
+  // ثانوي، وبيظهر بس لو الخدمة فعلاً بتسمح بأكتر من فني (نفس منطق showBookingModeSelector في
+  // apps/customer-app's catalog_navigation.dart — مفيش داعي نعرض اختيار لخدمة مفيهاش بدائل).
+  const [technicianChoiceMode, setTechnicianChoiceMode] = useState<'auto' | 'manual'>('auto');
+  const [technicians, setTechnicians] = useState<TechnicianBookingListItemDto[] | null>(null);
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState<string | null>(null);
 
   const [scheduleType, setScheduleType] = useState<'asap' | 'later'>('asap');
   const [scheduledAt, setScheduledAt] = useState('');
@@ -123,10 +132,29 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       .finally(() => setEstimating(false));
   }, [id, service, bookingMode]);
 
-  const totalCents = estimate?.estimated_total_cents ?? service?.base_price_cents ?? null;
+  useEffect(() => {
+    if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTechnicians(null);
+      return;
+    }
+    fetchTechniciansForService(id, selectedAddressId, {
+      bookingMode,
+      fieldValues: service?.pricing_model === 'formula' ? debouncedFieldValues : undefined,
+    }).then(setTechnicians);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [technicianChoiceMode, selectedAddressId, id, bookingMode, debouncedFieldValues]);
+
+  const totalCents =
+    (technicianChoiceMode === 'manual' &&
+      technicians?.find((t) => t.id === selectedTechnicianId)?.final_price_cents) ||
+    estimate?.estimated_total_cents ||
+    service?.base_price_cents ||
+    null;
 
   async function handleSubmit() {
     if (!service || !selectedAddressId) return;
+    if (technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -134,6 +162,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         service_id: service.id,
         address_id: selectedAddressId,
         booking_mode: bookingMode,
+        requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
         problem_description: problemDescription || undefined,
         scheduled_at: scheduleType === 'later' && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         promo_code: promoCode || undefined,
@@ -179,7 +208,12 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }
 
   const modes = availableBookingModes(service);
-  const canSubmit = !!selectedAddressId && (scheduleType === 'asap' || !!scheduledAt) && !submitting && !submitted;
+  const canSubmit =
+    !!selectedAddressId &&
+    (scheduleType === 'asap' || !!scheduledAt) &&
+    (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
+    !submitting &&
+    !submitted;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
@@ -286,6 +320,71 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           </div>
         )}
       </section>
+
+      {selectedAddressId && (
+        <section className="mt-6">
+          <h2 className="mb-3 font-semibold">مين يعمل الشغل؟</h2>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              onClick={() => {
+                setTechnicianChoiceMode('auto');
+                setSelectedTechnicianId(null);
+              }}
+              className={`flex-1 rounded-xl border p-3 text-right ${
+                technicianChoiceMode === 'auto' ? 'border-primary bg-primary/5' : 'border-border'
+              }`}
+            >
+              <p className="font-medium text-primary">خلي صُنّاع يختار</p>
+              <p className="text-sm text-muted">أسرع فني متاح بالمنطقة، بأفضل تقييم</p>
+            </button>
+            <button
+              onClick={() => setTechnicianChoiceMode('manual')}
+              className={`flex-1 rounded-xl border p-3 text-right ${
+                technicianChoiceMode === 'manual' ? 'border-primary bg-primary/5' : 'border-border'
+              }`}
+            >
+              <p className="font-medium">اختار بنفسك</p>
+              <p className="text-sm text-muted">شوف الفنيين المتاحين وسعر كل واحد</p>
+            </button>
+          </div>
+
+          {technicianChoiceMode === 'manual' && (
+            <div className="mt-3 space-y-2">
+              {technicians === null ? (
+                <div className="h-16 animate-pulse rounded-xl bg-surface-variant" />
+              ) : technicians.length === 0 ? (
+                <p className="text-sm text-muted">مفيش فنيين متاحين في منطقتك دلوقتي للخدمة دي</p>
+              ) : (
+                technicians.map((t) => (
+                  <label
+                    key={t.id}
+                    className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 ${
+                      selectedTechnicianId === t.id ? 'border-primary bg-primary/5' : 'border-border'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="technician"
+                        checked={selectedTechnicianId === t.id}
+                        onChange={() => setSelectedTechnicianId(t.id)}
+                      />
+                      <div>
+                        <p className="font-medium">{t.full_name}</p>
+                        <p className="text-sm text-muted">
+                          {t.average_rating > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}
+                          {t.distance_km !== null ? ` · ${t.distance_km} كم` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    {t.final_price_cents !== null && <span className="font-semibold text-primary">{formatEgp(t.final_price_cents)}</span>}
+                  </label>
+                ))
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {service.allows_scheduling && (
         <section className="mt-6">
@@ -550,23 +649,14 @@ function NewAddressForm({
         <input value={apartmentNumber} onChange={(e) => setApartmentNumber(e.target.value)} placeholder="الشقة" className="rounded-lg border border-border bg-surface px-3 py-2" />
       </div>
       <input value={landmark} onChange={(e) => setLandmark(e.target.value)} placeholder="علامة مميزة (اختياري)" className="w-full rounded-lg border border-border bg-surface px-3 py-2" />
-      {/* اختيار موقع حقيقي بالخريطة فجوة معروفة (docs/16) — إدخال يدوي مؤقت لحد ما نضيف Maps picker. */}
-      <div className="grid grid-cols-2 gap-3">
-        <input
-          value={latitude}
-          onChange={(e) => setLatitude(e.target.value)}
-          placeholder="خط العرض (latitude)"
-          dir="ltr"
-          className="rounded-lg border border-border bg-surface px-3 py-2"
-        />
-        <input
-          value={longitude}
-          onChange={(e) => setLongitude(e.target.value)}
-          placeholder="خط الطول (longitude)"
-          dir="ltr"
-          className="rounded-lg border border-border bg-surface px-3 py-2"
-        />
-      </div>
+      <MapPicker
+        latitude={latitude ? Number(latitude) : null}
+        longitude={longitude ? Number(longitude) : null}
+        onChange={(lat, lng) => {
+          setLatitude(String(lat));
+          setLongitude(String(lng));
+        }}
+      />
       {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={!canSubmit || busy} className="w-full rounded-lg bg-primary py-2 font-medium text-primary-foreground disabled:opacity-50">
         {busy ? 'جاري الحفظ...' : 'حفظ العنوان'}

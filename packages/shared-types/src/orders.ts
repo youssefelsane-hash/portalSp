@@ -69,6 +69,33 @@ export interface OrderResponseDto {
   technician_cash_not_received_at: string | null;
 }
 
+// Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). نفس CreateOrderDto اللي apps/customer-web
+// بتستخدمه (تعريف محلي هناك عمداً — راجع customer-web/README.md)، زائد هوية العميل. الطلب
+// بيتملك للعميل ده دايمًا، مش للموظف.
+export interface CreateOrderForCustomerBody {
+  customer_user_id: string;
+  service_id: string;
+  address_id: string;
+  order_type?: string;
+  booking_mode?: 'individual' | 'team' | 'emergency';
+  requested_technician_company_id?: string;
+  problem_description?: string;
+  customer_notes?: string;
+  scheduled_at?: string;
+  promo_code?: string;
+  requested_technician_id?: string;
+  original_order_id?: string;
+  addon_ids?: string[];
+  field_values?: Record<string, unknown>;
+  payment_method?: string;
+}
+
+export interface CreateOrderForCustomerResponseDto extends OrderResponseDto {
+  customer_user_id: string;
+  created_by_admin_user_id: string;
+  source_channel: string;
+}
+
 export interface OrderStatusHistoryResponseDto {
   id: string;
   previous_status: OrderStatus | null;

@@ -17,12 +17,28 @@ class OnboardingRepository {
     return TechnicianMe.fromJson(data!);
   }
 
+  // زرار أونلاين/أوفلاين (Script 4 §8) — كان مبني بالكامل في الباك-إند من زمان
+  // (PATCH /technician/availability) بس مفيش شاشة كانت بتناديه. بيبدّل is_available وis_on_duty
+  // مع بعض دايمًا (راجع تعليق TechnicianMe.isOnDuty).
+  Future<TechnicianMe> setOnDuty(bool onDuty) async {
+    final data = await auth.authedRequest(
+      'PATCH',
+      '/technician/availability',
+      body: {'is_available': onDuty, 'is_on_duty': onDuty},
+    );
+    return TechnicianMe.fromJson(data!);
+  }
+
   // "معاه مساعد؟" (docs/06 §3.7) — الفني بيحدد المساعد بنفسه بكوده (technician_code)، الإدارة
   // بعد كده توافق/ترفض من apps/admin. مفيش auto-matching (فجوة موثّقة صراحة في technicians/README.md).
-  Future<Map<String, dynamic>> requestAssistant(String assistantTechnicianCode) async {
-    final data = await auth.authedRequest('POST', '/technician/assistant-request', body: {
-      'assistant_technician_code': assistantTechnicianCode,
-    });
+  Future<Map<String, dynamic>> requestAssistant(
+    String assistantTechnicianCode,
+  ) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/technician/assistant-request',
+      body: {'assistant_technician_code': assistantTechnicianCode},
+    );
     return data!;
   }
 
