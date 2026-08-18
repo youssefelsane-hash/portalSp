@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'core/api_config.dart';
 import 'core/auth_repository.dart';
 import 'core/deep_link_router.dart';
 import 'design/app_theme.dart';
@@ -8,6 +9,7 @@ import 'features/auth/login_screen.dart';
 import 'features/catalog/booking_mode_screen.dart';
 
 void main() {
+  assertProductionApiConfig();
   runApp(const BaytakApp());
 }
 
