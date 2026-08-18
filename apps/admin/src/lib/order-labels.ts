@@ -51,6 +51,14 @@ export function isOrderReassignable(status: OrderStatus): boolean {
   return REASSIGNABLE_STATUSES.includes(status);
 }
 
+// مطابق حرفياً لـ RESCHEDULABLE_STATUSES في apps/api/src/modules/orders/orders.service.ts —
+// إعادة الجدولة (عميل أو أدمن، Script 4 Part K §42) متاحة بس قبل ما الفني يتحرّك فعليًا.
+const RESCHEDULABLE_STATUSES: OrderStatus[] = ['accepted', 'technician_assigned'];
+
+export function isOrderReschedulable(status: OrderStatus): boolean {
+  return RESCHEDULABLE_STATUSES.includes(status);
+}
+
 const CANCELLED_STATUSES: OrderStatus[] = [
   'cancelled_by_customer',
   'cancelled_by_technician',

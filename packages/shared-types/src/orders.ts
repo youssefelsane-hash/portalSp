@@ -216,6 +216,12 @@ export interface ReplaceCrewMemberBody {
   role_label?: string;
 }
 
+// مطابق لـ apps/api/src/modules/orders/dto/admin-reschedule-order.dto.ts (Script 4 Part K §42)
+export interface AdminRescheduleOrderBody {
+  new_slot_id: string;
+  reason: string;
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/cancellation-reason-response.dto.ts وentities/cancellation-reason.entity.ts
 export type CancellationAppliesTo = 'customer' | 'technician' | 'admin';
 

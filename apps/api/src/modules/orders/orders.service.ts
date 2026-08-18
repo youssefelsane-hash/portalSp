@@ -782,7 +782,51 @@ export class OrdersService {
    */
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
+    return this.rescheduleCore(order, dto.new_slot_id, {
+      userId,
+      role: 'customer',
+      changeSource: OrderChangeSource.CUSTOMER,
+    });
+  }
 
+  /**
+   * إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس reschedule() فوق (مقصور على العميل
+   * صاحب الطلب)، ده لأي طلب بغض النظر عن هوية العميل. استخدام تشغيلي حقيقي: العميل يتصل بخدمة
+   * العملاء يطلب تأجيل الموعد، الموظف بينفذها نيابة عنه — بديل عن الدخول على الداتابيز يدويًا.
+   * نفس آلية الحجز الذرّي بالحرف (rescheduleCore المشتركة)، الفرق بس هوية المنفّذ + سبب إلزامي
+   * للتدقيق (مش مطلوب من العميل نفسه لما بيعيد جدولة طلبه هو).
+   */
+  async rescheduleByAdmin(adminUserId: string, orderId: string, newSlotId: string, reason: string, meta?: AuditActorMeta): Promise<Order> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const previousScheduledAt = order.scheduledAt;
+    const updated = await this.rescheduleCore(order, newSlotId, {
+      userId: adminUserId,
+      role: 'admin',
+      changeSource: OrderChangeSource.ADMIN,
+      reasonSuffix: ` — سبب: ${reason}`,
+    });
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.rescheduled_by_admin',
+      entityType: 'order',
+      entityId: orderId,
+      oldValues: { scheduled_at: previousScheduledAt?.toISOString() ?? null },
+      newValues: { scheduled_at: updated.scheduledAt?.toISOString() ?? null, reason },
+      meta,
+    });
+    return updated;
+  }
+
+  private async rescheduleCore(
+    order: Order,
+    newSlotId: string,
+    actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
+  ): Promise<Order> {
+    const orderId = order.id;
     if (!RESCHEDULABLE_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
@@ -799,7 +843,7 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش مرتبط بموعد محدد أصلاً', HttpStatus.CONFLICT);
     }
 
-    const newSlot = await this.scheduleService.findAvailableSlotOrThrow(dto.new_slot_id);
+    const newSlot = await this.scheduleService.findAvailableSlotOrThrow(newSlotId);
     if (newSlot.technicianId !== order.technicianId) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -844,10 +888,10 @@ export class OrdersService {
           orderId: order.id,
           previousStatus: fresh.orderStatus,
           newStatus: fresh.orderStatus,
-          changedByUserId: userId,
-          changedByRole: 'customer',
-          changeSource: OrderChangeSource.CUSTOMER,
-          reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}`,
+          changedByUserId: actor.userId,
+          changedByRole: actor.role,
+          changeSource: actor.changeSource,
+          reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}${actor.reasonSuffix ?? ''}`,
         }),
       );
     });

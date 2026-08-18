@@ -757,3 +757,49 @@ endpoints تانية اتعمل لها اختبار حي قبل كده — مش 
 `packages/shared-types/src/orders.ts` (مطابقة بالحرف لـ`admin-crew-member.dto.ts`). **فجوة موثّقة
 صراحة**: مش اتعمل لها اختبار حي بمتصفح فعلي — نفس قيد WebAuthn MFA لتسجيل دخول الأدمن في بيئة
 الـsandbox، مذكور في قسم Call Center فوق بالتفصيل. `tsc`/`eslint`/`next build` كلهم نضاف.
+
+## إعادة جدولة عامة من الأدمن (Script 4 Part K §42، 2026-08-18)
+
+كانت فجوة موثّقة صراحة: `OrdersService.reschedule()` (شوف قسم "إعادة الجدولة docs/08 §22 بند
+9-12" فوق) مقصور على العميل صاحب الطلب بس (`findOneOwnedOrThrow`) — استخدام تشغيلي حقيقي غير
+مغطّى: العميل يتصل بخدمة العملاء يطلب تأجيل الموعد، الموظف بيحتاج ينفذها نيابة عنه بدل الدخول
+على الداتابيز يدويًا.
+
+**إعادة استخدام بدل تكرار**: منطق الحجز الذرّي (release القديم + book الجديد جوّه transaction
+واحدة، مع القفل التشاؤمي وإعادة التحقق تحت القفل ضد سباق depart()) اتفصل في method خاص
+`rescheduleCore()` بيتنادى من الاتنين — `reschedule()` (العميل) و`rescheduleByAdmin()` (الأدمن)
+الجديدة. صفر duplicate logic، الفرق بس هوية المنفّذ (`changedByRole`/`changeSource` في
+`order_status_history`) + سبب إلزامي (5-500 حرف، `AdminRescheduleOrderDto`) + سطر تدقيق إضافي
+(`order.rescheduled_by_admin`) — العميل مش مطلوب منه سبب لما بيعيد جدولة طلبه هو.
+
+**صلاحية مخصصة (`orders.reschedule`, migration `0133`)**: نفس نمط `orders.assign_assistant`/
+`orders.manage_crew` — ممنوحة لـ`super_admin` و`ops_manager`، عملية تشغيلية يومية. **مفيش
+step-up MFA** (بعكس `orders.adjust_price`/`orders.resolve_failed_visit`) — تغيير موعد مش قرار
+مالي، نفس مستوى حساسية `orders.reassign` بالظبط.
+
+**`POST /admin/orders/:id/reschedule`** — `{new_slot_id, reason}`. نفس قيود العميل بالحرف
+(الحالة لازم تكون `accepted`/`technician_assigned`، السلوت الجديد لازم يكون لنفس الفني المعيّن).
+
+**requote/scope-change**: تم التأكد إن ده مش فجوة فعلية — الـworkflow الهيكلي موجود بالفعل ومختبر
+من سيشنز سابقة (`OrderItemsService.propose()`/`approve()`/`decline()`، حالة `AWAITING_QUOTE_
+APPROVAL`، شوف قسم "عرض السعر أثناء التنفيذ" فوق). الأدمن عنده بالفعل رؤية قراءة (`GET
+/admin/orders/:id/quote-items`، كارت "بنود العرض" في `apps/admin`) — مفيش حاجة إضافية اتلقطت
+تحتاج بناء هنا.
+
+**اختبار حي كامل**:
+- **jest** (امتداد لـ`reschedule-and-address-warning.spec.ts`، describe block جديد
+  `rescheduleByAdmin()`): إعادة جدولة ناجحة بغض النظر عن هوية العميل + تأكيد `audit_logs`
+  (spy حقيقي على `AuditLogService.record`) + `order_status_history` (`changed_by_role='admin'`،
+  `change_source='admin'`، السبب متضمّن في النص)، رفض طلب مش موجود، ورفض بعد ما الفني يتحرّك
+  فعليًا (`technician_on_way`) — نفس قيد العميل بالحرف، صفر audit log بيتسجّل لما العملية ترفض.
+- **curl مباشر ضد dev server حقيقي**: تحقق `class-validator` على `reason` القصير (400)، إعادة
+  جدولة ناجحة (DB تحقق `scheduled_at`/سلوت جديد `booked`)، تحقق `audit_logs` و
+  `order_status_history` كاملين، ورفض بدون توكن (401). بيانات الاختبار اتنضّفت بالكامل (بما فيها
+  `chat_threads` اللي اتعمل تلقائي — الحذف الأول اتعثّر عليه بسبب ترتيب FK، نفس الدرس المتكرر).
+
+**apps/admin**: زرار "إعادة جدولة الموعد" جديد في `/orders/[id]` (بيظهر بس لو `isOrderReschedulable
+(order.order_status) && hasPermission('orders.reschedule')` — `isOrderReschedulable` helper جديد
+في `order-labels.ts` مطابق حرفيًا لـ`RESCHEDULABLE_STATUSES` في الباك-إند). فورم مستقل عن فورم
+"resolve-failed-visit" الموجود من قبل (سياقين مختلفين تمامًا رغم استخدام نفس `GET /technicians/:id/
+schedule` لجلب المواعيد المتاحة). **فجوة موثّقة صراحة**: مش اتعمل لها اختبار حي بمتصفح فعلي — نفس
+قيد WebAuthn MFA. `tsc`/`eslint`/`next build` كلهم نضاف.

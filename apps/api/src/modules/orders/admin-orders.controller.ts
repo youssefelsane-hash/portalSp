@@ -10,6 +10,7 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminOrdersService } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
+import { AdminRescheduleOrderDto } from './dto/admin-reschedule-order.dto';
 import { AssignAssistantDto } from './dto/assign-assistant.dto';
 import { AddCrewMemberDto, RemoveCrewMemberDto, ReplaceCrewMemberDto } from './dto/admin-crew-member.dto';
 import { CreateOrderForCustomerDto } from './dto/create-order-for-customer.dto';
@@ -136,6 +137,22 @@ export class AdminOrdersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(await this.adminOrdersService.reassign(admin.sub, id, dto.technician_id, audit));
+  }
+
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس POST /orders/:id/reschedule (مقصور
+  // على العميل صاحب الطلب)، ده لأي طلب. نفس آلية الحجز الذرّي بالحرف (OrdersService.rescheduleCore
+  // المشتركة)، مفيش تكرار منطق. مفيش step-up MFA هنا (بعكس adjust-price/resolve-failed-visit
+  // تحت) — تغيير موعد مش قرار مالي، نفس مستوى حساسية reassign فوقها بالظبط.
+  @Post(':id/reschedule')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.reschedule')
+  async rescheduleByAdmin(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminRescheduleOrderDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(await this.ordersService.rescheduleByAdmin(admin.sub, id, dto.new_slot_id, dto.reason, audit));
   }
 
   // بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): orders.adjust_price

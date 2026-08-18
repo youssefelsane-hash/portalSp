@@ -63,6 +63,7 @@ import {
   paymentStatusTone,
   isOrderCancellable,
   isOrderReassignable,
+  isOrderReschedulable,
 } from '@/lib/order-labels';
 import {
   PAYMENT_GATEWAY_STATUS_LABELS,
@@ -121,6 +122,14 @@ export default function OrderDetailPage() {
   const [replaceCrewReason, setReplaceCrewReason] = useState('');
   const [replaceCrewRoleLabel, setReplaceCrewRoleLabel] = useState('');
   const [crewShortageWarning, setCrewShortageWarning] = useState(false);
+
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس فورم إعادة الجدولة فوق (مقصور على
+  // outcome='reschedule' بتاع resolve-failed-visit)، ده لأي طلب reschedulable بغض النظر عن أي
+  // زيارة فاشلة. state منفصل عمدًا عشان الفورمين يفضلوا مستقلين (سياقين مختلفين تمامًا).
+  const [showAdminRescheduleForm, setShowAdminRescheduleForm] = useState(false);
+  const [adminRescheduleSlots, setAdminRescheduleSlots] = useState<ScheduleSlot[] | null>(null);
+  const [adminRescheduleSlotId, setAdminRescheduleSlotId] = useState('');
+  const [adminRescheduleReason, setAdminRescheduleReason] = useState('');
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -489,6 +498,44 @@ export default function OrderDetailPage() {
   // عضو طاقم عادي (اعتماد/فريق) بعكس المساعد (member_type='assistant', مساره منفصل فوق).
   const crewMembers = teamMembers.filter((m) => m.member_type !== 'assistant');
 
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — نفس endpoint جدول الفني المستخدم في
+  // فورم resolve-failed-visit فوق (GET /technicians/:id/schedule)، بس مسار تنفيذ مختلف كليًا
+  // (POST /admin/orders/:id/reschedule بدل resolve-failed-visit).
+  async function handleOpenAdminRescheduleForm() {
+    setShowAdminRescheduleForm((s) => !s);
+    if (adminRescheduleSlots !== null || !order?.technician_id) return;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const to = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const slots = await authedFetch<ScheduleSlot[]>(`/technicians/${order.technician_id}/schedule?from=${today}&to=${to}`);
+      setAdminRescheduleSlots(slots.filter((s) => s.is_available));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل جدول الفني');
+    }
+  }
+
+  async function handleAdminReschedule(e: FormEvent) {
+    e.preventDefault();
+    if (!adminRescheduleSlotId || adminRescheduleReason.trim().length < 5) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/orders/${id}/reschedule`, {
+        method: 'POST',
+        body: JSON.stringify({ new_slot_id: adminRescheduleSlotId, reason: adminRescheduleReason }),
+      });
+      setShowAdminRescheduleForm(false);
+      setAdminRescheduleSlots(null);
+      setAdminRescheduleSlotId('');
+      setAdminRescheduleReason('');
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   if (error && !order) {
     return (
       <AppShell>
@@ -634,6 +681,58 @@ export default function OrderDetailPage() {
                   )}
                   <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
                     تأكيد إعادة التعيين
+                  </Button>
+                </form>
+              )}
+            </CardFooter>
+          )}
+          {/* إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — مستقلة عن isOrderCancellable
+              فوق (accepted مش cancellable لكنها reschedulable). استخدام تشغيلي: العميل يتصل
+              يطلب تأجيل الميعاد، الموظف بينفذها نيابة عنه. */}
+          {isOrderReschedulable(order.order_status) && hasPermission('orders.reschedule') && (
+            <CardFooter className="flex-col items-stretch gap-3">
+              <Button type="button" variant="outline" disabled={isSaving} onClick={handleOpenAdminRescheduleForm}>
+                إعادة جدولة الموعد
+              </Button>
+              {showAdminRescheduleForm && (
+                <form onSubmit={handleAdminReschedule} className="flex flex-col gap-2">
+                  <Label htmlFor="admin_reschedule_slot">الموعد الجديد</Label>
+                  {adminRescheduleSlots === null && <p className="text-xs text-muted-foreground">جاري تحميل جدول الفني…</p>}
+                  {adminRescheduleSlots !== null && adminRescheduleSlots.length === 0 && (
+                    <p className="text-xs text-muted-foreground">مفيش مواعيد متاحة للفني ده حاليًا</p>
+                  )}
+                  {adminRescheduleSlots !== null && adminRescheduleSlots.length > 0 && (
+                    <SelectNative
+                      id="admin_reschedule_slot"
+                      value={adminRescheduleSlotId}
+                      onChange={(e) => setAdminRescheduleSlotId(e.target.value)}
+                      required
+                    >
+                      <option value="" disabled>
+                        اختار موعد
+                      </option>
+                      {adminRescheduleSlots.map((slot) => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.slot_date} — {slot.start_time.slice(0, 5)} إلى {slot.end_time.slice(0, 5)}
+                        </option>
+                      ))}
+                    </SelectNative>
+                  )}
+                  <Label htmlFor="admin_reschedule_reason">سبب إعادة الجدولة</Label>
+                  <Input
+                    id="admin_reschedule_reason"
+                    value={adminRescheduleReason}
+                    onChange={(e) => setAdminRescheduleReason(e.target.value)}
+                    required
+                    minLength={5}
+                    maxLength={500}
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isSaving || !adminRescheduleSlotId || adminRescheduleReason.trim().length < 5}
+                  >
+                    تأكيد إعادة الجدولة
                   </Button>
                 </form>
               )}
