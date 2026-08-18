@@ -212,3 +212,43 @@ flags على مستوى الخدمة موجودة ومُعرّضة بالفعل)
 suite، 451/451 اختبار) لسه سارية من الجولة اللي فاتت. اختبار حي كامل بمتصفح (تسجيل حقيقي → صفحة
 الخدمة → عنوان جديد بالخريطة الحقيقية → قسم اختيار الفني ظاهر وبيرجّع "مفيش فنيين متاحين" (صح، صفر
 فنيين مسجّلين في قاعدة التطوير) → حفظ الطلب) نجح بالكامل، لقطات شاشة موثّقة.
+
+## 16. زرع فني حقيقي كامل + إصلاح بَقّة حقيقية في `apps/api` (backend، تؤثر على الموبايل كمان)
+
+عشان نختبر المسارات المتبقية (تعيين فني فعلي، الشات الحي بthread حقيقي، تسليم الكاش) اختبار حي
+كامل مش mocked، اتعمل زرع فني حقيقي في قاعدة التطوير عبر الـAPI الحقيقي نفسه (مش SQL خام اختراعي):
+تسجيل حساب `user_type=technician` حقيقي (بيعمل `technician_profiles` تلقائيًا عبر
+`technician-profile.listener.ts`)، بعدين `UPDATE` مباشر بس على 3 حقول (`verification_status`،
+`is_available`/`is_on_duty`، `current_location`) + إضافة صف `technician_services`
+و`technician_zones` (الجداول دي مالهاش endpoint تسجيل ذاتي للفني لسه، فالإدخال المباشر هنا نطاق
+اختبار دلوقتي مقصود، مش قرار إنتاج). النتيجة: رحلة حجز كاملة حقيقية نجحت — `GET
+/services/:id/technicians` رجّع الفني الحقيقي بالمسافة/التقييم/السعر، `POST /orders` مع
+`requested_technician_id` بعت offer فعلي (`order_assignments`)، `POST
+/technician/orders/:id/accept` قبله، `depart`/`arrive`/`start`/`complete` (بعد رفع صورة حقيقية
+لـR2 storage) كلهم اشتغلوا، والشات الحي عبر WebSocket (بند 15) اتأكد بالكامل: نقطة خضرا "متصل
+الآن"، رسالة اتبعتت من العميل واترجعت فورًا عبر `chat:message_received` وظهرت في الواجهة — round
+trip كامل حقيقي، مش mock.
+
+**بَقّة حقيقية خطيرة اتلقطت أثناء اختبار تأكيد تسليم الكاش**: بعد ما العميل يدوس "أكّد استلام الشغل
+وتسليم الكاش"، قسمي "العنوان" و"الفني" (الاسم/التليفون) كانوا بيختفوا فورًا من الشاشة من غير أي
+سبب واضح. السبب الجذري في `apps/api/src/modules/orders/orders.controller.ts`: `getOne()` بس هي
+اللي كانت بتجيب `address`/`technicianContact` وتبعتهم لـ`toOrderResponseDto()` — كل الـmutations
+التانية (`cancel`، `confirm-cash-handover`، `reschedule`، `request-rematch`،
+`quote-items/approve`، `quote-items/decline`، وحتى `create()` نفسها) كانت بترجّع
+`toOrderResponseDto(order)` من غيرهم بالمرّة. **البَقّة دي مش خاصة بـcustomer-web** —
+`apps/customer-app`'s `order_detail_screen.dart`'s `_confirmCashHandover()` (وبقية الشاشات
+المشابهة) بتستبدل الـstate المحلي بالرد مباشرة (`setState(() => _order = order)`)، فنفس الاختفاء
+كان (ولسه) بيحصل على الموبايل بالظبط لأي حد بيستخدم أي زرار فعل على شاشة تفاصيل الطلب — مش بَقّة
+جديدة، بَقّة موجودة من الأول اتلقطت بالصدفة أثناء اختبار Script 3.
+
+**الإصلاح**: `private enrichedResponse(userId, order)` helper واحد في `OrdersController` بيعمل
+نفس اللي `getOne()` كانت بتعمله (`AddressesService.findOwnedOrThrow` + فحص
+`TECHNICIAN_CONTACT_VISIBLE_STATUSES` قبل `TechniciansService.findContactInfoOrThrow`)، واتستخدم
+بدل `toOrderResponseDto(order)` المباشرة في كل الـ7 endpoints فوق. اتأكد حي: `POST /orders` و`POST
+/orders/:id/cancel` بيرجّعوا `address` دلوقتي (كان `null`/غير موجود قبل كده)، والشاشة في
+`apps/customer-web` فضلت عارضة العنوان بعد الإلغاء (لقطة شاشة). `apps/api`: `tsc`/`nest
+build`/جيت الاختبارات كامل (79/79 suite، 451/451 اختبار) — صفر تراجع. مفيش اختبار تلقائي جديد
+مُضاف لـ`OrdersController` نفسه (فجوة مفتوحة بصراحة): `OrdersService` عندها 19 dependency
+مُحقنة، ومفيش نمط موجود في المشروع لتشغيل controller كامل ضد Postgres حي (كل الاختبارات الحالية
+إما mocked بالكامل أو بتاختبر service واحد بسيط مباشرة) — بناء نمط جديد بالكامل لإصلاح واحد
+مخاطرة مش متناسبة، فالتحقق اعتمد على اختبار حي مباشر (curl + متصفح، موثّق فوق) بدل كده.
