@@ -325,6 +325,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [doRefresh, requestStepUp, setAccessTokenBoth],
   );
 
+  // Heartbeat دوري (Script 5 — تتبع الحضور اللحظي ووقت العمل الفعلي، workforce-activity.service.ts
+  // §heartbeat). بيحدّث last_activity_at لكل جلسات المستخدم النشطة، مرة كل دقيقة وبس لما التاب يكون
+  // ظاهر فعليًا (Page Visibility API) — مفيش داعي نبعت من تاب في الخلفية أو مقفول، ده بيدّي "وقت
+  // عمل فعلي" وهمي. فشل الطلب (شبكة/مؤقتًا) بيتجاهل بصمت — مش عملية حرجة تستاهل toast للمستخدم.
+  useEffect(() => {
+    if (!user) return;
+    function sendHeartbeat() {
+      if (document.visibilityState !== 'visible') return;
+      void authedFetch('/admin/workforce/heartbeat', { method: 'POST' }).catch(() => undefined);
+    }
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 60_000);
+    document.addEventListener('visibilitychange', sendHeartbeat);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', sendHeartbeat);
+    };
+  }, [user, authedFetch]);
+
   const hasPermission = useCallback((permissionName: string) => permissions?.has(permissionName) ?? false, [permissions]);
 
   const value = useMemo(

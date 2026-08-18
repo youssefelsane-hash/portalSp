@@ -2,7 +2,15 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { AssignRoleBody, EmployeeDetail, RoleResponseDto, UpdateEmployeeBody } from '@baytak/shared-types';
+import { toast } from 'sonner';
+import type {
+  AssignRoleBody,
+  EmployeeDetail,
+  EmployeePresenceDto,
+  EmployeeSessionDto,
+  RoleResponseDto,
+  UpdateEmployeeBody,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -17,6 +25,13 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
+const PRESENCE_LABELS: Record<string, string> = { active: 'نشط الآن', idle: 'خامل', offline: 'غير متصل' };
+const PRESENCE_BADGE_VARIANT: Record<string, 'default' | 'secondary' | 'outline'> = {
+  active: 'default',
+  idle: 'secondary',
+  offline: 'outline',
+};
+
 export default function EmployeeDetailPage() {
   const { userId } = useParams<{ userId: string }>();
   const { isLoading, authedFetch } = useAuth();
@@ -30,11 +45,35 @@ export default function EmployeeDetailPage() {
   const [isSavingRole, setIsSavingRole] = useState(false);
   const [blockReason, setBlockReason] = useState('');
   const [showBlockForm, setShowBlockForm] = useState(false);
+  // Script 5 — حالة حية + جلسات. مفيش حاجة منهم لو الأدمن الحالي معندوش employees.activity.view/
+  // employees.sessions.view (403 بيتلقّط بصمت، الكارت بيختفي — "متعرضش أكتر مما يسمح الصلاحية").
+  const [presence, setPresence] = useState<EmployeePresenceDto | null>(null);
+  const [sessions, setSessions] = useState<EmployeeSessionDto[] | null>(null);
+  const [openAlertsCount, setOpenAlertsCount] = useState<number | null>(null);
 
   function load() {
     authedFetch<EmployeeDetail>(`/admin/employees/${userId}`)
       .then(setDetail)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل بيانات الموظف'));
+    authedFetch<EmployeePresenceDto>(`/admin/workforce/employees/${userId}/presence`)
+      .then(setPresence)
+      .catch(() => setPresence(null));
+    authedFetch<EmployeeSessionDto[]>(`/admin/workforce/employees/${userId}/sessions`)
+      .then(setSessions)
+      .catch(() => setSessions(null));
+    authedFetch<{ meta: { total: number } }>(`/admin/security/events?actor_user_id=${userId}&status=open`)
+      .then((res) => setOpenAlertsCount(res.meta.total))
+      .catch(() => setOpenAlertsCount(null));
+  }
+
+  async function handleRevokeSession(sessionId: string) {
+    try {
+      await authedFetch(`/admin/workforce/employees/${userId}/sessions/${sessionId}`, { method: 'DELETE' });
+      toast.success('اتلغت الجلسة');
+      load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'فشل إلغاء الجلسة');
+    }
   }
 
   useEffect(() => {
@@ -174,6 +213,10 @@ export default function EmployeeDetailPage() {
               <Badge variant="secondary">نشط</Badge>
             ) : (
               <Badge variant="outline">غير نشط</Badge>
+            )}
+            {presence && <Badge variant={PRESENCE_BADGE_VARIANT[presence.state]}>{PRESENCE_LABELS[presence.state]}</Badge>}
+            {openAlertsCount !== null && openAlertsCount > 0 && (
+              <Badge variant="destructive">{openAlertsCount} تنبيه أمني مفتوح</Badge>
             )}
           </>
         }
@@ -381,6 +424,48 @@ export default function EmployeeDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {sessions && sessions.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">الجلسات المفتوحة (Script 5)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>الجهاز</TableHead>
+                    <TableHead>IP</TableHead>
+                    <TableHead>آخر نشاط</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sessions.map((session) => (
+                    <TableRow key={session.id}>
+                      <TableCell>{session.deviceName ?? session.devicePlatform ?? '—'}</TableCell>
+                      <TableCell dir="ltr">{session.ipAddress ?? '—'}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {session.lastActivityAt ? new Date(session.lastActivityAt).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                      </TableCell>
+                      <TableCell>
+                        {session.isRevoked ? <Badge variant="outline">ملغاة</Badge> : <Badge variant="secondary">نشطة</Badge>}
+                      </TableCell>
+                      <TableCell>
+                        {!session.isRevoked && (
+                          <Button variant="ghost" size="sm" onClick={() => handleRevokeSession(session.id)}>
+                            إلغاء
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </AppShell>
   );
