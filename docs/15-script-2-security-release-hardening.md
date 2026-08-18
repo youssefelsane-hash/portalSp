@@ -316,7 +316,141 @@ Invariant المنفذ:
 الإثبات: 8 suites / 36 tests في مصفوفة Phase B، منها Socket.IO حقيقي وPostgreSQL متعدد listeners،
 ثم full Nest bootstrap نجح وسجل `RealtimeSecurityModule` والـgateways، وتوقف نظيفًا بـSIGINT.
 
-## Remaining phases
+## Part P — المراجعة الذاتية النهائية + FINAL SCRIPT 2 RELEASE GATE (2026-08-18)
 
-Durable outbox and workers, notifications/support concurrency, storage, pricing/provider/config/web
-release hardening, security matrix, and performance gates remain in progress.
+كل الأجزاء (A-O) اكتملت بالتنسيق المطلوب في السكريبت الأصلي. تقرير الفحص الأخير كامل تحت.
+
+### تقرير Part P الرسمي (لكل الأجزاء المُستكملة هذه الجلسة: E، G، H، K، M، N، O + إصلاح حرج staging)
+
+**PHASE**: Script 2 — استكمال كامل لـParts E/G/H/K/M/N/O بلا توقف، على `claude/home-services-app-plan-v13gb2`.
+
+**FINDINGS COVERED**: #26-30 (E)، #34-41 (G)، #42-45 (H)، #54-58 (K، مراجعة/توثيق)، #63-67 (M)،
+مصفوفة Part N الكاملة (21 بند)، Part O (كل عمال الخلفية)، بالإضافة لبَقّة حرجة اتكشفت خارج نطاق
+finding معيّن محدد سلفًا (NODE_ENV=staging bypass — Part M finding #63 الأوسع "no silent
+fallback").
+
+**ROOT CAUSE (لكل بَقّة حقيقية اتصلحت)**:
+1. `markAllRead()` بتحدّث `read_at` بس بلا `acknowledge` للـworkflow المرتبط.
+2. `reminderCount` بيتزود جوّه transaction الـclaim حتى لو `notify()` نفسها رمت استثناء بعد كده.
+3. امتداد الملف المخزّن مأخوذ من اسم الملف المُعلَن، منفصل عن magic-byte validation.
+4. `getOrCreateSupportThread()` search-then-create بلا حماية DB.
+5. Deep-link إلى شاشة محمية بعد جلسة ميتة كان بيعرض خطأ خام بدل الرجوع لتسجيل الدخول — لأن
+   `_refresh()` فشلها كان بيتسرب للشاشة المستدعية بس، من غير ما يحدّث حالة `AuthRepository`
+   المركزية.
+6. `field_ref` بتحوّل قيمة الحقل لرقم من غير فحص `isFinite` — NaN بتتسرب صامتة عبر شجرة المعادلة.
+7. **الأخطر**: كل فحوصات fail-fast الإنتاجية بتتفحص ضد `NODE_ENV==='production'` بس، لكن النشر
+   الحقيقي شغال بـ`staging` — فكود OTP الخام كان بيتسجّل في اللوج الحقيقي.
+8. `RolesGuard`/`JwtAuthGuard` (الحارسان الأساسيان لكل الـAPI) بلا اختبار مباشر خالص.
+9. `NotificationWorkflowReminderService.sweep()` بتحمّل كل الصفوف المستحقة بلا حد أقصى، مخالفة
+   لنمط `OrderAutoCancelService` المُتّبع فعلاً في نفس الكودبيز.
+
+**EXISTING IMPLEMENTATION REUSED**: `NotificationWorkflowService`/ADR-0012 (لإصلاح #1/#2)،
+`file-signature-validator.ts`/`detectActualFileFormat` (لإصلاح #3، مُستخدم أصلاً في الـcontroller)،
+نمط `ON CONFLICT DO NOTHING` من `createThreadForOrder` (لإصلاح #4)، `AuthRepository` نفسها كنقطة
+مركزية واحدة (لإصلاح #5، مش شاشة بشاشة)، `env.validation.ts`'s `.when()` pattern (لإصلاح #7، امتد
+مش اتبنى من صفر)، `OrderAutoCancelService.sweep()`'s `SWEEP_BATCH_SIZE`/`take` pattern بالحرف
+(لإصلاح #9).
+
+**IMPLEMENTED**: `NotificationWorkflowService.acknowledgeByIds()`، `revertFailedAttempt()`،
+`safeExtensionForFile()`، migration `0128` (unique partial index)، `AuthRepository._refresh()`'s
+401-triggered state clear (الاتنين customer-app وtechnician-app)، `field_ref` finite check +
+`PricingEngineService.evaluate()`'s final-price guard، `isProductionLikeEnv()` + توسيع 6 فحوصات
+Joi + فحص OTP allow-list، `auth-guards.spec.ts` (اختبارات جديدة بس، مفيش كود إنتاج جديد)،
+`SWEEP_BATCH_SIZE`/`take`/`order` في `notification-workflow-reminder.service.ts`.
+
+**SECURITY INVARIANTS**: مستخدم قرا كل حاجاته عبر "قرا الكل" مايستقبلش تذكيرات بعدها. محاولة
+تذكير فاشلة مابتستهلكش من الحصة. امتداد الملف المخزّن مشتق دايمًا من المحتوى الحقيقي مش الاسم
+المُعلَن. Thread دعم واحد بس لكل عميل. جلسة ميتة (حظر/إلغاء) بتترجع المستخدم لتسجيل الدخول من أي
+مكان في التطبيق فورًا، مش بس الشاشة اللي صادفت الفشل. قيمة تسعير غير رقمية بترفض بوضوح قبل ما
+توصل لسعر نهائي. **staging بقت بنفس صرامة production لكل حماية fail-fast — بما فيها منع تسجيل
+OTP خام في اللوج**. RolesGuard/JwtAuthGuard مؤكدين صح باختبار مباشر.
+
+**CONCURRENCY / IDEMPOTENCY**: `.returning(['workflowId'])` (property name مش column name).
+`pessimistic_write` row lock للـreminder claim (موجود من قبل، مؤكد). Unique partial index
+لـsupport threads. `uploadWithOrphanCleanup()` idempotent (`delete()` safe no-op لمفتاح مش
+موجود). `catchError` على الـshared `_inFlightRefresh` future آمن لاستدعاءات متزامنة متعددة.
+
+**DURABILITY / RECOVERY**: `notification-acknowledgement.spec.ts`'s cleanup بقت fault-tolerant
+بالكامل (afterEach/afterAll per-step try/catch، مش try/finally شامل). `dataSource.destroy()`
+محاط بـtimeout عشان اتصال عالق ميعلقش عملية jest. `NotificationWorkflowReminderService.sweep()`
+بقت bounded — الدفعة المتبقية بتتاخد تلقائيًا في التيك اللي بعده، مفيش فقدان.
+
+**DB / MIGRATION**: `0128_support_chat_thread_uniqueness.sql` (من جلسة سابقة، مؤكدة تانية هنا).
+مفيش migration جديدة في الاستكمال ده — كل الإصلاحات (batch bound، env validation، auth state)
+مستوى تطبيق بحت، والفهرس المطلوب لـsweep() الجديدة موجود بالفعل (`idx_notification_workflows_pending_reminders`،
+migration 0087).
+
+**TESTS**: اختبارات جديدة هذه الجلسة: `notification-acknowledgement.spec.ts` (refactor، 4 اختبار)،
+`order-media-authorization.spec.ts` (4 اختبار، PostgreSQL حقيقي)، `formula-evaluator.spec.ts`
+(+3 اختبار)، `env.validation.spec.ts` (+5 اختبار staging-parity)، `auth.service.spec.ts` (+1
+اختبار staging OTP masking)، `auth-guards.spec.ts` (8 اختبار جديد بالكامل)، `flutter test` كامل
+على الاتنين customer-app/technician-app (12 اختبار، صفر كسر).
+
+**LIVE VERIFICATION**: كل الاختبارات الجديدة عدّت على PostgreSQL حقيقي (`--detectOpenHandles`،
+صفر hang). `/payment-channels` اتأكد حيًا بـcurl فعلي (جلسة سابقة، مُشار له في Part K). staging
+OTP-masking اتأكد بـtest حي حقيقي (مش نظري) يثبت الكود الخام مابيتسجلش.
+
+**BUILD RESULTS**: `npx tsc --noEmit` نضيف على كل commit. `npx nest build` نضيف على كل commit.
+**الفحص النهائي الشامل**: `npx jest --runInBand --detectOpenHandles` — **78 suite / 443 اختبار،
+كلهم عدّوا، صفر hang، صفر open handle متبقي**، بعد كل تعديلات الاستكمال ده مجتمعة. قاعدة البيانات
+اتأكدت نضيفة بعد الفحص (اتصال واحد بس، بتاعي، صفر عمليات jest متبقية).
+
+**PERFORMANCE IMPACT**: إصلاح واحد فقط له أثر أداء مباشر (إيجابي) — `sweep()` bounded بدل
+unbounded. باقي الإصلاحات صفر أثر أداء (فحوصات validation إضافية بسيطة على مسار طلب واحد، مش
+loops أو queries إضافية). Part O دوّر صراحة عن أي DB query على heartbeat/global lock/full-table
+scan جديد — مفيش حاجة تانية اتلقطت غير sweep().
+
+**KNOWN LIMITATIONS** (موثّقة صراحة، مش سهو):
+- `TWILIO_SMS_FROM_NUMBER` رقم ألماني (+49) — لازم تأكيد حي برسالة OTP حقيقية لرقم مصري قبل
+  الإطلاق (Part K).
+- Paymob/Fawry لسه مؤجّلين عمدًا (قرار عمل، مش فجوة تقنية) — `/payment-channels` بيعكس ده صح.
+- Mailtrap SMTP sandbox مش production SMTP حقيقي — مقبول لحد احتياج فعلي لإيميلات حقيقية.
+- مفيش اختبار بصري حقيقي على جهاز Android/iOS فعلي لـFCM/Google Maps (بيئة السيرفر بلا
+  emulator/جهاز — موثّق في `docs/03`).
+- **توصية تشغيلية غير منفذة من هنا**: تغيير `NODE_ENV` الفعلي على Railway من `staging` لـ
+  `production` — الكود دلوقتي بيعامل الاتنين بنفس الصرامة، لكن `production` هو الاسم الصحيح
+  دلاليًا لبيئة حقيقية بمستخدمين حقيقيين.
+
+**TEMP DATA CLEANED**: كل الاختبارات الحية بتنضّف صفوفها بنفسها (afterEach/afterAll
+fault-tolerant). اتأكد بعد الفحص الشامل: صفر صفوف يتيمة، اتصال DB واحد بس متبقي.
+
+**COMMIT**: 8 commits منفصلة (كل واحد بفحوصاته الخاصة قبل push) — `830a58a` (Jest cleanup fix)،
+`cca4200` (Part E #30)، `8133453` (staging fail-fast حرج)، `c40f339` (Part G #41)، `1d7568d`
+(Part H #42/44)، `8f6a575` (Part K checklist)، `bdb2f4c` (Part M #64/65/67)، `aab1e0c` (Part N
+guards)، `a9147c2` (Part O sweep bound). كل commit اتـpush لـ`claude/home-services-app-plan-v13gb2`
+فورًا — مفيش تعديل على `main` خالص.
+
+**STATUS**: **VERIFIED DONE**.
+
+---
+
+### FINAL SCRIPT 2 RELEASE GATE — مراجعة كل بند بالحرف
+
+| البند | الحالة |
+|---|---|
+| OTP cannot be concurrently reused | ✅ Phase A، `otp-registration-integrity.spec.ts` |
+| Registration cannot leave usable broken accounts | ✅ Phase A |
+| Blocked users cannot retain unauthorized realtime access | ✅ Phase B، `realtime-access-revocation.spec.ts` |
+| Revoked Admin permissions don't continue receiving protected socket data | ✅ Phase B |
+| WebSocket payloads are validated | ✅ Phase B، `realtime-payload-security.spec.ts` |
+| Critical events have durable recovery | ✅ Phase C/D مراجَعة (recovery services لكل الأنواع) |
+| Recurring jobs cannot duplicate work across instances | ✅ Phase D، occurrence claims |
+| Notification acknowledgement/retry semantics are correct | ✅ Part E (#26/#27، هذه الجلسة) |
+| Support default thread creation is concurrency-safe | ✅ Part F (migration 0128) |
+| Storage uploads are durable and securely retrievable | ✅ Part G (S3 presigned، #38/#39) |
+| Orphan files are recoverable/cleaned | ✅ Part G (#34-36) |
+| Attachment 404 root cause is fixed | ✅ Part G (finding #40، مراجَع ومؤكد) |
+| Pricing numeric validation is safe | ✅ Part H (#42، هذه الجلسة) |
+| Pricing rounding matches actual business policy | ✅ Part H (#43، ceil/floor) |
+| Disabled payment methods are not offered as available | ✅ Part I (`/payment-channels`) |
+| Production release cannot silently use emulator/debug/dev configuration | ✅ Part J (`assertProductionApiConfig`) + Part M (staging fail-fast، هذه الجلسة) |
+| Firebase production configuration is enforced | ⚪ قرار واعي — push best-effort مش حرج زي SMS (موثّق Part N) |
+| External providers receive real production readiness checks | ✅ Part K (checklist كامل، هذه الجلسة) |
+| No known P0/P1 release blocker remains hidden behind frontend behavior | ✅ — أخطر بَقّة اتلقطت (staging OTP logging) كانت خلف إعداد بيئة مش frontend، واتصلحت بالكامل |
+
+**كل بند اتحقق أو اتوثّق صراحة كقرار تصميم واعي. Script 2 مكتمل بالكامل.**
+
+commit ✅ — push ✅ — checkpoint موثّق ✅. **STOP.**
+
+السكريبت الجاي (Script 3): CUSTOMER EXPERIENCE + BOOKING JOURNEY + PRICE TRANSPARENCY + SERVICE
+DISCOVERY + MOBILE/WEB UX TRANSFORMATION.
