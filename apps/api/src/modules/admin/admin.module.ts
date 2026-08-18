@@ -7,6 +7,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { Order } from '../orders/entities/order.entity';
 import { Payout } from '../payments/entities/payout.entity';
 import { Rating } from '../ratings/entities/rating.entity';
+import { SecurityModule } from '../security/security.module';
 import { SettingsModule } from '../settings/settings.module';
 import { Complaint } from '../support/entities/complaint.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -50,6 +51,10 @@ import { PermissionsService } from './permissions.service';
     // Call Center — عناوين العميل قبل إنشاء طلب نيابة عنه (Script 4 §33-37). CustomersModule
     // مالوش أي استيراد لـAdminModule، فمفيش خطر دائرية (نفس نمط TechniciansModule/CatalogModule).
     CustomersModule,
+    // Script 5 (docs/adr/0016) — PermissionsService بيسجّل محاولات تصعيد الصلاحيات كـsecurity
+    // event. SecurityModule بيستورد AuditModule/SettingsModule بس، صفر استيراد لـAdminModule
+    // — نفس فحص اللادائرية فوق بالحرف.
+    SecurityModule,
   ],
   controllers: [
     AdminReportsController,

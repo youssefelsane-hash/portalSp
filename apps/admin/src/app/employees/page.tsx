@@ -17,7 +17,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 const PER_PAGE = 20;
 
 export default function EmployeesPage() {
-  const { isLoading, authedFetchPaginated } = useAuth();
+  const { isLoading, authedFetchPaginated, hasPermission } = useAuth();
   const [employees, setEmployees] = useState<EmployeeResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -40,9 +40,16 @@ export default function EmployeesPage() {
       <PageHeader
         title="الموظفين"
         actions={
-          <Button asChild>
-            <Link href="/employees/new">+ إضافة موظف</Link>
-          </Button>
+          <div className="flex gap-2">
+            {hasPermission('employees.activity.view') && (
+              <Button variant="outline" asChild>
+                <Link href="/employees/workforce">لوحة القوى العاملة</Link>
+              </Button>
+            )}
+            <Button asChild>
+              <Link href="/employees/new">+ إضافة موظف</Link>
+            </Button>
+          </div>
         }
       />
 

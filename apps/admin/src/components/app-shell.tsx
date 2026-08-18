@@ -37,6 +37,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  ShieldAlert,
   Star,
   Tag,
   ToggleLeft,
@@ -137,6 +138,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/feature-flags', label: 'Feature Flags', icon: ToggleLeft },
       { href: '/audit-log', label: 'سجل النشاط', icon: ScrollText, permission: 'audit.view' },
       { href: '/security', label: 'الأمان والأجهزة', icon: KeyRound },
+      { href: '/security-center', label: 'مركز الأمان', icon: ShieldAlert, permission: 'security.alerts.view' },
     ],
   },
 ];

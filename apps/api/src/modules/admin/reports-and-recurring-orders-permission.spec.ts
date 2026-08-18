@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
+import { SecurityEventsService } from '../security/security-events.service';
 import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
 import { UserRole } from './entities/user-role.entity';
@@ -35,6 +36,7 @@ describe('reports.view / recurring_orders.view — منح صحيح (regression P
       dataSource.getRepository(UserRole),
       dataSource.getRepository(User),
       new AuditLogService(dataSource.getRepository(AuditLog)),
+      { recordDenial: async () => undefined } as unknown as SecurityEventsService,
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
