@@ -106,8 +106,24 @@ ACTIVE/IDLE/وقت العمل هو `employee_daily_activity` (مستوى الم�
 مش صف جديد. (3) تصعيد لمستخدم تاني → حدث HIGH (مش CRITICAL). (4) دورة حياة acknowledge→resolve،
 ومحاولة تحل حدث مُقفل بالفعل بترفض 409. الأربعة عدّوا 4/4 بعد إصلاح بَقّة الـtuple فوق.
 
-**اتأكد كمان حي curl مباشر** ضد dev server شغال فعليًا (الجزء اللي مسؤول عنه محرك التوجيه/الإشعارات
-الكامل، Part 25) — تفاصيل في `orders/README.md`... **لسه مطلوب، شوف task القادمة**.
+**اتأكد كمان حي curl مباشر ضد dev server شغال فعليًا** (السلسلة الكاملة، Part 25 — مش بس
+`PermissionsService`/`SecurityEventsService` بمعزل زي الاختبار فوق): موظف حقيقي بدور `support_agent`
+(أقرب دور نظامي لـ"Call Center") حاول يمنح نفسه `super_admin` عبر `POST /admin/users/:userId/roles`
+فعلي. النتيجة: `403` (رسالة نضيفة، مش stack trace)، الدور فضل `support_agent` زي ما هو في القاعدة
+(اتأكد بـ`psql` مباشر)، صف `security_events` واحد اتخلق فعليًا (`privilege_escalation_attempt`،
+`critical`، `open`، `actor_user_id = target_user_id`)، **و`notifications` عندها صف حقيقي جديد
+لحساب `super_admin` الحقيقي** (`notification_type='security_critical_event'`، `deep_link` بيشاور
+على `/security-center/:id`) — يعني السلسلة الكاملة `PermissionsGuard.recordDenial() →
+SecurityEventsService (INSERT + emit SECURITY_EVENT_CREATED_EVENT) → SecurityEventRoutingListener
+→ NotificationRoutingService.routeToRole('super_admin') → NotificationsService` شغالة حرفيًا من
+غير أي mock. بيانات الاختبار اتنضّفت بالكامل بعدها (موظف، صف الحدث، الإشعار، عداد النشاط اليومي).
+
+**بَقّة تشغيلية اتلقطت وقت التحقق ده (مش في كود Script 5)**: أول محاولة استخدمت `dist/main.js`
+مبني قديم كان لسه شغال من سيشن سابقة (عملية `node dist/main` منفصلة عن `nest start --watch`،
+مامتطبقش عليها `pkill -f "nest start"`) — يعني الطلبات كانت بتتخدم فعليًا بكود من قبل تغييرات
+Script 5 كلها، فالحدث الأمني ما كانش بيتسجّل خالص رغم إن الـ403 نفسه رجع صح (نفس المنطق القديم).
+اتكشفت لما `security_events` فضلت فاضية بعد الطلب — لازم تتأكد إن `ss -ltnp | grep 3000` بيوريك
+عملية `nest start --watch` (مش `node dist/main`) قبل أي تحقق حي، مش بس إن port 3000 بيرد.
 
 ## صلاحيات جديدة (migration `0137`)
 

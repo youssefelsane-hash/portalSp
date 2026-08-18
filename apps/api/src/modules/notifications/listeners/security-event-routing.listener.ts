@@ -45,7 +45,7 @@ export class SecurityEventRoutingListener {
         bodyAr: 'حدث أمني محتاج مراجعة — افتح مركز الأمان لتفاصيل الفاعل والإجراء المحاول.',
         referenceType: 'security_event',
         referenceId: event.securityEventId,
-        deepLink: `/security/alerts/${event.securityEventId}`,
+        deepLink: `/security-center/${event.securityEventId}`,
       });
     } catch (err) {
       this.logger.error(`فشل توجيه تنبيه الحدث الأمني ${event.securityEventId}`, err instanceof Error ? err.stack : err);
