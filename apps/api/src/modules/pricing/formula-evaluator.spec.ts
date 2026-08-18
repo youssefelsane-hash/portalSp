@@ -120,6 +120,28 @@ describe('formula-evaluator', () => {
       expect(() => evaluateFormulaNode(node, context())).toThrow(ApiException);
     });
 
+    // Script 2 Part H (finding #42) — كانت بَقّة حقيقية: قيمة نصية مش رقمية كانت بتتحول لـNaN
+    // بصمت وتتسرّب عبر باقي المعادلة (add/multiply/...) لحد السعر النهائي، عكس تعليق الدالة
+    // اللي بيدّعي "بيرفض بوضوح... بدل NaN بصمت".
+    it('field_ref بيرفض بوضوح لو قيمة الحقل نص مش رقمي خالص ("hello" مش "3")', () => {
+      const node: FormulaNode = { type: 'field_ref', field_key: 'area' };
+      expect(() => evaluateFormulaNode(node, context({ fieldValues: { area: 'hello' } }))).toThrow(ApiException);
+    });
+
+    it('add/multiply يرفضوا بوضوح لو أحد الـoperands field_ref بقيمة غير رقمية — NaN ماتوصلش للسعر النهائي', () => {
+      const addNode: FormulaNode = {
+        type: 'add',
+        operands: [{ type: 'literal', value: 100 }, { type: 'field_ref', field_key: 'area' }],
+      };
+      expect(() => evaluateFormulaNode(addNode, context({ fieldValues: { area: 'garbage' } }))).toThrow(ApiException);
+
+      const multiplyNode: FormulaNode = {
+        type: 'multiply',
+        operands: [{ type: 'field_ref', field_key: 'area' }, { type: 'literal', value: 165 }],
+      };
+      expect(() => evaluateFormulaNode(multiplyNode, context({ fieldValues: { area: 'garbage' } }))).toThrow(ApiException);
+    });
+
     it('constant_ref بيرجع قيمة الثابت', () => {
       const node: FormulaNode = { type: 'constant_ref', rule_key: 'price_per_meter' };
       const constants = new Map([['price_per_meter', { value: 140 }]]);
