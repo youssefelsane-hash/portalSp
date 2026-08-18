@@ -23,6 +23,7 @@ import { MAX_TEAM_MEMBERS_PER_ORDER } from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
+import { OrderTimelineEventRow } from './dto/order-timeline-event-response.dto';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { canTransition } from './order-state-machine';
 
@@ -115,6 +116,71 @@ export class AdminOrdersService {
       order: { cancelledAt: 'ASC' },
     });
     return { order, history, pricingEvaluation, technicianCancellations };
+  }
+
+  /**
+   * Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32) — كانت فجوة موثّقة صراحة: 4 مصادر
+   * منفصلة (audit_logs, order_status_history, order_assignments, technician_order_cancellations)
+   * كل واحدة في كارت لوحدها، الأدمن مضطر يقفز بين 4 أماكن يركّب الصورة الكاملة يدويًا. UNION ALL
+   * واحدة بترجّع تسلسل زمني واحد مرتّب، مع اسم الفاعل (لو موجود) جاهز — صفر N+1 queries على
+   * apps/admin بعدها.
+   */
+  async getTimeline(orderId: string): Promise<OrderTimelineEventRow[]> {
+    await this.findOrThrow(orderId);
+    return this.orders.manager.query<OrderTimelineEventRow[]>(
+      `WITH events AS (
+         SELECT
+           id, created_at AS ts, 'status_history' AS source,
+           concat('الحالة اتغيّرت من ', COALESCE(previous_status::text, '—'), ' لـ ', new_status::text) AS title,
+           jsonb_build_object(
+             'previous_status', previous_status, 'new_status', new_status, 'reason', reason,
+             'changed_by_role', changed_by_role, 'change_source', change_source
+           ) AS detail,
+           changed_by_user_id AS actor_user_id
+         FROM order_status_history WHERE order_id = $1
+
+         UNION ALL
+
+         SELECT
+           id, created_at AS ts, 'audit_log' AS source,
+           action AS title,
+           jsonb_build_object('old_values', old_values, 'new_values', new_values, 'actor_role', actor_role) AS detail,
+           actor_user_id
+         FROM audit_logs WHERE entity_type = 'order' AND entity_id = $1
+
+         UNION ALL
+
+         SELECT
+           id, sent_at AS ts, 'assignment' AS source,
+           concat('عرض جولة ', assignment_round::text, ' — ', assignment_status::text) AS title,
+           jsonb_build_object(
+             'technician_id', technician_id, 'assignment_round', assignment_round,
+             'assignment_status', assignment_status, 'distance_km', distance_km,
+             'responded_at', responded_at, 'rejection_reason_code', rejection_reason_code
+           ) AS detail,
+           NULL::uuid AS actor_user_id
+         FROM order_assignments WHERE order_id = $1
+
+         UNION ALL
+
+         SELECT
+           id, cancelled_at AS ts, 'technician_cancellation' AS source,
+           'الفني ألغى الطلب بعد القبول' AS title,
+           jsonb_build_object(
+             'technician_id', technician_id, 'reason_text', reason_text,
+             'within_policy_window', within_policy_window, 'fee_cents', fee_cents,
+             'recovery_action', recovery_action
+           ) AS detail,
+           technician_user_id AS actor_user_id
+         FROM technician_order_cancellations WHERE order_id = $1
+       )
+       SELECT e.id, e.ts, e.source, e.title, e.detail, e.actor_user_id AS "actorUserId",
+              u.full_name AS "actorFullName", u.user_type AS "actorUserType"
+       FROM events e
+       LEFT JOIN users u ON u.id = e.actor_user_id
+       ORDER BY e.ts ASC`,
+      [orderId],
+    );
   }
 
   async cancel(adminUserId: string, orderId: string, reason: string, meta?: AuditActorMeta): Promise<Order> {
