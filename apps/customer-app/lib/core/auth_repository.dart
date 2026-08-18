@@ -48,8 +48,26 @@ class AuthRepository extends ChangeNotifier {
   // نفس بَقّة apps/admin بالظبط (راجع الـ README هناك): refresh_token بيتدوّر على كل استخدام،
   // وأي إعادة استخدام لتوكن اتلغى بتقفل كل جلسات المستخدم. الـ single-flight guard ده بيمنع
   // أكتر من نداء refresh متزامن (زي init() بيتنادى مرتين من حاجتين مختلفتين وقت الإقلاع).
+  //
+  // Script 2 Part E (finding #30) — لو الباك-إند رفض الـrefresh برسالة 401 صريحة (حساب اتحظر،
+  // الجلسة اتلغت من الأدمن، refresh token متكرر الاستخدام)، ده معناها الجلسة ميتة فعليًا مش
+  // مجرد access_token قديم. كانت المشكلة إن الفشل ده بيتنشر بس للشاشة اللي عملت الـcall (مثلاً
+  // OrderDetailScreen بعد Deep Link)، وبتعرض رسالة خطأ خام من غير أي رجوع لـLoginScreen — باقي
+  // التطبيق (وAuthRepository نفسه) فاضل مقتنع إن المستخدم لسه داخل. مسح الحالة هنا (نقطة
+  // مركزية واحدة يمر بيها كل استدعاء authed*) بيخلي _AuthGate يعرض LoginScreen فورًا من أي
+  // مكان في التطبيق. الفحص محصور صراحة في statusCode==401 (رفض حقيقي من الباك-إند بعد رد HTTP
+  // فعلي) — مش أي فشل شبكة (SocketException/Timeout بترمي استثناء مختلف تمامًا مش ApiException،
+  // راجع api_client.dart)، عشان انقطاع نت مؤقت ميسجّلش خروج المستخدم بالغلط.
   Future<String> _refresh() {
-    return _inFlightRefresh ??= _doRefresh().whenComplete(() => _inFlightRefresh = null);
+    return (_inFlightRefresh ??= _doRefresh().whenComplete(() => _inFlightRefresh = null)).catchError((Object err) {
+      if (err is ApiException && err.statusCode == 401) {
+        _accessToken = null;
+        _user = null;
+        unawaited(_secureStorage.delete(key: _refreshTokenKey));
+        notifyListeners();
+      }
+      throw err;
+    });
   }
 
   Future<String> _doRefresh() async {
