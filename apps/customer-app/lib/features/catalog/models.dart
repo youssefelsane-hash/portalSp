@@ -33,6 +33,8 @@ class ServiceCategory {
   final String nameEn;
   final String slug;
   final String? iconUrl;
+  // Script 3 §14 — فئات شائعة حقيقية (مُعدّة من الأدمن)، مش مفبركة.
+  final bool isFeatured;
 
   ServiceCategory({
     required this.id,
@@ -41,6 +43,7 @@ class ServiceCategory {
     required this.nameEn,
     required this.slug,
     required this.iconUrl,
+    required this.isFeatured,
   });
 
   factory ServiceCategory.fromJson(Map<String, dynamic> json) => ServiceCategory(
@@ -50,6 +53,7 @@ class ServiceCategory {
         nameEn: json['name_en'] as String,
         slug: json['slug'] as String,
         iconUrl: json['icon_url'] as String?,
+        isFeatured: json['is_featured'] as bool? ?? false,
       );
 }
 
@@ -106,6 +110,15 @@ class CatalogService {
     if (allowsEmergency) return BookingMode.emergency;
     return null;
   }
+
+  // Script 3 §32/§35 — كل أوضاع الحجز المسموحة فعليًا للخدمة دي، بنفس ترتيب الأولوية. بتستخدم
+  // في تحديد هل نسأل العميل "إزاي حابب تحجز؟" أصلاً (لو وضع واحد بس، مفيش داعي نسأل خالص — بند
+  // 35: "Do not show Company/Team unnecessarily for simple services").
+  List<BookingMode> get availableBookingModes => [
+        if (allowsIndividual) BookingMode.individual,
+        if (allowsTeam) BookingMode.team,
+        if (allowsEmergency) BookingMode.emergency,
+      ];
 }
 
 // محرك التسعير الديناميكي (docs/08 §1) — مطابق لـ apps/api/src/modules/pricing/dto/pricing-response.dto.ts.

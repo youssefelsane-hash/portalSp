@@ -6,7 +6,7 @@ import 'core/deep_link_router.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
-import 'features/catalog/booking_mode_screen.dart';
+import 'features/catalog/home_screen.dart';
 
 void main() {
   assertProductionApiConfig();
@@ -47,6 +47,6 @@ class _AuthGate extends StatelessWidget {
     if (auth.biometricUnlockPending) {
       return const BiometricUnlockScreen();
     }
-    return auth.isAuthenticated ? const BookingModeScreen() : const LoginScreen();
+    return auth.isAuthenticated ? const HomeScreen() : const LoginScreen();
   }
 }

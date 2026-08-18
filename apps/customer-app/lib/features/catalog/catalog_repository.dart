@@ -18,6 +18,16 @@ class CatalogRepository {
     return items.map(CatalogService.fromJson).toList();
   }
 
+  // Script 3 §6/§7 — وصف طبيعي/بحث بديل عن تصفح الفئات ("المياه بتنزل من تحت الحوض" بدل
+  // "سباكة"). GET /services/search?q=... (aliases/substring، مش AI — catalog.service.ts's
+  // searchServices()). أقل من حرفين محليًا برضه (مطابق لفحص الباك-إند) عشان مانبعتش طلبات فاضية.
+  Future<List<CatalogService>> searchServices(String q) async {
+    final trimmed = q.trim();
+    if (trimmed.length < 2) return [];
+    final items = await apiRequestList('/services/search?${Uri(queryParameters: {'q': trimmed}).query}');
+    return items.map(CatalogService.fromJson).toList();
+  }
+
   // مستخدمة في "إعادة الحجز" — عندنا service_id بس من الطلب القديم، محتاجين الكائن الكامل
   // عشان نفتح CreateOrderScreen عليه.
   Future<CatalogService> fetchService(String serviceId) async {
