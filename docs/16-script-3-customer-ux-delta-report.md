@@ -1,0 +1,121 @@
+# Script 3 — تقرير Delta لتجربة العميل (قبل التنفيذ، بند 89)
+
+هذا التقرير مطلوب صراحة من سبيسفيكيشن Script 3 (بند 89) قبل أي تنفيذ واسع. الأساس: Script 1 SHA
+موثّق في `docs/14`، Script 2 مكتمل بالكامل وموثّق في `docs/15` (الفحص النهائي: 78 suite / 443
+اختبار، `tsc`/`nest build` نضاف). العمل هنا بيبدأ من نفس الفرع `claude/home-services-app-plan-v13gb2`،
+بلا أي تعديل على `main`.
+
+## 1. الشاشات الحالية في customer-app (جرد)
+
+`apps/customer-app/lib/features/` — 18 موديول: `account`, `addresses`, `auth`, `catalog`, `chat`,
+`domestic_workers`, `favorites`, `geo`, `loyalty`, `notifications`, `orders`, `payments`,
+`ratings`, `recurring`, `referrals`, `support`, `technician_referral`, `technicians`, `tracking`.
+
+الشاشات الأساسية لرحلة الحجز:
+
+- `catalog/booking_mode_screen.dart` — **أول شاشة بعد تسجيل الدخول** (`main.dart` → `_AuthGate`
+  → `BookingModeScreen` مباشرة). بتسأل "محتاج فرد ولا فريق؟" (فرد/اعتماد/طوارئ) **قبل** أي اختيار
+  خدمة — بالظبط الـanti-pattern اللي بند 2/3/32 من السكريبت بيحذّر منه صراحة.
+- `catalog/categories_screen.dart` — grid فئات بسيط (2 عمود)، بيستقبل `bookingMode` من الشاشة
+  اللي قبلها.
+- `catalog/services_screen.dart` — قايمة خدمات الفئة المختارة (137 سطر).
+- `orders/create_order_screen.dart` — **891 سطر**، الشاشة الأكبر: تفاصيل الخدمة، الحقول
+  الديناميكية (formula pricing fields)، العنوان، الجدولة، السعر، طريقة الدفع، التأكيد — كله في
+  ملف واحد (تدفق تدريجي داخليًا، مش شاشات منفصلة).
+- `orders/order_detail_screen.dart` — **987 سطر**، مركز الطلب النشط: الحالة، الفني، السعر،
+  الشات، العمل الإضافي، الإلغاء، التقييم.
+- `orders/orders_screen.dart` — سجل الطلبات (حالي/مكتمل/ملغي).
+
+## 2. تدفق الحجز الحالي بالضبط
+
+```
+تسجيل دخول → BookingModeScreen (فرد/اعتماد/طوارئ) → CategoriesScreen → ServicesScreen
+→ CreateOrderScreen (تفاصيل+سعر+عنوان+جدولة+دفع+تأكيد) → OrderDetailScreen (تتبع)
+```
+
+## 3. مشاكل UX الحالية (الحقيقية، اتأكدت بقراءة الكود مش افتراض)
+
+1. **الأخطر**: `BookingModeScreen` بوابة دخول إجبارية قبل فهم المشكلة — يخالف بند 2/3/5/32
+   صراحة. العميل الأول ما بيشوفش "قول لينا محتاج مساعدة في إيه" أبدًا، بيشوف مصطلح تشغيلي داخلي
+   (فرد/فريق) الأول.
+2. **مفيش شاشة Home حقيقية** — `BookingModeScreen` نفسها هي "الهوم" (فيها كل الأيقونات: طلباتي/
+   إشعارات/دعم/خدمات منزلية/حسابي) لكن من غير أي "وصف مشكلتك" أو بحث.
+3. **مفيش بحث نصي/طبيعي عن خدمة** — `CatalogRepository` مالهاش أي method بحث، والـ`Service`
+   entity في الباك-إند مالهاش أي حقل aliases/keywords/synonyms خالص (بند 7/12 محتاجينه).
+4. **booking_mode بيتسأل بمعزل عن الخدمة** — رغم إن كل `Service` عنده فعليًا
+   `allows_individual`/`allows_team`/`allows_emergency` (مُعرّضة في `service-response.dto.ts`)،
+   العميل بيختار الوضع الأول من غير ما يعرف الخدمة أصلاً هتسمح بيه ولا لأ.
+5. مفيش تمييز واضح بين "اختار فني بنفسك" و"سيبنا نختارلك" كـCTA أساسي/ثانوي مبكر (بند 33/34) —
+   موجود جوّه `CreateOrderScreen` لاحقًا بس مش بالتسلسل المطلوب.
+
+## 4. مكونات قابلة لإعادة الاستخدام (موجودة فعلاً)
+
+- `design/app_theme.dart`, `design/empty_state.dart`, `design/loading_list.dart`,
+  `design/status_chip.dart`, `design/confirm_dialog.dart` — أساس design system موجود، مش من
+  الصفر.
+- `CatalogRepository`/`OrdersRepository` — طبقة API نظيفة، مفيش داعي إعادة بناء.
+- محرك التسعير الديناميكي كامل ومربوط (formula fields, standard-data duration estimate).
+- `/payment-channels` (Script 2 Part I) — بيعكس الطرق المُفعّلة فعليًا، مُستخدم بالفعل في
+  `CreateOrderScreen`.
+- `PushNotificationService`/`deep_link_router.dart` (Script 2) — جاهزين.
+- الشات، الصور، التقييمات، العمل الإضافي — كلهم شغالين ومربوطين (راجع `docs/15` للتفاصيل).
+
+## 5. وظائف/API لازم تفضل زي ما هي (مايتلمسوش)
+
+كل الـbackend business logic: `OrdersService`, `MatchingService`, `PricingEngineService`,
+`WalletsService`, RBAC، الدفع، الفرق/الشركات، الترقية، الإشعارات. التعديلات المطلوبة هنا (لو
+وُجدت) إضافات صرفة (حقل جديد، endpoint قراءة جديد) مش تعديل منطق قائم.
+
+## 6. شاشات تفضل زي ما هي (KEEP)
+
+`order_detail_screen.dart` (الجدول الزمني بالفعل نصوص عربية مقروءة مش enums خام — اتأكد بقراءة
+الكود)، الشات، التقييمات، الإشعارات، الدعم، الحساب/العناوين — هذول شغالين وصح بنيويًا، أي تعديل
+هيكون REFINE بسيط مش REDESIGN.
+
+## 7. شاشات لازم REDESIGN
+
+- `BookingModeScreen` → تتحول لـHome حقيقية (وصف المشكلة + بحث + فئات شائعة)، ونقل سؤال
+  الوضع (فرد/اعتماد) لمرحلة بعد فهم الخدمة.
+- `CategoriesScreen` → تفضل موجودة بس بدون إجبار `bookingMode` كباراميتر أول.
+
+## 8. MERGE / REMOVE
+
+مفيش شاشة تتحذف — كل الوظائف الحالية شرعية ومطلوبة. `BookingModeScreen` بمعناها الحالي (بوابة
+اختيار وضع) بتندمج داخل `CreateOrderScreen`'s flow (بعد السعر، مش قبل الخدمة).
+
+## 9. الويب المفقود
+
+**مفيش Customer Web app خالص** — `apps/` فيها بس `api`, `admin` (لوحة تحكم داخلية),
+`customer-app`, `technician-app` (الاتنين Flutter mobile). بند 58/92 بيطلب تطبيق ويب حقيقي —
+هيتبني من الصفر (Next.js، بنفس نمط `apps/admin` تقنيًا، لكن منتج مختلف تمامًا — عميل مش أدمن).
+
+## 10. أنماط منافسين مُتّبعة
+
+- **ADOPT**: بحث/وصف مشكلة كنقطة دخول أولى (Thumbtack/TaskRabbit) — بدل تصنيف تشغيلي داخلي.
+- **ADOPT**: "دعنا نختار لك" كـCTA أساسي بارز، "اختر بنفسك" ثانوي (Urban Company/Thumbtack).
+- **ADAPT**: عرض نطاق سعر مع تفسير موجز ليه ممكن يتغيّر (مش نسخ التصميم البصري لأي منصة).
+- **REJECT/NOT NEEDED**: فبركة "آلاف الفنيين المعتمدين" أو تقييمات وهمية — بند 78 صراحة.
+- **OWNER DECISION REQUIRED**: هوية بصرية/ألوان "صُنّاع" النهائية — الـtheme الحالي أساسي
+  functional، أي قرار براندنج بصري كبير (لوجو، لوحة ألوان نهائية) قرار مالك، هنحافظ على المتّبع
+  حاليًا ونحسّن التناسق مش نخترع هوية جديدة من غير تفويض.
+
+## 11. قرارات تحتاج تفويض المالك
+
+- الهوية البصرية النهائية (شعار/ألوان) — خارج نطاق كود.
+- نطاق "Customer Web" الكامل مقابل MVP وظيفي حقيقي (هنبني MVP وظيفي حقيقي بنفس الـAPIs، مش
+  brochure، لكن full feature parity مع mobile في جلسة واحدة غير واقعي — هيتوثّق بصراحة أي جزء
+  PARTIAL).
+
+## 12. خطة التنفيذ (المراحل)
+
+Phase 1 (design system) → Phase 2 (Home + اكتشاف الخدمة، بما فيها نقل booking_mode) → Phase 2b
+(بحث/aliases) → Phase 3-7 (مراجعة/إصلاح فجوات حقيقية في الحجز الموجّه/السعر/المزود/المراجعة/الدفع)
+→ Phase 8-10 (مراجعة Active Order Hub/الشات/الدعم/السجل) → Phase 11 (Customer Web MVP حقيقي) →
+Phase 12-13 (أداء/إتاحة/RTL/اختبارات حية + تقرير نهائي).
+
+---
+
+**الحكم النهائي لـPhase 0**: الـbackend جاهز فعليًا لمعظم إعادة الترتيب المطلوبة (booking_mode
+flags على مستوى الخدمة موجودة ومُعرّضة بالفعل) — المشكلة UX بحتة في ترتيب الشاشات، مش نقص
+بيانات. الفجوة الحقيقية الوحيدة على مستوى الباك-إند المُكتشفة هنا: مفيش حقل aliases/keywords
+للبحث اللغوي الطبيعي. بقية الفجوات (Customer Web بالكامل) UI/تطبيق جديد، مش منطق أعمال جديد.
