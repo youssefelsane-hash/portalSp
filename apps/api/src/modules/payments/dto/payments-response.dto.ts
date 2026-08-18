@@ -192,3 +192,9 @@ export function toRefundResponseDto(refund: Refund): RefundResponseDto {
     completed_at: refund.completedAt ? refund.completedAt.toISOString() : null,
   };
 }
+
+// Script 2 Part I (findings #46/#47) — راجع payment-provider.registry.ts's listAll() للسياق الكامل.
+export interface PaymentChannelResponseDto {
+  method: string;
+  is_available: boolean;
+}

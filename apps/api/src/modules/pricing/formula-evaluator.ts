@@ -26,6 +26,8 @@ const ALLOWED_NODE_TYPES = new Set<FormulaNode['type']>([
   'min',
   'max',
   'round',
+  'ceil',
+  'floor',
   'if',
 ]);
 
@@ -97,9 +99,11 @@ export function validateFormulaNode(node: unknown, depth = 0): void {
       validateFormulaNode(candidate.percent, depth + 1);
       return;
     case 'round':
+    case 'ceil':
+    case 'floor':
       validateFormulaNode(candidate.value, depth + 1);
       if (candidate.decimals !== undefined && typeof candidate.decimals !== 'number') {
-        rejectFormula('round.decimals لازم يكون رقم لو موجود');
+        rejectFormula(`${candidate.type}.decimals لازم يكون رقم لو موجود`);
       }
       return;
     case 'if':
@@ -190,7 +194,22 @@ export function evaluateFormulaNode(node: FormulaNode, context: FormulaEvaluatio
       if (value === undefined) {
         throw new ApiException(ErrorCode.VAL_001, `الحقل "${node.field_key}" مطلوب لحساب السعر`, HttpStatus.BAD_REQUEST);
       }
-      return Number(toComparableNumber(value));
+      const numeric = Number(toComparableNumber(value));
+      // Script 2 Part H (finding #42) — كانت بَقّة حقيقية: قيمة نصية مش رقمية (زي "hello" بدل
+      // "3") كانت بتتحول لـNaN هنا من غير أي فحص، وNaN بتتسرّب صامتة عبر كل عمليات المعادلة
+      // الحسابية (add/multiply/...) لحد السعر النهائي — عكس تعليق الدالة اللي بيدّعي "بيرفض
+      // بوضوح... بدل ما يرجع NaN بصمت"، ده كان صحيح للحقل المفقود بس مش للحقل الملوث بقيمة
+      // غير رقمية. `validateAndNormalizeFieldValues` (pricing-engine.service.ts) بتتجاهل الفحص
+      // عمدًا للحقول من غير min/max مُعرّف (تصنيفية زي dropdown نص) — هنا بس، لحظة الاستخدام
+      // الفعلي كرقم في المعادلة، إحنا متأكدين إن السياق محتاج رقم فنرفض بوضوح لو مش رقم صالح.
+      if (!Number.isFinite(numeric)) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `قيمة الحقل "${node.field_key}" لازم تكون رقم صالح لحساب السعر — القيمة الحالية غير رقمية`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return numeric;
     }
 
     case 'constant_ref': {
@@ -256,6 +275,18 @@ export function evaluateFormulaNode(node: FormulaNode, context: FormulaEvaluatio
       const value = evaluateFormulaNode(node.value, context);
       const factor = 10 ** (node.decimals ?? 0);
       return Math.round(value * factor) / factor;
+    }
+
+    case 'ceil': {
+      const value = evaluateFormulaNode(node.value, context);
+      const factor = 10 ** (node.decimals ?? 0);
+      return Math.ceil(value * factor) / factor;
+    }
+
+    case 'floor': {
+      const value = evaluateFormulaNode(node.value, context);
+      const factor = 10 ** (node.decimals ?? 0);
+      return Math.floor(value * factor) / factor;
     }
 
     case 'if':

@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, rm, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { StorageService } from './storage.service';
 
@@ -13,6 +13,7 @@ import { StorageService } from './storage.service';
 @Injectable()
 export class LocalDiskStorageService implements StorageService {
   private readonly baseDir: string;
+  private readonly logger = new Logger('StorageService(local)');
 
   constructor(config: ConfigService) {
     this.baseDir = config.get<string>('storage.localDir')!;
@@ -28,5 +29,13 @@ export class LocalDiskStorageService implements StorageService {
   // مسار محلي ثابت أصلاً (مفيش presigning)، فمفيش حاجة تتجدد — نفس النتيجة اللي save() برجعها.
   async getUrl(key: string): Promise<string> {
     return `/uploads/${key}`;
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      await rm(join(this.baseDir, key), { force: true });
+    } catch (err) {
+      this.logger.error(`فشل حذف الملف اليتيم ${key}`, err instanceof Error ? err.stack : err);
+    }
   }
 }

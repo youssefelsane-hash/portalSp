@@ -8,6 +8,12 @@ export interface StorageService {
    * الكولر بيخزّن الـkey بس، وبيولّد رابط جديد وقت كل قراءة (مع كاش قصير المدى فوق النتيجة).
    */
   getUrl(key: string): Promise<string>;
+  /**
+   * Script 2 Part G (finding #34) — تعويض لو رفع الملف نجح بس تسجيل الـmetadata في الـDB فشل
+   * بعده مباشرة (`uploadWithOrphanCleanup`، `common/storage/upload-with-orphan-cleanup.util.ts`).
+   * idempotent — حذف key مش موجود أصلاً لازم يكون safe no-op، مش استثناء.
+   */
+  delete(key: string): Promise<void>;
 }
 
 export const STORAGE_SERVICE = Symbol('STORAGE_SERVICE');

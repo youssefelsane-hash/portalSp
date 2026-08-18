@@ -103,6 +103,8 @@ export type FormulaNode =
   | { type: 'min'; operands: FormulaNode[] }
   | { type: 'max'; operands: FormulaNode[] }
   | { type: 'round'; value: FormulaNode; decimals?: number }
+  | { type: 'ceil'; value: FormulaNode; decimals?: number }
+  | { type: 'floor'; value: FormulaNode; decimals?: number }
   | { type: 'if'; condition: FormulaCondition; then: FormulaNode; else: FormulaNode };
 
 export type ComparisonOperator = 'equals' | 'not_equals' | 'gt' | 'gte' | 'lt' | 'lte';

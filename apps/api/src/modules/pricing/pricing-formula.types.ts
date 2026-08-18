@@ -17,6 +17,13 @@ export type FormulaNode =
   | { type: 'min'; operands: FormulaNode[] }
   | { type: 'max'; operands: FormulaNode[] }
   | { type: 'round'; value: FormulaNode; decimals?: number }
+  // Script 2 Part H (finding #43) — سياسة تسعير شائعة في الخدمات المنزلية: "أي جزء من وحدة
+  // (متر/ساعة) يُحسب وحدة كاملة" (مثلاً مساحة زادت 0.1 م² عن الأساس → شريحة سعر تالية كاملة).
+  // round() القديمة عمرها ما كانت هتعبّر عن السياسة دي (بتقرّب لأقرب قيمة، مش لأعلى دايمًا).
+  // إضافة صرفة (node types جداد، مفيش تعديل على round نفسها) — الأدمن يختار يستخدمها لما
+  // السياسة الفعلية تتأكد، مش تغيير سلوك أي معادلة موجودة بالفعل.
+  | { type: 'ceil'; value: FormulaNode; decimals?: number }
+  | { type: 'floor'; value: FormulaNode; decimals?: number }
   | { type: 'if'; condition: FormulaCondition; then: FormulaNode; else: FormulaNode };
 
 export type ComparisonOperator = 'equals' | 'not_equals' | 'gt' | 'gte' | 'lt' | 'lte';

@@ -58,6 +58,20 @@ export class PricingEngineService {
     const context: FormulaEvaluationContext = { fieldValues, constants, lookupTables };
     const priceCents = Math.round(evaluateFormulaNode(finalPricePayload.price_cents, context));
 
+    // Script 2 Part H (finding #44) — حراسة أخيرة على السعر النهائي قبل ما يوصل لأي مكان بيحدد
+    // مبلغ حقيقي يتحصّل من العميل. field_ref (formula-evaluator.ts) بترفض القيم الغير رقمية
+    // دلوقتي، لكن ده حماية إضافية ضد أي مسار حسابي تاني (lookup/constant بقيمة متطرفة، قسمة على
+    // رقم قريب من صفر) ممكن نظريًا ينتج Infinity أو سعر سالب من غير ما يمر بـfield_ref خالص —
+    // بدل ما نسيب Postgres يرمي "invalid input syntax for type integer" خام لو القيمة NaN وقت
+    // الإدراج (orders.total_amount_cents integer)، بنرفض هنا برسالة واضحة.
+    if (!Number.isFinite(priceCents) || priceCents < 0) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'معادلة التسعير أنتجت سعرًا غير صالح لهذه المدخلات — راجع بيانات الخدمة',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
     const evalOptional = (node: FormulaNode | undefined): number | null =>
       node !== undefined ? evaluateFormulaNode(node, context) : null;
 

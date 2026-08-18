@@ -2,9 +2,10 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { TechniciansService } from '../technicians/technicians.service';
 import { Order } from './entities/order.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
@@ -38,20 +39,20 @@ export class OrderMediaService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
 
-    const key = `orders/${orderId}/${randomUUID()}${extname(file.originalname)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const media = this.orderMedia.create({
-      orderId,
-      uploadedByUserId: userId,
-      mediaType,
-      fileUrl,
-      storageKey: key,
-      fileSizeBytes: file.size,
-      caption: caption ?? null,
+    const key = `orders/${orderId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
+    return uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      const media = this.orderMedia.create({
+        orderId,
+        uploadedByUserId: userId,
+        mediaType,
+        fileUrl,
+        storageKey: key,
+        fileSizeBytes: file.size,
+        caption: caption ?? null,
+      });
+      await this.orderMedia.save(media);
+      return media;
     });
-    await this.orderMedia.save(media);
-    return media;
   }
 
   listForOrder(orderId: string): Promise<OrderMedia[]> {

@@ -38,6 +38,8 @@ const NODE_TYPE_LABELS: Record<FormulaNode['type'], string> = {
   min: 'أصغر قيمة',
   max: 'أكبر قيمة',
   round: 'تقريب',
+  ceil: 'تقريب لأعلى (أي جزء من الوحدة = وحدة كاملة)',
+  floor: 'تقريب لأسفل',
   if: 'شرط (لو... وإلا)',
 };
 
@@ -82,7 +84,9 @@ function defaultNodeForType(type: FormulaNode['type'], context: FormulaEditorCon
     case 'percentage':
       return { type: 'percentage', base: { type: 'literal', value: 0 }, percent: { type: 'literal', value: 0 } };
     case 'round':
-      return { type: 'round', value: { type: 'literal', value: 0 }, decimals: 0 };
+    case 'ceil':
+    case 'floor':
+      return { type, value: { type: 'literal', value: 0 }, decimals: 0 };
     case 'if':
       return {
         type: 'if',
@@ -234,7 +238,7 @@ export function FormulaTreeEditor({
         </div>
       )}
 
-      {node.type === 'round' && (
+      {(node.type === 'round' || node.type === 'ceil' || node.type === 'floor') && (
         <div className="flex flex-col gap-2">
           <div>
             <Label className="mb-1 block">القيمة</Label>

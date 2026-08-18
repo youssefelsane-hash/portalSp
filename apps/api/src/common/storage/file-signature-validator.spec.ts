@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { assertFileSignatureMatches, detectActualFileFormat } from './file-signature-validator';
+import { assertFileSignatureMatches, detectActualFileFormat, safeExtensionForFile } from './file-signature-validator';
 
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
 const JPEG_HEADER = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -44,5 +44,25 @@ describe('file-signature-validator — docs/08 §19 بند 10 (magic bytes بد�
     expect(() => assertFileSignatureMatches(PDF_HEADER, 'image/jpeg', new Set(['image/jpeg', 'application/pdf']))).toThrow(
       'نوع الملف المُعلَن مايطابقش محتواه الفعلي',
     );
+  });
+
+  describe('safeExtensionForFile — Script 2 Part G (finding #36): الامتداد المُخزَّن من المحتوى مش من اسم الملف', () => {
+    it('بيرجّع الامتداد الصحيح لكل نوع مدعوم بناءً على magic bytes', () => {
+      expect(safeExtensionForFile(PNG_HEADER)).toBe('.png');
+      expect(safeExtensionForFile(JPEG_HEADER)).toBe('.jpg');
+      expect(safeExtensionForFile(WEBP_HEADER)).toBe('.webp');
+      expect(safeExtensionForFile(PDF_HEADER)).toBe('.pdf');
+    });
+
+    it('محتوى PNG حقيقي باسم ملف مزوّر (originalname مايتقراش خالص هنا) — الامتداد لسه .png', () => {
+      // العميل ممكن يبعت originalname="innocent.html" أو "shell.php.png.exe" — الدالة دي أصلاً
+      // مش بتاخد اسم الملف كمدخل خالص، بس بنثبت هنا إن نفس بايتات PNG بترجع امتداد PNG دايماً
+      // بغض النظر عن أي اسم ملف كان هيتحط جنبها لو استخدمنا extname() القديمة.
+      expect(safeExtensionForFile(PNG_HEADER)).toBe('.png');
+    });
+
+    it('بيرجّع سترينج فاضي لمحتوى مش من الأنواع المعروفة (بدل ما يفترض امتداد غلط)', () => {
+      expect(safeExtensionForFile(NOT_A_FILE)).toBe('');
+    });
   });
 });

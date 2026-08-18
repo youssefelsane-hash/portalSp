@@ -2,9 +2,10 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { TechnicianDocument } from './entities/technician-document.entity';
 import { TechniciansService } from './technicians.service';
@@ -27,19 +28,19 @@ export class TechnicianDocumentsService {
   async upload(userId: string, dto: UploadDocumentDto, file: IncomingFile): Promise<TechnicianDocument> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
 
-    const key = `technician-documents/${profile.id}/${randomUUID()}${extname(file.originalname)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const document = this.documents.create({
-      technicianId: profile.id,
-      documentType: dto.document_type,
-      fileUrl,
-      storageKey: key,
-      fileSizeBytes: file.size,
-      mimeType: file.mimetype,
-      expiresAt: dto.expires_at ?? null,
+    const key = `technician-documents/${profile.id}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
+    return uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, (fileUrl) => {
+      const document = this.documents.create({
+        technicianId: profile.id,
+        documentType: dto.document_type,
+        fileUrl,
+        storageKey: key,
+        fileSizeBytes: file.size,
+        mimeType: file.mimetype,
+        expiresAt: dto.expires_at ?? null,
+      });
+      return this.documents.save(document);
     });
-    return this.documents.save(document);
   }
 
   async listMine(userId: string): Promise<TechnicianDocument[]> {

@@ -88,6 +88,25 @@ describe('formula-evaluator', () => {
       expect(evaluateFormulaNode({ type: 'max', operands: [{ type: 'literal', value: 5 }, { type: 'literal', value: 2 }] }, context())).toBe(5);
       expect(evaluateFormulaNode({ type: 'round', value: { type: 'literal', value: 12.678 }, decimals: 1 }, context())).toBe(12.7);
     });
+
+    // Script 2 Part H (finding #43) — ceil()/floor() جداد جنب round()، لسياسة "أي جزء من الوحدة
+    // يُحسب وحدة كاملة" اللي round() العادية معندهاش طريقة تعبّر عنها.
+    it('ceil بيقرّب لأعلى دايمًا حتى لو الكسر صغير (سياسة "أي جزء = وحدة كاملة")', () => {
+      expect(evaluateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 5.01 } }, context())).toBe(6);
+      expect(evaluateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 5 } }, context())).toBe(5);
+      expect(evaluateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 12.34 }, decimals: 1 }, context())).toBe(12.4);
+    });
+
+    it('floor بيقرّب لأسفل دايمًا', () => {
+      expect(evaluateFormulaNode({ type: 'floor', value: { type: 'literal', value: 5.99 } }, context())).toBe(5);
+      expect(evaluateFormulaNode({ type: 'floor', value: { type: 'literal', value: 12.34 }, decimals: 1 }, context())).toBe(12.3);
+    });
+
+    it('ceil/floor مسموحين في validateFormulaNode زي round بالظبط', () => {
+      expect(() => validateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 1 } })).not.toThrow();
+      expect(() => validateFormulaNode({ type: 'floor', value: { type: 'literal', value: 1 } })).not.toThrow();
+      expect(() => validateFormulaNode({ type: 'ceil', value: { type: 'literal', value: 1 }, decimals: 'x' })).toThrow();
+    });
   });
 
   describe('evaluateFormulaNode — مراجع (field_ref/constant_ref/lookup_ref)', () => {
@@ -99,6 +118,28 @@ describe('formula-evaluator', () => {
     it('field_ref بيرفض بوضوح لو الحقل مش موجود في السياق', () => {
       const node: FormulaNode = { type: 'field_ref', field_key: 'missing' };
       expect(() => evaluateFormulaNode(node, context())).toThrow(ApiException);
+    });
+
+    // Script 2 Part H (finding #42) — كانت بَقّة حقيقية: قيمة نصية مش رقمية كانت بتتحول لـNaN
+    // بصمت وتتسرّب عبر باقي المعادلة (add/multiply/...) لحد السعر النهائي، عكس تعليق الدالة
+    // اللي بيدّعي "بيرفض بوضوح... بدل NaN بصمت".
+    it('field_ref بيرفض بوضوح لو قيمة الحقل نص مش رقمي خالص ("hello" مش "3")', () => {
+      const node: FormulaNode = { type: 'field_ref', field_key: 'area' };
+      expect(() => evaluateFormulaNode(node, context({ fieldValues: { area: 'hello' } }))).toThrow(ApiException);
+    });
+
+    it('add/multiply يرفضوا بوضوح لو أحد الـoperands field_ref بقيمة غير رقمية — NaN ماتوصلش للسعر النهائي', () => {
+      const addNode: FormulaNode = {
+        type: 'add',
+        operands: [{ type: 'literal', value: 100 }, { type: 'field_ref', field_key: 'area' }],
+      };
+      expect(() => evaluateFormulaNode(addNode, context({ fieldValues: { area: 'garbage' } }))).toThrow(ApiException);
+
+      const multiplyNode: FormulaNode = {
+        type: 'multiply',
+        operands: [{ type: 'field_ref', field_key: 'area' }, { type: 'literal', value: 165 }],
+      };
+      expect(() => evaluateFormulaNode(multiplyNode, context({ fieldValues: { area: 'garbage' } }))).toThrow(ApiException);
     });
 
     it('constant_ref بيرجع قيمة الثابت', () => {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'core/api_config.dart';
 import 'core/api_exception.dart';
 import 'core/auth_repository.dart';
 import 'core/compromised_device_screen.dart';
@@ -14,6 +15,7 @@ import 'features/onboarding/onboarding_screen.dart';
 import 'features/orders/available_orders_screen.dart';
 
 void main() {
+  assertProductionApiConfig();
   runApp(const BaytakTechnicianApp());
 }
 

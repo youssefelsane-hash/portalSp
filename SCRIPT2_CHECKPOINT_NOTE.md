@@ -1,4 +1,13 @@
-# Script 2 Checkpoint — NOT FULLY REVIEWED
+# Script 2 Checkpoint — RESOLVED (2026-08-17)
+
+**Update**: the "not fully reviewed" batch described below was reviewed on
+`claude/home-services-app-plan-v13gb2` after this branch merged `main` (which already contained
+this note via PR #122). Full details, evidence, and two additional real bugs found/fixed during
+the review (support-thread race, file-extension trust) are documented in
+`docs/15-script-2-security-release-hardening.md`. This file is kept for history; treat
+`docs/15-script-2-security-release-hardening.md` as the current source of truth for Script 2 status.
+
+---
 
 This checkpoint was created because the Codex usage limit was reached unexpectedly.
 

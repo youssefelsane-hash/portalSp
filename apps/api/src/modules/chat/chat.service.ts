@@ -2,7 +2,8 @@ import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
@@ -97,20 +98,29 @@ export class ChatService {
     if (!customerProfile) {
       throw new ApiException(ErrorCode.VAL_001, 'حساب العميل غير موجود', HttpStatus.NOT_FOUND);
     }
-    const existing = await this.threads.findOne({
+    // Script 2 Part F (finding #31) — كانت "search then create" بلا حماية DB: طلبين متزامنين
+    // ممكن يعدّوا الاتنين على "مفيش خيط" ويعملوا صفين. نفس نمط createThreadForOrder فوق —
+    // ON CONFLICT DO NOTHING (idx_chat_threads_one_support_thread_per_customer، migration 0128)
+    // ثم إعادة قراءة واحدة بغض النظر مين كسب سباق الإدخال.
+    const inserted = await this.threads
+      .createQueryBuilder()
+      .insert()
+      .values({
+        orderId: null,
+        threadType: ChatThreadType.SUPPORT_CHAT,
+        customerId: customerProfile.id,
+        technicianId: null,
+        isActive: true,
+      })
+      .orIgnore()
+      .returning(['id'])
+      .execute();
+    const thread = await this.threads.findOneOrFail({
       where: { customerId: customerProfile.id, threadType: ChatThreadType.SUPPORT_CHAT },
     });
-    if (existing) return existing;
-
-    const thread = this.threads.create({
-      orderId: null,
-      threadType: ChatThreadType.SUPPORT_CHAT,
-      customerId: customerProfile.id,
-      technicianId: null,
-      isActive: true,
-    });
-    await this.threads.save(thread);
-    this.logger.log(`support chat thread اتعمل للعميل ${customerProfile.id}`);
+    if ((inserted.raw as Array<{ id: string }>).length > 0) {
+      this.logger.log(`support chat thread اتعمل للعميل ${customerProfile.id}`);
+    }
     return thread;
   }
 
@@ -268,19 +278,20 @@ export class ChatService {
     const thread = await this.getThreadForParticipant(userId, threadId);
     this.assertThreadOpen(thread);
 
-    const key = `chat/${threadId}/${randomUUID()}${extname(file.originalname)}`;
-    const fileUrl = await this.storage.save(key, file.buffer, file.mimetype);
-
-    const message = this.messages.create({
-      threadId,
-      senderUserId: userId,
-      messageType: ChatMessageType.IMAGE,
-      content: null,
-      fileUrl,
-      isRead: false,
-      isFlagged: false,
+    const key = `chat/${threadId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
+    const message = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      const msg = this.messages.create({
+        threadId,
+        senderUserId: userId,
+        messageType: ChatMessageType.IMAGE,
+        content: null,
+        fileUrl,
+        isRead: false,
+        isFlagged: false,
+      });
+      await this.messages.save(msg);
+      return msg;
     });
-    await this.messages.save(message);
 
     thread.lastMessageAt = message.createdAt;
     await this.threads.save(thread);

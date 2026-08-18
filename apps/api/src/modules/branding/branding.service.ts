@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { validateBrandingFile, BrandingFileValidationError } from './branding-file-validator';
 import { DEFAULT_BRANDING_ASSETS } from './branding-defaults';
@@ -132,25 +133,25 @@ export class BrandingService {
     }
 
     const key = `branding/${assetType}/${randomUUID()}`;
-    await this.storage.save(key, file.buffer, file.mimetype);
-
     const existing = await this.assets.findOne({ where: { assetType } });
     const previousValues = existing
       ? { storage_key: existing.storageKey, mime_type: existing.mimeType, width_px: existing.widthPx, height_px: existing.heightPx }
       : null;
 
-    const saved = await this.assets.save(
-      this.assets.create({
-        id: existing?.id,
-        assetType,
-        storageKey: key,
-        mimeType: file.mimetype,
-        widthPx: dimensions.widthPx,
-        heightPx: dimensions.heightPx,
-        fileSizeBytes: file.size,
-        originalFileName: file.originalname,
-        uploadedByUserId: adminUserId,
-      }),
+    const saved = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, () =>
+      this.assets.save(
+        this.assets.create({
+          id: existing?.id,
+          assetType,
+          storageKey: key,
+          mimeType: file.mimetype,
+          widthPx: dimensions.widthPx,
+          heightPx: dimensions.heightPx,
+          fileSizeBytes: file.size,
+          originalFileName: file.originalname,
+          uploadedByUserId: adminUserId,
+        }),
+      ),
     );
 
     await this.cache.del(PUBLIC_CACHE_KEY);
