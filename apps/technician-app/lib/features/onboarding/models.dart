@@ -5,6 +5,10 @@ class TechnicianMe {
   final String technicianCode;
   final String verificationStatus;
   final bool isAvailable;
+  // أونلاين/أوفلاين (Script 4 §8) — is_available وis_on_duty الاتنين شرط "و" معًا في كل مكان
+  // بيقرر أهلية المطابقة في الباك-إند (matching.service.ts وغيرها)، فمفيش داعي لتوجيهين منفصلين
+  // للفني — زرار واحد بيبدّل الاتنين مع بعض عبر PATCH /technician/availability.
+  final bool isOnDuty;
   // "معاه مساعد؟" + تصنيف نوع الفني الأربعة (docs/06 §3.7-§3.8) — محسوبين لحظياً في الباك-إند،
   // مش أعمدة مخزّنة. كانت فجوة موثّقة صراحة: مفيش شاشة في apps/technician-app كانت بتقرأهم خالص.
   final String technicianType;
@@ -15,19 +19,21 @@ class TechnicianMe {
     required this.technicianCode,
     required this.verificationStatus,
     required this.isAvailable,
+    required this.isOnDuty,
     required this.technicianType,
     required this.assistantLinkStatus,
     required this.assistantTechnicianId,
   });
 
   factory TechnicianMe.fromJson(Map<String, dynamic> json) => TechnicianMe(
-        technicianCode: json['technician_code'] as String,
-        verificationStatus: json['verification_status'] as String,
-        isAvailable: json['is_available'] as bool,
-        technicianType: json['technician_type'] as String,
-        assistantLinkStatus: json['assistant_link_status'] as String,
-        assistantTechnicianId: json['assistant_technician_id'] as String?,
-      );
+    technicianCode: json['technician_code'] as String,
+    verificationStatus: json['verification_status'] as String,
+    isAvailable: json['is_available'] as bool,
+    isOnDuty: json['is_on_duty'] as bool,
+    technicianType: json['technician_type'] as String,
+    assistantLinkStatus: json['assistant_link_status'] as String,
+    assistantTechnicianId: json['assistant_technician_id'] as String?,
+  );
 }
 
 // مطابق لـ TechniciansService.classifyType() بالحرف — راجع technicians/README.md.
@@ -86,7 +92,8 @@ class TechnicianDocument {
     required this.expiresAt,
   });
 
-  factory TechnicianDocument.fromJson(Map<String, dynamic> json) => TechnicianDocument(
+  factory TechnicianDocument.fromJson(Map<String, dynamic> json) =>
+      TechnicianDocument(
         id: json['id'] as String,
         documentType: json['document_type'] as String,
         fileUrl: json['file_url'] as String,

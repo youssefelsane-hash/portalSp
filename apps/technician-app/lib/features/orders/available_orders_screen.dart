@@ -12,6 +12,8 @@ import '../company/company_screen.dart';
 import '../kpi/kpi_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
+import '../onboarding/models.dart';
+import '../onboarding/onboarding_repository.dart';
 import '../portfolio/portfolio_screen.dart';
 import '../profile/profile_screen.dart';
 import '../progression/progression_screen.dart';
@@ -32,15 +34,49 @@ class AvailableOrdersScreen extends StatefulWidget {
 
 class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   late final OrdersRepository _repository;
+  late final OnboardingRepository _onboardingRepository;
   List<AvailableOrder>? _orders;
   String? _error;
   bool _isActing = false;
+  TechnicianMe? _me;
+  bool _togglingDuty = false;
 
   @override
   void initState() {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
+    _onboardingRepository = OnboardingRepository(
+      context.read<AuthRepository>(),
+    );
     _recoverActiveOrThenLoad();
+    _loadMe();
+  }
+
+  Future<void> _loadMe() async {
+    try {
+      final me = await _onboardingRepository.fetchMe();
+      if (mounted) setState(() => _me = me);
+    } on ApiException {
+      // فشل آمن — شريط الأونلاين/أوفلاين بيختفي بس، مايمنعش عرض الطلبات المتاحة.
+    }
+  }
+
+  // زرار أونلاين/أوفلاين (Script 4 §8) — أهم فعل تشغيلي على شاشة الفني الرئيسية، فمكانه أعلى
+  // القايمة مباشرة مش داخل بروفايل ثانوي. الباك-إند بيرفض أي مطابقة لفني is_on_duty=false بغض
+  // النظر عن حالة الزرار هنا (matching.service.ts) — ده مجرد UI بينادي المصدر الحقيقي.
+  Future<void> _toggleDuty(bool wantOnDuty) async {
+    setState(() => _togglingDuty = true);
+    try {
+      final me = await _onboardingRepository.setOnDuty(wantOnDuty);
+      if (mounted) setState(() => _me = me);
+    } on ApiException catch (err) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _togglingDuty = false);
+    }
   }
 
   // كانت فجوة موثّقة: لو التطبيق اتقفل في نص دورة تنفيذ طلب، الشاشة الرئيسية كانت بترجع
@@ -51,7 +87,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       final activeOrder = await _repository.getActive();
       if (activeOrder != null && mounted) {
         await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: activeOrder)),
+          MaterialPageRoute(
+            builder: (_) => OrderExecutionScreen(initialOrder: activeOrder),
+          ),
         );
       }
     } on ApiException {
@@ -75,12 +113,17 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       final acceptedOrder = await _repository.accept(order.orderId);
       if (mounted) {
         await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder)),
+          MaterialPageRoute(
+            builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder),
+          ),
         );
       }
       await _load();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -92,7 +135,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.reject(order.orderId);
       await _load();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -116,7 +162,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
             // كانت شغالة ومختبرة من زمان بس مفيش شاشة كانت بتستخدمها خالص.
             Builder(
               builder: (context) => FutureBuilder<int>(
-                future: NotificationsRepository(context.read<AuthRepository>()).unreadCount(),
+                future: NotificationsRepository(
+                  context.read<AuthRepository>(),
+                ).unreadCount(),
                 builder: (context, snapshot) {
                   final unread = snapshot.data ?? 0;
                   return IconButton(
@@ -127,7 +175,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                     ),
                     tooltip: 'الإشعارات',
                     onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
                     ),
                   );
                 },
@@ -135,58 +185,143 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
             ),
           ],
         ),
-        body: RefreshIndicator(
-          onRefresh: _load,
-          child: _error != null
-              ? Center(child: Text(_error!))
-              : _orders == null
-                  ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-                  : _orders!.isEmpty
-                      ? ListView(
-                          children: [
-                            const SizedBox(height: 60),
-                            Center(child: Text('أهلاً ${auth.user?.fullName ?? ''} 👋')),
-                            const SizedBox(height: 12),
-                            const EmptyState(icon: Icons.work_outline, title: 'مفيش طلبات متاحة دلوقتي'),
-                          ],
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _orders!.length,
-                          separatorBuilder: (context, index) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final order = _orders![index];
-                            return Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(order.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
-                                    const SizedBox(height: 4),
-                                    Text('${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}'),
-                                    Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
-                                    if (order.problemDescription != null) Text(order.problemDescription!),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        FilledButton(
-                                          onPressed: _isActing ? null : () => _accept(order),
-                                          child: const Text('قبول'),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        OutlinedButton(
-                                          onPressed: _isActing ? null : () => _reject(order),
-                                          child: const Text('رفض'),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+        body: Column(
+          children: [
+            if (_me != null)
+              _DutyToggleBar(
+                me: _me!,
+                busy: _togglingDuty,
+                onChanged: _toggleDuty,
+              ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: _error != null
+                    ? Center(child: Text(_error!))
+                    : _orders == null
+                    ? const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: LoadingList(),
+                      )
+                    : _orders!.isEmpty
+                    ? ListView(
+                        children: [
+                          const SizedBox(height: 60),
+                          Center(
+                            child: Text(
+                              'أهلاً ${auth.user?.fullName ?? ''} 👋',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const EmptyState(
+                            icon: Icons.work_outline,
+                            title: 'مفيش طلبات متاحة دلوقتي',
+                          ),
+                        ],
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _orders!.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final order = _orders![index];
+                          return Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    order.serviceNameAr,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
+                                  ),
+                                  Text(
+                                    'على بعد ${order.distanceKm.toStringAsFixed(1)} كم',
+                                  ),
+                                  if (order.problemDescription != null)
+                                    Text(order.problemDescription!),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      FilledButton(
+                                        onPressed: _isActing
+                                            ? null
+                                            : () => _accept(order),
+                                        child: const Text('قبول'),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      OutlinedButton(
+                                        onPressed: _isActing
+                                            ? null
+                                            : () => _reject(order),
+                                        child: const Text('رفض'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// شريط أونلاين/أوفلاين (Script 4 §8) — is_available وis_on_duty الاتنين مع بعض عبر تبديل واحد
+// (راجع تعليق TechnicianMe.isOnDuty). أخضر = هيوصله طلبات جديدة، رمادي = مش هيوصله حاجة لحد ما
+// يرجّعه بنفسه — الفرق ده مقصود مش مجرد لون.
+class _DutyToggleBar extends StatelessWidget {
+  const _DutyToggleBar({
+    required this.me,
+    required this.busy,
+    required this.onChanged,
+  });
+
+  final TechnicianMe me;
+  final bool busy;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final onDuty = me.isOnDuty && me.isAvailable;
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: onDuty ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+      child: SwitchListTile(
+        value: onDuty,
+        onChanged: busy ? null : onChanged,
+        secondary: busy
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(
+                onDuty ? Icons.wifi_tethering : Icons.wifi_tethering_off,
+                color: onDuty ? scheme.primary : null,
+              ),
+        title: Text(
+          onDuty
+              ? 'أونلاين — بتستقبل طلبات جديدة'
+              : 'أوفلاين — مش هيوصلك طلبات',
+        ),
+        subtitle: Text(
+          onDuty
+              ? 'دوس عشان توقف الاستقبال مؤقتًا'
+              : 'دوس عشان تبدأ تستقبل طلبات',
         ),
       ),
     );
@@ -209,7 +344,9 @@ class _TechnicianDrawer extends StatelessWidget {
             padding: EdgeInsets.zero,
             children: [
               DrawerHeader(
-                decoration: BoxDecoration(color: Theme.of(context).colorScheme.primaryContainer),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -219,12 +356,21 @@ class _TechnicianDrawer extends StatelessWidget {
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       child: Text(
                         (auth.user?.fullName ?? '؟').characters.first,
-                        style: const TextStyle(color: Colors.white, fontSize: 20),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(auth.user?.fullName ?? '', style: Theme.of(context).textTheme.titleMedium),
-                    Text('صُنّاع — الفني', style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      auth.user?.fullName ?? '',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      'صُنّاع — الفني',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
@@ -248,7 +394,11 @@ class _TechnicianDrawer extends StatelessWidget {
               ),
               const Divider(height: 1),
               const _DrawerGroupLabel('حسابي'),
-              _DrawerItem(icon: Icons.person_outline, label: 'بروفايلي', builder: (_) => const ProfileScreen()),
+              _DrawerItem(
+                icon: Icons.person_outline,
+                label: 'بروفايلي',
+                builder: (_) => const ProfileScreen(),
+              ),
               _DrawerItem(
                 icon: Icons.groups_outlined,
                 label: 'شركتي / فريقي',
@@ -259,7 +409,11 @@ class _TechnicianDrawer extends StatelessWidget {
                 label: 'أرباحي',
                 builder: (_) => const WalletScreen(),
               ),
-              _DrawerItem(icon: Icons.insights_outlined, label: 'الأداء الشهري', builder: (_) => const KpiScreen()),
+              _DrawerItem(
+                icon: Icons.insights_outlined,
+                label: 'الأداء الشهري',
+                builder: (_) => const KpiScreen(),
+              ),
               _DrawerItem(
                 icon: Icons.military_tech_outlined,
                 label: 'المسار الوظيفي',
@@ -272,7 +426,11 @@ class _TechnicianDrawer extends StatelessWidget {
               ),
               const Divider(height: 1),
               const _DrawerGroupLabel('الدعم والتدريب'),
-              _DrawerItem(icon: Icons.school_outlined, label: 'الأكاديمية', builder: (_) => const AcademyScreen()),
+              _DrawerItem(
+                icon: Icons.school_outlined,
+                label: 'الأكاديمية',
+                builder: (_) => const AcademyScreen(),
+              ),
               // اتصال/واتساب مباشر مع خدمة العملاء (docs/08 §22 بند 15-19) — منفصل عن
               // "تواصل مع الإدارة" (شات داخلي) تحت.
               _DrawerItem(
@@ -294,8 +452,14 @@ class _TechnicianDrawer extends StatelessWidget {
               ),
               const Divider(height: 1),
               ListTile(
-                leading: Icon(Icons.logout, color: Theme.of(context).colorScheme.error),
-                title: Text('تسجيل الخروج', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                leading: Icon(
+                  Icons.logout,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  'تسجيل الخروج',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
                 onTap: () {
                   Navigator.of(context).pop();
                   context.read<AuthRepository>().logout();
@@ -320,17 +484,21 @@ class _DrawerGroupLabel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Text(
         label,
-        style: Theme.of(context)
-            .textTheme
-            .labelMedium
-            ?.copyWith(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
 }
 
 class _DrawerItem extends StatelessWidget {
-  const _DrawerItem({required this.icon, required this.label, required this.builder});
+  const _DrawerItem({
+    required this.icon,
+    required this.label,
+    required this.builder,
+  });
 
   final IconData icon;
   final String label;

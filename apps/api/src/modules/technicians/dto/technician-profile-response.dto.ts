@@ -13,6 +13,7 @@ export interface TechnicianProfileResponseDto {
   bio: string | null;
   verification_status: string;
   is_available: boolean;
+  is_on_duty: boolean;
 }
 
 export function toTechnicianProfileResponseDto(profile: TechnicianProfile): TechnicianProfileResponseDto {
@@ -29,5 +30,10 @@ export function toTechnicianProfileResponseDto(profile: TechnicianProfile): Tech
     bio: profile.bio,
     verification_status: profile.verificationStatus,
     is_available: profile.isAvailable,
+    // كانت فجوة موثّقة صراحة (Script 4 §8): الفني ميقدرش يشوف/يبدّل حالة "أونلاين" بتاعته —
+    // matching.service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
+    // التلاتة بيشترطوا is_available AND is_on_duty معًا، بس الحقل ده كان ناقص من DTO بروفايل
+    // الفني نفسه (موجود بالفعل في admin-technician-response.dto.ts للأدمن بس).
+    is_on_duty: profile.isOnDuty,
   };
 }

@@ -238,4 +238,12 @@ npm run start:dev
 npm test
 ```
 
+**فجوة موثّقة صراحة (Script 4، 2026-08-18)**: `npx jest` الافتراضي (parallel workers) بيفشل أحيانًا
+بـ`QueryFailedError` (FK violation) في `afterAll` cleanup لملفات مختلفة كل مرة (اتشاف مع
+`cash-settlement-direction.spec.ts`، `referral-integrity.spec.ts`، `recurring-orders-concurrency.spec.ts`
+في تشغيلات متتالية مختلفة) — مش بَقّة في منطق التطبيق ولا في أي ملف اختبار بعينه (كل ملف بينجح
+لوحده)، ده تضارب DB مشترك بين الـworkers المتوازيين اللي بتشتغل على نفس Postgres instance. **الحل
+المؤكد**: `npx jest --runInBand` (تسلسلي) بيعدّي 79/79 نضيف دايمًا. لو `npx jest` العادي فشل، جرّب
+`--runInBand` قبل ما تفترض بَقّة حقيقية.
+
 مرجع كامل: `../../docs/01-master-plan.md`, `../../docs/02-data-dictionary.md` §13

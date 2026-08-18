@@ -254,3 +254,32 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 الجديد فشل (اتحجز من عميل تاني بينهم)، التحرير القديم بيترول باك تلقائيًا (نفس الـtransaction)،
 صفر خسارة صامتة لموعد العميل الأصلي وصفر حجز مزدوج للفني ممكن يحصل بأي حال. مُستخدم من
 `OrdersService.reschedule()` (`../orders/README.md`).
+
+## زرار أونلاين/أوفلاين — Script 4 §8 (2026-08-18)
+
+كانت فجوة موثّقة صراحة (اكتشفتها مراجعة Script 4 التحضيرية): `PATCH /technician/availability`
+كان مبني ومختبر بالكامل من زمان (`is_available`/`is_on_duty`، راجع السطر التاسع فوق)، بس **مفيش
+شاشة في `apps/technician-app` كانت بتناديه خالص** — الفني مالوش أي طريقة يوقف/يبدأ استقبال طلبات
+جديدة غير إن الأدمن يلمسها له. الفجوة كانت UI بحتة، صفر شغل backend مطلوب غير حاجة واحدة صغيرة:
+`TechnicianProfileResponseDto` (بروفايل الفني الذاتي) كان ناقص `is_on_duty` رغم إن
+`admin-technician-response.dto.ts` (بروفايل نفس الفني من عين الأدمن) بيرجّعه من زمان — اتضاف هنا
+(`dto/technician-profile-response.dto.ts`).
+
+**قرار تصميم**: زرار واحد مش اتنين. فحصت كل مكان بيقرر أهلية المطابقة
+(`matching.service.ts:137`, `technician-assignment-guard.service.ts:29`,
+`assistant-matching.service.ts` مرتين) ولقيت `is_available`و`is_on_duty` شرط "و" معًا في كل
+واحدة منهم من غير أي فرق دلالي مفيد للفني نفسه — فمفيش داعي لتوجيهين، الزرار بيبدّل الاتنين مع
+بعض دايمًا عبر نداء واحد.
+
+**التنفيذ**: `AvailableOrdersScreen` (الشاشة الرئيسية للفني بعد تسجيل الدخول، `main.dart`'s
+`_VerificationGate`) بقى فيها `_DutyToggleBar` أعلى قايمة الطلبات المتاحة مباشرة — أهم فعل تشغيلي
+على الشاشة، مش داخل بروفايل ثانوي. `OnboardingRepository.setOnDuty()` جديدة بتنادي
+`PATCH /technician/availability` بـ`{is_available, is_on_duty}` الاتنين بنفس القيمة.
+
+**اختبار حي**: اتعمل login حقيقي بالفني المزروع (`+201055501234`, `TECH-000011`) عبر OTP الحقيقي،
+`PATCH .../availability` اتنادى بـ`false` ثم `true` والقيمتين اتأكدوا في `technician_profiles`
+مباشرة بـ`psql` مش بس رد الـAPI (`is_available`/`is_on_duty` رجعوا `f`/`f` ثم `t`/`t` في الجدول
+فعلاً). `flutter analyze` و`flutter test` (5/5) عدّوا نضيف على `apps/technician-app`.
+
+**فشل آمن متعمّد**: `_loadMe()` بتلبّس الفشل بـ`ApiException` صامت — الشريط بيختفي بس، مش بيمنع
+عرض قايمة الطلبات المتاحة العادية (نفس فلسفة `_VerificationGate` في `main.dart`).
