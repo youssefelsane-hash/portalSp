@@ -3,6 +3,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
   ComparisonOperator,
   ConstantRulePayload,
+  FinalPriceFormulaPayload,
   FormulaCondition,
   FormulaNode,
   LookupTableRulePayload,
@@ -135,6 +136,33 @@ export interface FormulaEvaluationContext {
   fieldValues: Record<string, string | number | boolean>;
   constants: Map<string, ConstantRulePayload>;
   lookupTables: Map<string, LookupTableRulePayload>;
+}
+
+const OPTIONAL_FORMULA_OUTPUT_KEYS: (keyof FinalPriceFormulaPayload)[] = [
+  'min_price_cents',
+  'max_price_cents',
+  'estimated_duration_days',
+  'required_technicians',
+  'required_assistants',
+  'requires_assistant',
+  'suitable_for_emergency',
+];
+
+/**
+ * فحص شكل payload معادلة final_price كاملة — مشتركة بين PricingRulesService.upsert() (وقت
+ * الحفظ الحقيقي) وPricingEngineService.evaluateDraft() (وقت المعاينة قبل الحفظ، Script 4 Part L
+ * §47-48) — نفس القواعد بالحرف في المكانين، صفر تكرار منطق.
+ */
+export function validateFinalPriceFormulaPayload(payload: Record<string, unknown>): void {
+  if (payload.price_cents === undefined) {
+    rejectFormula('formula.price_cents إجباري');
+  }
+  validateFormulaNode(payload.price_cents);
+  for (const key of OPTIONAL_FORMULA_OUTPUT_KEYS) {
+    if (payload[key] !== undefined) {
+      validateFormulaNode(payload[key]);
+    }
+  }
 }
 
 function toComparableNumber(value: string | number | boolean): number | string {

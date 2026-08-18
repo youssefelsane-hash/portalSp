@@ -141,3 +141,40 @@ export interface PricingEvaluationResponseDto {
   requires_assistant: boolean | null;
   suitable_for_emergency: boolean | null;
 }
+
+// معاينة مسوّدة قبل الحفظ (Script 4 Part L §47-48) — مطابق لـ
+// apps/api/src/modules/pricing/dto/evaluate-draft-pricing.dto.ts
+export interface EvaluateDraftPricingBody {
+  field_values: Record<string, string | number | boolean>;
+  formula_payload?: FinalPriceFormulaPayload;
+}
+
+// مطابق لـ apps/api/src/modules/pricing/dto/create-pricing-rule-test.dto.ts
+export interface CreatePricingRuleTestBody {
+  label: string;
+  field_values: Record<string, string | number | boolean>;
+  expected_price_cents: number;
+}
+
+export interface PricingRuleTestResponseDto {
+  id: string;
+  service_id: string;
+  label: string;
+  field_values: Record<string, string | number | boolean>;
+  expected_price_cents: number;
+  created_at: string;
+}
+
+// مطابق لـ apps/api/src/modules/pricing/dto/run-pricing-rule-tests.dto.ts
+export interface RunPricingRuleTestsBody {
+  formula_payload?: FinalPriceFormulaPayload;
+}
+
+export interface PricingRuleTestRunResultDto {
+  id: string;
+  label: string;
+  expected_price_cents: number;
+  actual_price_cents: number | null;
+  passed: boolean;
+  error: string | null;
+}

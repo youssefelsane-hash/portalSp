@@ -17,7 +17,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
   CreatePricingFieldBody,
-  EvaluatePricingBody,
+  CreatePricingRuleTestBody,
   FinalPriceFormulaPayload,
   FormulaNode,
   LookupTableRulePayload,
@@ -26,6 +26,8 @@ import type {
   PricingFieldResponseDto,
   PricingFieldType,
   PricingRuleResponseDto,
+  PricingRuleTestResponseDto,
+  PricingRuleTestRunResultDto,
   UpdatePricingFieldBody,
   UpsertPricingRuleBody,
 } from '@baytak/shared-types';
@@ -138,6 +140,16 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
 
+  // حالات اختبار محفوظة (Script 4 Part L §48) — "المدخلات دي لازم تنتج السعر ده بالظبط"، بتتشغّل
+  // ضد المسوّدة الحالية (payload) عشان تتأكد إن تعديلك ما كسرش سيناريو معروف قبل ما تحفظ.
+  const [ruleTests, setRuleTests] = useState<PricingRuleTestResponseDto[] | null>(null);
+  const [showNewRuleTest, setShowNewRuleTest] = useState(false);
+  const [ruleTestLabel, setRuleTestLabel] = useState('');
+  const [ruleTestFieldValues, setRuleTestFieldValues] = useState<Record<string, string>>({});
+  const [ruleTestExpectedEgp, setRuleTestExpectedEgp] = useState('');
+  const [ruleTestRunResults, setRuleTestRunResults] = useState<PricingRuleTestRunResultDto[] | null>(null);
+  const [isRunningTests, setIsRunningTests] = useState(false);
+
   function loadAll() {
     authedFetch<PricingFieldResponseDto[]>(`/admin/services/${serviceId}/pricing-fields`)
       .then(setFields)
@@ -145,6 +157,9 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
     authedFetch<PricingRuleResponseDto[]>(`/admin/services/${serviceId}/pricing-rules`)
       .then(setRules)
       .catch(() => setRules([]));
+    authedFetch<PricingRuleTestResponseDto[]>(`/admin/services/${serviceId}/pricing-tests`)
+      .then(setRuleTests)
+      .catch(() => setRuleTests([]));
   }
 
   useEffect(() => {
@@ -360,27 +375,103 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
     }
   }
 
-  async function handlePreview() {
-    setIsPreviewing(true);
-    setPreviewError(null);
-    setPreviewResult(null);
+  // معاينة مسوّدة (Script 4 Part L §47-48) — كانت فجوة موثّقة صراحة: المعاينة كانت بتنادي
+  // evaluate-price اللي بيقرا القاعدة المحفوظة فعليًا بس، يعني الأدمن لازم يحفظ (ينشر لعملاء
+  // حقيقيين) التعديل الأول قبل ما يقدر يشوف نتيجته. دلوقتي بتبعت payload الحالي (اللي لسه بيتعدّل
+  // في المحرر، ممكن يكون متغيّر ولسه مش محفوظ) لـ evaluate-draft — بدون أي كتابة في الداتابيز.
+  function collectPreviewFieldValues(): Record<string, string | number | boolean> {
     const fieldValues: Record<string, string | number | boolean> = {};
     for (const field of fields ?? []) {
       const raw = previewValues[field.field_key];
       if (raw === undefined || raw === '') continue;
       fieldValues[field.field_key] = field.field_type === 'checkbox' ? raw === 'true' : raw;
     }
-    const body: EvaluatePricingBody = { field_values: fieldValues };
+    return fieldValues;
+  }
+
+  async function handlePreview() {
+    setIsPreviewing(true);
+    setPreviewError(null);
+    setPreviewResult(null);
     try {
-      const result = await authedFetch<PricingEvaluationResponseDto>(`/services/${serviceId}/evaluate-price`, {
+      const result = await authedFetch<PricingEvaluationResponseDto>(`/admin/services/${serviceId}/pricing/evaluate-draft`, {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ field_values: collectPreviewFieldValues(), formula_payload: payload }),
       });
       setPreviewResult(result);
     } catch (err) {
       setPreviewError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
       setIsPreviewing(false);
+    }
+  }
+
+  // حالات اختبار محفوظة (Script 4 Part L §48) — بتاخد مدخلات المعاينة الحالية (previewValues)
+  // كنقطة بداية سريعة، الأدمن يعدّل الـlabel/السعر المتوقع بس.
+  function openNewRuleTestForm() {
+    setRuleTestFieldValues({ ...previewValues });
+    setRuleTestExpectedEgp(previewResult ? (previewResult.price_cents / 100).toFixed(2) : '');
+    setRuleTestLabel('');
+    setShowNewRuleTest(true);
+  }
+
+  async function handleCreateRuleTest(e: FormEvent) {
+    e.preventDefault();
+    if (!ruleTestLabel.trim() || ruleTestExpectedEgp.trim() === '') return;
+    const fieldValues: Record<string, string | number | boolean> = {};
+    for (const field of fields ?? []) {
+      const raw = ruleTestFieldValues[field.field_key];
+      if (raw === undefined || raw === '') continue;
+      fieldValues[field.field_key] = field.field_type === 'checkbox' ? raw === 'true' : raw;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      const body: CreatePricingRuleTestBody = {
+        label: ruleTestLabel.trim(),
+        field_values: fieldValues,
+        expected_price_cents: Math.round(Number(ruleTestExpectedEgp) * 100),
+      };
+      await authedFetch(`/admin/services/${serviceId}/pricing-tests`, { method: 'POST', body: JSON.stringify(body) });
+      setShowNewRuleTest(false);
+      setRuleTestRunResults(null);
+      loadAll();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteRuleTest(testId: string) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/pricing-tests/${testId}`, { method: 'DELETE' });
+      setRuleTestRunResults(null);
+      loadAll();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // بيشغّل كل الحالات ضد المسوّدة الحالية (payload) — مش القاعدة المحفوظة، عشان الأدمن يتأكد
+  // إن تعديله اللي لسه بيعمله ما كسرش أي سيناريو معروف قبل ما يحفظ.
+  async function handleRunRuleTests() {
+    setIsRunningTests(true);
+    setError(null);
+    try {
+      const results = await authedFetch<PricingRuleTestRunResultDto[]>(`/admin/services/${serviceId}/pricing-tests/run`, {
+        method: 'POST',
+        body: JSON.stringify({ formula_payload: payload }),
+      });
+      setRuleTestRunResults(results);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsRunningTests(false);
     }
   }
 
@@ -827,9 +918,14 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                   </div>
                 ))}
               </div>
-              <Button size="sm" disabled={isPreviewing} onClick={handlePreview}>
-                احسب السعر
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" disabled={isPreviewing} onClick={handlePreview}>
+                  احسب السعر
+                </Button>
+                <Button size="sm" variant="outline" onClick={openNewRuleTestForm}>
+                  احفظ كحالة اختبار
+                </Button>
+              </div>
               {previewError && <p className="mt-3 text-destructive">{previewError}</p>}
               {previewResult && (
                 <div className="mt-3 rounded-md border p-3 text-sm">
@@ -852,6 +948,93 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                 </div>
               )}
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* حالات اختبار محفوظة (Script 4 Part L §48) — "المدخلات دي لازم تنتج السعر ده بالظبط"،
+          بتتشغّل ضد المسوّدة الحالية (payload) مش القاعدة المحفوظة — تتأكد إن التعديل اللي لسه
+          بتعمله ما كسرش سيناريو معروف قبل ما تحفظ. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">حالات اختبار محفوظة ({ruleTests?.length ?? 0})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!ruleTests || ruleTests.length === 0 ? (
+            <EmptyState title="مفيش حالات اختبار محفوظة — احسب سعر فوق واحفظه كحالة اختبار" />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>الوصف</TableHead>
+                  <TableHead>المدخلات</TableHead>
+                  <TableHead>السعر المتوقع</TableHead>
+                  <TableHead>النتيجة</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ruleTests.map((test) => {
+                  const runResult = ruleTestRunResults?.find((r) => r.id === test.id) ?? null;
+                  return (
+                    <TableRow key={test.id}>
+                      <TableCell>{test.label}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {Object.entries(test.field_values)
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join('، ')}
+                      </TableCell>
+                      <TableCell>{formatEgp(test.expected_price_cents)}</TableCell>
+                      <TableCell>
+                        {!runResult ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : runResult.error ? (
+                          <Badge variant="destructive">خطأ: {runResult.error}</Badge>
+                        ) : runResult.passed ? (
+                          <Badge variant="secondary">ناجح ({formatEgp(runResult.actual_price_cents ?? 0)})</Badge>
+                        ) : (
+                          <Badge variant="destructive">فشل ({formatEgp(runResult.actual_price_cents ?? 0)})</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" disabled={isSaving} onClick={() => handleDeleteRuleTest(test.id)}>
+                          حذف
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+          {ruleTests && ruleTests.length > 0 && (
+            <Button className="mt-3" size="sm" disabled={isRunningTests} onClick={handleRunRuleTests}>
+              {isRunningTests ? 'جاري التشغيل…' : 'شغّل كل الحالات ضد المسوّدة الحالية'}
+            </Button>
+          )}
+          {showNewRuleTest && (
+            <form onSubmit={handleCreateRuleTest} className="mt-4 flex flex-col gap-2 rounded-md border p-3">
+              <Label htmlFor="rule_test_label">الوصف</Label>
+              <Input id="rule_test_label" value={ruleTestLabel} onChange={(e) => setRuleTestLabel(e.target.value)} required />
+              <Label htmlFor="rule_test_expected">السعر المتوقع (جنيه)</Label>
+              <Input
+                id="rule_test_expected"
+                type="number"
+                min={0}
+                step="0.01"
+                value={ruleTestExpectedEgp}
+                onChange={(e) => setRuleTestExpectedEgp(e.target.value)}
+                required
+              />
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={isSaving}>
+                  حفظ حالة الاختبار
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setShowNewRuleTest(false)}>
+                  إلغاء
+                </Button>
+              </div>
+            </form>
           )}
         </CardContent>
       </Card>

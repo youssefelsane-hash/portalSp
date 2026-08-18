@@ -1,6 +1,7 @@
 import { PricingEvaluationResult } from '../pricing-formula.types';
 import { PricingFieldOption, PricingFieldType, ServicePricingField } from '../entities/service-pricing-field.entity';
 import { PricingRuleType, ServicePricingRule } from '../entities/service-pricing-rule.entity';
+import { ServicePricingRuleTest } from '../entities/service-pricing-rule-test.entity';
 
 export interface PricingFieldResponseDto {
   id: string;
@@ -86,4 +87,34 @@ export function toPricingEvaluationResponseDto(result: PricingEvaluationResult):
     requires_assistant: result.requiresAssistant,
     suitable_for_emergency: result.suitableForEmergency,
   };
+}
+
+// Script 4 Part L §48 — حالة اختبار محفوظة لمعادلة تسعير خدمة.
+export interface PricingRuleTestResponseDto {
+  id: string;
+  service_id: string;
+  label: string;
+  field_values: Record<string, string | number | boolean>;
+  expected_price_cents: number;
+  created_at: string;
+}
+
+export function toPricingRuleTestResponseDto(test: ServicePricingRuleTest): PricingRuleTestResponseDto {
+  return {
+    id: test.id,
+    service_id: test.serviceId,
+    label: test.label,
+    field_values: test.fieldValues,
+    expected_price_cents: test.expectedPriceCents,
+    created_at: test.createdAt.toISOString(),
+  };
+}
+
+export interface PricingRuleTestRunResultDto {
+  id: string;
+  label: string;
+  expected_price_cents: number;
+  actual_price_cents: number | null;
+  passed: boolean;
+  error: string | null;
 }

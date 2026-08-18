@@ -5,19 +5,9 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { UpsertPricingRuleDto } from './dto/upsert-pricing-rule.dto';
 import { ServicePricingRule, PricingRuleType } from './entities/service-pricing-rule.entity';
-import { validateFormulaNode } from './formula-evaluator';
-import { FinalPriceFormulaPayload } from './pricing-formula.types';
+import { validateFinalPriceFormulaPayload } from './formula-evaluator';
 
 const FINAL_PRICE_RULE_KEY = 'final_price';
-const OPTIONAL_FORMULA_OUTPUT_KEYS: (keyof FinalPriceFormulaPayload)[] = [
-  'min_price_cents',
-  'max_price_cents',
-  'estimated_duration_days',
-  'required_technicians',
-  'required_assistants',
-  'requires_assistant',
-  'suitable_for_emergency',
-];
 
 function rejectPayload(reason: string): never {
   throw new ApiException(ErrorCode.VAL_001, `payload غير صالح: ${reason}`, HttpStatus.BAD_REQUEST);
@@ -55,15 +45,7 @@ function validateRulePayload(ruleType: PricingRuleType, ruleKey: string, payload
   if (ruleKey !== FINAL_PRICE_RULE_KEY) {
     rejectPayload(`rule_type=formula لازم يكون rule_key="${FINAL_PRICE_RULE_KEY}"`);
   }
-  if (payload.price_cents === undefined) {
-    rejectPayload('formula.price_cents إجباري');
-  }
-  validateFormulaNode(payload.price_cents);
-  for (const key of OPTIONAL_FORMULA_OUTPUT_KEYS) {
-    if (payload[key] !== undefined) {
-      validateFormulaNode(payload[key]);
-    }
-  }
+  validateFinalPriceFormulaPayload(payload);
 }
 
 @Injectable()
