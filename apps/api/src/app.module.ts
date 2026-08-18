@@ -44,6 +44,7 @@ import { AcademyModule } from './modules/academy/academy.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { BrandingModule } from './modules/branding/branding.module';
 import { TechnicianProductivityModule } from './modules/technician-productivity/technician-productivity.module';
+import { SecurityModule } from './modules/security/security.module';
 
 @Module({
   imports: [
@@ -117,6 +118,7 @@ import { TechnicianProductivityModule } from './modules/technician-productivity/
     OpsModule,
     BrandingModule,
     TechnicianProductivityModule,
+    SecurityModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

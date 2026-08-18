@@ -4,12 +4,21 @@ import { DataSource, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User, UserType } from '../auth/entities/user.entity';
+import { SecurityEventSeverity, SecurityEventType } from '../security/entities/security-event.entity';
+import { SecurityEventsService } from '../security/security-events.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { Permission } from './entities/permission.entity';
 import { Role } from './entities/role.entity';
 import { RolePermission } from './entities/role-permission.entity';
 import { UserRole } from './entities/user-role.entity';
+
+interface EscalationDenialContext {
+  targetUserId?: string | null;
+  targetType?: string | null;
+  action: string;
+  attemptedValue?: Record<string, unknown> | null;
+}
 
 export interface RoleAssignment {
   role_id: string;
@@ -36,6 +45,7 @@ export class PermissionsService {
     @InjectRepository(UserRole) private readonly userRoles: Repository<UserRole>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly auditLog: AuditLogService,
+    private readonly securityEvents: SecurityEventsService,
   ) {}
 
   private async isSuperAdminUser(userId: string): Promise<boolean> {
@@ -66,12 +76,17 @@ export class PermissionsService {
    * صلاحية إنت نفسك ملكهاش، إلا بـ`roles.grant_unrestricted` (أو `super_admin` اللي بيتخطاها أصلاً
    * عن طريق `getUserPermissionNames()`).
    */
-  private async assertActorCanGrantPermissions(actorUserId: string, permissionNames: string[]): Promise<void> {
+  private async assertActorCanGrantPermissions(
+    actorUserId: string,
+    permissionNames: string[],
+    context: EscalationDenialContext,
+  ): Promise<void> {
     if (permissionNames.length === 0) return;
     const actorPermissions = await this.getUserPermissionNames(actorUserId);
     if (actorPermissions.has('roles.grant_unrestricted')) return;
     const forbidden = permissionNames.filter((n) => !actorPermissions.has(n));
     if (forbidden.length > 0) {
+      await this.recordEscalationDenial(actorUserId, context, forbidden);
       throw new ApiException(
         ErrorCode.AUTH_001,
         `مينفعش تمنح صلاحية إنت نفسك ملكهاش: ${forbidden.join(', ')}`,
@@ -81,13 +96,45 @@ export class PermissionsService {
   }
 
   /**
+   * Script 5 Part 4/5 — حدث أمني best-effort عند رفض تصعيد صلاحيات فعلي (الفاعل عنده roles.manage
+   * بس بيحاول يمنح/يتجاوز نطاقه هو، أو يمنح لنفسه بالذات). CRITICAL لو الهدف الفاعل نفسه
+   * (تصعيد ذاتي حرفي)، وإلا HIGH (تصعيد لمستخدم تاني — لسه خطير بس مش نفس درجة الخطورة).
+   */
+  private async recordEscalationDenial(
+    actorUserId: string,
+    context: EscalationDenialContext,
+    forbiddenPermissions: string[],
+  ): Promise<void> {
+    const isSelf = context.targetUserId != null && context.targetUserId === actorUserId;
+    await this.securityEvents.recordDenial({
+      eventType: isSelf ? SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT : SecurityEventType.UNAUTHORIZED_PERMISSION_GRANT,
+      severity: isSelf ? SecurityEventSeverity.CRITICAL : SecurityEventSeverity.HIGH,
+      actorUserId,
+      targetUserId: context.targetUserId ?? null,
+      targetType: context.targetType ?? null,
+      action: context.action,
+      attemptedValue: { ...(context.attemptedValue ?? {}), forbidden_permissions: forbiddenPermissions },
+    });
+  }
+
+  /**
    * `is_super_admin` مش موجود كـpermission في `role_permissions` أصلاً (بيتخطى الفحص بالكامل عن
    * طريق تصميم `getUserPermissionNames()`) — يعني فحص "الفاعل عنده كل صلاحيات الدور" العادي
    * مايكفيش لدور `super_admin` نفسه (ممكن يكون عدد صلاحياته المسجّلة فعليًا أقل من كتالوج
    * الصلاحيات الكامل، فالفحص العادي كان هيعدّي غلط). الدور ده بالتحديد يحتاج فحص صريح منفصل.
    */
-  private async assertActorIsSuperAdminOrThrow(actorUserId: string, actionAr: string): Promise<void> {
+  private async assertActorIsSuperAdminOrThrow(actorUserId: string, actionAr: string, context: EscalationDenialContext): Promise<void> {
     if (!(await this.isSuperAdminUser(actorUserId))) {
+      const isSelf = context.targetUserId != null && context.targetUserId === actorUserId;
+      await this.securityEvents.recordDenial({
+        eventType: isSelf ? SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT : SecurityEventType.UNAUTHORIZED_ROLE_CHANGE,
+        severity: isSelf ? SecurityEventSeverity.CRITICAL : SecurityEventSeverity.HIGH,
+        actorUserId,
+        targetUserId: context.targetUserId ?? null,
+        targetType: context.targetType ?? null,
+        action: context.action,
+        attemptedValue: context.attemptedValue ?? null,
+      });
       throw new ApiException(
         ErrorCode.AUTH_001,
         `لازم تكون Super Admin عشان ${actionAr}`,
@@ -223,10 +270,18 @@ export class PermissionsService {
     // super_admin مش عادي — صلاحياته الفعلية "كل الكتالوج" عن طريق bypass، مش قائمة role_permissions
     // (ممكن تكون أقل من الكتالوج الكامل)، فالفحص العادي تحت مش كافي لمنع نسخه.
     if (source.isSuperAdmin) {
-      await this.assertActorIsSuperAdminOrThrow(actorUserId, 'تنسخ دور Super Admin');
+      await this.assertActorIsSuperAdminOrThrow(actorUserId, 'تنسخ دور Super Admin', {
+        action: 'roles.clone',
+        targetType: 'role',
+        attemptedValue: { source_role_id: sourceRoleId, source_role_name: source.name },
+      });
     } else {
       const sourcePermissionNames = await this.getRolePermissionNames(sourceRoleId);
-      await this.assertActorCanGrantPermissions(actorUserId, sourcePermissionNames);
+      await this.assertActorCanGrantPermissions(actorUserId, sourcePermissionNames, {
+        action: 'roles.clone',
+        targetType: 'role',
+        attemptedValue: { source_role_id: sourceRoleId, source_role_name: source.name },
+      });
     }
 
     const newRole = await this.createRole(actorUserId, dto, meta);
@@ -318,6 +373,15 @@ export class PermissionsService {
         if (!actorCanGrantAny) {
           const forbidden = newlyAdded.filter((n) => !actorPermissions.has(n));
           if (forbidden.length > 0) {
+            await this.securityEvents.recordDenial({
+              eventType: SecurityEventType.UNAUTHORIZED_PERMISSION_GRANT,
+              severity: SecurityEventSeverity.HIGH,
+              actorUserId,
+              targetType: 'role',
+              targetId: roleId,
+              action: 'roles.set_permissions',
+              attemptedValue: { forbidden_permissions: forbidden },
+            });
             throw new ApiException(
               ErrorCode.AUTH_001,
               `مينفعش تمنح صلاحية إنت نفسك ملكهاش: ${forbidden.join(', ')}`,
@@ -388,10 +452,18 @@ export class PermissionsService {
       throw new ApiException(ErrorCode.VAL_001, 'الدور ده معطّل حاليًا — مينفعش يتعيّن', HttpStatus.CONFLICT);
     }
     if (role.isSuperAdmin) {
-      await this.assertActorIsSuperAdminOrThrow(assignedByUserId, 'تمنح دور Super Admin لمستخدم تاني');
+      await this.assertActorIsSuperAdminOrThrow(assignedByUserId, 'تمنح دور Super Admin لمستخدم تاني', {
+        action: 'roles.assign',
+        targetUserId: userId,
+        attemptedValue: { role_name: roleName },
+      });
     } else {
       const rolePermissionNames = await this.getRolePermissionNames(role.id);
-      await this.assertActorCanGrantPermissions(assignedByUserId, rolePermissionNames);
+      await this.assertActorCanGrantPermissions(assignedByUserId, rolePermissionNames, {
+        action: 'roles.assign',
+        targetUserId: userId,
+        attemptedValue: { role_name: roleName },
+      });
     }
     const existing = await this.userRoles.findOne({ where: { userId, roleId: role.id } });
     if (existing) {
@@ -436,7 +508,11 @@ export class PermissionsService {
       }
       // بَقّة أمنية اتصلحت (P0-1): سحب دور super_admin من حساب تاني كان مسموح لأي أدمن عنده
       // roles.manage بس — أدمن مش super_admin كان يقدر "يسقط" super_admin تاني من النظام.
-      await this.assertActorIsSuperAdminOrThrow(revokedByUserId, 'تسحب دور Super Admin من مستخدم تاني');
+      await this.assertActorIsSuperAdminOrThrow(revokedByUserId, 'تسحب دور Super Admin من مستخدم تاني', {
+        action: 'roles.revoke',
+        targetUserId: userId,
+        attemptedValue: { role_name: roleName },
+      });
     }
     // حماية القفل الذاتي (ADR-0010 §4) — مختلفة عن فحص آخر super_admin فوق: هنا عن *أي* دور
     // لو ده آخر دور للفاعل نفسه (لا يقدر يفقد وصوله بالكامل بضغطة واحدة).

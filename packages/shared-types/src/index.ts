@@ -30,3 +30,4 @@ export * from './technician-referrals';
 export * from './technician-kpi';
 export * from './technician-progression';
 export * from './branding';
+export * from './security';

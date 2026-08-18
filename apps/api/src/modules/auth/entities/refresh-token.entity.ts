@@ -35,6 +35,12 @@ export class RefreshToken {
   @Column({ name: 'last_seen_at', type: 'timestamptz', nullable: true })
   lastSeenAt: Date | null;
 
+  // heartbeat نشاط حقيقي (Script 5، migration 0136) — مختلف عن lastSeenAt فوق (بتتحدث بس وقت
+  // تدوير access token كل ~15 دقيقة). تقريبية عبر كل جلسات المستخدم النشطة، مش جلسة بعينها —
+  // تفاصيل القرار في docs/adr/0016-security-events-and-employee-activity.md.
+  @Column({ name: 'last_activity_at', type: 'timestamptz', nullable: true })
+  lastActivityAt: Date | null;
+
   @Column({ name: 'user_agent', type: 'varchar', length: 255, nullable: true })
   userAgent: string | null;
 
