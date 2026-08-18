@@ -647,3 +647,41 @@ IDOR حي (عميل/فني تاني مايقدروش يوصلوا لطلب مش 
 المؤشر الأقوى أولًا ثم تستبدل مؤشر `0118`، لذلك تفشل بأمان على بيانات legacy متعارضة ولا تترك
 القاعدة بلا حماية. اختبار PostgreSQL يثبت أن القبول وإعادة تعيين الأدمن والكتابة المباشرة كلها
 ترفض فنيًا منتظرًا موافقة عرض سعر، مع بقاء الانتقال `in_progress ↔ awaiting_quote_approval` صالحًا.
+
+## Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37، 2026-08-18)
+
+كانت فجوة موثّقة صراحة: `OrderSourceChannel.CALL_CENTER` قيمة enum موجودة من أول migration
+(`0007_orders.sql`) بس `create()` كان بيحط `CUSTOMER_APP` دايمًا بلا شرط — عمود ميت، صفر مسار
+حقيقي لموظف ينشئ طلب نيابة عن عميل.
+
+**التصميم**: `OrdersService.create()` اتعدّل يقبل باراميتر خامس اختياري `callCenterContext?:
+{adminUserId, meta}` — لو موجود، `source_channel='call_center'` و`created_by_admin_user_id`
+(migration `0131`) بيتسجّلوا على الطلب + سطر تدقيق (`order.created_for_customer`) بعد الـtransaction
+مباشرة. **نفس منطق التسعير/الجدولة/المطابقة بالحرف** — صفر duplicate logic، الفرق الوحيد هو مين
+"العميل" اللي بيتحسب منه `customer_id` (userId العميل الحقيقي بيتمرر لـ`create()`، مش userId
+الموظف — الطلب بيتملك للعميل دايمًا).
+
+**صلاحية مخصصة (`orders.create_for_customer`)**: مش `orders.manage` عامة، ومش ممنوحة لـ`ops_manager`
+زي `orders.cancel`/`orders.reassign` (دول عمليات على طلب موجود، ده إنشاء طلب جديد بهوية عميل
+تانية بالكامل). ممنوحة بس لـ`super_admin` و`support_agent` (migration `0131`) — طبقًا لطلب
+السبيسفيكيشن الأصلي الصريح: "صلاحية مخصصة، مش منح تلقائي لكل أدمن".
+
+**`GET /admin/customers/:userId/addresses`** (endpoint إداري جديد، قراءة بس) — نفس
+`AddressesService.findAllForUser()` اللي العميل نفسه بيستخدمه (`GET /addresses`)، صفر كتالوج
+عناوين تاني منفصل. لازم قبل إنشاء الطلب (الموظف محتاج يعرف عناوين العميل المسجّلة).
+
+**اختبار حي كامل** (curl مباشر ضد dev server حقيقي، JWT اتعمل sign بنفس `JWT_ACCESS_SECRET` بتاع
+بيئة الـdev نفسها — بديل متناسب لتسجيل دخول WebAuthn MFA الحقيقي اللي مش قابل للأتمتة عبر curl):
+- `super_admin` أنشأ طلب حقيقي لعميل حقيقي (`عميل حقيقي مع فني`) — `source_channel='call_center'`،
+  `created_by_admin_user_id` صح، `customer_id` بيرجع لنفس العميل مش الموظف، سطر تدقيق كامل،
+  **و`order_assignments` اتعمل فعليًا** (نفس محرك المطابقة الحقيقي اتنادى، مش مسار موازٍ).
+- `ops_manager` (بدون الصلاحية المخصصة) اترفض بوضوح: "دورك الإداري مش مديك صلاحية العملية دي".
+- بيانات الاختبار اتنضّفت بالكامل من الداتابيز بعد التحقق.
+
+**apps/admin**: صفحة `/orders/create-for-customer` (بحث برقم موبايل → اختيار عميل → عناوينه
+الحقيقية → فئة/خدمة من نفس الكتالوج → `field_values` JSON لخدمات formula كوضع متقدم ثانوي، نفس
+فلسفة الـraw JSON escape hatch في Pricing Builder → تأكيد). زرار "إنشاء طلب نيابة عن عميل" في
+`/orders` بيظهر بس لو `hasPermission('orders.create_for_customer')`. **فجوة موثّقة صراحة**: مش
+اتعمل لها اختبار حي بمتصفح فعلي — نفس قيد WebAuthn MFA لتسجيل دخول الأدمن في بيئة الـsandbox.
+`tsc`/`eslint`/`next build` كلهم نضاف، والـtypes متطابقة بالحرف مع رد الباك-إند الحقيقي المتحقق
+منه بالـcurl فوق.
