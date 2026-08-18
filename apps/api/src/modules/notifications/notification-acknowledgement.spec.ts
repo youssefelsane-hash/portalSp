@@ -14,9 +14,35 @@ import { NotificationsService } from './notifications.service';
 import { NotificationWorkflowReminderService } from './notification-workflow-reminder.service';
 import { NotificationWorkflowService } from './notification-workflow.service';
 
-// Script 2 Part E — findings #26 (markAllRead كانت مش بتعتمد الـworkflows المرتبطة، فنظام
-// التذكيرات كان يفضل يبعت للمستخدم بعد ما قرا كل حاجة) و#27 (reminderCount كان بيتاستهلك حتى
-// لو notify() نفسها فشلت بالخطأ، مش بس "فشل تسليم" عادي).
+// كل خطوة تنضيف مستقلة بذاتها (try/catch من غير throw) — فشل خطوة واحدة (مثلاً تعارض
+// مؤقت أو FK) ميوقفش باقي الخطوات. ده اللي كان ناقص قبل كده: try/finally واحد شامل كان
+// معناه إن فشل مبكر (مثلاً استعادة الإعدادات) يقفل كل التنضيف اللي بعده ويسيب صفوف يتيمة
+// في notifications/notification_workflows/users محتاجة تنضيف يدوي بـpsql بعدين.
+async function safeStep(label: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[notification-acknowledgement.spec] فشلت خطوة التنضيف "${label}":`, err);
+  }
+}
+
+// حد زمني للتنضيف النهائي (destroy الاتصالات) عشان اتصال عالق ميعلقش عملية الـjest كلها
+// لأجل غير مسمى — أفضل نسيب handle مفتوح ويكتشفه --detectOpenHandles من إننا نعلّق العملية.
+function withTimeout(promise: Promise<unknown>, ms: number, label: string): Promise<void> {
+  return Promise.race([
+    promise.then(() => undefined),
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.error(`[notification-acknowledgement.spec] "${label}" تجاوز ${ms}ms — متابعة من غير انتظار`);
+        resolve();
+      }, ms);
+      timer.unref?.();
+    }),
+  ]);
+}
+
 describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part E', () => {
   let dataSource: DataSource;
   let cache: RedisCacheService;
@@ -26,6 +52,10 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
   let originalQuietHoursEnd: string | null = null;
   const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const ids = { user: '' };
+
+  // كل test بيسجّل الـworkflow ids اللي أنشأها هنا؛ afterEach بينضفها فورًا بغض النظر
+  // عن نجاح الـassertions — مفيش اعتماد على afterAll التجميعي في الآخر بس.
+  let createdWorkflowIds: string[] = [];
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -50,10 +80,6 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
       settingsService,
     );
 
-    // ساعات الهدوء الافتراضية (22:00-08:00 UTC) ممكن تغطي وقت تشغيل الاختبار فعليًا وتخلّي
-    // processOne يأجّل التذكير بدل ما يبعته — start=end معناها "معطّلة" (quiet-hours.util.ts).
-    // بنعدّل الصفوف الموجودة فعلاً مباشرة ونبطل الكاش يدويًا (بدل SettingsService.update() اللي
-    // بينادي AuditLogService حقيقي)، ونرجّعهم زي ما كانوا في afterAll.
     await q(`SELECT value FROM settings WHERE key = 'notification_engine.quiet_hours_start'`).then(
       ([row]) => (originalQuietHoursStart = row?.value ?? null),
     );
@@ -66,29 +92,58 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
     await cache.del('settings:notification_engine.quiet_hours_end');
   });
 
+  afterEach(async () => {
+    if (!dataSource?.isInitialized || createdWorkflowIds.length === 0) {
+      createdWorkflowIds = [];
+      return;
+    }
+    const idsToClean = createdWorkflowIds;
+    createdWorkflowIds = [];
+    // notifications قبل notification_workflows دايمًا — FK (notifications.workflow_id
+    // REFERENCES notification_workflows.id)، migration 0087.
+    await safeStep('afterEach: حذف notifications المرتبطة', () =>
+      dataSource.query(`DELETE FROM notifications WHERE workflow_id = ANY($1::uuid[])`, [idsToClean]),
+    );
+    await safeStep('afterEach: حذف notification_workflows', () =>
+      dataSource.query(`DELETE FROM notification_workflows WHERE id = ANY($1::uuid[])`, [idsToClean]),
+    );
+  });
+
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    try {
-      if (originalQuietHoursStart !== null) {
-        await q(`UPDATE settings SET value = $1 WHERE key = 'notification_engine.quiet_hours_start'`, [
+
+    if (originalQuietHoursStart !== null) {
+      await safeStep('استعادة quiet_hours_start', () =>
+        q(`UPDATE settings SET value = $1 WHERE key = 'notification_engine.quiet_hours_start'`, [
           JSON.stringify(originalQuietHoursStart),
-        ]);
-      }
-      if (originalQuietHoursEnd !== null) {
-        await q(`UPDATE settings SET value = $1 WHERE key = 'notification_engine.quiet_hours_end'`, [
-          JSON.stringify(originalQuietHoursEnd),
-        ]);
-      }
-      await cache.del('settings:notification_engine.quiet_hours_start');
-      await cache.del('settings:notification_engine.quiet_hours_end');
-      if (ids.user) await q(`DELETE FROM notifications WHERE user_id = $1`, [ids.user]);
-      if (ids.user) await q(`DELETE FROM notification_workflows WHERE user_id = $1`, [ids.user]);
-      if (ids.user) await q(`DELETE FROM users WHERE id = $1`, [ids.user]);
-    } finally {
-      await dataSource.destroy();
-      await cache.onModuleDestroy?.();
+        ]),
+      );
     }
+    if (originalQuietHoursEnd !== null) {
+      await safeStep('استعادة quiet_hours_end', () =>
+        q(`UPDATE settings SET value = $1 WHERE key = 'notification_engine.quiet_hours_end'`, [
+          JSON.stringify(originalQuietHoursEnd),
+        ]),
+      );
+    }
+    await safeStep('إبطال كاش quiet_hours_start', () => cache.del('settings:notification_engine.quiet_hours_start'));
+    await safeStep('إبطال كاش quiet_hours_end', () => cache.del('settings:notification_engine.quiet_hours_end'));
+
+    // شبكة أمان إضافية: أي workflow ما اتنضفش في afterEach (مثلاً بسبب throw قبل ما
+    // يتسجّل الـid، أو afterEach نفسه فشل) بينضف هنا كمان بالـuser_id مباشرة.
+    if (ids.user) {
+      await safeStep('حذف notifications المتبقية للمستخدم', () => q(`DELETE FROM notifications WHERE user_id = $1`, [ids.user]));
+      await safeStep('حذف notification_workflows المتبقية للمستخدم', () =>
+        q(`DELETE FROM notification_workflows WHERE user_id = $1`, [ids.user]),
+      );
+      await safeStep('حذف المستخدم التجريبي', () => q(`DELETE FROM users WHERE id = $1`, [ids.user]));
+    }
+
+    // التدمير النهائي دايمًا بيتنفذ بغض النظر عن نتيجة أي خطوة فوق، وبحد زمني عشان
+    // اتصال عالق ميعلقش عملية jest كلها.
+    await withTimeout(dataSource.destroy(), 5_000, 'dataSource.destroy()');
+    await withTimeout(Promise.resolve(cache.onModuleDestroy?.()), 5_000, 'cache.onModuleDestroy()');
   });
 
   function notificationsService(dispatcher: { dispatch: (...args: unknown[]) => unknown }): NotificationsService {
@@ -112,6 +167,7 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
         titleAr: 'اختبار',
         bodyAr: 'اختبار',
       });
+      createdWorkflowIds.push(workflow.id);
       await svc.notify(
         { userId: ids.user, notificationType: `ack-test-${runId}`, titleAr: 'اختبار', bodyAr: 'اختبار', workflowId: workflow.id },
         NotificationChannel.IN_APP,
@@ -131,7 +187,7 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
         titleAr: 'اختبار',
         bodyAr: 'اختبار',
       });
-      // مفيش notification مرتبط بيه خالص — markAllRead متلمسوش لأن مفيش صف notifications يربطه.
+      createdWorkflowIds.push(otherWorkflow.id);
       const svc = notificationsService({ dispatch: async () => ({ delivered: true, failureReason: null }) });
       await svc.markAllRead(ids.user);
 
@@ -148,6 +204,7 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
         titleAr: 'تذكير اختبار',
         bodyAr: 'تذكير اختبار',
       });
+      createdWorkflowIds.push(workflow.id);
       await dataSource.query(`UPDATE notification_workflows SET next_reminder_at = now() - interval '1 minute' WHERE id = $1`, [
         workflow.id,
       ]);
@@ -171,9 +228,7 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
         `SELECT reminder_count, next_reminder_at, resolved_at FROM notification_workflows WHERE id = $1`,
         [workflow.id],
       );
-      // اتحسب 0→1 جوّه الترانزاكشن (claim)، وبعد فشل notify() اترجع لـ0 — الحصة ما اتهدرتش.
       expect(row.reminder_count).toBe(0);
-      // معاد جدولته قريب (دقايق)، مش لدورة كاملة تانية ولا اتلغى.
       expect(new Date(row.next_reminder_at).getTime()).toBeGreaterThan(Date.now());
       expect(new Date(row.next_reminder_at).getTime()).toBeLessThan(Date.now() + 5 * 60_000);
       expect(new Date(row.next_reminder_at).getTime()).not.toBe(originalNextReminderAt.getTime());
@@ -187,6 +242,7 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
         titleAr: 'تذكير اختبار',
         bodyAr: 'تذكير اختبار',
       });
+      createdWorkflowIds.push(workflow.id);
       await dataSource.query(`UPDATE notification_workflows SET next_reminder_at = now() - interval '1 minute' WHERE id = $1`, [
         workflow.id,
       ]);
