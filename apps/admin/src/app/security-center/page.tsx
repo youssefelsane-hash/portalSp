@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import type { SecurityEventDto, SecurityEventSeverity, SecurityEventStatus, SecurityOverviewResponse } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -52,12 +53,25 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   security_setting_change: 'تغيير إعداد أمني',
 };
 
+// useSearchParams() محتاج Suspense boundary وقت الـ static prerendering — بدونها next build
+// بيفشل على /security-center (نفس السبب في /login).
 export default function SecurityCenterPage() {
+  return (
+    <Suspense>
+      <SecurityCenterView />
+    </Suspense>
+  );
+}
+
+function SecurityCenterView() {
   const { isLoading, authedFetch } = useAuth();
+  const searchParams = useSearchParams();
+  const actorUserId = searchParams.get('actor_user_id');
+
   const [overview, setOverview] = useState<SecurityOverviewResponse | null>(null);
   const [events, setEvents] = useState<SecurityEventDto[] | null>(null);
   const [severityFilter, setSeverityFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('open');
+  const [statusFilter, setStatusFilter] = useState(actorUserId ? '' : 'open');
   const [error, setError] = useState<string | null>(null);
 
   function load() {
@@ -68,6 +82,7 @@ export default function SecurityCenterPage() {
     const params = new URLSearchParams();
     if (severityFilter) params.set('severity', severityFilter);
     if (statusFilter) params.set('status', statusFilter);
+    if (actorUserId) params.set('actor_user_id', actorUserId);
     authedFetch<{ items: SecurityEventDto[] }>(`/admin/security/events?${params.toString()}`)
       .then((res) => setEvents(res.items))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الأحداث'));
@@ -77,7 +92,7 @@ export default function SecurityCenterPage() {
     if (isLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, severityFilter, statusFilter]);
+  }, [isLoading, severityFilter, statusFilter, actorUserId]);
 
   const openCounts = new Map((overview?.open_by_severity ?? []).map((r) => [r.severity, r.count]));
 

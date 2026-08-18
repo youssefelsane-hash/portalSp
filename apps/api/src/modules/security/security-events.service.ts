@@ -61,12 +61,14 @@ export class SecurityEventsService {
   async recordDenial(params: RecordDenialParams): Promise<void> {
     try {
       const windowSeconds = await this.settings.getNumber('security.dedup_window_seconds', 300);
+      const escalateThreshold = await this.settings.getNumber('security.repeated_denial_escalate_threshold', 5);
       let createdEvent: SecurityEvent | null = null;
+      let escalatedEvent: { id: string; eventType: SecurityEventType; actorUserId: string | null } | null = null;
 
       await this.dataSource.transaction(async (manager) => {
         // manager.query() لـUPDATE بيرجّع tuple [rows, affectedCount] مش الصفوف مباشرة — نفس
         // المصيدة اللي اتصلحت في resolve() تحت.
-        const [existingRows] = await manager.query<[{ id: string }[], number]>(
+        const [existingRows] = await manager.query<[{ id: string; occurrence_count: number; severity: SecurityEventSeverity }[], number]>(
           `UPDATE security_events
            SET occurrence_count = occurrence_count + 1, last_occurred_at = now(), updated_at = now()
            WHERE actor_user_id IS NOT DISTINCT FROM $1
@@ -74,10 +76,26 @@ export class SecurityEventsService {
              AND action IS NOT DISTINCT FROM $3
              AND status = 'open'
              AND last_occurred_at > now() - ($4 || ' seconds')::interval
-           RETURNING id`,
+           RETURNING id, occurrence_count, severity`,
           [params.actorUserId, params.eventType, params.action ?? null, windowSeconds],
         );
-        if (existingRows.length > 0) return;
+        if (existingRows.length > 0) {
+          // تصعيد التكرار (Part 5 §13/Part 10) — نفس الفعل بالظبط بيترفض كتير على التوالي، ده
+          // إشارة أقوى من رفض واحد بس. أول مرة العداد يعدّي العتبة، السيفيرتي بيتصعّد لـHIGH (لو
+          // كان أقل) وبيتبعت تنبيه تاني — بعد كده مفيش إعادة تصعيد (severity != WARNING/INFO يمنعه).
+          const row = existingRows[0];
+          if (
+            row.occurrence_count === escalateThreshold &&
+            (row.severity === SecurityEventSeverity.INFO || row.severity === SecurityEventSeverity.WARNING)
+          ) {
+            await manager.query(`UPDATE security_events SET severity = $1, updated_at = now() WHERE id = $2`, [
+              SecurityEventSeverity.HIGH,
+              row.id,
+            ]);
+            escalatedEvent = { id: row.id, eventType: params.eventType, actorUserId: params.actorUserId };
+          }
+          return;
+        }
 
         const now = new Date();
         const entity = manager.getRepository(SecurityEvent).create({
@@ -115,20 +133,97 @@ export class SecurityEventsService {
         await this.bumpDeniedCounter(params.actorUserId).catch((err: unknown) => {
           this.logger.warn(`فشل تحديث عداد الرفض اليومي: ${err instanceof Error ? err.message : String(err)}`);
         });
+        await this.checkRepeatedDenialBurst(params.actorUserId).catch((err: unknown) => {
+          this.logger.warn(`فشل فحص تجميع الرفض المتكرر: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
 
-      // تنبيه لحظي أول مرة الحدث يتخلق بس — مش على كل تجميع (Part 5 §13، Part 6).
+      // تنبيه لحظي أول مرة الحدث يتخلق، أو أول مرة يتصعّد لـHIGH — مش على كل تجميع عادي (Part 5 §13، Part 6).
       if (createdEvent) {
         const event = createdEvent as SecurityEvent;
         this.eventEmitter.emit(
           SECURITY_EVENT_CREATED_EVENT,
           new SecurityEventCreatedEvent(event.id, event.eventType, event.severity, event.actorUserId),
         );
+      } else if (escalatedEvent) {
+        const escalated: { id: string; eventType: SecurityEventType; actorUserId: string | null } = escalatedEvent;
+        this.eventEmitter.emit(
+          SECURITY_EVENT_CREATED_EVENT,
+          new SecurityEventCreatedEvent(escalated.id, escalated.eventType, SecurityEventSeverity.HIGH, escalated.actorUserId),
+        );
       }
     } catch (err) {
       this.logger.error(
         `فشل تسجيل حدث أمني (${params.eventType}) للفاعل ${params.actorUserId ?? 'مجهول'} — الرفض الأصلي مستمر عادي`,
         err instanceof Error ? err.stack : err,
+      );
+    }
+  }
+
+  /**
+   * كشف تجميعي عبر أفعال مختلفة (Part 10) — مختلف عن تصعيد occurrence_count فوق (نفس الفعل
+   * بالظبط). هنا: نفس الفاعل اتسجّل ضده N حدث أمني *مفتوح* (أي نوع، أي فعل) خلال نافذة زمنية
+   * قصيرة نسبيًا — نمط "بيجرّب أبواب كتير قفلت في وشه بسرعة"، إشارة أقوى من رفض متكرر لنفس الفعل.
+   * REPEATED_PERMISSION_DENIAL بيتستبعد من العدّ نفسه عمداً — منعاً لحلقة (الحدث ده بيعتمد على
+   * عدّ الأحداث التانية، مش بيعدّ نفسه).
+   *
+   * ملاحظة عن "context-aware" (Part 10 مطلب صريح — دور Call Center اللي بيوصل بيانات عملاء
+   * كتير مش لازم يتحسب مشبوه): الكشف هنا مبني بالكامل على *رفض* فعلي (403 حقيقي من
+   * PermissionsGuard/StepUpGuard/PermissionsService)، مش على حجم الوصول المشروع. موظف Call
+   * Center بيعمل مئات عمليات "عرض بروفايل عميل" الناجحة يوميًا — دي أبداً مش هتوصل هنا لأنها
+   * مصرّح بيها أصلاً وبترجع 200، مش 403. فالتصنيف نفسه (denial-based مش access-volume-based)
+   * هو الحماية من false-positive على أدوار بحجم وصول عالي شرعي — مفيش حاجة تانية لازم تتبنى.
+   */
+  private async checkRepeatedDenialBurst(actorUserId: string): Promise<void> {
+    const windowSeconds = await this.settings.getNumber('security.repeated_denial_burst_window_seconds', 900);
+    const burstThreshold = await this.settings.getNumber('security.repeated_denial_burst_threshold', 5);
+
+    const [{ count }] = await this.dataSource.query<{ count: string }[]>(
+      `SELECT count(*)::int AS count FROM security_events
+       WHERE actor_user_id = $1 AND status = 'open' AND event_type != $2
+         AND last_occurred_at > now() - ($3 || ' seconds')::interval`,
+      [actorUserId, SecurityEventType.REPEATED_PERMISSION_DENIAL, windowSeconds],
+    );
+    if (Number(count) < burstThreshold) return;
+
+    let createdBurstEvent: SecurityEvent | null = null;
+    await this.dataSource.transaction(async (manager) => {
+      const [existingRows] = await manager.query<[{ id: string }[], number]>(
+        `UPDATE security_events
+         SET occurrence_count = occurrence_count + 1, last_occurred_at = now(), updated_at = now()
+         WHERE actor_user_id = $1 AND event_type = $2 AND status = 'open'
+           AND last_occurred_at > now() - ($3 || ' seconds')::interval
+         RETURNING id`,
+        [actorUserId, SecurityEventType.REPEATED_PERMISSION_DENIAL, windowSeconds],
+      );
+      if (existingRows.length > 0) return;
+
+      const now = new Date();
+      const entity = manager.getRepository(SecurityEvent).create({
+        eventType: SecurityEventType.REPEATED_PERMISSION_DENIAL,
+        severity: SecurityEventSeverity.CRITICAL,
+        status: SecurityEventStatus.OPEN,
+        actorUserId,
+        actorRole: null,
+        targetUserId: null,
+        targetType: null,
+        targetId: null,
+        sessionId: null,
+        ipAddress: null,
+        action: null,
+        attemptedValue: { distinct_denials_in_window: Number(count), window_seconds: windowSeconds },
+        occurrenceCount: 1,
+        firstOccurredAt: now,
+        lastOccurredAt: now,
+      });
+      createdBurstEvent = await manager.getRepository(SecurityEvent).save(entity);
+    });
+
+    if (createdBurstEvent) {
+      const event = createdBurstEvent as SecurityEvent;
+      this.eventEmitter.emit(
+        SECURITY_EVENT_CREATED_EVENT,
+        new SecurityEventCreatedEvent(event.id, event.eventType, event.severity, event.actorUserId),
       );
     }
   }

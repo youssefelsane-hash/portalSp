@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import type {
@@ -216,7 +217,9 @@ export default function EmployeeDetailPage() {
             )}
             {presence && <Badge variant={PRESENCE_BADGE_VARIANT[presence.state]}>{PRESENCE_LABELS[presence.state]}</Badge>}
             {openAlertsCount !== null && openAlertsCount > 0 && (
-              <Badge variant="destructive">{openAlertsCount} تنبيه أمني مفتوح</Badge>
+              <Link href={`/security-center?actor_user_id=${userId}`}>
+                <Badge variant="destructive">{openAlertsCount} تنبيه أمني مفتوح</Badge>
+              </Link>
             )}
           </>
         }
