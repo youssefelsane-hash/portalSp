@@ -37,6 +37,8 @@ class Order {
   // الفني هنا رغم إن الشاشة محتاجاها لعرض "طاقم الطلب".
   final String bookingMode;
   final int? requiredTechnicians;
+  // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
+  final String? scheduledAt;
 
   Order({
     required this.id,
@@ -48,6 +50,7 @@ class Order {
     required this.bookingMode,
     this.requiredTechnicians,
     this.address,
+    this.scheduledAt,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -62,6 +65,7 @@ class Order {
         address: json['address'] != null
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,
+        scheduledAt: json['scheduled_at'] as String?,
       );
 }
 

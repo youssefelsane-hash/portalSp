@@ -26,6 +26,7 @@ import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
+import 'upcoming_confirmed_jobs_screen.dart';
 
 class AvailableOrdersScreen extends StatefulWidget {
   const AvailableOrdersScreen({super.key});
@@ -262,6 +263,29 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // "امتى تحب تنفّذ الشغل؟" (docs/08 §165) — الطلبات اللي بتوصل
+                                  // للشاشة دي كلها قريبة (النهاردة/بكرة أو ASAP) بالتعريف، الطلبات
+                                  // المجدولة بعيدًا بتتأكّد تلقائيًا من غير ما توصل هنا خالص (راجع
+                                  // UpcomingConfirmedJobsScreen). التسمية هنا بتوضّح ده للفني.
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.bolt,
+                                        size: 16,
+                                        color: Theme.of(context).colorScheme.primary,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'طلب قريب — محتاج قرارك دلوقتي',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context).colorScheme.primary,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
                                   Text(
                                     order.serviceNameAr,
                                     style: Theme.of(
@@ -405,8 +429,15 @@ class _TechnicianDrawer extends StatelessWidget {
                 ),
               ),
               const _DrawerGroupLabel('الشغل'),
+              // "الشغل المؤكّد قدامي" (docs/08 §165) — طلبات مجدولة مستقبلية اتأكّدت تلقائيًا
+              // (بلا قرار قبول/رفض)، منفصلة عن قايمة "طلبات محتاجة قرارك" (الشاشة الرئيسية).
               _DrawerItem(
                 icon: Icons.event_available_outlined,
+                label: 'الشغل المؤكّد قدامي',
+                builder: (_) => const UpcomingConfirmedJobsScreen(),
+              ),
+              _DrawerItem(
+                icon: Icons.calendar_month_outlined,
                 label: 'جدول مواعيدي',
                 builder: (_) => const ScheduleScreen(),
               ),

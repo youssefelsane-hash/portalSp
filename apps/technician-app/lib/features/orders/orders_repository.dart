@@ -60,6 +60,13 @@ class OrdersRepository {
     return data == null ? null : Order.fromJson(data);
   }
 
+  // "الشغل المؤكّد قدامي" (docs/08 §165) — طلبات مجدولة مستقبلية اتأكّدت تلقائيًا (بلا قرار
+  // قبول/رفض من الفني — الفرق الجوهري بين طلب مجدول بعيد وطلب قريب في fetchAvailable() فوق).
+  Future<List<Order>> fetchUpcomingConfirmed() async {
+    final items = await authRepository.authedRequestList('/technician/orders/upcoming-confirmed');
+    return items.map(Order.fromJson).toList();
+  }
+
   // تحديث لحظي بعد قرار عرض السعر (docs/08 §15) — بتتنادى لما OrderTrackingGateway يبعت
   // order:status_changed (tracking_client.dart)، عشان نجيب أحدث نسخة كاملة من الطلب بدل ما
   // نبني Order يدوي من حقلين بس (order_status الجديد وحده مش كفاية، محتاجين باقي الحقول كمان).
