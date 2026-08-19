@@ -52,7 +52,7 @@
 | 22 | Ratings & Reviews | Ratings | VERIFIED | جزئي — راجعت `RatingsService` بالكامل بالقراءة: `assertRatable` (لازم COMPLETED)، `createRating` بفحص تكرار مزدوج (فحص منطقي + `UNIQUE` على `ratings.order_id` كخط دفاع أخير ضد سباق نادر)، ملكية الطلب متحقق منها في `rateAsCustomer`/`rateAsTechnician` (`customerId`/`technicianId` في الـwhere)، `after_photo_media_ids` متحقق إنها بتاعة نفس الطلب، مفيش استغلال حي جديد اتبنى | لا يوجد اختبار jest جديد (المنطق اتأكد سليم بالقراءة، السباق النادر مغطّى بـUNIQUE constraint فعلي مش code path يحتاج اختبار جديد) | لا يوجد | لا يوجد | `ratings.order_id` UNIQUE يعني تقييم واحد بس لكل طلب (مش تقييمين، واحد من كل طرف) — أول طرف يقيّم ياخد السلوت، قرار موثّق صراحة من `docs/02-data-dictionary.md §8.1` نفسه (الكود بيعلّق عليه بالحرف: "لو غلط لازم يتصحح بتحديث موثّق للقاموس، مش هنا بصمت") — مش بَقّة جديدة، قرار عمل قائم من الأساس | commit سابق + هذا التحقق |
 | 23 | Warranty / Revisit | Orders/Warranty | FIXED | نعم — `OrdersService.create()` حي، إعادة زيارة سليمة (طلب أصلي standard) + محاولة سلسلة (إعادة زيارة لإعادة زيارة) | نعم — 2 اختبار جديد (`order-revisit-chain.spec.ts`) | BUG-012a (P1 — سلسلة إعادة زيارات مجانية بلا نهاية) | BUG-012a fixed | مفيش رصد جديد بعد الإصلاح — الفحص بقى صريح على `orderType` بدل الاعتماد الضمني على `warrantyExpiresAt` بس | commit قادم |
 | 24 | Complaints / Support | Support | FIXED | لا (بَقّة metadata-level، نفس منهجية `mfa-step-up-enforcement.spec.ts` الموجودة أصلاً — لا تحتاج Postgres حي) | نعم — امتداد لـ`mfa-step-up-enforcement.spec.ts` الموجود (حالة جديدة لـ`AdminSupportController.resolve`) | BUG-012b (P1 — `complaints.resolve` بيحوّل فلوس تعويض بلا حد أقصى من غير step-up إجباري) | BUG-012b fixed | راجعت `resolve()`/`reject()`/`close()`/`updateSeverity()` بالكامل — قفل `pessimistic_write` + فحص `canTransitionComplaint` بيمنعوا حل/رفض مزدوج، مفيش مشكلة تانية | commit قادم |
-| 25 | Admin Control Plane | Admin | PENDING | | | | | | |
+| 25 | Admin Control Plane | Admin | FIXED | نعم — `AdminCustomersService.delete()`/`AuthService.deleteMe()` حيين ضد Postgres حقيقي، رصيد محفظة >0 يمنع الحذف، تصفير الرصيد يسمح بيه | نعم — اختبار جديد في `admin-customer-delete.spec.ts` + `auth-self-service.spec.ts` (رفض ثم نجاح بعد التصفير) | BUG-013 (P1 — حذف حساب عنده رصيد محفظة حقيقي بيحبس الفلوس بلا مسار استرجاع) | BUG-013 fixed | راجعت `AdminEmployeesService.delete()` بالمقارنة — مفيش نفس الفجوة (الموظفين مالهمش `WalletOwnerType` خالص، الفحص مش مطلوب هناك) — سليم كما هو. باقي الـcontrol plane (customers list/block/unblock، employees CRUD، reports) اتراجع بالقراءة السريعة، مفيش استغلال جديد اتلاقط | commit قادم |
 | 26 | Admin RBAC | Admin/Security | PENDING | | | | | | |
 | 27 | Security Center | Admin/Security | PENDING | | | | | | |
 | 28 | Audit Logging | Audit | PENDING | | | | | | |
@@ -488,6 +488,50 @@ Regression test: حالة جديدة في `mfa-step-up-enforcement.spec.ts` (ن�
 `MFA_REQUIRED_PERMISSIONS` ماكانتش تحتوي القيمة، والـmetadata كانت `undefined`).
 Live verification: jest (اختبار metadata بحت، مفيش Postgres/DI مطلوب — نفس منهجية باقي حالات
 الملف ده).
+Status: FIXED
+
+### BUG-013
+Severity: P1 (فلوس حقيقية تفضل عالقة في الدفتر بلا أي مسار استرجاع بعد حذف الحساب)
+Flow: Phase 25 (Admin Control Plane) — راجعت `AdminCustomersService.delete()` (§24) بحثًا عن أي
+تفاعل مالي مفقود بعد إغلاق فجوته الأصلية (إضافة الـendpoint نفسه) في سيشن سابقة
+Symptom: `AdminCustomersService.delete()` (أدمن) و`AuthService.deleteMe()` (العميل/الفني/الشغالة
+نفسه) كانا بيسوفت-دِلِيت `User` بلا أي فحص على رصيد `Wallet` — الـ`Wallet` نفسه بيفضل زي ما هو
+(مش بيتحذف، مالوش `deleted_at` أصلاً)، فأي مستخدم عنده استرداد/مكافأة ولاء/مكافأة ترشيح/أرباح فني
+لسه مصروفة كانت الفلوس تفضل موجودة في الدفتر لكن المستخدم (`is_active=false`، ممنوع login) مبقاش
+عنده أي طريقة يوصلها تاني.
+Reproduction: عميل/فني عنده `wallets.balance_cents > 0` (أو `pending_balance_cents`/
+`reserved_balance_cents`) → `DELETE /auth/me` أو `DELETE /admin/customers/:userId` → نجح بلا أي
+تحذير أو رفض → `Wallet` row فضل موجود بنفس الرصيد، `User` بقى `deleted_at` NOT NULL — مفيش أي
+endpoint (عميل ولا أدمن) يقدر يوصل للرصيد ده تاني غير تدخّل يدوي مباشر في الداتابيز.
+Expected: حذف حساب عنده رصيد محفظة حقيقي لازم يترفض بوضوح لحد ما الرصيد يتصفّر (استرداد/صرف)،
+مش ينجح بصمت ويحبس الفلوس.
+Actual: الحذف كان بينجح دايمًا بغض النظر عن الرصيد.
+Root cause: منطق الحذف اتكتب بالتركيز على تنظيف جلسات الدخول/RBAC بس (نفس نمط
+`AdminEmployeesService.delete()` اللي اتنسخ منه)، بلا اعتبار إن العميل/الفني (عكس الموظف) ممكن
+يكون عنده رصيد مالي حقيقي مرتبط بحسابه.
+Files involved: `apps/api/src/modules/admin/admin-customers.service.ts`,
+`apps/api/src/modules/admin/admin.module.ts`, `apps/api/src/modules/auth/auth.service.ts`,
+`apps/api/src/modules/auth/auth.module.ts`,
+`apps/api/src/modules/admin/admin-customer-delete.spec.ts`,
+`apps/api/src/modules/auth/auth-self-service.spec.ts`
+Financial/security impact: مباشر — فلوس حقيقية (مش مُخترعة، كانت موجودة أصلاً في الدفتر) بتبقى
+غير قابلة للاسترجاع للمستخدم صاحبها، ومحتاجة تدخّل يدوي في الداتابيز لأي حد يحاول يصلحها بعدين.
+Fix: `assertNoStrandedWalletBalance()` في `AdminCustomersService` (تحقق قبل الـtransaction، برّه
+أي قفل) + فحص مطابق مباشرة في `AuthService.deleteMe()` — لو أي من `balance_cents`/
+`pending_balance_cents`/`reserved_balance_cents` أكبر من صفر، الحذف بيترفض `VAL_001` برسالة
+واضحة توجّه لاستخدام `wallets.adjust` (الأداة الإدارية الموجودة أصلاً). `Wallet` اتضافت كـ
+`TypeOrmModule.forFeature` entity في `AdminModule`/`AuthModule` (بدون استيراد `PaymentsModule`
+كامل — نفس نمط `Payout` الموجود في `AdminModule` من قبل، تجنّبًا لأي حلقة dependency).
+`AdminEmployeesService.delete()` اتراجعت بالمقارنة ولقيتها مش محتاجة نفس الفحص (الموظفين مالهمش
+`WalletOwnerType` أصلاً — لا `customer` ولا `technician` ولا `domestic_worker`).
+Regression test: `admin-customer-delete.spec.ts` (حالة جديدة: عميل برصيد 120 جنيه، الحذف يترفض
+`VAL_001`، الحساب يفضل نشط) + `auth-self-service.spec.ts` (حالة جديدة: عميل برصيد 50 جنيه، الحذف
+يترفض، بعد تصفير الرصيد الحذف ينجح عادي). اتأكدت إنهم كانوا هيفشلوا قبل الإصلاح عبر `git stash`
+على `auth.service.ts`/`admin-customers.service.ts` — النتيجة كانت خطأ compile-time (`TS2554:
+Expected N arguments, but got N+1`) بدل فشل runtime، لأن الـconstructor نفسه اتغيّر — قبول كدليل
+أقوى (نفس الأسلوب اللي اتقبل في BUG-008).
+Live verification: jest حي ضد Postgres حقيقي (4 اختبارات جديدة نجحت، 21 اختبار في الملفات
+المتأثرة كلها نجحت).
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)

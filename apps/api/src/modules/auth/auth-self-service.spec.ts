@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { AuthService } from './auth.service';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 
 /**
  * Script 7 Phase 1 — إدارة الحساب الذاتية (GET/PATCH/DELETE /auth/me، POST /auth/logout،
@@ -23,7 +24,7 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
   let dataSource: DataSource;
   let service: AuthService;
   const runId = Date.now().toString(36);
-  const ids = { userA: '', userB: '', sessionA1: '', sessionA2: '', sessionB1: '' };
+  const ids = { userA: '', userB: '', userC: '', sessionA1: '', sessionA2: '', sessionB1: '' };
 
   const hashRefreshToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -31,7 +32,7 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, RefreshToken],
+      entities: [User, RefreshToken, Wallet],
     });
     await dataSource.initialize();
 
@@ -52,6 +53,7 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
       dataSource.getRepository(User),
       {} as never,
       dataSource.getRepository(RefreshToken),
+      dataSource.getRepository(Wallet),
       dataSource,
       new JwtService(),
       configStub,
@@ -95,13 +97,26 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
       [ids.userB, hashRefreshToken(`${runId}-b1`)],
     );
     ids.sessionB1 = sessionB1.id;
+
+    // مستخدم C عنده رصيد محفظة حقيقي (استرداد/مكافأة سابقة) — Script 7 Phase 25.
+    const [userC] = await q(
+      `INSERT INTO users (phone_number, full_name, user_type, phone_verified_at, preferred_language)
+       VALUES ($1,$2,'customer',now(),'ar') RETURNING id`,
+      [`+2015${runId}`.slice(0, 15), `عميل C ${runId}`],
+    );
+    ids.userC = userC.id;
+    await q(
+      `INSERT INTO wallets (owner_user_id, owner_type, balance_cents, currency_code) VALUES ($1,'customer',5000,'EGP')`,
+      [ids.userC],
+    );
   });
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
-      await dataSource.query(`DELETE FROM refresh_tokens WHERE user_id IN ($1,$2)`, [ids.userA, ids.userB]);
-      await dataSource.query(`DELETE FROM users WHERE id IN ($1,$2)`, [ids.userA, ids.userB]);
+      await dataSource.query(`DELETE FROM refresh_tokens WHERE user_id IN ($1,$2,$3)`, [ids.userA, ids.userB, ids.userC]);
+      await dataSource.query(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.userC]);
+      await dataSource.query(`DELETE FROM users WHERE id IN ($1,$2,$3)`, [ids.userA, ids.userB, ids.userC]);
     } finally {
       await dataSource.destroy();
     }
@@ -209,5 +224,20 @@ describe('AuthService — إدارة الحساب الذاتية (Script 7 Phase
     // (رفض فوري في JwtStrategy.validate() قبل حتى ما يوصل للـcontroller) مختبرة في
     // jwt-strategy-active-user-check.spec.ts.
     await expect(service.getMe(ids.userB)).rejects.toMatchObject({ code: 'AUTH_001' });
+  });
+
+  it('deleteMe(): مستخدم عنده رصيد محفظة حقيقي (>0) بيترفض من غير ما يتحذف — الفلوس متفضلش عالقة بلا مسار استرجاع (Script 7 Phase 25)', async () => {
+    await expect(service.deleteMe(ids.userC)).rejects.toMatchObject({ code: 'VAL_001' });
+
+    const [userCRow] = await dataSource.query<{ is_active: boolean; deleted_at: string | null }[]>(
+      `SELECT is_active, deleted_at FROM users WHERE id = $1`,
+      [ids.userC],
+    );
+    expect(userCRow.is_active).toBe(true);
+    expect(userCRow.deleted_at).toBeNull();
+
+    // بعد ما الرصيد يتصفّر (استرداد/صرف يدوي عبر wallets.adjust)، الحذف يعدّي عادي.
+    await dataSource.query(`UPDATE wallets SET balance_cents = 0 WHERE owner_user_id = $1`, [ids.userC]);
+    await expect(service.deleteMe(ids.userC)).resolves.toBeUndefined();
   });
 });

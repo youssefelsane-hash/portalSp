@@ -6,6 +6,7 @@ import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User } from '../auth/entities/user.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 import { AdminCustomerResponseDto, toAdminCustomerResponseDto } from './dto/customer-response.dto';
 import { BlockCustomerDto } from './dto/block-customer.dto';
 import { ListCustomersQueryDto } from './dto/list-customers-query.dto';
@@ -17,8 +18,22 @@ export class AdminCustomersService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(CustomerProfile) private readonly profiles: Repository<CustomerProfile>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
+    @InjectRepository(Wallet) private readonly wallets: Repository<Wallet>,
     private readonly auditLog: AuditLogService,
   ) {}
+
+  /** بَقّة حقيقية اتلقطت (Script 7 Phase 25) — راجع تعليق `delete()` تحت. */
+  private async assertNoStrandedWalletBalance(userId: string): Promise<void> {
+    const wallet = await this.wallets.findOne({ where: { ownerUserId: userId } });
+    if (!wallet) return;
+    if (wallet.balanceCents > 0 || wallet.pendingBalanceCents > 0 || wallet.reservedBalanceCents > 0) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `مينفعش تحذف حساب فيه رصيد محفظة (${wallet.balanceCents / 100} جنيه متاح، ${wallet.pendingBalanceCents / 100} معلّق، ${wallet.reservedBalanceCents / 100} محجوز) — لازم تسترده أو تصرفه للعميل الأول (wallets.adjust)`,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
 
   private async findProfileOrThrow(userId: string): Promise<CustomerProfile> {
     const profile = await this.profiles.findOne({ where: { userId } });
@@ -125,12 +140,21 @@ export class AdminCustomersService {
   // §24 — كانت فجوة موثّقة صراحة (admin/README.md): "نفس فجوة الموظفين بالظبط" — soft-delete
   // اتبنى للموظفين (AdminEmployeesService.delete()) بس اتسيبت العملاء من غيره بلا سبب مستقل.
   // نفس النمط بالحرف، بس بلا سحب أدوار RBAC (العملاء مالهمش UserRole أصلاً، عكس الموظفين).
+  //
+  // بَقّة مالية حقيقية اتلقطت واتصلحت (Script 7 Phase 25): مفيش أي فحص كان بيمنع حذف عميل عنده
+  // رصيد محفظة حقيقي (استرداد/مكافأة ولاء/ترشيح) — الحذف بيسوفت-دِلِيت `User`/`CustomerProfile`
+  // بس، الـ`Wallet` نفسه بيفضل زي ما هو (مش بيتحذف)، فالفلوس تفضل موجودة في الدفتر لكن العميل
+  // (اللي دلوقتي `is_active=false` ومحظور يعمل login) مبقاش عنده أي طريقة يوصلها تاني — فلوس
+  // حقيقية عالقة بلا أي مسار استرجاع غير تدخّل يدوي مباشر في الداتابيز. الفحص الجديد بيمنع الحذف
+  // نهائي لحد ما الرصيد يتصفّر (استرداد/صرف عبر `wallets.adjust`)، نفس فلسفة "مينفعش فلوس تختفي
+  // بصمت" الحاكمة لكل الموديول المالي.
   async delete(adminUserId: string, userId: string, meta?: AuditActorMeta): Promise<void> {
     const profile = await this.findProfileOrThrow(userId);
     const user = await this.users.findOne({ where: { id: userId } });
     if (!user) {
       throw new ApiException(ErrorCode.VAL_001, 'العميل غير موجود', HttpStatus.NOT_FOUND);
     }
+    await this.assertNoStrandedWalletBalance(userId);
 
     await this.dataSource.transaction(async (manager) => {
       await manager.update(
