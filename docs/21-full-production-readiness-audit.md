@@ -35,7 +35,7 @@
 | 5 | Productivity / Crew Calculation | Catalog/Productivity | FIXED | نعم — `OrdersService.create()` حي (أول مرة في المشروع كله) بالحالتين السلبيتين + الحالة السليمة + الحالة العادية | نعم — 4 اختبارات جديدة (`order-creation-standard-data-pairing.spec.ts`)، أول تغطية jest مباشرة لـ`create()` | BUG-004 (P1 — متطلب طاقم بيتفقد بصمت) | BUG-004 fixed | لا يوجد معروف حاليًا — الفحص بقى XOR صريح، ونموذج الإنتاجية الخطي نفسه (توزيع الإنتاجية طرديًا مع عدد الصنايعية) لسه قرار عمل مبسّط موثّق صراحة (مش الصيغة النهائية المؤكدة من المالك) — راجع تعليق `estimateDuration()` في `catalog.service.ts` | commit قادم |
 | 6 | Address / GPS / Serviceability | Addresses/Geo | FIXED | نعم — `create()`/`update()` حيين ضد Postgres حقيقي، مدينتين/منطقتين مختلفتين | نعم — 5 اختبارات جديدة (`addresses-area-city-consistency.spec.ts`) | BUG-005 (P2 — server trust boundary مفقود بين area_id/city_id) | BUG-005 fixed | لا يوجد فحص جغرافي حقيقي (point-in-polygon) على مستوى المدينة نفسها لسه — الفحص الحالي بس على مستوى نطاق الخدمة (`service_zones.boundary`) لو موجود؛ ده قرار MVP موثّق صراحة مسبقًا (§0.2.5) مش بَقّة جديدة | commit قادم |
 | 7 | Booking Modes (ASAP/Scheduled) | Orders | FIXED | نعم — `OrdersService.create()` حي، طوارئ+موعد مستقبلي وطوارئ عادي | نعم — اختباران جديدان (`order-emergency-scheduled-at.spec.ts`) | BUG-006 (P1 — استجابة طوارئ بتتأجل بصمت) | BUG-006 fixed | `computeDispatchDeferredUntil()` نفسها مغطّاة بوحدة اختبار منفصلة (deferred-dispatch.util.spec.ts) وسليمة؛ الفجوة كانت في نقطة استدعائها بس. مفيش فحص مشابه لسه لباقي تركيبات bookingMode/scheduled_at غير المتوقعة (مثلاً TEAM+scheduled_at قريب جدًا من الآن) — مش عندها نفس الخطورة (مفيش رسوم طوارئ مرتبطة) فمش بَقّة، لكن تستاهل نظرة في Phase 34 (Golden Path) | commit قادم |
-| 8 | Provider Selection UX & Semantics | Technicians/Matching | PENDING | | | | | | |
+| 8 | Provider Selection UX & Semantics | Technicians/Matching | FIXED | جزئي — `flutter analyze` نضيف على الشاشة المعدّلة، مفيش render حي جديد (تغيير نصي إضافي بس، بلا منطق جديد) | لا يوجد اختبار جديد (تغيير UI نصي بحت، السلوك الخلفي (backend) كان مغطّى ومختبر بالفعل من Script 6) | BUG-007 (P2 — فجوة توقعات UX، مش خلل بيانات/مالي) | BUG-007 fixed | السيمانتيك الخلفي ("تفضيل مش ضمان" لـ`requested_technician_id`/`requested_technician_company_id`، "ضمان فعلي" لـ`schedule_slot_id`) قرار عمل موثّق ومختبر حي من قبل (Script 6) — سليم ومتعمّد، مش بَقّة. الفجوة كانت في التواصل مع العميل بس، دلوقتي اتقفلت في `technician_profile_screen.dart`؛ اختيار الشركة (`booking_mode=team`) كان أصلاً واضح كفاية ("بدون تفضيل" مقابل اسم الشركة) فمحتاجش تعديل | commit قادم |
 | 9 | Order Creation (idempotency) | Orders | PENDING | | | | | | |
 | 10 | Cash Payment | Payments/Orders | PENDING | | | | | | |
 | 11 | Online Payment | Payments | PENDING | | | | | | |
@@ -231,6 +231,36 @@ Regression test: `order-emergency-scheduled-at.spec.ts` (اختبارين، Post
 Live verification: jest حي ضد Postgres حقيقي — 2/2 نجحوا بعد الإصلاح، 1/2 فشل (بالشكل المتوقع)
 قبله. Full regression: 97 suite، 540 اختبار، كله ناجح (باستثناء فشل عابر غير مرتبط في
 `security-concurrency.spec.ts` سيناريو B — موثّق تحت، معلّق لـPhase 30).
+Status: FIXED
+
+### BUG-007
+Severity: P2 (فجوة توقعات UX تجاه العميل — مش خلل بيانات/مالي، لكن ثقة حقيقية معرّضة للخطر)
+Flow: Phase 8 (Provider Selection UX & Semantics) — `apps/customer-app` شاشة بروفايل الفني
+Symptom: زرار "إعادة الحجز مع نفس الفني" (`technician_profile_screen.dart`) بيبعت
+`requested_technician_id` للباك-إند، واللي (بتصميم متعمّد وموثّق من Script 6) **تفضيل بس مش
+ضمان** — لو الفني ده مش متاح وقت التوزيع، المطابقة بترجع للتوزيع العادي بصمت (فني تاني تمامًا).
+الشاشة كانت بتعرض الزرار من غير أي إشارة لطبيعة "التفضيل" دي — عميل بيدوس الزرار متوقّع إنه
+حاجز نفس الفني بالظبط، ويتفاجئ لو فني تاني وصل بدل كده.
+Reproduction: فتح بروفايل أي فني، الضغط على "إعادة الحجز مع نفس الفني" — مفيش أي نص في الشاشة
+كلها بيوضّح إن ده تفضيل قابل للتجاوز، بعكس قسم "مواعيد فاضية" (جدولة حقيقية بـ`schedule_slot_id`،
+اللي هو فعلاً ضمان حقيقي — الفني نفسه أعلن توافره في الوقت ده).
+Expected: العميل يعرف بوضوح الفرق بين "تفضيل" (ممكن يتغيّر) و"موعد مؤكّد" (مضمون فعليًا) قبل
+ما يدوس أي زرار — مش يكتشف الفرق بعد المفاجأة.
+Actual: زرار "إعادة الحجز" وقسم "مواعيد فاضية" معروضين جنب بعض بلا أي تمييز نصي بينهم خالص.
+Root cause: التصميم الخلفي (preference-vs-guarantee) اتبنى واتوثّق واتختبر حي في Script 6، لكن
+التواصل مع واجهة العميل ما لحقش يتحدّث بالتوازي.
+Files involved: `apps/customer-app/lib/features/technicians/technician_profile_screen.dart`
+Financial/security impact: لا يوجد مباشر — مفيش فلوس/بيانات متأثرة، لكن أثر ثقة/تجربة عميل حقيقي
+(توقع مخالف للواقع).
+Fix: نص توضيحي مضاف تحت قسم "مواعيد فاضية" ("موعد مؤكّد — الفني نفسه أعلن إنه متاح فيه، مش
+تفضيل") وتحت زرار "إعادة الحجز مع نفس الفني" ("ده تفضيل مش ضمان — لو الفني مش متاح وقت التنفيذ،
+هنبعتلك أنسب فني تاني بدل ما نلغي الطلب. للتأكيد على نفس الفني ده بالظبط، احجز على واحد من
+مواعيده الفاضية فوق" — بيتغيّر لو مفيش مواعيد فاضية أصلاً).
+Regression test: مفيش (تغيير نصي بحت، بلا منطق/state جديد) — `flutter analyze` نضيف على الملف
+المعدّل، صفر تحذيرات.
+Live verification: مراجعة كود بصرية + `flutter analyze` بس (مش render حي بـXvfb — مبرَّر لأن
+التغيير إضافة نص فقط بلا تعديل في التفاعل/الحالة، ومنهجية الـrender الحي التقيلة مخصصة أساسًا
+لبَقّات تفاعل/رندر حقيقية زي `flutter_secure_storage` الموثّقة في نفس الـREADME).
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)

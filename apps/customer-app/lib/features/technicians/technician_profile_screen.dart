@@ -329,6 +329,11 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                       if (_scheduleSlots.any((s) => s.isAvailable)) ...[
                         const SizedBox(height: 16),
                         Text('مواعيد فاضية', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 4),
+                        Text(
+                          'موعد مؤكّد — الفني نفسه أعلن إنه متاح فيه، مش تفضيل',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.primary),
+                        ),
                         const SizedBox(height: 8),
                         Card(
                           child: Column(
@@ -428,7 +433,7 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                           ),
                       ],
                       const SizedBox(height: 24),
-                      if (profile.services.isNotEmpty)
+                      if (profile.services.isNotEmpty) ...[
                         FilledButton.icon(
                           onPressed: _rebooking ? null : _rebook,
                           icon: _rebooking
@@ -436,6 +441,14 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                               : const Icon(Icons.replay),
                           label: const Text('إعادة الحجز مع نفس الفني'),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _scheduleSlots.any((s) => s.isAvailable)
+                              ? 'ده تفضيل مش ضمان — لو الفني مش متاح وقت التنفيذ، هنبعتلك أنسب فني تاني بدل ما نلغي الطلب. للتأكيد على نفس الفني ده بالظبط، احجز على واحد من مواعيده الفاضية فوق'
+                              : 'ده تفضيل مش ضمان — لو الفني مش متاح وقت التنفيذ، هنبعتلك أنسب فني تاني بدل ما نلغي الطلب',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ],
                   ),
       ),
