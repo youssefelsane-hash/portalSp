@@ -40,6 +40,26 @@ Future<http.Response> _send(
   }
 }
 
+// بَقّة حقيقية اتلقطت (المالك بلّغ 2026-08-19) — نفس بَقّة apps/customer-app بالحرف (كانت
+// موجودة هناك قبل كده واتصلحت، لكن api_client.dart هنا نسخة مستقلة تماماً مش لمسناها وقتها):
+// كل شاشة في التطبيق بتمسك `on ApiException catch` بس. أي فشل تاني (انقطاع الشبكة، رد مش JSON
+// صالح، إلخ) كان بيرمي استثناء محدّش بيمسكه — الشاشة تفضل عالقة على loading spinner/shimmer
+// للأبد بلا أي رسالة (مثال حي: شاشة الإشعارات). الإصلاح: أي استثناء غير `ApiException` بيتحوّل
+// هنا لـ`ApiException` واضح — نقطة اختناق واحدة بدل تعديل كل شاشة لوحدها.
+Future<T> _guardNetworkError<T>(Future<T> Function() action) async {
+  try {
+    return await action();
+  } on ApiException {
+    rethrow;
+  } catch (err) {
+    throw ApiException(
+      code: 'NETWORK_ERROR',
+      message: 'تعذر الاتصال بالخادم — تأكد من اتصالك بالإنترنت وحاول تاني',
+      statusCode: 0,
+    );
+  }
+}
+
 // بيفكّ الـ envelope (docs/02-data-dictionary.md §13) ويرمي ApiException لو success=false،
 // ويرجّع data الخام (Map/List/primitive حسب الـ endpoint) — الكولر مسؤول عن الـ cast المناسب.
 Future<dynamic> _apiRequestRaw(
@@ -48,20 +68,22 @@ Future<dynamic> _apiRequestRaw(
   Map<String, dynamic>? body,
   String? accessToken,
 }) async {
-  final response = await _send(method, path, body: body, accessToken: accessToken);
-  final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-  final success = decoded['success'] as bool? ?? false;
+  return _guardNetworkError(() async {
+    final response = await _send(method, path, body: body, accessToken: accessToken);
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final success = decoded['success'] as bool? ?? false;
 
-  if (!success) {
-    final error = decoded['error'] as Map<String, dynamic>?;
-    throw ApiException(
-      code: error?['code'] as String? ?? 'UNKNOWN',
-      message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
-      statusCode: response.statusCode,
-    );
-  }
+    if (!success) {
+      final error = decoded['error'] as Map<String, dynamic>?;
+      throw ApiException(
+        code: error?['code'] as String? ?? 'UNKNOWN',
+        message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+        statusCode: response.statusCode,
+      );
+    }
 
-  return decoded['data'];
+    return decoded['data'];
+  });
 }
 
 // نداء عام لـ endpoints بترجع object واحد. accessToken اختياري (null لمسارات public زي OTP/الكتالوج).
@@ -106,19 +128,21 @@ Future<Map<String, dynamic>?> apiUpload(
   if (accessToken != null) {
     request.headers['Authorization'] = 'Bearer $accessToken';
   }
-  final streamedResponse = await request.send();
-  final response = await http.Response.fromStream(streamedResponse);
-  final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-  final success = decoded['success'] as bool? ?? false;
+  return _guardNetworkError(() async {
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final success = decoded['success'] as bool? ?? false;
 
-  if (!success) {
-    final error = decoded['error'] as Map<String, dynamic>?;
-    throw ApiException(
-      code: error?['code'] as String? ?? 'UNKNOWN',
-      message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
-      statusCode: response.statusCode,
-    );
-  }
+    if (!success) {
+      final error = decoded['error'] as Map<String, dynamic>?;
+      throw ApiException(
+        code: error?['code'] as String? ?? 'UNKNOWN',
+        message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+        statusCode: response.statusCode,
+      );
+    }
 
-  return decoded['data'] as Map<String, dynamic>?;
+    return decoded['data'] as Map<String, dynamic>?;
+  });
 }
