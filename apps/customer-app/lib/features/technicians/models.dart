@@ -73,6 +73,13 @@ class TechnicianBookingListItem {
   final String technicianLevel;
   final int? finalPriceCents;
   final double? levelPriceMultiplier;
+  // Script 6 Part 7 — بيانات مقارنة حقيقية لكروت السوق: كل فني في القايمة دي عدّى المرحلة 1
+  // الصارمة في الباك-إند (verification_status='approved')، فـisVerified دايمًا true فعليًا —
+  // بترجع صريحة من الـAPI بدل ما الشاشة تفترضها ضمنيًا. onTimeRatePercent/avgArrivalMinutes
+  // بيرجعوا null لو مفيش طلبات مجدولة/مكتملة كفاية لحساب متوسط منها (مش صفر مضلّل).
+  final bool isVerified;
+  final int? onTimeRatePercent;
+  final int? avgArrivalMinutes;
 
   TechnicianBookingListItem({
     required this.id,
@@ -86,6 +93,9 @@ class TechnicianBookingListItem {
     required this.technicianLevel,
     required this.finalPriceCents,
     required this.levelPriceMultiplier,
+    required this.isVerified,
+    required this.onTimeRatePercent,
+    required this.avgArrivalMinutes,
   });
 
   factory TechnicianBookingListItem.fromJson(Map<String, dynamic> json) => TechnicianBookingListItem(
@@ -100,6 +110,9 @@ class TechnicianBookingListItem {
         technicianLevel: json['technician_level'] as String? ?? 'new',
         finalPriceCents: json['final_price_cents'] as int?,
         levelPriceMultiplier: (json['level_price_multiplier'] as num?)?.toDouble(),
+        isVerified: json['is_verified'] as bool? ?? false,
+        onTimeRatePercent: json['on_time_rate'] as int?,
+        avgArrivalMinutes: json['avg_arrival_minutes'] as int?,
       );
 }
 

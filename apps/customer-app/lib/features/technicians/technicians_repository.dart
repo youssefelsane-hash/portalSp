@@ -22,6 +22,9 @@ class TechniciansRepository {
     // apps/api/src/modules/catalog/dto/list-technicians-for-service.dto.ts (JSON مُرمّز في
     // query string، نفس نمط أي مرشّح كائن في REST APIs هنا).
     Map<String, dynamic>? fieldValues,
+    // فرز يدوي (Script 6 Part 8) — recommended (افتراضي، ترتيب "الأنسب" من الباك-إند) أو
+    // lowest_price/highest_rating. منفصل عمداً عن الترتيب الافتراضي، مش بديل له.
+    String? sort,
   }) async {
     // سياسة إلغاء الفني (docs/10) — excludeTechnicianId بيتبعت وقت اختيار فني بديل بعد ما فني
     // لغى، عشان نفس الفني مايظهرش تاني في القايمة.
@@ -30,6 +33,7 @@ class TechniciansRepository {
     if (fieldValues != null && fieldValues.isNotEmpty) {
       query.write('&field_values=${Uri.encodeComponent(jsonEncode(fieldValues))}');
     }
+    if (sort != null) query.write('&sort=$sort');
     final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId$query');
     return items.map(TechnicianBookingListItem.fromJson).toList();
   }

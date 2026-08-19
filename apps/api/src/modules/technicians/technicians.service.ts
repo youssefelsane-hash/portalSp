@@ -35,6 +35,12 @@ export interface TechnicianBookingListItem {
   distanceKm: number | null;
   // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح قبل ما يختاره.
   currentLevel: TechnicianLevel;
+  // Script 6 Part 7 — بيانات مقارنة حقيقية للسوق (مفيش بيانات مصطنعة). isVerified دايمًا true
+  // هنا فعليًا (المرحلة 1 الصارمة فوق بتفلتر verification_status='approved' بس) — بيترجع
+  // كحقل صريح بدل ما apps/customer-app تفترض ده ضمنيًا من مجرد ظهور الفني في القايمة.
+  isVerified: boolean;
+  onTimeRatePercent: number | null;
+  avgArrivalMinutes: number | null;
 }
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
@@ -339,6 +345,8 @@ export class TechniciansService {
       service_completed_count: number;
       distance_km: string | null;
       current_level: TechnicianLevel;
+      on_time_rate: string | null;
+      avg_arrival_minutes: string | null;
     }
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
@@ -346,7 +354,24 @@ export class TechniciansService {
              tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
-               AS recommendation_score
+               AS recommendation_score,
+             -- Script 6 Part 7 — مؤشرات أداء حقيقية لكروت المقارنة في السوق (مش أرقام مصطنعة).
+             -- نفس منطق getPublicProfile() بالحرف (technician_departed_at→technician_arrived_at،
+             -- عتبة الالتزام 15 دقيقة) بس كـcorrelated subquery هنا عشان يشتغل لكل الفنيين المرشحين
+             -- دفعة واحدة (LIMIT 50 أصلاً، والعمود مفهرس idx_orders_technician_id).
+             (SELECT ROUND(
+                COUNT(*) FILTER (WHERE o.technician_arrived_at <= o.scheduled_at + interval '15 minutes') * 100.0
+                  / NULLIF(COUNT(*), 0)
+              )
+              FROM orders o
+              WHERE o.technician_id = tp.id AND o.scheduled_at IS NOT NULL
+                AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+             ) AS on_time_rate,
+             (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (o.technician_arrived_at - o.technician_departed_at)) / 60))
+              FROM orders o
+              WHERE o.technician_id = tp.id AND o.technician_departed_at IS NOT NULL
+                AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+             ) AS avg_arrival_minutes
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -372,6 +397,11 @@ export class TechniciansService {
         serviceCompletedCount: row.service_completed_count,
         distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
         currentLevel: row.current_level,
+        // المرحلة 1 الصارمة فوق فلترت verification_status='approved' بالفعل — أي صف راجع هنا
+        // فني موثّق فعلاً، مفيش سبب يبقى false أبداً هنا لكن الحقل بيترجع صريح مش ضمني.
+        isVerified: true,
+        onTimeRatePercent: row.on_time_rate !== null ? Number(row.on_time_rate) : null,
+        avgArrivalMinutes: row.avg_arrival_minutes !== null ? Number(row.avg_arrival_minutes) : null,
       })),
     };
   }

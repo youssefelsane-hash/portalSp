@@ -32,6 +32,9 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
     lowVolumeTechId: '',
     highVolumeUserId: '',
     highVolumeTechId: '',
+    orderCustomerUserId: '',
+    orderCustomerProfileId: '',
+    orderId: '',
   };
 
   beforeAll(async () => {
@@ -122,6 +125,30 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
       );
     }
 
+    // طلب مكتمل واحد للفني منخفض الحجم — عشان نثبت on_time_rate/avg_arrival_minutes (Script 6
+    // Part 7) بيتحسبوا صح من نفس منطق getPublicProfile() (correlated subquery في الاستعلام
+    // الرئيسي). وصل بعد الموعد المجدول بـ5 دقايق (جوّه عتبة الـ15 دقيقة) = "في الميعاد"، ورحلة
+    // 20 دقيقة (technician_departed_at→technician_arrived_at).
+    const [orderCustomerUser] = await dataSource.query(
+      `INSERT INTO users (phone_number,full_name,user_type) VALUES ($1,$2,'customer') RETURNING id`,
+      [`+2035${runId}`.slice(0, 15), `عميل طلب ${runId}`],
+    );
+    ids.orderCustomerUserId = orderCustomerUser.id;
+    const [customerProfile] = await dataSource.query(
+      `INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`,
+      [ids.orderCustomerUserId],
+    );
+    ids.orderCustomerProfileId = customerProfile.id;
+    const [order] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number,customer_id,technician_id,service_id,address_id,scheduled_at,
+          technician_departed_at,technician_arrived_at)
+       VALUES ($1,$2,$3,$4,$5, now(), now() - interval '15 minutes', now() + interval '5 minutes')
+       RETURNING id`,
+      [`ORD-RANK-${runId}`.slice(0, 24), ids.orderCustomerProfileId, ids.lowVolumeTechId, ids.serviceId, ids.addressId],
+    );
+    ids.orderId = order.id;
+
     const geoService = new GeoService(
       dataSource.getRepository(City),
       dataSource.getRepository(Area),
@@ -149,6 +176,8 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
+      await dataSource.query(`DELETE FROM orders WHERE id=$1`, [ids.orderId]);
+      await dataSource.query(`DELETE FROM customer_profiles WHERE id=$1`, [ids.orderCustomerProfileId]);
       await dataSource.query(`DELETE FROM technician_zones WHERE technician_id IN ($1,$2)`, [
         ids.lowVolumeTechId,
         ids.highVolumeTechId,
@@ -162,10 +191,11 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
         ids.highVolumeTechId,
       ]);
       await dataSource.query(`DELETE FROM addresses WHERE id=$1`, [ids.addressId]);
-      await dataSource.query(`DELETE FROM users WHERE id IN ($1,$2,$3)`, [
+      await dataSource.query(`DELETE FROM users WHERE id IN ($1,$2,$3,$4)`, [
         ids.lowVolumeUserId,
         ids.highVolumeUserId,
         ids.addressUserId,
+        ids.orderCustomerUserId,
       ]);
       await dataSource.query(`DELETE FROM services WHERE id=$1`, [ids.serviceId]);
       await dataSource.query(`DELETE FROM technician_zones WHERE service_zone_id=$1`, [ids.zoneId]);
@@ -192,5 +222,20 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
     expect(lowVolume.totalRatingsCount).toBe(1);
     expect(highVolume.averageRating).toBe(4.9);
     expect(highVolume.totalRatingsCount).toBe(200);
+  });
+
+  it('isVerified صريح true للاتنين، وon_time_rate/avg_arrival_minutes بيتحسبوا من طلب حقيقي (Script 6 Part 7)', async () => {
+    const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId);
+    const lowVolume = items.find((item) => item.technicianId === ids.lowVolumeTechId)!;
+    const highVolume = items.find((item) => item.technicianId === ids.highVolumeTechId)!;
+    expect(lowVolume.isVerified).toBe(true);
+    expect(highVolume.isVerified).toBe(true);
+    // الفني منخفض الحجم عنده الطلب المزروع: وصل بعد الموعد بـ5 دقايق (جوّه عتبة الـ15) = 100%
+    // التزام، ورحلة استغرقت 20 دقيقة (departed→arrived).
+    expect(lowVolume.onTimeRatePercent).toBe(100);
+    expect(lowVolume.avgArrivalMinutes).toBe(20);
+    // الفني عالي الحجم معندوش أي طلبات — null صريح مش صفر مضلّل.
+    expect(highVolume.onTimeRatePercent).toBeNull();
+    expect(highVolume.avgArrivalMinutes).toBeNull();
   });
 });

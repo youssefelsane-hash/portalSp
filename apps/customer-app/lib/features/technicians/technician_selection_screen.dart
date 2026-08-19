@@ -1,27 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../core/api_exception.dart';
-import '../../core/auth_repository.dart';
-import '../../design/empty_state.dart';
-import '../../design/loading_list.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
 import '../orders/create_order_screen.dart';
-import 'models.dart';
-import 'technician_profile_screen.dart';
-import 'technicians_repository.dart';
+import 'technician_marketplace_screen.dart';
 
-// اختيار الفني قبل الحجز (docs/08 §1.5) — كانت فجوة موثّقة صراحة: GET /services/:id/technicians
-// مختبر حي في الباك-إند من سيشن سابقة بلا أي شاشة تناديه، فالعميل مكانش يقدر يختار فني بعينه
-// قبل الحجز أصلاً (auto-match بس). الشاشة دي بتظهر بعد اختيار الخدمة (bookingMode=individual بس
-// — team ليها اختيار شركة/فريق منفصل جوّه CreateOrderScreen، emergency بيتوزّع تلقائيًا بالكامل).
+// اختيار الفني قبل الحجز (docs/08 §1.5، مُعاد تصميمها Script 6 Part 6-7) — كانت الشاشة دي
+// بتعرض كارت "اختار لي تلقائيًا" وقايمة الفنيين الكاملة (بالصور/التقييمات/الأسعار) في نفس
+// الوقت — تحميل معلومات وقرارات زيادة عن اللازم في خطوة واحدة، عكس مبدأ progressive disclosure
+// (docs/08 §Part 18). دلوقتي الخطوة الأولى بالظبط اختيارين كبيرين واضحين: تلقائي أو يدوي.
+// القايمة الحقيقية (كروت المقارنة، الفرز) اتنقلت بالكامل لـTechnicianMarketplaceScreen ومش
+// بتتحمّل أو تتعرض خالص لحد ما العميل يختار "يدوي" صراحة.
 class TechnicianSelectionScreen extends StatefulWidget {
   final CatalogService service;
 
   // سياسة إلغاء الفني (docs/10) — لو اتبعت، الشاشة بتستخدمها بدل التنقل لـCreateOrderScreen
   // (نفس الشاشة، غرض مختلف: اختيار فني بديل لطلب موجود بالفعل، مش إنشاء طلب جديد). null يعني
-  // السلوك الأصلي (اختيار فني قبل حجز جديد).
+  // السلوك الأصلي (اختيار فني قبل حجز جديد). في وضع الاستبدال ده، خطوة "تلقائي/يدوي" بتتخطى
+  // بالكامل — الزرار اللي جاب العميل هنا (order_detail_screen's "اختار الفريق بنفسك") قرر
+  // "يدوي" بالفعل، فمفيش داعي نسأله تاني.
   final void Function(String? requestedTechnicianId)? onManualSelect;
 
   // سياسة إلغاء الفني (docs/10) — لو اتبعت (وضع إعادة الاختيار)، القايمة مش هتعرض الفني ده.
@@ -48,19 +45,13 @@ class TechnicianSelectionScreen extends StatefulWidget {
 }
 
 class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
-  late final TechniciansRepository _repository;
   Address? _selectedAddress;
-  List<TechnicianBookingListItem>? _technicians;
-  bool _loading = false;
-  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _repository = TechniciansRepository(context.read<AuthRepository>());
     if (widget.initialAddress != null) {
       _selectedAddress = widget.initialAddress;
-      _load();
     } else {
       _pickAddress();
     }
@@ -75,31 +66,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
       if (mounted) Navigator.of(context).pop();
       return;
     }
-    setState(() {
-      _selectedAddress = address;
-      _technicians = null;
-      _error = null;
-    });
-    await _load();
-  }
-
-  Future<void> _load() async {
-    final address = _selectedAddress;
-    if (address == null) return;
-    setState(() => _loading = true);
-    try {
-      final items = await _repository.listForService(
-        widget.service.id,
-        address.id,
-        excludeTechnicianId: widget.excludeTechnicianId,
-        fieldValues: widget.fieldValues,
-      );
-      if (mounted) setState(() => _technicians = items);
-    } on ApiException catch (err) {
-      if (mounted) setState(() => _error = err.message);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    setState(() => _selectedAddress = address);
   }
 
   void _confirmSelection({String? requestedTechnicianId}) {
@@ -120,120 +87,128 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     );
   }
 
+  void _openMarketplace() {
+    final address = _selectedAddress;
+    if (address == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TechnicianMarketplaceScreen(
+          service: widget.service,
+          address: address,
+          excludeTechnicianId: widget.excludeTechnicianId,
+          fieldValues: widget.fieldValues,
+          onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final address = _selectedAddress;
+
+    if (address != null && widget.onManualSelect != null) {
+      return TechnicianMarketplaceScreen(
+        service: widget.service,
+        address: address,
+        excludeTechnicianId: widget.excludeTechnicianId,
+        fieldValues: widget.fieldValues,
+        onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
+      );
+    }
+
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: Text('اختار الفني: ${widget.service.nameAr}')),
-        body: _selectedAddress == null
+        body: address == null
             ? const SizedBox.shrink() // لسه بيختار عنوان (AddressesScreen فوقها)
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Card(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    child: ListTile(
-                      leading: const Icon(Icons.bolt),
-                      title: const Text('اختار لي تلقائيًا (أسرع)'),
-                      subtitle: const Text('هنبعت الطلب لأقرب/أنسب فني متاح فورًا'),
-                      trailing: const Icon(Icons.chevron_left),
-                      onTap: () => _confirmSelection(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('أو اختار الفني بنفسك', style: Theme.of(context).textTheme.titleMedium),
-                      TextButton.icon(
+            : Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: TextButton.icon(
                         onPressed: _pickAddress,
                         icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
                         label: const Text('تغيير العنوان'),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_loading)
-                    const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LoadingList(itemCount: 3))
-                  else if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                    )
-                  else if ((_technicians ?? []).isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: EmptyState(
-                        icon: Icons.engineering_outlined,
-                        title: 'مفيش فنيين متاحين للخدمة دي في منطقتك دلوقتي',
-                        description: 'استخدم "اختار لي تلقائيًا" فوق',
-                      ),
-                    )
-                  else
-                    ..._technicians!.map(
-                      (t) => Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundImage: t.avatarUrl != null ? NetworkImage(t.avatarUrl!) : null,
-                            child: t.avatarUrl == null ? const Icon(Icons.person) : null,
-                          ),
-                          title: Row(
-                            children: [
-                              Expanded(child: Text(t.fullName)),
-                              // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة الفني
-                              // والسعر النهائي المحسوب فعليًا بيه قبل ما يختاره.
-                              Chip(
-                                label: Text(technicianLevelLabelsAr[t.technicianLevel] ?? t.technicianLevel),
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ],
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  if (t.totalRatingsCount > 0) ...[
-                                    const Icon(Icons.star, size: 14, color: Colors.amber),
-                                    Text(' ${t.averageRating.toStringAsFixed(1)} (${t.totalRatingsCount})  '),
-                                  ] else
-                                    const Text('لسه من غير تقييم  '),
-                                  Text('· ${t.completedOrdersCount} طلب مكتمل'),
-                                  if (t.distanceKm != null) Text('  · ${t.distanceKm!.toStringAsFixed(1)} كم'),
-                                ],
-                              ),
-                              if (t.finalPriceCents != null)
-                                Text(
-                                  'السعر النهائي: ${(t.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                            ],
-                          ),
-                          isThreeLine: false,
-                          trailing: Wrap(
-                            spacing: 4,
-                            children: [
-                              IconButton(
-                                tooltip: 'البروفايل الكامل',
-                                icon: const Icon(Icons.info_outline),
-                                onPressed: () => Navigator.of(context).push(
-                                  MaterialPageRoute(builder: (_) => TechnicianProfileScreen(technicianId: t.id)),
-                                ),
-                              ),
-                              FilledButton(
-                                onPressed: () => _confirmSelection(requestedTechnicianId: t.id),
-                                child: const Text('اختار'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
                     ),
-                ],
+                    const Spacer(),
+                    Text(
+                      'إزاي حابب تختار الفني؟',
+                      style: Theme.of(context).textTheme.titleLarge,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    _ChoiceCard(
+                      icon: Icons.bolt,
+                      title: 'اختاروا لي الأنسب',
+                      subtitle: 'هنبعت الطلب لأنسب فني متاح فورًا حسب تقييمه وقربه منك',
+                      onTap: () => _confirmSelection(),
+                      highlighted: true,
+                    ),
+                    const SizedBox(height: 16),
+                    _ChoiceCard(
+                      icon: Icons.people_outline,
+                      title: 'اختار الفريق بنفسك',
+                      subtitle: 'شوف قايمة الفنيين المتاحين وقارن بينهم قبل ما تختار',
+                      onTap: _openMarketplace,
+                    ),
+                    const Spacer(flex: 2),
+                  ],
+                ),
               ),
+      ),
+    );
+  }
+}
+
+class _ChoiceCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool highlighted;
+
+  const _ChoiceCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.highlighted = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      color: highlighted ? scheme.primaryContainer : null,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(icon, size: 32, color: highlighted ? scheme.onPrimaryContainer : scheme.primary),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_left),
+            ],
+          ),
+        ),
       ),
     );
   }
