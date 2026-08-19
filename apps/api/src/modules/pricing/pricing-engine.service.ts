@@ -205,22 +205,25 @@ export class PricingEngineService {
     const normalized: Record<string, string | number | boolean> = {};
 
     for (const field of fields) {
-      const value = rawValues[field.fieldKey];
+      let value = rawValues[field.fieldKey];
+      // بَقّة حقيقية اتلقطت واتصلحت (Script 7 Phase 3): النسخة الأولى كانت بتـ`continue` فورًا
+      // بمجرد ما تحسب القيمة الافتراضية، يعني default_value غير صالح (رقم بره min/max، أو قيمة
+      // مش من ضمن options الحقل) كان بيتجاوز فحص الصلاحية كامل ويتحسب بيه السعر بصمت — اتأكد
+      // حيًا: default_value='99999' على حقل حده الأقصى 100 كان بيطلع سعر ×999 غلط تمامًا بلا أي
+      // رفض. الإصلاح: القيمة الافتراضية بتتحط في `value` وبتكمل نفس مسار فحص options/min-max
+      // اللي أي قيمة مبعوتة من العميل بتتفحص بيه بالظبط — مفيش مسار "مختصر" غير محمي بعد كده.
+      let usedDefault = false;
       if (value === undefined || value === null || value === '') {
         if (field.isRequired) {
           throw new ApiException(ErrorCode.VAL_001, `الحقل "${field.labelAr}" (${field.fieldKey}) مطلوب`, HttpStatus.BAD_REQUEST);
         }
-        // بَقّة حقيقية حية اتلقطت (Script 6 Part 3/4): حقل اختياري متلمسش من العميل كان بيتجاهل
-        // هنا تمامًا (continue بلا قيمة) بدل ما ياخد قيمته الافتراضية — فلو المعادلة بتشاور عليه
-        // (field_ref أو شرط)، evaluateFormulaNode()/evaluateCondition() كانوا بيرفضوا بـ400
-        // "الحقل مطلوب لحساب السعر"، رغم إنه مش إجباري فعلاً. الإصلاح: نطبّق default_value
-        // المُعدّة صراحة لو موجودة، أو الافتراض الضمني false لحقول CHECKBOX تحديدًا (نفس سلوك
-        // أي checkbox قياسي — متعلّمتش = false، مش "متجاوبتش").
+        // Script 6 Part 3/4: حقل اختياري متلمسش من العميل بياخد قيمته الافتراضية (المُعدّة صراحة،
+        // أو الافتراض الضمني false لحقول CHECKBOX) بدل ما يتجاهل تمامًا — لو المعادلة بتشاور عليه
+        // (field_ref أو شرط)، كانت بترفض غلط بـ"الحقل مطلوب" رغم إنه مش إجباري فعلاً.
         const defaulted = this.resolveDefaultValue(field);
-        if (defaulted !== undefined) {
-          normalized[field.fieldKey] = defaulted;
-        }
-        continue;
+        if (defaulted === undefined) continue;
+        value = defaulted;
+        usedDefault = true;
       }
 
       if (field.options && field.options.length > 0) {
@@ -232,7 +235,8 @@ export class PricingEngineService {
         const allowedValues = field.options.map((o) => o.value);
         for (const v of values) {
           if (!allowedValues.includes(String(v))) {
-            throw new ApiException(ErrorCode.VAL_001, `قيمة غير مسموحة للحقل "${field.labelAr}": ${v}`, HttpStatus.BAD_REQUEST);
+            const source = usedDefault ? ' (القيمة الافتراضية المُعدّة للحقل ده مش من ضمن خياراته الحالية — لازم تتصحح من إعدادات الخدمة)' : '';
+            throw new ApiException(ErrorCode.VAL_001, `قيمة غير مسموحة للحقل "${field.labelAr}": ${v}${source}`, HttpStatus.BAD_REQUEST);
           }
         }
         normalized[field.fieldKey] = values.map(String).join(',');
@@ -242,11 +246,12 @@ export class PricingEngineService {
       if (typeof value === 'number' || (typeof value === 'string' && field.minValue !== null) || field.maxValue !== null) {
         const numericValue = Number(value);
         if (!Number.isNaN(numericValue)) {
+          const source = usedDefault ? ' (القيمة الافتراضية المُعدّة للحقل ده — لازم تتصحح من إعدادات الخدمة)' : '';
           if (field.minValue !== null && numericValue < Number(field.minValue)) {
-            throw new ApiException(ErrorCode.VAL_001, `قيمة "${field.labelAr}" أقل من الحد الأدنى المسموح`, HttpStatus.BAD_REQUEST);
+            throw new ApiException(ErrorCode.VAL_001, `قيمة "${field.labelAr}" أقل من الحد الأدنى المسموح${source}`, HttpStatus.BAD_REQUEST);
           }
           if (field.maxValue !== null && numericValue > Number(field.maxValue)) {
-            throw new ApiException(ErrorCode.VAL_001, `قيمة "${field.labelAr}" أعلى من الحد الأقصى المسموح`, HttpStatus.BAD_REQUEST);
+            throw new ApiException(ErrorCode.VAL_001, `قيمة "${field.labelAr}" أعلى من الحد الأقصى المسموح${source}`, HttpStatus.BAD_REQUEST);
           }
         }
       }

@@ -30,7 +30,7 @@
 | 0 | tokenHash fix (carried over) | Security — employee sessions endpoint | VERIFIED | نعم — HTTP حي كامل (login حقيقي OTP، 200 مع فحص المفاتيح+القيم، 401 بلا توكن، 403 بلا صلاحية) | نعم — `employee-session-response.spec.ts` (3 اختبارات) | BUG-002 (test hygiene، s22c) | BUG-002 fixed | لا يوجد — الفحص مزدوج (allowlist مفاتيح + بحث عن القيم الحساسة الفعلية في الرد المُسلسَل) | commit قادم — انظر BUG-001/002 تحت |
 | 1 | Customer Auth & Account | Auth | VERIFIED | نعم — تسجيل حي، حذف حساب+رفض فوري لنفس التوكن، رفض تسجيل دخول برقم محذوف، عبور صلاحيات عميل↔أدمن (403 مرتين)، جلسات/logout كاملة | نعم — 50 اختبار موجود سابقًا (OTP/lockout/no-log-leak/blocked-inactive-deleted/concurrent-login/atomic-refresh/MFA step-up) + 7 اختبار جديد (`auth-self-service.spec.ts`) لـupdateMe/getMe/logout/listSessions/revokeSession IDOR/deleteMe | لا يوجد | لا يوجد (الـinvariants كلها كانت سليمة بالفعل) | لا يوجد معروف — الغطاء شامل دلوقتي (تسجيل، دخول، تجديد، خروج، حذف حساب، جلسات متعددة، IDOR) | commit قادم |
 | 2 | Service Discovery | Catalog | VERIFIED | نعم — خدمة/فئة معطّلة حقيقية اتزرعت، اتأكد حيًا عبر HTTP إنها 404/مش ظاهرة في `/services`, `/service-categories`, `/estimate` | نعم — 5 اختبار جديد (`catalog-visibility.spec.ts`) + 8 موجودين سابقًا (`catalog-search.spec.ts`، Script 3 §7/§12) | لا يوجد | لا يوجد (الحماية كانت سليمة، بس بلا regression test) | `launch_phase` عمود مخزّن بس مش مستخدم كفلتر خالص (ميتادata تنظيمية فقط — `is_active` هو البوابة الفعلية) — ملاحظة تصميم موثّقة، مش بَقّة (لا يوجد "current platform phase" مفهوم في الكود يقتضي استخدامه كفلتر) | commit قادم |
-| 3 | Booking Configuration (pricing fields) | Pricing | PENDING | | | | | | |
+| 3 | Booking Configuration (pricing fields) | Pricing | FIXED | نعم — خدمة formula حقيقية بحقل NUMBER `default_value` بره الحدود، `POST /services/:id/estimate` حي رجّع رفض واضح بدل سعر غلط | نعم — 2 اختبار جديد (`pricing-field-default-value-bypass.spec.ts`) + 5 موجودين (Script 6 Part 3/4) | BUG-003 (P1 — تسعير خاطئ بصمت) | BUG-003 fixed | لا يوجد معروف حاليًا — الفحص بقى موحّد لكل القيم (افتراضية أو من العميل) | commit قادم |
 | 4 | Pricing Engine | Pricing | PENDING | | | | | | |
 | 5 | Productivity / Crew Calculation | Catalog/Productivity | PENDING | | | | | | |
 | 6 | Address / GPS / Serviceability | Addresses/Geo | PENDING | | | | | | |
@@ -102,6 +102,32 @@ Financial/security impact: لا يوجد مباشر (بيانات اختبار �
 Fix: إضافة `DELETE FROM chat_messages WHERE thread_id IN (...)` ثم `DELETE FROM chat_threads WHERE order_id IN (...)` قبل `DELETE FROM orders` في الـ`afterAll`، بنفس نمط `SELECT id FROM orders WHERE order_number LIKE 'TS22C-%'` المستخدم في باقي سطور التنظيف.
 Regression test: مفيش اختبار جديد منفصل (الإصلاح في التنظيف نفسه) — الإثبات هو إن السويت بقى بيرجّع "Test Suites: 1 passed" بدل "failed to run"، واتأكد يدويًا إن `orders`/`chat_threads` بترجع لصفر بعد كل تشغيلة.
 Live verification: اتشغّل السويت 1 لوحده (نجح، 8/8 اختبار) ثم فحص مباشر لقاعدة البيانات (`SELECT count(*) FROM orders WHERE order_number LIKE 'TS22C-%'` → 0، وبرضه `chat_threads` المرتبطة → 0). بعدين Full regression كامل: 91 suite، 515 اختبار، كله ناجح.
+Status: FIXED
+
+### BUG-003
+Severity: P1 (financial correctness — سعر خاطئ يتحسب بصمت بدون أي رفض/تحذير)
+Flow: Phase 3 (Booking Configuration — pricing fields)
+Symptom: خدمة `pricing_model=formula` عندها حقل اختياري (NUMBER أو DROPDOWN) بـ`default_value`
+غير صالح (بره حدود `min_value`/`max_value`، أو مش من ضمن `options`) — أي عميل ما لمسش الحقل ده
+بياخد سعر محسوب من القيمة الفاسدة دي بصمت، بلا أي رفض أو تحذير.
+Reproduction: حقل NUMBER بحدود `[1,100]`، `default_value='99999'`، معادلة `price_cents = area
+× 100`. `evaluateDraft(serviceId, {})` (من غير `area`) رجع `priceCents=9999900` بدل رفض.
+Expected: أي قيمة (سواء مبعوتة من العميل أو افتراضية) تتفحص بنفس المعيار قبل استخدامها في حساب
+السعر — قيمة بره الحدود أو مش من ضمن الخيارات لازم ترفض بوضوح.
+Actual: `validateAndNormalizeFieldValues()` كانت بتعمل `continue` فورًا بعد حساب القيمة
+الافتراضية، فبتتخطى فحص `options`/`min_value`/`max_value` بالكامل — مسار مختصر غير محمي.
+Root cause: منطق الـdefault والـvalidation كانا في نفس الدالة بس في مسارين منفصلين — المسار
+الافتراضي اتضاف (Script 6 Part 3/4) من غير ما يمر على نفس فحص المسار العادي.
+Files involved: `apps/api/src/modules/pricing/pricing-engine.service.ts`
+Financial/security impact: سعر نهائي خاطئ للعميل (زيادة أو نقصان حسب المعادلة)، عمولة/أرباح فني
+محسوبين من رقم غلط، بلا أي أثر مرئي في اللوج أو للأدمن لحد ما حد يلاحظ الفرق بالصدفة.
+Fix: القيمة الافتراضية بتتحط في نفس متغيّر `value` وتكمل نفس مسار فحص options/min-max اللي أي
+قيمة عميل بتتفحص بيه بالضبط — مفيش `continue` مبكر غير محمي بعد كده. رسالة الخطأ بتوضّح صراحة
+لو المصدر كان القيمة الافتراضية (تسهيل تشخيص الأدمن).
+Regression test: `pricing-field-default-value-bypass.spec.ts` (اختبارين، Postgres حقيقي) —
+NUMBER بره الحدود وDROPDOWN بقيمة مش من ضمن الخيارات، الاتنين لازم يترفضوا بـ`VAL_001`.
+Live verification: `curl` مباشر ضد dev server حقيقي — خدمة formula حقيقية بنفس الإعداد، `POST
+/services/:id/estimate` رجع `400` برسالة واضحة بدل سعر `9999900` قرش. بيانات الاختبار اتنضّفت.
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
