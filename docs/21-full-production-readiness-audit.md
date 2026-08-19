@@ -36,7 +36,7 @@
 | 6 | Address / GPS / Serviceability | Addresses/Geo | FIXED | نعم — `create()`/`update()` حيين ضد Postgres حقيقي، مدينتين/منطقتين مختلفتين | نعم — 5 اختبارات جديدة (`addresses-area-city-consistency.spec.ts`) | BUG-005 (P2 — server trust boundary مفقود بين area_id/city_id) | BUG-005 fixed | لا يوجد فحص جغرافي حقيقي (point-in-polygon) على مستوى المدينة نفسها لسه — الفحص الحالي بس على مستوى نطاق الخدمة (`service_zones.boundary`) لو موجود؛ ده قرار MVP موثّق صراحة مسبقًا (§0.2.5) مش بَقّة جديدة | commit قادم |
 | 7 | Booking Modes (ASAP/Scheduled) | Orders | FIXED | نعم — `OrdersService.create()` حي، طوارئ+موعد مستقبلي وطوارئ عادي | نعم — اختباران جديدان (`order-emergency-scheduled-at.spec.ts`) | BUG-006 (P1 — استجابة طوارئ بتتأجل بصمت) | BUG-006 fixed | `computeDispatchDeferredUntil()` نفسها مغطّاة بوحدة اختبار منفصلة (deferred-dispatch.util.spec.ts) وسليمة؛ الفجوة كانت في نقطة استدعائها بس. مفيش فحص مشابه لسه لباقي تركيبات bookingMode/scheduled_at غير المتوقعة (مثلاً TEAM+scheduled_at قريب جدًا من الآن) — مش عندها نفس الخطورة (مفيش رسوم طوارئ مرتبطة) فمش بَقّة، لكن تستاهل نظرة في Phase 34 (Golden Path) | commit قادم |
 | 8 | Provider Selection UX & Semantics | Technicians/Matching | FIXED | جزئي — `flutter analyze` نضيف على الشاشة المعدّلة، مفيش render حي جديد (تغيير نصي إضافي بس، بلا منطق جديد) | لا يوجد اختبار جديد (تغيير UI نصي بحت، السلوك الخلفي (backend) كان مغطّى ومختبر بالفعل من Script 6) | BUG-007 (P2 — فجوة توقعات UX، مش خلل بيانات/مالي) | BUG-007 fixed | السيمانتيك الخلفي ("تفضيل مش ضمان" لـ`requested_technician_id`/`requested_technician_company_id`، "ضمان فعلي" لـ`schedule_slot_id`) قرار عمل موثّق ومختبر حي من قبل (Script 6) — سليم ومتعمّد، مش بَقّة. الفجوة كانت في التواصل مع العميل بس، دلوقتي اتقفلت في `technician_profile_screen.dart`؛ اختيار الشركة (`booking_mode=team`) كان أصلاً واضح كفاية ("بدون تفضيل" مقابل اسم الشركة) فمحتاجش تعديل | commit قادم |
-| 9 | Order Creation (idempotency) | Orders | PENDING | | | | | | |
+| 9 | Order Creation (idempotency) | Orders | FIXED | نعم — `OrdersService.create()` حي، retry متتالي + سباق متزامن حقيقي (`Promise.all`) + مفتاح مختلف + بلا مفتاح خالص | نعم — 4 اختبارات جديدة (`order-creation-idempotency.spec.ts`) بما فيها اختبار سباق DB حقيقي | BUG-008 (P1 — مفيش حماية retry/double-click على أهم endpoint في المنصة) | BUG-008 fixed | باقي منطق التسعير الشامل (promo/building/formula/zone/level) لسه محتاج تغطية jest مباشرة أوسع فوق نفس الفيكستشر (فجوة موروثة من Phase 4، مش جديدة) | commit قادم |
 | 10 | Cash Payment | Payments/Orders | PENDING | | | | | | |
 | 11 | Online Payment | Payments | PENDING | | | | | | |
 | 12 | Dispatch & Matching | Matching | PENDING | | | | | | |
@@ -261,6 +261,52 @@ Regression test: مفيش (تغيير نصي بحت، بلا منطق/state جد
 Live verification: مراجعة كود بصرية + `flutter analyze` بس (مش render حي بـXvfb — مبرَّر لأن
 التغيير إضافة نص فقط بلا تعديل في التفاعل/الحالة، ومنهجية الـrender الحي التقيلة مخصصة أساسًا
 لبَقّات تفاعل/رندر حقيقية زي `flutter_secure_storage` الموثّقة في نفس الـREADME).
+Status: FIXED
+
+### BUG-008
+Severity: P1 (أهم endpoint في المنصة كلها بلا أي حماية ضد double-click/retry شبكة)
+Flow: Phase 9 (Order Creation — idempotency)
+Symptom: `POST /orders` — endpoint إنشاء الطلب، اللي بيوزّع فني حقيقي وممكن يخصم محفظة (دفع
+prepaid) — كان بلا أي حماية Idempotency-Key خالص، بعكس كل عمليات الدفع
+(`payments.controller.ts`) اللي بتفرض الهيدر ده صراحة (docs/01-master-plan.md §1.4). عميل
+بيدوس زرار "أكّد الحجز" مرتين (شبكة بطيئة، double-tap، إعادة إرسال بعد timeout) كان يقدر ينشئ
+طلبين حقيقيين لنفس النية.
+Reproduction: `OrdersService.create()` بنفس الـuserId/dto مرتين متتاليتين (أو متزامنتين
+بـ`Promise.all`) — قبل الإصلاح: طلبين منفصلين اتسجّلوا، فني ممكن يتوزّع مرتين لنفس النية.
+Expected: نفس نمط `PaymentsService.payWithWallet()` — نفس مفتاح Idempotency-Key من نفس العميل
+يرجّع نفس الطلب الأصلي، مش ينشئ نسخة جديدة، حتى تحت سباق متزامن حقيقي.
+Actual: مفيش عمود `idempotency_key` أصلاً على `orders`، ومفيش أي فحص/فهرس يمنع التكرار.
+Root cause: نمط الحماية اتطبّق للدفع بس (docs/01 §1.4 نص صراحة على "كل عملية دفع") ومفيش حد
+مدّها لإنشاء الطلب نفسه رغم إنه بالظبط نفس فئة الخطر (mutation حقيقي بأثر مالي/تشغيلي محتمل).
+Files involved: `infra/migrations/0139_orders_idempotency_key.sql`,
+`apps/api/src/modules/orders/entities/order.entity.ts`,
+`apps/api/src/modules/orders/orders.service.ts`,
+`apps/api/src/modules/orders/orders.controller.ts`,
+`apps/api/src/modules/orders/admin-orders.controller.ts`,
+`apps/customer-app/lib/features/orders/orders_repository.dart`,
+`apps/customer-app/lib/features/orders/create_order_screen.dart`,
+`apps/customer-app/lib/features/orders/order_detail_screen.dart`,
+`apps/customer-web/src/lib/orders.ts`, `apps/customer-web/src/app/services/[id]/page.tsx`
+Financial/security impact: فني حقيقي بيتوزّع مرتين لنفس النية، وطلب prepaid ممكن يخصم محفظة
+مرتين لو الدفع بعد الحجز اتنفّذ تلقائيًا للطلبين. تأثير تشغيلي/مالي حقيقي، مش نظري.
+Fix: نفس نمط `payWithWallet()` بالحرف — عمود `idempotency_key` (migration 0139) بفهرس فريد
+جزئي على `(customer_id, idempotency_key)` (`WHERE idempotency_key IS NOT NULL` — يسمح بأكتر
+من NULL لنفس العميل). فحص مبكر (تحسين أداء) + الفهرس الفريد نفسه (الحماية الحقيقية ضد سباق
+حقيقي) — `try/catch` حوالين الـtransaction بيمسك `23505` على الفهرس ده تحديدًا ويرجّع الطلب
+الأصلي بدل ما يسرّب خطأ DB خام. الهيدر اختياري في الكونترولر (مش زي الدفع اللي بيفرضه إجباري)
+عشان مانكسرش أي كلاينت قديم، لكن الكلاينتات التلاتة (customer-app، customer-web،
+call-center admin) اتحدّثوا كلهم يبعتوه فعليًا — نفس درس `generateIdempotencyKey()` الموثّق في
+`payments_repository.dart`: المفتاح لازم يتولّد مرة واحدة بس (state field في Dart،
+`useState(() => crypto.randomUUID())` lazy initializer في React) ويتبعت تاني لأي retry، مش
+يتولّد من جديد جوّه كل نداء.
+Regression test: `order-creation-idempotency.spec.ts` (4 اختبارات، Postgres حقيقي) — retry
+متتالي بنفس المفتاح، مفتاح مختلف بينشئ طلب تاني عادي، **سباق متزامن حقيقي** (`Promise.all`
+بنفس المفتاح — بيثبت الفهرس الفريد + منطق `catch` شغالين صح مش بس الفحص المبكر)، وبلا مفتاح
+خالص السلوك القديم فاضل زي ما هو. اتأكد إن الاختبارات دي كانت فاشلة **حتى في compile-time**
+قبل الإصلاح (`create()` معندهوش خامس parameter خالص).
+Live verification: jest حي ضد Postgres حقيقي — 4/4 نجحوا بعد الإصلاح. `flutter analyze` نضيف
+على كل ملفات customer-app المعدّلة، `next build`/`tsc --noEmit` نضاف على customer-web. Full
+regression: 98 suite، 544 اختبار، كله ناجح.
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)

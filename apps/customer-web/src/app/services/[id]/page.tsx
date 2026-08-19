@@ -71,6 +71,11 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — lazy initializer بيتنفذ
+  // مرة واحدة بس مدى عمر الكومبوننت ده (نفس درس generateIdempotencyKey() في customer-app's
+  // payments_repository.dart — توليد مفتاح جديد جوّه handleSubmit نفسها كان هيلغي الحماية لأي
+  // retry). أي محاولة تانية (double-click، إعادة إرسال بعد timeout) بتستخدم نفس المفتاح.
+  const [orderIdempotencyKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     fetchService(id)
@@ -158,17 +163,21 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     setError(null);
     setSubmitting(true);
     try {
-      const order = await createOrder(authedFetch, {
-        service_id: service.id,
-        address_id: selectedAddressId,
-        booking_mode: bookingMode,
-        requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
-        problem_description: problemDescription || undefined,
-        scheduled_at: scheduleType === 'later' && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
-        promo_code: promoCode || undefined,
-        field_values: service.pricing_model === 'formula' ? fieldValues : undefined,
-        payment_method: paymentMethod === 'card' ? 'card' : undefined,
-      });
+      const order = await createOrder(
+        authedFetch,
+        {
+          service_id: service.id,
+          address_id: selectedAddressId,
+          booking_mode: bookingMode,
+          requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
+          problem_description: problemDescription || undefined,
+          scheduled_at: scheduleType === 'later' && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+          promo_code: promoCode || undefined,
+          field_values: service.pricing_model === 'formula' ? fieldValues : undefined,
+          payment_method: paymentMethod === 'card' ? 'card' : undefined,
+        },
+        orderIdempotencyKey,
+      );
       setSubmitted(true);
       if (paymentMethod === 'card') {
         const cardResult = await payWithCard(authedFetch, order.id);

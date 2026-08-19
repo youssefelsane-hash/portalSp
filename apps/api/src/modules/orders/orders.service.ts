@@ -163,8 +163,21 @@ export class OrdersService {
     // + created_by_admin_user_id للتدقيق. AdminOrdersController هو المسؤول عن التحقق من الصلاحية
     // (orders.create_for_customer) قبل ما ينادي هنا أصلاً.
     callCenterContext?: { adminUserId: string; meta?: AuditActorMeta },
+    // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — اختياري (recurring-orders
+    // مش بيبعته، عنده حماية تانية أصلاً). لو اتبعت، أي نداء تاني بنفس المفتاح لنفس العميل بيرجّع
+    // نفس الطلب الأصلي فورًا بدل ما ينشئ نسخة جديدة (double-click/retry شبكة).
+    idempotencyKey?: string,
   ): Promise<Order> {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+
+    // فحص مبكر رخيص قبل أي عمل تاني — الفحص الحاسم فعليًا هو الفهرس الفريد الجزئي على
+    // (customer_id, idempotency_key) (migration 0139)، ده بس تحسين أداء لتفادي كل منطق التسعير/
+    // التحقق لأي retry واضح بدري.
+    if (idempotencyKey) {
+      const existing = await this.orders.findOne({ where: { customerId: customerProfile.id, idempotencyKey } });
+      if (existing) return existing;
+    }
+
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
 
@@ -338,7 +351,9 @@ export class OrdersService {
     // requiresPrepay النهائية بتتحدد بعد ما totalAmountCents يتحسب فعليًا جوّه الـtransaction تحت.
     const requestedPrepayMethod = originalOrder ? undefined : dto.payment_method;
 
-    const order = await this.dataSource.transaction(async (manager) => {
+    let createdOrder: Order;
+    try {
+      createdOrder = await this.dataSource.transaction(async (manager) => {
       const [{ next_human_readable_number: orderNumber }] = await manager.query<
         { next_human_readable_number: string }[]
       >("SELECT next_human_readable_number('ORD')");
@@ -404,6 +419,7 @@ export class OrdersService {
         estimatedDurationDays: durationEstimate?.estimated_days ?? null,
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
+        idempotencyKey: idempotencyKey ?? null,
       });
       await manager.save(order);
 
@@ -493,13 +509,25 @@ export class OrdersService {
       );
 
       return order;
-    });
+      });
+    } catch (err) {
+      // سباق حقيقي: نداءين متزامنين بنفس الـidempotency key وصلوا هنا مع بعض (الفحص المبكر
+      // قبل الـtransaction لسه ما لقاش حاجة للاتنين، TOCTOU عادي). الفهرس الفريد الجزئي
+      // (migration 0139) بيرفض التاني، والـtransaction بتاعته بتترول باك بالكامل — بدل ما
+      // نسرّب خطأ DB خام للعميل، نرجّع نفس الطلب اللي الأول عمله فعلاً (نفس فلسفة
+      // PaymentsService.payWithWallet() بالحرف).
+      if (idempotencyKey && this.isIdempotencyKeyViolation(err)) {
+        const existing = await this.orders.findOne({ where: { customerId: customerProfile.id, idempotencyKey } });
+        if (existing) return existing;
+      }
+      throw err;
+    }
 
     // ربط سجل تدقيق تسعير formula (لو الخدمة formula) بالطلب اللي اتأكّد فعلاً — snapshot
     // السعر التاريخي (docs/08 §1، طلب تتبّع السعر النهائي حتى لو الأدمن غيّر القواعد بعدين).
     // بره الـtransaction عمداً — تدقيق مش لازم يفشّل إنشاء الطلب لو فشل، ومحتاج order.id الحقيقي.
     if (estimate.pricing_evaluation_id) {
-      await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, order.id);
+      await this.pricingEngineService.linkEvaluationToOrder(estimate.pricing_evaluation_id, createdOrder.id);
     }
 
     // Call Center — تدقيق الإنشاء نيابة عن العميل (Script 4 §37) — بره الـtransaction عمداً
@@ -510,7 +538,7 @@ export class OrdersService {
         actorRole: 'admin',
         action: 'order.created_for_customer',
         entityType: 'order',
-        entityId: order.id,
+        entityId: createdOrder.id,
         newValues: { customer_id: customerProfile.id, customer_user_id: userId, service_id: service.id },
         meta: callCenterContext.meta,
       });
@@ -521,8 +549,8 @@ export class OrdersService {
     // (نفس الحدث بالظبط، مع dispatchDeferredUntil محسوبة وقتها) من PaymentsService.emitPaymentConfirmedEvents()
     // بعد ما الدفع (كارت/InstaPay) يتأكد فعليًا — طلب لسه مش مدفوع مش "اتعمل" فعليًا بالمعنى
     // التجاري، ممكن ميتدفعش خالص. باقي أحداث النظام (إشعارات "طلبك اتسجّل"، إحصائيات) هتنتظر برضو.
-    if (order.orderStatus === OrderStatus.PENDING_PAYMENT) {
-      return order;
+    if (createdOrder.orderStatus === OrderStatus.PENDING_PAYMENT) {
+      return createdOrder;
     }
 
     // تأجيل بث المطابقة لطلب مجدول "بعيد" (ADR-0009 بند 1-2، P0-9) — بيتحسب هنا بالظبط (مش وقت
@@ -532,7 +560,7 @@ export class OrdersService {
     const leadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
     const dispatchDeferredUntil = computeDispatchDeferredUntil({
       scheduleSlotBooked: !!scheduleSlot,
-      scheduledAt: order.scheduledAt,
+      scheduledAt: createdOrder.scheduledAt,
       leadHours,
     });
 
@@ -549,9 +577,22 @@ export class OrdersService {
     // فالرد بيرجع بسرعة برضو من غير ما ينتظر بث حقيقي هيحصل بعدين. باقي أحداث النظام (إشعارات،
     // إحصائيات) لسه fire-and-forget عمداً — الاستثناء هنا بس لإن قرار التوزيع/التأجيل ده جزء
     // أساسي من دورة الطلب مش side effect.
-    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(order.id, dispatchDeferredUntil));
+    await this.events.emitAsync(ORDER_CREATED_EVENT, new OrderCreatedEvent(createdOrder.id, dispatchDeferredUntil));
 
-    return order;
+    return createdOrder;
+  }
+
+  // نفس نمط AdminOrdersService.isUniqueViolation() بالحرف — خطأ Postgres الخام (23505) بيتحوّل
+  // لاسترجاع الطلب الأصلي بدل ما يتسرّب كـ500 عام (سباق idempotency-key حقيقي، راجع create() فوق).
+  private isIdempotencyKeyViolation(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: unknown }).code === '23505' &&
+      'constraint' in err &&
+      (err as { constraint: unknown }).constraint === 'idx_orders_customer_idempotency_key'
+    );
   }
 
   // معاينة السعر الحقيقي الكامل قبل تأكيد الحجز (docs/08 §1/§2) — كانت فجوة موثّقة صراحة:

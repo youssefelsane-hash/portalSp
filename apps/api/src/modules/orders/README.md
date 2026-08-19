@@ -917,3 +917,32 @@ actor_full_name, actor_user_type}` موحّد، مرتّب تصاعديًا بـ
 ...) — قرار مؤجل عمدًا لأن الرسالتين الحاليتين فعلاً واضحتين وصحيحتين للعميل (Part 14 راضي)،
 والتفريق الأدق قيمته الحقيقية للتشخيص الداخلي بس (مش تجربة العميل)، وده نطاق أكبر من "بَقّة
 حقيقية" — قرار تصميم يحتاج وقت مخصص، مش جزء من الالتزام "أصلح الحقيقة في الباك-إند" هنا.
+
+## Idempotency-Key لإنشاء الطلب — كانت فجوة حقيقية، اتقفلت (Script 7 Phase 9، 2026-08-19)
+
+`POST /orders` — أهم endpoint في المنصة كلها (بيوزّع فني حقيقي، وممكن يخصم محفظة لو دفع
+prepaid) — كان بلا أي حماية Idempotency-Key خالص، بعكس كل عمليات الدفع (`payments.controller.ts`)
+اللي بتفرضه صراحة (docs/01 §1.4). عميل بيدوس زرار "أكّد الحجز" مرتين (شبكة بطيئة، double-tap)
+كان يقدر ينشئ طلبين حقيقيين لنفس النية.
+
+**الحل**: نفس نمط `PaymentsService.payWithWallet()` بالحرف — عمود `idempotency_key` (migration
+0139) بفهرس فريد جزئي على `(customer_id, idempotency_key)`. `OrdersService.create()` بياخد
+`idempotencyKey?` اختياري كخامس parameter: فحص مبكر رخيص قبل أي عمل (تحسين أداء)، والفهرس
+الفريد نفسه هو الحماية الحقيقية ضد سباق متزامن حقيقي — `try/catch` حوالين الـtransaction بيمسك
+`23505` على الفهرس ده تحديدًا ويرجّع الطلب الأصلي بدل ما يسرّب خطأ DB خام للعميل.
+
+الهيدر اختياري في الكونترولرات (`orders.controller.ts`، `admin-orders.controller.ts`) — مش زي
+الدفع اللي بيفرضه إجباري — عشان مانكسرش أي كلاينت قديم ما حدّثش لسه. لكن الكلاينتات التلاتة
+(customer-app، customer-web، call-center admin) اتحدّثوا كلهم يبعتوه فعليًا، بنفس درس
+`generateIdempotencyKey()` الموثّق في `payments_repository.dart`: **المفتاح لازم يتولّد مرة
+واحدة بس** (state field في Dart، `useState(() => crypto.randomUUID())` lazy initializer في
+React) ويتبعت تاني لأي retry — توليد مفتاح جديد جوّه دالة الإرسال نفسها كان هيلغي الحماية
+تمامًا لأي retry حقيقي.
+
+`recurring-orders.service.ts` **متأثرش عمداً** — عنده حماية idempotency خاصة بيه أصلاً
+(`(recurring_template_id, recurring_occurrence_at)`, `findGeneratedOrder()`) أقوى وأدق من مفهوم
+مفتاح واحد لكل نداء، فمش بيبعت `idempotencyKey` خالص للـ`create()` (عمود `NULL` للطلبات دي).
+
+**اختبار حي**: `order-creation-idempotency.spec.ts` (4 اختبارات) — بما فيها اختبار سباق متزامن
+حقيقي (`Promise.all` بنفس المفتاح، بيثبت الفهرس الفريد + منطق `catch` شغالين صح مش بس الفحص
+المبكر).

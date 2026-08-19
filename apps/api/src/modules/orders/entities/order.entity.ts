@@ -157,6 +157,12 @@ export class Order {
   @Column({ name: 'requested_units', type: 'numeric', precision: 10, scale: 2, nullable: true })
   requestedUnits: string | null;
 
+  // Idempotency-Key اختياري (docs/01 §1.4، migration 0139) — نفس مفتاح مرسل مرتين لنفس العميل
+  // يرجّع نفس الطلب الأصلي بدل ما ينشئ نسخة جديدة (double-click/retry). NULL للمسارات الداخلية
+  // (recurring-orders) اللي عندها حماية idempotency تانية أصلاً.
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 80, nullable: true })
+  idempotencyKey: string | null;
+
   @Column({ name: 'payment_method', type: 'enum', enum: ['cash', 'card', 'wallet', 'bank_transfer', 'corporate_credit'], enumName: 'payment_method', nullable: true })
   paymentMethod: string | null;
 

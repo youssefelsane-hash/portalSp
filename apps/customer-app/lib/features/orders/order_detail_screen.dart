@@ -53,6 +53,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _rated = false;
   bool _paying = false;
   bool _requestingRevisit = false;
+  // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — بيتولّد أول مرة بس
+  // (`??=`) ويفضل نفسه لأي محاولة تانية على نفس شاشة الطلب ده — لو أول نداء نجح فعليًا بس الرد
+  // اتفقد (network blip بعد الالتزام)، إعادة المحاولة بنفس المفتاح بترجّع نفس طلب إعادة الزيارة
+  // الأصلي بدل ما تنشئ نسخة تانية مجانية.
+  String? _revisitIdempotencyKey;
   bool _requestingRematch = false;
   bool _confirmingCashHandover = false;
   List<OrderItem> _quoteItems = [];
@@ -434,11 +439,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
     setState(() => _requestingRevisit = true);
     try {
+      _revisitIdempotencyKey ??= _paymentsRepository.generateIdempotencyKey();
       final revisitOrder = await _repository.create(
         serviceId: order.serviceId,
         addressId: order.addressId,
         bookingMode: BookingModeJson.fromApiValue(order.bookingMode),
         originalOrderId: order.id,
+        idempotencyKey: _revisitIdempotencyKey!,
       );
       if (mounted) {
         Navigator.of(context).pushReplacement(
