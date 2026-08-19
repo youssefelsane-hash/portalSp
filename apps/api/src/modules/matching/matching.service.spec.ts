@@ -162,8 +162,14 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     }
   });
 
-  const findCandidates = () => {
-    const order = { id: ids.blockingOrder, serviceId: ids.service, serviceZoneId: ids.zone, addressId: ids.address } as Order;
+  const findCandidates = (scheduledAt: Date | null = null) => {
+    const order = {
+      id: ids.blockingOrder,
+      serviceId: ids.service,
+      serviceZoneId: ids.zone,
+      addressId: ids.address,
+      scheduledAt,
+    } as Order;
     // findEligibleTechnicians خاصة (private) — بنستدعيها زي ما هي فعليًا (مش نسخة معاد كتابتها)
     // عشان أي تراجع مستقبلي عن الإصلاح يكسر الاختبار ده فورًا.
     return (matchingService as unknown as { findEligibleTechnicians: (...args: unknown[]) => Promise<{ technician_id: string }[]> })
@@ -172,6 +178,21 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
 
   it('طلب accepted غير محذوف: الفني بيتستبعد صح (السلوك الأصلي محفوظ)', async () => {
     const candidates = await findCandidates();
+    expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
+  });
+
+  // قرار عمل صريح من المالك (2026-08-19، سيناريو "تسليك مواصير نص يوم") — نفس بَقّة
+  // TechnicianAssignmentGuardService.assertEligible() المصلّحة بس هنا في مسار التوزيع الفعلي:
+  // فني عنده طلب نشط دلوقتي (accepted) مايترفضش من طلب تاني **مجدول** ليوم بعيد — الاستبعاد
+  // القديم كان unconditional بغض النظر عن scheduledAt الطلب المرشّح.
+  it('طلب مجدول بعد أسبوع: الفني مبيتستبعدش رغم إن عنده طلب accepted نشط دلوقتي', async () => {
+    const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const candidates = await findCandidates(weekFromNow);
+    expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
+  });
+
+  it('طلب ASAP (بلا scheduledAt) لسه بيرفض صح — مفيش تراجع في السلوك القديم', async () => {
+    const candidates = await findCandidates(null);
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
   });
 
