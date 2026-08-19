@@ -139,9 +139,19 @@ export class MatchingService {
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
-        AND tp.id NOT IN (
-          SELECT technician_id FROM orders
-          WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[]) AND deleted_at IS NULL
+        -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19 — سيناريو "تسليك مواصير نص يوم") — الاستبعاد
+        -- ده كان unconditional بغض النظر عن scheduledAt الطلب المرشّح، يعني فني عنده طلب نشط
+        -- النهاردة (حتى لو هيخلص بعد ساعتين) كان بيتستبعد من أي طلب تاني حتى لو مجدول بعد أسبوع —
+        -- بالظبط نفس البَقّة اللي اتصلحت في TechnicianAssignmentGuardService.assertEligible() بس
+        -- هنا في مسار التوزيع الفعلي نفسه. الاستبعاد ده يفضل يسري بس على طلبات ASAP (scheduledAt
+        -- فاضي) — الطلبات المجدولة بتتفحص بتعارض السلوتات الحقيقي تحت (بيعتمد على مدة الخدمة
+        -- الفعلية services.estimated_duration_minutes، مش "طول اليوم").
+        AND (
+          $10::timestamptz IS NOT NULL
+          OR tp.id NOT IN (
+            SELECT technician_id FROM orders
+            WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[]) AND deleted_at IS NULL
+          )
         )
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
