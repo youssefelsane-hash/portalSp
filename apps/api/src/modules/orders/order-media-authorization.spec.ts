@@ -132,6 +132,7 @@ describe('OrderMediaService — حدود تفويض المرفقات (Script 2 P
       {} as never,
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
 
     service = new OrderMediaService(dataSource.getRepository(Order), dataSource.getRepository(OrderMedia), techniciansService, fakeStorage);

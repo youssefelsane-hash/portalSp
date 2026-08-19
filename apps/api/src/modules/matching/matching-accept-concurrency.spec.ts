@@ -81,6 +81,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // settingsService
     );
     const assignmentGuard = new TechnicianAssignmentGuardService();
 

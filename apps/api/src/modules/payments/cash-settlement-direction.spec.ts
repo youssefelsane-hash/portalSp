@@ -199,6 +199,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
     const technicianLevelsService = new TechnicianLevelsService(
       dataSource.getRepository(TechnicianLevelConfig),

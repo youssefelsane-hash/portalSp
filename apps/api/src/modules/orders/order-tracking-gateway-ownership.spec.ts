@@ -143,6 +143,7 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // settingsService
     );
 
     gateway = new OrderTrackingGateway(

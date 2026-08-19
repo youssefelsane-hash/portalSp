@@ -134,6 +134,20 @@ export class CatalogController {
               return { item, estimate };
             }),
           );
-    return withPricing.map(({ item, estimate }) => toTechnicianBookingListItemResponseDto(item, estimate));
+    // فرز يدوي بسيط (Script 6 Part 8) — منفصل عمداً عن ترتيب "الأنسب" الافتراضي (recommended،
+    // من listForServiceBooking نفسها بمحرك التوصية بالمرحلتين). لما العميل يختار فرز صريح،
+    // بيعيد ترتيب نفس القايمة المؤهلة (المرحلة 1 لسه سارية) — مش استعلام جديد.
+    const sorted = [...withPricing];
+    if (query.sort === 'lowest_price') {
+      // نفس صيغة toTechnicianBookingListItemResponseDto's final_price_cents بالحرف — مصدر
+      // الحقيقة الوحيد لـ"السعر النهائي"، مش رقم تاني بيتحسب من جديد هنا.
+      const finalPriceOf = (estimate: (typeof withPricing)[number]['estimate']) =>
+        estimate ? estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents : Number.POSITIVE_INFINITY;
+      sorted.sort((a, b) => finalPriceOf(a.estimate) - finalPriceOf(b.estimate));
+    } else if (query.sort === 'highest_rating') {
+      sorted.sort((a, b) => b.item.averageRating - a.item.averageRating);
+    }
+
+    return sorted.map(({ item, estimate }) => toTechnicianBookingListItemResponseDto(item, estimate));
   }
 }

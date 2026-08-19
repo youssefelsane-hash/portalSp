@@ -168,6 +168,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
@@ -470,6 +471,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));

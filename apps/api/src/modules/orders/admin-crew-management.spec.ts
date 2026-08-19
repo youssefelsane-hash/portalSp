@@ -143,6 +143,7 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
 
     adminOrdersService = new AdminOrdersService(

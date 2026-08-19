@@ -177,6 +177,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       {} as never, // certificatesService
       {} as unknown as AuditLogService,
       {} as never, // geoService
+      {} as never, // settingsService
     );
     const technicianLevelsService = new TechnicianLevelsService(
       dataSource.getRepository(TechnicianLevelConfig),

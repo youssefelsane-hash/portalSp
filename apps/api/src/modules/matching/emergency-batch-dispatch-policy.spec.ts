@@ -92,6 +92,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // settingsService
     );
     const assignmentGuard = new TechnicianAssignmentGuardService();
 

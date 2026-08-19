@@ -78,6 +78,7 @@ describe('تصريح مهارات ذاتي للفني + موافقة أدمن (S
       {} as never, // certificatesService
       auditLog,
       {} as never, // geoService
+      {} as never, // settingsService
     );
     adminService = new AdminTechniciansService(
       dataSource.getRepository(TechnicianProfile),

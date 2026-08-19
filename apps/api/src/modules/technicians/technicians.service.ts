@@ -22,6 +22,7 @@ import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.en
 import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificate } from './entities/technician-certificate.entity';
 import { TechnicianCertificatesService } from './technician-certificates.service';
+import { SettingsService } from '../settings/settings.service';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -53,6 +54,7 @@ export class TechniciansService {
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly auditLog: AuditLogService,
     private readonly geoService: GeoService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   async findByUserIdOrThrow(userId: string): Promise<TechnicianProfile> {
@@ -283,9 +285,22 @@ export class TechniciansService {
 
   /**
    * قايمة الفنيين المؤهلين لخدمة في منطقة العميل — اختيار الفني قبل الحجز (docs/08 §3، بدل
-   * auto-match بس). الترتيب مطابق تمامًا لطلب المالك: التقييم أولاً، بعده القرب الجغرافي
-   * (PostGIS حقيقي، مش تقريب)، بعده عدد الطلبات المكتملة لنفس الخدمة تحديدًا (`technician_services.
-   * completed_count` — أدق من إجمالي الفني كله لأنه بيقيس خبرته في الخدمة دي بالذات).
+   * auto-match بس). مرحلتين (Script 6 Part 9):
+   *
+   * **المرحلة 1 — أهلية صارمة (hard gate)**: WHERE clause تحت — verification_status='approved'،
+   * عنده صف technician_services نشط للخدمة دي بالذات، عنده صف technician_zones نشط للمنطقة دي.
+   * أي فني ماعندوش الثلاثة دول **مش بيظهر خالص**، مهما كان تقييمه.
+   *
+   * **المرحلة 2 — ترتيب التوصية (recommendation score)**: بَقّة تصميمية حقيقية اتصلحت هنا —
+   * الترتيب القديم كان `ORDER BY average_rating DESC` مباشرة، يعني فني بتقييم 5.0 من تقييم واحد
+   * بس كان بيسبق فني بتقييم 4.9 من مئات الطلبات المكتملة (بالظبط المثال المحذّر منه في Part 9).
+   * الإصلاح: متوسط بايزي مرجّح بالثقة (Bayesian average) — كل فني عنده عدد تقييمات أقل من
+   * `ranking.bayesian_min_samples` (افتراضي 5) بيتسحب score بتاعه ناحية `ranking.
+   * bayesian_prior_mean` (افتراضي 4.0، متوسط منصف محافظ) بدل ما ياخد تقييمه الخام كامل الثقة.
+   * الصيغة: `score = (v×R + m×C) / (v+m)` — v=عدد تقييماته، R=متوسطه، m=العتبة، C=المتوسط
+   * الافتراضي. فني 5.0/تقييم واحد: `(1×5 + 5×4)/(1+5) = 4.17`. فني 4.9/200 تقييم:
+   * `(200×4.9 + 5×4)/(200+5) = 4.878` — بيسبقه صح دلوقتي. القيم قابلة للتعديل من الأدمن
+   * (`SettingsService`، بلا كود جديد) — نفس نمط أي وزن قابل للإعداد في المشروع.
    */
   async listForServiceBooking(
     serviceId: string,
@@ -311,6 +326,9 @@ export class TechniciansService {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة مش متاحة في منطقتك دلوقتي', HttpStatus.CONFLICT);
     }
 
+    const bayesianMinSamples = await this.settingsService.getNumber('ranking.bayesian_min_samples', 5);
+    const bayesianPriorMean = await this.settingsService.getNumber('ranking.bayesian_prior_mean', 4.0);
+
     interface TechnicianRow {
       technician_id: string;
       full_name: string;
@@ -326,7 +344,9 @@ export class TechniciansService {
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
              tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level,
+             (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
+               AS recommendation_score
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -334,10 +354,10 @@ export class TechniciansService {
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
-      ORDER BY tp.average_rating DESC, distance_km ASC NULLS LAST, ts.completed_count DESC
+      ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
       LIMIT 50
       `,
-      [serviceId, zone.id, addressId, excludeTechnicianId ?? null],
+      [serviceId, zone.id, addressId, excludeTechnicianId ?? null, bayesianMinSamples, bayesianPriorMean],
     );
 
     return {
