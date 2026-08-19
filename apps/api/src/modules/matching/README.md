@@ -465,3 +465,34 @@ now()`) ويخلّي `accept()` يرفضهم صراحة. النتيجة: أول 
 الماضي من زمان لسه بيظهر في `listAvailableForTechnician()` ولسه مقبول فعليًا عبر `accept()` —
 لسه محتاج تشغيل حي فعلي بعد ما Postgres يرجع متاح (Docker Hub egress policy محجوبة وقت التصحيح
 ده، راجع الملاحظة في `docs/adr/0018-emergency-vs-scheduled-and-trade-eligibility.md`).
+
+## ADR-0018 §9 — اختبار A/B صريح: accepted بيفضل مؤهّل لطوارئ، technician_on_way بيتستبعد
+
+اتضاف اختبار حي في `matching.service.spec.ts` بيثبت الفرق الجوهري بين `ACTIVE_TECHNICIAN
+_ORDER_STATUSES` وENGAGED_TECHNICIAN_ORDER_STATUSES على **نفس الفني بالظبط**: طلب طوارئ جديد
+لما الفني عنده طلب `accepted` (مقبول بس لسه ما بداش يتحرّك ليه) — بيفضل مؤهّل، بيظهر في
+`order_assignments`. نفس الفني، بس دلوقتي `technician_on_way` (منشغل جسديًا فعليًا) — طلب
+طوارئ جديد بيستبعده تمامًا (صفر `order_assignments`، الطلب يفضل `searching_technician`).
+
+## ADR-0018 §12-15 — تحقّق (مش تنفيذ جديد): أدمن/عميل/إلغاء الفني كلهم متوافقين بعد §3-4/§8/§9
+
+طلب صريح من المالك بمراجعة الاتساق بعد كل التصحيحات فوق — تدقيق كامل، صفر فجوة لقيت محتاجة
+كود جديد (كل حاجة بالفعل بتشارك نفس المصدر بعد §7/§8/§9):
+
+- **§12 (منع الإلغاء الذاتي لشغل مؤكّد تلقائيًا)**: `wasAutoConfirmedBySystem()` بتعتمد بس على
+  `order_status_history.change_source='system'` — مش على اسم الدالة (`autoConfirmScheduledOrder`
+  بعد إعادة التسمية) — فضلت صحيحة بلا أي تغيير مطلوب.
+- **§13 (مفيش إلغاء تلقائي لنقص العرض)**: `grep` شامل على `CANCELLED_BY_SYSTEM`/
+  `cancelForNoTechnicians` في `matching.service.ts`/`matching-recovery.service.ts` — صفر نتيجة
+  فعلية (بس تعليقات توثيقية بتشرح ليه الآلية القديمة اتشالت). فضل زي ما هو.
+- **§14 (تعيين الأدمن القسري = نفس قواعد المطابقة التلقائية)**: `admin-orders.service.ts`'s
+  `reassign()` بينادي `assignmentGuard.assertEligible()` مباشرة — نفس `TechnicianAssignmentGuardService`
+  المُحدَّثة بـ§2/§8/§9 (راجع `../technicians/README.md`). صفر منطق أهلية مستقل.
+- **§15 (اختيار العميل = التعيين النهائي)**: `OrdersService.create()`'s فحص `requested_technician_id`
+  (سطر ~236) هو **مجرد تحقق وجود** (الفني موجود فعلاً؟)، مش فحص أهلية — الأهلية الفعلية بتتحدد
+  وقت `dispatchNextRound`/`autoConfirmScheduledOrder` عبر `findEligibleTechnicians()` بنفس
+  `requestedTechnicianId` (تفضيل، مش ضمان — لو مش مؤهّل، يرجع للتوزيع العادي). `listForServiceBooking()`
+  (قايمة اختيار العميل) وطريق التوزيع الفعلي بيشاركوا نفس `technicianAvailabilityCondition()`
+  حرفيًا. اختيار عميل لفني طوارئ مش سيناريو موجود أصلاً (الطوارئ بث تلقائي بلا اختيار يدوي،
+  `create_order_screen.dart`'s `widget.bookingMode != BookingMode.emergency` بيستبعد شاشة
+  الموعد/الاختيار اليدوي للطوارئ صراحة).

@@ -316,6 +316,56 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await dataSource.query(`DELETE FROM orders WHERE id = $1`, [scheduledOrder.id]);
   });
 
+  // ADR-0018 §9 (طلب صريح من المالك 2026-08-19) — طلب طوارئ "إضافي" مش شاغل يوم كامل: فني عنده
+  // طلب accepted (مقبول بس لسه ما بداش يتحرّك ليه) لازم يفضل مؤهّل لطوارئ جديدة، بس فني منشغل
+  // جسديًا فعليًا (technician_on_way/arrived/in_progress) لازم يتستبعد. الاختبار بيثبت الاتنين
+  // معًا (A/B على نفس الفني، بس بحالة الطلب المختلفة) — ده الفرق الجوهري بين
+  // ACTIVE_TECHNICIAN_ORDER_STATUSES وENGAGED_TECHNICIAN_ORDER_STATUSES.
+  it('طوارئ إضافي مش شاغل يوم كامل: accepted بيفضل مؤهّل، technician_on_way بيتستبعد (§9)', async () => {
+    // في اللحظة دي ids.blockingOrder فعلاً 'accepted' بلا scheduled_at (نفس حالة الاختبار
+    // اللي فات) — طلب طوارئ جديد لازم يلاقي الفني ده مؤهّل.
+    const [acceptedStateOrder] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
+       RETURNING id`,
+      [`EMG9A-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    await matchingService.dispatchOrAutoConfirm(acceptedStateOrder.id);
+    const acceptedStateAssignments = await dataSource.query(
+      `SELECT technician_id FROM order_assignments WHERE order_id = $1`,
+      [acceptedStateOrder.id],
+    );
+    expect(acceptedStateAssignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(
+      true,
+    );
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [acceptedStateOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [acceptedStateOrder.id]);
+
+    // نفس الفني، بس دلوقتي منشغل جسديًا فعليًا (technician_on_way) — طلب طوارئ جديد لازم يستبعده.
+    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [ids.blockingOrder]);
+    const [engagedStateOrder] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
+       RETURNING id`,
+      [`EMG9B-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    await matchingService.dispatchOrAutoConfirm(engagedStateOrder.id);
+    const engagedStateAssignments = await dataSource.query(
+      `SELECT technician_id FROM order_assignments WHERE order_id = $1`,
+      [engagedStateOrder.id],
+    );
+    expect(engagedStateAssignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(
+      false,
+    );
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [engagedStateOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [engagedStateOrder.id]);
+
+    // نرجّع الحالة الأصلية (accepted) عشان باقي الاختبارات في الملف ده تفضل تلاقي نفس الافتراض.
+    await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [ids.blockingOrder]);
+  });
+
   // ADR-0017 بند 10 — Fallback توسيع النطاق: طلب ASAP وصل لعتبة matching.broaden_to_busy_after_round
   // بلا أي فني مؤهّل ومتاح، لازم يوسّع البحث ليشمل الفني المشغول ده (مؤهّل لنفس الخدمة/المنطقة،
   // بس عنده طلب accepted نشط دلوقتي — ids.blockingOrder) بدل ما يفضل عالق بلا أي محاولة.
