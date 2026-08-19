@@ -53,7 +53,13 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     if (widget.initialAddress != null) {
       _selectedAddress = widget.initialAddress;
     } else {
-      _pickAddress();
+      // بَقّة حقيقية اتلقطت بالتشغيل الحي (Xvfb+fluxbox، 2026-08-19): نفس بَقّة JobDetailsScreen —
+      // Navigator.push جوّه initState مباشرة بيتصادم مع انيميشن دخول الشاشة الحالية لسه شغالة
+      // (Navigator._debugLocked)، وبيسيب الشاشة ميتة تمامًا لأي تفاعل بعد كده. addPostFrameCallback
+      // بيأجّل النداء لحد ما الفريم الحالي يخلص.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pickAddress();
+      });
     }
   }
 
