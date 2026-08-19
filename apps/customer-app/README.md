@@ -240,3 +240,35 @@ flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api
 ```
 
 مرجع كامل: `../../docs/01-master-plan.md`
+
+## الخريطة على نسخة الويب — كانت فجوة حقيقية، اتقفلت (2026-08-19)
+
+بَقّتين منفصلتين اتلقطوا حيًا (المالك بلّغ) عند فتح شاشة اختيار العنوان على الويب (`flutter run -d
+chrome`/`flutter build web`): (1) `RangeError` كانت بتكسر الشاشة كلها قبل أي رندر خالص (تفاصيل
+كاملة في قسم "بَقّة حقيقية اتلقطت واتصلحت — `generateIdempotencyKey()`..." فوق)، (2) بعد ما اتصلحت
+دي، ظهرت `TypeError: Cannot read properties of undefined (reading 'maps')` — `google_maps_flutter_web`
+محتاج `<script src="https://maps.googleapis.com/maps/api/js?key=...">` في `web/index.html` نفسه،
+Flutter مش بيحقنه تلقائيًا زي Android/iOS. تفاصيل كاملة (بما فيها خطوة Cloud Console المطلوبة من
+المالك — تفعيل Maps JavaScript API للمفتاح، مش مجرد Maps SDK for Android/iOS) في
+`docs/03-external-integrations.md` §5. **تحقّق جزئي فقط من هنا**: `flutter build web --release`
+نجح، والملف الناتج فيه وسم السكريبت صح — لكن مفيش وصول لإنترنت خارجي من بيئة السيشن دي لـ
+`maps.googleapis.com` (نفس القيد الموثّق لـPaymob في `apps/api/src/modules/payments/README.md`)،
+فمقدرش أتأكد فعليًا إن Google بترجع الخريطة نفسها (يعتمد على إعداد Cloud Console اللي مالوش وصول
+ليه من هنا) — لازم تجربة حقيقية من جهاز المالك بعد سحب الإصلاح.
+
+## بَقّة حقيقية تالتة اتلقطت واتصلحت — شاشات بتعلّق للأبد على loading spinner بلا أي رسالة خطأ (2026-08-19)
+
+المالك بلّغ إن الضغط على زرار "+" في شاشة اختيار العنوان (أثناء الحجز السريع) "مفيش أي حاجة بتحصل"
+والصفحة بتعلّق لحد ما يعمل restart. السبب: `AddressFormScreen._loadCities()` (وكل شاشة تانية في
+التطبيق — 27 ملف) بتمسك `on ApiException catch` بس. أي فشل شبكة تاني (انقطاع اتصال، CORS — أشيع
+بكتير على الويب من الموبايل لأن المتصفح بيفرضه والـVM/الموبايل لأ، رد مش JSON صالح) كان بيرمي
+استثناء (`http.ClientException` مثلاً) محدّش بيمسكه — الشاشة تفضل عالقة على
+`_cities == null && _error == null` (سبينر) للأبد، بلا أي رسالة أو طريقة استرجاع غير restart كامل
+للتطبيق. **مالوش أي علاقة بالخرائط تحديدًا رغم إن الشاشة اللي ظهرت فيها هي شاشة العنوان** — نفس
+الفجوة موجودة في أي شاشة تانية بتنادي أي repository (طلبات، تقييمات، دعم فني، إلخ) عند أي فشل شبكة.
+
+الإصلاح: `_guardNetworkError()` جديدة في `lib/core/api_client.dart` — نقطة اختناق واحدة (كل
+الـrepositories بتعدّي من `apiRequest`/`apiRequestList`/`apiUpload`) بتحوّل أي استثناء غير
+`ApiException` لـ`ApiException` واضحة (`تعذر الاتصال بالخادم — تأكد من اتصالك بالإنترنت وحاول
+تاني`) — كل الـ27 ملف اللي بيمسكوا `on ApiException` بقوا بيشتغلوا صح تلقائيًا لأي فشل شبكة، بلا
+حاجة نلمس كل ملف لوحده. `flutter analyze`/`flutter build web --release` نضاف بعد التعديل.

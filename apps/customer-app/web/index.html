@@ -31,6 +31,17 @@
 
   <title>customer_app</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    google_maps_flutter_web محتاج مكتبة Google Maps JavaScript API محمّلة في الصفحة نفسها قبل
+    أي محاولة لعرض GoogleMap widget — بعكس Android/iOS، مفيش حقن تلقائي من Flutter، لازم <script>
+    يدوي هنا (كانت فجوة حقيقية: كان الملف ده افتراضي 100% بلا أي وسم Maps خالص، فـ`google.maps`
+    تفضل undefined على الويب مهما كان المفتاح صح، والسبب مالوش أي علاقة بالبلد/الموقع الجغرافي).
+    نفس المفتاح المستخدم في AndroidManifest.xml/AppDelegate.swift — **لازم Maps JavaScript API
+    تتفعّل ليه من Google Cloud Console (منفصلة عن Maps SDK for Android/iOS)، وقيود الـHTTP referrer
+    بتاعته (لو موجودة) لازم تسمح بالدومين اللي التطبيق شغال عليه (localhost وقت التطوير).
+  -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyADROTkhp-ICyuRnX0_rYJUxbn_num_BBE"></script>
 </head>
 <body>
   <!--
