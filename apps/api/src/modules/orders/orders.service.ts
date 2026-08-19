@@ -263,6 +263,18 @@ export class OrdersService {
     // snapshot على الطلب نفسه (مش مجرد معاينة زي POST /services/:id/estimate-duration)، عشان
     // تفضل ظاهرة لفريق العمليات/الفني حتى لو الأدمن غيّر service_standard_data بعدين.
     let durationEstimate: Awaited<ReturnType<CatalogService['estimateDuration']>> | null = null;
+    // بَقّة حقيقية اتلقطت (Script 7 Phase 5): الفحص القديم `&&` كان بيسمح بالظبط بالحالة الممنوعة
+    // في تعليق DTO نفسه ("الاتنين لازم يتبعتوا مع بعض أو ولا واحد فيهم") — لو العميل بعت واحد بس
+    // من standard_data_id/requested_units، الكود كان بيتجاهله بصمت ويحفظ الطلب بـrequiredTechnicians/
+    // requiredAssistants=null بلا أي خطأ، فمطابقة المساعدين (assistant-matching.service.ts) كانت
+    // بتتخطى تمامًا (`if (!order.requiredAssistants...) return;`) لشغلانة ممكن تحتاج طاقم فعليًا.
+    if (Boolean(dto.standard_data_id) !== Boolean(dto.requested_units)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'standard_data_id وrequested_units لازم يتبعتوا مع بعض — مينفعش واحد من غير التاني',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     if (dto.standard_data_id && dto.requested_units) {
       durationEstimate = await this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units);
     }

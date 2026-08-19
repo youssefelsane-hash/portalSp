@@ -31,8 +31,8 @@
 | 1 | Customer Auth & Account | Auth | VERIFIED | نعم — تسجيل حي، حذف حساب+رفض فوري لنفس التوكن، رفض تسجيل دخول برقم محذوف، عبور صلاحيات عميل↔أدمن (403 مرتين)، جلسات/logout كاملة | نعم — 50 اختبار موجود سابقًا (OTP/lockout/no-log-leak/blocked-inactive-deleted/concurrent-login/atomic-refresh/MFA step-up) + 7 اختبار جديد (`auth-self-service.spec.ts`) لـupdateMe/getMe/logout/listSessions/revokeSession IDOR/deleteMe | لا يوجد | لا يوجد (الـinvariants كلها كانت سليمة بالفعل) | لا يوجد معروف — الغطاء شامل دلوقتي (تسجيل، دخول، تجديد، خروج، حذف حساب، جلسات متعددة، IDOR) | commit قادم |
 | 2 | Service Discovery | Catalog | VERIFIED | نعم — خدمة/فئة معطّلة حقيقية اتزرعت، اتأكد حيًا عبر HTTP إنها 404/مش ظاهرة في `/services`, `/service-categories`, `/estimate` | نعم — 5 اختبار جديد (`catalog-visibility.spec.ts`) + 8 موجودين سابقًا (`catalog-search.spec.ts`، Script 3 §7/§12) | لا يوجد | لا يوجد (الحماية كانت سليمة، بس بلا regression test) | `launch_phase` عمود مخزّن بس مش مستخدم كفلتر خالص (ميتادata تنظيمية فقط — `is_active` هو البوابة الفعلية) — ملاحظة تصميم موثّقة، مش بَقّة (لا يوجد "current platform phase" مفهوم في الكود يقتضي استخدامه كفلتر) | commit قادم |
 | 3 | Booking Configuration (pricing fields) | Pricing | FIXED | نعم — خدمة formula حقيقية بحقل NUMBER `default_value` بره الحدود، `POST /services/:id/estimate` حي رجّع رفض واضح بدل سعر غلط | نعم — 2 اختبار جديد (`pricing-field-default-value-bypass.spec.ts`) + 5 موجودين (Script 6 Part 3/4) | BUG-003 (P1 — تسعير خاطئ بصمت) | BUG-003 fixed | لا يوجد معروف حاليًا — الفحص بقى موحّد لكل القيم (افتراضية أو من العميل) | commit قادم |
-| 4 | Pricing Engine | Pricing | VERIFIED | جزئي — فحص كود ثابت + قراءة دقيقة لكل مسارات الخصم/العمولة | لا يوجد اختبار جديد مخصص (المنطق اتفحص وأثبت سليم بالقراءة، مفيش استغلال حي أمكن بناؤه) | لا يوجد | لا يوجد | **فجوة اختبار مهمة (مش بَقّة منطق)**: `OrdersService.create()` — أهم دالة في المنصة كلها — **مفيش لها ولا اختبار jest واحد** بيناديها مباشرة رغم آلاف أسطر منطق التسعير/الخصم/الدفع فيها؛ كل التغطية التاريخية كانت curl يدوي غير متكرر. هتتغطى بعمق في Phase 9 (Order Creation) — نفس المكان اللي منطقيًا بينتمي له | commit قادم |
-| 5 | Productivity / Crew Calculation | Catalog/Productivity | PENDING | | | | | | |
+| 4 | Pricing Engine | Pricing | VERIFIED | جزئي — فحص كود ثابت + قراءة دقيقة لكل مسارات الخصم/العمولة | لا يوجد اختبار جديد مخصص (المنطق اتفحص وأثبت سليم بالقراءة، مفيش استغلال حي أمكن بناؤه) | لا يوجد | لا يوجد | **فجوة اختبار مهمة (مش بَقّة منطق)**: `OrdersService.create()` — أهم دالة في المنصة كلها — كان **مفيش لها ولا اختبار jest واحد** بيناديها مباشرة. **تحديث (Phase 5)**: أول فيكستشر jest مباشر لـ`create()` اتبنى فعلاً (`order-creation-standard-data-pairing.spec.ts`، BUG-004) وبيغطي مسار الإنتاجية/الطاقم بالكامل (سلبي+إيجابي)، لكن التغطية دي محصورة في جزء الإنتاجية بس — باقي منطق التسعير/الخصم الشامل (promo/building/formula/zone/level) لسه محتاج تغطية مباشرة، هتتوسّع في Phase 9 (Order Creation) فوق نفس الفيكستشر | commit قادم |
+| 5 | Productivity / Crew Calculation | Catalog/Productivity | FIXED | نعم — `OrdersService.create()` حي (أول مرة في المشروع كله) بالحالتين السلبيتين + الحالة السليمة + الحالة العادية | نعم — 4 اختبارات جديدة (`order-creation-standard-data-pairing.spec.ts`)، أول تغطية jest مباشرة لـ`create()` | BUG-004 (P1 — متطلب طاقم بيتفقد بصمت) | BUG-004 fixed | لا يوجد معروف حاليًا — الفحص بقى XOR صريح، ونموذج الإنتاجية الخطي نفسه (توزيع الإنتاجية طرديًا مع عدد الصنايعية) لسه قرار عمل مبسّط موثّق صراحة (مش الصيغة النهائية المؤكدة من المالك) — راجع تعليق `estimateDuration()` في `catalog.service.ts` | commit قادم |
 | 6 | Address / GPS / Serviceability | Addresses/Geo | PENDING | | | | | | |
 | 7 | Booking Modes (ASAP/Scheduled) | Orders | PENDING | | | | | | |
 | 8 | Provider Selection UX & Semantics | Technicians/Matching | PENDING | | | | | | |
@@ -128,6 +128,41 @@ Regression test: `pricing-field-default-value-bypass.spec.ts` (اختبارين�
 NUMBER بره الحدود وDROPDOWN بقيمة مش من ضمن الخيارات، الاتنين لازم يترفضوا بـ`VAL_001`.
 Live verification: `curl` مباشر ضد dev server حقيقي — خدمة formula حقيقية بنفس الإعداد، `POST
 /services/:id/estimate` رجع `400` برسالة واضحة بدل سعر `9999900` قرش. بيانات الاختبار اتنضّفت.
+Status: FIXED
+
+### BUG-004
+Severity: P1 (business invariant violated silently — متطلب طاقم حقيقي بيتفقد بلا أي خطأ يوصل للعميل/الأدمن)
+Flow: Phase 5 (Productivity / Crew Calculation) — `OrdersService.create()`
+Symptom: خدمة عندها `service_standard_data` (يعني محتاجة حساب طاقم/مدة فعلي) — العميل بعت
+`standard_data_id` بس من غير `requested_units` (أو العكس). الطلب اتسجّل عادي (201) بس
+`required_technicians`/`required_assistants`/`estimated_duration_days` كلهم `null`، بلا أي
+خطأ يوصل للعميل يوضّح إن الحقل التاني ناقص.
+Reproduction: `OrdersService.create()` بـ`standard_data_id` بس (من غير `requested_units`) —
+قبل الإصلاح: الطلب اتسجّل بنجاح بـ`requiredTechnicians=null`/`requiredAssistants=null` رغم إن
+`service_standard_data` بتاعة الخدمة كانت بتفرض حد أدنى 2 صنايعي + 1 مساعد. بعد كده
+`assistant-matching.service.ts:114` (`if (!order.requiredAssistants || ...) return;`) بيتخطى
+مطابقة المساعدين تمامًا — استبعاد صامت لمتطلب طاقم حقيقي.
+Expected: تعليق DTO نفسه (`create-order.dto.ts`) بيوثّق صراحة "الاتنين لازم يتبعتوا مع بعض أو
+ولا واحد فيهم — قرار عمل من المالك". إرسال واحد بس لازم يترفض بوضوح، مش يتعامل معاه كـ"ولا
+واحد".
+Actual: الفحص كان `if (dto.standard_data_id && dto.requested_units)` — بيسمح بالظبط بالحالة
+الممنوعة في التعليق (واحد بس) من غير أي رفض، وبيعاملها زي "ولا واحد" بصمت.
+Root cause: الفحص كان AND بسيط بدل XOR — مفيش حالة صريحة تميّز "واحد ناقص" عن "الاتنين ملهمش
+داعي أصلاً".
+Files involved: `apps/api/src/modules/orders/orders.service.ts` (دالة `create()`)
+Financial/security impact: مش مالي مباشر، لكن تشغيلي حقيقي — شغلانة تحتاج طاقم (مثلاً دهان
+بمساحة كبيرة محتاجة 4 صنايعية) ممكن تتوزّع على فني واحد بلا مساعدين، يا إما الشغل يتأخر يا إما
+الفني يضطر ياخد مساعدين برا النظام (بلا تتبّع/عمولة/تأمين) — فجوة عملياتية موثّقة بدل مالية.
+Fix: XOR check صريح (`Boolean(dto.standard_data_id) !== Boolean(dto.requested_units)`) بيرفض
+الحالة النصفية بـ`VAL_001` واضح قبل أي كتابة في الداتابيز (قبل الـtransaction بالكامل تمامًا)،
+فمفيش طلب بيتسجّل بمتطلبات طاقم ناقصة بصمت.
+Regression test: `order-creation-standard-data-pairing.spec.ts` (4 اختبارات، Postgres حقيقي،
+أول تغطية jest مباشرة لـ`OrdersService.create()` في المشروع كله) — الاتجاهين (كل حقل لوحده)
+بيترفضوا بـ`VAL_001`، الحالة السليمة (الاتنين مع بعض) بتحسب الطاقم صح فعليًا من
+`service_standard_data`، والحالة العادية (ولا واحد) لسه شغالة زي زمان. اتأكد بـ`git stash` إن
+الاختباران السلبيان كانوا بيفشلوا فعليًا قبل الإصلاح (الطلب كان بيتسجّل بنجاح بدل ما يترفض).
+Live verification: jest حي ضد Postgres حقيقي (مش mocks) — 4/4 نجحوا بعد الإصلاح، 2/4 فشلوا
+(بالشكل المتوقع) قبله. Full regression: 95 suite، 533 اختبار، كله ناجح.
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
