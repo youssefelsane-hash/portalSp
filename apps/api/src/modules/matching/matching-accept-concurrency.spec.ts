@@ -83,7 +83,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       {} as never,
       {} as never, // settingsService
     );
-    const assignmentGuard = new TechnicianAssignmentGuardService();
+    const assignmentGuard = new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never);
 
     matchingService = new MatchingService(
       dataSource.getRepository(OrderAssignment),
@@ -266,6 +266,38 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     // الخسارة لازم تتلغي أوتوماتيك — مش تفضل "sent" معلّقة للأبد (كانت هتخلي الفني الخاسر
     // يستنى رد على عرض راح فعلاً).
     expect(loserAssignment.assignment_status).toBe(AssignmentStatus.CANCELLED);
+  });
+
+  // ADR-0018 §5 (طلب صريح من المالك 2026-08-19) — عرض طوارئ لازم يفضل قابل للقبول طالما محدش
+  // أخده، حتى لو مهلة الجولة (expires_at) فاتت من زمان. راجع matching-round-expiry.processor.ts:
+  // مهلة الجولة بقت تريجر لتوسيع البث لفنيين إضافيين بس، مش ميعاد صلاحية للعرض نفسه.
+  it('عرض طوارئ فات معاده (expires_at) لسه قابل للقبول طالما محدش أخده — ADR-0018 §5', async () => {
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'completed'
+       WHERE technician_id IN ($1,$2)
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
+      [ids.technicianAProfile, ids.technicianBProfile],
+    );
+    const orderId = await insertOrder('expired-still-valid');
+    const [assignment] = await dataSource.query(
+      `INSERT INTO order_assignments (order_id, technician_id, assignment_round, assignment_status, sent_at, expires_at)
+       VALUES ($1,$2,1,'sent', now() - interval '5 minutes', now() - interval '4 minutes') RETURNING id`,
+      [orderId, ids.technicianAProfile],
+    );
+
+    // العرض يفضل ظاهر في قايمة الفني رغم إن expires_at فات من زمان.
+    const available = await matchingService.listAvailableForTechnician(ids.technicianAUser);
+    expect(available.some((row) => row.order_id === orderId)).toBe(true);
+
+    // القبول لازم ينجح رغم إن expires_at فات — العرض مش باطل لمجرد مرور الوقت، بس لسه محدش أخده.
+    const order = await matchingService.accept(ids.technicianAUser, orderId);
+    expect(order.orderStatus).toBe(OrderStatus.ACCEPTED);
+    expect(order.technicianId).toBe(ids.technicianAProfile);
+
+    const [updatedAssignment] = await dataSource.query(`SELECT assignment_status FROM order_assignments WHERE id = $1`, [
+      assignment.id,
+    ]);
+    expect(updatedAssignment.assignment_status).toBe(AssignmentStatus.ACCEPTED);
   });
 
   it('نفس الفني يقبل طلبين مختلفين بالتوازي — مورد الفني المشترك يسمح بطلب نشط واحد', async () => {

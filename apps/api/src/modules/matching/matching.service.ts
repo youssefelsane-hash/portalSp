@@ -15,7 +15,7 @@ import {
 import { ORDER_NO_TECHNICIAN_FOUND_EVENT, OrderNoTechnicianFoundEvent } from '../../common/events/order-no-technician-found.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
@@ -42,12 +42,23 @@ const EMERGENCY_SUBSEQUENT_BATCH_SIZE_FALLBACK = 10;
 const EMERGENCY_RESPONSE_TIMEOUT_SECONDS_FALLBACK = 20;
 const EMERGENCY_MAX_TECHNICIANS_CONTACTED_FALLBACK = 40;
 const EMERGENCY_ESCALATION_AFTER_ROUNDS_FALLBACK = 2;
-// ADR-0017 بند 7 — "النهاردة وبكرة" هي نافذة الطلب/القبول-الرفض العادية بالحرف من كلام المالك.
-// أي طلب لتاريخ بعد كده بيتأكد تلقائيًا (autoConfirmFutureOrder تحت) بلا انتظار قبول فني.
-const NEAR_TERM_REQUEST_DAYS_FALLBACK = 1;
+// **تصحيح جوهري (ADR-0018، طلب صريح من المالك 2026-08-19)** فوق ADR-0017 بند 7 القديم — الانقسام
+// مش "قريب/بعيد" (near_term_request_days بقت بلا استخدام فعلي هنا)، الانقسام الحقيقي هو
+// "طوارئ/مجدول": بس الطوارئ محتاجة قبول فني صريح (dispatchNextRound)، أي طلب تاني (عادي أو
+// "Quick Job" — شغل صغير، مش عاجل، لسه بيتبع نفس نموذج الحجز المجدول العادي) بيتأكد تلقائيًا
+// (autoConfirmScheduledOrder تحت) بلا انتظار قبول، بغض النظر عن قرب موعده.
+// حد "شغل يوم كامل" (ADR-0018 §2/§9) — الشغل اللي فوق الحد ده بالدقايق (أو estimated_duration_days
+// >= 1) بيُعتبر شاغل يوم الفني بالكامل لغرض تعارض الجدولة اليومية (technician-eligibility.sql.ts).
+const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // ADR-0017 بند 10 — الجولة اللي بعدها يتوسّع البحث لفنيين "مرتبطين بس مشغولين بطلب نشط دلوقتي"
 // (نفس شرط الخدمة/المنطقة يفضل ساري دايمًا). قيمة كبيرة (أكبر من matching.max_rounds) = تعطيل.
 const BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK = 4;
+// ADR-0018 §7 (طلب صريح من المالك 2026-08-19) — بعد ما الفني بقى متاح افتراضيًا (ADR-0017 بند 3)،
+// كل الفنيين المؤهلين بقوا "مرشّحين" دايمًا، فمن غير توازن حِمل هيتكرّر إسناد نفس الفني الأعلى
+// مستوى/الأقرب لكل الطلبات على طول. الوزن ده بيتطرح من order_priority_weight لكل طلب "نشط"
+// (ACTIVE_TECHNICIAN_ORDER_STATUSES) عند الفني — مش استبدال لترتيب المستوى/المسافة، إضافة ليه
+// (راجع findEligibleTechnicians تحت للتفصيل الكامل).
+const WORKLOAD_BALANCE_WEIGHT_FALLBACK = 2;
 
 interface EligibleTechnicianRow {
   technician_id: string;
@@ -83,9 +94,22 @@ export class MatchingService {
 
   /**
    * أقرب فنيين مؤهلين (خدمة + منطقة + متاح + معتمد) لعنوان الطلب، من غير اللي اتبعتلهم قبل كده
-   * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight) الأول،
-   * وبعدين المسافة — مش بديل عن المسافة، فني أعلى مستوى بياخد أولوية جوّه نفس دائرة المؤهلين مش
-   * إنه يتجاهل المسافة تماماً. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight)
+   * **مطروح منها حِمل شغل الفني الحالي** أولاً، وبعدين المسافة — مش بديل عن المسافة، فني أعلى
+   * مستوى/أقل حِمل بياخد أولوية جوّه نفس دائرة المؤهلين مش إنه يتجاهل المسافة تماماً. المسافة
+   * بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   *
+   * **موازنة الحِمل (ADR-0018 §7، طلب صريح من المالك 2026-08-19)**: بعد ما الفني بقى متاح
+   * افتراضيًا (ADR-0017 بند 3)، كل الفنيين المؤهلين بقوا "مرشّحين" دايمًا — من غير توازن، أعلى
+   * فني مستوى/أقرب هياخد كل الطلبات على طول رغم إن فنيين تانيين مؤهلين بنفس القدر بس أقل انشغالاً.
+   * `workload.active_count` (LATERAL subquery تحت) بيعدّ طلبات الفني النشطة دلوقتي فعليًا
+   * (`ACTIVE_TECHNICIAN_ORDER_STATUSES` — بما فيها المقبولة ولسه ما بدأتش، مش بس الجاري تنفيذها).
+   * الحِمل ده بيتطرح من `order_priority_weight` بوزن قابل للتعديل (`matching.workload_balance_weight`،
+   * افتراضي 2) قبل الترتيب — **إضافة على معايير الترتيب الموجودة، مش استبدال ليها** (لسه جوّه نفس
+   * بنية `ORDER BY` الموجودة، مش قاعدة منفصلة "أقل عدد طلبات يفوز دايمًا"): فرق مستوى كبير (مثلاً
+   * `premium` وزن 30 مقابل `professional` وزن 20) لسه بيغلب فرق حِمل معقول، لكن بين فنيين متقاربين
+   * في المستوى، اللي عنده حِمل أقل بياخد الأولوية. تعديل `matching.workload_balance_weight` لصفر
+   * بيرجّع للسلوك القديم بالحرف (تعطيل موازنة الحِمل بلا تغيير كود).
    *
    * **بَقّة حقيقية اتلقطت واتصلحت وقت اختبار حي لميزة تانية (خرائط/ملاحة apps/technician-app)**:
    * الاستعلام مكانش بيستبعد فني عنده أصلاً طلب نشط (accepted/technician_on_way/...) — يعني نفس
@@ -116,14 +140,16 @@ export class MatchingService {
    * الشركة بس لو اتبعت، نفس فلسفة `requestedTechnicianId` بالحرف (تفضيل بس، مش ضمان — لو
    * الشركة مالهاش حد مؤهّل متاح، `dispatchNextRound` يرجع يسأل من غير القيد).
    *
-   * **توافر الفني (ADR-0017 — نموذج Opt-out كامل، 2026-08-19)**: `technicianAvailabilityCondition()`
-   * (`technician-eligibility.sql.ts`) هي المصدر الوحيد المشترك مع `listForServiceBooking()`
-   * و`assertEligible()`. القاعدة: طلب ASAP بيستبعد فني عنده طلب نشط دلوقتي بالفعل (بلا اعتبار
-   * لموعد الطلب التاني)؛ طلب مجدول بيستبعد بس لو فيه طلب تاني *بموعد مستقبلي كمان* بتقاطع زمني
-   * حقيقي (طلب ASAP نشط دلوقتي **مايمنعش** طلب مجدول ليوم/وقت تاني — طلب صريح من المالك،
-   * سيناريو "تسليك مواصير نص يوم")؛ وأي استثناء `blocked` صريح حدده الفني بنفسه في جدوله.
+   * **توافر الفني (ADR-0017 — نموذج Opt-out كامل، 2026-08-19، مُصحَّحة بـADR-0018 نفس اليوم لاحقًا)**:
+   * `technicianAvailabilityCondition()` (`technician-eligibility.sql.ts`) هي المصدر الوحيد
+   * المشترك مع `listForServiceBooking()` و`assertEligible()`. القاعدة الحالية: طلب ASAP عادي (مش
+   * طوارئ) بيستبعد فني عنده طلب نشط دلوقتي بالفعل بالمعنى الأوسع؛ طلب طوارئ يستبعد بس لو الفني
+   * *منشغل جسديًا فعليًا دلوقتي* (`ENGAGED_TECHNICIAN_ORDER_STATUSES` — طلب مقبول بس لسه ما بداش
+   * ميستبعدش، ADR-0018 §9)؛ طلب مجدول (دايمًا غير طوارئ) بيستبعد بس لو فيه طلب تاني *بموعد نفس
+   * اليوم بتوقيت مصر* والشغل شاغل يوم كامل (ADR-0018 §2 — الجدولة باليوم مش بالساعة، `matching
+   * .full_day_job_minutes`)؛ وأي استثناء `blocked` صريح حدده الفني بنفسه في جدوله.
    */
-  private findEligibleTechnicians(
+  private async findEligibleTechnicians(
     order: Order,
     batchSize: number,
     requestedTechnicianId?: string | null,
@@ -131,18 +157,50 @@ export class MatchingService {
     preferredCompanyId?: string | null,
     ignoreActiveOrderConflict = false,
   ): Promise<EligibleTechnicianRow[]> {
+    const fullDayJobMinutes = await this.settingsService.getNumber(
+      'matching.full_day_job_minutes',
+      FULL_DAY_JOB_MINUTES_FALLBACK,
+    );
+    const workloadBalanceWeight = await this.settingsService.getNumber(
+      'matching.workload_balance_weight',
+      WORKLOAD_BALANCE_WEIGHT_FALLBACK,
+    );
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
       FROM technician_profiles tp
-      JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+      -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة (ts) OR فئة
+      -- الخدمة معتمدة (technician_categories، شرط الـEXISTS تحت في WHERE)" — فني معتمد بمستوى
+      -- الفئة كلها (سباكة/كهرباء/...) بلا صف technician_services مباشر لنفس الخدمة دي بالذات
+      -- لازم يفضل مؤهّل للمطابقة الفعلية.
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
         AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      -- ADR-0018 §7 — حِمل الفني الحالي (عدد الطلبات النشطة عليه دلوقتي) لغرض موازنة التوزيع
+      -- في الـORDER BY تحت. LATERAL بدل subquery عادي في SELECT عشان يتحسب مرة واحدة لكل فني
+      -- مرشّح بس (بعد كل شروط WHERE)، مش لكل صف technician_profiles في الجدول كله.
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS active_count
+        FROM orders wo
+        WHERE wo.technician_id = tp.id
+          AND wo.order_status = ANY($6::order_status[])
+          AND wo.deleted_at IS NULL
+      ) workload ON true
       WHERE tp.verification_status = 'approved'
+        -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
+        -- بمستوى الفئة كلها (technician_categories).
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tc
+            WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
+              AND tc.is_active = true AND tc.verification_status = 'approved'
+          )
+        )
         -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
         -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى
         -- no-op فعليًا، متسيّب في التوقيع بس (استخدامه القديم كان مقصور على ده بالظبط) — الشرط
@@ -159,10 +217,14 @@ export class MatchingService {
           scheduledAtParam: '$10',
           excludeOrderIdParam: '$4',
           activeStatusesParam: '$6',
+          engagedStatusesParam: '$11',
+          isEmergencyParam: '$12',
           serviceDurationExpr: 'COALESCE(s.estimated_duration_minutes, 60)',
+          fullDayThresholdMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
-      ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
+      ORDER BY (COALESCE(tlc.order_priority_weight, 0) - COALESCE(workload.active_count, 0) * $14::int) DESC,
+               distance_km ASC
       LIMIT $5
       `,
       [
@@ -176,6 +238,10 @@ export class MatchingService {
         ignoreAvailabilityFilter,
         preferredCompanyId ?? null,
         order.scheduledAt ?? null,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        order.bookingMode === BookingMode.EMERGENCY,
+        fullDayJobMinutes,
+        workloadBalanceWeight,
       ],
     );
   }
@@ -197,49 +263,31 @@ export class MatchingService {
    * الأحداث (إشعار/طابور المهلة) بتتبعت بعد ما الـtransaction تتقفل بنجاح بس، مش من جواها.
    */
   /**
-   * "قريب" (النهاردة/بكرة، أو ASAP) بيرجّع true (نفس فلسفة `matching.near_term_request_days`).
-   * ADR-0017 بند 7. حساب calendar-day بالـUTC (اتفاقية المشروع كلها UTC، مفيش timezone محلي).
+   * **تصحيح جوهري (ADR-0018، طلب صريح من المالك 2026-08-19)** — بيلغي انقسام "قريب/بعيد" القديم
+   * (ADR-0017 بند 7) بالكامل. الانقسام الصحيح هو **طوارئ/مجدول**: بس الطوارئ (استجابة فورية
+   * بالتعريف) محتاجة دورة طلب/قبول-رفض فعلية. أي طلب تاني — عادي أو "Quick Job" (شغل صغير، مش
+   * عاجل، ممكن يتطلب بكرة أو الأسبوع الجاي) — بيتبع نموذج الحجز المجدول العادي (تأكيد تلقائي بلا
+   * انتظار قبول)، بغض النظر عن قرب/بُعد اليوم المطلوب.
    */
-  private async isNearTermOrder(scheduledAt: Date | null): Promise<boolean> {
-    if (!scheduledAt) return true;
-    const nearTermDays = await this.settingsService.getNumber(
-      'matching.near_term_request_days',
-      NEAR_TERM_REQUEST_DAYS_FALLBACK,
-    );
-    const now = new Date();
-    const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const cutoffExclusive = startOfToday + (nearTermDays + 1) * 24 * 60 * 60 * 1000;
-    return scheduledAt.getTime() < cutoffExclusive;
+  private isEmergencyOrder(order: Pick<Order, 'bookingMode'>): boolean {
+    return order.bookingMode === BookingMode.EMERGENCY;
   }
 
   /**
-   * نقطة الدخول الموحّدة (ADR-0017 بند 7) — كل نداء خارجي (OrderDispatchListener،
-   * MatchingDeferredDispatchProcessor، MatchingRecoveryService.sweep) لازم يستخدم دي بدل
-   * `dispatchNextRound()` مباشرة، عشان القرار "قريب/بعيد" يتاخد مرة واحدة بس في مكان واحد.
-   * `reject()` الداخلية بتفضل تنادي `dispatchNextRound()` مباشرة عمدًا — لو فيه `order_assignments`
-   * أصلاً معناه الطلب قريب بالفعل (طلبات بعيدة ماليهاش assignments خالص)، مفيش داعي نعيد الفحص.
+   * نقطة الدخول الموحّدة — كل نداء خارجي (OrderDispatchListener، MatchingRecoveryService.sweep)
+   * لازم يستخدم دي بدل `dispatchNextRound()` مباشرة، عشان القرار "طوارئ/مجدول" يتاخد مرة واحدة
+   * بس في مكان واحد. `reject()` الداخلية بتفضل تنادي `dispatchNextRound()` مباشرة عمدًا — لو فيه
+   * `order_assignments` أصلاً معناه الطلب طوارئ بالفعل (المجدول ماليهوش assignments خالص).
    */
-  /**
-   * ADR-0017 بند 7 — بيستخدمها `OrderDispatchListener` عشان يقرر *قبل* حتى فحص
-   * `dispatchDeferredUntil` (ADR-0009): طلب "بعيد" لازم يتأكد فورًا وقت الإنشاء، مش يستنى لحد
-   * قرب الموعد زي آلية التأجيل بتاعة ADR-0009 (دي لسه سارية بس للطلبات "القريبة" اللي بعيدة عن
-   * دلوقتي بالساعات مش الأيام — تفاصيل الفرق في ADR-0017 بند 7).
-   */
-  async isFarFutureOrder(orderId: string): Promise<boolean> {
-    const order = await this.orders.findOne({ where: { id: orderId } });
-    if (!order) return false;
-    return !(await this.isNearTermOrder(order.scheduledAt));
-  }
-
   async dispatchOrAutoConfirm(orderId: string): Promise<{ dispatched: number }> {
     const order = await this.orders.findOne({ where: { id: orderId } });
     if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
       return { dispatched: 0 };
     }
-    if (await this.isNearTermOrder(order.scheduledAt)) {
+    if (this.isEmergencyOrder(order)) {
       return this.dispatchNextRound(orderId);
     }
-    return this.autoConfirmFutureOrder(orderId);
+    return this.autoConfirmScheduledOrder(orderId);
   }
 
   async dispatchNextRound(orderId: string): Promise<{ dispatched: number }> {
@@ -282,7 +330,7 @@ export class MatchingService {
 
       // هيكل الحجز الجديد (docs/06 §1.7) — "طوارئ" بتستخدم دفعة أكبر (افتراضي 10، "أول عشرة"
       // بالحرف من كلام المالك) وبتتجاهل فلتر التوافر العادي تمامًا (تفاصيل في findEligibleTechnicians).
-      const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
+      const isEmergency = this.isEmergencyOrder(order);
 
       // سقف أقصى لإجمالي الفنيين المتواصَل معاهم عبر كل الجولات (docs/08 §17.15، طوارئ بس) —
       // مستقل عن matching.max_rounds (ده بيحدّ عدد *الجولات*، ده بيحدّ عدد *الفنيين* الكلي).
@@ -467,7 +515,8 @@ export class MatchingService {
   }
 
   /**
-   * تأكيد تلقائي لطلب "بعيد" (ADR-0017 بند 7) — بدل انتظار قبول فني (`order_assignments`
+   * تأكيد تلقائي لطلب مجدول (ADR-0018، مُصحَّحة فوق ADR-0017 بند 7 القديم — بقت شاملة **كل**
+   * الطلبات غير الطوارئ، مش بس "البعيدة") — بدل انتظار قبول فني (`order_assignments`
    * SENT/VIEWED + مهلة رد)، بيدوّر عن أفضل فني مؤهّل واحد (نفس ترتيب `findEligibleTechnicians`،
    * أولوية مستوى ثم مسافة، ونفس تدرّج التفضيل "إعادة حجز → اعتماد شركة → عام" اللي
    * `dispatchNextRound` بتستخدمه) وبيأكّد الطلب ليه مباشرة — نفس انتقال الحالة اللي آخر `accept()`
@@ -477,7 +526,7 @@ export class MatchingService {
    * لو مفيش فني مؤهّل، الطلب يفضل `SEARCHING_TECHNICIAN` بلا إلغاء (نفس قرار §26.2 الموجود) —
    * `MatchingRecoveryService.sweep()` هتعيد المحاولة بنفس المسار ده تلقائيًا.
    */
-  async autoConfirmFutureOrder(orderId: string): Promise<{ dispatched: number }> {
+  async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
@@ -504,7 +553,7 @@ export class MatchingService {
       const technicianId = candidates[0].technician_id;
       // دفاع عمق ضد سباق نادر (ADR-0017 بند 5 — نفس نمط accept() الموجود بالحرف): قفل صف الفني
       // نفسه وإعادة فحص الأهلية تحت القفل مباشرة قبل الكتابة، عشان لو transaction تانية (accept()
-      // أو autoConfirmFutureOrder لطلب تاني) أكّدت نفس الفني لموعد متعارض في نفس اللحظة تقريبًا،
+      // أو autoConfirmScheduledOrder لطلب تاني) أكّدت نفس الفني لموعد متعارض في نفس اللحظة تقريبًا،
       // النداء ده يخسر السباق بأمان (stalled، مش استثناء غير متوقع/خطأ DB خام) بدل ما يكتب فوق
       // حالة اتغيّرت. uq_orders_one_active_asap_per_technician (migration 0144) لسه بتحمي حالة
       // ASAP بس على مستوى DB — التعارض بين طلبين مجدولين بيتفحص هنا بس دلوقتي (فجوة موثّقة).
@@ -579,6 +628,13 @@ export class MatchingService {
     return { dispatched: 1 };
   }
 
+  /**
+   * ADR-0018 §5 — العرض يفضل ظاهر هنا طالما `sent` (محدش قبله لسه)، **مهما كانت `expires_at`
+   * فاتت أو لأ**. `expires_at` بقت معناها "امتى النظام بيوسّع البث لفنيين إضافيين" بس (راجع
+   * matching-round-expiry.processor.ts) — مش ميعاد صلاحية للعرض نفسه. لو الفني فتح التطبيق بعد
+   * ما البث اتوسّع لفنيين تانيين، لازم لسه يشوف الطلب ده في قايمته ويقدر يقبله (أول واحد يقبل
+   * ياخده، exclusivity ذرّية في accept() تحت).
+   */
   async listAvailableForTechnician(userId: string): Promise<AvailableOrderRow[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     return this.dataSource.query<AvailableOrderRow[]>(
@@ -589,7 +645,7 @@ export class MatchingService {
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id
       JOIN addresses a ON a.id = o.address_id
-      WHERE oa.technician_id = $1 AND oa.assignment_status = 'sent' AND oa.expires_at > now()
+      WHERE oa.technician_id = $1 AND oa.assignment_status = 'sent'
       ORDER BY oa.sent_at DESC
       `,
       [profile.id],
@@ -620,10 +676,14 @@ export class MatchingService {
       }
       await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
 
+      // ADR-0018 §5 — مفيش فحص expiresAt هنا عمدًا: العرض يفضل قابل للقبول طالما assignment_status
+      // لسه sent/viewed (محدش قبله ولا هو رفضه صراحة)، بغض النظر عن مرور مهلة الجولة. راجع
+      // matching-round-expiry.processor.ts للتفصيل الكامل — expiresAt بقت بس تريجر لتوسيع البث،
+      // مش ميعاد صلاحية.
       const assignment = await manager.findOne(OrderAssignment, {
         where: { orderId, technicianId: profile.id, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
       });
-      if (!assignment || assignment.expiresAt.getTime() < Date.now()) {
+      if (!assignment) {
         throw new ApiException(ErrorCode.ORDR_003, 'العرض ده مبقاش متاح', HttpStatus.CONFLICT);
       }
 

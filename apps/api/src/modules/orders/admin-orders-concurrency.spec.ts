@@ -160,7 +160,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       dataSource.getRepository(OrderTeamMember),
       dataSource,
       techniciansService,
-      new TechnicianAssignmentGuardService(), // حقيقية — صفر stub، عشان نفس منطق الأهلية الفعلي يتنفّذ تحت السباق
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never), // حقيقية — صفر stub، عشان نفس منطق الأهلية الفعلي يتنفّذ تحت السباق
       new EventEmitter2(),
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never, // pricingEngineService — مش متنادى في reassign/crew

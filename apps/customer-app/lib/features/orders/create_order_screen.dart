@@ -323,11 +323,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (choice != null && mounted) setState(() => _requestedAt = choice.scheduledAt);
   }
 
+  // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد).
   String _formatRequestedAt() {
     final at = _requestedAt;
     if (at == null) return 'في أقرب وقت ممكن';
+    final today = DateTime.now();
+    final isToday = at.year == today.year && at.month == today.month && at.day == today.day;
+    final tomorrow = today.add(const Duration(days: 1));
+    final isTomorrow = at.year == tomorrow.year && at.month == tomorrow.month && at.day == tomorrow.day;
+    if (isToday) return 'النهاردة';
+    if (isTomorrow) return 'بكرة';
     final two = (int n) => n.toString().padLeft(2, '0');
-    return '${two(at.day)}/${two(at.month)}/${at.year} الساعة ${two(at.hour)}:${two(at.minute)}';
+    return '${two(at.day)}/${two(at.month)}/${at.year}';
   }
 
   Future<void> _validatePromo() async {

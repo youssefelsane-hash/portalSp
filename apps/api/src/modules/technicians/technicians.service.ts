@@ -24,7 +24,7 @@ import { TechnicianCertificate } from './entities/technician-certificate.entity'
 import { TechnicianCertificatesService } from './technician-certificates.service';
 import { SettingsService } from '../settings/settings.service';
 import { technicianAvailabilityCondition } from './technician-eligibility.sql';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -337,6 +337,7 @@ export class TechniciansService {
 
     const bayesianMinSamples = await this.settingsService.getNumber('ranking.bayesian_min_samples', 5);
     const bayesianPriorMean = await this.settingsService.getNumber('ranking.bayesian_prior_mean', 4.0);
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
 
     interface TechnicianRow {
       technician_id: string;
@@ -354,7 +355,7 @@ export class TechniciansService {
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
-             tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
+             tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
                AS recommendation_score,
@@ -377,10 +378,27 @@ export class TechniciansService {
              ) AS avg_arrival_minutes
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
-      JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+      -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة OR فئة الخدمة
+      -- معتمدة" (شرط الـEXISTS تحت). فني معتمد بالفئة بس (بلا صف technician_services مباشر
+      -- لنفس الخدمة دي بالذات) لازم يفضل يظهر هنا — ts.* بترجع NULL ليه وقتها (COALESCE فوق).
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+        AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
+        -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
+        -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
+        -- الثلاثة بيطبّقوها.
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tc
+            WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
+              AND tc.is_active = true AND tc.verification_status = 'approved'
+          )
+        )
         -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19، سيناريو "يوسف") — القايمة دي كانت بترشّح
         -- فني للعرض/الاختيار اليدوي حتى لو معندوش current_location خالص (لسه مفتحش تطبيق الفني
         -- أبدًا)، بينما findEligibleTechnicians() في matching.service.ts (اللي فعليًا بتوزّع
@@ -389,18 +407,22 @@ export class TechniciansService {
         -- (لازمة لأي توزيع فعلي بغض النظر عن ASAP/مجدول)، فبقى شرط هنا كمان.
         AND tp.current_location IS NOT NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
-        -- ADR-0017 بند 4/6 — نفس مصدر التوافر المستخدم في المطابقة الفعلية (matching.service.ts)
-        -- وتعيين الأدمن القسري، عشان القايمة دي تعكس مين فعلاً هيتقبل فعليًا للتاريخ/الوقت
-        -- ده، مش بس "مؤهّل بشكل عام" (نفس فئة بَقّة "يوسف" فوق، بس لبُعد الوقت مش الموقع).
-        -- excludeOrderIdParam = NULL حرفي — لسه مفيش طلب فعلي اتعمل، دي مرحلة تصفّح قبل الحجز.
+        -- ADR-0017 بند 4/6 (مُصحَّحة بـADR-0018) — نفس مصدر التوافر المستخدم في المطابقة الفعلية
+        -- (matching.service.ts) وتعيين الأدمن القسري، عشان القايمة دي تعكس مين فعلاً هيتقبل
+        -- فعليًا لليوم المطلوب، مش بس "مؤهّل بشكل عام". isEmergencyParam دايمًا false هنا —
+        -- الشاشة دي بتظهر بس لأوضاع فردي/اعتماد (مش طوارئ، الطوارئ بتتوزّع تلقائيًا بلا اختيار
+        -- عميل). excludeOrderIdParam = NULL حرفي — لسه مفيش طلب فعلي اتعمل، دي مرحلة تصفّح قبل الحجز.
         ${technicianAvailabilityCondition({
           technicianIdExpr: 'tp.id',
           scheduledAtParam: '$7',
           excludeOrderIdParam: 'NULL',
           activeStatusesParam: '$8',
+          engagedStatusesParam: '$9',
+          isEmergencyParam: '$10',
           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          fullDayThresholdMinutesParam: '$11',
         })}
-      ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
+      ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, COALESCE(ts.completed_count, 0) DESC
       LIMIT 50
       `,
       [
@@ -412,6 +434,9 @@ export class TechniciansService {
         bayesianPriorMean,
         scheduledAt ?? null,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        fullDayJobMinutes,
       ],
     );
 

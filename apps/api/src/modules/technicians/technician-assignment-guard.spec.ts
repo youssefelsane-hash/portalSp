@@ -66,7 +66,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       entities: [Order, TechnicianProfile],
     });
     await dataSource.initialize();
-    guard = new TechnicianAssignmentGuardService();
+    guard = new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never);
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 

@@ -91,7 +91,12 @@ export class TechnicianKpiCalculationService {
     const [assignmentsRow] = await this.dataSource.query(
       `
       SELECT
-        COUNT(*) FILTER (WHERE assignment_status IN ('accepted', 'rejected', 'timeout')) AS offered_orders_count,
+        -- ADR-0018 §5 — بعد التصحيح، عرض اتحل لصالح فني تاني (سبق قبله) بيتحول لـ'cancelled'
+        -- بدل ما يستنى TIMEOUT (التايم آوت بقى مش بيتسجّل خالص لعروض حية — راجع
+        -- matching-round-expiry.processor.ts). 'timeout' متسيّبة في القايمة لتوافق بيانات
+        -- تاريخية قبل التصحيح، 'cancelled' اتضافت عشان "اتعرض عليه بس فني تاني سبقه" يفضل
+        -- محسوب في معدّل الاستجابة زي ما كان قبل كده بالظبط (مفيش تراجع في دقة الـKPI).
+        COUNT(*) FILTER (WHERE assignment_status IN ('accepted', 'rejected', 'timeout', 'cancelled')) AS offered_orders_count,
         COUNT(*) FILTER (WHERE assignment_status = 'accepted') AS accepted_orders_count
       FROM order_assignments
       WHERE technician_id = $1 AND sent_at >= $2 AND sent_at < $3

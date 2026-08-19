@@ -10,7 +10,9 @@ import { SettingsModule } from '../settings/settings.module';
 // (كيان من موديول تاني بلا استيراد دائري). CatalogModule بيستورد TechniciansModule أصلاً، فمينفعش
 // العكس — الحل: تسجيل الكيانين هنا مباشرة بدل استيراد CatalogModule كامل.
 import { Service } from '../catalog/entities/service.entity';
+import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { TechnicianService } from '../catalog/entities/technician-service.entity';
+import { TechnicianCategory } from '../catalog/entities/technician-category.entity';
 import { AdminTechnicianCompaniesController } from './admin-technician-companies.controller';
 import { AdminTechnicianLevelsController } from './admin-technician-levels.controller';
 import { AdminTechniciansController } from './admin-technicians.controller';
@@ -32,6 +34,7 @@ import { TechnicianStatsRecalculationListener } from './technician-stats-recalcu
 import { TechnicianStatsService } from './technician-stats.service';
 import { TechnicianScheduleService } from './technician-schedule.service';
 import { TechnicianAssignmentGuardService } from './technician-assignment-guard.service';
+import { TechnicianCategoriesService } from './technician-categories.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
@@ -58,7 +61,9 @@ import { TechnicianZone } from './entities/technician-zone.entity';
       TechnicianCertificate,
       TechnicianScheduleSlot,
       TechnicianService,
+      TechnicianCategory,
       Service,
+      ServiceCategory,
       User,
     ]),
     AuditModule,
@@ -89,6 +94,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianStatsRecalculationListener,
     TechnicianScheduleService,
     TechnicianAssignmentGuardService,
+    TechnicianCategoriesService,
     ScheduleSlotReleaseListener,
     storageServiceProvider,
   ],
@@ -99,6 +105,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianStatsService,
     TechnicianScheduleService,
     TechnicianAssignmentGuardService,
+    TechnicianCategoriesService,
   ],
 })
 export class TechniciansModule {}
