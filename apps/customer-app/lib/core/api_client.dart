@@ -32,15 +32,52 @@ Future<http.Response> _send(
     case 'GET':
       return http.get(uri, headers: headers);
     case 'POST':
-      return http.post(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
+      return http.post(
+        uri,
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
     case 'PUT':
-      return http.put(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
+      return http.put(
+        uri,
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
     case 'PATCH':
-      return http.patch(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
+      return http.patch(
+        uri,
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
     case 'DELETE':
-      return http.delete(uri, headers: headers, body: body != null ? jsonEncode(body) : null);
+      return http.delete(
+        uri,
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      );
     default:
       throw ArgumentError('HTTP method غير مدعوم: $method');
+  }
+}
+
+// بَقّة حقيقية اتلقطت (المالك بلّغ 2026-08-19) — كل شاشة في التطبيق (27 ملف) بتمسك `on
+// ApiException catch` بس. أي فشل تاني (انقطاع الشبكة، CORS على الويب — أشيع بكتير على الويب من
+// الموبايل لأن المتصفح بيفرضه والـVM/الموبايل لأ، timeout، رد مش JSON صالح) كان بيرمي استثناء
+// (`http.ClientException`/`FormatException`/إلخ) محدّش بيمسكه — الشاشة تفضل عالقة على
+// loading spinner للأبد بلا أي رسالة، واللمستخدم مضطر يعمل restart كامل. الإصلاح: أي استثناء غير
+// `ApiException` بيتحوّل هنا لـ`ApiException` واضح — نقطة واحدة (كل الـrepositories بتعدّي من هنا)
+// بدل تعديل الـ27 ملف واحد واحد.
+Future<T> _guardNetworkError<T>(Future<T> Function() action) async {
+  try {
+    return await action();
+  } on ApiException {
+    rethrow;
+  } catch (err) {
+    throw ApiException(
+      code: 'NETWORK_ERROR',
+      message: 'تعذر الاتصال بالخادم — تأكد من اتصالك بالإنترنت وحاول تاني',
+      statusCode: 0,
+    );
   }
 }
 
@@ -53,20 +90,29 @@ Future<dynamic> _apiRequestRaw(
   String? accessToken,
   Map<String, String>? extraHeaders,
 }) async {
-  final response = await _send(method, path, body: body, accessToken: accessToken, extraHeaders: extraHeaders);
-  final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-  final success = decoded['success'] as bool? ?? false;
-
-  if (!success) {
-    final error = decoded['error'] as Map<String, dynamic>?;
-    throw ApiException(
-      code: error?['code'] as String? ?? 'UNKNOWN',
-      message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
-      statusCode: response.statusCode,
+  return _guardNetworkError(() async {
+    final response = await _send(
+      method,
+      path,
+      body: body,
+      accessToken: accessToken,
+      extraHeaders: extraHeaders,
     );
-  }
+    final decoded =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final success = decoded['success'] as bool? ?? false;
 
-  return decoded['data'];
+    if (!success) {
+      final error = decoded['error'] as Map<String, dynamic>?;
+      throw ApiException(
+        code: error?['code'] as String? ?? 'UNKNOWN',
+        message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+        statusCode: response.statusCode,
+      );
+    }
+
+    return decoded['data'];
+  });
 }
 
 // نداء عام لـ endpoints بترجع object واحد. accessToken اختياري (null لمسارات public زي OTP/الكتالوج).
@@ -77,7 +123,13 @@ Future<Map<String, dynamic>?> apiRequest(
   String? accessToken,
   Map<String, String>? extraHeaders,
 }) async {
-  final data = await _apiRequestRaw(method, path, body: body, accessToken: accessToken, extraHeaders: extraHeaders);
+  final data = await _apiRequestRaw(
+    method,
+    path,
+    body: body,
+    accessToken: accessToken,
+    extraHeaders: extraHeaders,
+  );
   return data as Map<String, dynamic>?;
 }
 
@@ -100,31 +152,36 @@ Future<Map<String, dynamic>?> apiUpload(
   Map<String, String> fields = const {},
   String? accessToken,
 }) async {
-  final uri = Uri.parse('$apiBaseUrl$path');
-  final request = http.MultipartRequest('POST', uri)
-    ..fields.addAll(fields)
-    ..files.add(http.MultipartFile.fromBytes(
-      'file',
-      fileBytes,
-      filename: filename,
-      contentType: _mediaTypeForFilename(filename),
-    ));
-  if (accessToken != null) {
-    request.headers['Authorization'] = 'Bearer $accessToken';
-  }
-  final streamedResponse = await request.send();
-  final response = await http.Response.fromStream(streamedResponse);
-  final decoded = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-  final success = decoded['success'] as bool? ?? false;
+  return _guardNetworkError(() async {
+    final uri = Uri.parse('$apiBaseUrl$path');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields.addAll(fields)
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          fileBytes,
+          filename: filename,
+          contentType: _mediaTypeForFilename(filename),
+        ),
+      );
+    if (accessToken != null) {
+      request.headers['Authorization'] = 'Bearer $accessToken';
+    }
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
+    final decoded =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final success = decoded['success'] as bool? ?? false;
 
-  if (!success) {
-    final error = decoded['error'] as Map<String, dynamic>?;
-    throw ApiException(
-      code: error?['code'] as String? ?? 'UNKNOWN',
-      message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
-      statusCode: response.statusCode,
-    );
-  }
+    if (!success) {
+      final error = decoded['error'] as Map<String, dynamic>?;
+      throw ApiException(
+        code: error?['code'] as String? ?? 'UNKNOWN',
+        message: error?['message'] as String? ?? 'حصل خطأ غير متوقع',
+        statusCode: response.statusCode,
+      );
+    }
 
-  return decoded['data'] as Map<String, dynamic>?;
+    return decoded['data'] as Map<String, dynamic>?;
+  });
 }

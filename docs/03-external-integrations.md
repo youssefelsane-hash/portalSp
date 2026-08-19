@@ -340,6 +340,24 @@ id) — أو نفس المفتاح لو مقيّد صح بالاتنين:
   ```
   استبدل `YOUR_GOOGLE_MAPS_API_KEY` بالمفتاح الحقيقي.
 
+### apps/customer-app — نسخة الويب (Flutter Web) — كانت فجوة حقيقية، اتقفلت (2026-08-19)
+
+`google_maps_flutter_web` (اللي بيشغّل الخريطة لما التطبيق يتبني للويب — `flutter build web`/
+`flutter run -d chrome`) محتاج مكتبة Google Maps JavaScript API محمّلة في صفحة HTML نفسها **قبل**
+أي محاولة لعرض `GoogleMap` widget — بعكس Android/iOS، Flutter مش بيحقن السكريبت ده تلقائيًا خالص.
+`apps/customer-app/web/index.html` كان لسه الـtemplate الافتراضي 100% بلا أي وسم Maps — يعني
+`window.google.maps` تفضل `undefined` مهما كان المفتاح نفسه صح وموجود في مفتاح Android/iOS، والخطأ
+اللي بيظهر (`TypeError: Cannot read properties of undefined (reading 'maps')`) **مالوش أي علاقة
+بموقع/بلد المستخدم** — نفس السلوك هيحصل من أي مكان في الدنيا.
+
+**الإصلاح**: `<script src="https://maps.googleapis.com/maps/api/js?key=...">` مضاف في `<head>` بـ
+`web/index.html`، بنفس المفتاح الموجود بالفعل في `AndroidManifest.xml`/`AppDelegate.swift`. **خطوة
+لازم تتعمل من Google Cloud Console (مفيش وصول لها من هنا)**: المفتاح ده كان مفعّل ليه Maps SDK for
+Android/iOS بس — لازم **Maps JavaScript API** تتفعّل ليه هي كمان (APIs & Services → Library)، ولو
+عنده قيود HTTP referrer، لازم الدومين اللي التطبيق شغال عليه يتضاف (`localhost:*` وقت التطوير
+المحلي). لو بعد سحب الإصلاح ده لسه فيه خطأ في الـconsole زي `InvalidKeyMapError` أو
+`RefererNotAllowedMapError`، ده معناه المفتاح نفسه محتاج التعديل ده من Cloud Console، مش كود جديد.
+
 ### apps/technician-app — مفيش حاجة تتحط
 
 زرار "افتح الملاحة للعنوان" بيستخدم رابط عام
