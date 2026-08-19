@@ -12,7 +12,7 @@ import {
   ORDER_EMERGENCY_DISPATCH_STRUGGLING_EVENT,
   OrderEmergencyDispatchStrugglingEvent,
 } from '../../common/events/order-emergency-dispatch-struggling.event';
-import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { ORDER_NO_TECHNICIAN_FOUND_EVENT, OrderNoTechnicianFoundEvent } from '../../common/events/order-no-technician-found.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
@@ -231,8 +231,7 @@ export class MatchingService {
 
       const maxRounds = await this.settingsService.getNumber('matching.max_rounds', MAX_ROUNDS_FALLBACK);
       if (nextRound > maxRounds) {
-        await this.cancelForNoTechnicians(order, manager);
-        return { kind: 'cancelled' as const, order };
+        return { kind: 'stalled' as const, order, notifyNoTechnician: nextRound === 1 };
       }
 
       // هيكل الحجز الجديد (docs/06 §1.7) — "طوارئ" بتستخدم دفعة أكبر (افتراضي 10، "أول عشرة"
@@ -252,8 +251,7 @@ export class MatchingService {
         );
         emergencyRemainingBudget = maxContacted - techniciansContactedSoFar;
         if (emergencyRemainingBudget <= 0) {
-          await this.cancelForNoTechnicians(order, manager);
-          return { kind: 'cancelled' as const, order };
+          return { kind: 'stalled' as const, order, notifyNoTechnician: nextRound === 1 };
         }
       }
 
@@ -296,10 +294,13 @@ export class MatchingService {
       if (candidates.length === 0) {
         candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
       }
-      // مفيش فنيين متاحين (سواء أول جولة أو بعد ما الكل رفض) = مفيش داعي نستنى — نلغي فوراً
+      // قرار عمل صريح من المالك (2026-08-19) — مفيش إلغاء تلقائي خالص لمجرد مفيش فني اتلاقاله
+      // دلوقتي. الطلب يفضل SEARCHING_TECHNICIAN بلا أي assignment جديد الجولة دي —
+      // MatchingRecoveryService.sweep() (بتشتغل كل دقيقة، مستقلة تمامًا) بتعيد نداء
+      // dispatchNextRound() تلقائيًا طالما مفيش assignment حي، فأول ما فني يبقى مؤهّل ومتاح
+      // (توفر جديد، خدمة/منطقة اتضافتله، إلخ) الطلب بيتوزّع عليه من غير أي تدخل يدوي.
       if (candidates.length === 0) {
-        await this.cancelForNoTechnicians(order, manager);
-        return { kind: 'cancelled' as const, order };
+        return { kind: 'stalled' as const, order, notifyNoTechnician: nextRound === 1 };
       }
 
       // مهلة رد أقصر للطوارئ (docs/08 §17.15 — "عمر العرض") — استعجال حقيقي، مستقلة عن مهلة
@@ -355,8 +356,8 @@ export class MatchingService {
     if (result.kind === 'noop') {
       return { dispatched: 0 };
     }
-    if (result.kind === 'cancelled') {
-      this.emitCancelledForNoTechnicians(result.order);
+    if (result.kind === 'stalled') {
+      if (result.notifyNoTechnician) this.emitNoTechniciansFound(result.order);
       return { dispatched: 0 };
     }
 
@@ -394,40 +395,15 @@ export class MatchingService {
     return { dispatched: result.dispatched };
   }
 
-  // بَقّة حقيقية اتلقطت واتصلحت وقت بناء order-auto-cancel.service.ts (تفاصيل في orders/README.md):
-  // الدالة دي كانت بتلغي الطلب فعلياً بس من غير ما تصدّر order.status_changed خالص — يعني العميل
-  // (والفني لو موجود) محدش كان بيوصله أي إشعار "مفيش فني قبل طلبك" رغم إن `OrderStatusNotificationListener`
-  // أصلاً بيعالج `CANCELLED_BY_SYSTEM` وكان جاهز يستقبل الحدث ده من زمان.
-  // بتاخد manager بره transaction dispatchNextRound اللي ماسكة القفل بالفعل — فتح transaction
-  // منفصلة هنا كان هيعمل deadlock حقيقي (الاتنين بيحاولوا يقفلوا نفس صف الطلب).
-  private async cancelForNoTechnicians(order: Order, manager: EntityManager): Promise<void> {
-    order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
-    order.cancelledAt = new Date();
-    await manager.save(order);
-    await manager.save(
-      manager.create(OrderStatusHistory, {
-        orderId: order.id,
-        previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
-        newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
-        changeSource: OrderChangeSource.SYSTEM,
-        reason: 'ORDR_002: لا يوجد فنيون متاحون حالياً',
-      }),
-    );
-  }
-
-  private emitCancelledForNoTechnicians(order: Order): void {
-    this.events.emit(
-      ORDER_STATUS_CHANGED_EVENT,
-      new OrderStatusChangedEvent(
-        order.id,
-        order.orderNumber,
-        OrderStatus.SEARCHING_TECHNICIAN,
-        OrderStatus.CANCELLED_BY_SYSTEM,
-        order.customerId,
-        order.technicianId,
-        'ORDR_002: لا يوجد فنيون متاحون حالياً',
-      ),
-    );
+  // قرار عمل صريح من المالك (2026-08-19، §26.2) — قبل كده الدالة دي كانت بتلغي الطلب فعليًا
+  // (CANCELLED_BY_SYSTEM) لمجرد مفيش فني اتلاقاله. المالك أكّد صراحة (بلاغين منفصلين، ده تاني
+  // واحد) إنه مش عايز أي إلغاء تلقائي للنظام خالص — الطلب يفضل SEARCHING_TECHNICIAN للأبد،
+  // MatchingRecoveryService.sweep() (بتشتغل كل دقيقة، موجودة بالفعل) بتعيد المحاولة تلقائيًا،
+  // وده بيتم فقط عبر إشعار (emitNoTechniciansFound تحت) — الحالة نفسها ما بتتغيرش خالص، فمفيش
+  // حاجة تتحفظ هنا. نفس السبب اللي كان موجود قبل كده (deadlock لو فتحنا transaction منفصلة) —
+  // الدالة القديمة اتشالت تمامًا بدل ما تتعدّل، مفيش أي DB write هنا خالص دلوقتي.
+  private emitNoTechniciansFound(order: Order): void {
+    this.events.emit(ORDER_NO_TECHNICIAN_FOUND_EVENT, new OrderNoTechnicianFoundEvent(order.id, order.orderNumber));
   }
 
   async listAvailableForTechnician(userId: string): Promise<AvailableOrderRow[]> {

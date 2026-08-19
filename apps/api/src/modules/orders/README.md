@@ -90,10 +90,12 @@
   `orders.payment_timeout_minutes` (افتراضي 15 دقيقة، `infra/migrations/0100_pending_payment_timeout_setting.sql`).
   مفيش استرداد هنا — الدفع نفسه مكملش، مفيش فلوس اتاخدت أصلاً. كل طلب بيتلغى جوّه transaction
   منفصلة بقفل ذري (`pessimistic_write`).
-- **`MatchingService.cancelForNoTechnicians()`** (بتتنادى لما مفيش فنيين مؤهلين أصلاً أو الجولات
-  خلصت من غير رد) — دي مسار مختلف تمامًا، مش جزء من `OrderAutoCancelService`، **وفاضلة شغالة زي ما
-  هي** (مش جزء من قرار المالك ده — القرار خاص بالفحص الدوري اللي بيلغي طلبات SEARCHING_TECHNICIAN
-  بعد مهلة زمنية، مش بمنطق "مفيش فنيين مؤهلين خالص من الأساس"؛ `matching/README.md` مرجع كامل).
+- **تحديث (2026-08-19، بلاغ تاني)**: `MatchingService.cancelForNoTechnicians()` (كانت بتتنادى
+  لما مفيش فنيين مؤهلين أصلاً أو الجولات خلصت من غير رد) كانت لسه شغالة كمسار منفصل — المالك بلّغ
+  إنها بتعمل بالظبط نفس السلوك المرفوض فوق (إلغاء تلقائي صامت)، بس من زاوية تانية. **اتشالت
+  بالكامل هي كمان** — تفاصيل كاملة في `matching/README.md`. `OrderAutoCancelService`.sweep()
+  فاضل زي ما هو (مسؤول بس عن `sweepPendingPayment()`)، `matching.service.ts` بقى مسؤول عن الفرع
+  التاني من نفس القرار.
 
 **فجوة موثّقة صراحة، لسه قايمة**: استخدام `promo_code` وقت إنشاء الطلب بيزوّد `PromoCode.usedCount`
 بس مفيش أي decrement/release ليه في أي مسار إلغاء بالكامل في النظام — مش بس هنا، ولا في `cancel()`
@@ -372,7 +374,7 @@
 `technicianCancel()`/`requestRematch()` الاتنين بياخدوا `pessimistic_write` على صف الطلب **جوّه الـtransaction** (نفس نمط `matching.service.ts dispatchNextRound()`/`accept()` بالحرف) — أي نداء متزامن تاني (عميل بيلغي، فني بيلغي، مطابقة جولة تانية) بيستنى القفل، وبعدين بيعيد فحص الحالة الحقيقية بدل ما يفترض القديمة. لو الحالة اتغيّرت، `409` واضح بدل تعارض صامت.
 
 ### اتعمله اختبار حي كامل (curl ضد Postgres/Redis حقيقيين، مش mocks)
-- **إلغاء عادي (auto-match، بث تلقائي)**: طلب `individual` بلا `requested_technician_id`، فني قبل، سبب برسوم 10% → الطلب رجع `searching_technician`، `technician_order_cancellations` صف صحيح بالكامل (`fee_cents=3000` من 30000)، محفظة الفني اتخصمت فعليًا (`wallet_transactions` نوع `penalty`)، إشعار عميل `in_app`+`push` (push فشل بأمان — مفيش جهاز مسجّل، failure_reason واضح في الجدول)، إشعار أدمن `ops_manager` عبر `NotificationRoutingService` وصل فعليًا (اتنين مستخدمين مختلفين). محدش فني تاني متاح في المنطقة التجريبية → `cancelForNoTechnicians()` الموجودة أصلاً قفلت الطلب `cancelled_by_system` بشكل صحيح (سلوك متوقع، مش بَقّة).
+- **إلغاء عادي (auto-match، بث تلقائي)**: طلب `individual` بلا `requested_technician_id`، فني قبل، سبب برسوم 10% → الطلب رجع `searching_technician`، `technician_order_cancellations` صف صحيح بالكامل (`fee_cents=3000` من 30000)، محفظة الفني اتخصمت فعليًا (`wallet_transactions` نوع `penalty`)، إشعار عميل `in_app`+`push` (push فشل بأمان — مفيش جهاز مسجّل، failure_reason واضح في الجدول)، إشعار أدمن `ops_manager` عبر `NotificationRoutingService` وصل فعليًا (اتنين مستخدمين مختلفين). محدش فني تاني متاح في المنطقة التجريبية → وقتها `cancelForNoTechnicians()` كانت بتقفل الطلب `cancelled_by_system` — **السطر ده تاريخي بس** (قرار المالك 2026-08-19 شال السلوك ده بالكامل؛ دلوقتي الطلب فضل `searching_technician` + إشعار `order.no_technician_found`، تفاصيل في `matching/README.md`).
 - **العميل اختار الفني بنفسه**: طلب بـ`requested_technician_id`، فني قبل، إلغاء بسبب من غير رسوم → `awaiting_technician_reselection` بالظبط (**مش** `searching_technician`) — الفرق الجوهري اتأكد حي.
 - **`request-rematch`**: بلا فني → `searching_technician` فورًا. محاولة تانية على نفس الطلب (مبقاش `awaiting_technician_reselection`) → `409` واضح. مع `requested_technician_id` (حتى لو نفس الفني اللي لغى) → اتقبل، بس الفني ده اتستبعد تلقائيًا من الترشيح (نفس آلية `order_assignments`).
 - **طوارئ**: طلب `emergency`، فني قبل، إلغاء → `searching_technician` فورًا (`recovery_action=auto_rematch` بغض النظر عن أي حاجة تانية) — اتأكد من صف `technician_order_cancellations` مباشرة.
@@ -871,15 +873,17 @@ actor_full_name, actor_user_type}` موحّد، مرتّب تصاعديًا بـ
    كود مطابق لما لقاه فحص الكود الساكن في `apps/customer-app` أول ما بدأنا.
 2. `MatchingService.dispatchNextRound()` لقى فني واحد بس مؤهل للخدمة/المنطقة، بعت له عرض، وجدول
    `ROUND_EXPIRED_JOB` بعد `matching.response_timeout_seconds` (افتراضي 30 ثانية).
-3. الفني ما ردّش (مفيش رفض ولا قبول)، الجولة انتهت، مفيش فني تاني للجولة الجاية →
-   `cancelForNoTechnicians()` قفلت الطلب `CANCELLED_BY_SYSTEM` بسبب `ORDR_002: لا يوجد فنيون
-   متاحون حالياً` مسجّل في `order_status_history.reason` (مش FK `cancellation_reason_id` —
-   ده عمداً، القاموس ده مخصّص لأسباب إلغاء العميل المختارة من قايمة محدودة، مش أسباب النظام
-   الدقيقة التشخيصية).
+3. الفني ما ردّش (مفيش رفض ولا قبول)، الجولة انتهت، مفيش فني تاني للجولة الجاية → **وقتها**
+   `cancelForNoTechnicians()` كانت بتقفل الطلب `CANCELLED_BY_SYSTEM` بسبب `ORDR_002: لا يوجد فنيون
+   متاحون حالياً`. **هذا السطر تاريخي** — قرار المالك (2026-08-19) شال السلوك ده بالكامل بعد
+   بلاغ لاحق أكّد نفس المشكلة تحديدًا (تفاصيل في `matching/README.md`)؛ نفس السيناريو دلوقتي
+   ينتج طلب فاضل `SEARCHING_TECHNICIAN` + إشعار أدمن، مش إلغاء.
 
-**الاستنتاج**: الإلغاء حقيقي 100%، بس **مالوش أي علاقة بطريقة الدفع** — أي طلب (كاش أو كارت) كان
-هيتلغي بنفس الطريقة بالظبط لو مفيش فني رد خلال 30 ثانية. العميل اللي بلّغ عن المشكلة على الأغلب
-كان بيختبر في بيئة فيها فنيين قليلين/بعيدين، وحصل بالصدفة وهو مجرّب كاش.
+**الاستنتاج (وقت الاختبار الأصلي، لسه صحيح جزئيًا)**: الإلغاء (وقتها) كان حقيقي 100%، بس **مالوش
+أي علاقة بطريقة الدفع** — أي طلب (كاش أو كارت) كان هيتلغي بنفس الطريقة بالظبط لو مفيش فني رد خلال
+30 ثانية. العميل اللي بلّغ عن المشكلة على الأغلب كان بيختبر في بيئة فيها فنيين قليلين/بعيدين، وحصل
+بالصدفة وهو مجرّب كاش. **دلوقتي مفيش إلغاء خالص في السيناريو ده — الاستنتاج الأهم (مالوش علاقة
+بطريقة الدفع) لسه صحيح، بس النتيجة النهائية اتغيّرت من "يتلغي" لـ"يفضل يدوّر".**
 
 **البَقّة الحقيقية الفعلية اللي اتلقطت** (مش الشك الأصلي، لكن أخطر منه فعليًا — Part 12/14):
 `OrderStatusNotificationListener.handleOrderStatusChanged()` كان بيفترض إن `CANCELLED_BY_SYSTEM`

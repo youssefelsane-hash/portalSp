@@ -265,7 +265,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
     expect(escalations[0].techniciansContactedSoFar).toBe(4);
   });
 
-  it('الجولة التالتة: الميزانية خلصت (4/4) فالطلب بيتلغي فورًا بدل ما يبعت لأي فني تاني', async () => {
+  it('الجولة التالتة: الميزانية خلصت (4/4) فمفيش دفعة جديدة — بس الطلب مايتلغيش تلقائيًا (قرار المالك 2026-08-19)', async () => {
     await expireRound(2);
     const result = await matchingService.dispatchNextRound(ids.order);
     expect(result.dispatched).toBe(0);
@@ -276,8 +276,9 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
     );
     expect(round3).toHaveLength(0);
 
+    // مفيش إلغاء تلقائي خالص — الطلب يفضل SEARCHING_TECHNICIAN، الأدمن/الموظف يتصرف يدويًا.
     const [order] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [ids.order]);
-    expect(order.order_status).toBe('cancelled_by_system');
+    expect(order.order_status).toBe('searching_technician');
 
     // التصعيد بيتصدّر مرة واحدة بس (وقت الجولة 2)، مش تاني في الجولة 3.
     expect(escalations).toHaveLength(1);

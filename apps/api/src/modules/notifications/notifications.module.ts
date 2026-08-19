@@ -28,6 +28,7 @@ import { CashCollectedRoutingListener } from './listeners/cash-collected-routing
 import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routing.listener';
 import { SupportChatMessageRoutingListener } from './listeners/support-chat-message-routing.listener';
 import { EmergencyDispatchStrugglingRoutingListener } from './listeners/emergency-dispatch-struggling-routing.listener';
+import { OrderNoTechnicianFoundRoutingListener } from './listeners/order-no-technician-found-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
@@ -114,6 +115,7 @@ import { NotificationsService } from './notifications.service';
     OrderOfferNotificationListener,
     OrderOfferResolutionListener,
     EmergencyDispatchStrugglingRoutingListener,
+    OrderNoTechnicianFoundRoutingListener,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })
