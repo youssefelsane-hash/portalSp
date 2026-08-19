@@ -55,8 +55,22 @@ export class SecurityEventsService {
    * نفس فلسفة AuditLogService.record() non-blocking تمامًا (audit/audit-log.service.ts).
    *
    * Dedup (Part 5 §13): بحث عن حدث OPEN مطابق (actor+type+action) جوّه نافذة زمنية، لو لقى بيزوّد
-   * occurrence_count بدل صف جديد. سباق حقيقي نادر ممكن يعمل صفين بدل واحد وقت أول حدثين متطابقين
-   * بالضبط في نفس اللحظة (فجوة موثّقة صراحة في README — مش حرج ماليًا، تنبيه أمني بس).
+   * occurrence_count بدل صف جديد.
+   *
+   * **بَقّة حقيقية اتلقطت واتصلحت (Script 7 Phase 30، `security-concurrency.spec.ts` سيناريو B —
+   * كانت متكررة بشكل فلاكي عبر 4 محاولات في سيشنز سابقة قبل ما تتحقق فعليًا)**: التعليق القديم هنا
+   * كان بيوصفها "سباق نادر ممكن يعمل صفين بدل واحد، بس مجموع occurrence_count يفضل صح" — ده غلط.
+   * الـ`UPDATE ... WHERE ...` (من غير `LIMIT 1` ولا id محدد) بيطابق **كل** الصفوف المتطابقة دفعة
+   * واحدة لو فيه صفين `open` مكرّرين أصلاً (بسبب سباق الإنشاء الأول) — يعني نداء واحد لاحق
+   * بيزوّد occurrence_count على **الصفين مع بعض** مش صف واحد، فمجموع occurrence_count بيتضخّم
+   * أسرع من عدد النداءات الفعلية (اتأكد حيًا: 5 نداءات متزامنة → مجموع 7، مش 5). ده أخطر من مجرد
+   * "صفين بدل واحد" — عداد التصعيد (`occurrence_count === escalateThreshold`) نفسه بيبقى غير
+   * موثوق، ممكن يوصل العتبة بدري أو يتصعّد أكتر من مرة.
+   *
+   * الحل الحقيقي: قفل استشاري (`pg_advisory_xact_lock`) على مفتاح الـdedup (actor+type+action)
+   * قبل أي قراءة/كتابة — نفس النمط بالحرف المستخدم فعلاً في `AuthService.requestOtp()` لمنع نفس
+   * فئة السباق على إعادة إرسال OTP. بيسلسل أي نداءين متزامنين لنفس المفتاح بالكامل، فمفيش صفين
+   * مكرّرين يتعملوا أصلاً، ومفيش UPDATE يقدر يطابق أكتر من صف واحد.
    */
   async recordDenial(params: RecordDenialParams): Promise<void> {
     try {
@@ -66,6 +80,15 @@ export class SecurityEventsService {
       let escalatedEvent: { id: string; eventType: SecurityEventType; actorUserId: string | null } | null = null;
 
       await this.dataSource.transaction(async (manager) => {
+        // قفل استشاري على مفتاح الـdedup بالكامل (actor+type+action) — بيسلسل أي نداءين متزامنين
+        // لنفس المفتاح، فمفيش صفين مكرّرين يتعملوا ولا UPDATE يطابق أكتر من صف واحد (راجع التعليق
+        // فوق). مفتاحين hashtext منفصلين (actor، type:action) بدل واحد مجمّع — نفس نمط
+        // AuthService.requestOtp() بالحرف.
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [
+          params.actorUserId ?? 'null',
+          `${params.eventType}:${params.action ?? 'null'}`,
+        ]);
+
         // manager.query() لـUPDATE بيرجّع tuple [rows, affectedCount] مش الصفوف مباشرة — نفس
         // المصيدة اللي اتصلحت في resolve() تحت.
         const [existingRows] = await manager.query<[{ id: string; occurrence_count: number; severity: SecurityEventSeverity }[], number]>(

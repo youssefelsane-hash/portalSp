@@ -57,7 +57,7 @@
 | 27 | Security Center | Admin/Security | VERIFIED | جزئي — Script5 (12 مرحلة كاملة) بنت الموديول ده من الصفر (نموذج حدث أمني، severity/lifecycle/dedup، تنبيهات Super Admin حية، Workforce UI، تجميع تكرار الرفض) واختبرته حي بالكامل، مفيش استغلال جديد اتبنى هنا | نعم — تغطية Script5 Phase5/6/10/11 بالكامل + `security-events-privilege-escalation.spec.ts` (نجحت في الريجريشن الكامل الأخير) | لا يوجد | لا يوجد | مفيش رصد جديد | commit سابق |
 | 28 | Audit Logging | Audit | VERIFIED | جزئي — تأكدت إن `audit_logs` append-only فعليًا (مفيش `@Delete`/`@Patch` على `admin-audit.controller.ts` ولا أي endpoint تاني في الموديول)، وإن كل عملية مالية/RBAC حساسة اتراجعت في المراحل السابقة فعلاً بتسجّل `AuditLogService.record()` جوّه نفس الـtransaction | نعم — تغطية موجودة بالفعل من Script5 Phase1 (audit matrix) | لا يوجد | لا يوجد | مفيش رصد جديد | commit سابق + هذا التحقق |
 | 29 | Notifications | Notifications | VERIFIED | جزئي — راجعت محرك الإشعارات (docs/08 §15، 4 مستويات أولوية) بالقراءة: `critical-offer`/`scheduled-job`/`quiet-hours` checkpoints كلهم بيتفحصوا بـunit tests موجودة، مفيش استغلال جديد اتبنى | نعم — `critical-offer-checkpoints.util.spec.ts`/`scheduled-job-checkpoints.util.spec.ts`/`quiet-hours.util.spec.ts` كلهم نجحوا في الريجريشن الكامل الأخير | لا يوجد | لا يوجد | Push notifications (بند 11 من قايمة المهام العامة) اتقفلت (onMessage/background handler/actionable) — لا يوجد رصد جديد هنا | commit سابق |
-| 30 | Concurrency & Idempotency | Cross-cutting | PENDING | | | | | | |
+| 30 | Concurrency & Idempotency | Cross-cutting | FIXED | نعم — `security-concurrency.spec.ts` سيناريو B حي ضد Postgres حقيقي، 10 تشغيلات متتالية نظيفة بعد الإصلاح (كانت فلاكي — اتكررت 4 مرات عبر سيشنز سابقة، واتأكدت فعليًا في الريجريشن الكامل قبل الإصلاح: مجموع occurrence_count=7 مش 5) | نعم — نفس الاختبار الموجود اتشدّد (كان بيقبل "أي عدد صفوف طالما المجموع صح"، بقى يفرض صف واحد بالظبط + occurrence_count=5 بالظبط) | BUG-014 (P2 — عداد تصعيد أمني غير موثوق تحت تزامن حقيقي، مش خلل مالي لكن بيأثر على دقة alerting) | BUG-014 fixed | مفيش رصد جديد بعد الإصلاح — باقي أنماط idempotency في المشروع (orders/payments/promo-codes) راجعتها في المراحل السابقة كلها سليمة (unique index + قفل ذرّي)، ده أول مكان بيستخدم advisory lock بدل partial unique index (لازم بسبب فلتر زمني `last_occurred_at > now() - window` مش قابل للتعبير في predicate ثابت) | commit قادم |
 | 31 | Database Invariants | Cross-cutting | PENDING | | | | | | |
 | 32 | UI/UX Quality | Customer-app | PENDING | | | | | | |
 | 33 | Error Handling / Observability | Cross-cutting | PENDING | | | | | | |
@@ -534,6 +534,47 @@ Live verification: jest حي ضد Postgres حقيقي (4 اختبارات جدي
 المتأثرة كلها نجحت).
 Status: FIXED
 
+### BUG-014
+Severity: P2 (عداد تصعيد أمني غير موثوق تحت تزامن حقيقي — مش خلل مالي، بس بيأثر على دقة تنبيهات
+الأمان، وممكن يوصل لتصعيد مضاعف/مبكر)
+Flow: Phase 30 (Concurrency & Idempotency) — التحقيق العميق المؤجّل صراحة من الملاحظة المرصودة
+فوق، بعد 4 تكرارات موثّقة عبر سيشنز سابقة ("متكررة بشكل فلاكي")
+Symptom: `SecurityEventsService.recordDenial()` بيعمل `UPDATE security_events SET
+occurrence_count = occurrence_count + 1 ... WHERE actor_user_id=... AND event_type=... AND
+action=... AND status='open' AND last_occurred_at > window RETURNING ...` — من غير `LIMIT 1` ولا
+قفل استشاري قبلها. لو سباق نادر في الإنشاء الأول (نداءين وصلوا قبل أي منهم يسجّل صف) عمل صفين
+`open` مكرّرين لنفس (actor+type+action) — وده كان موثّق بالفعل كـ"فجوة مقبولة" — أي `UPDATE`
+لاحق بيطابق **الصفين مع بعض** ويزوّد occurrence_count على كل واحد فيهم دفعة واحدة، مش صف واحد.
+Reproduction: `security-concurrency.spec.ts` سيناريو B — 5 نداءات `recordDenial()` متزامنة
+(`Promise.allSettled`) لنفس (actor+event_type+action). اتأكد فعليًا في الريجريشن الكامل الأخير
+(قبل الإصلاح): مجموع `occurrence_count` عبر كل الصفوف = 7 (مش 5) — دليل قاطع على over-counting،
+مش مجرد "صفين بدل واحد بمجموع صح" زي ما كان مفترَض قبل كده.
+Expected: مجموع occurrence_count يساوي عدد النداءات الفعلية بالظبط، بصرف النظر عن أي سباق داخلي.
+Actual: المجموع كان بيتضخّم فوق عدد النداءات الفعلية لو سباق الإنشاء الأول حصل.
+Root cause: التوثيق القديم (تعليق الكود + `security/README.md`) وصف الظاهرة غلط — افترض إن
+"صفين مكرّرين" أسوأ نتيجة ممكنة، بس الحقيقة إن `UPDATE` بلا تحديد صف واحد بيضاعف الزيادة نفسها
+على كل صف مطابق في كل نداء لاحق، فالتأثير التراكمي أسوأ من مجرد "بيانات مبعثرة على صفين" —
+عداد التصعيد (`occurrence_count === escalateThreshold`) نفسه بيبقى غير موثوق (ممكن يوصل العتبة
+بدري، أو يتصعّد أكتر من مرة لو الصفين وصلوا للعتبة في نفس اللحظة).
+Files involved: `apps/api/src/modules/security/security-events.service.ts`,
+`apps/api/src/modules/security/security-concurrency.spec.ts`,
+`apps/api/src/modules/security/README.md`
+Financial/security impact: غير مالي مباشر — تأثيره على دقة alerting الأمني (تصعيد severity من
+WARNING لـHIGH ممكن يحصل بتوقيت غلط أو يتكرر)، مش على أي حركة فلوس.
+Fix: `pg_advisory_xact_lock(hashtext($1), hashtext($2))` على مفتاح الـdedup (`actorUserId`،
+`` `${eventType}:${action}` ``) في أول سطر جوّه الـtransaction، قبل أي قراءة أو كتابة — نفس النمط
+بالحرف المستخدم فعلاً في `AuthService.requestOtp()` لمنع نفس فئة السباق (إعادة إرسال OTP
+متزامنة). بيسلسل أي نداءين متزامنين لنفس المفتاح بالكامل، فمفيش صفين مكرّرين يتعملوا خالص، ومفيش
+`UPDATE` يقدر يطابق أكتر من صف واحد بعد كده. اختيار advisory lock بدل partial unique index لأن
+الفلتر الزمني (`last_occurred_at > now() - window`) مش قابل للتعبير في predicate ثابت لفهرس.
+Regression test: `security-concurrency.spec.ts` سيناريو B اتشدّد — كان بيقبل "أي عدد صفوف طالما
+المجموع صح"، بقى يفرض `rows.length === 1` و`occurrence_count === 5` بالظبط. الفشل الحقيقي
+(مجموع=7) اتلقط فعليًا في الريجريشن الكامل قبل الإصلاح مباشرة (مش نظري) — أقوى دليل ممكن.
+Live verification: jest حي ضد Postgres حقيقي — 10 تشغيلات متتالية لسيناريو B لوحده، كلها نظيفة
+(كانت الفلاكي قبل كده). الريجريشن الكامل بعد الإصلاح: 99 suite، 549 اختبار، الكل نجح (0 فشل —
+أول مرة الـsuite الكامل ينجح 100% في كل الـaudit ده من غير أي استثناء موثّق).
+Status: FIXED
+
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
 
 ---
@@ -553,6 +594,11 @@ Status: FIXED
 ملفات jest تانية — بيرفع الثقة إن فيه lost-update race حقيقي في `recordDenial()` نفسها (مش
 مجرد حساسية بيئة). **لسه معلّق للتحقيق العميق في Phase 30** زي ما كان مخطط، لكن بثقة أعلى إنها
 بَقّة حقيقية مش ضوضاء — 3 من ~6 محاولات إجمالية فشلت لحد دلوقتي.
+
+**اتقفلت فعليًا (Script 7 Phase 30، 2026-08-19)**: التحقيق العميق المؤجّل ده اتعمل فعلاً، لقى
+السبب الجذري الحقيقي، واتصلح بـ`pg_advisory_xact_lock` — تفاصيل كاملة في BUG-014 تحت. مش "ضوضاء
+بيئة" ولا "فجوة مقبولة" — كانت بَقّة حقيقية في منطق الـdedup، اتأكد إصلاحها بـ10 تشغيلات متتالية
+نظيفة + الريجريشن الكامل (549/549).
 
 ## ملاحظات بيئة التشغيل لهذا الـaudit
 
