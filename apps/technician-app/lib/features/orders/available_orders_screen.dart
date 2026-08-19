@@ -13,7 +13,6 @@ import '../company/company_screen.dart';
 import '../kpi/kpi_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
-import '../onboarding/models.dart';
 import '../onboarding/onboarding_repository.dart';
 import '../portfolio/portfolio_screen.dart';
 import '../profile/profile_screen.dart';
@@ -46,8 +45,6 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Order? _activeOrder;
   String? _error;
   bool _isActing = false;
-  TechnicianMe? _me;
-  bool _togglingDuty = false;
 
   @override
   void initState() {
@@ -57,17 +54,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       context.read<AuthRepository>(),
     );
     _recoverActiveOrThenLoad();
-    _loadMe();
     _captureInitialLocation();
-  }
-
-  Future<void> _loadMe() async {
-    try {
-      final me = await _onboardingRepository.fetchMe();
-      if (mounted) setState(() => _me = me);
-    } on ApiException {
-      // فشل آمن — شريط الأونلاين/أوفلاين بيختفي بس، مايمنعش عرض الطلبات المتاحة.
-    }
   }
 
   // بَقّة حقيقية اتلقطت (بلاغ المالك — سيناريو "يوسف"): current_location مالوش أي مسار شرعي
@@ -95,25 +82,6 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     }
   }
 
-  // زرار أونلاين/أوفلاين (Script 4 §8) — أهم فعل تشغيلي على شاشة الفني الرئيسية، فمكانه أعلى
-  // القايمة مباشرة مش داخل بروفايل ثانوي. **تحديث (ADR-0017، 2026-08-19)**: is_available/
-  // is_on_duty اتشالوا من أهلية المطابقة تمامًا (matching.service.ts) — الفني متاح افتراضيًا
-  // Opt-out دلوقتي، الزرار ده بقى بلا أثر فعلي على استلام الطلبات (متسيّب في الواجهة لأي استخدام
-  // مستقبلي — مؤشر "أونلاين الآن" مثلاً — مش لأنه لسه بوابة أهلية).
-  Future<void> _toggleDuty(bool wantOnDuty) async {
-    setState(() => _togglingDuty = true);
-    try {
-      final me = await _onboardingRepository.setOnDuty(wantOnDuty);
-      if (mounted) setState(() => _me = me);
-    } on ApiException catch (err) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(err.message)));
-    } finally {
-      if (mounted) setState(() => _togglingDuty = false);
-    }
-  }
 
   // كانت فجوة موثّقة: لو التطبيق اتقفل في نص دورة تنفيذ طلب، الشاشة الرئيسية كانت بترجع
   // بالضرورة لقايمة الطلبات المتاحة من غير أي أثر للطلب اللي كان شغال عليه. دلوقتي بتتحقق
@@ -279,12 +247,6 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         ),
         body: Column(
           children: [
-            if (_me != null)
-              _DutyToggleBar(
-                me: _me!,
-                busy: _togglingDuty,
-                onChanged: _toggleDuty,
-              ),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _load,
@@ -500,54 +462,6 @@ class _UpcomingJobCard extends StatelessWidget {
         ),
         trailing: const Icon(Icons.chevron_left),
         onTap: onTap,
-      ),
-    );
-  }
-}
-
-// شريط أونلاين/أوفلاين (Script 4 §8) — is_available وis_on_duty الاتنين مع بعض عبر تبديل واحد
-// (راجع تعليق TechnicianMe.isOnDuty). أخضر = هيوصله طلبات جديدة، رمادي = مش هيوصله حاجة لحد ما
-// يرجّعه بنفسه — الفرق ده مقصود مش مجرد لون.
-class _DutyToggleBar extends StatelessWidget {
-  const _DutyToggleBar({
-    required this.me,
-    required this.busy,
-    required this.onChanged,
-  });
-
-  final TechnicianMe me;
-  final bool busy;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final onDuty = me.isOnDuty && me.isAvailable;
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: onDuty ? scheme.primaryContainer : scheme.surfaceContainerHighest,
-      child: SwitchListTile(
-        value: onDuty,
-        onChanged: busy ? null : onChanged,
-        secondary: busy
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(
-                onDuty ? Icons.wifi_tethering : Icons.wifi_tethering_off,
-                color: onDuty ? scheme.primary : null,
-              ),
-        title: Text(
-          onDuty
-              ? 'أونلاين — بتستقبل طلبات جديدة'
-              : 'أوفلاين — مش هيوصلك طلبات',
-        ),
-        subtitle: Text(
-          onDuty
-              ? 'دوس عشان توقف الاستقبال مؤقتًا'
-              : 'دوس عشان تبدأ تستقبل طلبات',
-        ),
       ),
     );
   }
