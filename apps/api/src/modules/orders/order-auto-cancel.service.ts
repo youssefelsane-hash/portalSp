@@ -3,14 +3,12 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, LessThan, Repository } from 'typeorm';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
-import { PaymentsService } from '../payments/payments.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { SettingsService } from '../settings/settings.service';
-import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { Order, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 
 const SWEEP_INTERVAL_MS = 60_000;
-const AUTO_CANCEL_MINUTES_FALLBACK = 20;
 // مهلة إلغاء تلقائي لطلب واقف في PENDING_PAYMENT (docs/08 §19 بند 3) — العميل بدأ دفع إلكتروني
 // (كارت/InstaPay، ADR-0013 "PAY BEFORE DISPATCH") بس مخلّصش (سابته/فشل قبل webhook التأكيد).
 // قيمة افتراضية تطويرية آمنة أقصر من مهلة البحث عن فني عمدًا — مفيش داعي الطلب يفضل حاجز
@@ -29,18 +27,18 @@ const SWEEP_BATCH_SIZE = 25;
  * بنفس السبب اللي المفروض تحمي منه. الفحص الدوري هنا مستقل تماماً: بيعيد التقييم من Postgres
  * مباشرة كل مرة، مفيش حالة متخزّنة في Redis ممكن "تعلق".
  *
- * **تحديث (docs/08 §19 بند 3+5)**: الفحص بقى يغطي مسارين إضافيين — (أ) طلبات PENDING_PAYMENT
- * قديمة (العميل بدأ دفع إلكتروني مسبق بس مخلّصش) بتتلغى بلا استرداد (الدفع أصلاً مكملش)، (ب)
- * طلبات SEARCHING_TECHNICIAN مدفوعة بالفعل (كارت/InstaPay) بياخدوا استرداد فوري تلقائي عبر
- * `PaymentsService.refundSystemCancelledOrder()` بعد الإلغاء مباشرة — مفيش عكس أرباح فني في
- * الحالة دي لأن مفيش فني اتعيّن أصلاً (technicianId=null بالتعريف وقت SEARCHING_TECHNICIAN).
+ * **تحديث (قرار عمل صريح من المالك، 2026-08-19) — مسار SEARCHING_TECHNICIAN اتشال بالكامل**:
+ * كان فيه مسار تاني هنا بيلغي طلبات SEARCHING_TECHNICIAN قديمة (مفيش فني قبلها خلال
+ * `orders.auto_cancel_after_minutes`) ويسترد فلوسها تلقائيًا لو مدفوعة مقدمًا. المالك أكّد صراحة
+ * إنه مش عايز السلوك ده خالص — طلب مفيش فني متاح ليه لازم يفضل SEARCHING_TECHNICIAN للأبد
+ * (والأدمن يتصرف يدويًا)، مش يتلغى تلقائيًا بصمت. المسار ده اتشال بالكامل (مش معطّل بس) — الملف
+ * ده دلوقتي مسؤول بس عن `sweepPendingPayment()` (طلبات دفع إلكتروني مسبق ماتمّش، مالهاش علاقة
+ * بتوفر فني خالص).
  *
  * **تحديث (§24 — تدقيق الاكتمال الداخلي، 2026-08-15)**: كانت فجوة موثّقة صراحة — `promo_codes.
  * used_count`/`spent_cents` بيتزودوا وقت استخدام الكود بس مفيش أي decrement/release في أي مسار
  * إلغاء. اتقفلت: `PromoCodesService.releaseUsage()` بينادى دلوقتي جوّه نفس transaction الإلغاء في
- * المسارين هنا (`cancelIfStillSearching`, `cancelIfStillPendingPayment`) وكمان في
- * `OrdersService.cancel()` و`AdminOrdersService.cancel()` — الأربعة مسارات اللي بتلغي الطلب نهائيًا
- * فعلاً (إلغاء الفني الذاتي مستثنى عمدًا: الطلب بيرجع لمطابقة تلقائية، مش بيتلغي).
+ * `cancelIfStillPendingPayment` وكمان في `OrdersService.cancel()` و`AdminOrdersService.cancel()`.
  */
 @Injectable()
 export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
@@ -52,7 +50,6 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
-    private readonly paymentsService: PaymentsService,
     private readonly promoCodesService: PromoCodesService,
   ) {}
 
@@ -67,98 +64,15 @@ export class OrderAutoCancelService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
+  // قرار عمل صريح من المالك (2026-08-19) — طلب لسه SEARCHING_TECHNICIAN (مفيش فني قبله لسه)
+  // **مايتلغيش تلقائيًا خالص** بعد كده، مهما طالت المدة. الطلب يفضل "جاري البحث عن فني" والأدمن
+  // هو اللي يتصرف يدويًا (تعيين قسري، أو إلغاء إداري لو قرر كده). ده عكس السلوك القديم اللي كان
+  // بيلغي الطلب تلقائيًا بعد `orders.auto_cancel_after_minutes` (20 دقيقة افتراضيًا) — المالك
+  // أكّد إن ده مش المطلوب: عميل طلب كاش (أو أي طريقة دفع) لازم طلبه يتقبل ويفضل قايم، مش يتلغى
+  // بصمت لمجرد مفيش فني متاح دلوقتي. مسار PENDING_PAYMENT (دفع إلكتروني اتبدأ ومخلّصش) مختلف
+  // تمامًا وفاضل شغال زي ما هو — ده مش عن توفر فني، ده عن دفع فعليًا ماتمش.
   async sweep(): Promise<number> {
-    const minutes = await this.settingsService.getNumber('orders.auto_cancel_after_minutes', AUTO_CANCEL_MINUTES_FALLBACK);
-    const cutoff = new Date(Date.now() - minutes * 60 * 1000);
-
-    const staleOrders = await this.orders.find({
-      select: ['id'],
-      where: { orderStatus: OrderStatus.SEARCHING_TECHNICIAN, placedAt: LessThan(cutoff) },
-      order: { placedAt: 'ASC' },
-      take: SWEEP_BATCH_SIZE,
-    });
-
-    let cancelledCount = 0;
-    for (const { id } of staleOrders) {
-      const cancelled = await this.cancelIfStillSearching(id, minutes);
-      if (cancelled) cancelledCount++;
-    }
-    if (cancelledCount > 0) {
-      this.logger.log(`الإلغاء التلقائي: ${cancelledCount} طلب اتلغى بعد ${minutes} دقيقة من غير فني`);
-    }
-
-    const pendingPaymentCancelledCount = await this.sweepPendingPayment();
-
-    return cancelledCount + pendingPaymentCancelledCount;
-  }
-
-  // بيدوّر بقفل ذري (pessimistic_write) نفس نمط matching.service.ts's accept() — لو فني قبل
-  // الطلب أو matching نفسها لغته في نفس اللحظة، أي محاولتين بيتصادفوا بيتحلّوا بأمان (الأولى
-  // تكسب القفل، التانية بتشوف order_status اتغيّر وترجع false من غير أي كسر).
-  private async cancelIfStillSearching(orderId: string, minutes: number): Promise<boolean> {
-    const result = await this.dataSource.transaction(async (manager) => {
-      const order = await manager
-        .createQueryBuilder(Order, 'o')
-        .setLock('pessimistic_write')
-        .where('o.id = :orderId', { orderId })
-        .getOne();
-
-      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) return null;
-
-      order.orderStatus = OrderStatus.CANCELLED_BY_SYSTEM;
-      order.cancelledAt = new Date();
-      await manager.save(order);
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
-          newStatus: OrderStatus.CANCELLED_BY_SYSTEM,
-          changeSource: OrderChangeSource.SYSTEM,
-          reason: `إلغاء تلقائي — مفيش فني قبل الطلب خلال ${minutes} دقيقة`,
-        }),
-      );
-      await this.promoCodesService.releaseUsage(manager, order.id);
-      return order;
-    });
-
-    if (!result) return false;
-
-    this.events.emit(
-      ORDER_STATUS_CHANGED_EVENT,
-      new OrderStatusChangedEvent(
-        result.id,
-        result.orderNumber,
-        OrderStatus.SEARCHING_TECHNICIAN,
-        OrderStatus.CANCELLED_BY_SYSTEM,
-        result.customerId,
-        result.technicianId,
-        `إلغاء تلقائي — مفيش فني قبل الطلب خلال ${minutes} دقيقة`,
-      ),
-    );
-
-    // استرداد فوري (docs/08 §19 بند 5) — الطلب ده كان مدفوع بالفعل (كارت/InstaPay مسبق الدفع،
-    // ADR-0013) وقت ما اتلغى لعدم توفر فني. برّه الـtransaction فوق عمدًا: refundSystemCancelledOrder()
-    // بتفتح transactions مستقلة بتاعتها ونداء بوابة خارجي حقيقي، ومفيش داعي هي وcancelIfStillSearching
-    // يشتركوا في نفس القفل — الطلب أصلاً بقى CANCELLED_BY_SYSTEM نهائي دلوقتي، مفيش سباق ممكن يحصل
-    // على orderStatus تاني. فشل الاسترداد هنا (استثناء غير متوقع) بيتلقط ويتسجّل بس مايوقفش بقية
-    // sweep() — نفس فلسفة onModuleInit's catch، الطلب فضل ملغي صح حتى لو الاسترداد فشل واحتاج
-    // متابعة يدوية.
-    if (result.paymentStatus === OrderPaymentStatus.PAID) {
-      try {
-        await this.paymentsService.refundCancelledPrepaidOrder(
-          result.id,
-          `استرداد تلقائي — الطلب اتلغى نظاميًا لعدم توفر فني خلال ${minutes} دقيقة`,
-          'system_auto_cancel',
-        );
-      } catch (err) {
-        this.logger.error(
-          `فشل الاسترداد التلقائي لطلب ${result.orderNumber} بعد الإلغاء النظامي — محتاج مراجعة يدوية`,
-          err instanceof Error ? err.stack : err,
-        );
-      }
-    }
-
-    return true;
+    return this.sweepPendingPayment();
   }
 
   // طلبات PENDING_PAYMENT قديمة (docs/08 §19 بند 3) — العميل بدأ دفع إلكتروني بس مخلّصش. مفيش
