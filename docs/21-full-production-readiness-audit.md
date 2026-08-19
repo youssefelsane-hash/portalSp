@@ -58,7 +58,7 @@
 | 28 | Audit Logging | Audit | VERIFIED | جزئي — تأكدت إن `audit_logs` append-only فعليًا (مفيش `@Delete`/`@Patch` على `admin-audit.controller.ts` ولا أي endpoint تاني في الموديول)، وإن كل عملية مالية/RBAC حساسة اتراجعت في المراحل السابقة فعلاً بتسجّل `AuditLogService.record()` جوّه نفس الـtransaction | نعم — تغطية موجودة بالفعل من Script5 Phase1 (audit matrix) | لا يوجد | لا يوجد | مفيش رصد جديد | commit سابق + هذا التحقق |
 | 29 | Notifications | Notifications | VERIFIED | جزئي — راجعت محرك الإشعارات (docs/08 §15، 4 مستويات أولوية) بالقراءة: `critical-offer`/`scheduled-job`/`quiet-hours` checkpoints كلهم بيتفحصوا بـunit tests موجودة، مفيش استغلال جديد اتبنى | نعم — `critical-offer-checkpoints.util.spec.ts`/`scheduled-job-checkpoints.util.spec.ts`/`quiet-hours.util.spec.ts` كلهم نجحوا في الريجريشن الكامل الأخير | لا يوجد | لا يوجد | Push notifications (بند 11 من قايمة المهام العامة) اتقفلت (onMessage/background handler/actionable) — لا يوجد رصد جديد هنا | commit سابق |
 | 30 | Concurrency & Idempotency | Cross-cutting | FIXED | نعم — `security-concurrency.spec.ts` سيناريو B حي ضد Postgres حقيقي، 10 تشغيلات متتالية نظيفة بعد الإصلاح (كانت فلاكي — اتكررت 4 مرات عبر سيشنز سابقة، واتأكدت فعليًا في الريجريشن الكامل قبل الإصلاح: مجموع occurrence_count=7 مش 5) | نعم — نفس الاختبار الموجود اتشدّد (كان بيقبل "أي عدد صفوف طالما المجموع صح"، بقى يفرض صف واحد بالظبط + occurrence_count=5 بالظبط) | BUG-014 (P2 — عداد تصعيد أمني غير موثوق تحت تزامن حقيقي، مش خلل مالي لكن بيأثر على دقة alerting) | BUG-014 fixed | مفيش رصد جديد بعد الإصلاح — باقي أنماط idempotency في المشروع (orders/payments/promo-codes) راجعتها في المراحل السابقة كلها سليمة (unique index + قفل ذرّي)، ده أول مكان بيستخدم advisory lock بدل partial unique index (لازم بسبب فلتر زمني `last_occurred_at > now() - window` مش قابل للتعبير في predicate ثابت) | commit قادم |
-| 31 | Database Invariants | Cross-cutting | PENDING | | | | | | |
+| 31 | Database Invariants | Cross-cutting | FIXED | نعم — استعلامات SQL خام مباشرة ضد Postgres حقيقي (`pg_constraint`, `information_schema`) + migration اتطبقت فعليًا + محاولة INSERT سالبة حية اترفضت بالفعل | نعم — 6 اختبارات جديدة (`db-invariants-negative-amounts.spec.ts`) | BUG-015 (P2 — أعمدة مبالغ مالية أساسية بلا CHECK constraint، defense-in-depth مفقود) | BUG-015 fixed | راجعت `confdeltype='c'` (ON DELETE CASCADE) على كل الجداول — 4 بس، كلهم junction tables لـRBAC (role_permissions/user_roles)، صفر cascade خطر على جداول مالية. راجعت الجداول الـ79 اللي مالهاش `deleted_at` — أغلبها append-only/immutable بالتصميم (audit_logs, wallet_transactions, order_status_history, security_events, ...) مش بَقّة، فحص شامل لكل واحد فيهم فردي مش متناسب مع باقي نطاق الـaudit | commit قادم |
 | 32 | UI/UX Quality | Customer-app | PENDING | | | | | | |
 | 33 | Error Handling / Observability | Cross-cutting | PENDING | | | | | | |
 | 34 | Full Golden-Path Live Test | Cross-cutting | PENDING | | | | | | |
@@ -573,6 +573,36 @@ Regression test: `security-concurrency.spec.ts` سيناريو B اتشدّد �
 Live verification: jest حي ضد Postgres حقيقي — 10 تشغيلات متتالية لسيناريو B لوحده، كلها نظيفة
 (كانت الفلاكي قبل كده). الريجريشن الكامل بعد الإصلاح: 99 suite، 549 اختبار، الكل نجح (0 فشل —
 أول مرة الـsuite الكامل ينجح 100% في كل الـaudit ده من غير أي استثناء موثّق).
+Status: FIXED
+
+### BUG-015
+Severity: P2 (defense-in-depth مفقود — مفيش استغلال حي مؤكّد، بس الحماية الوحيدة كانت application-layer بس لأهم أعمدة المبالغ في المنصة)
+Flow: Phase 31 (Database Invariants)
+Symptom: `wallet_transactions.amount_cents` عنده `CHECK (amount_cents > 0)` فعلي من أول يوم
+(اتأكد بـ`pg_constraint`)، لكن `orders.total_amount_cents`/`payments.amount_cents`/
+`refunds.amount_cents`/`payouts.amount_cents`/`payouts.net_amount_cents` — كل الأعمدة اللي بتمثّل
+مبالغ حقيقية بتتحرك عبر الطلب/الدفع/الاسترداد/الصرف — مالهمش أي CHECK constraint خالص.
+Reproduction: `SELECT conrelid::regclass, conname, pg_get_constraintdef(oid) FROM pg_constraint
+WHERE contype='c' AND conrelid::regclass::text IN ('orders','payments','refunds','payouts',
+'wallets','wallet_transactions')` — رجّعت بس صفين (`wallet_transactions` + قيد recurring على
+`orders` مش متعلق بالمبلغ)، صفر قيود على الأعمدة الخمسة التانية.
+Expected: أي عمود بيمثّل مبلغ مالي حقيقي (مش delta/تعديل يقدر يكون سالب منطقيًا) لازم يكون عنده
+CHECK على مستوى الداتابيز، مش validation الكود بس — نفس مبدأ `wallet_transactions` الموجود بالفعل.
+Actual: خمس أعمدة أساسية بلا أي حماية DB-level.
+Root cause: القيد على `wallet_transactions` اتضاف وقت تصميم محرك المحفظة (قلب النظام المالي)، لكن
+الجداول التانية (orders/payments/refunds/payouts) اتبنت في مراحل مختلفة بلا نفس المراجعة الصارمة.
+Files involved: `infra/migrations/0141_financial_amount_check_constraints.sql` (جديد),
+`apps/api/src/modules/orders/db-invariants-negative-amounts.spec.ts` (جديد),
+`apps/api/src/modules/payments/README.md`
+Financial/security impact: غير مباشر (defense-in-depth) — لو أي bug مستقبلي في الكود، migration
+غلط، أو تعديل يدوي مباشر حاول يسجّل مبلغ سالب، الداتابيز كانت هتقبله بصمت بدل ما ترفضه.
+Fix: migration جديدة بتضيف `CHECK (... >= 0)` للأعمدة الخمسة — اتأكد صفر صف سالب موجود فعليًا في
+الداتابيز قبل الإضافة (الإضافة آمنة 100%، اتطبّقت فعليًا على الداتابيز المحلية بنجاح).
+Regression test: `db-invariants-negative-amounts.spec.ts` (6 اختبارات) — 5 بتتأكد إن كل قيد موجود
+فعليًا في `pg_constraint` بالتعريف الصح، وواحد بيحاول `INSERT` مباشر بمبلغ سالب على `orders`
+ويتأكد الداتابيز نفسها بترفضه (مش بس فحص الكود) — الاستثناء بيحتوي اسم القيد بالظبط.
+Live verification: jest حي ضد Postgres حقيقي (6/6) + migration اتطبّقت فعليًا (`✅
+0141_financial_amount_check_constraints.sql خلص`).
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)

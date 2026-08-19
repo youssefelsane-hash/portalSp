@@ -372,3 +372,13 @@ cash-admin-confirmed:${orderId}`، بعده `settleAndComplete(manager, order, C
 `WORK_COMPLETED`/`AWAITING_PAYMENT`)، وبيتنادى عليها بس من `OrdersService
 .resolveCashHandoverDispute()` (صلاحية `orders.resolve_cash_dispute` + step-up MFA، نفس مستوى
 حساسية `payments.confirm_manual` بالحرف — مُدرجة في `MFA_REQUIRED_PERMISSIONS`).
+
+## CHECK constraints على أعمدة المبالغ الأساسية — كانت فجوة حقيقية (Script 7 Phase 31، 2026-08-19)
+
+`wallet_transactions.amount_cents` عنده `CHECK (amount_cents > 0)` من أول يوم، لكن
+`payments.amount_cents`/`refunds.amount_cents`/`payouts.amount_cents`/`payouts.net_amount_cents`
+(و`orders.total_amount_cents`) مالهمش أي CHECK constraint خالص — الحماية الوحيدة كانت validation
+على مستوى الكود بس (defense-in-depth مفقود). `infra/migrations/0141_financial_amount_check_constraints.sql`
+أضافت `CHECK (... >= 0)` للأعمدة الخمسة دي — اتأكد صفر صف سالب موجود في الداتابيز قبل الإضافة
+(الإضافة آمنة 100%). اختبار حي في `../orders/db-invariants-negative-amounts.spec.ts` بيثبت
+الداتابيز نفسها بترفض `INSERT` بمبلغ سالب فعليًا، مش بس فحص الكود.
