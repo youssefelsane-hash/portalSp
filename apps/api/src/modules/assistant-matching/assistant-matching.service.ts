@@ -76,8 +76,6 @@ export class AssistantMatchingService {
       `
       SELECT (
         tp.verification_status = 'approved'
-        AND tp.is_available = true
-        AND tp.is_on_duty = true
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (
           SELECT technician_id FROM orders
@@ -175,8 +173,6 @@ export class AssistantMatchingService {
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       WHERE tp.verification_status = 'approved'
-        AND tp.is_available = true
-        AND tp.is_on_duty = true
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id != ALL($6::uuid[])

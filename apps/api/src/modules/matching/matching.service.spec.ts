@@ -46,14 +46,16 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     // التانية في الـconstructor مش مُستخدمة في الدالة دي) — نفس نمط FakeRepository في
         // auth.service.spec.ts، تركيب يدوي خفيف بدل تشغيل موديول NestJS كامل.
     queueAdd = jest.fn().mockResolvedValue(undefined);
-    // autoConfirmFutureOrder (ADR-0017 بند 5) بتستخدم assignmentGuard الحقيقية (lockTechnician +
-    // assertEligible) كدفاع عمق ضد سباق الحجز المتزامن — لازم instance حقيقي هنا مش stub.
+    // autoConfirmScheduledOrder (ADR-0017 بند 5، اتسمّت كده ADR-0018) بتستخدم assignmentGuard
+    // الحقيقية (lockTechnician + assertEligible) كدفاع عمق ضد سباق الحجز المتزامن — لازم instance
+    // حقيقي هنا مش stub. TechnicianAssignmentGuardService بقى محتاج SettingsService (ADR-0018 §9،
+    // full_day_job_minutes) — stub بسيط بيرجّع الـfallback زي باقي الـmocks هنا.
     matchingService = new MatchingService(
       dataSource.getRepository(OrderAssignment),
       dataSource.getRepository(Order),
       dataSource,
       {} as never,
-      new TechnicianAssignmentGuardService(),
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
       { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never,
       { emit: jest.fn() } as never,
       { add: queueAdd } as never,
@@ -242,10 +244,10 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
   });
 
-  // ADR-0017 بند 7 — طلب "بعيد" (أكتر من matching.near_term_request_days، الافتراضي يوم واحد
-  // "النهاردة/بكرة") لازم يتأكد تلقائيًا فورًا بلا انتظار قبول فني — بلا أي order_assignments
-  // SENT/VIEWED، الطلب يوصل مباشرة لـACCEPTED بفني محدد.
-  it('autoConfirmFutureOrder: طلب بعد أسبوعين بيتأكد تلقائيًا لأفضل فني مؤهّل بلا انتظار قبول', async () => {
+  // ADR-0018 §3-4-6 — أي طلب غير طوارئ (مجدول عادي أو "Quick Job"، بغض النظر عن قرب/بُعد اليوم
+  // المطلوب) لازم يتأكد تلقائيًا فورًا بلا انتظار قبول فني — بلا أي order_assignments SENT/VIEWED،
+  // الطلب يوصل مباشرة لـACCEPTED بفني محدد.
+  it('autoConfirmScheduledOrder: طلب بعد أسبوعين بيتأكد تلقائيًا لأفضل فني مؤهّل بلا انتظار قبول', async () => {
     const twoWeeksFromNow = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
     const [order] = await dataSource.query(
       `INSERT INTO orders
@@ -256,7 +258,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     );
     const orderId = order.id as string;
 
-    const result = await matchingService.autoConfirmFutureOrder(orderId);
+    const result = await matchingService.autoConfirmScheduledOrder(orderId);
     expect(result).toEqual({ dispatched: 1 });
 
     const [updated] = await dataSource.query(
@@ -277,38 +279,41 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await dataSource.query(`DELETE FROM orders WHERE id = $1`, [orderId]);
   });
 
-  // isNearTermOrder (dispatchOrAutoConfirm الداخلية) — تثبيت الحد الفاصل نفسه: النهاردة/بكرة قريب
-  // (dispatchNextRound)، بعد كده بعيد (autoConfirmFutureOrder). بنفحص عبر السلوك الظاهر (هل
-  // اتعمل order_assignments أو لأ) بدل الوصول لدالة private مباشرة.
-  it('dispatchOrAutoConfirm: بكرة = قريب (order_assignments بتتعمل)، بعد 3 أيام = بعيد (تأكيد مباشر بلا assignments)', async () => {
-    const tomorrow = new Date(Date.now() + 20 * 60 * 60 * 1000); // < 24h من دلوقتي، لسه "بكرة" تقويميًا غالبًا
-    const [nearOrder] = await dataSource.query(
+  // ADR-0018 §3-4-6 — isEmergencyOrder (dispatchOrAutoConfirm الداخلية) هي الفاصل الوحيد دلوقتي،
+  // مش قرب/بُعد اليوم المطلوب: طوارئ (booking_mode='emergency', بلا scheduled_at) بتاخد دورة
+  // طلب/قبول-رفض حقيقية (dispatchNextRound)، أي طلب تاني — حتى لو مجدول بعد 3 أيام بس مش طوارئ —
+  // بيتأكد تلقائيًا فورًا (autoConfirmScheduledOrder) بلا أي order_assignments. بنفحص عبر السلوك
+  // الظاهر (هل اتعمل order_assignments أو لأ) بدل الوصول لدالة private مباشرة.
+  it('dispatchOrAutoConfirm: طوارئ = دورة قبول/رفض (order_assignments بتتعمل)، مجدول بعد 3 أيام = تأكيد مباشر بلا assignments', async () => {
+    const [emergencyOrder] = await dataSource.query(
       `INSERT INTO orders
-         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
-       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, 'emergency', 'emergency', now())
        RETURNING id`,
-      [`NEAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, tomorrow],
+      [`EMG-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
-    await matchingService.dispatchOrAutoConfirm(nearOrder.id);
-    const nearAssignments = await dataSource.query(`SELECT id FROM order_assignments WHERE order_id = $1`, [nearOrder.id]);
-    expect(nearAssignments.length).toBeGreaterThan(0);
-    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [nearOrder.id]);
-    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [nearOrder.id]);
+    await matchingService.dispatchOrAutoConfirm(emergencyOrder.id);
+    const emergencyAssignments = await dataSource.query(`SELECT id FROM order_assignments WHERE order_id = $1`, [emergencyOrder.id]);
+    expect(emergencyAssignments.length).toBeGreaterThan(0);
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [emergencyOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [emergencyOrder.id]);
 
     const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    const [farOrder] = await dataSource.query(
+    const [scheduledOrder] = await dataSource.query(
       `INSERT INTO orders
          (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
        VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
        RETURNING id`,
-      [`FAR2-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, threeDaysFromNow],
+      [`SCHED-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, threeDaysFromNow],
     );
-    await matchingService.dispatchOrAutoConfirm(farOrder.id);
-    const [farUpdated] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [farOrder.id]);
-    expect(farUpdated.order_status).toBe('accepted');
-    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [farOrder.id]);
-    await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [farOrder.id]);
-    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [farOrder.id]);
+    await matchingService.dispatchOrAutoConfirm(scheduledOrder.id);
+    const [scheduledUpdated] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [scheduledOrder.id]);
+    expect(scheduledUpdated.order_status).toBe('accepted');
+    const scheduledAssignments = await dataSource.query(`SELECT id FROM order_assignments WHERE order_id = $1`, [scheduledOrder.id]);
+    expect(scheduledAssignments.length).toBe(0);
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [scheduledOrder.id]);
+    await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [scheduledOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [scheduledOrder.id]);
   });
 
   // ADR-0017 بند 10 — Fallback توسيع النطاق: طلب ASAP وصل لعتبة matching.broaden_to_busy_after_round
@@ -324,7 +329,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       dataSource.getRepository(Order),
       dataSource,
       {} as never,
-      new TechnicianAssignmentGuardService(),
+      new TechnicianAssignmentGuardService(broadenSettingsService as never),
       broadenSettingsService as never,
       { emit: jest.fn() } as never,
       { add: broadenQueueAdd } as never,

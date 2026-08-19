@@ -24,7 +24,7 @@ import { TechnicianCertificate } from './entities/technician-certificate.entity'
 import { TechnicianCertificatesService } from './technician-certificates.service';
 import { SettingsService } from '../settings/settings.service';
 import { technicianAvailabilityCondition } from './technician-eligibility.sql';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -337,6 +337,7 @@ export class TechniciansService {
 
     const bayesianMinSamples = await this.settingsService.getNumber('ranking.bayesian_min_samples', 5);
     const bayesianPriorMean = await this.settingsService.getNumber('ranking.bayesian_prior_mean', 4.0);
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
 
     interface TechnicianRow {
       technician_id: string;
@@ -389,16 +390,20 @@ export class TechniciansService {
         -- (لازمة لأي توزيع فعلي بغض النظر عن ASAP/مجدول)، فبقى شرط هنا كمان.
         AND tp.current_location IS NOT NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
-        -- ADR-0017 بند 4/6 — نفس مصدر التوافر المستخدم في المطابقة الفعلية (matching.service.ts)
-        -- وتعيين الأدمن القسري، عشان القايمة دي تعكس مين فعلاً هيتقبل فعليًا للتاريخ/الوقت
-        -- ده، مش بس "مؤهّل بشكل عام" (نفس فئة بَقّة "يوسف" فوق، بس لبُعد الوقت مش الموقع).
-        -- excludeOrderIdParam = NULL حرفي — لسه مفيش طلب فعلي اتعمل، دي مرحلة تصفّح قبل الحجز.
+        -- ADR-0017 بند 4/6 (مُصحَّحة بـADR-0018) — نفس مصدر التوافر المستخدم في المطابقة الفعلية
+        -- (matching.service.ts) وتعيين الأدمن القسري، عشان القايمة دي تعكس مين فعلاً هيتقبل
+        -- فعليًا لليوم المطلوب، مش بس "مؤهّل بشكل عام". isEmergencyParam دايمًا false هنا —
+        -- الشاشة دي بتظهر بس لأوضاع فردي/اعتماد (مش طوارئ، الطوارئ بتتوزّع تلقائيًا بلا اختيار
+        -- عميل). excludeOrderIdParam = NULL حرفي — لسه مفيش طلب فعلي اتعمل، دي مرحلة تصفّح قبل الحجز.
         ${technicianAvailabilityCondition({
           technicianIdExpr: 'tp.id',
           scheduledAtParam: '$7',
           excludeOrderIdParam: 'NULL',
           activeStatusesParam: '$8',
+          engagedStatusesParam: '$9',
+          isEmergencyParam: '$10',
           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          fullDayThresholdMinutesParam: '$11',
         })}
       ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
       LIMIT 50
@@ -412,6 +417,9 @@ export class TechniciansService {
         bayesianPriorMean,
         scheduledAt ?? null,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        fullDayJobMinutes,
       ],
     );
 

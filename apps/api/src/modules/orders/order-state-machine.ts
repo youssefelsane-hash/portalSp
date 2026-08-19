@@ -129,6 +129,18 @@ export const ACTIVE_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.AWAITING_QUOTE_APPROVAL,
 ];
 
+// الحالات اللي الفني فيها "منشغل فعليًا دلوقتي" جسديًا (ADR-0018 §9) — أضيق من
+// ACTIVE_TECHNICIAN_ORDER_STATUSES فوق عمدًا: بتستبعد ACCEPTED (طلب اتقبل/اتأكّد بس الفني لسه
+// ما بدأش يتحرّك ليه). مُستخدمة بس لتحديد هل فني عنده طلب مجدول/ASAP مقبول يقدر يستقبل طلب
+// طوارئ كمان — طلب مجدول مقبول (accepted) لسه معاداش وقت تنفيذه ميعتبرش الفني "مشغول" لغرض
+// الطوارئ، بعكس طلب هو فعليًا في الطريق/واصل/شغال فيه دلوقتي. راجع technician-eligibility.sql.ts.
+export const ENGAGED_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.TECHNICIAN_ON_WAY,
+  OrderStatus.TECHNICIAN_ARRIVED,
+  OrderStatus.IN_PROGRESS,
+  OrderStatus.AWAITING_QUOTE_APPROVAL,
+];
+
 // الحالات اللي رقم تليفون الفني يظهر فيها للعميل (docs/08 §22 بند 1) — "تأكيد حجيز حقيقي" معناه
 // الفني وافق فعليًا (accepted)، مش بس اتعيّن وقاعد ينتظر قبوله (technician_assigned لسه قبلها).
 // نفس ACTIVE_TECHNICIAN_ORDER_STATUSES فوق + الحالات اللي بعد بدء الشغل (الفني لسه مرتبط بالطلب).

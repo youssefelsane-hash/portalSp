@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
-// "متى تحب تنفيذ الشغل؟" (docs/08 §154، طلب صريح من المالك: "كل حجز لازم يجاوب على السؤال
-// ده — مش نسأل هل الفني متاح عمومًا، نسأل هل يقدر ينفّذ في الوقت اللي العميل طالبه بالظبط").
-// خطوة إجبارية في تدفق الحجز العادي (فردي/اعتماد) — الطوارئ (docs/06) مستجاب فوري بالتعريف
-// فمش بيمرّ بالشاشة دي خالص (orders.service.ts بيرفض scheduled_at مع بوكينج طوارئ بوضوح).
+// "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
+// **تصحيح (ADR-0018 §2)**: النسخة الأولى من الشاشة دي كانت بتاخد ساعة محددة كمان ("النهاردة
+// الساعة كام؟") — ده يخالف قصد المالك الصريح: "العميل بيختار اليوم، مش بيوعد الفني بساعة معينة
+// (2:30، 5:15). المطابقة بتسأل: الفني ده يقدر ياخد شغلانة تانية في اليوم ده؟ مش بتعتمد على
+// سلوتات دقيقة بالدقيقة." الباك-إند لسه بيخزّن scheduled_at كـtimestamp (فايدة تقنية للفرز/الحسابات
+// الداخلية)، لكن قيمته دايمًا بداية اليوم المطلوب — العميل ميختارش وقت خالص من هنا.
+// خطوة إجبارية في تدفق الحجز العادي (فردي/اعتماد) — الطوارئ مستجابة فورية بالتعريف فمش بتمرّ
+// بالشاشة دي خالص (orders.service.ts بيرفض scheduled_at مع بوكينج طوارئ بوضوح).
 // null (ASAP) نتيجة صحيحة ومقصودة — مش غياب اختيار، هو اختيار العميل الصريح "في أقرب وقت".
 class ScheduleChoice {
   final DateTime? scheduledAt;
@@ -11,36 +15,12 @@ class ScheduleChoice {
   const ScheduleChoice.at(this.scheduledAt);
 }
 
+// بداية اليوم المحلي (Africa/Cairo، نفس منطقة العمل الوحيدة للمشروع) — نفس التاريخ اللي هيتعرض
+// للفني/الأدمن، بلا أي مكون وقت. `DateTime` المحلي هنا كافي (السيرفر بيحوّله UTC عند الإرسال).
+DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
+
 class ScheduleSelectionScreen extends StatelessWidget {
   const ScheduleSelectionScreen({super.key});
-
-  Future<void> _pickToday(BuildContext context) async {
-    final now = DateTime.now();
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
-    );
-    if (time == null || !context.mounted) return;
-    final chosen = DateTime(now.year, now.month, now.day, time.hour, time.minute);
-    if (chosen.isBefore(now.add(const Duration(minutes: 15)))) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('الوقت ده قريب أوي أو فات — اختار وقت بعد ربع ساعة على الأقل')),
-      );
-      return;
-    }
-    if (context.mounted) Navigator.of(context).pop(ScheduleChoice.at(chosen));
-  }
-
-  Future<void> _pickTomorrow(BuildContext context) async {
-    final tomorrow = DateTime.now().add(const Duration(days: 1));
-    final time = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 10, minute: 0),
-    );
-    if (time == null || !context.mounted) return;
-    final chosen = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, time.hour, time.minute);
-    if (context.mounted) Navigator.of(context).pop(ScheduleChoice.at(chosen));
-  }
 
   Future<void> _pickSpecificDate(BuildContext context) async {
     final now = DateTime.now();
@@ -51,23 +31,13 @@ class ScheduleSelectionScreen extends StatelessWidget {
       lastDate: now.add(const Duration(days: 90)),
     );
     if (date == null || !context.mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 10, minute: 0),
-    );
-    if (time == null || !context.mounted) return;
-    final chosen = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    if (chosen.isBefore(now.add(const Duration(minutes: 15)))) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('الموعد ده فات — اختار موعد في المستقبل')),
-      );
-      return;
-    }
-    if (context.mounted) Navigator.of(context).pop(ScheduleChoice.at(chosen));
+    Navigator.of(context).pop(ScheduleChoice.at(_startOfDay(date)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final today = _startOfDay(DateTime.now());
+    final tomorrow = today.add(const Duration(days: 1));
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -88,22 +58,22 @@ class ScheduleSelectionScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _ScheduleOptionCard(
                 icon: Icons.today_outlined,
-                title: 'النهاردة الساعة كام؟',
-                subtitle: 'حدّد وقت النهاردة اللي يناسبك',
-                onTap: () => _pickToday(context),
+                title: 'النهاردة',
+                subtitle: 'هيوصلك الفني خلال النهاردة',
+                onTap: () => Navigator.of(context).pop(ScheduleChoice.at(today)),
               ),
               const SizedBox(height: 12),
               _ScheduleOptionCard(
                 icon: Icons.event_outlined,
-                title: 'بكرة الساعة كام؟',
-                subtitle: 'حدّد وقت بكرة اللي يناسبك',
-                onTap: () => _pickTomorrow(context),
+                title: 'بكرة',
+                subtitle: 'هيوصلك الفني بكرة',
+                onTap: () => Navigator.of(context).pop(ScheduleChoice.at(tomorrow)),
               ),
               const SizedBox(height: 12),
               _ScheduleOptionCard(
                 icon: Icons.calendar_month_outlined,
-                title: 'تاريخ ووقت تاني',
-                subtitle: 'اختار أي يوم/ساعة في المستقبل',
+                title: 'يوم تاني',
+                subtitle: 'اختار أي يوم في المستقبل',
                 onTap: () => _pickSpecificDate(context),
               ),
             ],

@@ -1043,7 +1043,8 @@ export class OrdersService {
   }
 
   /**
-   * ADR-0017 بند 9 — هل الطلب ده وصل لـACCEPTED عبر autoConfirmFutureOrder (matching.service.ts)
+   * ADR-0017 بند 9 (ADR-0018: autoConfirmScheduledOrder) — هل الطلب ده وصل لـACCEPTED عبر
+   * autoConfirmScheduledOrder (matching.service.ts)
    * مش عبر قبول فني فعلي؟ بنستنتجها من `order_status_history` (`change_source='system'` +
    * `new_status='accepted'`) — نفس فلسفة ADR-0006 §3 بالحرف: استنتاج من إشارة موجودة بالفعل
    * بدل عمود جديد. `LIMIT 1` كافية — الطلب ميقدرش يوصل لـaccepted من system غير مرة واحدة
@@ -1141,7 +1142,7 @@ export class OrdersService {
       );
     }
 
-    // ADR-0017 بند 9 — طلب "بعيد" اتأكد تلقائيًا (autoConfirmFutureOrder، بلا قبول فعلي من
+    // ADR-0018 §12 — طلب مجدول اتأكد تلقائيًا (autoConfirmScheduledOrder، بلا قبول فعلي من
     // الفني) ميقدرش يتلغى ذاتيًا زي طلب عادي — حجز عميل مؤكد ميختفيش لمجرد إن الفني ضغط إلغاء.
     // نفس مبدأ ADR-0006 §3 بالحرف (استنتاج من order_status_history بدل عمود جديد) — بس هنا
     // بيستبعد الإلغاء الذاتي تمامًا (مش بس يغيّر سلوك الاسترجاع بعده)، لازم يعدّي بطلب دعم/أدمن.
@@ -1412,7 +1413,7 @@ export class OrdersService {
   }
 
   // "الشغل المؤكّد قدامي" (docs/08 §165) — عكس findActiveForTechnician() بالظبط: الطلبات
-  // المجدولة اللي اتأكّدت تلقائيًا (autoConfirmFutureOrder()) بس لسه معاداش موعدها، عشان
+  // المجدولة اللي اتأكّدت تلقائيًا (autoConfirmScheduledOrder()) بس لسه معاداش موعدها، عشان
   // apps/technician-app يعرضها كقايمة منفصلة ("شغل قادم مؤكّد") مش يخلطها مع "طلبات محتاجة قرارك".
   async findUpcomingConfirmedForTechnician(userId: string): Promise<Order[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);

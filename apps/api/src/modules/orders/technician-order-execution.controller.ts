@@ -59,11 +59,11 @@ export class TechnicianOrderExecutionController {
     return order ? this.toDto(order) : null;
   }
 
-  // "الشغل المؤكّد قدامي" (docs/08 §165) — كانت فجوة حقيقية: طلبات مجدولة مستقبلية بتتأكّد
-  // تلقائيًا (autoConfirmFutureOrder()) من غير أي شاشة في apps/technician-app تعرضها للفني قبل
-  // ما يوم تنفيذها يوصل — الفني معندوش أي طريقة يشوف "إيه المؤكّد قدامي" غير طلبات النهاردة/بكرة
-  // اللي محتاجة قبول/رفض صريح (GET .../available). مسار حرفي (`upcoming-confirmed`) لازم يتسجّل
-  // قبل `:id` لنفس سبب `active` فوق بالظبط.
+  // "الشغل المؤكّد قدامي" (docs/08 §165) — كانت فجوة حقيقية: طلبات مجدولة (ADR-0018: أي طلب غير
+  // طوارئ) بتتأكّد تلقائيًا (autoConfirmScheduledOrder()) من غير أي شاشة في apps/technician-app
+  // تعرضها للفني قبل ما يوم تنفيذها يوصل — الفني معندوش أي طريقة يشوف "إيه المؤكّد قدامي" غير
+  // طلبات الطوارئ اللي محتاجة قبول/رفض صريح (GET .../available). مسار حرفي (`upcoming-confirmed`)
+  // لازم يتسجّل قبل `:id` لنفس سبب `active` فوق بالظبط.
   @Get('upcoming-confirmed')
   async listUpcomingConfirmed(@CurrentUser() user: JwtPayload) {
     const orders = await this.ordersService.findUpcomingConfirmedForTechnician(user.sub);

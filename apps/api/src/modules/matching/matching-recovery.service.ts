@@ -2,7 +2,6 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
-import { SettingsService } from '../settings/settings.service';
 import { MatchingService } from './matching.service';
 
 const SWEEP_INTERVAL_MS = 60_000;
@@ -16,7 +15,6 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     private readonly matchingService: MatchingService,
-    private readonly settingsService: SettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -32,25 +30,21 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
+  /**
+   * **تبسيط جوهري (ADR-0018)** فوق منطق قريب/بعيد/lead_hours القديم (ADR-0017 بند 7-8) — بعد
+   * التصحيح، كل طلب `searching_technician` (طوارئ أو مجدول) بيتوجّه لمساره الصح فورًا وقت الإنشاء
+   * (`OrderDispatchListener`)، بلا أي آلية تأجيل/انتظار خالص. مهمة الـsweep دلوقتي بسيطة: أي طلب
+   * لسه من غير فني (مفيش عرض حي `sent`/`viewed` قايم عليه دلوقتي) — سواء طوارئ عالقة (كل الفنيين
+   * رفضوا/الجولة انتهت) أو مجدول فشل `autoConfirmScheduledOrder` الأول يلاقي فني مؤهل — لازم
+   * يترشّح لإعادة المحاولة. `dispatchOrAutoConfirm()` بتفرّق طوارئ/مجدول داخليًا زي ما هي دايمًا.
+   */
   async sweep(limit = BATCH_SIZE): Promise<number> {
-    const deferredLeadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
-    // ADR-0017 بند 7-8 — طلب "بعيد" (بعد النهاردة/بكرة) ماعندوش BullMQ deferred job خالص (اتشال
-    // من مسار البث تمامًا، autoConfirmFutureOrder بتتنادى فورًا وقت الإنشاء) فمفيش "وقت مؤجّل"
-    // ينتظره — لازم يترشّح للـsweep دايمًا (بلا شرط lead_hours) طالما لسه بلا فني. الشرط التالت
-    // ده بيضيفه صراحة، منفصل عن شرط lead_hours العادي (اللي لسه سارٍ للطلبات "القريبة" المؤجّلة
-    // بالساعات — ADR-0009).
-    const nearTermRequestDays = await this.settingsService.getNumber('matching.near_term_request_days', 1);
     const rows = await this.orders.query<Array<{ id: string }>>(
       `SELECT orders.id
        FROM orders
        WHERE orders.order_status = 'searching_technician'
          AND orders.service_zone_id IS NOT NULL
          AND orders.deleted_at IS NULL
-         AND (
-           orders.scheduled_at IS NULL
-           OR orders.scheduled_at <= now() + ($2::numeric * interval '1 hour')
-           OR orders.scheduled_at::date > (now()::date + ($3::int || ' days')::interval)
-         )
          AND NOT EXISTS (
            SELECT 1
            FROM order_assignments assignment
@@ -60,14 +54,12 @@ export class MatchingRecoveryService implements OnModuleInit, OnModuleDestroy {
          )
        ORDER BY orders.placed_at NULLS LAST, orders.id
        LIMIT $1`,
-      [Math.max(1, Math.min(limit, BATCH_SIZE)), deferredLeadHours, nearTermRequestDays],
+      [Math.max(1, Math.min(limit, BATCH_SIZE))],
     );
 
     let processed = 0;
     for (const row of rows) {
       try {
-        // ADR-0017 بند 8 — نقطة الدخول الموحّدة (بتفرّق قريب/بعيد داخليًا) بدل dispatchNextRound
-        // مباشرة، عشان الطلبات البعيدة تتعامل بمسار التأكيد التلقائي الصحيح مش البث العادي.
         await this.matchingService.dispatchOrAutoConfirm(row.id);
         processed += 1;
       } catch (error) {

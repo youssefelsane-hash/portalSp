@@ -83,7 +83,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       {} as never,
       {} as never, // settingsService
     );
-    const assignmentGuard = new TechnicianAssignmentGuardService();
+    const assignmentGuard = new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never);
 
     matchingService = new MatchingService(
       dataSource.getRepository(OrderAssignment),
