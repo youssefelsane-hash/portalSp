@@ -40,6 +40,11 @@
 
 ## مهلة جولة حقيقية عبر BullMQ (S10، نقطة 12) — فجوة كانت موثّقة هنا اتقفلت
 
+**ملحوظة (2026-08-19)**: "بيحوّلهم لـ`timeout`" تحت ده **تاريخي** — راجع قسم "ADR-0018 §5" في
+آخر الملف ده للتصحيح الجوهري: `MatchingRoundExpiryProcessor` بقى مابيلمسش حالة الـassignments
+خالص، العرض يفضل صالح للقبول طالما محدش قبله. باقي القسم ده (طابور BullMQ، `jobId` ثابت،
+بَقّة `roundExpiredJobId` القديمة، اعتماد Redis) لسه صحيح 100% بلا تغيير.
+
 قبل كده كانت فيه فجوة سلوكية حقيقية مش بس توثيقية: لو فني استلم عرض وماردّش عليه خالص (لا قبول ولا رفض صريح — موبايل مقفول، تطبيق مقفول، سيناريو واقعي جداً)، **مفيش أي حاجة كانت بتتحرك** — الطلب يفضل عالق في `searching_technician` للأبد، لأن الجولة التالية كانت بتتبعت بس لو **كل** العروض المعلّقة اترفضت صراحة (`reject()`). الرد بالصمت مش زي الرفض الصريح.
 
 - **`matching-rounds` طابور حقيقي (`@nestjs/bullmq`, Redis)**: `dispatchNextRound()` بعد ما يبعت الجولة، بيجدول job مؤجّل بمهلة `RESPONSE_TIMEOUT_SECONDS` (30 ثانية) بـ `jobId` ثابت (`orderId-rN`) عشان يمنع أي تكرار لو اتنادت الدالة مرتين لنفس الجولة غلطاً.
@@ -370,3 +375,87 @@ estimated_duration_minutes` — "نص يوم" مش "اليوم كله"). لطل�
 تلقائيًا بلا انتظار قبول (`autoConfirmFutureOrder`)؛ طلب بكرة بيدخل الجولة العادية
 (`order_assignments`) وطلب بعد 3 أيام بيتأكد مباشرة (`dispatchOrAutoConfirm` — تثبيت الحد
 الفاصل)؛ fallback التوسيع بيوصل الطلب لفني مشغول بعد ما تنضب القايمة العادية.
+
+**ملحوظة (2026-08-19)**: القسم فوق ده (near/far، `autoConfirmFutureOrder`) بقى **تاريخي** —
+راجع القسمين تحت (ADR-0018 §2-3-4-6 وADR-0018 §5) للتصحيح الجوهري اللي حصل بعده على نفس المنطق.
+الاسم اتغيّر لـ`autoConfirmScheduledOrder`، والانقسام بقى طوارئ/مجدول مش قريب/بعيد. مُتسيّب هنا
+بلا حذف (توثيق قرار تاريخي، نفس فلسفة الملف ده في كل مكان).
+
+## ADR-0018 §2/§3-4-6/§9 — جدولة باليوم + طوارئ/مجدول بدل قريب/بعيد (تصحيح جوهري من المالك، 2026-08-19)
+
+تصحيح صريح من المالك فوق كل القرارات فوق (near/far، `deferred_dispatch_lead_hours`،
+`near_term_request_days`). راجع `docs/adr/0018-emergency-vs-scheduled-and-trade-eligibility.md`
+للتصميم الكامل. الملخّص التنفيذي:
+
+- **الجدولة باليوم مش بالساعة** (§2): العميل بيختار يوم (بكرة، بعد 3 أيام، ...) مش وقت دقيق —
+  `schedule_selection_screen.dart` بقى `showDatePicker` بس، بلا `showTimePicker` خالص.
+  `scheduled_at` لسه `timestamptz` داخليًا، لكن دايمًا بداية اليوم المطلوب بتوقيت مصر.
+- **الانقسام الحقيقي طوارئ/مجدول، مش قريب/بعيد**: `isNearTermOrder`/`isFarFutureOrder` اتشالوا
+  بالكامل. `MatchingService.isEmergencyOrder(order)` (`order.bookingMode === BookingMode.EMERGENCY`)
+  هو الفحص الوحيد الآن — طوارئ بس بتاخد دورة طلب/قبول-رفض (`dispatchNextRound`)، أي طلب تاني
+  (عادي أو "Quick Job" — شغل صغير مش عاجل) بيتأكد تلقائيًا فورًا (`autoConfirmScheduledOrder`،
+  الاسم الجديد لـ`autoConfirmFutureOrder`) بغض النظر عن قرب/بُعد اليوم المطلوب.
+- **آلية تأجيل ADR-0009 (`MATCHING_DISPATCH_QUEUE`) بقت ميتة عمليًا**: `OrderDispatchListener`
+  بقى بينادي `dispatchOrAutoConfirm()` مباشرة بلا أي تأجيل — طلب الطوارئ ميقدرش يكون عنده
+  `scheduled_at` أصلاً، وأي طلب تاني بيتأكد فورًا. الفرع اتشال من الكود بتوثيق كامل ليه (مش كود
+  ميت متسيّب بالغلط)، البنية التحتية (`matching-dispatch.queue.ts`,
+  `matching-deferred-dispatch.processor.ts`) اتسيبت مسجّلة بلا استخدام فعلي.
+- **تعارض الجدولة بقى بمستوى اليوم**: `technician-eligibility.sql.ts` بقى بيقارن
+  `(scheduled_at AT TIME ZONE 'Africa/Cairo')::date` بدل تقاطع `tstzrange` بالدقيقة (بقى بلا معنى
+  بعد ما كل طلبات نفس اليوم بقت تبدأ بنفس اللحظة بالظبط) — استبعاد بس لو الشغل (القديم أو الجديد)
+  "شاغل يوم كامل" (`estimated_duration_days >= 1` أو مدة الخدمة فوق `matching.full_day_job_minutes`،
+  إعداد جديد، افتراضي 360 دقيقة/6 ساعات، migration `0146`).
+- **طلب الطوارئ "إضافي" مش شاغل يوم كامل** (§9): `ENGAGED_TECHNICIAN_ORDER_STATUSES`
+  (`order-state-machine.ts`) — أضيق من `ACTIVE_TECHNICIAN_ORDER_STATUSES`، بتستبعد `accepted`
+  عمدًا. فني عنده طلب مجدول مقبول بس لسه ما بدأش يتحرّك ليه (مش `technician_on_way`/`arrived`/
+  `in_progress`/`awaiting_quote_approval`) لسه مؤهّل لطوارئ جديدة — طوارئ الفني ممكن ياخد أكتر
+  من واحدة في نفس اليوم، مش بيقفل يوم الفني كله.
+- **إصلاح توقيت حقيقي**: كل مقارنات اليوم/الساعة (`scheduled_at`, `technician_schedule_slots`)
+  بقت `AT TIME ZONE 'Africa/Cairo'` صراحة بدل توقيت جلسة Postgres الافتراضي (UTC) — قبل كده
+  `(scheduled_at)::date` كان ممكن يرجّع يوم غلط لأي وقت بين نص الليل و2 الصبح بتوقيت مصر.
+
+`npx tsc --noEmit` + `npx nest build` عدّوا نضيفين بعد التصحيح. الاختبارات المتأثرة (`matching
+.service.spec.ts`, `order-dispatch.listener.spec.ts` — إعادة كتابة كاملة، `matching-recovery
+.service.spec.ts`, `technician-assignment-guard.spec.ts`, وباقي الـspecs اللي بتنشئ
+`TechnicianAssignmentGuardService`) اتحدّثت لتعكس السلوك الجديد؛ الـspecs اللي بتحتاج DB حي
+(Postgres/Redis) لسه محتاجة اختبار حي فعلي بعد ما البيئة ترجع (Docker Hub egress policy محجوبة
+وقت التصحيح ده — راجع الملاحظة في نهاية الملف).
+
+## ADR-0018 §5 — عرض الطوارئ يفضل صالح للقبول طالما محدش قبله، مش بينتهي بمهلة (تصحيح جوهري، 2026-08-19)
+
+بعد التصحيح فوق، `dispatchNextRound`/`accept`/`reject`/`MatchingRoundExpiryProcessor` بقوا
+**حصرًا لطلبات الطوارئ** (المجدول بيتأكد تلقائيًا بلا جولات خالص). طلب المالك الصريح: عرض
+الطوارئ لازم يفضل صالح للقبول طالما الطلب لسه من غير فني — **مش زي طلب Uber بينتهي بعد ثواني**،
+حتى لو المنصّة وسّعت البث لفنيين إضافيين بعد كده.
+
+**قبل التصحيح**: `MatchingRoundExpiryProcessor` كان بيحوّل عروض الجولة اللي فاتت مهلتها لـ`timeout`
+(`assignments.save()`) — ده كان بيخفيهم من `listAvailableForTechnician()` (فلتر `expires_at >
+now()`) ويخلّي `accept()` يرفضهم صراحة. النتيجة: أول فني اتبعتله عرض طوارئ بيفقد حقه في القبول
+لمجرد إن جولة تانية اتبعتت لفنيين إضافيين — رغم إن الطلب لسه من غير فني خالص، عكس طلب المالك
+الصريح تمامًا.
+
+**الإصلاح**:
+- `MatchingRoundExpiryProcessor.process()`: **مفيش لمس لحالة الـ`order_assignments` خالص** —
+  العروض المعلّقة تفضل `sent` زي ما هي. `expiresAt` بقى معناها "امتى نوسّع البث لفنيين إضافيين"
+  بس، مش "امتى العرض بيبقى باطل". لسه بيصدّر `ORDER_OFFER_RESOLVED_EVENT('expired')` عشان يوقف
+  دورة تذكير `critical_offer` المتكررة لهذا العرض بالذات (`notification_workflows` بس، مالوش أي
+  تأثير على `order_assignments`)، وبينادي `dispatchNextRound()` عشان يوسّع الدفعة لفنيين جداد.
+- `MatchingService.listAvailableForTechnician()`: اتشال شرط `oa.expires_at > now()` — العرض
+  يفضل ظاهر في قايمة الفني طالما `assignment_status = 'sent'`، بغض النظر عن مرور مهلة الجولة.
+- `MatchingService.accept()`: اتشال فحص `assignment.expiresAt.getTime() < Date.now()` — العرض
+  مقبول طالما لسه `sent`/`viewed` (محدش قبله، والفني ده نفسه ما رفضهوش صراحة). Exclusivity ذرّية
+  (فني تاني قبل → باقي العروض `cancelled` فورًا) موجودة من زمان (`accept()`، قفل
+  `pessimistic_write` على صف الطلب) وفضلت زي ما هي بالحرف — هي اللي بتضمن أول واحد يقبل ياخده.
+- **`AssignmentStatus.TIMEOUT` بقت بلا استخدام فعلي في الكتابة** (بيانات تاريخية بس قبل التصحيح
+  ده) — `technician-kpi-calculation.service.ts`'s `offered_orders_count` كان بيعتمد على `timeout`
+  كحالة نهائية للفني اللي ماردّش؛ دلوقتي "اتعرض عليه بس فني تاني سبقه" بيتحول لـ`cancelled` (كانت
+  موجودة أصلاً لنفس السيناريو من زمان)، فاتضافت لنفس فلتر الـKPI عشان معدّل الاستجابة يفضل محسوب
+  صح بلا تراجع في الدقة.
+
+**اتأكد بـunit tests (mocks بس، مفيش DB مطلوب — `matching-round-expiry.processor.spec.ts`،
+4 اختبارات، اتشغّلوا فعليًا ونجحوا)**: الفحص الأهم — `assignments.save()` **ماعادش بيتنادى خالص**
+لما جولة تنتهي مهلتها، `dispatchNextRound()` بينادى عشان يوسّع البث، والأحداث بتتصدّر صح. اختبار
+تكامل حي إضافي (`matching-accept-concurrency.spec.ts`) اتكتب بيثبت إن عرض `expires_at` بتاعه في
+الماضي من زمان لسه بيظهر في `listAvailableForTechnician()` ولسه مقبول فعليًا عبر `accept()` —
+لسه محتاج تشغيل حي فعلي بعد ما Postgres يرجع متاح (Docker Hub egress policy محجوبة وقت التصحيح
+ده، راجع الملاحظة في `docs/adr/0018-emergency-vs-scheduled-and-trade-eligibility.md`).

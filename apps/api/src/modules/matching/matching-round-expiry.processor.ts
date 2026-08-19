@@ -12,9 +12,25 @@ import { MATCHING_ROUNDS_QUEUE, RoundExpiredJobData } from './matching-rounds.qu
 import { MatchingService } from './matching.service';
 
 /**
- * بيتنفّذ لحظة انتهاء مهلة رد الفنيين على جولة (30 ثانية) — لو محدش رد صراحة (قبول/رفض)،
- * ده أول وآخر آلية بتحرّك الطلب في السيناريو ده (موبايل مقفول، تطبيق مقفول، ...). قبل كده
- * الطلب كان بيفضل عالق في searching_technician للأبد لو الفنيين تجاهلوا العرض من غير رفض صريح.
+ * بيتنفّذ لحظة انتهاء "مهلة رد" جولة (30 ثانية للعادي، أقصر للطوارئ) — لو محدش رد صراحة
+ * (قبول/رفض)، ده أول وآخر آلية بتحرّك الطلب في السيناريو ده (موبايل مقفول، تطبيق مقفول، ...).
+ * قبل كده الطلب كان بيفضل عالق في searching_technician للأبد لو الفنيين تجاهلوا العرض من غير
+ * رفض صريح.
+ *
+ * **تصحيح جوهري (ADR-0018 §5، طلب صريح من المالك 2026-08-19)**: بعد ADR-0018 §3-4-6، الجولات
+ * دي (dispatchNextRound/accept/reject) بقت **حصرًا لطلبات الطوارئ** (المجدول بيتأكد تلقائيًا
+ * فورًا بلا جولات خالص). طلب الطوارئ لازم **يفضل صالح للقبول طالما محدش قبله لسه** — مش زي
+ * طلب Uber بينتهي بعد ثواني. قبل التصحيح ده، انتهاء المهلة كان بيحوّل عروض الجولة لـTIMEOUT
+ * (بتختفي من `listAvailableForTechnician()` وبيترفضها `accept()`)، يعني أول فني اتبعتله
+ * العرض بيفقد حقه في القبول لمجرد إن الجولة "التالية" بدأت — رغم إن الطلب لسه من غير فني.
+ * الإصلاح: **مفيش لمس لحالة الـassignments خالص هنا**. `expiresAt` بقى معناها "امتى نوسّع
+ * البث لفنيين إضافيين" بس، مش "امتى العرض بيبقى باطل" — العرض يفضل `sent` (قابل للقبول) لحد
+ * ما فني تاني يقبل (`accept()` بتلغي كل العروض التانية وقتها فورًا، exclusivity ذرّية) أو
+ * الفني ده نفسه يرفض صراحة (`reject()`). النداء التاني لـ`dispatchNextRound()` تحت بيوسّع
+ * الدفعة لفنيين جداد بس، بلا ما يمس عروض الجولات اللي فاتت. `workflowService.resolve()` (في
+ * OrderOfferResolutionListener، مستمع لـORDER_OFFER_RESOLVED_EVENT تحت) لسه بيوقف دورة تذكير
+ * critical_offer المتكررة لهذا العرض بالذات (تجنّب إزعاج فني ساكت للأبد) — ده تنظيف إشعارات بس،
+ * مالوش أي تأثير على جدول order_assignments أو قابلية القبول.
  */
 // اتصال Redis منفصل عن اتصال الـ Queue (producer)، ممرَّر مباشرة (مش عن طريق configKey) — تفاصيل
 // كاملة في technician-stats.processor.ts وREADME: @nestjs/bullmq بيتجاهل configKey تماماً لو فيه
@@ -61,30 +77,30 @@ export class MatchingRoundExpiryProcessor extends WorkerHost {
       return; // الطلب اتحل (قبول/إلغاء) قبل ما المهلة تخلص — مفيش داعي نعمل حاجة
     }
 
-    const staleAssignments = await this.assignments.find({
+    // العروض المعلّقة (سواء اتشافت أو لأ) بتفضل sent/viewed زي ما هي — قابلة للقبول لحد ما فني
+    // تاني ياخد الطلب أو الفني ده يرفض صراحة (ADR-0018 §5 فوق). بنجيبها هنا بس عشان نوقف دورة
+    // التذكير المتكررة ليها (مش عشان نبطّلها).
+    const stillPending = await this.assignments.find({
       where: { orderId, assignmentRound: round, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
     });
-    if (staleAssignments.length === 0) {
+    if (stillPending.length === 0) {
       return; // كل عروض الجولة دي اتردّ عليها صراحة قبل المهلة (accept/reject) — مفيش حاجة معلّقة
     }
 
-    const now = new Date();
-    for (const assignment of staleAssignments) {
-      assignment.assignmentStatus = AssignmentStatus.TIMEOUT;
-      assignment.respondedAt = now;
-    }
-    await this.assignments.save(staleAssignments);
-    this.logger.log(`جولة ${round} انتهت من غير رد لـ${staleAssignments.length} فني — طلب ${order.orderNumber}, بنبعت الجولة الجاية`);
+    this.logger.log(`جولة ${round} انتهت مهلتها من غير رد لـ${stillPending.length} فني — طلب ${order.orderNumber}, بنوسّع البث`);
 
-    // docs/08 §17.16 — أي دورة تذكير critical_offer شغالة للعروض دي لازم توقف فورًا (idempotent،
-    // safe no-op للعروض العادية اللي مالهاش workflow أصلاً).
-    for (const assignment of staleAssignments) {
+    // docs/08 §17.16 — دورة تذكير critical_offer المتكررة لهذا العرض بالذات توقف (مش العرض
+    // نفسه — لسه sent وقابل للقبول). notification_workflows بس هو اللي بيتأثر هنا، مالوش أي
+    // علاقة بجدول order_assignments.
+    for (const assignment of stillPending) {
       this.events.emit(
         ORDER_OFFER_RESOLVED_EVENT,
         new OrderOfferResolvedEvent(assignment.id, orderId, order.orderNumber, assignment.technicianId, 'expired'),
       );
     }
 
+    // بيوسّع البث لدفعة فنيين إضافية (nextRound) — العروض القديمة فوق فضلت sent زي ما هي بلا
+    // أي لمسة، أول فني (قديم أو جديد) يقبل ياخد الطلب (exclusivity ذرّية في accept()).
     await this.matchingService.dispatchNextRound(orderId);
   }
 }

@@ -579,6 +579,13 @@ export class MatchingService {
     return { dispatched: 1 };
   }
 
+  /**
+   * ADR-0018 §5 — العرض يفضل ظاهر هنا طالما `sent` (محدش قبله لسه)، **مهما كانت `expires_at`
+   * فاتت أو لأ**. `expires_at` بقت معناها "امتى النظام بيوسّع البث لفنيين إضافيين" بس (راجع
+   * matching-round-expiry.processor.ts) — مش ميعاد صلاحية للعرض نفسه. لو الفني فتح التطبيق بعد
+   * ما البث اتوسّع لفنيين تانيين، لازم لسه يشوف الطلب ده في قايمته ويقدر يقبله (أول واحد يقبل
+   * ياخده، exclusivity ذرّية في accept() تحت).
+   */
   async listAvailableForTechnician(userId: string): Promise<AvailableOrderRow[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     return this.dataSource.query<AvailableOrderRow[]>(
@@ -589,7 +596,7 @@ export class MatchingService {
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id
       JOIN addresses a ON a.id = o.address_id
-      WHERE oa.technician_id = $1 AND oa.assignment_status = 'sent' AND oa.expires_at > now()
+      WHERE oa.technician_id = $1 AND oa.assignment_status = 'sent'
       ORDER BY oa.sent_at DESC
       `,
       [profile.id],
@@ -620,10 +627,14 @@ export class MatchingService {
       }
       await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
 
+      // ADR-0018 §5 — مفيش فحص expiresAt هنا عمدًا: العرض يفضل قابل للقبول طالما assignment_status
+      // لسه sent/viewed (محدش قبله ولا هو رفضه صراحة)، بغض النظر عن مرور مهلة الجولة. راجع
+      // matching-round-expiry.processor.ts للتفصيل الكامل — expiresAt بقت بس تريجر لتوسيع البث،
+      // مش ميعاد صلاحية.
       const assignment = await manager.findOne(OrderAssignment, {
         where: { orderId, technicianId: profile.id, assignmentStatus: In([AssignmentStatus.SENT, AssignmentStatus.VIEWED]) },
       });
-      if (!assignment || assignment.expiresAt.getTime() < Date.now()) {
+      if (!assignment) {
         throw new ApiException(ErrorCode.ORDR_003, 'العرض ده مبقاش متاح', HttpStatus.CONFLICT);
       }
 
