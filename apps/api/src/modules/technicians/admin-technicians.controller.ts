@@ -15,6 +15,9 @@ import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
+import { RejectTechnicianCategoryDto } from './dto/review-technician-category.dto';
+import { toTechnicianCategoryResponseDto } from './dto/technician-category-response.dto';
+import { TechnicianCategoriesService } from './technician-categories.service';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { ReviewCertificateDto } from './dto/review-certificate.dto';
 import { SuspendTechnicianDto } from './dto/suspend-technician.dto';
@@ -29,6 +32,7 @@ export class AdminTechniciansController {
   constructor(
     private readonly adminTechniciansService: AdminTechniciansService,
     private readonly certificatesService: TechnicianCertificatesService,
+    private readonly technicianCategoriesService: TechnicianCategoriesService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -90,6 +94,58 @@ export class AdminTechniciansController {
   ) {
     const row = await this.adminTechniciansService.suspendServiceDeclaration(admin.sub, id, dto.reason, audit);
     return toTechnicianServiceResponseDto(row);
+  }
+
+  // طابور مراجعة تصريحات الفئة/التخصص الذاتية (ADR-0018 §8) — نفس نمط service-declarations
+  // فوق بالحرف، بريفكس مختلف (`category-declarations`) لنفس سبب ميتصادمش مع `:id` تحت.
+  @Get('category-declarations')
+  @RequirePermission('technicians.approve')
+  async listCategoryDeclarations() {
+    const items = await this.technicianCategoriesService.listPendingCategoryDeclarationsWithNames();
+    return items.map(({ row, technicianCode, technicianFullName, categoryNameAr }) => ({
+      ...toTechnicianCategoryResponseDto(row, { includeTechnicianId: true }),
+      technician_code: technicianCode,
+      technician_full_name: technicianFullName,
+      category_name_ar: categoryNameAr,
+    }));
+  }
+
+  @Post('category-declarations/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async approveCategoryDeclaration(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.technicianCategoriesService.approveCategoryDeclaration(admin.sub, id, audit);
+    return toTechnicianCategoryResponseDto(row);
+  }
+
+  @Post('category-declarations/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async rejectCategoryDeclaration(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectTechnicianCategoryDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.technicianCategoriesService.rejectCategoryDeclaration(admin.sub, id, dto.reason, audit);
+    return toTechnicianCategoryResponseDto(row);
+  }
+
+  @Post('category-declarations/:id/suspend')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async suspendCategoryDeclaration(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectTechnicianCategoryDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.technicianCategoriesService.suspendCategoryDeclaration(admin.sub, id, dto.reason, audit);
+    return toTechnicianCategoryResponseDto(row);
   }
 
   @Get(':id')

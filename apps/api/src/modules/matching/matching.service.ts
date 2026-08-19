@@ -170,7 +170,11 @@ export class MatchingService {
       SELECT tp.id AS technician_id,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
       FROM technician_profiles tp
-      JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+      -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة (ts) OR فئة
+      -- الخدمة معتمدة (technician_categories، شرط الـEXISTS تحت في WHERE)" — فني معتمد بمستوى
+      -- الفئة كلها (سباكة/كهرباء/...) بلا صف technician_services مباشر لنفس الخدمة دي بالذات
+      -- لازم يفضل مؤهّل للمطابقة الفعلية.
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
         AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
@@ -187,6 +191,16 @@ export class MatchingService {
           AND wo.deleted_at IS NULL
       ) workload ON true
       WHERE tp.verification_status = 'approved'
+        -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
+        -- بمستوى الفئة كلها (technician_categories).
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tc
+            WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
+              AND tc.is_active = true AND tc.verification_status = 'approved'
+          )
+        )
         -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
         -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى
         -- no-op فعليًا، متسيّب في التوقيع بس (استخدامه القديم كان مقصور على ده بالظبط) — الشرط

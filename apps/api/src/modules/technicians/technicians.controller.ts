@@ -38,7 +38,10 @@ import { AddCertificateDto } from './dto/add-certificate.dto';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { RequestAssistantDto } from './dto/request-assistant.dto';
 import { SelfDeclareServiceDto } from './dto/self-declare-service.dto';
+import { SelfDeclareCategoryDto } from './dto/self-declare-category.dto';
 import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
+import { toTechnicianCategoryResponseDto } from './dto/technician-category-response.dto';
+import { TechnicianCategoriesService } from './technician-categories.service';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
@@ -57,6 +60,7 @@ export class TechniciansController {
     private readonly portfolioLinksService: PortfolioLinksService,
     private readonly scheduleService: TechnicianScheduleService,
     private readonly certificatesService: TechnicianCertificatesService,
+    private readonly technicianCategoriesService: TechnicianCategoriesService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -125,6 +129,27 @@ export class TechniciansController {
   @HttpCode(HttpStatus.OK)
   async withdrawService(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     await this.techniciansService.withdrawService(user.sub, id);
+    return { id, withdrawn: true };
+  }
+
+  // تصريح فئة/تخصص ذاتي (ADR-0018 §8) — نفس فلسفة "services" فوق بالحرف بس على مستوى فئة كاملة
+  // (سباكة، كهرباء...) مش خدمة واحدة. اعتماد الفئة بيديه أهلية تلقائية لكل خدماتها (راجع
+  // matching/README.md وtechnicians/README.md للتفصيل الكامل).
+  @Get('categories')
+  async listMyCategories(@CurrentUser() user: JwtPayload) {
+    const rows = await this.technicianCategoriesService.listMyCategories(user.sub);
+    return rows.map((row) => toTechnicianCategoryResponseDto(row));
+  }
+
+  @Post('categories')
+  async declareCategory(@CurrentUser() user: JwtPayload, @Body() dto: SelfDeclareCategoryDto) {
+    return toTechnicianCategoryResponseDto(await this.technicianCategoriesService.declareCategory(user.sub, dto));
+  }
+
+  @Delete('categories/:id')
+  @HttpCode(HttpStatus.OK)
+  async withdrawCategory(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.technicianCategoriesService.withdrawCategory(user.sub, id);
     return { id, withdrawn: true };
   }
 

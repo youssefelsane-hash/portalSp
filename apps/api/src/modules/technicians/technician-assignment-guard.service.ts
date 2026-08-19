@@ -43,10 +43,21 @@ export class TechnicianAssignmentGuardService {
       { has_service: boolean; has_zone: boolean; level_configured: boolean; decision_limit_cents: number | null }[]
     >(
       `SELECT
-         EXISTS (
-           SELECT 1 FROM technician_services
-           WHERE technician_id = $1 AND service_id = $2 AND is_active = true
-             AND verification_status = 'approved'
+         -- ADR-0018 §8 — خدمة معتمدة مباشرة أو فئة الخدمة معتمدة كلها (technician_categories) —
+         -- نفس القاعدة المطبّقة في matching.service.ts وtechnicians.service.ts's
+         -- listForServiceBooking() وassistant-matching.service.ts.
+         (
+           EXISTS (
+             SELECT 1 FROM technician_services
+             WHERE technician_id = $1 AND service_id = $2 AND is_active = true
+               AND verification_status = 'approved'
+           )
+           OR EXISTS (
+             SELECT 1 FROM technician_categories tc
+             JOIN services s ON s.id = $2
+             WHERE tc.technician_id = $1 AND tc.category_id = s.category_id
+               AND tc.is_active = true AND tc.verification_status = 'approved'
+           )
          ) AS has_service,
          EXISTS (
            SELECT 1 FROM technician_zones

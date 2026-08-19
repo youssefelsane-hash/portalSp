@@ -167,12 +167,22 @@ export class AssistantMatchingService {
       `
       SELECT tp.id AS technician_id
       FROM technician_profiles tp
-      JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+      -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة OR فئة الخدمة
+      -- معتمدة" (شرط الـEXISTS تحت)، نفس القاعدة في matching.service.ts.
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
         AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       WHERE tp.verification_status = 'approved'
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tc
+            WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
+              AND tc.is_active = true AND tc.verification_status = 'approved'
+          )
+        )
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id != ALL($6::uuid[])

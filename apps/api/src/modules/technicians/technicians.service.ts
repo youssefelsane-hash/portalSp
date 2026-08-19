@@ -355,7 +355,7 @@ export class TechniciansService {
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
-             tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
+             tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
                AS recommendation_score,
@@ -378,10 +378,27 @@ export class TechniciansService {
              ) AS avg_arrival_minutes
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
-      JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+      -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة OR فئة الخدمة
+      -- معتمدة" (شرط الـEXISTS تحت). فني معتمد بالفئة بس (بلا صف technician_services مباشر
+      -- لنفس الخدمة دي بالذات) لازم يفضل يظهر هنا — ts.* بترجع NULL ليه وقتها (COALESCE فوق).
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+        AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
+        -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
+        -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
+        -- الثلاثة بيطبّقوها.
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tc
+            WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
+              AND tc.is_active = true AND tc.verification_status = 'approved'
+          )
+        )
         -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19، سيناريو "يوسف") — القايمة دي كانت بترشّح
         -- فني للعرض/الاختيار اليدوي حتى لو معندوش current_location خالص (لسه مفتحش تطبيق الفني
         -- أبدًا)، بينما findEligibleTechnicians() في matching.service.ts (اللي فعليًا بتوزّع
@@ -405,7 +422,7 @@ export class TechniciansService {
           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
           fullDayThresholdMinutesParam: '$11',
         })}
-      ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
+      ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, COALESCE(ts.completed_count, 0) DESC
       LIMIT 50
       `,
       [

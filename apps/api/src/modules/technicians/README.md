@@ -388,6 +388,71 @@ placeholders "unknown" في نفس الوقت، حتى لو نفس الـparamet
 كمان — فني من غير موقع حي مسجّل مش هيظهر للاختيار من الأساس. `technician-ranking.spec.ts` (فنيينها
 مزروعين بموقع أصلاً) اتأكد لسه بيعدي بلا تغيير.
 
+## تأهيل الفني بمستوى الفئة/التخصص (trade) — ADR-0018 §8 (طلب صريح من المالك 2026-08-19)
+
+راجع `docs/adr/0018-emergency-vs-scheduled-and-trade-eligibility.md` للتصميم الكامل. تصحيح
+جوهري فوق قسم "تصريح مهارات ذاتي" فوق مباشرة — سطر 351-352 هناك ("صف `technician_services`
+نشط للخدمة") بقى **جزء واحد بس من قاعدة أوسع**، مش القاعدة الوحيدة، بعد التصحيح ده.
+
+**المشكلة**: `technician_services` (خدمة بخدمة) كانت الطريقة الوحيدة لتأهيل فني. سباك حقيقي محتاج
+يتربط بعشرات صفوف منفصلة (سدّ حوض، تسريب مياه، تركيب سخان، تغيير خلاط...) كل واحدة تصريح مستقل
++ اعتماد أدمن مستقل — عملية مرهقة إداريًا وللفني، ومش منطقية: لو الفني اتعمد كسباك، المفروض
+يبقى مؤهّل تلقائيًا لكل خدمات السباكة، مش يحتاج يكرر التصريح لكل خدمة فرعية.
+
+**الحل — `technician_categories` (`infra/migrations/0148_technician_categories.sql`)**: جدول
+جديد **إضافة جنب `technician_services` مش بديل ليها**. نفس سير عمل تصريح ذاتي → مراجعة أدمن
+بالحرف (نفس enum `technician_service_verification_status`، نفس أعمدة `is_active`/
+`is_self_declared`/`rejection_reason`/`reviewed_by_user_id`/`reviewed_at`)، بس على مستوى فئة
+(`service_categories`) كاملة بدل خدمة واحدة — بلا `skill_level`/`completed_count`/
+`average_rating`/`tested_at` (المفاهيم دي معناها بس على خدمة واحدة محددة).
+
+**أهلية الفني بقت "خدمة معتمدة مباشرة OR فئة الخدمة معتمدة"** — الأربعة مواقع المشتركة (نفس
+القايمة اللي "تصريح مهارات ذاتي" فوق وثّقها) اتعدّلت كلها بنفس القاعدة بالحرف:
+- `matching.service.ts`'s `findEligibleTechnicians()` (التوزيع الفعلي + بث الطوارئ).
+- `technician-assignment-guard.service.ts`'s `assertEligible()` (قبول الفني الذاتي + تعيين
+  الأدمن القسري).
+- `technicians.service.ts`'s `listForServiceBooking()` (قايمة اختيار الفني اليدوي للعميل).
+- `assistant-matching.service.ts`'s `broadcastToPool()` (بث المساعدين — أولوية 2 بس، أولوية 1
+  "المساعد الشخصي" مالهاش شرط خدمة/فئة أصلاً من زمان، علاقة مختلفة تمامًا).
+
+في الأربعة، `technician_services` بقى `LEFT JOIN` بدل `INNER JOIN`، وشرط إضافي في `WHERE`:
+`ts.id IS NOT NULL OR EXISTS (SELECT 1 FROM technician_categories tc WHERE tc.technician_id = ...
+AND tc.category_id = <service>.category_id AND tc.is_active = true AND tc.verification_status
+= 'approved')`. فني معتمد بالفئة بس (بلا صف `technician_services` مباشر لخدمة معيّنة) بيفضل
+مؤهّل ليها؛ فني معتمد بخدمة مباشرة بس (السلوك القديم) لسه بيشتغل زي ما هو بالحرف — إضافة صافية.
+
+**`listForServiceBooking()` تحديد إضافي**: كانت بتعرض `ts.completed_count` (عدد مرات إتمام
+الخدمة دي بالذات) في الرد والترتيب — بقت `COALESCE(ts.completed_count, 0)` عشان فني معتمد
+بالفئة بس (`ts` بترجع `NULL` ليه من الـ`LEFT JOIN`) ميكسرش الاستعلام أو يرجع `NULL` مضلّل.
+
+**API الفني (`technicians.controller.ts`)**: `GET/POST /technician/categories`،
+`DELETE /technician/categories/:id` — نفس شكل `/technician/services` بالحرف (خدمة `service_id`
+→ فئة `category_id`)، سرفيس منفصل `TechnicianCategoriesService` (بريبوزيتوري خاص بيه، مش داخل
+`TechniciansService`/`AdminTechniciansService` — قرار مقصود عشان الاتنين دول بينشئهم أكتر من
+26 ملف اختبار بـ`new` مباشرة في constructor بارامترات ثابتة؛ إضافة بارامتر جديد كانت هتكسرهم
+كلهم لمجرد ميزة إضافية. `TechnicianCategoriesService` منفصل تمامًا ومُسجَّل في DI، الاتنين
+التانيين فضلوا زي ما هم بلا أي تغيير).
+
+**API الأدمن (`admin-technicians.controller.ts`, صلاحية `technicians.approve` — نفس صلاحية
+اعتماد الخدمة)**: `GET /admin/technicians/category-declarations` (طابور، بأسماء محلولة)،
+`POST .../category-declarations/:id/approve|reject|suspend` — نفس نمط `service-declarations`
+بالحرف. الموافقة بلا body (مفيش `skill_level` على مستوى فئة كاملة يحتاج تعديل وقت الاعتماد).
+
+**إشعار (`technician_category.verification_changed` event)**: نفس نمط
+`technician_service.verification_changed` بالحرف — بينبّه بس على القرارات النهائية.
+
+**فجوة موثّقة صراحة (نطاق السيشن دي)**: الـbackend كامل ومتاح فعليًا (endpoints + eligibility
+SQL في الأربعة مواقع)، لكن **واجهة الأدمن (`apps/admin`) وشاشة "مهاراتي" في `apps/technician-app`
+لسه ما اتربطوش بالـcategories الجديدة دي** — لسه بيعرضوا/يديروا `technician_services` بس. ده
+مؤجّل عمدًا لسيشن منفصلة (نفس فلسفة "مرحلة بمرحلة" الموثّقة في CLAUDE.md) — الأولوية كانت
+للسلوك الخلفي الصحيح (أهلية المطابقة الفعلية) قبل الواجهة، عشان أي فني يتعمد بفئة عن طريق الـAPI
+مباشرة (أو بيانات مزروعة/seed) يشتغل صح فورًا من النهاردة.
+
+**اتأكد بـ`matching-technician-category-eligibility.spec.ts`** (اختبار حي، 3 اختبارات): فني
+معتمد بالفئة بس بيبقى مؤهّل لخدمتين مختلفتين جوّه نفس الفئة (بلا أي صف `technician_services`
+مباشر خالص)؛ فني معتمد بخدمة مباشرة بس لسه شغال زي ما هو (إضافة مش استبدال)؛ فني بلا أي اعتماد
+بيتستبعد تمامًا (ضبط سلبي). لسه محتاج تشغيل حي فعلي بعد ما Postgres يرجع متاح.
+
 ## بَقّتين حقيقيتين في `TechnicianAssignmentGuardService.assertEligible()` — طلب مجدول ليوم بعيد كان بيترفض غلط (2026-08-19)
 
 المالك بلّغ سيناريو حقيقي: فني عنده طلب مقبول (ACCEPTED) النهاردة، الأدمن حاول يعيّنه إجباريًا
