@@ -34,7 +34,7 @@
 | 4 | Pricing Engine | Pricing | VERIFIED | جزئي — فحص كود ثابت + قراءة دقيقة لكل مسارات الخصم/العمولة | لا يوجد اختبار جديد مخصص (المنطق اتفحص وأثبت سليم بالقراءة، مفيش استغلال حي أمكن بناؤه) | لا يوجد | لا يوجد | **فجوة اختبار مهمة (مش بَقّة منطق)**: `OrdersService.create()` — أهم دالة في المنصة كلها — كان **مفيش لها ولا اختبار jest واحد** بيناديها مباشرة. **تحديث (Phase 5)**: أول فيكستشر jest مباشر لـ`create()` اتبنى فعلاً (`order-creation-standard-data-pairing.spec.ts`، BUG-004) وبيغطي مسار الإنتاجية/الطاقم بالكامل (سلبي+إيجابي)، لكن التغطية دي محصورة في جزء الإنتاجية بس — باقي منطق التسعير/الخصم الشامل (promo/building/formula/zone/level) لسه محتاج تغطية مباشرة، هتتوسّع في Phase 9 (Order Creation) فوق نفس الفيكستشر | commit قادم |
 | 5 | Productivity / Crew Calculation | Catalog/Productivity | FIXED | نعم — `OrdersService.create()` حي (أول مرة في المشروع كله) بالحالتين السلبيتين + الحالة السليمة + الحالة العادية | نعم — 4 اختبارات جديدة (`order-creation-standard-data-pairing.spec.ts`)، أول تغطية jest مباشرة لـ`create()` | BUG-004 (P1 — متطلب طاقم بيتفقد بصمت) | BUG-004 fixed | لا يوجد معروف حاليًا — الفحص بقى XOR صريح، ونموذج الإنتاجية الخطي نفسه (توزيع الإنتاجية طرديًا مع عدد الصنايعية) لسه قرار عمل مبسّط موثّق صراحة (مش الصيغة النهائية المؤكدة من المالك) — راجع تعليق `estimateDuration()` في `catalog.service.ts` | commit قادم |
 | 6 | Address / GPS / Serviceability | Addresses/Geo | FIXED | نعم — `create()`/`update()` حيين ضد Postgres حقيقي، مدينتين/منطقتين مختلفتين | نعم — 5 اختبارات جديدة (`addresses-area-city-consistency.spec.ts`) | BUG-005 (P2 — server trust boundary مفقود بين area_id/city_id) | BUG-005 fixed | لا يوجد فحص جغرافي حقيقي (point-in-polygon) على مستوى المدينة نفسها لسه — الفحص الحالي بس على مستوى نطاق الخدمة (`service_zones.boundary`) لو موجود؛ ده قرار MVP موثّق صراحة مسبقًا (§0.2.5) مش بَقّة جديدة | commit قادم |
-| 7 | Booking Modes (ASAP/Scheduled) | Orders | PENDING | | | | | | |
+| 7 | Booking Modes (ASAP/Scheduled) | Orders | FIXED | نعم — `OrdersService.create()` حي، طوارئ+موعد مستقبلي وطوارئ عادي | نعم — اختباران جديدان (`order-emergency-scheduled-at.spec.ts`) | BUG-006 (P1 — استجابة طوارئ بتتأجل بصمت) | BUG-006 fixed | `computeDispatchDeferredUntil()` نفسها مغطّاة بوحدة اختبار منفصلة (deferred-dispatch.util.spec.ts) وسليمة؛ الفجوة كانت في نقطة استدعائها بس. مفيش فحص مشابه لسه لباقي تركيبات bookingMode/scheduled_at غير المتوقعة (مثلاً TEAM+scheduled_at قريب جدًا من الآن) — مش عندها نفس الخطورة (مفيش رسوم طوارئ مرتبطة) فمش بَقّة، لكن تستاهل نظرة في Phase 34 (Golden Path) | commit قادم |
 | 8 | Provider Selection UX & Semantics | Technicians/Matching | PENDING | | | | | | |
 | 9 | Order Creation (idempotency) | Orders | PENDING | | | | | | |
 | 10 | Cash Payment | Payments/Orders | PENDING | | | | | | |
@@ -202,6 +202,37 @@ Live verification: jest حي ضد Postgres حقيقي — 5/5 نجحوا بعد 
 المتوقع) قبله. Full regression: 96 suite، 538 اختبار، كله ناجح.
 Status: FIXED
 
+### BUG-006
+Severity: P1 (استجابة طوارئ حقيقية بتتأجل ساعات بصمت رغم رسوم طوارئ مدفوعة فعليًا)
+Flow: Phase 7 (Booking Modes — ASAP/Scheduled) — `OrdersService.create()`
+Symptom: `booking_mode=emergency` + `scheduled_at` مستقبلي (بلا `schedule_slot_id`) كان
+بيتقبل عادي. الطلب بيتسجّل بـ`orderType=EMERGENCY` و`surgeAmountCents` مطبّق فعليًا (رسوم
+الطوارئ)، بس `scheduledAt` في المستقبل — وبعدين `computeDispatchDeferredUntil()` بيؤجّل بث
+المطابقة الفعلي بالكامل لحد قرب الموعد ده، عكس تعريف "الطوارئ" (استجابة فورية) تمامًا.
+Reproduction: `OrdersService.create()` بـ`booking_mode=emergency` و`scheduled_at` بعد 6 ساعات —
+قبل الإصلاح: الطلب اتسجّل بنجاح، `surgeAmountCents=6000`، `scheduledAt` = الموعد المستقبلي —
+لو كمّلنا لحد بعد الـtransaction، `dispatchDeferredUntil` كان هيتحسب ويأجّل البث فعليًا.
+Expected: طلب طوارئ (docs/06) يترفض بوضوح لو اتحدد بموعد مستقبلي حر — نفس التعريف الموثّق
+بالفعل في تعليق `schedule_slot_id` جوّه نفس الدالة ("الطوارئ... استجابة فورية، مش موعد مستقبلي").
+Actual: الفحص القديم كان بيمنع بس تركيبة `emergency` + `schedule_slot_id` — الحقل الحر
+`scheduled_at` (بلا سلوت) كان مفيش عليه أي فحص خالص.
+Root cause: القاعدة اتطبّقت جزئيًا بس على مسار الجدولة الحقيقية (السلوت)، ونُسي المسار الحر
+(`scheduled_at` النصي العادي) اللي بيؤدي لنفس النتيجة الممنوعة (تأجيل البث).
+Files involved: `apps/api/src/modules/orders/orders.service.ts` (دالة `create()`)
+Financial/security impact: مش استغلال مالي مباشر، لكن أثر تشغيلي/تجاري حقيقي — عميل دافع رسوم
+طوارئ إضافية (سعر أعلى) لخدمة مفروض تكون فورية، وبدل كده بيستنى ساعات بلا أي بث مطابقة فعلي —
+فجوة بين الوعد التجاري (طوارئ = فوري) والتنفيذ الفعلي.
+Fix: فحص صريح `if (bookingMode === EMERGENCY && dto.scheduled_at) throw VAL_001` قبل أي منطق
+تاني، بنفس مكان فحص `bookingModeAllowed`.
+Regression test: `order-emergency-scheduled-at.spec.ts` (اختبارين، Postgres حقيقي، بيستخدم نفس
+فيكستشر `OrdersService.create()` المباشر من BUG-004) — طوارئ+موعد مستقبلي يترفض، وطوارئ بلا
+موعد (المسار السليم) لسه شغال عادي. اتأكد بـ`git stash` إن الاختبار السلبي كان بيفشل فعليًا
+قبل الإصلاح (الطلب كان بيتسجّل بنجاح بـ`surgeAmountCents` مدفوع فعليًا و`scheduledAt` مستقبلي).
+Live verification: jest حي ضد Postgres حقيقي — 2/2 نجحوا بعد الإصلاح، 1/2 فشل (بالشكل المتوقع)
+قبله. Full regression: 97 suite، 540 اختبار، كله ناجح (باستثناء فشل عابر غير مرتبط في
+`security-concurrency.spec.ts` سيناريو B — موثّق تحت، معلّق لـPhase 30).
+Status: FIXED
+
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
 
 ---
@@ -213,8 +244,14 @@ Status: FIXED
 لما اتشغّل لوحده. الكومنت في الاختبار نفسه بيوثّق فجوة معروفة ("سباق UPDATE...WHERE status='open'
 نادر ممكن يخلّي صفين بدل واحد") بس بيفترض المجموع النهائي لسه صح — الفشل ده يقترح إن تحت ضغط
 تزامن أعلى (تشغيل ملفات jest كتير بالتوازي بيزوّد التنافس الفعلي على اتصالات Postgres)، فيه
-احتمال lost-update حقيقي في `SecurityEventsService.recordDenial()`. **لسه معلّق للتحقيق العميق
-في Phase 30** — مش بَقّة مؤكدة لسه (نتيجة واحدة من 4 محاولات، مش reproducible بثبات).
+احتمال lost-update حقيقي في `SecurityEventsService.recordDenial()`.
+
+**تحديث (Script 7 Phase 7، 2026-08-19)**: اتكرر مرتين تانيين بعد كده — مرة جوّه الـsuite
+الكاملة (`totalOccurrences=8`)، ومرة **لوحده تمامًا** (`totalOccurrences=6`، مش تحت أي ضغط
+تزامن من ملفات تانية). التكرار وهو شغال لوحده بيقلّل احتمال إنه مجرد ضغط موارد Postgres من
+ملفات jest تانية — بيرفع الثقة إن فيه lost-update race حقيقي في `recordDenial()` نفسها (مش
+مجرد حساسية بيئة). **لسه معلّق للتحقيق العميق في Phase 30** زي ما كان مخطط، لكن بثقة أعلى إنها
+بَقّة حقيقية مش ضوضاء — 3 من ~6 محاولات إجمالية فشلت لحد دلوقتي.
 
 ## ملاحظات بيئة التشغيل لهذا الـaudit
 

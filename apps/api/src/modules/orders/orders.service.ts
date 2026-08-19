@@ -182,6 +182,16 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
+    // Script 7 Phase 7 — بَقّة حقيقية اتلقطت: الطوارئ (docs/06) معناها استجابة فورية بالتعريف
+    // (نفس التعليق موثّق تحت لـ`schedule_slot_id`)، لكن الفحص القديم كان بيمنع `schedule_slot_id`
+    // بس مع الطوارئ — `dto.scheduled_at` الحر (بلا سلوت محدد) كان بيعدّي عادي، فيتسجّل طلب
+    // `orderType=EMERGENCY` بـ`scheduledAt` في المستقبل، وبعدين `computeDispatchDeferredUntil()`
+    // بيؤجّل بث المطابقة فعليًا ساعات — عميل دافع رسوم طوارئ إضافية (`emergency_surcharge_cents`)
+    // بينتظر بلا أي استجابة "فورية" فعلية، عكس تعريف الوضع ده تمامًا.
+    if (bookingMode === BookingMode.EMERGENCY && dto.scheduled_at) {
+      throw new ApiException(ErrorCode.VAL_001, 'طلبات الطوارئ استجابة فورية — مينفعش تتحدد بموعد مستقبلي', HttpStatus.BAD_REQUEST);
+    }
+
     if (dto.requested_technician_company_id) {
       if (bookingMode !== BookingMode.TEAM) {
         throw new ApiException(
