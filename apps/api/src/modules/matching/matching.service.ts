@@ -53,6 +53,12 @@ const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // ADR-0017 بند 10 — الجولة اللي بعدها يتوسّع البحث لفنيين "مرتبطين بس مشغولين بطلب نشط دلوقتي"
 // (نفس شرط الخدمة/المنطقة يفضل ساري دايمًا). قيمة كبيرة (أكبر من matching.max_rounds) = تعطيل.
 const BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK = 4;
+// ADR-0018 §7 (طلب صريح من المالك 2026-08-19) — بعد ما الفني بقى متاح افتراضيًا (ADR-0017 بند 3)،
+// كل الفنيين المؤهلين بقوا "مرشّحين" دايمًا، فمن غير توازن حِمل هيتكرّر إسناد نفس الفني الأعلى
+// مستوى/الأقرب لكل الطلبات على طول. الوزن ده بيتطرح من order_priority_weight لكل طلب "نشط"
+// (ACTIVE_TECHNICIAN_ORDER_STATUSES) عند الفني — مش استبدال لترتيب المستوى/المسافة، إضافة ليه
+// (راجع findEligibleTechnicians تحت للتفصيل الكامل).
+const WORKLOAD_BALANCE_WEIGHT_FALLBACK = 2;
 
 interface EligibleTechnicianRow {
   technician_id: string;
@@ -88,9 +94,22 @@ export class MatchingService {
 
   /**
    * أقرب فنيين مؤهلين (خدمة + منطقة + متاح + معتمد) لعنوان الطلب، من غير اللي اتبعتلهم قبل كده
-   * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight) الأول،
-   * وبعدين المسافة — مش بديل عن المسافة، فني أعلى مستوى بياخد أولوية جوّه نفس دائرة المؤهلين مش
-   * إنه يتجاهل المسافة تماماً. المسافة بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   * على نفس الطلب. الترتيب: أولوية المستوى (technician_level_config.order_priority_weight)
+   * **مطروح منها حِمل شغل الفني الحالي** أولاً، وبعدين المسافة — مش بديل عن المسافة، فني أعلى
+   * مستوى/أقل حِمل بياخد أولوية جوّه نفس دائرة المؤهلين مش إنه يتجاهل المسافة تماماً. المسافة
+   * بتتحسب فعلياً بـ PostGIS (ST_Distance على geography) — مش تقريب.
+   *
+   * **موازنة الحِمل (ADR-0018 §7، طلب صريح من المالك 2026-08-19)**: بعد ما الفني بقى متاح
+   * افتراضيًا (ADR-0017 بند 3)، كل الفنيين المؤهلين بقوا "مرشّحين" دايمًا — من غير توازن، أعلى
+   * فني مستوى/أقرب هياخد كل الطلبات على طول رغم إن فنيين تانيين مؤهلين بنفس القدر بس أقل انشغالاً.
+   * `workload.active_count` (LATERAL subquery تحت) بيعدّ طلبات الفني النشطة دلوقتي فعليًا
+   * (`ACTIVE_TECHNICIAN_ORDER_STATUSES` — بما فيها المقبولة ولسه ما بدأتش، مش بس الجاري تنفيذها).
+   * الحِمل ده بيتطرح من `order_priority_weight` بوزن قابل للتعديل (`matching.workload_balance_weight`،
+   * افتراضي 2) قبل الترتيب — **إضافة على معايير الترتيب الموجودة، مش استبدال ليها** (لسه جوّه نفس
+   * بنية `ORDER BY` الموجودة، مش قاعدة منفصلة "أقل عدد طلبات يفوز دايمًا"): فرق مستوى كبير (مثلاً
+   * `premium` وزن 30 مقابل `professional` وزن 20) لسه بيغلب فرق حِمل معقول، لكن بين فنيين متقاربين
+   * في المستوى، اللي عنده حِمل أقل بياخد الأولوية. تعديل `matching.workload_balance_weight` لصفر
+   * بيرجّع للسلوك القديم بالحرف (تعطيل موازنة الحِمل بلا تغيير كود).
    *
    * **بَقّة حقيقية اتلقطت واتصلحت وقت اختبار حي لميزة تانية (خرائط/ملاحة apps/technician-app)**:
    * الاستعلام مكانش بيستبعد فني عنده أصلاً طلب نشط (accepted/technician_on_way/...) — يعني نفس
@@ -142,6 +161,10 @@ export class MatchingService {
       'matching.full_day_job_minutes',
       FULL_DAY_JOB_MINUTES_FALLBACK,
     );
+    const workloadBalanceWeight = await this.settingsService.getNumber(
+      'matching.workload_balance_weight',
+      WORKLOAD_BALANCE_WEIGHT_FALLBACK,
+    );
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
@@ -153,6 +176,16 @@ export class MatchingService {
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      -- ADR-0018 §7 — حِمل الفني الحالي (عدد الطلبات النشطة عليه دلوقتي) لغرض موازنة التوزيع
+      -- في الـORDER BY تحت. LATERAL بدل subquery عادي في SELECT عشان يتحسب مرة واحدة لكل فني
+      -- مرشّح بس (بعد كل شروط WHERE)، مش لكل صف technician_profiles في الجدول كله.
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS active_count
+        FROM orders wo
+        WHERE wo.technician_id = tp.id
+          AND wo.order_status = ANY($6::order_status[])
+          AND wo.deleted_at IS NULL
+      ) workload ON true
       WHERE tp.verification_status = 'approved'
         -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
         -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى
@@ -176,7 +209,8 @@ export class MatchingService {
           fullDayThresholdMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
-      ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
+      ORDER BY (COALESCE(tlc.order_priority_weight, 0) - COALESCE(workload.active_count, 0) * $14::int) DESC,
+               distance_km ASC
       LIMIT $5
       `,
       [
@@ -193,6 +227,7 @@ export class MatchingService {
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         order.bookingMode === BookingMode.EMERGENCY,
         fullDayJobMinutes,
+        workloadBalanceWeight,
       ],
     );
   }
