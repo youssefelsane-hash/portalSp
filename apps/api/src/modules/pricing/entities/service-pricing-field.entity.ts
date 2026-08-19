@@ -58,6 +58,12 @@ export class ServicePricingField {
   @Column({ name: 'max_value', type: 'numeric', precision: 12, scale: 2, nullable: true })
   maxValue: string | null;
 
+  // قيمة افتراضية اختيارية (Script 6 Part 3/4) — نص خام بيتفسّر حسب field_type وقت الاستخدام.
+  // لحقول CHECKBOX بلا default_value صريح هنا، الافتراض الضمني false — راجع
+  // PricingEngineService.validateAndNormalizeFieldValues().
+  @Column({ name: 'default_value', type: 'text', nullable: true })
+  defaultValue: string | null;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

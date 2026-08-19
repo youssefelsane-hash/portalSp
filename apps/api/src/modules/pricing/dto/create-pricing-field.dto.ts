@@ -53,4 +53,12 @@ export class CreatePricingFieldDto {
   @IsOptional()
   @IsNumber()
   max_value?: number;
+
+  // قيمة افتراضية اختيارية (Script 6 Part 3/4، migration 0138) — نص خام بيتفسّر حسب field_type
+  // وقت الاستخدام (راجع PricingEngineService.resolveDefaultValue). لحقول CHECKBOX من غيرها،
+  // الافتراض الضمني false.
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  default_value?: string;
 }

@@ -6,7 +6,7 @@ import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormul
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
-import { ServicePricingField } from './entities/service-pricing-field.entity';
+import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
 import { PricingRuleType } from './entities/service-pricing-rule.entity';
 import {
   ConstantRulePayload,
@@ -177,6 +177,27 @@ export class PricingEngineService {
     return this.evaluations.findOne({ where: { orderId }, order: { createdAt: 'DESC' } });
   }
 
+  /**
+   * قيمة افتراضية لحقل اختياري متلمسش (migration `0138`). `default_value` مخزّن نص خام (نفس
+   * تخزين min_value/max_value) وبيتفسّر حسب field_type. لو مفيش default_value مُعدّ صراحة:
+   * حقول CHECKBOX بس بتاخد افتراض ضمني false (سلوك checkbox قياسي عالميًا — عدم التفاعل معاه
+   * يعني "لأ" مش "بلا إجابة"). باقي الأنواع من غير default_value صريح تفضل زي ما هي (undefined،
+   * يعني الحقل هيتجاهل تمامًا زي قبل — لو المعادلة محتاجاه هتترفض بوضوح، وده صح لأن مفيش قيمة
+   * منطقية نفترضها لرقم/نص اختياري بلا default مُعدّ).
+   */
+  private resolveDefaultValue(field: ServicePricingField): string | number | boolean | undefined {
+    if (field.defaultValue !== null) {
+      if (field.fieldType === PricingFieldType.CHECKBOX) return field.defaultValue === 'true';
+      if (field.fieldType === PricingFieldType.NUMBER || field.fieldType === PricingFieldType.SLIDER) {
+        const numeric = Number(field.defaultValue);
+        return Number.isFinite(numeric) ? numeric : field.defaultValue;
+      }
+      return field.defaultValue;
+    }
+    if (field.fieldType === PricingFieldType.CHECKBOX) return false;
+    return undefined;
+  }
+
   private validateAndNormalizeFieldValues(
     fields: ServicePricingField[],
     rawValues: Record<string, string | number | boolean>,
@@ -188,6 +209,16 @@ export class PricingEngineService {
       if (value === undefined || value === null || value === '') {
         if (field.isRequired) {
           throw new ApiException(ErrorCode.VAL_001, `الحقل "${field.labelAr}" (${field.fieldKey}) مطلوب`, HttpStatus.BAD_REQUEST);
+        }
+        // بَقّة حقيقية حية اتلقطت (Script 6 Part 3/4): حقل اختياري متلمسش من العميل كان بيتجاهل
+        // هنا تمامًا (continue بلا قيمة) بدل ما ياخد قيمته الافتراضية — فلو المعادلة بتشاور عليه
+        // (field_ref أو شرط)، evaluateFormulaNode()/evaluateCondition() كانوا بيرفضوا بـ400
+        // "الحقل مطلوب لحساب السعر"، رغم إنه مش إجباري فعلاً. الإصلاح: نطبّق default_value
+        // المُعدّة صراحة لو موجودة، أو الافتراض الضمني false لحقول CHECKBOX تحديدًا (نفس سلوك
+        // أي checkbox قياسي — متعلّمتش = false، مش "متجاوبتش").
+        const defaulted = this.resolveDefaultValue(field);
+        if (defaulted !== undefined) {
+          normalized[field.fieldKey] = defaulted;
         }
         continue;
       }
