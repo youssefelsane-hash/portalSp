@@ -31,6 +31,13 @@ export const MFA_REQUIRED_PERMISSIONS = [
   // موافقة أرباح عمالة منزلية (docs/08 §25.1، migration 0112) — تحويل فلوس مباشر من محفظة
   // المنصة لمحفظة الشغالة بقرار أدمن، نفس مستوى حساسية payouts.approve/wallets.adjust بالظبط.
   'domestic_workers.approve_earnings',
+  // بَقّة أمنية حقيقية اتلقطت (Script 7 Phase 24): حل شكوى (SupportService.resolve()) بيحوّل
+  // compensation_cents — مبلغ يحدده الأدمن نفسه، بلا حد أقصى، allowNegativeBalance:true — مباشرة
+  // من محفظة المنصة للطرف اللي اشتكى، بنفس بالضبط منطق orders.resolve_failed_visit/
+  // orders.resolve_cash_dispute فوق، لكن كانت ناقصة من القايمة دي من الأساس. جلسة أدمن مسروقة
+  // (حتى بصلاحية complaints.resolve بس، مش لازم super_admin/finance) كانت تقدر تحوّل فلوس حقيقية
+  // بلا أي تأكيد MFA حديث خالص.
+  'complaints.resolve',
 ] as const;
 
 @Injectable()

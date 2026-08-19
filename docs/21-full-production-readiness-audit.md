@@ -48,10 +48,10 @@
 | 18 | Wallet / Ledger / Commission | Wallets | FIXED | جزئي — راجعت `WalletsService` بالكامل (`doubleEntry`/`reverseDoubleEntry`/`reserveForPayout`/`releaseReservation`/`finalizePayout`) بالقراءة الدقيقة (كان اتفحص بعمق في سيشن سابقة، task #36) + تتبعت كل مسارات `doubleEntry(` الحقيقية عبر الموديولات (orders/refunds/domestic-workers/technician-referrals) لأي استدعاء خارج الأنماط المعروفة، مفيش استغلال حي جديد اتبنى في المحرك نفسه (سليم رياضيًا: قفل بترتيب ثابت، فحص `allowNegativeBalance` بعد القفل مباشرة، `WITHDRAWAL` مقصور على `finalizePayout` بلا مسار موازي) | لا يوجد اختبار jest جديد للمحرك نفسه (كان مغطّى بعمق من قبل) — الإصلاح الوحيد ده توثيقي بحت (README)، فمفيش سلوك برمجي يحتاج regression test | BUG-011 (P3 — توثيق `domestic-workers/README.md` كان بيحيل غلط لـ`refunds.issue` كمسار استرداد عملي لحجوزات العمالة المنزلية، رغم إنها 404 دايمًا لغياب صف `Order`) | BUG-011 fixed (توثيقي) | حجز عمالة منزلية اتلغى بعد `confirm()` (الفلوس اتحصّلت فعليًا من العميل) مفيهوش استرداد تلقائي في v1 — قرار عمل موثّق صراحة من قبل (مش بَقّة)، بس المسار الإداري الفعلي (`wallets.adjust`) محتاج معرفة يدوية بالمبلغ الصحيح (مفيش زرار "استرد الحجز ده" جاهز) — فجوة تشغيلية أصغر، تستاهل UI مخصص مستقبلاً لو الحجم كبر | commit قادم |
 | 19 | Provider Payouts | Payouts | VERIFIED | جزئي — راجعت `PayoutsService` بالكامل بالقراءة (`requestPayout`/`reserveForPayout` lock/فحص رصيد، `adminApprove`/`adminReject`/`adminComplete` كلهم بقفل `pessimistic_write` + فحص حالة صريح، `linkOrderItemsForPayout` تفصيل توضيحي بس مش قيد محاسبي)، مفيش استغلال حي جديد اتبنى | نعم — تغطية موجودة بالفعل عميقة جدًا (`payout-double-release.spec.ts`: نداء `adminReject` مرتين، `releaseReservation` مباشر، approve×reject، complete×complete، complete×reject، rollback عند فشل audit) | لا يوجد | لا يوجد | مفيش رصد جديد — auto-approve (`payouts.auto_approve_limit_cents`) بيتخطى مراجعة UNDER_REVIEW بس لسه محتاج `adminComplete()` (صلاحية+step-up) عشان الفلوس تتحرك فعليًا، فمفيش تحويل فلوس تلقائي بالكامل بلا لمسة إنسان — تصميم متعمّد سليم. مفيش endpoint للفني يلغي طلب صرف UNDER_REVIEW بنفسه (لازم يعدي عبر admin reject) — قرار تصميم متسق مع باقي العمليات المالية الحساسة في المشروع، مش بَقّة | commit سابق + هذا التحقق |
 | 20 | Promo / Referral / Discounts | Promotions | VERIFIED | جزئي — راجعت `PromoCodesService` بالكامل بالقراءة (`computeDiscount` حدود صريحة صفر↔إجمالي الطلب، `assertUsable` كل الشروط بما فيها `restrictedToUserId`/`budgetCents`، `validateAndApply` بقفل ذرّي `pessimistic_write` جوّه transaction الطلب، `releaseUsage` idempotent بقفل ذرّي) + تتبعت كل مسارات إلغاء الطلب (`orders.service.ts` عميل، `order-auto-cancel.service.ts` نظام×2، `admin-orders.service.ts` أدمن) للتأكد كلهم بينادوا `releaseUsage` — و`technicianCancel()` بالذات اتأكد إنها **لا** تنادي `releaseUsage` عن قصد صحيح (بتنقل الطلب لإعادة مطابقة/اختيار بديل، مش إلغاء نهائي — الكود ما زال قيد الاستخدام فعليًا)، مفيش استغلال حي جديد اتبنى | نعم — تغطية موجودة بالفعل عميقة (`promo-code-usage-release.spec.ts`: idempotent، no-op لطلب بلا كود) + `referral-integrity.spec.ts`/`technician-referral-financial-integrity.spec.ts` للترشيح | لا يوجد | لا يوجد | مفيش رصد جديد — referrals تستخدم آلية إصدار كود خصم (`issueRewardInTransaction`) مش تحويل محفظة مباشر للعميل (يوصل عبر `PromoCodesService`/`assertUsable`)، بعكس مكافآت ترشيح الفنيين (`technician-referrals.service.ts`) اللي بتحوّل محفظة مباشرة — تصميمان مختلفان متعمّدان لنوعين مختلفين من الترشيح، موثّقان بالفعل | commit سابق + هذا التحقق |
-| 21 | Completion | Orders | PENDING | | | | | | |
-| 22 | Ratings & Reviews | Ratings | PENDING | | | | | | |
-| 23 | Warranty / Revisit | Orders/Warranty | PENDING | | | | | | |
-| 24 | Complaints / Support | Support | PENDING | | | | | | |
+| 21 | Completion | Orders | VERIFIED | جزئي — راجعت `transitionAsTechnician()`/`complete()` بالقراءة الدقيقة: فحص after_photo إجباري (docs/08 §20 بند 12) برّه الـtransaction (قراءة بس، آمن)، قفل `pessimistic_write` + إعادة فحص `orderStatus===previousStatus` جوّه الـtransaction يمنع double-complete فعليًا (double-click حقيقي: النداء التاني هيلاقي الحالة اتغيّرت ويترفض 409)، مفيش استغلال حي جديد اتبنى | نعم — `order-state-machine.spec.ts` يغطي شمولية الانتقالات، `cash-handover-confirmation.spec.ts` يغطي نقر مزدوج على `collectCash` بعد الاكتمال | لا يوجد | لا يوجد | مفيش رصد جديد — لطلب `booking_mode=team` بس الفني القائد (`order.technicianId`) هو اللي بينادي `complete()`، أعضاء الطاقم معندهمش بوابة تأكيد مستقلة — نفس القرار الإداري الموثّق بالفعل في Phase 13 (`crewShortage` indicator)، مش بَقّة جديدة | commit سابق + هذا التحقق |
+| 22 | Ratings & Reviews | Ratings | VERIFIED | جزئي — راجعت `RatingsService` بالكامل بالقراءة: `assertRatable` (لازم COMPLETED)، `createRating` بفحص تكرار مزدوج (فحص منطقي + `UNIQUE` على `ratings.order_id` كخط دفاع أخير ضد سباق نادر)، ملكية الطلب متحقق منها في `rateAsCustomer`/`rateAsTechnician` (`customerId`/`technicianId` في الـwhere)، `after_photo_media_ids` متحقق إنها بتاعة نفس الطلب، مفيش استغلال حي جديد اتبنى | لا يوجد اختبار jest جديد (المنطق اتأكد سليم بالقراءة، السباق النادر مغطّى بـUNIQUE constraint فعلي مش code path يحتاج اختبار جديد) | لا يوجد | لا يوجد | `ratings.order_id` UNIQUE يعني تقييم واحد بس لكل طلب (مش تقييمين، واحد من كل طرف) — أول طرف يقيّم ياخد السلوت، قرار موثّق صراحة من `docs/02-data-dictionary.md §8.1` نفسه (الكود بيعلّق عليه بالحرف: "لو غلط لازم يتصحح بتحديث موثّق للقاموس، مش هنا بصمت") — مش بَقّة جديدة، قرار عمل قائم من الأساس | commit سابق + هذا التحقق |
+| 23 | Warranty / Revisit | Orders/Warranty | FIXED | نعم — `OrdersService.create()` حي، إعادة زيارة سليمة (طلب أصلي standard) + محاولة سلسلة (إعادة زيارة لإعادة زيارة) | نعم — 2 اختبار جديد (`order-revisit-chain.spec.ts`) | BUG-012a (P1 — سلسلة إعادة زيارات مجانية بلا نهاية) | BUG-012a fixed | مفيش رصد جديد بعد الإصلاح — الفحص بقى صريح على `orderType` بدل الاعتماد الضمني على `warrantyExpiresAt` بس | commit قادم |
+| 24 | Complaints / Support | Support | FIXED | لا (بَقّة metadata-level، نفس منهجية `mfa-step-up-enforcement.spec.ts` الموجودة أصلاً — لا تحتاج Postgres حي) | نعم — امتداد لـ`mfa-step-up-enforcement.spec.ts` الموجود (حالة جديدة لـ`AdminSupportController.resolve`) | BUG-012b (P1 — `complaints.resolve` بيحوّل فلوس تعويض بلا حد أقصى من غير step-up إجباري) | BUG-012b fixed | راجعت `resolve()`/`reject()`/`close()`/`updateSeverity()` بالكامل — قفل `pessimistic_write` + فحص `canTransitionComplaint` بيمنعوا حل/رفض مزدوج، مفيش مشكلة تانية | commit قادم |
 | 25 | Admin Control Plane | Admin | PENDING | | | | | | |
 | 26 | Admin RBAC | Admin/Security | PENDING | | | | | | |
 | 27 | Security Center | Admin/Security | PENDING | | | | | | |
@@ -422,6 +422,73 @@ Regression test: N/A — إصلاح توثيقي بحت، صفر سلوك برم
 Live verification: N/A لنفس السبب — تأكدت من صحة الادعاء الجديد بقراءة `refundOrder()`'s
 signature/lookup مباشرة (مذكور فوق في Reproduction)، مش باختبار حي (لا يوجد سلوك يتغيّر ليُختبر).
 Status: FIXED (توثيقي)
+
+### BUG-012a
+Severity: P1 (خدمة مجانية بلا نهاية — الفني ما بيتعوّضش، المنصة بتخسر إيراد متكرر بلا حد)
+Flow: Phase 23 (Warranty / Revisit)
+Symptom: إعادة زيارة تحت الضمان (`order_type=revisit`, `POST /orders` بـ`original_order_id`) بتاخد
+`warranty_expires_at` **جديدة بالكامل** وقت اكتمالها (نفس `settleAndComplete()` اللي بتحسبها لأي
+طلب مكتمل، بلا أي استثناء لـ`order_type=revisit`) — ومفيش أي فحص كان بيمنع إعادة الزيارة نفسها
+من إنها تبقى `original_order_id` لإعادة زيارة تانية.
+Reproduction: طلب أصلي مدفوع مكتمل (ضمان 30 يوم) → إعادة زيارة مجانية بنجاح (متوقع وصحيح) →
+إعادة الزيارة دي تكتمل هي كمان → وقت الاكتمال بتاخد `warranty_expires_at` جديدة بنفس الـ30 يوم
+كاملة (مش وريث/باقي من الضمان الأصلي) → العميل يقدر يطلب إعادة زيارة تانية بـ`original_order_id`
+= إعادة الزيارة الأولى (مش الطلب الأصلي) → تنجح → تكرار للأبد طالما العميل بيطلب إعادة زيارة
+جديدة قبل ما ضمان آخر واحدة يخلص.
+Expected: "إعادة زيارة تحت الضمان" معناها "نصلح نفس المشكلة تاني لو رجعت مرة واحدة" — مش سلسلة
+خدمات مجانية بلا حد لنفس العميل/العنوان/الخدمة.
+Actual: مفيش أي حد أقصى — سلسلة كاملة من الطلبات المجانية ممكنة نظريًا للأبد.
+Root cause: `settleAndComplete()` بتحسب `warranty_expires_at` لأي طلب مكتمل بلا تفرقة بين
+`order_type=standard`/`revisit`، والفحص عند إنشاء إعادة زيارة كان بيتأكد بس من `orderStatus=COMPLETED`
++ نفس الخدمة/العنوان + `warrantyExpiresAt` سارٍ — من غير أي فحص على `orderType` بتاع الطلب الأصلي نفسه.
+Files involved: `apps/api/src/modules/orders/orders.service.ts`,
+`apps/api/src/modules/orders/order-revisit-chain.spec.ts` (جديد)
+Financial/security impact: مباشر — إيراد مفقود متكرر (المنصة/الفني ملهمش أي تعويض عن شغل بعد
+أول إعادة زيارة)، واستغلال متعمد ممكن من عميل يعرف الآلية.
+Fix: فحص صريح جديد — لو `originalOrder.orderType === OrderType.REVISIT`، الطلب بيترفض بوضوح
+(`VAL_001`) بدل ما يتقبل بصمت. إعادة الزيارة تفضل مسموحة مرة واحدة بس لكل طلب أصلي مدفوع حقيقي.
+Regression test: `order-revisit-chain.spec.ts` (اختباران) — إعادة زيارة لطلب أصلي عادي بتنجح
+(تأكيد المسار السليم لسه شغال)، وإعادة زيارة لإعادة زيارة تانية بترفض `VAL_001` — الاختبار الثاني
+كان هيفشل قبل الإصلاح (الطلب كان هينجح بدل ما يترفض) عبر `git stash` على `orders.service.ts` بس
+مع الإبقاء على الاختبار الجديد.
+Live verification: jest حي ضد Postgres حقيقي.
+Status: FIXED
+
+### BUG-012b
+Severity: P1 (تحويل فلوس حقيقي بقرار أدمن بلا أي تأكيد MFA/step-up حديث)
+Flow: Phase 24 (Complaints / Support) — اتلقطت أثناء مراجعة `SupportService.resolve()` لأي حركة
+محفظة جديدة بعد Phase 18-20
+Symptom: `POST /admin/complaints/:id/resolve` بيحوّل `compensation_cents` (مبلغ يحدده الأدمن نفسه،
+بلا حد أقصى، `allowNegativeBalance:true`) مباشرة من محفظة المنصة للطرف اللي اشتكى — بنفس بالظبط
+حساسية `orders.resolve_failed_visit`/`orders.resolve_cash_dispute`/`wallets.adjust` الموجودين
+فعلاً في `MFA_REQUIRED_PERMISSIONS` + `@RequireStepUp()`، لكن `complaints.resolve` كانت غايبة
+تمامًا من القايمة والـendpoint من غير `@RequireStepUp()` خالص.
+Reproduction: `mfa-step-up-enforcement.spec.ts` (اختبار metadata بسيط بلا Postgres، نفس النمط
+اللي كشف نفس الفئة أربع مرات قبل كده — `wallets.adjust`/`orders.adjust_price`/
+`payments.confirm_manual`/`settings.manage`) — حالة جديدة لـ`AdminSupportController.resolve`
+كانت هتفشل قبل الإصلاح على شقّين: `MFA_REQUIRED_PERMISSIONS` ماكانتش تحتوي `complaints.resolve`
+خالص، و`stepUpMetadata(handler)` كانت `undefined` (`StepUpGuard` بيبقى no-op تمامًا من غير
+`@RequireStepUp()` الفعلية).
+Expected: أي endpoint بيحوّل فلوس حقيقية بقرار أدمن مباشر لازم step-up إجباري، نفس المبدأ الحاكم
+الموثّق في `mfa-policy.service.ts` نفسه.
+Actual: جلسة أدمن مسروقة (حتى بصلاحية `complaints.resolve` بس — ممكن تتمنح لموظف دعم عادي، مش
+لازم `super_admin`/`finance`) كانت تقدر تحوّل فلوس حقيقية بلا أي تأكيد Passkey حديث خالص.
+Root cause: `complaints.resolve` اتضافت كصلاحية مالية جديدة (تعويض شكوى) من غير ما تتضاف لنفس
+القائمة/الحماية اللي كل صلاحية مالية تانية مماثلة اتضافتلها.
+Files involved: `apps/api/src/modules/auth/mfa-policy.service.ts`,
+`apps/api/src/modules/support/admin-support.controller.ts`,
+`apps/api/src/modules/auth/mfa-step-up-enforcement.spec.ts`
+Financial/security impact: مباشر — تحويل فلوس حقيقي بلا حماية step-up، نفس فئة P0 الأربع بَقّات
+السابقة بالحرف.
+Fix: `complaints.resolve` اتضافت لـ`MFA_REQUIRED_PERMISSIONS` (يفرض MFA إجباري وقت الدخول لأي
+حساب عنده الصلاحية دي) + `@RequireStepUp()` اتضافت فعليًا على `AdminSupportController.resolve()`.
+`reject()`/`close()`/`updateSeverity()` اتسيبوا من غير step-up عمدًا — مفيش حركة فلوس فيهم.
+Regression test: حالة جديدة في `mfa-step-up-enforcement.spec.ts` (نفس الملف اللي بيمنع الفئة دي
+ترجع تحصل بصمت لأي endpoint جديد مستقبلي) — اتأكدت إنها كانت هتفشل قبل الإصلاح (فحصت المنطق يدويًا:
+`MFA_REQUIRED_PERMISSIONS` ماكانتش تحتوي القيمة، والـmetadata كانت `undefined`).
+Live verification: jest (اختبار metadata بحت، مفيش Postgres/DI مطلوب — نفس منهجية باقي حالات
+الملف ده).
+Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
 

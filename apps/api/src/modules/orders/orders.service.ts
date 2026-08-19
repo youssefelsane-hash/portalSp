@@ -314,6 +314,19 @@ export class OrdersService {
       if (originalOrder.orderStatus !== OrderStatus.COMPLETED) {
         throw new ApiException(ErrorCode.VAL_001, 'الطلب الأصلي لازم يكون مكتمل الأول', HttpStatus.BAD_REQUEST);
       }
+      // بَقّة حقيقية اتلقطت (Script 7 Phase 23): إعادة الزيارة نفسها بتاخد warranty_expires_at
+      // جديدة بالكامل وقت اكتمالها (نفس مسار settleAndComplete() اللي بيحسبها لأي طلب مكتمل، مفيش
+      // استثناء لـorder_type=revisit) — من غير الفحص ده، كانت إعادة زيارة تقدر تبقى original_order_id
+      // لإعادة زيارة تانية، وهكذا للأبد: خدمة مجانية بلا نهاية لنفس العميل/العنوان/الخدمة كل ما
+      // الضمان يقرب يخلص، بلا أي تعويض للفني بعد الطلب الأصلي. الضمان معناه "نصلح نفس المشكلة تاني
+      // لو رجعت"، مش "سلسلة زيارات مجانية بلا حد" — إعادة الزيارة نفسها مينفعش تبقى أصل لإعادة زيارة تانية.
+      if (originalOrder.orderType === OrderType.REVISIT) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'إعادة الزيارة تحت الضمان مسموحة مرة واحدة بس لكل طلب أصلي — مينفعش تعمل إعادة زيارة لإعادة زيارة تانية',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       if (originalOrder.serviceId !== dto.service_id || originalOrder.addressId !== dto.address_id) {
         throw new ApiException(
           ErrorCode.VAL_001,
