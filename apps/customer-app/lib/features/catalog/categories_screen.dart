@@ -3,6 +3,7 @@ import '../../core/api_exception.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'catalog_repository.dart';
+import 'category_card.dart';
 import 'models.dart';
 import 'services_screen.dart';
 
@@ -53,26 +54,15 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                           crossAxisCount: 2,
                           mainAxisSpacing: 12,
                           crossAxisSpacing: 12,
-                          childAspectRatio: 1.2,
+                          childAspectRatio: 0.95,
                         ),
                         itemCount: _categories!.length,
                         itemBuilder: (context, index) {
                           final category = _categories![index];
-                          return Card(
-                            child: InkWell(
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
-                              ),
-                              child: Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text(
-                                    category.nameAr,
-                                    textAlign: TextAlign.center,
-                                    style: Theme.of(context).textTheme.titleMedium,
-                                  ),
-                                ),
-                              ),
+                          return CategoryCard(
+                            category: category,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
                             ),
                           );
                         },

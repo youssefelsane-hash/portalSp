@@ -11,6 +11,7 @@ import '../orders/orders_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
+import 'category_card.dart';
 import 'models.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
@@ -166,22 +167,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 1.2,
+                    childAspectRatio: 0.95,
                   ),
                   itemCount: _categories!.length,
                   itemBuilder: (context, index) {
                     final category = _categories![index];
-                    return Card(
-                      child: InkWell(
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
-                        ),
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text(category.nameAr, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-                          ),
-                        ),
+                    return CategoryCard(
+                      category: category,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
                       ),
                     );
                   },

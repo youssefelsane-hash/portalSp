@@ -113,6 +113,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
       {} as never, // certificatesService
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never, // geoService
+      {} as never, // settingsService
     );
 
     // OrdersService الحقيقية — بس التبعيات اللي فعليًا بتتنادى في complete()/transitionAsTechnician()

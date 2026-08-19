@@ -247,6 +247,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);

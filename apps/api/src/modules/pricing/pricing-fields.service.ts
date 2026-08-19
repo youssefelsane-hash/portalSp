@@ -69,6 +69,7 @@ export class PricingFieldsService {
       options: dto.options ?? null,
       minValue: dto.min_value !== undefined ? String(dto.min_value) : null,
       maxValue: dto.max_value !== undefined ? String(dto.max_value) : null,
+      defaultValue: dto.default_value ?? null,
     });
     await this.fields.save(field);
 
@@ -98,6 +99,7 @@ export class PricingFieldsService {
     if (dto.options !== undefined) field.options = dto.options;
     if (dto.min_value !== undefined) field.minValue = String(dto.min_value);
     if (dto.max_value !== undefined) field.maxValue = String(dto.max_value);
+    if (dto.default_value !== undefined) field.defaultValue = dto.default_value;
     if (dto.is_active !== undefined) field.isActive = dto.is_active;
     await this.fields.save(field);
 

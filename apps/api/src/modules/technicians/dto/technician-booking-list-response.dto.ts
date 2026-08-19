@@ -16,6 +16,9 @@ export interface TechnicianBookingListItemResponseDto {
   technician_level: string;
   final_price_cents: number | null;
   level_price_multiplier: number | null;
+  is_verified: boolean;
+  on_time_rate: number | null;
+  avg_arrival_minutes: number | null;
 }
 
 export function toTechnicianBookingListItemResponseDto(
@@ -34,5 +37,8 @@ export function toTechnicianBookingListItemResponseDto(
     technician_level: item.currentLevel,
     final_price_cents: estimate ? estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents : null,
     level_price_multiplier: estimate ? estimate.level_price_multiplier : null,
+    is_verified: item.isVerified,
+    on_time_rate: item.onTimeRatePercent,
+    avg_arrival_minutes: item.avgArrivalMinutes,
   };
 }

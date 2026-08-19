@@ -25,6 +25,12 @@ export class CreateServiceCategoryDto {
   @IsString()
   icon_url?: string;
 
+  // Script 6 Part 1-2 — صورة غلاف فعلية للكارت (أبعاد أكبر، مناسبة لعرض فوتوغرافي)، منفصلة
+  // عن icon_url (أيقونة صغيرة). كانت العمود موجود في الـschema بلا أي DTO يستخدمه.
+  @IsOptional()
+  @IsString()
+  cover_image_url?: string;
+
   @IsOptional()
   @IsInt()
   @Min(0)

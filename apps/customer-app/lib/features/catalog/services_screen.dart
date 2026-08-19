@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
+import '../../design/network_image_box.dart';
 import '../support/support_contact_screen.dart';
 import 'catalog_navigation.dart';
 import 'catalog_repository.dart';
@@ -90,6 +91,16 @@ class _ServicesScreenState extends State<ServicesScreen> {
                                 final service = _services![index];
                                 return Card(
                                   child: ListTile(
+                                    leading: SizedBox(
+                                      width: 56,
+                                      height: 56,
+                                      child: NetworkImageBox(
+                                        imageUrl: service.iconUrl,
+                                        placeholderIcon: Icons.build_outlined,
+                                        aspectRatio: 1,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
                                     title: Text(service.nameAr),
                                     subtitle: service.shortDescriptionAr != null
                                         ? Text(service.shortDescriptionAr!)

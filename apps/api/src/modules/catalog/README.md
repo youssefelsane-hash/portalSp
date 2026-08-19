@@ -131,4 +131,31 @@
 - **قرار تصميم متعمّد لتفادي coupling جديد بين الموديولات**: `ListTechniciansForServiceDto` بقى فيها `booking_mode?` من نوع `BookingModeFilter` (نفس string-literal type المُكرر عمدًا في `list-services.dto.ts`)، **مش** import مباشر لـ`BookingMode` enum من موديول `orders` — نفس الاتفاقية الموجودة بالفعل في نفس الملف.
 - **اتأكد حي**: خدمة `fixed` أساسها 1000 ج.م.، فني `premium` (مضاعف `ServiceLevelPricing` = 1.20) ظهر في القايمة بـ`final_price_cents:120000`/`level_price_multiplier:1.20` — مطابق تمامًا لناتج `/orders/preview` وللطلب الفعلي بعدين (تفاصيل كاملة في `../orders/README.md`).
 
+## `cover_image_url`/`icon_url` بقوا معروضين للعميل — Script 6 Part 1-2 (2026-08-19)
+
+**الفجوة**: `service_categories.cover_image_url` موجود في الـschema من migration 0006 القديمة
+(نفس الوقت اللي `icon_url` اتضاف فيه)، بس مفيش أي DTO أدمن أو عميل استخدمه خالص — الأدمن ماكانش
+عنده حتى حقل فورم يحطه بيه، والعميل ماكانش شايف صورة فئات خالص في `apps/customer-app` (كروت
+نص مركزي بس). كمان `services.icon_url` كان معروض للأدمن (`AdminServiceResponseDto`) بس مش
+للعميل (`ServiceResponseDto` كان ناقصه تمامًا).
+
+**الإصلاح**:
+- `ServiceCategory` entity: عمود `coverImageUrl` جديد (map لـ`cover_image_url` الموجود بالفعل).
+- `CreateServiceCategoryDto`/`UpdateServiceCategoryDto` (partial تلقائي): `cover_image_url?`
+  اختياري، نفس نمط `icon_url` بالحرف.
+- `AdminServiceCategoryResponseDto`/`ServiceCategoryResponseDto` (العام): `cover_image_url`
+  مضاف للاتنين. `ServiceResponseDto` (العام): `icon_url` مضاف (كان في نسخة الأدمن بس).
+- `apps/admin/src/app/catalog/page.tsx`: حقل نص جديد "رابط صورة الغلاف" في فورمي إنشاء/تعديل
+  الفئة، نفس نمط `icon_url` (رابط نصي، مش رفع ملف — قرار قائم بالفعل للأيقونة، اتبع نفسه هنا
+  بدل ما نخترع نمط رفع جديد).
+- `packages/shared-types/src/catalog.ts`: `cover_image_url` مضاف لـ`AdminServiceCategoryResponseDto`/
+  `CreateServiceCategoryBody`.
+
+**اتأكد حي**: فئة حقيقية اتزرعت بـ`cover_image_url`/`icon_url` الاتنين، `GET /service-categories`
+رجّع الاتنين مطابقين تمامًا. خدمة حقيقية اتزرعت بـ`icon_url`، `GET /services?category_id=...`
+رجّعه صح. بيانات الاختبار اتنضّفت بعدين.
+
+تفاصيل استخدام العميل الكامل (كروت الفئات/صفوف الخدمات في `apps/customer-app`) في
+`apps/customer-app/README.md`.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

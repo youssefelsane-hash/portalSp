@@ -35,4 +35,11 @@ export class ListTechniciansForServiceDto {
   @IsOptional()
   @IsUUID()
   exclude_technician_id?: string;
+
+  // ترتيب القايمة (Script 6 Part 8) — recommended (افتراضي، الأنسب حسب محرك التوصية) منفصل عمداً
+  // عن الفرز اليدوي البسيط (lowest_price/highest_rating) اللي العميل بيختاره بنفسه — Part 8 §
+  // "Sorting is NOT the same as default ranking".
+  @IsOptional()
+  @IsIn(['recommended', 'lowest_price', 'highest_rating'])
+  sort?: 'recommended' | 'lowest_price' | 'highest_rating';
 }

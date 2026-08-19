@@ -10,6 +10,7 @@ import type {
   EmployeePresenceDto,
   EmployeeSessionDto,
   RoleResponseDto,
+  SecurityEventDto,
   UpdateEmployeeBody,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -35,7 +36,7 @@ const PRESENCE_BADGE_VARIANT: Record<string, 'default' | 'secondary' | 'outline'
 
 export default function EmployeeDetailPage() {
   const { userId } = useParams<{ userId: string }>();
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const router = useRouter();
 
   const [detail, setDetail] = useState<EmployeeDetail | null>(null);
@@ -62,8 +63,13 @@ export default function EmployeeDetailPage() {
     authedFetch<EmployeeSessionDto[]>(`/admin/workforce/employees/${userId}/sessions`)
       .then(setSessions)
       .catch(() => setSessions(null));
-    authedFetch<{ meta: { total: number } }>(`/admin/security/events?actor_user_id=${userId}&status=open`)
-      .then((res) => setOpenAlertsCount(res.meta.total))
+    // بَقّة حقيقية اتلقطت بمتصفح حي (Script 6 Part 23، نفس فئة بَقّة security-center/page.tsx):
+    // /admin/security/events مُقسّم صفحات (ResponseInterceptor بيفكّ {items, meta} — data بترجع
+    // array، meta بتتصعّد لمستوى الـenvelope). authedFetch() العادي بيرجّع data زي ما هي (array)،
+    // فـres.meta كانت undefined دايمًا، والـcatch كان بيبلعها بصمت (openAlertsCount فاضل null
+    // للأبد، البادچ ما كانش بيظهر خالص حتى لو فيه تنبيهات مفتوحة فعلاً).
+    authedFetchPaginated<SecurityEventDto>(`/admin/security/events?actor_user_id=${userId}&status=open`)
+      .then((res) => setOpenAlertsCount(res.meta.total ?? null))
       .catch(() => setOpenAlertsCount(null));
   }
 

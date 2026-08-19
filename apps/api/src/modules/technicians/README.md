@@ -335,3 +335,45 @@ Default `approved` للصفوف الموجودة وأي تعيين أدمن جد
 (مفيش حساب أدمن مسجّل فيها من قبل، وتسجيل بصمة WebAuthn جديدة عبر curl مش ممكن فعليًا). التحقق
 البديل المتناسب: نفس الـSQL اللي الصفحة هتستخدمه (join الأسماء) اتغطى باختبار جزء من نفس السبك
 الحي فوق.
+
+### ترتيب السوق الافتراضي في اختيار الفني — محرك توصية بمرحلتين (Script 6 Part 9، 2026-08-19)
+
+**المشكلة اللي اتصلحت**: `listForServiceBooking()` (بيستخدمها `GET /services/:id/technicians` في
+`catalog`) كانت بترتب النتايج `ORDER BY average_rating DESC` مباشرة. ده معناه فني بتقييم 5.0 من
+مراجعة واحدة بس كان بيسبق فني بتقييم 4.9 من 200 مراجعة مكتملة — بالظبط المثال المحذّر منه في
+الـscript (Part 9): تقييم عالي بعينة صغيرة جداً معندهوش ثقة إحصائية كافية عشان يتصدّر فني بسجل
+حقيقي طويل.
+
+**الإصلاح**: متوسط بايزي مرجّح بالثقة (Bayesian confidence-weighted average) — `recommendation_score
+= (v×R + m×C) / (v+m)` حيث v=`total_ratings_count`، R=`average_rating`، m=عتبة الحد الأدنى
+للعينة (`ranking.bayesian_min_samples`، افتراضي 5)، C=المتوسط الافتراضي المحافظ (`ranking.
+bayesian_prior_mean`، افتراضي 4.0) — الاتنين قابلين للتعديل من `SettingsService` من غير كود جديد.
+المرحلة 1 (الأهلية الصارمة: `verification_status='approved'` + صف `technician_services` نشط
+للخدمة + صف `technician_zones` نشط للمنطقة) فضلت زي ما هي — أي فني ماعندوش الثلاثة دول مش بيظهر
+خالص مهما كان تقييمه؛ التغيير بس في ترتيب المرحلة 2. الترتيب النهائي:
+`ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC, completed_count DESC`.
+
+**فرز يدوي منفصل (Part 8)**: `GET /services/:id/technicians?sort=lowest_price|highest_rating`
+(افتراضي `recommended` بدون باراميتر) — بيتطبّق في `CatalogController` بعد حساب السعر النهائي
+الحقيقي لكل فني (نفس `estimate()` اللي `POST /orders` هيستخدمه بالحرف)، مش استعلام SQL تاني.
+صريح في `list-technicians-for-service.dto.ts`: الفرز اليدوي مش نفس ترتيب "الأنسب" الافتراضي.
+
+**بَقّة حقيقية اتلقطت أثناء كتابة الاختبار الحي**: أول نسخة من صيغة SQL استخدمت
+`$5 * $6` (اتنين parameters من غير أي سياق نوع بيانات ملموس في نفس التعبير) — PostgreSQL بيرفضها
+فوراً بـ`operator is not unique: unknown * unknown` لأنه مش قادر يحل نوع العملية بين اتنين
+placeholders "unknown" في نفس الوقت، حتى لو نفس الـparameter ($5) بيتحل لاحقاً من استخدام تاني
+في نفس الاستعلام (`tp.total_ratings_count + $5`). الفحص اليدوي الأول (استعلام SQL خام بقيم حرفية
+5 و4.0 بدل placeholders) فات على البَقّة دي تماماً لأنه معندوش parameters خالص. الإصلاح: casts
+صريحة (`$5::int * $6::numeric` و`$5::int` في الـNULLIF) — اتأكد بالاختبار الحي تحت.
+
+**اختبار حي** (`technician-ranking.spec.ts`، Postgres حقيقي): فني اتزرع بتقييم 5.0/مراجعة واحدة،
+وفني تاني بتقييم 4.9/200 مراجعة، الاتنين مؤهلين لنفس الخدمة/المنطقة بالظبط. اتأكد إن الفني الأول
+(200 مراجعة) بيترتب **قبل** الفني التاني (مراجعة واحدة) في `listForServiceBooking()` — مطابقة
+حرفية للمثال المحسوب في التوثيق أعلى الميثود (`4.878` مقابل `4.17`). اتأكد كمان إن `average_rating`/
+`total_ratings_count` الخام لسه بترجع زي ما هي في الاستجابة (الترتيب بس اتغير، مش البيانات
+المعروضة للعميل).
+
+**فجوة موثّقة صراحة**: مفيش fair-distribution/load-balancing factor لسه (جزء من Part 9's الأوسع —
+"avoid over-favoring one provider forever") — الـrecommendation_score حالياً بيعتمد بس على
+التقييم البايزي، مش على عدد الطلبات الأخيرة أو التوزيع العادل. مؤجّل عمداً لحد ما يكون فيه بيانات
+كفاية لقياسه بمعنى.

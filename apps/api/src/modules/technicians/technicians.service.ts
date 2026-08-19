@@ -22,6 +22,7 @@ import { TechnicianPortfolioLink } from './entities/technician-portfolio-link.en
 import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificate } from './entities/technician-certificate.entity';
 import { TechnicianCertificatesService } from './technician-certificates.service';
+import { SettingsService } from '../settings/settings.service';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -34,6 +35,12 @@ export interface TechnicianBookingListItem {
   distanceKm: number | null;
   // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح قبل ما يختاره.
   currentLevel: TechnicianLevel;
+  // Script 6 Part 7 — بيانات مقارنة حقيقية للسوق (مفيش بيانات مصطنعة). isVerified دايمًا true
+  // هنا فعليًا (المرحلة 1 الصارمة فوق بتفلتر verification_status='approved' بس) — بيترجع
+  // كحقل صريح بدل ما apps/customer-app تفترض ده ضمنيًا من مجرد ظهور الفني في القايمة.
+  isVerified: boolean;
+  onTimeRatePercent: number | null;
+  avgArrivalMinutes: number | null;
 }
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
@@ -53,6 +60,7 @@ export class TechniciansService {
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly auditLog: AuditLogService,
     private readonly geoService: GeoService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   async findByUserIdOrThrow(userId: string): Promise<TechnicianProfile> {
@@ -283,9 +291,22 @@ export class TechniciansService {
 
   /**
    * قايمة الفنيين المؤهلين لخدمة في منطقة العميل — اختيار الفني قبل الحجز (docs/08 §3، بدل
-   * auto-match بس). الترتيب مطابق تمامًا لطلب المالك: التقييم أولاً، بعده القرب الجغرافي
-   * (PostGIS حقيقي، مش تقريب)، بعده عدد الطلبات المكتملة لنفس الخدمة تحديدًا (`technician_services.
-   * completed_count` — أدق من إجمالي الفني كله لأنه بيقيس خبرته في الخدمة دي بالذات).
+   * auto-match بس). مرحلتين (Script 6 Part 9):
+   *
+   * **المرحلة 1 — أهلية صارمة (hard gate)**: WHERE clause تحت — verification_status='approved'،
+   * عنده صف technician_services نشط للخدمة دي بالذات، عنده صف technician_zones نشط للمنطقة دي.
+   * أي فني ماعندوش الثلاثة دول **مش بيظهر خالص**، مهما كان تقييمه.
+   *
+   * **المرحلة 2 — ترتيب التوصية (recommendation score)**: بَقّة تصميمية حقيقية اتصلحت هنا —
+   * الترتيب القديم كان `ORDER BY average_rating DESC` مباشرة، يعني فني بتقييم 5.0 من تقييم واحد
+   * بس كان بيسبق فني بتقييم 4.9 من مئات الطلبات المكتملة (بالظبط المثال المحذّر منه في Part 9).
+   * الإصلاح: متوسط بايزي مرجّح بالثقة (Bayesian average) — كل فني عنده عدد تقييمات أقل من
+   * `ranking.bayesian_min_samples` (افتراضي 5) بيتسحب score بتاعه ناحية `ranking.
+   * bayesian_prior_mean` (افتراضي 4.0، متوسط منصف محافظ) بدل ما ياخد تقييمه الخام كامل الثقة.
+   * الصيغة: `score = (v×R + m×C) / (v+m)` — v=عدد تقييماته، R=متوسطه، m=العتبة، C=المتوسط
+   * الافتراضي. فني 5.0/تقييم واحد: `(1×5 + 5×4)/(1+5) = 4.17`. فني 4.9/200 تقييم:
+   * `(200×4.9 + 5×4)/(200+5) = 4.878` — بيسبقه صح دلوقتي. القيم قابلة للتعديل من الأدمن
+   * (`SettingsService`، بلا كود جديد) — نفس نمط أي وزن قابل للإعداد في المشروع.
    */
   async listForServiceBooking(
     serviceId: string,
@@ -311,6 +332,9 @@ export class TechniciansService {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة مش متاحة في منطقتك دلوقتي', HttpStatus.CONFLICT);
     }
 
+    const bayesianMinSamples = await this.settingsService.getNumber('ranking.bayesian_min_samples', 5);
+    const bayesianPriorMean = await this.settingsService.getNumber('ranking.bayesian_prior_mean', 4.0);
+
     interface TechnicianRow {
       technician_id: string;
       full_name: string;
@@ -321,12 +345,33 @@ export class TechniciansService {
       service_completed_count: number;
       distance_km: string | null;
       current_level: TechnicianLevel;
+      on_time_rate: string | null;
+      avg_arrival_minutes: string | null;
     }
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
              tp.average_rating, tp.total_ratings_count, ts.completed_count AS service_completed_count,
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level,
+             (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
+               AS recommendation_score,
+             -- Script 6 Part 7 — مؤشرات أداء حقيقية لكروت المقارنة في السوق (مش أرقام مصطنعة).
+             -- نفس منطق getPublicProfile() بالحرف (technician_departed_at→technician_arrived_at،
+             -- عتبة الالتزام 15 دقيقة) بس كـcorrelated subquery هنا عشان يشتغل لكل الفنيين المرشحين
+             -- دفعة واحدة (LIMIT 50 أصلاً، والعمود مفهرس idx_orders_technician_id).
+             (SELECT ROUND(
+                COUNT(*) FILTER (WHERE o.technician_arrived_at <= o.scheduled_at + interval '15 minutes') * 100.0
+                  / NULLIF(COUNT(*), 0)
+              )
+              FROM orders o
+              WHERE o.technician_id = tp.id AND o.scheduled_at IS NOT NULL
+                AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+             ) AS on_time_rate,
+             (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (o.technician_arrived_at - o.technician_departed_at)) / 60))
+              FROM orders o
+              WHERE o.technician_id = tp.id AND o.technician_departed_at IS NOT NULL
+                AND o.technician_arrived_at IS NOT NULL AND o.deleted_at IS NULL
+             ) AS avg_arrival_minutes
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -334,10 +379,10 @@ export class TechniciansService {
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
-      ORDER BY tp.average_rating DESC, distance_km ASC NULLS LAST, ts.completed_count DESC
+      ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
       LIMIT 50
       `,
-      [serviceId, zone.id, addressId, excludeTechnicianId ?? null],
+      [serviceId, zone.id, addressId, excludeTechnicianId ?? null, bayesianMinSamples, bayesianPriorMean],
     );
 
     return {
@@ -352,6 +397,11 @@ export class TechniciansService {
         serviceCompletedCount: row.service_completed_count,
         distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
         currentLevel: row.current_level,
+        // المرحلة 1 الصارمة فوق فلترت verification_status='approved' بالفعل — أي صف راجع هنا
+        // فني موثّق فعلاً، مفيش سبب يبقى false أبداً هنا لكن الحقل بيترجع صريح مش ضمني.
+        isVerified: true,
+        onTimeRatePercent: row.on_time_rate !== null ? Number(row.on_time_rate) : null,
+        avgArrivalMinutes: row.avg_arrival_minutes !== null ? Number(row.avg_arrival_minutes) : null,
       })),
     };
   }

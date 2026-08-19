@@ -4,6 +4,7 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
+import { toEmployeeSessionResponseDto } from './dto/employee-session-response.dto';
 import { WorkforceActivityService } from './workforce-activity.service';
 
 // Script 5 Part 2/12 — رؤية جلسات/نشاط الموظفين. heartbeat مفتوح لأي أدمن (بيسجّل نشاطه هو بس)،
@@ -34,8 +35,9 @@ export class AdminWorkforceController {
 
   @Get('employees/:userId/sessions')
   @RequirePermission('employees.sessions.view')
-  listSessions(@Param('userId', ParseUUIDPipe) userId: string) {
-    return this.workforce.listSessions(userId);
+  async listSessions(@Param('userId', ParseUUIDPipe) userId: string) {
+    const sessions = await this.workforce.listSessions(userId);
+    return sessions.map(toEmployeeSessionResponseDto);
   }
 
   @Delete('employees/:userId/sessions/:sessionId')

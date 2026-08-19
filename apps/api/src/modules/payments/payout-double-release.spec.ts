@@ -89,6 +89,7 @@ describe('Payout transitions — serialized state and reserved-wallet integrity'
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
 

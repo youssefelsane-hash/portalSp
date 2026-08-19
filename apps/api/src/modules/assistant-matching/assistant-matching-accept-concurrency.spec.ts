@@ -59,6 +59,7 @@ describe('AssistantMatchingService.accept() — قبول مزدوج متزامن
       {} as never,
       {} as never,
       {} as never,
+      {} as never, // settingsService
     );
 
     service = new AssistantMatchingService(

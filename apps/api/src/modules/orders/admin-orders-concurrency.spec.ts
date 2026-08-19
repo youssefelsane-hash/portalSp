@@ -130,6 +130,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
+      {} as never, // settingsService
     );
 
     adminOrdersService = new AdminOrdersService(
