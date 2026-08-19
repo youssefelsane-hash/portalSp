@@ -42,9 +42,9 @@
 | 12 | Dispatch & Matching | Matching | VERIFIED | جزئي — راجعت `matching.service.ts` (ترتيب دفعات، أولوية مستوى، تفضيل فني/شركة مع fallback) بالقراءة، مفيش استغلال جديد اتبنى | نعم — تغطية موجودة بالفعل (اختبارات حية موثّقة في matching/README.md للطوارئ، تفضيل الشركة، fallback) | لا يوجد | لا يوجد | مفيش | commit سابق + هذا التحقق |
 | 13 | Capacity / Multi-worker Jobs | Matching/Crew | VERIFIED | نعم — أكّدت إن `matching.service.ts` بيوزّع قائد واحد بس، `assistant-matching` بيغطي `requiredAssistants` بس، و`requiredTechnicians>1` (طاقم كامل) قصده الإداري (`crewShortage` indicator، admin crew editing tool) مش تلقائي بالكامل — قرار عمل موثّق صراحة، مش بَقّة | نعم — `admin-crew-management.spec.ts` (14 اختبار) يغطي هذا المسار بالكامل بما فيه `crewShortage` | لا يوجد | لا يوجد | التوليد التلقائي الكامل لأكتر من فني قائد واحد مش مطبّق (owner نفسه أكّد "الحساب مش موجود حاليا") — فجوة موثّقة صراحة من قبل، مش جديدة | commit سابق + هذا التحقق |
 | 14 | Technician App | Technician-app | FIXED | جزئي — `flutter analyze` نضيف (0 أخطاء) على الشاشة الجديدة والملفات المعدّلة، مفيش render حي (Xvfb) — تغيير إضافي بحت مبرَّر بنفس منطق BUG-007 | لا يوجد اختبار jest جديد (تغيير Dart-only، الـendpoint المُستخدم مغطّى backend من قبل بـIDOR fix موثّق) | BUG-009 (P2 — فني قائد لطلب "اعتماد" معندوش أي رؤية لطاقمه في التطبيق) | BUG-009 fixed | إضافة/إزالة عضو طاقم من التطبيق نفسه (مش بس عرض) لسه مش موجودة — الباك-إند جاهز (`POST`/`DELETE .../team-members`) بس الشاشة الجديدة read-only عمدًا (نطاق محدود لإصلاح فجوة الرؤية الأساسية، مش إعادة بناء الشاشة بالكامل) | commit قادم |
-| 15 | Order State Machine | Orders | PENDING | | | | | | |
-| 16 | Cancellations | Orders | PENDING | | | | | | |
-| 17 | Refunds | Payments | PENDING | | | | | | |
+| 15 | Order State Machine | Orders | VERIFIED | جزئي — راجعت `ORDER_TRANSITIONS` كامل (`Record<OrderStatus,...>` بيفرض شمولية compile-time، أي حالة ناقصة = خطأ tsc)، مفيش استغلال جديد اتبنى | نعم — `order-state-machine.spec.ts` موجود من قبل | لا يوجد | لا يوجد | مفيش | commit سابق + هذا التحقق |
+| 16 | Cancellations | Orders | VERIFIED | جزئي — راجعت `CUSTOMER_CANCELLABLE_STATUSES`/سياسة إلغاء الفني (docs/10)، مفيش استغلال جديد اتبنى (نطاق عميق اتغطى في سيشنز سابقة: P0-9، endpoint إلغاء الفني، رسوم الإلغاء) | نعم — تغطية موجودة بالفعل عميقة عبر عدة ملفات spec | لا يوجد | لا يوجد | مفيش | commit سابق + هذا التحقق |
+| 17 | Refunds | Payments | PARTIAL | نعم — أعدت تشغيل سيناريو "throw أثناء نداء البوابة" الموجود من قبل (يثبت استرداد عالق PROCESSING فعليًا) + `listRefunds()` الجديدة عليه مباشرة | نعم — امتداد لاختبار موجود (`refund-transaction-safety.spec.ts`) بنفس الفكستشر اللي بيثبت السيناريو الحقيقي أصلاً | BUG-010 (P1 — استرداد عالق PROCESSING بلا أي رؤية إدارية) | BUG-010 fixed جزئيًا (الرؤية بس) | **قرار عمل مطلوب**: `provider.reconcile()` موجود في الـinterface ومطبّق فعليًا لـPaymob بس **مش متصل بأي endpoint/job خالص** — التسوية التلقائية الكاملة (نداء reconcile فعليًا وإكمال الاسترداد تلقائيًا) لسه مش مبنية عمدًا (خطر حقيقي: منطق مالي معقّد — عكس أرباح الفني، قيد مزدوج، تجميع "الطلب اتراد بالكامل" عبر أكتر من دفعة — يحتاج بناء + اختبار حي ضد Paymob sandbox حقيقي، خارج نطاق آمن لتغيير عاجل بلا اختبار خارجي حقيقي). مصنّفة NEEDS BUSINESS DECISION جزئيًا | commit قادم |
 | 18 | Wallet / Ledger / Commission | Wallets | PENDING | | | | | | |
 | 19 | Provider Payouts | Payouts | PENDING | | | | | | |
 | 20 | Promo / Referral / Discounts | Promotions | PENDING | | | | | | |
@@ -345,6 +345,51 @@ Live verification: `flutter analyze` بس (مش render حي بـXvfb) — مبر
 التقيلة مخصصة أساسًا لبَقات تفاعل/رندر حقيقية (نفس تبرير BUG-007). طلبات `booking_mode=individual`
 (الأغلبية الساحقة حاليًا) مش متأثرة خالص — القسم الجديد مش بيظهر ليهم أصلًا.
 Status: FIXED
+
+### BUG-010
+Severity: P1 (استرداد عالق ببلاش فلوس عميل — لا مسترد ولا متتبَّع، مالوش أي رؤية إدارية)
+Flow: Phase 17 (Refunds) — التحقيق الصريح المطلوب في "known items to retest" ("refund stuck in
+PROCESSING")
+Symptom: `refundOrder()` بتسجّل صف `Refund` بحالة PROCESSING **قبل** نداء بوابة الدفع الخارجي
+(تصميم متعمّد وصحيح لمنع استرداد مزدوج)، لكن لو النداء نفسه رمى استثناء (شبكة اتقطعت، timeout)،
+الصف يفضل PROCESSING **للأبد** — رسالة الرفض بتقول للأدمن "راجع الطلب يدويًا (provider.reconcile)"،
+لكن `provider.reconcile()` **مش متصل بأي endpoint أو job خالص** — طريقة الحل الموصوفة مش موجودة
+فعليًا كـعملية قابلة للاستدعاء. وأخطر من كده: **مفيش أي endpoint كان بيرجّع قايمة استردادات
+خالص** — الأدمن معندوش طريقة يعرف إن فيه استرداد عالق من الأساس غير استعلام DB مباشر.
+Reproduction: `refund-transaction-safety.spec.ts` عنده سيناريو موجود بالفعل من قبل ("نداء البوابة
+رمى استثناء") بيثبت ده حيًا: صف Refund بيفضل `PROCESSING` بعد استثناء البوابة، ومحاولة استرداد
+تانية بترفض فورًا (409) — يعني الاسترداد ده مقفول تمامًا بلا أي طريقة يتقفل بيها.
+Expected: الأدمن (على الأقل) يقدر يشوف كل الاستردادات العالقة في PROCESSING عشان يتصرف (حتى لو
+التصرف نفسه لسه يدوي عبر لوحة تحكم Paymob مباشرة مؤقتًا).
+Actual: صفر رؤية، صفر endpoint، صفر أثر — `provider.reconcile()` كود ميت عمليًا.
+Root cause: التصميم الأصلي (توثيق صريح في الكود نفسه) اعتبر التسوية اليدوية "خارج نطاق" وقت
+بناء إصلاح الـdistributed-transaction، لكن حتى "اليدوي" ده محتاج نقطة دخول — ماتبنتش.
+Files involved: `apps/api/src/modules/payments/payments.service.ts`,
+`apps/api/src/modules/payments/admin-payments.controller.ts`,
+`apps/api/src/modules/payments/dto/payments-response.dto.ts`,
+`apps/api/src/modules/payments/dto/list-refunds-query.dto.ts`,
+`infra/migrations/0140_refunds_view_permission.sql`
+Financial/security impact: مباشر — فلوس عميل (أو فني، حسب اتجاه الاسترداد) ممكن تفضل "معلّقة"
+غير مؤكّدة لا عند العميل ولا عند المنصة، بلا أي تنبيه لحد يلاحظ غير مراجعة يدوية للـDB.
+Fix (جزء منفّذ الآن): `PaymentsService.listRefunds(status?)` + `GET /admin/refunds?status=...`
+(صلاحية جديدة `refunds.view`، migration 0140، نفس نمط `payouts.view`/`wallets.view` من قبل) —
+الأدمن دلوقتي يقدر يشوف كل الاستردادات، وتحديدًا يفلتر `processing` عشان يلاقي العالقة. الـDTO
+اتوسّع بحقول مفيدة للمراجعة (`payment_id`, `refund_method`, `requested_at`, `provider_refund_id`).
+Fix (جزء مؤجّل عمدًا — قرار عمل مطلوب): التسوية التلقائية الكاملة (نداء `provider.reconcile()`
+فعليًا + تطبيق أثرها المالي بنفس منطق phase (c) الحالي في `refundOrder()`) **متعمّد التأجيل** —
+منطق مالي حساس جدًا (عكس أرباح فني متناسب، قيد مزدوج، تجميع حالة "الطلب اتراد بالكامل" عبر أكتر
+من دفعة) يحتاج بناء دقيق + اختبار حي ضد Paymob sandbox حقيقي (مش mock)، وده خارج نطاق آمن لبناء
+تحت ضغط وقت بلا القدرة على اختبار خارجي فعلي هنا. مصنّفة NEEDS BUSINESS DECISION — القرار
+المطلوب من المالك: هل نبني endpoint إداري صريح "حاول تسوية الاسترداد ده تاني" (يستدعي reconcile
+فعليًا)، ولا نكتفي بالرؤية + تسوية يدوية عبر Paymob dashboard مباشرة كسياسة تشغيلية مقبولة؟
+Regression test: امتداد للاختبار الموجود بالفعل (`refund-transaction-safety.spec.ts`، سيناريو
+"throw") — أضفت assertion إن `listRefunds(PROCESSING)` بترجّع نفس الصف العالق اللي الاختبار
+أثبت عالقته فعليًا. اتأكد بـ`tsc`/تشغيل الاختبار إن الميثود الجديدة صحيحة، والاختبار مايبنيش على
+افتراض نظري (نفس البيانات اللي الاختبار الأصلي أثبتها عالقة).
+Live verification: jest حي ضد Postgres حقيقي (7/7 نجحوا). Full regression: 98 suite، 544
+اختبار — نجحوا كلهم غير فشل عابر غير مرتبط (`security-concurrency.spec.ts`، موثّق ومؤجّل لـPhase 30
+من قبل، اتأكد إنه مش ناتج عن التغيير ده بإعادة تشغيله لوحده والسويت كله مرتين تانيين).
+Status: PARTIAL (الرؤية اتصلحت، التسوية التلقائية الكاملة NEEDS BUSINESS DECISION)
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
 

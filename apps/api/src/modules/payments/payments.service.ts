@@ -1567,6 +1567,18 @@ export class PaymentsService {
    * خطأ شبكة/داخلي غير متوقّع بيرمي الاستثناء عادي (transaction بترجع لورا، مفيش صف refund
    * اتسجّل خالص) عشان الأدمن يقدر يعيد المحاولة — مش قفل دائم زي الرفض النهائي.
    */
+  // كانت فجوة موثّقة صراحة اتلقطت أثناء تحقيق Script 7 Phase 17 ("refund عالق PROCESSING"):
+  // رسالة الرفض في refundOrder() بتحول الأدمن لمراجعة يدوية، لكن مفيش أي endpoint كان بيرجّع
+  // قايمة استردادات خالص — الأدمن معندوش طريقة يعرف إن فيه استرداد عالق من الأساس غير استعلام
+  // DB مباشر. migration 0140 (`refunds.view`) بتحمي الـendpoint ده.
+  async listRefunds(status?: RefundStatus): Promise<Refund[]> {
+    return this.refunds.find({
+      where: status ? { refundStatus: status } : {},
+      order: { requestedAt: 'DESC' },
+      take: 200,
+    });
+  }
+
   async refundOrder(
     performedByUserId: string,
     orderId: string,

@@ -176,20 +176,32 @@ export function toPayoutOrderItemResponseDto(item: PayoutOrderItem): PayoutOrder
 export interface RefundResponseDto {
   id: string;
   refund_number: string;
+  payment_id: string;
   order_id: string;
   amount_cents: number;
+  refund_type: string;
+  refund_method: string;
   refund_status: string;
+  reason_notes: string | null;
+  requested_at: string;
   completed_at: string | null;
+  provider_refund_id: string | null;
 }
 
 export function toRefundResponseDto(refund: Refund): RefundResponseDto {
   return {
     id: refund.id,
     refund_number: refund.refundNumber,
+    payment_id: refund.paymentId,
     order_id: refund.orderId,
     amount_cents: refund.amountCents,
+    refund_type: refund.refundType,
+    refund_method: refund.refundMethod,
     refund_status: refund.refundStatus,
+    reason_notes: refund.reasonNotes,
+    requested_at: refund.requestedAt.toISOString(),
     completed_at: refund.completedAt ? refund.completedAt.toISOString() : null,
+    provider_refund_id: refund.providerRefundId,
   };
 }
 

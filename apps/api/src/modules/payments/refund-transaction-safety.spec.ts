@@ -254,6 +254,12 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     await expect(service.refundOrder(ids.customerUser, orderId, 'محاولة تانية')).rejects.toThrow(
       'محاولة استرداد سابقة لسه قيد التأكيد',
     );
+
+    // Script 7 Phase 17 — كانت فجوة موثّقة صراحة: الاسترداد العالق ده كان مفيش أي طريقة للأدمن
+    // يشوفه بيها خالص (مفيش GET /admin/refunds). listRefunds() الجديدة لازم ترجّعه صراحة —
+    // إثبات إن الرؤية بقت موجودة فعليًا لنفس السيناريو اللي الاختبار ده بيثبته فوق.
+    const stuckRefunds = await service.listRefunds(RefundStatus.PROCESSING);
+    expect(stuckRefunds.some((r) => r.id === refund!.id)).toBe(true);
   });
 
   it('البوابة رفضت أول محاولة: الرفض لا يحجز أي مبلغ، لذلك يمكن إعادة المحاولة لاحقًا بأمان', async () => {
