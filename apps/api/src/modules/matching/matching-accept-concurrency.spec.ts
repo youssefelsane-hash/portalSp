@@ -325,7 +325,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     await insertOrder('busy-tech', ids.technicianBProfile, OrderStatus.ACCEPTED);
     const targetOrder = await insertOrder('admin-target');
     await expect(adminOrdersService.reassign(ids.adminUser, targetOrder, ids.technicianBProfile)).rejects.toThrow(
-      'الفني عنده طلب نشط بالفعل',
+      'الفني غير متاح في الوقت المطلوب لهذا الطلب',
     );
   });
 
@@ -345,20 +345,20 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     const acceptTarget = await insertOrder('quote-accept-target');
     await insertAssignment(acceptTarget, ids.technicianBProfile);
     await expect(matchingService.accept(ids.technicianBUser, acceptTarget)).rejects.toThrow(
-      'الفني عنده طلب نشط بالفعل',
+      'الفني غير متاح في الوقت المطلوب لهذا الطلب',
     );
 
     const reassignTarget = await insertOrder('quote-reassign-target');
     await expect(
       adminOrdersService.reassign(ids.adminUser, reassignTarget, ids.technicianBProfile),
-    ).rejects.toThrow('الفني عنده طلب نشط بالفعل');
+    ).rejects.toThrow('الفني غير متاح في الوقت المطلوب لهذا الطلب');
 
     await expect(
       dataSource.query(
         `UPDATE orders SET technician_id = $1, order_status = 'accepted' WHERE id = $2`,
         [ids.technicianBProfile, reassignTarget],
       ),
-    ).rejects.toMatchObject({ code: '23505', constraint: 'uq_orders_one_active_per_technician' });
+    ).rejects.toMatchObject({ code: '23505', constraint: 'uq_orders_one_active_asap_per_technician' });
 
     await dataSource.query(`UPDATE orders SET order_status = 'in_progress' WHERE id = $1`, [quoteOrder]);
     await dataSource.query(`UPDATE orders SET order_status = 'awaiting_quote_approval' WHERE id = $1`, [quoteOrder]);

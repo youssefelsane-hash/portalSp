@@ -165,4 +165,12 @@ flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api
 نقطة اختناق واحدة جوّه `_apiRequestRaw()`/`apiUpload()` بتحوّل أي استثناء غير `ApiException`
 لـ`ApiException` واضحة. `flutter analyze` نضيف بلا تحذيرات.
 
+## بَقّة حقيقية اتلقطت — شاشة الإشعارات فاضية رغم إن الجرس بيوريّ عدد (2026-08-19، بلاغ المالك)
+
+نفس البَقّة بالحرف الموجودة في `apps/customer-app/README.md` (نفس الملف نسخة طبق الأصل بين
+التطبيقين) — `NotificationsRepository.list()` كانت بتستخدم `authedRequest()` (متوقّعة `Map`) لـ
+`GET /notifications` رغم إن الـendpoint بيرجّع `{items, meta}` واللي `ResponseInterceptor` بيسطّحه
+لـ`array` مباشرة. `_guardNetworkError()` (الفقرة فوق) ماكانتش كافية لأن الـcast اللي بيفشل موجود
+**بعد** نطاق حمايتها. الإصلاح: `list()` بقت تستخدم `authedRequestList()` بدل `authedRequest()`.
+
 مرجع كامل: `../../docs/01-master-plan.md`

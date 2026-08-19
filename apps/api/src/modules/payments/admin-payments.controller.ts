@@ -12,6 +12,7 @@ import { ListPayoutsQueryDto } from './dto/list-payouts-query.dto';
 import { ListRefundsQueryDto } from './dto/list-refunds-query.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
+import { RejectInstaPayPaymentDto } from './dto/reject-instapay-payment.dto';
 import {
   toAdminPayoutResponseDto,
   toPaymentResponseDto,
@@ -94,6 +95,23 @@ export class AdminPaymentsController {
     @AuditContext() audit: AuditMeta,
   ) {
     const payment = await this.paymentsService.confirmInstaPayPayment(user.sub, id, audit);
+    return toPaymentResponseDto(payment);
+  }
+
+  /**
+   * كانت فجوة حقيقية — confirm-instapay فوق موجودة من زمان، رفض دفعة InstaPay معلّقة لأ (بعكس
+   * طلبات الصرف اللي عندها approve/reject/complete). نفس الصلاحية/MFA بالظبط.
+   */
+  @Post('payments/:id/reject-instapay')
+  @RequirePermission('payments.confirm_manual')
+  @RequireStepUp()
+  async rejectInstaPayPayment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectInstaPayPaymentDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const payment = await this.paymentsService.rejectInstaPayPayment(user.sub, id, dto.reason, audit);
     return toPaymentResponseDto(payment);
   }
 

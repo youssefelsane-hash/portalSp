@@ -23,6 +23,8 @@ import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificate } from './entities/technician-certificate.entity';
 import { TechnicianCertificatesService } from './technician-certificates.service';
 import { SettingsService } from '../settings/settings.service';
+import { technicianAvailabilityCondition } from './technician-eligibility.sql';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -312,6 +314,7 @@ export class TechniciansService {
     serviceId: string,
     addressId: string,
     excludeTechnicianId?: string,
+    scheduledAt?: Date | null,
   ): Promise<{ zoneId: string; items: TechnicianBookingListItem[] }> {
     interface AddressRow {
       city_id: string | null;
@@ -386,10 +389,30 @@ export class TechniciansService {
         -- (لازمة لأي توزيع فعلي بغض النظر عن ASAP/مجدول)، فبقى شرط هنا كمان.
         AND tp.current_location IS NOT NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
+        -- ADR-0017 بند 4/6 — نفس مصدر التوافر المستخدم في المطابقة الفعلية (matching.service.ts)
+        -- وتعيين الأدمن القسري، عشان القايمة دي تعكس مين فعلاً هيتقبل فعليًا للتاريخ/الوقت
+        -- ده، مش بس "مؤهّل بشكل عام" (نفس فئة بَقّة "يوسف" فوق، بس لبُعد الوقت مش الموقع).
+        -- excludeOrderIdParam = NULL حرفي — لسه مفيش طلب فعلي اتعمل، دي مرحلة تصفّح قبل الحجز.
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: '$7',
+          excludeOrderIdParam: 'NULL',
+          activeStatusesParam: '$8',
+          serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+        })}
       ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
       LIMIT 50
       `,
-      [serviceId, zone.id, addressId, excludeTechnicianId ?? null, bayesianMinSamples, bayesianPriorMean],
+      [
+        serviceId,
+        zone.id,
+        addressId,
+        excludeTechnicianId ?? null,
+        bayesianMinSamples,
+        bayesianPriorMean,
+        scheduledAt ?? null,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+      ],
     );
 
     return {

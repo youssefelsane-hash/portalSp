@@ -1,9 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { BookingMode, Order } from '../orders/entities/order.entity';
+import { Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { technicianAvailabilityCondition } from './technician-eligibility.sql';
 
 /** Shared assignment eligibility used by technician acceptance and admin reassignment. */
 @Injectable()
@@ -24,19 +25,10 @@ export class TechnicianAssignmentGuardService {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
-    // بَقّة حقيقية اتلقطت (تعيين فني إجباري من الأدمن لطلب مجدول ليوم بعيد، 2026-08-19): isAvailable/
-    // isOnDuty بيعبّروا عن حالة الفني "دلوقتي" (هو مسجّل أونلاين وحر فعلاً هذه اللحظة) — مش عن جدول
-    // مواعيده المستقبلي. طلب عنده scheduledAt (يعني ليه ميعاد محدد مستقبلي، مش ASAP) لازم يتقيّم
-    // بالجدول الحقيقي (technician_schedule_slots تحت) مش بحالة "أونلاين دلوقتي" — الفني مش مفروض
-    // يكون أونلاين النهاردة عشان طلب بعد 6 أيام مثلاً. الفحص ده يفضل يسري بس على طلبات ASAP
-    // (scheduledAt فاضي) اللي فعلاً محتاجة الفني يكون متاح أونلاين هذه اللحظة بالظبط.
-    if (
-      !order.scheduledAt &&
-      order.bookingMode !== BookingMode.EMERGENCY &&
-      (!technician.isAvailable || !technician.isOnDuty)
-    ) {
-      throw new ApiException(ErrorCode.ORDR_003, 'الفني غير متاح أو خارج الوردية حاليًا', HttpStatus.CONFLICT);
-    }
+    // ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل. الفني متاح افتراضيًا
+    // (Opt-out) — مش محتاج يكون "أونلاين دلوقتي" عشان الأدمن يقدر يعيّنه لطلب مجدول (أو حتى فوري،
+    // التعيين القسري قرار إداري صريح مش انتظار قبول عادي). التوافر الحقيقي بيتفحص تحت عبر
+    // technicianAvailabilityCondition() (نفس المصدر المستخدم في matching.service.ts).
     if (!technician.currentLocation) {
       throw new ApiException(ErrorCode.ORDR_003, 'لا يوجد موقع حالي للفني يسمح بالتعيين', HttpStatus.CONFLICT);
     }
@@ -70,45 +62,25 @@ export class TechnicianAssignmentGuardService {
       throw new ApiException(ErrorCode.ORDR_003, 'قيمة الطلب أعلى من حد قرار مستوى الفني', HttpStatus.CONFLICT);
     }
 
-    // بَقّة حقيقية اتلقطت (نفس السيناريو فوق: تعيين فني له طلب نشط النهاردة لطلب تاني مجدول بعد
-    // أسبوع) — ACTIVE_TECHNICIAN_ORDER_STATUSES (order-state-machine.ts) بتفترض عمدًا "فني واحد
-    // بياخد طلب نشط واحد في نفس الوقت"، وده صحيح لطلبات ASAP (محتاجة الفني يكون حر فعليًا دلوقتي)
-    // لكنه غلط لو الطلب الجديد ده مجدول (scheduledAt) ليوم تاني خالص — التعارض الحقيقي بين
-    // ميعادين مختلفين بيتفحص صح بالجدول (technician_schedule_slots) تحت، مش هنا. الفحص ده يفضل
-    // يسري بس على طلبات ASAP.
-    if (!order.scheduledAt) {
-      const [activeOrder] = await manager.query<{ id: string }[]>(
-        `SELECT id FROM orders
-         WHERE technician_id = $1
-           AND id != $2
-           AND order_status = ANY($3::order_status[])
-           AND deleted_at IS NULL
-         LIMIT 1`,
-        [technician.id, order.id, ACTIVE_TECHNICIAN_ORDER_STATUSES],
-      );
-      if (activeOrder) {
-        throw new ApiException(ErrorCode.ORDR_003, 'الفني عنده طلب نشط بالفعل', HttpStatus.CONFLICT);
-      }
-    }
-
-    if (order.scheduledAt) {
-      const [conflict] = await manager.query<{ id: string }[]>(
-        `SELECT tss.id
-         FROM technician_schedule_slots tss
-         JOIN services s ON s.id = $2
-         WHERE tss.technician_id = $1
-           AND tss.status = 'booked'
-           AND tss.deleted_at IS NULL
-           AND tss.order_id IS DISTINCT FROM $3
-           AND tss.slot_date = ($4::timestamptz)::date
-           AND tss.start_time < (($4::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
-           AND tss.end_time > ($4::timestamptz)::time
-         LIMIT 1`,
-        [technician.id, order.serviceId, order.id, order.scheduledAt],
-      );
-      if (conflict) {
-        throw new ApiException(ErrorCode.ORDR_003, 'الفني عنده موعد متعارض مع الطلب', HttpStatus.CONFLICT);
-      }
+    // ADR-0017 بند 4-5 — نفس مصدر التوافر المشترك مع matching.service.ts (findEligibleTechnicians)
+    // وtechnicians.service.ts (listForServiceBooking)، بدل نسخة مستقلة تالتة ممكن تنجرف عن الاتنين
+    // التانيين (زي ما حصل بالظبط قبل كده — راجع ADR-0017 السياق).
+    const [{ available }] = await manager.query<{ available: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1 FROM technician_profiles tp
+         WHERE tp.id = $1
+         ${technicianAvailabilityCondition({
+           technicianIdExpr: 'tp.id',
+           scheduledAtParam: '$4',
+           excludeOrderIdParam: '$3',
+           activeStatusesParam: '$5',
+           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $2)',
+         })}
+       ) AS available`,
+      [technician.id, order.serviceId, order.id, order.scheduledAt, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+    );
+    if (!available) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الفني غير متاح في الوقت المطلوب لهذا الطلب (تعارض جدول أو طلب آخر نشط)', HttpStatus.CONFLICT);
     }
   }
 }

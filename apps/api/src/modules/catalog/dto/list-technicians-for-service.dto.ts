@@ -1,10 +1,19 @@
 import { Transform } from 'class-transformer';
-import { IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
+import { IsDateString, IsIn, IsObject, IsOptional, IsUUID } from 'class-validator';
 import { BOOKING_MODE_FILTER_VALUES, BookingModeFilter } from './list-services.dto';
 
 export class ListTechniciansForServiceDto {
   @IsUUID()
   address_id: string;
+
+  // ADR-0017 بند 6 — "إمتى عايز الخدمة؟" لازم تتحدد قبل اختيار الفني عشان القايمة نفسها تعكس
+  // مين فعلاً متاح للتاريخ/الوقت ده (مش بس "مؤهّل بشكل عام"). فاضي = ASAP (نفس الافتراضي القديم،
+  // اختيار صريح مش سهو). لو موجودة، بتتمرر لنفس شرط التوافر المستخدم في المطابقة الفعلية
+  // (technicianAvailabilityCondition) — عشان القايمة دي والتوزيع الفعلي يتفقوا دايمًا (بَقّة
+  // "يوسف" كانت بالظبط اختلاف بين الاتنين).
+  @IsOptional()
+  @IsDateString()
+  scheduled_at?: string;
 
   // خدمات pricing_model=formula (docs/08 §1) — لو العميل ملى تفاصيل الشغل بالفعل (فورم ديناميكي
   // قبل شاشة اختيار الفني)، السعر النهائي الحقيقي لكل فني مرشّح (بعد مضاعف مستواه) بيظهر هنا —

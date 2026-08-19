@@ -308,3 +308,45 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 (بدون ضغطة مستخدم) جوّه `initState()` **لازم** يتأجّل بـ`addPostFrameCallback` — نداءه المباشر
 بيخاطر بتصادم مع انيميشن دخول الشاشة الحالية نفسها، والنتيجة Navigator فاسد بصمت بلا أي رسالة خطأ
 للمستخدم.
+
+## بَقّة حقيقية اتلقطت — شاشة الإشعارات فاضية رغم إن الجرس بيوريّ عدد (2026-08-19، بلاغ المالك)
+
+`NotificationsRepository.list()` كانت بتستخدم `authedRequest()`/`apiRequest()` (متوقّعة `Map`)
+لـ`GET /notifications`، رغم إن الـendpoint ده شكله `{items, meta}` — `ResponseInterceptor`
+(الباك-إند) بيسطّح الشكل ده تلقائيًا فبيرجّع `data` كـ**array مباشرة**، مش `Map` فيه مفتاح
+`items`. النتيجة: `apiRequest()`'s الـcast الداخلي (`data as Map<String, dynamic>?`) كان بيرمي
+`TypeError` خام **قبل** حتى ما يوصل للسطر اللي بيقرأ `data!['items']` — والـTypeError ده مش
+`ApiException`، فمعالجة `on ApiException catch` في `notifications_screen.dart` ماكانتش بتمسكه
+خالص، فالشاشة تفضل عالقة على `_notifications == null` للأبد. `GET /notifications/unread-count`
+بيرجّع `Map` عادي (مش `{items,meta}`) فمابيتسطّحش، فالجرس (badge) كان شغال طبيعي — ده بالظبط
+اللي خلّى العرض يبان "جرس بيوريّ عدد، شاشة فاضية" بالحرف. الإصلاح الحقيقي (كان لازم `_guardNetworkError`
+السابقة، بس ماكانش كافي — التحويل ده بيحصل بعد نطاق `_guardNetworkError` مش جواه): `list()` بقت
+تستخدم `authedRequestList()` (نفس المستخدمة في `fetchPreferences()` جنبها بالفعل — المسار الصح
+لأي endpoint بشكل `{items, meta}`) بدل `authedRequest()`.
+
+## "امتى تحب تنفّذ الشغل؟" — خطوة إجبارية جديدة في تدفق الحجز (docs/08 §154، 2026-08-19)
+
+كانت فجوة حقيقية: تدفق الحجز العادي (فئة → خدمة → وضع الحجز → ... → تأكيد) ما كانش بيسأل العميل
+عن الموعد المطلوب خالص — `scheduled_at` كان معلن في الباك-إند (`CreateOrderDto`) من زمان بس
+مفيش أي كود Dart في `apps/customer-app` بيملاه، فكل الطلبات كانت بتتسجّل ASAP ضمنيًا بلا ما العميل
+يُسأل أو يقدر يطلب موعد مستقبلي من الشاشة الرئيسية أصلاً (المسار الوحيد اللي كان بيستخدم التاريخ/
+الوقت فعليًا هو تدفق منفصل تمامًا للعاملات المنزليات `domestic_workers/`، غير متصل بالحجز العادي).
+
+**الحل**: شاشة جديدة `features/orders/schedule_selection_screen.dart` (`ScheduleSelectionScreen`) —
+أربع خيارات: "في أقرب وقت ممكن" (ASAP، `scheduledAt=null` صراحة، مش سهو)، "النهاردة الساعة كام؟"،
+"بكرة الساعة كام؟"، "تاريخ ووقت تاني". بتظهر إجباريًا في `catalog_navigation.dart`'s
+`navigateToServiceBooking()` فورًا بعد اختيار وضع الحجز (فردي/اعتماد) — **الطوارئ مستثناة عمدًا**
+(استجابة فورية بالتعريف، و`orders.service.ts` بيرفض `scheduled_at` مع بوكينج طوارئ بوضوح). العميل
+اللي يرجع من غير ما يختار بيلغي الحجز كله (نفس نمط إلغاء اختيار العنوان الموجود بالفعل).
+
+القيمة بعد كده بتتمرّر كـconstructor parameter (`requestedAt`) عبر كل الشاشات في السلسلة —
+`JobDetailsScreen` → `TechnicianSelectionScreen` → `TechnicianMarketplaceScreen`/`CreateOrderScreen`
+مباشرة (مفيش state management مشترك في التطبيق ده، نفس نمط `initialAddress`/`fieldValues` الموجود
+بالفعل) — لحد `CreateOrderScreen` اللي بتعرضها وتسمح بتغييرها (`_pickSchedule`) قبل التأكيد النهائي،
+وتبعتها فعليًا كـ`scheduled_at` (ISO 8601 UTC) في `POST /orders`. `TechniciansRepository.listForService()`
+بقت كمان بتبعت نفس القيمة كـ`scheduled_at` query param لـ`GET /services/:id/technicians` (كان
+مدعوم في الباك-إند من ADR-0017 بند 6 بلا أي استخدام فعلي من العميل) — عشان قايمة الفنيين المعروضة
+تعكس فعليًا مين متاح للتاريخ المطلوب، مش أهلية عامة "دلوقتي" ممكن متبقاش صحيحة وقت الموعد الفعلي.
+`POST /orders/preview` **ما بتاخدش** `scheduled_at` عمدًا (موثّق صراحة في `preview-order.dto.ts` —
+الموعد مأثرش على السعر خالص). `Order.scheduledAt` بقى معروض في `order_detail_screen.dart` كمان
+للتتبع الكامل (كان الحقل ده موجود في رد الباك-إند من زمان بس الموديل هنا مكانش بيقراه خالص).

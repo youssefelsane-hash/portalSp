@@ -19,6 +19,7 @@ import { ACTIVE_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { technicianAvailabilityCondition } from '../technicians/technician-eligibility.sql';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 
@@ -41,6 +42,12 @@ const EMERGENCY_SUBSEQUENT_BATCH_SIZE_FALLBACK = 10;
 const EMERGENCY_RESPONSE_TIMEOUT_SECONDS_FALLBACK = 20;
 const EMERGENCY_MAX_TECHNICIANS_CONTACTED_FALLBACK = 40;
 const EMERGENCY_ESCALATION_AFTER_ROUNDS_FALLBACK = 2;
+// ADR-0017 بند 7 — "النهاردة وبكرة" هي نافذة الطلب/القبول-الرفض العادية بالحرف من كلام المالك.
+// أي طلب لتاريخ بعد كده بيتأكد تلقائيًا (autoConfirmFutureOrder تحت) بلا انتظار قبول فني.
+const NEAR_TERM_REQUEST_DAYS_FALLBACK = 1;
+// ADR-0017 بند 10 — الجولة اللي بعدها يتوسّع البحث لفنيين "مرتبطين بس مشغولين بطلب نشط دلوقتي"
+// (نفس شرط الخدمة/المنطقة يفضل ساري دايمًا). قيمة كبيرة (أكبر من matching.max_rounds) = تعطيل.
+const BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK = 4;
 
 interface EligibleTechnicianRow {
   technician_id: string;
@@ -100,21 +107,21 @@ export class MatchingService {
    * نفس شروط الأهلية العادية بالظبط (خدمة/منطقة/متاح/معتمد/مش مشغول). لو رجعت فاضية، الكولر
    * (`dispatchNextRound`) مسؤول يرجع يسأل من غير القيد ده بدل ما يعتبرها "مفيش فنيين خالص".
    *
-   * `ignoreAvailabilityFilter` (docs/06 §1.7 — بث "طوارئ") — لو `true`، بيتجاهل شرط
-   * `is_available`/`is_on_duty` تمامًا (المالك: "بيوصل لكل الناس القريبة منه بلا استثناء...
-   * طالما فاتح نت والإشعار ممكن يوصله"). باقي شروط الأهلية (معتمد، ليه موقع، مش مشغول بطلب
-   * نشط بالفعل، مؤهّل للخدمة/المنطقة) بتفضل زي ما هي — "بلا استثناء" في كلام المالك بيقصد
-   * حالة التوافر بس، مش قدرة الفني الفعلية إنه يستلم طلب أصلاً.
+   * `ignoreAvailabilityFilter` — **بقى no-op بالكامل (ADR-0017 بند 3)**. كان بيتحكم في تجاهل
+   * `is_available`/`is_on_duty`، لكن العمودين دول اتشالوا من الأهلية للكل (مش بس الطوارئ) —
+   * الفني متاح افتراضيًا Opt-out، مش محتاج زرار يدوسه كل يوم. متسيّب في التوقيع بس عشان الـcaller
+   * (بث الطوارئ) موجود من زمان، حذفه من التوقيع نفسه تنظيف تجميلي مؤجَّل لسيشن منفصلة.
    *
    * `preferredCompanyId` (docs/06 §1.5 — "اعتماد" بشركة محدّدة) — بيقيّد النتيجة لفنيي نفس
    * الشركة بس لو اتبعت، نفس فلسفة `requestedTechnicianId` بالحرف (تفضيل بس، مش ضمان — لو
    * الشركة مالهاش حد مؤهّل متاح، `dispatchNextRound` يرجع يسأل من غير القيد).
    *
-   * **تعارض جدولة (docs/08 §2) — كانت فجوة موثّقة صراحة، اتقفلت (2026-08-13)**: لطلب
-   * `order.scheduledAt` مستقبلي، الاستعلام دلوقتي بيستبعد كمان أي فني عنده سلوت `booked` في
-   * `technician_schedule_slots` بيتقاطع زمنيًا مع نافذة الطلب المتوقعة (`scheduled_at` →
-   * `scheduled_at + services.estimated_duration_minutes`) — مش بس "مفيش طلب نشط دلوقتي" زي ما
-   * كان قبل كده. لطلب فوري (`scheduledAt` = `null`) الشرط ده no-op تمامًا، نفس السلوك القديم.
+   * **توافر الفني (ADR-0017 — نموذج Opt-out كامل، 2026-08-19)**: `technicianAvailabilityCondition()`
+   * (`technician-eligibility.sql.ts`) هي المصدر الوحيد المشترك مع `listForServiceBooking()`
+   * و`assertEligible()`. القاعدة: طلب ASAP بيستبعد فني عنده طلب نشط دلوقتي بالفعل (بلا اعتبار
+   * لموعد الطلب التاني)؛ طلب مجدول بيستبعد بس لو فيه طلب تاني *بموعد مستقبلي كمان* بتقاطع زمني
+   * حقيقي (طلب ASAP نشط دلوقتي **مايمنعش** طلب مجدول ليوم/وقت تاني — طلب صريح من المالك،
+   * سيناريو "تسليك مواصير نص يوم")؛ وأي استثناء `blocked` صريح حدده الفني بنفسه في جدوله.
    */
   private findEligibleTechnicians(
     order: Order,
@@ -122,6 +129,7 @@ export class MatchingService {
     requestedTechnicianId?: string | null,
     ignoreAvailabilityFilter = false,
     preferredCompanyId?: string | null,
+    ignoreActiveOrderConflict = false,
   ): Promise<EligibleTechnicianRow[]> {
     return this.dataSource.query<EligibleTechnicianRow[]>(
       `
@@ -135,43 +143,25 @@ export class MatchingService {
       JOIN services s ON s.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
       WHERE tp.verification_status = 'approved'
-        AND ($8::boolean OR (tp.is_available = true AND tp.is_on_duty = true))
+        -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
+        -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى
+        -- no-op فعليًا، متسيّب في التوقيع بس (استخدامه القديم كان مقصور على ده بالظبط) — الشرط
+        -- التالت ده تعبير دايمًا صحيح (tautology) بس عشان Postgres يقدر يستنتج نوع $8 أصلاً
+        -- (parameter من غير أي إشارة ليه بيرمي "could not determine data type").
+        AND ($8::boolean IS NULL OR $8::boolean IS NOT NULL)
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
-        -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19 — سيناريو "تسليك مواصير نص يوم") — الاستبعاد
-        -- ده كان unconditional بغض النظر عن scheduledAt الطلب المرشّح، يعني فني عنده طلب نشط
-        -- النهاردة (حتى لو هيخلص بعد ساعتين) كان بيتستبعد من أي طلب تاني حتى لو مجدول بعد أسبوع —
-        -- بالظبط نفس البَقّة اللي اتصلحت في TechnicianAssignmentGuardService.assertEligible() بس
-        -- هنا في مسار التوزيع الفعلي نفسه. الاستبعاد ده يفضل يسري بس على طلبات ASAP (scheduledAt
-        -- فاضي) — الطلبات المجدولة بتتفحص بتعارض السلوتات الحقيقي تحت (بيعتمد على مدة الخدمة
-        -- الفعلية services.estimated_duration_minutes، مش "طول اليوم").
-        AND (
-          $10::timestamptz IS NOT NULL
-          OR tp.id NOT IN (
-            SELECT technician_id FROM orders
-            WHERE technician_id IS NOT NULL AND order_status = ANY($6::order_status[]) AND deleted_at IS NULL
-          )
-        )
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
-        -- تعارض جدولة (docs/08 §2، كانت فجوة موثّقة صراحة في ADR-0007 §7 — "بالاكتفاء بفحص
-        -- 'مفيش طلب نشط' بدل فحص السلوتات"): لطلب scheduled_at مستقبلي، الفحص فوق (طلب نشط
-        -- دلوقتي) مش كافي — فني ممكن يكون فاضي دلوقتي بس عنده سلوت booked بطلب تاني يتعارض
-        -- بالظبط مع وقت الطلب ده. $10 (scheduled_at) بيكون NULL لطلبات فورية فالشرط كله no-op
-        -- (نفس السلوك القديم بالحرف). النافذة الزمنية = [scheduled_at, scheduled_at + مدة الخدمة
-        -- المقدّرة (services.estimated_duration_minutes، افتراضي ساعة لو مش محدد)] — كل القيم UTC
-        -- مباشرة (نفس اتفاقية تركيب scheduled_at من slot_date/start_time في orders.service.ts).
-        AND NOT EXISTS (
-          SELECT 1 FROM technician_schedule_slots tss
-          WHERE tss.technician_id = tp.id
-            AND tss.status = 'booked'
-            AND tss.deleted_at IS NULL
-            AND $10::timestamptz IS NOT NULL
-            AND tss.slot_date = ($10::timestamptz)::date
-            AND tss.start_time < (($10::timestamptz + (COALESCE(s.estimated_duration_minutes, 60) || ' minutes')::interval))::time
-            AND tss.end_time > ($10::timestamptz)::time
-        )
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: '$10',
+          excludeOrderIdParam: '$4',
+          activeStatusesParam: '$6',
+          serviceDurationExpr: 'COALESCE(s.estimated_duration_minutes, 60)',
+          ignoreActiveOrderConflict,
+        })}
       ORDER BY COALESCE(tlc.order_priority_weight, 0) DESC, distance_km ASC
       LIMIT $5
       `,
@@ -206,6 +196,52 @@ export class MatchingService {
    * (كانت هتعمل deadlock: transaction تانية تحاول تقفل نفس صف الطلب اللي الأولى لسه ماسكاه).
    * الأحداث (إشعار/طابور المهلة) بتتبعت بعد ما الـtransaction تتقفل بنجاح بس، مش من جواها.
    */
+  /**
+   * "قريب" (النهاردة/بكرة، أو ASAP) بيرجّع true (نفس فلسفة `matching.near_term_request_days`).
+   * ADR-0017 بند 7. حساب calendar-day بالـUTC (اتفاقية المشروع كلها UTC، مفيش timezone محلي).
+   */
+  private async isNearTermOrder(scheduledAt: Date | null): Promise<boolean> {
+    if (!scheduledAt) return true;
+    const nearTermDays = await this.settingsService.getNumber(
+      'matching.near_term_request_days',
+      NEAR_TERM_REQUEST_DAYS_FALLBACK,
+    );
+    const now = new Date();
+    const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const cutoffExclusive = startOfToday + (nearTermDays + 1) * 24 * 60 * 60 * 1000;
+    return scheduledAt.getTime() < cutoffExclusive;
+  }
+
+  /**
+   * نقطة الدخول الموحّدة (ADR-0017 بند 7) — كل نداء خارجي (OrderDispatchListener،
+   * MatchingDeferredDispatchProcessor، MatchingRecoveryService.sweep) لازم يستخدم دي بدل
+   * `dispatchNextRound()` مباشرة، عشان القرار "قريب/بعيد" يتاخد مرة واحدة بس في مكان واحد.
+   * `reject()` الداخلية بتفضل تنادي `dispatchNextRound()` مباشرة عمدًا — لو فيه `order_assignments`
+   * أصلاً معناه الطلب قريب بالفعل (طلبات بعيدة ماليهاش assignments خالص)، مفيش داعي نعيد الفحص.
+   */
+  /**
+   * ADR-0017 بند 7 — بيستخدمها `OrderDispatchListener` عشان يقرر *قبل* حتى فحص
+   * `dispatchDeferredUntil` (ADR-0009): طلب "بعيد" لازم يتأكد فورًا وقت الإنشاء، مش يستنى لحد
+   * قرب الموعد زي آلية التأجيل بتاعة ADR-0009 (دي لسه سارية بس للطلبات "القريبة" اللي بعيدة عن
+   * دلوقتي بالساعات مش الأيام — تفاصيل الفرق في ADR-0017 بند 7).
+   */
+  async isFarFutureOrder(orderId: string): Promise<boolean> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) return false;
+    return !(await this.isNearTermOrder(order.scheduledAt));
+  }
+
+  async dispatchOrAutoConfirm(orderId: string): Promise<{ dispatched: number }> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
+      return { dispatched: 0 };
+    }
+    if (await this.isNearTermOrder(order.scheduledAt)) {
+      return this.dispatchNextRound(orderId);
+    }
+    return this.autoConfirmFutureOrder(orderId);
+  }
+
   async dispatchNextRound(orderId: string): Promise<{ dispatched: number }> {
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager
@@ -303,6 +339,20 @@ export class MatchingService {
       }
       if (candidates.length === 0) {
         candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
+      }
+      // ADR-0017 بند 10 — Fallback توسيع النطاق: لو نضبت قايمة الفنيين "المثاليين" (مؤهلين
+      // ومتاحين فعلاً) وعدّينا جولة العتبة القابلة للإعداد، نوسّع البحث لفنيين مؤهلين لنفس
+      // الخدمة/المنطقة لكن مشغولين حاليًا بطلب تاني — أفضل من طلب عالق بلا أي محاولة، وأفضل من
+      // بث عشوائي لفني مش متخصص. مقصورة على طلبات ASAP (الاستبعاد بتاعها هو "مشغول دلوقتي" —
+      // الطلبات المجدولة أصلاً بتتعارض بس مع تداخل زمني حقيقي، توسيعها هيسمح بحجز مزدوج فعلي).
+      if (candidates.length === 0 && !order.scheduledAt && !isEmergency) {
+        const broadenAfterRound = await this.settingsService.getNumber(
+          'matching.broaden_to_busy_after_round',
+          BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK,
+        );
+        if (nextRound >= broadenAfterRound) {
+          candidates = await this.findEligibleTechnicians(order, batchSize, null, false, null, true);
+        }
       }
       // قرار عمل صريح من المالك (2026-08-19) — مفيش إلغاء تلقائي خالص لمجرد مفيش فني اتلاقاله
       // دلوقتي. الطلب يفضل SEARCHING_TECHNICIAN بلا أي assignment جديد الجولة دي —
@@ -414,6 +464,119 @@ export class MatchingService {
   // الدالة القديمة اتشالت تمامًا بدل ما تتعدّل، مفيش أي DB write هنا خالص دلوقتي.
   private emitNoTechniciansFound(order: Order): void {
     this.events.emit(ORDER_NO_TECHNICIAN_FOUND_EVENT, new OrderNoTechnicianFoundEvent(order.id, order.orderNumber));
+  }
+
+  /**
+   * تأكيد تلقائي لطلب "بعيد" (ADR-0017 بند 7) — بدل انتظار قبول فني (`order_assignments`
+   * SENT/VIEWED + مهلة رد)، بيدوّر عن أفضل فني مؤهّل واحد (نفس ترتيب `findEligibleTechnicians`،
+   * أولوية مستوى ثم مسافة، ونفس تدرّج التفضيل "إعادة حجز → اعتماد شركة → عام" اللي
+   * `dispatchNextRound` بتستخدمه) وبيأكّد الطلب ليه مباشرة — نفس انتقال الحالة اللي آخر `accept()`
+   * بتعمله بالحرف، بس بـ`changeSource=system` (مفيش فني ضغط "قبول" فعليًا). صف `order_assignments`
+   * واحد بحالة `accepted` بيتسجّل للتوثيق/الإحصائيات بس (مش "عرض" يستنى رد).
+   *
+   * لو مفيش فني مؤهّل، الطلب يفضل `SEARCHING_TECHNICIAN` بلا إلغاء (نفس قرار §26.2 الموجود) —
+   * `MatchingRecoveryService.sweep()` هتعيد المحاولة بنفس المسار ده تلقائيًا.
+   */
+  async autoConfirmFutureOrder(orderId: string): Promise<{ dispatched: number }> {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
+        return { kind: 'noop' as const };
+      }
+
+      let candidates = order.requestedTechnicianId
+        ? await this.findEligibleTechnicians(order, 1, order.requestedTechnicianId, false)
+        : [];
+      if (candidates.length === 0 && order.requestedTechnicianCompanyId) {
+        candidates = await this.findEligibleTechnicians(order, 1, null, false, order.requestedTechnicianCompanyId);
+      }
+      if (candidates.length === 0) {
+        candidates = await this.findEligibleTechnicians(order, 1, null, false);
+      }
+      if (candidates.length === 0) {
+        return { kind: 'stalled' as const, order };
+      }
+
+      const technicianId = candidates[0].technician_id;
+      // دفاع عمق ضد سباق نادر (ADR-0017 بند 5 — نفس نمط accept() الموجود بالحرف): قفل صف الفني
+      // نفسه وإعادة فحص الأهلية تحت القفل مباشرة قبل الكتابة، عشان لو transaction تانية (accept()
+      // أو autoConfirmFutureOrder لطلب تاني) أكّدت نفس الفني لموعد متعارض في نفس اللحظة تقريبًا،
+      // النداء ده يخسر السباق بأمان (stalled، مش استثناء غير متوقع/خطأ DB خام) بدل ما يكتب فوق
+      // حالة اتغيّرت. uq_orders_one_active_asap_per_technician (migration 0144) لسه بتحمي حالة
+      // ASAP بس على مستوى DB — التعارض بين طلبين مجدولين بيتفحص هنا بس دلوقتي (فجوة موثّقة).
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
+      try {
+        await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
+      } catch {
+        return { kind: 'stalled' as const, order };
+      }
+
+      const now = new Date();
+      await manager.save(
+        manager.create(OrderAssignment, {
+          orderId: order.id,
+          technicianId,
+          assignmentRound: 1,
+          distanceKm: candidates[0].distance_km,
+          assignmentStatus: AssignmentStatus.ACCEPTED,
+          sentAt: now,
+          respondedAt: now,
+          expiresAt: now,
+        }),
+      );
+
+      if (!canTransition(order.orderStatus, OrderStatus.TECHNICIAN_ASSIGNED)) {
+        return { kind: 'noop' as const };
+      }
+      order.technicianId = technicianId;
+      order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
+      order.assignedAt = now;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
+          newStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+          changedByUserId: null,
+          changedByRole: 'system',
+          changeSource: OrderChangeSource.SYSTEM,
+        }),
+      );
+
+      order.orderStatus = OrderStatus.ACCEPTED;
+      order.acceptedAt = now;
+      await manager.save(order);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId: order.id,
+          previousStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+          newStatus: OrderStatus.ACCEPTED,
+          changedByUserId: null,
+          changedByRole: 'system',
+          changeSource: OrderChangeSource.SYSTEM,
+        }),
+      );
+
+      return { kind: 'confirmed' as const, order, technicianId };
+    });
+
+    if (result.kind === 'noop') {
+      return { dispatched: 0 };
+    }
+    if (result.kind === 'stalled') {
+      this.emitNoTechniciansFound(result.order);
+      return { dispatched: 0 };
+    }
+
+    this.events.emit(
+      ORDER_ACCEPTED_EVENT,
+      new OrderAcceptedEvent(result.order.id, result.order.customerId, result.technicianId, result.order.scheduledAt),
+    );
+    return { dispatched: 1 };
   }
 
   async listAvailableForTechnician(userId: string): Promise<AvailableOrderRow[]> {

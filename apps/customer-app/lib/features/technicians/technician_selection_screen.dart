@@ -30,6 +30,10 @@ class TechnicianSelectionScreen extends StatefulWidget {
   // يختار عنوان هنا زي ما كان دايمًا).
   final Address? initialAddress;
   final Map<String, dynamic>? fieldValues;
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — بتتمرر لقايمة الفنيين (GET .../technicians?
+  // scheduled_at=...) عشان الأهلية المعروضة تبقى مطابقة فعليًا لتاريخ الطلب، ولـCreateOrderScreen
+  // النهائية. null (وضع الاستبدال onManualSelect، أو الطوارئ) يعني ASAP بلا أي تأثير.
+  final DateTime? requestedAt;
 
   const TechnicianSelectionScreen({
     super.key,
@@ -38,6 +42,7 @@ class TechnicianSelectionScreen extends StatefulWidget {
     this.excludeTechnicianId,
     this.initialAddress,
     this.fieldValues,
+    this.requestedAt,
   });
 
   @override
@@ -88,6 +93,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           requestedTechnicianId: requestedTechnicianId,
           initialAddress: _selectedAddress,
           initialFieldValues: widget.fieldValues,
+          requestedAt: widget.requestedAt,
         ),
       ),
     );
@@ -103,6 +109,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           address: address,
           excludeTechnicianId: widget.excludeTechnicianId,
           fieldValues: widget.fieldValues,
+          requestedAt: widget.requestedAt,
           onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
         ),
       ),
@@ -119,6 +126,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         address: address,
         excludeTechnicianId: widget.excludeTechnicianId,
         fieldValues: widget.fieldValues,
+        requestedAt: widget.requestedAt,
         onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
       );
     }

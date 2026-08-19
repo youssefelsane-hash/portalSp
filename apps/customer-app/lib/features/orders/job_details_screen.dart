@@ -16,8 +16,11 @@ import '../technicians/technician_selection_screen.dart';
 // الشغل الأول، بعدين قايمة الفنيين وهي شايفة السعر النهائي الحقيقي فعليًا لكل واحد.
 class JobDetailsScreen extends StatefulWidget {
   final CatalogService service;
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — اتحددت قبل الشاشة دي (catalog_navigation.dart)،
+  // بتتمرر جاهزة لحد ما توصل لـTechnicianSelectionScreen/CreateOrderScreen.
+  final DateTime? requestedAt;
 
-  const JobDetailsScreen({super.key, required this.service});
+  const JobDetailsScreen({super.key, required this.service, this.requestedAt});
 
   @override
   State<JobDetailsScreen> createState() => _JobDetailsScreenState();
@@ -94,6 +97,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           service: widget.service,
           initialAddress: _selectedAddress,
           fieldValues: Map<String, dynamic>.from(_fieldValues),
+          requestedAt: widget.requestedAt,
         ),
       ),
     );

@@ -1000,3 +1000,16 @@ CI رجّع `Test Suites: 1 failed, 101 passed` مع `Tests: 557 passed, 557 tot
 **الإصلاح**: التلات ملفات بقى كل واحد فيهم بينشئ `country`→`city`→`service_zone` خاصة بيه في
 `beforeAll` (بنفس الاتفاقية المستخدمة في كل ملف اختبار حي تاني بالمشروع) ويمسحهم في `afterAll`
 بعد كل حاجة بتشير ليهم. صفر اعتماد على أي صف مشترك مع ملف تاني بعد كده.
+
+## ADR-0017 — إلغاء الفني لطلب "بعيد" اتأكد تلقائيًا ممنوع تمامًا (2026-08-19)
+
+راجع `../matching/README.md`'s قسم ADR-0017 و`docs/adr/0017-booking-availability-opt-out-model.md`
+للسياق الكامل. المالك طلب صراحة: طلب اتأكّد تلقائيًا لفني (`MatchingService.autoConfirmFutureOrder()`
+— بلا قبول فعلي من الفني) ميقدرش يتلغى ذاتيًا زي طلب عادي، لازم يعدّي عبر الدعم/الأدمن. `OrdersService
+.technicianCancel()` و`getTechnicianCancellationPolicy()` (المستشاري، بيستخدمه `apps/technician-app`
+قبل ما يعرض زرار الإلغاء) الاتنين بيستدعوا `wasAutoConfirmedBySystem(orderId)` (استعلام مباشر على
+`order_status_history` — `change_source='system' AND new_status='accepted'`، بلا عمود جديد، نفس
+فلسفة استنتاج ADR-0006 §3 بالحرف) ويرفضوا الإلغاء الذاتي برسالة `ORDR_004` واضحة لو `true`. **فجوة
+موثّقة**: مفيش اختبار حي مخصص لـ`technicianCancel()` نفسها لحد كتابة السطر ده — `OrdersService`
+عندها تبعيات كبيرة (تسعير/دفع/محافظ) بتخلّي بناء fixture معزول مكلّف، مؤجَّل لمرحلة التحقق الحي
+الشاملة (E2E) بدل اختبار وحدة منفصل.

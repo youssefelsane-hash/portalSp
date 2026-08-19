@@ -258,6 +258,18 @@ export class AdminOrdersService {
     return cancelledOrder;
   }
 
+  /**
+   * ADR-0017 بند 4 — قايمة الفنيين المرشحين للتعيين القسري/إعادة التعيين لازم تعكس **نفس**
+   * منطق الأهلية المستخدم فعليًا وقت التنفيذ (assertEligible)، مش قايمة "كل الفنيين المعتمدين"
+   * عامة كانت بتخلي الأدمن يختار من dropdown يكتشف بعد كده إن الباك إند بيرفضه لسبب كان
+   * ممكن يتعرض قبل المحاولة أصلاً. بتعيد استخدام listForServiceBooking بالحرف (نفس مصدر
+   * الأهلية اللي العميل شايفه)، بس مقيّدة بموعد/خدمة/عنوان الطلب الحقيقي نفسه.
+   */
+  async listEligibleTechniciansForReassign(orderId: string) {
+    const order = await this.findOrThrow(orderId);
+    return this.techniciansService.listForServiceBooking(order.serviceId, order.addressId, order.technicianId ?? undefined, order.scheduledAt);
+  }
+
   async reassign(
     adminUserId: string,
     orderId: string,

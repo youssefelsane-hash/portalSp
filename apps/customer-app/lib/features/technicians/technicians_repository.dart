@@ -25,6 +25,10 @@ class TechniciansRepository {
     // فرز يدوي (Script 6 Part 8) — recommended (افتراضي، ترتيب "الأنسب" من الباك-إند) أو
     // lowest_price/highest_rating. منفصل عمداً عن الترتيب الافتراضي، مش بديل له.
     String? sort,
+    // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0017 بند 6) — null يعني ASAP، غير كده لازم
+    // نتأكد إن الفني فعلاً يقدر ينفّذ في الموعد ده بالذات (مش عام "متاح دلوقتي" وبس). الباك-إند
+    // بيستخدم نفس شرط الأهلية بالحرف اللي المطابقة الحقيقية بتستخدمه (technician-eligibility.sql.ts).
+    DateTime? scheduledAt,
   }) async {
     // سياسة إلغاء الفني (docs/10) — excludeTechnicianId بيتبعت وقت اختيار فني بديل بعد ما فني
     // لغى، عشان نفس الفني مايظهرش تاني في القايمة.
@@ -34,6 +38,7 @@ class TechniciansRepository {
       query.write('&field_values=${Uri.encodeComponent(jsonEncode(fieldValues))}');
     }
     if (sort != null) query.write('&sort=$sort');
+    if (scheduledAt != null) query.write('&scheduled_at=${Uri.encodeComponent(scheduledAt.toUtc().toIso8601String())}');
     final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId$query');
     return items.map(TechnicianBookingListItem.fromJson).toList();
   }

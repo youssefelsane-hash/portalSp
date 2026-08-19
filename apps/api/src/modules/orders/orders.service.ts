@@ -1042,6 +1042,24 @@ export class OrdersService {
     return { withinWindow: true, windowExpiresAt, blockedReason: null };
   }
 
+  /**
+   * ADR-0017 بند 9 — هل الطلب ده وصل لـACCEPTED عبر autoConfirmFutureOrder (matching.service.ts)
+   * مش عبر قبول فني فعلي؟ بنستنتجها من `order_status_history` (`change_source='system'` +
+   * `new_status='accepted'`) — نفس فلسفة ADR-0006 §3 بالحرف: استنتاج من إشارة موجودة بالفعل
+   * بدل عمود جديد. `LIMIT 1` كافية — الطلب ميقدرش يوصل لـaccepted من system غير مرة واحدة
+   * (انتقالات الحالة بعدها تاخده لحالات تانية، ولو رجع searching_technician واتأكد تاني هيتسجل
+   * صف تاني بنفس الإشارة برضه — النتيجة صحيحة في الحالتين).
+   */
+  private async wasAutoConfirmedBySystem(orderId: string): Promise<boolean> {
+    const [row] = await this.dataSource.query<{ id: string }[]>(
+      `SELECT id FROM order_status_history
+       WHERE order_id = $1 AND new_status = 'accepted' AND change_source = 'system'
+       LIMIT 1`,
+      [orderId],
+    );
+    return !!row;
+  }
+
   /** هل عضو الفريق ده مسموحله يلغي طلب "اعتماد" (فريق) بنفسه — مالك/مدير دايمًا، عضو عادي بس لو إعداد صريح مفعّل. */
   private async canSelfCancelTeamOrder(teamRole: TechnicianTeamRole): Promise<boolean> {
     if (TEAM_SELF_CANCEL_ALLOWED_ROLES.has(teamRole)) return true;
@@ -1066,6 +1084,16 @@ export class OrdersService {
       if (!(await this.canSelfCancelTeamOrder(technicianProfile.teamRole))) {
         return { can_cancel: false, reason_if_not: 'مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق', window_expires_at: null };
       }
+    }
+
+    // ADR-0017 بند 9 — نفس الفحص في technicianCancel() (المصدر الحقيقي)، هنا استشاري بس عشان
+    // apps/technician-app يقدر يعرض "شغلانة مؤكدة" بدل زرار إلغاء عادي من الأساس.
+    if (await this.wasAutoConfirmedBySystem(orderId)) {
+      return {
+        can_cancel: false,
+        reason_if_not: 'الطلب ده اتأكّد تلقائيًا بموعد مستقبلي — تواصل مع الدعم/الأدمن لإلغائه',
+        window_expires_at: null,
+      };
     }
 
     const { withinWindow, windowExpiresAt, blockedReason } = await this.evaluateCancellationWindow(order);
@@ -1109,6 +1137,18 @@ export class OrdersService {
       throw new ApiException(
         ErrorCode.VAL_001,
         'مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق أو الدعم',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // ADR-0017 بند 9 — طلب "بعيد" اتأكد تلقائيًا (autoConfirmFutureOrder، بلا قبول فعلي من
+    // الفني) ميقدرش يتلغى ذاتيًا زي طلب عادي — حجز عميل مؤكد ميختفيش لمجرد إن الفني ضغط إلغاء.
+    // نفس مبدأ ADR-0006 §3 بالحرف (استنتاج من order_status_history بدل عمود جديد) — بس هنا
+    // بيستبعد الإلغاء الذاتي تمامًا (مش بس يغيّر سلوك الاسترجاع بعده)، لازم يعدّي بطلب دعم/أدمن.
+    if (await this.wasAutoConfirmedBySystem(orderId)) {
+      throw new ApiException(
+        ErrorCode.ORDR_004,
+        'الطلب ده اتأكّد تلقائيًا بموعد مستقبلي — الإلغاء الذاتي مش متاح، تواصل مع الدعم/الأدمن لإلغائه أو إعادة تعيين فني بديل',
         HttpStatus.FORBIDDEN,
       );
     }

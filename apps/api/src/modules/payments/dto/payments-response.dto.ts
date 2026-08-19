@@ -64,6 +64,9 @@ export interface PaymentResponseDto {
   completed_at: string | null;
   /** null = دفعة الطلب الأصلية، غير null = محاولة تحصيل شغل إضافي (docs/08 §21). */
   order_item_batch_id: string | null;
+  /** InstaPay بس — العميل قال إنه حوّل فعليًا (مش تأكيد نهائي، ده لسه بيتم من الأدمن). */
+  customer_confirmed_transfer_at: string | null;
+  failure_message: string | null;
 }
 
 export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
@@ -76,6 +79,10 @@ export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
     payment_status: payment.paymentStatus,
     completed_at: payment.completedAt ? payment.completedAt.toISOString() : null,
     order_item_batch_id: payment.orderItemBatchId,
+    customer_confirmed_transfer_at: payment.customerConfirmedTransferAt
+      ? payment.customerConfirmedTransferAt.toISOString()
+      : null,
+    failure_message: payment.failureMessage,
   };
 }
 

@@ -315,3 +315,58 @@ estimated_duration_minutes` — "نص يوم" مش "اليوم كله"). لطل�
 (المصدر الوحيد للحقيقة عن "مشغول" لازم يبقى غياب حجز فعلي، مش غياب سلوت `available`). **محتاج ADR
 قبل التنفيذ** (زي ما `CLAUDE.md` بيطلب لأي قرار معماري كبير) — مسجّل في `docs/08` §26.1 المحدّثة،
 لسه ما اتبنيش.
+
+## ADR-0017 — Opt-out كامل + مطابقة بعيد/قريب + Fallback (2026-08-19، رسالة شاملة من المالك)
+
+القسم فوق كان تسجيل أوّلي لطلب المالك — ده تنفيذه الفعلي. راجع
+`docs/adr/0017-booking-availability-opt-out-model.md` للتصميم الكامل والبدائل المرفوضة. ملخص
+التغييرات الحقيقية في الكود:
+
+- **مصدر أهلية موحّد واحد**: `technicians/technician-eligibility.sql.ts` (`technicianAvailabilityCondition()`)
+  — نفس الـfragment SQL بالحرف مستخدم دلوقتي في `findEligibleTechnicians()` (هنا)،
+  `TechniciansService.listForServiceBooking()` (اختيار العميل)، و`TechnicianAssignmentGuardService
+  .assertEligible()` (تعيين الأدمن). أي تعديل مستقبلي على "الفني ده متاح فعلاً؟" بيتعمل مرة واحدة
+  بس. `is_available`/`is_on_duty` اتشالوا من الأهلية بالكامل — العمودين لسه موجودين بالـschema
+  لأي استخدام مستقبلي (مؤشر "أونلاين الآن" مثلاً)، بس مش شرط استبعاد تاني.
+- **Opt-out حقيقي**: غياب أي صف `technician_schedule_slots` = الفني متاح طول اليوم. صف `blocked`
+  صريح (enum كان موجود من زمان، مستخدمش فعليًا لحد كده) بيستبعد بس نافذة زمنية محددة — يوم كامل
+  أو ساعات مخصصة. `available`/`booked` القديمة لسه بتخدم مسار الحجز الصريح (`schedule_slot_id`).
+- **تعارض الطلبات المجدولة من `orders` مباشرة**: بدل الاعتماد الجزئي على سلوتات `booked` (مش
+  بتتعمل تلقائيًا لطلب `scheduledAt` حر بلا `schedule_slot_id`)، الفحص بقى `NOT EXISTS` مباشر على
+  `orders` نفسها (طلب تاني بموعد مستقبلي كمان بيتقاطع زمنيًا) — مصدر حقيقة واحد، بلا مزامنة صف
+  منفصل.
+- **`uq_orders_one_active_per_technician` اتضيّق لـASAP بس** (migration `0144`) — كان UNIQUE
+  INDEX بيمنع أي فني من امتلاك أكتر من طلب "نشط" واحد بغض النظر عن الموعد، وده كان بيكسر بالظبط
+  الميزة اللي فوق (فني عنده طلب ASAP نشط ميقدرش "يقبل" طلب مجدول تاني — الكتابة نفسها كانت
+  بترمي `23505` خام). دلوقتي القيد يسري بس على `scheduled_at IS NULL`. **فجوة موثّقة صراحة**:
+  مفيش قيد DB حقيقي (GIST EXCLUDE) لمنع تعارض زمني بين طلبين *مجدولين* لنفس الفني — الحماية
+  الوحيدة دلوقتي دفاع عمق تطبيقي (قفل صف الفني + إعادة فحص `assertEligible` تحت القفل، نفس نمط
+  `accept()`). قيد DB حقيقي محتاج عمود duration مخزّن فعليًا على `orders` (EXCLUDE constraints
+  ما بتدعمش joins) — مؤجَّل لسيشن منفصلة، سباق نادر جدًا (طلبين مختلفين لنفس الفني بالظبط في نفس
+  اللحظة تقريبًا).
+- **`autoConfirmFutureOrder()` جديدة**: طلب بعد `matching.near_term_request_days` (افتراضي 1 —
+  "النهاردة وبكرة") بيتأكد تلقائيًا لأفضل فني مؤهّل واحد **بلا** `order_assignments` SENT/VIEWED —
+  بلا انتظار قبول فني خالص، بلا "عرض" يستنى رد. `dispatchOrAutoConfirm()` (نقطة الدخول الموحّدة
+  الجديدة اللي كل الـcallers الخارجيين بيستخدموها بدل `dispatchNextRound()` مباشرة) بتقرر
+  قريب/بعيد وتوجّه للمسار الصح. طلب قريب (النهاردة/بكرة، أو ASAP) — بلا تغيير، نفس
+  `dispatchNextRound()`/عرض-قبول-رفض الموجود.
+- **`MatchingRecoveryService.sweep()`** اتحدّثت تستخدم `dispatchOrAutoConfirm()` وشرط WHERE
+  موسّع (طلب بعيد بلا `order_assignments` بيترشّح دايمًا، مش بس لو قريب من `deferred_dispatch_lead_hours`).
+- **إلغاء الفني لطلب بعيد اتأكد تلقائيًا**: `OrdersService.technicianCancel()`/
+  `getTechnicianCancellationPolicy()` بيرفضوا الإلغاء الذاتي تمامًا (`wasAutoConfirmedBySystem()`
+  — استنتاج من `order_status_history.change_source='system'`، بلا عمود جديد) — لازم يعدّي عبر
+  الدعم/الأدمن. تفاصيل في `../orders/README.md`.
+- **Fallback توسيع النطاق** (`matching.broaden_to_busy_after_round`, افتراضي = `matching.max_rounds`):
+  لو طلب ASAP عادي وصل لآخر جولة بلا أي فني مؤهّل ومتاح، جولة إضافية بتفحص فنيين مؤهلين لنفس
+  الخدمة/المنطقة لكن **مشغولين حاليًا بطلب تاني نشط** (`ignoreActiveOrderConflict=true` في
+  `technicianAvailabilityCondition`) — بديل عن طلب عالق بلا أي محاولة، بلا كسر ملاءمة التخصص
+  (شرط الخدمة يفضل يتفحص دايمًا). مقصورة على ASAP/غير الطوارئ — الطلبات المجدولة أصلاً بتتعارض
+  بس مع تداخل زمني حقيقي، توسيعها هيسمح بحجز مزدوج فعلي.
+
+**اتأكد حي بالكامل** (`matching.service.spec.ts` — 8 اختبارات إجمالًا، `matching-accept-concurrency
+.spec.ts`، `order-dispatch.listener.spec.ts`، `matching-recovery.service.spec.ts`،
+`technician-assignment-guard.spec.ts`، `technician-marketplace-location.spec.ts` — 42 test suite
+كاملة، 200 اختبار، صفر فشل بعد التعديلات): فني عنده طلب ASAP نشط بيتأكدله طلب مجدول بعد أسبوعين
+تلقائيًا بلا انتظار قبول (`autoConfirmFutureOrder`)؛ طلب بكرة بيدخل الجولة العادية
+(`order_assignments`) وطلب بعد 3 أيام بيتأكد مباشرة (`dispatchOrAutoConfirm` — تثبيت الحد
+الفاصل)؛ fallback التوسيع بيوصل الطلب لفني مشغول بعد ما تنضب القايمة العادية.

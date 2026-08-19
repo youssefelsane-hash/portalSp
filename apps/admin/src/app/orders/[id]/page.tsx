@@ -93,6 +93,12 @@ export default function OrderDetailPage() {
   const [showReassignForm, setShowReassignForm] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
   const [approvedTechnicians, setApprovedTechnicians] = useState<AdminTechnicianResponseDto[] | null>(null);
+  // ADR-0017 بند 4 — قايمة مستقلة لاستبدال/تعيين الفني الأساسي بس (reassign)، مبنية على نفس
+  // منطق الأهلية الحقيقي لهذا الطلب بالذات (خدمة/منطقة/موعد)، بديل عن approvedTechnicians العامة
+  // فوق (لسه مستخدمة زي ما هي لإضافة/استبدال عضو فريق ومساعد — نطاق مختلف).
+  const [eligibleReassignTechnicians, setEligibleReassignTechnicians] = useState<
+    { technicianId: string; fullName: string }[] | null
+  >(null);
   const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
   const [newTotalEgp, setNewTotalEgp] = useState('');
   const [adjustPriceReason, setAdjustPriceReason] = useState('');
@@ -113,6 +119,8 @@ export default function OrderDetailPage() {
   const [showRefundForm, setShowRefundForm] = useState(false);
   const [refundAmountEgp, setRefundAmountEgp] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  const [rejectInstaPayPaymentId, setRejectInstaPayPaymentId] = useState<string | null>(null);
+  const [rejectInstaPayReason, setRejectInstaPayReason] = useState('');
 
   // إدارة طاقم الطلب من الأدمن (Script 4 §22-29, §38-41) — منفصل عن teamMembers/المساعدين فوق
   // (member_type='assistant')، ده للأعضاء العاديين (member_type='team_member') في طلب "اعتماد".
@@ -189,6 +197,14 @@ export default function OrderDetailPage() {
       .catch(() => setApprovedTechnicians([]));
   }
 
+  function loadEligibleReassignTechnicians() {
+    authedFetch<{ zoneId: string; items: { technicianId: string; fullName: string }[] }>(
+      `/admin/orders/${id}/eligible-technicians`,
+    )
+      .then(({ items }) => setEligibleReassignTechnicians(items))
+      .catch(() => setEligibleReassignTechnicians([]));
+  }
+
   async function handleReassign(e: FormEvent) {
     e.preventDefault();
     setIsSaving(true);
@@ -252,6 +268,27 @@ export default function OrderDetailPage() {
     setError(null);
     try {
       await authedFetch(`/admin/payments/${paymentId}/confirm-instapay`, { method: 'POST' });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // كانت فجوة حقيقية — confirm-instapay فوق موجود من زمان، رفض دفعة InstaPay معلّقة لأ.
+  async function handleRejectInstaPay(e: FormEvent) {
+    e.preventDefault();
+    if (!rejectInstaPayPaymentId || rejectInstaPayReason.trim().length < 2) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/payments/${rejectInstaPayPaymentId}/reject-instapay`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: rejectInstaPayReason }),
+      });
+      setRejectInstaPayPaymentId(null);
+      setRejectInstaPayReason('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -685,7 +722,7 @@ export default function OrderDetailPage() {
                     disabled={isSaving}
                     onClick={() => {
                       setShowReassignForm((s) => !s);
-                      if (!approvedTechnicians) loadApprovedTechnicians();
+                      if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
                     }}
                   >
                     {order.technician_id ? 'استبدال الفني المعيّن' : 'تعيين فني يدوي'}
@@ -710,10 +747,12 @@ export default function OrderDetailPage() {
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
                   <Label htmlFor="technician_id">الفني الجديد</Label>
-                  {!approvedTechnicians ? (
-                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المعتمدين…</p>
-                  ) : approvedTechnicians.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">مفيش فنيين معتمدين متاحين</p>
+                  {!eligibleReassignTechnicians ? (
+                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المؤهلين لهذا الطلب…</p>
+                  ) : eligibleReassignTechnicians.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      مفيش فنيين مؤهلين ومتاحين لخدمة/منطقة/موعد الطلب ده دلوقتي
+                    </p>
                   ) : (
                     <SelectNative
                       id="technician_id"
@@ -724,9 +763,9 @@ export default function OrderDetailPage() {
                       <option value="" disabled>
                         اختار فني
                       </option>
-                      {approvedTechnicians.map((tech) => (
-                        <option key={tech.id} value={tech.id}>
-                          {tech.full_name} ({tech.technician_code})
+                      {eligibleReassignTechnicians.map((tech) => (
+                        <option key={tech.technicianId} value={tech.technicianId}>
+                          {tech.fullName}
                         </option>
                       ))}
                     </SelectNative>
@@ -1057,20 +1096,70 @@ export default function OrderDetailPage() {
                           {p.payment_status === 'failed' && p.failure_message && (
                             <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
                           )}
+                          {/* بَقّة حقيقية اتلقطت — العميل مكانش عنده طريقة يسجّل بيها "أنا حوّلت" غير
+                              polling محلي بلا أثر على السيرفر. customer_confirmed_transfer_at بيفرّق
+                              للأدمن بين دفعة محدش لمسها ودفعة العميل بيدّعي إنه حوّلها فعلاً. */}
+                          {p.payment_method === 'instapay' &&
+                            p.payment_status === 'pending' &&
+                            p.customer_confirmed_transfer_at && (
+                              <span className="text-amber-600">
+                                العميل قال إنه حوّل الفلوس ({new Date(p.customer_confirmed_transfer_at).toLocaleString('ar-EG')}) — محتاج مراجعة
+                              </span>
+                            )}
                           {/* §24 — كانت فجوة موثّقة: POST /admin/payments/:id/confirm-instapay موجود ومختبر
                               من زمان (ADR-0013 §7) بس صفر زرار له في أي شاشة — إنستاباي طريقة دفع حقيقية
                               كانت مقفولة عمليًا بلا واجهة أدمن تقفل الدورة. */}
                           {p.payment_method === 'instapay' && p.payment_status === 'pending' && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="self-start"
-                              disabled={isSaving}
-                              onClick={() => handleConfirmInstaPay(p.id)}
-                            >
-                              تأكيد استلام تحويل إنستاباي
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={isSaving}
+                                onClick={() => handleConfirmInstaPay(p.id)}
+                              >
+                                تأكيد استلام تحويل إنستاباي
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={isSaving}
+                                onClick={() => {
+                                  setRejectInstaPayPaymentId(p.id);
+                                  setRejectInstaPayReason('');
+                                }}
+                              >
+                                رفض التحويل
+                              </Button>
+                            </div>
+                          )}
+                          {/* رفض دفعة InstaPay معلّقة (مقابل التأكيد فوق) — كانت فجوة حقيقية، endpoint
+                              رفض مالوش أي واجهة خالص قبل كده. */}
+                          {rejectInstaPayPaymentId === p.id && (
+                            <form onSubmit={handleRejectInstaPay} className="flex flex-col gap-2">
+                              <Label htmlFor={`reject_instapay_reason_${p.id}`}>سبب الرفض</Label>
+                              <Input
+                                id={`reject_instapay_reason_${p.id}`}
+                                value={rejectInstaPayReason}
+                                onChange={(e) => setRejectInstaPayReason(e.target.value)}
+                                minLength={2}
+                                required
+                              />
+                              <div className="flex gap-2">
+                                <Button type="submit" size="sm" variant="destructive" disabled={isSaving}>
+                                  تأكيد الرفض
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setRejectInstaPayPaymentId(null)}
+                                >
+                                  إلغاء
+                                </Button>
+                              </div>
+                            </form>
                           )}
                         </li>
                       ))}

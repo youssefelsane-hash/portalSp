@@ -48,6 +48,16 @@ class OnboardingRepository {
     return data!;
   }
 
+  // بَقّة حقيقية اتلقطت (بلاغ المالك — سيناريو "يوسف"): current_location مالوش أي مسار شرعي
+  // يتحدد بيه أول مرة قبل ما الفني ياخد طلب فعلي — POST /technician/location كان موجود
+  // بالباك-إند من زمان بلا أي نداء ليه من التطبيق خالص (المسار الوحيد المتصل فعليًا كان
+  // WebSocket تتبّع الموقع، ومتاح بس وقت طلب نشط). بيتنادى دلوقتي مرة واحدة أول ما
+  // AvailableOrdersScreen تفتح (`_captureInitialLocation`) عشان matching.service.ts's شرط
+  // current_location IS NOT NULL يتحقق من أول لحظة، مش بعد أول طلب.
+  Future<void> updateLocation(double latitude, double longitude) async {
+    await auth.authedRequest('POST', '/technician/location', body: {'latitude': latitude, 'longitude': longitude});
+  }
+
   Future<List<TechnicianDocument>> listDocuments() async {
     final items = await auth.authedRequestList('/technician/documents');
     return items.map(TechnicianDocument.fromJson).toList();

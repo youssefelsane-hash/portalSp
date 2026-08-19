@@ -144,6 +144,15 @@ export class AdminOrdersController {
     return toOrderResponseDto(await this.adminOrdersService.cancel(admin.sub, id, dto.reason, audit));
   }
 
+  // ADR-0017 بند 4 — قايمة الفنيين المؤهلين فعليًا لهذا الطلب بالذات (خدمة/منطقة/موعد)، نفس
+  // المصدر المستخدم في اختيار العميل. بديل عن /admin/technicians?verification_status=approved
+  // العام اللي كان مستخدم في واجهة إعادة التعيين قبل كده بلا أي فلترة أهلية حقيقية.
+  @Get(':id/eligible-technicians')
+  @RequirePermission('orders.reassign')
+  async listEligibleTechnicians(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminOrdersService.listEligibleTechniciansForReassign(id);
+  }
+
   @Post(':id/reassign')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('orders.reassign')
