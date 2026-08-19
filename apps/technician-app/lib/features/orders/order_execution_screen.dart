@@ -55,6 +55,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   String? _photoMessage;
   CancellationPolicy? _cancellationPolicy;
   List<OrderMediaItem>? _media;
+  List<TeamMember>? _teamMembers;
 
   @override
   void initState() {
@@ -67,6 +68,19 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _connectTrackingIfActive();
     _loadCancellationPolicyIfApplicable();
     _loadMedia();
+    _loadTeamMembersIfApplicable();
+  }
+
+  // طاقم الطلب — بس لطلبات "اعتماد" (booking_mode='team'). فشل التحميل (مشكلة شبكة عابرة)
+  // مايمنعش بقية الشاشة تشتغل، نفس فلسفة _loadMedia() فوق بالحرف.
+  Future<void> _loadTeamMembersIfApplicable() async {
+    if (_order.bookingMode != 'team') return;
+    try {
+      final members = await _repository.fetchTeamMembers(_order.id);
+      if (mounted) setState(() => _teamMembers = members);
+    } catch (_) {
+      // تجاهل — راجع تعليق _loadMedia().
+    }
   }
 
   // استرجاع الصور اللي اترفعت قبل كده — راجع التعليق في media_repository.dart. فشل التحميل
@@ -369,6 +383,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             problemDescription: _order.problemDescription,
             totalAmountCents: _order.totalAmountCents,
             paymentStatus: 'paid',
+            bookingMode: _order.bookingMode,
+            requiredTechnicians: _order.requiredTechnicians,
+            address: _order.address,
           );
       }
       if (mounted) setState(() {});
@@ -435,6 +452,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 ),
               ),
             ),
+            if (_order.bookingMode == 'team') ...[
+              const SizedBox(height: 12),
+              _TeamRosterCard(members: _teamMembers, requiredTechnicians: _order.requiredTechnicians),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -556,6 +577,59 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 child: _acting
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                     : Text(technicianActionLabelsAr[nextAction] ?? nextAction),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// طاقم الطلب (docs/08 §5) — راجع تعليق TeamMember في models.dart. `null` لسه بيحمّل، قايمة فاضية
+// معناها "محدّش اتضاف لسه" (مختلف عن null، مش خطأ تحميل — الكارت بيوضّح الاتنين بنص مختلف).
+class _TeamRosterCard extends StatelessWidget {
+  final List<TeamMember>? members;
+  final int? requiredTechnicians;
+
+  const _TeamRosterCard({required this.members, required this.requiredTechnicians});
+
+  @override
+  Widget build(BuildContext context) {
+    final loaded = members;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.groups_outlined, size: 20),
+                const SizedBox(width: 8),
+                Text('طاقم الطلب', style: Theme.of(context).textTheme.titleSmall),
+                if (requiredTechnicians != null) ...[
+                  const SizedBox(width: 4),
+                  Text('(مطلوب $requiredTechnicians)', style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (loaded == null)
+              const Text('بيحمّل...')
+            else if (loaded.isEmpty)
+              const Text('لسه محدّش اتضاف لطاقم الطلب')
+            else
+              ...loaded.map(
+                (m) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text('${m.fullName} — ${m.roleLabel}')),
+                    ],
+                  ),
+                ),
               ),
           ],
         ),

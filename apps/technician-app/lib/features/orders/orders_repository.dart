@@ -119,6 +119,14 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
+  // طاقم الطلب (docs/08 §5) — كانت فجوة موثّقة صراحة (Script 7 Phase 13/14): الباك-إند عنده
+  // GET .../team-members جاهزة ومؤمّنة بالفعل (ownership check ضد IDOR) بس التطبيق ما كانش
+  // بيستخدمها خالص. بس لطلبات booking_mode='team'.
+  Future<List<TeamMember>> fetchTeamMembers(String orderId) async {
+    final items = await authRepository.authedRequestList('/technician/orders/$orderId/team-members');
+    return items.map(TeamMember.fromJson).toList();
+  }
+
   // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (قطعة غيار/أجرة إضافية)، الطلب
   // بيتحول awaiting_quote_approval لحد ما العميل يوافق/يرفض من apps/customer-app.
   Future<Order> proposeQuoteItems(String orderId, List<Map<String, dynamic>> items) async {

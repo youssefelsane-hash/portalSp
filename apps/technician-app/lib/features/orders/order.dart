@@ -32,6 +32,11 @@ class Order {
   final int totalAmountCents;
   final String paymentStatus;
   final OrderAddress? address;
+  // "اعتماد" (docs/06 §1) — بس لما يبقى 'team' في الباك-إند (order.entity.ts's BookingMode) فيه
+  // مفهوم "طاقم" أصلاً (order_team_members). Script 7 Phase 13/14 — كانت مفقودة تمامًا من نموذج
+  // الفني هنا رغم إن الشاشة محتاجاها لعرض "طاقم الطلب".
+  final String bookingMode;
+  final int? requiredTechnicians;
 
   Order({
     required this.id,
@@ -40,6 +45,8 @@ class Order {
     required this.problemDescription,
     required this.totalAmountCents,
     required this.paymentStatus,
+    required this.bookingMode,
+    this.requiredTechnicians,
     this.address,
   });
 
@@ -50,6 +57,8 @@ class Order {
         problemDescription: json['problem_description'] as String?,
         totalAmountCents: json['total_amount_cents'] as int,
         paymentStatus: json['payment_status'] as String,
+        bookingMode: json['booking_mode'] as String? ?? 'individual',
+        requiredTechnicians: json['required_technicians'] as int?,
         address: json['address'] != null
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,

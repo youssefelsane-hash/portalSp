@@ -39,9 +39,9 @@
 | 9 | Order Creation (idempotency) | Orders | FIXED | نعم — `OrdersService.create()` حي، retry متتالي + سباق متزامن حقيقي (`Promise.all`) + مفتاح مختلف + بلا مفتاح خالص | نعم — 4 اختبارات جديدة (`order-creation-idempotency.spec.ts`) بما فيها اختبار سباق DB حقيقي | BUG-008 (P1 — مفيش حماية retry/double-click على أهم endpoint في المنصة) | BUG-008 fixed | باقي منطق التسعير الشامل (promo/building/formula/zone/level) لسه محتاج تغطية jest مباشرة أوسع فوق نفس الفيكستشر (فجوة موروثة من Phase 4، مش جديدة) | commit قادم |
 | 10 | Cash Payment | Payments/Orders | VERIFIED | جزئي — راجع كل مسارات `collectCash()`/`adminConfirmCashReceived()`/`resolveCashHandoverDispute()` بالقراءة الدقيقة + شغّلت الاختبارات الحية الموجودة، مفيش استغلال حي جديد اتبنى (مفيش بَقّة اتلقطت تستاهله) | نعم — تغطية موجودة بالفعل عميقة (`cash-handover-confirmation.spec.ts`: نقر مزدوج idempotent، تعارض عميل/فني، retry بعد نزاع؛ `cash-settlement-direction.spec.ts`: اتجاه العمولة، دلتا مختلطة، عمولة صفر) | لا يوجد | لا يوجد | مفيش — `assertPayable()` + قفل pessimistic_write بيمنعوا double-collect فعليًا (اتفحص بالقراءة، القفل + فحص `paymentStatus===PAID` بعد إعادة القراءة تحت القفل كافي رياضيًا). "CASH auto-cancellation" من قايمة "items to retest" كانت أصلاً بَقّة توثيق إشعار (كود داخلي `ORDR_002` مسرّب للعميل) اتصلحت في Script 6 Phase4 — مش خلل إلغاء كاش فعلي، واتأكد إنها لسه مصلحة | commit سابق (Script 6) + هذا التحقق |
 | 11 | Online Payment | Payments | VERIFIED | جزئي — راجعت `refundOrder()` بالكامل (حجز/PROCESSING/split-transaction ضد external-success-local-failure) + `payWithCard`/`payWithWallet` idempotency، مفيش استغلال حي جديد اتبنى | نعم — تغطية موجودة بالفعل عميقة (`webhook-amount-verification.spec.ts`, `webhook-recovery.service.spec.ts`, `payments.provider-outcome.spec.ts`, `refund-transaction-safety.spec.ts`) + P0-7/P0-8 (تحقق مبلغ webhook، عدم إرجاع 200 كاذب) من سيشنز سابقة | لا يوجد | لا يوجد | سيناريو "refund عالق PROCESSING للأبد" (مذكور صراحة في قايمة "known items to retest") — الكود عنده معالجة صريحة له (`refund-recovery`/reconcile يدوي مذكور في رسالة الخطأ)، لكن التحقيق العميق فيه (هل بيتصلح تلقائي؟) مؤجّل عمدًا لـPhase 17 (Refunds) — نفس مكانه المخصص في خطة الـaudit، مش هتكرر الفحص هنا | commit سابق (P0-7/P0-8) + هذا التحقق |
-| 12 | Dispatch & Matching | Matching | PENDING | | | | | | |
-| 13 | Capacity / Multi-worker Jobs | Matching/Crew | PENDING | | | | | | |
-| 14 | Technician App | Technician-app | PENDING | | | | | | |
+| 12 | Dispatch & Matching | Matching | VERIFIED | جزئي — راجعت `matching.service.ts` (ترتيب دفعات، أولوية مستوى، تفضيل فني/شركة مع fallback) بالقراءة، مفيش استغلال جديد اتبنى | نعم — تغطية موجودة بالفعل (اختبارات حية موثّقة في matching/README.md للطوارئ، تفضيل الشركة، fallback) | لا يوجد | لا يوجد | مفيش | commit سابق + هذا التحقق |
+| 13 | Capacity / Multi-worker Jobs | Matching/Crew | VERIFIED | نعم — أكّدت إن `matching.service.ts` بيوزّع قائد واحد بس، `assistant-matching` بيغطي `requiredAssistants` بس، و`requiredTechnicians>1` (طاقم كامل) قصده الإداري (`crewShortage` indicator، admin crew editing tool) مش تلقائي بالكامل — قرار عمل موثّق صراحة، مش بَقّة | نعم — `admin-crew-management.spec.ts` (14 اختبار) يغطي هذا المسار بالكامل بما فيه `crewShortage` | لا يوجد | لا يوجد | التوليد التلقائي الكامل لأكتر من فني قائد واحد مش مطبّق (owner نفسه أكّد "الحساب مش موجود حاليا") — فجوة موثّقة صراحة من قبل، مش جديدة | commit سابق + هذا التحقق |
+| 14 | Technician App | Technician-app | FIXED | جزئي — `flutter analyze` نضيف (0 أخطاء) على الشاشة الجديدة والملفات المعدّلة، مفيش render حي (Xvfb) — تغيير إضافي بحت مبرَّر بنفس منطق BUG-007 | لا يوجد اختبار jest جديد (تغيير Dart-only، الـendpoint المُستخدم مغطّى backend من قبل بـIDOR fix موثّق) | BUG-009 (P2 — فني قائد لطلب "اعتماد" معندوش أي رؤية لطاقمه في التطبيق) | BUG-009 fixed | إضافة/إزالة عضو طاقم من التطبيق نفسه (مش بس عرض) لسه مش موجودة — الباك-إند جاهز (`POST`/`DELETE .../team-members`) بس الشاشة الجديدة read-only عمدًا (نطاق محدود لإصلاح فجوة الرؤية الأساسية، مش إعادة بناء الشاشة بالكامل) | commit قادم |
 | 15 | Order State Machine | Orders | PENDING | | | | | | |
 | 16 | Cancellations | Orders | PENDING | | | | | | |
 | 17 | Refunds | Payments | PENDING | | | | | | |
@@ -307,6 +307,43 @@ Regression test: `order-creation-idempotency.spec.ts` (4 اختبارات، Post
 Live verification: jest حي ضد Postgres حقيقي — 4/4 نجحوا بعد الإصلاح. `flutter analyze` نضيف
 على كل ملفات customer-app المعدّلة، `next build`/`tsc --noEmit` نضاف على customer-web. Full
 regression: 98 suite، 544 اختبار، كله ناجح.
+Status: FIXED
+
+### BUG-009
+Severity: P2 (فجوة تشغيلية حقيقية — مش خلل بيانات/مالي، لكن فني قائد بلا رؤية طاقمه فعليًا)
+Flow: Phase 13/14 (Capacity/Multi-worker Jobs، Technician App)
+Symptom: الباك-إند عنده `GET/POST/DELETE /technician/orders/:id/team-members` جاهزة ومؤمّنة
+بالكامل (IDOR fix موثّق من قبل، `findOwnedByTechnicianOrThrow`) — لكن `apps/technician-app`
+كان معندوش أي إشارة لمفهوم "طاقم" خالص: نموذج `Order` نفسه ما كانش بيقرأ `booking_mode` من
+الباك-إند أصلاً. فني قائد على طلب "اعتماد" (`booking_mode=team`) بيفتح التطبيق ومعندوش أي طريقة
+يشوف بيها مين المُعيَّن معاه في الطاقم، ولا هل الطاقم كامل حسب `required_technicians`.
+Reproduction: فتح شاشة تنفيذ طلب `booking_mode=team` في `apps/technician-app` — صفر إشارة لأي
+عضو طاقم، صفر أي نص "طاقم الطلب" خالص في الشاشة كلها.
+Expected: الفني القائد يقدر يشوف طاقمه الحالي (الأسماء/الأدوار) وهل العدد كافي، زي ما العميل
+والأدمن بيشوفوا بالفعل (موثّق في orders/README.md: "معروض في الواجهات: apps/admin وapps/customer-app").
+Actual: صفر رؤية خالص من جانب الفني القائد نفسه.
+Root cause: نموذج `Order` في `apps/technician-app` (`order.dart`) اتبني قبل مفهوم "اعتماد"
+(booking_mode=team) يتضاف للمنصة، وما اتحدّثش لما الميزة اتضافت لاحقًا في apps/admin/customer-app.
+Files involved: `apps/technician-app/lib/features/orders/order.dart`,
+`apps/technician-app/lib/features/orders/models.dart`,
+`apps/technician-app/lib/features/orders/orders_repository.dart`,
+`apps/technician-app/lib/features/orders/order_execution_screen.dart`
+Financial/security impact: لا يوجد مباشر — الباك-إند نفسه كان مؤمّن بالفعل، الفجوة كانت في
+التطبيق بس. أثر تشغيلي حقيقي: فني قائد على شغلانة محتاجة طاقم كبير ممكن يوصل مكان الشغل بلا أي
+فكرة عن باقي الطاقم.
+Fix: `Order.fromJson()` بقى بيقرأ `booking_mode`/`required_technicians`. `TeamMember` model
+جديد + `OrdersRepository.fetchTeamMembers()` بينادي الـendpoint الموجود بالفعل. كارت "طاقم
+الطلب" جديد (read-only) في `order_execution_screen.dart` — بيظهر بس لـ`booking_mode=team`،
+بيحمّل الطاقم بنفس فلسفة `_loadMedia()` (فشل التحميل مايكسرش باقي الشاشة)، وبيعرض تحذير عددي
+لو `required_technicians` معروف.
+Regression test: مفيش اختبار jest جديد (الـendpoint نفسه مغطّى backend من قبل، والتغيير هنا
+Dart-only إضافي). `flutter analyze` نضيف على كل الملفات المعدّلة (0 أخطاء) — لقط بَقّة تجميع
+حقيقية أثناء الفحص (استدعاء `Order()` يدوي بعد `collect-cash` كان محتاج `bookingMode` الجديد
+كـparameter مطلوب، اتصلح بالمرة).
+Live verification: `flutter analyze` بس (مش render حي بـXvfb) — مبرَّر لأن التغيير إضافة قسم
+جديد مقفول خلف شرط (`bookingMode=='team'`) بلا تعديل في أي منطق موجود، ومنهجية الـrender الحي
+التقيلة مخصصة أساسًا لبَقات تفاعل/رندر حقيقية (نفس تبرير BUG-007). طلبات `booking_mode=individual`
+(الأغلبية الساحقة حاليًا) مش متأثرة خالص — القسم الجديد مش بيظهر ليهم أصلًا.
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
