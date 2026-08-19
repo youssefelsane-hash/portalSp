@@ -16,6 +16,7 @@ export interface AdminServiceCategoryResponseDto {
   slug: string;
   description_ar: string | null;
   icon_url: string | null;
+  cover_image_url: string | null;
   display_order: number;
   is_active: boolean;
   is_featured: boolean;
@@ -32,6 +33,7 @@ export function toAdminServiceCategoryResponseDto(category: ServiceCategory): Ad
     slug: category.slug,
     description_ar: category.descriptionAr,
     icon_url: category.iconUrl,
+    cover_image_url: category.coverImageUrl,
     display_order: category.displayOrder,
     is_active: category.isActive,
     is_featured: category.isFeatured,

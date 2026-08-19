@@ -12,6 +12,8 @@ export interface AdminServiceCategoryResponseDto {
   slug: string;
   description_ar: string | null;
   icon_url: string | null;
+  // Script 6 Part 1-2 — صورة غلاف فعلية للكارت، منفصلة عن icon_url (أيقونة صغيرة).
+  cover_image_url: string | null;
   display_order: number;
   is_active: boolean;
   is_featured: boolean;
@@ -26,6 +28,7 @@ export interface CreateServiceCategoryBody {
   slug: string;
   description_ar?: string;
   icon_url?: string;
+  cover_image_url?: string;
   display_order?: number;
   is_featured?: boolean;
   launch_phase?: number;

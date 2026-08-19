@@ -70,6 +70,7 @@ export class AdminCatalogService {
       slug: dto.slug,
       descriptionAr: dto.description_ar ?? null,
       iconUrl: dto.icon_url ?? null,
+      coverImageUrl: dto.cover_image_url ?? null,
       displayOrder: dto.display_order ?? 0,
       isFeatured: dto.is_featured ?? false,
       launchPhase: dto.launch_phase ?? 1,
@@ -109,6 +110,7 @@ export class AdminCatalogService {
     if (dto.slug !== undefined) category.slug = dto.slug;
     if (dto.description_ar !== undefined) category.descriptionAr = dto.description_ar;
     if (dto.icon_url !== undefined) category.iconUrl = dto.icon_url;
+    if (dto.cover_image_url !== undefined) category.coverImageUrl = dto.cover_image_url;
     if (dto.display_order !== undefined) category.displayOrder = dto.display_order;
     if (dto.is_featured !== undefined) category.isFeatured = dto.is_featured;
     if (dto.launch_phase !== undefined) category.launchPhase = dto.launch_phase;

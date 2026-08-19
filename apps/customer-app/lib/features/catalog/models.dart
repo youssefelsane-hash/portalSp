@@ -33,6 +33,10 @@ class ServiceCategory {
   final String nameEn;
   final String slug;
   final String? iconUrl;
+  // Script 6 Part 1-2 — صورة غلاف فعلية للكارت (كانت فجوة موثّقة صراحة: العمود موجود في
+  // الـschema من زمان بس مش معروض للعميل خالص قبل كده). null لو الأدمن لسه ما حطهاش —
+  // الشاشة بترجع لـiconUrl، وبعدها لـplaceholder عام (NetworkImageBox).
+  final String? coverImageUrl;
   // Script 3 §14 — فئات شائعة حقيقية (مُعدّة من الأدمن)، مش مفبركة.
   final bool isFeatured;
 
@@ -43,8 +47,13 @@ class ServiceCategory {
     required this.nameEn,
     required this.slug,
     required this.iconUrl,
+    required this.coverImageUrl,
     required this.isFeatured,
   });
+
+  // أول صورة متاحة فعليًا للكارت (غلاف ثم أيقونة) — مصدر حقيقة واحد بدل ما كل شاشة تكرر نفس
+  // منطق fallback السلسلة.
+  String? get cardImageUrl => coverImageUrl ?? iconUrl;
 
   factory ServiceCategory.fromJson(Map<String, dynamic> json) => ServiceCategory(
         id: json['id'] as String,
@@ -53,6 +62,7 @@ class ServiceCategory {
         nameEn: json['name_en'] as String,
         slug: json['slug'] as String,
         iconUrl: json['icon_url'] as String?,
+        coverImageUrl: json['cover_image_url'] as String?,
         isFeatured: json['is_featured'] as bool? ?? false,
       );
 }
@@ -62,6 +72,9 @@ class CatalogService {
   final String categoryId;
   final String nameAr;
   final String? shortDescriptionAr;
+  // Script 6 Part 1-2 — كانت فجوة موثّقة صراحة: موجودة في DTO الأدمن من زمان بس مش معروضة
+  // للعميل قبل كده.
+  final String? iconUrl;
   final String pricingModel;
   final int basePriceCents;
   final int inspectionFeeCents;
@@ -79,6 +92,7 @@ class CatalogService {
     required this.categoryId,
     required this.nameAr,
     required this.shortDescriptionAr,
+    required this.iconUrl,
     required this.pricingModel,
     required this.basePriceCents,
     required this.inspectionFeeCents,
@@ -93,6 +107,7 @@ class CatalogService {
         categoryId: json['category_id'] as String,
         nameAr: json['name_ar'] as String,
         shortDescriptionAr: json['short_description_ar'] as String?,
+        iconUrl: json['icon_url'] as String?,
         pricingModel: json['pricing_model'] as String,
         basePriceCents: json['base_price_cents'] as int,
         inspectionFeeCents: json['inspection_fee_cents'] as int,

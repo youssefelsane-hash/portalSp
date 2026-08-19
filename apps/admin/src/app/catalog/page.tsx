@@ -85,6 +85,7 @@ export default function CatalogPage() {
       parent_category_id: parentCategoryId || undefined,
       description_ar: (form.get('description_ar') as string) || undefined,
       icon_url: (form.get('icon_url') as string) || undefined,
+      cover_image_url: (form.get('cover_image_url') as string) || undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
       is_featured: form.get('is_featured') === 'on',
@@ -115,6 +116,7 @@ export default function CatalogPage() {
       name_en: form.get('name_en') as string,
       description_ar: (form.get('description_ar') as string) || undefined,
       icon_url: (form.get('icon_url') as string) || undefined,
+      cover_image_url: (form.get('cover_image_url') as string) || undefined,
       parent_category_id: parentCategoryId || undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
@@ -232,6 +234,9 @@ export default function CatalogPage() {
                 <Input name="slug" placeholder="slug (مثال: plumbing)" required dir="ltr" />
                 <Textarea name="description_ar" placeholder="وصف الفئة (اختياري)" rows={2} />
                 <Input name="icon_url" placeholder="رابط الأيقونة (اختياري)" dir="ltr" />
+                {/* Script 6 Part 1-2 — صورة غلاف الكارت (تعرض في التطبيق بنسبة عرض 4:3، مختلفة
+                    عن الأيقونة الصغيرة icon_url). */}
+                <Input name="cover_image_url" placeholder="رابط صورة الغلاف (اختياري — بتظهر في كارت الفئة بالتطبيق)" dir="ltr" />
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="new_cat_parent">فئة أب (اختياري — لعمل فئة فرعية)</Label>
                   <SelectNative id="new_cat_parent" name="parent_category_id" defaultValue="">
@@ -318,6 +323,12 @@ export default function CatalogPage() {
                               </div>
                               <Textarea name="description_ar" defaultValue={category.description_ar ?? ''} placeholder="الوصف" rows={2} />
                               <Input name="icon_url" defaultValue={category.icon_url ?? ''} placeholder="رابط الأيقونة" dir="ltr" />
+                              <Input
+                                name="cover_image_url"
+                                defaultValue={category.cover_image_url ?? ''}
+                                placeholder="رابط صورة الغلاف (بتظهر في كارت الفئة بالتطبيق)"
+                                dir="ltr"
+                              />
                               <div className="flex flex-col gap-1">
                                 <Label>فئة أب</Label>
                                 <SelectNative name="parent_category_id" defaultValue={category.parent_category_id ?? ''}>
