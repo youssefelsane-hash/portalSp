@@ -13,6 +13,8 @@ export interface OrderPaymentSummaryDto {
   order_item_batch_id: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  /** InstaPay بس — العميل قال إنه حوّل فعليًا (مش تأكيد نهائي). */
+  customer_confirmed_transfer_at: string | null;
 }
 
 export interface OrderRefundSummaryDto {
@@ -38,7 +40,15 @@ export function toOrderFinancialSummaryResponseDto(summary: {
   cancellationFeeCents: number;
   payments: Pick<
     Payment,
-    'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt' | 'orderItemBatchId' | 'failureCode' | 'failureMessage'
+    | 'id'
+    | 'paymentMethod'
+    | 'paymentStatus'
+    | 'amountCents'
+    | 'completedAt'
+    | 'orderItemBatchId'
+    | 'failureCode'
+    | 'failureMessage'
+    | 'customerConfirmedTransferAt'
   >[];
   refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
 }): OrderFinancialSummaryResponseDto {
@@ -55,6 +65,7 @@ export function toOrderFinancialSummaryResponseDto(summary: {
       order_item_batch_id: p.orderItemBatchId,
       failure_code: p.failureCode,
       failure_message: p.failureMessage,
+      customer_confirmed_transfer_at: p.customerConfirmedTransferAt ? p.customerConfirmedTransferAt.toISOString() : null,
     })),
     refunds: summary.refunds.map((r) => ({
       id: r.id,

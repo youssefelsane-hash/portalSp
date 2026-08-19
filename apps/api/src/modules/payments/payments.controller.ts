@@ -90,4 +90,17 @@ export class PaymentsController {
     );
     return { payment: toPaymentResponseDto(payment), reference_code: referenceCode, instructions_ar: instructionsAr };
   }
+
+  /**
+   * بَقّة حقيقية اتلقطت — العميل مكانش عنده أي طريقة يسجّل بيها "أنا حوّلت الفلوس فعلاً" غير
+   * polling محلي بلا أثر على السيرفر (شاشة InstaPay في customer-app كانت بتسأل GET على الطلب
+   * 5 مرات بس، مفيش أي POST). بيسجّل `customer_confirmed_transfer_at` — مش تأكيد نهائي للدفع
+   * (ده لسه بيتم بس عبر `confirmInstaPayPayment` من الأدمن)، بس بيفرّق للأدمن بين دفعة محدش
+   * لمسها ودفعة العميل بيدّعي إنه حوّلها.
+   */
+  @Post(':id/confirm-instapay-transfer')
+  async confirmInstaPayTransfer(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const payment = await this.paymentsService.confirmInstaPayTransferByCustomer(user.sub, id);
+    return toPaymentResponseDto(payment);
+  }
 }

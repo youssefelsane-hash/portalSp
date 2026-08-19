@@ -24,16 +24,25 @@ enum _CheckState { idle, checking, confirmedPaid, stillPending }
 
 class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> {
   late final OrdersRepository _ordersRepository;
+  late final PaymentsRepository _paymentsRepository;
   _CheckState _checkState = _CheckState.idle;
 
   @override
   void initState() {
     super.initState();
     _ordersRepository = OrdersRepository(context.read<AuthRepository>());
+    _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
   }
 
   Future<void> _confirmPayment() async {
     setState(() => _checkState = _CheckState.checking);
+    // بَقّة حقيقية اتصلحت: الزرار ده كان بيعمل polling محلي بس من غير ما يسجّل في الباك-إند إن
+    // العميل ادّعى التحويل — الأدمن مكانش عنده أي طريقة يعرف مين ضغط الزرار أصلاً قبل التأكيد.
+    try {
+      await _paymentsRepository.confirmInstaPayTransfer(widget.orderId);
+    } catch (_) {
+      // مش بلوكر — لو الشبكة قطعت هنا، الـpolling تحت لسه بيحاول يكتشف تأكيد الأدمن نفسه.
+    }
     for (var attempt = 0; attempt < 5; attempt++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       final order = await _ordersRepository.getOne(widget.orderId);

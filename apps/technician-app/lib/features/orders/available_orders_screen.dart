@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -51,6 +52,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     );
     _recoverActiveOrThenLoad();
     _loadMe();
+    _captureInitialLocation();
   }
 
   Future<void> _loadMe() async {
@@ -62,9 +64,36 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     }
   }
 
+  // بَقّة حقيقية اتلقطت (بلاغ المالك — سيناريو "يوسف"): current_location مالوش أي مسار شرعي
+  // يتحدد بيه أول مرة قبل ما الفني ياخد طلب فعلي — matching.service.ts بيشترط current_location
+  // IS NOT NULL صراحة، فالفني الجديد كان ميقدرش يتوصّله أي طلب أبدًا حتى لو مؤهّل تمامًا. بيتنادى
+  // مرة واحدة (best-effort، صامت تمامًا — مفيش رسالة خطأ للمستخدم) أول ما الشاشة الرئيسية تفتح.
+  // مش بديل عن تتبّع الموقع اللحظي وقت التنفيذ (order_execution_screen.dart's _shareLocation عبر
+  // WebSocket) — ده بس أول قيمة تخلي الفني "قابل للتوزيع عليه" من الأساس.
+  Future<void> _captureInitialLocation() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        return;
+      }
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+      );
+      await _onboardingRepository.updateLocation(position.latitude, position.longitude);
+    } catch (_) {
+      // صامت عمدًا — أول ما الفني ياخد طلب فعلي، تتبّع التنفيذ اللحظي هيحدّث الموقع تاني.
+    }
+  }
+
   // زرار أونلاين/أوفلاين (Script 4 §8) — أهم فعل تشغيلي على شاشة الفني الرئيسية، فمكانه أعلى
-  // القايمة مباشرة مش داخل بروفايل ثانوي. الباك-إند بيرفض أي مطابقة لفني is_on_duty=false بغض
-  // النظر عن حالة الزرار هنا (matching.service.ts) — ده مجرد UI بينادي المصدر الحقيقي.
+  // القايمة مباشرة مش داخل بروفايل ثانوي. **تحديث (ADR-0017، 2026-08-19)**: is_available/
+  // is_on_duty اتشالوا من أهلية المطابقة تمامًا (matching.service.ts) — الفني متاح افتراضيًا
+  // Opt-out دلوقتي، الزرار ده بقى بلا أثر فعلي على استلام الطلبات (متسيّب في الواجهة لأي استخدام
+  // مستقبلي — مؤشر "أونلاين الآن" مثلاً — مش لأنه لسه بوابة أهلية).
   Future<void> _toggleDuty(bool wantOnDuty) async {
     setState(() => _togglingDuty = true);
     try {

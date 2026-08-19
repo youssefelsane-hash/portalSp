@@ -10,6 +10,7 @@ import {
 } from '../../common/events/additional-work-payment.event';
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '../../common/events/payment-instapay-rejected.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -748,6 +749,98 @@ export class PaymentsService {
       throw new Error('InstaPay provider لازم يرجّع reference دايماً — نتيجة غير متوقعة');
     }
     return { payment, referenceCode: result.referenceCode, instructionsAr: result.instructionsAr };
+  }
+
+  /**
+   * بَقّة حقيقية اتلقطت — العميل يسجّل "أنا حوّلت الفلوس فعلاً" (`PaymentsController.confirmInstaPayTransfer`)،
+   * مش مجرد polling محلي بلا أثر. مش تأكيد نهائي للدفع — ده لسه بيتم بس عبر
+   * `confirmInstaPayPayment` من الأدمن. Idempotent (تسجيل الوقت الأول بس لو اتنادت أكتر من مرة).
+   */
+  async confirmInstaPayTransferByCustomer(userId: string, orderId: string): Promise<Payment> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    if (order.customerId !== customerProfile.id) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش بتاعك', HttpStatus.FORBIDDEN);
+    }
+    const payment = await this.payments.findOne({
+      where: { orderId, paymentMethod: PaymentMethod.INSTAPAY, paymentStatus: PaymentGatewayStatus.PENDING },
+      order: { initiatedAt: 'DESC' },
+    });
+    if (!payment) {
+      throw new ApiException(ErrorCode.PAY_003, 'مفيش دفعة InstaPay معلّقة للطلب ده', HttpStatus.CONFLICT);
+    }
+    if (!payment.customerConfirmedTransferAt) {
+      payment.customerConfirmedTransferAt = new Date();
+      await this.payments.save(payment);
+    }
+    return payment;
+  }
+
+  /**
+   * رفض إداري لدفعة InstaPay معلّقة (مقابل confirmInstaPayPayment) — كانت فجوة حقيقية: التأكيد
+   * موجود بس الرفض لأ، بعكس طلبات الصرف اللي عندها approve/reject/complete. الدفعة بترجع
+   * `failed` (سبب/نص حر من الأدمن)، الطلب يفضل PENDING_PAYMENT (العميل يقدر يعيد المحاولة
+   * بـInstaPay تاني أو يختار وسيلة تانية) — بلا إلغاء تلقائي للطلب نفسه.
+   */
+  async rejectInstaPayPayment(
+    adminUserId: string,
+    paymentId: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<Payment> {
+    const previousStatus = (await this.payments.findOne({ where: { id: paymentId } }))?.paymentStatus ?? null;
+
+    return this.dataSource.transaction(async (manager) => {
+      const lockedPayment = await manager
+        .createQueryBuilder(Payment, 'p')
+        .setLock('pessimistic_write')
+        .where('p.id = :paymentId', { paymentId })
+        .getOne();
+      if (!lockedPayment) {
+        throw new ApiException(ErrorCode.VAL_001, 'الدفعة غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      if (lockedPayment.paymentMethod !== PaymentMethod.INSTAPAY) {
+        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي مش InstaPay', HttpStatus.CONFLICT);
+      }
+      if (lockedPayment.paymentStatus !== PaymentGatewayStatus.PENDING) {
+        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي مش معلّقة عشان ترفضها', HttpStatus.CONFLICT);
+      }
+
+      lockedPayment.paymentStatus = PaymentGatewayStatus.FAILED;
+      lockedPayment.failureCode = 'instapay_manual_rejection';
+      lockedPayment.failureMessage = reason;
+      lockedPayment.failedAt = new Date();
+      await manager.save(lockedPayment);
+
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'payment.instapay_rejected_manually',
+          entityType: 'payment',
+          entityId: paymentId,
+          oldValues: { payment_status: previousStatus },
+          newValues: {
+            payment_status: lockedPayment.paymentStatus,
+            reason,
+            order_id: lockedPayment.orderId,
+            reference: lockedPayment.gatewayReference,
+          },
+          meta,
+        },
+        manager,
+      );
+
+      this.events.emit(
+        PAYMENT_INSTAPAY_REJECTED_EVENT,
+        new PaymentInstaPayRejectedEvent(lockedPayment.orderId, lockedPayment.customerId, reason),
+      );
+
+      return lockedPayment;
+    });
   }
 
   /**
@@ -1538,7 +1631,15 @@ export class PaymentsService {
     cancellationFeeCents: number;
     payments: Pick<
       Payment,
-      'id' | 'paymentMethod' | 'paymentStatus' | 'amountCents' | 'completedAt' | 'orderItemBatchId' | 'failureCode' | 'failureMessage'
+      | 'id'
+      | 'paymentMethod'
+      | 'paymentStatus'
+      | 'amountCents'
+      | 'completedAt'
+      | 'orderItemBatchId'
+      | 'failureCode'
+      | 'failureMessage'
+      | 'customerConfirmedTransferAt'
     >[];
     refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
   }> {

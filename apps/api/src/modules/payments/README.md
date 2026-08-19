@@ -407,3 +407,29 @@ cash-admin-confirmed:${orderId}`، بعده `settleAndComplete(manager, order, C
 
 **فجوة تشغيلية موثّقة**: مفيش job دوري في الإنتاج بيقارن `balance_cents` لكل محفظة ضد دفتر حركاتها
 ويرفع alert عند انحراف — لو الأمر جد لازم يتضاف (خارج نطاق هذا الـaudit).
+
+## إكمال تدفق InstaPay اليدوي (ADR-0013 §7 — docs/08 §163، 2026-08-19)
+
+كان التدفق مبني ~90% (تعليمات تحويل + كود مرجعي + تأكيد أدمن يدوي `confirmInstaPayPayment`)، لكن
+فيه فجوتين حقيقيتين اتلقطتا بمراجعة كاملة للمسار (باك-إند → admin → customer-app):
+
+1. **العميل مالوش أي أثر مسجّل إنه "حوّل الفلوس"** — `instapay_reference_screen.dart`'s زرار
+   "حوّلت الفلوس" كان بيعمل `GET` polling محلي 5 مرات بس، من غير ما ينادي أي endpoint. يعني
+   الأدمن معندوش طريقة يفرّق بين "العميل لسه ما حوّلش" و"العميل بيقول إنه حوّل، محتاج مراجعة" —
+   لازم يفتح كل الدفعات المعلّقة يدوياً بلا أولوية. الإصلاح: `payments.customer_confirmed_transfer_at`
+   (migration `0145`) + `PaymentsService.confirmInstaPayTransferByCustomer()` +
+   `POST /orders/:id/confirm-instapay-transfer` (عميل) — الزرار في `instapay_reference_screen.dart`
+   بينادي الـendpoint ده أول حاجة قبل الـpolling (فشل الشبكة هنا مش بلوكر، الـpolling لسه بيحاول).
+   واجهة الأدمن (`apps/admin/src/app/orders/[id]/page.tsx`) بتوضّح مؤشر كهرماني "العميل قال إنه
+   حوّل" على الدفعات دي.
+2. **مفيش رفض إداري صريح** — `confirmInstaPayPayment` موجودة من زمان، لكن بعكس طلبات الصرف
+   (approve/reject/complete) مفيش `reject` مقابلها لدفعة InstaPay. الإصلاح: `PaymentsService.rejectInstaPayPayment()`
+   + `POST /admin/payments/:id/reject-instapay` (نفس صلاحية `payments.confirm_manual` + `@RequireStepUp()`
+   بالظبط زي التأكيد) — الدفعة بترجع `failed` (`failure_code=instapay_manual_rejection`, سبب حر)،
+   **الطلب يفضل `pending_payment` بلا إلغاء تلقائي** (العميل يقدر يعيد المحاولة أو يختار وسيلة تانية)،
+   والعميل بياخد إشعار فوري بالسبب (`PaymentInstaPayRejectedNotificationListener`).
+
+الاختبار الحي `instapay-manual-flow.spec.ts` بيثبت المسارين (تأكيد العميل idempotent + معزول عن
+عملاء تانيين، رفض الأدمن بيقفل الدفعة ويمنع رفض/تأكيد تاني، الحدث بيتبعت بالبيانات الصح).
+`payments.confirm_manual` عرضها في `/admin` عادي دلوقتي (مش محجوب خلف sandbox) — القرار الوحيد
+المتبقي فعلياً هو تفعيل حساب InstaPay حقيقي وقت الإطلاق (`docs/03-external-integrations.md`).

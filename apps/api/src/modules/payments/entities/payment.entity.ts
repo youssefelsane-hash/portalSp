@@ -93,6 +93,12 @@ export class Payment {
   @Column({ name: 'failed_at', type: 'timestamptz', nullable: true })
   failedAt: Date | null;
 
+  // InstaPay بس — العميل ضغط "حوّلت الفلوس" فعليًا (migration 0145). بيفرّق للأدمن بين دفعة
+  // محدش لمسها ودفعة العميل بيدّعي إنه حوّلها، بلا ما يبقى تأكيد فعلي (ده لسه بيتم بس عبر
+  // confirmInstaPayPayment من الأدمن).
+  @Column({ name: 'customer_confirmed_transfer_at', type: 'timestamptz', nullable: true })
+  customerConfirmedTransferAt: Date | null;
+
   @Column({ name: 'collected_by_user_id', type: 'uuid', nullable: true })
   collectedByUserId: string | null;
 

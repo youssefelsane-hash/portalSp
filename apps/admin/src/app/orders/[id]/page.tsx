@@ -119,6 +119,8 @@ export default function OrderDetailPage() {
   const [showRefundForm, setShowRefundForm] = useState(false);
   const [refundAmountEgp, setRefundAmountEgp] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  const [rejectInstaPayPaymentId, setRejectInstaPayPaymentId] = useState<string | null>(null);
+  const [rejectInstaPayReason, setRejectInstaPayReason] = useState('');
 
   // إدارة طاقم الطلب من الأدمن (Script 4 §22-29, §38-41) — منفصل عن teamMembers/المساعدين فوق
   // (member_type='assistant')، ده للأعضاء العاديين (member_type='team_member') في طلب "اعتماد".
@@ -266,6 +268,27 @@ export default function OrderDetailPage() {
     setError(null);
     try {
       await authedFetch(`/admin/payments/${paymentId}/confirm-instapay`, { method: 'POST' });
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // كانت فجوة حقيقية — confirm-instapay فوق موجود من زمان، رفض دفعة InstaPay معلّقة لأ.
+  async function handleRejectInstaPay(e: FormEvent) {
+    e.preventDefault();
+    if (!rejectInstaPayPaymentId || rejectInstaPayReason.trim().length < 2) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/payments/${rejectInstaPayPaymentId}/reject-instapay`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: rejectInstaPayReason }),
+      });
+      setRejectInstaPayPaymentId(null);
+      setRejectInstaPayReason('');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -1073,20 +1096,70 @@ export default function OrderDetailPage() {
                           {p.payment_status === 'failed' && p.failure_message && (
                             <span className="text-destructive">تعذّر التحصيل: {p.failure_message}</span>
                           )}
+                          {/* بَقّة حقيقية اتلقطت — العميل مكانش عنده طريقة يسجّل بيها "أنا حوّلت" غير
+                              polling محلي بلا أثر على السيرفر. customer_confirmed_transfer_at بيفرّق
+                              للأدمن بين دفعة محدش لمسها ودفعة العميل بيدّعي إنه حوّلها فعلاً. */}
+                          {p.payment_method === 'instapay' &&
+                            p.payment_status === 'pending' &&
+                            p.customer_confirmed_transfer_at && (
+                              <span className="text-amber-600">
+                                العميل قال إنه حوّل الفلوس ({new Date(p.customer_confirmed_transfer_at).toLocaleString('ar-EG')}) — محتاج مراجعة
+                              </span>
+                            )}
                           {/* §24 — كانت فجوة موثّقة: POST /admin/payments/:id/confirm-instapay موجود ومختبر
                               من زمان (ADR-0013 §7) بس صفر زرار له في أي شاشة — إنستاباي طريقة دفع حقيقية
                               كانت مقفولة عمليًا بلا واجهة أدمن تقفل الدورة. */}
                           {p.payment_method === 'instapay' && p.payment_status === 'pending' && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="self-start"
-                              disabled={isSaving}
-                              onClick={() => handleConfirmInstaPay(p.id)}
-                            >
-                              تأكيد استلام تحويل إنستاباي
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={isSaving}
+                                onClick={() => handleConfirmInstaPay(p.id)}
+                              >
+                                تأكيد استلام تحويل إنستاباي
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={isSaving}
+                                onClick={() => {
+                                  setRejectInstaPayPaymentId(p.id);
+                                  setRejectInstaPayReason('');
+                                }}
+                              >
+                                رفض التحويل
+                              </Button>
+                            </div>
+                          )}
+                          {/* رفض دفعة InstaPay معلّقة (مقابل التأكيد فوق) — كانت فجوة حقيقية، endpoint
+                              رفض مالوش أي واجهة خالص قبل كده. */}
+                          {rejectInstaPayPaymentId === p.id && (
+                            <form onSubmit={handleRejectInstaPay} className="flex flex-col gap-2">
+                              <Label htmlFor={`reject_instapay_reason_${p.id}`}>سبب الرفض</Label>
+                              <Input
+                                id={`reject_instapay_reason_${p.id}`}
+                                value={rejectInstaPayReason}
+                                onChange={(e) => setRejectInstaPayReason(e.target.value)}
+                                minLength={2}
+                                required
+                              />
+                              <div className="flex gap-2">
+                                <Button type="submit" size="sm" variant="destructive" disabled={isSaving}>
+                                  تأكيد الرفض
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setRejectInstaPayPaymentId(null)}
+                                >
+                                  إلغاء
+                                </Button>
+                              </div>
+                            </form>
                           )}
                         </li>
                       ))}

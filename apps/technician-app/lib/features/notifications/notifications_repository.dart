@@ -8,10 +8,15 @@ class NotificationsRepository {
 
   NotificationsRepository(this.auth);
 
+  // بَقّة حقيقية اتلقطت (بلاغ المالك: الجرس بيوريّ إشعار بس الشاشة فاضية): GET /notifications
+  // بيرجع {items, meta} من الباك-إند، وResponseInterceptor بيسطّح الشكل ده تلقائيًا فيخلّي
+  // data الفعلية array مباشرة (مش Map فيه مفتاح items) — authedRequest()/apiRequest() بتعمل
+  // cast لـMap دايمًا فكانت بترمي TypeError خام (مش ApiException) قبل حتى ما توصل للسطر اللي
+  // كان بيقرأ data!['items']. authedRequestList() هي المسار الصح لأي endpoint بالشكل
+  // {items, meta} — بتتعامل مع الـarray المسطّح مباشرة.
   Future<List<AppNotification>> list({bool unreadOnly = false}) async {
     final query = unreadOnly ? '?unread_only=true&per_page=50' : '?per_page=50';
-    final data = await auth.authedRequest('GET', '/notifications$query');
-    final items = (data!['items'] as List<dynamic>).cast<Map<String, dynamic>>();
+    final items = await auth.authedRequestList('/notifications$query');
     return items.map(AppNotification.fromJson).toList();
   }
 

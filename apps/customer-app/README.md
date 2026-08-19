@@ -308,3 +308,18 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 (بدون ضغطة مستخدم) جوّه `initState()` **لازم** يتأجّل بـ`addPostFrameCallback` — نداءه المباشر
 بيخاطر بتصادم مع انيميشن دخول الشاشة الحالية نفسها، والنتيجة Navigator فاسد بصمت بلا أي رسالة خطأ
 للمستخدم.
+
+## بَقّة حقيقية اتلقطت — شاشة الإشعارات فاضية رغم إن الجرس بيوريّ عدد (2026-08-19، بلاغ المالك)
+
+`NotificationsRepository.list()` كانت بتستخدم `authedRequest()`/`apiRequest()` (متوقّعة `Map`)
+لـ`GET /notifications`، رغم إن الـendpoint ده شكله `{items, meta}` — `ResponseInterceptor`
+(الباك-إند) بيسطّح الشكل ده تلقائيًا فبيرجّع `data` كـ**array مباشرة**، مش `Map` فيه مفتاح
+`items`. النتيجة: `apiRequest()`'s الـcast الداخلي (`data as Map<String, dynamic>?`) كان بيرمي
+`TypeError` خام **قبل** حتى ما يوصل للسطر اللي بيقرأ `data!['items']` — والـTypeError ده مش
+`ApiException`، فمعالجة `on ApiException catch` في `notifications_screen.dart` ماكانتش بتمسكه
+خالص، فالشاشة تفضل عالقة على `_notifications == null` للأبد. `GET /notifications/unread-count`
+بيرجّع `Map` عادي (مش `{items,meta}`) فمابيتسطّحش، فالجرس (badge) كان شغال طبيعي — ده بالظبط
+اللي خلّى العرض يبان "جرس بيوريّ عدد، شاشة فاضية" بالحرف. الإصلاح الحقيقي (كان لازم `_guardNetworkError`
+السابقة، بس ماكانش كافي — التحويل ده بيحصل بعد نطاق `_guardNetworkError` مش جواه): `list()` بقت
+تستخدم `authedRequestList()` (نفس المستخدمة في `fetchPreferences()` جنبها بالفعل — المسار الصح
+لأي endpoint بشكل `{items, meta}`) بدل `authedRequest()`.

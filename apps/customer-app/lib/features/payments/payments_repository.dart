@@ -85,6 +85,13 @@ class PaymentsRepository {
     );
     return InstaPayReference.fromJson(data!);
   }
+
+  // العميل بيقول "أنا حوّلت فعلاً" — بيسجّل customer_confirmed_transfer_at بس، مش تأكيد نهائي
+  // للدفعة (ده لسه شغل موظف Finance عبر confirm-instapay). كانت فجوة حقيقية: الزرار في الشاشة
+  // كان بيعمل polling محلي بس من غير ما ينادي أي endpoint يسجّل إن العميل ادّعى التحويل خالص.
+  Future<void> confirmInstaPayTransfer(String orderId) async {
+    await auth.authedRequest('POST', '/orders/$orderId/confirm-instapay-transfer');
+  }
 }
 
 class InstaPayReference {

@@ -66,6 +66,8 @@ export interface OrderPaymentSummaryDto {
   order_item_batch_id: string | null;
   failure_code: string | null;
   failure_message: string | null;
+  // InstaPay بس — العميل قال إنه حوّل فعليًا (مش تأكيد نهائي، ده لسه بيتم من الأدمن).
+  customer_confirmed_transfer_at: string | null;
 }
 
 export interface OrderRefundSummaryDto {
