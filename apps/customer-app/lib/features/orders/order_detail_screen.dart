@@ -651,6 +651,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text('السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}'),
+                              const SizedBox(height: 4),
+                              // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — null يعني العميل اختار
+                              // ASAP صراحة وقت الحجز، مش غياب بيانات.
+                              Text(
+                                order.scheduledAt == null
+                                    ? 'الموعد: في أقرب وقت ممكن'
+                                    : 'الموعد المطلوب: ${DateTime.parse(order.scheduledAt!).toLocal().toString().substring(0, 16)}',
+                                style: const TextStyle(color: Colors.grey),
+                              ),
                               if (order.problemDescription != null) ...[
                                 const SizedBox(height: 8),
                                 Text('الوصف: ${order.problemDescription}'),

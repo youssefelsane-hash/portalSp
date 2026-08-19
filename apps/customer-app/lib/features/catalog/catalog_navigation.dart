@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
+import '../orders/schedule_selection_screen.dart';
 import '../technicians/technician_selection_screen.dart';
 import 'booking_mode_selector.dart';
 import 'models.dart';
@@ -26,16 +27,31 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   }
 
   if (!context.mounted) return;
+
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — خطوة إجبارية بعد وضع الحجز مباشرة، قبل أي تفاصيل
+  // تانية (نفس ترتيب المالك: وضع الحجز → تفاصيل الشغل → الموعد المطلوب → العنوان → ...).
+  // الطوارئ مستثناة عمدًا — استجابة فورية بالتعريف (orders.service.ts بيرفض scheduled_at مع
+  // بوكينج طوارئ بوضوح)، فسؤال "امتى؟" هنا مضلّل مش مفيد.
+  DateTime? scheduledAt;
+  if (bookingMode != BookingMode.emergency) {
+    final choice = await Navigator.of(context).push<ScheduleChoice>(
+      MaterialPageRoute(builder: (_) => const ScheduleSelectionScreen()),
+    );
+    if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
+    scheduledAt = choice.scheduledAt;
+  }
+
+  if (!context.mounted) return;
   Navigator.of(context).push(
     MaterialPageRoute(
       // نفس منطق ServicesScreen الأصلي بالحرف (P0-10، 2026-08-13): فردي وpricing_model=formula
       // لازم يجمع تفاصيل الشغل (JobDetailsScreen) قبل قايمة الفنيين، فردي وسعر ثابت يروح لقايمة
       // الفنيين مباشرة، اعتماد/طوارئ يروحوا CreateOrderScreen (فيها اختيار شركة/فريق أو توزيع تلقائي).
       builder: (_) => bookingMode != BookingMode.individual
-          ? CreateOrderScreen(service: service, bookingMode: bookingMode)
+          ? CreateOrderScreen(service: service, bookingMode: bookingMode, requestedAt: scheduledAt)
           : service.pricingModel == 'formula'
-              ? JobDetailsScreen(service: service)
-              : TechnicianSelectionScreen(service: service),
+              ? JobDetailsScreen(service: service, requestedAt: scheduledAt)
+              : TechnicianSelectionScreen(service: service, requestedAt: scheduledAt),
     ),
   );
 }

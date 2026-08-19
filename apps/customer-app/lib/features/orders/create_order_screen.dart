@@ -18,6 +18,7 @@ import '../technicians/technicians_repository.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
+import 'schedule_selection_screen.dart';
 
 class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
@@ -36,6 +37,10 @@ class CreateOrderScreen extends StatefulWidget {
   // العميل يوصل هنا بعد ما اختار فني من القايمة دي، القيم دي بتتمرر جاهزة عشان مايدخلش نفس
   // البيانات مرتين — لسه ظاهرة ومعدّلة هنا (مش قراءة فقط) لو حاب يغيّر حاجة قبل التأكيد النهائي.
   final Map<String, dynamic>? initialFieldValues;
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — اتحددت إجباريًا في بداية التدفق (catalog_navigation.dart)
+  // لكل وضع غير الطوارئ. null = ASAP (اختيار العميل الصريح، مش سهو). Widget النهائي هنا بيعرضها
+  // ويسمح بتغييرها قبل التأكيد النهائي (نفس فلسفة "تغيير العنوان").
+  final DateTime? requestedAt;
 
   const CreateOrderScreen({
     super.key,
@@ -45,6 +50,7 @@ class CreateOrderScreen extends StatefulWidget {
     this.scheduleSlotId,
     this.initialAddress,
     this.initialFieldValues,
+    this.requestedAt,
   });
 
   @override
@@ -64,6 +70,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _promoController = TextEditingController();
   final _buildingController = TextEditingController();
   Address? _selectedAddress;
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — قابلة للتغيير هنا برضه (نفس _selectedAddress)،
+  // مش مقفولة على اختيار الشاشة السابقة.
+  late DateTime? _requestedAt;
   bool _submitting = false;
   // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — بيتولّد مرة واحدة بس
   // وقت فتح الشاشة (نفس درس generateIdempotencyKey() في payments_repository.dart بالحرف: توليد
@@ -126,6 +135,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
     _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
     _selectedAddress = widget.initialAddress;
+    _requestedAt = widget.requestedAt;
     if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
@@ -304,6 +314,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
   }
 
+  // "تغيير الموعد" (docs/08 §154) — بلا أثر لو الطلب مربوط بسلوت جدولة محدد (widget.scheduleSlotId)،
+  // ده موعد الفني نفسه المعلن، مش موعد حر قابل للتعديل من هنا.
+  Future<void> _pickSchedule() async {
+    final choice = await Navigator.of(context).push<ScheduleChoice>(
+      MaterialPageRoute(builder: (_) => const ScheduleSelectionScreen()),
+    );
+    if (choice != null && mounted) setState(() => _requestedAt = choice.scheduledAt);
+  }
+
+  String _formatRequestedAt() {
+    final at = _requestedAt;
+    if (at == null) return 'في أقرب وقت ممكن';
+    final two = (int n) => n.toString().padLeft(2, '0');
+    return '${two(at.day)}/${two(at.month)}/${at.year} الساعة ${two(at.hour)}:${two(at.minute)}';
+  }
+
   Future<void> _validatePromo() async {
     final code = _promoController.text.trim();
     if (code.isEmpty) return;
@@ -443,6 +469,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         bookingMode: widget.bookingMode,
         requestedTechnicianId: widget.requestedTechnicianId,
         scheduleSlotId: widget.scheduleSlotId,
+        // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
+        // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
+        scheduledAt: widget.scheduleSlotId == null ? _requestedAt?.toUtc().toIso8601String() : null,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
         buildingCode: _buildingController.text.trim(),
@@ -698,6 +727,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   leading: Icon(Icons.event_available_outlined),
                   title: Text('حجز موعد محدد مع هذا الفني'),
                   subtitle: Text('الطلب هيتوزّع على الفني ده أول حاجة — لو مش متاح وقتها، هنلاقيلك فني تاني'),
+                ),
+              ),
+            ] else if (widget.bookingMode != BookingMode.emergency) ...[
+              const SizedBox(height: 16),
+              Text('الموعد المطلوب', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  leading: Icon(_requestedAt == null ? Icons.bolt : Icons.event_outlined),
+                  title: Text(_formatRequestedAt()),
+                  trailing: const Icon(Icons.chevron_left),
+                  onTap: _pickSchedule,
                 ),
               ),
             ],

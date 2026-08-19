@@ -39,6 +39,10 @@ class TechnicianMarketplaceScreen extends StatefulWidget {
   final void Function(String technicianId) onSelect;
   final String? excludeTechnicianId;
   final Map<String, dynamic>? fieldValues;
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — بتتبعت لـGET /services/:id/technicians عشان
+  // الأهلية المعروضة هنا تطابق فعليًا نفس منطق المطابقة الحقيقي (ADR-0017) لنفس تاريخ الطلب،
+  // مش أهلية عامة "دلوقتي" ممكن متبقاش صحيحة وقت الموعد الفعلي.
+  final DateTime? requestedAt;
 
   const TechnicianMarketplaceScreen({
     super.key,
@@ -47,6 +51,7 @@ class TechnicianMarketplaceScreen extends StatefulWidget {
     required this.onSelect,
     this.excludeTechnicianId,
     this.fieldValues,
+    this.requestedAt,
   });
 
   @override
@@ -76,6 +81,7 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
         excludeTechnicianId: widget.excludeTechnicianId,
         fieldValues: widget.fieldValues,
         sort: _sort.apiValue,
+        scheduledAt: widget.requestedAt,
       );
       if (mounted) setState(() => _technicians = items);
     } on ApiException catch (err) {

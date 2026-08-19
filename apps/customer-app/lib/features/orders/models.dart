@@ -62,6 +62,8 @@ class Order {
   // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل وحده، مايسوّيش الطلب لوحده.
   final String? customerCashConfirmedAt;
   final String? technicianCashNotReceivedAt;
+  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — null = ASAP (اختيار العميل الصريح وقت الحجز، مش سهو).
+  final String? scheduledAt;
 
   Order({
     required this.id,
@@ -92,6 +94,7 @@ class Order {
     this.technicianPhone,
     this.customerCashConfirmedAt,
     this.technicianCashNotReceivedAt,
+    this.scheduledAt,
   });
 
   bool get isUnderWarranty =>
@@ -128,6 +131,7 @@ class Order {
         technicianPhone: json['technician_phone'] as String?,
         customerCashConfirmedAt: json['customer_cash_confirmed_at'] as String?,
         technicianCashNotReceivedAt: json['technician_cash_not_received_at'] as String?,
+        scheduledAt: json['scheduled_at'] as String?,
       );
 }
 
