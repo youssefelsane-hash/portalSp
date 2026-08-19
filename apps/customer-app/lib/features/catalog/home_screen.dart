@@ -86,11 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupportContactScreen())),
             ),
             IconButton(
-              icon: const Icon(Icons.cleaning_services_outlined),
-              tooltip: 'الخدمات المنزلية',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DomesticWorkersScreen())),
-            ),
-            IconButton(
               icon: const Icon(Icons.person_outline),
               tooltip: 'حسابي',
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AccountScreen())),
@@ -169,9 +164,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisSpacing: 12,
                     childAspectRatio: 0.95,
                   ),
-                  itemCount: _categories!.length,
+                  // +1 عشان كارت "الخدمات المنزلية" المثبّت في المركز الأول (تحت) — كان زرار
+                  // منفصل في الـAppBar وحده، سهل الإهمال. دلوقتي جزء طبيعي من شبكة الفئات زي
+                  // بقيتها، بس بميزة بصرية (إطار مميز) تفرّقه لأنه موديول منفصل (عمالة منزلية)
+                  // مش فئة عادية من `service_categories`.
+                  itemCount: _categories!.length + 1,
                   itemBuilder: (context, index) {
-                    final category = _categories![index];
+                    if (index == 0) {
+                      return _DomesticWorkersCard(
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const DomesticWorkersScreen()),
+                        ),
+                      );
+                    }
+                    final category = _categories![index - 1];
                     return CategoryCard(
                       category: category,
                       onTap: () => Navigator.of(context).push(
@@ -182,6 +188,67 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// كارت "الخدمات المنزلية" المثبّت (كان زرار AppBar وحيد بعيد عن باقي الفئات — طلب مالك صريح:
+// "يبقى زيه زي بقية الخدمات ظاهر جنبهم... بس يفضل ليه علامة مميزة"). نفس هيكل CategoryCard
+// (صورة فوق + اسم تحت) عشان يندمج بصريًا في نفس الشبكة، بس بإطار ملوّن + Badge صغيرة تفرّقه.
+class _DomesticWorkersCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _DomesticWorkersCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scheme.tertiary, width: 2),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 96,
+                  color: scheme.tertiaryContainer,
+                  child: Icon(Icons.cleaning_services_outlined, size: 40, color: scheme.onTertiaryContainer),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                  child: Text(
+                    'الخدمات المنزلية',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ],
+            ),
+            Positioned(
+              top: 6,
+              right: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: scheme.tertiary, borderRadius: BorderRadius.circular(20)),
+                child: Text(
+                  'مميز',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onTertiary),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

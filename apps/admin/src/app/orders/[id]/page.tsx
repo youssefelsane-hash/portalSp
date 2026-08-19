@@ -689,11 +689,46 @@ export default function OrderDetailPage() {
               <p className="text-destructive">رسوم الطوارئ: {formatEgp(order.surge_amount_cents)}</p>
             )}
             {order.discount_amount_cents > 0 && <p>الخصم: {formatEgp(order.discount_amount_cents)}</p>}
-            <p>الفني: {order.technician_id ? <span dir="ltr">{order.technician_id}</span> : 'لسه مفيش'}</p>
+            {/* اسم/تليفون الفني بدل الـUUID الخام (طلب مالك صريح — موظف العمليات مش المفروض ينسخ
+                UUID يدويًا عشان يعرف مين الفني). الـUUID لسه موجود كمعلومة ثانوية (title) لو
+                احتاجه حد للتصحيح التقني. الاسم قابل للنقر — بيودّي لصفحة بروفايل الفني. */}
+            <p>
+              الفني:{' '}
+              {order.technician_id ? (
+                order.technician_name ? (
+                  <Link href={`/technicians/${order.technician_id}`} className="underline" title={order.technician_id}>
+                    {order.technician_name}
+                    {order.technician_phone ? ` — ${order.technician_phone}` : ''}
+                  </Link>
+                ) : (
+                  <span dir="ltr" title="اسم الفني مش متاح">
+                    {order.technician_id}
+                  </span>
+                )
+              ) : (
+                'لسه مفيش'
+              )}
+            </p>
             {order.problem_description && <p>وصف المشكلة: {order.problem_description}</p>}
             {order.customer_notes && <p>ملاحظات العميل: {order.customer_notes}</p>}
             <p>
               اتحجز في: {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+            </p>
+            {/* موعد الخدمة المطلوب — مختلف تمامًا عن "اتحجز في" (وقت إنشاء الطلب). طلب مالك صريح:
+                موظفي العمليات كانوا بيلخبطوا بين الاتنين. null = "في أقرب وقت ممكن" (ASAP)، مش
+                غياب بيانات — نفس دلالة scheduled_at=null في باقي المشروع (ScheduleChoice.asap). */}
+            <p className="font-medium">
+              موعد الخدمة المطلوب:{' '}
+              {order.scheduled_at ? (
+                new Date(order.scheduled_at).toLocaleDateString('ar-EG-u-nu-latn', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })
+              ) : (
+                <Badge variant="secondary">في أقرب وقت ممكن</Badge>
+              )}
             </p>
             {order.warranty_expires_at && (
               <p>

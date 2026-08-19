@@ -6,6 +6,10 @@ import 'package:flutter/material.dart';
 // (2:30، 5:15). المطابقة بتسأل: الفني ده يقدر ياخد شغلانة تانية في اليوم ده؟ مش بتعتمد على
 // سلوتات دقيقة بالدقيقة." الباك-إند لسه بيخزّن scheduled_at كـtimestamp (فايدة تقنية للفرز/الحسابات
 // الداخلية)، لكن قيمته دايمًا بداية اليوم المطلوب — العميل ميختارش وقت خالص من هنا.
+// **تصحيح تاني (طلب مالك صريح، جلسة تالية)**: الشاشة كانت لسه فيها 4 خيارات (فوري/النهاردة/بكرة/
+// يوم تاني) — كتير ومربك برأي المالك. خيارين بس دلوقتي: "في أقرب وقت ممكن" و"اختار تاريخ تاني"
+// (بيفتح الكالندر مباشرة، والعميل يقدر يختار النهاردة أو بكرة من جوّه الكالندر نفسه لو حابب،
+// من غير ما نحتاج زرار مخصص لكل يوم قريب).
 // خطوة إجبارية في تدفق الحجز العادي (فردي/اعتماد) — الطوارئ مستجابة فورية بالتعريف فمش بتمرّ
 // بالشاشة دي خالص (orders.service.ts بيرفض scheduled_at مع بوكينج طوارئ بوضوح).
 // null (ASAP) نتيجة صحيحة ومقصودة — مش غياب اختيار، هو اختيار العميل الصريح "في أقرب وقت".
@@ -36,8 +40,6 @@ class ScheduleSelectionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final today = _startOfDay(DateTime.now());
-    final tomorrow = today.add(const Duration(days: 1));
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -57,23 +59,9 @@ class ScheduleSelectionScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _ScheduleOptionCard(
-                icon: Icons.today_outlined,
-                title: 'النهاردة',
-                subtitle: 'هيوصلك الفني خلال النهاردة',
-                onTap: () => Navigator.of(context).pop(ScheduleChoice.at(today)),
-              ),
-              const SizedBox(height: 12),
-              _ScheduleOptionCard(
-                icon: Icons.event_outlined,
-                title: 'بكرة',
-                subtitle: 'هيوصلك الفني بكرة',
-                onTap: () => Navigator.of(context).pop(ScheduleChoice.at(tomorrow)),
-              ),
-              const SizedBox(height: 12),
-              _ScheduleOptionCard(
                 icon: Icons.calendar_month_outlined,
-                title: 'يوم تاني',
-                subtitle: 'اختار أي يوم في المستقبل',
+                title: 'اختار تاريخ تاني',
+                subtitle: 'حدد اليوم اللي يناسبك من الكالندر',
                 onTap: () => _pickSpecificDate(context),
               ),
             ],
