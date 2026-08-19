@@ -33,7 +33,7 @@
 | 3 | Booking Configuration (pricing fields) | Pricing | FIXED | نعم — خدمة formula حقيقية بحقل NUMBER `default_value` بره الحدود، `POST /services/:id/estimate` حي رجّع رفض واضح بدل سعر غلط | نعم — 2 اختبار جديد (`pricing-field-default-value-bypass.spec.ts`) + 5 موجودين (Script 6 Part 3/4) | BUG-003 (P1 — تسعير خاطئ بصمت) | BUG-003 fixed | لا يوجد معروف حاليًا — الفحص بقى موحّد لكل القيم (افتراضية أو من العميل) | commit قادم |
 | 4 | Pricing Engine | Pricing | VERIFIED | جزئي — فحص كود ثابت + قراءة دقيقة لكل مسارات الخصم/العمولة | لا يوجد اختبار جديد مخصص (المنطق اتفحص وأثبت سليم بالقراءة، مفيش استغلال حي أمكن بناؤه) | لا يوجد | لا يوجد | **فجوة اختبار مهمة (مش بَقّة منطق)**: `OrdersService.create()` — أهم دالة في المنصة كلها — كان **مفيش لها ولا اختبار jest واحد** بيناديها مباشرة. **تحديث (Phase 5)**: أول فيكستشر jest مباشر لـ`create()` اتبنى فعلاً (`order-creation-standard-data-pairing.spec.ts`، BUG-004) وبيغطي مسار الإنتاجية/الطاقم بالكامل (سلبي+إيجابي)، لكن التغطية دي محصورة في جزء الإنتاجية بس — باقي منطق التسعير/الخصم الشامل (promo/building/formula/zone/level) لسه محتاج تغطية مباشرة، هتتوسّع في Phase 9 (Order Creation) فوق نفس الفيكستشر | commit قادم |
 | 5 | Productivity / Crew Calculation | Catalog/Productivity | FIXED | نعم — `OrdersService.create()` حي (أول مرة في المشروع كله) بالحالتين السلبيتين + الحالة السليمة + الحالة العادية | نعم — 4 اختبارات جديدة (`order-creation-standard-data-pairing.spec.ts`)، أول تغطية jest مباشرة لـ`create()` | BUG-004 (P1 — متطلب طاقم بيتفقد بصمت) | BUG-004 fixed | لا يوجد معروف حاليًا — الفحص بقى XOR صريح، ونموذج الإنتاجية الخطي نفسه (توزيع الإنتاجية طرديًا مع عدد الصنايعية) لسه قرار عمل مبسّط موثّق صراحة (مش الصيغة النهائية المؤكدة من المالك) — راجع تعليق `estimateDuration()` في `catalog.service.ts` | commit قادم |
-| 6 | Address / GPS / Serviceability | Addresses/Geo | PENDING | | | | | | |
+| 6 | Address / GPS / Serviceability | Addresses/Geo | FIXED | نعم — `create()`/`update()` حيين ضد Postgres حقيقي، مدينتين/منطقتين مختلفتين | نعم — 5 اختبارات جديدة (`addresses-area-city-consistency.spec.ts`) | BUG-005 (P2 — server trust boundary مفقود بين area_id/city_id) | BUG-005 fixed | لا يوجد فحص جغرافي حقيقي (point-in-polygon) على مستوى المدينة نفسها لسه — الفحص الحالي بس على مستوى نطاق الخدمة (`service_zones.boundary`) لو موجود؛ ده قرار MVP موثّق صراحة مسبقًا (§0.2.5) مش بَقّة جديدة | commit قادم |
 | 7 | Booking Modes (ASAP/Scheduled) | Orders | PENDING | | | | | | |
 | 8 | Provider Selection UX & Semantics | Technicians/Matching | PENDING | | | | | | |
 | 9 | Order Creation (idempotency) | Orders | PENDING | | | | | | |
@@ -163,6 +163,43 @@ Regression test: `order-creation-standard-data-pairing.spec.ts` (4 اختبار�
 الاختباران السلبيان كانوا بيفشلوا فعليًا قبل الإصلاح (الطلب كان بيتسجّل بنجاح بدل ما يترفض).
 Live verification: jest حي ضد Postgres حقيقي (مش mocks) — 4/4 نجحوا بعد الإصلاح، 2/4 فشلوا
 (بالشكل المتوقع) قبله. Full regression: 95 suite، 533 اختبار، كله ناجح.
+Status: FIXED
+
+### BUG-005
+Severity: P2 (server trust boundary مفقود — استغلال محتاج input متعمّد غير طبيعي، مش UI عادي، لكن مفيش أي فحص server-side)
+Flow: Phase 6 (Address / GPS / Serviceability) — `AddressesService.create()`/`update()`
+Symptom: `city_id` و`area_id` بيتبعتوا من العميل كـUUID مستقلين بلا أي تحقق إن `area_id` فعلاً
+تابع لـ`city_id` المبعوت جنبه. بما إن `findZoneForPoint()` (orders.service.ts) بيحدد نطاق
+التسعير من `address.cityId` بس (مش من `areaId`)، عميل كان يقدر يبعت `city_id` لمدينة و`area_id`
+لمنطقة تابعة لمدينة تانية تمامًا — العنوان بيتسجّل بـ`cityId` غير متسق مع مكانه الحقيقي.
+Reproduction: `AddressesService.create(userId, {city_id: cityB, area_id: areaA})` حيث
+`areaA.cityId === cityA !== cityB` — قبل الإصلاح: العنوان اتسجّل بنجاح. `update()` بنفس
+المنطق: تغيير `city_id` لوحده (بلا `area_id`) أو `area_id` لوحده (بلا `city_id`) كان بيتقبل
+بلا أي فحص اتساق خالص.
+Expected: `area_id` لازم يترفض لو مش تابع فعليًا لـ`city_id` الناتج (سواء الاتنين اتبعتوا مع
+بعض أو واحد بس مع القيمة القديمة المحفوظة).
+Actual: `isAreaLaunched(areaId)` القديمة كانت بتتحقق من `area_id` لوحده بس (موجود/مفعّل/مطلق)
+بلا أي مقارنة بـ`city_id`. أخطر من كده: `update()` كان بيقبل تغيير `city_id` لوحده بلا أي فحص
+جغرافي خالص (مش حتى `isAreaLaunched` القديمة).
+Root cause: التحقق كان مصمم حول `area_id` بس من الأول، وبعدين `city_id` اتضاف كحقل مستقل من
+غير ربط رجوعي.
+Files involved: `apps/api/src/modules/customers/addresses.service.ts`,
+`apps/api/src/modules/geo/geo.service.ts`
+Financial/security impact: مش استغلال بسيط عبر الـUI العادي (اللي غالبًا بيجيب `area_id` من
+`GET /geo/cities/:id/areas` بترشيح `city_id` أصلاً)، لكنه فجوة أمان server-side حقيقية — عميل
+بيتحكم في الـpayload مباشرة (curl/تعديل الطلب) يقدر "يختار" نطاق تسعير (`service_zone_pricing`)
+مختلف عن مكانه الفعلي عن طريق التلاعب بـ`city_id` بعيدًا عن `area_id`/الإحداثيات الحقيقية —
+خصوصًا إن كل المدن الحالية معندهاش `boundary` مرسوم (fallback لأول نطاق نشط في المدينة، زي ما
+موثّق في `findZoneForPoint()`).
+Fix: `GeoService.isAreaLaunchedInCity(areaId, cityId)` جديدة بتتحقق من الاتنين في استعلام واحد
+(موجود/مفعّل/مطلق/تابع فعليًا لنفس المدينة). `update()` بقى بيحسب `effectiveAreaId`/
+`effectiveCityId` (القيمة الجديدة أو المحفوظة) ويتحقق من الاتساق كل مرة أي منهم بيتغيّر — حتى
+لو واحد بس اتبعت.
+Regression test: `addresses-area-city-consistency.spec.ts` (5 اختبارات، Postgres حقيقي) —
+`create()` بزوج متسق/غير متسق، و`update()` بتغيير كل حقل لوحده وبالاتنين مع بعض. اتأكد بـ
+`git stash` إن 3 من الاختبارات كانوا بيفشلوا فعليًا قبل الإصلاح.
+Live verification: jest حي ضد Postgres حقيقي — 5/5 نجحوا بعد الإصلاح، 3/5 فشلوا (بالشكل
+المتوقع) قبله. Full regression: 96 suite، 538 اختبار، كله ناجح.
 Status: FIXED
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
