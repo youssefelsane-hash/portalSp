@@ -1,8 +1,6 @@
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
-import { PaymentsService } from '../payments/payments.service';
-import type { PaymentProvider, RefundResult } from '../payments/gateways/payment-provider.interface';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
 import { Setting } from '../settings/entities/setting.entity';
@@ -13,15 +11,14 @@ import { OrderAutoCancelService } from './order-auto-cancel.service';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 
-// اختبار حي ضد Postgres حقيقي — بيثبت بند 3+5 من تدقيق جاهزية الإطلاق (docs/08 §19):
-// (أ) طلبات PENDING_PAYMENT قديمة (دفع إلكتروني مسبق ماتمّش) بتتلغى تلقائيًا بلا استرداد،
-// (ب) طلبات SEARCHING_TECHNICIAN مدفوعة (كارت/InstaPay) بتاخد استرداد فوري تلقائي عند
-// الإلغاء النظامي، (ج) طلبات SEARCHING_TECHNICIAN غير مدفوعة (كاش) متاخدش أي محاولة استرداد
-// (regression — الإصلاح ميضيفش استرداد كاذب لطلبات مفيش فلوس اتاخدت أصلاً منها).
-describe('OrderAutoCancelService — PENDING_PAYMENT sweep + استرداد تلقائي (docs/08 §19 بند 3+5)', () => {
+// اختبار حي ضد Postgres حقيقي — بيثبت docs/08 §19 بند 3 (طلبات PENDING_PAYMENT قديمة بتتلغى
+// تلقائيًا بلا استرداد) + قرار عمل صريح من المالك (2026-08-19): طلبات SEARCHING_TECHNICIAN
+// (مفيش فني قبلها لسه) **مايتلغوش تلقائيًا خالص** بعد كده، مهما طالت المدة أو كانت مدفوعة أو لأ —
+// عكس السلوك القديم اللي كان بيلغيها ويسترد فلوسها تلقائيًا. ده regression test صريح للتراجع ده:
+// لو حد رجّع مسار SEARCHING_TECHNICIAN من غير قصد، الاختبار ده هيفشل.
+describe('OrderAutoCancelService — PENDING_PAYMENT sweep + SEARCHING_TECHNICIAN مايتلغيش تلقائيًا (docs/08 §19 بند 3، قرار 2026-08-19)', () => {
   let dataSource: DataSource;
   let service: OrderAutoCancelService;
-  let paymentsService: PaymentsService;
   let cache: RedisCacheService;
 
   const runId = Date.now().toString(36);
@@ -36,45 +33,6 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + استرداد تل
     address: '',
   };
   const OLD_MINUTES_AGO = 200; // أقدم بكتير من أي إعداد مهلة معقول (15/20 دقيقة افتراضيًا)
-
-  const makeFakeProvider = (behavior: 'succeed' | 'reject'): PaymentProvider => ({
-    providerKey: 'fake-test-provider',
-    isConfigured: true,
-    supportsRefund: true,
-    supportsVoid: false,
-    supportsCapture: false,
-    supportsTokenization: false,
-    async createPayment() {
-      throw new Error('not used in this test');
-    },
-    verifyWebhook() {
-      throw new Error('not used in this test');
-    },
-    async getPaymentStatus() {
-      throw new Error('not used in this test');
-    },
-    async refund(): Promise<RefundResult> {
-      if (behavior === 'reject') {
-        return { succeeded: false, providerRefundId: null, status: 'failed' as never, failureReason: 'رفض من البوابة' };
-      }
-      return { succeeded: true, providerRefundId: `prov-refund-${runId}`, status: 'refunded' as never, failureReason: null };
-    },
-    async void() {
-      throw new Error('not used in this test');
-    },
-    async capture() {
-      throw new Error('not used in this test');
-    },
-    async reconcile() {
-      throw new Error('not used in this test');
-    },
-    async chargeToken() {
-      throw new Error('not used in this test');
-    },
-    verifyCardSaveWebhook() {
-      return null;
-    },
-  });
 
   async function insertOrder(opts: {
     label: string;
@@ -174,33 +132,11 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + استرداد تل
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
 
-    paymentsService = new PaymentsService(
-      dataSource.getRepository(Order),
-      dataSource.getRepository(Payment),
-      dataSource.getRepository(Refund),
-      dataSource.getRepository(User),
-      dataSource.getRepository(WebhookEvent),
-      dataSource,
-      {} as never, // walletsService — مش متنادى (technicianId=null دايمًا هنا، refundMethod=ORIGINAL_METHOD)
-      {} as never, // catalogService
-      {} as never, // customerProfiles
-      {} as never, // techniciansService
-      {} as never, // technicianLevelsService
-      {} as never, // technicianStatsService
-      {} as never, // loyaltyService
-      settingsService,
-      { record: async () => undefined } as never, // auditLog
-      { emit: () => undefined } as never, // events
-      { getProvider: () => makeFakeProvider('succeed') } as never, // paymentProviders
-      {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
-    );
-
     service = new OrderAutoCancelService(
       dataSource.getRepository(Order),
       dataSource,
       settingsService,
       { emit: () => undefined } as never,
-      paymentsService,
       { releaseUsage: async () => undefined } as never, // promoCodesService — الاختبار ده ملوش علاقة بأكواد الخصم
     );
   });
@@ -242,31 +178,30 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + استرداد تل
     expect(refund).toBeNull();
   });
 
-  it('طلب SEARCHING_TECHNICIAN مدفوع (كارت) قديم — يتلغى نظاميًا ويترد فورًا تلقائيًا (orderStatus فضل CANCELLED_BY_SYSTEM، paymentStatus بقى REFUNDED)', async () => {
+  it('طلب SEARCHING_TECHNICIAN مدفوع (كارت) قديم جدًا — يفضل SEARCHING_TECHNICIAN بلا أي إلغاء أو استرداد (regression: كان بيتلغى ويترد تلقائيًا قبل قرار المالك 2026-08-19)', async () => {
     const { orderId } = await insertOrder({
       label: `pd-${runId}`,
       orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
       paymentStatus: OrderPaymentStatus.PAID,
       minutesAgo: OLD_MINUTES_AGO,
     });
-    await insertSucceededPayment(orderId, `pd-${runId}`, PaymentMethod.CARD);
+    const paymentId = await insertSucceededPayment(orderId, `pd-${runId}`, PaymentMethod.CARD);
 
     await service.sweep();
 
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
-    expect(order?.orderStatus).toBe(OrderStatus.CANCELLED_BY_SYSTEM);
-    expect(order?.paymentStatus).toBe(OrderPaymentStatus.REFUNDED);
+    expect(order?.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
+    expect(order?.paymentStatus).toBe(OrderPaymentStatus.PAID);
+    expect(order?.cancelledAt).toBeNull();
 
-    const payment = await dataSource.getRepository(Payment).findOne({ where: { orderId } });
-    expect(payment?.paymentStatus).toBe(PaymentGatewayStatus.REFUNDED);
+    const payment = await dataSource.getRepository(Payment).findOne({ where: { id: paymentId } });
+    expect(payment?.paymentStatus).toBe(PaymentGatewayStatus.SUCCEEDED);
 
     const refund = await dataSource.getRepository(Refund).findOne({ where: { orderId } });
-    expect(refund).not.toBeNull();
-    expect(refund!.amountCents).toBe(30000);
-    expect(refund!.providerRefundId).toBe(`prov-refund-${runId}`);
+    expect(refund).toBeNull();
   });
 
-  it('طلب SEARCHING_TECHNICIAN غير مدفوع (كاش) قديم — يتلغى بس بلا أي محاولة استرداد (regression: مفيش فلوس اتاخدت أصلاً)', async () => {
+  it('طلب SEARCHING_TECHNICIAN غير مدفوع (كاش) قديم جدًا — يفضل SEARCHING_TECHNICIAN برضه (نفس القاعدة بصرف النظر عن حالة الدفع)', async () => {
     const { orderId } = await insertOrder({
       label: `un-${runId}`,
       orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
@@ -277,8 +212,9 @@ describe('OrderAutoCancelService — PENDING_PAYMENT sweep + استرداد تل
     await service.sweep();
 
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
-    expect(order?.orderStatus).toBe(OrderStatus.CANCELLED_BY_SYSTEM);
+    expect(order?.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
     expect(order?.paymentStatus).toBe(OrderPaymentStatus.UNPAID);
+    expect(order?.cancelledAt).toBeNull();
 
     const refund = await dataSource.getRepository(Refund).findOne({ where: { orderId } });
     expect(refund).toBeNull();

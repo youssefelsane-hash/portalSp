@@ -141,11 +141,15 @@ B لنفس الطلب بالتوازي لا يسبب lost update: الدفعتا
 `REFUNDED`، وعكس أرباح الفني/المنصة يبقى مرة واحدة لكل صف Refund. هذا مثبت باختبار PostgreSQL
 متزامن في `cash-settlement-direction.spec.ts`.
 
-## `refundCancelledPrepaidOrder()` — استرداد فوري لإلغاء نظامي أو إلغاء عميل قبل التوزيع (docs/08 §19 بند 3+5، عُمّمت في §20 بند 7)
+## `refundCancelledPrepaidOrder()` — استرداد فوري لإلغاء عميل قبل التوزيع (docs/08 §19 بند 3+5، عُمّمت في §20 بند 7)
 
-بينادى من مكانين: `OrderAutoCancelService` (`../orders/order-auto-cancel.service.ts`) لما طلب
-`SEARCHING_TECHNICIAN` مدفوع مسبقًا (كارت/InstaPay) يتلغى تلقائيًا لعدم توفر فني، و`OrdersService.
-cancel()` (`../orders/orders.service.ts`) لما العميل نفسه يلغي طلب مدفوع مسبقًا. **مختلف عمدًا
+**تحديث (قرار عمل صريح من المالك، 2026-08-19)**: كانت بتتنادى من مكانين — `OrderAutoCancelService`
+(لما طلب `SEARCHING_TECHNICIAN` مدفوع مسبقًا يتلغى تلقائيًا لعدم توفر فني) و`OrdersService.cancel()`
+(لما العميل نفسه يلغي طلب مدفوع مسبقًا). **المسار الأول اتشال بالكامل** — طلب `SEARCHING_TECHNICIAN`
+دلوقتي مايتلغيش تلقائيًا خالص مهما طالت المدة (تفاصيل كاملة `../orders/README.md`)، فمفيش استرداد
+نظامي مرتبط بيه بعد كده. الدالة دلوقتي بتتنادى من `OrdersService.cancel()` بس — لما العميل نفسه يلغي
+طلب مدفوع مسبقًا. باراميتر `triggeredBy: 'system_auto_cancel' | 'customer_cancel'` (تحت) لسه موجود
+في التوقيع لتوافق واجهة برمجية، بس القيمة `'system_auto_cancel'` بقت غير مستخدمة فعليًا حاليًا. **مختلف عمدًا
 عن `refundOrder()` فوق**: هناك الطلب لازم `COMPLETED`/`DISPUTED` عشان ينتقل لـ`REFUNDED` نهائية
 (استرداد بعد خدمة/نزاع). هنا الطلب **بالفعل** `CANCELLED_BY_SYSTEM`/`CANCELLED_BY_CUSTOMER` —
 الحالة الصح اللي تحكي قصته الحقيقية (اتلغى، مش اتسلّم واترجعت فلوسه) — فمفيش انتقال `orderStatus`
@@ -165,9 +169,11 @@ cancel()` (`../orders/orders.service.ts`) لما العميل نفسه يلغي 
 لغى، مش سياسة جديدة. رسوم إلغاء العميل (لو السبب `chargesFee`) قيد `PENALTY` مستقل تمامًا جوّه
 `OrdersService.cancel()` نفسها — الدالة دي مسؤولة بس عن استرداد المبلغ المدفوع فعليًا للبوابة.
 
-اتأكد حي في `../orders/order-auto-cancel-pending-payment.spec.ts` (المسار النظامي) و
-`../orders/orders-cancel-prepaid-refund.spec.ts` (المسار الجديد، مسار العميل — 4 اختبارات: استرداد
-قبل/بعد التعيين، رجريشن على طلب كاش غير مدفوع، idempotency عند نداء مزدوج).
+اتأكد حي في `../orders/orders-cancel-prepaid-refund.spec.ts` (مسار العميل — 4 اختبارات: استرداد
+قبل/بعد التعيين، رجريشن على طلب كاش غير مدفوع، idempotency عند نداء مزدوج). `../orders/
+order-auto-cancel-pending-payment.spec.ts` بقت بتثبت العكس دلوقتي — طلب `SEARCHING_TECHNICIAN`
+مدفوع مسبقًا وقديم جدًا **يفضل زي ما هو بلا أي استرداد** (المسار النظامي القديم اتشال بالكامل،
+تفاصيل `../orders/README.md`).
 
 `tsc --noEmit`/`nest build`/38 suite (205 اختبار) عدّوا نضيف بعد التعميم.
 

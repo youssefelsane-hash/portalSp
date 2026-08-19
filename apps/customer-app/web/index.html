@@ -37,11 +37,11 @@
     أي محاولة لعرض GoogleMap widget — بعكس Android/iOS، مفيش حقن تلقائي من Flutter، لازم <script>
     يدوي هنا (كانت فجوة حقيقية: كان الملف ده افتراضي 100% بلا أي وسم Maps خالص، فـ`google.maps`
     تفضل undefined على الويب مهما كان المفتاح صح، والسبب مالوش أي علاقة بالبلد/الموقع الجغرافي).
-    نفس المفتاح المستخدم في AndroidManifest.xml/AppDelegate.swift — **لازم Maps JavaScript API
-    تتفعّل ليه من Google Cloud Console (منفصلة عن Maps SDK for Android/iOS)، وقيود الـHTTP referrer
-    بتاعته (لو موجودة) لازم تسمح بالدومين اللي التطبيق شغال عليه (localhost وقت التطوير).
+    مفتاح مخصّص لـMaps JavaScript API (الويب) — مختلف عن مفتاح Android/iOS في
+    AndroidManifest.xml/AppDelegate.swift عمدًا (المالك جهّزه بعد التوضيح: قيود المفتاحين مختلفة
+    بطبيعتها — Android/iOS بيتقيّدوا بـpackage name/bundle id، الويب بيتقيّد بـHTTP referrer).
   -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyADROTkhp-ICyuRnX0_rYJUxbn_num_BBE"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCmfNLFMj3OJoLqEosSEo1ugP1Ccqi4Y6k"></script>
 </head>
 <body>
   <!--

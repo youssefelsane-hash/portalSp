@@ -1985,7 +1985,7 @@ export class PaymentsService {
   async refundCancelledPrepaidOrder(
     orderId: string,
     reasonNotes: string,
-    triggeredBy: 'system_auto_cancel' | 'customer_cancel' = 'system_auto_cancel',
+    triggeredBy: 'system_auto_cancel' | 'customer_cancel',
   ): Promise<Refund | null> {
     const prepared = await this.dataSource.transaction(async (manager) => {
       const order = await manager

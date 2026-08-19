@@ -78,7 +78,7 @@ export class NotificationWorkflowReminderService implements OnModuleInit, OnModu
     return sentCount;
   }
 
-  // قفل ذري لكل صف على حدة (pessimistic_write) — نفس نمط OrderAutoCancelService.cancelIfStillSearching().
+  // قفل ذري لكل صف على حدة (pessimistic_write) — نفس نمط OrderAutoCancelService.cancelIfStillPendingPayment().
   private async processOne(workflowId: string): Promise<boolean> {
     const now = new Date();
 
