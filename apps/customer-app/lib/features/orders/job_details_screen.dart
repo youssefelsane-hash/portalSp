@@ -35,7 +35,14 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   void initState() {
     super.initState();
     _loadPricingFields();
-    _pickAddress();
+    // بَقّة حقيقية اتلقطت بالتشغيل الحي (Xvfb+fluxbox، 2026-08-19): نداء Navigator.push هنا
+    // مباشرة جوّه initState بيحصل وهو الـNavigator لسه في نص انيميشن الدخول لـJobDetailsScreen
+    // نفسها (لسه locked) — بيرمي 'navigator._debugLocked' assertion جوّه microtask، والشاشة
+    // بتفضل "ميتة" تمامًا لأي لمسة بعد كده (كل تفاعل تاني مع الـNavigator بيرمي نفس الاستثناء
+    // بصمت). addPostFrameCallback بيأجّل النداء لحد ما الفريم الحالي وانيميشن الدخول يخلصوا.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pickAddress();
+    });
   }
 
   Future<void> _loadPricingFields() async {
