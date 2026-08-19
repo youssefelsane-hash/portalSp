@@ -31,9 +31,16 @@ class PaymentsRepository {
   // في الباك-إند نفسه (orders.service.ts's payWithWallet)، مش عبر العقد المصمَّم أصلاً. الإصلاح:
   // المفتاح بقى بيتولّد مرة واحدة بس ويتبعت من الكولر (order_detail_screen.dart) — retry لنفس
   // محاولة الدفع بيستخدم نفس المفتاح فعليًا، زي ما العقد مفروض يشتغل بالظبط.
+  //
+  // بَقّة حقيقية تانية اتلقطت (Script 7 Phase 9 نفسها، ظهرت بس على Flutter Web): `1 << 32`
+  // بيتقيّم لـ0 لما التطبيق يتبني بـdart2js/DDC (بعكس الـVM اللي بتحسبها 4294967296 عادي) —
+  // `Random().nextInt(0)` بيرمي RangeError فورًا، يعني أي شاشة بتنادي الدالة دي وقت initState
+  // (create_order_screen.dart) كانت بتكسر الشاشة كلها بشاشة حمرا قبل ما أي حاجة تترندر خالص
+  // (بما فيها الخريطة — مش بَقّة خريطة زي ما بدا في الظاهر). الحد الأقصى بقى `0x7FFFFFFF`
+  // (2^31-1) — قيمة آمنة ومتطابقة على كل أهداف الترجمة (VM، dart2js، DDC) بلا أي إزاحة بت كبيرة.
   String generateIdempotencyKey() {
     final random = Random();
-    return '${DateTime.now().microsecondsSinceEpoch}-${random.nextInt(1 << 32)}';
+    return '${DateTime.now().microsecondsSinceEpoch}-${random.nextInt(0x7FFFFFFF)}';
   }
 
   Future<Map<String, dynamic>> payWithWallet(String orderId, String idempotencyKey) async {
