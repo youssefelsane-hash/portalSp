@@ -17,6 +17,7 @@ import { StepUpToken } from './entities/step-up-token.entity';
 import { User } from './entities/user.entity';
 import { WebAuthnChallenge } from './entities/webauthn-challenge.entity';
 import { WebAuthnCredential } from './entities/webauthn-credential.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 import { MfaPolicyService } from './mfa-policy.service';
 import { SessionsController } from './sessions.controller';
 import { StepUpService } from './step-up.service';
@@ -33,6 +34,7 @@ import { WebAuthnService } from './webauthn.service';
       WebAuthnChallenge,
       AdminMfaRecoveryCode,
       StepUpToken,
+      Wallet,
     ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}), // الأسرار والصلاحية بيتحددوا لحظة التوقيع في AuthService، مش هنا

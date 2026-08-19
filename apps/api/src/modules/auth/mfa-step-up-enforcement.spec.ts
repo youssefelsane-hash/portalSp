@@ -9,6 +9,7 @@ import { AdminUsersController } from '../admin/admin-users.controller';
 import { AdminSettingsController } from '../admin/admin-settings.controller';
 import { AdminBrandingController } from '../branding/admin-branding.controller';
 import { AdminDomesticWorkersController } from '../domestic-workers/admin-domestic-workers.controller';
+import { AdminSupportController } from '../support/admin-support.controller';
 
 // اختبار وحدة بسيط (صفر Postgres/DI — قراءة metadata الـdecorators مباشرة) — بَقّة أمنية حقيقية
 // اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): mfa-policy.service.ts's
@@ -54,6 +55,9 @@ describe('كل endpoint بصلاحية من MFA_REQUIRED_PERMISSIONS لازم ي
     [AdminBrandingController.prototype, 'remove', 'branding.manage', true],
     [AdminDomesticWorkersController.prototype, 'approveEarning', 'domestic_workers.approve_earnings', true],
     [AdminDomesticWorkersController.prototype, 'rejectEarning', 'domestic_workers.approve_earnings', true],
+    // Script 7 Phase 24 — complaints.resolve بتحوّل compensation_cents فلوس حقيقية بلا حد أقصى،
+    // كانت ناقصة من القايمة والـdecorator الاتنين (راجع BUG-012 في docs/21).
+    [AdminSupportController.prototype, 'resolve', 'complaints.resolve', true],
   ];
 
   it.each(cases)('%s.%s (صلاحية %s) — step-up مطلوب: %s', (controllerProto, methodName, expectedPermission, requiresStepUp) => {

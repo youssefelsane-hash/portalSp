@@ -6,6 +6,7 @@ import { User } from '../auth/entities/user.entity';
 import { CustomersModule } from '../customers/customers.module';
 import { Order } from '../orders/entities/order.entity';
 import { Payout } from '../payments/entities/payout.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 import { Rating } from '../ratings/entities/rating.entity';
 import { SecurityModule } from '../security/security.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -45,6 +46,7 @@ import { PermissionsService } from './permissions.service';
       CustomerProfile,
       RefreshToken,
       Payout,
+      Wallet,
     ]),
     AuditModule,
     SettingsModule,

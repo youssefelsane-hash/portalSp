@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -76,12 +76,18 @@ export class AdminOrdersController {
     @CurrentUser() admin: JwtPayload,
     @Body() dto: CreateOrderForCustomerDto,
     @AuditContext() audit: AuditMeta,
+    // Idempotency-Key اختياري (migration 0139، Script 7 Phase 9) — نفس حماية مسار العميل العادي،
+    // موظف مركز الاتصال ممكن يدوس زرار "أنشئ الطلب" مرتين برضو.
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     const { customer_user_id, ...createDto } = dto;
-    const order = await this.ordersService.create(customer_user_id, createDto, undefined, {
-      adminUserId: admin.sub,
-      meta: audit,
-    });
+    const order = await this.ordersService.create(
+      customer_user_id,
+      createDto,
+      undefined,
+      { adminUserId: admin.sub, meta: audit },
+      idempotencyKey?.trim() || undefined,
+    );
     return {
       ...toOrderResponseDto(order),
       customer_user_id,

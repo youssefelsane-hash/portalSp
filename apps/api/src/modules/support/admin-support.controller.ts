@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestj
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
+import { RequireStepUp } from '../../common/decorators/require-step-up.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -21,8 +22,13 @@ export class AdminSupportController {
     return complaints.map(toComplaintResponseDto);
   }
 
+  // بَقّة أمنية حقيقية اتلقطت واتصلحت (Script 7 Phase 24): compensation_cents بتحوّل فلوس حقيقية
+  // من محفظة المنصة (allowNegativeBalance:true، بلا حد أقصى) بقرار أدمن مباشر — نفس مستوى حساسية
+  // orders.resolve_failed_visit/orders.resolve_cash_dispute بالظبط (اتضافت لـMFA_REQUIRED_PERMISSIONS
+  // معاها)، لكن كانت ناقصة @RequireStepUp() من الأساس.
   @Post(':id/resolve')
   @RequirePermission('complaints.resolve')
+  @RequireStepUp()
   async resolve(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,

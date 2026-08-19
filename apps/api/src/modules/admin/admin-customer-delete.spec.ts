@@ -3,6 +3,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User } from '../auth/entities/user.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 import { AdminCustomersService } from './admin-customers.service';
 
 // اختبار حي ضد Postgres حقيقي — §24: كانت فجوة موثّقة صراحة (admin/README.md) — DELETE
@@ -13,13 +14,13 @@ describe('AdminCustomersService.delete() — soft-delete حساب عميل (docs
   let dataSource: DataSource;
   let service: AdminCustomersService;
   const runId = Date.now().toString(36);
-  const ids = { user: '', profile: '' };
+  const ids = { user: '', profile: '', userWithBalance: '', profileWithBalance: '' };
 
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, CustomerProfile, RefreshToken],
+      entities: [User, CustomerProfile, RefreshToken, Wallet],
     });
     await dataSource.initialize();
 
@@ -36,11 +37,27 @@ describe('AdminCustomersService.delete() — soft-delete حساب عميل (docs
       [ids.user, `hash-${runId}`],
     );
 
+    // عميل تاني عنده رصيد محفظة حقيقي — Script 7 Phase 25.
+    const [userWithBalance] = await q(
+      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
+      [`+2020${runId}`.slice(0, 15), `عميل رصيد ${runId}`],
+    );
+    ids.userWithBalance = userWithBalance.id;
+    const [profileWithBalance] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [
+      ids.userWithBalance,
+    ]);
+    ids.profileWithBalance = profileWithBalance.id;
+    await q(
+      `INSERT INTO wallets (owner_user_id, owner_type, balance_cents, currency_code) VALUES ($1,'customer',12000,'EGP')`,
+      [ids.userWithBalance],
+    );
+
     service = new AdminCustomersService(
       dataSource,
       dataSource.getRepository(User),
       dataSource.getRepository(CustomerProfile),
       dataSource.getRepository(RefreshToken),
+      dataSource.getRepository(Wallet),
       { record: async () => undefined } as unknown as AuditLogService,
     );
   });
@@ -48,9 +65,20 @@ describe('AdminCustomersService.delete() — soft-delete حساب عميل (docs
   afterAll(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM refresh_tokens WHERE user_id = $1`, [ids.user]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.profile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.user]);
+    await q(`DELETE FROM customer_profiles WHERE id IN ($1,$2)`, [ids.profile, ids.profileWithBalance]);
+    await q(`DELETE FROM wallets WHERE owner_user_id = $1`, [ids.userWithBalance]);
+    await q(`DELETE FROM users WHERE id IN ($1,$2)`, [ids.user, ids.userWithBalance]);
     await dataSource.destroy();
+  });
+
+  it('عميل عنده رصيد محفظة حقيقي (>0) — الحذف بيترفض من غير ما يتحذف، مفيش فلوس عالقة بلا مسار استرجاع', async () => {
+    await expect(service.delete('00000000-0000-0000-0000-000000000001', ids.userWithBalance)).rejects.toMatchObject({
+      code: 'VAL_001',
+    });
+
+    const [userRow] = await dataSource.query(`SELECT is_active, deleted_at FROM users WHERE id = $1`, [ids.userWithBalance]);
+    expect(userRow.is_active).toBe(true);
+    expect(userRow.deleted_at).toBeNull();
   });
 
   it('بيلغي التوكنات النشطة، يعطّل الحساب، ويعمل soft-delete على User وCustomerProfile', async () => {

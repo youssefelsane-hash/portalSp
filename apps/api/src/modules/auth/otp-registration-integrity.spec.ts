@@ -77,6 +77,7 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
       dataSource.getRepository(User),
       dataSource.getRepository(OtpCode),
       dataSource.getRepository(RefreshToken),
+      dataSource.getRepository(Wallet),
       dataSource,
       new JwtService(),
       config,

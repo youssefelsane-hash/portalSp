@@ -67,8 +67,17 @@ class OrdersRepository {
     // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
     // لشاشة الدفع فورًا بعد ده، التوزيع مش هيبدأ غير بعد ما الدفع يتأكد فعليًا.
     String? paymentMethod,
+    // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — لازم يتولّد مرة واحدة
+    // بس من الكولر (CreateOrderScreen، نفس درس generateIdempotencyKey() في
+    // payments_repository.dart بالحرف) ويتبعت هنا — أي retry (double-tap، timeout شبكة) بنفس
+    // المفتاح يرجّع نفس الطلب الأصلي من الباك-إند بدل ما ينشئ نسخة جديدة.
+    required String idempotencyKey,
   }) async {
-    final data = await auth.authedRequest('POST', '/orders', body: {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders',
+      extraHeaders: {'Idempotency-Key': idempotencyKey},
+      body: {
       'service_id': serviceId,
       'address_id': addressId,
       if (standardDataId != null) 'standard_data_id': standardDataId,

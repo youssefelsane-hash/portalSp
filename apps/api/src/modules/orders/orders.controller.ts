@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Inject, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
@@ -67,8 +67,16 @@ export class OrdersController {
   }
 
   @Post()
-  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreateOrderDto) {
-    return this.enrichedResponse(user.sub, await this.ordersService.create(user.sub, dto));
+  async create(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: CreateOrderDto,
+    // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — اختياري (مش زي عمليات
+    // الدفع اللي بتفرضه إجباري) عشان مانكسرش الأكلاينتات القديمة اللي لسه ما بعتوش الهيدر ده،
+    // لكن أي كلاينت يبعته بيدّيه حماية idempotency حقيقية ضد double-click/retry شبكة.
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) {
+    const key = idempotencyKey?.trim() || undefined;
+    return this.enrichedResponse(user.sub, await this.ordersService.create(user.sub, dto, undefined, undefined, key));
   }
 
   // معاينة السعر الكامل قبل التأكيد (docs/08 §1/§2) — read-only، نفس منطق create() بالحرف.

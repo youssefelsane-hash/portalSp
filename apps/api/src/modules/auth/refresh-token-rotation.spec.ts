@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { AuthService } from './auth.service';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from './entities/user.entity';
+import { Wallet } from '../payments/entities/wallet.entity';
 
 // اختبار حي ضد Postgres حقيقي (نفس فلسفة matching.service.spec.ts/permissions.service.spec.ts) —
 // بيثبت إصلاح بَقّة أمنية حقيقية (مراجعة أمان شاملة 2026-08-13، بند P0-5 في docs/12): refresh()
@@ -27,7 +28,7 @@ describe('AuthService.refresh() — تدوير refresh token ذرّي تحت ت�
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, RefreshToken],
+      entities: [User, RefreshToken, Wallet],
     });
     await dataSource.initialize();
 
@@ -48,6 +49,7 @@ describe('AuthService.refresh() — تدوير refresh token ذرّي تحت ت�
       dataSource.getRepository(User),
       {} as never,
       dataSource.getRepository(RefreshToken),
+      dataSource.getRepository(Wallet),
       dataSource,
       new JwtService(),
       configStub,

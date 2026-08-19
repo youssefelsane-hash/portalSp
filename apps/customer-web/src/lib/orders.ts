@@ -123,8 +123,15 @@ export interface CancellationReasonDto {
 export const fetchCustomerCancellationReasons = () =>
   apiFetchList<CancellationReasonDto>('/cancellation-reasons?applies_to=customer');
 
-export const createOrder = (authedFetch: AuthedFetch, body: CreateOrderBody) =>
-  authedFetch<OrderResponseDto>('/orders', { method: 'POST', body: JSON.stringify(body) });
+// Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — لازم يتولّد مرة واحدة بس
+// من الكولر (نفس نمط payWithCard في payments.ts) ويتبعت هنا — أي retry بنفس المفتاح يرجّع نفس
+// الطلب الأصلي بدل ما ينشئ نسخة جديدة.
+export const createOrder = (authedFetch: AuthedFetch, body: CreateOrderBody, idempotencyKey: string) =>
+  authedFetch<OrderResponseDto>('/orders', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+  });
 
 export const listMyOrders = (authedFetch: AuthedFetch) => authedFetch<OrderResponseDto[]>('/orders');
 

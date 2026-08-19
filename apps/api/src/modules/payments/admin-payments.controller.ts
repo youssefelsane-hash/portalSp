@@ -9,6 +9,7 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { PaymentsService } from './payments.service';
 import { PayoutsService } from './payouts.service';
 import { ListPayoutsQueryDto } from './dto/list-payouts-query.dto';
+import { ListRefundsQueryDto } from './dto/list-refunds-query.dto';
 import { RefundOrderDto } from './dto/refund-order.dto';
 import { RejectPayoutDto } from './dto/reject-payout.dto';
 import {
@@ -47,6 +48,17 @@ export class AdminPaymentsController {
   async listPayoutOrderItems(@Param('id', ParseUUIDPipe) id: string) {
     const items = await this.payoutsService.listOrderItems(id);
     return items.map(toPayoutOrderItemResponseDto);
+  }
+
+  // كانت فجوة موثّقة صراحة اتلقطت أثناء تحقيق Script 7 Phase 17 ("refund عالق PROCESSING"):
+  // رسالة الرفض في PaymentsService.refundOrder() بتحيل الأدمن لمراجعة يدوية لاسترداد عالق، لكن
+  // مفيش أي endpoint كان بيرجّع قايمة استردادات خالص — الأدمن معندوش طريقة يعرف إن فيه استرداد
+  // عالق من الأساس. `?status=processing` بيفلتر عليهم تحديدًا.
+  @Get('refunds')
+  @RequirePermission('refunds.view')
+  async listRefunds(@Query() query: ListRefundsQueryDto) {
+    const rows = await this.paymentsService.listRefunds(query.status);
+    return rows.map(toRefundResponseDto);
   }
 
   @Post('orders/:id/refund')

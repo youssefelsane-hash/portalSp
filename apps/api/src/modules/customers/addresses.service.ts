@@ -76,8 +76,11 @@ export class AddressesService {
   }
 
   async create(userId: string, dto: CreateAddressDto): Promise<Address> {
-    // التغطية: الخدمة متاحة بس في المناطق اللي فعلاً مُطلقة — docs/01-master-plan.md §6 (S2)
-    const isLaunched = await this.geoService.isAreaLaunched(dto.area_id);
+    // التغطية: الخدمة متاحة بس في المناطق اللي فعلاً مُطلقة — docs/01-master-plan.md §6 (S2).
+    // لازم `area_id` يتبع فعليًا لـ`city_id` المبعوت جنبه (Script 7 Phase 5 — راجع تعليق
+    // `isAreaLaunchedInCity()` في geo.service.ts) — وإلا نطاق التسعير الفعلي (اللي بيتحدد من
+    // `cityId` بس وقت الحجز) ممكن يتحدد بمدينة العميل مختارها بحرية، مش مكانه الحقيقي.
+    const isLaunched = await this.geoService.isAreaLaunchedInCity(dto.area_id, dto.city_id);
     if (!isLaunched) {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
@@ -115,15 +118,23 @@ export class AddressesService {
   async update(userId: string, addressId: string, dto: UpdateAddressDto): Promise<Address> {
     const address = await this.findOwnedOrThrow(userId, addressId);
 
-    if (dto.area_id && dto.area_id !== address.areaId) {
-      const isLaunched = await this.geoService.isAreaLaunched(dto.area_id);
-      if (!isLaunched) {
-        throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
+    // Script 7 Phase 6 — لازم `area_id`/`city_id` الناتجين (بعد التحديث) يفضلوا متسقين مع
+    // بعض دايمًا، حتى لو العميل بعت واحد منهم بس. الفحص القديم كان بيتحقق من `area_id` لوحده
+    // (`isAreaLaunched`) وكان بيتجاهل `city_id` تمامًا لو اتبعت لوحده بلا `area_id` — كان ممكن
+    // العميل يغيّر مدينته بس من غير أي تحقق خالص، فيتسجّل عنوان بـ`cityId` مش تابع لـ`areaId`
+    // الأصلي أصلاً.
+    if (dto.area_id !== undefined || dto.city_id !== undefined) {
+      const effectiveAreaId = dto.area_id ?? address.areaId;
+      const effectiveCityId = dto.city_id ?? address.cityId;
+      if (effectiveAreaId && effectiveCityId && (effectiveAreaId !== address.areaId || effectiveCityId !== address.cityId)) {
+        const isLaunched = await this.geoService.isAreaLaunchedInCity(effectiveAreaId, effectiveCityId);
+        if (!isLaunched) {
+          throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
+        }
       }
-      address.areaId = dto.area_id;
+      address.areaId = effectiveAreaId;
+      address.cityId = effectiveCityId;
     }
-
-    if (dto.city_id !== undefined) address.cityId = dto.city_id;
     if (dto.label !== undefined) address.label = dto.label;
     if (dto.street_name !== undefined) address.streetName = dto.street_name;
     if (dto.building_number !== undefined) address.buildingNumber = dto.building_number;

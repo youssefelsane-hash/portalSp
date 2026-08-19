@@ -351,6 +351,18 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
     await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
     await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TS22C-%`]);
     await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
+    // بَقّة حقيقية اتلقطت (Script 7 Phase 0/30 — تدقيق الجاهزية للإنتاج): قبول الفني بيولّد
+    // chat_thread تلقائي للطلب (order_id UNIQUE FK)، بس التنظيف هنا مكانش بيمسحه قبل orders —
+    // الـDELETE بتاع orders كان بيفشل بـFK violation في كل تشغيلة، فكل السطور اللي بعده (العناوين،
+    // البروفايلات، المستخدمين، الخدمات، الفئة، المنطقة) كانت بتسرّب صفوف يتيمة للأبد في كل مرة
+    // السويت ده يتشغّل. اتأكدت حيًا: 8 طلب + chat_thread واحد متراكمين في قاعدة التطوير قبل الإصلاح.
+    await q(
+      `DELETE FROM chat_messages WHERE thread_id IN (
+         SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)
+       )`,
+      [`TS22C-%`],
+    );
+    await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TS22C-%`]);
     await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TS22C-%`]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id IN ($1, $2)`, [ids.customerProfile, ids.otherCustomerProfile]);

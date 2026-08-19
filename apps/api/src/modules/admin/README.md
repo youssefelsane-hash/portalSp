@@ -131,6 +131,17 @@ ADR-0010 — مفيش داعي منحها صراحة). اختبار regression �
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §13.7 و `../../../../docs/01-master-plan.md` §2.4.
 
+## بَقّة مالية حقيقية اتلقطت واتصلحت: حذف عميل عنده رصيد محفظة (Script 7 Phase 25، 2026-08-19)
+
+`AdminCustomersService.delete()` (وبنفس المنطق `AuthService.deleteMe()` الذاتي للعميل نفسه) كان
+بيسوفت-دِلِيت `User`/`CustomerProfile` بلا أي فحص على رصيد المحفظة — الـ`Wallet` نفسه بيفضل زي ما
+هو (مش بيتحذف)، فأي عميل عنده استرداد/مكافأة ولاء/مكافأة ترشيح لسه مصروفة كانت الفلوس تفضل موجودة
+في الدفتر بس بلا أي طريقة توصلها تاني (الحساب `is_active=false` ومحظور دخول). أخطر من كده: نفس
+الفجوة كانت موجودة لأي فني (`TECHNICIAN`) أو شغالة (`DOMESTIC_WORKER`) يستخدم `DELETE /auth/me`
+الذاتي — أرباح حقيقية ممكن تتحبس. الفحص الجديد (`assertNoStrandedWalletBalance()`) بيرفض الحذف
+بوضوح لحد ما الرصيد (متاح/معلّق/محجوز) يتصفّر أول — استرداد/صرف عبر `wallets.adjust` الموجودة
+ومختبرة أصلاً. اختبار حي في `admin-customer-delete.spec.ts` و`auth-self-service.spec.ts`.
+
 ## بَقّة أمنية حقيقية اتلقطت واتصلحت: فجوة MFA/step-up على `PATCH /admin/settings/:key` (تدقيق جاهزية الإطلاق النهائي، 2026-08-14)
 
 `settings.manage` مُدرجة في `MFA_REQUIRED_PERMISSIONS` (`../auth/mfa-policy.service.ts`) بس

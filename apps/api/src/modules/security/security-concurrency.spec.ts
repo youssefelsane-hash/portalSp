@@ -112,7 +112,7 @@ describe('Security/Workforce — اختبارات سباق صريحة (Script 5 
     expect(rows.length).toBe(1);
   });
 
-  it('سيناريو B — recordDenial متزامن (5 نداء بالتوازي) لنفس (actor+event_type+action): مفيش كراش، مجموع occurrence_count = 5 (سواء صف واحد أو أكتر)', async () => {
+  it('سيناريو B — recordDenial متزامن (5 نداء بالتوازي) لنفس (actor+event_type+action): مفيش كراش، صف واحد بس، occurrence_count = 5 بالظبط (Script 7 Phase 30 — كانت فلاكي، اتصلحت فعليًا بقفل استشاري)', async () => {
     const results = await Promise.allSettled(
       Array.from({ length: 5 }, () =>
         securityEvents.recordDenial({
@@ -129,12 +129,13 @@ describe('Security/Workforce — اختبارات سباق صريحة (Script 5 
       `SELECT occurrence_count FROM security_events WHERE actor_user_id = $1 AND action = 'test.race_denial'`,
       [ids.actorDenial],
     );
-    // فجوة موثّقة صراحة (README): سباق UPDATE...WHERE status='open' نادر ممكن يخلّي صفين بدل واحد
-    // (الاتنين مبيلقوش الصف التاني لسه متسجّل وقت الفحص). المهم: مفيش فقدان بيانات — مجموع
-    // occurrence_count عبر كل الصفوف لازم يساوي 5 بالظبط، مهما كان عدد الصفوف.
-    const totalOccurrences = rows.reduce((sum, r) => sum + r.occurrence_count, 0);
-    expect(totalOccurrences).toBe(5);
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // إصلاح حقيقي (Script 7 Phase 30) — قفل استشاري (pg_advisory_xact_lock) على مفتاح الـdedup
+    // بيسلسل النداءات المتزامنة بالكامل، فمفيش صفين مكرّرين يتعملوا خالص ولا UPDATE يطابق أكتر من
+    // صف واحد (كانت البَقّة الحقيقية: صفين مكرّرين + UPDATE واحد بيزوّد الاتنين مع بعض، فمجموع
+    // occurrence_count كان بيتضخّم أسرع من عدد النداءات الفعلية — اتأكد حيًا: مجموع 7 مش 5 قبل
+    // الإصلاح). دلوقتي الفحص صريح: صف واحد بالظبط، occurrence_count = 5 بالظبط.
+    expect(rows.length).toBe(1);
+    expect(rows[0].occurrence_count).toBe(5);
   });
 
   it('سيناريو C — إلغاء نفس الجلسة بالتوازي (3 نداء): واحد بس ينجح، الباقي يترفض 404 (مفيش double-revoke)', async () => {

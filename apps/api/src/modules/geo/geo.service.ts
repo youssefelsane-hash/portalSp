@@ -38,6 +38,19 @@ export class GeoService {
   }
 
   /**
+   * Script 7 Phase 6 — بَقّة حقيقية اتلقطت: `isAreaLaunched()` القديمة بتتحقق من `area_id`
+   * لوحده من غير ما تتأكد إنه فعلاً تابع لـ`city_id` المبعوت جنبه. عميل ممكن يبعت `city_id`
+   * لمدينة و`area_id` لمنطقة تابعة لمدينة تانية تمامًا — العنوان كان بيتسجّل عادي بـ`cityId`
+   * مش متسق مع `areaId` الحقيقي، ولأن `findZoneForPoint()` بيحدد نطاق التسعير من `cityId`
+   * بس (مش من `areaId`)، ده كان بيسمح للعميل يختار أي مدينة (وبالتالي أي نطاق تسعير) بغض النظر
+   * عن مكانه الفعلي — خصوصًا لما المدينة معندهاش boundary مرسوم (الحالة الحالية لكل المدن).
+   */
+  async isAreaLaunchedInCity(areaId: string, cityId: string): Promise<boolean> {
+    const area = await this.areas.findOne({ where: { id: areaId } });
+    return area !== null && area.isLaunched && area.isActive && area.cityId === cityId;
+  }
+
+  /**
    * تبسيط متعمّد لمرحلة MVP: بترجع أول نطاق نشط في المدينة بدل بحث جغرافي (ST_Contains) حقيقي
    * ضد boundary المنطقة — مقبول لما المدينة عندها نطاق واحد أو اتنين بس (§0.2.5 في الماستر بلان:
    * "اطلق على حيّين فقط"). لسه مستخدمة كـ fallback في findZoneForPoint لما مفيش نطاق في المدينة

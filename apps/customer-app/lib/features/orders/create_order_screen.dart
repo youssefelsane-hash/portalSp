@@ -65,6 +65,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final _buildingController = TextEditingController();
   Address? _selectedAddress;
   bool _submitting = false;
+  // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — بيتولّد مرة واحدة بس
+  // وقت فتح الشاشة (نفس درس generateIdempotencyKey() في payments_repository.dart بالحرف: توليد
+  // مفتاح جديد جوّه _submit() نفسها كان هيلغي الحماية لأي retry). أي محاولة تانية من نفس الشاشة
+  // (double-tap، إعادة إرسال بعد timeout شبكة) بتستخدم نفس المفتاح.
+  late final String _orderIdempotencyKey;
   bool _validatingPromo = false;
   String? _promoError;
   bool _validatingBuilding = false;
@@ -119,6 +124,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _repository = OrdersRepository(context.read<AuthRepository>());
     _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
     _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
+    _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
     _selectedAddress = widget.initialAddress;
     if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
@@ -446,6 +452,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
         paymentMethod: _selectedPaymentMethod,
+        idempotencyKey: _orderIdempotencyKey,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
       // لشاشة الدفع فورًا (مش نسيبه يكتشف بنفسه) — التوزيع مش هيبدأ غير بعد ما الدفع يتأكد.

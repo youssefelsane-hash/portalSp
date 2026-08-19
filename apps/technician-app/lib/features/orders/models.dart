@@ -76,3 +76,35 @@ class AvailableOrder {
         expiresAt: DateTime.parse(json['expires_at'] as String),
       );
 }
+
+// طاقم الطلب (docs/08 §5) — كانت فجوة موثّقة صراحة (Script 7 Phase 13/14): الباك-إند عنده
+// GET/POST/DELETE .../team-members جاهزة ومؤمّنة بالفعل (technician-order-execution.controller.ts)
+// بس apps/technician-app ما كانتش بتستخدمها خالص — فني قائد على طلب "اعتماد" (booking_mode=team)
+// معندوش أي رؤية لطاقمه (مين المُعيّن، الطلب مكتمل ولا لسه ناقص). مطابق لـ
+// apps/api/src/modules/orders/dto/team-member-response.dto.ts.
+class TeamMember {
+  final String id;
+  final String technicianId;
+  final String fullName;
+  final String? avatarUrl;
+  final String roleLabel;
+  final String memberType;
+
+  TeamMember({
+    required this.id,
+    required this.technicianId,
+    required this.fullName,
+    required this.avatarUrl,
+    required this.roleLabel,
+    required this.memberType,
+  });
+
+  factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
+        id: json['id'] as String,
+        technicianId: json['technician_id'] as String,
+        fullName: json['full_name'] as String,
+        avatarUrl: json['avatar_url'] as String?,
+        roleLabel: json['role_label'] as String,
+        memberType: json['member_type'] as String,
+      );
+}

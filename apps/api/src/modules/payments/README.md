@@ -372,3 +372,32 @@ cash-admin-confirmed:${orderId}`، بعده `settleAndComplete(manager, order, C
 `WORK_COMPLETED`/`AWAITING_PAYMENT`)، وبيتنادى عليها بس من `OrdersService
 .resolveCashHandoverDispute()` (صلاحية `orders.resolve_cash_dispute` + step-up MFA، نفس مستوى
 حساسية `payments.confirm_manual` بالحرف — مُدرجة في `MFA_REQUIRED_PERMISSIONS`).
+
+## CHECK constraints على أعمدة المبالغ الأساسية — كانت فجوة حقيقية (Script 7 Phase 31، 2026-08-19)
+
+`wallet_transactions.amount_cents` عنده `CHECK (amount_cents > 0)` من أول يوم، لكن
+`payments.amount_cents`/`refunds.amount_cents`/`payouts.amount_cents`/`payouts.net_amount_cents`
+(و`orders.total_amount_cents`) مالهمش أي CHECK constraint خالص — الحماية الوحيدة كانت validation
+على مستوى الكود بس (defense-in-depth مفقود). `infra/migrations/0141_financial_amount_check_constraints.sql`
+أضافت `CHECK (... >= 0)` للأعمدة الخمسة دي — اتأكد صفر صف سالب موجود في الداتابيز قبل الإضافة
+(الإضافة آمنة 100%). اختبار حي في `../orders/db-invariants-negative-amounts.spec.ts` بيثبت
+الداتابيز نفسها بترفض `INSERT` بمبلغ سالب فعليًا، مش بس فحص الكود.
+
+## اختبار التسوية المالية الشامل (Script 7 Phase 35، 2026-08-19)
+
+`financial-reconciliation.e2e.spec.ts` — أول اختبار regression دائم بيسلسل عمليات مالية حقيقية
+متتابعة على نفس المحافظ (`collectCash` → `refundOrder` جزئي → محاكاة أرباح سابقة → `requestPayout`
+→ `adminComplete`) ويثبت مباشرة الـinvariant الأساسي لكل نظام القيد المزدوج: رصيد كل محفظة
+المخزّن (`wallets.balance_cents`) لازم يطابق تمامًا مجموع دفتر حركاتها الفعلي
+(`SUM(wallet_transactions)`)، وصافي كل الحركات المرتبطة بعملية مالية واحدة (تسوية + استرداد) لازم
+يساوي صفر بالظبط (كل خصم له إضافة مقابلة، مفيش فلوس بتتخلق أو تختفي من العدم).
+
+**قرار تصميم مهم**: المطابقة المطلقة (`computeBalanceFromLedger(wallet) === wallet.balanceCents`)
+بتتطبق بس على محفظتي العميل والفني (مستخدمين جداد اتنشأوا في الاختبار نفسه، تاريخهم الكامل موجود).
+محفظة المنصة (`PLATFORM_SYSTEM_USER_ID`) مشتركة عبر شهور من تشغيل اختبارات كتير على نفس قاعدة
+البيانات، وعندها انحراف تاريخي تراكمي ضخم (اتفحص وقت بناء الاختبار: فرق ~28 مليون قرش بين الرصيد
+المخزّن ودفتر حركاتها الكامل) — مش عيب حي، ضجيج بيانات اختبار قديمة. المقياس الصحيح ليها هو **الدلتا**
+(الفرق بين لقطتين من نفس الاستعلام قبل/بعد عملية محددة)، مش القيمة المطلقة.
+
+**فجوة تشغيلية موثّقة**: مفيش job دوري في الإنتاج بيقارن `balance_cents` لكل محفظة ضد دفتر حركاتها
+ويرفع alert عند انحراف — لو الأمر جد لازم يتضاف (خارج نطاق هذا الـaudit).

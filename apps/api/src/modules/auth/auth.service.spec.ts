@@ -176,6 +176,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: users },
         { provide: getRepositoryToken(OtpCode), useValue: otpCodes },
         { provide: getRepositoryToken(RefreshToken), useValue: refreshTokens },
+        { provide: getRepositoryToken(Wallet), useValue: new FakeRepository<Wallet>() },
         { provide: DataSource, useValue: createFakeDataSource(users, otpCodes, refreshTokens) },
         // MFA (ADR-0011) — الاختبارات هنا كلها لحسابات عادية (مش High-Privilege)، فـ
         // userRequiresMfa بترجع false دايمًا وlogin() بيكمل مسار OTP العادي القديم زي ما هو.
@@ -291,6 +292,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: prodUsers },
         { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
         { provide: getRepositoryToken(RefreshToken), useValue: prodRefreshTokens },
+        { provide: getRepositoryToken(Wallet), useValue: new FakeRepository<Wallet>() },
         {
           provide: DataSource,
           useValue: createFakeDataSource(prodUsers, new FakeRepository<OtpCode>(), prodRefreshTokens),
@@ -343,6 +345,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useValue: stagingUsers },
         { provide: getRepositoryToken(OtpCode), useValue: new FakeRepository<OtpCode>() },
         { provide: getRepositoryToken(RefreshToken), useValue: stagingRefreshTokens },
+        { provide: getRepositoryToken(Wallet), useValue: new FakeRepository<Wallet>() },
         {
           provide: DataSource,
           useValue: createFakeDataSource(stagingUsers, new FakeRepository<OtpCode>(), stagingRefreshTokens),

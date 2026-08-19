@@ -68,6 +68,7 @@ export class AuthService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(OtpCode) private readonly otpCodes: Repository<OtpCode>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
+    @InjectRepository(Wallet) private readonly wallets: Repository<Wallet>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
@@ -573,7 +574,24 @@ export class AuthService {
     return user;
   }
 
+  /**
+   * بَقّة مالية حقيقية اتلقطت واتصلحت (Script 7 Phase 25): مفيش أي فحص كان بيمنع مستخدم عنده رصيد
+   * محفظة حقيقي (استرداد/مكافأة ولاء/ترشيح/أرباح فني) من حذف حسابه بنفسه — الحذف بيسوفت-دِلِيت
+   * `User` بس، الـ`Wallet` بيفضل زي ما هو (مش بيتحذف)، فالفلوس تفضل موجودة في الدفتر لكن المستخدم
+   * (دلوقتي `is_active=false` ومحظور يعمل login) مبقاش عنده أي طريقة يوصلها تاني — فلوس حقيقية
+   * عالقة بلا أي مسار استرجاع غير تدخّل يدوي مباشر في الداتابيز. نفس فلسفة "مينفعش فلوس تختفي
+   * بصمت" الحاكمة لكل الموديول المالي (راجع `AdminCustomersService.assertNoStrandedWalletBalance`
+   * لنفس الفحص من جهة الأدمن).
+   */
   async deleteMe(userId: string): Promise<void> {
+    const wallet = await this.wallets.findOne({ where: { ownerUserId: userId } });
+    if (wallet && (wallet.balanceCents > 0 || wallet.pendingBalanceCents > 0 || wallet.reservedBalanceCents > 0)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `مينفعش تحذف حسابك وفيه رصيد محفظة (${wallet.balanceCents / 100} جنيه متاح، ${wallet.pendingBalanceCents / 100} معلّق، ${wallet.reservedBalanceCents / 100} محجوز) — لازم تستخدمه أو تتواصل مع الدعم لاسترداده الأول`,
+        HttpStatus.CONFLICT,
+      );
+    }
     await this.revokeAllUserTokens(userId, 'account_deletion');
     await this.users.update(userId, { isActive: false });
     await this.users.softDelete(userId);
