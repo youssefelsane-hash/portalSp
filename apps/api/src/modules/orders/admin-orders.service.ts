@@ -251,6 +251,7 @@ export class AdminOrdersService {
         cancelledOrder.customerId,
         cancelledOrder.technicianId,
         reason,
+        adminUserId,
       ),
     );
 

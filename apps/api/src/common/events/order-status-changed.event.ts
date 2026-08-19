@@ -14,5 +14,12 @@ export class OrderStatusChangedEvent {
     public readonly customerId: string,
     public readonly technicianId: string | null,
     public readonly reason: string | null = null,
+    // بَقّة حقيقية حية اتلقطت (Script 6 Part 11/12/14): CANCELLED_BY_SYSTEM بيتصدر لحالتين مختلفتين
+    // تمامًا — إلغاء أدمن فعلي (admin-orders.service.ts، cancelledByUserId مضبوط) وإلغاء تلقائي
+    // حقيقي بلا أي تدخل بشري (matching.service.ts، مفيش فنيين متاحين، cancelledByUserId=null).
+    // OrderStatusNotificationListener كان بيفترض CANCELLED_BY_SYSTEM = أدمن دايمًا، فالعميل كان
+    // بياخد إشعار "طلبك اتلغى من الإدارة" حتى لو محدش من الإدارة لمس الطلب خالص. الحقل ده هو
+    // المُميّز الحقيقي بدل الافتراض.
+    public readonly cancelledByUserId: string | null = null,
   ) {}
 }

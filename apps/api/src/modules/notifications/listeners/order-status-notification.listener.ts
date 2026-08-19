@@ -7,6 +7,14 @@ import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationWorkflowService } from '../notification-workflow.service';
 import { NotificationsService } from '../notifications.service';
 
+// أسباب الإلغاء التلقائي الداخلية (matching.service.ts/order-auto-cancel.service.ts) بتتسجّل
+// بصيغة "CODE: نص عربي مفهوم" لمصلحة الأدمن/الـtimeline (Part 12/13 — كود دقيق للتشخيص).
+// العميل مش المفروض يشوف الكود الداخلي ده أبداً (Part 14) — بس النص العربي اللي بعده مفيد
+// وواضح فعلاً، فبنشيل الكود بس مش الرسالة كلها.
+function stripInternalErrorCodePrefix(reason: string): string {
+  return reason.replace(/^[A-Z]+_\d+:\s*/, '');
+}
+
 // عنوان/محتوى الإشعار للعميل حسب الحالة الجديدة — الحالات غير المذكورة هنا (draft, pending_payment, ...)
 // مش من مخرجات transitionAsTechnician/cancel أصلاً، فمش محتاجة تتغطى هنا.
 const CUSTOMER_MESSAGES: Partial<Record<OrderStatus, { title: string; body: string }>> = {
@@ -143,13 +151,24 @@ export class OrderStatusNotificationListener {
 
       // إلغاء إداري (من لوحة الأدمن) بيوصل للطرفين مع سبب الإلغاء نفسه — مختلف عن
       // إلغاء العميل اللي بيوصل للفني بس، لأن هنا القرار جه من برّه الطرفين الاتنين.
+      //
+      // بَقّة حقيقية حية اتلقطت (Script 6 Part 11/12/14، اختبار حي كامل لطلب كاش حقيقي): الكود
+      // هنا كان بيفترض CANCELLED_BY_SYSTEM = أدمن دايمًا (تعليق قديم "من لوحة الأدمن") — لكن
+      // matching.service.ts بيصدّر نفس الحالة دي لما محدش فني متاح خالص، بلا أي تدخل بشري.
+      // النتيجة: عميل طلبه اتلغى تلقائيًا (مفيش فني قريب) كان بياخد إشعار "طلبك اتلغى من
+      // الإدارة" — كذب صريح على العميل، وكمان بيسرّب كود داخلي خام ("ORDR_002:") في نص الرسالة
+      // (Part 14: "Do not expose SQL/internal technical errors"). event.cancelledByUserId هو
+      // المُميّز الحقيقي: مضبوط = أدمن فعلي لمس الطلب، null = تلقائي بالكامل.
       if (event.newStatus === OrderStatus.CANCELLED_BY_SYSTEM) {
+        const isAdminInitiated = event.cancelledByUserId !== null;
         const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
         await this.notificationsService.notify({
           userId: customer.userId,
-          notificationType: 'order_cancelled_by_admin',
-          titleAr: 'طلبك اتلغى من الإدارة',
-          bodyAr: event.reason ? `السبب: ${event.reason}` : 'تواصل مع الدعم لمزيد من التفاصيل.',
+          notificationType: isAdminInitiated ? 'order_cancelled_by_admin' : 'order_cancelled_automatically',
+          titleAr: isAdminInitiated ? 'طلبك اتلغى من الإدارة' : 'اتلغى طلبك تلقائيًا',
+          bodyAr: isAdminInitiated
+            ? (event.reason ? `السبب: ${event.reason}` : 'تواصل مع الدعم لمزيد من التفاصيل.')
+            : (event.reason ? stripInternalErrorCodePrefix(event.reason) : 'حصلت مشكلة مؤقتة، حاول تاني أو تواصل مع الدعم.'),
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/orders/${event.orderId}`,
@@ -159,9 +178,11 @@ export class OrderStatusNotificationListener {
           const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianId);
           await this.notificationsService.notify({
             userId: technician.userId,
-            notificationType: 'order_cancelled_by_admin',
-            titleAr: 'طلب اتلغى من الإدارة',
-            bodyAr: `طلب رقم ${event.orderNumber} اتلغى من الإدارة.`,
+            notificationType: isAdminInitiated ? 'order_cancelled_by_admin' : 'order_cancelled_automatically',
+            titleAr: isAdminInitiated ? 'طلب اتلغى من الإدارة' : 'طلب اتلغى تلقائيًا',
+            bodyAr: isAdminInitiated
+              ? `طلب رقم ${event.orderNumber} اتلغى من الإدارة.`
+              : `طلب رقم ${event.orderNumber} اتلغى تلقائيًا.`,
             referenceType: 'order',
             referenceId: event.orderId,
             deepLink: `/technician/orders/${event.orderId}`,
