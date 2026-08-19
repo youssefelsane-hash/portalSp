@@ -21,6 +21,8 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
   const runId = Date.now().toString(36);
   const ids = {
     zone: '',
+    city: '',
+    country: '',
     service: '',
     customerProfile: '',
     address: '',
@@ -86,8 +88,28 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     });
     await dataSource.initialize();
 
-    const [zone] = await q(`SELECT id FROM service_zones LIMIT 1`);
+    // نطاق خدمة خاص بالملف ده، مش "SELECT ... LIMIT 1" مقترَض من أي صف موجود — ده كان بيسبب سباق
+    // حقيقي على CI (قاعدة بيانات فاضية، ملفات jest تانية بتنشئ نطاقها وتحذفه في afterAll بتاعها،
+    // فـ"أول نطاق موجود" ممكن يبقى نطاق ملف تاني بيتحذف قبل ما نخلص، وDELETE بتاعه يفشل بـFK
+    // violation من أوردرات الملف ده اللي لسه موجودة).
+    const [country] = await q(
+      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [`دولة طاقم ${runId}`, `Crew Country ${runId}`, 'W' + runId.slice(0, 1).toUpperCase(), '+000', 'EGP'],
+    );
+    const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
+      country.id,
+      `مدينة طاقم ${runId}`,
+      `Crew City ${runId}`,
+      `test-crew-city-${runId}`,
+    ]);
+    const [zone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
+      city.id,
+      `نطاق طاقم ${runId}`,
+      `Crew Zone ${runId}`,
+    ]);
     ids.zone = zone.id;
+    ids.city = city.id;
+    ids.country = country.id;
     const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`, [
       `فئة طاقم ${runId}`,
       `Crew Category ${runId}`,
@@ -174,6 +196,9 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       await q(`DELETE FROM technician_companies WHERE id = $1`, [ids.company]);
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }
