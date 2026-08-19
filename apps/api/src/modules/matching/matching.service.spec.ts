@@ -366,6 +366,35 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [ids.blockingOrder]);
   });
 
+  // ADR-0018 §14 (طلب المالك — "فني حاظر يوم بعينه بيتستبعد صح") — استثناء `blocked` صريح حدده
+  // الفني بنفسه (technician_schedule_slots) لازم يستبعده بس لليوم المحدد ده تحديدًا (بتوقيت مصر
+  // الصحيح بعد إصلاح ADR-0018 §2)، مش أي يوم تاني. `blockedDay` بتاعت الاختبار محسوبة بـنص
+  // النهار UTC عمدًا — دايمًا نفس اليوم التقويمي بتوقيت مصر (+2/+3) بغض النظر عن توقيت جهاز
+  // التشغيل نفسه، وslot_date بتتحسب داخل Postgres (`AT TIME ZONE 'Africa/Cairo'`) مش في JS —
+  // نفس مصدر الحقيقة اللي الكود الحقيقي بيستخدمه بالظبط.
+  it('فني حاظر يوم بعينه بيتستبعد بس لليوم ده — يوم تاني يفضل مؤهّل (ADR-0018 §2/§14)', async () => {
+    const blockedDay = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+    blockedDay.setUTCHours(12, 0, 0, 0);
+    const otherDay = new Date(blockedDay.getTime() + 24 * 60 * 60 * 1000);
+
+    const [slot] = await dataSource.query(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1, ($2::timestamptz AT TIME ZONE 'Africa/Cairo')::date, '00:00', '23:59', 'blocked')
+       RETURNING id`,
+      [ids.technicianProfile, blockedDay],
+    );
+
+    try {
+      const blockedDayCandidates = await findCandidates(blockedDay);
+      expect(blockedDayCandidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
+
+      const otherDayCandidates = await findCandidates(otherDay);
+      expect(otherDayCandidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
+    } finally {
+      await dataSource.query(`DELETE FROM technician_schedule_slots WHERE id = $1`, [slot.id]);
+    }
+  });
+
   // ADR-0017 بند 10 — Fallback توسيع النطاق: طلب ASAP وصل لعتبة matching.broaden_to_busy_after_round
   // بلا أي فني مؤهّل ومتاح، لازم يوسّع البحث ليشمل الفني المشغول ده (مؤهّل لنفس الخدمة/المنطقة،
   // بس عنده طلب accepted نشط دلوقتي — ids.blockingOrder) بدل ما يفضل عالق بلا أي محاولة.
