@@ -275,4 +275,16 @@ npm run dev                  # بيشتغل على :3001 (مش :3000 عشان ap
 
 `@baytak/shared-types` (`packages/shared-types`) لازم يتبني (`npm run build` هناك) بعد أي تعديل فيه قبل ما `apps/admin` يشوف الأنواع الجديدة — مفيش watch mode تلقائي دلوقتي (فجوة صغيرة، محتاجة إما TypeScript project references أو سكريبت watch لما نلاحظ الاحتكاك ده بيبطّئنا فعلاً).
 
+## بَقّة حقيقية — روابط مستندات/شهادات الفني وصور شات الدعم بترجع 404 (2026-08-19)
+
+المالك بلّغ إن فتح مستندات تسجيل الفني (`technicians/[id]`) من الأدمن بيرجع `404 This page could
+not be found` — الرابط اللي بيفتح كان `localhost:3001/uploads/technician-documents/...`
+(**بورت الأدمن نفسه، 3001، مش الباك-إند 3000**). السبب: `LocalDiskStorageService.getUrl()`/
+`save()` (`apps/api`) بيرجّعوا مسار نسبي عمداً (`/uploads/...`، بره الـglobalPrefix `/api/v1`) —
+`orders/[id]/page.tsx` كان أصلاً بيعالج ده بمتغيّر `API_ORIGIN` (أصل الباك-إند من
+`NEXT_PUBLIC_API_URL` بعد شيل `/api/v1`) قبل ما يستخدم أي `file_url`، لكن `technicians/[id]/page.tsx`
+و`support-chat/[id]/page.tsx` كانوا بيستخدموا `file_url` مباشرة كـ`href`/`src` — المتصفح بيحله
+على أصل صفحة الأدمن نفسها بدل الباك-إند، فيرجع 404. الإصلاح: نفس نمط `API_ORIGIN` اتعمم على
+الملفين (`support/[id]/page.tsx` كان مصلّح من الأساس).
+
 مرجع كامل: `../../docs/01-master-plan.md`

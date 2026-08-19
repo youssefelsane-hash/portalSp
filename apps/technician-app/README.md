@@ -154,4 +154,15 @@ flutter pub get
 flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api/v1
 ```
 
+## بَقّة حقيقية — شاشات بتعلّق للأبد على loading spinner (نفس بَقّة apps/customer-app، اتصلحت هنا كمان، 2026-08-19)
+
+المالك بلّغ إن شاشة الإشعارات (وغيرها) بتفضل عالقة على shimmer/loading للأبد بلا أي رسالة خطأ.
+السبب مطابق تمامًا لـ`apps/customer-app` (راجع README بتاعه، "بَقّة حقيقية تالتة") — بس
+`api_client.dart` هنا **نسخة مستقلة تمامًا** (مفيش package Flutter مشترك بين التطبيقين في
+المونوريبو ده)، فإصلاح `apps/customer-app` القديم ماكانش بيغطي `apps/technician-app` خالص. كل
+شاشة بتمسك `on ApiException catch` بس؛ أي فشل شبكة تاني (انقطاع اتصال، رد مش JSON صالح) كان بيرمي
+استثناء محدّش بيمسكه، فالشاشة تفضل عالقة للأبد. الإصلاح: نفس نمط `_guardNetworkError()` بالحرف —
+نقطة اختناق واحدة جوّه `_apiRequestRaw()`/`apiUpload()` بتحوّل أي استثناء غير `ApiException`
+لـ`ApiException` واضحة. `flutter analyze` نضيف بلا تحذيرات.
+
 مرجع كامل: `../../docs/01-master-plan.md`

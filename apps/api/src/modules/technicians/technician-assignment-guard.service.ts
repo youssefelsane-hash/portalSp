@@ -24,7 +24,14 @@ export class TechnicianAssignmentGuardService {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
+    // بَقّة حقيقية اتلقطت (تعيين فني إجباري من الأدمن لطلب مجدول ليوم بعيد، 2026-08-19): isAvailable/
+    // isOnDuty بيعبّروا عن حالة الفني "دلوقتي" (هو مسجّل أونلاين وحر فعلاً هذه اللحظة) — مش عن جدول
+    // مواعيده المستقبلي. طلب عنده scheduledAt (يعني ليه ميعاد محدد مستقبلي، مش ASAP) لازم يتقيّم
+    // بالجدول الحقيقي (technician_schedule_slots تحت) مش بحالة "أونلاين دلوقتي" — الفني مش مفروض
+    // يكون أونلاين النهاردة عشان طلب بعد 6 أيام مثلاً. الفحص ده يفضل يسري بس على طلبات ASAP
+    // (scheduledAt فاضي) اللي فعلاً محتاجة الفني يكون متاح أونلاين هذه اللحظة بالظبط.
     if (
+      !order.scheduledAt &&
       order.bookingMode !== BookingMode.EMERGENCY &&
       (!technician.isAvailable || !technician.isOnDuty)
     ) {
@@ -63,17 +70,25 @@ export class TechnicianAssignmentGuardService {
       throw new ApiException(ErrorCode.ORDR_003, 'قيمة الطلب أعلى من حد قرار مستوى الفني', HttpStatus.CONFLICT);
     }
 
-    const [activeOrder] = await manager.query<{ id: string }[]>(
-      `SELECT id FROM orders
-       WHERE technician_id = $1
-         AND id != $2
-         AND order_status = ANY($3::order_status[])
-         AND deleted_at IS NULL
-       LIMIT 1`,
-      [technician.id, order.id, ACTIVE_TECHNICIAN_ORDER_STATUSES],
-    );
-    if (activeOrder) {
-      throw new ApiException(ErrorCode.ORDR_003, 'الفني عنده طلب نشط بالفعل', HttpStatus.CONFLICT);
+    // بَقّة حقيقية اتلقطت (نفس السيناريو فوق: تعيين فني له طلب نشط النهاردة لطلب تاني مجدول بعد
+    // أسبوع) — ACTIVE_TECHNICIAN_ORDER_STATUSES (order-state-machine.ts) بتفترض عمدًا "فني واحد
+    // بياخد طلب نشط واحد في نفس الوقت"، وده صحيح لطلبات ASAP (محتاجة الفني يكون حر فعليًا دلوقتي)
+    // لكنه غلط لو الطلب الجديد ده مجدول (scheduledAt) ليوم تاني خالص — التعارض الحقيقي بين
+    // ميعادين مختلفين بيتفحص صح بالجدول (technician_schedule_slots) تحت، مش هنا. الفحص ده يفضل
+    // يسري بس على طلبات ASAP.
+    if (!order.scheduledAt) {
+      const [activeOrder] = await manager.query<{ id: string }[]>(
+        `SELECT id FROM orders
+         WHERE technician_id = $1
+           AND id != $2
+           AND order_status = ANY($3::order_status[])
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [technician.id, order.id, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+      );
+      if (activeOrder) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الفني عنده طلب نشط بالفعل', HttpStatus.CONFLICT);
+      }
     }
 
     if (order.scheduledAt) {

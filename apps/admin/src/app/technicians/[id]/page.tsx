@@ -27,6 +27,12 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS, NEXT_VERIFICATION_STEP } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 
+// بَقّة حقيقية اتلقطت (مستندات/شهادات الفني بترجع 404 عند فتحها من الأدمن، 2026-08-19) — نفس
+// حل orders/[id]/page.tsx بالحرف: file_url راجع من LocalDiskStorageService نسبي عمداً
+// (`/uploads/...`، بره الـglobalPrefix /api/v1) عشان يشتغل مع S3 لاحقًا كمان. من غير الـprefix ده،
+// المتصفح بيحله على أصل صفحة الأدمن نفسها (localhost:3001) بدل الباك-إند (localhost:3000)، فيرجع 404.
+const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/api\/v1\/?$/, '');
+
 // §24 — كانت فجوة موثّقة: GET /admin/technician-productivity/:technicianId موجود ومختبر
 // (technician_productivity.view) من زمان بلا أي واجهة أدمن تعرضه — مش موجودة في @baytak/shared-types
 // (endpoint أدمن-بس ضيّق، مفيش داعي يتشارك مع Flutter)، فتعريف محلي هنا مطابق للباك-إند بالحرف
@@ -461,7 +467,7 @@ export default function TechnicianDetailPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <a href={doc.file_url} target="_blank" rel="noreferrer" className="underline">
+                        <a href={`${API_ORIGIN}${doc.file_url}`} target="_blank" rel="noreferrer" className="underline">
                           فتح الملف
                         </a>
                       </TableCell>
@@ -540,7 +546,7 @@ export default function TechnicianDetailPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <a href={cert.file_url} target="_blank" rel="noreferrer" className="underline">
+                        <a href={`${API_ORIGIN}${cert.file_url}`} target="_blank" rel="noreferrer" className="underline">
                           فتح الملف
                         </a>
                       </TableCell>
