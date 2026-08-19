@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -1387,11 +1387,43 @@ export class OrdersService {
   // كانت فجوة موثّقة في apps/technician-app/README.md: مفيش endpoint يرجّع "الطلب النشط
   // الحالي" للفني من غير ما يعرف الـ id مقدماً — يعني التطبيق مقدرش يسترجع شاشة التنفيذ تلقائياً
   // لما يتفتح تاني بعد ما يتقفل في نص الدورة. null لو مفيش طلب نشط، مش خطأ.
+  //
+  // بَقّة حقيقية اتلقطت (docs/08 §165، بعد ADR-0017): الاستعلام ده كان `findOne` بلا فلترة على
+  // `scheduledAt` — قبل migration 0144 كان الافتراض صحيح (فني واحد بياخد طلب `ACCEPTED` واحد بس
+  // في نفس الوقت)، دلوقتي الفني ممكن يكون عنده طلب ASAP في التنفيذ الفعلي ونفس الوقت طلب مجدول
+  // مستقبلي `ACCEPTED` (مؤكّد تلقائيًا، لسه مالوش موعد وصل). `findOne` كان ممكن يرجّع الطلب
+  // الغلط (المجدول بدل الشغال فعليًا دلوقتي) لو كان الأحدث تحديثًا، فالتطبيق كان هيفتح شاشة تنفيذ
+  // لطلب لسه معادوش وقته. الفلتر الجديد بيستبعد أي طلب مجدول لسه معاداش موعده — "نشط للاسترجاع"
+  // معناها فعليًا شغال دلوقتي أو ASAP، مش "مؤكّد ومستني يوم مستقبلي".
   async findActiveForTechnician(userId: string): Promise<Order | null> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const now = new Date();
     return this.orders.findOne({
-      where: { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES) },
+      where: [
+        { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
+        {
+          technicianId: profile.id,
+          orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
+          scheduledAt: LessThanOrEqual(now),
+        },
+      ],
       order: { updatedAt: 'DESC' },
+    });
+  }
+
+  // "الشغل المؤكّد قدامي" (docs/08 §165) — عكس findActiveForTechnician() بالظبط: الطلبات
+  // المجدولة اللي اتأكّدت تلقائيًا (autoConfirmFutureOrder()) بس لسه معاداش موعدها، عشان
+  // apps/technician-app يعرضها كقايمة منفصلة ("شغل قادم مؤكّد") مش يخلطها مع "طلبات محتاجة قرارك".
+  async findUpcomingConfirmedForTechnician(userId: string): Promise<Order[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const now = new Date();
+    return this.orders.find({
+      where: {
+        technicianId: profile.id,
+        orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
+        scheduledAt: MoreThan(now),
+      },
+      order: { scheduledAt: 'ASC' },
     });
   }
 

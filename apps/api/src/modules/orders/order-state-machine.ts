@@ -113,8 +113,13 @@ export const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
 
 // الحالات اللي الطلب "نشط" فيها من ناحية الفني — مُستخدمة في order-tracking.gateway.ts (تحديد
 // آخر طلب نشط للفني وقت بث الموقع) وGET /technician/orders/active (استرجاع حالة التنفيذ بعد
-// إعادة فتح التطبيق). بتفترض ضمنياً فني واحد بياخد طلب نشط واحد بس في نفس الوقت — نفس الافتراض
-// اللي order-tracking.gateway.ts أصلاً بيعتمد عليه (findOne مش find) قبل ما الملف ده يتلمس.
+// إعادة فتح التطبيق). **تحديث (ADR-0017، migration 0144)**: الافتراض القديم هنا ("فني واحد بياخد
+// طلب نشط واحد بس في نفس الوقت") بقى غير صحيح — الفني ممكن يكون عنده طلب ASAP في التنفيذ الفعلي
+// وطلب مجدول مستقبلي `ACCEPTED` (مؤكّد تلقائيًا) في نفس الوقت. الكولرز فوق بقيا بيفلتروا كمان على
+// `scheduledAt` (بيستبعدوا أي طلب مجدول لسه معاداش موعده) عشان الاستعلام `findOne` يفضل يرجّع
+// نتيجة واحدة صحيحة (نفس منطق ASAP-only uniqueness constraint في migration 0144 بالضبط —
+// مفروض فعليًا يبقى صف واحد بس "مستحق دلوقتي" في أي لحظة). راجع
+// `findUpcomingConfirmedForTechnician()` للطلبات المؤكّدة المستقبلية (عكس الفلتر ده تمامًا).
 export const ACTIVE_TECHNICIAN_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,

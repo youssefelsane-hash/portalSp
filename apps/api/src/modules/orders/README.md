@@ -1013,3 +1013,18 @@ CI رجّع `Test Suites: 1 failed, 101 passed` مع `Tests: 557 passed, 557 tot
 موثّقة**: مفيش اختبار حي مخصص لـ`technicianCancel()` نفسها لحد كتابة السطر ده — `OrdersService`
 عندها تبعيات كبيرة (تسعير/دفع/محافظ) بتخلّي بناء fixture معزول مكلّف، مؤجَّل لمرحلة التحقق الحي
 الشاملة (E2E) بدل اختبار وحدة منفصل.
+
+## بَقّة حقيقية اتلقطت — استرجاع الطلب النشط للفني كان ممكن يرجّع الطلب الغلط (docs/08 §165)
+
+نتيجة مباشرة لميزة "ASAP واحد + N طلبات مجدولة" (migration 0144، ADR-0017): `ACTIVE_TECHNICIAN
+_ORDER_STATUSES` (`order-state-machine.ts`) بتفترض ضمنياً صف واحد بس بيطابق فني بعينه في أي لحظة —
+افتراض كان صحيح قبل الميزة دي (فني واحد بياخد طلب `accepted` واحد بس)، بقى غير صحيح دلوقتي (طلب
+ASAP شغال فعليًا + طلب مجدول مستقبلي `accepted` مؤكّد تلقائيًا في نفس الوقت). `findActiveForTechnician()`
+(هنا) و`order-tracking.gateway.ts`'s استعلام بث الموقع اللحظي الاتنين كانوا `findOne()` بلا فلترة
+على `scheduled_at` — يعني ممكن يرجّعوا الطلب المجدول (لسه معاداش موعده) بدل الطلب الشغال فعليًا لو
+كان الأحدث تحديثًا. الإصلاح: الاتنين بقيا بيستبعدوا أي طلب `scheduled_at` في المستقبل (`IS NULL
+OR <= now()`). `findUpcomingConfirmedForTechnician()` (جديدة، عكس الفلتر ده تمامًا) بتغذّي
+`GET /technician/orders/upcoming-confirmed` — كانت فجوة حقيقية تانية: الطلبات المجدولة المؤكّدة
+دي مفيش أي شاشة في `apps/technician-app` كانت بتعرضها للفني قبل يوم تنفيذها (`UpcomingConfirmedJobsScreen`
+الجديدة، تفاصيل كاملة في `../../../technician-app/README.md`). اختبار حي كامل في
+`technician-active-order-recovery.spec.ts` بيثبت الفصل الصح، بما فيه لحظة وصول موعد الطلب المجدول.

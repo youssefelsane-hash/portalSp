@@ -10,7 +10,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { websocketCorsOriginHandler } from '../../common/websocket/websocket-cors.util';
@@ -139,8 +139,16 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     const profile = await this.techniciansService.findByUserIdOrThrow(payload.sub);
     await this.techniciansService.updateLocation(payload.sub, body);
 
+    // بَقّة حقيقية اتلقطت (docs/08 §165، بعد ADR-0017): نفس بَقّة orders.service.ts's
+    // findActiveForTechnician() بالحرف — فني ممكن يكون عنده طلب ASAP شغال فعليًا وطلب مجدول
+    // مستقبلي `ACCEPTED` (مؤكّد تلقائيًا) في نفس الوقت. من غير الفلتر ده، findOne كان ممكن
+    // يرجّع الطلب المجدول الغلط ويبعت تحديث الموقع لغرفة الطلب اللي مش شغال عليه فعليًا دلوقتي.
+    const now = new Date();
     const activeOrder = await this.orders.findOne({
-      where: { technicianId: profile.id, orderStatus: In(ACTIVE_TRACKING_STATUSES) },
+      where: [
+        { technicianId: profile.id, orderStatus: In(ACTIVE_TRACKING_STATUSES), scheduledAt: IsNull() },
+        { technicianId: profile.id, orderStatus: In(ACTIVE_TRACKING_STATUSES), scheduledAt: LessThanOrEqual(now) },
+      ],
     });
     if (!activeOrder) return;
 
