@@ -67,6 +67,10 @@ export interface OrderResponseDto {
    * لما order_status=disputed (technician_cash_not_received_at != null = نزاع كاش). */
   customer_cash_confirmed_at: string | null;
   technician_cash_not_received_at: string | null;
+  /** اسم/تليفون الفني المُعيَّن — للعميل بيظهروا بس بعد تأكيد حجز حقيقي (IDOR)، للأدمن بيظهروا
+   * دايمًا طالما فيه فني معيّن (order-response.dto.ts). undefined لو مفيش فني أو الشرط مش متحقق. */
+  technician_name?: string;
+  technician_phone?: string;
 }
 
 // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). نفس CreateOrderDto اللي apps/customer-web

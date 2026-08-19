@@ -32,6 +32,7 @@ import { ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { OrdersService } from './orders.service';
 import { PaymentsService } from '../payments/payments.service';
+import { TechniciansService } from '../technicians/technicians.service';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -43,6 +44,7 @@ export class AdminOrdersController {
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
     private readonly paymentsService: PaymentsService,
+    private readonly techniciansService: TechniciansService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -55,8 +57,16 @@ export class AdminOrdersController {
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { order, history, pricingEvaluation, technicianCancellations } = await this.adminOrdersService.getDetail(id);
+    // اسم/تليفون الفني بيبانوا للأدمن دايمًا طالما فيه فني معيّن (بخلاف عقد العميل
+    // TECHNICIAN_CONTACT_VISIBLE_STATUSES اللي حماية IDOR ضد العميل قبل تأكيد حجز حقيقي — مبدأ
+    // مختلف تمامًا، مش ينطبق على موظف عمليات عنده صلاحية RBAC كاملة على الطلب أصلاً). كانت فجوة
+    // عرض حقيقية: شاشة تفاصيل الطلب كانت بتعرض technician_id كـUUID خام بلا اسم/رقم، وموظف
+    // العمليات مضطر ينسخ الـUUID يدويًا عشان يعرف مين الفني المُعيَّن.
+    const technicianContact = order.technicianId
+      ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
+      : null;
     return {
-      ...toOrderResponseDto(order),
+      ...toOrderResponseDto(order, undefined, technicianContact),
       status_history: history.map(toOrderStatusHistoryResponseDto),
       // للتشغيل بس (docs/08 §35) — null لو الخدمة مش pricing_model=formula، راجع
       // PricingEngineService.findEvaluationForOrder().
