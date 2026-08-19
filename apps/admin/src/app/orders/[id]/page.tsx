@@ -93,6 +93,12 @@ export default function OrderDetailPage() {
   const [showReassignForm, setShowReassignForm] = useState(false);
   const [technicianId, setTechnicianId] = useState('');
   const [approvedTechnicians, setApprovedTechnicians] = useState<AdminTechnicianResponseDto[] | null>(null);
+  // ADR-0017 بند 4 — قايمة مستقلة لاستبدال/تعيين الفني الأساسي بس (reassign)، مبنية على نفس
+  // منطق الأهلية الحقيقي لهذا الطلب بالذات (خدمة/منطقة/موعد)، بديل عن approvedTechnicians العامة
+  // فوق (لسه مستخدمة زي ما هي لإضافة/استبدال عضو فريق ومساعد — نطاق مختلف).
+  const [eligibleReassignTechnicians, setEligibleReassignTechnicians] = useState<
+    { technicianId: string; fullName: string }[] | null
+  >(null);
   const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
   const [newTotalEgp, setNewTotalEgp] = useState('');
   const [adjustPriceReason, setAdjustPriceReason] = useState('');
@@ -187,6 +193,14 @@ export default function OrderDetailPage() {
     authedFetchPaginated<AdminTechnicianResponseDto>('/admin/technicians?verification_status=approved&per_page=100')
       .then(({ items }) => setApprovedTechnicians(items))
       .catch(() => setApprovedTechnicians([]));
+  }
+
+  function loadEligibleReassignTechnicians() {
+    authedFetch<{ zoneId: string; items: { technicianId: string; fullName: string }[] }>(
+      `/admin/orders/${id}/eligible-technicians`,
+    )
+      .then(({ items }) => setEligibleReassignTechnicians(items))
+      .catch(() => setEligibleReassignTechnicians([]));
   }
 
   async function handleReassign(e: FormEvent) {
@@ -685,7 +699,7 @@ export default function OrderDetailPage() {
                     disabled={isSaving}
                     onClick={() => {
                       setShowReassignForm((s) => !s);
-                      if (!approvedTechnicians) loadApprovedTechnicians();
+                      if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
                     }}
                   >
                     {order.technician_id ? 'استبدال الفني المعيّن' : 'تعيين فني يدوي'}
@@ -710,10 +724,12 @@ export default function OrderDetailPage() {
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
                   <Label htmlFor="technician_id">الفني الجديد</Label>
-                  {!approvedTechnicians ? (
-                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المعتمدين…</p>
-                  ) : approvedTechnicians.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">مفيش فنيين معتمدين متاحين</p>
+                  {!eligibleReassignTechnicians ? (
+                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المؤهلين لهذا الطلب…</p>
+                  ) : eligibleReassignTechnicians.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      مفيش فنيين مؤهلين ومتاحين لخدمة/منطقة/موعد الطلب ده دلوقتي
+                    </p>
                   ) : (
                     <SelectNative
                       id="technician_id"
@@ -724,9 +740,9 @@ export default function OrderDetailPage() {
                       <option value="" disabled>
                         اختار فني
                       </option>
-                      {approvedTechnicians.map((tech) => (
-                        <option key={tech.id} value={tech.id}>
-                          {tech.full_name} ({tech.technician_code})
+                      {eligibleReassignTechnicians.map((tech) => (
+                        <option key={tech.technicianId} value={tech.technicianId}>
+                          {tech.fullName}
                         </option>
                       ))}
                     </SelectNative>

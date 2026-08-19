@@ -18,6 +18,14 @@ export class OrderDispatchListener {
   @OnEvent(ORDER_CREATED_EVENT)
   async handleOrderCreated(event: OrderCreatedEvent): Promise<void> {
     try {
+      // ADR-0017 بند 7 — طلب "بعيد" (بعد النهاردة/بكرة) بيتأكد تلقائيًا فورًا وقت الإنشاء، بلا
+      // انتظار قبول فني ولا تأجيل بث (آلية ADR-0009 تحت لسه سارية بس للطلبات "القريبة" البعيدة
+      // عن دلوقتي بالساعات مش الأيام — الفحص ده لازم يسبقها).
+      if (await this.matchingService.isFarFutureOrder(event.orderId)) {
+        await this.matchingService.autoConfirmFutureOrder(event.orderId);
+        return;
+      }
+
       // ADR-0009 بند 1-2 (P0-9) — طلب مجدول "بعيد" (dispatchDeferredUntil محسوبة في
       // OrdersService.create()): بدل ما نبث فورًا، نجدول job مؤجّل يبدأ أول جولة مطابقة حقيقية
       // قرب الموعد. jobId ثابت (deferredDispatchJobId(orderId)) يمنع أي تكرار لو الحدث اتنادى

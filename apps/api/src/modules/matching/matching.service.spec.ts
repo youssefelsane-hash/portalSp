@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { MatchingService } from './matching.service';
 import { Order } from '../orders/entities/order.entity';
+import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { OrderAssignment } from './entities/order-assignment.entity';
+import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 
 // اختبار حي ضد Postgres حقيقي (نفس فلسفة المشروع: مفيش mocks لاستعلامات SQL خام) — بيثبت
 // إصلاح البَقّة الموثّقة: استعلام استبعاد "الفني عنده طلب نشط بالفعل" في findEligibleTechnicians()
@@ -35,7 +38,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Order, OrderAssignment],
+      entities: [Order, OrderAssignment, OrderStatusHistory, TechnicianProfile],
     });
     await dataSource.initialize();
 
@@ -43,12 +46,14 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     // التانية في الـconstructor مش مُستخدمة في الدالة دي) — نفس نمط FakeRepository في
         // auth.service.spec.ts، تركيب يدوي خفيف بدل تشغيل موديول NestJS كامل.
     queueAdd = jest.fn().mockResolvedValue(undefined);
+    // autoConfirmFutureOrder (ADR-0017 بند 5) بتستخدم assignmentGuard الحقيقية (lockTechnician +
+    // assertEligible) كدفاع عمق ضد سباق الحجز المتزامن — لازم instance حقيقي هنا مش stub.
     matchingService = new MatchingService(
       dataSource.getRepository(OrderAssignment),
       dataSource.getRepository(Order),
       dataSource,
       {} as never,
-      {} as never,
+      new TechnicianAssignmentGuardService(),
       { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never,
       { emit: jest.fn() } as never,
       { add: queueAdd } as never,
@@ -163,8 +168,12 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   });
 
   const findCandidates = (scheduledAt: Date | null = null) => {
+    // ADR-0017 بند 5 — findEligibleTechnicians دلوقتي بتستبعد صراحة "نفس الطلب" (self-exclude)
+    // من فحص التعارض عبر order.id — لازم يبقى id مختلف عن ids.blockingOrder هنا (زي أي طلب مرشّح
+    // حقيقي فعليًا، مش نفس صف الطلب "المشغول" اللي بنفحص التعارض معاه)، وإلا الاستبعاد الذاتي
+    // بيلغي فحص التعارض بالغلط.
     const order = {
-      id: ids.blockingOrder,
+      id: randomUUID(),
       serviceId: ids.service,
       serviceZoneId: ids.zone,
       addressId: ids.address,
@@ -231,5 +240,113 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     expect(queueAdd).toHaveBeenCalledTimes(1);
 
     await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
+  });
+
+  // ADR-0017 بند 7 — طلب "بعيد" (أكتر من matching.near_term_request_days، الافتراضي يوم واحد
+  // "النهاردة/بكرة") لازم يتأكد تلقائيًا فورًا بلا انتظار قبول فني — بلا أي order_assignments
+  // SENT/VIEWED، الطلب يوصل مباشرة لـACCEPTED بفني محدد.
+  it('autoConfirmFutureOrder: طلب بعد أسبوعين بيتأكد تلقائيًا لأفضل فني مؤهّل بلا انتظار قبول', async () => {
+    const twoWeeksFromNow = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const [order] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+       RETURNING id`,
+      [`FAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, twoWeeksFromNow],
+    );
+    const orderId = order.id as string;
+
+    const result = await matchingService.autoConfirmFutureOrder(orderId);
+    expect(result).toEqual({ dispatched: 1 });
+
+    const [updated] = await dataSource.query(
+      `SELECT order_status, technician_id FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    expect(updated.order_status).toBe('accepted');
+    expect(updated.technician_id).toBe(ids.technicianProfile);
+
+    const assignments = await dataSource.query(
+      `SELECT assignment_status FROM order_assignments WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(assignments).toEqual([{ assignment_status: 'accepted' }]);
+
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [orderId]);
+    await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [orderId]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [orderId]);
+  });
+
+  // isNearTermOrder (dispatchOrAutoConfirm الداخلية) — تثبيت الحد الفاصل نفسه: النهاردة/بكرة قريب
+  // (dispatchNextRound)، بعد كده بعيد (autoConfirmFutureOrder). بنفحص عبر السلوك الظاهر (هل
+  // اتعمل order_assignments أو لأ) بدل الوصول لدالة private مباشرة.
+  it('dispatchOrAutoConfirm: بكرة = قريب (order_assignments بتتعمل)، بعد 3 أيام = بعيد (تأكيد مباشر بلا assignments)', async () => {
+    const tomorrow = new Date(Date.now() + 20 * 60 * 60 * 1000); // < 24h من دلوقتي، لسه "بكرة" تقويميًا غالبًا
+    const [nearOrder] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+       RETURNING id`,
+      [`NEAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, tomorrow],
+    );
+    await matchingService.dispatchOrAutoConfirm(nearOrder.id);
+    const nearAssignments = await dataSource.query(`SELECT id FROM order_assignments WHERE order_id = $1`, [nearOrder.id]);
+    expect(nearAssignments.length).toBeGreaterThan(0);
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [nearOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [nearOrder.id]);
+
+    const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const [farOrder] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+       RETURNING id`,
+      [`FAR2-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, threeDaysFromNow],
+    );
+    await matchingService.dispatchOrAutoConfirm(farOrder.id);
+    const [farUpdated] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [farOrder.id]);
+    expect(farUpdated.order_status).toBe('accepted');
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [farOrder.id]);
+    await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [farOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [farOrder.id]);
+  });
+
+  // ADR-0017 بند 10 — Fallback توسيع النطاق: طلب ASAP وصل لعتبة matching.broaden_to_busy_after_round
+  // بلا أي فني مؤهّل ومتاح، لازم يوسّع البحث ليشمل الفني المشغول ده (مؤهّل لنفس الخدمة/المنطقة،
+  // بس عنده طلب accepted نشط دلوقتي — ids.blockingOrder) بدل ما يفضل عالق بلا أي محاولة.
+  it('Fallback: طلب ASAP بيوصل لفني مشغول (ids.blockingOrder نشط) بعد ما يعدّي عتبة التوسيع', async () => {
+    const broadenSettingsService = {
+      getNumber: jest.fn(async (key: string, fallback: number) => (key === 'matching.broaden_to_busy_after_round' ? 1 : fallback)),
+    };
+    const broadenQueueAdd = jest.fn().mockResolvedValue(undefined);
+    const broadenMatchingService = new MatchingService(
+      dataSource.getRepository(OrderAssignment),
+      dataSource.getRepository(Order),
+      dataSource,
+      {} as never,
+      new TechnicianAssignmentGuardService(),
+      broadenSettingsService as never,
+      { emit: jest.fn() } as never,
+      { add: broadenQueueAdd } as never,
+    );
+
+    const [order] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, now())
+       RETURNING id`,
+      [`BROAD-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+
+    await broadenMatchingService.dispatchNextRound(order.id);
+
+    const assignments = await dataSource.query(
+      `SELECT technician_id FROM order_assignments WHERE order_id = $1`,
+      [order.id],
+    );
+    expect(assignments.some((a: { technician_id: string }) => a.technician_id === ids.technicianProfile)).toBe(true);
+
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [order.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [order.id]);
   });
 });

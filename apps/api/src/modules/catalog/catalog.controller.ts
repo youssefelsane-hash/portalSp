@@ -110,6 +110,7 @@ export class CatalogController {
       id,
       query.address_id,
       query.exclude_technician_id,
+      query.scheduled_at ? new Date(query.scheduled_at) : null,
     );
     const service = await this.catalogService.findServiceOrThrow(id);
     const isEmergency = query.booking_mode === 'emergency';
