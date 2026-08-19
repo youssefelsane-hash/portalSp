@@ -28,7 +28,7 @@
 | # | Phase | Area | Status | Live Tested? | Regression Test? | Bugs Found | Bugs Fixed | Remaining Risk | Evidence / Commit |
 |---|-------|------|--------|---------------|-------------------|------------|------------|-----------------|--------------------|
 | 0 | tokenHash fix (carried over) | Security — employee sessions endpoint | VERIFIED | نعم — HTTP حي كامل (login حقيقي OTP، 200 مع فحص المفاتيح+القيم، 401 بلا توكن، 403 بلا صلاحية) | نعم — `employee-session-response.spec.ts` (3 اختبارات) | BUG-002 (test hygiene، s22c) | BUG-002 fixed | لا يوجد — الفحص مزدوج (allowlist مفاتيح + بحث عن القيم الحساسة الفعلية في الرد المُسلسَل) | commit قادم — انظر BUG-001/002 تحت |
-| 1 | Customer Auth & Account | Auth | PENDING | | | | | | |
+| 1 | Customer Auth & Account | Auth | VERIFIED | نعم — تسجيل حي، حذف حساب+رفض فوري لنفس التوكن، رفض تسجيل دخول برقم محذوف، عبور صلاحيات عميل↔أدمن (403 مرتين)، جلسات/logout كاملة | نعم — 50 اختبار موجود سابقًا (OTP/lockout/no-log-leak/blocked-inactive-deleted/concurrent-login/atomic-refresh/MFA step-up) + 7 اختبار جديد (`auth-self-service.spec.ts`) لـupdateMe/getMe/logout/listSessions/revokeSession IDOR/deleteMe | لا يوجد | لا يوجد (الـinvariants كلها كانت سليمة بالفعل) | لا يوجد معروف — الغطاء شامل دلوقتي (تسجيل، دخول، تجديد، خروج، حذف حساب، جلسات متعددة، IDOR) | commit قادم |
 | 2 | Service Discovery | Catalog | PENDING | | | | | | |
 | 3 | Booking Configuration (pricing fields) | Pricing | PENDING | | | | | | |
 | 4 | Pricing Engine | Pricing | PENDING | | | | | | |
