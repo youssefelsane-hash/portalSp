@@ -45,7 +45,7 @@
 | 15 | Order State Machine | Orders | VERIFIED | جزئي — راجعت `ORDER_TRANSITIONS` كامل (`Record<OrderStatus,...>` بيفرض شمولية compile-time، أي حالة ناقصة = خطأ tsc)، مفيش استغلال جديد اتبنى | نعم — `order-state-machine.spec.ts` موجود من قبل | لا يوجد | لا يوجد | مفيش | commit سابق + هذا التحقق |
 | 16 | Cancellations | Orders | VERIFIED | جزئي — راجعت `CUSTOMER_CANCELLABLE_STATUSES`/سياسة إلغاء الفني (docs/10)، مفيش استغلال جديد اتبنى (نطاق عميق اتغطى في سيشنز سابقة: P0-9، endpoint إلغاء الفني، رسوم الإلغاء) | نعم — تغطية موجودة بالفعل عميقة عبر عدة ملفات spec | لا يوجد | لا يوجد | مفيش | commit سابق + هذا التحقق |
 | 17 | Refunds | Payments | PARTIAL | نعم — أعدت تشغيل سيناريو "throw أثناء نداء البوابة" الموجود من قبل (يثبت استرداد عالق PROCESSING فعليًا) + `listRefunds()` الجديدة عليه مباشرة | نعم — امتداد لاختبار موجود (`refund-transaction-safety.spec.ts`) بنفس الفكستشر اللي بيثبت السيناريو الحقيقي أصلاً | BUG-010 (P1 — استرداد عالق PROCESSING بلا أي رؤية إدارية) | BUG-010 fixed جزئيًا (الرؤية بس) | **قرار عمل مطلوب**: `provider.reconcile()` موجود في الـinterface ومطبّق فعليًا لـPaymob بس **مش متصل بأي endpoint/job خالص** — التسوية التلقائية الكاملة (نداء reconcile فعليًا وإكمال الاسترداد تلقائيًا) لسه مش مبنية عمدًا (خطر حقيقي: منطق مالي معقّد — عكس أرباح الفني، قيد مزدوج، تجميع "الطلب اتراد بالكامل" عبر أكتر من دفعة — يحتاج بناء + اختبار حي ضد Paymob sandbox حقيقي، خارج نطاق آمن لتغيير عاجل بلا اختبار خارجي حقيقي). مصنّفة NEEDS BUSINESS DECISION جزئيًا | commit قادم |
-| 18 | Wallet / Ledger / Commission | Wallets | PENDING | | | | | | |
+| 18 | Wallet / Ledger / Commission | Wallets | FIXED | جزئي — راجعت `WalletsService` بالكامل (`doubleEntry`/`reverseDoubleEntry`/`reserveForPayout`/`releaseReservation`/`finalizePayout`) بالقراءة الدقيقة (كان اتفحص بعمق في سيشن سابقة، task #36) + تتبعت كل مسارات `doubleEntry(` الحقيقية عبر الموديولات (orders/refunds/domestic-workers/technician-referrals) لأي استدعاء خارج الأنماط المعروفة، مفيش استغلال حي جديد اتبنى في المحرك نفسه (سليم رياضيًا: قفل بترتيب ثابت، فحص `allowNegativeBalance` بعد القفل مباشرة، `WITHDRAWAL` مقصور على `finalizePayout` بلا مسار موازي) | لا يوجد اختبار jest جديد للمحرك نفسه (كان مغطّى بعمق من قبل) — الإصلاح الوحيد ده توثيقي بحت (README)، فمفيش سلوك برمجي يحتاج regression test | BUG-011 (P3 — توثيق `domestic-workers/README.md` كان بيحيل غلط لـ`refunds.issue` كمسار استرداد عملي لحجوزات العمالة المنزلية، رغم إنها 404 دايمًا لغياب صف `Order`) | BUG-011 fixed (توثيقي) | حجز عمالة منزلية اتلغى بعد `confirm()` (الفلوس اتحصّلت فعليًا من العميل) مفيهوش استرداد تلقائي في v1 — قرار عمل موثّق صراحة من قبل (مش بَقّة)، بس المسار الإداري الفعلي (`wallets.adjust`) محتاج معرفة يدوية بالمبلغ الصحيح (مفيش زرار "استرد الحجز ده" جاهز) — فجوة تشغيلية أصغر، تستاهل UI مخصص مستقبلاً لو الحجم كبر | commit قادم |
 | 19 | Provider Payouts | Payouts | PENDING | | | | | | |
 | 20 | Promo / Referral / Discounts | Promotions | PENDING | | | | | | |
 | 21 | Completion | Orders | PENDING | | | | | | |
@@ -390,6 +390,38 @@ Live verification: jest حي ضد Postgres حقيقي (7/7 نجحوا). Full reg
 اختبار — نجحوا كلهم غير فشل عابر غير مرتبط (`security-concurrency.spec.ts`، موثّق ومؤجّل لـPhase 30
 من قبل، اتأكد إنه مش ناتج عن التغيير ده بإعادة تشغيله لوحده والسويت كله مرتين تانيين).
 Status: PARTIAL (الرؤية اتصلحت، التسوية التلقائية الكاملة NEEDS BUSINESS DECISION)
+
+### BUG-011
+Severity: P3 (توثيق مضلِّل لمسار مالي إداري — مفيش أثر مالي مباشر، بس خطر تشغيلي حقيقي لو حد اتبع التوثيق حرفيًا)
+Flow: Phase 18 (Wallet / Ledger / Commission) — تتبع مسارات `doubleEntry()` كلها عبر الموديولات
+غير `payments`/`orders` (referral bonuses، domestic-worker earnings) بحثًا عن أي مسار مالي جديد
+مش متسق مع محرك المحفظة المركزي.
+Symptom: `domestic-workers/README.md` (سطرين، قسم الإلغاء وقسم الرفض) بيوثّق إن استرداد فلوس
+عميل بعد إلغاء حجز عمالة منزلية مؤكَّد (الفلوس اتحصّلت فعليًا في `confirm()` عبر `WalletTxType.ADJUSTMENT`
+مباشر لمحفظة المنصة، بلا صف `Payment`/`Order` خالص) "قرار منفصل عبر `refunds.issue` الموجود أصلاً
+لو مطلوب".
+Reproduction: تتبعت `PaymentsService.refundOrder(performedByUserId, orderId, ...)` — أول سطر
+بيدوّر على `Order` بـ`orderId` (`this.orders.findOne({ where: { id: orderId, ... } })`). حجوزات
+العمالة المنزلية (`DomesticWorkerBooking`) مالهاش صف `Order` خالص — استخدام `refunds.issue` بـ
+`booking_id` كـ`orderId` هيرجّع `404 الطلب غير موجود` دايمًا، مش استرداد حقيقي.
+Expected: التوثيق يوجّه لمسار إداري فعليًا قابل للاستخدام.
+Actual: التوثيق كان بيوجّه لمسار 404 دايمًا — أي أدمن/دعم فني حاول يتبع التوثيق حرفيًا كان هيتفاجئ
+بفشل صامت وقت محاولة استرداد فلوس عميل حقيقي.
+Root cause: توثيق اتكتب بافتراض إن `refunds.issue` مسار عام لأي استرداد في المنصة، من غير تتبع
+فعلي لتوقيعها (`orderId`-scoped حصريًا) ضد نموذج بيانات حجوزات العمالة المنزلية (بدون `Order` أصلاً).
+Files involved: `apps/api/src/modules/domestic-workers/README.md` (توثيق فقط — صفر تغيير كود/سلوك)
+Financial/security impact: غير مباشر — لا يوجد خلل في حركة الفلوس نفسها (الفلوس فعلاً بتفضل عند
+المنصة زي ما هو موثّق ومقصود، `wallets.adjust` قادر يسترجعها يدويًا وده مسار موجود ومختبر أصلاً
+عبر `wallet-manual-adjustment.spec.ts`) — الخطر هو تشغيلي بحت: عملية استرداد حقيقية مطلوبة ممكن
+تتأخر أو تفشل لو الموظف اتبع التوثيق الغلط بدل ما يعرف يستخدم `wallets.adjust`.
+Fix: صححت السطرين في `domestic-workers/README.md` ليوضحوا إن `wallets.adjust`
+(`PATCH /admin/wallets/:userId/adjust`) هو المسار العملي الوحيد المتاح حاليًا، ووضحت صراحة ليه
+`refunds.issue` مش قابل للاستخدام هنا (غياب صف `Order`).
+Regression test: N/A — إصلاح توثيقي بحت، صفر سلوك برمجي اتغيّر (لا كود، لا migration، لا DTO).
+لا يوجد "قبل/بعد" قابل للاختبار آليًا لتصحيح نص README.
+Live verification: N/A لنفس السبب — تأكدت من صحة الادعاء الجديد بقراءة `refundOrder()`'s
+signature/lookup مباشرة (مذكور فوق في Reproduction)، مش باختبار حي (لا يوجد سلوك يتغيّر ليُختبر).
+Status: FIXED (توثيقي)
 
 (هيتم إضافة بَقّات جديدة هنا أول ما تتأكد.)
 
