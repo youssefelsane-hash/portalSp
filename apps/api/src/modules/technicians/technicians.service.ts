@@ -378,6 +378,13 @@ export class TechniciansService {
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19، سيناريو "يوسف") — القايمة دي كانت بترشّح
+        -- فني للعرض/الاختيار اليدوي حتى لو معندوش current_location خالص (لسه مفتحش تطبيق الفني
+        -- أبدًا)، بينما findEligibleTechnicians() في matching.service.ts (اللي فعليًا بتوزّع
+        -- الطلب) بتشترط current_location IS NOT NULL صراحة — يعني عميل يقدر "يختار" فني هنا
+        -- والتوزيع الفعلي بعد كده يرفضه تمامًا بصمت. current_location شرط أساسي مايتفاوضش عليه
+        -- (لازمة لأي توزيع فعلي بغض النظر عن ASAP/مجدول)، فبقى شرط هنا كمان.
+        AND tp.current_location IS NOT NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
       ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, ts.completed_count DESC
       LIMIT 50
