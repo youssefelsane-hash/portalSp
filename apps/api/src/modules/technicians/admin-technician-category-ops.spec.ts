@@ -19,6 +19,7 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     country: '',
     city: '',
     zone: '',
+    otherZone: '',
     category: '',
     otherCategory: '',
     service: '',
@@ -99,6 +100,14 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
       `Ops Zone ${runId}`,
     ]);
     ids.zone = zone.id;
+    // نطاق تاني بلا فنيين خالص عليه — يثبت فلتر zone_id (docs/08 §36.3) بيرجّع مجموعة فاضية له،
+    // مش بس بيقصر النطاق الأصلي.
+    const [otherZone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
+      ids.city,
+      `نطاق عمليات تاني ${runId}`,
+      `Ops Other Zone ${runId}`,
+    ]);
+    ids.otherZone = otherZone.id;
     const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`, [
       `فئة عمليات ${runId}`,
       `Ops Category ${runId}`,
@@ -208,7 +217,7 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
       await q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [[ids.service, ids.otherService]]);
       await q(`DELETE FROM service_categories WHERE id = ANY($1::uuid[])`, [[ids.category, ids.otherCategory]]);
-      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM service_zones WHERE id = ANY($1::uuid[])`, [[ids.zone, ids.otherZone]]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
       await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
@@ -252,6 +261,17 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     });
     expect(meta.total).toBe(1);
     expect(items[0].id).toBe(ids.techPending);
+  });
+
+  it('list() — فلتر zone_id (docs/08 §36.3، مصفوفة القوى العاملة) بيقصر النتيجة على الفنيين المعتمدين على النطاق ده بس', async () => {
+    const { items, meta } = await service.list({ categoryId: ids.category, zoneId: ids.zone, page: 1, perPage: 50 });
+    // online/blocked/pending عندهم نطاق ids.zone؛ noZone معندوش أي نطاق خالص → لازم يُستبعد.
+    expect(meta.total).toBe(3);
+    expect(items.some((r) => r.id === ids.techNoZone)).toBe(false);
+    expect(items.some((r) => r.id === ids.techOnline)).toBe(true);
+
+    const emptyZone = await service.list({ categoryId: ids.category, zoneId: ids.otherZone, page: 1, perPage: 50 });
+    expect(emptyZone.meta.total).toBe(0);
   });
 
   it('list() — ترقيم صفحات حقيقي (page/perPage) بيحترم LIMIT/OFFSET والعدد الكلي', async () => {

@@ -67,6 +67,7 @@ export class AdminTechniciansController {
   async listByCategory(@Query() query: ListCategoryOpsQueryDto) {
     const { items, meta } = await this.categoryOpsService.list({
       categoryId: query.category_id,
+      zoneId: query.zone_id,
       verificationStatus: query.verification_status,
       level: query.level,
       page: query.page ?? 1,

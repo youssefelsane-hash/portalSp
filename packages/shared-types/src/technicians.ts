@@ -139,3 +139,32 @@ export interface SelfDeclareCategoryBody {
 export interface RejectTechnicianServiceBody {
   reason: string;
 }
+
+// مطابق لـ apps/api/src/modules/technicians/admin-technicians.controller.ts (GET
+// /admin/technicians/by-category) — مركز عمليات فئة (docs/08 §35.9)، مُستخدَم كمان في مصفوفة
+// القوى العاملة بفلتر zone_id إضافي (docs/08 §36.3).
+export type TechnicianCapacityTier = 'LIGHT' | 'MEANINGFUL' | 'HEAVY' | 'BLOCKED';
+
+// ملحوظة: الـcontroller بيرجّع {items, meta} — بس ResponseInterceptor في apps/api بيكتشف الشكل
+// ده تلقائيًا وبيفكّه (items → envelope.data مباشرة، meta → envelope.meta) — استخدم
+// authedFetchPaginated<AdminCategoryOpsRowDto>() في apps/admin، مش authedFetch عادي (راجع
+// apps/admin/src/lib/api-client.ts تعليق apiFetchPaginated).
+export interface AdminCategoryOpsRowDto {
+  id: string;
+  technician_code: string;
+  full_name: string;
+  phone_number: string;
+  verification_status: TechnicianVerificationStatus;
+  current_level: TechnicianLevel;
+  online: boolean;
+  last_active_at: string | null;
+  working_now: boolean;
+  capacity_tier_today: TechnicianCapacityTier;
+  open_requests_count: number;
+  crew_leader_shortage_count: number;
+  crew_recruit_open_offers_count: number;
+  zone_count: number;
+  category_count: number;
+  has_zone_issue: boolean;
+  has_category_issue: boolean;
+}
