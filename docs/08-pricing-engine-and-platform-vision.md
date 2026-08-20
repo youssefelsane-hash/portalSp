@@ -3708,3 +3708,104 @@ ADR-0018) حي ضد Postgres حقيقي من الصفر — **3/3 نجحوا**:
 مش ظاهرة في customer-app **مش بَقّة كود** — السلسلة الأربعة اتأكدت حرفيًا سليمة، والسبب الوحيد
 المنطقي هو env vars ناقصة في `.env` الفعلي على جهاز المالك (تفاصيل الحل الكاملة موجودة من قبل في
 §28.7 و`docs/03-external-integrations.md` §8).
+
+---
+
+## 31. تجنيد فريق ميداني ذاتي من الفني القائد — طلب صريح من المالك (2026-08-20)
+
+**السياق**: طلب `booking_mode=team` بيتعيّن أوتوماتيك لفني واحد ("القائد") حتى لو معاه فريق كامل
+دلوقتي — ده سلوك صحيح ومقصود، اتأكد من المالك صراحة. المطلوب الجديد: القائد يشوف فورًا لو فريقه
+ناقص لشغلانة معيّنة، وعنده طريقة عملية يجنّد بيها ناس تكمل معاه — **بلا موافقة من المُضاف** (زي
+"معاه مساعد؟" و`OrderTeamService.addMember()` الموجودين بالظبط)، والمُضاف يشوف الشغلانة فورًا في
+تطبيقه "بنفس شكل أي طلب تاني"، مع وضوح مين ضافه.
+
+**النص الأصلي من المالك (مترجم/ملخّص من رسالة عامية)**: طلب محتاج فريق بيتقبل لفرد واحد حتى لو
+فريقه مش كامل — ده كويس. المطلوب: يظهر فوق كده تنبيه إن الفريق مش مكتمل + زرار "دعوة/ضم فريق" بين
+خيارات الطلب الموجودة. الزرار ده يفتح قايمة فنيين متاحين **من نفس الصنعة**، يستحسن قريبين جغرافيًا،
+**ورتبتهم أقل من (أو بتاعة "مساعد" العادية — الفني الجديد بيتصنف افتراضيًا كمساعد) رتبة القائد**.
+كل ما يدوس على واحد، ينضاف فورًا (زي قبول تلقائي، مش طلب/انتظار)، ويظهر عند المُضاف نفس شكل أي طلب
+تاني بالظبط، مع وضوح إن ده قائد الفريق اللي ضافه.
+
+### 31.1 — القرار: إعادة استخدام `order_team_members` (docs/08 §5) — صفر جدول/migration جديد
+
+فحصت الكود قبل أي تعديل (نفس منهج §29/§30): البنية التحتية كلها موجودة بالفعل ومختبرة —
+`order_team_members` (migration `0060`)، `memberType`/`addedByTechnicianId`، حدث `ORDER_CREW_
+CHANGED_EVENT` + مستمعه (مبني أصلاً لإضافة الأدمن، Script 4 §22-29). الفجوة الحقيقية مش في تخزين
+البيانات — في **ثلاث نقط دقيقة**:
+
+1. **`OrderTeamService.addMember()`** الحالية مقصورة على "نفس الشركة/الفريق" (`company_id` مطابق)
+   — القائد ميقدرش يجنّد حد بره شركته خالص. المطلوب هنا تجنيد **من مجمع كل الفنيين المتاحين
+   المؤهلين للصنعة**، مش بس شركته — أوسع عمدًا، زي فلسفة `assistant-matching`'s broadcast pool
+   (ADR-0007) بس بدون بث/سباق، اختيار مباشر من القائد.
+2. **صفر مؤشر "الفريق ناقص" على واجهة الفني القائد نفسه** — `crewShortage` موجود بس في مسار
+   الأدمن (`AdminOrdersService.removeCrewMember()`، Script 4 §22-29)، مش متعرّض للفني خالص.
+3. **بَقّة حقيقية أخطر اتلقطت هنا**: `OrdersService.findOwnedByTechnicianOrThrow()`/
+   `findActiveForTechnician()`/`findUpcomingConfirmedForTechnician()` الثلاثة بيفلتروا بـ
+   `orders.technician_id = profile.id` **بس** — عضو فريق مُضاف (`order_team_members`, `orders
+   .technician_id` لسه بتاع القائد) **معندوش أي طريقة يشوف الطلب ده في تطبيقه خالص**، لا في
+   القايمة ولا حتى بمعرفته الـid مباشرة (`GET /technician/orders/:id` بيرجّع `404` "الطلب غير
+   موجود أو مش بتاعك" للمُضاف). ده كان بيمنع تحقيق طلب المالك بالكامل ("يظهر عنده نفس شكل أي طلب")
+   بغض النظر عن أي واجهة تجنيد جديدة — لازم يتصلح الأول.
+
+### 31.2 — التصميم
+
+- **رتبة الفني = `TechnicianLevel` (`technician-profile.entity.ts`)** بترتيبها التصريحي الموجود
+  (`NEW < VERIFIED < PROFESSIONAL < PREMIUM < TEAM_LEADER`) — قرار مقصود للبساطة (طلب المالك
+  صراحة "عشان يبقى الموضوع بسيط" مرتين في نفس الرسالة) بدل الاعتماد على `order_priority_weight`
+  القابل للتعديل في `technician_level_config` (كان ممكن يدّي ترتيب أدق، لكن يحتاج join إضافي
+  وتعقيد مش مبرر هنا). **القاعدة**: المرشّح لازم `currentLevel` ترتيبها ≤ ترتيب القائد — فني جديد
+  (`NEW`، أقل رتبة) دايمًا مؤهّل كـ"مساعد" افتراضي مهما كانت رتبة القائد، مطابق حرفي لطلب المالك.
+- **`OrderTeamService.listRecruitCandidates(userId, orderId)`** (جديدة) — نفس نمط
+  `TechniciansService.listForServiceBooking()` بالحرف (`technicianAvailabilityCondition` مش
+  مستخدمة عمدًا هنا — دي بتفحص تعارض جدول *مستقبلي*، والتجنيد هنا "تعال دلوقتي" مش حجز مستقبلي،
+  فبساطة العميل تنطبق برضه هنا): `verification_status=approved`، `is_available=true`،
+  `current_location IS NOT NULL`، مؤهّل لفئة خدمة الطلب (`technician_services` مباشر OR
+  `technician_categories` معتمدة — نفس قاعدة ADR-0018 §8)، مش عضو مضاف بالفعل، مش القائد نفسه،
+  `currentLevel` ≤ رتبة القائد، مرتّبين بالمسافة لعنوان الطلب (`ST_Distance`) تصاعديًا، `LIMIT 30`.
+- **`OrderTeamService.recruitMember(userId, orderId, technicianId, roleLabel?)`** (جديدة) — نفس
+  فحوصات `listRecruitCandidates` **بتتأكد تاني وقت الإضافة الفعلية** (مش بس اعتماد على القايمة
+  اللي المستخدم شافها، ممكن تبقى قديمة) + فحوصات `addMember()` المشتركة (`MAX_TEAM_MEMBERS_PER_
+  ORDER`، مش مضاف بالفعل) **بلا** فحص الشركة (ده الفرق الجوهري عن `addMember()`). بيحفظ صف
+  `order_team_members` (`memberType='team_member'`, `addedByTechnicianId=القائد`) ويطلق
+  `ORDER_CREW_CHANGED_EVENT` (`addedByType='technician'` — قيمة جديدة على الحدث الموجود، تفرّق عن
+  إضافة الأدمن في نص الإشعار: "قائد فريقك ضافك" بدل "الإدارة ضافتك").
+- **`OrderTeamService.getShortage(order, teamMembersCount)`** — استخراج منطق `crewShortage`
+  الموجود في `AdminOrdersService` لدالة مشتركة واحدة (`(teamMembersCount + 1) < requiredTechnicians`،
+  الـ`+1` القائد نفسه) بدل تكراره — الأدمن يستخدمها زي ما هي، الفني القائد يستخدمها هنا كمان.
+- **إصلاح فجوة الرؤية (§31.1 بند 3)**: `OrdersService.findVisibleForTechnician(userId, orderId)`
+  جديدة (للقراءة بس — `GET :id`/`GET :id/team-members`) — الطلب مرئي لو `technicianId=profile.id`
+  **أو** فيه صف `order_team_members` بنفس `technicianId`. مقصورة على القراءة عمدًا — كل أفعال
+  التنفيذ (`depart`/`arrive`/`start`/`complete`/`cancel`) تفضل `findOwnedByTechnicianOrThrow`
+  (القائد بس)، نفس فلسفة "عضو فريق عادي ميقدرش يلغي بنفسه" (`docs/08` §5) بالحرف — عضو الفريق
+  يشوف ويتابع، مايتحكّمش في حالة الطلب. `OrdersService.listTeamAssignedForTechnician(userId)`
+  جديدة كمان — "شغلي كعضو فريق" (Orders حالتها نشطة، الفني عضو مش قائد) لقايمة منفصلة في
+  `apps/technician-app`.
+- **DTO**: `OrderResponseDto` بقت تدعم `team_shortage?`/`team_members_needed?`/`team_leader_name?`
+  اختياريين (زي `technician_name`/`technician_phone` الموجودين بالفعل — الكولر بيحسبهم، مش الدالة
+  المشتركة) — بيتملوا بس في `TechnicianOrderExecutionController` لطلبات `booking_mode=team`.
+
+### 31.3 — Endpoints جديدة (`technician/orders`)
+
+- `GET /technician/orders/team-assigned` — "شغلي كعضو فريق" (`listTeamAssignedForTechnician`).
+- `GET /technician/orders/:id/recruit-candidates` — القائد بس (`findOwnedByTechnicianOrThrow`)،
+  المرشّحين (§31.2).
+- `POST /technician/orders/:id/recruit-candidates/:technicianId` — القائد بس، تجنيد فوري
+  (`role_label` اختياري في الـbody، افتراضي "عضو فريق").
+- `GET /technician/orders/:id` و`GET /technician/orders/:id/team-members` بقوا يستخدموا
+  `findVisibleForTechnician` بدل `findOwnedByTechnicianOrThrow` (عضو الفريق يقدر يشوف تفاصيل
+  الطلب وزمايله دلوقتي، مش بس القائد).
+
+### 31.4 — `apps/technician-app`
+
+كارت "الفريق ناقص" (لو `team_shortage=true`) في شاشة تفاصيل الطلب للقائد بس، بزرار "دعوة/ضم فريق"
+يفتح شاشة قايمة المرشّحين (بطاقة اسم/صورة/مسافة/رتبة، دوس = تجنيد فوري بلا تأكيد تاني — نفس فلسفة
+المالك "زي قبول تلقائي"). لعضو الفريق المُضاف: الطلب يظهر في قايمة "شغلي" (`team-assigned`) بنفس
+كارت أي طلب تاني + سطر "قائد الفريق: <الاسم>" (`team_leader_name`).
+
+### 31.5 — التحقق
+
+`tsc --noEmit`/`nest build`/`jest` (بدون DB حي في البيئة دي وقت الكتابة — نفس القيد الموثّق من
+قبل في الجلسة دي لسبب تاني بالكامل، إعادة تأكيد هنا لتفادي أي التباس) + اختبار Dart حي للشاشات
+الجديدة لو `flutter`/بيئة العرض متاحة وقت التنفيذ. أي جزء يتأجل بيتوثّق هنا صراحة بالاسم، مش بصمت.
+
+§28.7 و`docs/03-external-integrations.md` §8).

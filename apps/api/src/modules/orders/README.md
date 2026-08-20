@@ -115,6 +115,45 @@
 - **`POST/GET/DELETE /technician/orders/:id/team-members`** (`OrderTeamService`، جديد داخل `orders` مش موديول مستقل — امتداد مباشر لبيانات الطلب نفسه، نفس فلسفة `order-media.service.ts`). `GET /orders/:id/team-members` (العميل) — بيشوف مين هيشتغل معاه فعليًا، بعد فحص ملكية الطلب. **كان endpoint يتيم بالكامل من جانب `apps/customer-app` — مفيش كود Dart كان بينادي عليه خالص، اتقفلت في Phase B #12 (تفاصيل في `apps/customer-app/README.md`).**
 - **اتعمله اختبار حي كامل**: فني (`TECH-000001`, مالك شركة) ضاف فني تاني (`TECH-000002`) لشركته عبر `POST /technician/company/staff` الموجود، طلب حقيقي اتعمل بـ`booking_mode=team` وانعيّن للفني الأول عبر `POST /admin/orders/:id/reassign` (تعيين قسري موجود من قبل). الفني الأول ضاف الفني التاني كعضو فريق بدور "سباك مساعد" — ظهر فورًا للعميل في `GET /orders/:id/team-members` بنفس الدور. محاولة إضافة نفس العضو تاني اترفضت `409`، محاولة الفني يضيف نفسه اترفضت `400`، محاولة إضافة `technician_id` وهمي غير موجود اترفضت بوضوح (`findByProfileIdOrThrow`)، حذف العضو نجح واختفى فورًا من القايمتين (الفني والعميل).
 
+## تجنيد فريق ميداني ذاتي من الفني القائد — صُنّاع (`docs/08` §31، طلب مالك صريح 2026-08-20) — ✅ خلص
+
+مختلف عمدًا عن "توزيع أدوار الفريق" فوق (اللي مقصورة على نفس الشركة/الفريق بس): هنا القائد بيجنّد
+من **مجمع كل الفنيين المتاحين المؤهلين للصنعة**، مش بس شركته — بلا موافقة من المُضاف (نفس فلسفة
+`addMember()`)، تجنيد فوري بضغطة واحدة.
+
+- **`OrderTeamService.listRecruitCandidates(userId, orderId)`** — نفس نمط
+  `TechniciansService.listForServiceBooking()` (فئة/خدمة معتمدة، `ADR-0018` §8)، بس بدون
+  `technicianAvailabilityCondition` (التجنيد "تعال دلوقتي" مش حجز مستقبلي). فلاتر: `is_available`،
+  `current_location IS NOT NULL`، مش مضاف بالفعل، مش القائد، **`currentLevel` ترتيبها ≤ ترتيب
+  القائد** (`TechnicianLevel`: `NEW < VERIFIED < PROFESSIONAL < PREMIUM < TEAM_LEADER`، قرار
+  مقصود للبساطة بدل `order_priority_weight` القابل للتعديل). مرتّبين بالمسافة، `LIMIT 30`.
+- **`OrderTeamService.recruitMember(userId, orderId, technicianId, roleLabel?)`** — نفس فحوصات
+  `listRecruitCandidates` تتأكد تاني وقت الإضافة الفعلية (القايمة ممكن تبقى قديمة)، `roleLabel`
+  اختياري (افتراضي "عضو فريق"). بيطلق `ORDER_CREW_CHANGED_EVENT` بـ`addedByType='technician'`
+  (قيمة جديدة على الحدث، افتراضي `'admin'` — نص إشعار مختلف: "قائد فريقك ضافك" بدل "الإدارة ضافتك").
+- **`OrderTeamService.getShortageForOrder(orderId, requiredTechnicians)`** / الدالة المشتركة
+  `computeCrewShortage()` (exported من `order-team.service.ts`) — نفس منطق `crewShortage` بتاع
+  `AdminOrdersService.removeCrewMember()` (Script 4 §22-29)، اتستخرج لدالة واحدة مشتركة.
+- **بَقّة حقيقية أخطر اتلقطت واتصلحت هنا**: `findOwnedByTechnicianOrThrow()`/
+  `findActiveForTechnician()`/`findUpcomingConfirmedForTechnician()` كانوا بيفلتروا بـ
+  `orders.technician_id = profile.id` **بس** — عضو فريق مُضاف (قائد أو أدمن، مش بس التجنيد الجديد)
+  معندوش أي طريقة يشوف الطلب في تطبيقه خالص، حتى بمعرفته الـid مباشرة. **`OrdersService
+  .findVisibleForTechnician(userId, orderId)`** جديدة (للقراءة بس — `GET :id`/`GET
+  :id/team-members`، الطلب مرئي لو `technicianId=profile.id` **أو** فيه صف `order_team_members`
+  بنفس `technicianId`) — أفعال التنفيذ (`depart`/`arrive`/`start`/`complete`/`cancel`) تفضل
+  `findOwnedByTechnicianOrThrow` (القائد بس)، نفس فلسفة "عضو فريق عادي ميقدرش يلغي بنفسه".
+  `OrdersService.listTeamAssignedForTechnician(userId)` جديدة كمان — "شغلي كعضو فريق".
+- **Endpoints جديدة** (`technician/orders`): `GET team-assigned`، `GET :id/recruit-candidates`،
+  `POST :id/recruit-candidates/:technicianId`. `GET :id` و`GET :id/team-members` بقوا
+  `findVisibleForTechnician`. الرد بيحمل `team_shortage`/`team_members_needed` (للقائد على
+  `booking_mode=team`) أو `team_leader_name` (لعضو فريق بيشوف تفاصيل طلب مضاف ليه).
+- **اختبار حي مكتوب** (`order-team-recruiting.spec.ts`، بدون DB حي في بيئة الكتابة — نفس القيد
+  الموثّق): فلترة المرشّحين (رتبة/توافر/فئة/موقع)، تجنيد ناجح + رفض (رتبة أعلى، مش متاح، نفسه،
+  مكرر)، `getShortageForOrder`، ورؤية عضو الفريق للطلب (`findVisibleForTechnician`/
+  `listTeamAssignedForTechnician`).
+- **`apps/technician-app`**: كارت "الفريق ناقص" + زرار "دعوة/ضم فريق" (شاشة قايمة مرشّحين، دوس =
+  تجنيد فوري) — تفاصيل في `apps/technician-app/README.md`.
+
 ## الضمان وإعادة الزيارة (`warranty_expires_at` + `parent_order_id`) — صُنّاع (`docs/08` §7) — ✅ خلص
 
 **اكتشاف قبل أي كود**: `orders.warranty_expires_at` و`orders.parent_order_id` **موجودين بالفعل من migration 0007 الأولى** — نفس فئة "أعمدة راكدة" اتكشفت أكتر من مرة في السيشن ده (`customer_profiles.total_orders_count`، `technician_services.completed_count`، إلخ). **مفيش عمود جديد اتضاف في `orders` خالص** — بس تفعيل الموجود + `order_type` قيمة جديدة (`revisit`, migration `0061`).

@@ -108,3 +108,40 @@ class TeamMember {
         memberType: json['member_type'] as String,
       );
 }
+
+// مرشّح للتجنيد الذاتي (docs/08 §31) — مطابق لـ OrderTeamService.listRecruitCandidates() (RecruitCandidateRow).
+class RecruitCandidate {
+  final String technicianId;
+  final String fullName;
+  final String? avatarUrl;
+  final String currentLevel;
+  final double averageRating;
+  final double? distanceKm;
+
+  RecruitCandidate({
+    required this.technicianId,
+    required this.fullName,
+    required this.avatarUrl,
+    required this.currentLevel,
+    required this.averageRating,
+    required this.distanceKm,
+  });
+
+  factory RecruitCandidate.fromJson(Map<String, dynamic> json) => RecruitCandidate(
+        technicianId: json['technician_id'] as String,
+        fullName: json['full_name'] as String,
+        avatarUrl: json['avatar_url'] as String?,
+        currentLevel: json['current_level'] as String,
+        averageRating: double.tryParse(json['average_rating']?.toString() ?? '') ?? 0,
+        distanceKm: json['distance_km'] != null ? (json['distance_km'] as num).toDouble() : null,
+      );
+}
+
+// نفس ترتيب TechnicianLevel في technician-profile.entity.ts بالحرف (docs/08 §31) — للعرض بس هنا.
+const Map<String, String> technicianLevelLabelsAr = {
+  'new': 'جديد',
+  'verified': 'موثّق',
+  'professional': 'محترف',
+  'premium': 'مميّز',
+  'team_leader': 'قائد فريق',
+};

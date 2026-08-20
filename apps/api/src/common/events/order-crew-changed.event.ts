@@ -5,11 +5,16 @@ export const ORDER_CREW_CHANGED_EVENT = 'order.crew_changed';
 
 export type CrewChangeType = 'added' | 'removed' | 'replaced';
 
+// مين عمل الإضافة/الاستبدال — بيتحكم في نص الإشعار بس (docs/08 §31: تجنيد ذاتي من الفني القائد،
+// بعكس §22-29 اللي كانت أدمن بس). افتراضي 'admin' في كل نداءات الأدمن الموجودة (تمرير صريح تحت).
+export type CrewChangeActorType = 'admin' | 'technician';
+
 export class OrderCrewChangedEvent {
   constructor(
     public readonly orderId: string,
     public readonly changeType: CrewChangeType,
     public readonly addedTechnicianProfileId: string | null,
     public readonly removedTechnicianProfileId: string | null,
+    public readonly addedByType: CrewChangeActorType = 'admin',
   ) {}
 }

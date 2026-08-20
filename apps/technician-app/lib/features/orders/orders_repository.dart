@@ -134,6 +134,31 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
+  // تجنيد فريق ذاتي (docs/08 §31، طلب مالك صريح 2026-08-20) — القائد بيدوّر على مرشّحين من
+  // مجمع كل الفنيين المتاحين المؤهلين للصنعة (مش بس شركته)، مرتّبين بالمسافة، مفلترين برتبة
+  // (TechnicianLevel) أقل من أو تساوي رتبته.
+  Future<List<RecruitCandidate>> fetchRecruitCandidates(String orderId) async {
+    final items = await authRepository.authedRequestList('/technician/orders/$orderId/recruit-candidates');
+    return items.map(RecruitCandidate.fromJson).toList();
+  }
+
+  // تجنيد فوري بلا موافقة من المُضاف (زي "معاه مساعد؟" بالظبط) — بيرجّع قايمة الفريق المحدّثة.
+  Future<List<TeamMember>> recruitTeamMember(String orderId, String technicianId, {String? roleLabel}) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/recruit-candidates/$technicianId',
+      body: roleLabel != null && roleLabel.trim().isNotEmpty ? {'role_label': roleLabel.trim()} : null,
+    );
+    final items = (data?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    return items.map(TeamMember.fromJson).toList();
+  }
+
+  // "شغلي كعضو فريق" (docs/08 §31) — طلبات الفني مضاف ليها كعضو، مش قائدها.
+  Future<List<Order>> fetchTeamAssigned() async {
+    final items = await authRepository.authedRequestList('/technician/orders/team-assigned');
+    return items.map(Order.fromJson).toList();
+  }
+
   // مسار عرض السعر أثناء التنفيذ — الفني بيقترح بنود إضافية (قطعة غيار/أجرة إضافية)، الطلب
   // بيتحول awaiting_quote_approval لحد ما العميل يوافق/يرفض من apps/customer-app.
   Future<Order> proposeQuoteItems(String orderId, List<Map<String, dynamic>> items) async {

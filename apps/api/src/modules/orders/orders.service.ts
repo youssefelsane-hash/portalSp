@@ -992,6 +992,50 @@ export class OrdersService {
     return order;
   }
 
+  /**
+   * (docs/08 §31) — للقراءة بس (تفاصيل الطلب + قايمة أعضاء الفريق)، مش لأي فعل تنفيذي. عضو فريق
+   * مُضاف (order_team_members، مش قائد الطلب) عنده حق يشوف الطلب دلوقتي — بَقّة حقيقية كانت هنا:
+   * findOwnedByTechnicianOrThrow() القديمة كانت بترفض 404 لعضو الفريق نفسه، فمكانش يقدر أصلاً
+   * يشوف تفاصيل شغلانة اتضاف ليها. أفعال التنفيذ (depart/arrive/start/complete/cancel) لسه
+   * findOwnedByTechnicianOrThrow بس (القائد وحده) — نفس فلسفة "عضو فريق عادي ميقدرش يلغي بنفسه".
+   */
+  async findVisibleForTechnician(userId: string, orderId: string): Promise<Order> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+    }
+    if (order.technicianId === profile.id) {
+      return order;
+    }
+    const [membership] = await this.orders.manager.query<{ id: string }[]>(
+      `SELECT id FROM order_team_members WHERE order_id = $1 AND technician_id = $2 LIMIT 1`,
+      [orderId, profile.id],
+    );
+    if (!membership) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+    }
+    return order;
+  }
+
+  /** "شغلي كعضو فريق" (docs/08 §31) — عكس findActiveForTechnician() بالظبط: طلبات الفني قائدها فيها فني تاني، وهو بس مضاف كعضو. */
+  async listTeamAssignedForTechnician(userId: string): Promise<Order[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    // استعلام خام لمعرّفات الطلبات بس (بلا hydration) — الجلب الفعلي عبر repository.find() تحت
+    // عشان يرجّع كيانات Order مربوطة صح (camelCase)، مش صفوف خام (snake_case) هتكسر toOrderResponseDto.
+    const rows = await this.orders.manager.query<{ order_id: string }[]>(
+      `SELECT DISTINCT otm.order_id FROM order_team_members otm
+       JOIN orders o ON o.id = otm.order_id
+       WHERE otm.technician_id = $1 AND o.order_status = ANY($2::order_status[]) AND o.deleted_at IS NULL`,
+      [profile.id, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+    );
+    if (rows.length === 0) return [];
+    return this.orders.find({
+      where: { id: In(rows.map((r) => r.order_id)) },
+      order: { updatedAt: 'DESC' },
+    });
+  }
+
   // الحالات اللي الفني يقدر يلغي فيها نفسه — بعد ما الشغل الفعلي يبدأ (in_progress فما بعده)
   // الإلغاء لازم يعدّي من الشكوى مش زرار مباشر (نفس الحد القديم، لسه موجود).
   private static readonly TECHNICIAN_CANCELLABLE_STATUSES = new Set<OrderStatus>([

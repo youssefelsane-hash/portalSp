@@ -63,6 +63,12 @@ export interface OrderResponseDto {
   /** لو الفني بلّغ "لم أستلم" (نفس البند فوق) — الطلب بيبقى disputed، وده الحقل اللي يميّز نزاع
    * الكاش عن نزاع الزيارة الفاشلة (resolveFailedVisit) لما order_status=disputed. */
   technician_cash_not_received_at: string | null;
+  /** تجنيد فريق ذاتي (docs/08 §31) — موجودين بس في مسارات technician/orders لطلبات booking_mode=team،
+   * الكولر (TechnicianOrderExecutionController) هو المسؤول عن حسابهم، مش الدالة المشتركة دي. */
+  team_shortage?: boolean;
+  team_members_needed?: number;
+  /** موجود بس لعضو فريق (مش القائد نفسه) بيشوف تفاصيل طلب مضاف ليه — "قائد الفريق: <الاسم>". */
+  team_leader_name?: string;
 }
 
 // address اختياري — القوائم (GET /orders، GET /admin/orders) بتفضل من غير join إضافي، مسارات
