@@ -47,6 +47,7 @@ import { UpdateLocationDto } from './dto/update-location.dto';
 import { UpdateTechnicianProfileDto } from './dto/update-technician-profile.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { ScheduleQueryDto } from './dto/schedule-query.dto';
+import { BulkSetAvailabilityDto } from './dto/bulk-set-availability.dto';
 
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -230,6 +231,17 @@ export class TechniciansController {
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     await this.scheduleService.deleteSlot(profile.id, id);
     return { id, deleted: true };
+  }
+
+  // تعديل جماعي سريع للإتاحة (docs/08 §34.3) — نطاق تاريخ/أسبوع/شهر كامل بنداء واحد بدل يوم
+  // بيوم. توسيع النطاق (from→to) لقائمة تواريخ بيحصل هنا في الـcontroller (طبقة عرض بسيطة)،
+  // مش في الـservice، عشان الـservice يفضل عامل بس على قايمة تواريخ صريحة.
+  @Post('schedule/bulk')
+  @HttpCode(HttpStatus.OK)
+  async bulkSetAvailability(@CurrentUser() user: JwtPayload, @Body() dto: BulkSetAvailabilityDto) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const results = await this.scheduleService.bulkSetAvailability(profile.id, dto.dates, dto.action, dto.notes_ar);
+    return { results };
   }
 
   // شهادات/كورسات الفني (docs/08 §4) — تسويقية بالكامل، لازم مراجعة أدمن (approve/reject) قبل
