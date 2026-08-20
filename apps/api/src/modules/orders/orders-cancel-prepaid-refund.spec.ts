@@ -188,6 +188,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       paymentsService,
       {} as never, // supportService
       { emit: () => undefined } as never, // events
+      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
     );
   });
 

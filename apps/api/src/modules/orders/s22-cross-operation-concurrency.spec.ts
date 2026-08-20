@@ -327,6 +327,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       paymentsService,
       supportService,
       events,
+      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
     );
   });
 

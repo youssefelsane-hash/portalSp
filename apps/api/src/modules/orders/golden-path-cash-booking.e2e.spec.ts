@@ -274,6 +274,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
       paymentsService,
       supportService,
       events,
+      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
     );
 
     ratingsService = new RatingsService(

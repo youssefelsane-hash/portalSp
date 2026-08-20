@@ -813,6 +813,13 @@ export class MatchingService {
     const technicianId = profile.id;
     const result = await this.dataSource.transaction(async (manager) => {
       const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, technicianId, opportunityId);
+      // docs/08 §35، ADR-0021 §2 — الفرصة دي جدول مشترك مع تجنيد الفريق (context='crew_recruit')،
+      // بس قبولها هنا معناها "تبقى قائد الطلب" — غلط تمامًا لعرض تجنيد فريق (قبوله لازم يضيف صف
+      // order_team_members بدل ما يغيّر orders.technician_id). قبولها بيتم من OrderTeamService
+      // .acceptCrewOpportunity() بدل كده.
+      if (opportunity.context !== 'assignment') {
+        throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تعيين قائد — استخدم مسار تجنيد الفريق', HttpStatus.BAD_REQUEST);
+      }
 
       const order = await manager
         .createQueryBuilder(Order, 'o')
@@ -852,6 +859,9 @@ export class MatchingService {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
     const result = await this.dataSource.transaction(async (manager) => {
       const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, profile.id, opportunityId);
+      if (opportunity.context !== 'assignment') {
+        throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تعيين قائد — استخدم مسار تجنيد الفريق', HttpStatus.BAD_REQUEST);
+      }
       await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
       return { orderId: opportunity.order_id };
     });
