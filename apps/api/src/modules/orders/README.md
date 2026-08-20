@@ -1106,3 +1106,12 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 **"الطلب مميّز بصريًا"** محسوب وقت القراءة في `AdminOrdersService.getDetail()`
 (`crew_shortage_urgent` في استجابة `GET /admin/orders/:id`) — مش state مخزّن إضافي، نفس عتبة
 `CrewShortageEscalationService` بالظبط عشان الإشعار والتمييز البصري يفضلوا متسقين مع بعض دايمًا.
+
+## كارت رؤية طاقم الطلب للأدمن — "مين ضاف مين وإمتى" (docs/08 §35.16)
+
+الكارت نفسه كان موجود فعليًا من قبل §35.16 (تركيبة `GET /admin/orders/:id`'s `crew_status`/
+`technician_contact` + `GET /admin/orders/:id/team-members`) — الفجوة الحقيقية الوحيدة كانت "مين
+ضاف": عمودين `added_by_technician_id`/`added_by_admin_user_id` موجودين في `order_team_members` من
+§35.1-3/§35.6 بس مالهمش استهلاك فعلي. `OrderTeamService.listForOrder()` بقى بيحل الاسم الحقيقي
+(`added_by: {type: 'leader'|'admin', name}`) عبر `LEFT JOIN` بسيط — صفر migration جديدة، صفر جدول/
+نظام تسجيل جديد.

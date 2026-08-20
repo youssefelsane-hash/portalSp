@@ -1,3 +1,8 @@
+export interface OrderTeamMemberAddedBy {
+  type: 'leader' | 'admin';
+  name: string;
+}
+
 export interface OrderTeamMemberRow {
   id: string;
   technicianId: string;
@@ -8,6 +13,10 @@ export interface OrderTeamMemberRow {
   // من قائد الطلب في "اعتماد" (docs/08 §5).
   memberType: string;
   createdAt: Date;
+  // كارت رؤية طاقم الطلب للأدمن (docs/08 §35.16) — "مين ضاف مين وإمتى". null نظريًا بس (صف
+  // قديم من قبل إضافة العمودين، أو إدخال يدوي مباشر في القاعدة) — كل الأعضاء الجداد من الآن
+  // فصاعدًا لازم يكون عندهم واحد من الاتنين (addedByTechnicianId أو addedByAdminUserId).
+  addedBy: OrderTeamMemberAddedBy | null;
 }
 
 export interface TeamMemberResponseDto {
@@ -18,6 +27,7 @@ export interface TeamMemberResponseDto {
   role_label: string;
   member_type: string;
   created_at: string;
+  added_by: OrderTeamMemberAddedBy | null;
 }
 
 export function toTeamMemberResponseDto(row: OrderTeamMemberRow): TeamMemberResponseDto {
@@ -29,5 +39,6 @@ export function toTeamMemberResponseDto(row: OrderTeamMemberRow): TeamMemberResp
     role_label: row.roleLabel,
     member_type: row.memberType,
     created_at: row.createdAt.toISOString(),
+    added_by: row.addedBy,
   };
 }

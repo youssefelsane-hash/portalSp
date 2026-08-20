@@ -166,17 +166,51 @@ export class OrderTeamService {
   }
 
   /** عام عمداً (بدون فحص ملكية) — بيتنادى من واجهة الفني (القائد) والعميل والأدمن كلهم لعرض نفس القايمة. */
+  // docs/08 §35.16 (كارت رؤية طاقم الطلب للأدمن) — "مين ضاف مين وإمتى". added_by بيتحل لاسم حقيقي
+  // (مش UUID خام) عبر LEFT JOIN منفصل لكل مصدر ممكن (تقني القائد أو أدمن)، بلا تكرار منطق حل
+  // الاسم في التطبيق. الأعمدة الخام (addedByTechnicianId/addedByAdminUserId) كانت موجودة أصلاً في
+  // order_team_members من الإضافة الأولى (§35.1-3/§35.6) — صفر migration جديدة، بس أول استهلاك
+  // فعلي ليها هنا.
   async listForOrder(orderId: string): Promise<OrderTeamMemberRow[]> {
-    return this.teamMembers.manager.query<OrderTeamMemberRow[]>(
+    const rows = await this.teamMembers.manager.query<
+      {
+        id: string;
+        technicianId: string;
+        fullName: string;
+        avatarUrl: string | null;
+        roleLabel: string;
+        memberType: string;
+        createdAt: Date;
+        addedByType: 'leader' | 'admin' | null;
+        addedByName: string | null;
+      }[]
+    >(
       `SELECT otm.id, otm.technician_id AS "technicianId", u.full_name AS "fullName", u.avatar_url AS "avatarUrl",
-              otm.role_label AS "roleLabel", otm.member_type AS "memberType", otm.created_at AS "createdAt"
+              otm.role_label AS "roleLabel", otm.member_type AS "memberType", otm.created_at AS "createdAt",
+              CASE WHEN otm.added_by_technician_id IS NOT NULL THEN 'leader'
+                   WHEN otm.added_by_admin_user_id IS NOT NULL THEN 'admin'
+                   ELSE NULL END AS "addedByType",
+              COALESCE(leader_user.full_name, admin_user.full_name) AS "addedByName"
        FROM order_team_members otm
        JOIN technician_profiles tp ON tp.id = otm.technician_id
        JOIN users u ON u.id = tp.user_id
+       LEFT JOIN technician_profiles leader_profile ON leader_profile.id = otm.added_by_technician_id
+       LEFT JOIN users leader_user ON leader_user.id = leader_profile.user_id
+       LEFT JOIN users admin_user ON admin_user.id = otm.added_by_admin_user_id
        WHERE otm.order_id = $1
        ORDER BY otm.created_at ASC`,
       [orderId],
     );
+    return rows.map((r) => ({
+      id: r.id,
+      technicianId: r.technicianId,
+      fullName: r.fullName,
+      avatarUrl: r.avatarUrl,
+      roleLabel: r.roleLabel,
+      memberType: r.memberType,
+      createdAt: r.createdAt,
+      addedBy: r.addedByType && r.addedByName ? { type: r.addedByType, name: r.addedByName } : null,
+    }));
   }
 
   /**

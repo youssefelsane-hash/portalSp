@@ -332,6 +332,11 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     expect(handler).toHaveBeenCalledTimes(1);
     const event = handler.mock.calls[0][0] as OrderCrewChangedEvent;
     expect(event).toMatchObject({ orderId, changeType: 'added', addedTechnicianProfileId: ids.juniorProfile, addedByType: 'technician' });
+
+    // docs/08 §35.16 — listForOrder() لازم يحل "مين ضاف" لاسم القائد نفسه، مش UUID خام.
+    const teamMembers = await orderTeamService.listForOrder(orderId);
+    expect(teamMembers).toHaveLength(1);
+    expect(teamMembers[0].addedBy).toEqual({ type: 'leader', name: `فني leader ${runId}` });
   });
 
   it('recruitMember — دور "assistant" بيتخزن member_type=assistant، role_label الافتراضي "مساعد"', async () => {

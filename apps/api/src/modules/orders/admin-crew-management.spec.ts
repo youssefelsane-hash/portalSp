@@ -6,7 +6,7 @@ import { Order, BookingMode } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
-import { MAX_TEAM_MEMBERS_PER_ORDER } from './order-team.service';
+import { MAX_TEAM_MEMBERS_PER_ORDER, OrderTeamService } from './order-team.service';
 import { User } from '../auth/entities/user.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
@@ -18,6 +18,7 @@ import { ORDER_CREW_CHANGED_EVENT } from '../../common/events/order-crew-changed
 describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)', () => {
   let dataSource: DataSource;
   let adminOrdersService: AdminOrdersService;
+  let orderTeamService: OrderTeamService;
   const auditLogRecord = jest.fn(async () => undefined);
   const runId = Date.now().toString(36);
   const ids = {
@@ -197,6 +198,18 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       // getNumber() فعليًا لحساب classifyTechnicianCapacity().
       { getNumber: async (_key: string, fallback: number) => fallback } as never,
     );
+
+    // docs/08 §35.16 (كارت رؤية طاقم الطلب) — listForOrder() بس، مش محتاجة assignmentGuard/
+    // workOpportunities الحقيقيين.
+    orderTeamService = new OrderTeamService(
+      dataSource.getRepository(Order),
+      dataSource.getRepository(OrderTeamMember),
+      techniciansService,
+      {} as never,
+      {} as never,
+      { getNumber: async (_key: string, fallback: number) => fallback } as never,
+      new EventEmitter2(),
+    );
   });
 
   afterAll(async () => {
@@ -229,6 +242,11 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     expect(rows).toHaveLength(1);
     expect(rows[0].technician_id).toBe(ids.memberAProfile);
     expect(rows[0].added_by_admin_user_id).toBe(ids.adminUserId);
+
+    // docs/08 §35.16 — listForOrder() لازم يحل "مين ضاف" لاسم أدمن حقيقي، مش UUID خام.
+    const teamMembers = await orderTeamService.listForOrder(orderId);
+    expect(teamMembers).toHaveLength(1);
+    expect(teamMembers[0].addedBy).toEqual({ type: 'admin', name: `أدمن اختبار ${runId}` });
   });
 
   it('addCrewMember — يرفض لو الطلب مش "اعتماد" (فريق)', async () => {
