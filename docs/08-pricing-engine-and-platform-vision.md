@@ -3902,4 +3902,95 @@ ADR-0017 اللي أدى لإنشاء `technicianAvailabilityCondition()` كمص
 الأرجح تأخر التوقّع (الفني بيتوقّع اختفاء فوري زي أنظمة توصيل تانية) مش بَقّة فعلية — يستاهل تأكيد
 حي بعد نشر الإصدار ده.
 
-§28.7 و`docs/03-external-integrations.md` §8).
+---
+
+## 33. بيانات InstaPay بقت تتعدّل من `/admin/settings` مش env vars — طلب مالك صريح 2026-08-20
+
+**الطلب بالحرف**: "عايز بيانات [InstaPay] تكون بتنضاف من خانة الأدمين مش من environment... عادي
+بيانات InstaPay ممكن تتغير مثلاً، ولكن طبعاً ما يحقش لحد يغيرها غير السوبر أدمين." — تعديل مباشر
+على القرار اللي §28.7 وثّقته (عنوان IPA/اسم المستلم كـ`INSTAPAY_IPA_ADDRESS`/
+`INSTAPAY_RECIPIENT_NAME` في `.env`) — القرار ده **اتلغى بالكامل**، مش مكمّل.
+
+### 33.1 — ليه env vars كانت فعلاً قرار غلط هنا (مش مجرد تفضيل)
+
+القيمتين دول مش سرّ/مفتاح API (بعكس Paymob/Fawry) — نص بيتعرض للعميل كتعليمات تحويل بس، وممكن
+يتغيّروا (حساب بنكي جديد مثلاً) من غير أي علاقة بدورة نشر كود. عمرهم في `.env` كانوا بيتطلّبوا:
+(1) وصول SSH/terminal للسيرفر، (2) تعديل ملف، (3) إعادة تشغيل السيرفر بالكامل — دايرة معقدة جدًا
+لتغيير نص بسيط، وكمان **مفيش تحكم صلاحيات خالص**: أي حد وصل للسيرفر يقدر يغيّرها، مش بس
+`super_admin`. القيمة الصح لبيانات زي دي: مخزن `settings` الديناميكي الموجود بالفعل في المشروع
+(`SettingsService`)، بالظبط زي `payments.instapay_confirmation_window_hours` اللي كانت فعلاً
+settings-based من زمان — كنت باين ده وقتها بس مكملتش الفكرة لعنوان IPA/الاسم، دلوقتي اتقفلت.
+
+### 33.2 — التحدي المعماري الحقيقي: `isConfigured` كانت `readonly boolean` محسوبة مرة واحدة بس
+
+`PaymentProvider.isConfigured` (الواجهة المشتركة بين Paymob/Fawry/Cash/Wallet/InstaPay) بترجع
+`boolean` تزامني بس — مناسب تمامًا لقيم env (مش هتتغيّر من غير restart أصلاً)، **مش** مناسب لقيمة
+في قاعدة بيانات ممكن `super_admin` يغيّرها في أي لحظة والسيرفر شغال. لو سيّبت `isConfigured` تتحسب
+مرة واحدة بس وقت `bootstrap` (زي env vars بالظبط)، تغيير `super_admin` من `/settings` مكانش هيبان
+غير بعد `restart` كامل — بالظبط نفس المشكلة اللي بنحاول نحلها.
+
+**القرار المعماري**: بدل تغيير الواجهة المشتركة `PaymentProvider.isConfigured` لتبقى `async`
+(كان هيجرّ تغيير في Paymob/Fawry/Cash/Wallet الأربعة كمان + كل استهلاكاتهم +6 ملفات اختبار على
+الأقل — نطاق واسع لمخاطرة مش لازمة في موديول مالي حساس لمجرد قيمة نصية واحدة)، فضّلت حل محدود
+النطاق: `InstaPayProvider` بس بقى عنده `isConfigured`/`ipaAddress`/`recipientName` mutable (مش
+`readonly`) بيتحمّلوا مرة في `onModuleInit()`، وبيتحدّثوا لحظيًا لما `SettingsService.update()`
+يطلق حدث عام جديد (`SETTING_UPDATED_EVENT`، `setting.updated`) — أي موديول تاني يقدر يستخدم نفس
+الحدث ده لاحقًا لأي إعداد محتاج live-reload من غير ما يعيد اختراع العجلة. **قيد صريح موثّق في
+الكود نفسه**: الحدث ده `EventEmitter2` (in-process بس) — لو النظام يوماً بقى شغال على أكتر من
+instance واحد، لازم يتحول لـRedis pub/sub؛ مقبول دلوقتي لأن النظام موثّق كـinstance واحد في كل
+مكان (مفيش أي ذكر لـload balancer/تعدد instances في المشروع كله).
+
+### 33.3 — التنفيذ
+
+- **`infra/migrations/0150_instapay_admin_managed_config.sql`**: صفين جداد في `settings`
+  (`payments.instapay.ipa_address`, `payments.instapay.recipient_name`، `value_type='string'`،
+  `group_name='payments'`، فاضيين افتراضيًا = InstaPay معطّلة زي ما كانت بالظبط).
+- **`SettingsService`**: `EventEmitter2` بقى param **اختياري** في الـconstructor (`?:` — 24+ ملف
+  اختبار بينشئوها بـ`new` مباشرة بـ3 args بس، إجباره كان هيكسرهم كلهم لمجرد ميزة إضافية).
+  `update()` بيطلق `SETTING_UPDATED_EVENT` بعد إبطال الكاش مباشرة.
+- **`InstaPayProvider`**: `ConfigService` اتشال، `SettingsService.getString()` بدل env vars.
+  `onModuleInit()` (تحميل أول مرة وقت bootstrap) + `@OnEvent(SETTING_UPDATED_EVENT)` (تحديث
+  لحظي لما `super_admin` يعدّل من الأدمن — بيتحقق الحدث خاص بالمفتاحين دول بس قبل ما يعيد التحميل).
+- **`configuration.ts`/`env.validation.ts`/`.env.example`**: `INSTAPAY_IPA_ADDRESS`/
+  `INSTAPAY_RECIPIENT_NAME` اتشالوا بالكامل — مفيش أي env var تاني بديل، القيمة الوحيدة دلوقتي
+  هي `/admin/settings`.
+- **صفر تعديل مطلوب في `apps/admin`**: صفحة الإعدادات (`/settings`) عامة بالفعل — بتعرض أي صف
+  `settings` جديد تلقائيًا كخانة نص قابلة للتعديل، مجمّعة بـ`group_name`. الصفين الجداد ظهروا فيها
+  فورًا بمجرد إضافة الـmigration، بلا أي كود frontend إضافي.
+- **الحماية لـ`super_admin` بس موجودة من زمان، اتأكد منها بس مش اتعملت جديدة**: رابط `/settings`
+  في الشريط الجانبي مشروط بصلاحية `settings.manage`، و`PATCH /admin/settings/:key` نفس الصلاحية
+  + `@RequireStepUp()` (MFA) — و`settings.manage` مُعطاة لـ`super_admin` بس افتراضيًا
+  (`infra/migrations/0023_settings_manage_permission.sql`).
+- **`docs/03-external-integrations.md` §8**: الخطوات اتبدّلت بالكامل من ".env + restart" لـ
+  "/admin/settings كـsuper_admin"، الجدول السريع لكل الـenv vars اتحدّث كمان (InstaPay بقى ملاحظة
+  بس، مش صفين env).
+
+### 33.4 — التحقق (تم فعليًا)
+
+- اختبار حي جديد `instapay-admin-managed-config.spec.ts` ضد Postgres حقيقي: `isConfigured` يبدأ
+  `false` (القيمتين فاضيين افتراضيًا)، `SettingsService.update()` لـ`ipa_address` بس لسه `false`
+  (القيمة التانية لسه فاضية)، تحديث `recipient_name` كمان يخلّي `isConfigured=true` **بلا أي
+  restart** (نفس الـinstance، الحدث بس)، و`createPayment()` بترجع تعليمات فيها القيم الجديدة
+  بالظبط. تحديث لاحق يمسح قيمة واحدة يرجّع `isConfigured=false` تاني — دورة كاملة اتأكدت.
+- `tsc --noEmit`، `npx nest build` نضاف.
+- `npx jest` الكامل بعد الدفعة: **111/111 suite، 600/600 اختبار، exit 0** — صفر ريجريشن.
+
+**بَقّتين حقيقيتين اتلقطوا واتصلحوا وقت كتابة الاختبار الحي نفسه (مش في كود الإنتاج — في الاختبار
+والدورة اللي بيثبتها)**:
+1. `settings.updated_by_user_id` عليها FK حقيقي لـ`users` — أول نسخة من الاختبار استخدمت
+   `randomUUID()` وهمي كـ`adminUserId` (نفس فئة البَقّة اللي اتلقطت قبل كده في §28.5's
+   `instapay-manual-flow.spec.ts`)، فـ`update()` كانت بترفض `QueryFailedError`. الإصلاح: مستخدم
+   أدمن حقيقي مزروع في `beforeAll`.
+2. **بَقّة أهم بتوضّح تصميم الكاش نفسه**: أول نسخة من الاختبار كانت بتصفّر القيمتين بـraw SQL
+   مباشر (`UPDATE settings SET value = ...`) في `beforeAll` قبل بناء `provider`، فـ`isConfigured`
+   الأولي كان بيرجع `true` غلط بدل `false` المتوقع. السبب: `readRaw()` في `SettingsService`
+   كاش-أول (Redis، TTL 60 ثانية) — تعديل القاعدة مباشرة بـSQL خام **مايبطّلش الكاش**، بس
+   `SettingsService.update()` هي اللي بتعمل `cache.del()`. الإصلاح: الاختبار بقى يستخدم
+   `settingsService.update()` نفسها للتصفير الأولي، مش SQL خام — درس مهم لأي اختبار حي جديد
+   يلمس `settings`: **تعديل القيمة عبر `SettingsService` دايمًا، مش SQL مباشر، لو الاختبار
+   بيعتمد على القيمة دي فورًا بعد كده** (حتى لو النية كانت "مجرد تحضير بيانات").
+
+**الخلاصة**: بيانات InstaPay بقت فعليًا تحت تحكم `super_admin` الكامل من `/admin/settings` —
+تغيير لحظي، بلا `.env`، بلا restart، بلا وصول SSH للسيرفر. أي "بيانات نسبية" تانية مشابهة (قيم
+ممكن تتغيّر بمرور الوقت، مش أسرار API) لازم تتبني بنفس النمط ده من هنا فصاعدًا — `settings` +
+`SETTING_UPDATED_EVENT` لو الموديول محتاج قيمة في الذاكرة، مش env var جديد.

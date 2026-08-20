@@ -90,9 +90,7 @@ export const envValidationSchema = Joi.object({
   FAWRY_SECURE_KEY: Joi.string().allow('').optional(),
   FAWRY_REFERENCE_EXPIRY_HOURS: Joi.number().default(72),
 
-  // InstaPay — تعليمات تحويل يدوي بس (ADR-0013 §7)، مفيش سرّ/توقيع مطلوب هنا خالص.
-  INSTAPAY_IPA_ADDRESS: Joi.string().allow('').optional(),
-  INSTAPAY_RECIPIENT_NAME: Joi.string().allow('').optional(),
+  // InstaPay: عنوان IPA/اسم المستلم بقوا إعدادات أدمن (/admin/settings) مش env vars — §31.
 
   // تخزين الملفات — 'local' افتراضي (تطوير)، 'S3' للإنتاج. تفاصيل كل قيمة: docs/03-external-integrations.md
   // docs/08 §19 بند 16 — كان النظام يقدر يقلع "healthy" في الإنتاج وهو لسه بيكتب على قرص محلي

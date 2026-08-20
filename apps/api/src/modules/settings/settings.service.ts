@@ -1,8 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../common/events/setting-updated.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Setting } from './entities/setting.entity';
 
@@ -16,6 +18,10 @@ export class SettingsService {
     @InjectRepository(Setting) private readonly settings: Repository<Setting>,
     private readonly auditLog: AuditLogService,
     private readonly cache: RedisCacheService,
+    // اختياري عمدًا — SettingsService بيتنشئ يدويًا بـ`new` في 24+ ملف اختبار (3 args بس) قبل
+    // إضافة الحدث ده (§33)، إجباره كان هيكسرهم كلهم لمجرد ميزة إضافية. الاستخدام الحقيقي (DI في
+    // apps/api الفعلي) بيوصله دايمًا، الـ`?.` تحت بس للسياقات اليدوية دي.
+    private readonly events?: EventEmitter2,
   ) {}
 
   private cacheKey(key: string): string {
@@ -110,6 +116,13 @@ export class SettingsService {
     await this.settings.save(setting);
     // إبطال فوري — مش مستنيين انتهاء الـ TTL، القراءة الجاية لازم تشوف القيمة الجديدة على طول
     await this.cache.del(this.cacheKey(key));
+    // §33 — أي موديول محتفظ بنسخة في الذاكرة من قيمة إعداد (زي InstaPayProvider) بيسمع للحدث ده
+    // بدل ما يعتمد على readRaw() في كل نداء. in-process بس — راجع تحذير النطاق في
+    // setting-updated.event.ts. emitAsync (مش emit) عمداً — نفس سبب orders.service.ts's
+    // ORDER_CREATED_EVENT بالحرف: بننتظر كل المستمعين يخلّصوا قبل ما نرجّع نجاح الـPATCH للأدمن،
+    // عشان super_admin يتأكد إن التغيير سارٍ فعليًا في اللحظة اللي بيشوف فيها رد الحفظ، مش سباق
+    // race condition ممكن يخلّي قراءة فورية بعد الحفظ ترجع قيمة قديمة.
+    await this.events?.emitAsync(SETTING_UPDATED_EVENT, new SettingUpdatedEvent(setting.key, value));
 
     await this.auditLog.record({
       actorUserId: adminUserId,

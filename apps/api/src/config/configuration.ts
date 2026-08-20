@@ -118,11 +118,7 @@ export default () => ({
         ? parseInt(process.env.FAWRY_REFERENCE_EXPIRY_HOURS, 10)
         : 72,
     },
-    // InstaPay — مسبق الدفع بتأكيد يدوي بس (ADR-0013 §7)، مفيش بوابة API حقيقية. عنوان IPA
-    // بيتعرض للعميل كتعليمات تحويل، الاسم بس للطمأنة (يتأكد إن المرسل واقف صح).
-    instapay: {
-      ipaAddress: process.env.INSTAPAY_IPA_ADDRESS,
-      recipientName: process.env.INSTAPAY_RECIPIENT_NAME,
-    },
+    // InstaPay: عنوان IPA/اسم المستلم بقوا يتعدّلوا من /admin/settings مش env vars (§31، طلب
+    // مالك صريح 2026-08-20) — راجع InstaPayProvider وinfra/migrations/0150.
   },
 });
