@@ -5,6 +5,7 @@ import { BuildingsModule } from '../buildings/buildings.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
 import { GeoModule } from '../geo/geo.module';
+import { MatchingModule } from '../matching/matching.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { PromotionsModule } from '../promotions/promotions.module';
@@ -58,6 +59,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     PricingModule,
     PromotionsModule,
     SettingsModule,
+    MatchingModule,
     PaymentsModule,
     SupportModule,
     AuditModule,

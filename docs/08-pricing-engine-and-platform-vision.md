@@ -4428,3 +4428,37 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
   662/662 اختبار**، صفر ريجريشن، صفر flake ظاهر في التشغيل ده.
 - **لسه فاضل من §35**: 35.7-35.20 (تفسير المطابقة، مركز عمليات أدمن، تنبيهات، توزيع، تايم لاين،
   اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي).
+
+### 35.5 — إغلاق §35.7: تفسير مطابقة فني/طلب — "ليه الفني ده مش بياخد الطلب ده؟"
+
+منفَّذ حسب `ADR-0021` §4 — راجع `apps/api/src/modules/matching/matching-explainability.service.ts`
+للتفاصيل التقنية الكاملة. ملخص:
+
+- **`MatchingExplainabilityService.explainTechnicianForOrder(order, technicianId)`** جديدة —
+  بترجّع تفسير مركّب (8 checks: `verified`/`category_eligible`/`zone_eligible`/`has_location`/
+  `not_already_offered`/`matches_requested_technician`/`matches_preferred_company`/
+  `availability_ok`) + `capacity_tier` (`LIGHT|MEANINGFUL|HEAVY|BLOCKED`) + `distance_km`، محسوبين
+  كلهم في استعلام واحد (مش N round-trips).
+- **إعادة استخدام حرفية، صفر خوارزمية تشخيصية موازية** (طلب المالك صراحة، مذكور مرتين في §35):
+  `technicianAvailabilityCondition()` نفسها (نفس دالة `matching.service.ts`/`technicians.service
+  .ts`/`technician-assignment-guard.service.ts`) بتتلف جوّه `EXISTS` مترابط عشان تترجم لبوليان
+  فردي بلا تكرار منطق، و`classifyTechnicianCapacity()` نفسها لعمود `capacity_tier`. فحص الفئة/
+  الخدمة (`category_eligible`) استثناء وحيد — SQL منسوخ حرفيًا من نفس شرط
+  `findEligibleTechnicians()` (الشرط ده مكرر أصلاً بلا دالة مشتركة مستخرجة بين matching.service.ts
+  وtechnicians.service.ts من قبل §35.7 — استخراجه لدالة مشتركة يستدعي تعديل ملفين شغالين
+  ومُختبرين، خارج نطاق التغيير المطلوب هنا).
+- **Endpoint جديد**: `GET /admin/orders/:id/technicians/:technicianId/explain` — قراءة بس، أي
+  أدمن (نفس نمط `getTimeline`/`listTeamMembers` — صفر صلاحية إضافية).
+- **`MatchingModule` بقت `export`تها** (`MatchingExplainabilityService` مضافة لـ`providers`/
+  `exports`)، و`OrdersModule` استوردت `MatchingModule` — اتجاه استيراد واحد بس (`Orders→Matching`)،
+  اتأكد بصفر cycle عبر boot حقيقي للتطبيق كامل (`NestFactory.create(AppModule).init()`) قبل أي
+  commit، تحديدًا عشان `MatchingModule` كان فيها قرار معماري سابق يمنع استيراد `OrdersModule` بسبب
+  بَقّة ترتيب routes حقيقية (تفاصيل في `orders/README.md`) — الاتجاه العكسي (`Orders→Matching`) آمن
+  لأن `MatchingModule` مابتستوردش `OrdersModule` أصلاً.
+- **اختبارات حية جديدة** (`matching-explainability.spec.ts`، 7/7): فني مؤهّل بالكامل (كل الـchecks
+  ناجحة + `LIGHT`)، فئة/خدمة مختلفة، نطاق مختلف، بلا موقع GPS، حظر يوم صريح (`BLOCKED`)، اتعرض
+  عليه الطلب قبل كده (`order_assignments`)، وطلب بلا `service_zone_id` بيرمي خطأ واضح.
+- **التحقق النهائي**: `tsc --noEmit`/`nest build` نضاف، smoke-boot كامل للتطبيق نجح. `npx jest`
+  الكامل: **118/118 suite، 669/669 اختبار**، صفر ريجريشن.
+- **لسه فاضل من §35**: 35.8-35.20 (فانل المطابقة، مركز عمليات أدمن، تنبيهات، توزيع، تايم لاين،
+  اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي).
