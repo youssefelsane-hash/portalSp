@@ -302,4 +302,21 @@ status) اتفحص خصيصًا واتلقى **مش موصّل فعليًا لأ
 `IMPLEMENTED — DEVICE TEST PENDING` للجزء اللي محتاج هاردوير فعلي، مطابقة لتصنيف بصمة
 `apps/customer-app` في نفس الوثيقة (docs/08).
 
+## إشعارات نقص طاقم الفريق (docs/08 §35.5/§35.17، `ORDER_CREW_SHORTAGE_ESCALATED_EVENT`)
+
+حدث واحد (`common/events/order-crew-shortage-escalated.event.ts`، من `CrewShortageEscalationService`
+في `modules/orders/`) بيغذّي استمعانين مستقلين هنا، كل واحد بمسؤولية مختلفة تمامًا (نفس نمط باقي
+المستمعات في الموديول ده — استمعان لكل مستقبِل، مش شرط واحد جوه استمعان واحد):
+
+- **`OrderCrewShortageEscalatedRoutingListener`** (§35.5) — توجيه لدور `ops_manager` عبر
+  `NotificationRoutingService.routeToRole()`.
+- **`OrderCrewShortageLeaderReminderListener`** (§35.17، جديد) — تذكير شخصي لقائد الطلب نفسه
+  (`order.technicianId`) إن طاقمه لسه ناقص، مع تفاصيل العدد الناقص (فني/مساعد) و`deepLink` لشاشة
+  الطلب. لو الطلب من غير قائد معيّن (`technician_id` فاضي — نظريًا نادر لطلب `booking_mode='team'`
+  وصل لمرحلة التصعيد) بيرجع بهدوء من غير إشعار.
+
+اختبار حي: `order-crew-shortage-leader-reminder.spec.ts` (3/3) — نص الإشعار الصح، رجوع هادئ من غير
+قائد، مسك آمن للاستثناء. `OrderCrewChangedNotificationListener` (موجود مسبقًا، مش من §35.17) بيغطي
+"انضميت لطلب X"/"اتشلت من طلب X" — راجع `modules/orders/README.md` لتفاصيل الحدث اللي بيغذّيه.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
