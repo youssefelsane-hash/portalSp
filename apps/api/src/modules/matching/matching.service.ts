@@ -13,6 +13,7 @@ import {
   OrderEmergencyDispatchStrugglingEvent,
 } from '../../common/events/order-emergency-dispatch-struggling.event';
 import { ORDER_NO_TECHNICIAN_FOUND_EVENT, OrderNoTechnicianFoundEvent } from '../../common/events/order-no-technician-found.event';
+import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
@@ -75,7 +76,7 @@ const FAIRNESS_DECLINE_WEIGHT_FALLBACK = 0.5;
 // المالك — "avoid permanent deterministic winners"). افتراضي معطّل (0 = مفيش نطاق تعادل خالص).
 const TIE_BREAK_THRESHOLD_FALLBACK = 0;
 
-interface EligibleTechnicianRow {
+export interface EligibleTechnicianRow {
   technician_id: string;
   distance_km: string;
   rank_score: string;
@@ -166,7 +167,10 @@ export class MatchingService {
    * اليوم بتوقيت مصر* والشغل شاغل يوم كامل (ADR-0018 §2 — الجدولة باليوم مش بالساعة، `matching
    * .full_day_job_minutes`)؛ وأي استثناء `blocked` صريح حدده الفني بنفسه في جدوله.
    */
-  private async findEligibleTechnicians(
+  // مش private عمدًا (docs/08 §36.6) — MatchingExplainabilityService بيعيد استخدامها بالحرف
+  // (batchSize كبير) عشان يحسب rank_score/ترتيب فني معيّن بين المرشّحين المؤهّلين الحقيقيين، بدل
+  // ما يخترع صيغة ترتيب موازية في التفسير. الموديولين مسجّلين في نفس MatchingModule، صفر دورة.
+  async findEligibleTechnicians(
     order: Order,
     batchSize: number,
     requestedTechnicianId?: string | null,
@@ -794,14 +798,33 @@ export class MatchingService {
 
       if (meaningfulPick) {
         const tier = await this.classifyCandidate(order, meaningfulPick.technicianId, fullDayJobMinutes);
-        await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
-        return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId };
+        const opportunity = await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
+        return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId, opportunity };
       }
 
       return { kind: 'stalled' as const, order };
     });
 
-    if (result.kind === 'noop' || result.kind === 'offered') {
+    if (result.kind === 'noop') {
+      return { dispatched: 0 };
+    }
+    if (result.kind === 'offered') {
+      // بره الـtransaction عمداً (زي ORDER_ACCEPTED_EVENT تحت) — مفيش داعي حد يسمع بيانات مش
+      // مؤكّدة. docs/08 §36.1 — created:false يعني الفرصة كانت موجودة بالفعل (idempotent
+      // re-check)، مش عرض جديد فعليًا، فمفيش داعي إشعار مكرر.
+      if (result.opportunity.created) {
+        this.events.emit(
+          WORK_OPPORTUNITY_OFFERED_EVENT,
+          new WorkOpportunityOfferedEvent(
+            result.opportunity.id,
+            result.order.id,
+            result.order.orderNumber,
+            result.technicianId,
+            'assignment',
+            result.opportunity.capacity_tier_at_offer,
+          ),
+        );
+      }
       return { dispatched: 0 };
     }
     if (result.kind === 'stalled') {

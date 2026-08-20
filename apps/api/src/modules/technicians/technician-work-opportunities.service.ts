@@ -48,7 +48,9 @@ export class TechnicianWorkOpportunitiesService {
   /**
    * إنشاء عرض جديد — idempotent عبر القيد الفريد الجزئي (`uq_technician_work_opportunities_
    * offered`، migration 0153): لو عرض `offered` حي موجود بالفعل لنفس الطلب/الفني، بيرجّع نفس
-   * الصف بدل ما يكرره أو يرمي خطأ.
+   * الصف بدل ما يكرره أو يرمي خطأ. `created` في الرد بيفرّق "صف جديد فعلاً" عن "كان موجود بالفعل"
+   * — الكولر (docs/08 §36.1) بيستخدمها عشان يبعت إشعار مرة واحدة بس، مش كل مرة الدالة دي تتنادى
+   * idempotent-بشكل بلا داعي.
    */
   async offerIfNotExists(
     manager: EntityManager,
@@ -57,13 +59,13 @@ export class TechnicianWorkOpportunitiesService {
     tier: TechnicianCapacityTier,
     context: WorkOpportunityContext = 'assignment',
     crewRole: CrewRecruitRole | null = null,
-  ): Promise<WorkOpportunityRow> {
+  ): Promise<WorkOpportunityRow & { created: boolean }> {
     const [existing] = await manager.query<WorkOpportunityRow[]>(
       `SELECT * FROM technician_work_opportunities
        WHERE order_id = $1 AND technician_id = $2 AND status = 'offered' AND deleted_at IS NULL`,
       [orderId, technicianId],
     );
-    if (existing) return existing;
+    if (existing) return { ...existing, created: false };
 
     const [created] = await manager.query<WorkOpportunityRow[]>(
       `INSERT INTO technician_work_opportunities (order_id, technician_id, capacity_tier_at_offer, status, context, crew_role)
@@ -72,14 +74,15 @@ export class TechnicianWorkOpportunitiesService {
        RETURNING *`,
       [orderId, technicianId, tier, context, crewRole],
     );
-    if (created) return created;
-    // سباق نادر: صف تاني خلق نفس العرض بين الـSELECT والـINSERT — نرجع نقرأه بدل ما نفشل.
+    if (created) return { ...created, created: true };
+    // سباق نادر: صف تاني خلق نفس العرض بين الـSELECT والـINSERT — نرجع نقرأه بدل ما نفشل. created:false
+    // عمدًا — الصف التاني (اللي فعلاً كتب الـINSERT) هو المسؤول عن إشعاره بنفسه، مش إحنا.
     const [race] = await manager.query<WorkOpportunityRow[]>(
       `SELECT * FROM technician_work_opportunities
        WHERE order_id = $1 AND technician_id = $2 AND status = 'offered' AND deleted_at IS NULL`,
       [orderId, technicianId],
     );
-    return race;
+    return { ...race, created: false };
   }
 
   /** هل فيه عرض `offered` حي لأي فني على الطلب ده؟ — نفس فكرة `liveAssignments` في dispatchNextRound(). */

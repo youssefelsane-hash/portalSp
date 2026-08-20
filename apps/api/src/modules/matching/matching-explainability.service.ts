@@ -14,6 +14,12 @@ import {
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
 } from '../technicians/technician-eligibility.sql';
+import { MatchingService } from './matching.service';
+
+// batchSize كبير عمدًا (docs/08 §36.6) — عشان findEligibleTechnicians() ترجّع كل المجمّع المؤهّل
+// الحقيقي (مش أول N بس) وقت حساب ترتيب/rank_score فني معيّن للتفسير. صفر تأثير على مسار المطابقة
+// الفعلي — نداء تشخيصي منفصل تمامًا (قراءة بس).
+const EXPLAIN_RANKING_BATCH_SIZE = 10_000;
 
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
@@ -21,6 +27,15 @@ export interface TechnicianEligibilityCheck {
   key: string;
   passed: boolean;
   labelAr: string;
+}
+
+export interface TechnicianRankInfo {
+  /** rank_score الحقيقي (نفس صيغة findEligibleTechnicians() بالحرف) — أعلى = أولوية أكبر. */
+  rankScore: number;
+  /** ترتيب الفني ده بين كل المرشّحين المؤهّلين فعليًا لنفس الطلب دلوقتي (1 = الأعلى أولوية). */
+  rank: number;
+  /** إجمالي عدد المرشّحين المؤهّلين فعليًا (نفس المجمّع اللي findEligibleTechnicians() هترجّعه). */
+  totalEligible: number;
 }
 
 export interface TechnicianEligibilityExplanation {
@@ -32,6 +47,9 @@ export interface TechnicianEligibilityExplanation {
   checks: TechnicianEligibilityCheck[];
   capacityTier: TechnicianCapacityTier | null;
   distanceKm: string | null;
+  /** null لو الفني مش ضمن المجمّع المؤهّل الحقيقي فعليًا (findEligibleTechnicians() ماترجّعوش) —
+   * غالبًا نفس سبب eligible=false فوق، أو order.requestedTechnicianId مضبوط لفني تاني (docs/08 §36.6). */
+  rankInfo: TechnicianRankInfo | null;
 }
 
 interface EligibilityRow {
@@ -43,6 +61,7 @@ interface EligibilityRow {
   matches_requested_technician: boolean;
   matches_preferred_company: boolean;
   availability_ok: boolean;
+  decision_limit_ok: boolean;
   distance_km: string | null;
 }
 
@@ -70,6 +89,7 @@ export class MatchingExplainabilityService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly settingsService: SettingsService,
+    private readonly matchingService: MatchingService,
   ) {}
 
   async explainTechnicianForOrder(order: Order, technicianId: string): Promise<TechnicianEligibilityExplanation> {
@@ -115,6 +135,15 @@ export class MatchingExplainabilityService {
             fullDayThresholdMinutesParam: '$12',
           })}
         ) AS availability_ok,
+        -- docs/08 §36.6 — نفس شرط findEligibleTechnicians()/assertCoreEligibility() بالحرف
+        -- (decision_limit_cents) كان ناقص من قايمة checks هنا رغم إضافته لاكتشاف/تأكيد المطابقة
+        -- الفعليين (§36.1 تعميق) — فجوة حقيقية كانت ممكن تخلي التفسير يقول "مؤهّل" لفني محرك
+        -- المطابقة الحقيقي هيرفضه فعليًا وقت التأكيد.
+        EXISTS (
+          SELECT 1 FROM technician_level_config dlc
+          WHERE dlc.level = tp.current_level
+            AND (dlc.decision_limit_cents IS NULL OR dlc.decision_limit_cents >= $13::int)
+        ) AS decision_limit_ok,
         (ST_Distance(tp.current_location, a.location) / 1000.0)::text AS distance_km
       FROM technician_profiles tp
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -136,6 +165,7 @@ export class MatchingExplainabilityService {
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         isEmergency,
         fullDayJobMinutes,
+        order.totalAmountCents,
       ],
     );
 
@@ -152,6 +182,7 @@ export class MatchingExplainabilityService {
       { key: 'matches_requested_technician', passed: row.matches_requested_technician, labelAr: 'يطابق الفني المطلوب (إعادة حجز، لو مطلوب)' },
       { key: 'matches_preferred_company', passed: row.matches_preferred_company, labelAr: 'يطابق الشركة/الفريق المطلوب (اعتماد، لو مطلوب)' },
       { key: 'availability_ok', passed: row.availability_ok, labelAr: 'متاح وقت الطلب (بلا تعارض جدول/حظر يوم)' },
+      { key: 'decision_limit_ok', passed: row.decision_limit_ok, labelAr: 'حد قرار مستوى الفني يكفي قيمة الطلب' },
     ];
 
     const firstFailure = checks.find((c) => !c.passed);
@@ -176,6 +207,26 @@ export class MatchingExplainabilityService {
 
     const reasonAr = eligible ? 'مؤهّل بالكامل لمطابقة هذا الطلب دلوقتي' : `مش مؤهّل — ${firstFailure!.labelAr} (فشل)`;
 
+    // docs/08 §36.6 — ترتيب/rank_score حقيقي بين المرشّحين المؤهّلين فعليًا، مُعاد استخدامه بالحرف
+    // من findEligibleTechnicians() (نفس صيغة order_priority_weight/workload/fairness)، صفر صيغة
+    // ترتيب موازية مخترعة هنا. batchSize كبير عشان يرجّع المجمّع كامل مش أول N بس.
+    let rankInfo: TechnicianRankInfo | null = null;
+    try {
+      const rankedCandidates = await this.matchingService.findEligibleTechnicians(
+        order,
+        EXPLAIN_RANKING_BATCH_SIZE,
+        order.requestedTechnicianId,
+        false,
+        order.requestedTechnicianCompanyId,
+      );
+      const idx = rankedCandidates.findIndex((c) => c.technician_id === technicianId);
+      if (idx !== -1) {
+        rankInfo = { rankScore: Number(rankedCandidates[idx].rank_score), rank: idx + 1, totalEligible: rankedCandidates.length };
+      }
+    } catch {
+      rankInfo = null;
+    }
+
     return {
       technicianId,
       orderId: order.id,
@@ -184,6 +235,7 @@ export class MatchingExplainabilityService {
       checks,
       capacityTier,
       distanceKm: row.distance_km,
+      rankInfo,
     };
   }
 

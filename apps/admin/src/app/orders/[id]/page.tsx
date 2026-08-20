@@ -8,10 +8,12 @@ import type {
   OrderDetailResponseDto,
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
+  OrderMatchingFunnelDto,
   OrderMediaResponseDto,
   OrderTimelineEventResponseDto,
   RemoveCrewMemberResponseDto,
   TeamMemberResponseDto,
+  TechnicianEligibilityExplanationDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -74,6 +76,7 @@ import {
   REFUND_METHOD_LABELS,
   REFUND_STATUS_LABELS,
 } from '@/lib/payments-labels';
+import { CAPACITY_TIER_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
@@ -142,6 +145,15 @@ export default function OrderDetailPage() {
   const [adminRescheduleSlots, setAdminRescheduleSlots] = useState<ScheduleSlot[] | null>(null);
   const [adminRescheduleSlotId, setAdminRescheduleSlotId] = useState('');
   const [adminRescheduleReason, setAdminRescheduleReason] = useState('');
+  // مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
+  // (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. funnelError متوقّع/هادئ لطلبات بلا service_zone_id
+  // (400 من الباك-إند نفسه — مش كل الطلبات القديمة عندها نطاق محدد).
+  const [matchingFunnel, setMatchingFunnel] = useState<OrderMatchingFunnelDto | null>(null);
+  const [funnelError, setFunnelError] = useState<string | null>(null);
+  const [explainTechnicianId, setExplainTechnicianId] = useState('');
+  const [explanation, setExplanation] = useState<TechnicianEligibilityExplanationDto | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState<string | null>(null);
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -167,6 +179,33 @@ export default function OrderDetailPage() {
     authedFetch<OrderTimelineEventResponseDto[]>(`/admin/orders/${id}/timeline`)
       .then(setTimeline)
       .catch(() => setTimeline([]));
+    // فانل مطابقة الطلب (docs/08 §36.5/§35.8) — مسار منفصل عمداً زي باقي المصادر الثانوية فوق.
+    // فشل هادئ متوقّع (400) لطلبات بلا service_zone_id.
+    setFunnelError(null);
+    authedFetch<OrderMatchingFunnelDto>(`/admin/orders/${id}/matching-funnel`)
+      .then(setMatchingFunnel)
+      .catch((err) => {
+        setMatchingFunnel(null);
+        setFunnelError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل فانل المطابقة');
+      });
+  }
+
+  async function handleExplainTechnician(e: FormEvent) {
+    e.preventDefault();
+    if (!explainTechnicianId) return;
+    setExplainLoading(true);
+    setExplainError(null);
+    setExplanation(null);
+    try {
+      const result = await authedFetch<TechnicianEligibilityExplanationDto>(
+        `/admin/orders/${id}/technicians/${explainTechnicianId}/explain`,
+      );
+      setExplanation(result);
+    } catch (err) {
+      setExplainError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل التفسير');
+    } finally {
+      setExplainLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -666,6 +705,138 @@ export default function OrderDetailPage() {
               })}
             </ul>
           )}
+        </CardContent>
+      </Card>
+
+      {/* مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
+          (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. فانل الطلب + تفسير فني محدد اختياري. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-base">مفتّش المطابقة — ليه الطلب ده بيتصرّف كده؟</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {funnelError && <p className="text-sm text-destructive">{funnelError}</p>}
+          {!funnelError && !matchingFunnel && <p className="text-sm text-muted-foreground">جاري التحميل...</p>}
+          {matchingFunnel && (
+            <div className="flex flex-col gap-4 text-sm">
+              <div>
+                <p className="mb-2 font-medium">مجمّع الفنيين المؤهّلين</p>
+                <div className="flex flex-wrap gap-2">
+                  <StatusChip tone="neutral">مؤهّل للفئة: {matchingFunnel.pool.category_eligible}</StatusChip>
+                  <StatusChip tone="neutral">مؤهّل للنطاق: {matchingFunnel.pool.zone_eligible}</StatusChip>
+                  <Badge variant="outline" className={capacityTierBadgeClass('LIGHT')}>
+                    {CAPACITY_TIER_LABELS.LIGHT}: {matchingFunnel.pool.light}
+                  </Badge>
+                  <Badge variant="outline" className={capacityTierBadgeClass('MEANINGFUL')}>
+                    {CAPACITY_TIER_LABELS.MEANINGFUL}: {matchingFunnel.pool.meaningful}
+                  </Badge>
+                  <Badge variant="outline" className={capacityTierBadgeClass('HEAVY')}>
+                    {CAPACITY_TIER_LABELS.HEAVY}: {matchingFunnel.pool.heavy}
+                  </Badge>
+                  <Badge variant="outline" className={capacityTierBadgeClass('BLOCKED')}>
+                    {CAPACITY_TIER_LABELS.BLOCKED}: {matchingFunnel.pool.blocked}
+                  </Badge>
+                </div>
+              </div>
+              <div>
+                <p className="mb-2 font-medium">توزيع الطلب (order_assignments)</p>
+                <p className="text-muted-foreground">
+                  اتبعت: {matchingFunnel.dispatch_assignments.sent} · اتشاف: {matchingFunnel.dispatch_assignments.viewed} · قُبل:{' '}
+                  {matchingFunnel.dispatch_assignments.accepted} · رُفض: {matchingFunnel.dispatch_assignments.rejected} · انتهت مهلته:{' '}
+                  {matchingFunnel.dispatch_assignments.timeout} · اتلغى: {matchingFunnel.dispatch_assignments.cancelled}
+                </p>
+              </div>
+              {matchingFunnel.crew_recruit_opportunities && (
+                <div>
+                  <p className="mb-2 font-medium">فرص تجنيد الفريق</p>
+                  <p className="text-muted-foreground">
+                    اتعرضت: {matchingFunnel.crew_recruit_opportunities.offered} · اتقبلت: {matchingFunnel.crew_recruit_opportunities.accepted} ·
+                    اتراضت: {matchingFunnel.crew_recruit_opportunities.declined} · اتقفلت: {matchingFunnel.crew_recruit_opportunities.closed}
+                  </p>
+                </div>
+              )}
+              {matchingFunnel.crew_status && (
+                <div>
+                  <p className="mb-2 font-medium">حالة الطاقم</p>
+                  <p className="text-muted-foreground">
+                    فنيين: {matchingFunnel.crew_status.assignedTechnicians}/{matchingFunnel.crew_status.requiredTechnicians} · مساعدين:{' '}
+                    {matchingFunnel.crew_status.assignedAssistants}/{matchingFunnel.crew_status.requiredAssistants} —{' '}
+                    <span className={matchingFunnel.crew_status.crewComplete ? 'text-success' : 'text-warning'}>
+                      {matchingFunnel.crew_status.crewComplete ? 'الطاقم مكتمل' : 'الطاقم ناقص'}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="border-t pt-4">
+            <p className="mb-2 font-medium text-sm">ليه/ليه لأ فني محدد؟</p>
+            <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
+                  الفني
+                </Label>
+                <SelectNative
+                  id="explain_technician"
+                  value={explainTechnicianId}
+                  onFocus={() => {
+                    if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
+                  }}
+                  onChange={(e) => setExplainTechnicianId(e.target.value)}
+                  className="min-w-[220px]"
+                >
+                  <option value="">اختار فني</option>
+                  {eligibleReassignTechnicians?.map((tech) => (
+                    <option key={tech.technicianId} value={tech.technicianId}>
+                      {tech.fullName}
+                    </option>
+                  ))}
+                </SelectNative>
+              </div>
+              <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
+                {explainLoading ? 'جاري التفسير...' : 'فسّر'}
+              </Button>
+            </form>
+            {explainError && <p className="mt-2 text-sm text-destructive">{explainError}</p>}
+            {explanation && (
+              <div className="mt-3 flex flex-col gap-2 text-sm">
+                <p className="font-medium">
+                  <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
+                    {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
+                  </span>
+                  {' — '}
+                  {explanation.reason_ar}
+                </p>
+                {explanation.capacity_tier && (
+                  <p>
+                    القدرة الاستيعابية:{' '}
+                    <Badge variant="outline" className={capacityTierBadgeClass(explanation.capacity_tier)}>
+                      {CAPACITY_TIER_LABELS[explanation.capacity_tier]}
+                    </Badge>
+                  </p>
+                )}
+                {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
+                {explanation.rank_info && (
+                  <p>
+                    الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
+                    {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
+                  </p>
+                )}
+                {!explanation.rank_info && (
+                  <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>
+                )}
+                <ul className="flex flex-col gap-1">
+                  {explanation.checks.map((check) => (
+                    <li key={check.key} className="flex items-center gap-2">
+                      <span className={check.passed ? 'text-success' : 'text-destructive'}>{check.passed ? '✓' : '✗'}</span>
+                      <span className={check.passed ? undefined : 'text-destructive'}>{check.label_ar}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 

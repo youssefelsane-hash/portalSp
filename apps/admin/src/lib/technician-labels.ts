@@ -1,4 +1,4 @@
-import type { TechnicianLevel, TechnicianVerificationStatus } from '@baytak/shared-types';
+import type { TechnicianCapacityTier, TechnicianLevel, TechnicianVerificationStatus } from '@baytak/shared-types';
 
 // تصريح مهارات ذاتي (Script 4 §2-7)
 export const SKILL_LEVEL_LABELS: Record<string, string> = {
@@ -27,6 +27,23 @@ export const LEVEL_LABELS: Record<TechnicianLevel, string> = {
 };
 
 export const ALL_LEVELS: TechnicianLevel[] = ['new', 'verified', 'professional', 'premium', 'team_leader'];
+
+// لغة بصرية موحّدة لتصنيف القدرة الاستيعابية (LIGHT/MEANINGFUL/HEAVY/BLOCKED) — نُقلت هنا من
+// operations/page.tsx (docs/08 §36.3) عشان تُستخدَم كمان في مفتّش المطابقة بصفحة تفاصيل الطلب
+// (§36.5) بلا تكرار — نفس النغمات في كل شاشة تعرض التصنيف ده (تمهيدًا لـ§36.14).
+export const CAPACITY_TIER_LABELS: Record<TechnicianCapacityTier, string> = {
+  LIGHT: 'خفيف',
+  MEANINGFUL: 'متوسط',
+  HEAVY: 'مشغول',
+  BLOCKED: 'محظور',
+};
+
+export function capacityTierBadgeClass(tier: TechnicianCapacityTier): string {
+  if (tier === 'LIGHT') return 'border-transparent bg-success-bg text-success';
+  if (tier === 'MEANINGFUL') return 'border-transparent bg-muted text-muted-foreground';
+  if (tier === 'HEAVY') return 'border-transparent bg-warning-bg text-warning';
+  return 'border-transparent bg-danger-bg text-danger';
+}
 
 // مطابق للمسار الخطي في apps/api/.../technician-verification-state-machine.ts — كل حالة
 // وسيطة وخطوتها الجاية في المسار (approve/reject لسه متاحين دايماً بشكل منفصل، مش هنا).

@@ -8,7 +8,7 @@ import type {
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
   OperationsOverview,
-  TechnicianCapacityTier,
+  WorkloadForecastRowDto,
 } from '@baytak/shared-types';
 import { AlertTriangle, ClipboardList, Radio, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -24,7 +24,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
-import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
+import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, CAPACITY_TIER_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
 
 function KpiCard({
   title,
@@ -78,22 +78,6 @@ function CapacityTierRow({ label, value, tone }: { label: string; value: number;
     </div>
   );
 }
-
-function capacityTierBadgeClass(tier: TechnicianCapacityTier): string {
-  // نفس نغمات CapacityTierRow فوق ونفس نمط الشارة الموجود بالفعل في apps/admin/src/app/page.tsx
-  // (bg-{tone}-bg text-{tone}) — لغة بصرية موحّدة (docs/08 §36.3، تمهيدًا لـ§36.14).
-  if (tier === 'LIGHT') return 'border-transparent bg-success-bg text-success';
-  if (tier === 'MEANINGFUL') return 'border-transparent bg-muted text-muted-foreground';
-  if (tier === 'HEAVY') return 'border-transparent bg-warning-bg text-warning';
-  return 'border-transparent bg-danger-bg text-danger';
-}
-
-const CAPACITY_TIER_LABELS: Record<TechnicianCapacityTier, string> = {
-  LIGHT: 'خفيف',
-  MEANINGFUL: 'متوسط',
-  HEAVY: 'مشغول',
-  BLOCKED: 'محظور',
-};
 
 function verificationBadgeVariant(status: AdminCategoryOpsRowDto['verification_status']) {
   if (status === 'approved') return 'secondary' as const;
@@ -272,6 +256,169 @@ function WorkforceMatrixSection({
   );
 }
 
+const WORKLOAD_PER_PAGE = 15;
+
+function formatDayLabel(dateStr: string, offset: number): string {
+  if (offset === 0) return 'النهاردة';
+  if (offset === 1) return 'بكرة';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('ar-EG', { weekday: 'short', day: 'numeric', month: 'numeric' });
+}
+
+// عرض الحمل القريب — 7 أيام (docs/08 §36.4). صفر تصنيف موازي جديد: نفس شارات/ألوان
+// CapacityTierBadgeClass/CAPACITY_TIER_LABELS المستخدمة فعلاً في مصفوفة القوى العاملة فوق (لغة
+// بصرية موحّدة، تمهيدًا لـ§36.14). "متعدد الأيام" علامة بصرية بس على يوم بداية الشغلانة — راجع
+// تعليق admin-workload-forecast.service.ts للسبب (محرك المطابقة الحالي مابيعملش date-range
+// spanning فعليًا، فالشاشة دي بتعكس بالظبط قرار المحرك مش تخترع تصنيف تاني).
+function NearFutureWorkloadSection({
+  categoryId,
+  authedFetch,
+  authedFetchPaginated,
+}: {
+  categoryId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  authedFetchPaginated: ReturnType<typeof useAuth>['authedFetchPaginated'];
+}) {
+  const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
+  const [cityId, setCityId] = useState<string>('');
+  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
+  const [zoneId, setZoneId] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState<WorkloadForecastRowDto[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
+  }, [authedFetch]);
+
+  useEffect(() => {
+    setZoneId('');
+    if (!cityId) {
+      setZones(null);
+      return;
+    }
+    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
+      .then(setZones)
+      .catch(() => undefined);
+  }, [authedFetch, cityId]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [categoryId, zoneId]);
+
+  useEffect(() => {
+    if (!categoryId) {
+      setItems(null);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(WORKLOAD_PER_PAGE) });
+    if (zoneId) params.set('zone_id', zoneId);
+    authedFetchPaginated<WorkloadForecastRowDto>(`/admin/operations/workload-forecast?${params.toString()}`)
+      .then(({ items: rows, meta }) => {
+        setItems(rows);
+        setTotal(meta.total ?? rows.length);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل عرض الحمل القريب'))
+      .finally(() => setLoading(false));
+  }, [authedFetchPaginated, categoryId, zoneId, page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / WORKLOAD_PER_PAGE));
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-medium text-muted-foreground">عرض الحمل القريب (7 أيام)</h2>
+
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="workload_city" className="text-sm text-muted-foreground">
+            المدينة
+          </Label>
+          <SelectNative id="workload_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+            <option value="">كل المدن</option>
+            {cities?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="workload_zone" className="text-sm text-muted-foreground">
+            النطاق
+          </Label>
+          <SelectNative
+            id="workload_zone"
+            value={zoneId}
+            onChange={(e) => setZoneId(e.target.value)}
+            disabled={!cityId}
+            className="max-w-xs"
+          >
+            <option value="">{cityId ? 'كل نطاقات المدينة' : 'اختر مدينة الأول'}</option>
+            {zones?.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+      </div>
+
+      {!categoryId && (
+        <EmptyState title="اختر فئة من فلتر الصفحة فوق" description="عرض الحمل القريب محتاج فئة محددة عشان يعرض الفنيين المؤهّلين لها." />
+      )}
+
+      {categoryId && error && <p className="text-destructive">{error}</p>}
+
+      {categoryId && !error && loading && <TableSkeleton rows={5} columns={8} />}
+
+      {categoryId && !error && !loading && items && items.length === 0 && (
+        <EmptyState title="مفيش فنيين" description="مفيش فني معتمد للفئة/النطاق المختارين دلوقتي." />
+      )}
+
+      {categoryId && !error && !loading && items && items.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>الفني</TableHead>
+                {items[0].days.map((d, i) => (
+                  <TableHead key={d.date}>{formatDayLabel(d.date, i)}</TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <Link href={`/technicians/${row.id}`} className="font-medium hover:underline">
+                      {row.full_name}
+                    </Link>
+                    <div className="text-xs text-muted-foreground">{row.technician_code}</div>
+                  </TableCell>
+                  {row.days.map((d) => (
+                    <TableCell key={d.date}>
+                      <Badge variant="outline" className={capacityTierBadgeClass(d.tier)}>
+                        {CAPACITY_TIER_LABELS[d.tier]}
+                      </Badge>
+                      {d.is_multi_day && <div className="mt-1 text-[10px] text-muted-foreground">متعدد الأيام</div>}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="فني" onPageChange={setPage} />
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function OperationsOverviewPage() {
   const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
@@ -367,6 +514,8 @@ export default function OperationsOverviewPage() {
           </section>
 
           <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+
+          <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
 
           <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />

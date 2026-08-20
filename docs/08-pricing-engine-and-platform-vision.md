@@ -4742,9 +4742,9 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
 **الجزء ب — مركز عمليات أدمن (بند 2-19)**:
 - **§36.2**: نظرة عامة تشغيلية (KPIs قابلة للفلترة) + بنية الصفحة الأساسية.
 - **§36.3** ✅: مصفوفة القوى العاملة (تصفح فني بمنطقة/نطاق/فئة).
-- **§36.4**: عرض الحمل القريب (7 أيام، FREE/LIGHT/MEANINGFUL/HEAVY/BLOCKED/MULTI-DAY).
-- **§36.5**: مفتّش مطابقة الطلب (واجهة فوق فانل §35.6 الموجود).
-- **§36.6**: "ليه/ليه لأ؟" (واجهة فوق §35.5 + تمديد الباك-إند لو ناقص تفسير ranking/fairness/manual-assign-failure).
+- **§36.4** ✅: عرض الحمل القريب (7 أيام، LIGHT/MEANINGFUL/HEAVY/BLOCKED + علامة متعدد الأيام).
+- **§36.5** ✅: مفتّش مطابقة الطلب (واجهة فوق فانل §35.8 الموجود).
+- **§36.6** ✅: "ليه/ليه لأ؟" — تعميق تفسير §35.7/§35.8 (decision_limit_ok + rank_score/ترتيب حقيقي).
 - **§36.7**: مراقبة تسليم الطلبات (REQ SENT + حالات الحقيقية بس).
 - **§36.8**: تايم لاين المطابقة (واجهة فوق §35.11).
 - **§36.9**: مركز الاستثناءات/التنبيهات (فوق تصعيد §35.4 + تنبيهات جديدة).
@@ -5028,3 +5028,137 @@ endpoint مركز عمليات الفئة الموجود بالفعل من §35.
 بحتة مش ريجريشن حقيقي (تشغيل الملف بمفرده عدّى 9/9 نضاف فورًا). **الإصلاح البنيوي (استبدال النمط
 دا بـ`runId` فريد لكل تشغيلة بدل `Math.random()` عشوائي) خارج نطاق §36.3، موثّق هنا كفجوة صريحة
 عبر كل الموديول لسيشن جاية.**
+
+### §36.4 — إغلاق: عرض الحمل القريب (7 أيام)
+
+`AdminWorkloadForecastService`/`GET /admin/operations/workload-forecast` — تفاصيل كاملة (بما فيها
+اكتشاف مهم عن سلوك HEAVY/multi-day الحالي، وبَقّة حقيقية اتلقطت واتصلحت أثناء كتابة الاختبار)
+في `apps/api/src/modules/operations/README.md` §36.4. ملخّص:
+
+- **صفر تصنيف موازي جديد**: كل يوم من الـ7 بيتصنّف بنفس شروط `classifyTechnicianCapacity()` بالحرف
+  (`BLOCKED > HEAVY > MEANINGFUL > LIGHT`)، bulk aggregate واحد (`date_series` + `CROSS JOIN`).
+- **اكتشاف حقيقي موثّق صراحة**: شغلانة متعددة الأيام (`estimated_duration_days≥2`) بتوصّم يوم
+  البداية بس كـHEAVY في محرك المطابقة الحالي — الأيام التالية مش محسوبة busy تلقائيًا (مفيش
+  date-range spanning فعلي حاليًا). الشاشة بتعكس ده بالضبط، مش بتخترع تصنيف "أذكى" يخالف الواقع.
+  `is_multi_day` علامة بصرية بس على يوم البداية.
+- **بَقّة حقيقية اتلقطت واتصلحت أثناء كتابة الاختبار نفسه**: `AdminWorkloadForecastService` كانت
+  بتمرّر صفوف الأيام الخام (`is_multi_day` snake_case من `json_agg`) مباشرة كـ`WorkloadForecastDay[]`
+  (`isMultiDay` camelCase) من غير أي تحويل — نوع TypeScript كان بيكذب على شكل التشغيل الفعلي،
+  فـ`isMultiDay` كان دايمًا `undefined`. اختبار `toMatchObject({isMultiDay: true})` كشفها فورًا.
+- `apps/admin`: قسم `NearFutureWorkloadSection` فوق نفس صفحة `/operations` (تحت `WorkforceMatrixSection`
+  §36.3 مباشرة)، نفس لغة الشارات/الألوان الموجودة بالفعل.
+
+**التحقق**: اختبار حي جديد `admin-workload-forecast.spec.ts` (7/7) ضد Postgres حقيقي. `tsc --noEmit`/
+`nest build` نضاف في `apps/api`. `next build` كامل (تحقق TypeScript + تجميع 52 صفحة) نضاف صفر أخطاء
+في `apps/admin`. **تحديث لاحق (§36.5 تحت)**: سبب رفض `JwtStrategy` غير المفسَّر وقتها اتحلّ — كان
+حساب `+200000000000` ("baytak — حساب المنصة") مالوش `is_active=true` أصلاً (حساب نظام محجوز مش
+مخصص لتسجيل دخول حقيقي)، مش بَقّة في الكود. استخدام حساب أدمن حقيقي فعّال (`is_active=true`) حلّ
+المشكلة فورًا — راجع §36.5 للتحقق الحي الكامل اللي اتعمل بعد كده.
+
+### §36.5 — إغلاق: مفتّش مطابقة الطلب
+
+`apps/admin/src/app/orders/[id]/page.tsx` — كارت "مفتّش المطابقة" جديد بعد Timeline موحّد مباشرة.
+**صفر endpoint جديد**: استهلاك مباشر لـ`GET :id/matching-funnel`/`GET :id/technicians/:id/explain`
+الموجودين بالفعل في `admin-orders.controller.ts` (§35.7/§35.8، `MatchingExplainabilityService`) —
+مكانوش مستخدَمين في أي واجهة أدمن خالص قبل كده رغم وجودهم شغالين ومُختبرين في الباك-إند من قبل.
+الفانل بيتحمّل تلقائيًا مع باقي مصادر الصفحة (مسار منفصل، فشل هادئ 400 متوقّع لطلبات بلا
+`service_zone_id`). فورم "ليه/ليه لأ؟" بيستخدم `eligibleReassignTechnicians` الموجود بالفعل
+(فنيين نفس نطاق/فئة الطلب، ADR-0017 بند 4) بدل تكرار قايمة فنيين جديدة.
+
+**تحسين هيكلي جانبي**: `CAPACITY_TIER_LABELS`/`capacityTierBadgeClass` كانوا معرّفين محليًا جوّه
+`operations/page.tsx` بس (§36.3) — اتنقلوا لـ`apps/admin/src/lib/technician-labels.ts` المشترك
+عشان يُستخدموا هنا كمان بلا تكرار (لغة بصرية موحّدة حقيقية، مش بس شعار — تمهيدًا لـ§36.14).
+
+**ملحوظة تسمية حقيقية اتلقطت أثناء بناء الـDTOs**: `crew_status` (من الـendpoint-ين) بيرجّع كائن
+`CrewComposition` مباشرة من غير أي تحويل تسمية في الـcontroller — يعني حقوله الداخلية camelCase
+(`requiredTechnicians`...)، عكس باقي حقول نفس الاستجابة اللي snake_case. سلوك حقيقي موجود بالفعل
+في الكود (`admin-orders.controller.ts`، مش شيء اخترعته الجلسة دي)، موثّق صراحة في
+`packages/shared-types/src/matching-explainability.ts` عشان مايتلخبطش مع باقي القاموس.
+
+**تحقق حي حقيقي (مش mocks، ومش next build بس)**: بعد ما JWT اليدوي فشل مرتين (§36.4)، اتلقطت
+السبب الحقيقي هنا: حساب `+200000000000` ("baytak — حساب المنصة") `is_active=false` فعليًا في
+الداتابيز — حساب نظام محجوز مش مخصص لتسجيل دخول حقيقي، مش بَقّة في `JwtStrategy`. استخدام حساب
+أدمن حقيقي فعّال (`is_active=true`) من نفس الداتابيز حلّ المشكلة فورًا: الاتنين endpoint رجّعوا شكل
+مطابق تمامًا لـDTOs الجديدة (`matching-funnel` لطلب حقيقي مُلغى، `explain` بكل الـ8 checks + tier +
+مسافة لفني حقيقي). `apps/api`: `tsc --noEmit`/`nest build` نضاف (صفر تعديل باك-إند فعليًا — إعادة
+استخدام حرفية). `apps/admin`: `next build` كامل نضاف صفر أخطاء.
+
+### §36.6 — إغلاق: تعميق تفسير المطابقة (decision_limit_ok + rank_score/ترتيب حقيقي)
+
+تفاصيل كاملة في `apps/api/src/modules/matching/README.md` (قسم "تعميق تفسير المطابقة"). ملخّص:
+
+- **بَقّة حقيقية اتلقطت وقت مراجعة §35.7's checks مقابل §36.1(تعميق)**: `explainTechnicianForOrder()`
+  ماكانتش بتفحص `decision_limit_cents` رغم إن `findEligibleTechnicians()` و`assertCoreEligibility()`
+  الاتنين بيفحصوه — كان ممكن يقول "مؤهّل" لفني هيترفض فعليًا وقت المطابقة/التأكيد الحقيقيين. **الإصلاح**:
+  check تاسع (`decision_limit_ok`) بنفس شرط `EXISTS` بالحرف.
+- **إضافة جديدة (تنفيذ للبند اللي المالك طلبه صراحة — "ranking/fairness explanation")**: `rankInfo`
+  (`rank_score`, `rank`, `total_eligible`) — ترتيب الفني الحقيقي بين المرشّحين المؤهّلين فعليًا،
+  مُعاد استخدامه بالحرف من `MatchingService.findEligibleTechnicians()` (بقت مش `private`، صفر صيغة
+  ترتيب موازية) بـ`batchSize=10,000` عشان يرجّع المجمّع كامل. `apps/admin`: كارت "مفتّش المطابقة"
+  (§36.5) بيعرض الترتيب/rank_score تلقائيًا.
+
+**التحقق**: اختبارين حيّين جداد (11/11 دلوقتي في `matching-explainability.spec.ts`، كانوا 9) —
+`rankInfo` صح للفني المؤهّل الوحيد (`rank=1`)، `rankInfo=null` لفني بره المجمّع، و`decision_limit_ok
+=false` لفني `new`-level قدّام طلب فوق حده (نفس فئة بَقّة §36.1(تعميق) بالظبط، بس في مسار التفسير).
+`npx jest` الكامل بعد التعديل: **125/126 suite، 706/709 اختبار** — صفر ريجريشن من تغيير visibility
+`findEligibleTechnicians()`/constructor `MatchingExplainabilityService` (الفشل الوحيد المتبقي نفس
+فجوة seed "تسليك مواسير" البيئية الموثّقة في §36.1(تعميق)/§36.4، مش جديد). `apps/api`: `tsc --noEmit`/
+`nest build` نضاف. `apps/admin`: `next build` كامل نضاف صفر أخطاء. تحقق حي إضافي عبر curl + JWT
+حقيقي أكّد شكل الـwire (`checks` بقت 9، `rank_info` ظاهر) مطابق تمامًا للـDTOs.
+
+**فجوة موثّقة صراحة**: "fairness" مذكورة في طلب المالك الأصلي مش لها شرح إضافي منفصل في التفسير —
+`fairness_weight`/`recent_effective_workload` بالفعل جزء من `rank_score` المُرجَّع (نفس الصيغة)، بس
+مفيش تفكيك لعناصر الـrank_score الفرعية (كام منها من `order_priority_weight` مقابل `workload`
+مقابل `fairness`) في الاستجابة الحالية — لو المالك محتاج التفكيك ده بالتفصيل لاحقًا، إضافة صغيرة
+فوق نفس البنية، خارج نطاق §36.6 الحالي.
+
+### §36.1 (إضافة) — فجوة إشعار حقيقية اتلقطت واتصلحت أثناء تحقيق مستقل لنفس البَقّة (صفر إشعار عند إنشاء فرصة عمل اختيارية)
+
+بالتوازي مع تحقيق §36.1/§36.1(تعميق) فوق (اللي لقى السبب الجذري الفعلي — `decision_limit_cents`
+ناقص من `findEligibleTechnicians()` — وصلّحه)، تحقيق مستقل من سيشن تانية على نفس البَقّة المُبلَّغة
+مشى في مسار تشخيصي مختلف ولقى فجوة حقيقية إضافية، منفصلة عن السبب الجذري لكن بتستاهل الإصلاح بنفس
+الأهمية: `technician_work_opportunities` (migration `0153`) كان بيتعمله INSERT فعليًا من الباك-إند
+في السيناريو الصحيح (فرصة اختيارية للفني الـMEANINGFUL بدل تحميل صامت) — لكن **صفر حدث/إشعار كان
+بيتصدّر لحظة الإنشاء**، عكس عرض `order_assignments` العادي اللي ليه `ORDER_OFFER_CREATED_EVENT`
+كامل مربوط بـ`OrderOfferNotificationListener`. الفني كان مضطر يفتح شاشة الطلبات المتاحة بنفسه أو
+يعمل pull-to-refresh عشان يكتشف وجود فرصة. بعد ما السبب الجذري اتصلح، الفجوة دي لسه موجودة كطبقة
+دفاع تانية مهمة — حتى مع فني مؤهّل بالكامل، لازم يوصله إشعار real-time فعلي، مش يعتمد على فتح
+التطبيق بنفسه.
+
+**نظرية اتفحصت واتثبت رياضيًا إنها غلط أثناء نفس التحقيق — موثّقة هنا عمدًا عشان سيشن جاية ما
+تعيدش نفس المحاولة**: افترضت الأول إن `LIMIT` صغير في `findEligibleTechnicians()`
+(`matching.batch_size`، افتراضي 5) ممكن يستبعد فني مؤهّل فعليًا من التصنيف/العرض. كتبت إصلاح كامل
+(setting جديد `matching.capacity_offer_candidate_pool_size`) وبدأت أكتب اختبار انحدار ليه — وأثناء
+الاشتقاق الدقيق للـSQL/الحلقة اتضح رياضيًا إن ده مستحيل يغيّر النتيجة: بما إن
+`technicianAvailabilityCondition()` و`classifyTechnicianCapacity()` بيستخدموا نفس حدود الاستبعاد
+بالحرف (HEAVY/BLOCKED)، أي فني بيرجع من `findEligibleTechnicians()` أصلاً ميقدرش يبقى غير LIGHT أو
+MEANINGFUL. و`ORDER BY rank_score DESC ... LIMIT N` بيشمل صاحب الترتيب الأول دايمًا لأي N≥1، وحلقة
+التصنيف في `autoConfirmScheduledOrder()` بتستقر دايمًا على نفس صاحب الترتيب الأول (أول LIGHT بيوقف
+الحلقة فورًا؛ أول MEANINGFUL بيتحفظ وميتغيّرش). يعني **حجم مجمّع المرشحين ميقدرش يغيّر مين بياخد
+الفرصة الوحيدة — بس بيغيّر عدد الصفوف الزيادة اللي بتتفحص وتتضيّع**. اتراجع بالكامل (`git checkout
+--` للكود، حذف الـmigration والاختبار) — **ملحوظة صريحة لأي سيشن جاية: توسيع batch_size/candidate
+pool مش إصلاح حقيقي للبَقّة دي، اتثبت رياضيًا، متتكررش المحاولة من غير دليل جديد**.
+
+**الإصلاح المُنفَّذ**:
+- `common/events/work-opportunity-offered.event.ts` (جديد) — `WORK_OPPORTUNITY_OFFERED_EVENT` +
+  `WorkOpportunityOfferedEvent(opportunityId, orderId, orderNumber, technicianId, context, capacityTier)`.
+- `technicians/technician-work-opportunities.service.ts` — `offerIfNotExists()` بقى بيرجّع
+  `{ ...row, created: boolean }` عشان الطرف المستدعي يعرف يفرّق بين "فرصة جديدة فعلاً" و"إعادة فحص
+  idempotent على فرصة موجودة" (بدون تكرار الإشعار).
+- `matching/matching.service.ts` — `autoConfirmScheduledOrder()` بيطلق الحدث لما `opportunity.created`
+  يبقى `true` (context=`assignment`).
+- `orders/order-team.service.ts` — `recruitMember()` بيطلق نفس الحدث لما `opportunity.created` يبقى
+  `true` (context=`crew_recruit`).
+- `notifications/listeners/work-opportunity-offered-notification.listener.ts` (جديد) — نفس نمط
+  `order-offer-notification.listener.ts` بالحرف، نص عربي مختلف لكل context، `notifyMultiChannel()`
+  بقناتي `IN_APP`+`PUSH`، مسجّل في `notifications.module.ts`.
+
+**اختبار الانحدار**: اتضاف اختبارين حيّين ضد Postgres حقيقي (مش mocks) — واحد في
+`matching/matching-work-opportunity.spec.ts` (context=`assignment`، بيتأكد الحدث بيتصدّر مرة واحدة
+بس حتى لو `autoConfirmScheduledOrder()` اتنادى تاني idempotent) وواحد في
+`orders/order-team-recruiting.spec.ts` (نفس الفحص لـcontext=`crew_recruit`، جوه اختبار
+`recruitMember — فني MEANINGFUL/HEAVY` الموجود بالفعل).
+
+**ملحوظة توثيق — "تسليك الحوض"**: السؤال ده اتجاوَب بالفعل بدقة في §36.1(تعميق) فوق (الجزء ج) من
+قاعدة بيانات حية — مفيش خدمة بالاسم ده، أقرب خدمة حقيقية "تسليك مواسير" وسلوك الـtier بتاعها موثّق
+بالتفصيل هناك. مفيش داعي لتكرار التوثيق هنا.
