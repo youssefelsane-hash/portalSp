@@ -176,8 +176,9 @@ export async function classifyTechnicianCapacity(
     technicianId: string;
     /** موعد الطلب المرشّح (`order.scheduledAt`) — `null` = ASAP/اليوم. */
     scheduledAt: Date | string | null;
-    /** معرّف الطلب المرشّح نفسه، عشان يستبعد نفسه من فحص التعارض. */
-    excludeOrderId: string;
+    /** معرّف الطلب المرشّح نفسه، عشان يستبعد نفسه من فحص التعارض. `null` لو مفيش طلب مرشّح فعلي
+     * (استخدام تشخيصي بس، زي معاينة قدرة الفني للأدمن — docs/08 §34.4). */
+    excludeOrderId: string | null;
     /** مدة الخدمة المقدّرة بالدقايق للطلب المرشّح. */
     serviceDurationMinutes: number;
     fullDayThresholdMinutes: number;
@@ -240,4 +241,93 @@ export async function classifyTechnicianCapacity(
     ],
   );
   return rows[0].tier;
+}
+
+export interface TechnicianCapacityDescription {
+  tier: TechnicianCapacityTier;
+  /** سبب مقروء بالعربي — نص جاهز للعرض المباشر في شاشة الأدمن (docs/08 §34.4، بند W). */
+  reasonAr: string;
+  /** نطاق تاريخ الشغل الشاغل ليوم الفني (لو السبب مشروع متعدد الأيام) — `null` لو مش منطبق. */
+  occupiedFrom: string | null;
+  occupiedTo: string | null;
+}
+
+/**
+ * نسخة تشخيصية لشفافية الأدمن (docs/08 §34.4، ADR-0020 §W) — بتلف حوالين `classifyTechnicianCapacity()`
+ * وبترجع سبب مقروء + نطاق الأيام المشغولة لو موجود، بدل تصنيف خام بس. `excludeOrderId=null` +
+ * `serviceDurationMinutes` عام (60 دقيقة افتراضي) لأنه مفيش طلب مرشّح فعلي هنا — معاينة عامة
+ * "الفني ده متاح إمتى" مش قرار مطابقة حقيقي.
+ */
+export async function describeTechnicianCapacity(
+  dataSource: { query: <T = unknown>(sql: string, params?: unknown[]) => Promise<T[]> },
+  params: { technicianId: string; date: string; fullDayThresholdMinutes: number },
+): Promise<TechnicianCapacityDescription> {
+  const tier = await classifyTechnicianCapacity(dataSource, {
+    technicianId: params.technicianId,
+    scheduledAt: `${params.date}T00:00:00`,
+    excludeOrderId: null,
+    serviceDurationMinutes: 60,
+    fullDayThresholdMinutes: params.fullDayThresholdMinutes,
+  });
+
+  if (tier === 'BLOCKED') {
+    const [slot] = await dataSource.query<{ slot_date: string }>(
+      `SELECT TO_CHAR(slot_date, 'YYYY-MM-DD') AS slot_date FROM technician_schedule_slots
+       WHERE technician_id = $1 AND status = 'blocked' AND deleted_at IS NULL AND slot_date = $2::date
+       LIMIT 1`,
+      [params.technicianId, params.date],
+    );
+    return {
+      tier,
+      reasonAr: 'الفني حظر اليوم ده بنفسه صراحة (إجازة/استثناء شخصي)',
+      occupiedFrom: slot?.slot_date ?? params.date,
+      occupiedTo: slot?.slot_date ?? params.date,
+    };
+  }
+
+  if (tier === 'LIGHT') {
+    return { tier, reasonAr: 'الفني فاضي أو حِمله خفيف — مؤهّل للتأكيد التلقائي العادي', occupiedFrom: null, occupiedTo: null };
+  }
+
+  // MEANINGFUL أو HEAVY — نلاقي الطلب اللي مسبّب التصنيف عشان نبني السبب + النطاق. لو أكتر من
+  // طلب، بناخد الأطول مدة (الأقرب لتفسير "ليه" بالنسبة للأدمن).
+  const [cause] = await dataSource.query<
+    { order_number: string; estimated_duration_days: number | null; scheduled_at_date: string | null; order_status: string }
+  >(
+    `SELECT o.order_number, o.estimated_duration_days, o.order_status,
+            TO_CHAR((COALESCE(o.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM-DD') AS scheduled_at_date
+     FROM orders o
+     WHERE o.technician_id = $1 AND o.deleted_at IS NULL
+       AND o.order_status = ANY($3::order_status[])
+       AND (COALESCE(o.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = $2::date
+     ORDER BY COALESCE(o.estimated_duration_days, 0) DESC
+     LIMIT 1`,
+    [params.technicianId, params.date, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+  );
+
+  const durationDays = Math.max(1, cause?.estimated_duration_days ?? 1);
+  const fromDate = cause?.scheduled_at_date ?? params.date;
+  const toDate = new Date(new Date(`${fromDate}T00:00:00Z`).getTime() + (durationDays - 1) * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  if (tier === 'HEAVY') {
+    return {
+      tier,
+      reasonAr: cause
+        ? `الفني عنده شغل شاغل يومه بالكامل (طلب ${cause.order_number}${durationDays > 1 ? `، ${durationDays} أيام` : ''})`
+        : 'الفني منشغل جسديًا فعليًا دلوقتي',
+      occupiedFrom: fromDate,
+      occupiedTo: toDate,
+    };
+  }
+
+  return {
+    tier,
+    reasonAr: cause
+      ? `الفني عنده شغل قصير نفس اليوم (طلب ${cause.order_number}) — لسه مؤهّل لفرصة اختيارية`
+      : 'الفني عنده شغل قصير نفس اليوم — لسه مؤهّل لفرصة اختيارية',
+    occupiedFrom: fromDate,
+    occupiedTo: fromDate,
+  };
 }

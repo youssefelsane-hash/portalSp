@@ -24,6 +24,11 @@ export interface WorkOpportunityListItem extends WorkOpportunityRow {
   scheduled_at: string | null;
 }
 
+export interface WorkOpportunityAdminRow extends WorkOpportunityRow {
+  technician_code: string;
+  technician_full_name: string;
+}
+
 /**
  * طبقة بيانات لطلبات الشغل الإضافي الاختيارية (docs/08 §34.1، ADR-0020 §2) — جدول
  * `technician_work_opportunities` مفهوش TypeORM entity (نفس نمط `technician_categories` — SQL
@@ -90,6 +95,23 @@ export class TechnicianWorkOpportunitiesService {
        WHERE wo.technician_id = $1 AND wo.status = 'offered' AND wo.deleted_at IS NULL
        ORDER BY wo.offered_at DESC`,
       [technicianId],
+    );
+  }
+
+  /**
+   * كل تاريخ الفرص لطلب معيّن (docs/08 §34.4، ADR-0020 §W) — شفافية أدمن: "ليه الطلب ده اتوزّع
+   * بالشكل ده" — مين اتعرضله فرصة، بأي تصنيف قدرة استيعابية وقتها، وقرر إيه (قبل/رفض/لسه مستني/
+   * اتقفلت لأن الطلب اتغطى من حتة تانية).
+   */
+  async listForOrderAdmin(orderId: string): Promise<WorkOpportunityAdminRow[]> {
+    return this.dataSource.query<WorkOpportunityAdminRow[]>(
+      `SELECT wo.*, tp.technician_code, u.full_name AS technician_full_name
+       FROM technician_work_opportunities wo
+       JOIN technician_profiles tp ON tp.id = wo.technician_id
+       JOIN users u ON u.id = tp.user_id
+       WHERE wo.order_id = $1 AND wo.deleted_at IS NULL
+       ORDER BY wo.offered_at DESC`,
+      [orderId],
     );
   }
 

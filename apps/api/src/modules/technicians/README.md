@@ -567,6 +567,32 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   /technician/orders/work-opportunities`** — endpoints جديدة في `TechnicianOrdersController`
   (موديول `matching`)، منفصلة تمامًا عن `/available` (بث الطوارئ).
 
-**لسه مش منفَّذ (مسجّل في docs/08 §34.5، مراحل تالية)**: §34.2 (نموذج العدالة بالتاريخ الحديث)،
-§34.4 (شفافية الأدمن الكاملة + فصل واجهة الفني بين شغل مؤكد/فرصة اختيارية/طوارئ في الشاشة
-الرئيسية — endpoints الفرص جاهزة، بس مفيش واجهة `technician-app` مخصصة ليها لسه).
+**§34.2 (نموذج العدالة بالتاريخ الحديث)** — ✅ خلص، تفاصيل كاملة في `../matching/README.md`.
+
+## شفافية الأدمن + فصل واجهة الفني (docs/08 §34.4، ADR-0020 §W/§X) — ✅ خلص
+
+- **`describeTechnicianCapacity()`** (`technician-eligibility.sql.ts`) — نسخة تشخيصية فوق
+  `classifyTechnicianCapacity()`، بترجع سبب مقروء بالعربي + نطاق أيام مشغول (لو السبب مشروع
+  متعدد الأيام) بدل تصنيف خام. **`GET /admin/technicians/:id/capacity?date=YYYY-MM-DD`** جديدة
+  (`AdminTechniciansController`) بتستخدمها — "الفني ده متاح إمتى ولية؟" سؤال تشخيصي عام، مش قرار
+  مطابقة حقيقي لطلب بعينه.
+- **`TechnicianWorkOpportunitiesService.listForOrderAdmin()`** جديدة — تاريخ كل الفرص لطلب معيّن
+  (مين اتعرضله، بأي تصنيف، وقرر إيه) مع اسم الفني، مش بس معرّفه. **`GET /admin/orders/:id/work-
+  opportunities`** جديدة (`AdminOrdersController`) — منفصلة عن `:id/eligible-technicians`
+  الموجودة (دي بتسأل "مين مؤهّل دلوقتي"، الجديدة بتسأل "مين اتعرض عليه فعليًا وحصل إيه").
+- **بَقّة حقيقية اتلقطت واتصلحت وقت كتابة `describeTechnicianCapacity()`**: `node-postgres`
+  بيرجّع أعمدة `date`/`timestamptz` كـ`Date` object جافاسكريبت (مش نص) افتراضيًا — كود أول نسخة
+  كان بينادي `.slice(0, 10)` على القيمة دي مباشرة (بافتراض إنها نص) — كان هيرمي `TypeError`
+  حقيقي أول ما سبب `HEAVY`/`BLOCKED` فيه `scheduled_at`/`slot_date` غير NULL فعليًا (كل اختبارات
+  الوحدة الأولى صادف إنها مرّت لأن القيمة كانت NULL دايمًا في السيناريوهات المُختبرة، فالفرع
+  البديل [`params.date`] كان بيتنفّذ بدل الفرع المكسور). الإصلاح: `TO_CHAR(..., 'YYYY-MM-DD')`
+  في الـSQL نفسه بدل الاعتماد على تحويل نوع الـdriver الضمني — درس عام لأي كود جديد بيلمس أعمدة
+  تاريخ/وقت خام عبر `dataSource.query()` في المشروع ده.
+- **`apps/technician-app`**: `AvailableOrdersScreen` بقى فيه قسم "فرص شغل إضافي" منفصل تمامًا
+  بصريًا وسلوكيًا عن قسم طلبات الطوارئ — بطاقة `_WorkOpportunityCard` جديدة، لون مختلف (أزرق
+  معلوماتي مش أحمر استعجال)، نص بيوضّح "ليه" وصلت الفرصة (عندك شغل تاني نفس اليوم)، بلا أي عدّاد
+  وقت (الفرصة ما بتنتهيش بمهلة). قبول متأخر على فرصة اتقفلت من فني تاني بيرجّع خطأ واضح، والقايمة
+  بتتحدّث فورًا تختفي الفرصة اللي بقت مش صالحة.
+- **اختبار حي**: 3 اختبارات جديدة (`describeTechnicianCapacity` — LIGHT/HEAVY متعدد الأيام/
+  BLOCKED) اتضافوا لـ`technician-capacity-classification.spec.ts`، واختبار جديد لـ
+  `listForOrderAdmin()` في `../matching/matching-work-opportunity.spec.ts`.
