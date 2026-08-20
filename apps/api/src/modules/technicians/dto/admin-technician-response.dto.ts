@@ -55,6 +55,12 @@ export interface AdminTechnicianDetailResponseDto extends AdminTechnicianRespons
   // الشهادات (docs/08) — كانت فجوة UI موثّقة صراحة: POST .../certificates/:certificateId/review
   // كان جاهز ومختبر بلا أي شاشة أدمن تعرض الشهادات pending أصلاً (الأدمن كان محتاج curl/Postman).
   certificates: CertificateResponseDto[];
+  // تتبع أونلاين/آخر نشاط (docs/08 §35.10، ADR-0021 §6) — observability بحت، مفصولة تمامًا عن
+  // is_available/is_on_duty فوق (نموذج قديم اتشال من الأهلية بالكامل، ADR-0017). `online` من
+  // RealtimeSessionRegistry (اتصال socket لحظي)، `last_active_at` من آخر تجديد جلسة حقيقي
+  // (MAX(refresh_tokens.last_seen_at)) — راجع TechnicianActivityService للتفاصيل الكاملة.
+  online: boolean;
+  last_active_at: string | null;
 }
 
 // docs/08 §19 بند 9 — الأدمن (بس مش الفني) هو الطرف الوحيد اللي بيقرا roots المستندات دي كتلة
@@ -65,10 +71,13 @@ export async function toAdminTechnicianDetailResponseDto(
   documents: TechnicianDocument[],
   certificates: TechnicianCertificate[],
   storage: StorageService,
+  activity: { online: boolean; lastActiveAt: Date | null },
 ): Promise<AdminTechnicianDetailResponseDto> {
   return {
     ...toAdminTechnicianResponseDto(profile, user),
     documents: await Promise.all(documents.map((d) => toTechnicianDocumentResponseDto(d, storage))),
     certificates: await Promise.all(certificates.map((c) => toCertificateResponseDto(c, storage))),
+    online: activity.online,
+    last_active_at: activity.lastActiveAt ? activity.lastActiveAt.toISOString() : null,
   };
 }

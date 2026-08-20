@@ -31,6 +31,7 @@ import { VerificationNoteDto } from './dto/verification-note.dto';
 import { TechnicianCapacityQueryDto } from './dto/technician-capacity-query.dto';
 import { describeTechnicianCapacity } from './technician-eligibility.sql';
 import { SettingsService } from '../settings/settings.service';
+import { TechnicianActivityService } from './technician-activity.service';
 
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
@@ -42,6 +43,7 @@ export class AdminTechniciansController {
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly technicianCategoriesService: TechnicianCategoriesService,
     private readonly settingsService: SettingsService,
+    private readonly technicianActivityService: TechnicianActivityService,
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
@@ -218,7 +220,10 @@ export class AdminTechniciansController {
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { profile, user, documents } = await this.adminTechniciansService.getDetail(id);
     const certificates = await this.certificatesService.listForTechnician(id);
-    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates, this.storage);
+    // docs/08 §35.10 — observability بحت (online/last_active_at)، منفصل تمامًا عن is_available/
+    // is_on_duty. راجع TechnicianActivityService.
+    const activity = await this.technicianActivityService.getActivityForUser(profile.userId);
+    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates, this.storage, activity);
   }
 
   @Post(':id/approve')

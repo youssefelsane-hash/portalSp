@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { storageServiceProvider } from '../../common/storage/storage.provider';
+import { RealtimeSecurityModule } from '../../common/websocket/realtime-security.module';
 import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { GeoModule } from '../geo/geo.module';
@@ -36,6 +37,7 @@ import { TechnicianScheduleService } from './technician-schedule.service';
 import { TechnicianAssignmentGuardService } from './technician-assignment-guard.service';
 import { TechnicianCategoriesService } from './technician-categories.service';
 import { TechnicianWorkOpportunitiesService } from './technician-work-opportunities.service';
+import { TechnicianActivityService } from './technician-activity.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
@@ -70,6 +72,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     AuditModule,
     GeoModule,
     SettingsModule,
+    RealtimeSecurityModule,
     BullModule.registerQueue({ name: TECHNICIAN_STATS_QUEUE }),
   ],
   controllers: [
@@ -97,6 +100,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianAssignmentGuardService,
     TechnicianCategoriesService,
     TechnicianWorkOpportunitiesService,
+    TechnicianActivityService,
     ScheduleSlotReleaseListener,
     storageServiceProvider,
   ],
@@ -109,6 +113,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianAssignmentGuardService,
     TechnicianCategoriesService,
     TechnicianWorkOpportunitiesService,
+    TechnicianActivityService,
   ],
 })
 export class TechniciansModule {}
