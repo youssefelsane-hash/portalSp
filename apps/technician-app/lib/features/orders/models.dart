@@ -145,7 +145,9 @@ class TeamMember {
       );
 }
 
-// مرشّح للتجنيد الذاتي (docs/08 §31) — مطابق لـ OrderTeamService.listRecruitCandidates() (RecruitCandidateRow).
+// مرشّح للتجنيد (docs/08 §31/§35) — مطابق لـ OrderTeamService.listRecruitCandidates() (RecruitCandidateRow).
+// isLeaderTeamMember/capacityTier جداد (ADR-0021 §2) — أولوية فريق القائد الدائم + شفافية القدرة
+// الاستيعابية (LIGHT = تجنيد فوري، MEANINGFUL/HEAVY = هيتعرضله فرصة اختيارية بدل تحميل صامت).
 class RecruitCandidate {
   final String technicianId;
   final String fullName;
@@ -153,6 +155,8 @@ class RecruitCandidate {
   final String currentLevel;
   final double averageRating;
   final double? distanceKm;
+  final bool isLeaderTeamMember;
+  final String capacityTier;
 
   RecruitCandidate({
     required this.technicianId,
@@ -161,6 +165,8 @@ class RecruitCandidate {
     required this.currentLevel,
     required this.averageRating,
     required this.distanceKm,
+    required this.isLeaderTeamMember,
+    required this.capacityTier,
   });
 
   factory RecruitCandidate.fromJson(Map<String, dynamic> json) => RecruitCandidate(
@@ -170,8 +176,70 @@ class RecruitCandidate {
         currentLevel: json['current_level'] as String,
         averageRating: double.tryParse(json['average_rating']?.toString() ?? '') ?? 0,
         distanceKm: json['distance_km'] != null ? (json['distance_km'] as num).toDouble() : null,
+        isLeaderTeamMember: json['is_leader_team_member'] as bool? ?? false,
+        capacityTier: json['capacity_tier'] as String? ?? 'LIGHT',
       );
 }
+
+// نتيجة محاولة تجنيد (docs/08 §35) — LIGHT بيتضاف فورًا (status='added')، MEANINGFUL/HEAVY
+// بيتحوّل لفرصة اختيارية بدل تحميل صامت (status='offer_sent').
+class RecruitOutcome {
+  final String status;
+  final String? opportunityId;
+  final String? capacityTier;
+  final List<TeamMember> items;
+
+  RecruitOutcome({required this.status, this.opportunityId, this.capacityTier, this.items = const []});
+
+  bool get isOfferSent => status == 'offer_sent';
+}
+
+// دعوة انضمام لفريق طلب (docs/08 §35، ADR-0021 §2) — الطلب أصلاً له قائد، الفني هنا بيتعرضله
+// ينضم كعضو تحته (مش يبقى القائد، بعكس WorkOpportunity العادية). مطابق لـ
+// TechnicianWorkOpportunitiesService.listCrewRecruitForTechnician().
+class CrewOpportunity {
+  final String id;
+  final String orderId;
+  final String orderNumber;
+  final String serviceNameAr;
+  final String? problemDescription;
+  final String streetName;
+  final String capacityTierAtOffer;
+  final String crewRole;
+  final String? teamLeaderName;
+  final String? scheduledAt;
+
+  CrewOpportunity({
+    required this.id,
+    required this.orderId,
+    required this.orderNumber,
+    required this.serviceNameAr,
+    required this.problemDescription,
+    required this.streetName,
+    required this.capacityTierAtOffer,
+    required this.crewRole,
+    required this.teamLeaderName,
+    required this.scheduledAt,
+  });
+
+  factory CrewOpportunity.fromJson(Map<String, dynamic> json) => CrewOpportunity(
+        id: json['id'] as String,
+        orderId: json['order_id'] as String,
+        orderNumber: json['order_number'] as String,
+        serviceNameAr: json['service_name_ar'] as String,
+        problemDescription: json['problem_description'] as String?,
+        streetName: json['street_name'] as String,
+        capacityTierAtOffer: json['capacity_tier_at_offer'] as String,
+        crewRole: json['crew_role'] as String? ?? 'technician',
+        teamLeaderName: json['team_leader_name'] as String?,
+        scheduledAt: json['scheduled_at'] as String?,
+      );
+}
+
+const Map<String, String> crewRoleLabelsAr = {
+  'technician': 'فني',
+  'assistant': 'مساعد',
+};
 
 // نفس ترتيب TechnicianLevel في technician-profile.entity.ts بالحرف (docs/08 §31) — للعرض بس هنا.
 const Map<String, String> technicianLevelLabelsAr = {

@@ -151,23 +151,51 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
-  // تجنيد فريق ذاتي (docs/08 §31، طلب مالك صريح 2026-08-20) — القائد بيدوّر على مرشّحين من
-  // مجمع كل الفنيين المتاحين المؤهلين للصنعة (مش بس شركته)، مرتّبين بالمسافة، مفلترين برتبة
-  // (TechnicianLevel) أقل من أو تساوي رتبته.
-  Future<List<RecruitCandidate>> fetchRecruitCandidates(String orderId) async {
-    final items = await authRepository.authedRequestList('/technician/orders/$orderId/recruit-candidates');
+  // تجنيد فريق (docs/08 §31/§35، طلب مالك صريح 2026-08-20) — القائد بيدوّر على مرشّحين من
+  // مجمع كل الفنيين المتاحين المؤهلين للصنعة (مش بس شركته)، مرتّبين بالمسافة (فريقه الدائم
+  // أولاً)، مفلترين برتبة (TechnicianLevel) أقل من أو تساوي رتبته. role إجباري (فني/مساعد) —
+  // أي دور القائد بيكمّل دلوقتي.
+  Future<List<RecruitCandidate>> fetchRecruitCandidates(String orderId, String role) async {
+    final items = await authRepository.authedRequestList('/technician/orders/$orderId/recruit-candidates?role=$role');
     return items.map(RecruitCandidate.fromJson).toList();
   }
 
-  // تجنيد فوري بلا موافقة من المُضاف (زي "معاه مساعد؟" بالظبط) — بيرجّع قايمة الفريق المحدّثة.
-  Future<List<TeamMember>> recruitTeamMember(String orderId, String technicianId, {String? roleLabel}) async {
+  // تجنيد (docs/08 §31/§35) — فني LIGHT بيتضاف فورًا بلا موافقة (زي "معاه مساعد؟")، MEANINGFUL/
+  // HEAVY بيتحوّل لفرصة اختيارية (status='offer_sent') بدل تحميل صامت — نفس فلسفة ADR-0020.
+  Future<RecruitOutcome> recruitTeamMember(String orderId, String technicianId, String role, {String? roleLabel}) async {
     final data = await authRepository.authedRequest(
       'POST',
       '/technician/orders/$orderId/recruit-candidates/$technicianId',
-      body: roleLabel != null && roleLabel.trim().isNotEmpty ? {'role_label': roleLabel.trim()} : null,
+      body: {
+        'role': role,
+        if (roleLabel != null && roleLabel.trim().isNotEmpty) 'role_label': roleLabel.trim(),
+      },
     );
+    final status = data?['status'] as String? ?? 'added';
+    final items = (data?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    return RecruitOutcome(
+      status: status,
+      opportunityId: data?['opportunity_id'] as String?,
+      capacityTier: data?['capacity_tier'] as String?,
+      items: items.map(TeamMember.fromJson).toList(),
+    );
+  }
+
+  // دعوات انضمام لفريق (docs/08 §35) — منفصلة عن fetchWorkOpportunities() فوق (أثر القبول مختلف
+  // جوهريًا: ينضم كعضو، مش يبقى قائد).
+  Future<List<CrewOpportunity>> fetchCrewOpportunities() async {
+    final items = await authRepository.authedRequestList('/technician/orders/work-opportunities/crew');
+    return items.map(CrewOpportunity.fromJson).toList();
+  }
+
+  Future<List<TeamMember>> acceptCrewOpportunity(String opportunityId) async {
+    final data = await authRepository.authedRequest('POST', '/technician/orders/work-opportunities/$opportunityId/accept-crew');
     final items = (data?['items'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
     return items.map(TeamMember.fromJson).toList();
+  }
+
+  Future<void> declineCrewOpportunity(String opportunityId) async {
+    await authRepository.authedRequest('POST', '/technician/orders/work-opportunities/$opportunityId/decline-crew');
   }
 
   // "شغلي كعضو فريق" (docs/08 §31) — طلبات الفني مضاف ليها كعضو، مش قائدها.

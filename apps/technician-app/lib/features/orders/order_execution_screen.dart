@@ -141,12 +141,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
-  // تجنيد فريق ذاتي (docs/08 §31، طلب مالك صريح 2026-08-20) — بعد الرجوع من شاشة المرشّحين،
-  // نحدّث الطلب (team_shortage/team_members_needed) وقايمة الفريق مع بعض عشان الكارت يعكس أي
-  // تجنيد حصل فورًا، مش يفضل عارض الأرقام القديمة لحد ما الشاشة تتقفل وتترجع تتفتح.
-  Future<void> _openRecruitTeam() async {
+  // تجنيد فريق (docs/08 §31/§35، طلب مالك صريح 2026-08-20) — بعد الرجوع من شاشة المرشّحين،
+  // نحدّث الطلب (crew_status) وقايمة الفريق مع بعض عشان الكارت يعكس أي تجنيد حصل فورًا، مش
+  // يفضل عارض الأرقام القديمة لحد ما الشاشة تتقفل وتترجع تتفتح.
+  Future<void> _openRecruitTeam(String role) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => RecruitTeamScreen(orderId: _order.id)),
+      MaterialPageRoute(builder: (_) => RecruitTeamScreen(orderId: _order.id, role: role)),
     );
     await _refreshFromServer();
     await _loadTeamMembersIfApplicable();
@@ -467,13 +467,15 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             if (_order.bookingMode == 'team') ...[
               const SizedBox(height: 12),
               _TeamRosterCard(members: _teamMembers, requiredTechnicians: _order.requiredTechnicians),
-              // "الفريق ناقص" (docs/08 §31) — بتبان بس للقائد نفسه (team_shortage محسوبة بس لو
-              // orders.technicianId=viewerProfileId، راجع toDtoWithTeamInfo في الباك-إند).
-              if (_order.teamShortage) ...[
+              // تكوين الطاقم (docs/08 §35، ADR-0021 §1) — بتبان بس للقائد نفسه (crew_status
+              // محسوبة بس لو orders.technicianId=viewerProfileId، راجع toDtoWithTeamInfo في
+              // الباك-إند). فني/مساعد منفصلين، بدل بند "ناقص" واحد كان بيتجاهل المساعدين.
+              if (_order.crewStatus != null && !_order.crewStatus!.crewComplete) ...[
                 const SizedBox(height: 8),
-                _TeamShortageBanner(
-                  membersNeeded: _order.teamMembersNeeded,
-                  onRecruit: _openRecruitTeam,
+                _CrewStatusCard(
+                  crewStatus: _order.crewStatus!,
+                  onRecruitTechnician: () => _openRecruitTeam('technician'),
+                  onRecruitAssistant: () => _openRecruitTeam('assistant'),
                 ),
               ],
               // عضو فريق (مش القائد) بيشوف مين ضافه.
@@ -669,32 +671,58 @@ class _TeamRosterCard extends StatelessWidget {
   }
 }
 
-// "الفريق ناقص" (docs/08 §31، طلب مالك صريح 2026-08-20) — بارز فوق زي ما المالك طلب بالحرف،
-// مع زرار "دعوة/ضم فريق" ضمن خيارات الطلب الموجودة. القائد بس هو اللي يشوف الكارت ده
-// (team_shortage محسوبة بس ليه، راجع toDtoWithTeamInfo في الباك-إند).
-class _TeamShortageBanner extends StatelessWidget {
-  const _TeamShortageBanner({required this.membersNeeded, required this.onRecruit});
+// تكوين الطاقم (docs/08 §35، ADR-0021 §1) — بارز فوق زي ما المالك طلب بالحرف، فني/مساعد منفصلين
+// (بدل بند "ناقص" واحد كان بيتجاهل المساعدين تمامًا). زرار "دعوة/ضم" مستقل لكل دور ناقص فعليًا.
+// القائد بس هو اللي يشوف الكارت ده (crew_status محسوبة بس ليه، راجع toDtoWithTeamInfo في الباك-إند).
+class _CrewStatusCard extends StatelessWidget {
+  const _CrewStatusCard({required this.crewStatus, required this.onRecruitTechnician, required this.onRecruitAssistant});
 
-  final int membersNeeded;
-  final VoidCallback onRecruit;
+  final CrewStatus crewStatus;
+  final VoidCallback onRecruitTechnician;
+  final VoidCallback onRecruitAssistant;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Card(
-      color: Theme.of(context).colorScheme.errorContainer,
+      color: colorScheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.group_add_outlined, color: Theme.of(context).colorScheme.onErrorContainer),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'الفريق مش مكتمل — محتاج $membersNeeded كمان',
-                style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
-              ),
+            Row(
+              children: [
+                Icon(Icons.group_add_outlined, color: colorScheme.onErrorContainer),
+                const SizedBox(width: 8),
+                Text('الطاقم مش مكتمل', style: TextStyle(color: colorScheme.onErrorContainer, fontWeight: FontWeight.bold)),
+              ],
             ),
-            TextButton(onPressed: onRecruit, child: const Text('دعوة/ضم فريق')),
+            const SizedBox(height: 6),
+            Text(
+              'مطلوب ${crewStatus.requiredTechnicians} فني + ${crewStatus.requiredAssistants} مساعد — '
+              'حالي ${crewStatus.assignedTechnicians} فني + ${crewStatus.assignedAssistants} مساعد',
+              style: TextStyle(color: colorScheme.onErrorContainer),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (crewStatus.missingTechnicians > 0)
+                  TextButton.icon(
+                    onPressed: onRecruitTechnician,
+                    icon: const Icon(Icons.engineering_outlined),
+                    label: Text('محتاج ${crewStatus.missingTechnicians} فني'),
+                  ),
+                if (crewStatus.missingAssistants > 0)
+                  TextButton.icon(
+                    onPressed: onRecruitAssistant,
+                    icon: const Icon(Icons.handyman_outlined),
+                    label: Text('محتاج ${crewStatus.missingAssistants} مساعد'),
+                  ),
+              ],
+            ),
           ],
         ),
       ),

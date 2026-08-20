@@ -21,6 +21,39 @@ class OrderAddress {
       );
 }
 
+// تكوين الطاقم الموحّد (docs/08 §35، ADR-0021 §1) — فني/مساعد منفصلين، بتستبدل teamShortage/
+// teamMembersNeeded القديمين (كانوا بيتجاهلوا required_assistants تمامًا). مطابق لـ
+// OrderTeamService.CrewComposition في الباك-إند.
+class CrewStatus {
+  final int requiredTechnicians;
+  final int requiredAssistants;
+  final int assignedTechnicians;
+  final int assignedAssistants;
+  final int missingTechnicians;
+  final int missingAssistants;
+  final bool crewComplete;
+
+  CrewStatus({
+    required this.requiredTechnicians,
+    required this.requiredAssistants,
+    required this.assignedTechnicians,
+    required this.assignedAssistants,
+    required this.missingTechnicians,
+    required this.missingAssistants,
+    required this.crewComplete,
+  });
+
+  factory CrewStatus.fromJson(Map<String, dynamic> json) => CrewStatus(
+        requiredTechnicians: json['requiredTechnicians'] as int,
+        requiredAssistants: json['requiredAssistants'] as int,
+        assignedTechnicians: json['assignedTechnicians'] as int,
+        assignedAssistants: json['assignedAssistants'] as int,
+        missingTechnicians: json['missingTechnicians'] as int,
+        missingAssistants: json['missingAssistants'] as int,
+        crewComplete: json['crewComplete'] as bool,
+      );
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts — نسخة الفني (منفصلة عن
 // AvailableOrder اللي بيرجعها /technician/orders/available، ده الشكل الكامل اللي كل فعل
 // (accept/depart/arrive/start/complete) بيرجّعه بعد تنفيذه).
@@ -39,9 +72,9 @@ class Order {
   final int? requiredTechnicians;
   // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
   final String? scheduledAt;
-  // تجنيد فريق ذاتي (docs/08 §31) — موجودين بس لقائد الطلب على booking_mode='team' (getOne بتحسبهم).
-  final bool teamShortage;
-  final int teamMembersNeeded;
+  // تكوين الطاقم (docs/08 §35، ADR-0021 §1) — موجود بس لقائد الطلب على booking_mode='team'
+  // (getOne بتحسبه). بيستبدل teamShortage/teamMembersNeeded القديمين بالكامل.
+  final CrewStatus? crewStatus;
   // موجود بس لعضو فريق (مش القائد) بيشوف تفاصيل طلب مضاف ليه — "قائد الفريق: <الاسم>".
   final String? teamLeaderName;
 
@@ -56,8 +89,7 @@ class Order {
     this.requiredTechnicians,
     this.address,
     this.scheduledAt,
-    this.teamShortage = false,
-    this.teamMembersNeeded = 0,
+    this.crewStatus,
     this.teamLeaderName,
   });
 
@@ -74,8 +106,7 @@ class Order {
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,
         scheduledAt: json['scheduled_at'] as String?,
-        teamShortage: json['team_shortage'] as bool? ?? false,
-        teamMembersNeeded: json['team_members_needed'] as int? ?? 0,
+        crewStatus: json['crew_status'] != null ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>) : null,
         teamLeaderName: json['team_leader_name'] as String?,
       );
 }
