@@ -34,6 +34,7 @@ import { OrdersService } from './orders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { MatchingExplainabilityService } from '../matching/matching-explainability.service';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -47,6 +48,7 @@ export class AdminOrdersController {
     private readonly paymentsService: PaymentsService,
     private readonly techniciansService: TechniciansService,
     private readonly workOpportunities: TechnicianWorkOpportunitiesService,
+    private readonly matchingExplainabilityService: MatchingExplainabilityService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -82,6 +84,27 @@ export class AdminOrdersController {
       // docs/08 §35.5 — "الطلب مميّز بصريًا" لما نقص الطاقم يعدّي عتبة التصعيد. محسوب وقت
       // القراءة (نفس عتبة CrewShortageEscalationService)، false دايمًا لطلبات فردية/طوارئ.
       crew_shortage_urgent: crewShortageUrgent,
+    };
+  }
+
+  // تفسير مطابقة (docs/08 §35.7، ADR-0021 §4) — "ليه الفني ده مش بياخد الطلب ده؟" بنفس شروط
+  // MatchingService.findEligibleTechnicians() الحقيقية بالحرف (صفر خوارزمية تشخيصية موازية).
+  // قراءة بس، أي أدمن (نفس نمط getTimeline/listTeamMembers فوق).
+  @Get(':id/technicians/:technicianId/explain')
+  async explainTechnicianEligibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('technicianId', ParseUUIDPipe) technicianId: string,
+  ) {
+    const { order } = await this.adminOrdersService.getDetail(id);
+    const explanation = await this.matchingExplainabilityService.explainTechnicianForOrder(order, technicianId);
+    return {
+      technician_id: explanation.technicianId,
+      order_id: explanation.orderId,
+      eligible: explanation.eligible,
+      reason_ar: explanation.reasonAr,
+      capacity_tier: explanation.capacityTier,
+      distance_km: explanation.distanceKm,
+      checks: explanation.checks.map((c) => ({ key: c.key, passed: c.passed, label_ar: c.labelAr })),
     };
   }
 

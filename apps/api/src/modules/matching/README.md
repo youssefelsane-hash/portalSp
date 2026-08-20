@@ -570,3 +570,19 @@ recent_effective_workload = عدد الطلبات المؤكدة (assigned_at) �
   بياخد أفضلية لما `fairness_weight` مفعّل، فني رفض فرص كتير مايحتفظش بأفضلية مصطنعة، الإعداد
   معطّل افتراضيًا (صفر أثر)، كسر التعادل بيغيّر الفايز عبر نداءات متكررة (20 محاولة، الاتنين
   المرشحين ظهروا الأول على الأقل مرة)، وعطّل التعطيل الافتراضي بيرجّع ترتيب حتمي صارم 100%.
+
+## تفسير مطابقة فني/طلب (docs/08 §35.7، ADR-0021 §4)
+
+`MatchingExplainabilityService.explainTechnicianForOrder(order, technicianId)` — "ليه الفني ده مش
+بياخد الطلب ده؟" لأي أدمن، بإجابة بتستهلك **نفس** شروط `findEligibleTechnicians()` الحقيقية
+بالحرف (8 checks + `capacity_tier` + `distance_km` في استعلام واحد)، صفر خوارزمية تشخيصية موازية.
+`technicianAvailabilityCondition()`/`classifyTechnicianCapacity()` بيتلفوا زي ما هما (نفس الدوال
+المستخدمة في `matching.service.ts` فعليًا) — تعديل أي منهم لاحقًا بيأثّر على التفسير والمطابقة
+الحقيقية مع بعض تلقائيًا، بلا خطر انجراف. `Endpoint`: `GET /admin/orders/:id/technicians/:technicianId/explain`
+(`admin-orders.controller.ts`، قراءة بس أي أدمن). فحص الفئة/الخدمة (`category_eligible`) الاستثناء
+الوحيد اللي منسوخ SQL بدل دالة مشتركة — الشرط ده أصلاً مكرر بلا استخراج بين `matching.service.ts`
+و`technicians.service.ts` من قبل الميزة دي، استخراجه لدالة مشتركة خارج نطاق §35.7.
+
+**`MatchingModule` بقت تصدّر `MatchingExplainabilityService`**، و`OrdersModule` استوردت
+`MatchingModule` (اتجاه واحد بس — `Matching` لسه مابتستوردش `OrdersModule`، القرار الموثّق فوق في
+تعليق `matching.module.ts` نفسه). اتأكد بصفر cycle عبر boot حقيقي كامل للتطبيق قبل أي commit.
