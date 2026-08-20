@@ -634,3 +634,15 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 فريق (شركة/مالك ولا لا)، فرص مفتوحة، سلوك إلغاء، تقييم، شكاوى (bounded 10 + عدّاد كلي)، صرف
 (`wallets`+`payouts`، bounded 5). **قراءة بس** — أي فعل إداري بيتعمل عبر endpoints الموجودة فعلاً،
 صفر منطق mutation مكرر هنا.
+
+## بَقّة حقيقية: إزالة منطقة الفني كانت soft-delete بس، من غير إلغاء تفعيل فعلي (docs/08 §36.1)
+
+اتلقطت أثناء تحقيق حي لبَقّة "فني بيوقف يستقبل فرص بعد أول شغلانة" (اتضح إنها مش قابلة لإعادة
+الإنتاج — راجع docs/08 §36.1 للتفاصيل الكاملة). `AdminTechniciansService.removeZone()` كان بينادي
+`technicianZones.softDelete()` بس (`deleted_at`)، لكن استعلامات المطابقة الخام في ~5 أماكن
+(`matching.service.ts`، `technicians.service.ts`، `matching-explainability.service.ts`،
+`technician-assignment-guard.service.ts`) بتفلتر بـ`tz.is_active = true` **بس**، من غير فحص
+`deleted_at` — يعني منطقة "متشالة" فعليًا من الأدمن كانت لسه بتطابق في المطابقة الحقيقية. الإصلاح:
+`removeZone()` دلوقتي بيقلب `is_active=false` كمان قبل الـsoft-delete (نقطة كتابة واحدة، بدل تعديل
+كل استعلامات القراءة المكرّرة). اختبار حي: `admin-technician-zone-removal.spec.ts` (2/2) —
+`is_active`+`deleted_at` الاتنين صح، ونفس شرط الـJOIN الخام بيرجّع صفر صفوف بعد الإصلاح.
