@@ -142,9 +142,12 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     ids.techOnlineUser = online.userId;
     ids.techNoZone = (await insertTechnician('nozone', { hasZone: false })).profileId;
     ids.techBlocked = (await insertTechnician('blocked', { hasZone: true })).profileId;
+    // CURRENT_DATE بيتحسب بتوقيت جلسة Postgres (UTC عادةً)، لكن classifyTechnicianCapacity()
+    // بتحسب "اليوم" بتوقيت القاهرة (technician-eligibility.sql.ts) — فرق التوقيت الصيفي بيخلق
+    // نافذة ساعتين كل ليلة الاتنين مش متساويين فيها، فلازم نفس التحويل هنا.
     await q(
       `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
-       VALUES ($1, CURRENT_DATE, '00:00', '23:59', 'blocked')`,
+       VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date, '00:00', '23:59', 'blocked')`,
       [ids.techBlocked],
     );
     ids.techPending = (
