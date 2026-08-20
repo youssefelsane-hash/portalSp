@@ -31,3 +31,4 @@ export * from './technician-kpi';
 export * from './technician-progression';
 export * from './branding';
 export * from './security';
+export * from './operations';

@@ -4847,3 +4847,49 @@ exclusion)، **اتصلحت فورًا**: `AdminTechniciansService.removeZone()`
 687/687 اختبار**، صفر ريجريشن حقيقي (فشل عابر واحد معروف في `golden-path-cash-booking.e2e.spec.ts`
 — نفس فئة انجراف رصيد المحفظة المشترك تحت تشغيل متوازي، اتأكد إنه مش ريجريشن بإعادة تشغيل منفصلة
 ناجحة).
+
+### §36.2 — إغلاق: بداية "مركز العمليات" — نظرة عامة تشغيلية (KPIs قابلة للفلترة) + بنية الصفحة الأساسية
+
+**الباك-إند** — موديول جديد مستقل `apps/api/src/modules/operations/` (نفس نمط `MatchingModule`:
+بيستورد ثوابت/كيانات خام من `orders` بس، صفر استيراد لـ`OrdersModule` نفسه، صفر خطر دورة استيراد).
+`AdminOperationsOverviewService.getOverview({categoryId?})` — استعلام واحد بـCTEs بيرجّع 4 مؤشرات،
+كل واحد فيهم معاد استخدامه من مصدر حقيقة موجود بالفعل (صفر منطق أهلية/تصنيف جديد مُخترَع):
+- `dispatch_pending_count` — طلبات `SEARCHING_TECHNICIAN`/`AWAITING_TECHNICIAN_RESELECTION`.
+- `crew_shortage_open_count` — نفس `ESCALATABLE_STATUSES` بالحرف من `CrewShortageEscalationService`
+  (§35.5)، اتصدّرت من هناك بدل ما تتكرّر.
+- `technicians_online_count` — `RealtimeSessionRegistry.onlineUserIds()` (§35.10) مقاطَعة مع pool الفنيين.
+- `capacity_today` (LIGHT/MEANINGFUL/HEAVY/BLOCKED) — bulk aggregate بنفس شروط
+  `classifyTechnicianCapacity()` بالحرف (technician-eligibility.sql.ts، §34.1)، بس استعلام واحد
+  لكل الفنيين مرة واحدة بدل نداء منفصل لكل فني (نفس أسلوب §35.8's `explainOrderFunnel` — "avoid
+  expensive synchronous diagnostics at scale").
+
+`GET /admin/operations/overview?category_id=...` — `@Roles(UserType.ADMIN)` بس، بلا صلاحية دقيقة
+مخصوصة (نفس مستوى `/orders`). نوع استجابة جديد `OperationsOverview` في `packages/shared-types`
+(ملف `operations.ts` مستقل، هيتوسّع مع §36.3-14).
+
+**الواجهة** — صفحة جديدة `apps/admin/src/app/operations/page.tsx` + عنصر نافيجيشن "مركز العمليات"
+(أول عنصر في مجموعة "العمليات"، قبل "الطلبات"). فلتر فئة واحد (`SelectNative` معاد استخدامه من نفس
+مكوّن `catalog/page.tsx`)، 3 كروت KPI (نفس نمط `StatCard`/`AttentionCard` بتاع `/` الرئيسية) + صف
+توزيع القدرة الاستيعابية اليوم. ملحوظة صريحة في الصفحة نفسها: الأقسام الجاية (§36.3-14) هتتضاف هنا
+فوق نفس الصفحة، مش صفحات منفصلة متفرقة.
+
+**قرار عمل متعمّد**: اكتفيت بفلتر الفئة بس في النسخة دي (مش فلتر منطقة كمان) — فلتر المنطقة محتاج
+UI اختيار مدينة→منطقة (cascading selector) مش موجود جاهز حاليًا، وده أنسب لـ§36.10 (ذكاء تغطية
+القوى العاملة، فئة+منطقة صراحة) بدل ما يتحشر هنا في صفحة "بنية أساسية" المفروض تفضل بسيطة.
+
+**تحقق حي كامل** — مش مجرد جيست: شغّلت الـAPI + admin dev servers حقيقيين، سجّلت دخول فعلي بحساب
+أدمن حقيقي من الداتابيز (`+201000000005`، بلا أي role — مُعفى من MFA لأنه صفر صلاحيات حساسة، راجع
+`MfaPolicyService`)، فتحت `/operations` في متصفح حقيقي (Playwright)، وشفت أرقام حقيقية من
+الداتابيز الفعلية (16 فني مصنّف LIGHT، فلتر الفئة اتملى بفئات حقيقية) — سكرين-شوت في
+`/tmp/operations-page.png` وقت التحقق.
+
+اختبار حي جديد: `admin-operations-overview.spec.ts` (8/8) — dispatch pending، crew shortage
+مفتوح/مقفول، فلتر الفئة، وكل الـ4 tiers (LIGHT/MEANINGFUL/HEAVY/BLOCKED) بسيناريوهات حقيقية على
+Postgres. `tsc --noEmit`/`nest build` نضاف في `apps/api` و`apps/admin` الاتنين، smoke-boot للتطبيق
+الكامل (`BOOT_OK`)، `npx jest` الكامل: **124/124 suite، 695/695 اختبار**، صفر ريجريشن.
+
+**فجوة موثّقة صراحة (مش نطاق §36.2)**: لا يوجد أي بنية Playwright تلقائية مثبّتة في المشروع (لا
+`playwright.config`، لا `@playwright/test` كـdependency، لا ملفات `.spec.ts` لـPlaywright) رغم إن
+`apps/admin/README.md` بيذكر "Playwright ضد الباك-إند الحقيقي" — التحقق الحي فوق كان بسكريبت مؤقت
+غير محفوظ (استخدم حزمة `playwright` العامة المثبّتة في البيئة). بناء بنية اختبار Playwright حقيقية
+دائمة خارج نطاق هذه المهمة، موثّق هنا كفجوة صريحة لسيشن جاية.

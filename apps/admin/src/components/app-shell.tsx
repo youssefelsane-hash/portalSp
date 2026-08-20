@@ -7,6 +7,7 @@ import {
   AvatarFallback,
 } from '@/components/ui/avatar';
 import {
+  Activity,
   BarChart3,
   Banknote,
   Bell,
@@ -69,6 +70,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'العمليات',
     items: [
+      { href: '/operations', label: 'مركز العمليات', icon: Activity },
       { href: '/orders', label: 'الطلبات', icon: ClipboardList },
       { href: '/recurring-orders', label: 'الطلبات المتكررة', icon: CalendarClock, permission: 'recurring_orders.view' },
       { href: '/support', label: 'الشكاوى', icon: Megaphone },
