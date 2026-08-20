@@ -38,6 +38,7 @@ import { TechnicianAssignmentGuardService } from './technician-assignment-guard.
 import { TechnicianCategoriesService } from './technician-categories.service';
 import { TechnicianWorkOpportunitiesService } from './technician-work-opportunities.service';
 import { TechnicianActivityService } from './technician-activity.service';
+import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
@@ -101,6 +102,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianCategoriesService,
     TechnicianWorkOpportunitiesService,
     TechnicianActivityService,
+    AdminTechnicianCategoryOpsService,
     ScheduleSlotReleaseListener,
     storageServiceProvider,
   ],
