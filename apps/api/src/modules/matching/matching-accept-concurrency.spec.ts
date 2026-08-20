@@ -302,6 +302,15 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
 
   it('نفس الفني يقبل طلبين مختلفين بالتوازي — مورد الفني المشترك يسمح بطلب نشط واحد', async () => {
     await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [ids.order]);
+    // تنضيف طلب الفني A النشط المتبقّي من اختبار "عرض طوارئ فات معاده" قبله (نفس نمط التنضيف
+    // اللي اختبار "قبول فني × إعادة تعيين أدمن" بعده بيعمله) — من غيره technicianA بيدخل الاختبار
+    // ده وهو أصلاً عنده طلب accepted من زمان، فالاتنين orderA/orderB يترفضوا بدل ما ينجح واحد بس.
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'completed'
+       WHERE technician_id IN ($1,$2)
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
+      [ids.technicianAProfile, ids.technicianBProfile],
+    );
     const orderA = await insertOrder('same-tech-a');
     const orderB = await insertOrder('same-tech-b');
     await insertAssignment(orderA, ids.technicianAProfile);

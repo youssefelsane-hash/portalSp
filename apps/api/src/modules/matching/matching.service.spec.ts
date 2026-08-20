@@ -281,10 +281,12 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
 
   // ADR-0018 §3-4-6 — isEmergencyOrder (dispatchOrAutoConfirm الداخلية) هي الفاصل الوحيد دلوقتي،
   // مش قرب/بُعد اليوم المطلوب: طوارئ (booking_mode='emergency', بلا scheduled_at) بتاخد دورة
-  // طلب/قبول-رفض حقيقية (dispatchNextRound)، أي طلب تاني — حتى لو مجدول بعد 3 أيام بس مش طوارئ —
-  // بيتأكد تلقائيًا فورًا (autoConfirmScheduledOrder) بلا أي order_assignments. بنفحص عبر السلوك
-  // الظاهر (هل اتعمل order_assignments أو لأ) بدل الوصول لدالة private مباشرة.
-  it('dispatchOrAutoConfirm: طوارئ = دورة قبول/رفض (order_assignments بتتعمل)، مجدول بعد 3 أيام = تأكيد مباشر بلا assignments', async () => {
+  // طلب/قبول-رفض حقيقية (dispatchNextRound، assignment بحالة 'sent' يستنى رد الفني)، أي طلب تاني
+  // — حتى لو مجدول بعد 3 أيام بس مش طوارئ — بيتأكد تلقائيًا فورًا (autoConfirmScheduledOrder)
+  // **بصف order_assignments واحد بحالة 'accepted' مباشرة** (سجل تدقيق مين اتأكّد له الطلب، مش
+  // دورة طلب/رد فعلية — مطابق تمامًا لسلوك autoConfirmScheduledOrder الموثّق والمُختبر في الاختبار
+  // اللي فوق ده بالحرف)، مش صفر assignments زي ما كان متوقّع هنا غلط في نسخة سابقة من الاختبار ده.
+  it('dispatchOrAutoConfirm: طوارئ = دورة قبول/رفض (order_assignments بحالة sent)، مجدول بعد 3 أيام = تأكيد مباشر (order_assignments بحالة accepted فورًا)', async () => {
     const [emergencyOrder] = await dataSource.query(
       `INSERT INTO orders
          (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode, order_type, placed_at)
@@ -309,8 +311,12 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await matchingService.dispatchOrAutoConfirm(scheduledOrder.id);
     const [scheduledUpdated] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [scheduledOrder.id]);
     expect(scheduledUpdated.order_status).toBe('accepted');
-    const scheduledAssignments = await dataSource.query(`SELECT id FROM order_assignments WHERE order_id = $1`, [scheduledOrder.id]);
-    expect(scheduledAssignments.length).toBe(0);
+    // صف واحد بحالة 'accepted' مباشرة — سجل تدقيق "مين اتأكّد له الطلب"، مش دورة طلب/رد
+    // (بعكس الطوارئ فوق اللي عندها assignment بحالة 'sent' يستنى رد الفني).
+    const scheduledAssignments = await dataSource.query(`SELECT assignment_status FROM order_assignments WHERE order_id = $1`, [
+      scheduledOrder.id,
+    ]);
+    expect(scheduledAssignments).toEqual([{ assignment_status: 'accepted' }]);
     await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [scheduledOrder.id]);
     await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [scheduledOrder.id]);
     await dataSource.query(`DELETE FROM orders WHERE id = $1`, [scheduledOrder.id]);
