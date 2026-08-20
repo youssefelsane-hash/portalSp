@@ -97,6 +97,10 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
       serviceZoneId: ids.zone,
       addressId: ids.address,
       scheduledAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
+      // قيمة رمزية صغيرة تحت حد قرار مستوى 'new' (200 جنيه) — كل فنيي الاختبار ده 'new' افتراضيًا
+      // إلا لو صرّحوا بمستوى تاني، والاختبارات هنا بتفحص ترتيب العدالة مش حدود القرار السعرية
+      // (docs/08 §36.1 تعميق — findEligibleTechnicians بقت بتفحص decision_limit_cents).
+      totalAmountCents: 10000,
     } as Order;
   }
 

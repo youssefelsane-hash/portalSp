@@ -258,6 +258,23 @@ export class MatchingService {
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
+        -- بَقّة حقيقية اتلقطت وقت تحقيق §36.1 (docs/08، تعميق تسجيل موبايل حقيقي): الاستعلام ده
+        -- كان بيكتشف الفني كمرشّح حتى لو مستواه مالوش حد قرار (decision_limit_cents) يكفي قيمة
+        -- الطلب — نفس القاعدة اللي assertEligible() (technician-assignment-guard.service.ts)
+        -- بيطبّقها وقت التأكيد بالظبط، بس هناك بعد ما الفني اتختار بالفعل كـlightPick. النتيجة:
+        -- الفني الوحيد المؤهّل (خدمة/منطقة/توفر) بيترشّح بسبب المسافة/الأولوية، يوصل لآخر خطوة،
+        -- assertEligible() يرميه، وautoConfirmScheduledOrder() بيرجّع 'stalled' فورًا من غير أي
+        -- محاولة تانية — يعني الطلب "مفيهوش فني" تمامًا، حتى لو فيه فنيين تانيين مؤهّلين فعليًا
+        -- (مستوى أعلى) كانوا هيعدّوا الفحص لو وصلولهم الدور. فني NEW حقيقي (مستوى افتراضي لأي
+        -- تسجيل جديد، حد قرار 200 جنيه) وطلب "تسليك مواسير" (300 جنيه ثابت) بيكرروا البَقّة دي
+        -- بالظبط — مش خاص بمسار التسجيل (fixture بنفس المستوى بيقع في نفس المشكلة تمامًا، اتأكد
+        -- حي في mobile-signup-technician-parity.spec.ts). فلترة الاستعلام هنا (مصدر حقيقة واحد
+        -- مع assertEligible()) بدل ما نسيب الاكتشاف أعمى وبعدين نفشل بصمت وقت التأكيد.
+        AND EXISTS (
+          SELECT 1 FROM technician_level_config dlc
+          WHERE dlc.level = tp.current_level
+            AND (dlc.decision_limit_cents IS NULL OR dlc.decision_limit_cents >= $18::int)
+        )
         ${technicianAvailabilityCondition({
           technicianIdExpr: 'tp.id',
           scheduledAtParam: '$10',
@@ -291,6 +308,7 @@ export class MatchingService {
         fairnessWeight,
         String(fairnessLookbackDays),
         fairnessDeclineWeight,
+        order.totalAmountCents,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);

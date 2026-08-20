@@ -598,3 +598,29 @@ opportunities sent/declined/pending → crew shortage، كل عدد بيتحسب
 مخترعة. `crew_status` بيعيد استخدام `computeCrewComposition()` (دالة نقية من `order-team.service
 .ts`) بدل حقن `OrderTeamService` كامل، عمدًا (نفس سبب تجنّب `OrdersModule` cycle الموثّق فوق).
 `Endpoint`: `GET /admin/orders/:id/matching-funnel`.
+
+## بَقّة حقيقية أعمق — اكتشاف المرشّحين ماكانتش عارفة بحد قرار المستوى (docs/08 §36.1 تعميق)
+
+اتلقطت أثناء تحقيق حي بالمسار الحقيقي الكامل (تسجيل موبايل → OTP → تصريح فئة → اعتماد أدمن → موقع
+→ تعيين منطقة، صفر SQL خام لمحاكاة الحالة) لبَقّة مُبلَّغة "الفني بيوقف يستقبل فرص بعد أول شغلانة".
+`findEligibleTechnicians()` (استعلام اكتشاف المرشّحين، مستخدَم في `autoConfirmScheduledOrder()`
+و`dispatchNextRound()` الاتنين — 8 نقاط نداء) ماكانتش بتفحص `technician_level_config.decision_limit_cents`
+خالص، بينما `TechnicianAssignmentGuardService.assertCoreEligibility()` (بوابة التأكيد، `../technicians/README.md`)
+بترفض صراحة لو `order.totalAmountCents` أعلى من حد قرار مستوى الفني. النتيجة: `autoConfirmScheduledOrder()`
+بتلاقي فني كـ`lightPick`، توصله لآخر خطوة، بترفضه هناك، **وبترجّع `{kind:'stalled'}` فورًا من غير
+أي محاولة تانية** — حتى لو كان فيه `meaningfulPick` اتلاقى في نفس الدورة. بما إن كل تسجيل جديد
+افتراضيًا مستوى `new` (حد قرار 200 جنيه في الداتابيز الحالية)، أي فني جديد حقيقي بيفشل بصمت مع أي
+طلب أعلى من 200 جنيه — صفر إشعار، صفر خطأ ظاهر.
+
+**الإصلاح**: `EXISTS` واحد إضافي في WHERE الاستعلام (`AND EXISTS (SELECT 1 FROM technician_level_config
+dlc WHERE dlc.level = tp.current_level AND (dlc.decision_limit_cents IS NULL OR dlc.decision_limit_cents
+>= $18::int))`) بمعامل جديد `order.totalAmountCents` — نفس شرط `assertCoreEligibility()` بالحرف،
+بس فلترة من الاكتشاف بدل رفض صامت وقت التأكيد. تعديل جراحي واحد بيغطي `autoConfirmScheduledOrder()`
+و`dispatchNextRound()` تلقائيًا (نفس الدالة).
+
+اختبار حي جديد `mobile-signup-technician-parity.spec.ts` (3 حالات: fixture، فني مسجَّل بالمسار
+الحقيقي الكامل بنفس المستوى — سلوك متطابق بالحرف يؤكد إن مسار إنشاء الحساب مالوش أثر، وفني `new`
+حقيقي بيُستبعد بصمت من طلب 300 جنيه لكن بيتطابق عادي لنفس الخدمة بسعر 150 جنيه — يثبت الاستبعاد
+سعري بحت). تفاصيل كاملة (بما فيها أثر الإصلاح على 4 specs موجودة كانت بتنادي `findEligibleTechnicians()`
+مباشرة بكائن `Order` جزئي بلا `totalAmountCents`، وفجوتين تانيتين غير مرتبطتين اتلقطوا في نفس
+التحقيق) في `docs/08-pricing-engine-and-platform-vision.md` §36.1 (تعميق).

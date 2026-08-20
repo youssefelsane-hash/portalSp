@@ -170,6 +170,9 @@ describe('MatchingService.findEligibleTechnicians() — موازنة الحِم�
       serviceZoneId: ids.zone,
       addressId: ids.address,
       scheduledAt: weekFromNow,
+      // قيمة رمزية صغيرة تحت حد قرار مستوى 'new' (200 جنيه) — findEligibleTechnicians بقت بتفحص
+      // decision_limit_cents (docs/08 §36.1 تعميق)، والاختبار هنا بيفحص ترتيب موازنة الحِمل بس.
+      totalAmountCents: 10000,
     } as Order;
 
     const candidates = await (

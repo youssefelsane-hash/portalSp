@@ -186,6 +186,10 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       serviceZoneId: ids.zone,
       addressId: ids.address,
       scheduledAt,
+      // قيمة رمزية صغيرة تحت حد قرار مستوى 'new' (200 جنيه) — findEligibleTechnicians بقت
+      // بتفحص decision_limit_cents (docs/08 §36.1 تعميق)، والاختبارات هنا بتفحص فحص التعارض
+      // على الوقت مش حدود القرار السعرية.
+      totalAmountCents: 10000,
     } as Order;
     // findEligibleTechnicians خاصة (private) — بنستدعيها زي ما هي فعليًا (مش نسخة معاد كتابتها)
     // عشان أي تراجع مستقبلي عن الإصلاح يكسر الاختبار ده فورًا.

@@ -151,7 +151,11 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
 
   it('BLOCKED — الفني حظر اليوم صراحة، بياخد الأولوية فوق أي تصنيف تاني', async () => {
     await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
-    const today = new Date().toISOString().slice(0, 10);
+    // "اليوم" هنا لازم يتحسب بتوقيت القاهرة زي بالظبط classifyTechnicianCapacity()
+    // (technician-eligibility.sql.ts: `now() AT TIME ZONE 'Africa/Cairo'`) — مش UTC خام. فرق
+    // التوقيت الصيفي (+3 مش +2) بيخلق نافذة ساعتين كل ليلة تاريخ القاهرة بيبقى فيها يوم قدّام
+    // UTC، فأي حساب UTC هنا كان بيسجّل الحجب على تاريخ غلط ويخلي الاختبار fail بس في الفترة دي.
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
     await q(
       `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
        VALUES ($1,$2,'00:00:00','23:59:59','blocked')`,
@@ -161,8 +165,9 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
   });
 
   // describeTechnicianCapacity() — نسخة شفافية الأدمن (docs/08 §34.4، ADR-0020 §W)، بترجع سبب
-  // مقروء + نطاق أيام بدل تصنيف خام. نفس الفكستشر، بتعيد استخدام ids.technician/today.
-  const today = new Date().toISOString().slice(0, 10);
+  // مقروء + نطاق أيام بدل تصنيف خام. نفس الفكستشر، بتعيد استخدام ids.technician/today (بتوقيت
+  // القاهرة، نفس السبب أعلاه).
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
 
   it('describeTechnicianCapacity: LIGHT — سبب واضح، بلا نطاق أيام مشغول', async () => {
     await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
@@ -190,7 +195,9 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     expect(description.tier).toBe('HEAVY');
     expect(description.reasonAr).toContain(order.order_number);
     expect(description.occupiedFrom).toBe(today);
-    const expectedTo = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+    // جمع تقويمي بحت على تاريخ `today` (بتوقيت القاهرة بالفعل) بدل Date.now() UTC خام — نفس سبب
+    // إصلاح `today` نفسه أعلاه.
+    const expectedTo = new Date(new Date(`${today}T00:00:00Z`).getTime() + 2 * 86_400_000).toISOString().slice(0, 10);
     expect(description.occupiedTo).toBe(expectedTo);
   });
 

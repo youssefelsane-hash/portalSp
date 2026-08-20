@@ -239,9 +239,11 @@ describe('AdminOperationsOverviewService.getOverview() (docs/08 §36.2)', () => 
 
   it('capacity_today — فني حاظر النهاردة صراحة بيتصنّف BLOCKED', async () => {
     const tech = await insertTechnician('blocked', ids.categoryA);
+    // CURRENT_DATE بيتحسب بتوقيت جلسة Postgres (UTC عادةً)، لكن classifyTechnicianCapacity()
+    // بتحسب "اليوم" بتوقيت القاهرة (technician-eligibility.sql.ts) — لازم نفس التحويل هنا.
     await q(
       `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
-       VALUES ($1, CURRENT_DATE, '00:00', '23:59', 'blocked')`,
+       VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date, '00:00', '23:59', 'blocked')`,
       [tech.profileId],
     );
 

@@ -404,7 +404,9 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     // الفني حظر اليوم بنفسه بعد ما الفرصة اتعرضت عليه — العرض لسه offered (ظاهر في الشاشة)، بس
     // الحالة الحقيقية اتغيّرت. القبول لازم يعيد الفحص تحت قفل ويترفض، مش ينجح بناءً على الفرصة
     // الظاهرة القديمة.
-    const today = new Date().toISOString().slice(0, 10);
+    // "اليوم" بتوقيت القاهرة زي بالظبط classifyTechnicianCapacity() (مش UTC خام) — فرق التوقيت
+    // الصيفي بيخلق نافذة ساعتين كل ليلة تاريخ القاهرة بيبقى فيها يوم قدّام UTC.
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
     await q(
       `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
        VALUES ($1,$2,'00:00:00','23:59:59','blocked')`,

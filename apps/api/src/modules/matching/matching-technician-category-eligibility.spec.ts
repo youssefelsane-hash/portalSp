@@ -166,7 +166,16 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
   });
 
   const findCandidates = (serviceId: string) => {
-    const order = { id: randomUUID(), serviceId, serviceZoneId: ids.zone, addressId: ids.address, scheduledAt: null } as Order;
+    // totalAmountCents رمزي تحت حد قرار 'new' (200 جنيه) — findEligibleTechnicians بقت بتفحص
+    // decision_limit_cents (docs/08 §36.1 تعميق)، والاختبار هنا بيفحص أهلية الفئة/الخدمة بس.
+    const order = {
+      id: randomUUID(),
+      serviceId,
+      serviceZoneId: ids.zone,
+      addressId: ids.address,
+      scheduledAt: null,
+      totalAmountCents: 10000,
+    } as Order;
     return (
       matchingService as unknown as { findEligibleTechnicians: (...args: unknown[]) => Promise<{ technician_id: string }[]> }
     ).findEligibleTechnicians(order, 50, null, false, null);
