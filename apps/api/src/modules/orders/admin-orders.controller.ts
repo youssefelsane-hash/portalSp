@@ -12,7 +12,7 @@ import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { AdminRescheduleOrderDto } from './dto/admin-reschedule-order.dto';
 import { AssignAssistantDto } from './dto/assign-assistant.dto';
-import { AddCrewMemberDto, RemoveCrewMemberDto, ReplaceCrewMemberDto } from './dto/admin-crew-member.dto';
+import { AddCrewMemberDto, ReassignLeaderDto, RemoveCrewMemberDto, ReplaceCrewMemberDto } from './dto/admin-crew-member.dto';
 import { CreateOrderForCustomerDto } from './dto/create-order-for-customer.dto';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { toOrderFinancialSummaryResponseDto } from './dto/order-financial-summary-response.dto';
@@ -336,6 +336,24 @@ export class AdminOrdersController {
         dto.role_label,
         audit,
       ),
+    );
+  }
+
+  // تغيير قائد الطلب (docs/08 §35، ADR-0021 §5) — كانت فجوة حقيقية: reassign() تحت مقصورة على
+  // مرحلة "قبل القبول" (REASSIGNABLE_STATUSES)، مش تقدر تُستخدم لطلب فريق بعد ما القبول وتجميع
+  // الطاقم حصلوا بالفعل. نفس صلاحية إدارة الطاقم (orders.manage_crew) — تغيير القائد قرار تشغيلي
+  // يومي زي إضافة/إزالة عضو، مش قرار super_admin منفصل.
+  @Post(':id/reassign-leader')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.manage_crew')
+  async reassignLeader(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReassignLeaderDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toOrderResponseDto(
+      await this.adminOrdersService.reassignLeader(admin.sub, id, dto.new_leader_technician_id, dto.reason, audit),
     );
   }
 }

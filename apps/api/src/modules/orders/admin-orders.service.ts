@@ -17,6 +17,8 @@ import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-ev
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianCapacityTier, classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
+import { SettingsService } from '../settings/settings.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
@@ -28,6 +30,7 @@ import { TechnicianOrderCancellation } from './entities/technician-order-cancell
 import { canTransition } from './order-state-machine';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
+const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 // حالات مايصحش نعدّل السعر فيها: بعد الدفع (لازم يعدّي من استرداد/تحصيل إضافي حقيقي، مش
 // تعديل رقم خام) أو في أي حالة نهائية (اتلغى/انتهت صلاحيته/اتردله فلوسه) — التعديل هنا
@@ -65,6 +68,7 @@ export class AdminOrdersService {
     private readonly auditLog: AuditLogService,
     private readonly pricingEngineService: PricingEngineService,
     private readonly promoCodesService: PromoCodesService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   async list(
@@ -481,6 +485,25 @@ export class AdminOrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده معيّن كمساعد على الطلب ده بالفعل', HttpStatus.CONFLICT);
     }
 
+    // docs/08 §35، ADR-0021 §5 — نفس فحص BLOCKED الحقيقي المستخدم في validateCrewCandidateOrThrow
+    // (قاعدة صلبة غير قابلة للتجاوز حتى إداريًا)، مسجّل هنا مباشرة (مش عبر الدالة المشتركة) لأن
+    // فحوصات assignAssistant الأخرى (عدد الأماكن، شغل "مساعد" تحديدًا) مختلفة عن addCrewMember.
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const capacityTier = await classifyTechnicianCapacity(this.dataSource, {
+      technicianId: technician.id,
+      scheduledAt: order.scheduledAt,
+      excludeOrderId: order.id,
+      serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+      fullDayThresholdMinutes: fullDayJobMinutes,
+    });
+    if (capacityTier === 'BLOCKED') {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتعيّن حتى بتعيين إداري', HttpStatus.CONFLICT);
+    }
+
     await this.teamMembers.save(
       this.teamMembers.create({
         orderId,
@@ -506,7 +529,7 @@ export class AdminOrdersService {
       action: 'order.assistant_assigned_manually',
       entityType: 'order',
       entityId: order.id,
-      newValues: { technician_id: technician.id },
+      newValues: { technician_id: technician.id, capacity_tier: capacityTier },
       meta,
     });
 
@@ -519,7 +542,14 @@ export class AdminOrdersService {
   // "مساعد" بس. صلاحية مخصصة (orders.manage_crew، migration 0132) — عملية تشغيلية يومية
   // زي orders.assign_assistant، مش قرار super_admin بس.
 
-  private async validateCrewCandidateOrThrow(order: Order, technicianProfileId: string): Promise<void> {
+  /**
+   * docs/08 §35، ADR-0021 §5 — بَقّة حقيقية اتصلحت: كانت بتفحص اعتماد/عضوية بس، صفر وعي بـ
+   * classifyTechnicianCapacity() (نفس الفحص اللي §35.1 صلّحه لمسار القائد الذاتي). BLOCKED
+   * (حظر يوم صريح من الفني نفسه) قاعدة حقيقية غير قابلة للتجاوز حتى من الأدمن ("hard business
+   * restriction" — طلب المالك صراحة). MEANINGFUL/HEAVY مش استبعاد — الأدمن بيقرر بوعي كامل،
+   * بس التصنيف بيتسجّل في الـaudit (شفافية، مش تحميل صامت).
+   */
+  private async validateCrewCandidateOrThrow(order: Order, technicianProfileId: string): Promise<TechnicianCapacityTier> {
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'إدارة طاقم الفريق متاحة بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
     }
@@ -534,12 +564,29 @@ export class AdminOrdersService {
     if (alreadyMember) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
+
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const tier = await classifyTechnicianCapacity(this.dataSource, {
+      technicianId: technician.id,
+      scheduledAt: order.scheduledAt,
+      excludeOrderId: order.id,
+      serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+      fullDayThresholdMinutes: fullDayJobMinutes,
+    });
+    if (tier === 'BLOCKED') {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتجنّد حتى بتعيين إداري', HttpStatus.CONFLICT);
+    }
+    return tier;
   }
 
   /** إضافة عضو طاقم (Ops حل نقص طاقم، مش شغل "مساعد" بالضرورة — راجع assignAssistant فوق للمساعد تحديدًا). */
   async addCrewMember(adminUserId: string, orderId: string, technicianId: string, roleLabel: string, meta?: AuditActorMeta): Promise<Order> {
     const order = await this.findOrThrow(orderId);
-    await this.validateCrewCandidateOrThrow(order, technicianId);
+    const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId);
 
     const existingCount = await this.teamMembers.count({ where: { orderId } });
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
@@ -568,7 +615,7 @@ export class AdminOrdersService {
       action: 'order.crew_member_added',
       entityType: 'order',
       entityId: orderId,
-      newValues: { technician_id: technicianId, role_label: roleLabel },
+      newValues: { technician_id: technicianId, role_label: roleLabel, capacity_tier: capacityTier },
       meta,
     });
     return order;
@@ -630,7 +677,7 @@ export class AdminOrdersService {
     if (newTechnicianId === existingMember.technicianId) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني الجديد نفس الفني القديم', HttpStatus.BAD_REQUEST);
     }
-    await this.validateCrewCandidateOrThrow(order, newTechnicianId);
+    const capacityTier = await this.validateCrewCandidateOrThrow(order, newTechnicianId);
 
     const oldMember = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(OrderTeamMember);
@@ -665,10 +712,107 @@ export class AdminOrdersService {
       entityType: 'order',
       entityId: orderId,
       oldValues: { technician_id: oldMember.technicianId, role_label: oldMember.roleLabel },
-      newValues: { technician_id: newTechnicianId, reason },
+      newValues: { technician_id: newTechnicianId, reason, capacity_tier: capacityTier },
       meta,
     });
     return order;
+  }
+
+  /**
+   * تغيير قائد الطلب (docs/08 §35، ADR-0021 §5) — كانت فجوة حقيقية: `reassign()` فوق مقصورة على
+   * `REASSIGNABLE_STATUSES` (قبل أي فني يقبل الطلب أصلاً) ومصمّمة أصلاً لطلب فردي (فني واحد بلا
+   * طاقم) — مش تقدر تُستخدم لتغيير قائد طلب فريق **بعد** ما القبول حصل وطاقم اتجمّع بالفعل. القائد
+   * الجديد بيتفحص بنفس صرامة `assignmentGuard.assertEligible()` (نفس المستخدمة في `reassign()`
+   * ومسار قبول الفني الذاتي — صفر خوارزمية موازية). القائد القديم بيتحوّل لعضو فريق عادي (بدل ما
+   * يختفي من الطلب فجأة) — "order/team state remains coherent" (طلب مالك صريح، سيناريو I).
+   */
+  async reassignLeader(
+    adminUserId: string,
+    orderId: string,
+    newLeaderTechnicianId: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
+    const snapshot = await this.findOrThrow(orderId);
+    if (snapshot.bookingMode !== BookingMode.TEAM) {
+      throw new ApiException(ErrorCode.VAL_001, 'تغيير القائد متاح بس لطلبات "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
+    }
+    if (PRICE_LOCKED_STATUSES.has(snapshot.orderStatus)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تغيّر القائد والطلب في حالة ${snapshot.orderStatus} — الطلب اتقفل بالفعل`,
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (snapshot.technicianId === newLeaderTechnicianId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو القائد بالفعل', HttpStatus.CONFLICT);
+    }
+    // القائد الأصلي وقت الطلب — مصدر التحقق من التزامن جوّه الترانزاكشن تحت. بعكس reassign()
+    // العادية (بتعتمد على انتقال حالة الطلب لاستبعاد سباق تاني)، تغيير القائد هنا مايغيّرش حالة
+    // الطلب خالص — بَقّة حقيقية اتلقطت حية (اختبار سباق: أدمنين بيغيّروا لفنيين مختلفين بالتوازي
+    // كانوا الاتنين بينجحوا لأن الفحص القديم كان بس "الفني ده مش القائد الحالي بالفعل"، مش "القائد
+    // اللي انبنى عليه القرار لسه هو نفسه" — لازم إعادة فحص القائد المتوقّع تحت القفل صراحة.
+    const expectedPreviousLeaderId = snapshot.technicianId;
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, newLeaderTechnicianId);
+      const order = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.id = :orderId', { orderId })
+        .getOne();
+      if (!order || order.technicianId !== expectedPreviousLeaderId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب اتغيّر (القائد اتبدّل من مكان تاني) — رجّع الصفحة وحاول تاني', HttpStatus.CONFLICT);
+      }
+      if (PRICE_LOCKED_STATUSES.has(order.orderStatus)) {
+        throw new ApiException(ErrorCode.ORDR_003, 'الطلب اتقفل قبل ما التغيير يخلص', HttpStatus.CONFLICT);
+      }
+      await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
+
+      const previousLeaderId = order.technicianId;
+      const teamMemberRepo = manager.getRepository(OrderTeamMember);
+
+      // لو القائد الجديد كان عضو فريق بالفعل — بيتشال من العضوية (بقى قائد دلوقتي، مش عضو تحت نفسه).
+      const existingMembership = await teamMemberRepo.findOne({ where: { orderId: order.id, technicianId: lockedTechnician.id } });
+      if (existingMembership) {
+        await teamMemberRepo.remove(existingMembership);
+      }
+
+      order.technicianId = lockedTechnician.id;
+      await manager.save(order);
+
+      if (previousLeaderId) {
+        const alreadyMemberAsOldLeader = await teamMemberRepo.findOne({ where: { orderId: order.id, technicianId: previousLeaderId } });
+        if (!alreadyMemberAsOldLeader) {
+          await teamMemberRepo.save(
+            teamMemberRepo.create({
+              orderId: order.id,
+              technicianId: previousLeaderId,
+              roleLabel: 'قائد سابق',
+              addedByTechnicianId: null,
+              addedByAdminUserId: adminUserId,
+            }),
+          );
+        }
+      }
+      return { order, previousLeaderId };
+    });
+
+    this.events.emit(
+      ORDER_REASSIGNED_EVENT,
+      new OrderReassignedEvent(result.order.id, result.order.orderNumber, result.order.technicianId!),
+    );
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'order.leader_reassigned',
+      entityType: 'order',
+      entityId: orderId,
+      oldValues: { technician_id: result.previousLeaderId },
+      newValues: { technician_id: result.order.technicianId, reason },
+      meta,
+    });
+    return result.order;
   }
 
   // نفس نمط RatingsService.isUniqueViolation() بالحرف — خطأ Postgres الخام (23505) بيتحوّل

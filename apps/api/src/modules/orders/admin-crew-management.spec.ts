@@ -18,6 +18,7 @@ import { ORDER_CREW_CHANGED_EVENT } from '../../common/events/order-crew-changed
 describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)', () => {
   let dataSource: DataSource;
   let adminOrdersService: AdminOrdersService;
+  const auditLogRecord = jest.fn(async () => undefined);
   const runId = Date.now().toString(36);
   const ids = {
     zone: '',
@@ -34,6 +35,7 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     memberBProfile: '',
     unapprovedProfile: '',
     otherCompanyProfile: '',
+    blockedProfile: '',
   };
   const users: string[] = [];
   let phoneCounter = 0;
@@ -78,6 +80,15 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       roleLabel,
       ids.adminUserId,
     ]);
+  }
+
+  /** حظر اليوم الحالي (بتوقيت مصر) — يمثّل "مش متاح فعليًا" الحقيقي (docs/08 §35، ADR-0021 §5). */
+  async function blockToday(profileId: string) {
+    await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date, '00:00', '23:59', 'blocked')`,
+      [profileId],
+    );
   }
 
   beforeAll(async () => {
@@ -154,6 +165,8 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     ids.memberBProfile = await insertTechnician('memberb', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
     ids.unapprovedProfile = await insertTechnician('unapproved', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.PENDING });
     ids.otherCompanyProfile = await insertTechnician('othercompany', { companyId: null, verificationStatus: TechnicianVerificationStatus.APPROVED });
+    ids.blockedProfile = await insertTechnician('blocked', { companyId: ids.company, verificationStatus: TechnicianVerificationStatus.APPROVED });
+    await blockToday(ids.blockedProfile);
 
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -175,11 +188,14 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       dataSource.getRepository(OrderTeamMember),
       dataSource,
       techniciansService,
-      {} as never, // assignmentGuard — مش متنادى في مسارات الطاقم
+      {} as never, // assignmentGuard — مش متنادى في مسارات الطاقم العادية (بس تُستخدم في reassignLeader)
       new EventEmitter2(),
-      { record: async () => undefined } as unknown as AuditLogService,
+      { record: auditLogRecord } as unknown as AuditLogService,
       {} as never, // pricingEngineService
       {} as never, // promoCodesService
+      // settingsService حقيقي جزئيًا — validateCrewCandidateOrThrow (docs/08 §35) بينادي
+      // getNumber() فعليًا لحساب classifyTechnicianCapacity().
+      { getNumber: async (_key: string, fallback: number) => fallback } as never,
     );
   });
 
@@ -190,6 +206,7 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCRW-%`]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.blockedProfile]);
       // بما فيهم فنيي الحشو الـ15 اللي اتضافوا جوّه اختبار "أقصى عدد" (كلهم company_id=ids.company)
       // — مش بس الخمسة الأساسيين، وإلا FK هيمنع مسح الشركة تحتهم.
       await q(`DELETE FROM technician_profiles WHERE id = $1 OR company_id = $2`, [ids.otherCompanyProfile, ids.company]);
@@ -222,6 +239,25 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
   it('addCrewMember — يرفض فني لسه مش معتمد', async () => {
     const orderId = await insertOrder(`add-unapproved-${runId}`, { bookingMode: BookingMode.TEAM, technicianId: ids.leaderProfile, requiredTechnicians: 3 });
     await expect(adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.unapprovedProfile, 'دور')).rejects.toThrow();
+  });
+
+  // docs/08 §35، ADR-0021 §5 — بَقّة حقيقية اتصلحت: addCrewMember كانت بتفحص اعتماد/عضوية بس،
+  // صفر وعي بحظر يوم صريح (BLOCKED) — "hard business restriction" غير قابل للتجاوز حتى بتعيين
+  // إداري، طلب المالك صراحة.
+  it('addCrewMember — يرفض فني حظر اليوم بنفسه حتى بتعيين إداري (BLOCKED قاعدة صلبة)', async () => {
+    const orderId = await insertOrder(`add-blocked-${runId}`, { bookingMode: BookingMode.TEAM, technicianId: ids.leaderProfile, requiredTechnicians: 3 });
+    await expect(adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.blockedProfile, 'دور')).rejects.toThrow(/حظر اليوم/);
+    const rows = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('addCrewMember — يسجّل capacity_tier في الـaudit log (شفافية، مش تحميل صامت)', async () => {
+    const orderId = await insertOrder(`add-audit-tier-${runId}`, { bookingMode: BookingMode.TEAM, technicianId: ids.leaderProfile, requiredTechnicians: 3 });
+    auditLogRecord.mockClear();
+    await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberBProfile, 'دور');
+    expect(auditLogRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'order.crew_member_added', newValues: expect.objectContaining({ capacity_tier: 'LIGHT' }) }),
+    );
   });
 
   it('addCrewMember — يرفض لو الفني هو نفسه قائد الطلب بالفعل', async () => {

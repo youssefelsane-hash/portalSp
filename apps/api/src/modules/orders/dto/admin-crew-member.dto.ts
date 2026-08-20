@@ -34,3 +34,14 @@ export class ReplaceCrewMemberDto {
   @MaxLength(100)
   role_label?: string;
 }
+
+// تغيير قائد الطلب (docs/08 §35، ADR-0021 §5).
+export class ReassignLeaderDto {
+  @IsUUID()
+  new_leader_technician_id: string;
+
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  reason: string;
+}
