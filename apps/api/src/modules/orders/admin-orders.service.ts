@@ -19,7 +19,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewShortage } from './order-team.service';
+import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
@@ -105,6 +105,7 @@ export class AdminOrdersService {
     history: OrderStatusHistory[];
     pricingEvaluation: ServicePricingEvaluation | null;
     technicianCancellations: TechnicianOrderCancellation[];
+    crewStatus: ReturnType<typeof computeCrewComposition> | null;
   }> {
     const order = await this.findOrThrow(orderId);
     const history = await this.statusHistory.find({ where: { orderId }, order: { createdAt: 'ASC' } });
@@ -115,7 +116,19 @@ export class AdminOrdersService {
       where: { orderId },
       order: { cancelledAt: 'ASC' },
     });
-    return { order, history, pricingEvaluation, technicianCancellations };
+    // docs/08 §35، ADR-0021 §1 — نفس crewStatus اللي apps/technician-app بيشوفه بالظبط (مصدر
+    // حقيقة واحد)، عشان الأدمن يشوف الحالة الحقيقية للطاقم بلا حاجة يعدّ الأعضاء يدويًا.
+    let crewStatus: ReturnType<typeof computeCrewComposition> | null = null;
+    if (order.bookingMode === BookingMode.TEAM) {
+      const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
+        `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
+        [orderId],
+      );
+      const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
+      const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+      crewStatus = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+    }
+    return { order, history, pricingEvaluation, technicianCancellations, crewStatus };
   }
 
   /**
@@ -582,13 +595,17 @@ export class AdminOrdersService {
       meta,
     });
 
-    // جاهزية الطاقم (Script 4 §22-29: "don't silently show ready" لو الطاقم نقص) — required_technicians
-    // هو snapshot محرك الإنتاجية وقت الحجز (orders.service.ts)، مفيش تعقّب لدور محدد بعد، فده
-    // مؤشر عددي بسيط بس (العدد الكلي بعد الإزالة مقابل المطلوب) مش تطابق أدوار دقيق.
-    // منطق مشترك مع OrderTeamService.getShortageForOrder() (docs/08 §31) — computeCrewShortage().
-    const remaining = await this.teamMembers.count({ where: { orderId } });
-    const { shortage: crewShortage } = computeCrewShortage(order.requiredTechnicians, remaining);
-    return { crewShortage };
+    // جاهزية الطاقم (Script 4 §22-29: "don't silently show ready" لو الطاقم نقص) — منطق مشترك مع
+    // OrderTeamService.getCrewComposition() (docs/08 §35، ADR-0021 §1) — فني/مساعد منفصلين دلوقتي،
+    // مش عدّاد كلي زي computeCrewShortage() القديمة.
+    const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
+      `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
+      [orderId],
+    );
+    const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
+    const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+    const composition = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+    return { crewShortage: !composition.crewComplete };
   }
 
   /**

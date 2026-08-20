@@ -215,6 +215,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
       {} as never, // paymentsService — مش متنادى (صفر cancel_with_fee في الاختبار ده)
       supportService,
       events,
+      {} as never, // orderTeamService (docs/08 §35)
     );
   });
 
@@ -499,6 +500,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
       {} as never,
       {} as never,
       events,
+      {} as never, // orderTeamService (docs/08 §35)
     );
   });
 

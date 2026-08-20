@@ -6,12 +6,19 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { TechnicianCapacityTier, classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { SettingsService } from '../settings/settings.service';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
+const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
+
+export type CrewRole = 'technician' | 'assistant';
 
 // ترتيب رتبة الفني (docs/08 §31) — نفس ترتيب تعريف enum TechnicianLevel التصريحي بالحرف، قرار
 // مقصود للبساطة (طلب المالك صراحة) بدل الاعتماد على order_priority_weight القابل للتعديل في
@@ -31,17 +38,51 @@ export interface RecruitCandidateRow {
   currentLevel: TechnicianLevel;
   averageRating: string;
   distanceKm: string | null;
+  isLeaderTeamMember: boolean;
+  capacityTier: TechnicianCapacityTier;
 }
 
-/** (docs/08 §31) — استخراج مشترك لمنطق "الفريق ناقص" المستخدم في AdminOrdersService.removeCrewMember()
- * وهنا كمان، بدل تكراره. الـ+1 بيمثّل قائد الطلب نفسه (مش صف في order_team_members). */
-export function computeCrewShortage(
+export interface CrewComposition {
+  requiredTechnicians: number;
+  requiredAssistants: number;
+  /** بما فيهم القائد (+1 دايمًا). */
+  assignedTechnicians: number;
+  assignedAssistants: number;
+  missingTechnicians: number;
+  missingAssistants: number;
+  crewComplete: boolean;
+}
+
+export type RecruitOutcome =
+  | { status: 'added' }
+  | { status: 'offer_sent'; opportunityId: string; capacityTier: TechnicianCapacityTier };
+
+/**
+ * تكوين الطاقم (docs/08 §35، ADR-0021 §1) — مصدر الحقيقة الوحيد لسؤال "الطاقم كامل؟"، فني/مساعد
+ * منفصلين. بتستبدل computeCrewShortage() القديمة اللي كانت بتتجاهل required_assistants تمامًا
+ * وبتحسب فني/مساعد كواحد — بَقّة حقيقية اتلقطت في مراجعة §35.0 (راجع ADR-0021 للسياق الكامل).
+ * الـ+1 في assignedTechnicians بيمثّل قائد الطلب نفسه (مش صف في order_team_members).
+ */
+export function computeCrewComposition(
   requiredTechnicians: number | null,
-  teamMembersCount: number,
-): { shortage: boolean; needed: number } {
-  if (requiredTechnicians == null) return { shortage: false, needed: 0 };
-  const currentSize = teamMembersCount + 1;
-  return { shortage: currentSize < requiredTechnicians, needed: Math.max(0, requiredTechnicians - currentSize) };
+  requiredAssistants: number | null,
+  counts: { technicians: number; assistants: number },
+): CrewComposition {
+  const reqTechnicians = requiredTechnicians ?? 1;
+  const reqAssistants = requiredAssistants ?? 0;
+  const assignedTechnicians = counts.technicians + 1;
+  const assignedAssistants = counts.assistants;
+  const missingTechnicians = Math.max(0, reqTechnicians - assignedTechnicians);
+  const missingAssistants = Math.max(0, reqAssistants - assignedAssistants);
+  return {
+    requiredTechnicians: reqTechnicians,
+    requiredAssistants: reqAssistants,
+    assignedTechnicians,
+    assignedAssistants,
+    missingTechnicians,
+    missingAssistants,
+    crewComplete: missingTechnicians === 0 && missingAssistants === 0,
+  };
 }
 
 /**
@@ -50,6 +91,11 @@ export function computeCrewShortage(
  * (orders.technician_id) بس، وبس لأعضاء من **نفس الشركة/الفريق** (company_id مطابق) — عشان
  * منمنعش فني يحط أي حد عشوائي على طلب مش بتاعه. مقصود إن العضو المضاف مبيوافقش على الإضافة —
  * زي "معاه مساعد؟" (technicians/README.md) بالظبط، القرار للفني القائد مش للمضاف.
+ *
+ * **docs/08 §35، ADR-0021** — التجنيد الأوسع (listRecruitCandidates/recruitMember) بقى بيعيد
+ * استخدام نفس دوال الأهلية/القدرة الحقيقية (technicianAvailabilityCondition/classifyTechnicianCapacity)
+ * بدل قاعدة isAvailable القديمة اللي اتشالت من الأهلية بالكامل من ADR-0017 — كانت بَقّة انجراف
+ * حقيقية (تجنيد الفريق شغال بقاعدة مختلفة عن باقي المنصة). راجع ADR-0021 §2 للتفاصيل الكاملة.
  */
 @Injectable()
 export class OrderTeamService {
@@ -57,6 +103,9 @@ export class OrderTeamService {
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(OrderTeamMember) private readonly teamMembers: Repository<OrderTeamMember>,
     private readonly techniciansService: TechniciansService,
+    private readonly assignmentGuard: TechnicianAssignmentGuardService,
+    private readonly workOpportunities: TechnicianWorkOpportunitiesService,
+    private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
   ) {}
 
@@ -130,31 +179,67 @@ export class OrderTeamService {
     );
   }
 
-  /** "الفريق ناقص؟" (docs/08 §31) — نفس السؤال اللي apps/admin بيسأله، هنا للفني القائد على طلبه هو. */
-  async getShortageForOrder(orderId: string, requiredTechnicians: number | null): Promise<{ shortage: boolean; needed: number }> {
-    const count = await this.teamMembers.count({ where: { orderId } });
-    return computeCrewShortage(requiredTechnicians, count);
+  /**
+   * "الطاقم كامل؟" (docs/08 §35، ADR-0021 §1) — مصدر الحقيقة الوحيد، فني/مساعد منفصلين. بتُستخدم
+   * من الفني القائد، الأدمن، وبوابة اكتمال الطاقم في OrdersService.start() — نفس الحساب بالظبط
+   * في كل مكان.
+   */
+  async getCrewComposition(orderId: string, order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'>): Promise<CrewComposition> {
+    const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
+      `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
+      [orderId],
+    );
+    const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
+    const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+    return computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+  }
+
+  private async getServiceDurationMinutes(order: Order): Promise<number> {
+    const [service] = await this.teamMembers.manager.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    return service?.estimated_duration_minutes ?? 60;
   }
 
   /**
-   * مرشّحين للتجنيد الذاتي (docs/08 §31) — نفس نمط TechniciansService.listForServiceBooking()
-   * بالحرف (نفس الجداول/شرط الأهلية بالفئة، ADR-0018 §8)، بس **بدون** technicianAvailabilityCondition
-   * (بتفحص تعارض جدول *مستقبلي*؛ التجنيد هنا "تعال دلوقتي" مش حجز مستقبلي — بساطة العميل تنطبق
-   * برضه هنا، طلب مالك صريح). فرق جوهري عن addMember(): صفر فحص شركة، مجمع كل الفنيين المتاحين.
+   * مرشّحين للتجنيد الذاتي (docs/08 §31/§35، ADR-0021 §2) — نفس نمط TechniciansService
+   * .listForServiceBooking() بالحرف (نفس الجداول/شرط الأهلية بالفئة، ADR-0018 §8)، لكن **بدون**
+   * استبعاد الفنيين المثقلين (MEANINGFUL/HEAVY) من القايمة — بيترجعوا مع تصنيف قدرتهم
+   * (`capacityTier`) عشان الواجهة تقدر تعرض "فرصة اختيارية" بدل تجنيد فوري. البلوك المستبعد
+   * الوحيد هو BLOCKED (حظر يوم صريح) — ده استبعاد حقيقي، مش تفضيلي.
+   *
+   * **أولوية فريق القائد الدائم (docs/08 §35 بند 2، ADR-0021 §2)**: `isLeaderTeamMember` (نفس
+   * `technician_companies.id` بتاع القائد) بيترتّب أولاً — أعضاء فريقه الدائم بيظهروا فوق أي فني
+   * تاني لو مؤهّلين، من غير ما نستبعد الباقي.
+   *
+   * ملاحظة أداء: تصنيف القدرة (`classifyTechnicianCapacity`) بيتحسب لكل مرشّح على حدة (N استعلام
+   * بعد LIMIT 30) بدل تكرار منطق الـCTE المعقّد بتاعها inline هنا — إعادة استخدام الدالة الواحدة
+   * (ADR-0021 §5: "صفر مصدر حقيقة تاني") أهم من توفير استعلام واحد في مسار مش ساخن (يتنادى من
+   * القائد وقت التجنيد بس، مش في كل دورة مطابقة).
    */
-  async listRecruitCandidates(userId: string, orderId: string): Promise<RecruitCandidateRow[]> {
+  async listRecruitCandidates(userId: string, orderId: string, role: CrewRole): Promise<RecruitCandidateRow[]> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'تجنيد فريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
     }
+    const composition = await this.getCrewComposition(orderId, order);
+    if (role === 'technician' && composition.missingTechnicians <= 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
+    }
+    if (role === 'assistant' && composition.missingAssistants <= 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
+    }
+
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const leaderRank = TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel];
 
-    return this.teamMembers.manager.query<RecruitCandidateRow[]>(
+    const rows = await this.teamMembers.manager.query<Omit<RecruitCandidateRow, 'capacityTier'>[]>(
       `
       SELECT tp.id AS "technicianId", u.full_name AS "fullName", u.avatar_url AS "avatarUrl",
              tp.current_level AS "currentLevel", tp.average_rating AS "averageRating",
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS "distanceKm"
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS "distanceKm",
+             (tp.company_id IS NOT NULL AND tp.company_id = $4::uuid) AS "isLeaderTeamMember"
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       JOIN orders o ON o.id = $1
@@ -163,7 +248,6 @@ export class OrderTeamService {
         AND ts.is_active = true AND ts.verification_status = 'approved'
       CROSS JOIN LATERAL (SELECT location FROM addresses WHERE id = o.address_id) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        AND tp.is_available = true
         AND tp.current_location IS NOT NULL
         AND tp.id != $2
         AND (
@@ -178,19 +262,37 @@ export class OrderTeamService {
         AND CASE tp.current_level
               WHEN 'new' THEN 0 WHEN 'verified' THEN 1 WHEN 'professional' THEN 2
               WHEN 'premium' THEN 3 WHEN 'team_leader' THEN 4 END <= $3
-      ORDER BY "distanceKm" ASC NULLS LAST, tp.average_rating DESC
+      ORDER BY "isLeaderTeamMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC
       LIMIT 30
       `,
-      [orderId, leaderProfileId, leaderRank],
+      [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
     );
+
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
+    const withCapacity = await Promise.all(
+      rows.map(async (row) => ({
+        ...row,
+        capacityTier: await classifyTechnicianCapacity(this.teamMembers.manager, {
+          technicianId: row.technicianId,
+          scheduledAt: order.scheduledAt,
+          excludeOrderId: orderId,
+          serviceDurationMinutes,
+          fullDayThresholdMinutes: fullDayJobMinutes,
+        }),
+      })),
+    );
+    return withCapacity.filter((row) => row.capacityTier !== 'BLOCKED');
   }
 
   /**
-   * تجنيد فوري (docs/08 §31) — بلا موافقة من المُضاف (زي addMember() بالظبط)، بس بيعيد التحقق
-   * الكامل تاني وقت الإضافة الفعلية (القايمة اللي المستخدم شافها ممكن تبقى قديمة — تعارض حقيقي
-   * لو فني اتشغل/اتضاف لطلب تاني بين ما القائد فتح القايمة ودوس على مرشّح).
+   * تجنيد (docs/08 §31/§35، ADR-0021 §2) — بلا موافقة من المُضاف (زي addMember() بالظبط). بيعيد
+   * التحقق الكامل تاني وقت الإضافة الفعلية (القايمة اللي المستخدم شافها ممكن تبقى قديمة). القدرة
+   * الاستيعابية بتحدد الأثر: LIGHT = إضافة فورية، MEANINGFUL/HEAVY = فرصة اختيارية (technician_
+   * work_opportunities، context='crew_recruit') بدل تحميل صامت — نفس فلسفة ADR-0020 بالحرف،
+   * تطبيقها هنا بالظبط المطلوب في docs/08 §35 بند 3 ("لا تحميل صامت لعضو فريق مثقل").
    */
-  async recruitMember(userId: string, orderId: string, technicianId: string, roleLabel?: string): Promise<void> {
+  async recruitMember(userId: string, orderId: string, technicianId: string, role: CrewRole, roleLabel?: string): Promise<RecruitOutcome> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
     if (order.bookingMode !== BookingMode.TEAM) {
       throw new ApiException(ErrorCode.VAL_001, 'تجنيد فريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
@@ -199,13 +301,21 @@ export class OrderTeamService {
       throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
     }
 
+    const composition = await this.getCrewComposition(orderId, order);
+    if (role === 'technician' && composition.missingTechnicians <= 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
+    }
+    if (role === 'assistant' && composition.missingAssistants <= 0) {
+      throw new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
+    }
+
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
     if (TECHNICIAN_LEVEL_RANK[candidateProfile.currentLevel] > TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel]) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده رتبته أعلى منك — مينفعش تجنّده', HttpStatus.FORBIDDEN);
     }
-    if (!candidateProfile.isAvailable || !candidateProfile.currentLocation) {
-      throw new ApiException(ErrorCode.VAL_001, 'الفني ده مش متاح دلوقتي', HttpStatus.CONFLICT);
+    if (!candidateProfile.currentLocation) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده مالوش موقع حالي — مينفعش يتجنّد دلوقتي', HttpStatus.CONFLICT);
     }
 
     const existingCount = await this.teamMembers.count({ where: { orderId } });
@@ -217,14 +327,116 @@ export class OrderTeamService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
 
-    const member = this.teamMembers.create({
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
+    const tier = await classifyTechnicianCapacity(this.teamMembers.manager, {
+      technicianId,
+      scheduledAt: order.scheduledAt,
+      excludeOrderId: orderId,
+      serviceDurationMinutes,
+      fullDayThresholdMinutes: fullDayJobMinutes,
+    });
+    if (tier === 'BLOCKED') {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتجنّد', HttpStatus.CONFLICT);
+    }
+
+    const memberType = role === 'assistant' ? 'assistant' : 'team_member';
+    const label = roleLabel && roleLabel.trim().length > 0 ? roleLabel.trim() : role === 'assistant' ? 'مساعد' : 'عضو فريق';
+
+    if (tier === 'LIGHT') {
+      const member = this.teamMembers.create({ orderId, technicianId, roleLabel: label, addedByTechnicianId: leaderProfileId, memberType });
+      await this.teamMembers.save(member);
+      this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'added', technicianId, null, 'technician'));
+      return { status: 'added' };
+    }
+
+    // MEANINGFUL/HEAVY — فرصة اختيارية بدل تحميل صامت (docs/08 §35 بند 3).
+    const opportunity = await this.workOpportunities.offerIfNotExists(
+      this.teamMembers.manager,
       orderId,
       technicianId,
-      roleLabel: roleLabel && roleLabel.trim().length > 0 ? roleLabel.trim() : 'عضو فريق',
-      addedByTechnicianId: leaderProfileId,
-    });
-    await this.teamMembers.save(member);
+      tier,
+      'crew_recruit',
+      role,
+    );
+    return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };
+  }
 
-    this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'added', technicianId, null, 'technician'));
+  /**
+   * قبول فرصة تجنيد فريق (docs/08 §35، ADR-0021 §2) — إعادة فحص كاملة تحت قفل قبل أي كتابة، نفس
+   * فلسفة MatchingService.acceptWorkOpportunity() بالحرف، لكن الأثر مختلف جوهريًا: إضافة صف
+   * order_team_members بدل تغيير orders.technician_id (الفرصة دي "انضم كعضو" مش "بقى القائد").
+   * إعادة فحص عدد المطلوب المتبقي **تحت قفل** هنا تحديدًا هي حماية التزامن الحقيقية (docs/08 §35
+   * سيناريو L — منع تجاوز العدد المطلوب لو أكتر من فرصة اتقبلت بالتوازي).
+   */
+  async acceptCrewOpportunity(userId: string, opportunityId: string): Promise<OrderTeamMemberRow[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.orders.manager.transaction(async (manager) => {
+      const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, profile.id, opportunityId);
+      if (opportunity.context !== 'crew_recruit' || !opportunity.crew_role) {
+        throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تجنيد فريق', HttpStatus.BAD_REQUEST);
+      }
+
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId: opportunity.order_id })
+        .getOne();
+      if (!order || order.bookingMode !== BookingMode.TEAM || !order.technicianId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
+      }
+
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
+      await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
+
+      const composition = await this.getCrewComposition(order.id, order);
+      const role = opportunity.crew_role;
+      if (role === 'technician' && composition.missingTechnicians <= 0) {
+        await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
+        throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT);
+      }
+      if (role === 'assistant' && composition.missingAssistants <= 0) {
+        await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
+        throw new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT);
+      }
+
+      const alreadyAdded = await manager.findOne(OrderTeamMember, { where: { orderId: order.id, technicianId: profile.id } });
+      if (alreadyAdded) {
+        await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
+        throw new ApiException(ErrorCode.VAL_001, 'أنت مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
+      }
+
+      const memberType = role === 'assistant' ? 'assistant' : 'team_member';
+      const member = manager.create(OrderTeamMember, {
+        orderId: order.id,
+        technicianId: profile.id,
+        roleLabel: role === 'assistant' ? 'مساعد' : 'عضو فريق',
+        addedByTechnicianId: order.technicianId,
+        memberType,
+      });
+      await manager.save(member);
+      await this.workOpportunities.markDecided(manager, opportunityId, 'accepted');
+
+      this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(order.id, 'added', profile.id, null, 'technician'));
+      return this.listForOrder(order.id);
+    });
+  }
+
+  /** فرص تجنيد الفريق المفتوحة للفني الحالي (docs/08 §35، للتطبيق — شاشة منفصلة عن الفرص العادية). */
+  async listCrewOpportunitiesForUser(userId: string) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.workOpportunities.listCrewRecruitForTechnician(profile.id);
+  }
+
+  /** رفض فرصة تجنيد فريق — الفني قرر معندوش قدرة استيعابية حقيقية. صفر إعادة توزيع تلقائي (التجنيد قرار القائد/الأدمن، مش دورة مطابقة). */
+  async declineCrewOpportunity(userId: string, opportunityId: string): Promise<void> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    await this.orders.manager.transaction(async (manager) => {
+      const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, profile.id, opportunityId);
+      if (opportunity.context !== 'crew_recruit') {
+        throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تجنيد فريق', HttpStatus.BAD_REQUEST);
+      }
+      await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
+    });
   }
 }

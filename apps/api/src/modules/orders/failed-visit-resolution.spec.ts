@@ -313,6 +313,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       paymentsService,
       supportService,
       events,
+      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
     );
   });
 

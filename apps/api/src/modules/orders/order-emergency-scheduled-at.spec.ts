@@ -250,6 +250,7 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       paymentsService,
       supportService,
       events,
+      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
     );
   });
 

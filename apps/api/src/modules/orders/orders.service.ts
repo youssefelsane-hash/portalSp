@@ -47,6 +47,7 @@ import { CancellationAppliesTo, CancellationReason } from './entities/cancellati
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
+import { OrderTeamService } from './order-team.service';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
@@ -111,6 +112,9 @@ export class OrdersService {
     private readonly paymentsService: PaymentsService,
     private readonly supportService: SupportService,
     private readonly events: EventEmitter2,
+    // docs/08 §35، ADR-0021 §1 — آخر بند عمدًا (بعد events) عشان ياخد أقل بلاست-رديوس ممكن على
+    // الاختبارات القديمة الكتير اللي بتبني OrdersService بـpositional args (append واحد بس).
+    private readonly orderTeamService: OrderTeamService,
   ) {}
 
   findAllForCustomerUser(userId: string): Promise<Order[]> {
@@ -1534,6 +1538,20 @@ export class OrdersService {
         throw new ApiException(
           ErrorCode.ORDR_005,
           'لازم ترفع صورة واحدة على الأقل بعد الشغل قبل ما تقفل الطلب',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+
+    // بوابة اكتمال الطاقم (docs/08 §35، ADR-0021 §1/§3) — القائد يقدر يتحرّك/يوصل بطاقم ناقص
+    // (ممكن باقي الطاقم يوصل بعده)، بس مايبدأش الشغل الفعلي (IN_PROGRESS) قبل ما الطاقم يكتمل —
+    // نفس فلسفة بوابة after_photo فوق: قرار مالك صريح مفروض على الباك-إند مش بس زرار الواجهة.
+    if (to === OrderStatus.IN_PROGRESS && order.bookingMode === BookingMode.TEAM) {
+      const crew = await this.orderTeamService.getCrewComposition(order.id, order);
+      if (!crew.crewComplete) {
+        throw new ApiException(
+          ErrorCode.ORDR_005,
+          `الطاقم لسه ناقص — محتاج ${crew.missingTechnicians} فني و${crew.missingAssistants} مساعد قبل ما تقدر تبدأ الشغل`,
           HttpStatus.BAD_REQUEST,
         );
       }

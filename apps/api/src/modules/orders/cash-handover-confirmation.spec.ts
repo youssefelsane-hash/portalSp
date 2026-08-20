@@ -250,6 +250,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
       paymentsService,
       supportService,
       events,
+      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
     );
   });
 

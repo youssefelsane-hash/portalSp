@@ -5,6 +5,8 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { TechnicianCapacityTier } from './technician-eligibility.sql';
 
 export type WorkOpportunityStatus = 'offered' | 'accepted' | 'declined' | 'closed';
+export type WorkOpportunityContext = 'assignment' | 'crew_recruit';
+export type CrewRecruitRole = 'technician' | 'assistant';
 
 export interface WorkOpportunityRow {
   id: string;
@@ -14,6 +16,8 @@ export interface WorkOpportunityRow {
   status: WorkOpportunityStatus;
   offered_at: string;
   decided_at: string | null;
+  context: WorkOpportunityContext;
+  crew_role: CrewRecruitRole | null;
 }
 
 export interface WorkOpportunityListItem extends WorkOpportunityRow {
@@ -22,6 +26,8 @@ export interface WorkOpportunityListItem extends WorkOpportunityRow {
   problem_description: string | null;
   street_name: string;
   scheduled_at: string | null;
+  /** بس لفرص crew_recruit — اسم قائد الطلب اللي بيتم التجنيد تحته (docs/08 §35). */
+  team_leader_name?: string | null;
 }
 
 export interface WorkOpportunityAdminRow extends WorkOpportunityRow {
@@ -49,6 +55,8 @@ export class TechnicianWorkOpportunitiesService {
     orderId: string,
     technicianId: string,
     tier: TechnicianCapacityTier,
+    context: WorkOpportunityContext = 'assignment',
+    crewRole: CrewRecruitRole | null = null,
   ): Promise<WorkOpportunityRow> {
     const [existing] = await manager.query<WorkOpportunityRow[]>(
       `SELECT * FROM technician_work_opportunities
@@ -58,11 +66,11 @@ export class TechnicianWorkOpportunitiesService {
     if (existing) return existing;
 
     const [created] = await manager.query<WorkOpportunityRow[]>(
-      `INSERT INTO technician_work_opportunities (order_id, technician_id, capacity_tier_at_offer, status)
-       VALUES ($1,$2,$3,'offered')
+      `INSERT INTO technician_work_opportunities (order_id, technician_id, capacity_tier_at_offer, status, context, crew_role)
+       VALUES ($1,$2,$3,'offered',$4,$5)
        ON CONFLICT (order_id, technician_id) WHERE status = 'offered' AND deleted_at IS NULL DO NOTHING
        RETURNING *`,
-      [orderId, technicianId, tier],
+      [orderId, technicianId, tier, context, crewRole],
     );
     if (created) return created;
     // سباق نادر: صف تاني خلق نفس العرض بين الـSELECT والـINSERT — نرجع نقرأه بدل ما نفشل.
@@ -85,6 +93,11 @@ export class TechnicianWorkOpportunitiesService {
     return rows[0].exists;
   }
 
+  /** فرص "تعيين قائد" بس (السلوك الأصلي، migration 0153) — context='assignment'. فرص تجنيد الفريق
+   * (context='crew_recruit') ليها استعلام/شاشة منفصلة (docs/08 §35/§35.4) — أثرهم عند القبول
+   * مختلف جوهريًا (يبقى قائد VS ينضم كعضو)، عرضهم في نفس القايمة/زرار القبول القديم هيدّي واجهة
+   * مضلّلة (زرار "قبول" هيرمي خطأ واضح بدل ما ينضم فعلاً — راجع matching.service.ts's
+   * acceptWorkOpportunity()). */
   async listForTechnician(technicianId: string): Promise<WorkOpportunityListItem[]> {
     return this.dataSource.query<WorkOpportunityListItem[]>(
       `SELECT wo.*, o.order_number, s.name_ar AS service_name_ar, o.problem_description, a.street_name, o.scheduled_at
@@ -92,7 +105,24 @@ export class TechnicianWorkOpportunitiesService {
        JOIN orders o ON o.id = wo.order_id
        JOIN services s ON s.id = o.service_id
        JOIN addresses a ON a.id = o.address_id
-       WHERE wo.technician_id = $1 AND wo.status = 'offered' AND wo.deleted_at IS NULL
+       WHERE wo.technician_id = $1 AND wo.status = 'offered' AND wo.deleted_at IS NULL AND wo.context = 'assignment'
+       ORDER BY wo.offered_at DESC`,
+      [technicianId],
+    );
+  }
+
+  /** فرص تجنيد الفريق (docs/08 §35) — الفني بيتعرضله ينضم كعضو تحت قائد موجود بالفعل. */
+  async listCrewRecruitForTechnician(technicianId: string): Promise<WorkOpportunityListItem[]> {
+    return this.dataSource.query<WorkOpportunityListItem[]>(
+      `SELECT wo.*, o.order_number, s.name_ar AS service_name_ar, o.problem_description, a.street_name, o.scheduled_at,
+              leader_u.full_name AS team_leader_name
+       FROM technician_work_opportunities wo
+       JOIN orders o ON o.id = wo.order_id
+       JOIN services s ON s.id = o.service_id
+       JOIN addresses a ON a.id = o.address_id
+       LEFT JOIN technician_profiles leader_tp ON leader_tp.id = o.technician_id
+       LEFT JOIN users leader_u ON leader_u.id = leader_tp.user_id
+       WHERE wo.technician_id = $1 AND wo.status = 'offered' AND wo.deleted_at IS NULL AND wo.context = 'crew_recruit'
        ORDER BY wo.offered_at DESC`,
       [technicianId],
     );

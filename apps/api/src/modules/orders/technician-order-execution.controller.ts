@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -23,7 +23,7 @@ import { toRecruitCandidateResponseDto } from './dto/recruit-candidate-response.
 import { BookingMode, Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
-import { OrderTeamService } from './order-team.service';
+import { CrewRole, OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 
@@ -64,8 +64,10 @@ export class TechnicianOrderExecutionController {
       return base;
     }
     if (order.technicianId === viewerProfileId) {
-      const { shortage, needed } = await this.orderTeamService.getShortageForOrder(order.id, order.requiredTechnicians);
-      return { ...base, team_shortage: shortage, team_members_needed: needed };
+      // docs/08 §35، ADR-0021 §1 — crew_status موحّد (فني/مساعد منفصلين) بدل team_shortage/
+      // team_members_needed القديمين (كانوا بيتجاهلوا required_assistants تمامًا).
+      const crewStatus = await this.orderTeamService.getCrewComposition(order.id, order);
+      return { ...base, crew_status: crewStatus };
     }
     if (order.technicianId) {
       const leader = await this.techniciansService.findContactInfoOrThrow(order.technicianId);
@@ -112,14 +114,19 @@ export class TechnicianOrderExecutionController {
     return this.toDtoWithTeamInfo(order, profile.id);
   }
 
-  /** مرشّحين للتجنيد الذاتي (docs/08 §31) — القائد بس (listRecruitCandidates بتفحص الملكية داخلها). */
+  /** مرشّحين للتجنيد (docs/08 §31/§35) — القائد بس (listRecruitCandidates بتفحص الملكية داخلها).
+   * `role` إجباري (technician/assistant) — أي دور محتاج يكمّله القائد دلوقتي. */
   @Get(':id/recruit-candidates')
-  async listRecruitCandidates(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    const candidates = await this.orderTeamService.listRecruitCandidates(user.sub, id);
+  async listRecruitCandidates(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('role') role: CrewRole = 'technician',
+  ) {
+    const candidates = await this.orderTeamService.listRecruitCandidates(user.sub, id, role === 'assistant' ? 'assistant' : 'technician');
     return candidates.map(toRecruitCandidateResponseDto);
   }
 
-  /** تجنيد فوري بلا موافقة من المُضاف (docs/08 §31) — نفس فلسفة addMember() بالظبط. */
+  /** تجنيد (docs/08 §31/§35) — LIGHT بيتضاف فورًا، MEANINGFUL/HEAVY بيتعرضله فرصة اختيارية بدل تحميل صامت. */
   @Post(':id/recruit-candidates/:technicianId')
   @HttpCode(HttpStatus.OK)
   async recruitTeamMember(
@@ -128,9 +135,33 @@ export class TechnicianOrderExecutionController {
     @Param('technicianId', ParseUUIDPipe) technicianId: string,
     @Body() dto: RecruitTeamMemberDto,
   ) {
-    await this.orderTeamService.recruitMember(user.sub, id, technicianId, dto.role_label);
+    const outcome = await this.orderTeamService.recruitMember(user.sub, id, technicianId, dto.role === 'assistant' ? 'assistant' : 'technician', dto.role_label);
+    if (outcome.status === 'offer_sent') {
+      return { status: outcome.status, opportunity_id: outcome.opportunityId, capacity_tier: outcome.capacityTier };
+    }
     const items = (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
-    return { items };
+    return { status: outcome.status, items };
+  }
+
+  /** فرص تجنيد الفريق المفتوحة للفني الحالي (docs/08 §35) — منفصلة عن /work-opportunities العادية
+   * (matching module) عشان أثر القبول مختلف جوهريًا (ينضم كعضو، مش يبقى قائد). */
+  @Get('work-opportunities/crew')
+  listCrewOpportunities(@CurrentUser() user: JwtPayload) {
+    return this.orderTeamService.listCrewOpportunitiesForUser(user.sub);
+  }
+
+  @Post('work-opportunities/:opportunityId/accept-crew')
+  @HttpCode(HttpStatus.OK)
+  async acceptCrewOpportunity(@CurrentUser() user: JwtPayload, @Param('opportunityId', ParseUUIDPipe) opportunityId: string) {
+    const items = await this.orderTeamService.acceptCrewOpportunity(user.sub, opportunityId);
+    return { items: items.map(toTeamMemberResponseDto) };
+  }
+
+  @Post('work-opportunities/:opportunityId/decline-crew')
+  @HttpCode(HttpStatus.OK)
+  async declineCrewOpportunity(@CurrentUser() user: JwtPayload, @Param('opportunityId', ParseUUIDPipe) opportunityId: string) {
+    await this.orderTeamService.declineCrewOpportunity(user.sub, opportunityId);
+    return null;
   }
 
   // سياسة إلغاء الفني (docs/10) — استشاري بس، الواجهة بتستخدمه قبل ما تعرض زرار "إلغاء" أصلاً.
