@@ -4530,3 +4530,49 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
   676/676 اختبار**، صفر ريجريشن.
 - **لسه فاضل من §35**: 35.9 (مركز عمليات فئة — بيستهلك `TechnicianActivityService.
   getActivitySnapshot()` دلوقتي)، 35.11-35.20.
+
+### 35.8 — إغلاق §35.9: مركز عمليات فئة — "Admin → Technicians → كهرباء"
+
+منفَّذ حسب `ADR-0021` §5 — راجع
+`apps/api/src/modules/technicians/admin-technician-category-ops.service.ts` للتفاصيل التقنية
+الكاملة. ملخص:
+
+- **`AdminTechnicianCategoryOpsService.list()`** — مجمّع العرض الكامل لفئة (`GET /admin/
+  technicians/by-category?category_id=...`)، مُصفّح (`page`/`per_page`، `LIMIT`/`OFFSET` حقيقي +
+  `COUNT(*) OVER()` للعدد الكلي) وقابل للفلترة (`verification_status`، `level`). عضوية الفئة بتشمل
+  الفنيين `pending` كمان (مش بس `approved`) — طلب المالك الصريح "approved/pending" في نفس الشاشة.
+- **حالات غنية حقيقية لكل صف** (صفر رقم مُلفَّق، كلها من مصادر حقيقة موجودة):
+  - `online`/`last_active_at` — `TechnicianActivityService` (§35.10) مباشرة.
+  - `working_now` — استعلام batch واحد على `orders.order_status = ANY(ACTIVE_TECHNICIAN_ORDER_STATUSES)`.
+  - `capacity_tier_today` — `classifyTechnicianCapacity()` (نفس دالة §34.1/§35.7)، نداء واحد **لكل
+    فني في الصفحة بس** (محدود بحجم الصفحة، مش سكان لمجمّع الفنيين كله).
+  - `open_requests_count` — `order_assignments` (`sent`) + `technician_work_opportunities`
+    (`offered`) مجمّعين، استعلام واحد.
+  - `crew_leader_shortage_count` — عدد طلبات الفريق اللي هو قائدها وطاقمها لسه ناقص (نفس منطق
+    `computeCrewComposition()`، بس كعدّاد مجمّع لدفعة قادة مش لطلب واحد).
+  - `crew_recruit_open_offers_count` — `technician_work_opportunities context='crew_recruit'
+    status='offered'`.
+  - `zone_count`/`category_count` → `has_zone_issue`/`has_category_issue` — تنبيه تشغيلي "الفني ده
+    أصلاً مش هياخد أي طلب" (صفر نطاقات أو صفر فئات مفعّلة).
+- **قيد أداء متعمّد وموثّق**: مفيش فلتر `online_only` على مستوى الترقيم — `online` in-memory محلية
+  (`RealtimeSessionRegistry`)، فلترتها قبل `LIMIT`/`OFFSET` هتحتاج جلب المجمّع كله وفلترته في
+  التطبيق (بالظبط النمط اللي المالك حذّر منه صراحة "avoid expensive synchronous diagnostics at
+  scale"). الأدمن يشوف `online` في كل صف بدل كده.
+- **Endpoint جديد**: `GET /admin/technicians/by-category` — مسجّل **قبل** `GET :id` عمدًا في
+  الكونترولر (وإلا NestJS هيحاول يفسّر `by-category` كـUUID — نفس فخ ترتيب routes الموثّق في
+  `matching.module.ts` من سيشنز سابقة). قراءة/تشخيص بس، صفر صلاحية إضافية.
+- **اختبارات حية جديدة** (`admin-technician-category-ops.spec.ts`، 3/3): كل الحالات الغنية
+  بتتحسب صح ومستقلة عن بعضها (فني أونلاين+طلب مفتوح+قائد طاقم ناقص، فني بلا نطاق+عرض انضمام
+  مفتوح، فني محظور اليوم+شغال دلوقتي، فني pending)، فلتر `verification_status`، وترقيم صفحات
+  حقيقي (`LIMIT`/`OFFSET` + عدد كلي صحيح).
+- **التحقق النهائي**: `tsc --noEmit`/`nest build` نضاف، smoke-boot كامل للتطبيق نجح (تأكيد ترتيب
+  الـroutes صح). `npx jest` الكامل (متوازي): 120 suite، 2 فشل ظاهر — الاتنين في موديولات مالهاش أي
+  علاقة بتعديلات §35.9 (`payments`/`matching`، مش `technicians`): `matching-technician-category
+  -eligibility.spec.ts` (تصادم رقم تليفون تحت `randomUUID().slice(0,12)` مقصوص لـ14 حرف) اتأكّدت
+  فلاكة بإعادة تشغيل `--runInBand` منفردة (3/3 نجحوا)؛ `financial-reconciliation.e2e.spec.ts` نفس
+  فئة الفلاكة الموثّقة سابقًا في المشروع (محفظة منصة مشتركة بتتراكم عبر تشغيل متوازي عبر شهور).
+  صفر ريجريشن حقيقي من §35.9 — 3/3 اختبارات `admin-technician-category-ops.spec.ts` الجديدة نجحت
+  في نفس التشغيل الكامل.
+- **لسه فاضل من §35**: 35.11-35.20 (بروفايل فني 360، تنبيهات، توزيع، تايم لاين، بروفايل عميل،
+  كارت طاقم الطلب، إشعارات إكمال الفريق، RBAC/audit شامل، أمان التزامن، اختبارات السيناريوهات
+  الكاملة A-L، تحقق E2E حي، الإغلاق النهائي).

@@ -612,3 +612,16 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 `online`/`last_active_at` جداد في `AdminTechnicianDetailResponseDto` (`GET /admin/technicians/:id`
 بس — مش الـ8 endpoints التانية اللي بترجّع الرد المختصر بعد أفعال إدارية)، منفصلين تمامًا عن
 `is_available`/`is_on_duty` القديمين (اتشالوا من الأهلية بالكامل من ADR-0017 — مفيش خلط بينهم).
+
+## مركز عمليات فئة (docs/08 §35.9، ADR-0021 §5)
+
+`AdminTechnicianCategoryOpsService.list()` — `GET /admin/technicians/by-category?category_id=...`
+(مسجّل قبل `GET :id` عمدًا، وإلا NestJS يفسّر `by-category` كـUUID). مُصفّح (`LIMIT`/`OFFSET` +
+`COUNT(*) OVER()`)، عضوية الفئة بتشمل `pending` كمان مش بس `approved`. حالات غنية لكل صف —
+`online`/`last_active_at` (§35.10)، `working_now` (طلب نشط دلوقتي)، `capacity_tier_today`
+(`classifyTechnicianCapacity()`، محدود بحجم الصفحة بس)، `open_requests_count`
+(`order_assignments`+`technician_work_opportunities`)، `crew_leader_shortage_count`/
+`crew_recruit_open_offers_count` (تورط نقص الطاقم)، `has_zone_issue`/`has_category_issue` (تنبيه
+تشغيلي: صفر نطاقات/فئات مفعّلة). **قيد متعمّد**: مفيش فلتر `online_only` على مستوى الترقيم —
+`online` in-memory محلية، فلترتها قبل `LIMIT`/`OFFSET` هتحتاج جلب المجمّع كله (بالظبط النمط اللي
+المالك حذّر منه "avoid expensive synchronous diagnostics at scale").

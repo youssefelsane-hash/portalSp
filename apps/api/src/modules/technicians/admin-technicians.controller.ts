@@ -32,6 +32,8 @@ import { TechnicianCapacityQueryDto } from './dto/technician-capacity-query.dto'
 import { describeTechnicianCapacity } from './technician-eligibility.sql';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianActivityService } from './technician-activity.service';
+import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
+import { ListCategoryOpsQueryDto } from './dto/list-category-ops-query.dto';
 
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
@@ -44,6 +46,7 @@ export class AdminTechniciansController {
     private readonly technicianCategoriesService: TechnicianCategoriesService,
     private readonly settingsService: SettingsService,
     private readonly technicianActivityService: TechnicianActivityService,
+    private readonly categoryOpsService: AdminTechnicianCategoryOpsService,
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
@@ -52,6 +55,43 @@ export class AdminTechniciansController {
   async list(@Query() query: ListTechniciansQueryDto) {
     const { items, meta } = await this.adminTechniciansService.list(query);
     return { items: items.map(({ profile, user }) => toAdminTechnicianResponseDto(profile, user)), meta };
+  }
+
+  // مركز عمليات فئة (docs/08 §35.9، ADR-0021 §5) — "Admin → Technicians → كهرباء". مسجّل قبل
+  // GET :id عمدًا (لازم يسبقها في تسجيل الـroutes، وإلا NestJS هيحاول يفسّر "by-category" كـUUID
+  // لـ:id — بَقّة ترتيب routes معروفة سابقًا في المشروع، راجع matching.module.ts للسياق الكامل).
+  // بلا RequirePermission مخصوصة — عرض/تشخيص بس، نفس مستوى GET :id العادي.
+  @Get('by-category')
+  async listByCategory(@Query() query: ListCategoryOpsQueryDto) {
+    const { items, meta } = await this.categoryOpsService.list({
+      categoryId: query.category_id,
+      verificationStatus: query.verification_status,
+      level: query.level,
+      page: query.page ?? 1,
+      perPage: query.per_page ?? 20,
+    });
+    return {
+      items: items.map((r) => ({
+        id: r.id,
+        technician_code: r.technicianCode,
+        full_name: r.fullName,
+        phone_number: r.phoneNumber,
+        verification_status: r.verificationStatus,
+        current_level: r.currentLevel,
+        online: r.online,
+        last_active_at: r.lastActiveAt ? r.lastActiveAt.toISOString() : null,
+        working_now: r.workingNow,
+        capacity_tier_today: r.capacityTierToday,
+        open_requests_count: r.openRequestsCount,
+        crew_leader_shortage_count: r.crewLeaderShortageCount,
+        crew_recruit_open_offers_count: r.crewRecruitOpenOffersCount,
+        zone_count: r.zoneCount,
+        category_count: r.categoryCount,
+        has_zone_issue: r.hasZoneIssue,
+        has_category_issue: r.hasCategoryIssue,
+      })),
+      meta: { page: meta.page, per_page: meta.perPage, total: meta.total },
+    };
   }
 
   // معاينة القدرة الاستيعابية ليوم بعينه (docs/08 §34.4، ADR-0020 §W) — "الفني ده متاح إمتى ولية؟"
