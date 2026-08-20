@@ -21,6 +21,7 @@ import { TechniciansModule } from './modules/technicians/technicians.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { OperationsModule } from './modules/operations/operations.module';
 import { AssistantMatchingModule } from './modules/assistant-matching/assistant-matching.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { InternalChatModule } from './modules/internal-chat/internal-chat.module';
@@ -96,6 +97,9 @@ import { SecurityModule } from './modules/security/security.module';
     // /technician/orders/:id (في OrdersModule) وإلا الـ ParseUUIDPipe بترفض "available" كـ id غلط.
     MatchingModule,
     OrdersModule,
+    // مركز العمليات (docs/08 §36.2 فصاعدًا) — موديول مستقل، صفر تعارض ترتيب مسارات (بادئة
+    // admin/operations خاصة بيه بالكامل).
+    OperationsModule,
     // مكانها هنا تنظيمي بس — بتسمع ORDER_ACCEPTED_EVENT عبر EventEmitter2 العالمي، مفيش أي
     // كوبلينج فعلي على ترتيب التحميل زي تحذير matching.module.ts.
     AssistantMatchingModule,

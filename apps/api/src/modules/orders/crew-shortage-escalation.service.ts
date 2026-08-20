@@ -14,7 +14,9 @@ const SWEEP_BATCH_SIZE = 25;
 const ESCALATION_HOURS_BEFORE_FALLBACK = 24;
 // طلبات الفريق قبل ما تبدأ التنفيذ فعليًا (IN_PROGRESS ممنوع أصلاً لو الطاقم ناقص — بوابة §35.1) —
 // نطاق الحالات اللي "نقص الطاقم" فيها معنى عملي حقيقي (قائد اتعيّن، طاقم لسه بيتجمّع).
-const ESCALATABLE_STATUSES = [
+// مُصدَّرة (مش local بس) عشان AdminOperationsOverviewService (docs/08 §36.2) تعيد استخدامها
+// بالظبط بدل ما تكرّر نفس القائمة — "نقص الطاقم لسه مفتوح تشغيليًا" لازم يفضل تعريف واحد.
+export const ESCALATABLE_STATUSES = [
   OrderStatus.TECHNICIAN_ASSIGNED,
   OrderStatus.ACCEPTED,
   OrderStatus.TECHNICIAN_ON_WAY,
