@@ -64,10 +64,21 @@ const BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK = 4;
 // (ACTIVE_TECHNICIAN_ORDER_STATUSES) عند الفني — مش استبدال لترتيب المستوى/المسافة، إضافة ليه
 // (راجع findEligibleTechnicians تحت للتفصيل الكامل).
 const WORKLOAD_BALANCE_WEIGHT_FALLBACK = 2;
+// نموذج العدالة بالتاريخ الحديث (docs/08 §34.2، ADR-0020 §6) — إضافة فوق موازنة الحِمل الحالي
+// الموجودة (workload_balance_weight)، مش بديلة ليها: دي بتقيس "مشغول دلوقتي"، دي بتقيس "خد شغل
+// كتير الأسبوع اللي فات حتى لو فاضي دلوقتي". افتراضي معطّل تمامًا (fairness_weight=0) — مفعّل
+// بس لما الأدمن يزوّد القيمة من /admin/settings بلا أي كود.
+const FAIRNESS_LOOKBACK_DAYS_FALLBACK = 7;
+const FAIRNESS_WEIGHT_FALLBACK = 0;
+const FAIRNESS_DECLINE_WEIGHT_FALLBACK = 0.5;
+// كسر التعادل بين مرشحين متقاربين جدًا في الترتيب (docs/08 §34.2، ADR-0020 §6، بند T من رسالة
+// المالك — "avoid permanent deterministic winners"). افتراضي معطّل (0 = مفيش نطاق تعادل خالص).
+const TIE_BREAK_THRESHOLD_FALLBACK = 0;
 
 interface EligibleTechnicianRow {
   technician_id: string;
   distance_km: string;
+  rank_score: string;
 }
 
 export interface AvailableOrderRow {
@@ -171,10 +182,24 @@ export class MatchingService {
       'matching.workload_balance_weight',
       WORKLOAD_BALANCE_WEIGHT_FALLBACK,
     );
-    return this.dataSource.query<EligibleTechnicianRow[]>(
+    const fairnessLookbackDays = await this.settingsService.getNumber(
+      'matching.fairness_lookback_days',
+      FAIRNESS_LOOKBACK_DAYS_FALLBACK,
+    );
+    const fairnessWeight = await this.settingsService.getNumber('matching.fairness_weight', FAIRNESS_WEIGHT_FALLBACK);
+    const fairnessDeclineWeight = await this.settingsService.getNumber(
+      'matching.fairness_decline_weight',
+      FAIRNESS_DECLINE_WEIGHT_FALLBACK,
+    );
+    const candidates = await this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km,
+             (
+               COALESCE(tlc.order_priority_weight, 0)
+               - COALESCE(workload.active_count, 0) * $14::int
+               - COALESCE(fairness.recent_effective_workload, 0) * $15::numeric
+             ) AS rank_score
       FROM technician_profiles tp
       -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة (ts) OR فئة
       -- الخدمة معتمدة (technician_categories، شرط الـEXISTS تحت في WHERE)" — فني معتمد بمستوى
@@ -196,6 +221,21 @@ export class MatchingService {
           AND wo.order_status = ANY($6::order_status[])
           AND wo.deleted_at IS NULL
       ) workload ON true
+      -- docs/08 §34.2، ADR-0020 §6 — "توزيع حديث": عدد الطلبات اللي اتأكدت للفني في نافذة الأيام
+      -- الأخيرة (لازم technician_id + assigned_at، مش بس "نشط دلوقتي" زي workload فوق) + الفرص
+      -- المرفوضة الحديثة (order_assignments المرفوضة + technician_work_opportunities المرفوضة)
+      -- بوزن أخف (fairness_decline_weight) — رفض الفرصة مش عقاب كامل، بس مش بلا أثر خالص برضه
+      -- (منع فني من الحفاظ على أفضلية "مش شغال" مصطنعة برفض كل حاجة تتعرض عليه).
+      LEFT JOIN LATERAL (
+        SELECT
+          (
+            (SELECT COUNT(*) FROM orders ro WHERE ro.technician_id = tp.id AND ro.assigned_at >= now() - ($16 || ' days')::interval AND ro.deleted_at IS NULL)
+            + $17::numeric * (
+              (SELECT COUNT(*) FROM order_assignments roa WHERE roa.technician_id = tp.id AND roa.assignment_status = 'rejected' AND roa.sent_at >= now() - ($16 || ' days')::interval)
+              + (SELECT COUNT(*) FROM technician_work_opportunities rwo WHERE rwo.technician_id = tp.id AND rwo.status = 'declined' AND rwo.offered_at >= now() - ($16 || ' days')::interval AND rwo.deleted_at IS NULL)
+            )
+          ) AS recent_effective_workload
+      ) fairness ON true
       WHERE tp.verification_status = 'approved'
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
         -- بمستوى الفئة كلها (technician_categories).
@@ -229,7 +269,7 @@ export class MatchingService {
           fullDayThresholdMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
-      ORDER BY (COALESCE(tlc.order_priority_weight, 0) - COALESCE(workload.active_count, 0) * $14::int) DESC,
+      ORDER BY rank_score DESC,
                distance_km ASC
       LIMIT $5
       `,
@@ -248,8 +288,45 @@ export class MatchingService {
         order.bookingMode === BookingMode.EMERGENCY,
         fullDayJobMinutes,
         workloadBalanceWeight,
+        fairnessWeight,
+        String(fairnessLookbackDays),
+        fairnessDeclineWeight,
       ],
     );
+    const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);
+    return this.applyTieBreak(candidates, tieBreakThreshold);
+  }
+
+  /**
+   * كسر التعادل بين مرشّحين متقاربين (docs/08 §34.2، ADR-0020 §6، بند T من رسالة المالك — "avoid
+   * permanent deterministic winners"). لو الفرق بين أعلى `rank_score` ومرشّحين تانيين أقل من
+   * `threshold`، دول بيُعتبروا "متعادلين" — بدل ترتيب حتمي صارم بينهم، تشويش عشوائي موزون
+   * (الأقرب لأعلى نتيجة وزنه أعلى — نفس فلسفة exponential/weighted sampling، مش عشوائية خام
+   * غير مفسَّرة: النتائج الخام نفسها لسه محفوظة، الأدمن يقدر يشوفها). `threshold <= 0` (الافتراضي)
+   * = تعطيل كامل، الترتيب الحتمي زي ما هو بالحرف.
+   */
+  private applyTieBreak(candidates: EligibleTechnicianRow[], threshold: number): EligibleTechnicianRow[] {
+    if (threshold <= 0 || candidates.length < 2) return candidates;
+
+    const maxScore = Number(candidates[0].rank_score);
+    const tieEndIndex = candidates.findIndex((c) => maxScore - Number(c.rank_score) > threshold);
+    const tieBandSize = tieEndIndex === -1 ? candidates.length : tieEndIndex;
+    if (tieBandSize < 2) return candidates;
+
+    const tieBand = candidates.slice(0, tieBandSize);
+    const rest = candidates.slice(tieBandSize);
+    const shuffled = tieBand
+      .map((candidate) => {
+        const weight = 1 / (1 + (maxScore - Number(candidate.rank_score)));
+        // مفتاح عشوائي موزون (exponential sampling) — احتمالية الظهور الأول بتتناسب مع الوزن،
+        // بلا الحاجة لخوارزمية reservoir كاملة (الدفعة هنا صغيرة أصلاً، batch_size محدود).
+        const key = -Math.log(Math.random()) / weight;
+        return { candidate, key };
+      })
+      .sort((a, b) => a.key - b.key)
+      .map((entry) => entry.candidate);
+
+    return [...shuffled, ...rest];
   }
 
   /**
