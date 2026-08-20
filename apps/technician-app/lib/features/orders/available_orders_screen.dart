@@ -51,6 +51,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // اليوم لسه بيتعرضله فرصة، بس قبول/رفض صريح بدل تأكيد تلقائي صامت. منفصلة تمامًا عن _orders
   // فوق (طوارئ، order_assignments) — عرض مختلف، ومسار موافقة مختلف بالكامل في الباك-إند.
   List<WorkOpportunity>? _workOpportunities;
+  // دعوات انضمام لفريق (docs/08 §35، ADR-0021 §2) — منفصلة عن _workOpportunities فوق: القبول هنا
+  // معناه "انضم كعضو تحت قائد موجود بالفعل"، مش "بقى قائد الطلب".
+  List<CrewOpportunity>? _crewOpportunities;
   Order? _activeOrder;
   String? _error;
   bool _isActing = false;
@@ -152,6 +155,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     }
     await _loadTeamAssigned();
     await _loadWorkOpportunities();
+    await _loadCrewOpportunities();
   }
 
   // فشل التحميل (مشكلة شبكة عابرة) مايمنعش بقية الشاشة تشتغل — نفس فلسفة _loadTeamMembersIfApplicable
@@ -201,6 +205,41 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       await _repository.declineWorkOpportunity(opportunity.id);
       await _loadWorkOpportunities();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  Future<void> _loadCrewOpportunities() async {
+    try {
+      final invites = await _repository.fetchCrewOpportunities();
+      if (mounted) setState(() => _crewOpportunities = invites);
+    } catch (_) {
+      // تجاهل — نفس فلسفة _loadTeamAssigned فوق.
+    }
+  }
+
+  Future<void> _acceptCrewOpportunity(CrewOpportunity invite) async {
+    setState(() => _isActing = true);
+    try {
+      await _repository.acceptCrewOpportunity(invite.id);
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      // ممكن تكون اتقفلت من مكان تاني (العدد المطلوب اكتمل قبل ما توصل) — نحدّث القايمة عشان تختفي.
+      await _loadCrewOpportunities();
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  Future<void> _declineCrewOpportunity(CrewOpportunity invite) async {
+    setState(() => _isActing = true);
+    try {
+      await _repository.declineCrewOpportunity(invite.id);
+      await _loadCrewOpportunities();
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
@@ -348,8 +387,14 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final upcoming = _upcomingOrders ?? const <Order>[];
     final teamAssigned = _teamAssignedOrders ?? const <Order>[];
     final workOpportunities = _workOpportunities ?? const <WorkOpportunity>[];
+    final crewOpportunities = _crewOpportunities ?? const <CrewOpportunity>[];
 
-    if (!hasActive && pending.isEmpty && upcoming.isEmpty && teamAssigned.isEmpty && workOpportunities.isEmpty) {
+    if (!hasActive &&
+        pending.isEmpty &&
+        upcoming.isEmpty &&
+        teamAssigned.isEmpty &&
+        workOpportunities.isEmpty &&
+        crewOpportunities.isEmpty) {
       return ListView(
         children: [
           const SizedBox(height: 60),
@@ -417,6 +462,31 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               busy: _isActing,
               onAccept: () => _acceptWorkOpportunity(opportunity),
               onDecline: () => _declineWorkOpportunity(opportunity),
+            ),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 8),
+        ],
+        // دعوات انضمام لفريق (docs/08 §35، ADR-0021 §2) — قسم منفصل بصريًا عن فرص الشغل الإضافي
+        // فوق: هنا القائد بيدعوك تنضم تحته، مش عرض عادي من محرك المطابقة.
+        if (crewOpportunities.isNotEmpty) ...[
+          Row(
+            children: [
+              const Icon(Icons.group_add_outlined, size: 18, color: Colors.deepPurple),
+              const SizedBox(width: 6),
+              Text(
+                'دعوات انضمام لفريق',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final invite in crewOpportunities) ...[
+            _CrewOpportunityCard(
+              invite: invite,
+              busy: _isActing,
+              onAccept: () => _acceptCrewOpportunity(invite),
+              onDecline: () => _declineCrewOpportunity(invite),
             ),
             const SizedBox(height: 8),
           ],
@@ -604,6 +674,66 @@ class _WorkOpportunityCard extends StatelessWidget {
             Row(
               children: [
                 FilledButton(onPressed: busy ? null : onAccept, child: const Text('قبول')),
+                const SizedBox(width: 8),
+                OutlinedButton(onPressed: busy ? null : onDecline, child: const Text('رفض')),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// دعوة انضمام لفريق (docs/08 §35، ADR-0021 §2) — الفرق الجوهري عن _WorkOpportunityCard فوق: هنا
+// قائد فريق حقيقي بيدعوك تنضم تحته (مش محرك المطابقة بيعرض عليك تبقى قائد)، والقبول معناه "انضم
+// كعضو" مش "بقى مسؤول الطلب". لون مختلف (بنفسجي بدل أزرق المعلومات) عشان الفرق يبان بصريًا فورًا.
+class _CrewOpportunityCard extends StatelessWidget {
+  const _CrewOpportunityCard({
+    required this.invite,
+    required this.busy,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  final CrewOpportunity invite;
+  final bool busy;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  @override
+  Widget build(BuildContext context) {
+    final roleLabel = crewRoleLabelsAr[invite.crewRole] ?? invite.crewRole;
+    return Card(
+      color: Colors.deepPurple.withValues(alpha: 0.06),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.group_add_outlined, size: 16, color: Colors.deepPurple),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    invite.teamLeaderName != null
+                        ? 'قائد الفريق ${invite.teamLeaderName} بيدعوك تنضم كـ$roleLabel'
+                        : 'دعوة انضمام كـ$roleLabel',
+                    style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(invite.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(invite.streetName),
+            if (invite.problemDescription != null) Text(invite.problemDescription!),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                FilledButton(onPressed: busy ? null : onAccept, child: const Text('انضم')),
                 const SizedBox(width: 8),
                 OutlinedButton(onPressed: busy ? null : onDecline, child: const Text('رفض')),
               ],
