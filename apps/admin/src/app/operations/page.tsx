@@ -8,7 +8,6 @@ import type {
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
   OperationsOverview,
-  TechnicianCapacityTier,
   WorkloadForecastRowDto,
 } from '@baytak/shared-types';
 import { AlertTriangle, ClipboardList, Radio, Users } from 'lucide-react';
@@ -25,7 +24,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
-import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
+import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, CAPACITY_TIER_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
 
 function KpiCard({
   title,
@@ -79,22 +78,6 @@ function CapacityTierRow({ label, value, tone }: { label: string; value: number;
     </div>
   );
 }
-
-function capacityTierBadgeClass(tier: TechnicianCapacityTier): string {
-  // نفس نغمات CapacityTierRow فوق ونفس نمط الشارة الموجود بالفعل في apps/admin/src/app/page.tsx
-  // (bg-{tone}-bg text-{tone}) — لغة بصرية موحّدة (docs/08 §36.3، تمهيدًا لـ§36.14).
-  if (tier === 'LIGHT') return 'border-transparent bg-success-bg text-success';
-  if (tier === 'MEANINGFUL') return 'border-transparent bg-muted text-muted-foreground';
-  if (tier === 'HEAVY') return 'border-transparent bg-warning-bg text-warning';
-  return 'border-transparent bg-danger-bg text-danger';
-}
-
-const CAPACITY_TIER_LABELS: Record<TechnicianCapacityTier, string> = {
-  LIGHT: 'خفيف',
-  MEANINGFUL: 'متوسط',
-  HEAVY: 'مشغول',
-  BLOCKED: 'محظور',
-};
 
 function verificationBadgeVariant(status: AdminCategoryOpsRowDto['verification_status']) {
   if (status === 'approved') return 'secondary' as const;

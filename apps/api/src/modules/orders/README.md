@@ -1134,3 +1134,24 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 (داخل اختبار `recruitMember — فني MEANINGFUL/HEAVY` الموجود) بيتأكد الحدث بيتصدّر مرة واحدة بس حتى
 لو نفس الفني اتنادى عليه تاني (idempotent). تفاصيل السبب الجذري الكامل والتحقيق في
 `docs/08-pricing-engine-and-platform-vision.md` §36.1.
+
+## مفتّش المطابقة في صفحة تفاصيل الطلب (docs/08 §36.5)
+
+**صفر endpoint جديد**: قسم `apps/admin/src/app/orders/[id]/page.tsx` (كارت "مفتّش المطابقة")
+بيستهلك endpoint-ين موجودين بالفعل في `admin-orders.controller.ts` من §35.7/§35.8
+(`GET :id/matching-funnel`، `GET :id/technicians/:technicianId/explain`) — مكانوش مستخدَمين في أي
+واجهة أدمن خالص قبل كده رغم وجودهم في الباك-إند من قبل. `matchingFunnel` بيتحمّل تلقائيًا مع باقي
+مصادر الصفحة (مسار منفصل، فشل هادئ متوقّع 400 لطلبات بلا `service_zone_id`). فورم "ليه/ليه لأ؟"
+بيستخدم `eligibleReassignTechnicians` الموجود بالفعل (مصدر فنيين نفس نطاق/فئة الطلب، §ADR-0017
+بند 4) بدل تكرار قايمة فنيين جديدة.
+
+**ملحوظة تسمية حقيقية اتوثّقت في `packages/shared-types/src/matching-explainability.ts`**:
+`crew_status` (من كل الـendpoint-ين) بيرجّع كائن `CrewComposition` من `order-team.service.ts`
+مباشرة من غير أي تحويل تسمية — يعني حقوله الداخلية **camelCase** (`requiredTechnicians`...)، عكس
+باقي الحقول في الاستجابة اللي `snake_case`. سلوك حقيقي موجود بالفعل في الكود (مش اختراع)، موثّق
+صراحة عشان أي استهلاك جديد للـendpoint ده يعرف الفرق.
+
+**تحقق حي (curl + JWT حقيقي بنفس سر `.env`، ضد Postgres/طلب حقيقيين)**: الاتنين رجّعوا شكل مطابق
+تمامًا لـDTOs الجديدة — `matching-funnel` رجّع `pool`/`dispatch_assignments` صح لطلب حقيقي مُلغى،
+`explain` رجّع 8 checks + `capacity_tier`/`distance_km` صح لفني حقيقي. `apps/admin`: `next build`
+كامل نضاف صفر أخطاء.
