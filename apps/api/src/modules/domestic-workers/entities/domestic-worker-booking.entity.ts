@@ -8,6 +8,9 @@ export enum DomesticWorkerBookingType {
 
 export enum DomesticWorkerBookingStatus {
   PENDING_CONFIRMATION = 'pending_confirmation',
+  // الشغالة وافقت (بلا أي تحصيل — docs/adr/0019) لكن دفع InstaPay لسه معلّق تأكيده إداريًا.
+  // مضافة في migration 0149.
+  AWAITING_PAYMENT = 'awaiting_payment',
   CONFIRMED = 'confirmed',
   ACTIVE = 'active',
   COMPLETED = 'completed',
@@ -51,6 +54,11 @@ export class DomesticWorkerBooking {
   @Column({ name: 'current_period_end_at', type: 'timestamptz', nullable: true })
   currentPeriodEndAt: Date | null;
 
+  // الفترة المستهدفة وقت ما الحجز/التجديد awaiting_payment — بتتحول لـcurrentPeriodEndAt بس لما
+  // InstaPay تتأكد إداريًا (شهري بس). مضافة في migration 0149 (docs/adr/0019).
+  @Column({ name: 'pending_period_end_at', type: 'timestamptz', nullable: true })
+  pendingPeriodEndAt: Date | null;
+
   @Column({ name: 'price_cents', type: 'integer' })
   priceCents: number;
 
@@ -65,6 +73,12 @@ export class DomesticWorkerBooking {
   @Column({ name: 'customer_notes', type: 'text', nullable: true })
   customerNotes: string | null;
 
+  // توقيت موافقة الشغالة الفعلي (status → AWAITING_PAYMENT). مضافة في migration 0149.
+  @Column({ name: 'accepted_at', type: 'timestamptz', nullable: true })
+  acceptedAt: Date | null;
+
+  // معناها بقى "الدفع اتأكد إداريًا عبر InstaPay" (إعادة تعريف دلالي، docs/adr/0019) — مش "الشغالة
+  // وافقت" زي قبل (ده بقى acceptedAt فوق). العمود نفسه موجود من migration 0066 الأصلية.
   @Column({ name: 'confirmed_at', type: 'timestamptz', nullable: true })
   confirmedAt: Date | null;
 

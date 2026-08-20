@@ -37,8 +37,10 @@ export class Payment {
   @Column({ name: 'payment_number', type: 'varchar', length: 24, unique: true })
   paymentNumber: string;
 
-  @Column({ name: 'order_id', type: 'uuid' })
-  orderId: string;
+  // NULL لو الدفعة دي لحجز خدمة منزلية بدل طلب — راجع domesticWorkerBookingId تحت. بالظبط واحد
+  // من الاتنين مش NULL (قيد CHECK في migration 0149، docs/adr/0019).
+  @Column({ name: 'order_id', type: 'uuid', nullable: true })
+  orderId: string | null;
 
   @Column({ name: 'customer_id', type: 'uuid' })
   customerId: string;
@@ -107,4 +109,9 @@ export class Payment {
   // للدفعات دي — الطلب لسه شغال، مش بيقفل).
   @Column({ name: 'order_item_batch_id', type: 'uuid', nullable: true })
   orderItemBatchId: string | null;
+
+  // إعادة استخدام تدفق InstaPay اليدوي الموجود لحجوزات الخدمات المنزلية بدل نظام دفع مواز
+  // (docs/adr/0019) — NULL لو الدفعة دي لطلب عادي. mutually exclusive مع orderId عبر CHECK.
+  @Column({ name: 'domestic_worker_booking_id', type: 'uuid', nullable: true })
+  domesticWorkerBookingId: string | null;
 }

@@ -1,13 +1,16 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, LessThanOrEqual, Repository } from 'typeorm';
+import { OnEvent } from '@nestjs/event-emitter';
+import { DataSource, LessThanOrEqual, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import {
+  DOMESTIC_WORKER_BOOKING_PAYMENT_CONFIRMED_EVENT,
+  DomesticWorkerBookingPaymentConfirmedEvent,
+} from '../../common/events/domestic-worker-booking-payment-confirmed.event';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
-import { CustomerProfile } from '../customers/entities/customer-profile.entity';
-import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
-import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
-import { WalletsService } from '../payments/wallets.service';
+import { Payment, PaymentGatewayStatus } from '../payments/entities/payment.entity';
+import { PaymentsService } from '../payments/payments.service';
 import { SettingsService } from '../settings/settings.service';
 import { CancelWorkerBookingDto } from './dto/cancel-worker-booking.dto';
 import { CreateWorkerBookingDto } from './dto/create-worker-booking.dto';
@@ -21,12 +24,16 @@ const COMMISSION_PERCENTAGE_FALLBACK = 15;
 const SWEEP_BATCH_SIZE = 25;
 
 /**
- * حجوزات قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — دفع حقيقي عبر WalletsService.doubleEntry
- * الموجودة (نفس آلية payWithWallet/settleAndComplete)، مش نظام دفع مواز مختلق.
+ * حجوزات قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — الدفع عبر تدفق InstaPay اليدوي الموجود
+ * فعلاً لطلبات orders، مُعاد استخدامه بالكامل عبر `PaymentsService` (docs/adr/0019، توجيه صريح من
+ * المالك 2026-08-20) — مش نظام دفع مواز مختلق. موافقة الشغالة (`confirm()`) مستقلة تمامًا عن
+ * الدفع؛ الحجز بينتقل لـ`awaiting_payment` وبعدين العميل بيدفع InstaPay، والأدمن بيأكّد/يرفض عبر
+ * نفس `POST /admin/payments/:id/confirm-instapay`/`reject-instapay` بتاعة الطلبات بالحرف.
  *
  * **التجديد الشهري التلقائي عبر فحص دوري (setInterval)، مش BullMQ** — نفس فلسفة
  * OrderAutoCancelService/RecurringOrdersService بالحرف (تفادي الاعتماد على Worker عنده بَقّة
- * recovery موثّقة بعد انقطاع Redis طويل).
+ * recovery موثّقة بعد انقطاع Redis طويل). بقى بيحوّل العقد لـ`awaiting_payment` بدل خصم صامت —
+ * تجديد شهري بقى محتاج نفس دورة الدفع اليدوي زي التأكيد الأول بالظبط.
  */
 @Injectable()
 export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDestroy {
@@ -41,7 +48,7 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     private readonly customerProfiles: CustomerProfilesService,
     private readonly addressesService: AddressesService,
     private readonly workersService: DomesticWorkersService,
-    private readonly walletsService: WalletsService,
+    private readonly paymentsService: PaymentsService,
     private readonly settingsService: SettingsService,
   ) {}
 
@@ -139,25 +146,35 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       .then((worker) => this.bookings.find({ where: { workerId: worker.id }, order: { createdAt: 'DESC' } }));
   }
 
+  /**
+   * ظهور الحجوزات للأدمن (docs/adr/0019 §6 — كل مرحلة لازم تبان للأدمن) — أهم استخدام: لقاء
+   * الحجوزات `awaiting_payment` عشان الأدمن يعرف يدوّر على دفعة InstaPay المرتبطة (عبر
+   * `payment.domestic_worker_booking_id`) ويأكّدها. **فجوة UI موثّقة صراحة**: مفيش صفحة Next.js
+   * في apps/admin لسه بتستهلك الـendpoint ده — راجع domestic-workers/README.md.
+   */
+  listForAdmin(status?: DomesticWorkerBookingStatus): Promise<DomesticWorkerBooking[]> {
+    return this.bookings.find({ where: status ? { status } : {}, order: { createdAt: 'DESC' } });
+  }
+
   private async commissionPercentage(): Promise<number> {
     return this.settingsService.getNumber('commission.domestic_worker_percentage', COMMISSION_PERCENTAGE_FALLBACK);
   }
 
   /**
-   * الشغالة/المربية بتأكّد الحجز → تحصيل السعر فورًا من محفظة العميل لمحفظة المنصة (زي
-   * payWithWallet بالظبط). **أرباح الشغالة نفسها متتحوّلش هنا خالص** (docs/08 §25.1، قرار مالك
-   * صريح 2026-08-15) — بالساعة بتدخل طابور الموافقة بعد `completeHourly()` (اكتمال الزيارة
-   * الفعلي)؛ شهري (مفيش إشارة "الشهر اتخدم" منفصلة عن التجديد في النظام الحالي) بتدخل الطابور هنا
-   * وفي كل تجديد (`tryRenew`) — بس برضه pending مش رصيد قابل للصرف فورًا، راجع
-   * DomesticWorkerEarningApprovalsService.approve() للمسار الوحيد اللي بيحرّك الفلوس فعليًا.
+   * الشغالة/المربية بتوافق على الحجز — **بلا أي تحصيل خالص** (توجيه صريح من المالك 2026-08-20،
+   * docs/adr/0019: "Worker acceptance must be independent from payment"). الحجز بينتقل لـ
+   * `awaiting_payment` بس؛ العميل هو اللي بيبدأ دفع InstaPay بعد كده
+   * (`PaymentsService.payDomesticWorkerBookingWithInstaPay`)، وتأكيد الدفع الإداري
+   * (`PaymentsService.confirmInstaPayPayment`) هو اللي بيحوّل الحجز فعليًا لـ`confirmed`/`active`.
+   * **بَقّة حقيقية كانت هنا واتصلحت**: كان بيحصّل السعر فورًا من محفظة العميل، ومفيش أي آلية شحن
+   * محفظة (top-up) في المنصة كلها — يعني أي عميل بلا رصيد سابق كان مستحيل يدفع تمامًا.
    */
   async confirm(userId: string, bookingId: string): Promise<DomesticWorkerBooking> {
-    const { booking, worker } = await this.findOwnedByWorkerOrThrow(userId, bookingId);
+    const { booking } = await this.findOwnedByWorkerOrThrow(userId, bookingId);
     if (booking.status !== DomesticWorkerBookingStatus.PENDING_CONFIRMATION) {
       throw new ApiException(ErrorCode.VAL_001, 'الحجز مش في حالة انتظار تأكيد', HttpStatus.CONFLICT);
     }
 
-    const split = await this.commissionSplit(booking.priceCents);
     return this.dataSource.transaction(async (manager) => {
       const lockedBooking = await manager
         .createQueryBuilder(DomesticWorkerBooking, 'booking')
@@ -167,29 +184,16 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       if (!lockedBooking || lockedBooking.status !== DomesticWorkerBookingStatus.PENDING_CONFIRMATION) {
         throw new ApiException(ErrorCode.VAL_001, 'الحجز مش في حالة انتظار تأكيد', HttpStatus.CONFLICT);
       }
-      const customerProfile = await manager.getRepository(CustomerProfile).findOne({ where: { id: lockedBooking.customerId } });
-      if (!customerProfile) {
-        throw new ApiException(ErrorCode.VAL_001, 'ملف العميل غير موجود', HttpStatus.NOT_FOUND);
-      }
 
       const now = new Date();
-      if (lockedBooking.bookingType === DomesticWorkerBookingType.HOURLY) {
-        await this.chargeCustomerInTransaction(manager, lockedBooking, customerProfile.userId);
-        lockedBooking.status = DomesticWorkerBookingStatus.CONFIRMED;
-      } else {
-        const periodEnd = addMonths(lockedBooking.scheduledAt.getTime() > now.getTime() ? lockedBooking.scheduledAt : now, 1);
-        await this.chargeCustomerAndCreatePendingEarningInTransaction(
-          manager,
-          lockedBooking,
-          customerProfile.userId,
-          worker.userId,
-          split.workerEarningCents,
-          `monthly:${periodEnd.toISOString()}`,
+      lockedBooking.status = DomesticWorkerBookingStatus.AWAITING_PAYMENT;
+      lockedBooking.acceptedAt = now;
+      if (lockedBooking.bookingType === DomesticWorkerBookingType.MONTHLY_LIVE_IN) {
+        lockedBooking.pendingPeriodEndAt = addMonths(
+          lockedBooking.scheduledAt.getTime() > now.getTime() ? lockedBooking.scheduledAt : now,
+          1,
         );
-        lockedBooking.status = DomesticWorkerBookingStatus.ACTIVE;
-        lockedBooking.currentPeriodEndAt = periodEnd;
       }
-      lockedBooking.confirmedAt = now;
       return manager.save(lockedBooking);
     });
   }
@@ -200,53 +204,52 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     return { platformCommissionCents, workerEarningCents: priceCents - platformCommissionCents };
   }
 
-  /** خصم من محفظة العميل لمحفظة المنصة بس — صفر تحويل لأي شغالة هنا. */
-  private async chargeCustomerInTransaction(
-    manager: EntityManager,
-    booking: DomesticWorkerBooking,
-    customerUserId: string,
-  ): Promise<void> {
-    const customerWallet = await this.walletsService.getOrCreateWallet(customerUserId, WalletOwnerType.CUSTOMER, manager);
-    const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
-    await this.walletsService.doubleEntry(
-      {
-        fromWalletId: customerWallet.id,
-        toWalletId: platformWallet.id,
-        amountCents: booking.priceCents,
-        transactionType: WalletTxType.ADJUSTMENT,
-        referenceType: 'domestic_worker_booking',
-        referenceId: booking.id,
-        descriptionAr: `دفع حجز خدمة منزلية ${booking.bookingNumber}`,
-      },
-      manager,
-    );
-  }
-
   /**
-   * خصم العميل + تسجيل استحقاق الشغالة كـ"pending" جوّه transaction واحدة (نفس درس البَقّة
-   * القديمة — الاتنين لازم يفشلوا أو ينجحوا مع بعض، مش نداءين منفصلين). صفر تحويل مباشر لمحفظة
-   * الشغالة هنا — بس صف طابور موافقة، راجع docs/08 §25.1.
+   * InstaPay اتأكدت إداريًا لحجز خدمة منزلية (`PaymentsService.confirmInstaPayPayment`، حدث
+   * `DOMESTIC_WORKER_BOOKING_PAYMENT_CONFIRMED_EVENT` — docs/adr/0019). بالساعة: مفيش حاجة تتعمل
+   * هنا — الاستحقاق لسه بيتسجّل بس في `completeHourly()` بعد اكتمال الزيارة الفعلي، زي الأول
+   * بالظبط. شهري بس: تسجيل استحقاق الشغالة PENDING عن الفترة اللي اتدفعت (نفس السلوك القديم، بس
+   * الزناد بقى تأكيد الدفع مش لحظة الخصم). **Idempotent عمدًا** — لو الحدث اتبعت مرتين (retry بعد
+   * انقطاع عابر) بيرجع بهدوء لو صف الاستحقاق بنفس `sourceKey` موجود بالفعل، بلا تسجيل مكرر.
    */
-  private async chargeCustomerAndCreatePendingEarningInTransaction(
-    manager: EntityManager,
-    booking: DomesticWorkerBooking,
-    customerUserId: string,
-    workerUserId: string,
-    workerEarningCents: number,
-    sourceKey: string,
-  ): Promise<void> {
-    await this.chargeCustomerInTransaction(manager, booking, customerUserId);
-    if (workerEarningCents > 0) {
-      await manager.getRepository(DomesticWorkerEarningApproval).save(
-        manager.getRepository(DomesticWorkerEarningApproval).create({
-          bookingId: booking.id,
-          workerUserId,
-          sourceKey,
-          amountCents: workerEarningCents,
-          status: DomesticWorkerEarningApprovalStatus.PENDING,
-        }),
+  @OnEvent(DOMESTIC_WORKER_BOOKING_PAYMENT_CONFIRMED_EVENT)
+  async onBookingPaymentConfirmed(event: DomesticWorkerBookingPaymentConfirmedEvent): Promise<void> {
+    try {
+      await this.handleBookingPaymentConfirmed(event.bookingId);
+    } catch (err) {
+      // لا نوقف بقية المستمعين؛ نفس فلسفة PrepaidOrderSettlementListener — فشل عابر هنا محتاج
+      // مراجعة يدوية مش يكسر تأكيد الدفع نفسه (اللي نجح بالفعل جوّه PaymentsService).
+      this.logger.error(
+        `فشل تسجيل استحقاق شهري بعد تأكيد دفع حجز ${event.bookingId}`,
+        err instanceof Error ? err.stack : err,
       );
     }
+  }
+
+  async handleBookingPaymentConfirmed(bookingId: string): Promise<void> {
+    const booking = await this.bookings.findOne({ where: { id: bookingId } });
+    if (!booking || booking.bookingType !== DomesticWorkerBookingType.MONTHLY_LIVE_IN) return;
+    if (booking.status !== DomesticWorkerBookingStatus.ACTIVE || !booking.currentPeriodEndAt) return;
+
+    const worker = await this.profiles.findOne({ where: { id: booking.workerId } });
+    if (!worker) return;
+
+    const sourceKey = `monthly:${booking.currentPeriodEndAt.toISOString()}`;
+    const existing = await this.earningApprovals.findOne({ where: { bookingId: booking.id, sourceKey } });
+    if (existing) return;
+
+    const { workerEarningCents } = await this.commissionSplit(booking.priceCents);
+    if (workerEarningCents <= 0) return;
+
+    await this.earningApprovals.save(
+      this.earningApprovals.create({
+        bookingId: booking.id,
+        workerUserId: worker.userId,
+        sourceKey,
+        amountCents: workerEarningCents,
+        status: DomesticWorkerEarningApprovalStatus.PENDING,
+      }),
+    );
   }
 
   /** الشغالة بتقفل حجز بالساعة بعد ما تخلّص الزيارة — هنا بس (اكتمال حقيقي) بيتسجّل استحقاقها كـ"pending". */
@@ -299,9 +302,20 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     return completedBooking;
   }
 
+  /**
+   * إلغاء عميل — بيتعامل مع كل حالات الدفع الممكنة (docs/adr/0019، توجيه صريح: "handle
+   * cancellation and refunds consistently"):
+   * - `pending_confirmation`/`awaiting_payment` (مفيش دفع اتأكد لسه): إلغاء بسيط + إبطال أي دفعة
+   *   InstaPay معلّقة مرتبطة (عشان الأدمن ميأكدش دفعة لحجز اتلغى).
+   * - `confirmed`/`active` (دفع InstaPay اتأكد فعليًا): استرداد كامل حقيقي عبر
+   *   `PaymentsService.refundCancelledDomesticWorkerBooking()` بعد الإلغاء — بره الـtransaction
+   *   عمدًا (استرداد InstaPay بيرجع wallet credit فوري، لكن نفس نمط الأمان بتاع طلبات orders
+   *   بالحرف لأي بوابة تانية مستقبلية). فشل الاسترداد بيتلقط ويتسجّل بس مايكسرش تجربة العميل —
+   *   الحجز فضل ملغي صح حتى لو الاسترداد فشل واحتاج مراجعة يدوية.
+   */
   async cancel(userId: string, bookingId: string, dto: CancelWorkerBookingDto): Promise<DomesticWorkerBooking> {
     const ownedBooking = await this.findOwnedByCustomerOrThrow(userId, bookingId);
-    return this.dataSource.transaction(async (manager) => {
+    const { cancelledBooking, hadConfirmedPayment } = await this.dataSource.transaction(async (manager) => {
       const booking = await manager
         .createQueryBuilder(DomesticWorkerBooking, 'booking')
         .setLock('pessimistic_write')
@@ -310,6 +324,8 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       if (!booking || booking.status === DomesticWorkerBookingStatus.COMPLETED || booking.status === DomesticWorkerBookingStatus.CANCELLED) {
         throw new ApiException(ErrorCode.VAL_001, 'الحجز ده مش قابل للإلغاء دلوقتي', HttpStatus.CONFLICT);
       }
+      const hadConfirmedPayment =
+        booking.status === DomesticWorkerBookingStatus.CONFIRMED || booking.status === DomesticWorkerBookingStatus.ACTIVE;
 
       const pendingApprovals = await manager
         .createQueryBuilder(DomesticWorkerEarningApproval, 'approval')
@@ -325,13 +341,38 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
         await manager.save(approval);
       }
 
-      // مفيش استرداد جزئي في v1 لو الحجز اتأكد بالفعل؛ لكن أي استحقاق لم يُعتمد يُبطل ذريًا.
+      // أي دفعة InstaPay لسه معلّقة (لسه ما اتأكدتش/ما اترفضتش) بقت من غير محل بإلغاء الحجز.
+      await manager
+        .createQueryBuilder()
+        .update(Payment)
+        .set({ paymentStatus: PaymentGatewayStatus.CANCELLED })
+        .where('domestic_worker_booking_id = :bookingId', { bookingId: booking.id })
+        .andWhere('payment_status = :status', { status: PaymentGatewayStatus.PENDING })
+        .execute();
+
       booking.status = DomesticWorkerBookingStatus.CANCELLED;
       booking.cancelledAt = new Date();
       booking.cancellationReason = dto.reason ?? null;
       booking.autoRenew = false;
-      return manager.save(booking);
+      const cancelledBooking = await manager.save(booking);
+      return { cancelledBooking, hadConfirmedPayment };
     });
+
+    if (hadConfirmedPayment) {
+      try {
+        await this.paymentsService.refundCancelledDomesticWorkerBooking(
+          cancelledBooking.id,
+          `استرداد تلقائي — العميل لغى حجز خدمة منزلية مدفوع InstaPay${dto.reason ? `: ${dto.reason}` : ''}`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `فشل استرداد حجز خدمة منزلية ${cancelledBooking.id} بعد الإلغاء — يحتاج مراجعة يدوية`,
+          err instanceof Error ? err.stack : err,
+        );
+      }
+    }
+
+    return cancelledBooking;
   }
 
   async sweep(): Promise<{ renewed: number; expired: number }> {
@@ -379,77 +420,44 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       expired += result.affected ?? 0;
     }
     if (renewed > 0 || expired > 0) {
-      this.logger.log(`حجوزات الخدمات المنزلية: ${renewed} تجديد ناجح، ${expired} عقد انتهى`);
+      // "renewed" هنا معناها "دخل انتظار دفع تجديد جديد" مش "اتجدد فعليًا" — التجديد الفعلي بيحصل
+      // بس لما InstaPay تتأكد إداريًا (docs/adr/0019)، مش لحظة الـsweep.
+      this.logger.log(`حجوزات الخدمات المنزلية: ${renewed} دخلوا انتظار دفع تجديد، ${expired} عقد انتهى`);
     }
     return { renewed, expired };
   }
 
-  /** فشل دفع/بيانات نهائي يوقف التجديد؛ خطأ بنية عابر يظل مستحقًا كي تعيده الدورة التالية. */
+  /**
+   * فترة عقد شهري وصلت نهايتها — بدل التجديد الصامت القديم (خصم فوري من المحفظة)، الحجز بينتقل
+   * لـ`awaiting_payment` (نفس بوابة الدفع اليدوي بتاعة InstaPay، docs/adr/0019) لحد ما دفعة جديدة
+   * تتأكد إداريًا. **تغيير سلوك حقيقي ومقصود عن قبل**: التجديد بقى محتاج فعل بشري (العميل يدفع،
+   * الأدمن يأكّد) بدل ما يحصل صامت — نفس السبب اللي خلى الدفع الأولي يتغيّر: مفيش top-up لمحفظة
+   * العميل، فخصم صامت شهري كان بيفشل بصمت لنفس البَقّة بالظبط كل شهر.
+   */
   private async tryRenew(bookingId: string, expectedPeriodEnd: Date, now: Date): Promise<boolean> {
-    const commissionPercentage = await this.commissionPercentage();
-    try {
-      return await this.dataSource.transaction(async (manager) => {
-        const booking = await manager
-          .createQueryBuilder(DomesticWorkerBooking, 'booking')
-          .setLock('pessimistic_write')
-          .where('booking.id = :bookingId', { bookingId })
-          .getOne();
-        if (
-          !booking ||
-          booking.status !== DomesticWorkerBookingStatus.ACTIVE ||
-          booking.bookingType !== DomesticWorkerBookingType.MONTHLY_LIVE_IN ||
-          !booking.autoRenew ||
-          !booking.currentPeriodEndAt ||
-          booking.currentPeriodEndAt.getTime() !== expectedPeriodEnd.getTime() ||
-          booking.currentPeriodEndAt.getTime() > now.getTime()
-        ) {
-          return false;
-        }
+    return this.dataSource.transaction(async (manager) => {
+      const booking = await manager
+        .createQueryBuilder(DomesticWorkerBooking, 'booking')
+        .setLock('pessimistic_write')
+        .where('booking.id = :bookingId', { bookingId })
+        .getOne();
+      if (
+        !booking ||
+        booking.status !== DomesticWorkerBookingStatus.ACTIVE ||
+        booking.bookingType !== DomesticWorkerBookingType.MONTHLY_LIVE_IN ||
+        !booking.autoRenew ||
+        !booking.currentPeriodEndAt ||
+        booking.currentPeriodEndAt.getTime() !== expectedPeriodEnd.getTime() ||
+        booking.currentPeriodEndAt.getTime() > now.getTime()
+      ) {
+        return false;
+      }
 
-        const worker = await manager.getRepository(DomesticWorkerProfile).findOne({ where: { id: booking.workerId } });
-        const customerProfile = await manager.getRepository(CustomerProfile).findOne({ where: { id: booking.customerId } });
-        if (!worker || !customerProfile) {
-          throw new ApiException(ErrorCode.VAL_001, 'بيانات طرفي الحجز غير مكتملة', HttpStatus.CONFLICT);
-        }
-        const platformCommissionCents = Math.round((booking.priceCents * commissionPercentage) / 100);
-        const nextPeriodEnd = addMonths(booking.currentPeriodEndAt, 1);
-        await this.chargeCustomerAndCreatePendingEarningInTransaction(
-          manager,
-          booking,
-          customerProfile.userId,
-          worker.userId,
-          booking.priceCents - platformCommissionCents,
-          `monthly:${nextPeriodEnd.toISOString()}`,
-        );
-        booking.currentPeriodEndAt = nextPeriodEnd;
-        await manager.save(booking);
-        return true;
-      });
-    } catch (err) {
-      const terminalBusinessFailure = err instanceof ApiException;
-      this.logger.warn(
-        `فشل تجديد حجز ${bookingId} — ${terminalBusinessFailure ? 'إيقاف auto_renew' : 'سيُعاد في الدورة التالية'}: ${
-          err instanceof Error ? err.message : err
-        }`,
-      );
-      if (!terminalBusinessFailure) return false;
-      await this.dataSource.transaction(async (manager) => {
-        const booking = await manager
-          .createQueryBuilder(DomesticWorkerBooking, 'booking')
-          .setLock('pessimistic_write')
-          .where('booking.id = :bookingId', { bookingId })
-          .getOne();
-        if (
-          booking?.status === DomesticWorkerBookingStatus.ACTIVE &&
-          booking.autoRenew &&
-          booking.currentPeriodEndAt?.getTime() === expectedPeriodEnd.getTime()
-        ) {
-          booking.autoRenew = false;
-          await manager.save(booking);
-        }
-      });
-      return false;
-    }
+      booking.status = DomesticWorkerBookingStatus.AWAITING_PAYMENT;
+      booking.pendingPeriodEndAt = addMonths(booking.currentPeriodEndAt, 1);
+      await manager.save(booking);
+      return true;
+    });
   }
 }
 

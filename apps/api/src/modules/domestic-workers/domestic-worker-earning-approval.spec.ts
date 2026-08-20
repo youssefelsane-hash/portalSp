@@ -6,6 +6,7 @@ import { CustomerProfilesService } from '../customers/customer-profiles.service'
 import { PLATFORM_SYSTEM_USER_ID, Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { WalletsService } from '../payments/wallets.service';
+import { PaymentsService } from '../payments/payments.service';
 import { SettingsService } from '../settings/settings.service';
 import { DomesticWorkerBookingsService } from './domestic-worker-bookings.service';
 import { DomesticWorkerEarningApprovalsService } from './domestic-worker-earning-approvals.service';
@@ -18,13 +19,20 @@ import { DomesticWorkerProfile } from './entities/domestic-worker-profile.entity
 // العمالة المنزلية ممنوع تتحول رصيد قابل للصرف تلقائيًا عند قبول الحجز ولا قبل تنفيذ الخدمة،
 // وبعد الاكتمال بتدخل "pending"، ومتترجعش رصيد فعلي إلا بموافقة أدمن — مفروضة من الباك-إند نفسه
 // (فحص حالة صريح بيمنع موافقة/رفض مزدوج)، مش مجرد زرار واجهة.
-describe('طابور موافقة أرباح العمالة المنزلية — pending لحد موافقة أدمن (docs/08 §25.1)', () => {
+//
+// **مُحدَّث (docs/adr/0019، 2026-08-20)**: بعد فصل موافقة الشغالة عن الدفع، الاختبارات دي بتحاكي
+// "تأكيد InstaPay إداريًا" بتحديث SQL مباشر لحالة الحجز (نفس أثر
+// `PaymentsService.confirmInstaPayPayment()` الحقيقي على صف الحجز بالظبط) بدل ما تمر بمكدس
+// InstaPayProvider/PaymentProviderRegistry الكامل — تغطية تدفق InstaPay الفعلي (idempotency-key،
+// gateway reference، تأكيد/رفض الأدمن) موجودة في instapay-manual-flow.spec.ts، ده اختبار منفصل
+// عمدًا عشان يفضل مركّز على طابور استحقاق الشغالة نفسه.
+describe('طابور موافقة أرباح العمالة المنزلية — pending لحد موافقة أدمن (docs/08 §25.1، docs/adr/0019)', () => {
   jest.setTimeout(30_000);
 
   let dataSource: DataSource;
   let bookingsService: DomesticWorkerBookingsService;
   let approvalsService: DomesticWorkerEarningApprovalsService;
-  let walletsService: WalletsService;
+  let refundCancelledDomesticWorkerBooking: jest.Mock;
 
   const runId = Date.now().toString(36);
   const DOMESTIC_WORKER_COMMISSION_PERCENTAGE = 15;
@@ -82,6 +90,23 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     return dataSource.getRepository(DomesticWorkerEarningApproval).findOne({ where: { bookingId } });
   }
 
+  /**
+   * بيحاكي أثر `PaymentsService.confirmInstaPayPayment()` على صف الحجز نفسه (بلا المرور بمكدس
+   * الدفع الفعلي — راجع تعليق الوصف فوق). بالساعة: CONFIRMED. شهري: ACTIVE +
+   * current_period_end_at = pending_period_end_at.
+   */
+  async function simulateInstaPayConfirmed(bookingId: string): Promise<void> {
+    await dataSource.query(
+      `UPDATE domestic_worker_bookings
+       SET status = CASE WHEN booking_type = 'hourly' THEN 'confirmed'::domestic_worker_booking_status ELSE 'active'::domestic_worker_booking_status END,
+           current_period_end_at = COALESCE(pending_period_end_at, current_period_end_at),
+           confirmed_at = now(),
+           pending_period_end_at = NULL
+       WHERE id = $1 AND status = 'awaiting_payment'`,
+      [bookingId],
+    );
+  }
+
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
@@ -124,13 +149,20 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     const settingsService = {
       getNumber: async () => DOMESTIC_WORKER_COMMISSION_PERCENTAGE,
     } as unknown as SettingsService;
-    walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
+    const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const workersService = new DomesticWorkersService(dataSource.getRepository(DomesticWorkerProfile), { record: async () => undefined } as never);
 
     await walletsService.getOrCreateWallet(PLATFORM_SYSTEM_USER_ID, WalletOwnerType.PLATFORM);
-    const customerWallet = await walletsService.getOrCreateWallet(ids.customerUser, WalletOwnerType.CUSTOMER);
-    await q(`UPDATE wallets SET balance_cents = 1000000 WHERE id = $1`, [customerWallet.id]);
+    await walletsService.getOrCreateWallet(ids.customerUser, WalletOwnerType.CUSTOMER);
+
+    // فرع الدفع الفعلي (InstaPay initiate/confirm/refund) بره نطاق الاختبار ده عمدًا — راجع
+    // instapay-manual-flow.spec.ts. هنا بنحتاج بس refundCancelledDomesticWorkerBooking (بتتنادى من
+    // cancel() لو الحجز كان مدفوع فعليًا)، فمُوك بسيط بيرجع null (نفس "مفيش دفعة ناجحة" الحقيقي).
+    refundCancelledDomesticWorkerBooking = jest.fn().mockResolvedValue(null);
+    const paymentsServiceStub = {
+      refundCancelledDomesticWorkerBooking,
+    } as unknown as PaymentsService;
 
     bookingsService = new DomesticWorkerBookingsService(
       dataSource.getRepository(DomesticWorkerBooking),
@@ -140,7 +172,7 @@ describe('طابور موافقة أرباح العمالة المنزلية —
       customerProfilesService,
       {} as never, // addressesService — مش متنادى، الاختبار بيعمل insert مباشر للحجز
       workersService,
-      walletsService,
+      paymentsServiceStub,
       settingsService,
     );
 
@@ -183,19 +215,22 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     }
   });
 
-  it('تأكيد حجز بالساعة: العميل بيتخصم بس — صفر أرباح pending وصفر رصيد للشغالة قبل الاكتمال', async () => {
+  it('موافقة الشغالة: بلا أي تحصيل — الحجز ينتقل awaiting_payment فقط، حتى لو العميل بلا رصيد محفظة خالص', async () => {
     const bookingId = await insertHourlyBooking('confirm', 30000);
     await bookingsService.confirm(ids.workerUser, bookingId);
 
     const booking = await dataSource.getRepository(DomesticWorkerBooking).findOne({ where: { id: bookingId } });
-    expect(booking?.status).toBe(DomesticWorkerBookingStatus.CONFIRMED);
+    expect(booking?.status).toBe(DomesticWorkerBookingStatus.AWAITING_PAYMENT);
+    expect(booking?.acceptedAt).not.toBeNull();
+    expect(booking?.confirmedAt).toBeNull();
     expect(await pendingApprovalForBooking(bookingId)).toBeNull();
     expect(await workerWalletBalance()).toBe(0);
   });
 
-  it('اكتمال الزيارة: استحقاق الشغالة بيدخل pending — لسه صفر رصيد قابل للصرف', async () => {
+  it('اكتمال الزيارة (بعد تأكيد دفع InstaPay إداريًا): استحقاق الشغالة بيدخل pending — لسه صفر رصيد قابل للصرف', async () => {
     const bookingId = await insertHourlyBooking('complete', 30000);
     await bookingsService.confirm(ids.workerUser, bookingId);
+    await simulateInstaPayConfirmed(bookingId);
     await bookingsService.completeHourly(ids.workerUser, bookingId);
 
     const approval = await pendingApprovalForBooking(bookingId);
@@ -205,9 +240,16 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     expect(await workerWalletBalance()).toBe(0);
   });
 
+  it('completeHourly() بيرفض حجز لسه awaiting_payment — الدفع لازم يتأكد الأول', async () => {
+    const bookingId = await insertHourlyBooking('not-yet-paid', 30000);
+    await bookingsService.confirm(ids.workerUser, bookingId);
+    await expect(bookingsService.completeHourly(ids.workerUser, bookingId)).rejects.toThrow(ApiException);
+  });
+
   it('approve×approve: طلب واحد فقط يحوّل الاستحقاق إلى رصيد، والثاني يرى الحالة النهائية', async () => {
     const bookingId = await insertHourlyBooking('approve', 20000);
     await bookingsService.confirm(ids.workerUser, bookingId);
+    await simulateInstaPayConfirmed(bookingId);
     await bookingsService.completeHourly(ids.workerUser, bookingId);
     const approval = await pendingApprovalForBooking(bookingId);
 
@@ -224,6 +266,7 @@ describe('طابور موافقة أرباح العمالة المنزلية —
   it('رفض الأدمن: الاستحقاق بيتقفل rejected بسبب موثّق — صفر تحويل لمحفظة الشغالة', async () => {
     const bookingId = await insertHourlyBooking('reject', 20000);
     await bookingsService.confirm(ids.workerUser, bookingId);
+    await simulateInstaPayConfirmed(bookingId);
     await bookingsService.completeHourly(ids.workerUser, bookingId);
     const approval = await pendingApprovalForBooking(bookingId);
     const balanceBefore = await workerWalletBalance();
@@ -240,6 +283,7 @@ describe('طابور موافقة أرباح العمالة المنزلية —
   it('approve×reject: قرار نهائي واحد فقط يفوز ولا يمكن أن تنفصل حالة الصف عن أثر المحفظة', async () => {
     const bookingId = await insertHourlyBooking('decision-race', 10000);
     await bookingsService.confirm(ids.workerUser, bookingId);
+    await simulateInstaPayConfirmed(bookingId);
     await bookingsService.completeHourly(ids.workerUser, bookingId);
     const approval = await pendingApprovalForBooking(bookingId);
     const balanceBefore = await workerWalletBalance();
@@ -258,19 +302,47 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     );
   });
 
-  it('إلغاء حجز شهري يبطل الاستحقاق pending ذريًا، وصفحة أدمن قديمة لا تستطيع اعتماده', async () => {
+  it('إلغاء حجز شهري وهو awaiting_payment: صفر استرداد (مفيش دفع اتأكد أصلاً)، مفيش استحقاق يتسجّل خالص', async () => {
+    const bookingId = await insertMonthlyBooking('cancel-before-payment', 30000);
+    await bookingsService.confirm(ids.workerUser, bookingId);
+    expect(await pendingApprovalForBooking(bookingId)).toBeNull();
+
+    refundCancelledDomesticWorkerBooking.mockClear();
+    await bookingsService.cancel(ids.customerUser, bookingId, { reason: 'إلغاء قبل الدفع' });
+    expect(refundCancelledDomesticWorkerBooking).not.toHaveBeenCalled();
+    const booking = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
+    expect(booking.status).toBe(DomesticWorkerBookingStatus.CANCELLED);
+  });
+
+  it('إلغاء حجز شهري بعد تأكيد الدفع: الاستحقاق pending يتبطل ذريًا + استرداد بيتحاول', async () => {
     const bookingId = await insertMonthlyBooking('cancel-invalidates', 30000);
     await bookingsService.confirm(ids.workerUser, bookingId);
+    await simulateInstaPayConfirmed(bookingId);
+    await bookingsService.handleBookingPaymentConfirmed(bookingId);
     const approval = await pendingApprovalForBooking(bookingId);
     expect(approval?.status).toBe(DomesticWorkerEarningApprovalStatus.PENDING);
 
-    await bookingsService.cancel(ids.customerUser, bookingId, { reason: 'إلغاء قبل اعتماد الاستحقاق' });
+    refundCancelledDomesticWorkerBooking.mockClear();
+    await bookingsService.cancel(ids.customerUser, bookingId, { reason: 'إلغاء بعد اعتماد الاستحقاق' });
+    expect(refundCancelledDomesticWorkerBooking).toHaveBeenCalledWith(bookingId, expect.any(String));
     const invalidated = await pendingApprovalForBooking(bookingId);
     expect(invalidated?.status).toBe(DomesticWorkerEarningApprovalStatus.INVALIDATED);
     await expect(approvalsService.approve(ids.adminUser, approval!.id)).rejects.toThrow(ApiException);
   });
 
-  it('نسختان من sweep تجددان الفترة المستحقة مرة واحدة فقط وتنتجان استحقاقًا واحدًا', async () => {
+  it('handleBookingPaymentConfirmed مرتين لنفس الحجز (retry بعد حدث ضاع) — استحقاق واحد بس، لا تكرار', async () => {
+    const bookingId = await insertMonthlyBooking('payment-confirmed-idempotent', 12000);
+    await bookingsService.confirm(ids.workerUser, bookingId);
+    await simulateInstaPayConfirmed(bookingId);
+
+    await Promise.all([bookingsService.handleBookingPaymentConfirmed(bookingId), bookingsService.handleBookingPaymentConfirmed(bookingId)]);
+
+    const approvals = await dataSource.getRepository(DomesticWorkerEarningApproval).find({ where: { bookingId } });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0].amountCents).toBe(10200); // 12000 - 15%
+  });
+
+  it('نسختان من sweep تنقلان العقد المستحق لـawaiting_payment مرة واحدة فقط، بلا أي خصم فوري وبلا استحقاق قبل تأكيد الدفع', async () => {
     const bookingId = await insertMonthlyBooking('renew-race', 12000, true);
     const balanceBefore = Number(
       (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
@@ -281,39 +353,14 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     expect(sweeps.reduce((sum, result) => sum + result.renewed, 0)).toBe(1);
 
     const after = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
-    expect(after.currentPeriodEndAt!.getTime()).toBeGreaterThan(before.currentPeriodEndAt!.getTime());
-    const approvals = await dataSource.getRepository(DomesticWorkerEarningApproval).find({ where: { bookingId } });
-    expect(approvals).toHaveLength(1);
-    expect(approvals[0].sourceKey).toBe(`monthly:${after.currentPeriodEndAt!.toISOString()}`);
+    expect(after.status).toBe(DomesticWorkerBookingStatus.AWAITING_PAYMENT);
+    expect(after.pendingPeriodEndAt!.getTime()).toBeGreaterThan(before.currentPeriodEndAt!.getTime());
+    // current_period_end_at الفعلي متغيرش لحد ما الدفع يتأكد إداريًا — لسه نفس الفترة القديمة.
+    expect(after.currentPeriodEndAt!.getTime()).toBe(before.currentPeriodEndAt!.getTime());
+    expect(await pendingApprovalForBooking(bookingId)).toBeNull();
     const customerBalance = Number(
       (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
     );
-    expect(customerBalance).toBe(balanceBefore - 12000);
-  });
-
-  it('عطل بنية عابر يرجع transaction كاملة ويظل قابلًا للاسترداد في الدورة التالية', async () => {
-    const bookingId = await insertMonthlyBooking('renew-recovery', 9000, true);
-    const before = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
-    const balanceBefore = Number(
-      (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
-    );
-    const failure = jest.spyOn(walletsService, 'doubleEntry').mockRejectedValueOnce(new Error('transient database failure'));
-
-    const failedSweep = await bookingsService.sweep();
-    failure.mockRestore();
-    expect(failedSweep.renewed).toBe(0);
-    const afterFailure = await dataSource.getRepository(DomesticWorkerBooking).findOneByOrFail({ id: bookingId });
-    expect(afterFailure.autoRenew).toBe(true);
-    expect(afterFailure.currentPeriodEndAt?.getTime()).toBe(before.currentPeriodEndAt?.getTime());
-    expect(await dataSource.getRepository(DomesticWorkerEarningApproval).count({ where: { bookingId } })).toBe(0);
-
-    // The next scheduler tick can safely retry the same durable period cursor.
-    const recoveredSweep = await bookingsService.sweep();
-    expect(recoveredSweep.renewed).toBe(1);
-    expect(await dataSource.getRepository(DomesticWorkerEarningApproval).count({ where: { bookingId } })).toBe(1);
-    const balanceAfter = Number(
-      (await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]))[0].balance_cents,
-    );
-    expect(balanceAfter).toBe(balanceBefore - 9000);
+    expect(customerBalance).toBe(balanceBefore); // صفر خصم — التجديد بقى محتاج دفع InstaPay فعلي
   });
 });
