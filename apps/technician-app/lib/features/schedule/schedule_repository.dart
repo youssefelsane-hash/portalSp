@@ -38,4 +38,18 @@ class ScheduleRepository {
   Future<void> delete(String slotId) async {
     await auth.authedRequest('DELETE', '/technician/schedule/$slotId');
   }
+
+  /// تعديل جماعي سريع للإتاحة (docs/08 §34.3) — نطاق تواريخ كامل بنداء واحد بدل يوم بيوم.
+  /// `action` إما `block` (تعليم الأيام دي "غير متاح") أو `unblock` (رجوعها للافتراضي "متاح").
+  Future<void> bulkSetAvailability({
+    required List<String> dates,
+    required String action,
+    String? notesAr,
+  }) async {
+    await auth.authedRequest('POST', '/technician/schedule/bulk', body: {
+      'dates': dates,
+      'action': action,
+      if (notesAr != null && notesAr.isNotEmpty) 'notes_ar': notesAr,
+    });
+  }
 }

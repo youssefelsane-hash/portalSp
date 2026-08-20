@@ -144,6 +144,61 @@ export class TechnicianScheduleService {
       .execute();
   }
 
+  /**
+   * تعديل جماعي سريع للإتاحة (docs/08 §34.3) — بدل ما الفني يفتح كل يوم لوحده، بيبعت مجموعة
+   * تواريخ مرة واحدة و`block`/`unblock`. مفيش migration/enum جديد — نفس الجدول، نفس المعنى
+   * (ADR-0017): `block` = صف `blocked` كامل اليوم (الاستثناء الصريح الوحيد)، `unblock` = مسح أي
+   * استثناء موجود ليوم بعينه (الرجوع للافتراضي "متاح" بغياب أي صف). يوم عليه سلوت `booked` فعلي
+   * (طلب حقيقي مرتبط بيه) بيتستبعد من العملية الجماعية — الفني ميقدرش "يفك حظر" يوم عنده حجز حقيقي
+   * فيه من هنا (ده مش استثناء بيتحكم فيه، ده طلب فعلي)، والنتيجة بترجع `skipped_booked` واضحة له.
+   */
+  async bulkSetAvailability(
+    technicianProfileId: string,
+    dates: string[],
+    action: 'block' | 'unblock',
+    notesAr?: string,
+  ): Promise<{ date: string; status: 'applied' | 'skipped_booked' }[]> {
+    const uniqueDates = [...new Set(dates)];
+    const results: { date: string; status: 'applied' | 'skipped_booked' }[] = [];
+
+    for (const date of uniqueDates) {
+      await this.slots.manager.transaction(async (manager) => {
+        const existing = await manager.find(TechnicianScheduleSlot, {
+          where: { technicianId: technicianProfileId, slotDate: date },
+        });
+        const live = existing.filter((s) => s.deletedAt === null);
+        if (live.some((s) => s.status === TechnicianScheduleSlotStatus.BOOKED)) {
+          results.push({ date, status: 'skipped_booked' });
+          return;
+        }
+
+        if (live.length > 0) {
+          await manager.softDelete(
+            TechnicianScheduleSlot,
+            live.map((s) => s.id),
+          );
+        }
+
+        if (action === 'block') {
+          const slot = manager.create(TechnicianScheduleSlot, {
+            technicianId: technicianProfileId,
+            slotDate: date,
+            startTime: '00:00:00',
+            endTime: '23:59:59',
+            status: TechnicianScheduleSlotStatus.BLOCKED,
+            notesAr: notesAr ?? null,
+          });
+          await manager.save(slot);
+        }
+        // action === 'unblock': مسح أي صف موجود كافي — غياب الصف يرجّع اليوم لافتراض "متاح".
+
+        results.push({ date, status: 'applied' });
+      });
+    }
+
+    return results.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
   /** Rebuilds missed release events from durable order state without an unbounded scan. */
   async reconcileReleasedSlots(batchSize = 25): Promise<number> {
     const rows = await this.slots.query(
