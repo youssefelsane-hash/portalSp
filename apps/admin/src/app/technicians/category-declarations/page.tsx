@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { AdminTechnicianServiceDeclarationResponseDto } from '@baytak/shared-types';
+import type { AdminTechnicianCategoryDeclarationResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -11,22 +11,21 @@ import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { SKILL_LEVEL_LABELS } from '@/lib/technician-labels';
 
-// طابور مراجعة تصريحات المهارات الذاتية (Script 4 §2-7) — كانت فجوة موثّقة صراحة: الفني بقى
-// يقدر يصرّح بخدمة جديدة بنفسه من apps/technician-app، بس مفيش أي واجهة أدمن كانت بتعرض الطلبات
-// دي أو تسمح بمراجعتها غير عبر API مباشرة. صفحة واحدة تجمّع كل التصريحات المعلّقة من كل الفنيين
-// (مش لازم تدخل بروفايل كل فني لوحده) — نفس فلسفة صفحات الطوابير التانية (سجل التدقيق، الشكاوى).
-export default function ServiceDeclarationsQueuePage() {
+// طابور مراجعة تصريحات التخصص/الفئة الذاتية (§29) — بدّل طابور "المهارات" القديم اللي كان
+// خدمة-بخدمة بالكامل (كانت فجوة موثّقة: كل خدمة بمفردها تحتاج تصريح وموافقة منفصلين، غير قابل
+// للتوسّع — طلب مالك صريح 2026-08-20). نفس نمط الصفحة القديمة بالحرف، بس بيستهلك
+// category-declarations بدل service-declarations. للتعيين المباشر من غير انتظار تصريح الفني،
+// راجع كارت "التخصصات" في /technicians/[id].
+export default function CategoryDeclarationsQueuePage() {
   const { isLoading, authedFetch } = useAuth();
-  const [items, setItems] = useState<AdminTechnicianServiceDeclarationResponseDto[] | null>(null);
+  const [items, setItems] = useState<AdminTechnicianCategoryDeclarationResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    authedFetch<AdminTechnicianServiceDeclarationResponseDto[]>('/admin/technicians/service-declarations')
+    authedFetch<AdminTechnicianCategoryDeclarationResponseDto[]>('/admin/technicians/category-declarations')
       .then(setItems)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل طابور المراجعة'));
   }, [authedFetch]);
@@ -40,7 +39,7 @@ export default function ServiceDeclarationsQueuePage() {
     setActingId(id);
     setError(null);
     try {
-      await authedFetch(`/admin/technicians/service-declarations/${id}/approve`, { method: 'POST', body: JSON.stringify({}) });
+      await authedFetch(`/admin/technicians/category-declarations/${id}/approve`, { method: 'POST', body: JSON.stringify({}) });
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -53,7 +52,7 @@ export default function ServiceDeclarationsQueuePage() {
     setActingId(id);
     setError(null);
     try {
-      await authedFetch(`/admin/technicians/service-declarations/${id}/reject`, {
+      await authedFetch(`/admin/technicians/category-declarations/${id}/reject`, {
         method: 'POST',
         body: JSON.stringify({ reason }),
       });
@@ -68,8 +67,8 @@ export default function ServiceDeclarationsQueuePage() {
   return (
     <AppShell>
       <PageHeader
-        title="طابور تصريحات المهارات"
-        description="طلبات الفنيين لتقديم خدمات جديدة — كل طلب لازم اعتماد صريح قبل ما يوصله أي طلب فيها"
+        title="طابور تصريحات التخصصات"
+        description="طلبات الفنيين للاعتماد كتخصص/فئة كاملة (سباكة، كهرباء...) — أي خدمة جديدة تتضاف تحت الفئة دي تبقى متاحة للفني تلقائيًا بعد الاعتماد"
       />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
       {items === null ? (
@@ -81,8 +80,7 @@ export default function ServiceDeclarationsQueuePage() {
           <TableHeader>
             <TableRow>
               <TableHead>الفني</TableHead>
-              <TableHead>الخدمة</TableHead>
-              <TableHead>المستوى المقترح</TableHead>
+              <TableHead>التخصص</TableHead>
               <TableHead>تاريخ الطلب</TableHead>
               <TableHead className="text-left">الإجراء</TableHead>
             </TableRow>
@@ -98,10 +96,7 @@ export default function ServiceDeclarationsQueuePage() {
                     {item.technician_code}
                   </div>
                 </TableCell>
-                <TableCell>{item.service_name_ar}</TableCell>
-                <TableCell>
-                  <Badge variant="outline">{SKILL_LEVEL_LABELS[item.skill_level] ?? item.skill_level}</Badge>
-                </TableCell>
+                <TableCell>{item.category_name_ar}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   {new Date(item.created_at).toLocaleString('ar-EG')}
                 </TableCell>
@@ -116,7 +111,7 @@ export default function ServiceDeclarationsQueuePage() {
                           رفض
                         </Button>
                       }
-                      title={`رفض طلب "${item.service_name_ar}" لـ${item.technician_full_name}`}
+                      title={`رفض طلب تخصص "${item.category_name_ar}" لـ${item.technician_full_name}`}
                       label="سبب الرفض"
                       minLength={5}
                       destructive

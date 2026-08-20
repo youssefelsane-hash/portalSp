@@ -3,10 +3,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import type {
+  AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
   AdminTechnicianDetailResponseDto,
   AdminWalletDetailResponseDto,
   AssignTechnicianZoneBody,
+  SelfDeclareCategoryBody,
+  TechnicianCategoryResponseDto,
   TechnicianLevel,
   TechnicianZoneResponseDto,
 } from '@baytak/shared-types';
@@ -76,6 +79,15 @@ export default function TechnicianDetailPage() {
   const [newZoneId, setNewZoneId] = useState('');
   const [newZoneIsPrimary, setNewZoneIsPrimary] = useState(false);
 
+  // التخصصات (الفئات) — §29: بديل "خدمة بخدمة" — الأدمن يعيّن للفني فئة كاملة (سباكة/كهرباء/...)
+  // مباشرة من هنا، أو يراجع طلب تصريح ذاتي قائم من الفني لنفس الفئة. أي خدمة جديدة تتضاف تحت فئة
+  // معتمدة للفني تبقى متاحة له تلقائيًا (matching.service.ts's category_id join).
+  const [categories, setCategories] = useState<TechnicianCategoryResponseDto[] | null>(null);
+  const [allCategories, setAllCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
+  const [newCategoryId, setNewCategoryId] = useState('');
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [savingCategory, setSavingCategory] = useState(false);
+
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
 
@@ -103,11 +115,17 @@ export default function TechnicianDetailPage() {
     authedFetch<TechnicianZoneResponseDto[]>(`/admin/technicians/${id}/zones`).then(setZones);
   }
 
+  function loadCategories() {
+    authedFetch<TechnicianCategoryResponseDto[]>(`/admin/technicians/${id}/categories`).then(setCategories);
+  }
+
   useEffect(() => {
     if (isLoading) return;
     load();
     loadZones();
+    loadCategories();
     authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones);
+    authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setAllCategories);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 
@@ -251,6 +269,74 @@ export default function TechnicianDetailPage() {
   function zoneName(serviceZoneId: string): string {
     return allZones?.find((z) => z.id === serviceZoneId)?.name_ar ?? serviceZoneId;
   }
+
+  function categoryName(categoryId: string): string {
+    return allCategories?.find((c) => c.id === categoryId)?.name_ar ?? categoryId;
+  }
+
+  async function handleAssignCategory(e: FormEvent) {
+    e.preventDefault();
+    if (!newCategoryId) return;
+    const body: SelfDeclareCategoryBody = { category_id: newCategoryId };
+    setSavingCategory(true);
+    setCategoryError(null);
+    try {
+      await authedFetch(`/admin/technicians/${id}/categories`, { method: 'POST', body: JSON.stringify(body) });
+      setNewCategoryId('');
+      loadCategories();
+    } catch (err) {
+      setCategoryError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSavingCategory(false);
+    }
+  }
+
+  async function handleRemoveCategory(categoryId: string) {
+    setSavingCategory(true);
+    setCategoryError(null);
+    try {
+      await authedFetch(`/admin/technicians/${id}/categories/${categoryId}`, { method: 'DELETE' });
+      loadCategories();
+    } catch (err) {
+      setCategoryError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSavingCategory(false);
+    }
+  }
+
+  async function handleApproveCategoryDeclaration(rowId: string) {
+    setSavingCategory(true);
+    setCategoryError(null);
+    try {
+      await authedFetch(`/admin/technicians/category-declarations/${rowId}/approve`, { method: 'POST', body: JSON.stringify({}) });
+      loadCategories();
+    } catch (err) {
+      setCategoryError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSavingCategory(false);
+    }
+  }
+
+  async function handleRejectCategoryDeclaration(rowId: string, reason: string) {
+    setSavingCategory(true);
+    setCategoryError(null);
+    try {
+      await authedFetch(`/admin/technicians/category-declarations/${rowId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      loadCategories();
+    } catch (err) {
+      setCategoryError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSavingCategory(false);
+    }
+  }
+
+  // فئات مفيش لها صف خالص لسه (مش pending ولا معتمدة) — دي بس اللي تظهر في قايمة "إضافة تخصص".
+  const assignableCategories = allCategories?.filter(
+    (c) => !categories?.some((tc) => tc.category_id === c.id && (tc.is_active || tc.verification_status === 'pending_verification')),
+  );
 
   if (error && !detail) {
     return (
@@ -652,6 +738,119 @@ export default function TechnicianDetailPage() {
                         >
                           إزالة
                         </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">التخصصات (الفئات)</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">
+              الفني بيبقى مؤهّل لكل خدمات الفئة اللي معتمدة له تلقائيًا — أي خدمة جديدة تتضاف تحت
+              الفئة دي تتاحله من غير أي خطوة إضافية.
+            </p>
+            {categoryError && <p className="text-sm text-destructive">{categoryError}</p>}
+            <form onSubmit={handleAssignCategory} className="flex flex-wrap items-end gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="category_select">تخصص جديد</Label>
+                <SelectNative
+                  id="category_select"
+                  value={newCategoryId}
+                  onChange={(e) => setNewCategoryId(e.target.value)}
+                  className="min-w-48"
+                >
+                  <option value="">اختار فئة</option>
+                  {assignableCategories?.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name_ar}
+                    </option>
+                  ))}
+                </SelectNative>
+              </div>
+              <Button type="submit" size="sm" disabled={savingCategory || !newCategoryId}>
+                تعيين مباشر
+              </Button>
+            </form>
+
+            {!categories ? (
+              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+            ) : categories.length === 0 ? (
+              <EmptyState title="مفيش تخصصات معيّنة لسه" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>الفئة</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead>المصدر</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {categories.map((tc) => (
+                    <TableRow key={tc.id}>
+                      <TableCell>{categoryName(tc.category_id)}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            tc.verification_status === 'approved' && tc.is_active
+                              ? 'secondary'
+                              : tc.verification_status === 'rejected'
+                                ? 'destructive'
+                                : 'outline'
+                          }
+                        >
+                          {tc.verification_status === 'approved' && !tc.is_active
+                            ? 'متوقف'
+                            : tc.verification_status === 'approved'
+                              ? 'معتمدة'
+                              : tc.verification_status === 'pending_verification'
+                                ? 'قيد المراجعة'
+                                : tc.verification_status === 'rejected'
+                                  ? 'مرفوضة'
+                                  : 'موقوفة'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {tc.is_self_declared ? 'طلب من الفني' : 'تعيين مباشر من الإدارة'}
+                      </TableCell>
+                      <TableCell>
+                        {tc.verification_status === 'pending_verification' ? (
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" disabled={savingCategory} onClick={() => handleApproveCategoryDeclaration(tc.id)}>
+                              اعتماد
+                            </Button>
+                            <PromptDialog
+                              trigger={
+                                <Button size="sm" variant="destructive" disabled={savingCategory}>
+                                  رفض
+                                </Button>
+                              }
+                              title={`رفض طلب تخصص "${categoryName(tc.category_id)}"`}
+                              label="سبب الرفض"
+                              minLength={5}
+                              destructive
+                              confirmLabel="تأكيد الرفض"
+                              onConfirm={(reason) => handleRejectCategoryDeclaration(tc.id, reason)}
+                            />
+                          </div>
+                        ) : tc.is_active ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={savingCategory}
+                            onClick={() => handleRemoveCategory(tc.category_id)}
+                          >
+                            إزالة
+                          </Button>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ))}

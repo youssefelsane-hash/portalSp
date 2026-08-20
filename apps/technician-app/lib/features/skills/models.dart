@@ -1,19 +1,19 @@
-// تصريح مهارات ذاتي (Script 4 §2-7) — مطابق لـ
-// apps/api/src/modules/technicians/dto/technician-service-response.dto.ts.
-class TechnicianServiceDeclaration {
+// تصريح تخصص ذاتي بمستوى الفئة الكاملة (سباكة/كهرباء/...) — §29، بدّل التصريح خدمة-بخدمة
+// القديم بالكامل (طلب مالك صريح 2026-08-20: أي خدمة جديدة تتضاف تحت فئة معتمدة للفني تبقى متاحة
+// له تلقائيًا، بلا أي تصريح إضافي لكل خدمة لوحدها). مطابق لـ
+// apps/api/src/modules/technicians/dto/technician-category-response.dto.ts.
+class TechnicianCategoryDeclaration {
   final String id;
-  final String serviceId;
-  final String skillLevel;
+  final String categoryId;
   final String verificationStatus;
   final bool isSelfDeclared;
   final bool isActive;
   final String? rejectionReason;
   final String createdAt;
 
-  TechnicianServiceDeclaration({
+  TechnicianCategoryDeclaration({
     required this.id,
-    required this.serviceId,
-    required this.skillLevel,
+    required this.categoryId,
     required this.verificationStatus,
     required this.isSelfDeclared,
     required this.isActive,
@@ -21,11 +21,10 @@ class TechnicianServiceDeclaration {
     required this.createdAt,
   });
 
-  factory TechnicianServiceDeclaration.fromJson(Map<String, dynamic> json) =>
-      TechnicianServiceDeclaration(
+  factory TechnicianCategoryDeclaration.fromJson(Map<String, dynamic> json) =>
+      TechnicianCategoryDeclaration(
         id: json['id'] as String,
-        serviceId: json['service_id'] as String,
-        skillLevel: json['skill_level'] as String,
+        categoryId: json['category_id'] as String,
         verificationStatus: json['verification_status'] as String,
         isSelfDeclared: json['is_self_declared'] as bool,
         isActive: json['is_active'] as bool,
@@ -34,17 +33,11 @@ class TechnicianServiceDeclaration {
       );
 }
 
-const Map<String, String> serviceVerificationStatusLabelsAr = {
+const Map<String, String> categoryVerificationStatusLabelsAr = {
   'pending_verification': 'تحت مراجعة الإدارة',
-  'approved': 'معتمدة',
-  'rejected': 'مرفوضة',
-  'suspended': 'موقوفة مؤقتًا',
-};
-
-const Map<String, String> skillLevelLabelsAr = {
-  'beginner': 'مبتدئ',
-  'standard': 'متوسط',
-  'expert': 'خبير',
+  'approved': 'معتمد',
+  'rejected': 'مرفوض',
+  'suspended': 'موقوف مؤقتًا',
 };
 
 class ServiceCategoryOption {
@@ -58,16 +51,4 @@ class ServiceCategoryOption {
         id: json['id'] as String,
         nameAr: json['name_ar'] as String,
       );
-}
-
-class ServiceOption {
-  final String id;
-  final String nameAr;
-
-  ServiceOption({required this.id, required this.nameAr});
-
-  factory ServiceOption.fromJson(Map<String, dynamic> json) => ServiceOption(
-    id: json['id'] as String,
-    nameAr: json['name_ar'] as String,
-  );
 }
