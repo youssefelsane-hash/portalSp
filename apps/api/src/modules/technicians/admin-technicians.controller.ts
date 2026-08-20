@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -26,6 +28,11 @@ import { toTechnicianDocumentResponseDto } from './dto/technician-document-respo
 import { toCertificateResponseDto } from './dto/certificate-response.dto';
 import { toTechnicianZoneResponseDto } from './dto/technician-zone-response.dto';
 import { VerificationNoteDto } from './dto/verification-note.dto';
+import { TechnicianCapacityQueryDto } from './dto/technician-capacity-query.dto';
+import { describeTechnicianCapacity } from './technician-eligibility.sql';
+import { SettingsService } from '../settings/settings.service';
+
+const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 @Controller('admin/technicians')
 @Roles(UserType.ADMIN)
@@ -34,6 +41,8 @@ export class AdminTechniciansController {
     private readonly adminTechniciansService: AdminTechniciansService,
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly technicianCategoriesService: TechnicianCategoriesService,
+    private readonly settingsService: SettingsService,
+    @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -41,6 +50,27 @@ export class AdminTechniciansController {
   async list(@Query() query: ListTechniciansQueryDto) {
     const { items, meta } = await this.adminTechniciansService.list(query);
     return { items: items.map(({ profile, user }) => toAdminTechnicianResponseDto(profile, user)), meta };
+  }
+
+  // معاينة القدرة الاستيعابية ليوم بعينه (docs/08 §34.4، ADR-0020 §W) — "الفني ده متاح إمتى ولية؟"
+  // سؤال تشخيصي عام، مش قرار مطابقة حقيقي لطلب بعينه (ده لسه بيحصل جوّه matching.service.ts وقت
+  // التوزيع الفعلي). بلا RequirePermission مخصوصة — عرض بس، نفس مستوى GET :id العادي.
+  @Get(':id/capacity')
+  async getCapacity(@Param('id', ParseUUIDPipe) id: string, @Query() query: TechnicianCapacityQueryDto) {
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const description = await describeTechnicianCapacity(this.dataSource, {
+      technicianId: id,
+      date: query.date,
+      fullDayThresholdMinutes: fullDayJobMinutes,
+    });
+    return {
+      technician_id: id,
+      date: query.date,
+      tier: description.tier,
+      reason_ar: description.reasonAr,
+      occupied_from: description.occupiedFrom,
+      occupied_to: description.occupiedTo,
+    };
   }
 
   // طابور مراجعة تصريحات المهارات الذاتية (Script 4 §2-7) — راجع فوق تعليق نفس القسم في

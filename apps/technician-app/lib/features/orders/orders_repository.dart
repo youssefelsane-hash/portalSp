@@ -67,6 +67,23 @@ class OrdersRepository {
     return items.map(Order.fromJson).toList();
   }
 
+  // طلبات شغل إضافي اختيارية (docs/08 §34.1b، ADR-0020) — منفصلة تمامًا عن fetchAvailable()
+  // (بث الطوارئ). الفني عنده شغل متوسط/تقيل نفس اليوم لسه بيتعرضله فرصة، بس قبول/رفض صريح
+  // بدل تأكيد تلقائي صامت.
+  Future<List<WorkOpportunity>> fetchWorkOpportunities() async {
+    final items = await authRepository.authedRequestList('/technician/orders/work-opportunities');
+    return items.map(WorkOpportunity.fromJson).toList();
+  }
+
+  Future<Order> acceptWorkOpportunity(String opportunityId) async {
+    final data = await authRepository.authedRequest('POST', '/technician/orders/work-opportunities/$opportunityId/accept');
+    return Order.fromJson(data!);
+  }
+
+  Future<void> declineWorkOpportunity(String opportunityId) async {
+    await authRepository.authedRequest('POST', '/technician/orders/work-opportunities/$opportunityId/decline');
+  }
+
   // تحديث لحظي بعد قرار عرض السعر (docs/08 §15) — بتتنادى لما OrderTrackingGateway يبعت
   // order:status_changed (tracking_client.dart)، عشان نجيب أحدث نسخة كاملة من الطلب بدل ما
   // نبني Order يدوي من حقلين بس (order_status الجديد وحده مش كفاية، محتاجين باقي الحقول كمان).

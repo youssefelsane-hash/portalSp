@@ -17,6 +17,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
 
   let dataSource: DataSource;
   let matchingService: MatchingService;
+  let workOpportunities: TechnicianWorkOpportunitiesService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -68,7 +69,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     const assignmentGuard = new TechnicianAssignmentGuardService({
       getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
     } as never);
-    const workOpportunities = new TechnicianWorkOpportunitiesService(dataSource);
+    workOpportunities = new TechnicianWorkOpportunitiesService(dataSource);
 
     matchingService = new MatchingService(
       dataSource.getRepository(OrderAssignment),
@@ -257,6 +258,27 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     await expect(matchingService.acceptWorkOpportunity(ids.meaningfulTechUser, opportunity.id)).rejects.toMatchObject({
       getStatus: expect.any(Function),
     });
+  });
+
+  it('شفافية الأدمن — listForOrderAdmin() بيرجّع تاريخ الفرص كامل مع اسم الفني (docs/08 §34.4)', async () => {
+    const orderId = await insertOrder('admin-visibility');
+    const [opp1] = await q(
+      `INSERT INTO technician_work_opportunities (order_id, technician_id, capacity_tier_at_offer, status)
+       VALUES ($1,$2,'MEANINGFUL','declined') RETURNING id`,
+      [orderId, ids.lightTechProfile],
+    );
+    const [opp2] = await q(
+      `INSERT INTO technician_work_opportunities (order_id, technician_id, capacity_tier_at_offer, status)
+       VALUES ($1,$2,'HEAVY','offered') RETURNING id`,
+      [orderId, ids.meaningfulTechProfile],
+    );
+
+    const rows = await workOpportunities.listForOrderAdmin(orderId);
+    expect(rows).toHaveLength(2);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(opp1.id)).toMatchObject({ status: 'declined', capacity_tier_at_offer: 'MEANINGFUL', technician_id: ids.lightTechProfile });
+    expect(byId.get(opp1.id)?.technician_full_name).toContain('فني فرص L');
+    expect(byId.get(opp2.id)).toMatchObject({ status: 'offered', capacity_tier_at_offer: 'HEAVY', technician_id: ids.meaningfulTechProfile });
   });
 
   it('فنيين اتنين بيقبلوا فرصتين على نفس الطلب بالتوازي — واحد بس يفوز (Scenario I، ADR-0020 §4)', async () => {

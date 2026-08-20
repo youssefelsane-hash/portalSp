@@ -33,6 +33,7 @@ import { ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { OrdersService } from './orders.service';
 import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -45,6 +46,7 @@ export class AdminOrdersController {
     private readonly orderTeamService: OrderTeamService,
     private readonly paymentsService: PaymentsService,
     private readonly techniciansService: TechniciansService,
+    private readonly workOpportunities: TechnicianWorkOpportunitiesService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -161,6 +163,26 @@ export class AdminOrdersController {
   @RequirePermission('orders.reassign')
   async listEligibleTechnicians(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminOrdersService.listEligibleTechniciansForReassign(id);
+  }
+
+  // شفافية "ليه الطلب ده اتوزّع بالشكل ده" (docs/08 §34.4، ADR-0020 §W) — مين اتعرضله فرصة شغل
+  // إضافي اختيارية، بأي تصنيف قدرة استيعابية وقتها، وقرر إيه. منفصل عن eligible-technicians فوق
+  // (ده بيسأل "مين مؤهّل دلوقتي"، ده بيسأل "مين اتعرض عليه فعليًا وحصل إيه").
+  @Get(':id/work-opportunities')
+  async listWorkOpportunities(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.workOpportunities.listForOrderAdmin(id);
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        technician_id: row.technician_id,
+        technician_code: row.technician_code,
+        technician_full_name: row.technician_full_name,
+        capacity_tier_at_offer: row.capacity_tier_at_offer,
+        status: row.status,
+        offered_at: row.offered_at,
+        decided_at: row.decided_at,
+      })),
+    };
   }
 
   @Post(':id/reassign')

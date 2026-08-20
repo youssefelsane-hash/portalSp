@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../academy/academy_screen.dart';
@@ -46,6 +47,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // (تجنيد ذاتي من قائد تاني)، مش هو قائدها. كانت بَقّة حقيقية: عضو الفريق معندوش أي طريقة يشوف
   // الطلب ده في تطبيقه خالص قبل كده (findOwnedByTechnicianOrThrow القديمة كانت بترفض 404 ليه).
   List<Order>? _teamAssignedOrders;
+  // طلبات شغل إضافي اختيارية (docs/08 §34.1b/§34.4، ADR-0020) — الفني عنده شغل متوسط/تقيل نفس
+  // اليوم لسه بيتعرضله فرصة، بس قبول/رفض صريح بدل تأكيد تلقائي صامت. منفصلة تمامًا عن _orders
+  // فوق (طوارئ، order_assignments) — عرض مختلف، ومسار موافقة مختلف بالكامل في الباك-إند.
+  List<WorkOpportunity>? _workOpportunities;
   Order? _activeOrder;
   String? _error;
   bool _isActing = false;
@@ -146,6 +151,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       if (mounted) setState(() => _error = err.message);
     }
     await _loadTeamAssigned();
+    await _loadWorkOpportunities();
   }
 
   // فشل التحميل (مشكلة شبكة عابرة) مايمنعش بقية الشاشة تشتغل — نفس فلسفة _loadTeamMembersIfApplicable
@@ -156,6 +162,49 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       if (mounted) setState(() => _teamAssignedOrders = assigned);
     } catch (_) {
       // تجاهل — راجع التعليق فوق.
+    }
+  }
+
+  Future<void> _loadWorkOpportunities() async {
+    try {
+      final opportunities = await _repository.fetchWorkOpportunities();
+      if (mounted) setState(() => _workOpportunities = opportunities);
+    } catch (_) {
+      // تجاهل — نفس فلسفة _loadTeamAssigned فوق.
+    }
+  }
+
+  Future<void> _acceptWorkOpportunity(WorkOpportunity opportunity) async {
+    setState(() => _isActing = true);
+    try {
+      final acceptedOrder = await _repository.acceptWorkOpportunity(opportunity.id);
+      if (mounted) {
+        setState(() => _activeOrder = acceptedOrder);
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder)),
+        );
+        await _refreshActiveOrder();
+      }
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      // الفرصة ممكن تكون اتقفلت من مكان تاني (فني تاني قبلها/الطلب اتغطى) — نحدّث القايمة عشان
+      // تختفي فورًا بدل ما تفضل ظاهرة وهي بقت مش صالحة.
+      await _loadWorkOpportunities();
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  Future<void> _declineWorkOpportunity(WorkOpportunity opportunity) async {
+    setState(() => _isActing = true);
+    try {
+      await _repository.declineWorkOpportunity(opportunity.id);
+      await _loadWorkOpportunities();
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _isActing = false);
     }
   }
 
@@ -298,8 +347,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final pending = _orders ?? const <AvailableOrder>[];
     final upcoming = _upcomingOrders ?? const <Order>[];
     final teamAssigned = _teamAssignedOrders ?? const <Order>[];
+    final workOpportunities = _workOpportunities ?? const <WorkOpportunity>[];
 
-    if (!hasActive && pending.isEmpty && upcoming.isEmpty && teamAssigned.isEmpty) {
+    if (!hasActive && pending.isEmpty && upcoming.isEmpty && teamAssigned.isEmpty && workOpportunities.isEmpty) {
       return ListView(
         children: [
           const SizedBox(height: 60),
@@ -346,6 +396,31 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
             ),
             const SizedBox(height: 8),
           ],
+        ],
+        // طلبات شغل إضافي اختيارية (docs/08 §34.1b/§34.4) — قسم منفصل بصريًا وسلوكيًا عن طلبات
+        // الطوارئ فوق: دي مش عاجلة، الفني عرضلها عشان عنده شغل تاني نفس اليوم، مش لأن الطلب طوارئ.
+        if (workOpportunities.isNotEmpty) ...[
+          Row(
+            children: [
+              Icon(Icons.add_task_outlined, size: 18, color: context.infoColor),
+              const SizedBox(width: 6),
+              Text(
+                'فرص شغل إضافي',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final opportunity in workOpportunities) ...[
+            _WorkOpportunityCard(
+              opportunity: opportunity,
+              busy: _isActing,
+              onAccept: () => _acceptWorkOpportunity(opportunity),
+              onDecline: () => _declineWorkOpportunity(opportunity),
+            ),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 8),
         ],
         // "شغلي كعضو فريق" (docs/08 §31) — طلبات القائد التاني جنّده ليها، مش هو قائدها.
         if (teamAssigned.isNotEmpty) ...[
@@ -468,6 +543,69 @@ class _EmergencyRequestCard extends StatelessWidget {
                   onPressed: busy ? null : onReject,
                   child: const Text('رفض'),
                 ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// طلب شغل إضافي اختياري (docs/08 §34.1b، ADR-0020) — الفرق الجوهري عن _EmergencyRequestCard فوق:
+// دي مش عاجلة، ومفيش عدّاد وقت أو مهلة خالص (الفرصة تفضل صالحة لحد ما تتقبل/تترفض/الطلب يتغطى من
+// فني تاني). النص بيوضّح "ليه" وصلت الفرصة دي (عندك شغل تاني نفس اليوم) عشان الفني يقدر يقرر
+// بمعلومات كاملة (يعرف تفاصيل عملياتية الباك-إند مش عارفها، زي "الشغل الحالي هيخلص بدري").
+class _WorkOpportunityCard extends StatelessWidget {
+  const _WorkOpportunityCard({
+    required this.opportunity,
+    required this.busy,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  final WorkOpportunity opportunity;
+  final bool busy;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+
+  String get _tierLabel => switch (opportunity.capacityTierAtOffer) {
+        'HEAVY' => 'عندك شغل تقيل النهاردة — الفرصة دي اختيارية بالكامل',
+        _ => 'عندك شغل تاني النهاردة — لو تقدر تستوعبها، اقبلها',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: context.infoColor.withValues(alpha: 0.06),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.add_task_outlined, size: 16, color: context.infoColor),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    _tierLabel,
+                    style: TextStyle(fontSize: 12, color: context.infoColor, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(opportunity.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(opportunity.streetName),
+            if (opportunity.problemDescription != null) Text(opportunity.problemDescription!),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                FilledButton(onPressed: busy ? null : onAccept, child: const Text('قبول')),
+                const SizedBox(width: 8),
+                OutlinedButton(onPressed: busy ? null : onDecline, child: const Text('رفض')),
               ],
             ),
           ],

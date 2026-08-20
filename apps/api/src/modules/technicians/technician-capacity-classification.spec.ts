@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { classifyTechnicianCapacity } from './technician-eligibility.sql';
+import { classifyTechnicianCapacity, describeTechnicianCapacity } from './technician-eligibility.sql';
 import { OrderStatus } from '../orders/entities/order.entity';
 
 // تصنيف القدرة الاستيعابية 4 مستويات (docs/08 §34.1، ADR-0020 §1) — اختبار حي ضد Postgres حقيقي.
@@ -158,5 +158,57 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
       [ids.technician, today],
     );
     expect(await classify(null)).toBe('BLOCKED');
+  });
+
+  // describeTechnicianCapacity() — نسخة شفافية الأدمن (docs/08 §34.4، ADR-0020 §W)، بترجع سبب
+  // مقروء + نطاق أيام بدل تصنيف خام. نفس الفكستشر، بتعيد استخدام ids.technician/today.
+  const today = new Date().toISOString().slice(0, 10);
+
+  it('describeTechnicianCapacity: LIGHT — سبب واضح، بلا نطاق أيام مشغول', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
+    await q(`UPDATE technician_schedule_slots SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
+    const description = await describeTechnicianCapacity(dataSource, {
+      technicianId: ids.technician,
+      date: today,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(description.tier).toBe('LIGHT');
+    expect(description.reasonAr.length).toBeGreaterThan(0);
+    expect(description.occupiedFrom).toBeNull();
+  });
+
+  it('describeTechnicianCapacity: HEAVY — سبب فيه رقم الطلب + نطاق أيام صحيح لمشروع 3 أيام', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
+    const orderId = await insertOrder(OrderStatus.ACCEPTED, { durationDays: 3 });
+    const [order] = await q(`SELECT order_number FROM orders WHERE id = $1`, [orderId]);
+
+    const description = await describeTechnicianCapacity(dataSource, {
+      technicianId: ids.technician,
+      date: today,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(description.tier).toBe('HEAVY');
+    expect(description.reasonAr).toContain(order.order_number);
+    expect(description.occupiedFrom).toBe(today);
+    const expectedTo = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+    expect(description.occupiedTo).toBe(expectedTo);
+  });
+
+  it('describeTechnicianCapacity: BLOCKED — سبب "حظر بنفسه"، نطاق يوم الحظر بالظبط', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
+    await q(`UPDATE technician_schedule_slots SET deleted_at = now() WHERE technician_id = $1`, [ids.technician]);
+    await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1,$2,'00:00:00','23:59:59','blocked')`,
+      [ids.technician, today],
+    );
+    const description = await describeTechnicianCapacity(dataSource, {
+      technicianId: ids.technician,
+      date: today,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(description.tier).toBe('BLOCKED');
+    expect(description.occupiedFrom).toBe(today);
+    expect(description.occupiedTo).toBe(today);
   });
 });

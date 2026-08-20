@@ -77,6 +77,42 @@ class AvailableOrder {
       );
 }
 
+// طلب شغل إضافي اختياري (docs/08 §34.1b، ADR-0020) — منفصل تمامًا عن AvailableOrder فوق (بث
+// الطوارئ، order_assignments): مفيش expires_at (الفرصة تفضل صالحة لحد القبول/الرفض/الطلب يتغطى
+// من فني تاني)، ومطابق لـ TechnicianWorkOpportunitiesService.listForTechnician() في الباك-إند.
+class WorkOpportunity {
+  final String id;
+  final String orderId;
+  final String orderNumber;
+  final String serviceNameAr;
+  final String? problemDescription;
+  final String streetName;
+  final String capacityTierAtOffer;
+  final String? scheduledAt;
+
+  WorkOpportunity({
+    required this.id,
+    required this.orderId,
+    required this.orderNumber,
+    required this.serviceNameAr,
+    required this.problemDescription,
+    required this.streetName,
+    required this.capacityTierAtOffer,
+    required this.scheduledAt,
+  });
+
+  factory WorkOpportunity.fromJson(Map<String, dynamic> json) => WorkOpportunity(
+        id: json['id'] as String,
+        orderId: json['order_id'] as String,
+        orderNumber: json['order_number'] as String,
+        serviceNameAr: json['service_name_ar'] as String,
+        problemDescription: json['problem_description'] as String?,
+        streetName: json['street_name'] as String,
+        capacityTierAtOffer: json['capacity_tier_at_offer'] as String,
+        scheduledAt: json['scheduled_at'] as String?,
+      );
+}
+
 // طاقم الطلب (docs/08 §5) — كانت فجوة موثّقة صراحة (Script 7 Phase 13/14): الباك-إند عنده
 // GET/POST/DELETE .../team-members جاهزة ومؤمّنة بالفعل (technician-order-execution.controller.ts)
 // بس apps/technician-app ما كانتش بتستخدمها خالص — فني قائد على طلب "اعتماد" (booking_mode=team)
