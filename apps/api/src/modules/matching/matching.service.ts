@@ -725,9 +725,11 @@ export class MatchingService {
         // في الترتيب لو هو المرشّح الوحيد اللي مش LIGHT (docs/08 §34.1b).
         candidates = await this.findEligibleTechnicians(order, candidateBatchSize, null, false);
       }
-      if (candidates.length === 0) {
-        return { kind: 'stalled' as const, order };
-      }
+      // **بلا `return stalled` هنا لو candidates.length === 0** — دي بالظبط الحالة اللي محتاجة
+      // fallback الـHEAVY توسيع البحث تحت (docs/08 §34.1b): الاستعلام الصارم (technicianAvailability
+      // Condition()) بيستبعد فنيين HEAVY **بالكامل** من الأساس (مش بيرجعهم كمرشحين نصنّفهم بعدين) —
+      // يعني لو الفني الوحيد المؤهّل HEAVY، `candidates` هنا بترجع فاضية تمامًا، مش "فيها فني
+      // مصنّف HEAVY". لو رجّعنا stalled هنا زي الأول، fallback التوسيع تحت كان أبدًا مش هيتنفّذ.
 
       let lightPick: { technicianId: string; distanceKm: string } | null = null;
       let meaningfulPick: { technicianId: string; distanceKm: string } | null = null;

@@ -50,7 +50,7 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
     );
   }
 
-  async function makeTechnician(label: string): Promise<string> {
+  async function makeTechnician(label: string, level: string = 'new'): Promise<string> {
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
       `+2014${label}${runId}`.slice(0, 14),
       `فني عدالة ${label} ${runId}`,
@@ -58,8 +58,8 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
     cleanupUserIds.push(user.id as string);
     const [profile] = await q(
       `INSERT INTO technician_profiles (user_id, technician_code, current_level, verification_status, current_location)
-       VALUES ($1,$2,'new','approved', ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
-      [user.id, `FAIR${label}${runId}`.slice(0, 20)],
+       VALUES ($1,$2,$3,'approved', ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
+      [user.id, `FAIR${label}${runId}`.slice(0, 20), level],
     );
     cleanupTechnicianIds.push(profile.id as string);
     await q(`INSERT INTO technician_services (technician_id, service_id, is_active) VALUES ($1,$2,true)`, [profile.id, ids.service]);
@@ -245,5 +245,21 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
       orders.push(candidates.filter((c) => c.technician_id === techP || c.technician_id === techQ).map((c) => c.technician_id));
     }
     for (const order of orders) expect(order).toEqual(orders[0]);
+  });
+
+  it('فرق مستوى/جودة كبير لسه بيغلب أفضلية العدالة الصغيرة (بند S/17 من رسالة المالك)', async () => {
+    // فني "premium" (order_priority_weight=30) عنده شغل حديث كتير، مقابل فني "new" (weight=0)
+    // معندوش أي شغل حديث خالص. لو العدالة كانت بتلغي فرق المستوى بالكامل، الفني الجديد كان
+    // هيفوز رغم فرق الجودة الكبير — ده بالظبط اللي المطلوب يتجنّبه.
+    const premiumTech = await makeTechnician('premium', 'premium');
+    const newTech = await makeTechnician('newbie', 'new');
+    for (let i = 0; i < 3; i += 1) await insertRecentAssignedOrder(premiumTech);
+
+    const service = buildMatchingService({ 'matching.fairness_weight': 5, 'matching.fairness_lookback_days': 7 });
+    const candidates = await findCandidates(service, buildOrder());
+    const ids_ = candidates.map((c) => c.technician_id);
+    // فرق المستوى (30) أكبر بكتير من أثر العدالة القصوى المعقول هنا (5 وزن × 3 طلبات = 15)،
+    // فالـpremium (رغم انشغاله الحديث) لازم يفضل الأول.
+    expect(ids_.indexOf(premiumTech)).toBeLessThan(ids_.indexOf(newTech));
   });
 });
