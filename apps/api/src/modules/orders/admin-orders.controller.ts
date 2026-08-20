@@ -58,7 +58,8 @@ export class AdminOrdersController {
 
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
-    const { order, history, pricingEvaluation, technicianCancellations, crewStatus } = await this.adminOrdersService.getDetail(id);
+    const { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent } =
+      await this.adminOrdersService.getDetail(id);
     // اسم/تليفون الفني بيبانوا للأدمن دايمًا طالما فيه فني معيّن (بخلاف عقد العميل
     // TECHNICIAN_CONTACT_VISIBLE_STATUSES اللي حماية IDOR ضد العميل قبل تأكيد حجز حقيقي — مبدأ
     // مختلف تمامًا، مش ينطبق على موظف عمليات عنده صلاحية RBAC كاملة على الطلب أصلاً). كانت فجوة
@@ -78,6 +79,9 @@ export class AdminOrdersController {
       technician_cancellations: technicianCancellations.map(toTechnicianOrderCancellationResponseDto),
       // docs/08 §35، ADR-0021 §1 — null لطلبات فردية/طوارئ (crew مش مفهوم منطبق أصلاً).
       crew_status: crewStatus,
+      // docs/08 §35.5 — "الطلب مميّز بصريًا" لما نقص الطاقم يعدّي عتبة التصعيد. محسوب وقت
+      // القراءة (نفس عتبة CrewShortageEscalationService)، false دايمًا لطلبات فردية/طوارئ.
+      crew_shortage_urgent: crewShortageUrgent,
     };
   }
 

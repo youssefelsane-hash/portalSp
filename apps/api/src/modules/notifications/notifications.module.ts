@@ -29,6 +29,7 @@ import { ComplaintFiledRoutingListener } from './listeners/complaint-filed-routi
 import { SupportChatMessageRoutingListener } from './listeners/support-chat-message-routing.listener';
 import { EmergencyDispatchStrugglingRoutingListener } from './listeners/emergency-dispatch-struggling-routing.listener';
 import { OrderNoTechnicianFoundRoutingListener } from './listeners/order-no-technician-found-routing.listener';
+import { OrderCrewShortageEscalatedRoutingListener } from './listeners/order-crew-shortage-escalated-routing.listener';
 import { PaymentInstaPayRejectedNotificationListener } from './listeners/payment-instapay-rejected-notification.listener';
 import { PaymentInstaPayConfirmedNotificationListener } from './listeners/payment-instapay-confirmed-notification.listener';
 import { PaymentInstaPayTransferReportedRoutingListener } from './listeners/payment-instapay-transfer-reported-routing.listener';
@@ -121,6 +122,7 @@ import { NotificationsService } from './notifications.service';
     OrderOfferResolutionListener,
     EmergencyDispatchStrugglingRoutingListener,
     OrderNoTechnicianFoundRoutingListener,
+    OrderCrewShortageEscalatedRoutingListener,
     PaymentInstaPayRejectedNotificationListener,
     PaymentInstaPayConfirmedNotificationListener,
     PaymentInstaPayTransferReportedRoutingListener,
