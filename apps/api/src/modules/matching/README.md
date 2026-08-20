@@ -507,3 +507,34 @@ _ORDER_STATUSES` وENGAGED_TECHNICIAN_ORDER_STATUSES على **نفس الفني 
 /README.md` (القسم اللي فوقه مباشرة) و`technician-eligibility.sql.ts` نفسه — التوثيق هنا بس
 تنويه: `findEligibleTechnicians()` هنا بتاخد الإصلاح تلقائيًا (نفس المصدر الموحّد)، صفر تعديل
 مطلوب في الملف ده نفسه.
+
+## طلبات شغل إضافي اختيارية — مسار جديد منفصل تمامًا عن الطوارئ (docs/08 §34.1b، ADR-0020)
+
+راجع `../technicians/README.md` (قسم مطابق) و`docs/adr/0020-technician-workload-tiers-and-fair-
+allocation.md` للتصميم الكامل. ملخص التنفيذ في الموديول ده:
+
+- `autoConfirmScheduledOrder()` بقت تصنّف كل مرشّح (`classifyTechnicianCapacity()`) قبل التأكيد:
+  `LIGHT` → تأكيد تلقائي زي ما هو بالحرف من زمان (بلا تغيير سلوك). `MEANINGFUL` (عنده شغل قصير
+  نفس اليوم بس مش شاغل يومه بالكامل) → صف `technician_work_opportunities` جديد بدل التأكيد، الطلب
+  يفضل `SEARCHING_TECHNICIAN`. `HEAVY` (شاغل يوم كامل/منشغل فعليًا دلوقتي) → فرصة برضه بس لو
+  `matching.offer_heavy_workload_technicians` مفعّل (افتراضي `true`)، عبر استعلام موسّع
+  (`ignoreActiveOrderConflict`، نفس آلية ADR-0017 §10) لأنه مش هيبان أصلاً في المرشحين العاديين.
+- `hasLiveOfferForOrder()` بيوقف أي محاولة تصنيف/عرض جديدة طالما فيه عرض `offered` حي — نفس فكرة
+  `liveAssignments` في `dispatchNextRound()`، بلا تكرار عروض.
+- `acceptWorkOpportunity()`/`declineWorkOpportunity()` — قبول تحت قفل كامل (فرصة + طلب + فني)،
+  إعادة فحص أهلية عبر `assertEligibleForWorkOpportunity()` **الجديدة** في `TechnicianAssignmentGuard
+  Service` (نسخة مخفّفة من `assertEligible()` — نفس فحوصات معتمد/موقع/خدمة+منطقة/مستوى، لكن بدل
+  بوابة `technicianAvailabilityCondition()` النهائية [اللي أصلاً مصمّمة تستبعد `HEAVY`/`BLOCKED`
+  معًا، عكس المطلوب هنا تمامًا] فحص `classifyTechnicianCapacity() !== 'BLOCKED'` بس — الفني بيقبل
+  **رغم** إنه `MEANINGFUL`/`HEAVY`، ده قرار الفني الصريح مش بَقّة). رفض بينادي `dispatchOrAutoConfirm()`
+  تاني فورًا (مرشّح تاني ياخد فرصة، بلا انتظار sweep الدقيقة).
+- `confirmTechnicianForOrder()` — الجزء المشترك من التأكيد (كان جوّه `autoConfirmScheduledOrder()`
+  بس، اتستخرج) بين المسارين، بما فيها `closeRemainingForOrder()` — أي فرصة تانية حية لنفس الطلب
+  بتتقفل تلقائيًا لما الطلب يتغطى (تلقائي أو قبول فرصة).
+- `TechnicianWorkOpportunitiesService` (موديول `technicians`، `migration 0153`) — طبقة بيانات بس،
+  فرق جوهري عن `order_assignments`: **مفيش `expires_at`**، الفرصة تفضل صالحة لحد ما تتقبل/تترفض/
+  الطلب يتغطى.
+- **اختبار حي شامل** (`matching-work-opportunity.spec.ts`، 4 اختبارات): فني `LIGHT` يتأكد تلقائيًا
+  بلا فرصة، فني `MEANINGFUL` يتعرضله فرصة (idempotent على النداء المتكرر)، قبولها بيأكد الطلب فعليًا،
+  رفضها بيفضل الطلب يدوّر وقبول متأخر عليها يترفض بوضوح، وسباق حقيقي بين فرصتين على نفس الطلب —
+  واحد بس يفوز (`Promise.allSettled`، نفس نمط `matching-accept-concurrency.spec.ts`).

@@ -40,4 +40,25 @@ export class TechnicianOrdersController {
     await this.matchingService.reject(user.sub, id, dto.reason_code);
     return null;
   }
+
+  // طلبات شغل إضافي اختيارية (docs/08 §34.1b، ADR-0020) — منفصلة تمامًا عن /available فوق (بث
+  // الطوارئ، order_assignments). الفني عنده شغل متوسط/تقيل في نفس اليوم لسه بيتعرضله فرصة، بس
+  // قبول/رفض صريح بدل تأكيد تلقائي صامت.
+  @Get('work-opportunities')
+  listWorkOpportunities(@CurrentUser() user: JwtPayload) {
+    return this.matchingService.listWorkOpportunitiesForUser(user.sub);
+  }
+
+  @Post('work-opportunities/:id/accept')
+  async acceptWorkOpportunity(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const order = await this.matchingService.acceptWorkOpportunity(user.sub, id);
+    const address = await this.addressesService.findByIdOrThrow(order.addressId);
+    return toOrderResponseDto(order, address);
+  }
+
+  @Post('work-opportunities/:id/decline')
+  async declineWorkOpportunity(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.matchingService.declineWorkOpportunity(user.sub, id);
+    return null;
+  }
 }

@@ -4127,8 +4127,35 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
 
 ### 34.5 — خطة التنفيذ بالمراحل (المرحلة 1 تُبنى في نفس السيشن دي، الباقي محتاج ADR أول)
 
-- **مرحلة 1 (بلا ADR، امتداد تقني مباشر)**: 34.3 (تعديل جماعي للإتاحة) — بلا تغيير معماري.
-- **مرحلة 2 (تحتاج `ADR-0020` معتمد قبل الكود)**: 34.1 (كيان الفرصة الاختيارية) + 34.2 (نموذج
-  العدالة) + 34.4 (شفافية الأدمن + واجهة الفني).
+- **مرحلة 1 (بلا ADR، امتداد تقني مباشر)**: 34.3 (تعديل جماعي للإتاحة) — ✅ خلص، `apps/technician-app`
+  الشاشة اتبنت من جديد بتقويم شهري + تحديد متعدد، 5 اختبارات حية.
+- **مرحلة 2 (تحتاج `ADR-0020` معتمد قبل الكود)**: 34.1 (تصنيف القدرة الاستيعابية + كيان الفرصة
+  الاختيارية) — ✅ خلص، تفاصيل تحت. 34.2 (نموذج العدالة) + 34.4 (شفافية الأدمن + واجهة الفني
+  المنفصلة) — لسه مش منفَّذين.
 
 راجع `docs/adr/0020-technician-workload-tiers-and-fair-allocation.md` للتصميم الكامل للمرحلة 2.
+
+### 34.6 — إغلاق §34.1/§34.1b: تصنيف القدرة الاستيعابية + طلبات شغل إضافي اختيارية
+
+منفَّذ بالكامل حسب تصميم `ADR-0020` §1-5 — راجع `apps/api/src/modules/technicians/README.md`
+و`apps/api/src/modules/matching/README.md` (قسمين مطابقين) للتفاصيل التقنية الكاملة. ملخص:
+
+- `classifyTechnicianCapacity()` (`technician-eligibility.sql.ts`) — 4 مستويات، اختبار حي مستقل
+  (`technician-capacity-classification.spec.ts`، 6/6).
+- `technician_work_opportunities` (migration `0153`) + `TechnicianWorkOpportunitiesService`.
+- `MatchingService.autoConfirmScheduledOrder()` بقت تصنّف قبل التأكيد — `LIGHT` تلقائي زي ما هو،
+  `MEANINGFUL`/`HEAVY` (لو الإعداد سامح) فرصة اختيارية بدل تأكيد صامت.
+- `acceptWorkOpportunity()`/`declineWorkOpportunity()` + `TechnicianAssignmentGuardService
+  .assertEligibleForWorkOpportunity()` جديدة (إعادة فحص كامل تحت قفل، بدون بوابة توفر يوم
+  اللي أصلاً بتستبعد `HEAVY` — القبول قرار الفني الصريح مش بَقّة).
+- 3 endpoints جديدة (`GET/POST work-opportunities/...`) في `TechnicianOrdersController`.
+- اختبار حي شامل جديد (`matching-work-opportunity.spec.ts`، 4/4): `LIGHT` تلقائي بلا فرصة،
+  `MEANINGFUL` فرصة (idempotent) + قبول فعلي، رفض + قبول متأخر مرفوض بوضوح، وسباق حقيقي بين
+  فرصتين على نفس الطلب (واحد بس يفوز — Scenario I من رسالة المالك).
+- **التحقق**: `tsc --noEmit`/`nest build` نضاف، كل الـ10 test suites في موديول `matching` والـ9 في
+  `technicians` عدّت (35+44 اختبار)، `npx jest` الكامل: **115/115 suite، 628/629 اختبار** — الفشل
+  الوحيد (`financial-reconciliation.e2e.spec.ts`) اتأكّد سباق تشغيل متوازي معروف على محفظة
+  `PLATFORM_SYSTEM_USER_ID` المشتركة (نفس فئة §33.5)، يعدّي 100% لوحده.
+- **لسه فاضل من §34 بالكامل**: 34.2 (نموذج العدالة — تاريخ حديث + تتبع رفض الفرص + كسر تعادل)،
+  34.4 (endpoint شفافية أدمن + واجهة `technician-app` تعرض/تقبل/ترفض الفرص — الـbackend جاهز
+  بالكامل، مفيش واجهة مستخدم لسه)، وتقييم/توثيق كل الـ20 سيناريو المذكورة في رسالة المالك رسميًا.

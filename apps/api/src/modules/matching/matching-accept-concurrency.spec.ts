@@ -5,6 +5,7 @@ import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { OrderStatus } from '../orders/entities/order.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
@@ -108,6 +109,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       {} as never,
       { emit: () => true } as never,
       { add: async () => undefined } as never,
+      new TechnicianWorkOpportunitiesService(dataSource),
     );
 
     adminOrdersService = new AdminOrdersService(

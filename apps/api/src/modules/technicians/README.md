@@ -537,3 +537,36 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 الافتراضي، يوم فيه `booked` بيتستبعد بلا لمس، استدعاء `block` مرتين على نفس اليوم idempotent (بلا
 خطأ قيد الـexclusion الحقيقي من migration 0118)، و`block` بيستبدل سلوتات `available` جزئية قديمة
 موجودة بصف واحد كامل اليوم.
+
+## تصنيف القدرة الاستيعابية 4 مستويات + طلبات شغل إضافي اختيارية (docs/08 §34.1، ADR-0020)
+
+راجع `docs/adr/0020-technician-workload-tiers-and-fair-allocation.md` للتصميم الكامل. المنطق
+الفعلي موزّع كالتالي:
+
+- **`classifyTechnicianCapacity()`** (`technician-eligibility.sql.ts`) — دالة جديدة **فوق**
+  `technicianAvailabilityCondition()` الموجودة (بلا تكرار منطق، بتلف حوالين نفس شروط `blocked`/
+  تعارض `orders`)، بترجّع تصنيف بدل بوليان: `BLOCKED` (استثناء صريح، أولوية فوق أي حاجة) →
+  `HEAVY` (انشغال جسدي فعلي دلوقتي أو شاغل يوم كامل) → `MEANINGFUL` (عنده شغل قصير نفس اليوم بس
+  مش شاغله بالكامل) → `LIGHT` (لا تعارض خالص). اختبار حي مستقل (`technician-capacity-classification
+  .spec.ts`، 6 اختبارات) يغطي الأربعة بالإضافة لتأكيد عدم وجود تعارض كاذب مع يوم بعيد.
+- **`technician_work_opportunities`** (migration `0153`، بلا TypeORM entity — نفس نمط
+  `technician_categories`، SQL خام مباشر عبر `TechnicianWorkOpportunitiesService` جديدة) — جدول
+  الفرص الاختيارية. **مختلف جوهريًا عن `order_assignments`** (بث الطوارئ): مفيش `expires_at`،
+  الفرصة تفضل صالحة لحد ما تتقبل/تترفض/الطلب يتغطى من فني تاني (`closeRemainingForOrder()`).
+- **`TechnicianAssignmentGuardService.assertEligibleForWorkOpportunity()`** جديدة — نفس فحوصات
+  `assertEligible()` الأساسية (اتستخرجت لـ`assertCoreEligibility()` خاصة مشتركة بين الاتنين) لكن
+  بدل بوابة `technicianAvailabilityCondition()` النهائية (اللي بتستبعد `HEAVY` أصلاً — مش مناسبة
+  هنا، الفني بيقبل **رغم** إنه `MEANINGFUL`/`HEAVY` عمدًا) فحص `classifyTechnicianCapacity() !==
+  'BLOCKED'` بس.
+- منطق القرار الفعلي (مين ياخد تأكيد تلقائي مقابل فرصة اختيارية) في `MatchingService
+  .autoConfirmScheduledOrder()` — تفاصيل كاملة في `../matching/README.md` (قسم مطابق).
+- **إعدادات جديدة** (`settings`, migration `0153`): `matching.offer_heavy_workload_technicians`
+  (افتراضي `true`)، `matching.fairness_lookback_days`/`matching.fairness_weight`/`matching.tie_
+  break_threshold` (افتراضي `0` = معطّل — محجوزة لـ§34.2، نموذج العدالة، لسه مش منفَّذ).
+- **`POST /technician/orders/work-opportunities/:id/accept`** / **`.../decline`** / **`GET
+  /technician/orders/work-opportunities`** — endpoints جديدة في `TechnicianOrdersController`
+  (موديول `matching`)، منفصلة تمامًا عن `/available` (بث الطوارئ).
+
+**لسه مش منفَّذ (مسجّل في docs/08 §34.5، مراحل تالية)**: §34.2 (نموذج العدالة بالتاريخ الحديث)،
+§34.4 (شفافية الأدمن الكاملة + فصل واجهة الفني بين شغل مؤكد/فرصة اختيارية/طوارئ في الشاشة
+الرئيسية — endpoints الفرص جاهزة، بس مفيش واجهة `technician-app` مخصصة ليها لسه).
