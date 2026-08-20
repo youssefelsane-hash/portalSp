@@ -1122,3 +1122,15 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 المالك ("event-sourced، إعادة استخدام بنية الحدث/audit الموجودة") — اتوسّع بمصدرين جداد بس، صفر
 جدول جديد: `technician_work_opportunities` (فرص اختيارية §34.1 + تجنيد فريق §35.1-3، فرع `UNION`
 عادي) و`crew_shortage_escalation` (صف تركيبي من `orders.crew_shortage_escalated_at` نفسه، §35.5).
+
+## فجوة إشعار تجنيد الفريق — ✅ اتصلحت (docs/08 §36.1)
+
+`OrderTeamService.recruitMember()` كان بيعمل INSERT فعلي في `technician_work_opportunities`
+(context=`crew_recruit`) لما الفني المرشّح يبقى MEANINGFUL/HEAVY — بس صفر حدث كان بيتصدّر لحظتها،
+يعني الفني مكانش عنده أي إشارة real-time إن قائد فريق دعاه. بعد `offerIfNotExists()`، لو
+`opportunity.created===true` بس، `recruitMember()` بيطلق `WORK_OPPORTUNITY_OFFERED_EVENT`
+(`../../common/events/work-opportunity-offered.event.ts`) المستهلَك في `../notifications/listeners
+/work-opportunity-offered-notification.listener.ts`. اختبار حي في `order-team-recruiting.spec.ts`
+(داخل اختبار `recruitMember — فني MEANINGFUL/HEAVY` الموجود) بيتأكد الحدث بيتصدّر مرة واحدة بس حتى
+لو نفس الفني اتنادى عليه تاني (idempotent). تفاصيل السبب الجذري الكامل والتحقيق في
+`docs/08-pricing-engine-and-platform-vision.md` §36.1.

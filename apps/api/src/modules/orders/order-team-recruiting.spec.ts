@@ -14,6 +14,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { SettingsService } from '../settings/settings.service';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
+import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 
 // اختبار حي ضد Postgres حقيقي — تجنيد فريق ميداني ذاتي من الفني القائد (docs/08 §31/§35، طلب
 // صريح من المالك 2026-08-20). مختلف عمدًا عن admin-crew-management.spec.ts: هنا القائد نفسه هو
@@ -380,7 +381,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     await expect(orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'technician')).rejects.toThrow();
   });
 
-  it('recruitMember — فني MEANINGFUL/HEAVY بيتعرضله فرصة اختيارية بدل تحميل صامت (docs/08 §35 بند 3)', async () => {
+  it('recruitMember — فني MEANINGFUL/HEAVY بيتعرضله فرصة اختيارية بدل تحميل صامت (docs/08 §35 بند 3)، وبيطلق WORK_OPPORTUNITY_OFFERED_EVENT مرة واحدة بس (docs/08 §36.1 — إصلاح فجوة الإشعار)', async () => {
     const orderId = await insertOrder(`recruit-meaningful-${runId}`, { requiredTechnicians: 3 });
     // نشغّل الجونيور بشغلانة مؤكدة تانية نفس اليوم (ASAP، بلا scheduled_at) — يبقى MEANINGFUL على الأقل.
     const [busyOrder] = await q(
@@ -388,6 +389,10 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
        VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',10000,0,'individual') RETURNING id`,
       [`TESTREC-busy-${runId}`.slice(0, 24), ids.customerProfile, ids.juniorProfile, ids.service, ids.address, ids.zone],
     );
+
+    const events = (orderTeamService as unknown as { events: EventEmitter2 }).events;
+    const offeredHandler = jest.fn();
+    events.on(WORK_OPPORTUNITY_OFFERED_EVENT, offeredHandler);
 
     const outcome = await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'technician');
     expect(outcome.status).toBe('offer_sent');
@@ -397,12 +402,31 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     const memberRows = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
     expect(memberRows).toHaveLength(0); // صفر تحميل صامت — لسه محتاج قبول صريح
 
-    const [opp] = await q(`SELECT context, crew_role, status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`, [
+    const [opp] = await q(`SELECT id, context, crew_role, status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`, [
       orderId,
       ids.juniorProfile,
     ]);
     expect(opp).toMatchObject({ context: 'crew_recruit', crew_role: 'technician', status: 'offered' });
 
+    // docs/08 §36.1 — كانت technician_work_opportunities بتتعمله INSERT من غير أي حدث/إشعار يوصل
+    // للفني. WORK_OPPORTUNITY_OFFERED_EVENT لازم يتصدّر مرة واحدة بالظبط مع context='crew_recruit'.
+    expect(offeredHandler).toHaveBeenCalledTimes(1);
+    const [offeredEvent] = offeredHandler.mock.calls[0] as [WorkOpportunityOfferedEvent];
+    expect(offeredEvent).toMatchObject({
+      opportunityId: opp.id,
+      orderId,
+      technicianId: ids.juniorProfile,
+      context: 'crew_recruit',
+    });
+
+    // نداء تاني على نفس الفني/الطلب (الفرصة القديمة لسه offered، مش عضو فريق فعلي — alreadyAdded
+    // بيفحص order_team_members بس) بيرجّع offer_sent تاني (idempotent) بس من غير ما يطلق حدث جديد.
+    offeredHandler.mockClear();
+    const secondOutcome = await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'technician');
+    expect(secondOutcome.status).toBe('offer_sent');
+    expect(offeredHandler).not.toHaveBeenCalled();
+
+    events.off(WORK_OPPORTUNITY_OFFERED_EVENT, offeredHandler);
     await q(`DELETE FROM orders WHERE id = $1`, [busyOrder.id]);
   });
 

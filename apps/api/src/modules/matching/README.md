@@ -624,3 +624,19 @@ dlc WHERE dlc.level = tp.current_level AND (dlc.decision_limit_cents IS NULL OR 
 سعري بحت). تفاصيل كاملة (بما فيها أثر الإصلاح على 4 specs موجودة كانت بتنادي `findEligibleTechnicians()`
 مباشرة بكائن `Order` جزئي بلا `totalAmountCents`، وفجوتين تانيتين غير مرتبطتين اتلقطوا في نفس
 التحقيق) في `docs/08-pricing-engine-and-platform-vision.md` §36.1 (تعميق).
+
+## فجوة إشعار الفرصة الاختيارية — ✅ اتصلحت (docs/08 §36.1)
+
+`autoConfirmScheduledOrder()` كان بيعمل INSERT فعلي في `technician_work_opportunities`
+(context=`assignment`) لما الفني الأفضل يبقى MEANINGFUL بدل تحميل صامت — بس صفر حدث/إشعار كان
+بيتصدّر لحظتها، عكس عرض `order_assignments` العادي (`ORDER_OFFER_CREATED_EVENT`). الفني كان مضطر
+يفتح شاشة الطلبات المتاحة بنفسه/pull-to-refresh عشان يكتشف الفرصة — بلاغ مالك حقيقي "فني بيوقف
+يستقبل فرص بعد أول شغلانة" بيتفق تمامًا مع الفجوة دي. الإصلاح: `WORK_OPPORTUNITY_OFFERED_EVENT`
+جديد (`common/events/work-opportunity-offered.event.ts`) بيتصدّر بس لما `offerIfNotExists()` يرجّع
+`created:true` (idempotent — إعادة الفحص ما بتكررش الإشعار)، مستهلَك في `../notifications/listeners
+/work-opportunity-offered-notification.listener.ts`. اختبار حي في `matching-work-opportunity.spec.ts`
+بيتأكد الحدث بيتصدّر مرة واحدة بس. **نظرية اتفحصت واتراجع عنها بالكامل**: توسيع `matching.batch_size`
+مش إصلاح حقيقي — اتثبت رياضيًا إن حجم مجمّع المرشحين ميقدرش يغيّر مين بياخد الفرصة الوحيدة (كل
+تفاصيل الإثبات في `docs/08-pricing-engine-and-platform-vision.md` §36.1). **صراحة**: الإصلاح ده
+مُثبَت ومنطقي بالكامل، بس معنديش وصول لقاعدة بيانات إنتاج حقيقية أثبّت بيها إنه السبب الوحيد —
+موثّق كـGAP جزئي في §36.1.

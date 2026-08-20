@@ -13,6 +13,7 @@ import {
   OrderEmergencyDispatchStrugglingEvent,
 } from '../../common/events/order-emergency-dispatch-struggling.event';
 import { ORDER_NO_TECHNICIAN_FOUND_EVENT, OrderNoTechnicianFoundEvent } from '../../common/events/order-no-technician-found.event';
+import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from '../orders/order-state-machine';
@@ -794,14 +795,33 @@ export class MatchingService {
 
       if (meaningfulPick) {
         const tier = await this.classifyCandidate(order, meaningfulPick.technicianId, fullDayJobMinutes);
-        await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
-        return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId };
+        const opportunity = await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
+        return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId, opportunity };
       }
 
       return { kind: 'stalled' as const, order };
     });
 
-    if (result.kind === 'noop' || result.kind === 'offered') {
+    if (result.kind === 'noop') {
+      return { dispatched: 0 };
+    }
+    if (result.kind === 'offered') {
+      // بره الـtransaction عمداً (زي ORDER_ACCEPTED_EVENT تحت) — مفيش داعي حد يسمع بيانات مش
+      // مؤكّدة. docs/08 §36.1 — created:false يعني الفرصة كانت موجودة بالفعل (idempotent
+      // re-check)، مش عرض جديد فعليًا، فمفيش داعي إشعار مكرر.
+      if (result.opportunity.created) {
+        this.events.emit(
+          WORK_OPPORTUNITY_OFFERED_EVENT,
+          new WorkOpportunityOfferedEvent(
+            result.opportunity.id,
+            result.order.id,
+            result.order.orderNumber,
+            result.technicianId,
+            'assignment',
+            result.opportunity.capacity_tier_at_offer,
+          ),
+        );
+      }
       return { dispatched: 0 };
     }
     if (result.kind === 'stalled') {

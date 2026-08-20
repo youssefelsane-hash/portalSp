@@ -5028,3 +5028,54 @@ endpoint مركز عمليات الفئة الموجود بالفعل من §35.
 بحتة مش ريجريشن حقيقي (تشغيل الملف بمفرده عدّى 9/9 نضاف فورًا). **الإصلاح البنيوي (استبدال النمط
 دا بـ`runId` فريد لكل تشغيلة بدل `Math.random()` عشوائي) خارج نطاق §36.3، موثّق هنا كفجوة صريحة
 عبر كل الموديول لسيشن جاية.**
+
+### §36.1 (إضافة) — فجوة إشعار حقيقية اتلقطت واتصلحت أثناء تحقيق مستقل لنفس البَقّة (صفر إشعار عند إنشاء فرصة عمل اختيارية)
+
+بالتوازي مع تحقيق §36.1/§36.1(تعميق) فوق (اللي لقى السبب الجذري الفعلي — `decision_limit_cents`
+ناقص من `findEligibleTechnicians()` — وصلّحه)، تحقيق مستقل من سيشن تانية على نفس البَقّة المُبلَّغة
+مشى في مسار تشخيصي مختلف ولقى فجوة حقيقية إضافية، منفصلة عن السبب الجذري لكن بتستاهل الإصلاح بنفس
+الأهمية: `technician_work_opportunities` (migration `0153`) كان بيتعمله INSERT فعليًا من الباك-إند
+في السيناريو الصحيح (فرصة اختيارية للفني الـMEANINGFUL بدل تحميل صامت) — لكن **صفر حدث/إشعار كان
+بيتصدّر لحظة الإنشاء**، عكس عرض `order_assignments` العادي اللي ليه `ORDER_OFFER_CREATED_EVENT`
+كامل مربوط بـ`OrderOfferNotificationListener`. الفني كان مضطر يفتح شاشة الطلبات المتاحة بنفسه أو
+يعمل pull-to-refresh عشان يكتشف وجود فرصة. بعد ما السبب الجذري اتصلح، الفجوة دي لسه موجودة كطبقة
+دفاع تانية مهمة — حتى مع فني مؤهّل بالكامل، لازم يوصله إشعار real-time فعلي، مش يعتمد على فتح
+التطبيق بنفسه.
+
+**نظرية اتفحصت واتثبت رياضيًا إنها غلط أثناء نفس التحقيق — موثّقة هنا عمدًا عشان سيشن جاية ما
+تعيدش نفس المحاولة**: افترضت الأول إن `LIMIT` صغير في `findEligibleTechnicians()`
+(`matching.batch_size`، افتراضي 5) ممكن يستبعد فني مؤهّل فعليًا من التصنيف/العرض. كتبت إصلاح كامل
+(setting جديد `matching.capacity_offer_candidate_pool_size`) وبدأت أكتب اختبار انحدار ليه — وأثناء
+الاشتقاق الدقيق للـSQL/الحلقة اتضح رياضيًا إن ده مستحيل يغيّر النتيجة: بما إن
+`technicianAvailabilityCondition()` و`classifyTechnicianCapacity()` بيستخدموا نفس حدود الاستبعاد
+بالحرف (HEAVY/BLOCKED)، أي فني بيرجع من `findEligibleTechnicians()` أصلاً ميقدرش يبقى غير LIGHT أو
+MEANINGFUL. و`ORDER BY rank_score DESC ... LIMIT N` بيشمل صاحب الترتيب الأول دايمًا لأي N≥1، وحلقة
+التصنيف في `autoConfirmScheduledOrder()` بتستقر دايمًا على نفس صاحب الترتيب الأول (أول LIGHT بيوقف
+الحلقة فورًا؛ أول MEANINGFUL بيتحفظ وميتغيّرش). يعني **حجم مجمّع المرشحين ميقدرش يغيّر مين بياخد
+الفرصة الوحيدة — بس بيغيّر عدد الصفوف الزيادة اللي بتتفحص وتتضيّع**. اتراجع بالكامل (`git checkout
+--` للكود، حذف الـmigration والاختبار) — **ملحوظة صريحة لأي سيشن جاية: توسيع batch_size/candidate
+pool مش إصلاح حقيقي للبَقّة دي، اتثبت رياضيًا، متتكررش المحاولة من غير دليل جديد**.
+
+**الإصلاح المُنفَّذ**:
+- `common/events/work-opportunity-offered.event.ts` (جديد) — `WORK_OPPORTUNITY_OFFERED_EVENT` +
+  `WorkOpportunityOfferedEvent(opportunityId, orderId, orderNumber, technicianId, context, capacityTier)`.
+- `technicians/technician-work-opportunities.service.ts` — `offerIfNotExists()` بقى بيرجّع
+  `{ ...row, created: boolean }` عشان الطرف المستدعي يعرف يفرّق بين "فرصة جديدة فعلاً" و"إعادة فحص
+  idempotent على فرصة موجودة" (بدون تكرار الإشعار).
+- `matching/matching.service.ts` — `autoConfirmScheduledOrder()` بيطلق الحدث لما `opportunity.created`
+  يبقى `true` (context=`assignment`).
+- `orders/order-team.service.ts` — `recruitMember()` بيطلق نفس الحدث لما `opportunity.created` يبقى
+  `true` (context=`crew_recruit`).
+- `notifications/listeners/work-opportunity-offered-notification.listener.ts` (جديد) — نفس نمط
+  `order-offer-notification.listener.ts` بالحرف، نص عربي مختلف لكل context، `notifyMultiChannel()`
+  بقناتي `IN_APP`+`PUSH`، مسجّل في `notifications.module.ts`.
+
+**اختبار الانحدار**: اتضاف اختبارين حيّين ضد Postgres حقيقي (مش mocks) — واحد في
+`matching/matching-work-opportunity.spec.ts` (context=`assignment`، بيتأكد الحدث بيتصدّر مرة واحدة
+بس حتى لو `autoConfirmScheduledOrder()` اتنادى تاني idempotent) وواحد في
+`orders/order-team-recruiting.spec.ts` (نفس الفحص لـcontext=`crew_recruit`، جوه اختبار
+`recruitMember — فني MEANINGFUL/HEAVY` الموجود بالفعل).
+
+**ملحوظة توثيق — "تسليك الحوض"**: السؤال ده اتجاوَب بالفعل بدقة في §36.1(تعميق) فوق (الجزء ج) من
+قاعدة بيانات حية — مفيش خدمة بالاسم ده، أقرب خدمة حقيقية "تسليك مواسير" وسلوك الـtier بتاعها موثّق
+بالتفصيل هناك. مفيش داعي لتكرار التوثيق هنا.
