@@ -6,6 +6,7 @@ import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
+import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 
 // اختبار حي ضد Postgres حقيقي — تكملة InstaPay اليدوي (ADR-0013 §7، docs/08 §163):
 // confirmInstaPayTransferByCustomer() (العميل يقول "أنا حوّلت") + rejectInstaPayPayment()
@@ -29,7 +30,9 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     otherCustomerProfile: '',
     address: '',
     order: '',
+    order2: '',
     instapayPayment: '',
+    instapayPayment2: '',
     cardPayment: '',
   };
 
@@ -37,7 +40,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [Order, Payment, Refund, User, WebhookEvent, CustomerProfile],
+      entities: [Order, Payment, Refund, User, WebhookEvent, CustomerProfile, OrderStatusHistory],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -117,6 +120,24 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     );
     ids.cardPayment = cardPayment.id;
 
+    // طلب/دفعة InstaPay ثانية منفصلة تمامًا — مخصوصة لاختبار confirmInstaPayPayment() (§28) من
+    // غير ما تتداخل مع طلب/دفعة confirmInstaPayTransferByCustomer/rejectInstaPayPayment فوق
+    // (confirmInstaPayTransferByCustomer بيدوّر على "أحدث دفعة instapay pending للطلب" —
+    // لازم يبقى طلب مختلف تمامًا عشان مايتلخبطش مع الدفعة التانية).
+    const [order2] = await q(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+         payment_status, total_amount_cents, placed_at)
+       VALUES ($1,$2,$3,$4,$5,'pending_payment','pending',100000, now()) RETURNING id`,
+      [`TESTIP2-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    ids.order2 = order2.id;
+    const [instapayPayment2] = await q(
+      `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, initiated_at)
+       VALUES ($1,$2,$3,$4,'instapay','pending',$5, now()) RETURNING id`,
+      [`PAYIP2-${runId}`.slice(0, 24), ids.order2, ids.customerProfile, 100000, `idem-ip2-${runId}`],
+    );
+    ids.instapayPayment2 = instapayPayment2.id;
+
     service = new PaymentsService(
       dataSource.getRepository(Order),
       dataSource.getRepository(Payment),
@@ -137,9 +158,13 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      // settingsService — لازم getNumber() حقيقي (مش {} فاضية) لأن confirmInstaPayPayment()
+      // بينادي emitPaymentConfirmedEvents() اللي بيقرا matching.deferred_dispatch_lead_hours.
+      { getNumber: async () => 4 } as never,
       { record: auditRecord } as never,
-      { emit: eventsEmit } as never,
+      // events — emitAsync() كمان بيتنادى (مش emit() بس) جوّه emitPaymentConfirmedEvents()
+      // لحدث ORDER_CREATED_EVENT.
+      { emit: eventsEmit, emitAsync: async () => undefined } as never,
       {} as never,
       {} as never,
     );
@@ -149,6 +174,11 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
+    // order2/instapayPayment2 (§28 — confirmInstaPayPayment() تست) — بيولّد order_status_history
+    // صف حقيقي (بعكس order1 اللي دورته كلها reject، مفيهاش أي history)، لازم يتمسح الأول قبل الطلب.
+    await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order2]);
+    await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order2]);
+    await q(`DELETE FROM orders WHERE id = $1`, [ids.order2]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.otherCustomerProfile]);
@@ -175,19 +205,65 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       ).rejects.toThrow('الطلب غير موجود');
     });
 
-    it('بيسجّل customer_confirmed_transfer_at أول مرة، وبيفضل ثابت (idempotent) في نداء تاني', async () => {
+    it('بيسجّل customer_confirmed_transfer_at أول مرة، وبيفضل ثابت (idempotent) في نداء تاني — وبيبعت حدث تبليغ للأدمن مرة واحدة بس', async () => {
+      eventsEmit.mockClear();
       const first = await service.confirmInstaPayTransferByCustomer(ids.customerUser, ids.order);
       expect(first.id).toBe(ids.instapayPayment);
       expect(first.customerConfirmedTransferAt).not.toBeNull();
       const firstTimestamp = first.customerConfirmedTransferAt!.getTime();
+      // §28 — فجوة الرصد اللي اتقفلت: أول تبليغ لازم يطلق حدث توجيه لفريق Finance.
+      expect(eventsEmit).toHaveBeenCalledWith(
+        'payment.instapay_transfer_reported',
+        expect.objectContaining({ paymentId: ids.instapayPayment, orderId: ids.order }),
+      );
+      expect(eventsEmit).toHaveBeenCalledTimes(1);
 
       const second = await service.confirmInstaPayTransferByCustomer(ids.customerUser, ids.order);
       expect(second.customerConfirmedTransferAt!.getTime()).toBe(firstTimestamp);
+      // نقر مزدوج — مفيش حدث تاني اتصدّر (كان هيبعت تنبيه مكرر لفريق Finance بلا داعي).
+      expect(eventsEmit).toHaveBeenCalledTimes(1);
 
       const [row] = await dataSource.query(`SELECT customer_confirmed_transfer_at FROM payments WHERE id = $1`, [
         ids.instapayPayment,
       ]);
       expect(row.customer_confirmed_transfer_at).not.toBeNull();
+    });
+  });
+
+  describe('confirmInstaPayPayment() — §28: إشعار تأكيد مخصوص + idempotency', () => {
+    it('يأكّد الدفعة، يبدأ التوزيع، وبيبعت حدث تأكيد مخصوص للعميل مرة واحدة بس', async () => {
+      eventsEmit.mockClear();
+      // confirmInstaPayPayment() (بعكس rejectInstaPayPayment) بيحفظ collectedByUserId
+      // (payments.collected_by_user_id) وchangedByUserId (order_status_history.changed_by_user_id)
+      // في أعمدة UUID حقيقية بـFK فعلي على users — لازم مستخدم موجود بالفعل، مش نص حر زي
+      // 'admin-1' ولا UUID عشوائي. بنستخدم customerUser الموجود أصلاً (مش دقيق دلاليًا كـ"أدمن"،
+      // بس كفاية لاختبار سلوك الأحداث/الـidempotency).
+      const adminUserId = ids.customerUser;
+      const confirmed = await service.confirmInstaPayPayment(adminUserId, ids.instapayPayment2);
+      expect(confirmed.paymentStatus).toBe(PaymentGatewayStatus.SUCCEEDED);
+      expect(confirmed.completedAt).not.toBeNull();
+
+      expect(eventsEmit).toHaveBeenCalledWith(
+        'payment.instapay_confirmed',
+        expect.objectContaining({ orderId: ids.order2, customerId: ids.customerProfile }),
+      );
+      const confirmedEmitCount = eventsEmit.mock.calls.filter((call) => call[0] === 'payment.instapay_confirmed').length;
+      expect(confirmedEmitCount).toBe(1);
+
+      // نقر مزدوج — الدفعة بقت succeeded خلاص، مسار الـidempotency بيرجّعها من غير أثر مالي إضافي
+      // ومن غير ما يبعت حدث "تأكيد" تاني (كان هيوصل للعميل إشعار مكرر "تحويلك اتأكّد" بلا داعي).
+      eventsEmit.mockClear();
+      const confirmedAgain = await service.confirmInstaPayPayment(adminUserId, ids.instapayPayment2);
+      expect(confirmedAgain.paymentStatus).toBe(PaymentGatewayStatus.SUCCEEDED);
+      expect(confirmedAgain.completedAt!.getTime()).toBe(confirmed.completedAt!.getTime());
+      expect(eventsEmit).not.toHaveBeenCalledWith('payment.instapay_confirmed', expect.anything());
+
+      const [row] = await dataSource.query(
+        `SELECT p.payment_status AS payment_status, o.order_status AS order_status FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.id = $1`,
+        [ids.instapayPayment2],
+      );
+      expect(row.payment_status).toBe(PaymentGatewayStatus.SUCCEEDED);
+      expect(row.order_status).toBe('searching_technician');
     });
   });
 

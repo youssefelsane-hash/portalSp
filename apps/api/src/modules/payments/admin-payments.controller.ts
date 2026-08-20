@@ -77,6 +77,18 @@ export class AdminPaymentsController {
   }
 
   /**
+   * طابور تأكيد InstaPay الإداري (§28) — كانت فجوة حقيقية: confirm/reject موجودين من زمان
+   * بصلاحية `payments.confirm_manual`، بس مفيش GET بيجمّعهم في مكان واحد — موظف Finance كان
+   * مضطر يدوّر طلب-طلب. نفس الصلاحية بالظبط، من غير @RequireStepUp() (ده فرض بس على الأفعال
+   * المالية الفعلية confirm/reject تحت، مش على القراءة — نفس فرق payouts.view/payouts.approve).
+   */
+  @Get('payments/instapay-pending')
+  @RequirePermission('payments.confirm_manual')
+  async listInstaPayPending() {
+    return { items: await this.paymentsService.listInstaPayPending() };
+  }
+
+  /**
    * تأكيد إداري يدوي لدفعة InstaPay (ADR-0013 §7) — صلاحية مخصوصة `payments.confirm_manual`
    * (Finance/Super Admin بس)، مش `refunds.issue` ولا أي صلاحية عامة. Idempotent فعليًا داخل
    * PaymentsService.confirmInstaPayPayment() (قفل pessimistic_write + فحص PENDING جوّه القفل) —

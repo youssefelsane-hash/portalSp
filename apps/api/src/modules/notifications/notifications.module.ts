@@ -30,6 +30,8 @@ import { SupportChatMessageRoutingListener } from './listeners/support-chat-mess
 import { EmergencyDispatchStrugglingRoutingListener } from './listeners/emergency-dispatch-struggling-routing.listener';
 import { OrderNoTechnicianFoundRoutingListener } from './listeners/order-no-technician-found-routing.listener';
 import { PaymentInstaPayRejectedNotificationListener } from './listeners/payment-instapay-rejected-notification.listener';
+import { PaymentInstaPayConfirmedNotificationListener } from './listeners/payment-instapay-confirmed-notification.listener';
+import { PaymentInstaPayTransferReportedRoutingListener } from './listeners/payment-instapay-transfer-reported-routing.listener';
 import { EmergencyOrderRoutingListener } from './listeners/emergency-order-routing.listener';
 import { LowRatingRoutingListener } from './listeners/low-rating-routing.listener';
 import { OrderAcceptedNotificationListener } from './listeners/order-accepted-notification.listener';
@@ -120,6 +122,8 @@ import { NotificationsService } from './notifications.service';
     EmergencyDispatchStrugglingRoutingListener,
     OrderNoTechnicianFoundRoutingListener,
     PaymentInstaPayRejectedNotificationListener,
+    PaymentInstaPayConfirmedNotificationListener,
+    PaymentInstaPayTransferReportedRoutingListener,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })

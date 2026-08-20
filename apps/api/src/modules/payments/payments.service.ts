@@ -11,6 +11,12 @@ import {
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '../../common/events/payment-instapay-rejected.event';
+import { InstaPayPendingPaymentResponseDto } from './dto/payments-response.dto';
+import { PAYMENT_INSTAPAY_CONFIRMED_EVENT, PaymentInstaPayConfirmedEvent } from '../../common/events/payment-instapay-confirmed.event';
+import {
+  PAYMENT_INSTAPAY_TRANSFER_REPORTED_EVENT,
+  PaymentInstaPayTransferReportedEvent,
+} from '../../common/events/payment-instapay-transfer-reported.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -736,6 +742,50 @@ export class PaymentsService {
   }
 
   /**
+   * طابور تأكيد InstaPay الإداري (§28) — كل الدفعات المعلّقة، اللي العميل بلّغ التحويل فيها الأول
+   * (محتاجة قرار فوري) — نفس نمط طابور الصرف (listPayouts) بس مخصوص لـInstaPay. مفيش pagination
+   * لأن الطابور ده المفروض يفضل صغير عمليًا (لو كبر، مشكلة تشغيلية أهم من الـUI).
+   */
+  async listInstaPayPending(): Promise<InstaPayPendingPaymentResponseDto[]> {
+    const rows = await this.dataSource.query<
+      {
+        id: string;
+        order_id: string;
+        order_number: string;
+        customer_name: string;
+        customer_phone: string;
+        amount_cents: number;
+        gateway_reference: string | null;
+        initiated_at: Date;
+        customer_confirmed_transfer_at: Date | null;
+      }[]
+    >(
+      `SELECT p.id, p.order_id, o.order_number, u.full_name AS customer_name, u.phone_number AS customer_phone,
+              p.amount_cents, p.gateway_reference, p.initiated_at, p.customer_confirmed_transfer_at
+       FROM payments p
+       JOIN orders o ON o.id = p.order_id
+       JOIN customer_profiles cp ON cp.id = o.customer_id
+       JOIN users u ON u.id = cp.user_id
+       WHERE p.payment_method = 'instapay' AND p.payment_status = 'pending'
+       ORDER BY (p.customer_confirmed_transfer_at IS NOT NULL) DESC,
+                COALESCE(p.customer_confirmed_transfer_at, p.initiated_at) ASC`,
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      order_id: row.order_id,
+      order_number: row.order_number,
+      customer_name: row.customer_name,
+      customer_phone: row.customer_phone,
+      amount_cents: row.amount_cents,
+      gateway_reference: row.gateway_reference,
+      initiated_at: row.initiated_at.toISOString(),
+      customer_confirmed_transfer_at: row.customer_confirmed_transfer_at
+        ? row.customer_confirmed_transfer_at.toISOString()
+        : null,
+    }));
+  }
+
+  /**
    * InstaPay — مسبق الدفع بتأكيد يدوي بس (ADR-0013 §7). بيرجّع تعليمات التحويل، مفيش webhook
    * تلقائي خالص — موظف Finance مُصرَّح له بس هو اللي بيأكّد الاستلام عبر confirmInstaPayPayment().
    */
@@ -775,6 +825,13 @@ export class PaymentsService {
     if (!payment.customerConfirmedTransferAt) {
       payment.customerConfirmedTransferAt = new Date();
       await this.payments.save(payment);
+      // بره أي transaction عمداً (نفس فلسفة باقي أحداث الموديول) — بس بعد الـsave فوق مباشرة،
+      // مش هنا لازم ننتظر أي حاجة تانية. مرة واحدة بس (جوّه نفس الـif) عشان النقر المتكرر
+      // مايبعتش تنبيه مكرر لفريق Finance كل مرة.
+      this.events.emit(
+        PAYMENT_INSTAPAY_TRANSFER_REPORTED_EVENT,
+        new PaymentInstaPayTransferReportedEvent(payment.id, order.id, order.orderNumber, payment.amountCents),
+      );
     }
     return payment;
   }
@@ -921,6 +978,9 @@ export class PaymentsService {
 
     if (dispatchInfo) {
       await this.emitPaymentConfirmedEvents(dispatchInfo);
+      // إشعار عميل مخصوص "تحويلك اتأكّد" — نظير payment.instapay_rejected بالحرف، مش هيتصدّر
+      // تاني في نقر مزدوج (dispatchInfo فاضل null في مسار الـidempotency فوق).
+      this.events.emit(PAYMENT_INSTAPAY_CONFIRMED_EVENT, new PaymentInstaPayConfirmedEvent(dispatchInfo.orderId, dispatchInfo.customerId));
     }
 
     return payment;
