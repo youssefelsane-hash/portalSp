@@ -596,3 +596,19 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 - **اختبار حي**: 3 اختبارات جديدة (`describeTechnicianCapacity` — LIGHT/HEAVY متعدد الأيام/
   BLOCKED) اتضافوا لـ`technician-capacity-classification.spec.ts`، واختبار جديد لـ
   `listForOrderAdmin()` في `../matching/matching-work-opportunity.spec.ts`.
+
+## تتبع أونلاين/آخر نشاط (docs/08 §35.10، ADR-0021 §6)
+
+`TechnicianActivityService.getActivityForUser()`/`getActivitySnapshot()` (batch) — **صفر تخزين
+حالة جديد**، الاتنين محسوبين من مصادر حقيقة موجودة بالفعل: `online` من `RealtimeSessionRegistry`
+(in-memory، Map موجودة أصلاً في `common/websocket/`، صفر تعديل على أي gateway)، `last_active_at`
+من `MAX(refresh_tokens.last_seen_at)` (بيتحدّث تلقائيًا كل تجديد access token، بلا أي كود جديد في
+`apps/technician-app`). **قرار متعمّد**: نظام `last_activity_at`/`employee_daily_activity` الموجود
+(`WorkforceActivityService`، ADR-0016) اتقصد عدم إعادة استخدامه هنا — مقصور على `user_type='admin'`
+عبر heartbeat صريح من `apps/admin`، توسيعه للفنيين كان محتاج آلية heartbeat جديدة في Flutter (تكلفة
+غير مبررة لميزة observability). **تحذير موثّق في الكود**: `RealtimeSessionRegistry` in-memory محلية
+لكل process — نشر بأكتر من instance هيخلي فني متصل بـinstance تاني يظهر "أوفلاين" هنا.
+
+`online`/`last_active_at` جداد في `AdminTechnicianDetailResponseDto` (`GET /admin/technicians/:id`
+بس — مش الـ8 endpoints التانية اللي بترجّع الرد المختصر بعد أفعال إدارية)، منفصلين تمامًا عن
+`is_available`/`is_on_duty` القديمين (اتشالوا من الأهلية بالكامل من ADR-0017 — مفيش خلط بينهم).

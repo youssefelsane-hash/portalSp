@@ -4493,3 +4493,40 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
   671/671 اختبار**، صفر ريجريشن.
 - **لسه فاضل من §35**: 35.9-35.20 (مركز عمليات أدمن، تنبيهات، توزيع، تايم لاين، اختبارات
   السيناريوهات الكاملة A-L، تحقق E2E حي).
+
+### 35.7 — إغلاق §35.10: تتبع أونلاين/آخر نشاط — observability بحت، صفر تخزين حالة جديد
+
+منفَّذ حسب `ADR-0021` §6 — راجع `apps/api/src/modules/technicians/technician-activity.service.ts`
+للتفاصيل التقنية الكاملة. **قرار معماري متعمّد يستحق التوثيق هنا بوضوح**: الخطة الأصلية في
+`ADR-0021` كانت تفترض عمود `last_active_at` جديد على `technician_profiles` — بعد المراجعة الفعلية
+لقيت مصدرين حقيقة **موجودين بالفعل** يغطوا بالضبط نفس المفهومين بلا أي migration جديدة:
+
+- **`online`** — `RealtimeSessionRegistry` (الموجودة بالفعل، `common/websocket/`) بتسجّل كل
+  socket متصل بأي namespace (تتبع/شات) في Map محلية بالـuserId. إضافتين للقراءة بس
+  (`isUserOnline()`/`onlineUserIds()`) — صفر تعديل على أي gateway موجود.
+- **`last_active_at`** — `MAX(refresh_tokens.last_seen_at)` — العمود ده بيتحدّث فعليًا في كل دورة
+  تجديد access token (`AuthService`)، لكل أنواع المستخدمين (فني/عميل/أدمن) بلا أي تعاون من العميل
+  (Flutter) مطلوب. **تحذير معماري موثّق صراحة في الكود**: `RealtimeSessionRegistry` in-memory محلية
+  لكل process — في نشر بأكتر من instance، فني متصل بـinstance تاني هيظهر "أوفلاين" هنا. مقبول
+  حاليًا (نفس حجم النشر)، موثّق عشان مايتنساش.
+- **قرار تانٍ مهم**: فيه نظام `last_activity_at`/`employee_daily_activity` (`WorkforceActivityService`،
+  ADR-0016) موجود بالفعل بس ده **مقصور على `user_type='admin'` عبر heartbeat صريح من `apps/admin`**
+  (POST كل دقيقة من التاب وهو فاتح) — مش قابل لإعادة الاستخدام للفنيين بلا بناء آلية heartbeat
+  جديدة في `apps/technician-app` (تكلفة/بطارية غير مبررة لميزة observability). `refresh_tokens
+  .last_seen_at` هو الاختيار الصحيح للفنيين تحديدًا (تلقائي بلا أي كود جديد في التطبيقات).
+- **`AdminTechnicianDetailResponseDto`**: `online`/`last_active_at` جداد، منفصلين تمامًا عن
+  `is_available`/`is_on_duty` الموجودين (نموذج قديم اتشال من الأهلية بالكامل، ADR-0017) — تعليق
+  صريح في الكود يمنع أي حد يخلط بينهم لاحقًا. **نطاق التغيير مقصود ضيق**: بس `GET /admin/
+  technicians/:id` (تفاصيل فني واحد) — مش الـ8 endpoints التانية اللي بترجّع `AdminTechnicianResponseDto`
+  بعد أفعال إدارية (اعتماد/رفض/تعليق..) — دول مش محتاجين online/last_active أصلاً، وتوسيع الدالة
+  المشتركة كان هيلمس كل الـ8 بلا داعي حقيقي.
+- **`TechnicianActivityService`** جديدة (`TechniciansModule`، بتستورد `RealtimeSecurityModule` —
+  صفر cycle، `RealtimeSecurityModule` مالهاش أي استيراد لـ`TechniciansModule`) — `getActivityForUser()`
+  و`getActivitySnapshot()` (batch، استعلام واحد لعدة فنيين — أساس §35.9 القادمة).
+- **اختبارات حية جديدة** (`technician-activity.spec.ts`، 5/5): فني بلا أي جلسة، `last_seen_at`
+  حقيقي بيرجع حتى لو الجلسة revoked (تاريخ حقيقي مش حالة حالية)، `online` بيتغيّر مع
+  `register()`/`unregister()` (in-memory بحت)، batch لعدة فنيين، ومصفوفة فاضية.
+- **التحقق النهائي**: `tsc --noEmit`/`nest build` نضاف. `npx jest` الكامل: **119/119 suite،
+  676/676 اختبار**، صفر ريجريشن.
+- **لسه فاضل من §35**: 35.9 (مركز عمليات فئة — بيستهلك `TechnicianActivityService.
+  getActivitySnapshot()` دلوقتي)، 35.11-35.20.

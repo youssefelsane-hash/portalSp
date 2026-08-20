@@ -78,6 +78,23 @@ export class RealtimeSessionRegistry implements OnModuleInit, OnModuleDestroy {
     this.socketsByUser.delete(userId);
   }
 
+  /**
+   * "أونلاين دلوقتي" (docs/08 §35.10، ADR-0021 §6) — observability بحت، بيقرأ نفس الـMap
+   * الموجودة أصلاً بلا أي تخزين جديد. **تحذير معماري متعمّد**: الـMap دي in-memory محلية لكل
+   * process — في نشر بأكتر من instance/pod، فني متصل بـinstance تاني هيظهر "أوفلاين" هنا رغم
+   * إنه متصل فعليًا. مقبول حاليًا (نفس حجم النشر الحالي)، وموثّق صراحة عشان أي سيشن مستقبلية
+   * تعرف الفجوة دي لو النشر اتوسّع لأكتر من instance — مش سهو.
+   */
+  isUserOnline(userId: string): boolean {
+    const sockets = this.socketsByUser.get(userId);
+    return !!sockets && sockets.size > 0;
+  }
+
+  /** كل الـuserIds المتصلين دلوقتي عبر أي socket (تتبع/شات/أي namespace تاني بيستخدم نفس الـregistry). */
+  onlineUserIds(): string[] {
+    return [...this.socketsByUser.keys()];
+  }
+
   consumeRateLimit(socketId: string, event: string, limit: number, windowMs: number): boolean {
     const now = Date.now();
     const socketWindows = this.rateWindows.get(socketId) ?? new Map<string, number[]>();
