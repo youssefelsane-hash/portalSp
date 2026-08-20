@@ -5,6 +5,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
 
@@ -158,6 +159,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       await q(`DELETE FROM order_status_history WHERE order_id = ANY($1::uuid[])`, [orderIds]);
       await q(`DELETE FROM order_assignments WHERE order_id = ANY($1::uuid[])`, [orderIds]);
       await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
+      await q(`DELETE FROM technician_schedule_slots WHERE technician_id IN ($1,$2)`, [ids.lightTechProfile, ids.meaningfulTechProfile]);
       await q(`DELETE FROM technician_zones WHERE technician_id IN ($1,$2)`, [ids.lightTechProfile, ids.meaningfulTechProfile]);
       await q(`DELETE FROM technician_services WHERE technician_id IN ($1,$2)`, [ids.lightTechProfile, ids.meaningfulTechProfile]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
@@ -230,6 +232,133 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     expect(decided.status).toBe('accepted');
   });
 
+  it('فني HEAVY (شاغل يوم كامل) — لسه بيتعرضله فرصة، مش يفضل الطلب stalled بلا حل (docs/08 §34.1b بند 4)', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = ANY($1::uuid[])`, [
+      [ids.meaningfulTechProfile, ids.lightTechProfile],
+    ]);
+    // شغل يوم كامل (estimated_duration_days=3) — الفني ده بس المرشّح المؤهّل، ومستبعد بالكامل من
+    // الاستعلام الصارم (technicianAvailabilityCondition())، مش مجرد "مصنّف HEAVY في نتيجة راجعة".
+    const heavyBaselineId = await insertOrder('heavy-baseline');
+    await q(`UPDATE orders SET technician_id = $1, order_status = 'accepted', estimated_duration_days = 3 WHERE id = $2`, [
+      ids.meaningfulTechProfile,
+      heavyBaselineId,
+    ]);
+    // الفني التاني (lightTechProfile) لازم يكون مش مؤهّل/مشغول برضه هنا — غير كده هو هيبقى مرشّح
+    // LIGHT حقيقي وييجي عليه التأكيد التلقائي العادي بدل ما نختبر مسار HEAVY بالظبط.
+    await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date, '00:00:00','23:59:59','blocked')`,
+      [ids.lightTechProfile],
+    );
+
+    const orderId = await insertOrder('heavy');
+    await q(`UPDATE orders SET requested_technician_id = $1 WHERE id = $2`, [ids.meaningfulTechProfile, orderId]);
+
+    const result = await matchingService.autoConfirmScheduledOrder(orderId);
+    expect(result.dispatched).toBe(0);
+
+    const [order] = await q(`SELECT order_status FROM orders WHERE id = $1`, [orderId]);
+    expect(order.order_status).toBe('searching_technician');
+
+    const [opportunity] = await q(
+      `SELECT * FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
+      [orderId, ids.meaningfulTechProfile],
+    );
+    expect(opportunity).toBeDefined();
+    expect(opportunity.status).toBe('offered');
+    expect(opportunity.capacity_tier_at_offer).toBe('HEAVY');
+
+    // تنظيف — الفني الفاضي لازم يرجع فاضي لأي اختبار بعده.
+    await q(`UPDATE technician_schedule_slots SET deleted_at = now() WHERE technician_id = $1`, [ids.lightTechProfile]);
+  });
+
+  it('فني HEAVY لا يتعرضله فرصة لو matching.offer_heavy_workload_technicians معطّل — الطلب يفضل يدوّر بلا فرصة', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = ANY($1::uuid[])`, [
+      [ids.meaningfulTechProfile, ids.lightTechProfile],
+    ]);
+    const heavyBaselineId2 = await insertOrder('heavy-baseline-off');
+    await q(`UPDATE orders SET technician_id = $1, order_status = 'accepted', estimated_duration_days = 3 WHERE id = $2`, [
+      ids.meaningfulTechProfile,
+      heavyBaselineId2,
+    ]);
+    await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1, (now() AT TIME ZONE 'Africa/Cairo')::date, '00:00:00','23:59:59','blocked')`,
+      [ids.lightTechProfile],
+    );
+
+    const orderId = await insertOrder('heavy-off');
+    await q(`UPDATE orders SET requested_technician_id = $1 WHERE id = $2`, [ids.meaningfulTechProfile, orderId]);
+
+    const noOfferService = new MatchingService(
+      dataSource.getRepository(OrderAssignment),
+      dataSource.getRepository(Order),
+      dataSource,
+      new TechniciansService(
+        dataSource.getRepository(TechnicianProfile),
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      ),
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
+      {
+        getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+        getBoolean: jest.fn(async () => false),
+      } as never,
+      { emit: () => true } as never,
+      { add: async () => undefined } as never,
+      workOpportunities,
+    );
+
+    const result = await noOfferService.autoConfirmScheduledOrder(orderId);
+    expect(result.dispatched).toBe(0);
+    const opportunities = await q(`SELECT * FROM technician_work_opportunities WHERE order_id = $1`, [orderId]);
+    expect(opportunities).toHaveLength(0);
+    const [order] = await q(`SELECT order_status FROM orders WHERE id = $1`, [orderId]);
+    expect(order.order_status).toBe('searching_technician');
+
+    await q(`UPDATE technician_schedule_slots SET deleted_at = now() WHERE technician_id = $1`, [ids.lightTechProfile]);
+  });
+
+  it('إتمام الشغل الحالي بيرجّع الفني LIGHT فورًا حتى لو عنده فرصة اختيارية لسه مفتوحة (docs/08 §34 بند L)', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.meaningfulTechProfile]);
+    const jobAId = await insertOrder('job-a');
+    await q(`UPDATE orders SET technician_id = $1, order_status = 'accepted' WHERE id = $2`, [ids.meaningfulTechProfile, jobAId]);
+
+    // فرصة اختيارية (Job B) اتعرضت بسبب Job A لسه شغال.
+    const jobBId = await insertOrder('job-b');
+    await q(`UPDATE orders SET requested_technician_id = $1 WHERE id = $2`, [ids.meaningfulTechProfile, jobBId]);
+    await matchingService.autoConfirmScheduledOrder(jobBId);
+    const [openOpportunity] = await q(`SELECT * FROM technician_work_opportunities WHERE order_id = $1`, [jobBId]);
+    expect(openOpportunity.status).toBe('offered');
+
+    // Job A يخلص فعليًا (completed) — القدرة الاستيعابية لازم ترجع LIGHT فورًا، بلا أي cache قديم.
+    await q(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [jobAId]);
+    const tierAfterCompletion = await classifyTechnicianCapacity(dataSource, {
+      technicianId: ids.meaningfulTechProfile,
+      scheduledAt: null,
+      excludeOrderId: jobBId,
+      serviceDurationMinutes: 60,
+      fullDayThresholdMinutes: 360,
+    });
+    expect(tierAfterCompletion).toBe('LIGHT');
+
+    // طلب تالت جديد لنفس الفني — بما إنه بقى LIGHT فعليًا، يتأكد تلقائيًا بلا فرصة تانية.
+    const jobCId = await insertOrder('job-c');
+    await q(`UPDATE orders SET requested_technician_id = $1 WHERE id = $2`, [ids.meaningfulTechProfile, jobCId]);
+    const result = await matchingService.autoConfirmScheduledOrder(jobCId);
+    expect(result.dispatched).toBe(1);
+    const [orderC] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [jobCId]);
+    expect(orderC.order_status).toBe('accepted');
+    expect(orderC.technician_id).toBe(ids.meaningfulTechProfile);
+  });
+
   it('رفض الفرصة — الطلب يفضل يدوّر، وقبول متأخر على فرصة مرفوضة يترفض بوضوح', async () => {
     await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.meaningfulTechProfile]);
     const baselineOrderId2 = await insertOrder('busy-baseline-2');
@@ -258,6 +387,40 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     await expect(matchingService.acceptWorkOpportunity(ids.meaningfulTechUser, opportunity.id)).rejects.toMatchObject({
       getStatus: expect.any(Function),
     });
+  });
+
+  it('قبول فرصة بيعيد فحص الحالة الحقيقية تحت قفل — الفني حظر اليوم بعد العرض، القبول يترفض بوضوح (Scenario K)', async () => {
+    await q(`UPDATE orders SET deleted_at = now() WHERE technician_id = $1`, [ids.meaningfulTechProfile]);
+    await q(`UPDATE technician_schedule_slots SET deleted_at = now() WHERE technician_id = $1`, [ids.meaningfulTechProfile]);
+    const baselineId = await insertOrder('recheck-baseline');
+    await q(`UPDATE orders SET technician_id = $1, order_status = 'accepted' WHERE id = $2`, [ids.meaningfulTechProfile, baselineId]);
+
+    const orderId = await insertOrder('recheck');
+    await q(`UPDATE orders SET requested_technician_id = $1 WHERE id = $2`, [ids.meaningfulTechProfile, orderId]);
+    await matchingService.autoConfirmScheduledOrder(orderId);
+    const [opportunity] = await q(`SELECT * FROM technician_work_opportunities WHERE order_id = $1`, [orderId]);
+    expect(opportunity.status).toBe('offered');
+
+    // الفني حظر اليوم بنفسه بعد ما الفرصة اتعرضت عليه — العرض لسه offered (ظاهر في الشاشة)، بس
+    // الحالة الحقيقية اتغيّرت. القبول لازم يعيد الفحص تحت قفل ويترفض، مش ينجح بناءً على الفرصة
+    // الظاهرة القديمة.
+    const today = new Date().toISOString().slice(0, 10);
+    await q(
+      `INSERT INTO technician_schedule_slots (technician_id, slot_date, start_time, end_time, status)
+       VALUES ($1,$2,'00:00:00','23:59:59','blocked')`,
+      [ids.meaningfulTechProfile, today],
+    );
+
+    await expect(matchingService.acceptWorkOpportunity(ids.meaningfulTechUser, opportunity.id)).rejects.toMatchObject({
+      getStatus: expect.any(Function),
+    });
+    const [stillOffered] = await q(`SELECT status FROM technician_work_opportunities WHERE id = $1`, [opportunity.id]);
+    expect(stillOffered.status).toBe('offered');
+    const [order] = await q(`SELECT order_status FROM orders WHERE id = $1`, [orderId]);
+    expect(order.order_status).toBe('searching_technician');
+
+    // تنظيف — منعًا لتلوّث اختبارات تانية بعد كده بيستخدموا نفس الفني.
+    await q(`UPDATE technician_schedule_slots SET deleted_at = now() WHERE technician_id = $1`, [ids.meaningfulTechProfile]);
   });
 
   it('شفافية الأدمن — listForOrderAdmin() بيرجّع تاريخ الفرص كامل مع اسم الفني (docs/08 §34.4)', async () => {
