@@ -108,6 +108,28 @@ export class AdminOrdersController {
     };
   }
 
+  // فانل مطابقة الطلب (docs/08 §35.8، ADR-0021 §4) — "ليه الطلب ده لسه بيدوّر؟" قراءة بس، أي أدمن.
+  @Get(':id/matching-funnel')
+  async getMatchingFunnel(@Param('id', ParseUUIDPipe) id: string) {
+    const { order } = await this.adminOrdersService.getDetail(id);
+    const funnel = await this.matchingExplainabilityService.explainOrderFunnel(order);
+    return {
+      order_id: funnel.orderId,
+      order_status: funnel.orderStatus,
+      pool: {
+        category_eligible: funnel.pool.categoryEligible,
+        zone_eligible: funnel.pool.zoneEligible,
+        blocked: funnel.pool.blocked,
+        heavy: funnel.pool.heavy,
+        meaningful: funnel.pool.meaningful,
+        light: funnel.pool.light,
+      },
+      dispatch_assignments: funnel.dispatchAssignments,
+      crew_recruit_opportunities: funnel.crewRecruitOpportunities,
+      crew_status: funnel.crewStatus,
+    };
+  }
+
   // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). صلاحية مخصصة (orders.create_for_customer)
   // مش ممنوحة تلقائيًا لكل أدمن — راجع migration 0131. نفس OrdersService.create() الحقيقي بالحرف
   // (نفس التحقق/التسعير/الجدولة)، الفرق الوحيد هو مين "العميل" اللي بيتحسب منه customer_id.

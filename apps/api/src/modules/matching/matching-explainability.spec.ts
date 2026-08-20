@@ -23,6 +23,7 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     customerProfile: '',
     address: '',
     order: '',
+    teamOrder: '',
     eligibleProfile: '',
     wrongCategoryProfile: '',
     wrongZoneProfile: '',
@@ -169,6 +170,9 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
 
   afterAll(async () => {
     try {
+      await q(`DELETE FROM technician_work_opportunities WHERE order_id = $1`, [ids.teamOrder]);
+      await q(`DELETE FROM order_team_members WHERE order_id = $1`, [ids.teamOrder]);
+      await q(`DELETE FROM orders WHERE id = $1`, [ids.teamOrder]);
       await q(`DELETE FROM order_assignments WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
@@ -254,5 +258,47 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     const order = await orderRow();
     order.serviceZoneId = null;
     await expect(service.explainTechnicianForOrder(order, ids.eligibleProfile)).rejects.toThrow();
+  });
+
+  // docs/08 §35.8 — فانل مطابقة الطلب. نفس فنيي الفيكستشر فوق بالظبط: category_eligible=5 (كل
+  // الفنيين ما عدا wrongCategoryProfile)، zone_eligible=4 (كل اللي فوق ما عدا wrongZoneProfile)،
+  // ومنهم: blocked=1 (blockedProfile)، light=3 (eligible/noLocation/alreadyOffered — تصنيف القدرة
+  // بيتجاهل GPS/order_assignments عمدًا، مش نفس شروط explainTechnicianForOrder()).
+  it('explainOrderFunnel() — أعداد الفانل الحقيقية مطابقة لفنيي الفيكستشر بالظبط', async () => {
+    const order = await orderRow();
+    const funnel = await service.explainOrderFunnel(order);
+    expect(funnel.pool.categoryEligible).toBe(5);
+    expect(funnel.pool.zoneEligible).toBe(4);
+    expect(funnel.pool.blocked).toBe(1);
+    expect(funnel.pool.heavy).toBe(0);
+    expect(funnel.pool.meaningful).toBe(0);
+    expect(funnel.pool.light).toBe(3);
+    expect(funnel.dispatchAssignments.rejected).toBe(1);
+    expect(funnel.dispatchAssignments.sent).toBe(0);
+    expect(funnel.crewStatus).toBeNull();
+    expect(funnel.crewRecruitOpportunities).toBeNull();
+  });
+
+  it('explainOrderFunnel() — طلب فريق بيرجّع crew_status + crew_recruit_opportunities بدل null', async () => {
+    const [teamOrder] = await q(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,'team',3,0) RETURNING id`,
+      [`TESTEXPTM-${runId}`.slice(0, 24), ids.customerProfile, ids.eligibleProfile, ids.service, ids.address, ids.zone],
+    );
+    ids.teamOrder = teamOrder.id;
+    await q(
+      `INSERT INTO technician_work_opportunities (order_id, technician_id, context, crew_role, capacity_tier_at_offer, status, offered_at)
+       VALUES ($1,$2,'crew_recruit','technician','MEANINGFUL','offered', now())`,
+      [ids.teamOrder, ids.noLocationProfile],
+    );
+
+    const order = await dataSource.getRepository(Order).findOneOrFail({ where: { id: ids.teamOrder } });
+    const funnel = await service.explainOrderFunnel(order);
+    expect(funnel.crewStatus).not.toBeNull();
+    expect(funnel.crewStatus?.requiredTechnicians).toBe(3);
+    expect(funnel.crewStatus?.assignedTechnicians).toBe(1); // بس القائد (+1)، مفيش أعضاء فريق لسه
+    expect(funnel.crewStatus?.crewComplete).toBe(false);
+    expect(funnel.crewRecruitOpportunities).not.toBeNull();
+    expect(funnel.crewRecruitOpportunities?.offered).toBe(1);
   });
 });

@@ -3,7 +3,11 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
-import { BookingMode, Order } from '../orders/entities/order.entity';
+import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity';
+// دالة نقية (صفر DI) — استيرادها هنا مباشر بلا خطر cycle، بعكس OrderTeamService (Injectable
+// كامل)، اللي حقنه هنا كان هيفرض MatchingModule تستورد OrdersModule وترجّع نفس بَقّة ترتيب الـroutes
+// الموثّقة في matching.module.ts (Orders→Matching اتجاه واحد بس، ده السبب).
+import { computeCrewComposition, CrewComposition } from '../orders/order-team.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   classifyTechnicianCapacity,
@@ -182,4 +186,200 @@ export class MatchingExplainabilityService {
       distanceKm: row.distance_km,
     };
   }
+
+  /**
+   * فانل مطابقة الطلب (docs/08 §35.8، ADR-0021 §4) — "ليه الطلب ده لسه بيدوّر؟" بمراحل حقيقية
+   * مطابقة للترتيب اللي المالك طلبه بالحرف: category-eligible → zone-passed → blocked → free/
+   * meaningful/heavy split → opportunities sent/declined/pending → crew shortage. صفر رقم
+   * مُلفَّق — كل عدد هنا بيتحسب من نفس شروط `findEligibleTechnicians()`/`classifyTechnicianCapacity()`
+   * (تصنيف الطاقم الأربعة كامل هنا، مش بس LIGHT/MEANINGFUL زي `explainTechnicianForOrder()` —
+   * BLOCKED/HEAVY مُستبعدين فعليًا من `findEligibleTechnicians()` لكن لسه مفيدين للأدمن يشوفهم
+   * كسبب "ليه العدد قليل"، مش مجرد صفر بلا تفسير) — استعلام واحد لكل الفانل الأساسي (مش N فني
+   * منفصل، عشان الأداء مع مجمّعات كبيرة زي طلب المالك "avoid expensive synchronous diagnostics").
+   */
+  async explainOrderFunnel(order: Order): Promise<OrderMatchingFunnel> {
+    if (!order.serviceZoneId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مالوش نطاق خدمة محدد — مفيش فانل مطابقة ممكن عليه أصلاً', HttpStatus.BAD_REQUEST);
+    }
+
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const serviceDurationMinutes = service?.estimated_duration_minutes ?? 60;
+
+    const [poolRow] = await this.dataSource.query<
+      { category_eligible_count: string; zone_eligible_count: string; blocked_count: string; heavy_count: string; meaningful_count: string; light_count: string }[]
+    >(
+      `
+      WITH target AS (
+        SELECT (COALESCE($3::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date AS target_date
+      ),
+      pool AS (
+        SELECT tp.id
+        FROM technician_profiles tp
+        LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+          AND ts.verification_status = 'approved'
+        JOIN services s ON s.id = $1
+        WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved'
+          AND (
+            ts.id IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM technician_categories tc
+              WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
+                AND tc.is_active = true AND tc.verification_status = 'approved'
+            )
+          )
+      ),
+      zone_pool AS (
+        SELECT p.id FROM pool p
+        WHERE EXISTS (SELECT 1 FROM technician_zones tz WHERE tz.technician_id = p.id AND tz.service_zone_id = $2 AND tz.is_active = true)
+      ),
+      classified AS (
+        SELECT z.id,
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM technician_schedule_slots tss, target
+              WHERE tss.technician_id = z.id AND tss.status = 'blocked' AND tss.deleted_at IS NULL
+                AND tss.slot_date = target.target_date
+                AND tss.start_time < ((COALESCE($3::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')
+                      + ($6::int || ' minutes')::interval)::time
+                AND tss.end_time > (COALESCE($3::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
+            ) THEN 'BLOCKED'
+            WHEN EXISTS (
+              SELECT 1 FROM orders co JOIN services cs ON cs.id = co.service_id, target
+              WHERE co.technician_id = z.id AND co.id IS DISTINCT FROM $4::uuid
+                AND co.order_status = ANY($7::order_status[]) AND co.deleted_at IS NULL
+                AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
+                AND (
+                  (
+                    target.target_date = (now() AT TIME ZONE 'Africa/Cairo')::date
+                    AND co.order_status = ANY($8::order_status[])
+                  )
+                  OR COALESCE(co.estimated_duration_days, 0) >= 1
+                  OR COALESCE(cs.estimated_duration_minutes, 60) >= $5::int
+                  OR $6::int >= $5::int
+                )
+            ) THEN 'HEAVY'
+            WHEN EXISTS (
+              SELECT 1 FROM orders co, target
+              WHERE co.technician_id = z.id AND co.id IS DISTINCT FROM $4::uuid
+                AND co.order_status = ANY($7::order_status[]) AND co.deleted_at IS NULL
+                AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
+            ) THEN 'MEANINGFUL'
+            ELSE 'LIGHT'
+          END AS tier
+        FROM zone_pool z
+      )
+      SELECT
+        (SELECT COUNT(*) FROM pool) AS category_eligible_count,
+        (SELECT COUNT(*) FROM zone_pool) AS zone_eligible_count,
+        COUNT(*) FILTER (WHERE tier = 'BLOCKED') AS blocked_count,
+        COUNT(*) FILTER (WHERE tier = 'HEAVY') AS heavy_count,
+        COUNT(*) FILTER (WHERE tier = 'MEANINGFUL') AS meaningful_count,
+        COUNT(*) FILTER (WHERE tier = 'LIGHT') AS light_count
+      FROM classified
+      `,
+      [
+        order.serviceId,
+        order.serviceZoneId,
+        order.scheduledAt,
+        order.id,
+        fullDayJobMinutes,
+        serviceDurationMinutes,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+      ],
+    );
+
+    const assignmentRows = await this.dataSource.query<{ assignment_status: string; count: string }[]>(
+      `SELECT assignment_status, COUNT(*) AS count FROM order_assignments WHERE order_id = $1 GROUP BY assignment_status`,
+      [order.id],
+    );
+    const dispatchAssignments: OrderAssignmentStatusCounts = { sent: 0, viewed: 0, accepted: 0, rejected: 0, timeout: 0, cancelled: 0 };
+    for (const row of assignmentRows) {
+      if (row.assignment_status in dispatchAssignments) {
+        (dispatchAssignments as unknown as Record<string, number>)[row.assignment_status] = Number(row.count);
+      }
+    }
+
+    let crewRecruitOpportunities: WorkOpportunityStatusCounts | null = null;
+    let crewStatus: CrewComposition | null = null;
+    if (order.bookingMode === BookingMode.TEAM) {
+      const opportunityRows = await this.dataSource.query<{ status: string; count: string }[]>(
+        `SELECT status, COUNT(*) AS count FROM technician_work_opportunities
+         WHERE order_id = $1 AND context = 'crew_recruit' AND deleted_at IS NULL GROUP BY status`,
+        [order.id],
+      );
+      crewRecruitOpportunities = { offered: 0, accepted: 0, declined: 0, closed: 0 };
+      for (const row of opportunityRows) {
+        if (row.status in crewRecruitOpportunities) {
+          (crewRecruitOpportunities as unknown as Record<string, number>)[row.status] = Number(row.count);
+        }
+      }
+
+      const teamRows = await this.dataSource.query<{ member_type: string; count: string }[]>(
+        `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
+        [order.id],
+      );
+      const technicians = Number(teamRows.find((r) => r.member_type === 'team_member')?.count ?? 0);
+      const assistants = Number(teamRows.find((r) => r.member_type === 'assistant')?.count ?? 0);
+      crewStatus = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+    }
+
+    return {
+      orderId: order.id,
+      orderStatus: order.orderStatus,
+      pool: {
+        categoryEligible: Number(poolRow?.category_eligible_count ?? 0),
+        zoneEligible: Number(poolRow?.zone_eligible_count ?? 0),
+        blocked: Number(poolRow?.blocked_count ?? 0),
+        heavy: Number(poolRow?.heavy_count ?? 0),
+        meaningful: Number(poolRow?.meaningful_count ?? 0),
+        light: Number(poolRow?.light_count ?? 0),
+      },
+      dispatchAssignments,
+      crewRecruitOpportunities,
+      crewStatus,
+    };
+  }
+}
+
+export interface OrderMatchingFunnelPoolCounts {
+  categoryEligible: number;
+  zoneEligible: number;
+  blocked: number;
+  heavy: number;
+  meaningful: number;
+  /** المرشّحين الفعليين لتعيين/تأكيد تلقائي دلوقتي — نفس الفنيين اللي findEligibleTechnicians() هترجّعهم. */
+  light: number;
+}
+
+export interface OrderAssignmentStatusCounts {
+  sent: number;
+  viewed: number;
+  accepted: number;
+  rejected: number;
+  timeout: number;
+  cancelled: number;
+}
+
+export interface WorkOpportunityStatusCounts {
+  offered: number;
+  accepted: number;
+  declined: number;
+  closed: number;
+}
+
+export interface OrderMatchingFunnel {
+  orderId: string;
+  orderStatus: OrderStatus;
+  pool: OrderMatchingFunnelPoolCounts;
+  /** توزيع order_assignments (مسار التوزيع العادي/الطوارئ) — سواء اتبعت للطلب فعليًا لحد دلوقتي. */
+  dispatchAssignments: OrderAssignmentStatusCounts;
+  /** null لطلبات فردية/طوارئ — بس لطلبات الفريق (technician_work_opportunities، context='crew_recruit'). */
+  crewRecruitOpportunities: WorkOpportunityStatusCounts | null;
+  /** null لطلبات فردية/طوارئ. */
+  crewStatus: CrewComposition | null;
 }

@@ -4462,3 +4462,34 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
   الكامل: **118/118 suite، 669/669 اختبار**، صفر ريجريشن.
 - **لسه فاضل من §35**: 35.8-35.20 (فانل المطابقة، مركز عمليات أدمن، تنبيهات، توزيع، تايم لاين،
   اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي).
+
+### 35.6 — إغلاق §35.8: فانل مطابقة الطلب — "ليه الطلب ده لسه بيدوّر؟"
+
+منفَّذ حسب `ADR-0021` §4، فوق نفس بنية §35.7 مباشرة — راجع `MatchingExplainabilityService
+.explainOrderFunnel()` للتفاصيل التقنية الكاملة. ملخص:
+
+- **المراحل بالترتيب المطلوب بالحرف من رسالة المالك**: category-eligible count → zone-passed →
+  blocked → free(LIGHT)/meaningful/heavy split → opportunities sent/declined/pending → crew
+  shortage. كل عدد بيتحسب باستعلام واحد (مش N فني منفصل) — أداء ثابت مع مجمّعات كبيرة.
+  `BLOCKED`/`HEAVY` بيبانوا كأرقام حقيقية (مش صفر بلا تفسير) رغم إنهم فعليًا مُستبعدين من
+  `findEligibleTechnicians()` — عشان الأدمن يفهم "ليه العدد قليل"، مش بس "العدد قليل".
+  `technician_categories`/`technicianAvailabilityCondition` (blocked/heavy/meaningful CTEs)
+  منسوخين حرفيًا من نفس شروط §35.7/`matching.service.ts` — صفر رقم مُلفَّق.
+- **opportunities sent/declined/pending**: مصدرين حقيقيين منفصلين مش مدموجين تحت تسمية واحدة
+  مخترعة — `order_assignments` (مسار التوزيع العادي/الطوارئ، `sent/viewed/accepted/rejected/
+  timeout/cancelled`) و`technician_work_opportunities` بس لطلبات الفريق (`context='crew_recruit'`،
+  `offered/accepted/declined/closed`) — تسميتين مختلفتين لأن الجدولين فعليًا عندهم enum مختلف،
+  دمجهم تحت تسمية موحّدة كان هيكون اختراع مصطلح مش موجود في الـschema الحقيقي.
+- **`crew_status`**: بيتحسب هنا بإعادة استخدام `computeCrewComposition()` (دالة نقية، §35.1) —
+  **مش** حقن `OrderTeamService` (Injectable كامل) داخل `MatchingExplainabilityService`، عمدًا: كان
+  هيفرض `MatchingModule` تستورد `OrdersModule` وترجّع بالحرف نفس بَقّة ترتيب الـroutes الموثّقة في
+  تعليق `matching.module.ts` (السبب اللي خلّى `MatchingModule` توقف عن استيراد `OrdersModule` من
+  الأساس). استيراد دالة نقية عبر TS import عادي بلا خطر — مفيش Nest module wiring جديد.
+- **Endpoint جديد**: `GET /admin/orders/:id/matching-funnel` — قراءة بس، أي أدمن.
+- **اختبارات حية جديدة** (امتداد لنفس `matching-explainability.spec.ts`، +2 = 9/9 إجمالي): أعداد
+  الفانل مطابقة لفنيي فيكستشر §35.7 بالظبط (`category_eligible=5, zone_eligible=4, blocked=1,
+  light=3`)، وطلب فريق بيرجّع `crew_status`/`crew_recruit_opportunities` حقيقيين بدل `null`.
+- **التحقق النهائي**: `tsc --noEmit`/`nest build` نضاف. `npx jest` الكامل: **118/118 suite،
+  671/671 اختبار**، صفر ريجريشن.
+- **لسه فاضل من §35**: 35.9-35.20 (مركز عمليات أدمن، تنبيهات، توزيع، تايم لاين، اختبارات
+  السيناريوهات الكاملة A-L، تحقق E2E حي).

@@ -586,3 +586,15 @@ recent_effective_workload = عدد الطلبات المؤكدة (assigned_at) �
 **`MatchingModule` بقت تصدّر `MatchingExplainabilityService`**، و`OrdersModule` استوردت
 `MatchingModule` (اتجاه واحد بس — `Matching` لسه مابتستوردش `OrdersModule`، القرار الموثّق فوق في
 تعليق `matching.module.ts` نفسه). اتأكد بصفر cycle عبر boot حقيقي كامل للتطبيق قبل أي commit.
+
+## فانل مطابقة الطلب (docs/08 §35.8، ADR-0021 §4)
+
+`MatchingExplainabilityService.explainOrderFunnel(order)` — "ليه الطلب ده لسه بيدوّر؟" بمراحل
+حقيقية: category-eligible → zone-passed → blocked → free(LIGHT)/meaningful/heavy split →
+opportunities sent/declined/pending → crew shortage، كل عدد بيتحسب باستعلام واحد (مش N فني منفصل).
+نفس شروط `findEligibleTechnicians()`/`classifyTechnicianCapacity()` (منسوخة SQL، نفس فئة استثناء
+§35.7). `opportunities` مصدرين حقيقيين منفصلين — `order_assignments` (توزيع عادي/طوارئ) و
+`technician_work_opportunities context='crew_recruit'` (فرق بس) — مش مدموجين تحت تسمية موحّدة
+مخترعة. `crew_status` بيعيد استخدام `computeCrewComposition()` (دالة نقية من `order-team.service
+.ts`) بدل حقن `OrderTeamService` كامل، عمدًا (نفس سبب تجنّب `OrdersModule` cycle الموثّق فوق).
+`Endpoint`: `GET /admin/orders/:id/matching-funnel`.
