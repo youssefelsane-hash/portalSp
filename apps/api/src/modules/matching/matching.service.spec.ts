@@ -6,6 +6,7 @@ import { OrderStatusHistory } from '../orders/entities/order-status-history.enti
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 
 // اختبار حي ضد Postgres حقيقي (نفس فلسفة المشروع: مفيش mocks لاستعلامات SQL خام) — بيثبت
 // إصلاح البَقّة الموثّقة: استعلام استبعاد "الفني عنده طلب نشط بالفعل" في findEligibleTechnicians()
@@ -59,6 +60,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never,
       { emit: jest.fn() } as never,
       { add: queueAdd } as never,
+      new TechnicianWorkOpportunitiesService(dataSource),
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
@@ -445,6 +447,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       broadenSettingsService as never,
       { emit: jest.fn() } as never,
       { add: broadenQueueAdd } as never,
+      new TechnicianWorkOpportunitiesService(dataSource),
     );
 
     const [order] = await dataSource.query(

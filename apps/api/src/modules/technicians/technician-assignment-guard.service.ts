@@ -5,7 +5,7 @@ import { BookingMode, Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
-import { technicianAvailabilityCondition } from './technician-eligibility.sql';
+import { classifyTechnicianCapacity, technicianAvailabilityCondition } from './technician-eligibility.sql';
 
 // نفس fallback matching.service.ts وtechnicians.service.ts — راجع ADR-0018 §2/§9.
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -28,6 +28,82 @@ export class TechnicianAssignmentGuardService {
   }
 
   async assertEligible(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
+    await this.assertCoreEligibility(manager, technician, order);
+
+    // ADR-0017 بند 4-5 / ADR-0018 §9 — نفس مصدر التوافر المشترك مع matching.service.ts
+    // (findEligibleTechnicians) وtechnicians.service.ts (listForServiceBooking)، بدل نسخة مستقلة
+    // تالتة ممكن تنجرف عن الاتنين التانيين (زي ما حصل بالظبط قبل كده — راجع ADR-0017 السياق).
+    // مكان الاستدعاء ده (قبول الفني الذاتي + تعيين الأدمن القسري) بيخدم كل أنواع الطلبات، فعكس
+    // technicians.service.ts (تصفح العميل، طوارئ = false دايمًا) لازم نحسب isEmergency من نوع
+    // الطلب الفعلي نفسه.
+    const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
+    const fullDayJobMinutes = await this.settingsService.getNumber(
+      'matching.full_day_job_minutes',
+      FULL_DAY_JOB_MINUTES_FALLBACK,
+    );
+    const [{ available }] = await manager.query<{ available: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1 FROM technician_profiles tp
+         WHERE tp.id = $1
+         ${technicianAvailabilityCondition({
+           technicianIdExpr: 'tp.id',
+           scheduledAtParam: '$4',
+           excludeOrderIdParam: '$3',
+           activeStatusesParam: '$5',
+           engagedStatusesParam: '$6',
+           isEmergencyParam: '$7',
+           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $2)',
+           fullDayThresholdMinutesParam: '$8',
+         })}
+       ) AS available`,
+      [
+        technician.id,
+        order.serviceId,
+        order.id,
+        order.scheduledAt,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        isEmergency,
+        fullDayJobMinutes,
+      ],
+    );
+    if (!available) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الفني غير متاح في الوقت المطلوب لهذا الطلب (تعارض جدول أو طلب آخر نشط)', HttpStatus.CONFLICT);
+    }
+  }
+
+  /**
+   * إعادة فحص أهلية لقبول فرصة شغل إضافي اختيارية (docs/08 §34.1b، ADR-0020 §4) — **نفس فحوصات
+   * `assertEligible()` الأساسية بالحرف (معتمد/موقع/خدمة+منطقة/مستوى)، لكن بدون بوابة `technician
+   * AvailabilityCondition()` النهائية** (دي مصمّمة أصلاً لتستبعد أي تعارض يوم — `HEAVY`/`BLOCKED`
+   * معًا — وده بالظبط عكس المطلوب هنا: الفني بيقبل فرصة **رغم** إنه `MEANINGFUL`/`HEAVY`، دي مش
+   * غلطة، ده قرار الفني الصريح). البديل: فحص `classifyTechnicianCapacity()` بس — `BLOCKED`
+   * (الفني حظر نفسه صراحة من وقت العرض لحد دلوقتي) هو الاستبعاد الوحيد المنطقي هنا.
+   */
+  async assertEligibleForWorkOpportunity(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
+    await this.assertCoreEligibility(manager, technician, order);
+
+    const fullDayJobMinutes = await this.settingsService.getNumber(
+      'matching.full_day_job_minutes',
+      FULL_DAY_JOB_MINUTES_FALLBACK,
+    );
+    const [service] = await manager.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const tier = await classifyTechnicianCapacity(manager, {
+      technicianId: technician.id,
+      scheduledAt: order.scheduledAt,
+      excludeOrderId: order.id,
+      serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+      fullDayThresholdMinutes: fullDayJobMinutes,
+    });
+    if (tier === 'BLOCKED') {
+      throw new ApiException(ErrorCode.ORDR_003, 'الفني حظر اليوم ده بنفسه — مينفعش يقبل الفرصة دي', HttpStatus.CONFLICT);
+    }
+  }
+
+  private async assertCoreEligibility(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
     }
@@ -77,47 +153,6 @@ export class TechnicianAssignmentGuardService {
     }
     if (capability.decision_limit_cents !== null && order.totalAmountCents > Number(capability.decision_limit_cents)) {
       throw new ApiException(ErrorCode.ORDR_003, 'قيمة الطلب أعلى من حد قرار مستوى الفني', HttpStatus.CONFLICT);
-    }
-
-    // ADR-0017 بند 4-5 / ADR-0018 §9 — نفس مصدر التوافر المشترك مع matching.service.ts
-    // (findEligibleTechnicians) وtechnicians.service.ts (listForServiceBooking)، بدل نسخة مستقلة
-    // تالتة ممكن تنجرف عن الاتنين التانيين (زي ما حصل بالظبط قبل كده — راجع ADR-0017 السياق).
-    // مكان الاستدعاء ده (قبول الفني الذاتي + تعيين الأدمن القسري) بيخدم كل أنواع الطلبات، فعكس
-    // technicians.service.ts (تصفح العميل، طوارئ = false دايمًا) لازم نحسب isEmergency من نوع
-    // الطلب الفعلي نفسه.
-    const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
-    const fullDayJobMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
-    const [{ available }] = await manager.query<{ available: boolean }[]>(
-      `SELECT EXISTS (
-         SELECT 1 FROM technician_profiles tp
-         WHERE tp.id = $1
-         ${technicianAvailabilityCondition({
-           technicianIdExpr: 'tp.id',
-           scheduledAtParam: '$4',
-           excludeOrderIdParam: '$3',
-           activeStatusesParam: '$5',
-           engagedStatusesParam: '$6',
-           isEmergencyParam: '$7',
-           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $2)',
-           fullDayThresholdMinutesParam: '$8',
-         })}
-       ) AS available`,
-      [
-        technician.id,
-        order.serviceId,
-        order.id,
-        order.scheduledAt,
-        ACTIVE_TECHNICIAN_ORDER_STATUSES,
-        ENGAGED_TECHNICIAN_ORDER_STATUSES,
-        isEmergency,
-        fullDayJobMinutes,
-      ],
-    );
-    if (!available) {
-      throw new ApiException(ErrorCode.ORDR_003, 'الفني غير متاح في الوقت المطلوب لهذا الطلب (تعارض جدول أو طلب آخر نشط)', HttpStatus.CONFLICT);
     }
   }
 }

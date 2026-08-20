@@ -19,7 +19,12 @@ import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, ca
 import { SettingsService } from '../settings/settings.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
-import { technicianAvailabilityCondition } from '../technicians/technician-eligibility.sql';
+import {
+  classifyTechnicianCapacity,
+  technicianAvailabilityCondition,
+  TechnicianCapacityTier,
+} from '../technicians/technician-eligibility.sql';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 
@@ -90,6 +95,7 @@ export class MatchingService {
     private readonly settingsService: SettingsService,
     private readonly events: EventEmitter2,
     @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue<RoundExpiredJobData>,
+    private readonly workOpportunities: TechnicianWorkOpportunitiesService,
   ) {}
 
   /**
@@ -526,7 +532,98 @@ export class MatchingService {
    * لو مفيش فني مؤهّل، الطلب يفضل `SEARCHING_TECHNICIAN` بلا إلغاء (نفس قرار §26.2 الموجود) —
    * `MatchingRecoveryService.sweep()` هتعيد المحاولة بنفس المسار ده تلقائيًا.
    */
+  /**
+   * تأكيد فني على طلب داخل transaction مقفولة بالفعل (`manager` جاي من الـcaller، القفل على صف
+   * الطلب اتاخد قبل النداء) — نفس منطق التأكيد التلقائي بالحرف، مستخرج كدالة مشتركة لأنه بقى
+   * بيتنادى من مسارين دلوقتي (docs/08 §34.1b، ADR-0020 §4): التأكيد التلقائي لمرشّح `LIGHT`، وقبول
+   * الفني الصريح لفرصة شغل إضافي (`acceptWorkOpportunity`).
+   */
+  private async confirmTechnicianForOrder(
+    manager: EntityManager,
+    order: Order,
+    technicianId: string,
+    distanceKm: string | null,
+  ): Promise<{ kind: 'noop' } | { kind: 'confirmed'; order: Order; technicianId: string }> {
+    const now = new Date();
+    await manager.save(
+      manager.create(OrderAssignment, {
+        orderId: order.id,
+        technicianId,
+        assignmentRound: 1,
+        distanceKm,
+        assignmentStatus: AssignmentStatus.ACCEPTED,
+        sentAt: now,
+        respondedAt: now,
+        expiresAt: now,
+      }),
+    );
+
+    if (!canTransition(order.orderStatus, OrderStatus.TECHNICIAN_ASSIGNED)) {
+      return { kind: 'noop' };
+    }
+    order.technicianId = technicianId;
+    order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
+    order.assignedAt = now;
+    await manager.save(order);
+    await manager.save(
+      manager.create(OrderStatusHistory, {
+        orderId: order.id,
+        previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        newStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+        changedByUserId: null,
+        changedByRole: 'system',
+        changeSource: OrderChangeSource.SYSTEM,
+      }),
+    );
+
+    order.orderStatus = OrderStatus.ACCEPTED;
+    order.acceptedAt = now;
+    await manager.save(order);
+    await manager.save(
+      manager.create(OrderStatusHistory, {
+        orderId: order.id,
+        previousStatus: OrderStatus.TECHNICIAN_ASSIGNED,
+        newStatus: OrderStatus.ACCEPTED,
+        changedByUserId: null,
+        changedByRole: 'system',
+        changeSource: OrderChangeSource.SYSTEM,
+      }),
+    );
+
+    // أي فرصة شغل إضافي تانية حية لنفس الطلب بقت بلا معنى — الطلب اتغطى.
+    await this.workOpportunities.closeRemainingForOrder(manager, order.id);
+
+    return { kind: 'confirmed', order, technicianId };
+  }
+
+  /**
+   * تصنيف القدرة الاستيعابية للمرشّح الأول قبل قرار التأكيد التلقائي (docs/08 §34.1b، ADR-0020
+   * §1/§3) — مش بديل عن `findEligibleTechnicians()` (لسه المصدر الوحيد للأهلية الأساسية)، طبقة
+   * قرار إضافية فوقه: `LIGHT` يتأكد تلقائيًا زي ما هو بالحرف، `MEANINGFUL`/`HEAVY` (لو الإعداد
+   * سامح) بيتحول لفرصة اختيارية بدل تأكيد صامت.
+   */
+  private async classifyCandidate(order: Order, technicianId: string, fullDayJobMinutes: number): Promise<TechnicianCapacityTier> {
+    const service = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    return classifyTechnicianCapacity(this.dataSource, {
+      technicianId,
+      scheduledAt: order.scheduledAt,
+      excludeOrderId: order.id,
+      serviceDurationMinutes: service[0]?.estimated_duration_minutes ?? 60,
+      fullDayThresholdMinutes: fullDayJobMinutes,
+    });
+  }
+
   async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
+    // فرصة اختيارية حية موجودة بالفعل لنفس الطلب — منستنى قرار الفني، مش نعرض تاني/نأكّد تلقائي
+    // (نفس فكرة liveAssignments في dispatchNextRound). لو الفني يرفض، الـcaller (endpoint الرفض)
+    // بينادي dispatchOrAutoConfirm تاني بنفسه، فمفيش داعي sweep يعيد المحاولة هنا كل دقيقة.
+    if (await this.workOpportunities.hasLiveOfferForOrder(orderId)) {
+      return { dispatched: 0 };
+    }
+
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager
         .createQueryBuilder(Order, 'o')
@@ -537,6 +634,9 @@ export class MatchingService {
         return { kind: 'noop' as const };
       }
 
+      const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+      const candidateBatchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
+
       let candidates = order.requestedTechnicianId
         ? await this.findEligibleTechnicians(order, 1, order.requestedTechnicianId, false)
         : [];
@@ -544,76 +644,67 @@ export class MatchingService {
         candidates = await this.findEligibleTechnicians(order, 1, null, false, order.requestedTechnicianCompanyId);
       }
       if (candidates.length === 0) {
-        candidates = await this.findEligibleTechnicians(order, 1, null, false);
+        // دفعة (مش فني واحد بس) — عشان نقدر نلاقي أول مرشّح LIGHT فعلي بدل ما نقف عند أول واحد
+        // في الترتيب لو هو المرشّح الوحيد اللي مش LIGHT (docs/08 §34.1b).
+        candidates = await this.findEligibleTechnicians(order, candidateBatchSize, null, false);
       }
       if (candidates.length === 0) {
         return { kind: 'stalled' as const, order };
       }
 
-      const technicianId = candidates[0].technician_id;
-      // دفاع عمق ضد سباق نادر (ADR-0017 بند 5 — نفس نمط accept() الموجود بالحرف): قفل صف الفني
-      // نفسه وإعادة فحص الأهلية تحت القفل مباشرة قبل الكتابة، عشان لو transaction تانية (accept()
-      // أو autoConfirmScheduledOrder لطلب تاني) أكّدت نفس الفني لموعد متعارض في نفس اللحظة تقريبًا،
-      // النداء ده يخسر السباق بأمان (stalled، مش استثناء غير متوقع/خطأ DB خام) بدل ما يكتب فوق
-      // حالة اتغيّرت. uq_orders_one_active_asap_per_technician (migration 0144) لسه بتحمي حالة
-      // ASAP بس على مستوى DB — التعارض بين طلبين مجدولين بيتفحص هنا بس دلوقتي (فجوة موثّقة).
-      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
-      try {
-        await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
-      } catch {
-        return { kind: 'stalled' as const, order };
+      let lightPick: { technicianId: string; distanceKm: string } | null = null;
+      let meaningfulPick: { technicianId: string; distanceKm: string } | null = null;
+      for (const candidate of candidates) {
+        const tier = await this.classifyCandidate(order, candidate.technician_id, fullDayJobMinutes);
+        if (tier === 'LIGHT') {
+          lightPick = { technicianId: candidate.technician_id, distanceKm: candidate.distance_km };
+          break;
+        }
+        if (tier === 'MEANINGFUL' && !meaningfulPick) {
+          meaningfulPick = { technicianId: candidate.technician_id, distanceKm: candidate.distance_km };
+        }
       }
 
-      const now = new Date();
-      await manager.save(
-        manager.create(OrderAssignment, {
-          orderId: order.id,
-          technicianId,
-          assignmentRound: 1,
-          distanceKm: candidates[0].distance_km,
-          assignmentStatus: AssignmentStatus.ACCEPTED,
-          sentAt: now,
-          respondedAt: now,
-          expiresAt: now,
-        }),
-      );
-
-      if (!canTransition(order.orderStatus, OrderStatus.TECHNICIAN_ASSIGNED)) {
-        return { kind: 'noop' as const };
+      if (!lightPick && !meaningfulPick) {
+        // مفيش LIGHT ولا MEANINGFUL في الدفعة (كلهم HEAVY أو اتستبعدوا) — نجرّب توسيع البحث
+        // (ignoreActiveOrderConflict، نفس آلية ADR-0017 §10) عشان نلاقي مرشّح HEAVY نعرضله فرصة،
+        // لو الإعداد سامح بده.
+        const offerHeavy = await this.settingsService.getBoolean('matching.offer_heavy_workload_technicians', true);
+        if (offerHeavy) {
+          const broadened = await this.findEligibleTechnicians(order, 1, null, false, null, true);
+          if (broadened.length > 0) {
+            const tier = await this.classifyCandidate(order, broadened[0].technician_id, fullDayJobMinutes);
+            if (tier !== 'BLOCKED') {
+              meaningfulPick = { technicianId: broadened[0].technician_id, distanceKm: broadened[0].distance_km };
+            }
+          }
+        }
       }
-      order.technicianId = technicianId;
-      order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
-      order.assignedAt = now;
-      await manager.save(order);
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: OrderStatus.SEARCHING_TECHNICIAN,
-          newStatus: OrderStatus.TECHNICIAN_ASSIGNED,
-          changedByUserId: null,
-          changedByRole: 'system',
-          changeSource: OrderChangeSource.SYSTEM,
-        }),
-      );
 
-      order.orderStatus = OrderStatus.ACCEPTED;
-      order.acceptedAt = now;
-      await manager.save(order);
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: OrderStatus.TECHNICIAN_ASSIGNED,
-          newStatus: OrderStatus.ACCEPTED,
-          changedByUserId: null,
-          changedByRole: 'system',
-          changeSource: OrderChangeSource.SYSTEM,
-        }),
-      );
+      if (lightPick) {
+        const technicianId = lightPick.technicianId;
+        // دفاع عمق ضد سباق نادر (ADR-0017 بند 5 — نفس نمط accept() الموجود بالحرف): قفل صف الفني
+        // نفسه وإعادة فحص الأهلية تحت القفل مباشرة قبل الكتابة.
+        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
+        try {
+          await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
+        } catch {
+          return { kind: 'stalled' as const, order };
+        }
+        const confirmResult = await this.confirmTechnicianForOrder(manager, order, technicianId, lightPick.distanceKm);
+        return confirmResult.kind === 'noop' ? { kind: 'noop' as const } : { kind: 'confirmed' as const, order, technicianId };
+      }
 
-      return { kind: 'confirmed' as const, order, technicianId };
+      if (meaningfulPick) {
+        const tier = await this.classifyCandidate(order, meaningfulPick.technicianId, fullDayJobMinutes);
+        await this.workOpportunities.offerIfNotExists(manager, order.id, meaningfulPick.technicianId, tier);
+        return { kind: 'offered' as const, order, technicianId: meaningfulPick.technicianId };
+      }
+
+      return { kind: 'stalled' as const, order };
     });
 
-    if (result.kind === 'noop') {
+    if (result.kind === 'noop' || result.kind === 'offered') {
       return { dispatched: 0 };
     }
     if (result.kind === 'stalled') {
@@ -626,6 +717,74 @@ export class MatchingService {
       new OrderAcceptedEvent(result.order.id, result.order.customerId, result.technicianId, result.order.scheduledAt),
     );
     return { dispatched: 1 };
+  }
+
+  /**
+   * قبول فرصة شغل إضافي (docs/08 §34.1b، ADR-0020 §4) — الفني بيدوس "قبول" على فرصة كان معروضة
+   * عليه لأنه `MEANINGFUL`/`HEAVY` وقت العرض. **إعادة فحص كاملة تحت قفل قبل أي كتابة** — عرض
+   * ظاهر مش ضمان إن القبول هيعدّي:
+   *  1. قفل صف الفرصة نفسه (`FOR UPDATE`) — لازم تفضل `offered` (مش اتقبلت/اترفضت/اتقفلت من
+   *     حدث تاني، زي تأكيد تلقائي لفني تاني أو انشغال الطلب بطريقة تانية).
+   *  2. قفل صف الطلب (`pessimistic_write`) — لازم يفضل `SEARCHING_TECHNICIAN`.
+   *  3. قفل صف الفني وإعادة فحص الأهلية الكاملة (`assignmentGuard.assertEligible`) — لو الفني
+   *     بقى `BLOCKED` من وقت العرض (حظر يوم بنفسه مثلاً)، القبول يترفض بوضوح.
+   */
+  async acceptWorkOpportunity(userId: string, opportunityId: string): Promise<Order> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const technicianId = profile.id;
+    const result = await this.dataSource.transaction(async (manager) => {
+      const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, technicianId, opportunityId);
+
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId: opportunity.order_id })
+        .getOne();
+      if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح دلوقتي — ممكن يكون اتغطى من فني تاني', HttpStatus.CONFLICT);
+      }
+
+      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
+      await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
+
+      const confirmResult = await this.confirmTechnicianForOrder(manager, order, technicianId, null);
+      if (confirmResult.kind === 'noop') {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح دلوقتي — ممكن يكون اتغطى من فني تاني', HttpStatus.CONFLICT);
+      }
+      await this.workOpportunities.markDecided(manager, opportunityId, 'accepted');
+
+      return confirmResult;
+    });
+
+    this.events.emit(
+      ORDER_ACCEPTED_EVENT,
+      new OrderAcceptedEvent(result.order.id, result.order.customerId, result.technicianId, result.order.scheduledAt),
+    );
+    return result.order;
+  }
+
+  /**
+   * رفض فرصة شغل إضافي — الفني قرر معندوش قدرة استيعابية حقيقية. الطلب يفضل `SEARCHING_TECHNICIAN`
+   * بلا أي إعادة محاولة تلقائية فورية هنا (الـcaller/controller هو اللي بينادي
+   * `dispatchOrAutoConfirm()` تاني بعد الرفض، عشان مرشّح تاني ياخد فرصة — نفس فلسفة `reject()`
+   * الموجودة للطوارئ، لكن هنا مفيش جولة/expiry، القرار الفني وحده هو المحرّك).
+   */
+  async declineWorkOpportunity(userId: string, opportunityId: string): Promise<{ orderId: string }> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const result = await this.dataSource.transaction(async (manager) => {
+      const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, profile.id, opportunityId);
+      await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
+      return { orderId: opportunity.order_id };
+    });
+    // الفني رفض — نديله فرصة تانية للمرشّح اللي بعده فورًا بدل ما نستنى sweep الدقيقة (نفس فلسفة
+    // reject() الموجودة للطوارئ اللي بتنادي dispatchNextRound() على طول).
+    await this.dispatchOrAutoConfirm(result.orderId);
+    return result;
+  }
+
+  async listWorkOpportunitiesForUser(userId: string) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.workOpportunities.listForTechnician(profile.id);
   }
 
   /**

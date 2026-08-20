@@ -35,6 +35,7 @@ import { TechnicianStatsService } from './technician-stats.service';
 import { TechnicianScheduleService } from './technician-schedule.service';
 import { TechnicianAssignmentGuardService } from './technician-assignment-guard.service';
 import { TechnicianCategoriesService } from './technician-categories.service';
+import { TechnicianWorkOpportunitiesService } from './technician-work-opportunities.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
@@ -95,6 +96,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianScheduleService,
     TechnicianAssignmentGuardService,
     TechnicianCategoriesService,
+    TechnicianWorkOpportunitiesService,
     ScheduleSlotReleaseListener,
     storageServiceProvider,
   ],
@@ -106,6 +108,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianScheduleService,
     TechnicianAssignmentGuardService,
     TechnicianCategoriesService,
+    TechnicianWorkOpportunitiesService,
   ],
 })
 export class TechniciansModule {}

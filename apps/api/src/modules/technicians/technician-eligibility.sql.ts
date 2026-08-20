@@ -1,3 +1,5 @@
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+
 /**
  * شرط SQL موحّد لتوافر الفني وقت طلب معيّن — المصدر الوحيد المستخدم حرفيًا في الأماكن الثلاثة
  * اللي بتسأل نفس السؤال ("الفني ده يقدر ياخد الطلب ده فعليًا؟"): matching.service.ts (التوزيع
@@ -148,4 +150,94 @@ export function technicianAvailabilityCondition(opts: {
         AND tss.end_time > (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
     )
   `;
+}
+
+export type TechnicianCapacityTier = 'LIGHT' | 'MEANINGFUL' | 'HEAVY' | 'BLOCKED';
+
+/**
+ * تصنيف القدرة الاستيعابية بـ4 مستويات (docs/08 §34.1، ADR-0020 §1) — دالة **جديدة** فوق نفس
+ * شروط `technicianAvailabilityCondition()` (بلا تكرار منطق)، بترجّع تصنيف بدل بوليان بسيط. الفرق
+ * الوحيد عن الدالة فوق: بتفرّق سبب الاستبعاد (`HEAVY`) عن "عنده شغل لكن مش شاغل يومه بالكامل"
+ * (`MEANINGFUL`، تصنيف جديد ماكانش موجود قبل كده — الدالة القديمة كانت بتعتبره ببساطة "مؤهّل").
+ *
+ * الأولوية بالترتيب (زي `technicianAvailabilityCondition()` بالحرف — `blocked` بياخد الأولوية
+ * فوق أي تعارض طلبات):
+ *  1. `BLOCKED` — استثناء `blocked` صريح حدده الفني بنفسه بيغطي وقت الطلب.
+ *  2. `HEAVY` — تعارض حقيقي: انشغال جسدي فعلي دلوقتي (لو اليوم = النهاردة) أو "شاغل يوم كامل".
+ *  3. `MEANINGFUL` — عنده طلب نشط تاني بنفس اليوم، لكن مش `HEAVY` (شغل قصير/خفيف).
+ *  4. `LIGHT` — لا تعارض خالص.
+ *
+ * مش مصمّمة لطلبات الطوارئ (الطوارئ ليها مسار `order_assignments` منفصل تمامًا، `dispatchNext
+ * Round()`، بلا تغيير) — بتُستخدم بس من `autoConfirmScheduledOrder()` قبل قرار التأكيد التلقائي.
+ */
+export async function classifyTechnicianCapacity(
+  dataSource: { query: <T = unknown>(sql: string, params?: unknown[]) => Promise<T[]> },
+  params: {
+    technicianId: string;
+    /** موعد الطلب المرشّح (`order.scheduledAt`) — `null` = ASAP/اليوم. */
+    scheduledAt: Date | string | null;
+    /** معرّف الطلب المرشّح نفسه، عشان يستبعد نفسه من فحص التعارض. */
+    excludeOrderId: string;
+    /** مدة الخدمة المقدّرة بالدقايق للطلب المرشّح. */
+    serviceDurationMinutes: number;
+    fullDayThresholdMinutes: number;
+  },
+): Promise<TechnicianCapacityTier> {
+  const rows = await dataSource.query<{ tier: TechnicianCapacityTier }>(
+    `
+    WITH target AS (
+      SELECT (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date AS target_date
+    ),
+    blocked AS (
+      SELECT 1 FROM technician_schedule_slots tss, target
+      WHERE tss.technician_id = $1 AND tss.status = 'blocked' AND tss.deleted_at IS NULL
+        AND tss.slot_date = target.target_date
+        AND tss.start_time < ((COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')
+              + ($5::int || ' minutes')::interval)::time
+        AND tss.end_time > (COALESCE($2::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
+      LIMIT 1
+    ),
+    heavy AS (
+      SELECT 1 FROM orders co
+      JOIN services cs ON cs.id = co.service_id, target
+      WHERE co.technician_id = $1 AND co.id IS DISTINCT FROM $3::uuid
+        AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
+        AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
+        AND (
+          (
+            target.target_date = (now() AT TIME ZONE 'Africa/Cairo')::date
+            AND co.order_status = ANY($7::order_status[])
+          )
+          OR COALESCE(co.estimated_duration_days, 0) >= 1
+          OR COALESCE(cs.estimated_duration_minutes, 60) >= $4::int
+          OR $5::int >= $4::int
+        )
+      LIMIT 1
+    ),
+    meaningful AS (
+      SELECT 1 FROM orders co, target
+      WHERE co.technician_id = $1 AND co.id IS DISTINCT FROM $3::uuid
+        AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
+        AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
+      LIMIT 1
+    )
+    SELECT
+      CASE
+        WHEN EXISTS (SELECT 1 FROM blocked) THEN 'BLOCKED'
+        WHEN EXISTS (SELECT 1 FROM heavy) THEN 'HEAVY'
+        WHEN EXISTS (SELECT 1 FROM meaningful) THEN 'MEANINGFUL'
+        ELSE 'LIGHT'
+      END AS tier
+    `,
+    [
+      params.technicianId,
+      params.scheduledAt,
+      params.excludeOrderId,
+      params.fullDayThresholdMinutes,
+      params.serviceDurationMinutes,
+      ACTIVE_TECHNICIAN_ORDER_STATUSES,
+      ENGAGED_TECHNICIAN_ORDER_STATUSES,
+    ],
+  );
+  return rows[0].tier;
 }

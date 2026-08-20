@@ -15,6 +15,7 @@ import { TechnicianLevelConfig } from '../technicians/entities/technician-level-
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
 
@@ -113,6 +114,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
       settingsService,
       events,
       { add: async () => undefined } as never,
+      new TechnicianWorkOpportunitiesService(dataSource),
     );
 
     // إعدادات الاختبار: دفعة أولى=2، تالية=3 (مختلفة عمدًا عشان نثبت إنهم قابلين للتعديل
