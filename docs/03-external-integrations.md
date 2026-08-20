@@ -469,34 +469,33 @@ cd apps/customer-app && flutter build appbundle --release
 `POST /admin/payments/:id/reject-instapay` (رفض) في `admin-payments.controller.ts` — تفاصيل
 معمارية كاملة في `apps/api/src/modules/payments/README.md`.
 
-### الفرق الجوهري عن Paymob/Fawry فوق — **صفر اعتماد خارجي مطلوب**
+### الفرق الجوهري عن Paymob/Fawry فوق — **مش env vars خالص، إعداد أدمن ديناميكي**
 
-القيمتين المحتاجين هنا (`INSTAPAY_IPA_ADDRESS`, `INSTAPAY_RECIPIENT_NAME`) مش مفاتيح API بترتبط
-بحساب تاجر حقيقي — هما بس نص بيتعرض للعميل كتعليمات ("حوّل لـ..."). يعني تقدر تفعّل InstaPay
-**للتجربة فوراً** بأي قيمة تختارها (رقم موبايلك المسجّل InstaPay، أو IPA وهمي زي
-`test@instapay`)، من غير ما تستنى اعتماد أي جهة خارجية. للاستخدام الحقيقي بفلوس حقيقية، القيمتين
-دول لازم يبقوا عنوان IPA وحساب استلام حقيقيين مسجّلين باسم الشركة.
+القيمتين المحتاجين هنا مش مفاتيح API بترتبط بحساب تاجر حقيقي — هما بس نص بيتعرض للعميل كتعليمات
+("حوّل لـ..."). عشان كده (وعشان ممكن يتغيروا — تغيير حساب بنكي مثلاً) **بقوا يتعدّلوا من لوحة
+تحكم الأدمن مباشرة (`/admin/settings`)، مش من `.env`** (طلب مالك صريح 2026-08-20، §33 في
+`docs/08-pricing-engine-and-platform-vision.md`) — تغيير لحظي بلا إعادة نشر أو restart للسيرفر،
+ومحدود لـ`super_admin` بس (نفس تقييد كل `/admin/settings`، صلاحية `settings.manage`).
 
 ### الخطوات
 
-1. لو عندك حساب بنكي مصري (أو محفظة موبايل) مسجّل InstaPay: من تطبيق البنك → إعدادات InstaPay
-   → هتلاقي **IPA Address** بتاعك (شكله زي `name@bankcode` أو رقم موبايلك المسجّل) — ده
-   `INSTAPAY_IPA_ADDRESS`.
-2. الاسم اللي هيتعرض للعميل عشان يتطمّن إنه بيحوّل للجهة الصح (مثلاً اسم الشركة أو صاحب الحساب) —
-   ده `INSTAPAY_RECIPIENT_NAME`.
-3. للتجربة بس (مفيش فلوس حقيقية بتتحرك، ده مجرد نص تعليمات): أي قيمتين وهميتين شغالين فورًا.
-
-### مكان القيم
-
-في `apps/api/.env`:
-```
-INSTAPAY_IPA_ADDRESS=<من الخطوة 1، أو قيمة تجريبية للتجربة>
-INSTAPAY_RECIPIENT_NAME=<من الخطوة 2، أو اسم تجريبي للتجربة>
-```
+1. سجّل دخول كـ`super_admin` في `apps/admin` → **الإعدادات** (`/settings`، ظاهرة لـ`super_admin`
+   بس في الشريط الجانبي).
+2. في مجموعة **payments**، هتلاقي صفين: `payments.instapay.ipa_address` و
+   `payments.instapay.recipient_name`.
+3. لو عندك حساب بنكي مصري (أو محفظة موبايل) مسجّل InstaPay: من تطبيق البنك → إعدادات InstaPay →
+   هتلاقي **IPA Address** بتاعك (شكله زي `name@bankcode` أو رقم موبايلك المسجّل) — دي القيمة
+   الأولى. الاسم اللي هيتعرض للعميل عشان يتطمّن إنه بيحوّل للجهة الصح — دي القيمة التانية.
+4. للتجربة بس (مفيش فلوس حقيقية بتتحرك، ده مجرد نص تعليمات): أي قيمتين وهميتين (زي
+   `test@instapay` واسم تجريبي) شغالين فورًا من غير ما تستنى اعتماد أي جهة خارجية. للاستخدام
+   الحقيقي بفلوس حقيقية، القيمتين دول لازم يبقوا عنوان IPA وحساب استلام حقيقيين مسجّلين باسم
+   الشركة.
+5. عدّل القيمة في خانة النص واضغط "حفظ" — التغيير سارٍ فورًا (لحظيًا، مفيش restart مطلوب) بمجرد
+   ما القيمتين الاتنين بيبقوا مليانين.
 
 ### التأكد إنها اشتغلت
 
-بعد ملء القيم وإعادة تشغيل `apps/api`، جرّب `POST /orders/:id/pay-with-instapay` على طلب حقيقي —
+بعد ملء القيمتين من `/settings`، جرّب `POST /orders/:id/pay-with-instapay` على طلب حقيقي —
 المفروض ترجع `instructions_ar` فيها العنوان والاسم اللي حطيتهم + `reference_code`. من `apps/customer-app`
 اضغط "حوّلت الفلوس" في `InstaPayReferenceScreen` — لازم يسجّل `customer_confirmed_transfer_at` (يظهر
 فورًا في `apps/admin` → **تأكيدات InstaPay**، `/instapay-confirmations`). اضغط "تأكيد الاستلام" من
@@ -528,9 +527,7 @@ PAYMOB_HMAC_SECRET=
 FAWRY_MERCHANT_CODE=
 FAWRY_SECURE_KEY=
 
-# InstaPay (§8) — صفر اعتماد خارجي، أي قيمة تختارها شغالة فورًا للتجربة
-INSTAPAY_IPA_ADDRESS=
-INSTAPAY_RECIPIENT_NAME=
+# InstaPay (§8) مش env var خالص — يتظبط من apps/admin → الإعدادات (super_admin بس)
 
 # S3 storage (§3)
 STORAGE_PROVIDER=local   # غيّرها لـ s3 لما تملأ الباقي

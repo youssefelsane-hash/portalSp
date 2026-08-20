@@ -161,7 +161,7 @@ export class OrderTeamService {
       JOIN services svc ON svc.id = o.service_id
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = o.service_id
         AND ts.is_active = true AND ts.verification_status = 'approved'
-      CROSS JOIN (SELECT location FROM addresses WHERE id = o.address_id) a
+      CROSS JOIN LATERAL (SELECT location FROM addresses WHERE id = o.address_id) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND tp.is_available = true
         AND tp.current_location IS NOT NULL

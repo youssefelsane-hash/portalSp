@@ -431,5 +431,29 @@ cash-admin-confirmed:${orderId}`، بعده `settleAndComplete(manager, order, C
 
 الاختبار الحي `instapay-manual-flow.spec.ts` بيثبت المسارين (تأكيد العميل idempotent + معزول عن
 عملاء تانيين، رفض الأدمن بيقفل الدفعة ويمنع رفض/تأكيد تاني، الحدث بيتبعت بالبيانات الصح).
-`payments.confirm_manual` عرضها في `/admin` عادي دلوقتي (مش محجوب خلف sandbox) — القرار الوحيد
-المتبقي فعلياً هو تفعيل حساب InstaPay حقيقي وقت الإطلاق (`docs/03-external-integrations.md`).
+`payments.confirm_manual` عرضها في `/admin` عادي دلوقتي (مش محجوب خلف sandbox).
+
+## عنوان IPA/اسم المستلم بقوا إعداد أدمن ديناميكي مش env var — طلب مالك صريح 2026-08-20 (docs/08 §33)
+
+كان القرار السابق (`docs/03-external-integrations.md`، وقت الإطلاق) إن التفعيل يبقى عبر
+`INSTAPAY_IPA_ADDRESS`/`INSTAPAY_RECIPIENT_NAME` كـenv vars — المالك رفض ده صراحة: "عادي بيانات
+InstaPay ممكن تتغير... بس ما يحقش لحد يغيّرها غير السوبر أدمين". القيمتين مش سرّ (نص بيتعرض
+للعميل بس)، فمناسبين تمامًا لمخزن `settings` الديناميكي (`../settings/README.md`) بدل `.env` —
+تغيير لحظي من `/admin/settings` بلا إعادة نشر أو restart، ومحدود لـ`super_admin` بس تلقائيًا
+(نفس تقييد كل `/admin/settings`، `settings.manage`).
+
+**التحدي المعماري**: `PaymentProvider.isConfigured` واجهة `readonly boolean` تزامنية — مناسبة
+لـenv vars (مش هتتغيّر من غير restart)، مش لقيمة في قاعدة بيانات. بدل تغيير الواجهة المشتركة
+لـ`async` (كان هيجرّ Paymob/Fawry/Cash/Wallet الأربعة + كل استهلاكاتهم +6 ملفات اختبار — نطاق
+واسع لمخاطرة مش لازمة في موديول مالي حساس)، `InstaPayProvider` بس بقى عنده `isConfigured`/
+`ipaAddress`/`recipientName` **mutable** (مش `readonly`)، بيتحمّلوا في `onModuleInit()` وبيتحدّثوا
+لحظيًا لما `SettingsService.update()` يطلق `SETTING_UPDATED_EVENT` (بدائي عام جديد، تفاصيله في
+`../settings/README.md`). مفاتيح الإعداد: `payments.instapay.ipa_address`،
+`payments.instapay.recipient_name` (migration `0150`، `group_name='payments'`، فاضيين افتراضيًا).
+
+اختبار حي جديد `gateways/instapay-admin-managed-config.spec.ts` بيثبت الدورة الكاملة: `isConfigured`
+يبدأ `false`، تحديث قيمة واحدة بس لسه `false`، تحديث القيمتين بيخلّيه `true` **بلا أي restart**
+(نفس الـprocess)، `createPayment()` بترجع القيم الجديدة بالظبط في التعليمات، مسح قيمة بيرجّعه
+`false` تاني، وتحديث إعداد تاني غير علاقة (`payments.instapay_confirmation_window_hours`) صفر
+تأثير. `docs/03-external-integrations.md` §8 اتحدّث بالكامل من ".env + restart" لـ"/admin/settings
+كـsuper_admin".

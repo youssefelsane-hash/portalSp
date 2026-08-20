@@ -326,6 +326,12 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
   it('listTeamAssignedForTechnician — "شغلي كعضو فريق" بيرجّع الطلب اللي هو مضاف ليه بس، مش طلبات هو قائدها', async () => {
     const orderId = await insertOrder(`team-assigned-${runId}`, { requiredTechnicians: 3 });
     await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile);
+    // insertOrder() بيزرع الطلب بـtechnician_assigned افتراضيًا (مقبول لباقي اختبارات الملف
+    // اللي مش شايفة حالة الطلب أصلاً) — بس listTeamAssignedForTechnician() بتفلتر على
+    // ACTIVE_TECHNICIAN_ORDER_STATUSES (نفس شرط findActiveForTechnician() بالحرف)، واللي مش
+    // شاملة technician_assigned (حالة "قبل القبول" — راجع order-state-machine.ts). لازم القبول
+    // الفعلي يحصل الأول عشان الطلب يبان في القايمة دي، بالظبط زي أي طلب حقيقي.
+    await q(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [orderId]);
     const [juniorUserRow] = await q(`SELECT user_id FROM technician_profiles WHERE id = $1`, [ids.juniorProfile]);
 
     const assigned = await ordersService.listTeamAssignedForTechnician(juniorUserRow.user_id);
