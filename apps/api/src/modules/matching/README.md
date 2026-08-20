@@ -575,7 +575,8 @@ recent_effective_workload = عدد الطلبات المؤكدة (assigned_at) �
 
 `MatchingExplainabilityService.explainTechnicianForOrder(order, technicianId)` — "ليه الفني ده مش
 بياخد الطلب ده؟" لأي أدمن، بإجابة بتستهلك **نفس** شروط `findEligibleTechnicians()` الحقيقية
-بالحرف (8 checks + `capacity_tier` + `distance_km` في استعلام واحد)، صفر خوارزمية تشخيصية موازية.
+بالحرف (9 checks (راجع §36.6 تحت لآخر إضافة) + `capacity_tier` + `distance_km` في استعلام واحد)،
+صفر خوارزمية تشخيصية موازية.
 `technicianAvailabilityCondition()`/`classifyTechnicianCapacity()` بيتلفوا زي ما هما (نفس الدوال
 المستخدمة في `matching.service.ts` فعليًا) — تعديل أي منهم لاحقًا بيأثّر على التفسير والمطابقة
 الحقيقية مع بعض تلقائيًا، بلا خطر انجراف. `Endpoint`: `GET /admin/orders/:id/technicians/:technicianId/explain`
@@ -598,6 +599,33 @@ opportunities sent/declined/pending → crew shortage، كل عدد بيتحسب
 مخترعة. `crew_status` بيعيد استخدام `computeCrewComposition()` (دالة نقية من `order-team.service
 .ts`) بدل حقن `OrderTeamService` كامل، عمدًا (نفس سبب تجنّب `OrdersModule` cycle الموثّق فوق).
 `Endpoint`: `GET /admin/orders/:id/matching-funnel`.
+
+## تعميق تفسير المطابقة — decision_limit_ok + rank_info حقيقي (docs/08 §36.6)
+
+**بَقّة حقيقية اتلقطت وقت بناء §36.5's UI (مفتّش المطابقة في صفحة تفاصيل الطلب)**:
+`explainTechnicianForOrder()` كانت قايمة الـ8 checks بتاعتها ناقصة `decision_limit_cents` —
+`findEligibleTechnicians()` بقت تفحصه من §36.1(تعميق)، و`assertCoreEligibility()` بيفحصه من
+الأساس، بس `explainTechnicianForOrder()` (اللي المفروض "نفس الشروط بالحرف") ما اتحدّثتش وقتها.
+النتيجة: التفسير كان ممكن يقول "مؤهّل" لفني محرك المطابقة الحقيقي هيرفضه فعليًا. **الإصلاح**: check
+تاسع (`decision_limit_ok`) بنفس الـ`EXISTS` بالحرف من `findEligibleTechnicians()`/
+`assertCoreEligibility()`.
+
+**إضافة جديدة (مش إصلاح بَقّة)**: `rankInfo` (`rank_score`, `rank`, `total_eligible`) — "الفني ده
+ترتيبه كام بين المرشّحين المؤهّلين فعليًا؟". `MatchingService.findEligibleTechnicians()` بقت مش
+`private` عمدًا (المصدر الوحيد، `MatchingExplainabilityService` بتناديها بالحرف بـ`batchSize` كبير
+(10,000) عشان ترجّع المجمّع المؤهّل كامل بدل أول N بس، بعدين تدوّر على موقع الفني المطلوب فيه) —
+**صفر صيغة ترتيب موازية مخترعة في التفسير**، نفس `order_priority_weight`/`workload_balance_weight`/
+`fairness_weight` المستخدمين في المطابقة الفعلية بالحرف. الموديولين (`MatchingService`،
+`MatchingExplainabilityService`) مسجّلين بالفعل في نفس `MatchingModule`، صفر دورة استيراد جديدة.
+`rankInfo=null` لو الفني مش ضمن المجمّع المؤهّل فعليًا (غالبًا نفس سبب `eligible=false`، أو
+`order.requestedTechnicianId` مضبوط لفني تاني — إعادة حجز صريحة بتستبعد الباقي من الترتيب أصلاً،
+سلوك صحيح مش بَقّة).
+
+اختبارين حيّين جداد في `matching-explainability.spec.ts` (11/11 دلوقتي، كانوا 9): `rankInfo` صح
+للفني المؤهّل الوحيد في الفكستشر (`rank=1`)، `rankInfo=null` لفني بره المجمّع (نطاق غلط)،
+و`decision_limit_ok=false` لفني مستوى `new` (حد قرار 200 جنيه حقيقي) قدّام طلب 300 جنيه — نفس فئة
+بَقّة §36.1(تعميق) بالظبط، بس في مسار التفسير مش الاكتشاف. `apps/admin`: كارت "مفتّش المطابقة"
+(§36.5) بيعرض `rank_info` تلقائيًا لو موجود.
 
 ## بَقّة حقيقية أعمق — اكتشاف المرشّحين ماكانتش عارفة بحد قرار المستوى (docs/08 §36.1 تعميق)
 

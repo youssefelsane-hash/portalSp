@@ -10,7 +10,17 @@ export interface TechnicianEligibilityCheckDto {
   label_ar: string;
 }
 
-// GET /admin/orders/:id/technicians/:technicianId/explain (§35.7)
+// docs/08 §36.6 — rank_score/ترتيب حقيقي بين المرشّحين المؤهّلين فعليًا لنفس الطلب دلوقتي، مُعاد
+// استخدامه بالحرف من MatchingService.findEligibleTechnicians() (نفس صيغة order_priority_weight/
+// workload_balance_weight/fairness_weight)، صفر صيغة ترتيب موازية مخترعة في الواجهة. null لو
+// الفني مش ضمن المجمّع المؤهّل فعليًا (نفس سبب eligible=false غالبًا).
+export interface TechnicianRankInfoDto {
+  rank_score: number;
+  rank: number;
+  total_eligible: number;
+}
+
+// GET /admin/orders/:id/technicians/:technicianId/explain (§35.7/§36.6)
 export interface TechnicianEligibilityExplanationDto {
   technician_id: string;
   order_id: string;
@@ -19,6 +29,7 @@ export interface TechnicianEligibilityExplanationDto {
   capacity_tier: TechnicianCapacityTier | null;
   distance_km: string | null;
   checks: TechnicianEligibilityCheckDto[];
+  rank_info: TechnicianRankInfoDto | null;
 }
 
 export interface OrderMatchingFunnelPoolCountsDto {

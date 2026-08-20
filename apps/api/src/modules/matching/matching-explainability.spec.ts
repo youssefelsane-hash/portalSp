@@ -1,5 +1,6 @@
 import { DataSource } from 'typeorm';
 import { MatchingExplainabilityService } from './matching-explainability.service';
+import { MatchingService } from './matching.service';
 import { SettingsService } from '../settings/settings.service';
 import { Order } from '../orders/entities/order.entity';
 
@@ -75,7 +76,22 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     });
     await dataSource.initialize();
 
-    service = new MatchingExplainabilityService(dataSource, settingsServiceStub);
+    // docs/08 §36.6 — findEligibleTechnicians() بقت مُعاد استخدامها بالحرف جوّه
+    // explainTechnicianForOrder() لحساب rank_score/ترتيب الفني الحقيقي. الدالة دي بتلمس بس
+    // dataSource/settingsService — باقي الـdependencies هنا stub خام (مش مستخدَمة أصلاً في
+    // findEligibleTechnicians()، نفس نمط matching-work-opportunity.spec.ts).
+    const matchingServiceForRanking = new MatchingService(
+      {} as never,
+      {} as never,
+      dataSource,
+      {} as never,
+      {} as never,
+      settingsServiceStub,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    service = new MatchingExplainabilityService(dataSource, settingsServiceStub, matchingServiceForRanking);
 
     const [country] = await q(
       `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
@@ -206,13 +222,58 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     return order;
   }
 
-  it('فني مؤهّل بالكامل — eligible=true، كل الـchecks ناجحة، capacityTier=LIGHT', async () => {
+  it('فني مؤهّل بالكامل — eligible=true، كل الـchecks ناجحة، capacityTier=LIGHT، rankInfo حقيقي (docs/08 §36.6)', async () => {
     const order = await orderRow();
     const result = await service.explainTechnicianForOrder(order, ids.eligibleProfile);
     expect(result.eligible).toBe(true);
     expect(result.checks.every((c) => c.passed)).toBe(true);
+    expect(result.checks.find((c) => c.key === 'decision_limit_ok')?.passed).toBe(true);
     expect(result.capacityTier).toBe('LIGHT');
     expect(result.distanceKm).not.toBeNull();
+    // docs/08 §36.6 — rank_score/ترتيب حقيقي مُعاد استخدامه من findEligibleTechnicians() بالحرف،
+    // مش صفر مُلفَّق. الفني ده الوحيد المؤهّل فعليًا في الفكستشر ده، يبقى rank=1.
+    expect(result.rankInfo).not.toBeNull();
+    expect(result.rankInfo?.rank).toBe(1);
+    expect(result.rankInfo?.totalEligible).toBeGreaterThanOrEqual(1);
+    expect(typeof result.rankInfo?.rankScore).toBe('number');
+  });
+
+  it('rankInfo=null لفني مش ضمن المجمّع المؤهّل فعليًا (نطاق غلط)', async () => {
+    const order = await orderRow();
+    const result = await service.explainTechnicianForOrder(order, ids.wrongZoneProfile);
+    expect(result.rankInfo).toBeNull();
+  });
+
+  it('حد قرار مستوى الفني أقل من قيمة الطلب — decision_limit_ok=false، eligible=false (docs/08 §36.6، بَقّة حقيقية اتصلحت)', async () => {
+    // فني جديد بمستوى 'new' (حد قرار 200 جنيه حقيقي من technician_level_config) — الطلب هنا
+    // 300 جنيه (total_amount_cents=30000)، يعني نفس البَقّة اللي §36.1(تعميق) صلّحها في
+    // findEligibleTechnicians() كانت لسه موجودة هنا في explainTechnicianForOrder() لحد الإصلاح ده.
+    const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
+      nextPhone(),
+      `فني حد قرار تفسير ${runId}`,
+    ]);
+    users.push(user.id);
+    const [profile] = await q(
+      `INSERT INTO technician_profiles (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, verification_status, is_available, current_location)
+       VALUES ($1,$2,'x',1,'new','approved',true, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
+      [user.id, `TCEXPLIM${runId}`.slice(0, 20)],
+    );
+    const lowLimitProfile = profile.id as string;
+    await q(`INSERT INTO technician_services (technician_id, service_id, verification_status, is_active) VALUES ($1,$2,'approved',true)`, [
+      lowLimitProfile,
+      ids.service,
+    ]);
+    await q(`INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`, [lowLimitProfile, ids.zone]);
+
+    const order = await orderRow();
+    const result = await service.explainTechnicianForOrder(order, lowLimitProfile);
+    expect(result.eligible).toBe(false);
+    expect(result.checks.find((c) => c.key === 'decision_limit_ok')?.passed).toBe(false);
+    expect(result.rankInfo).toBeNull();
+
+    await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [lowLimitProfile]);
+    await q(`DELETE FROM technician_services WHERE technician_id = $1`, [lowLimitProfile]);
+    await q(`DELETE FROM technician_profiles WHERE id = $1`, [lowLimitProfile]);
   });
 
   it('فني بفئة/خدمة مختلفة — category_eligible=false، eligible=false', async () => {

@@ -817,6 +817,15 @@ export default function OrderDetailPage() {
                   </p>
                 )}
                 {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
+                {explanation.rank_info && (
+                  <p>
+                    الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
+                    {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
+                  </p>
+                )}
+                {!explanation.rank_info && (
+                  <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>
+                )}
                 <ul className="flex flex-col gap-1">
                   {explanation.checks.map((check) => (
                     <li key={check.key} className="flex items-center gap-2">

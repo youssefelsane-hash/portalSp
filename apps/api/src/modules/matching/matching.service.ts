@@ -76,7 +76,7 @@ const FAIRNESS_DECLINE_WEIGHT_FALLBACK = 0.5;
 // المالك — "avoid permanent deterministic winners"). افتراضي معطّل (0 = مفيش نطاق تعادل خالص).
 const TIE_BREAK_THRESHOLD_FALLBACK = 0;
 
-interface EligibleTechnicianRow {
+export interface EligibleTechnicianRow {
   technician_id: string;
   distance_km: string;
   rank_score: string;
@@ -167,7 +167,10 @@ export class MatchingService {
    * اليوم بتوقيت مصر* والشغل شاغل يوم كامل (ADR-0018 §2 — الجدولة باليوم مش بالساعة، `matching
    * .full_day_job_minutes`)؛ وأي استثناء `blocked` صريح حدده الفني بنفسه في جدوله.
    */
-  private async findEligibleTechnicians(
+  // مش private عمدًا (docs/08 §36.6) — MatchingExplainabilityService بيعيد استخدامها بالحرف
+  // (batchSize كبير) عشان يحسب rank_score/ترتيب فني معيّن بين المرشّحين المؤهّلين الحقيقيين، بدل
+  // ما يخترع صيغة ترتيب موازية في التفسير. الموديولين مسجّلين في نفس MatchingModule، صفر دورة.
+  async findEligibleTechnicians(
     order: Order,
     batchSize: number,
     requestedTechnicianId?: string | null,
