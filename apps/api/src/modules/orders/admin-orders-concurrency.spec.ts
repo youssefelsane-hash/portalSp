@@ -32,6 +32,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     leaderProfile: '',
     technicianAProfile: '',
     technicianBProfile: '',
+    newLeaderCProfile: '',
+    newLeaderDProfile: '',
   };
   const users: string[] = [];
 
@@ -139,6 +141,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     ids.leaderProfile = await makeTechnician('leader');
     ids.technicianAProfile = await makeTechnician('a');
     ids.technicianBProfile = await makeTechnician('b');
+    ids.newLeaderCProfile = await makeTechnician('c');
+    ids.newLeaderDProfile = await makeTechnician('d');
 
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -165,6 +169,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never, // pricingEngineService — مش متنادى في reassign/crew
       {} as never, // promoCodesService
+      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never, // settingsService (docs/08 §35)
     );
   });
 
@@ -175,15 +180,10 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCC-%`]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-      await q(`DELETE FROM technician_services WHERE technician_id = ANY($1)`, [
-        [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile],
-      ]);
-      await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [
-        [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile],
-      ]);
-      await q(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [
-        [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile],
-      ]);
+      const allTechnicians = [ids.leaderProfile, ids.technicianAProfile, ids.technicianBProfile, ids.newLeaderCProfile, ids.newLeaderDProfile];
+      await q(`DELETE FROM technician_services WHERE technician_id = ANY($1)`, [allTechnicians]);
+      await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [allTechnicians]);
+      await q(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [allTechnicians]);
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
@@ -249,5 +249,91 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       ids.technicianAProfile,
     ]);
     expect(members[0].c).toBe(1);
+  });
+
+  // تغيير قائد الطلب (docs/08 §35، ADR-0021 §5) — كانت فجوة حقيقية: reassign() مقصورة على مرحلة
+  // "قبل القبول"، مش تقدر تُستخدم لطلب فريق بعد ما القبول وتجميع الطاقم حصلوا بالفعل.
+  it('reassignLeader — بينجح لطلب فريق مقبول، والقائد القديم بيتحوّل لعضو فريق عادي (تماسك الحالة، سيناريو I)', async () => {
+    const orderId = await insertOrder(`reassign-leader-ok-${runId}`, {
+      bookingMode: BookingMode.TEAM,
+      technicianId: ids.leaderProfile,
+      orderStatus: OrderStatus.ACCEPTED,
+    });
+
+    const updated = await adminOrdersService.reassignLeader(ids.adminUserA, orderId, ids.newLeaderCProfile, 'القائد الأصلي مش متاح');
+    expect(updated.technicianId).toBe(ids.newLeaderCProfile);
+
+    const [oldLeaderMember] = await q(`SELECT role_label, added_by_admin_user_id FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
+      orderId,
+      ids.leaderProfile,
+    ]);
+    expect(oldLeaderMember).toBeDefined();
+    expect(oldLeaderMember.role_label).toBe('قائد سابق');
+    expect(oldLeaderMember.added_by_admin_user_id).toBe(ids.adminUserA);
+  });
+
+  it('reassignLeader — لو القائد الجديد كان عضو فريق بالفعل، بيتشال من العضوية (بقى قائد مش عضو)', async () => {
+    const orderId = await insertOrder(`reassign-leader-was-member-${runId}`, {
+      bookingMode: BookingMode.TEAM,
+      technicianId: ids.leaderProfile,
+      orderStatus: OrderStatus.ACCEPTED,
+    });
+    await q(`INSERT INTO order_team_members (order_id, technician_id, role_label, added_by_admin_user_id) VALUES ($1,$2,$3,$4)`, [
+      orderId,
+      ids.newLeaderDProfile,
+      'عضو فريق',
+      ids.adminUserA,
+    ]);
+
+    const updated = await adminOrdersService.reassignLeader(ids.adminUserA, orderId, ids.newLeaderDProfile, 'ترقية لقائد');
+    expect(updated.technicianId).toBe(ids.newLeaderDProfile);
+    const [stillMember] = await q(`SELECT id FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [orderId, ids.newLeaderDProfile]);
+    expect(stillMember).toBeUndefined();
+  });
+
+  it('reassignLeader — يرفض لطلب فردي (مش "اعتماد")', async () => {
+    const orderId = await insertOrder(`reassign-leader-notteam-${runId}`, {
+      bookingMode: BookingMode.INDIVIDUAL,
+      technicianId: ids.leaderProfile,
+      orderStatus: OrderStatus.ACCEPTED,
+    });
+    await expect(adminOrdersService.reassignLeader(ids.adminUserA, orderId, ids.newLeaderCProfile, 'سبب')).rejects.toThrow();
+  });
+
+  it('reassignLeader — يرفض تعيين نفس القائد الحالي', async () => {
+    const orderId = await insertOrder(`reassign-leader-same-${runId}`, {
+      bookingMode: BookingMode.TEAM,
+      technicianId: ids.leaderProfile,
+      orderStatus: OrderStatus.ACCEPTED,
+    });
+    await expect(adminOrdersService.reassignLeader(ids.adminUserA, orderId, ids.leaderProfile, 'سبب')).rejects.toThrow();
+  });
+
+  it('سباق حقيقي: أدمنين اتنين بيحاولوا يغيّروا قائد نفس طلب الفريق لفنيين مختلفين بالتوازي — واحد بس ينجح', async () => {
+    const orderId = await insertOrder(`reassign-leader-race-${runId}`, {
+      bookingMode: BookingMode.TEAM,
+      technicianId: ids.leaderProfile,
+      orderStatus: OrderStatus.ACCEPTED,
+    });
+
+    const results = await Promise.allSettled([
+      adminOrdersService.reassignLeader(ids.adminUserA, orderId, ids.newLeaderCProfile, 'سبب أ'),
+      adminOrdersService.reassignLeader(ids.adminUserB, orderId, ids.newLeaderDProfile, 'سبب ب'),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+
+    const [finalOrder] = await q(`SELECT technician_id FROM orders WHERE id = $1`, [orderId]);
+    expect([ids.newLeaderCProfile, ids.newLeaderDProfile]).toContain(finalOrder.technician_id);
+
+    // القائد الأصلي لازم يتحوّل لعضو فريق مرة واحدة بس — صفر صف مكرر من المحاولة اللي فشلت.
+    const oldLeaderMembership = await q(`SELECT count(*)::int AS c FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [
+      orderId,
+      ids.leaderProfile,
+    ]);
+    expect(oldLeaderMembership[0].c).toBe(1);
   });
 });

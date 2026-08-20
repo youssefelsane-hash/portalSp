@@ -124,6 +124,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never,
       {} as never,
+      {} as never, // settingsService (docs/08 §35)
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
