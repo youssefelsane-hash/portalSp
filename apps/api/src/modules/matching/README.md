@@ -538,3 +538,35 @@ allocation.md` للتصميم الكامل. ملخص التنفيذ في الم�
   بلا فرصة، فني `MEANINGFUL` يتعرضله فرصة (idempotent على النداء المتكرر)، قبولها بيأكد الطلب فعليًا،
   رفضها بيفضل الطلب يدوّر وقبول متأخر عليها يترفض بوضوح، وسباق حقيقي بين فرصتين على نفس الطلب —
   واحد بس يفوز (`Promise.allSettled`، نفس نمط `matching-accept-concurrency.spec.ts`).
+
+## نموذج العدالة بالتاريخ الحديث + كسر التعادل (docs/08 §34.2، ADR-0020 §6)
+
+إضافة فوق موازنة الحِمل الحالي الموجودة (`workload_balance_weight` — دي بتقيس "مشغول دلوقتي")،
+مش بديلة ليها: `findEligibleTechnicians()` بقى بيحسب `rank_score` صريح (بدل التعبير المباشر جوّه
+`ORDER BY`) بيضيف مكوّن `recent_effective_workload` من LATERAL جديدة:
+
+```
+rank_score = order_priority_weight
+           - active_count * workload_balance_weight
+           - recent_effective_workload * fairness_weight
+
+recent_effective_workload = عدد الطلبات المؤكدة (assigned_at) في آخر fairness_lookback_days يوم
+                           + fairness_decline_weight * (عدد order_assignments المرفوضة + technician_work_opportunities المرفوضة في نفس النافذة)
+```
+
+- **`fairness_weight` افتراضي `0`** — النموذج **معطّل بالكامل افتراضيًا**، الترتيب زي ما هو
+  بالحرف (نفس `workload_balance_weight` القديم بس). الأدمن يفعّله برقم من `/admin/settings` بلا
+  أي كود.
+- **الفرص المرفوضة بتحسب "شبه شغل" بوزن أخف** (`fairness_decline_weight`، افتراضي `0.5`) — مش
+  عقاب كامل، بس بيمنع فني من الحفاظ على أفضلية "معندوش شغل" مصطنعة برفض كل حاجة تتعرض عليه (بند
+  R من رسالة المالك). بيحسب من مصدرين: `order_assignments` المرفوضة (طوارئ) و`technician_work_
+  opportunities` المرفوضة (الفرص الاختيارية، §34.1b).
+- **كسر التعادل الموزون** (`applyTieBreak()`) — لو الفرق بين أعلى `rank_score` ومرشّحين تانيين
+  أقل من `matching.tie_break_threshold` (افتراضي `0` = معطّل)، ترتيبهم بيتشوّش عشوائيًا **موزون**
+  (الأقرب لأعلى نتيجة وزنه أعلى، exponential sampling — مش عشوائية خام) بدل ترتيب حتمي صارم. الهدف
+  منع فوز نفس الفني دايمًا لما الفرق تافه (بند T من رسالة المالك: "avoid permanent deterministic
+  winners"). النتائج الخام (`rank_score`) لسه محفوظة في النتيجة — مش عشوائية غير مفسَّرة.
+- **اختبار حي شامل** (`matching-fairness-scoring.spec.ts`، 5 اختبارات): فني أقل استغلالاً حديثًا
+  بياخد أفضلية لما `fairness_weight` مفعّل، فني رفض فرص كتير مايحتفظش بأفضلية مصطنعة، الإعداد
+  معطّل افتراضيًا (صفر أثر)، كسر التعادل بيغيّر الفايز عبر نداءات متكررة (20 محاولة، الاتنين
+  المرشحين ظهروا الأول على الأقل مرة)، وعطّل التعطيل الافتراضي بيرجّع ترتيب حتمي صارم 100%.
