@@ -390,6 +390,11 @@ export class AdminTechniciansService {
     if (!existing) {
       throw new ApiException(ErrorCode.VAL_001, 'المنطقة دي مش متعيّنة للفني ده أصلاً', HttpStatus.NOT_FOUND);
     }
+    // بَقّة حقيقية اتلقطت وقت تحقيق §36.1: الـsoft-delete وحده مش كافي — استعلامات المطابقة
+    // الخام (matching.service.ts وغيرها) بتفلتر بـ`tz.is_active = true` بس، من غير `deleted_at
+    // IS NULL`، فصف "محذوف" لكن `is_active` لسه true كان بيفضل يطابق فعليًا. isActive:false هنا
+    // هو الإصلاح الجذري (نقطة كتابة واحدة) بدل تعديل كل استعلامات القراءة المكرّرة.
+    await this.technicianZones.update(existing.id, { isActive: false });
     await this.technicianZones.softDelete(existing.id);
 
     await this.auditLog.record({
