@@ -371,7 +371,20 @@ export class AdminCatalogService {
     });
   }
 
-  // ── الفنيين المؤهلين ─────────────────────────────────────────────────
+  // ── الفنيين المؤهلين (قديم — خدمة-بخدمة، مش المصدر الحقيقي للأهلية) ────
+  // §29 (طلب مالك صريح 2026-08-20): المسار المعتمد لأهلية الفني بقى الفئة/التخصص
+  // (technician_categories، راجع technicians/technician-categories.service.ts + كارت
+  // "التخصصات" في apps/admin's /technicians/[id]). الدوال التلاتة دي بتقرا/تكتب technician_services
+  // مباشرة **بس** — فني معتمد بالفئة فقط (بلا صف technician_services مباشر لنفس الخدمة) مش هيظهر
+  // هنا خالص، رغم إنه فعليًا مؤهّل وهيتوزّعله الطلب حقيقةً (matching.service.ts's findEligibleTechnicians
+  // بيطبّق شرط "OR فئة معتمدة"، مش الاستعلام ده). **بَقّة حقيقية اتلقطت من بلاغ المالك المباشر
+  // (2026-08-20)**: كارت أدمن قديم في /catalog/services/:id كان بيعرض النتيجة الضيّقة دي كـ"الفنيين
+  // المؤهلين" بلا أي إشارة إنها مش المصدر الحقيقي — الأدمن يضيف فئة لفني، يفتح صفحة الخدمة، يلاقي
+  // "مفيش فنيين مؤهلين"، ويفتكر إن الفئة مش شغالة رغم إنها شغالة فعليًا. الكارت اتشال من apps/admin
+  // (راجع docs/08 §30) — الدوال دي فاضلة هنا بس عمدًا (زي technician_services نفسها) عشان استخدام
+  // نادر عبر API مباشر لو احتاجه حد، **مش لعرضها كمصدر أهلية تاني في أي واجهة جديدة**. المصدر
+  // الحقيقي الوحيد للأهلية: technicians.service.ts's listForServiceBooking() (العميل + إعادة تعيين
+  // الأدمن) وmatching.service.ts's findEligibleTechnicians() (التوزيع الفعلي).
 
   listEligibleTechnicians(serviceId: string): Promise<TechnicianService[]> {
     return this.technicianServices.find({ where: { serviceId }, order: { createdAt: 'DESC' } });

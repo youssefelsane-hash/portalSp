@@ -5,11 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import type {
   AdminServiceResponseDto,
   AdminServiceZoneResponseDto,
-  AdminTechnicianResponseDto,
-  AssignTechnicianServiceBody,
   CreateServiceAddonBody,
   CreateServiceStandardDataBody,
-  EligibleTechnicianResponseDto,
   PricingModel,
   RecordProductivityActualBody,
   ServiceAddonResponseDto,
@@ -18,7 +15,6 @@ import type {
   ServiceProductivitySuggestionResponseDto,
   ServiceStandardDataResponseDto,
   ServiceZonePricingResponseDto,
-  SkillLevel,
   TechnicianLevel,
   UpdateServiceBody,
   UpsertLevelPricingBody,
@@ -56,12 +52,6 @@ const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
   team_leader: 'قائد فريق',
 };
 
-const SKILL_LEVEL_LABELS: Record<SkillLevel, string> = {
-  beginner: 'مبتدئ',
-  standard: 'عادي',
-  expert: 'خبير',
-};
-
 export default function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
@@ -70,8 +60,6 @@ export default function ServiceDetailPage() {
   const [service, setService] = useState<AdminServiceResponseDto | null>(null);
   const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zonePricing, setZonePricing] = useState<ServiceZonePricingResponseDto[] | null>(null);
-  const [approvedTechnicians, setApprovedTechnicians] = useState<AdminTechnicianResponseDto[] | null>(null);
-  const [eligibleTechnicians, setEligibleTechnicians] = useState<EligibleTechnicianResponseDto[] | null>(null);
   const [levelPricing, setLevelPricing] = useState<ServiceLevelPricingResponseDto[] | null>(null);
   const [addons, setAddons] = useState<ServiceAddonResponseDto[] | null>(null);
   const [standardData, setStandardData] = useState<ServiceStandardDataResponseDto[] | null>(null);
@@ -98,12 +86,6 @@ export default function ServiceDetailPage() {
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الخدمة'));
     authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones).catch(() => setZones([]));
     authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing).catch(() => setZonePricing([]));
-    // ResponseInterceptor بيفكّ {items, meta} ويحط items في data مباشرة — يعني authedFetch العادي
-    // (مش authedFetchPaginated) بيرجّع المصفوفة على طول من غير غلاف إضافي.
-    authedFetch<AdminTechnicianResponseDto[]>('/admin/technicians?verification_status=approved&per_page=100')
-      .then(setApprovedTechnicians)
-      .catch(() => setApprovedTechnicians([]));
-    authedFetch<EligibleTechnicianResponseDto[]>(`/admin/services/${id}/technicians`).then(setEligibleTechnicians).catch(() => setEligibleTechnicians([]));
     authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing).catch(() => setLevelPricing([]));
     authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons).catch(() => setAddons([]));
     authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData).catch(() => setStandardData([]));
@@ -121,11 +103,6 @@ export default function ServiceDetailPage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
-
-  function technicianName(technicianId: string): string {
-    const tech = approvedTechnicians?.find((t) => t.id === technicianId);
-    return tech ? `${tech.full_name} (${tech.technician_code})` : technicianId;
-  }
 
   function zoneName(zoneId: string): string {
     const zone = zones?.find((z) => z.id === zoneId);
@@ -162,39 +139,6 @@ export default function ServiceDetailPage() {
     try {
       await authedFetch(`/admin/services/zone-pricing/${pricingId}`, { method: 'DELETE' });
       authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleAssignTechnician(e: FormEvent) {
-    e.preventDefault();
-    const form = new FormData(e.target as HTMLFormElement);
-    const body: AssignTechnicianServiceBody = {
-      technician_id: form.get('technician_id') as string,
-      skill_level: (form.get('skill_level') as SkillLevel) || undefined,
-    };
-    setIsSaving(true);
-    setError(null);
-    try {
-      await authedFetch(`/admin/services/${id}/technicians`, { method: 'POST', body: JSON.stringify(body) });
-      (e.target as HTMLFormElement).reset();
-      authedFetch<EligibleTechnicianResponseDto[]>(`/admin/services/${id}/technicians`).then(setEligibleTechnicians);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function handleRemoveTechnician(technicianId: string) {
-    setIsSaving(true);
-    setError(null);
-    try {
-      await authedFetch(`/admin/services/${id}/technicians/${technicianId}`, { method: 'DELETE' });
-      authedFetch<EligibleTechnicianResponseDto[]>(`/admin/services/${id}/technicians`).then(setEligibleTechnicians);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -681,68 +625,6 @@ export default function ServiceDetailPage() {
                             تعطيل
                           </Button>
                         )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">الفنيين المؤهلين</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleAssignTechnician} className="mb-4 flex flex-col gap-2 rounded-md border p-3">
-              <Label htmlFor="et_tech">الفني</Label>
-              <SelectNative id="et_tech" name="technician_id" required defaultValue="">
-                <option value="" disabled>
-                  اختار فني
-                </option>
-                {approvedTechnicians?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.full_name} ({t.technician_code})
-                  </option>
-                ))}
-              </SelectNative>
-              <Label htmlFor="et_skill">مستوى المهارة</Label>
-              <SelectNative id="et_skill" name="skill_level" defaultValue="standard">
-                {Object.entries(SKILL_LEVEL_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </SelectNative>
-              <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
-                إضافة فني
-              </Button>
-            </form>
-            {!eligibleTechnicians ? (
-              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
-            ) : eligibleTechnicians.length === 0 ? (
-              <EmptyState title="مفيش فنيين مؤهلين للخدمة دي لسه" />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>الفني</TableHead>
-                    <TableHead>المهارة</TableHead>
-                    <TableHead>عدد الطلبات المكتملة</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {eligibleTechnicians.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell>{technicianName(t.technician_id)}</TableCell>
-                      <TableCell>{SKILL_LEVEL_LABELS[t.skill_level]}</TableCell>
-                      <TableCell>{t.completed_count}</TableCell>
-                      <TableCell>
-                        <Button size="sm" variant="ghost" disabled={isSaving} onClick={() => handleRemoveTechnician(t.technician_id)}>
-                          إزالة
-                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
