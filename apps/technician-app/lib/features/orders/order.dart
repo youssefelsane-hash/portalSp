@@ -39,6 +39,11 @@ class Order {
   final int? requiredTechnicians;
   // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
   final String? scheduledAt;
+  // تجنيد فريق ذاتي (docs/08 §31) — موجودين بس لقائد الطلب على booking_mode='team' (getOne بتحسبهم).
+  final bool teamShortage;
+  final int teamMembersNeeded;
+  // موجود بس لعضو فريق (مش القائد) بيشوف تفاصيل طلب مضاف ليه — "قائد الفريق: <الاسم>".
+  final String? teamLeaderName;
 
   Order({
     required this.id,
@@ -51,6 +56,9 @@ class Order {
     this.requiredTechnicians,
     this.address,
     this.scheduledAt,
+    this.teamShortage = false,
+    this.teamMembersNeeded = 0,
+    this.teamLeaderName,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -66,6 +74,9 @@ class Order {
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,
         scheduledAt: json['scheduled_at'] as String?,
+        teamShortage: json['team_shortage'] as bool? ?? false,
+        teamMembersNeeded: json['team_members_needed'] as int? ?? 0,
+        teamLeaderName: json['team_leader_name'] as String?,
       );
 }
 

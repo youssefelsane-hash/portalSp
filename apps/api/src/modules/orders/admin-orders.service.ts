@@ -19,7 +19,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { MAX_TEAM_MEMBERS_PER_ORDER } from './order-team.service';
+import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewShortage } from './order-team.service';
 import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
@@ -585,8 +585,9 @@ export class AdminOrdersService {
     // جاهزية الطاقم (Script 4 §22-29: "don't silently show ready" لو الطاقم نقص) — required_technicians
     // هو snapshot محرك الإنتاجية وقت الحجز (orders.service.ts)، مفيش تعقّب لدور محدد بعد، فده
     // مؤشر عددي بسيط بس (العدد الكلي بعد الإزالة مقابل المطلوب) مش تطابق أدوار دقيق.
+    // منطق مشترك مع OrderTeamService.getShortageForOrder() (docs/08 §31) — computeCrewShortage().
     const remaining = await this.teamMembers.count({ where: { orderId } });
-    const crewShortage = order.requiredTechnicians != null && remaining + 1 < order.requiredTechnicians;
+    const { shortage: crewShortage } = computeCrewShortage(order.requiredTechnicians, remaining);
     return { crewShortage };
   }
 

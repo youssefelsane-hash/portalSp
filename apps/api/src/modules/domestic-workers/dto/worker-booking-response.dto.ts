@@ -15,6 +15,9 @@ export interface WorkerBookingResponseDto {
   price_cents: number;
   status: string;
   customer_notes: string | null;
+  /** الشغالة وافقت (status انتقل لـawaiting_payment) — منفصل عن confirmed_at (docs/adr/0019). */
+  accepted_at: string | null;
+  /** "الدفع اتأكد إداريًا عبر InstaPay" (إعادة تعريف دلالي، docs/adr/0019) — مش "الشغالة وافقت". */
   confirmed_at: string | null;
   completed_at: string | null;
   cancelled_at: string | null;
@@ -38,6 +41,7 @@ export function toWorkerBookingResponseDto(booking: DomesticWorkerBooking): Work
     price_cents: booking.priceCents,
     status: booking.status,
     customer_notes: booking.customerNotes,
+    accepted_at: booking.acceptedAt ? booking.acceptedAt.toISOString() : null,
     confirmed_at: booking.confirmedAt ? booking.confirmedAt.toISOString() : null,
     completed_at: booking.completedAt ? booking.completedAt.toISOString() : null,
     cancelled_at: booking.cancelledAt ? booking.cancelledAt.toISOString() : null,

@@ -6,14 +6,17 @@ import { RequireStepUp } from '../../common/decorators/require-step-up.decorator
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
+import { DomesticWorkerBookingsService } from './domestic-worker-bookings.service';
 import { DomesticWorkerEarningApprovalsService } from './domestic-worker-earning-approvals.service';
 import { DomesticWorkersService } from './domestic-workers.service';
+import { DomesticWorkerBookingStatus } from './entities/domestic-worker-booking.entity';
 import { DomesticWorkerEarningApprovalStatus } from './entities/domestic-worker-earning-approval.entity';
 import { DomesticWorkerVerificationStatus } from './entities/domestic-worker-profile.entity';
 import { RejectEarningApprovalDto } from './dto/reject-earning-approval.dto';
 import { ReviewWorkerDto } from './dto/review-worker.dto';
 import { toEarningApprovalResponseDto } from './dto/earning-approval-response.dto';
 import { toWorkerResponseDto } from './dto/worker-response.dto';
+import { toWorkerBookingResponseDto } from './dto/worker-booking-response.dto';
 
 // إدارة قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — نفس صلاحية technicians.review_documents
 // (قرار مراجعة approve/reject على مقدّم خدمة قبل ما يبان للعميل، نفس نوع القرار بالظبط).
@@ -22,6 +25,7 @@ import { toWorkerResponseDto } from './dto/worker-response.dto';
 export class AdminDomesticWorkersController {
   constructor(
     private readonly workersService: DomesticWorkersService,
+    private readonly bookingsService: DomesticWorkerBookingsService,
     private readonly earningApprovalsService: DomesticWorkerEarningApprovalsService,
   ) {}
 
@@ -44,6 +48,21 @@ export class AdminDomesticWorkersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toWorkerResponseDto(await this.workersService.review(admin.sub, id, dto, audit));
+  }
+
+  /**
+   * حجوزات الخدمات المنزلية — ظهور للأدمن (docs/adr/0019 §6). أهم استخدام:
+   * `?status=awaiting_payment` عشان الأدمن يلاقي الحجوزات المستنية دفع InstaPay ويأكّدها عبر
+   * `POST /admin/payments/:id/confirm-instapay` بتاعة orders بالحرف (نفس الـendpoint، مفيش تكرار).
+   */
+  @Get('bookings')
+  @RequirePermission('domestic_workers.approve_earnings')
+  async listBookings(@Query('status') status?: string) {
+    if (status !== undefined && !Object.values(DomesticWorkerBookingStatus).includes(status as DomesticWorkerBookingStatus)) {
+      throw new BadRequestException('status غير صحيحة');
+    }
+    const bookings = await this.bookingsService.listForAdmin(status as DomesticWorkerBookingStatus | undefined);
+    return bookings.map(toWorkerBookingResponseDto);
   }
 
   // طابور موافقة أرباح العمالة المنزلية (docs/08 §25.1، قرار مالك صريح 2026-08-15) — أرباح

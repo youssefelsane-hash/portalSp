@@ -14,6 +14,7 @@ import '../tracking/tracking_client.dart';
 import 'models.dart';
 import 'order.dart';
 import 'orders_repository.dart';
+import 'recruit_team_screen.dart';
 
 // قبل/بعد الشغل — عتبة بسيطة على الحالة بدل قايمة صور فعلية (مفيش GET /technician/orders/:id
 // لاسترجاع صور اترفعت قبل كده لو التطبيق اتقفل وفتح تاني، نفس فجوة الاستمرارية الموثّقة فوق).
@@ -138,6 +139,17 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     } on ApiException {
       // تجاهل — راجع التعليق فوق.
     }
+  }
+
+  // تجنيد فريق ذاتي (docs/08 §31، طلب مالك صريح 2026-08-20) — بعد الرجوع من شاشة المرشّحين،
+  // نحدّث الطلب (team_shortage/team_members_needed) وقايمة الفريق مع بعض عشان الكارت يعكس أي
+  // تجنيد حصل فورًا، مش يفضل عارض الأرقام القديمة لحد ما الشاشة تتقفل وتترجع تتفتح.
+  Future<void> _openRecruitTeam() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => RecruitTeamScreen(orderId: _order.id)),
+    );
+    await _refreshFromServer();
+    await _loadTeamMembersIfApplicable();
   }
 
   // بَقّة حقيقية اتلقطت: الفني كان بيكتب lat/lng يدوي بنفسه بدل ما نستخدم موقعه الفعلي —
@@ -455,6 +467,25 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             if (_order.bookingMode == 'team') ...[
               const SizedBox(height: 12),
               _TeamRosterCard(members: _teamMembers, requiredTechnicians: _order.requiredTechnicians),
+              // "الفريق ناقص" (docs/08 §31) — بتبان بس للقائد نفسه (team_shortage محسوبة بس لو
+              // orders.technicianId=viewerProfileId، راجع toDtoWithTeamInfo في الباك-إند).
+              if (_order.teamShortage) ...[
+                const SizedBox(height: 8),
+                _TeamShortageBanner(
+                  membersNeeded: _order.teamMembersNeeded,
+                  onRecruit: _openRecruitTeam,
+                ),
+              ],
+              // عضو فريق (مش القائد) بيشوف مين ضافه.
+              if (_order.teamLeaderName != null) ...[
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.supervisor_account_outlined),
+                    title: Text('قائد الفريق: ${_order.teamLeaderName}'),
+                  ),
+                ),
+              ],
             ],
             if (_error != null) ...[
               const SizedBox(height: 12),
@@ -631,6 +662,39 @@ class _TeamRosterCard extends StatelessWidget {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// "الفريق ناقص" (docs/08 §31، طلب مالك صريح 2026-08-20) — بارز فوق زي ما المالك طلب بالحرف،
+// مع زرار "دعوة/ضم فريق" ضمن خيارات الطلب الموجودة. القائد بس هو اللي يشوف الكارت ده
+// (team_shortage محسوبة بس ليه، راجع toDtoWithTeamInfo في الباك-إند).
+class _TeamShortageBanner extends StatelessWidget {
+  const _TeamShortageBanner({required this.membersNeeded, required this.onRecruit});
+
+  final int membersNeeded;
+  final VoidCallback onRecruit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Theme.of(context).colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(Icons.group_add_outlined, color: Theme.of(context).colorScheme.onErrorContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'الفريق مش مكتمل — محتاج $membersNeeded كمان',
+                style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
+              ),
+            ),
+            TextButton(onPressed: onRecruit, child: const Text('دعوة/ضم فريق')),
           ],
         ),
       ),

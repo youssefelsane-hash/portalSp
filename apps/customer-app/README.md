@@ -350,3 +350,15 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 `POST /orders/preview` **ما بتاخدش** `scheduled_at` عمدًا (موثّق صراحة في `preview-order.dto.ts` —
 الموعد مأثرش على السعر خالص). `Order.scheduledAt` بقى معروض في `order_detail_screen.dart` كمان
 للتتبع الكامل (كان الحقل ده موجود في رد الباك-إند من زمان بس الموديل هنا مكانش بيقراه خالص).
+
+**تحديث جوهري (docs/08 §32.3، طلب مالك صريح 2026-08-20)** — "أربع خيارات" فوق بقت **خيارين بس**
+دلوقتي، وبعد كده اتشال "في أقرب وقت ممكن" نهائيًا: بلاغ مالك حقيقي إن ASAP كانت بترفض فنيين متاحين
+فعليًا بحجة تعارض وهمي (السبب الجذري الكامل + الإصلاح في `../api/src/modules/technicians/README.md`
+و`docs/08 §32.1/§32.2`). `ScheduleSelectionScreen` بقت: "اختار يوم محدد" (نفس مسار "تاريخ ووقت
+تاني" القديم بلا أي تغيير فيه، بيفتح `showDatePicker` على طول) و"مرن — اختار نطاق أيام"
+(`showDateRangePicker`، أقصى 14 يوم — الباك-إند بيختار أقرب يوم فعليًا متاح جوّه النطاق،
+`CreateOrderDto.scheduled_at_range_end` الجديد). `ScheduleChoice` بقت تحمل `scheduledAt` (إجباري
+دلوقتي) + `rangeEnd` (اختياري) بدل factory بتاعة `.asap()`. القيمتين بيتمرّروا سوا عبر نفس سلسلة
+الشاشات فوق (`requestedAtRangeEnd` جنب `requestedAt`) لحد `CreateOrderScreen`. وصف وضع الحجز
+الفردي ("شغلانة سريعة — حد يخلّصها بسرعة") اتشال كمان بنفس الطلب — بقى "فردي" بس (`BookingMode
+.labelAr`، `booking_mode_selector.dart`) — كان بيوحي باستعجال يتلخبط مع وضع "طوارئ" الفعلي.

@@ -33,12 +33,14 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   // الطوارئ مستثناة عمدًا — استجابة فورية بالتعريف (orders.service.ts بيرفض scheduled_at مع
   // بوكينج طوارئ بوضوح)، فسؤال "امتى؟" هنا مضلّل مش مفيد.
   DateTime? scheduledAt;
+  DateTime? scheduledAtRangeEnd;
   if (bookingMode != BookingMode.emergency) {
     final choice = await Navigator.of(context).push<ScheduleChoice>(
       MaterialPageRoute(builder: (_) => const ScheduleSelectionScreen()),
     );
     if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
     scheduledAt = choice.scheduledAt;
+    scheduledAtRangeEnd = choice.rangeEnd;
   }
 
   if (!context.mounted) return;
@@ -48,10 +50,15 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
       // لازم يجمع تفاصيل الشغل (JobDetailsScreen) قبل قايمة الفنيين، فردي وسعر ثابت يروح لقايمة
       // الفنيين مباشرة، اعتماد/طوارئ يروحوا CreateOrderScreen (فيها اختيار شركة/فريق أو توزيع تلقائي).
       builder: (_) => bookingMode != BookingMode.individual
-          ? CreateOrderScreen(service: service, bookingMode: bookingMode, requestedAt: scheduledAt)
+          ? CreateOrderScreen(
+              service: service,
+              bookingMode: bookingMode,
+              requestedAt: scheduledAt,
+              requestedAtRangeEnd: scheduledAtRangeEnd,
+            )
           : service.pricingModel == 'formula'
-              ? JobDetailsScreen(service: service, requestedAt: scheduledAt)
-              : TechnicianSelectionScreen(service: service, requestedAt: scheduledAt),
+              ? JobDetailsScreen(service: service, requestedAt: scheduledAt, requestedAtRangeEnd: scheduledAtRangeEnd)
+              : TechnicianSelectionScreen(service: service, requestedAt: scheduledAt, requestedAtRangeEnd: scheduledAtRangeEnd),
     ),
   );
 }

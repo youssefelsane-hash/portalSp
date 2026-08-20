@@ -263,6 +263,36 @@ export class OrdersService {
       }
     }
 
+    // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — بندوّر يوم بيوم داخل
+    // [scheduled_at, scheduled_at_range_end] (الاتنين شاملين) على أقرب يوم فيه فني مؤهّل واحد على
+    // الأقل فعليًا، ونستبدل به dto.scheduled_at الحرفي تحت. لو محدش متاح في كل النطاق، بنسيب أول
+    // يوم في النطاق كما هو — نفس فلسفة "مفيش إلغاء تلقائي لمجرد مفيش فني دلوقتي"
+    // (MatchingRecoveryService.sweep() هتعيد المحاولة تلقائيًا بعد إنشاء الطلب).
+    let resolvedScheduledAtIso: string | undefined = dto.scheduled_at;
+    if (dto.scheduled_at_range_end) {
+      if (!dto.scheduled_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن محتاج تاريخ بداية (scheduled_at)', HttpStatus.BAD_REQUEST);
+      }
+      if (scheduleSlot) {
+        throw new ApiException(ErrorCode.VAL_001, 'مينفعش تحدد نطاق أيام مرن مع سلوت وقت محدد', HttpStatus.BAD_REQUEST);
+      }
+      const rangeStart = new Date(dto.scheduled_at);
+      const rangeEnd = new Date(dto.scheduled_at_range_end);
+      const rangeDays = Math.round((rangeEnd.getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000));
+      if (rangeDays < 0 || rangeDays > 14) {
+        throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن لازم يكون بين يوم و14 يوم', HttpStatus.BAD_REQUEST);
+      }
+      for (let offset = 0; offset <= rangeDays; offset += 1) {
+        const candidateDay = new Date(rangeStart.getTime() + offset * 24 * 60 * 60 * 1000);
+        // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا، مش كل الأيام دايمًا.
+        const eligible = await this.techniciansService.hasEligibleTechnicianForDate(service.id, zone.id, address.id, candidateDay);
+        if (eligible) {
+          resolvedScheduledAtIso = candidateDay.toISOString();
+          break;
+        }
+      }
+    }
+
     // مضاعف سعر مستوى الفني (docs/08 — "قرار عمل: السعر النهائي معروف قبل التأكيد") — بيتطبّق
     // بس لو الفني معروف صراحة وقت الحجز (اختيار مباشر أو سلوت جدولة)، مش لو العميل سايب المطابقة
     // تختار (technicianLevel=undefined يبقى مضاعف=1 داخل estimate()، زي ما كان بالظبط). سلوت
@@ -390,12 +420,14 @@ export class OrdersService {
         orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
-        // سلوت الجدولة (لو اتحجز) بيحدد الموعد المطلوب فعليًا — أدق من dto.scheduled_at الحر
+        // سلوت الجدولة (لو اتحجز) بيحدد الموعد المطلوب فعليًا — أدق من resolvedScheduledAtIso
         // (تاريخ/وقت السلوت نفسه اللي الفني أعلن عنه، UTC مباشرة زي باقي أوقات المشروع).
+        // resolvedScheduledAtIso = dto.scheduled_at الحر، أو أقرب يوم متاح فعليًا داخل النطاق
+        // المرن لو dto.scheduled_at_range_end اتبعت (docs/08 §32.3).
         scheduledAt: scheduleSlot
           ? new Date(`${scheduleSlot.slotDate}T${scheduleSlot.startTime}Z`)
-          : dto.scheduled_at
-            ? new Date(dto.scheduled_at)
+          : resolvedScheduledAtIso
+            ? new Date(resolvedScheduledAtIso)
             : null,
         recurringTemplateId: recurringIdentity?.templateId ?? null,
         recurringOccurrenceAt: recurringIdentity?.scheduledFor ?? null,
@@ -990,6 +1022,50 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
     return order;
+  }
+
+  /**
+   * (docs/08 §31) — للقراءة بس (تفاصيل الطلب + قايمة أعضاء الفريق)، مش لأي فعل تنفيذي. عضو فريق
+   * مُضاف (order_team_members، مش قائد الطلب) عنده حق يشوف الطلب دلوقتي — بَقّة حقيقية كانت هنا:
+   * findOwnedByTechnicianOrThrow() القديمة كانت بترفض 404 لعضو الفريق نفسه، فمكانش يقدر أصلاً
+   * يشوف تفاصيل شغلانة اتضاف ليها. أفعال التنفيذ (depart/arrive/start/complete/cancel) لسه
+   * findOwnedByTechnicianOrThrow بس (القائد وحده) — نفس فلسفة "عضو فريق عادي ميقدرش يلغي بنفسه".
+   */
+  async findVisibleForTechnician(userId: string, orderId: string): Promise<Order> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+    }
+    if (order.technicianId === profile.id) {
+      return order;
+    }
+    const [membership] = await this.orders.manager.query<{ id: string }[]>(
+      `SELECT id FROM order_team_members WHERE order_id = $1 AND technician_id = $2 LIMIT 1`,
+      [orderId, profile.id],
+    );
+    if (!membership) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+    }
+    return order;
+  }
+
+  /** "شغلي كعضو فريق" (docs/08 §31) — عكس findActiveForTechnician() بالظبط: طلبات الفني قائدها فيها فني تاني، وهو بس مضاف كعضو. */
+  async listTeamAssignedForTechnician(userId: string): Promise<Order[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    // استعلام خام لمعرّفات الطلبات بس (بلا hydration) — الجلب الفعلي عبر repository.find() تحت
+    // عشان يرجّع كيانات Order مربوطة صح (camelCase)، مش صفوف خام (snake_case) هتكسر toOrderResponseDto.
+    const rows = await this.orders.manager.query<{ order_id: string }[]>(
+      `SELECT DISTINCT otm.order_id FROM order_team_members otm
+       JOIN orders o ON o.id = otm.order_id
+       WHERE otm.technician_id = $1 AND o.order_status = ANY($2::order_status[]) AND o.deleted_at IS NULL`,
+      [profile.id, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+    );
+    if (rows.length === 0) return [];
+    return this.orders.find({
+      where: { id: In(rows.map((r) => r.order_id)) },
+      order: { updatedAt: 'DESC' },
+    });
   }
 
   // الحالات اللي الفني يقدر يلغي فيها نفسه — بعد ما الشغل الفعلي يبدأ (in_progress فما بعده)

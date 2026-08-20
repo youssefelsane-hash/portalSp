@@ -54,9 +54,12 @@ class OrdersRepository {
     // العميل في TechnicianProfileScreen. أقوى من requestedTechnicianId (الفني نفسه أعلن التوافر
     // في الوقت ده صراحة) — الباك-إند بيستنتج الفني منها تلقائيًا.
     String? scheduleSlotId,
-    // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — ISO 8601 UTC، null = ASAP. مستبعد بالكامل من
-    // البوكينج طوارئ (الباك-إند بيرفضه صراحة — استجابة فورية بالتعريف).
+    // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — ISO 8601 UTC. مستبعد بالكامل من البوكينج طوارئ
+    // (الباك-إند بيرفضه صراحة — استجابة فورية بالتعريف).
     String? scheduledAt,
+    // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — لو اتبعت مع scheduledAt،
+    // الباك-إند بيختار أقرب يوم فعليًا متاح جوّه النطاق بدل scheduledAt الحرفي.
+    String? scheduledAtRangeEnd,
     // إعادة الزيارة تحت الضمان (docs/08 §7) — الطلب الأصلي المكتمل. الباك-إند بيتجاهَل
     // requestedTechnicianId/promoCode/buildingCode/addonIds لو اتبعت مع ده (مجانية بالكامل،
     // بترجع لنفس الفني الأصلي تلقائيًا).
@@ -101,6 +104,7 @@ class OrdersRepository {
       if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
       if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
       if (scheduledAt != null) 'scheduled_at': scheduledAt,
+      if (scheduledAtRangeEnd != null) 'scheduled_at_range_end': scheduledAtRangeEnd,
       if (originalOrderId != null) 'original_order_id': originalOrderId,
     });
     return Order.fromJson(data!);

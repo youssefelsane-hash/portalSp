@@ -23,6 +23,7 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       { findByProfileIdOrThrow: jest.fn().mockResolvedValue({ userId: 'user-1' }) } as never,
       {} as never,
       {} as never,

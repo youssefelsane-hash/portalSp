@@ -38,9 +38,13 @@ class CreateOrderScreen extends StatefulWidget {
   // البيانات مرتين — لسه ظاهرة ومعدّلة هنا (مش قراءة فقط) لو حاب يغيّر حاجة قبل التأكيد النهائي.
   final Map<String, dynamic>? initialFieldValues;
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — اتحددت إجباريًا في بداية التدفق (catalog_navigation.dart)
-  // لكل وضع غير الطوارئ. null = ASAP (اختيار العميل الصريح، مش سهو). Widget النهائي هنا بيعرضها
-  // ويسمح بتغييرها قبل التأكيد النهائي (نفس فلسفة "تغيير العنوان").
+  // لكل وضع غير الطوارئ. Widget النهائي هنا بيعرضها ويسمح بتغييرها قبل التأكيد النهائي (نفس فلسفة
+  // "تغيير العنوان"). null بس في وضع الطوارئ.
   final DateTime? requestedAt;
+  // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — لو موجودة، الباك-إند
+  // بيختار أقرب يوم فعليًا متاح جوّه [requestedAt, requestedAtRangeEnd] بدل requestedAt الحرفي.
+  // بتتصفّر تلقائيًا لو العميل غيّر الموعد من هنا (نفس فلسفة _pickSchedule تحت).
+  final DateTime? requestedAtRangeEnd;
 
   const CreateOrderScreen({
     super.key,
@@ -51,6 +55,7 @@ class CreateOrderScreen extends StatefulWidget {
     this.initialAddress,
     this.initialFieldValues,
     this.requestedAt,
+    this.requestedAtRangeEnd,
   });
 
   @override
@@ -73,6 +78,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — قابلة للتغيير هنا برضه (نفس _selectedAddress)،
   // مش مقفولة على اختيار الشاشة السابقة.
   late DateTime? _requestedAt;
+  // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتصفّر لو العميل غيّر الموعد من هنا (_pickSchedule).
+  late DateTime? _requestedAtRangeEnd;
   bool _submitting = false;
   // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — بيتولّد مرة واحدة بس
   // وقت فتح الشاشة (نفس درس generateIdempotencyKey() في payments_repository.dart بالحرف: توليد
@@ -136,6 +143,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
     _selectedAddress = widget.initialAddress;
     _requestedAt = widget.requestedAt;
+    _requestedAtRangeEnd = widget.requestedAtRangeEnd;
     if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
     if (widget.bookingMode == BookingMode.team) _loadCompanies();
@@ -320,13 +328,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     final choice = await Navigator.of(context).push<ScheduleChoice>(
       MaterialPageRoute(builder: (_) => const ScheduleSelectionScreen()),
     );
-    if (choice != null && mounted) setState(() => _requestedAt = choice.scheduledAt);
+    if (choice != null && mounted) {
+      setState(() {
+        _requestedAt = choice.scheduledAt;
+        _requestedAtRangeEnd = choice.rangeEnd;
+      });
+    }
   }
 
-  // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد).
+  // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد). null بس في وضع الطوارئ
+  // (الصف ده مش ظاهر أصلاً وقتها — راجع _buildScheduleRow تحت).
   String _formatRequestedAt() {
     final at = _requestedAt;
-    if (at == null) return 'في أقرب وقت ممكن';
+    if (at == null) return 'فوري';
+    final rangeEnd = _requestedAtRangeEnd;
+    if (rangeEnd != null) {
+      final two = (int n) => n.toString().padLeft(2, '0');
+      return 'مرن: ${two(at.day)}/${two(at.month)} — ${two(rangeEnd.day)}/${two(rangeEnd.month)}';
+    }
     final today = DateTime.now();
     final isToday = at.year == today.year && at.month == today.month && at.day == today.day;
     final tomorrow = today.add(const Duration(days: 1));
@@ -479,6 +498,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
         // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
         scheduledAt: widget.scheduleSlotId == null ? _requestedAt?.toUtc().toIso8601String() : null,
+        // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد (نفس منطق
+        // scheduledAt فوق بالحرف).
+        scheduledAtRangeEnd:
+            widget.scheduleSlotId == null ? _requestedAtRangeEnd?.toUtc().toIso8601String() : null,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
         buildingCode: _buildingController.text.trim(),
@@ -742,7 +765,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               const SizedBox(height: 8),
               Card(
                 child: ListTile(
-                  leading: Icon(_requestedAt == null ? Icons.bolt : Icons.event_outlined),
+                  leading: Icon(_requestedAtRangeEnd != null ? Icons.event_repeat_outlined : Icons.event_outlined),
                   title: Text(_formatRequestedAt()),
                   trailing: const Icon(Icons.chevron_left),
                   onTap: _pickSchedule,

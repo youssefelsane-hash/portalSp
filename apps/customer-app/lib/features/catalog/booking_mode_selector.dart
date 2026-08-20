@@ -53,8 +53,10 @@ class _BookingModeCard extends StatelessWidget {
 
   const _BookingModeCard({required this.mode, required this.onTap});
 
+  // "سريعة/بسرعة" اتشالت من وصف الوضع الفردي (docs/08 §32.3، طلب مالك صريح 2026-08-20) — كانت
+  // بتوحي بالاستعجال وتتلخبط مع وضع "طوارئ" الفعلي تحت.
   (IconData, String, Color?) get _presentation => switch (mode) {
-        BookingMode.individual => (Icons.person_outline, 'شغلانة سريعة — حد يخلّصها بسرعة', null),
+        BookingMode.individual => (Icons.person_outline, 'فردي — فني واحد بيتولى الشغلانة', null),
         BookingMode.team => (Icons.groups_outlined, 'اعتماد — شغلانة كبيرة محتاجة فريق أو شركة', null),
         BookingMode.emergency => (Icons.bolt_outlined, 'طوارئ — حجز فوري، استجابة أسرع', Colors.red),
       };

@@ -11,6 +11,7 @@ import {
   WebhookProcessingStage,
   WebhookProcessingStatus,
 } from './entities/webhook-event.entity';
+import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletsService } from './wallets.service';
@@ -217,6 +218,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
+      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       walletsService,
       catalogService,

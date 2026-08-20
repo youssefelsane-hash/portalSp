@@ -12,6 +12,7 @@ import { Payout, PayoutStatus } from './entities/payout.entity';
 import { PayoutOrderItem } from './entities/payout-order-item.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
+import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -236,6 +237,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
+      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       walletsService,
       catalogService,

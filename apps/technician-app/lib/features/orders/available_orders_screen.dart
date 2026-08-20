@@ -42,6 +42,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // UpcomingConfirmedJobsScreen القديمة) والطلب النشط دلوقتي (كان بس auto-redirect وقت فتح
   // التطبيق، مفيش أثر ليه لو الفني رجع للشاشة الرئيسية بعد كده) بقوا جزء من نفس الشاشة الرئيسية.
   List<Order>? _upcomingOrders;
+  // "شغلي كعضو فريق" (docs/08 §31، طلب مالك صريح 2026-08-20) — طلبات اتضاف ليها الفني كعضو فريق
+  // (تجنيد ذاتي من قائد تاني)، مش هو قائدها. كانت بَقّة حقيقية: عضو الفريق معندوش أي طريقة يشوف
+  // الطلب ده في تطبيقه خالص قبل كده (findOwnedByTechnicianOrThrow القديمة كانت بترفض 404 ليه).
+  List<Order>? _teamAssignedOrders;
   Order? _activeOrder;
   String? _error;
   bool _isActing = false;
@@ -141,6 +145,18 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
+    await _loadTeamAssigned();
+  }
+
+  // فشل التحميل (مشكلة شبكة عابرة) مايمنعش بقية الشاشة تشتغل — نفس فلسفة _loadTeamMembersIfApplicable
+  // في order_execution_screen.dart بالحرف.
+  Future<void> _loadTeamAssigned() async {
+    try {
+      final assigned = await _repository.fetchTeamAssigned();
+      if (mounted) setState(() => _teamAssignedOrders = assigned);
+    } catch (_) {
+      // تجاهل — راجع التعليق فوق.
+    }
   }
 
   Future<void> _accept(AvailableOrder order) async {
@@ -172,6 +188,13 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: order)),
     );
     await _refreshActiveOrder();
+    await _load();
+  }
+
+  Future<void> _openTeamAssignedOrder(Order order) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: order)),
+    );
     await _load();
   }
 
@@ -274,8 +297,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final hasActive = _activeOrder != null;
     final pending = _orders ?? const <AvailableOrder>[];
     final upcoming = _upcomingOrders ?? const <Order>[];
+    final teamAssigned = _teamAssignedOrders ?? const <Order>[];
 
-    if (!hasActive && pending.isEmpty && upcoming.isEmpty) {
+    if (!hasActive && pending.isEmpty && upcoming.isEmpty && teamAssigned.isEmpty) {
       return ListView(
         children: [
           const SizedBox(height: 60),
@@ -320,6 +344,19 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               dayLabel: _formatScheduledDay(order.scheduledAt),
               onTap: () => _openUpcomingOrder(order),
             ),
+            const SizedBox(height: 8),
+          ],
+        ],
+        // "شغلي كعضو فريق" (docs/08 §31) — طلبات القائد التاني جنّده ليها، مش هو قائدها.
+        if (teamAssigned.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'شغلي كعضو فريق',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          for (final order in teamAssigned) ...[
+            _TeamAssignedJobCard(order: order, onTap: () => _openTeamAssignedOrder(order)),
             const SizedBox(height: 8),
           ],
         ],
@@ -459,6 +496,32 @@ class _UpcomingJobCard extends StatelessWidget {
         subtitle: Text(
           '${order.address != null ? order.address!.streetName : ''}'
           ' — ${_formatEgp(order.totalAmountCents)}',
+        ),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+// "شغلي كعضو فريق" (docs/08 §31) — نفس شكل _UpcomingJobCard بالظبط، بس بيوضّح مين قائد الفريق
+// اللي جنّده (team_leader_name، محسوبة في TechnicianOrderExecutionController.toDtoWithTeamInfo()).
+class _TeamAssignedJobCard extends StatelessWidget {
+  const _TeamAssignedJobCard({required this.order, required this.onTap});
+
+  final Order order;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.groups_outlined),
+        title: Text('طلب ${order.orderNumber}'),
+        subtitle: Text(
+          order.teamLeaderName != null
+              ? 'قائد الفريق: ${order.teamLeaderName} — ${_formatEgp(order.totalAmountCents)}'
+              : _formatEgp(order.totalAmountCents),
         ),
         trailing: const Icon(Icons.chevron_left),
         onTap: onTap,

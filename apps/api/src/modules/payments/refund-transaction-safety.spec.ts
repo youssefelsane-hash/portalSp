@@ -6,6 +6,7 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment
 import { Refund, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
+import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import type { PaymentProvider, RefundResult } from './gateways/payment-provider.interface';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح بَقّة distributed-transaction حقيقية (docs/08 §19
@@ -180,6 +181,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
+      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       {} as never, // walletsService — مش متنادى (مفيش فني على الطلب، refundMethod=ORIGINAL_METHOD مش WALLET_CREDIT)
       {} as never, // catalogService

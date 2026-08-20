@@ -10,6 +10,7 @@ import { User } from '../auth/entities/user.entity';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminWalletController } from './admin-wallet.controller';
 import { PaymentChannelsController } from './payment-channels.controller';
@@ -59,6 +60,10 @@ import { WebhookEvent } from './entities/webhook-event.entity';
       User,
       WebhookEvent,
       TechnicianProfile,
+      // إعادة استخدام تدفق InstaPay اليدوي لحجوزات الخدمات المنزلية (docs/adr/0019) — Repository
+      // بس هنا، بلا استيراد DomesticWorkersModule خالص (هو أصلاً بيستورد PaymentsModule، فاستيراد
+      // عكسي هنا كان هيعمل دورة استيراد).
+      DomesticWorkerBooking,
     ]),
     CustomersModule,
     TechniciansModule,

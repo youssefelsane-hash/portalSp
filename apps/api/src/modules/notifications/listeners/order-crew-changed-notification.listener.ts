@@ -24,7 +24,10 @@ export class OrderCrewChangedNotificationListener {
           userId: added.userId,
           notificationType: 'crew_member_added',
           titleAr: 'اتضفت لفريق طلب',
-          bodyAr: 'الإدارة ضافتك لفريق طلب — اتأكد إنك جاهز.',
+          bodyAr:
+            event.addedByType === 'technician'
+              ? 'قائد فريقك ضافك لطلب جديد — اتأكد إنك جاهز.'
+              : 'الإدارة ضافتك لفريق طلب — اتأكد إنك جاهز.',
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,

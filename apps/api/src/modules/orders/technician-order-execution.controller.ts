@@ -18,11 +18,14 @@ import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
-import { Order } from './entities/order.entity';
+import { RecruitTeamMemberDto } from './dto/recruit-team-member.dto';
+import { toRecruitCandidateResponseDto } from './dto/recruit-candidate-response.dto';
+import { BookingMode, Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
+import { TechniciansService } from '../technicians/technicians.service';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -37,6 +40,7 @@ export class TechnicianOrderExecutionController {
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
     private readonly addressesService: AddressesService,
+    private readonly techniciansService: TechniciansService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -47,6 +51,27 @@ export class TechnicianOrderExecutionController {
   private async toDto(order: Order) {
     const address = await this.addressesService.findByIdOrThrow(order.addressId);
     return toOrderResponseDto(order, address);
+  }
+
+  /**
+   * نسخة toDto بتحسب حقول تجنيد الفريق (docs/08 §31) — بس لمسارات تفاصيل الطلب الفردي
+   * (getOne/team-assigned)، مش القوائم العادية ولا أفعال التنفيذ (زرار "افتح الملاحة" مش محتاج
+   * الحقول دي، صفر استعلام إضافي غير ضروري في المسار الساخن ده).
+   */
+  private async toDtoWithTeamInfo(order: Order, viewerProfileId: string) {
+    const base = await this.toDto(order);
+    if (order.bookingMode !== BookingMode.TEAM) {
+      return base;
+    }
+    if (order.technicianId === viewerProfileId) {
+      const { shortage, needed } = await this.orderTeamService.getShortageForOrder(order.id, order.requiredTechnicians);
+      return { ...base, team_shortage: shortage, team_members_needed: needed };
+    }
+    if (order.technicianId) {
+      const leader = await this.techniciansService.findContactInfoOrThrow(order.technicianId);
+      return { ...base, team_leader_name: leader.name };
+    }
+    return base;
   }
 
   // مسار حرفي (`active`) لازم يتسجّل قبل `:id` — وإلا NestJS هيحاول يفسّرها كـ UUID ويرفضها
@@ -70,10 +95,42 @@ export class TechnicianOrderExecutionController {
     return Promise.all(orders.map((order) => this.toDto(order)));
   }
 
-  // نفس الفجوة القديمة (قراءة طلب واحد بالـ id) — كانت موثّقة صراحة، اتقفلت.
+  // "شغلي كعضو فريق" (docs/08 §31) — مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق.
+  @Get('team-assigned')
+  async listTeamAssigned(@CurrentUser() user: JwtPayload) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const orders = await this.ordersService.listTeamAssignedForTechnician(user.sub);
+    return Promise.all(orders.map((order) => this.toDtoWithTeamInfo(order, profile.id)));
+  }
+
+  // نفس الفجوة القديمة (قراءة طلب واحد بالـ id) — كانت موثّقة صراحة، اتقفلت. بقى findVisibleForTechnician
+  // بدل findOwnedByTechnicianOrThrow (docs/08 §31) — عضو فريق مُضاف يقدر يشوف تفاصيل الطلب دلوقتي كمان.
   @Get(':id')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return this.toDto(await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id));
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const order = await this.ordersService.findVisibleForTechnician(user.sub, id);
+    return this.toDtoWithTeamInfo(order, profile.id);
+  }
+
+  /** مرشّحين للتجنيد الذاتي (docs/08 §31) — القائد بس (listRecruitCandidates بتفحص الملكية داخلها). */
+  @Get(':id/recruit-candidates')
+  async listRecruitCandidates(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const candidates = await this.orderTeamService.listRecruitCandidates(user.sub, id);
+    return candidates.map(toRecruitCandidateResponseDto);
+  }
+
+  /** تجنيد فوري بلا موافقة من المُضاف (docs/08 §31) — نفس فلسفة addMember() بالظبط. */
+  @Post(':id/recruit-candidates/:technicianId')
+  @HttpCode(HttpStatus.OK)
+  async recruitTeamMember(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('technicianId', ParseUUIDPipe) technicianId: string,
+    @Body() dto: RecruitTeamMemberDto,
+  ) {
+    await this.orderTeamService.recruitMember(user.sub, id, technicianId, dto.role_label);
+    const items = (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
+    return { items };
   }
 
   // سياسة إلغاء الفني (docs/10) — استشاري بس، الواجهة بتستخدمه قبل ما تعرض زرار "إلغاء" أصلاً.
@@ -195,9 +252,9 @@ export class TechnicianOrderExecutionController {
   async listTeamMembers(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     // إصلاح أمني (مراجعة booking flow الشاملة 2026-08-12) — نفس فئة بَقّة listMedia بالظبط:
     // كانت بتنادي listForOrder(id) (عامة عمداً، بلا تحقق ملكية) من غير أي فحص قبلها، فأي فني
-    // يقدر يشوف أعضاء فريق طلب مش بتاعه. findOwnedByTechnicianOrThrow نفس الفحص اللي getOne()
-    // بتستخدمه في نفس الـcontroller ده.
-    await this.ordersService.findOwnedByTechnicianOrThrow(user.sub, id);
+    // يقدر يشوف أعضاء فريق طلب مش بتاعه. بقى findVisibleForTechnician (docs/08 §31) بدل
+    // findOwnedByTechnicianOrThrow — عضو الفريق المُضاف يقدر يشوف زمايله دلوقتي كمان، مش القائد بس.
+    await this.ordersService.findVisibleForTechnician(user.sub, id);
     return (await this.orderTeamService.listForOrder(id)).map(toTeamMemberResponseDto);
   }
 

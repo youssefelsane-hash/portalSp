@@ -462,6 +462,53 @@ export class TechniciansService {
   }
 
   /**
+   * فحص وجود خفيف (`EXISTS` بس، بلا ترتيب بايزي ولا subqueries إحصائية) — دوس §32.3 docs/08:
+   * "مرن — اختار نطاق أيام" في `apps/customer-app` بيحتاج يفحص يوم بيوم داخل نطاق (لحد 14 يوم)
+   * عشان يلاقي أقرب يوم فيه فني مؤهّل واحد على الأقل، فلازم استعلام رخيص يتكرر بأمان — نسخة كاملة
+   * زي `listForServiceBooking()` (ترتيب توصية بايزي + subqueries التزام بالمواعيد) غالية جدًا
+   * تتكرر لحد 14 مرة. نفس شروط الأهلية الأساسية بالحرف (خدمة/فئة، منطقة، `current_location`،
+   * `technicianAvailabilityCondition()` الموحّدة).
+   */
+  async hasEligibleTechnicianForDate(serviceId: string, zoneId: string, addressId: string, date: Date): Promise<boolean> {
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
+    const [{ exists }] = await this.technicianProfiles.manager.query<{ exists: boolean }[]>(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM technician_profiles tp
+        LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+          AND ts.verification_status = 'approved'
+        JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+        JOIN services svc ON svc.id = $1
+        CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
+        WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+          AND (
+            ts.id IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM technician_categories tc
+              WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
+                AND tc.is_active = true AND tc.verification_status = 'approved'
+            )
+          )
+          AND tp.current_location IS NOT NULL
+          ${technicianAvailabilityCondition({
+            technicianIdExpr: 'tp.id',
+            scheduledAtParam: '$4',
+            excludeOrderIdParam: 'NULL',
+            activeStatusesParam: '$5',
+            engagedStatusesParam: '$6',
+            isEmergencyParam: '$7',
+            serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+            fullDayThresholdMinutesParam: '$8',
+          })}
+      ) AS exists
+      `,
+      [serviceId, zoneId, addressId, date, ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, false, fullDayJobMinutes],
+    );
+    return exists;
+  }
+
+  /**
    * بروفايل عام — للعميل يشوفه قبل/بعد الحجز. معدل الالتزام بالمواعيد (`on_time_rate`) بيتحسب
    * بس من الطلبات اللي عندها `scheduled_at` فعلي (فرق عن ASAP اللي معندهاش وقت متوقّع يتقاس
    * عليه الالتزام أصلاً) — `null` لو مفيش طلبات مجدولة اتنفّذت لسه، مش صفر مضلّل.

@@ -15,6 +15,7 @@ import { WalletTransaction } from '../payments/entities/wallet-transaction.entit
 import { WalletsService } from '../payments/wallets.service';
 import { User, UserType } from '../auth/entities/user.entity';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
+import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { TechniciansService } from '../technicians/technicians.service';
@@ -260,6 +261,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
+      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       walletsService,
       {} as never, // catalogService
