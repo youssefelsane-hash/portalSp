@@ -121,12 +121,16 @@ describe('MatchingService.findEligibleTechnicians() — موازنة الحِم�
     ids.technicianAProfile = await makeTechnician('A');
     ids.technicianBProfile = await makeTechnician('B');
 
-    // فني A بس عنده طلبين ASAP نشطين (accepted، بلا scheduledAt) — فني B مفيش عنده حاجة خالص.
+    // فني A بس عنده طلبين نشطين (accepted) — فني B مفيش عنده حاجة خالص. بـscheduledAt مستقبلي
+    // مختلف لكل واحد فيهم (مش NULL) عمدًا — uq_orders_one_active_asap_per_technician
+    // (migration 0144) بيسمح بفني واحد بس عنده طلب ASAP نشط واحد في نفس الوقت؛ الحِمل نفسه
+    // (workload.active_count في matching.service.ts) بيتحسب بغض النظر عن scheduledAt، فطلبين
+    // مجدولين بيأثروا على الترتيب بالظبط زي طلبين ASAP، من غير ما يصطدموا بالقيد ده.
     for (let i = 0; i < 2; i += 1) {
       const [busyOrder] = await q(
-        `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status)
-         VALUES ($1,$2,$3,$4,$5,$6,'accepted') RETURNING id`,
-        [`WLBUSY-${i}-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianAProfile, ids.service, ids.address, ids.zone],
+        `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, scheduled_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'accepted', now() + ($7 || ' days')::interval) RETURNING id`,
+        [`WLBUSY-${i}-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianAProfile, ids.service, ids.address, ids.zone, 10 + i],
       );
       busyOrderIds.push(busyOrder.id as string);
     }
