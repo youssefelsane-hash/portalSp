@@ -625,3 +625,12 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 تشغيلي: صفر نطاقات/فئات مفعّلة). **قيد متعمّد**: مفيش فلتر `online_only` على مستوى الترقيم —
 `online` in-memory محلية، فلترتها قبل `LIMIT`/`OFFSET` هتحتاج جلب المجمّع كله (بالظبط النمط اللي
 المالك حذّر منه "avoid expensive synchronous diagnostics at scale").
+
+## بروفايل فني 360° (docs/08 §35.11، ADR-0021 §5)
+
+`AdminTechnician360Service.getProfile()` — `GET /admin/technicians/:id/360` — تجميعة واحدة: هوية،
+فئات/نطاقات، مستوى/اعتماد، `online`/`last_active_at` (§35.10)، طلبات حالية/قادمة (bounded 10)،
+أيام محظورة (bounded 20)، قدرة استيعابية النهارده (`describeTechnicianCapacity()`، §34.4)، دور
+فريق (شركة/مالك ولا لا)، فرص مفتوحة، سلوك إلغاء، تقييم، شكاوى (bounded 10 + عدّاد كلي)، صرف
+(`wallets`+`payouts`، bounded 5). **قراءة بس** — أي فعل إداري بيتعمل عبر endpoints الموجودة فعلاً،
+صفر منطق mutation مكرر هنا.

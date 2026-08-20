@@ -34,6 +34,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TechnicianActivityService } from './technician-activity.service';
 import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
 import { ListCategoryOpsQueryDto } from './dto/list-category-ops-query.dto';
+import { AdminTechnician360Service } from './admin-technician-360.service';
 
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
@@ -47,6 +48,7 @@ export class AdminTechniciansController {
     private readonly settingsService: SettingsService,
     private readonly technicianActivityService: TechnicianActivityService,
     private readonly categoryOpsService: AdminTechnicianCategoryOpsService,
+    private readonly technician360Service: AdminTechnician360Service,
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
@@ -91,6 +93,88 @@ export class AdminTechniciansController {
         has_category_issue: r.hasCategoryIssue,
       })),
       meta: { page: meta.page, per_page: meta.perPage, total: meta.total },
+    };
+  }
+
+  // بروفايل فني 360° (docs/08 §35.11، ADR-0021 §5) — تجميعة قراءة بس، صفر منطق مطوّر جديد (كل
+  // فعل إداري لسه بيتعمل عبر endpoints الموجودة). بلا RequirePermission مخصوصة — نفس مستوى GET :id.
+  @Get(':id/360')
+  async getProfile360(@Param('id', ParseUUIDPipe) id: string) {
+    const p = await this.technician360Service.getProfile(id);
+    return {
+      identity: {
+        id: p.identity.id,
+        technician_code: p.identity.technicianCode,
+        full_name: p.identity.fullName,
+        phone_number: p.identity.phoneNumber,
+        years_of_experience: p.identity.yearsOfExperience,
+        current_level: p.identity.currentLevel,
+        verification_status: p.identity.verificationStatus,
+        created_at: p.identity.createdAt.toISOString(),
+      },
+      categories: p.categories.map((c) => ({
+        category_id: c.categoryId,
+        name_ar: c.nameAr,
+        is_active: c.isActive,
+        verification_status: c.verificationStatus,
+      })),
+      zones: p.zones.map((z) => ({ zone_id: z.zoneId, name_ar: z.nameAr, is_active: z.isActive })),
+      online: p.activity.online,
+      last_active_at: p.activity.lastActiveAt ? p.activity.lastActiveAt.toISOString() : null,
+      capacity_today: {
+        tier: p.capacityToday.tier,
+        reason_ar: p.capacityToday.reasonAr,
+        occupied_from: p.capacityToday.occupiedFrom,
+        occupied_to: p.capacityToday.occupiedTo,
+      },
+      team_role: p.teamRole
+        ? { company_id: p.teamRole.companyId, company_name: p.teamRole.companyName, is_owner: p.teamRole.isOwner }
+        : null,
+      current_and_upcoming_jobs: p.currentAndUpcomingJobs.map((j) => ({
+        order_id: j.orderId,
+        order_number: j.orderNumber,
+        order_status: j.orderStatus,
+        scheduled_at: j.scheduledAt ? j.scheduledAt.toISOString() : null,
+        service_name_ar: j.serviceNameAr,
+      })),
+      blocked_dates: p.blockedDates.map((b) => ({ slot_date: b.slotDate, start_time: b.startTime, end_time: b.endTime })),
+      open_opportunities_count: p.openOpportunitiesCount,
+      performance: {
+        average_rating: p.performance.averageRating,
+        total_ratings_count: p.performance.totalRatingsCount,
+        completed_orders_count: p.performance.completedOrdersCount,
+        cancelled_orders_count: p.performance.cancelledOrdersCount,
+      },
+      cancellation_behavior: {
+        total_cancellations: p.cancellationBehavior.totalCancellations,
+        recent_cancellations: p.cancellationBehavior.recentCancellations,
+      },
+      complaints: {
+        open_count: p.complaints.openCount,
+        total_count: p.complaints.totalCount,
+        recent: p.complaints.recent.map((c) => ({
+          id: c.id,
+          severity: c.severity,
+          status: c.status,
+          created_at: c.createdAt.toISOString(),
+        })),
+      },
+      wallet: p.wallet
+        ? {
+            balance_cents: p.wallet.balanceCents,
+            pending_balance_cents: p.wallet.pendingBalanceCents,
+            total_earned_cents: p.wallet.totalEarnedCents,
+            is_frozen: p.wallet.isFrozen,
+          }
+        : null,
+      recent_payouts: p.recentPayouts.map((r) => ({
+        id: r.id,
+        payout_number: r.payoutNumber,
+        net_amount_cents: r.netAmountCents,
+        payout_status: r.payoutStatus,
+        requested_at: r.requestedAt.toISOString(),
+        completed_at: r.completedAt ? r.completedAt.toISOString() : null,
+      })),
     };
   }
 
