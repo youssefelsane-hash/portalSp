@@ -42,12 +42,26 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
   };
   const orderIds: string[] = [];
 
-  async function insertOrder(label: string, technicianId?: string, status = OrderStatus.SEARCHING_TECHNICIAN): Promise<string> {
+  async function insertOrder(
+    label: string,
+    technicianId?: string,
+    status = OrderStatus.SEARCHING_TECHNICIAN,
+    estimatedDurationDays?: number,
+  ): Promise<string> {
     const [order] = await dataSource.query(
       `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,10000) RETURNING id`,
-      [`P7-${label}-${runId}`.slice(0, 24), ids.customerProfile, technicianId ?? null, ids.service, ids.address, ids.zone, status],
+         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, estimated_duration_days)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8) RETURNING id`,
+      [
+        `P7-${label}-${runId}`.slice(0, 24),
+        ids.customerProfile,
+        technicianId ?? null,
+        ids.service,
+        ids.address,
+        ids.zone,
+        status,
+        estimatedDurationDays ?? null,
+      ],
     );
     orderIds.push(order.id as string);
     return order.id as string;
@@ -311,8 +325,12 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
          AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
       [ids.technicianAProfile, ids.technicianBProfile],
     );
-    const orderA = await insertOrder('same-tech-a');
-    const orderB = await insertOrder('same-tech-b');
+    // docs/08 §32 — طلبين قصيرين (المدة الافتراضية) بقوا متوافقين قانونيًا لنفس الفني في نفس
+    // اليوم (شغلانتين قصار)، فمابقاش "نجاح واحد بس" مؤشر صح لسلامة القفل. estimated_duration_days=1
+    // (شاغل يوم كامل) بيرجّع التعارض الحقيقي اللي الاختبار ده قصده أصلاً — يثبت إن القفل بيمنع
+    // نفس الفني يقبل طلبين متعارضين فعليًا بالتوازي، مش مجرد "طلبين" بشكل عام.
+    const orderA = await insertOrder('same-tech-a', undefined, OrderStatus.SEARCHING_TECHNICIAN, 1);
+    const orderB = await insertOrder('same-tech-b', undefined, OrderStatus.SEARCHING_TECHNICIAN, 1);
     await insertAssignment(orderA, ids.technicianAProfile);
     await insertAssignment(orderB, ids.technicianAProfile);
 
@@ -363,14 +381,19 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
          AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
       [ids.technicianBProfile],
     );
-    await insertOrder('busy-tech', ids.technicianBProfile, OrderStatus.ACCEPTED);
+    // docs/08 §32 (طلب مالك صريح 2026-08-20) — ASAP بقى يتبع نفس قاعدة الطلب المجدول: طلب
+    // accepted قصير لسه ما بدأش الفني ميستبعدش تاني من شغلانة قصيرة تانية في نفس اليوم (الفني
+    // يقدر ياخد أكتر من شغلانة قصيرة). "منشغل فعليًا" دلوقتي (technician_on_way فما بعده) هي
+    // الحالة الحقيقية اللي لسه بتستبعد — technicianAvailabilityCondition()'s ENGAGED_TECHNICIAN
+    // _ORDER_STATUSES. status=ACCEPTED هنا كان بيعتمد على القاعدة القديمة (اتشالت في §32).
+    await insertOrder('busy-tech', ids.technicianBProfile, OrderStatus.TECHNICIAN_ON_WAY);
     const targetOrder = await insertOrder('admin-target');
     await expect(adminOrdersService.reassign(ids.adminUser, targetOrder, ids.technicianBProfile)).rejects.toThrow(
       'الفني غير متاح في الوقت المطلوب لهذا الطلب',
     );
   });
 
-  it('عرض سعر معلّق يفضل ماسك مورد الفني أمام القبول وإعادة التعيين والكتابة المباشرة', async () => {
+  it('عرض سعر معلّق يفضل ماسك مورد الفني أمام القبول وإعادة التعيين', async () => {
     await dataSource.query(
       `UPDATE orders SET order_status = 'completed'
        WHERE technician_id = $1
@@ -390,16 +413,13 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     );
 
     const reassignTarget = await insertOrder('quote-reassign-target');
+    // docs/08 §32 (طلب مالك صريح 2026-08-20) — القيد القديم uq_orders_one_active_asap_per
+    // _technician اتشال (migration 0152): الحماية ضد كتابة مباشرة متجاوزة للتطبيق بقت
+    // application-level بس (نفس فلسفة الطلبات المجدولة من الأول، migration 0144's توثيق).
+    // الاختبار ده بيتحقق من الحماية على مستوى التطبيق (accept/reassign) بس دلوقتي.
     await expect(
       adminOrdersService.reassign(ids.adminUser, reassignTarget, ids.technicianBProfile),
     ).rejects.toThrow('الفني غير متاح في الوقت المطلوب لهذا الطلب');
-
-    await expect(
-      dataSource.query(
-        `UPDATE orders SET technician_id = $1, order_status = 'accepted' WHERE id = $2`,
-        [ids.technicianBProfile, reassignTarget],
-      ),
-    ).rejects.toMatchObject({ code: '23505', constraint: 'uq_orders_one_active_asap_per_technician' });
 
     await dataSource.query(`UPDATE orders SET order_status = 'in_progress' WHERE id = $1`, [quoteOrder]);
     await dataSource.query(`UPDATE orders SET order_status = 'awaiting_quote_approval' WHERE id = $1`, [quoteOrder]);

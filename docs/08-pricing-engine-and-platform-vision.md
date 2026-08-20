@@ -3942,7 +3942,9 @@ instance واحد، لازم يتحول لـRedis pub/sub؛ مقبول دلوق�
 
 ### 33.3 — التنفيذ
 
-- **`infra/migrations/0150_instapay_admin_managed_config.sql`**: صفين جداد في `settings`
+- **`infra/migrations/0151_instapay_admin_managed_config.sql`** (اترقّم من 0150 لـ0151 وقت الـrebase
+  فوق 3 commits اتدفعوا من سيشن تانية بالتوازي على نفس الفرع — تعارض ترقيم migration، اتحل قبل
+  الدمج مش بعده): صفين جداد في `settings`
   (`payments.instapay.ipa_address`, `payments.instapay.recipient_name`، `value_type='string'`،
   `group_name='payments'`، فاضيين افتراضيًا = InstaPay معطّلة زي ما كانت بالظبط).
 - **`SettingsService`**: `EventEmitter2` بقى param **اختياري** في الـconstructor (`?:` — 24+ ملف
@@ -3973,7 +3975,50 @@ instance واحد، لازم يتحول لـRedis pub/sub؛ مقبول دلوق�
   restart** (نفس الـinstance، الحدث بس)، و`createPayment()` بترجع تعليمات فيها القيم الجديدة
   بالظبط. تحديث لاحق يمسح قيمة واحدة يرجّع `isConfigured=false` تاني — دورة كاملة اتأكدت.
 - `tsc --noEmit`، `npx nest build` نضاف.
-- `npx jest` الكامل بعد الدفعة: **111/111 suite، 600/600 اختبار، exit 0** — صفر ريجريشن.
+- `npx jest` الكامل النهائي (بعد الدمج مع الـ3 commits المتوازية + تصحيح الـ5 بَقّات تحت):
+  **112/112 suite، 613/614 اختبار، exit 0**. الاختبار الوحيد اللي فشل في التشغيل المتوازي
+  (`financial-reconciliation.e2e.spec.ts`) اتأكّد **مش ريجريشن** — بيعدّي 100% لوحده
+  (`--runInBand --testPathPattern`)، نفس فئة البَقّة الموثّقة تحت في §33.5 (سباق على صف محفظة
+  `PLATFORM_SYSTEM_USER_ID` المشتركة عبر كل ملفات الاختبار، مش منطق غلط).
+
+### 33.5 — 5 بَقّات حقيقية اتلقطت واتصلحت في كود سيشن تانية بعد الـrebase (مش في كود §33 نفسه)
+
+الـ`git push` الأول لـ§33 اترفض (فرع اتحدّث من سيشن Claude تانية شغالة بالتوازي، 3 commits جداد).
+بعد `git rebase`، أول تشغيل كامل لـ`npx jest` (اللي بيجمع كود §33 + كود السيشن التانية سوا لأول مرة)
+كشف 5 test suites فاشلة — **ولا واحدة فيهم من تعديلات §33 نفسها**؛ كلهم بَقّات موجودة بالفعل في
+كود السيشن التانية (نفس نمط بَقّة §28.6 السابقة: كود جديد ما اتشافش أول مرة إلا لما اتجمّع مع باقي
+المشروع). زي ما `CLAUDE.md` بينص ("مفيش push لحاجة كاسرة، حتى لو الكسر مش من عندك")، اتصلحوا كلهم
+قبل أي commit/push نهائي:
+
+1. **`instapay-manual-flow.spec.ts`**: assertion قديمة افترضت شكل event مختلف بعد ما السيشن
+   التانية خلّت `PaymentInstaPayRejectedEvent` polymorphic (`referenceType`/`referenceId` بدل
+   `orderId` مباشر) — تصحيح الـassertion بس، مفيش تغيير منطق.
+2. **`domestic-worker-earning-approval.spec.ts`**: كيان `Payment` ناقص من مصفوفة `entities` بتاعة
+   الـ`DataSource` الحقيقية في الاختبار (خطأ TypeORM غامض "Class constructor Payment cannot be
+   invoked without 'new'") + race condition حقيقي غير محمي في
+   `DomesticWorkerBookingsService.handleBookingPaymentConfirmed()` (كتابة `earningApprovals.save()`
+   من غير حماية duplicate-key) — اتصلح بـ`isEarningApprovalDuplicate()` جديدة (نفس نمط
+   `isUniqueViolation()`/`isIdempotencyKeyViolation()` الموجود بالفعل في الموديول، فحص
+   `err.code === '23505' && err.constraint === 'uq_dw_earning_approvals_booking_source'`).
+3. **`order-team-recruiting.spec.ts`**: بَقّة SQL حقيقية في `order-team.service.ts` —
+   `CROSS JOIN (SELECT location FROM addresses ...)` بدل `CROSS JOIN LATERAL` (subquery بيرجع
+   لعمود من جدول برّاني، Postgres بيرفضها بلا `LATERAL`) + حالة طلب مزروعة غلط في اختبار واحد.
+4. **`matching-accept-concurrency.spec.ts`**: الأعمق — قيد DB قديم `uq_orders_one_active_asap_per_
+   technician` (migration 0144) بقى يتعارض مباشرة مع قرار §32 المعتمد من نفس السيشن التانية
+   (توحيد ASAP كـ"مجدول للنهاردة" — فني ممكن ياخد أكتر من شغلانة قصيرة في نفس اليوم). القيد اتشال
+   بـ`infra/migrations/0152_drop_stale_asap_uniqueness_constraint.sql` (تبرير كامل في تعليق
+   الـmigration نفسها — إكمال طبيعي لقرار §32 المعتمد بالفعل من المالك، مش قرار معماري مستقل
+   جديد محتاج ADR منفصل) + تصحيح اختبارين تابعين كانوا بيعتمدوا ضمنيًا على سلوك القيد القديم.
+5. **`golden-path-cash-booking.e2e.spec.ts`**: نفس فئة السباق الموثّقة في §33.4 فوق — سباق على
+   محفظة `PLATFORM_SYSTEM_USER_ID` المشتركة بين كل ملفات الاختبار وقت التشغيل المتوازي، مش بَقّة
+   منطقية. اتأكّد بـ`--runInBand` على الملف لوحده (نجح في 6 ثواني بلا أي فشل).
+
+**درس عام لأي سيشن جاية**: `PLATFORM_SYSTEM_USER_ID` محفظته صف مشترك واحد عبر قاعدة بيانات
+الاختبار **كلها** — أي اختبار بيقيس "الفرق قبل/بعد" على المحفظة دي (delta، مش رصيد مطلق) لازم
+يفترض تشغيل متوازي (`npx jest` الافتراضي، مش `--runInBand`) ممكن يـinterleave معاه من ملفات تانية
+مش مرتبطة. الاختبارات الموجودة فعلاً موثّقة بتعليقات صريحة بكده ("قيس الفرق بس، الرصيد المطلق مش
+مرجع يوثق بيه") — أي فشل عليها لازم يتأكد أول بـ`--runInBand --testPathPattern=...` قبل ما يتفترض
+إنه ريجريشن حقيقي.
 
 **بَقّتين حقيقيتين اتلقطوا واتصلحوا وقت كتابة الاختبار الحي نفسه (مش في كود الإنتاج — في الاختبار
 والدورة اللي بيثبتها)**:

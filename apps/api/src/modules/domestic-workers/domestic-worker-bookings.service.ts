@@ -241,14 +241,34 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
     const { workerEarningCents } = await this.commissionSplit(booking.priceCents);
     if (workerEarningCents <= 0) return;
 
-    await this.earningApprovals.save(
-      this.earningApprovals.create({
-        bookingId: booking.id,
-        workerUserId: worker.userId,
-        sourceKey,
-        amountCents: workerEarningCents,
-        status: DomesticWorkerEarningApprovalStatus.PENDING,
-      }),
+    try {
+      await this.earningApprovals.save(
+        this.earningApprovals.create({
+          bookingId: booking.id,
+          workerUserId: worker.userId,
+          sourceKey,
+          amountCents: workerEarningCents,
+          status: DomesticWorkerEarningApprovalStatus.PENDING,
+        }),
+      );
+    } catch (err) {
+      // بَقّة حقيقية اتلقطت وقت الاختبار الحي: فحص existing فوق check-then-insert عادي، مفيش قفل
+      // — نداءين متزامنين حقيقيين (retry بعد event ضاع + الأصلي، أو webhook مكرر) ممكن الاتنين
+      // يعدّوا الفحص قبل ما أي واحد يكتب. uq_dw_earning_approvals_booking_source هي خط الدفاع
+      // الأخير الحقيقي هنا (idempotency-key pattern، نفس OrdersService.isIdempotencyKeyViolation()
+      // بالحرف) — لو ده اللي حصل، ده مش خطأ، ده معناه استحقاق تاني خلّص الكتابة قبلنا بالظبط.
+      if (!this.isEarningApprovalDuplicate(err)) throw err;
+    }
+  }
+
+  private isEarningApprovalDuplicate(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: unknown }).code === '23505' &&
+      'constraint' in err &&
+      (err as { constraint: unknown }).constraint === 'uq_dw_earning_approvals_booking_source'
     );
   }
 

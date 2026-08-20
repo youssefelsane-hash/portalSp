@@ -292,7 +292,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       expect(rejected.failedAt).not.toBeNull();
       expect(eventsEmit).toHaveBeenCalledWith(
         'payment.instapay_rejected',
-        expect.objectContaining({ orderId: ids.order, reason: 'الكود المرجعي مش مطابق' }),
+        expect.objectContaining({ referenceType: 'order', referenceId: ids.order, reason: 'الكود المرجعي مش مطابق' }),
       );
 
       const [row] = await dataSource.query(`SELECT payment_status, failure_code FROM payments WHERE id = $1`, [

@@ -5,6 +5,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { PLATFORM_SYSTEM_USER_ID, Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
+import { Payment } from '../payments/entities/payment.entity';
 import { WalletsService } from '../payments/wallets.service';
 import { PaymentsService } from '../payments/payments.service';
 import { SettingsService } from '../settings/settings.service';
@@ -111,7 +112,7 @@ describe('طابور موافقة أرباح العمالة المنزلية —
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, CustomerProfile, Wallet, WalletTransaction, DomesticWorkerBooking, DomesticWorkerProfile, DomesticWorkerEarningApproval],
+      entities: [User, CustomerProfile, Wallet, WalletTransaction, Payment, DomesticWorkerBooking, DomesticWorkerProfile, DomesticWorkerEarningApproval],
     });
     await dataSource.initialize();
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
