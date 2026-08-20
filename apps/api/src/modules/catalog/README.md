@@ -14,7 +14,7 @@
 - **`/admin/service-categories`**: `POST` (إنشاء، بيرفض `slug` مكرر ويتحقق إن الأب موجود لو محدد)، `PATCH` (تعديل أي حقل، بيرفض إن الفئة تبقى أب لنفسها)، `DELETE` (soft-delete — بيرفض لو فيه خدمات لسه مرتبطة بالفئة، لازم تتعطّل أو تتنقل الأول).
 - **`/admin/services`**: نفس النمط — `POST`/`PATCH`/`DELETE`. أي تغيير سعر (`base_price_cents`) بيتطبّق فوراً على `POST /services/:id/estimate` من غير أي إعادة نشر أو تعديل كود.
 - **`/admin/services/:id/zone-pricing`**: `PUT` upsert (سعر مختلف لمنطقة معيّنة + `surge_multiplier`) و `DELETE .../zone-pricing/:pricingId` (تعطيل). الـ upsert بيدوّر على صف نشط موجود لنفس (خدمة، منطقة) بدل ما يكرّر صفوف.
-- **`/admin/services/:id/technicians`**: تحديد الفنيين المؤهلين لخدمة معيّنة (`technician_services`) — `POST` (تعيين بمستوى مهارة، بيرفض تكرار وفني غير موجود)، `DELETE .../technicians/:technicianId`.
+- ~~**`/admin/services/:id/technicians`**: تحديد الفنيين المؤهلين لخدمة معيّنة (`technician_services`) — `POST`/`DELETE`~~ — **الواجهة اتشالت (§29/§30، طلب مالك صريح 2026-08-20)**: الـendpoints نفسها فاضلة شغالة (تعديل `technician_services` مباشرة لو حد احتاجها عبر API)، بس مش المصدر الحقيقي للأهلية ولا مستخدمة من أي واجهة تانية — راجع تعليق `AdminCatalogService.listEligibleTechnicians()` والقسم تحت.
 - **كل عملية بتتسجّل في سجل التدقيق** (`../audit/README.md`) — `service.created`/`updated`/`deleted`, `service_category.*`, `service_zone_pricing.*`, `technician_service.assigned`/`removed`.
 - اتعمله اختبار end-to-end فعلي شامل مطابق لمثال المستخدم بالحرف: فئة "خدمات منزلية" ← فئة فرعية "تنظيف" (بإعادة ربط فئة موجودة بأب جديد) ← خدمة "تنظيف كنب" — ظهرت فوراً في `GET /services` العام. تعديل السعر (من 250 لـ 300 جنيه) اتطبّق فوراً على `estimate`. تعطيل الخدمة خفاها من القائمة العامة فوراً. تسعير منطقة مخصص (350 جنيه + surge 1.2) اتطبّق صح على `estimate` وقفل السطر الأول لما اتعدّل تاني بدل ما يكرّره. تعيين فني كمستوى "خبير" نجح، تكراره اترفض، فني وهمي اترفض بـ404، وشيله نجح. حذف فئة فيها خدمة لسه اترفض بوضوح، وبعد حذف الخدمة الحذف نجح (soft-delete حقيقي — اختفت من قائمة الأدمن). عميل عادي اترفض بالكامل من كل مسارات الإدارة (403 من `RolesGuard` قبل حتى `PermissionsGuard`).
 - **`catalog.manage`** صلاحية جديدة (`infra/migrations/0022_catalog_manage_permission.sql`) — `super_admin` و`ops_manager` بس.
@@ -36,6 +36,24 @@
 ## `apps/admin` — شاشة تفاصيل الخدمة (`/catalog/services/:id`) — كانت فجوة موثّقة، اتقفلت
 
 كانت موثّقة في `apps/admin/README.md` ("تسعير حسب المنطقة، الفنيين المؤهلين لكل خدمة... مش متاحين من الواجهة لسه") — كل الـ endpoints فوق كانت API-only. اسم الخدمة في `/catalog` بقى رابط لشاشة تفاصيل فيها 4 أقسام: تسعير حسب المنطقة (إنشاء/تعطيل)، الفنيين المؤهلين (إضافة/إزالة، بالاسم وكود الفني الحقيقي مش UUID خام — بيتحل من نفس قايمة `GET /admin/technicians?verification_status=approved` المُستخدمة في شاشة إعادة تعيين الطلبات)، تسعير حسب مستوى الفني (إنشاء/upsert)، والإضافات الاختيارية (إنشاء/تفعيل/تعطيل). تفاصيل كاملة في `apps/admin/README.md`.
+
+## "الفنيين المؤهلين" في شاشة الخدمة كانت قايمة قراءة مضلّلة — اتشالت (§29/§30، بلاغ مالك مباشر 2026-08-20)
+
+كارت "الفنيين المؤهلين" في `apps/admin`'s `/catalog/services/:id` (موصوف فوق) كان بيقرا/يكتب
+`technician_services` مباشرة بس — مش شرط الأهلية الحقيقي الكامل (`technician_services` مباشر OR
+فئة معتمدة، §29). الأدمن يضيف فئة كاملة لفني (كارت "التخصصات" الجديد في `/technicians/[id]`)،
+يفتح خدمة تحت الفئة دي، ويلاقي "مفيش فنيين مؤهلين" — رغم إن الفني ده فعليًا هيتوزّعله الطلب صح لو
+اتحجز حقيقةً (`matching.service.ts` بيطبّق الشرط الكامل، مش الاستعلام الضيّق ده). اتأكد إن الأهلية
+الحقيقية شغالة صح بمراجعة حية (`matching-technician-category-eligibility.spec.ts` — 3/3 نجحوا
+ضد Postgres حقيقي: فني بالفئة بس بيتأهّل، فني بالخدمة المباشرة بس لسه شغال، فني بلا اعتماد بيتستبعد)
+و`admin-orders.service.ts`'s `listEligibleTechniciansForReassign()` (إعادة تعيين الأدمن) اللي بيستخدم
+`listForServiceBooking()` الصح أصلاً — مفيش أي مسار حقيقي (مطابقة، إعادة تعيين، اختيار العميل اليدوي)
+كان بيعتمد على القايمة الضيّقة دي، الأثر كان بصري/إداري بس (تضليل الأدمن)، مش خلل في التوزيع الفعلي.
+
+**الإصلاح**: الكارت اتشال بالكامل من `/catalog/services/:id` (`apps/admin`). الـbackend
+(`listEligibleTechnicians`/`assignTechnician`/`removeTechnician` في `AdminCatalogService`) اتسيّب
+زي ما هو (نفس فلسفة §29.2 — إضافي، مش بديل)، بس بتعليق واضح يوضّح حدوده عشان محدّش يستخدمه تاني
+كمصدر أهلية. تفاصيل كاملة: `docs/08-pricing-engine-and-platform-vision.md` §30.
 
 ## هيكل الحجز الجديد — `allows_individual`/`allows_team` (صُنّاع، `docs/06` §1، `docs/07` الجزء أ)
 
