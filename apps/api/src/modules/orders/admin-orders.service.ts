@@ -200,6 +200,36 @@ export class AdminOrdersService {
            ) AS detail,
            technician_user_id AS actor_user_id
          FROM technician_order_cancellations WHERE order_id = $1
+
+         UNION ALL
+
+         -- docs/08 §35.14 — فرص التوزيع/التجنيد (technician_work_opportunities، §34.1/§35.1-3) —
+         -- كانت غايبة تمامًا عن الـtimeline قبل كده (بس order_assignments، مش الفرص الاختيارية
+         -- LIGHT/MEANINGFUL/HEAVY ولا فرص تجنيد الفريق crew_recruit).
+         SELECT
+           id, offered_at AS ts, 'work_opportunity' AS source,
+           concat(
+             CASE WHEN context = 'crew_recruit' THEN 'فرصة انضمام لفريق' ELSE 'فرصة عمل إضافي' END,
+             ' — ', status::text
+           ) AS title,
+           jsonb_build_object(
+             'technician_id', technician_id, 'context', context, 'crew_role', crew_role,
+             'capacity_tier_at_offer', capacity_tier_at_offer, 'status', status, 'decided_at', decided_at
+           ) AS detail,
+           NULL::uuid AS actor_user_id
+         FROM technician_work_opportunities WHERE order_id = $1 AND deleted_at IS NULL
+
+         UNION ALL
+
+         -- docs/08 §35.14 — تصعيد نقص طاقم (§35.5، CrewShortageEscalationService) — صف واحد
+         -- تركيبي من عمود orders.crew_shortage_escalated_at نفسه (صفر جدول جديد)، بيظهر بس لو
+         -- الطلب اتصعّد فعلاً.
+         SELECT
+           o.id, o.crew_shortage_escalated_at AS ts, 'crew_shortage_escalation' AS source,
+           'تصعيد نقص طاقم للأدمن (قبل الموعد بمهلة قليلة)' AS title,
+           NULL::jsonb AS detail,
+           NULL::uuid AS actor_user_id
+         FROM orders o WHERE o.id = $1 AND o.crew_shortage_escalated_at IS NOT NULL
        )
        SELECT e.id, e.ts, e.source, e.title, e.detail, e.actor_user_id AS "actorUserId",
               u.full_name AS "actorFullName", u.user_type AS "actorUserType"
