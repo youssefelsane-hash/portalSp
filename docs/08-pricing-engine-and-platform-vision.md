@@ -4393,3 +4393,38 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
   654/654 اختبار**، صفر ريجريشن، صفر flake ظاهر في التشغيل ده.
 - **لسه فاضل من §35**: 35.5 (تصعيد 24 ساعة)، 35.7-35.20 (تفسير المطابقة، مركز عمليات أدمن،
   تنبيهات، توزيع، تايم لاين، اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي).
+
+### 35.4 — إغلاق §35.5: تصعيد نقص طاقم قبل الموعد + تمييز الطلب بصريًا للأدمن
+
+منفَّذ حسب `ADR-0021` — راجع `apps/api/src/modules/orders/crew-shortage-escalation.service.ts`
+للتفاصيل التقنية الكاملة. ملخص:
+
+- **`CrewShortageEscalationService`** — فحص دوري (`setInterval`, دقيقة واحدة) بنفس نمط
+  `OrderAutoCancelService`/`NotificationWorkflowReminderService` بالحرف (إعادة تقييم من Postgres
+  مباشرة كل مرة، مفيش حالة متخزّنة في Redis ممكن "تعلق" بعد انقطاع طويل، دفعة محدودة `take: 25`
+  بدل full-table scan). بيدوّر على طلبات فريق (`booking_mode='team'`) قبل ما تبدأ التنفيذ فعليًا
+  (`technician_assigned`/`accepted`/`technician_on_way`/`technician_arrived`)، موعدها
+  (`scheduled_at`) هيوصل خلال `orders.crew_shortage_escalation_hours_before` ساعة (افتراضي 24،
+  قابل للتعديل من `/settings`)، ولسه ناقصة طاقم فعليًا (`OrderTeamService.getCrewComposition()`
+  الحقيقية — صفر خوارزمية موازية).
+- **تصعيد لمرة واحدة بس لكل طلب** (قرار تصميم متعمّد، موثّق في الكود) — عمود جديد
+  `orders.crew_shortage_escalated_at` (migration `0156`) بيمنع sweep من إعادة التصعيد كل دقيقة.
+  ده "تنبيه قوي" عند عبور العتبة زي ما طلب المالك، مش نظام تذكيرات متكرر كامل (ده هيتقيّم لاحقًا
+  لو المالك طلبه صراحة في §35.12).
+- **التوجيه** — `OrderCrewShortageEscalatedRoutingListener` جديد، نفس نمط
+  `EmergencyDispatchStrugglingRoutingListener`/`OrderNoTechnicianFoundRoutingListener` بالحرف
+  (`NotificationRoutingService.routeToRole()` الموجود، مفيش نظام توجيه موازي) — بيوجّه لـ`ops_manager`
+  (نفس صاحب صلاحية `orders.manage_crew`، migration `0132`).
+- **"الطلب مميّز بصريًا"** (الجزء التاني من طلب المالك) — محسوب وقت القراءة
+  (`AdminOrdersService.getDetail()`'s `crewShortageUrgent` → `crew_shortage_urgent` في استجابة
+  `GET /admin/orders/:id`)، مش state مخزّن إضافي — نفس مبدأ ADR-0021 §5 (صفر تخزين حالة زيادة عن
+  اللازم لما نقدر نحسبها من البيانات الحقيقية وقت الطلب)، ونفس عتبة `CrewShortageEscalationService`
+  بالظبط عشان "الأدمن بيوصله إشعار" و"الطلب باين مميّز في الشاشة" يفضلوا متسقين مع بعض دايمًا.
+- **اختبارات حية جديدة** (`crew-shortage-escalation.spec.ts`، 8/8): تصعيد طلب ناقص طاقم قريب
+  الموعد + الحدث بيتبعت مرة واحدة بس (idempotency عبر sweep تاني)، عدم تصعيد طلب طاقمه كامل حتى
+  لو قريب، عدم تصعيد طلب ناقص لكن بعيد (72 ساعة)، استبعاد الطلبات الفردية، احترام علامة
+  "اتصعّد بالفعل"، وتحقق `crew_shortage_urgent` الثلاث حالات (true/false حسب القرب والاكتمال).
+- **التحقق النهائي**: `tsc --noEmit`/`nest build` نضاف. `npx jest` الكامل: **117/117 suite،
+  662/662 اختبار**، صفر ريجريشن، صفر flake ظاهر في التشغيل ده.
+- **لسه فاضل من §35**: 35.7-35.20 (تفسير المطابقة، مركز عمليات أدمن، تنبيهات، توزيع، تايم لاين،
+  اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي).

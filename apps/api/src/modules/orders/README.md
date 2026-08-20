@@ -1089,3 +1089,20 @@ OR <= now()`). `findUpcomingConfirmedForTechnician()` (جديدة، عكس ال�
 لوضع الحجز الفردي اتشال كمان (بيوحي باستعجال يتلخبط مع "طوارئ" الفعلي) — بقى "فردي" بس. تفاصيل
 كاملة (السبب الجذري بكامله، القرار، وتأكيد إن طلبات الطوارئ أصلاً بتفضل ظاهرة لحد القبول —
 ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pricing-engine-and-platform-vision.md` §32.
+
+## تصعيد نقص طاقم قبل الموعد (docs/08 §35.5، ADR-0021)
+
+`CrewShortageEscalationService` (فحص دوري كل دقيقة، نفس نمط `OrderAutoCancelService` بالحرف —
+إعادة تقييم من Postgres مباشرة كل مرة، مفيش حالة متخزّنة في Redis ممكن "تعلق") بيدوّر على طلبات
+فريق قبل ما تبدأ التنفيذ فعليًا (`technician_assigned`/`accepted`/`technician_on_way`/
+`technician_arrived`)، موعدها هيوصل خلال `orders.crew_shortage_escalation_hours_before` ساعة
+(افتراضي 24، `/settings`)، ولسه ناقصة طاقم فعليًا عبر `OrderTeamService.getCrewComposition()`
+الحقيقية (صفر خوارزمية موازية). تصعيد **لمرة واحدة بس لكل طلب** — عمود
+`orders.crew_shortage_escalated_at` (migration `0156`) بيمنع التكرار كل دقيقة؛ ده "تنبيه قوي" عند
+عبور العتبة زي ما المالك طلب، مش نظام تذكيرات متكرر كامل. الحدث `order.crew_shortage_escalated`
+بيتوجّه لـ`ops_manager` عبر `NotificationRoutingService.routeToRole()` الموجود (نفس نمط
+`OrderNoTechnicianFoundRoutingListener` بالحرف).
+
+**"الطلب مميّز بصريًا"** محسوب وقت القراءة في `AdminOrdersService.getDetail()`
+(`crew_shortage_urgent` في استجابة `GET /admin/orders/:id`) — مش state مخزّن إضافي، نفس عتبة
+`CrewShortageEscalationService` بالظبط عشان الإشعار والتمييز البصري يفضلوا متسقين مع بعض دايمًا.

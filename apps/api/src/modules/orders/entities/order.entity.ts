@@ -113,6 +113,11 @@ export class Order {
   @Column({ name: 'scheduled_at', type: 'timestamptz', nullable: true })
   scheduledAt: Date | null;
 
+  // تصعيد نقص الطاقم (docs/08 §35.5، migration 0156) — علامة "اتصعّد للأدمن مرة" (لمنع التكرار)،
+  // مش تذكير متكرر. راجع CrewShortageEscalationService للتفاصيل الكاملة.
+  @Column({ name: 'crew_shortage_escalated_at', type: 'timestamptz', nullable: true })
+  crewShortageEscalatedAt: Date | null;
+
   // Durable identity of an automatically generated recurring occurrence. Both
   // columns are null for ordinary orders and unique together for recurring jobs.
   @Column({ name: 'recurring_template_id', type: 'uuid', nullable: true })

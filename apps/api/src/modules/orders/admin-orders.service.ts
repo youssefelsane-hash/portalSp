@@ -110,6 +110,7 @@ export class AdminOrdersService {
     pricingEvaluation: ServicePricingEvaluation | null;
     technicianCancellations: TechnicianOrderCancellation[];
     crewStatus: ReturnType<typeof computeCrewComposition> | null;
+    crewShortageUrgent: boolean;
   }> {
     const order = await this.findOrThrow(orderId);
     const history = await this.statusHistory.find({ where: { orderId }, order: { createdAt: 'ASC' } });
@@ -123,6 +124,7 @@ export class AdminOrdersService {
     // docs/08 §35، ADR-0021 §1 — نفس crewStatus اللي apps/technician-app بيشوفه بالظبط (مصدر
     // حقيقة واحد)، عشان الأدمن يشوف الحالة الحقيقية للطاقم بلا حاجة يعدّ الأعضاء يدويًا.
     let crewStatus: ReturnType<typeof computeCrewComposition> | null = null;
+    let crewShortageUrgent = false;
     if (order.bookingMode === BookingMode.TEAM) {
       const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
         `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
@@ -131,8 +133,16 @@ export class AdminOrdersService {
       const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
       const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
       crewStatus = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+
+      // "الطلب مميّز بصريًا" (docs/08 §35.5) — محسوب وقت القراءة، مش state مخزّن (ADR-0021 §5):
+      // نفس عتبة CrewShortageEscalationService بالظبط (orders.crew_shortage_escalation_hours_before)
+      // عشان "الأدمن بيتصعّدله إشعار" و"الطلب باين مميّز" يفضلوا متسقين مع بعض دايمًا.
+      if (!crewStatus.crewComplete && order.scheduledAt) {
+        const hoursBefore = await this.settingsService.getNumber('orders.crew_shortage_escalation_hours_before', 24);
+        crewShortageUrgent = order.scheduledAt.getTime() - Date.now() <= hoursBefore * 60 * 60 * 1000;
+      }
     }
-    return { order, history, pricingEvaluation, technicianCancellations, crewStatus };
+    return { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent };
   }
 
   /**
