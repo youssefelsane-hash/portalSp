@@ -8,9 +8,9 @@ import '../../design/status_chip.dart';
 import 'models.dart';
 import 'skills_repository.dart';
 
-// مهاراتي (Script 4 §2-7) — كانت فجوة موثّقة صراحة: الفني مالوش أي مسار يطلب خدمة بنفسه، كل
-// شيء كان معيّن من الأدمن يدوياً. الشاشة دي بتعرض حالة كل خدمة (تحت المراجعة/معتمدة/مرفوضة/
-// موقوفة) وبتسمح بطلب خدمة جديدة من نفس الكتالوج الديناميكي اللي العميل بيشوفه.
+// مهاراتي (§29 — بدّل الإصدار القديم خدمة-بخدمة بالكامل، طلب مالك صريح 2026-08-20) — الفني
+// بيصرّح بتخصص/فئة كاملة (سباكة، كهرباء، صيانة...) مش خدمة فردية. أي خدمة جديدة تتضاف تحت الفئة
+// دي بعد الاعتماد تبقى متاحة له تلقائيًا، بلا أي تصريح إضافي.
 class SkillsScreen extends StatefulWidget {
   const SkillsScreen({super.key});
 
@@ -20,7 +20,8 @@ class SkillsScreen extends StatefulWidget {
 
 class _SkillsScreenState extends State<SkillsScreen> {
   late final SkillsRepository _repository;
-  List<TechnicianServiceDeclaration>? _services;
+  List<TechnicianCategoryDeclaration>? _categories;
+  List<ServiceCategoryOption>? _allCategories;
   String? _error;
   bool _acting = false;
 
@@ -33,33 +34,37 @@ class _SkillsScreenState extends State<SkillsScreen> {
 
   Future<void> _load() async {
     try {
-      final services = await _repository.listMyServices();
-      if (mounted) setState(() => _services = services);
+      final categories = await _repository.listMyCategories();
+      if (mounted) setState(() => _categories = categories);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
   }
 
+  String _categoryName(String categoryId) {
+    final match = _allCategories?.where((c) => c.id == categoryId);
+    if (match == null || match.isEmpty) return categoryId;
+    return match.first.nameAr;
+  }
+
   Future<void> _openAddSkillFlow() async {
     final declared = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => _AddSkillScreen(repository: _repository),
-      ),
+      MaterialPageRoute(builder: (_) => _AddSkillScreen(repository: _repository)),
     );
     if (declared == true) await _load();
   }
 
-  Future<void> _withdraw(TechnicianServiceDeclaration service) async {
+  Future<void> _withdraw(TechnicianCategoryDeclaration category) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
-          title: const Text('سحب الخدمة'),
+          title: const Text('سحب التخصص'),
           content: Text(
-            service.verificationStatus == 'approved'
-                ? 'هتتوقف عن استقبال طلبات الخدمة دي — تقدر تطلبها تاني بعدين.'
-                : 'هيتلغى طلبك للخدمة دي.',
+            category.verificationStatus == 'approved'
+                ? 'هتتوقف عن استقبال طلبات التخصص ده — تقدر تطلبه تاني بعدين.'
+                : 'هيتلغى طلبك للتخصص ده.',
           ),
           actions: [
             TextButton(
@@ -78,7 +83,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
 
     setState(() => _acting = true);
     try {
-      await _repository.withdraw(service.id);
+      await _repository.withdraw(category.id);
       await _load();
     } on ApiException catch (err) {
       if (mounted)
@@ -114,33 +119,33 @@ class _SkillsScreenState extends State<SkillsScreen> {
         floatingActionButton: FloatingActionButton.extended(
           onPressed: _acting ? null : _openAddSkillFlow,
           icon: const Icon(Icons.add),
-          label: const Text('أضف مهارة'),
+          label: const Text('أضف تخصص'),
         ),
         body: RefreshIndicator(
           onRefresh: _load,
           child: _error != null
               ? Center(child: Text(_error!))
-              : _services == null
+              : _categories == null
               ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
-              : _services!.isEmpty
+              : _categories!.isEmpty
               ? ListView(
                   children: const [
                     SizedBox(height: 60),
                     EmptyState(
-                      icon: Icons.build_outlined,
-                      title: 'لسه مافيش خدمات مسجّلة',
+                      icon: Icons.category_outlined,
+                      title: 'لسه مافيش تخصصات مسجّلة',
                       description:
-                          'دوس "أضف مهارة" عشان تطلب خدمة جديدة من الإدارة توافق عليها',
+                          'دوس "أضف تخصص" عشان تطلب تخصص جديد (سباكة، كهرباء...) توافق عليه الإدارة',
                     ),
                   ],
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                  itemCount: _services!.length,
+                  itemCount: _categories!.length,
                   separatorBuilder: (context, index) =>
                       const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final service = _services![index];
+                    final category = _categories![index];
                     return Card(
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -152,8 +157,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    skillLevelLabelsAr[service.skillLevel] ??
-                                        service.skillLevel,
+                                    _categoryName(category.categoryId),
                                     style: Theme.of(
                                       context,
                                     ).textTheme.titleMedium,
@@ -161,44 +165,44 @@ class _SkillsScreenState extends State<SkillsScreen> {
                                 ),
                                 StatusChip(
                                   label:
-                                      serviceVerificationStatusLabelsAr[service
+                                      categoryVerificationStatusLabelsAr[category
                                           .verificationStatus] ??
-                                      service.verificationStatus,
-                                  tone: _toneFor(service.verificationStatus),
+                                      category.verificationStatus,
+                                  tone: _toneFor(category.verificationStatus),
                                 ),
                               ],
                             ),
-                            if (service.verificationStatus == 'rejected' &&
-                                service.rejectionReason != null) ...[
+                            if (category.verificationStatus == 'rejected' &&
+                                category.rejectionReason != null) ...[
                               const SizedBox(height: 8),
                               Text(
-                                'سبب الرفض: ${service.rejectionReason}',
+                                'سبب الرفض: ${category.rejectionReason}',
                                 style: TextStyle(
                                   color: Theme.of(context).colorScheme.error,
                                 ),
                               ),
                             ],
-                            if (service.verificationStatus == 'suspended' &&
-                                service.rejectionReason != null) ...[
+                            if (category.verificationStatus == 'suspended' &&
+                                category.rejectionReason != null) ...[
                               const SizedBox(height: 8),
                               Text(
-                                'سبب الإيقاف: ${service.rejectionReason}',
+                                'سبب الإيقاف: ${category.rejectionReason}',
                                 style: TextStyle(
                                   color: Theme.of(context).colorScheme.error,
                                 ),
                               ),
                             ],
-                            if (service.verificationStatus != 'suspended') ...[
+                            if (category.verificationStatus != 'suspended') ...[
                               const SizedBox(height: 8),
                               Align(
                                 alignment: Alignment.centerLeft,
                                 child: TextButton(
                                   onPressed: _acting
                                       ? null
-                                      : () => _withdraw(service),
+                                      : () => _withdraw(category),
                                   child: Text(
-                                    service.verificationStatus == 'approved'
-                                        ? 'إيقاف الخدمة'
+                                    category.verificationStatus == 'approved'
+                                        ? 'إيقاف التخصص'
                                         : 'سحب الطلب',
                                   ),
                                 ),
@@ -216,8 +220,8 @@ class _SkillsScreenState extends State<SkillsScreen> {
   }
 }
 
-// خطوة 1: فئة → خطوة 2: خدمة داخلها — تدرّج هرمي (نفس منطق الكتالوج الديناميكي)، مش قايمة مسطّحة
-// بمئات الخدمات في شاشة واحدة (Script 4 §3 — "hierarchical, searchable UX").
+// خطوة واحدة بس — اختار الفئة، خلاص (§29 — اتشالت خطوة "اختار خدمة جوه الفئة" القديمة، الفني
+// بقى بيصرّح بالفئة الكبيرة كلها مش خدمة فردية جواها).
 class _AddSkillScreen extends StatefulWidget {
   const _AddSkillScreen({required this.repository});
 
@@ -230,9 +234,6 @@ class _AddSkillScreen extends StatefulWidget {
 class _AddSkillScreenState extends State<_AddSkillScreen> {
   List<ServiceCategoryOption>? _categories;
   String? _error;
-  ServiceCategoryOption? _selectedCategory;
-  List<ServiceOption>? _services;
-  bool _loadingServices = false;
   bool _submitting = false;
 
   @override
@@ -250,36 +251,15 @@ class _AddSkillScreenState extends State<_AddSkillScreen> {
     }
   }
 
-  Future<void> _selectCategory(ServiceCategoryOption category) async {
-    setState(() {
-      _selectedCategory = category;
-      _services = null;
-      _loadingServices = true;
-    });
-    try {
-      final services = await widget.repository.listServicesForCategory(
-        category.id,
-      );
-      if (mounted) setState(() => _services = services);
-    } on ApiException catch (err) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(err.message)));
-    } finally {
-      if (mounted) setState(() => _loadingServices = false);
-    }
-  }
-
-  Future<void> _declare(ServiceOption service) async {
+  Future<void> _declare(ServiceCategoryOption category) async {
     setState(() => _submitting = true);
     try {
-      await widget.repository.declare(service.id);
+      await widget.repository.declare(category.id);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'طلبك لخدمة "${service.nameAr}" اترسل — هيوصلك إشعار لما الإدارة تراجعه',
+              'طلبك لتخصص "${category.nameAr}" اترسل — هيوصلك إشعار لما الإدارة تراجعه',
             ),
           ),
         );
@@ -300,84 +280,38 @@ class _AddSkillScreenState extends State<_AddSkillScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            _selectedCategory == null ? 'اختار فئة' : _selectedCategory!.nameAr,
-          ),
-          leading: _selectedCategory != null
-              ? IconButton(
-                  icon: const Icon(Icons.arrow_forward), // RTL: رجوع بيبان يمين
-                  onPressed: () => setState(() {
-                    _selectedCategory = null;
-                    _services = null;
-                  }),
-                )
-              : null,
-        ),
+        appBar: AppBar(title: const Text('اختار تخصص')),
         body: _error != null
             ? Center(child: Text(_error!))
-            : _selectedCategory == null
-            ? _buildCategoryList()
-            : _buildServiceList(),
+            : _categories == null
+            ? const Padding(padding: EdgeInsets.all(16), child: LoadingList())
+            : _categories!.isEmpty
+            ? const EmptyState(
+                icon: Icons.category_outlined,
+                title: 'مفيش فئات متاحة دلوقتي',
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: _categories!.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  final category = _categories![index];
+                  return Card(
+                    child: ListTile(
+                      title: Text(category.nameAr),
+                      trailing: _submitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.add_circle_outline),
+                      onTap: _submitting ? null : () => _declare(category),
+                    ),
+                  );
+                },
+              ),
       ),
-    );
-  }
-
-  Widget _buildCategoryList() {
-    if (_categories == null)
-      return const Padding(padding: EdgeInsets.all(16), child: LoadingList());
-    if (_categories!.isEmpty) {
-      return const EmptyState(
-        icon: Icons.category_outlined,
-        title: 'مفيش فئات متاحة دلوقتي',
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _categories!.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 4),
-      itemBuilder: (context, index) {
-        final category = _categories![index];
-        return Card(
-          child: ListTile(
-            title: Text(category.nameAr),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => _selectCategory(category),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildServiceList() {
-    if (_loadingServices)
-      return const Padding(padding: EdgeInsets.all(16), child: LoadingList());
-    if (_services == null || _services!.isEmpty) {
-      return const EmptyState(
-        icon: Icons.build_outlined,
-        title: 'مفيش خدمات في الفئة دي دلوقتي',
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _services!.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 4),
-      itemBuilder: (context, index) {
-        final service = _services![index];
-        return Card(
-          child: ListTile(
-            title: Text(service.nameAr),
-            trailing: _submitting
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.add_circle_outline),
-            onTap: _submitting ? null : () => _declare(service),
-          ),
-        );
-      },
     );
   }
 }

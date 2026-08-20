@@ -16,6 +16,7 @@ import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
 import { RejectTechnicianCategoryDto } from './dto/review-technician-category.dto';
+import { SelfDeclareCategoryDto } from './dto/self-declare-category.dto';
 import { toTechnicianCategoryResponseDto } from './dto/technician-category-response.dto';
 import { TechnicianCategoriesService } from './technician-categories.service';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -146,6 +147,41 @@ export class AdminTechniciansController {
   ) {
     const row = await this.technicianCategoriesService.suspendCategoryDeclaration(admin.sub, id, dto.reason, audit);
     return toTechnicianCategoryResponseDto(row);
+  }
+
+  // تعيين مباشر من الأدمن (§29) — كارت "التخصصات" في بروفايل الفني. بعكس category-declarations
+  // فوق (موافقة/رفض طلب قائم من الفني)، الـ3 دول بيسمحوا للأدمن يعيّن/يشيل فئة لفني مباشرة من
+  // غير ما ينتظر تصريح ذاتي. نفس نمط zones تحت بالحرف.
+  @Get(':id/categories')
+  async listCategories(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.technicianCategoriesService.listForTechnician(id);
+    return rows.map((row) => toTechnicianCategoryResponseDto(row));
+  }
+
+  @Post(':id/categories')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async assignCategory(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SelfDeclareCategoryDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const row = await this.technicianCategoriesService.adminAssignCategory(admin.sub, id, dto.category_id, audit);
+    return toTechnicianCategoryResponseDto(row);
+  }
+
+  @Delete(':id/categories/:categoryId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async removeCategory(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    await this.technicianCategoriesService.adminRemoveCategory(admin.sub, id, categoryId, audit);
+    return { category_id: categoryId, removed: true };
   }
 
   @Get(':id')

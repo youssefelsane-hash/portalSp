@@ -50,6 +50,85 @@ export class TechnicianCategoriesService {
     return this.technicianCategories.find({ where: { technicianId: profile.id }, order: { createdAt: 'DESC' } });
   }
 
+  // ── تعيين مباشر من الأدمن (§29) — بروفايل الفني في apps/admin ────────
+  // بعكس declareCategory/approveCategoryDeclaration فوق (الفني يصرّح بنفسه، الأدمن يوافق على طلب
+  // قائم)، الدالتين دول بيسمحوا للأدمن يعيّن/يشيل فئة لفني مباشرة من الصفر — "وأنا بختار له هو
+  // بيعرف يعمل إيه" (طلب مالك صريح 2026-08-20). نفس نمط AdminTechniciansService.assignZone
+  // /removeZone بالحرف (راجعهم للمقارنة المباشرة).
+
+  listForTechnician(technicianId: string): Promise<TechnicianCategory[]> {
+    return this.technicianCategories.find({ where: { technicianId }, order: { createdAt: 'DESC' } });
+  }
+
+  async adminAssignCategory(
+    adminUserId: string,
+    technicianId: string,
+    categoryId: string,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianCategory> {
+    const category = await this.serviceCategories.findOne({ where: { id: categoryId } });
+    if (!category || !category.isActive) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفئة غير موجودة أو متوقفة', HttpStatus.NOT_FOUND);
+    }
+
+    const existing = await this.technicianCategories.findOne({ where: { technicianId, categoryId } });
+    if (existing && existing.verificationStatus === TechnicianServiceVerificationStatus.APPROVED && existing.isActive) {
+      return existing; // idempotent — الفئة معتمدة ونشطة بالفعل، صفر تكرار في سجل التدقيق
+    }
+
+    const previousStatus = existing?.verificationStatus ?? null;
+    const row =
+      existing ??
+      this.technicianCategories.create({
+        technicianId,
+        categoryId,
+        isSelfDeclared: false,
+      });
+    row.verificationStatus = TechnicianServiceVerificationStatus.APPROVED;
+    row.isActive = true;
+    row.rejectionReason = null;
+    row.reviewedByUserId = adminUserId;
+    row.reviewedAt = new Date();
+    await this.technicianCategories.save(row);
+
+    if (previousStatus !== TechnicianServiceVerificationStatus.APPROVED) {
+      await this.emitCategoryVerificationChanged(row, previousStatus ?? TechnicianServiceVerificationStatus.PENDING_VERIFICATION, null);
+    }
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_category.admin_assigned',
+      entityType: 'technician_category',
+      entityId: row.id,
+      oldValues: previousStatus ? { verification_status: previousStatus } : undefined,
+      newValues: { verification_status: row.verificationStatus, category_id: categoryId },
+      meta,
+    });
+    return row;
+  }
+
+  async adminRemoveCategory(adminUserId: string, technicianId: string, categoryId: string, meta?: AuditActorMeta): Promise<void> {
+    const existing = await this.technicianCategories.findOne({ where: { technicianId, categoryId } });
+    if (!existing || !existing.isActive) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفئة دي مش معيّنة للفني ده أصلاً', HttpStatus.NOT_FOUND);
+    }
+
+    existing.isActive = false;
+    await this.technicianCategories.save(existing);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_category.admin_removed',
+      entityType: 'technician_category',
+      entityId: existing.id,
+      oldValues: { is_active: true },
+      newValues: { is_active: false },
+      meta,
+    });
+  }
+
   async declareCategory(userId: string, dto: SelfDeclareCategoryDto): Promise<TechnicianCategory> {
     const profile = await this.findProfileByUserIdOrThrow(userId);
     const category = await this.serviceCategories.findOne({ where: { id: dto.category_id } });

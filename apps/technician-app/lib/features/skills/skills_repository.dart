@@ -1,46 +1,36 @@
 import '../../core/auth_repository.dart';
 import 'models.dart';
 
-// تصريح مهارات ذاتي (Script 4 §2-7) — كانت فجوة موثّقة صراحة: technician_services كان 100%
-// معيّن من الأدمن يدوياً، الفني مالوش أي مسار يطلب خدمة بنفسه. التصريح وحده مايديش أهلية مطابقة
-// فورية — بيدخل طابور مراجعة أدمن (pending_verification)، راجع apps/api's technicians/README.md.
+// تصريح تخصص ذاتي بمستوى الفئة (§29) — بدّل تصريح المهارات خدمة-بخدمة القديم (Script 4 §2-7)
+// بالكامل. الفني بيصرّح بفئة كاملة (سباكة، كهرباء...) بدل خدمة فردية — التصريح وحده مايديش أهلية
+// مطابقة فورية، بيدخل طابور مراجعة أدمن (pending_verification) زي القديم بالظبط.
 class SkillsRepository {
   final AuthRepository auth;
 
   SkillsRepository(this.auth);
 
-  Future<List<TechnicianServiceDeclaration>> listMyServices() async {
-    final items = await auth.authedRequestList('/technician/services');
-    return items.map(TechnicianServiceDeclaration.fromJson).toList();
+  Future<List<TechnicianCategoryDeclaration>> listMyCategories() async {
+    final items = await auth.authedRequestList('/technician/categories');
+    return items.map(TechnicianCategoryDeclaration.fromJson).toList();
   }
 
-  Future<TechnicianServiceDeclaration> declare(
-    String serviceId, {
-    String skillLevel = 'standard',
-  }) async {
+  Future<TechnicianCategoryDeclaration> declare(String categoryId) async {
     final data = await auth.authedRequest(
       'POST',
-      '/technician/services',
-      body: {'service_id': serviceId, 'skill_level': skillLevel},
+      '/technician/categories',
+      body: {'category_id': categoryId},
     );
-    return TechnicianServiceDeclaration.fromJson(data!);
+    return TechnicianCategoryDeclaration.fromJson(data!);
   }
 
   Future<void> withdraw(String id) async {
-    await auth.authedRequest('DELETE', '/technician/services/$id');
+    await auth.authedRequest('DELETE', '/technician/categories/$id');
   }
 
-  // تصفّح الكتالوج الديناميكي الموجود بالفعل (@Public()، نفس endpoints العميل بالحرف — مفيش
-  // كتالوج تاني منفصل للفني) — هرمي (فئة → خدمة) عشان الفني ميشوفش مئات الخدمات في شاشة واحدة.
+  // تصفّح الكتالوج الديناميكي الموجود بالفعل (@Public()، نفس endpoint العميل بالحرف) — قايمة
+  // الفئات الكبيرة بس، مفيش تدرّج لخدمات فرعية هنا خالص (§29 — الفني بيصرّح بالفئة كلها مرة واحدة).
   Future<List<ServiceCategoryOption>> listCategories() async {
     final items = await auth.authedRequestList('/service-categories');
     return items.map(ServiceCategoryOption.fromJson).toList();
-  }
-
-  Future<List<ServiceOption>> listServicesForCategory(String categoryId) async {
-    final items = await auth.authedRequestList(
-      '/services?category_id=$categoryId',
-    );
-    return items.map(ServiceOption.fromJson).toList();
   }
 }

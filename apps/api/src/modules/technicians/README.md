@@ -441,12 +441,25 @@ AND tc.category_id = <service>.category_id AND tc.is_active = true AND tc.verifi
 **إشعار (`technician_category.verification_changed` event)**: نفس نمط
 `technician_service.verification_changed` بالحرف — بينبّه بس على القرارات النهائية.
 
-**فجوة موثّقة صراحة (نطاق السيشن دي)**: الـbackend كامل ومتاح فعليًا (endpoints + eligibility
-SQL في الأربعة مواقع)، لكن **واجهة الأدمن (`apps/admin`) وشاشة "مهاراتي" في `apps/technician-app`
-لسه ما اتربطوش بالـcategories الجديدة دي** — لسه بيعرضوا/يديروا `technician_services` بس. ده
-مؤجّل عمدًا لسيشن منفصلة (نفس فلسفة "مرحلة بمرحلة" الموثّقة في CLAUDE.md) — الأولوية كانت
-للسلوك الخلفي الصحيح (أهلية المطابقة الفعلية) قبل الواجهة، عشان أي فني يتعمد بفئة عن طريق الـAPI
-مباشرة (أو بيانات مزروعة/seed) يشتغل صح فورًا من النهاردة.
+~~**فجوة موثّقة صراحة (نطاق السيشن دي)**: الـbackend كامل ومتاح فعليًا... لكن واجهة الأدمن
+وشاشة "مهاراتي" لسه ما اتربطوش بالـcategories الجديدة دي~~ — **اتقفلت (§29، طلب مالك صريح
+2026-08-20)**: المالك رفض المنطق خدمة-بخدمة صراحة ("كتير جدًا، وأي خدمة جديدة هضطر أضيفها لكل
+فني") وطلب الفئة تبقى المسار الوحيد المتاح من الواجهات من هنا. التفاصيل الكاملة:
+`docs/08-pricing-engine-and-platform-vision.md` §29. ملخّص سريع:
+- **`apps/technician-app`**: شاشة "مهاراتي" (`features/skills/`) بقت خطوة واحدة (اختار فئة، خلاص)
+  بدل فئة→خدمة→طلب، بتنادي `/technician/categories` بدل `/technician/services`.
+- **`apps/admin`**: صفحة `/technicians/category-declarations` جديدة (بدّلت `/technicians
+  /service-declarations` بالكامل) لمراجعة تصريحات الفني الذاتية. **وكمان تعيين مباشر جديد كليًا**
+  لم يكن موجودًا قبل كده حتى بالـAPI: كارت "التخصصات" في `/technicians/[id]` بيسمح للأدمن يعيّن
+  فئة لفني مباشرة من غير ما ينتظر تصريح ذاتي أولاً (`POST /admin/technicians/:id/categories`،
+  `DELETE .../categories/:categoryId` — endpoints جديدة، `TechnicianCategoriesService
+  .adminAssignCategory()`/`adminRemoveCategory()`، idempotent upsert للتعيين وsoft-remove
+  للإزالة بيحافظ على السجل التاريخي). نفس الكارت بيعرض طلبات الفني المعلّقة (لو موجودة) بزراير
+  اعتماد/رفض مباشرة — الأدمن يقدر يراجع طلب الفني **أو** يعيّن مباشرة من نفس المكان.
+- **`technician_services` (الطريقة القديمة خدمة-بخدمة) اتسيّبت في الباك-إند زي ما هي عمدًا** —
+  الجدول والـmigrations وشرط الـ`OR` في محرك المطابقة كلهم فاضلين (فنيين اتعمدوا بيها قبل كده
+  لسه شغالين بلا انقطاع)، بس **مفيش أي واجهة تفتح مسار خدمة-فردية جديد من هنا** — الفئة هي
+  المسار الوحيد. تفاصيل القرار وسببه: §29.2 في docs/08.
 
 **اتأكد بـ`matching-technician-category-eligibility.spec.ts`** (اختبار حي، 3 اختبارات): فني
 معتمد بالفئة بس بيبقى مؤهّل لخدمتين مختلفتين جوّه نفس الفئة (بلا أي صف `technician_services`

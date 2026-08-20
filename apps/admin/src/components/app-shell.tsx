@@ -82,8 +82,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/technicians', label: 'الفنيين', icon: Wrench },
       {
-        href: '/technicians/service-declarations',
-        label: 'طابور تصريحات المهارات',
+        href: '/technicians/category-declarations',
+        label: 'طابور تصريحات التخصصات',
         icon: ClipboardCheck,
         permission: 'technicians.approve',
       },

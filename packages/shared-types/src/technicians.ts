@@ -108,6 +108,34 @@ export interface ApproveTechnicianServiceBody {
   skill_level?: 'beginner' | 'standard' | 'expert';
 }
 
+// أهلية بمستوى الفئة/التخصص (ADR-0018 §8، §29) — مطابق لـ
+// apps/api/src/modules/technicians/dto/technician-category-response.dto.ts. بديل "مهاراتي"
+// خدمة-بخدمة فوق — الفني/الأدمن بيتعاملوا بالفئة الكبيرة (سباكة/كهرباء/...) مش خدمة فردية.
+export interface TechnicianCategoryResponseDto {
+  id: string;
+  category_id: string;
+  verification_status: TechnicianServiceVerificationStatus;
+  is_self_declared: boolean;
+  is_active: boolean;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  technician_id?: string;
+  category_name_ar?: string;
+}
+
+// نسخة طابور المراجعة (GET /admin/technicians/category-declarations).
+export interface AdminTechnicianCategoryDeclarationResponseDto extends TechnicianCategoryResponseDto {
+  technician_id: string;
+  technician_code: string;
+  technician_full_name: string;
+  category_name_ar: string;
+}
+
+export interface SelfDeclareCategoryBody {
+  category_id: string;
+}
+
 export interface RejectTechnicianServiceBody {
   reason: string;
 }
