@@ -38,6 +38,14 @@ export class CreateOrderDto {
   @IsDateString()
   scheduled_at?: string;
 
+  // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — لو اتبعت مع scheduled_at،
+  // الباك-إند بيدوّر على أقرب يوم بينهم (الاتنين شاملين) فيه فني مؤهّل واحد على الأقل فعليًا،
+  // ويثبّت الطلب على اليوم ده بدل scheduled_at الحرفي. أقصى 14 يوم فرق — orders.service.ts
+  // بيرفض غير كده صراحة (تكرار استعلام أهلية يومي محدود، مش نطاق مفتوح).
+  @IsOptional()
+  @IsDateString()
+  scheduled_at_range_end?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(24)

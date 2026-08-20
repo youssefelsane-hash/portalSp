@@ -19,13 +19,31 @@
  *   كان ممكن يرجّع اليوم الغلط (يوم قبل اللي العميل فعليًا قصده) لأي وقت بين نص الليل و2 الصبح
  *   بتوقيت مصر، ونفس المشكلة لمقارنة `start_time`/`end_time` (تخزين محلي) ضد وقت UTC خام.
  *
+ * **تصحيح تاني جوهري (docs/08 §32، بلاغ مالك حقيقي 2026-08-20)**: قبل التصحيح ده، طلب ASAP
+ * (`scheduled_at IS NULL`) غير الطوارئ كان بيتبع قاعدة **مختلفة تمامًا** عن الطلب المجدول — أي
+ * طلب نشط للفني (`ACTIVE_TECHNICIAN_ORDER_STATUSES`، بما فيها `accepted` لسه ما بدأش) كان
+ * يستبعده بالكامل من أي طلب ASAP جديد، **حتى لو الطلب التاني ده مجدول ليوم بعيد خالص أو قصير
+ * جدًا (مش شاغل يوم كامل)**. النتيجة: فني ظاهر "فاضي" في كل شاشات التطبيق (مفيش شغل حالي ظاهر
+ * ليه — `findActiveForTechnician()` بيستبعد عمدًا أي طلب مجدول لسه معاداش موعده) كان بيختفي
+ * تمامًا من نتائج ASAP لمجرد إن عنده صف `orders` واحد `accepted` معلّق (حتى لو الأسبوع الجاي).
+ * العميل يدوس "في أقرب وقت ممكن" أو "اختار الفريق بنفسك" فيلاقي "مفيش فنيين متاحين" رغم إن
+ * فنيين حقيقيين متاحين فعلاً — بينما "اختار تاريخ تاني" (نفس اليوم بالظبط) بيشتغل عادي، لأنه
+ * بيتبع قاعدة (2) تحت (تعارض يوم + يوم كامل بس). **الإصلاح**: ASAP بقى يتبع **بالحرف نفس قاعدة
+ * الطلب المجدول** (يوم=النهاردة بتوقيت مصر) — نفس فلسفة "بوكينج ASAP = بوكينج مجدول ليوم
+ * النهاردة، مش نوع مختلف" (طلب صريح من المالك: "خلي عادي البوكينج فلو في اختيار الفريق بنفسك
+ * هو هو نفس البوكينج فلو بتاع الجدولة"). حماية ازدواج الحجز الحقيقية (فني يتاخد طلبين فوريين
+ * في نفس اللحظة) اتفصلت لشرط مستقل: انشغال جسدي فعلي دلوقتي (`ENGAGED_TECHNICIAN_ORDER_STATUSES`
+ * — نفس شرط الطوارئ بالظبط)، بس مطبّق كمان لغير الطوارئ **لو اليوم المطلوب هو النهاردة**
+ * (لطلب مجدول ليوم بعيد، انشغال الفني دلوقتي مالوش أي معنى).
+ *
  * القاعدة الكاملة دلوقتي:
- *  1. طلب بلا موعد (ASAP أو طوارئ) — الطوارئ تتستبعد بس لو الفني *منشغل جسديًا فعليًا دلوقتي*
- *     (`ENGAGED_TECHNICIAN_ORDER_STATUSES`)؛ ASAP العادي (مش طوارئ) يتستبعد لو عنده أي طلب نشط
- *     بالمعنى الأوسع (`ACTIVE_TECHNICIAN_ORDER_STATUSES`، بما فيها `accepted`).
- *  2. طلب بموعد مستقبلي (دايمًا مجدول غير طوارئ — الطوارئ ميقدرش يكون عنده `scheduled_at` أصلاً،
- *     `orders.service.ts` بيرفضه صراحة) — استبعاد بس لو فيه طلب تاني بموعد **نفس اليوم بتوقيت
- *     مصر** والشغل ده (القديم أو الجديد) "شاغل يوم كامل".
+ *  1. طلب طوارئ (بلا `scheduled_at` بالتعريف) — استبعاد بس لو الفني *منشغل جسديًا فعليًا دلوقتي*
+ *     (`ENGAGED_TECHNICIAN_ORDER_STATUSES`).
+ *  2. أي طلب تاني (ASAP أو مجدول — نفس القاعدة بالحرف، "اليوم المطلوب" = النهاردة لـASAP):
+ *     استبعاد لو (أ) الفني منشغل جسديًا فعليًا دلوقتي **واليوم المطلوب هو النهاردة**، أو (ب) فيه
+ *     طلب تاني بموعد **نفس اليوم المطلوب بتوقيت مصر** والشغل ده (القديم أو الجديد) "شاغل يوم
+ *     كامل". طلب `accepted` قصير لسه ما بدأش مايستبعدش — الفني يقدر ياخد أكتر من شغلانة قصيرة
+ *     في نفس اليوم.
  *  3. الفني حدد بنفسه استثناء `blocked` (يوم كامل أو ساعات مخصصة) بيتقاطع مع وقت الطلب —
  *     لطلب ASAP/طوارئ، "وقت الطلب" = دلوقتي (`now()`)، بتوقيت مصر.
  *
@@ -78,12 +96,11 @@ export function technicianAvailabilityCondition(opts: {
        AND (${isEmergencyParam}::boolean IS NULL OR ${isEmergencyParam}::boolean IS NOT NULL)
        AND (${fullDayThresholdMinutesParam}::int IS NULL OR ${fullDayThresholdMinutesParam}::int IS NOT NULL)`
     : `
-    -- (1) بلا موعد (ASAP أو طوارئ): طوارئ تتستبعد بس لو الفني منشغل جسديًا فعليًا دلوقتي
-    -- (ADR-0018 §9 — طلب مقبول لسه ما بدأش مش "شغل" لغرض الطوارئ). ASAP العادي (مش طوارئ)
-    -- يفضل بنفس الصرامة القديمة (أي طلب نشط بالمعنى الأوسع بيستبعده).
+    -- اليوم المطلوب للطلب المرشّح نفسه (ASAP = النهاردة، مجدول = يوم scheduled_at) — بتوقيت مصر.
     AND (
-      ${scheduledAtParam}::timestamptz IS NOT NULL
-      OR (
+      -- (1) طوارئ: استبعاد بس لو الفني منشغل جسديًا فعليًا دلوقتي (ADR-0018 §9 — طلب مقبول
+      -- لسه ما بدأش مش "شغل" لغرض الطوارئ).
+      (
         ${isEmergencyParam}::boolean IS TRUE
         AND NOT EXISTS (
           SELECT 1 FROM orders bo
@@ -91,32 +108,31 @@ export function technicianAvailabilityCondition(opts: {
             AND bo.order_status = ANY(${engagedStatusesParam}::order_status[]) AND bo.deleted_at IS NULL
         )
       )
-      OR (
+      OR
+      -- (2) أي طلب تاني (ASAP أو مجدول — نفس القاعدة بالحرف، docs/08 §32): استبعاد لو (أ) الفني
+      -- منشغل جسديًا فعليًا دلوقتي *واليوم المطلوب هو النهاردة*، أو (ب) فيه طلب تاني بموعد نفس
+      -- اليوم المطلوب والشغل (القديم أو الجديد) شاغل يوم كامل. طلب accepted قصير لسه ما بدأش
+      -- مايستبعدش — نفس فلسفة الطلب المجدول تمامًا، بلا استثناء خاص لـASAP.
+      (
         ${isEmergencyParam}::boolean IS NOT TRUE
         AND NOT EXISTS (
-          SELECT 1 FROM orders bo
-          WHERE bo.technician_id = ${technicianIdExpr} AND bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
-            AND bo.order_status = ANY(${activeStatusesParam}::order_status[]) AND bo.deleted_at IS NULL
+          SELECT 1 FROM orders co
+          JOIN services cs ON cs.id = co.service_id
+          WHERE co.technician_id = ${technicianIdExpr} AND co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
+            AND co.order_status = ANY(${activeStatusesParam}::order_status[]) AND co.deleted_at IS NULL
+            AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date
+                = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
+            AND (
+              (
+                (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
+                  = (now() AT TIME ZONE 'Africa/Cairo')::date
+                AND co.order_status = ANY(${engagedStatusesParam}::order_status[])
+              )
+              OR COALESCE(co.estimated_duration_days, 0) >= 1
+              OR COALESCE(cs.estimated_duration_minutes, 60) >= ${fullDayThresholdMinutesParam}::int
+              OR ${serviceDurationExpr} >= ${fullDayThresholdMinutesParam}::int
+            )
         )
-      )
-    )
-    -- (2) بموعد مستقبلي (دايمًا مجدول غير طوارئ — الطوارئ ميقدرش يكون عنده scheduled_at خالص):
-    -- استبعاد بس لو فيه طلب تاني بموعد *نفس اليوم بتوقيت مصر* والشغل شاغل يوم كامل.
-    AND (
-      ${scheduledAtParam}::timestamptz IS NULL
-      OR NOT EXISTS (
-        SELECT 1 FROM orders co
-        JOIN services cs ON cs.id = co.service_id
-        WHERE co.technician_id = ${technicianIdExpr} AND co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
-          AND co.order_status = ANY(${activeStatusesParam}::order_status[]) AND co.deleted_at IS NULL
-          AND co.scheduled_at IS NOT NULL
-          AND (co.scheduled_at AT TIME ZONE 'Africa/Cairo')::date
-              = (${scheduledAtParam}::timestamptz AT TIME ZONE 'Africa/Cairo')::date
-          AND (
-            COALESCE(co.estimated_duration_days, 0) >= 1
-            OR COALESCE(cs.estimated_duration_minutes, 60) >= ${fullDayThresholdMinutesParam}::int
-            OR ${serviceDurationExpr} >= ${fullDayThresholdMinutesParam}::int
-          )
       )
     )`;
   return `

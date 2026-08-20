@@ -652,11 +652,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               const SizedBox(height: 8),
                               Text('السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}'),
                               const SizedBox(height: 4),
-                              // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — null يعني العميل اختار
-                              // ASAP صراحة وقت الحجز، مش غياب بيانات.
+                              // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، مُعدَّلة §32.3) — التاريخ بقى
+                              // إجباري لكل الأوضاع غير الطوارئ، فـnull هنا معناها طلب طوارئ (أو
+                              // طلب قديم من قبل التصحيح).
                               Text(
                                 order.scheduledAt == null
-                                    ? 'الموعد: في أقرب وقت ممكن'
+                                    ? 'الموعد: فوري'
                                     : 'الموعد المطلوب: ${DateTime.parse(order.scheduledAt!).toLocal().toString().substring(0, 16)}',
                                 style: const TextStyle(color: Colors.grey),
                               ),

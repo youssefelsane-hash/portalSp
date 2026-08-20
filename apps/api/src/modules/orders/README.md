@@ -1067,3 +1067,25 @@ OR <= now()`). `findUpcomingConfirmedForTechnician()` (جديدة، عكس ال�
 دي مفيش أي شاشة في `apps/technician-app` كانت بتعرضها للفني قبل يوم تنفيذها (`UpcomingConfirmedJobsScreen`
 الجديدة، تفاصيل كاملة في `../../../technician-app/README.md`). اختبار حي كامل في
 `technician-active-order-recovery.spec.ts` بيثبت الفصل الصح، بما فيه لحظة وصول موعد الطلب المجدول.
+
+## بَقّة ASAP الحقيقية + إلغاؤها من الواجهة + "مرن — اختار نطاق أيام" (docs/08 §32، طلب مالك صريح 2026-08-20)
+
+بلاغ مالك حقيقي: `apps/customer-app`'s "في أقرب وقت ممكن" كانت بترفض فنيين متاحين فعلاً (تفاصيل
+السبب الجذري الكامل في `../technicians/README.md` و`../matching/README.md`، الإصلاح في
+`technician-eligibility.sql.ts`). المالك طلب كمان إلغاء الخيار ده من الواجهة نهائيًا (بيوحي بطوارئ
+مش موجودة فعليًا) وإضافة "مرن — اختار نطاق أيام" بدله.
+
+**`CreateOrderDto.scheduled_at_range_end`** (جديد، اختياري) — لو اتبعت مع `scheduled_at`،
+`OrdersService.create()` بيدوّر يوم بيوم داخل `[scheduled_at, scheduled_at_range_end]` (الاتنين
+شاملين، أقصى 14 يوم — `ApiException` واضح لو النطاق أكبر أو `scheduled_at` مفقود) عبر
+`TechniciansService.hasEligibleTechnicianForDate()` (استعلام `EXISTS` خفيف، تفاصيل في
+`../technicians/README.md`) لحد ما يلاقي أول يوم فيه فني مؤهّل واحد على الأقل، ويثبّت `scheduledAt`
+النهائي على اليوم ده. لو محدش متاح في كل النطاق، بيرجع لبداية النطاق كما هو — نفس فلسفة "مفيش
+إلغاء تلقائي لمجرد مفيش فني دلوقتي" الموجودة أصلاً (`MatchingRecoveryService.sweep()` هتعيد
+المحاولة تلقائيًا). مينفعش يتبعت مع `schedule_slot_id` (سلوت محدد أصلاً موعد صريح، مفيش داعي نطاق).
+
+**`apps/customer-app`**: `ScheduleSelectionScreen` بقت تاريخ إجباري دايمًا (اتشال خيار "في أقرب
+وقت ممكن" نهائيًا) + خيار "مرن" (`showDateRangePicker`). وصف "شغلانة سريعة — حد يخلّصها بسرعة"
+لوضع الحجز الفردي اتشال كمان (بيوحي باستعجال يتلخبط مع "طوارئ" الفعلي) — بقى "فردي" بس. تفاصيل
+كاملة (السبب الجذري بكامله، القرار، وتأكيد إن طلبات الطوارئ أصلاً بتفضل ظاهرة لحد القبول —
+ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pricing-engine-and-platform-vision.md` §32.

@@ -6,22 +6,26 @@ import 'package:flutter/material.dart';
 // (2:30، 5:15). المطابقة بتسأل: الفني ده يقدر ياخد شغلانة تانية في اليوم ده؟ مش بتعتمد على
 // سلوتات دقيقة بالدقيقة." الباك-إند لسه بيخزّن scheduled_at كـtimestamp (فايدة تقنية للفرز/الحسابات
 // الداخلية)، لكن قيمته دايمًا بداية اليوم المطلوب — العميل ميختارش وقت خالص من هنا.
-// **تصحيح تاني (طلب مالك صريح، جلسة تالية)**: الشاشة كانت لسه فيها 4 خيارات (فوري/النهاردة/بكرة/
-// يوم تاني) — كتير ومربك برأي المالك. خيارين بس دلوقتي: "في أقرب وقت ممكن" و"اختار تاريخ تاني"
-// (بيفتح الكالندر مباشرة، والعميل يقدر يختار النهاردة أو بكرة من جوّه الكالندر نفسه لو حابب،
-// من غير ما نحتاج زرار مخصص لكل يوم قريب).
-// خطوة إجبارية في تدفق الحجز العادي (فردي/اعتماد) — الطوارئ مستجابة فورية بالتعريف فمش بتمرّ
-// بالشاشة دي خالص (orders.service.ts بيرفض scheduled_at مع بوكينج طوارئ بوضوح).
-// null (ASAP) نتيجة صحيحة ومقصودة — مش غياب اختيار، هو اختيار العميل الصريح "في أقرب وقت".
+// **تصحيح تاني (docs/08 §32.3، طلب مالك صريح 2026-08-20)**: خيار "في أقرب وقت ممكن" (ASAP) اتشال
+// نهائيًا — بلاغ مالك حقيقي: كان بيتبع قاعدة أهلية مختلفة عن "اختار تاريخ تاني" (حتى لنفس اليوم)،
+// فكان بيرفض فنيين متاحين فعلاً بحجة تعارض وهمي (تفاصيل كاملة في docs/08 §32.1/§32.2 وتعليق
+// technician-eligibility.sql.ts). التاريخ بقى إجباري دايمًا — تقويم يفتح على طول، بلا خطوة اختيار
+// وسيطة، بالظبط زي مسار "اختار تاريخ تاني" القديم بلا أي تغيير فيه. أُضيف خيار "مرن" (نطاق أيام)
+// بجانبه — الباك-إند بيختار أقرب يوم فعليًا متاح جوّه النطاق (orders.service.ts، أقصى 14 يوم).
 class ScheduleChoice {
-  final DateTime? scheduledAt;
-  const ScheduleChoice.asap() : scheduledAt = null;
-  const ScheduleChoice.at(this.scheduledAt);
+  final DateTime scheduledAt;
+  // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس (مفيش نطاق).
+  final DateTime? rangeEnd;
+  const ScheduleChoice(this.scheduledAt, {this.rangeEnd});
 }
 
 // بداية اليوم المحلي (Africa/Cairo، نفس منطقة العمل الوحيدة للمشروع) — نفس التاريخ اللي هيتعرض
 // للفني/الأدمن، بلا أي مكون وقت. `DateTime` المحلي هنا كافي (السيرفر بيحوّله UTC عند الإرسال).
 DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day);
+
+// أقصى فرق بين بداية ونهاية النطاق المرن — matching orders.service.ts's اقتصادها بالحرف
+// (استعلام أهلية يومي متكرر بحد أقصى، مش نطاق مفتوح).
+const int _maxFlexibleRangeDays = 14;
 
 class ScheduleSelectionScreen extends StatelessWidget {
   const ScheduleSelectionScreen({super.key});
@@ -35,7 +39,27 @@ class ScheduleSelectionScreen extends StatelessWidget {
       lastDate: now.add(const Duration(days: 90)),
     );
     if (date == null || !context.mounted) return;
-    Navigator.of(context).pop(ScheduleChoice.at(_startOfDay(date)));
+    Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
+  }
+
+  Future<void> _pickFlexibleRange(BuildContext context) async {
+    final now = DateTime.now();
+    final range = await showDateRangePicker(
+      context: context,
+      initialDateRange: DateTimeRange(start: now.add(const Duration(days: 1)), end: now.add(const Duration(days: 4))),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 90)),
+      helpText: 'اختار نطاق الأيام اللي تناسبك',
+    );
+    if (range == null || !context.mounted) return;
+    final start = _startOfDay(range.start);
+    var end = _startOfDay(range.end);
+    // العميل يقدر يختار نطاق أوسع من الحد المسموح بيه — بنقصّه للحد الأقصى بدل ما نرفض الاختيار
+    // كله ونرجّعه يعيد من الأول (تجربة استخدام أسهل، والنتيجة العملية واحدة: أقرب يوم متاح جوّه
+    // أول 14 يوم من اختياره).
+    final maxEnd = start.add(const Duration(days: _maxFlexibleRangeDays));
+    if (end.isAfter(maxEnd)) end = maxEnd;
+    Navigator.of(context).pop(ScheduleChoice(start, rangeEnd: end));
   }
 
   @override
@@ -51,18 +75,18 @@ class ScheduleSelectionScreen extends StatelessWidget {
             children: [
               const SizedBox(height: 8),
               _ScheduleOptionCard(
-                icon: Icons.bolt,
-                title: 'في أقرب وقت ممكن',
-                subtitle: 'هنبدأ نبحث عن فني متاح فورًا',
+                icon: Icons.calendar_month_outlined,
+                title: 'اختار يوم محدد',
+                subtitle: 'حدد اليوم اللي يناسبك من الكالندر',
                 highlighted: true,
-                onTap: () => Navigator.of(context).pop(const ScheduleChoice.asap()),
+                onTap: () => _pickSpecificDate(context),
               ),
               const SizedBox(height: 12),
               _ScheduleOptionCard(
-                icon: Icons.calendar_month_outlined,
-                title: 'اختار تاريخ تاني',
-                subtitle: 'حدد اليوم اللي يناسبك من الكالندر',
-                onTap: () => _pickSpecificDate(context),
+                icon: Icons.event_repeat_outlined,
+                title: 'مرن — اختار نطاق أيام',
+                subtitle: 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
+                onTap: () => _pickFlexibleRange(context),
               ),
             ],
           ),

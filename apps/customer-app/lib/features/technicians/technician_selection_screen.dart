@@ -32,8 +32,11 @@ class TechnicianSelectionScreen extends StatefulWidget {
   final Map<String, dynamic>? fieldValues;
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — بتتمرر لقايمة الفنيين (GET .../technicians?
   // scheduled_at=...) عشان الأهلية المعروضة تبقى مطابقة فعليًا لتاريخ الطلب، ولـCreateOrderScreen
-  // النهائية. null (وضع الاستبدال onManualSelect، أو الطوارئ) يعني ASAP بلا أي تأثير.
+  // النهائية. null (وضع الاستبدال onManualSelect، أو الطوارئ) يعني بلا تفضيل تاريخ.
   final DateTime? requestedAt;
+  // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتمرر لـCreateOrderScreen بس (مش لقايمة الفنيين —
+  // المعاينة هناك بتفترض يوم واحد، النطاق بيتحل فعليًا وقت إنشاء الطلب في الباك-إند).
+  final DateTime? requestedAtRangeEnd;
 
   const TechnicianSelectionScreen({
     super.key,
@@ -43,6 +46,7 @@ class TechnicianSelectionScreen extends StatefulWidget {
     this.initialAddress,
     this.fieldValues,
     this.requestedAt,
+    this.requestedAtRangeEnd,
   });
 
   @override
@@ -94,6 +98,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           initialAddress: _selectedAddress,
           initialFieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
+          requestedAtRangeEnd: widget.requestedAtRangeEnd,
         ),
       ),
     );

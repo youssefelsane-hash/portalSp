@@ -136,9 +136,13 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
 
     // الطلب "المشغول" — accepted فعليًا (الحالة النشطة اللي بتستبعد الفني)، وهيتعمله soft-delete
     // في كل test لوحده (مش هنا) عشان الاختبارين يفضلوا مستقلين عن بعض.
+    // **تحديث (docs/08 §32، 2026-08-20)**: estimated_duration_days=1 ("شاغل يوم كامل") مُضافة
+    // عمدًا — بعد توحيد قاعدة ASAP مع المجدول (يوم بدل "أي طلب نشط")، طلب accepted قصير لسه ما
+    // بدأش مبقاش يستبعد خالص (نفس فلسفة المجدول تمامًا)، فالفحوصات هنا محتاجة تعارض يوم-كامل
+    // حقيقي عشان تفضل ذات معنى — راجع اختبار "accepted تاني قصير مابيستبعدش" تحت لتغطية العكس بالظبط.
     const [blockingOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted') RETURNING id`,
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, estimated_duration_days)
+       VALUES ($1,$2,$3,$4,$5,$6,'accepted',1) RETURNING id`,
       [`TEST-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianProfile, ids.service, ids.address, ids.zone],
     );
     ids.blockingOrder = blockingOrder.id;
@@ -187,24 +191,47 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       .findEligibleTechnicians(order, 50, null, false, null);
   };
 
-  it('طلب accepted غير محذوف: الفني بيتستبعد صح (السلوك الأصلي محفوظ)', async () => {
+  it('طلب accepted شاغل يوم كامل غير محذوف: الفني بيتستبعد صح (السلوك الأصلي محفوظ)', async () => {
     const candidates = await findCandidates();
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
   });
 
   // قرار عمل صريح من المالك (2026-08-19، سيناريو "تسليك مواصير نص يوم") — نفس بَقّة
   // TechnicianAssignmentGuardService.assertEligible() المصلّحة بس هنا في مسار التوزيع الفعلي:
-  // فني عنده طلب نشط دلوقتي (accepted) مايترفضش من طلب تاني **مجدول** ليوم بعيد — الاستبعاد
-  // القديم كان unconditional بغض النظر عن scheduledAt الطلب المرشّح.
-  it('طلب مجدول بعد أسبوع: الفني مبيتستبعدش رغم إن عنده طلب accepted نشط دلوقتي', async () => {
+  // فني عنده طلب accepted شاغل يوم كامل النهاردة مايترفضش من طلب تاني **مجدول** ليوم بعيد —
+  // الاستبعاد القديم كان unconditional بغض النظر عن scheduledAt الطلب المرشّح.
+  it('طلب مجدول بعد أسبوع: الفني مبيتستبعدش رغم إن عنده طلب accepted شاغل يوم كامل النهاردة', async () => {
     const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const candidates = await findCandidates(weekFromNow);
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
   });
 
-  it('طلب ASAP (بلا scheduledAt) لسه بيرفض صح — مفيش تراجع في السلوك القديم', async () => {
+  it('طلب ASAP (بلا scheduledAt) لسه بيرفض صح لو الفني عنده طلب تاني شاغل يوم كامل النهاردة — الحماية الحقيقية اتحافظ عليها', async () => {
     const candidates = await findCandidates(null);
     expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(false);
+  });
+
+  // إصلاح بَقّة حقيقية (docs/08 §32، بلاغ مالك 2026-08-20): قبل الإصلاح، طلب accepted قصير
+  // (لسه ما بدأش، مش شاغل يوم كامل) كان بيستبعد الفني من *أي* طلب ASAP جديد بالكامل — رغم إن
+  // نفس الفني ده كان بيفضل مؤهّل تمامًا لطلب مجدول لنفس اليوم بالظبط. الإصلاح: ASAP بقى يتبع
+  // بالحرف نفس قاعدة الطلب المجدول (يوم = النهاردة).
+  it('طلب ASAP بقى يتقبل رغم إن الفني عنده طلب accepted تاني النهاردة (قصير، لسه ما بدأش) — إصلاح البَقّة (docs/08 §32)', async () => {
+    // بنعزل الفحص ده عن blockingOrder المشترك (شاغل يوم كامل — سبب استبعاد تاني مختلف تمامًا
+    // اتغطى فوق) بـsoft-delete مؤقت، عشان الاختبار ده يثبت تحديدًا إن طلب accepted قصير (مش
+    // شاغل يوم كامل) بمفرده مابيستبعدش.
+    await dataSource.query(`UPDATE orders SET deleted_at = now() WHERE id = $1`, [ids.blockingOrder]);
+    const [order] = await dataSource.query(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status)
+       VALUES ($1,$2,$3,$4,$5,$6,'accepted') RETURNING id`,
+      [`ACC-${runId}`.slice(0, 24), ids.customerProfile, ids.technicianProfile, ids.service, ids.address, ids.zone],
+    );
+    try {
+      const candidates = await findCandidates(null);
+      expect(candidates.some((c) => c.technician_id === ids.technicianProfile)).toBe(true);
+    } finally {
+      await dataSource.query(`DELETE FROM orders WHERE id = $1`, [order.id]);
+      await dataSource.query(`UPDATE orders SET deleted_at = NULL WHERE id = $1`, [ids.blockingOrder]);
+    }
   });
 
   it('نفس الطلب بعد soft-delete: الفني مبيتستبعدش — مبقاش "محبوس" كمشغول للأبد', async () => {

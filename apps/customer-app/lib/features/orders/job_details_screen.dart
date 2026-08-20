@@ -19,8 +19,10 @@ class JobDetailsScreen extends StatefulWidget {
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — اتحددت قبل الشاشة دي (catalog_navigation.dart)،
   // بتتمرر جاهزة لحد ما توصل لـTechnicianSelectionScreen/CreateOrderScreen.
   final DateTime? requestedAt;
+  // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
+  final DateTime? requestedAtRangeEnd;
 
-  const JobDetailsScreen({super.key, required this.service, this.requestedAt});
+  const JobDetailsScreen({super.key, required this.service, this.requestedAt, this.requestedAtRangeEnd});
 
   @override
   State<JobDetailsScreen> createState() => _JobDetailsScreenState();
@@ -98,6 +100,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           initialAddress: _selectedAddress,
           fieldValues: Map<String, dynamic>.from(_fieldValues),
           requestedAt: widget.requestedAt,
+          requestedAtRangeEnd: widget.requestedAtRangeEnd,
         ),
       ),
     );

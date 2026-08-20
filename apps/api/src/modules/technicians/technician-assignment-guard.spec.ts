@@ -4,12 +4,16 @@ import { BookingMode, Order, OrderStatus } from '../orders/entities/order.entity
 import { TechnicianAssignmentGuardService } from './technician-assignment-guard.service';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 
-// اختبار حي ضد Postgres حقيقي — بيثبت بَقّة حقيقية اتلقطت من بلاغ المالك (2026-08-19): تعيين
-// فني له طلب نشط النهاردة لطلب تاني مجدول ليوم بعيد خالص (مثلاً بعد أسبوع) كان بيترفض غلط بحجة
-// "الفني عنده طلب نشط بالفعل" أو "خارج الوردية حاليًا" — رغم إن الطلبين في وقتين مختلفين تمامًا
-// ومفيش تعارض حقيقي بينهم. الإصلاح: الفحصين دول (isAvailable/isOnDuty والـactive-order) بقوا
-// يسريان بس على طلبات ASAP (scheduledAt فاضي) — الطلبات المجدولة بتتفحص بالجدول الحقيقي
-// (technician_schedule_slots) اللي أصلاً بيتفحص بتاريخ/وقت صحيح تحت في نفس الميثود.
+// اختبار حي ضد Postgres حقيقي — بيثبت بَقّتين حقيقيتين اتلقطوا من بلاغات المالك:
+// (2026-08-19) تعيين فني له طلب نشط النهاردة لطلب تاني مجدول ليوم بعيد خالص (مثلاً بعد أسبوع)
+// كان بيترفض غلط بحجة "الفني عنده طلب نشط بالفعل" — رغم إن الطلبين في يومين مختلفين تمامًا
+// ومفيش تعارض حقيقي بينهم؛
+// (2026-08-20، docs/08 §32) عكسها بالظبط لطلبات ASAP نفس اليوم — كان أي طلب accepted نشط
+// (حتى لو قصير ولسه ما بدأش) بيستبعد الفني من *أي* طلب ASAP جديد، رغم إن نفس الفني كان مؤهّل
+// تمامًا لطلب مجدول لنفس اليوم بالظبط. الإصلاح الموحّد: ASAP بقى يتبع بالحرف نفس قاعدة الطلب
+// المجدول (يوم = النهاردة) — استبعاد بس لو (أ) الفني منشغل جسديًا فعليًا دلوقتي، أو (ب) فيه
+// تعارض يوم كامل حقيقي. isAvailable/isOnDuty مش متفحوصين خالص هنا (ADR-0017 بند 3 — اتشالوا
+// من الأهلية بالكامل، الفني متاح افتراضيًا Opt-out).
 describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدول ليوم مختلف لازم يعدي (docs/08، قرار 2026-08-19)', () => {
   jest.setTimeout(30_000);
 
@@ -173,28 +177,36 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     }
   });
 
-  it('طلب ASAP (بلا scheduledAt) لسه بيترفض صح لو الفني أوفلاين — مفيش تراجع في السلوك القديم', async () => {
-    await setTechnicianOnline(false);
-    const candidate = await insertOrder({ label: 'asap-offline', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
+  // إصلاح بَقّة حقيقية (docs/08 §32، بلاغ مالك 2026-08-20): قبل الإصلاح، طلب ASAP كان بيترفض لمجرد
+  // إن الفني عنده *أي* طلب accepted نشط تاني — حتى لو قصير ولسه ما بدأش، رغم إن نفس الفني ده كان
+  // بيفضل مؤهّل تمامًا لطلب *مجدول* لنفس اليوم. النتيجة: العميل يدوس "في أقرب وقت ممكن" فيلاقي
+  // "مفيش فنيين متاحين" رغم وجود فنيين فاضيين فعلاً. الإصلاح: ASAP بقى يتبع بالحرف نفس قاعدة
+  // الطلب المجدول (يوم = النهاردة) — طلب accepted قصير لسه ما بدأش مايستبعدش خالص.
+  it('ASAP بقى يتقبل رغم إن الفني عنده طلب accepted تاني النهاردة (قصير، لسه ما بدأش) — إصلاح البَقّة (docs/08 §32)', async () => {
+    // الفني أونلاين دلوقتي، وعنده طلب "active-today" من الاختبار الأول لسه ACCEPTED (قصير، مش
+    // شاغل يوم كامل، ولسه ما بدأش يتحرّك ليه — بالضبط زي المطلوب مايستبعدش تحته).
+    const candidate = await insertOrder({ label: 'asap-short-busy', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
 
+    await dataSource.manager.transaction(async (manager) => {
+      const technician = await guard.lockTechnician(manager, ids.technicianProfile);
+      await expect(guard.assertEligible(manager, technician, candidate)).resolves.toBeUndefined();
+    });
+  });
+
+  it('ASAP لسه بيترفض صح لو الفني منشغل جسديًا فعليًا دلوقتي (technician_on_way) — الحماية الحقيقية اتحافظ عليها', async () => {
+    // نفس طلب "active-today" بس بقى في الطريق فعليًا دلوقتي — ده الحالة الوحيدة اللي المفروض
+    // تستبعد فني من طلب ASAP جديد (ازدواج حجز حقيقي: فني واحد ياخد شغلانتين فوريتين في نفس اللحظة).
+    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE order_number = $1`, [`TAG-active-today-${runId}`.slice(0, 24)]);
     try {
+      const candidate = await insertOrder({ label: 'asap-engaged', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
+
       await dataSource.manager.transaction(async (manager) => {
         const technician = await guard.lockTechnician(manager, ids.technicianProfile);
         await expect(guard.assertEligible(manager, technician, candidate)).rejects.toBeInstanceOf(ApiException);
       });
     } finally {
-      await setTechnicianOnline(true);
+      await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE order_number = $1`, [`TAG-active-today-${runId}`.slice(0, 24)]);
     }
-  });
-
-  it('طلب ASAP (بلا scheduledAt) لسه بيترفض صح لو الفني عنده طلب نشط تاني — مفيش تراجع في السلوك القديم', async () => {
-    // الفني أونلاين دلوقتي، بس عنده طلب "active-today" من الاختبار الأول لسه ACCEPTED.
-    const candidate = await insertOrder({ label: 'asap-busy', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
-
-    await dataSource.manager.transaction(async (manager) => {
-      const technician = await guard.lockTechnician(manager, ids.technicianProfile);
-      await expect(guard.assertEligible(manager, technician, candidate)).rejects.toBeInstanceOf(ApiException);
-    });
   });
 
   it('طلب طوارئ (EMERGENCY) بلا scheduledAt بيعدي حتى لو الفني أوفلاين — سلوك قديم متأثرش', async () => {
