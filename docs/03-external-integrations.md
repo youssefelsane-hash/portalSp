@@ -456,6 +456,62 @@ cd apps/customer-app && flutter build appbundle --release
 
 ---
 
+## 8. الدفع بالتحويل اليدوي — InstaPay
+
+**ليه InstaPay بالذات**: شبكة التحويل الفوري الرسمية للبنك المركزي المصري، منتشرة جداً بين
+العملاء اللي مش عايزين يدخلوا بيانات كارت أو يقفوا في طابور فوري — تحويل مباشر بس بعنوان IPA أو
+رقم موبايل مسجّل. **مفيش API رسمي متاح لمنصات تجارية عادية دلوقتي** (على عكس Paymob/Fawry فوق)،
+فالتأكيد كله يدوي: العميل بيحوّل بنفسه من تطبيق بنكه، وموظف Finance بيأكّد الاستلام بعد ما يشوف
+التحويل فعلاً في الحساب.
+
+**الكود**: `apps/api/src/modules/payments/gateways/instapay-provider.service.ts` (يرجّع تعليمات
+تحويل بس، مش رابط دفع) + `POST /admin/payments/:id/confirm-instapay` (تأكيد) و
+`POST /admin/payments/:id/reject-instapay` (رفض) في `admin-payments.controller.ts` — تفاصيل
+معمارية كاملة في `apps/api/src/modules/payments/README.md`.
+
+### الفرق الجوهري عن Paymob/Fawry فوق — **صفر اعتماد خارجي مطلوب**
+
+القيمتين المحتاجين هنا (`INSTAPAY_IPA_ADDRESS`, `INSTAPAY_RECIPIENT_NAME`) مش مفاتيح API بترتبط
+بحساب تاجر حقيقي — هما بس نص بيتعرض للعميل كتعليمات ("حوّل لـ..."). يعني تقدر تفعّل InstaPay
+**للتجربة فوراً** بأي قيمة تختارها (رقم موبايلك المسجّل InstaPay، أو IPA وهمي زي
+`test@instapay`)، من غير ما تستنى اعتماد أي جهة خارجية. للاستخدام الحقيقي بفلوس حقيقية، القيمتين
+دول لازم يبقوا عنوان IPA وحساب استلام حقيقيين مسجّلين باسم الشركة.
+
+### الخطوات
+
+1. لو عندك حساب بنكي مصري (أو محفظة موبايل) مسجّل InstaPay: من تطبيق البنك → إعدادات InstaPay
+   → هتلاقي **IPA Address** بتاعك (شكله زي `name@bankcode` أو رقم موبايلك المسجّل) — ده
+   `INSTAPAY_IPA_ADDRESS`.
+2. الاسم اللي هيتعرض للعميل عشان يتطمّن إنه بيحوّل للجهة الصح (مثلاً اسم الشركة أو صاحب الحساب) —
+   ده `INSTAPAY_RECIPIENT_NAME`.
+3. للتجربة بس (مفيش فلوس حقيقية بتتحرك، ده مجرد نص تعليمات): أي قيمتين وهميتين شغالين فورًا.
+
+### مكان القيم
+
+في `apps/api/.env`:
+```
+INSTAPAY_IPA_ADDRESS=<من الخطوة 1، أو قيمة تجريبية للتجربة>
+INSTAPAY_RECIPIENT_NAME=<من الخطوة 2، أو اسم تجريبي للتجربة>
+```
+
+### التأكد إنها اشتغلت
+
+بعد ملء القيم وإعادة تشغيل `apps/api`، جرّب `POST /orders/:id/pay-with-instapay` على طلب حقيقي —
+المفروض ترجع `instructions_ar` فيها العنوان والاسم اللي حطيتهم + `reference_code`. من `apps/customer-app`
+اضغط "حوّلت الفلوس" في `InstaPayReferenceScreen` — لازم يسجّل `customer_confirmed_transfer_at` (يظهر
+فورًا في `apps/admin` → **تأكيدات InstaPay**، `/instapay-confirmations`). اضغط "تأكيد الاستلام" من
+هناك — `GET /orders/:id` المفروض يرجع `payment_status: paid`.
+
+### ملاحظة UI
+
+الباك-إند وواجهات الثلاث تطبيقات جاهزين بالكامل: `apps/customer-app` فيه `InstaPayReferenceScreen`
+(زرار "حوّلت الفلوس" بيسجّل تبليغ العميل، مش بس polling محلي)، `apps/admin` فيه شاشة طابور مخصوصة
+(`/instapay-confirmations`) بتجمّع كل الدفعات المعلّقة في مكان واحد بدل ما موظف Finance يدوّر
+طلب-طلب، وموظف Finance بياخد إشعار in-app فوري لما العميل يبلّغ التحويل + إشعار مخصوص للعميل لما
+التحويل يتأكّد. تفاصيل كاملة في `docs/08-pricing-engine-and-platform-vision.md` §28.5.
+
+---
+
 ## ملخص سريع — كل الـ env vars في مكان واحد
 
 انسخ `apps/api/.env.example` لـ `apps/api/.env` واملأ اللي عايزه بس (الباقي فاضي = القناة دي
@@ -471,6 +527,10 @@ PAYMOB_HMAC_SECRET=
 # FawryPay (§2) — تحذير: راجع "تحذير مهم قبل الاستخدام الإنتاجي" في القسم ده قبل الاعتماد عليها
 FAWRY_MERCHANT_CODE=
 FAWRY_SECURE_KEY=
+
+# InstaPay (§8) — صفر اعتماد خارجي، أي قيمة تختارها شغالة فورًا للتجربة
+INSTAPAY_IPA_ADDRESS=
+INSTAPAY_RECIPIENT_NAME=
 
 # S3 storage (§3)
 STORAGE_PROVIDER=local   # غيّرها لـ s3 لما تملأ الباقي
