@@ -626,6 +626,12 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 `online` in-memory محلية، فلترتها قبل `LIMIT`/`OFFSET` هتحتاج جلب المجمّع كله (بالظبط النمط اللي
 المالك حذّر منه "avoid expensive synchronous diagnostics at scale").
 
+**فلتر `zone_id` اختياري (docs/08 §36.3، مصفوفة القوى العاملة في مركز العمليات)**: `EXISTS` واحد
+إضافي على `technician_zones` (نفس الجدول اللي `zone_count` أصلًا بيتحسب منه) — تعديل جراحي واحد،
+صفر تكرار منطق. الأدمن بيتصفّح مدينة→نطاق→فئة→فني (`apps/admin/src/app/operations/page.tsx`)، بس
+الـendpoint ده نفسه لسه شغال بلا `zone_id` تمامًا زي ما كان (فلتر اختياري بحت، مايأثرش على
+`apps/admin/src/app/technicians/category-declarations` أو أي استهلاك تاني موجود).
+
 ## بروفايل فني 360° (docs/08 §35.11، ADR-0021 §5)
 
 `AdminTechnician360Service.getProfile()` — `GET /admin/technicians/:id/360` — تجميعة واحدة: هوية،

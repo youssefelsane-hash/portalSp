@@ -7,6 +7,10 @@ export class ListCategoryOpsQueryDto {
   category_id: string;
 
   @IsOptional()
+  @IsUUID()
+  zone_id?: string;
+
+  @IsOptional()
   @IsEnum(TechnicianVerificationStatus)
   verification_status?: TechnicianVerificationStatus;
 

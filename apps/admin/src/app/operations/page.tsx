@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { AdminServiceCategoryResponseDto, OperationsOverview } from '@baytak/shared-types';
+import type {
+  AdminCategoryOpsRowDto,
+  AdminCityResponseDto,
+  AdminServiceCategoryResponseDto,
+  AdminServiceZoneResponseDto,
+  OperationsOverview,
+  TechnicianCapacityTier,
+} from '@baytak/shared-types';
 import { AlertTriangle, ClipboardList, Radio, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -12,6 +19,12 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { SelectNative } from '@/components/ui/select-native';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { TableSkeleton } from '@/components/table-skeleton';
+import { EmptyState } from '@/components/empty-state';
+import { Pagination } from '@/components/pagination';
+import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
 
 function KpiCard({
   title,
@@ -66,8 +79,201 @@ function CapacityTierRow({ label, value, tone }: { label: string; value: number;
   );
 }
 
+function capacityTierBadgeClass(tier: TechnicianCapacityTier): string {
+  // نفس نغمات CapacityTierRow فوق ونفس نمط الشارة الموجود بالفعل في apps/admin/src/app/page.tsx
+  // (bg-{tone}-bg text-{tone}) — لغة بصرية موحّدة (docs/08 §36.3، تمهيدًا لـ§36.14).
+  if (tier === 'LIGHT') return 'border-transparent bg-success-bg text-success';
+  if (tier === 'MEANINGFUL') return 'border-transparent bg-muted text-muted-foreground';
+  if (tier === 'HEAVY') return 'border-transparent bg-warning-bg text-warning';
+  return 'border-transparent bg-danger-bg text-danger';
+}
+
+const CAPACITY_TIER_LABELS: Record<TechnicianCapacityTier, string> = {
+  LIGHT: 'خفيف',
+  MEANINGFUL: 'متوسط',
+  HEAVY: 'مشغول',
+  BLOCKED: 'محظور',
+};
+
+function verificationBadgeVariant(status: AdminCategoryOpsRowDto['verification_status']) {
+  if (status === 'approved') return 'secondary' as const;
+  if (status === 'rejected' || status === 'suspended') return 'destructive' as const;
+  return 'outline' as const;
+}
+
+const MATRIX_PER_PAGE = 20;
+
+// مصفوفة القوى العاملة (docs/08 §36.3) — مدينة→نطاق→فئة→فني. صفر منطق تصنيف/أهلية جديد هنا:
+// نفس endpoint مركز عمليات الفئة (§35.9، AdminTechnicianCategoryOpsService) بفلتر zone_id
+// إضافي بس. الفئة مشتركة مع فلتر الصفحة الرئيسي فوق (نفس القيمة، حالة واحدة) — النطاق فرعي
+// تحته (مدينة→نطاق cascading، نفس نمط apps/admin/src/app/geo/page.tsx).
+function WorkforceMatrixSection({
+  categoryId,
+  authedFetch,
+  authedFetchPaginated,
+}: {
+  categoryId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  authedFetchPaginated: ReturnType<typeof useAuth>['authedFetchPaginated'];
+}) {
+  const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
+  const [cityId, setCityId] = useState<string>('');
+  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
+  const [zoneId, setZoneId] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState<AdminCategoryOpsRowDto[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
+  }, [authedFetch]);
+
+  useEffect(() => {
+    setZoneId('');
+    if (!cityId) {
+      setZones(null);
+      return;
+    }
+    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
+      .then(setZones)
+      .catch(() => undefined);
+  }, [authedFetch, cityId]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [categoryId, zoneId]);
+
+  useEffect(() => {
+    if (!categoryId) {
+      setItems(null);
+      setError(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(MATRIX_PER_PAGE) });
+    if (zoneId) params.set('zone_id', zoneId);
+    authedFetchPaginated<AdminCategoryOpsRowDto>(`/admin/technicians/by-category?${params.toString()}`)
+      .then(({ items: rows, meta }) => {
+        setItems(rows);
+        setTotal(meta.total ?? rows.length);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مصفوفة القوى العاملة'))
+      .finally(() => setLoading(false));
+  }, [authedFetchPaginated, categoryId, zoneId, page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / MATRIX_PER_PAGE));
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-medium text-muted-foreground">مصفوفة القوى العاملة (مدينة → نطاق → فئة → فني)</h2>
+
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="matrix_city" className="text-sm text-muted-foreground">
+            المدينة
+          </Label>
+          <SelectNative id="matrix_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+            <option value="">كل المدن</option>
+            {cities?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="matrix_zone" className="text-sm text-muted-foreground">
+            النطاق
+          </Label>
+          <SelectNative
+            id="matrix_zone"
+            value={zoneId}
+            onChange={(e) => setZoneId(e.target.value)}
+            disabled={!cityId}
+            className="max-w-xs"
+          >
+            <option value="">{cityId ? 'كل نطاقات المدينة' : 'اختر مدينة الأول'}</option>
+            {zones?.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+      </div>
+
+      {!categoryId && (
+        <EmptyState title="اختر فئة من فلتر الصفحة فوق" description="مصفوفة القوى العاملة محتاجة فئة محددة عشان تعرض الفنيين المؤهّلين لها." />
+      )}
+
+      {categoryId && error && <p className="text-destructive">{error}</p>}
+
+      {categoryId && !error && loading && <TableSkeleton rows={5} columns={7} />}
+
+      {categoryId && !error && !loading && items && items.length === 0 && (
+        <EmptyState title="مفيش فنيين" description="مفيش فني معتمد للفئة/النطاق المختارين دلوقتي." />
+      )}
+
+      {categoryId && !error && !loading && items && items.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>الفني</TableHead>
+                <TableHead>الاعتماد</TableHead>
+                <TableHead>المستوى</TableHead>
+                <TableHead>القدرة النهاردة</TableHead>
+                <TableHead>حالة الاتصال</TableHead>
+                <TableHead>نطاقات/فئات</TableHead>
+                <TableHead>طلبات مفتوحة</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <Link href={`/technicians/${row.id}`} className="font-medium hover:underline">
+                      {row.full_name}
+                    </Link>
+                    <div className="text-xs text-muted-foreground">{row.technician_code}</div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={verificationBadgeVariant(row.verification_status)}>
+                      {VERIFICATION_STATUS_LABELS[row.verification_status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{LEVEL_LABELS[row.current_level]}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={capacityTierBadgeClass(row.capacity_tier_today)}>
+                      {CAPACITY_TIER_LABELS[row.capacity_tier_today]}
+                    </Badge>
+                    {row.working_now && <span className="ms-1 text-xs text-muted-foreground">(شغال دلوقتي)</span>}
+                  </TableCell>
+                  <TableCell>
+                    <span className={row.online ? 'text-success' : 'text-muted-foreground'}>{row.online ? 'أونلاين' : 'أوفلاين'}</span>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    <span className={row.has_zone_issue ? 'text-danger' : undefined}>{row.zone_count} نطاق</span>
+                    {' · '}
+                    <span className={row.has_category_issue ? 'text-danger' : undefined}>{row.category_count} فئة</span>
+                  </TableCell>
+                  <TableCell>{row.open_requests_count}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="فني" onPageChange={setPage} />
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function OperationsOverviewPage() {
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
   const [categoryId, setCategoryId] = useState<string>('');
   const [overview, setOverview] = useState<OperationsOverview | null>(null);
@@ -160,12 +366,13 @@ export default function OperationsOverviewPage() {
             </div>
           </section>
 
+          <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+
           <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <p>
-              دي بداية "مركز العمليات" — بنية أساسية بس (docs/08 §36.2). الأقسام الجاية (مصفوفة القوى العاملة،
-              مفتّش المطابقة، تايم لاين، مركز التنبيهات، ذكاء التغطية...) هتتضاف هنا مرحلة بمرحلة فوق نفس الصفحة دي،
-              مش صفحات منفصلة متفرقة.
+              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (مفتّش المطابقة، "ليه/ليه لأ؟"،
+              تايم لاين، مركز التنبيهات، ذكاء التغطية...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
             </p>
           </section>
         </div>

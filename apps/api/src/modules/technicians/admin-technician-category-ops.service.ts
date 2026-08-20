@@ -15,6 +15,7 @@ const GENERIC_SERVICE_DURATION_MINUTES = 60;
 
 export interface CategoryOpsFilters {
   categoryId: string;
+  zoneId?: string;
   verificationStatus?: TechnicianVerificationStatus;
   level?: TechnicianLevel;
   page: number;
@@ -64,6 +65,11 @@ interface RawRow {
  * نطاقات/فئات (استعلام واحد مجمّع)، وتصنيف القدرة (`classifyTechnicianCapacity()`، نداء واحد لكل
  * فني في الصفحة — محدود بحجم الصفحة، مش سكان لمجمّع الفنيين كله).
  *
+ * **فلتر منطقة اختياري (docs/08 §36.3، "مصفوفة القوى العاملة")**: `zoneId` بيضيف شرط `EXISTS` على
+ * `technician_zones` (نفس الجدول اللي `zone_count` أصلًا بيتحسب منه فوق) — تعديل جراحي واحد على
+ * استعلام الأساس، صفر تكرار منطق أهلية جديد. الأدمن بيختار مدينة→نطاق (نفس نمط `geo/page.tsx`)
+ * ثم فئة (فلتر السطر ده الأساسي أصلًا) — تصفح Region→Zone→Category→Technician بالحرف.
+ *
  * **online/offline observability بحت** (تحذير المالك المتكرر مرتين في §35): الحقل ده معروض بس،
  * صفر تأثير على أي فلترة/ترتيب أهلية هنا. **قيد متعمّد**: مفيش فلتر `online_only` على مستوى
  * الصفحة/الترقيم — الحالة دي in-memory محلية (`RealtimeSessionRegistry`)، مش عمود SQL يتفلتر
@@ -103,10 +109,17 @@ export class AdminTechnicianCategoryOpsService {
         )
         AND ($2::technician_verification_status IS NULL OR tp.verification_status = $2)
         AND ($3::technician_level IS NULL OR tp.current_level = $3)
+        AND (
+          $4::uuid IS NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_zones tz
+            WHERE tz.technician_id = tp.id AND tz.service_zone_id = $4 AND tz.is_active = true
+          )
+        )
       ORDER BY u.full_name ASC
-      LIMIT $4 OFFSET $5
+      LIMIT $5 OFFSET $6
       `,
-      [filters.categoryId, filters.verificationStatus ?? null, filters.level ?? null, filters.perPage, offset],
+      [filters.categoryId, filters.verificationStatus ?? null, filters.level ?? null, filters.zoneId ?? null, filters.perPage, offset],
     );
 
     const total = rawRows.length > 0 ? Number(rawRows[0].total_count) : 0;
