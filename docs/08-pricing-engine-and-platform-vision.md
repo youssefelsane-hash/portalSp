@@ -4655,6 +4655,41 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
   إكمال الفريق، RBAC/audit شامل، أمان التزامن، اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي،
   الإغلاق النهائي).
 
+### 35.12 — إغلاق §35.17: إشعارات إكمال الفريق (تذكير القائد بنقص طاقمه)
+
+منفَّذ حسب `ADR-0021`. ملخص:
+
+- **الاكتشاف الأول**: مطلوبات المالك الثلاثة لإشعارات إكمال الفريق كان اتنين منها موجودين
+  بالفعل — "انضميت لطلب X" (وبونص: "اتشلت من طلب X") عبر `OrderCrewChangedNotificationListener`
+  الموجود مسبقًا، و"تصعيد للأدمن" عبر `OrderCrewShortageEscalatedRoutingListener` (§35.5). **الفجوة
+  الحقيقية الوحيدة**: القائد نفسه (`orders.technician_id`) ما كانش بياخد أي تذكير شخصي إن طاقمه
+  لسه ناقص — بس الأدمن (`ops_manager`) كان بياخد التنبيه.
+- **`OrderCrewShortageLeaderReminderListener`** (جديد، `notifications/listeners/`) — بيسمع لنفس
+  حدث `ORDER_CREW_SHORTAGE_ESCALATED_EVENT` الموجود من §35.5 بالظبط (صفر حدث جديد، صفر sweep
+  جديد)، بيجيب القائد عبر `order.technicianId → TechniciansService.findByProfileIdOrThrow()`،
+  وبيبعت إشعار `crew_shortage_leader_reminder` بنص عربي بيوضّح العدد الناقص (فني/مساعد) مع
+  `deepLink` لشاشة الطلب في `apps/technician-app`. مسجّل في `NotificationsModule` جنب
+  `OrderCrewShortageEscalatedRoutingListener` — نفس نمط "استمعانات مستقلة على نفس الحدث بمسؤوليات
+  مختلفة" المستخدم في كل الموديول ده.
+- **اختبار حي جديد** (`order-crew-shortage-leader-reminder.spec.ts`، 3/3): إشعار حقيقي بالنص الصح
+  لطلب ناقص فني ومساعد معًا، رجوع هادئ من غير إشعار لطلب من غير قائد معيّن (`technician_id` فاضي)،
+  ومسك آمن للاستثناء لو الطلب مش موجود — التصميم يتبع نفس نمط `notification-acknowledgement.spec.ts`
+  (TechniciansService/NotificationsService حقيقيين جزئيًا: الـrepos اللي فعلًا بتتلمس متوصّلة
+  بـPostgres حقيقي، الباقي stub لأنه مش على المسار).
+- **ملاحظة بيئة (مش بَقّة في الكود)**: أي spec بينشئ NestJS app context كامل أو `DataSource`
+  بيسيب Jest واقف لدقيقة زيادة بعد انتهاء الاختبارات فعليًا ("Jest did not exit one second after
+  the test run has completed") — ده handle مفتوح (غالبًا اتصال DB/Redis) مش اتقفل صح في التنظيف،
+  موجود في كل الـspecs المشابهة مش بس ده. لو شفت process جست شغال لمدة طويلة من غير استهلاك CPU
+  فعلي، شغّله في الخلفية وافحص ملف الـlog بدل ما تستنى الـpipe يتقفل.
+- **التحقق النهائي**: `tsc --noEmit`/`nest build`/smoke-boot (`NestFactory.create(AppModule).init()`)
+  نضاف. `npx jest` الكامل: **122/122 suite، 685/685 اختبار**، صفر ريجريشن حقيقي — فشل عابر واحد
+  (`emergency-batch-dispatch-policy.spec.ts`) بسبب تصادم `countries.iso_code` عشوائي (الـspec ده
+  بيستخدم `Math.random()` لتوليد كود دولتين حروف، احتمال تصادم ضئيل لكن موجود) — اتأكد إنه مش
+  ريجريشن بإعادة تشغيل الملف لوحده (3/3 نجح).
+- **لسه فاضل من §35**: 35.12-35.13، 35.15، 35.18-35.20 (تنبيهات العمليات، توزيع/عدالة، بروفايل
+  عميل، RBAC/audit شامل، أمان التزامن، اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي، الإغلاق
+  النهائي).
+
 ## §36. مركز عمليات أدمن كامل + فريق مفضّل (Preferred Crew) + محرك سياسة مطابقة/تسعير قابل للتعديل — طلب صريح من المالك (2026-08-20، فوق §35، رسالتين منفصلتين بنفس الرسالة)
 
 **قاعدة العمل صراحة من المالك**: "امشي واحدة واحدة، على مهلك، مش مستعجلين" — الشغل هنا هيتم على
