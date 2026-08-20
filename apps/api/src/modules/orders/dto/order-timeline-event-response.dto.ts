@@ -1,8 +1,16 @@
-// Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32) — يجمع 4 مصادر منفصلة كانت كل واحدة
-// فيها بتتعرض في كارت لوحده (audit_logs, order_status_history, order_assignments,
-// technician_order_cancellations) في تسلسل زمني واحد. مصدر البيانات الخام: raw SQL UNION ALL في
-// AdminOrdersService.getTimeline() (نفس أسلوب OrderTeamService.listForOrder()).
-export type OrderTimelineEventSource = 'status_history' | 'audit_log' | 'assignment' | 'technician_cancellation';
+// Timeline موحّد لتفاصيل الطلب (Script 4 Part G §30-32، وسّعتها docs/08 §35.14) — يجمع مصادر
+// منفصلة كانت كل واحدة فيها بتتعرض في كارت لوحده (audit_logs, order_status_history,
+// order_assignments, technician_order_cancellations, technician_work_opportunities،
+// orders.crew_shortage_escalated_at) في تسلسل زمني واحد. مصدر البيانات الخام: raw SQL UNION ALL
+// في AdminOrdersService.getTimeline() (نفس أسلوب OrderTeamService.listForOrder()) — صفر جدول
+// event-log جديد، كل مصدر هنا جدول/عمود حقيقي موجود بالفعل.
+export type OrderTimelineEventSource =
+  | 'status_history'
+  | 'audit_log'
+  | 'assignment'
+  | 'technician_cancellation'
+  | 'work_opportunity'
+  | 'crew_shortage_escalation';
 
 export interface OrderTimelineEventRow {
   id: string;

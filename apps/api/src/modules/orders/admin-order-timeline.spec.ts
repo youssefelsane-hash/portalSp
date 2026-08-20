@@ -138,6 +138,7 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
 
   afterAll(async () => {
     try {
+      await q(`DELETE FROM technician_work_opportunities WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM order_assignments WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM technician_order_cancellations WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM audit_logs WHERE entity_id = $1`, [ids.order]);
@@ -210,6 +211,25 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
     const auditEvent = timeline.find((e) => e.source === 'audit_log')!;
     expect(auditEvent.title).toBe('order.rescheduled_by_admin');
     expect(auditEvent.actorFullName).toContain('أدمن تايملاين');
+  });
+
+  it('docs/08 §35.14 — بيشمل فرص العمل/التجنيد وتصعيد نقص الطاقم (صفر جدول جديد)', async () => {
+    await q(
+      `INSERT INTO technician_work_opportunities (order_id, technician_id, context, crew_role, capacity_tier_at_offer, status, offered_at)
+       VALUES ($1,$2,'crew_recruit','technician','MEANINGFUL','offered', now() - interval '1 hour')`,
+      [ids.order, ids.leaderProfile],
+    );
+    await q(`UPDATE orders SET crew_shortage_escalated_at = now() - interval '30 minutes' WHERE id = $1`, [ids.order]);
+
+    const timeline = await adminOrdersService.getTimeline(ids.order);
+    const sources = timeline.map((e) => e.source);
+    expect(sources).toContain('work_opportunity');
+    expect(sources).toContain('crew_shortage_escalation');
+
+    const opportunityEvent = timeline.find((e) => e.source === 'work_opportunity')!;
+    expect(opportunityEvent.detail).toMatchObject({ context: 'crew_recruit', crew_role: 'technician', status: 'offered' });
+
+    await q(`UPDATE orders SET crew_shortage_escalated_at = NULL WHERE id = $1`, [ids.order]);
   });
 
   it('يرجّع مصفوفة فاضية لطلب مفيهوش أي أحداث لسه', async () => {

@@ -1115,3 +1115,10 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 §35.1-3/§35.6 بس مالهمش استهلاك فعلي. `OrderTeamService.listForOrder()` بقى بيحل الاسم الحقيقي
 (`added_by: {type: 'leader'|'admin', name}`) عبر `LEFT JOIN` بسيط — صفر migration جديدة، صفر جدول/
 نظام تسجيل جديد.
+
+## تايم لاين مطابقة الطلب (docs/08 §35.14)
+
+`AdminOrdersService.getTimeline()` الموحّد (Script 4 Part G §30-32) كان أصلاً الحل الصحيح لطلب
+المالك ("event-sourced، إعادة استخدام بنية الحدث/audit الموجودة") — اتوسّع بمصدرين جداد بس، صفر
+جدول جديد: `technician_work_opportunities` (فرص اختيارية §34.1 + تجنيد فريق §35.1-3، فرع `UNION`
+عادي) و`crew_shortage_escalation` (صف تركيبي من `orders.crew_shortage_escalated_at` نفسه، §35.5).

@@ -4629,3 +4629,28 @@ Admin endpoint جديد يعرض لكل فني/يوم: القدرة الاستي
 - **لسه فاضل من §35**: 35.12-35.15، 35.17-35.20 (تنبيهات، توزيع، تايم لاين، بروفايل عميل، إشعارات
   إكمال الفريق، RBAC/audit شامل، أمان التزامن، اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي،
   الإغلاق النهائي).
+
+### 35.11 — إغلاق §35.14: تايم لاين مطابقة الطلب — إعادة استخدام الـtimeline الموحّد الموجود
+
+منفَّذ حسب `ADR-0021` §5 — راجع `AdminOrdersService.getTimeline()` (`admin-orders.service.ts`)
+للتفاصيل التقنية الكاملة. ملخص:
+
+- **الاكتشاف الأول**: `getTimeline()` الموحّد (Script 4 Part G §30-32) كان موجود بالفعل، بيجمع 4
+  مصادر (`order_status_history`/`audit_logs`/`order_assignments`/`technician_order_cancellations`)
+  في تسلسل زمني واحد — وده أصلاً **بالظبط** التصميم اللي المالك طلبه ("event-sourced، إعادة
+  استخدام بنية الحدث/الـaudit الموجودة، مش لوج غير مهيكل جديد"). **الفجوة الحقيقية**: مصدرين
+  متعلقين بالمطابقة مالهمش أي وجود في الـtimeline خالص — `technician_work_opportunities` (فرص
+  اختيارية LIGHT/MEANINGFUL/HEAVY من §34.1 + فرص تجنيد الفريق crew_recruit من §35.1-3) و
+  `orders.crew_shortage_escalated_at` (تصعيد §35.5).
+- **إضافتين في نفس الـUNION ALL**، صفر جدول جديد: `technician_work_opportunities` (فرع UNION
+  عادي، نفس نمط `order_assignments`)، و`crew_shortage_escalation` (صف تركيبي واحد من عمود
+  `orders.crew_shortage_escalated_at` نفسه — بيظهر بس لو الطلب اتصعّد فعلاً، مفيش جدول
+  event-log منفصل).
+- **`OrderTimelineEventSource`** اتوسّعت بقيمتين جداد (`work_opportunity`/`crew_shortage_escalation`).
+- **اختبار حي موسّع** (`admin-order-timeline.spec.ts`، +1 اختبار = 4/4): تصعيد نقص طاقم + فرصة
+  تجنيد فريق بيظهروا في الـtimeline بالتفاصيل الصح (`context`/`crew_role`/`status`).
+- **التحقق النهائي**: `tsc --noEmit`/`nest build` نضاف. `npx jest` الكامل: **121/121 suite،
+  682/682 اختبار**، صفر ريجريشن.
+- **لسه فاضل من §35**: 35.12-35.13، 35.15، 35.17-35.20 (تنبيهات، توزيع، بروفايل عميل، إشعارات
+  إكمال الفريق، RBAC/audit شامل، أمان التزامن، اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي،
+  الإغلاق النهائي).
