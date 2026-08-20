@@ -79,6 +79,19 @@ export interface OrderRefundSummaryDto {
   completed_at: string | null;
 }
 
+// §28 — طابور تأكيد InstaPay الإداري (GET /admin/payments/instapay-pending).
+export interface InstaPayPendingPaymentResponseDto {
+  id: string;
+  order_id: string;
+  order_number: string;
+  customer_name: string;
+  customer_phone: string;
+  amount_cents: number;
+  gateway_reference: string | null;
+  initiated_at: string;
+  customer_confirmed_transfer_at: string | null;
+}
+
 export interface OrderFinancialSummaryResponseDto {
   platform_commission_cents: number;
   technician_earning_cents: number;

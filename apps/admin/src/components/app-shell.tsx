@@ -22,6 +22,7 @@ import {
   Home as HomeIcon,
   ImageIcon,
   KeyRound,
+  Landmark,
   LayoutDashboard,
   LifeBuoy,
   ListX,
@@ -112,6 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'المالية',
     items: [
       { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
+      { href: '/instapay-confirmations', label: 'تأكيدات InstaPay', icon: Landmark, permission: 'payments.confirm_manual' },
       {
         href: '/domestic-worker-earnings',
         label: 'اعتماد أرباح الخدمات المنزلية',

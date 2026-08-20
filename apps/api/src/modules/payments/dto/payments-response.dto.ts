@@ -86,6 +86,21 @@ export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
   };
 }
 
+// §28 — طابور تأكيد InstaPay الإداري (كانت فجوة حقيقية: مفيش أي شاشة/endpoint بيجمّع الدفعات
+// المعلّقة، الأدمن كان مضطر يدور عليها طلب-طلب من جوّه تفاصيل كل طلب لوحده). فيه اسم/رقم العميل
+// (مش UUID خام — نفس درس §28.1) عشان الطابور يبقى قابل للاستخدام فعليًا من غير نداء تاني.
+export interface InstaPayPendingPaymentResponseDto {
+  id: string;
+  order_id: string;
+  order_number: string;
+  customer_name: string;
+  customer_phone: string;
+  amount_cents: number;
+  gateway_reference: string | null;
+  initiated_at: string;
+  customer_confirmed_transfer_at: string | null;
+}
+
 export interface SavedPaymentMethodResponseDto {
   id: string;
   provider: string;
