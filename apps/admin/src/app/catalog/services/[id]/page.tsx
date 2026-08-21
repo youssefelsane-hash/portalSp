@@ -60,6 +60,8 @@ export default function ServiceDetailPage() {
   const [service, setService] = useState<AdminServiceResponseDto | null>(null);
   const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zonePricing, setZonePricing] = useState<ServiceZonePricingResponseDto[] | null>(null);
+  // docs/08 §36.22-23، ADR-0024 — تبديل الفورم بين override (رقم مطلق) وpercentage (نسبة مئوية).
+  const [zpMode, setZpMode] = useState<'override' | 'percentage'>('override');
   const [levelPricing, setLevelPricing] = useState<ServiceLevelPricingResponseDto[] | null>(null);
   const [addons, setAddons] = useState<ServiceAddonResponseDto[] | null>(null);
   const [standardData, setStandardData] = useState<ServiceStandardDataResponseDto[] | null>(null);
@@ -113,9 +115,15 @@ export default function ServiceDetailPage() {
     e.preventDefault();
     const form = new FormData(e.target as HTMLFormElement);
     const validFrom = form.get('valid_from') as string;
+    const mode = (form.get('pricing_mode') as 'override' | 'percentage') || 'override';
     const body: UpsertZonePricingBody = {
       service_zone_id: form.get('service_zone_id') as string,
-      price_cents: Math.round(Number(form.get('price')) * 100),
+      pricing_mode: mode,
+      // docs/08 §36.22-23، ADR-0024 — override: رقم مطلق يستبدل السعر الأساسي بالكامل.
+      // percentage: نسبة مئوية فوق السعر الأساسي الحالي، بتتحدّث تلقائيًا مع أي تغيير فيه.
+      ...(mode === 'override'
+        ? { price_cents: Math.round(Number(form.get('price')) * 100) }
+        : { modifier_percentage: Number(form.get('modifier_percentage')) }),
       // تاريخ سريان (docs/06 §3.10) — فاضي = فوري (النهاردة). تاريخ مستقبلي = جدولة سعر
       // جاي من غير ما يأثر على أي حاجة دلوقتي (تفاصيل في catalog/README.md).
       valid_from: validFrom ? new Date(validFrom).toISOString() : undefined,
@@ -125,6 +133,7 @@ export default function ServiceDetailPage() {
     try {
       await authedFetch(`/admin/services/${id}/zone-pricing`, { method: 'PUT', body: JSON.stringify(body) });
       (e.target as HTMLFormElement).reset();
+      setZpMode('override');
       authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -585,8 +594,27 @@ export default function ServiceDetailPage() {
                   </option>
                 ))}
               </SelectNative>
-              <Label htmlFor="zp_price">السعر (جنيه)</Label>
-              <Input id="zp_price" name="price" type="number" min="0" step="0.01" required />
+              <Label htmlFor="zp_mode">طريقة التسعير</Label>
+              <SelectNative
+                id="zp_mode"
+                name="pricing_mode"
+                value={zpMode}
+                onChange={(e) => setZpMode(e.target.value as 'override' | 'percentage')}
+              >
+                <option value="override">رقم مطلق (يستبدل السعر الأساسي بالكامل)</option>
+                <option value="percentage">نسبة مئوية فوق السعر الأساسي (بتتحدّث تلقائيًا معاه)</option>
+              </SelectNative>
+              {zpMode === 'override' ? (
+                <>
+                  <Label htmlFor="zp_price">السعر (جنيه)</Label>
+                  <Input id="zp_price" name="price" type="number" min="0" step="0.01" required />
+                </>
+              ) : (
+                <>
+                  <Label htmlFor="zp_modifier">النسبة المئوية (مثال: 15 لزيادة 15%, -10 لتخفيض 10%)</Label>
+                  <Input id="zp_modifier" name="modifier_percentage" type="number" step="0.01" required />
+                </>
+              )}
               <Label htmlFor="zp_valid_from">تاريخ السريان (فاضي = فوري)</Label>
               <Input id="zp_valid_from" name="valid_from" type="date" />
               <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
@@ -613,7 +641,11 @@ export default function ServiceDetailPage() {
                   {zonePricing.map((p) => (
                     <TableRow key={p.id}>
                       <TableCell>{zoneName(p.service_zone_id)}</TableCell>
-                      <TableCell>{formatEgp(p.price_cents)}</TableCell>
+                      <TableCell>
+                        {p.pricing_mode === 'percentage'
+                          ? `${p.modifier_percentage! > 0 ? '+' : ''}${p.modifier_percentage}% من السعر الأساسي`
+                          : formatEgp(p.price_cents!)}
+                      </TableCell>
                       <TableCell dir="ltr">{new Date(p.valid_from).toLocaleDateString('ar-EG')}</TableCell>
                       <TableCell dir="ltr">{p.valid_until ? new Date(p.valid_until).toLocaleDateString('ar-EG') : '—'}</TableCell>
                       <TableCell>

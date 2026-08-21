@@ -176,4 +176,25 @@
 تفاصيل استخدام العميل الكامل (كروت الفئات/صفوف الخدمات في `apps/customer-app`) في
 `apps/customer-app/README.md`.
 
+## تسعير المنطقة كمُعدِّل نسبي — `pricing_mode='percentage'` (docs/08 §36.22-23، ADR-0024)
+
+تدقيق حي أثبت إن `service_zone_pricing.price_cents` كان دايمًا استبدال ثابت مطلق — لو الأدمن غيّر
+`base_price_cents` بتاع الخدمة بعدين، أي منطقة عندها override تفضل مسمّرة على السعر القديم للأبد
+بلا أي تنبيه. التفاصيل الكاملة والبدائل المرفوضة في `docs/adr/0024-zone-price-percentage-modifier.md`.
+
+- **`pricing_mode` جديد** (enum، افتراضي `override` — صفر تغيير سلوك للصفوف الموجودة): `override`
+  (السلوك القديم بالحرف، `price_cents` رقم مطلق) أو `percentage` (`modifier_percentage` نسبة مئوية
+  فوق `service.base_price_cents` **وقت الحساب نفسه** — `effective_base = round(base_price_cents * (1 + modifier_percentage/100))`،
+  فبيتحدّث تلقائيًا مع أي تغيير في السعر الأساسي).
+- **`price_cents` بقى Nullable**، **`modifier_percentage` عمود جديد Nullable** — CHECK constraint
+  في الداتابيز يمنع أي صف يخلط الاتنين أو يسيبهم فاضيين. `surge_multiplier`/تاريخ السريان بلا أي
+  تغيير (بيتطبّقوا فوق الناتج سواء override أو percentage).
+- **`CatalogService.estimate()`**: فرع جديد لحساب `effective_base` لـ`percentage` قبل `surge`/
+  `level_price_multiplier` — الباقي (formula pricing model، بلا zone override خالص) بلا أي تغيير.
+- **`apps/admin`**: فورم تسعير المنطقة (`catalog/services/[id]`) بقى فيه اختيار وضع صريح (radio/select)،
+  الجدول بيعرض "+15% من السعر الأساسي" بدل رقم لو الوضع percentage.
+- **اختبار حي جديد** (`zone-pricing-percentage-modifier.spec.ts`، 4/4): override بيتصرف بالظبط زي
+  الأول (رجريشن)، percentage بيتحسب صح، تغيير السعر الأساسي بينعكس تلقائيًا، صفر zoneId = سعر
+  أساسي عادي بلا أي تعديل.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
