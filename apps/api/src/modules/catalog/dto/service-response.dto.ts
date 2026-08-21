@@ -52,6 +52,7 @@ export interface ServiceResponseDto {
   allows_emergency: boolean;
   allows_individual: boolean;
   allows_team: boolean;
+  cash_allowed: boolean;
   min_technician_level: string;
 }
 
@@ -75,6 +76,7 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     allows_emergency: service.allowsEmergency,
     allows_individual: service.allowsIndividual,
     allows_team: service.allowsTeam,
+    cash_allowed: service.cashAllowed,
     min_technician_level: service.minTechnicianLevel,
   };
 }

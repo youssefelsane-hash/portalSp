@@ -395,6 +395,7 @@ export default function ServiceDetailPage() {
       allows_emergency: form.get('allows_emergency') === 'on',
       allows_individual: form.get('allows_individual') === 'on',
       allows_team: form.get('allows_team') === 'on',
+      cash_allowed: form.get('cash_allowed') === 'on',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
@@ -604,6 +605,11 @@ export default function ServiceDetailPage() {
               <label className="flex items-center gap-2">
                 <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
                 يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
+              </label>
+              {/* محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1) */}
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="cash_allowed" defaultChecked={service.cash_allowed} />
+                يسمح بالدفع كاش (لو اتلغى، لازم كارت/InstaPay مقدّم)
               </label>
             </div>
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">

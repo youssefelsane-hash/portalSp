@@ -190,6 +190,15 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
+    // قدرة دفع لكل خدمة (ADR-0026، docs/08 §42 Phase A.1) — cash_allowed=false يعني الخدمة دي
+    // مينفعش تتقفل بكاش خالص (لازم كارت/InstaPay مقدّم). غياب dto.payment_method يعني كاش ضمنيًا
+    // (نفس منطق requestedPrepayMethod تحت بالحرف). إعادة الزيارة تحت الضمان (original_order_id)
+    // مستثناة عمدًا — مجانية بالكامل دايمًا (originalOrder ? undefined : ...)، فمفيش كاش فعلي
+    // يتحصّل أصلاً عشان يتفحص.
+    if (!dto.payment_method && !dto.original_order_id && !service.cashAllowed) {
+      throw new ApiException(ErrorCode.VAL_001, 'الدفع كاش مش متاح لهذه الخدمة — لازم تختار كارت أو InstaPay', HttpStatus.BAD_REQUEST);
+    }
+
     // Script 7 Phase 7 — بَقّة حقيقية اتلقطت: الطوارئ (docs/06) معناها استجابة فورية بالتعريف
     // (نفس التعليق موثّق تحت لـ`schedule_slot_id`)، لكن الفحص القديم كان بيمنع `schedule_slot_id`
     // بس مع الطوارئ — `dto.scheduled_at` الحر (بلا سلوت محدد) كان بيعدّي عادي، فيتسجّل طلب

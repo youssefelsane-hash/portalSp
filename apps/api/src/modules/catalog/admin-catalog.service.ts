@@ -201,6 +201,7 @@ export class AdminCatalogService {
       allowsEmergency: dto.allows_emergency ?? false,
       allowsIndividual: dto.allows_individual ?? true,
       allowsTeam: dto.allows_team ?? false,
+      cashAllowed: dto.cash_allowed ?? true,
       minTechnicianLevel: dto.min_technician_level,
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
@@ -248,6 +249,7 @@ export class AdminCatalogService {
     if (dto.allows_emergency !== undefined) service.allowsEmergency = dto.allows_emergency;
     if (dto.allows_individual !== undefined) service.allowsIndividual = dto.allows_individual;
     if (dto.allows_team !== undefined) service.allowsTeam = dto.allows_team;
+    if (dto.cash_allowed !== undefined) service.cashAllowed = dto.cash_allowed;
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

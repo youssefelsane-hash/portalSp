@@ -227,3 +227,31 @@
   للمستوى من غير فئة، رجريشن كامل لخدمة من غير أي صف فئة، فئة بلا صف نشط = مضاعف 1)،
   `../technicians/technician-pricing-tier-assignment.spec.ts` (3/3 — استقلال `changePricingTier()`/
   `changeLevel()` في الاتجاهين + 409 لنفس الفئة).
+
+## `services.cash_allowed` — أول قدرة دفع على محرك الحجز الموحّد (docs/08 §42 Phase A.1، ADR-0026)
+
+طلب مالك استراتيجي كبير (docs/08 §42): توحيد حجز الخدمة العادية/الشغالة/المتكرر في محرك حجز واحد
+قابل للتهيئة عبر أعلام قدرة على `Service`، بدل مسار منفصل لكل نوع خدمة غريب. الشريحة الأولى
+(Phase A.1) اختارت أصغر تغيير حقيقي وآمن: تدقيق حي أثبت صفر `cash_allowed`/`deposit_required` في
+السكيما كلها — أي خدمة بتقبل كاش افتراضيًا بلا أي فحص، والاستثناء الوحيد (حجز الشغالة) بيحقق "مفيش
+كاش" بمساره المنفصل بالكامل مش بسياسة على المسار المشترك. التفاصيل والبدائل المرفوضة في
+`docs/adr/0026-service-capability-model-payment-policy.md`.
+
+- **`services.cash_allowed` عمود جديد** (`boolean NOT NULL DEFAULT true`، migration 0163) — نفس
+  نمط `allows_individual`/`allows_team` بالحرف: علم مباشر على `Service`، مش جدول تهيئة منفصل ولا
+  enum `payment_policy` (زيادة سابقة لأوانها — الإيداع/الدفع الجزئي لسه مالوش تصميم تسوية حقيقي،
+  Phase A.3 مؤجّلة). الافتراضي `true` عمدًا — صفر تغيير سلوك لأي خدمة موجودة.
+- **`OrdersService.create()`**: فحص جديد فور تحميل الخدمة (جنب فحص `allows_individual`/`allows_team`
+  بالظبط) — لو `!dto.payment_method` (كاش ضمنيًا، نفس منطق `requestedPrepayMethod`) و`!service.cashAllowed`
+  والطلب مش إعادة زيارة تحت الضمان (`original_order_id` — مجانية بالكامل دايمًا، مفيش كاش فعلي
+  يتحصّل أصلاً)، يترفض `VAL_001` وقت الإنشاء — مش بعد ما الفني يوصل ويكتشف إنه ملوش طريقة يقبض.
+- **`apps/admin`**: checkbox جديد "يسمح بالدفع كاش" في نفس فورم "تفاصيل الخدمة" الموجود
+  (`catalog/services/[id]/page.tsx`)، مش شاشة منفصلة.
+- **`packages/shared-types`**: تمديد `AdminServiceResponseDto`/`CreateServiceBody`/`UpdateServiceBody`.
+  الحقل معروض للعميل كمان (`ServiceResponseDto` في `apps/api`) — تحضيرًا لواجهة الحجز تخفي خيار
+  الكاش لو الخدمة قافلاه، بلا استدعاء تاني.
+- **اختبار حي جديد**: `orders/service-cash-allowed.spec.ts` (3/3 — كاش على خدمة `cash_allowed=false`
+  يترفض، نفس الخدمة بـ`payment_method=card` صراحة تتسجّل عادي، خدمة عادية بالافتراضي `true` لسه
+  بتقبل كاش زي ما كانت بالظبط — رجريشن صفري لكل الخدمات الموجودة).
+- **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4)، صفر إيداع/دفع
+  جزئي (Phase A.3) — التفاصيل الكاملة والترتيب المرحلي في `docs/08` §42.

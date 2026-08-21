@@ -80,6 +80,13 @@ export class Service {
   @Column({ name: 'allows_team', type: 'boolean', default: false })
   allowsTeam: boolean;
 
+  // محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1). نفس نمط
+  // allows_individual/allows_team بالحرف: علم مباشر على Service مش جدول تهيئة منفصل. الافتراضي
+  // true عمدًا — صفر تغيير سلوك لأي خدمة موجودة، والأدمن يقفلها صراحة لخدمة بعينها (شغالة/مربية
+  // لاحقًا مثلاً، Phase A.4).
+  @Column({ name: 'cash_allowed', type: 'boolean', default: true })
+  cashAllowed: boolean;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',

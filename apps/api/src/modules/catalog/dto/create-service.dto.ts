@@ -106,6 +106,12 @@ export class CreateServiceDto {
   @IsBoolean()
   allows_team?: boolean;
 
+  // محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1). false يعني الخدمة دي
+  // لازم تتقفل بكارت/InstaPay مقدّم، الكاش مرفوض صراحة وقت إنشاء الطلب (orders.service.ts).
+  @IsOptional()
+  @IsBoolean()
+  cash_allowed?: boolean;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;
