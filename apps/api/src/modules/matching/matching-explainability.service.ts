@@ -29,6 +29,17 @@ export interface TechnicianEligibilityCheck {
   labelAr: string;
 }
 
+export interface TechnicianRankScoreBreakdown {
+  /** جودة — technician_level_config.order_priority_weight بتاع مستوى الفني. */
+  priorityComponent: number;
+  /** قدرة — خصم الحِمل الحالي (سالب، already-negated). */
+  workloadPenalty: number;
+  /** عدالة — خصم "توزيع حديث" (سالب، already-negated). */
+  fairnessPenalty: number;
+  /** موثوقية (docs/08 §36.20-21، ADR-0023) — تعديل مبني على تقييم الفني، صفر لو تقييماته أقل من الحد الأدنى. */
+  reliabilityAdjustment: number;
+}
+
 export interface TechnicianRankInfo {
   /** rank_score الحقيقي (نفس صيغة findEligibleTechnicians() بالحرف) — أعلى = أولوية أكبر. */
   rankScore: number;
@@ -36,6 +47,8 @@ export interface TechnicianRankInfo {
   rank: number;
   /** إجمالي عدد المرشّحين المؤهّلين فعليًا (نفس المجمّع اللي findEligibleTechnicians() هترجّعه). */
   totalEligible: number;
+  /** تفكيك rank_score لمكوّناته الأربعة — نفس الأرقام الخام من الاستعلام، صفر حساب مكرر هنا. */
+  scoreBreakdown: TechnicianRankScoreBreakdown;
 }
 
 export interface TechnicianEligibilityExplanation {
@@ -221,7 +234,18 @@ export class MatchingExplainabilityService {
       );
       const idx = rankedCandidates.findIndex((c) => c.technician_id === technicianId);
       if (idx !== -1) {
-        rankInfo = { rankScore: Number(rankedCandidates[idx].rank_score), rank: idx + 1, totalEligible: rankedCandidates.length };
+        const row = rankedCandidates[idx];
+        rankInfo = {
+          rankScore: Number(row.rank_score),
+          rank: idx + 1,
+          totalEligible: rankedCandidates.length,
+          scoreBreakdown: {
+            priorityComponent: Number(row.priority_component),
+            workloadPenalty: Number(row.workload_penalty),
+            fairnessPenalty: Number(row.fairness_penalty),
+            reliabilityAdjustment: Number(row.reliability_adjustment),
+          },
+        };
       }
     } catch {
       rankInfo = null;

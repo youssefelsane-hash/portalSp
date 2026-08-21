@@ -685,3 +685,24 @@ BookingMode.TEAM`. `individual`/`emergency` بلا أي تغيير. نفس ال�
 تفاصيل الإثبات في `docs/08-pricing-engine-and-platform-vision.md` §36.1). **صراحة**: الإصلاح ده
 مُثبَت ومنطقي بالكامل، بس معنديش وصول لقاعدة بيانات إنتاج حقيقية أثبّت بيها إنه السبب الوحيد —
 موثّق كـGAP جزئي في §36.1.
+
+## وزن الموثوقية في `rank_score` (docs/08 §36.20-21، ADR-0023)
+
+تدقيق حي لكل أوزان سياسة المطابقة المطلوبة (جودة/قدرة/عدالة/مسافة/موثوقية) أثبت إن 4 من 5 موجودين
+وشغالين فعليًا (`order_priority_weight`/`workload_balance_weight`/`fairness_weight`/`distance_km`
+كـtiebreak حتمي بعد الترتيب، مش وزن مخلوط). **الفجوة الوحيدة كانت الموثوقية** — `average_rating`
+مالوش أي أثر على الترتيب. التفاصيل الكاملة (البدائل المرفوضة، ليه المسافة فضلت tiebreak) في
+`docs/adr/0023-matching-policy-reliability-weight.md`.
+
+- **3 إعدادات جديدة** (`matching.reliability_weight` افتراضي 0 — معطّل، `matching.reliability_baseline_rating`
+  افتراضي 4.0، `matching.reliability_min_ratings_count` افتراضي 3).
+- **الصيغة**: `reliability_adjustment = CASE WHEN total_ratings_count >= min_count THEN (average_rating - baseline) * weight ELSE 0 END`
+  — بتتضاف لـ`rank_score` بنفس أسلوب `fairness`/`workload` بالحرف. فني بصفر تقييمات (تسجيل جديد)
+  محايد تمامًا، مش معاقَب على قلة بيانات.
+- **التفسير (§36.6)**: `EligibleTechnicianRow` بقى فيها `priority_component`/`workload_penalty`/
+  `fairness_penalty`/`reliability_adjustment` — أرقام خام إضافية (صفر كسر للـresponse القديم)،
+  `MatchingExplainabilityService`/`admin-orders.controller.ts` بيمرروهم في `rank_info.score_breakdown`.
+- **اختبار حي جديد** (`matching-reliability-scoring.spec.ts`، 3/3): الإعداد معطّل = صفر أثر (رجريشن)،
+  الإعداد مفعّل = تقييم أعلى ياخد أولوية، فني جديد بصفر تقييمات محايد (مش معاقَب كإنه "تقييمه صفر").
+  اتأكد كمان زيرو رجريشن في `matching-fairness-scoring`/`matching-workload-balance`/
+  `matching.service`/`matching-explainability` (29/29).

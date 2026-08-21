@@ -818,10 +818,18 @@ export default function OrderDetailPage() {
                 )}
                 {explanation.distance_km && <p>المسافة: {Number(explanation.distance_km).toFixed(1)} كم</p>}
                 {explanation.rank_info && (
-                  <p>
-                    الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
-                    {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
-                  </p>
+                  <>
+                    <p>
+                      الترتيب بين المؤهّلين فعليًا: <span className="font-medium">{explanation.rank_info.rank}</span> من أصل{' '}
+                      {explanation.rank_info.total_eligible} (rank_score: {explanation.rank_info.rank_score.toFixed(1)})
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      جودة {explanation.rank_info.score_breakdown.priority_component.toFixed(1)} − قدرة{' '}
+                      {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
+                      {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
+                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)}
+                    </p>
+                  </>
                 )}
                 {!explanation.rank_info && (
                   <p className="text-xs text-muted-foreground">مش ضمن المجمّع المؤهّل فعليًا دلوقتي — راجع الـchecks تحت.</p>

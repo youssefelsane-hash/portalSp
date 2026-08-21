@@ -75,11 +75,20 @@ const FAIRNESS_DECLINE_WEIGHT_FALLBACK = 0.5;
 // كسر التعادل بين مرشحين متقاربين جدًا في الترتيب (docs/08 §34.2، ADR-0020 §6، بند T من رسالة
 // المالك — "avoid permanent deterministic winners"). افتراضي معطّل (0 = مفيش نطاق تعادل خالص).
 const TIE_BREAK_THRESHOLD_FALLBACK = 0;
+// docs/08 §36.20-21، ADR-0023 — وزن الموثوقية، معطّل افتراضيًا زي fairness_weight.
+const RELIABILITY_WEIGHT_FALLBACK = 0;
+const RELIABILITY_BASELINE_RATING_FALLBACK = 4.0;
+const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
   distance_km: string;
   rank_score: string;
+  // docs/08 §36.20-21، ADR-0023 — تفكيك مكوّنات rank_score للتفسير (§36.6)، صفر تأثير على الترتيب نفسه.
+  priority_component: string;
+  workload_penalty: string;
+  fairness_penalty: string;
+  reliability_adjustment: string;
 }
 
 export interface AvailableOrderRow {
@@ -195,6 +204,17 @@ export class MatchingService {
       'matching.fairness_decline_weight',
       FAIRNESS_DECLINE_WEIGHT_FALLBACK,
     );
+    // docs/08 §36.20-21، ADR-0023 — وزن الموثوقية (تقييم الفني)، معطّل افتراضيًا (0) زي fairness_weight
+    // بالظبط. فني عنده تقييمات أقل من الحد الأدنى بيتحسب محايد (صفر تأثير)، مش معاقَب على قلة بيانات.
+    const reliabilityWeight = await this.settingsService.getNumber('matching.reliability_weight', RELIABILITY_WEIGHT_FALLBACK);
+    const reliabilityBaselineRating = await this.settingsService.getNumber(
+      'matching.reliability_baseline_rating',
+      RELIABILITY_BASELINE_RATING_FALLBACK,
+    );
+    const reliabilityMinRatingsCount = await this.settingsService.getNumber(
+      'matching.reliability_min_ratings_count',
+      RELIABILITY_MIN_RATINGS_COUNT_FALLBACK,
+    );
     const candidates = await this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
@@ -203,7 +223,22 @@ export class MatchingService {
                COALESCE(tlc.order_priority_weight, 0)
                - COALESCE(workload.active_count, 0) * $14::int
                - COALESCE(fairness.recent_effective_workload, 0) * $15::numeric
-             ) AS rank_score
+               + (
+                 CASE WHEN tp.total_ratings_count >= $22::int
+                   THEN (tp.average_rating - $21::numeric) * $20::numeric
+                   ELSE 0
+                 END
+               )
+             ) AS rank_score,
+             COALESCE(tlc.order_priority_weight, 0) AS priority_component,
+             COALESCE(workload.active_count, 0) * $14::int AS workload_penalty,
+             COALESCE(fairness.recent_effective_workload, 0) * $15::numeric AS fairness_penalty,
+             (
+               CASE WHEN tp.total_ratings_count >= $22::int
+                 THEN (tp.average_rating - $21::numeric) * $20::numeric
+                 ELSE 0
+               END
+             ) AS reliability_adjustment
       FROM technician_profiles tp
       -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة (ts) OR فئة
       -- الخدمة معتمدة (technician_categories، شرط الـEXISTS تحت في WHERE)" — فني معتمد بمستوى
@@ -320,6 +355,9 @@ export class MatchingService {
         fairnessDeclineWeight,
         order.totalAmountCents,
         order.bookingMode === BookingMode.TEAM,
+        reliabilityWeight,
+        reliabilityBaselineRating,
+        reliabilityMinRatingsCount,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);
