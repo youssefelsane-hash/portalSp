@@ -14,6 +14,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { AdminAuditController } from './admin-audit.controller';
+import { AdminCustomer360Service } from './admin-customer-360.service';
 import { AdminCustomersController } from './admin-customers.controller';
 import { AdminCustomersService } from './admin-customers.service';
 import { AdminEmployeesController } from './admin-employees.controller';
@@ -67,7 +68,7 @@ import { PermissionsService } from './permissions.service';
     AdminEmployeesController,
     AdminCustomersController,
   ],
-  providers: [AdminReportsService, PermissionsService, AdminEmployeesService, AdminCustomersService],
+  providers: [AdminReportsService, PermissionsService, AdminEmployeesService, AdminCustomersService, AdminCustomer360Service],
   exports: [PermissionsService],
 })
 export class AdminModule {}
