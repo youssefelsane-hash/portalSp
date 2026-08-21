@@ -52,6 +52,9 @@ export interface ServiceResponseDto {
   allows_emergency: boolean;
   allows_individual: boolean;
   allows_team: boolean;
+  cash_allowed: boolean;
+  deposit_required: boolean;
+  deposit_percentage: number | null;
   min_technician_level: string;
 }
 
@@ -75,6 +78,9 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     allows_emergency: service.allowsEmergency,
     allows_individual: service.allowsIndividual,
     allows_team: service.allowsTeam,
+    cash_allowed: service.cashAllowed,
+    deposit_required: service.depositRequired,
+    deposit_percentage: service.depositPercentage !== null ? Number(service.depositPercentage) : null,
     min_technician_level: service.minTechnicianLevel,
   };
 }

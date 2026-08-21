@@ -179,6 +179,11 @@ export class AdminCatalogService {
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الـ slug ده مستخدم قبل كده', HttpStatus.CONFLICT);
     }
+    // سياسة إيداع (ADR-0027) — deposit_percentage إجباري لو deposit_required=true، نفس القيد
+    // المفروض على الـDB (migration 0164 CHECK) بس بترجع رسالة واضحة بدل خطأ DB خام.
+    if (dto.deposit_required && dto.deposit_percentage === undefined) {
+      throw new ApiException(ErrorCode.VAL_001, 'نسبة الإيداع مطلوبة لو الخدمة محتاجة إيداع', HttpStatus.BAD_REQUEST);
+    }
 
     const service = this.services.create({
       categoryId: dto.category_id,
@@ -201,6 +206,9 @@ export class AdminCatalogService {
       allowsEmergency: dto.allows_emergency ?? false,
       allowsIndividual: dto.allows_individual ?? true,
       allowsTeam: dto.allows_team ?? false,
+      cashAllowed: dto.cash_allowed ?? true,
+      depositRequired: dto.deposit_required ?? false,
+      depositPercentage: dto.deposit_percentage !== undefined ? String(dto.deposit_percentage) : null,
       minTechnicianLevel: dto.min_technician_level,
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
@@ -248,6 +256,18 @@ export class AdminCatalogService {
     if (dto.allows_emergency !== undefined) service.allowsEmergency = dto.allows_emergency;
     if (dto.allows_individual !== undefined) service.allowsIndividual = dto.allows_individual;
     if (dto.allows_team !== undefined) service.allowsTeam = dto.allows_team;
+    if (dto.cash_allowed !== undefined) service.cashAllowed = dto.cash_allowed;
+    // سياسة إيداع (ADR-0027) — لو الأدمن قفل deposit_required صراحة، نمسح النسبة القديمة (مفيش
+    // معنى لنسبة إيداع محفوظة لخدمة مبقتش محتاجة إيداع). نفس القيد على الإنشاء: مينفعش
+    // deposit_required=true بدون نسبة، سواء الجاية دلوقتي أو المحفوظة أصلاً.
+    if (dto.deposit_percentage !== undefined) service.depositPercentage = String(dto.deposit_percentage);
+    if (dto.deposit_required !== undefined) {
+      service.depositRequired = dto.deposit_required;
+      if (!dto.deposit_required && dto.deposit_percentage === undefined) service.depositPercentage = null;
+    }
+    if (service.depositRequired && service.depositPercentage === null) {
+      throw new ApiException(ErrorCode.VAL_001, 'نسبة الإيداع مطلوبة لو الخدمة محتاجة إيداع', HttpStatus.BAD_REQUEST);
+    }
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

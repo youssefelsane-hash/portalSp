@@ -60,6 +60,9 @@ export interface AdminServiceResponseDto {
   allows_emergency: boolean;
   allows_individual: boolean;
   allows_team: boolean;
+  cash_allowed: boolean;
+  deposit_required: boolean;
+  deposit_percentage: number | null;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -90,6 +93,9 @@ export interface CreateServiceBody {
   allows_emergency?: boolean;
   allows_individual?: boolean;
   allows_team?: boolean;
+  cash_allowed?: boolean;
+  deposit_required?: boolean;
+  deposit_percentage?: number;
   min_technician_level?: string;
   commission_percentage?: number;
   display_order?: number;

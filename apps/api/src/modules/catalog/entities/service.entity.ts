@@ -80,6 +80,23 @@ export class Service {
   @Column({ name: 'allows_team', type: 'boolean', default: false })
   allowsTeam: boolean;
 
+  // محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1). نفس نمط
+  // allows_individual/allows_team بالحرف: علم مباشر على Service مش جدول تهيئة منفصل. الافتراضي
+  // true عمدًا — صفر تغيير سلوك لأي خدمة موجودة، والأدمن يقفلها صراحة لخدمة بعينها (شغالة/مربية
+  // لاحقًا مثلاً، Phase A.4).
+  @Column({ name: 'cash_allowed', type: 'boolean', default: true })
+  cashAllowed: boolean;
+
+  // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نفس نمط cash_allowed بالحرف. الافتراضي false
+  // متعمّد (صفر تغيير سلوك). depositPercentage محصورة 1-99 على مستوى الـDB (migration 0164) ولازم
+  // تكون موجودة لو depositRequired=true — القيد ده مفروض بالـCHECK constraint وبالتحقق في
+  // AdminCatalogService.
+  @Column({ name: 'deposit_required', type: 'boolean', default: false })
+  depositRequired: boolean;
+
+  @Column({ name: 'deposit_percentage', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  depositPercentage: string | null;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',

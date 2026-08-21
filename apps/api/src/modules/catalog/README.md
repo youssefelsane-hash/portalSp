@@ -227,3 +227,63 @@
   للمستوى من غير فئة، رجريشن كامل لخدمة من غير أي صف فئة، فئة بلا صف نشط = مضاعف 1)،
   `../technicians/technician-pricing-tier-assignment.spec.ts` (3/3 — استقلال `changePricingTier()`/
   `changeLevel()` في الاتجاهين + 409 لنفس الفئة).
+
+## `services.cash_allowed` — أول قدرة دفع على محرك الحجز الموحّد (docs/08 §42 Phase A.1، ADR-0026)
+
+طلب مالك استراتيجي كبير (docs/08 §42): توحيد حجز الخدمة العادية/الشغالة/المتكرر في محرك حجز واحد
+قابل للتهيئة عبر أعلام قدرة على `Service`، بدل مسار منفصل لكل نوع خدمة غريب. الشريحة الأولى
+(Phase A.1) اختارت أصغر تغيير حقيقي وآمن: تدقيق حي أثبت صفر `cash_allowed`/`deposit_required` في
+السكيما كلها — أي خدمة بتقبل كاش افتراضيًا بلا أي فحص، والاستثناء الوحيد (حجز الشغالة) بيحقق "مفيش
+كاش" بمساره المنفصل بالكامل مش بسياسة على المسار المشترك. التفاصيل والبدائل المرفوضة في
+`docs/adr/0026-service-capability-model-payment-policy.md`.
+
+- **`services.cash_allowed` عمود جديد** (`boolean NOT NULL DEFAULT true`، migration 0163) — نفس
+  نمط `allows_individual`/`allows_team` بالحرف: علم مباشر على `Service`، مش جدول تهيئة منفصل ولا
+  enum `payment_policy` (زيادة سابقة لأوانها — الإيداع/الدفع الجزئي لسه مالوش تصميم تسوية حقيقي،
+  Phase A.3 مؤجّلة). الافتراضي `true` عمدًا — صفر تغيير سلوك لأي خدمة موجودة.
+- **`OrdersService.create()`**: فحص جديد فور تحميل الخدمة (جنب فحص `allows_individual`/`allows_team`
+  بالظبط) — لو `!dto.payment_method` (كاش ضمنيًا، نفس منطق `requestedPrepayMethod`) و`!service.cashAllowed`
+  والطلب مش إعادة زيارة تحت الضمان (`original_order_id` — مجانية بالكامل دايمًا، مفيش كاش فعلي
+  يتحصّل أصلاً)، يترفض `VAL_001` وقت الإنشاء — مش بعد ما الفني يوصل ويكتشف إنه ملوش طريقة يقبض.
+- **`apps/admin`**: checkbox جديد "يسمح بالدفع كاش" في نفس فورم "تفاصيل الخدمة" الموجود
+  (`catalog/services/[id]/page.tsx`)، مش شاشة منفصلة.
+- **`packages/shared-types`**: تمديد `AdminServiceResponseDto`/`CreateServiceBody`/`UpdateServiceBody`.
+  الحقل معروض للعميل كمان (`ServiceResponseDto` في `apps/api`) — تحضيرًا لواجهة الحجز تخفي خيار
+  الكاش لو الخدمة قافلاه، بلا استدعاء تاني.
+- **اختبار حي جديد**: `orders/service-cash-allowed.spec.ts` (3/3 — كاش على خدمة `cash_allowed=false`
+  يترفض، نفس الخدمة بـ`payment_method=card` صراحة تتسجّل عادي، خدمة عادية بالافتراضي `true` لسه
+  بتقبل كاش زي ما كانت بالظبط — رجريشن صفري لكل الخدمات الموجودة).
+- **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4)، صفر إيداع/دفع
+  جزئي (Phase A.3، خلصت تحت) — التفاصيل الكاملة والترتيب المرحلي في `docs/08` §42.
+
+## `services.deposit_required`/`deposit_percentage` — سياسة إيداع (docs/08 §42 Phase A.3، ADR-0027)
+
+تصميم "دفعة مقدّمة + باقي لاحقًا" اللي Phase A.1 أجّلته عمدًا (مفيش تصميم تسوية كافٍ وقتها). الحل
+النهائي: **صفر آلية تحصيل جديدة** — الإيداع هو ببساطة أول دفعة أقل من الإجمالي، والباقي (الدلتا)
+بيتحصّل تلقائيًا عبر نفس آلية `AWAITING_PAYMENT`/`PaymentsService.settleAlreadyPaidOrder()` الموجودة
+بالفعل لتحصيل البند الإضافي (ADR-0015). التفاصيل والبدائل المرفوضة في
+`docs/adr/0027-service-deposit-policy.md`.
+
+- **`services.deposit_required`** (`boolean NOT NULL DEFAULT false`) + **`services.deposit_percentage`**
+  (`numeric(5,2)` nullable، محصور 1-99 بـCHECK constraint، migration 0164) — نفس نمط `cash_allowed`
+  بالحرف: علمين مباشرين على `Service`، مش enum واحد (الاتنين مستقلين حقيقة — خدمة ممكن تمنع الكاش
+  بالكامل من غير إيداع، أو العكس).
+- **`orders.deposit_amount_cents`** (`integer` nullable) — snapshot بالجنيه محسوب وقت إنشاء الطلب
+  (بعد كل الخصومات)، مش مربوط ديناميكيًا بنسبة الخدمة بعدين (نفس فلسفة `standardDataId` snapshot).
+- **`OrdersService.create()`**: خدمة `deposit_required=true` لازم دفع مقدّم إلكتروني إجباري (كاش
+  مينفعش يتقسّم فعليًا) — نفس فحص `cash_allowed` بالحرف بس مستقل عنه. `previewPrice()` بترجّع نفس
+  التفصيل (`deposit_amount_cents`/`due_now_cents`/`remaining_amount_cents`) قبل التأكيد.
+- **`PaymentsService.amountOwedNow()` — السطر الحرج الوحيد اللي الميزة كلها محتاجاه**: الحالة
+  الافتراضية غير-المدفوعة بترجع `order.depositAmountCents ?? order.totalAmountCents` بدل
+  `totalAmountCents` دايمًا. أول دفعة (وقت `PENDING_PAYMENT`) بتحصّل الإيداع بس؛ الباقي بيتحصّل
+  تلقائيًا لما الطلب يوصل `WORK_COMPLETED` عبر نفس مسار الدلتا — **وممكن يتحصّل كاش** حتى لو
+  الإيداع كان إلكتروني إجباري (الباقي بعد الشغل يدًا بيد زي أي دلتا تانية).
+- **`apps/admin`**: checkbox "محتاجة إيداع مقدّم" + حقل "نسبة الإيداع %" في نفس فورم "تفاصيل
+  الخدمة" (جنب `cash_allowed`)، مش شاشة منفصلة.
+- **`packages/shared-types`**: تمديد `AdminServiceResponseDto`/`CreateServiceBody`/`UpdateServiceBody`.
+- **اختبار حي جديد**: `orders/service-deposit-policy.e2e.spec.ts` — كاش على خدمة `deposit_required=true`
+  يترفض، كارت يتسجّل `PENDING_PAYMENT` بمبلغ إيداع محسوب صح (30% من الإجمالي)، `amountOwedNow()`
+  ترجع مبلغ الإيداع قبل أي دفع والدلتا الصحيحة بعد ما الإيداع يتحصّل، `previewPrice()` بتطابق
+  `create()` بالحرف، ورجريشن لخدمة `deposit_required=false` (الافتراضي).
+- **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4) أو توزيع أرباح
+  الطاقم للشركات (Phase B.3).

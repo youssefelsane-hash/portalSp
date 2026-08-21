@@ -370,6 +370,7 @@ export default function ServiceDetailPage() {
     const basePrice = form.get('base_price') as string;
     const inspectionFee = form.get('inspection_fee') as string;
     const commission = form.get('commission_percentage') as string;
+    const depositPercentage = form.get('deposit_percentage') as string;
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
     const minTechnicianLevel = form.get('min_technician_level') as string;
@@ -395,6 +396,9 @@ export default function ServiceDetailPage() {
       allows_emergency: form.get('allows_emergency') === 'on',
       allows_individual: form.get('allows_individual') === 'on',
       allows_team: form.get('allows_team') === 'on',
+      cash_allowed: form.get('cash_allowed') === 'on',
+      deposit_required: form.get('deposit_required') === 'on',
+      deposit_percentage: depositPercentage ? Number(depositPercentage) : undefined,
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
@@ -565,6 +569,20 @@ export default function ServiceDetailPage() {
                 />
               </div>
               <div className="flex flex-col gap-1">
+                {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نسبة الإيداع من الإجمالي،
+                    فعّالة بس لو checkbox "محتاجة إيداع" تحت متفعّل. */}
+                <Label htmlFor="svc_deposit_pct">نسبة الإيداع %</Label>
+                <Input
+                  id="svc_deposit_pct"
+                  name="deposit_percentage"
+                  type="number"
+                  min="1"
+                  max="99"
+                  step="0.01"
+                  defaultValue={service.deposit_percentage ?? ''}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
                 <Label htmlFor="svc_min_level">أقل مستوى فني مسموح</Label>
                 <SelectNative id="svc_min_level" name="min_technician_level" defaultValue={service.min_technician_level}>
                   {Object.entries(TECHNICIAN_LEVEL_LABELS).map(([value, label]) => (
@@ -604,6 +622,16 @@ export default function ServiceDetailPage() {
               <label className="flex items-center gap-2">
                 <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
                 يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
+              </label>
+              {/* محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1) */}
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="cash_allowed" defaultChecked={service.cash_allowed} />
+                يسمح بالدفع كاش (لو اتلغى، لازم كارت/InstaPay مقدّم)
+              </label>
+              {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) */}
+              <label className="flex items-center gap-2">
+                <input type="checkbox" name="deposit_required" defaultChecked={service.deposit_required} />
+                محتاجة إيداع مقدّم (النسبة % فوق، والباقي يتحصّل بعد الشغل)
               </label>
             </div>
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
