@@ -3,7 +3,6 @@ import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
 import '../orders/create_order_screen.dart';
-import 'company_marketplace_screen.dart';
 import 'technician_marketplace_screen.dart';
 
 // اختيار الفني قبل الحجز (docs/08 §1.5، مُعاد تصميمها Script 6 Part 6-7) — كانت الشاشة دي
@@ -14,13 +13,6 @@ import 'technician_marketplace_screen.dart';
 // بتتحمّل أو تتعرض خالص لحد ما العميل يختار "يدوي" صراحة.
 class TechnicianSelectionScreen extends StatefulWidget {
   final CatalogService service;
-
-  // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36): اعتماد (BookingMode.team) كان بيتخطى
-  // الشاشة دي بالكامل ويقفز لـCreateOrderScreen على طول، عكس فردي. دلوقتي نفس الشاشة بتُستخدم
-  // للاتنين — "اختاروا لي الأنسب" يبقى تفويض تلقائي للمطابقة (فني أو شركة حسب الوضع)، و"اختار
-  // بنفسك" يفتح TechnicianMarketplaceScreen لفردي أو CompanyMarketplaceScreen لاعتماد. افتراضي
-  // individual عشان كل استدعاءات الشاشة دي القديمة (قبل الإصلاح ده) تفضل شغالة بلا أي تعديل.
-  final BookingMode bookingMode;
 
   // سياسة إلغاء الفني (docs/10) — لو اتبعت، الشاشة بتستخدمها بدل التنقل لـCreateOrderScreen
   // (نفس الشاشة، غرض مختلف: اختيار فني بديل لطلب موجود بالفعل، مش إنشاء طلب جديد). null يعني
@@ -62,7 +54,6 @@ class TechnicianSelectionScreen extends StatefulWidget {
     this.fieldValues,
     this.requestedAt,
     this.requestedAtRangeEnd,
-    this.bookingMode = BookingMode.individual,
   });
 
   @override
@@ -145,17 +136,6 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     );
   }
 
-  // اعتماد (docs/08 §36 — إصلاح بَقّة) — مكافئ _openMarketplace فوق بالحرف بس لاختيار شركة/فريق.
-  void _openCompanyMarketplace() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CompanyMarketplaceScreen(
-          onSelect: (id) => _confirmSelection(requestedTechnicianCompanyId: id),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final address = _selectedAddress;
@@ -221,9 +201,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       icon: Icons.people_outline,
                       title: 'اختار الفريق بنفسك',
                       subtitle: widget.bookingMode == BookingMode.team
-                          ? 'شوف قايمة الشركات/الفرق المتاحة وقارن بينهم قبل ما تختار'
+                          ? 'شوف قايمة الفنيين المؤهّلين والشركات المتاحة وقارن بينهم قبل ما تختار'
                           : 'شوف قايمة الفنيين المتاحين وقارن بينهم قبل ما تختار',
-                      onTap: widget.bookingMode == BookingMode.team ? _openCompanyMarketplace : _openMarketplace,
+                      onTap: _openMarketplace,
                     ),
                     const Spacer(flex: 2),
                   ],
