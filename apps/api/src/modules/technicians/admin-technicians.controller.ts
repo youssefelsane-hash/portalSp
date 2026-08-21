@@ -70,6 +70,7 @@ export class AdminTechniciansController {
       zoneId: query.zone_id,
       verificationStatus: query.verification_status,
       level: query.level,
+      q: query.q,
       page: query.page ?? 1,
       perPage: query.per_page ?? 20,
     });

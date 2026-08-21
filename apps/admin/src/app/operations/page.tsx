@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type {
   AdminCategoryOpsRowDto,
@@ -12,9 +12,11 @@ import type {
   DispatchDeliveryResponseDto,
   ExceptionCenterResponseDto,
   OperationsOverview,
+  TechnicianLevel,
+  TechnicianVerificationStatus,
   WorkloadForecastRowDto,
 } from '@baytak/shared-types';
-import { AlertTriangle, Bell, ClipboardList, Compass, Radio, Send, Users } from 'lucide-react';
+import { AlertTriangle, Bell, ChevronDown, ChevronLeft, ClipboardList, Compass, Radio, Send, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -23,12 +25,19 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { SelectNative } from '@/components/ui/select-native';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { Pagination } from '@/components/pagination';
-import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, CAPACITY_TIER_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
+import {
+  VERIFICATION_STATUS_LABELS,
+  LEVEL_LABELS,
+  ALL_LEVELS,
+  CAPACITY_TIER_LABELS,
+  capacityTierBadgeClass,
+} from '@/lib/technician-labels';
 
 function KpiCard({
   title,
@@ -321,6 +330,13 @@ function WorkforceMatrixSection({
   const [cityId, setCityId] = useState<string>('');
   const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zoneId, setZoneId] = useState<string>('');
+  // بحث/فلترة شاملة (docs/08 §36.12) — الاتنين قابلين للجمع مع فلاتر المدينة/النطاق/الفئة فوق،
+  // مش بديل ليهم. q مُعاد استخدامها من ILIKE بسيط مضاف حديثًا في AdminTechnicianCategoryOpsService
+  // (اسم/كود الفني)، صفر محرك بحث جديد.
+  const [qInput, setQInput] = useState('');
+  const [q, setQ] = useState('');
+  const [verificationStatus, setVerificationStatus] = useState<TechnicianVerificationStatus | ''>('');
+  const [level, setLevel] = useState<TechnicianLevel | ''>('');
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<AdminCategoryOpsRowDto[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -342,9 +358,15 @@ function WorkforceMatrixSection({
       .catch(() => undefined);
   }, [authedFetch, cityId]);
 
+  // ديبونس بسيط لمربّع البحث — نداء واحد بعد ما الأدمن يوقف الكتابة، مش نداء لكل حرف.
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(qInput.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [qInput]);
+
   useEffect(() => {
     setPage(1);
-  }, [categoryId, zoneId]);
+  }, [categoryId, zoneId, q, verificationStatus, level]);
 
   useEffect(() => {
     if (!categoryId) {
@@ -356,6 +378,9 @@ function WorkforceMatrixSection({
     setError(null);
     const params = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(MATRIX_PER_PAGE) });
     if (zoneId) params.set('zone_id', zoneId);
+    if (q) params.set('q', q);
+    if (verificationStatus) params.set('verification_status', verificationStatus);
+    if (level) params.set('level', level);
     authedFetchPaginated<AdminCategoryOpsRowDto>(`/admin/technicians/by-category?${params.toString()}`)
       .then(({ items: rows, meta }) => {
         setItems(rows);
@@ -363,7 +388,7 @@ function WorkforceMatrixSection({
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مصفوفة القوى العاملة'))
       .finally(() => setLoading(false));
-  }, [authedFetchPaginated, categoryId, zoneId, page]);
+  }, [authedFetchPaginated, categoryId, zoneId, q, verificationStatus, level, page]);
 
   const totalPages = Math.max(1, Math.ceil(total / MATRIX_PER_PAGE));
 
@@ -400,6 +425,54 @@ function WorkforceMatrixSection({
             {zones?.map((z) => (
               <option key={z.id} value={z.id}>
                 {z.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="matrix_q" className="text-sm text-muted-foreground">
+            بحث
+          </Label>
+          <Input
+            id="matrix_q"
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+            placeholder="اسم الفني أو الكود"
+            className="max-w-xs"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="matrix_verification" className="text-sm text-muted-foreground">
+            الاعتماد
+          </Label>
+          <SelectNative
+            id="matrix_verification"
+            value={verificationStatus}
+            onChange={(e) => setVerificationStatus(e.target.value as TechnicianVerificationStatus | '')}
+            className="max-w-xs"
+          >
+            <option value="">كل حالات الاعتماد</option>
+            {(Object.keys(VERIFICATION_STATUS_LABELS) as TechnicianVerificationStatus[]).map((s) => (
+              <option key={s} value={s}>
+                {VERIFICATION_STATUS_LABELS[s]}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="matrix_level" className="text-sm text-muted-foreground">
+            المستوى
+          </Label>
+          <SelectNative
+            id="matrix_level"
+            value={level}
+            onChange={(e) => setLevel(e.target.value as TechnicianLevel | '')}
+            className="max-w-xs"
+          >
+            <option value="">كل المستويات</option>
+            {ALL_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {LEVEL_LABELS[l]}
               </option>
             ))}
           </SelectNative>
@@ -868,6 +941,51 @@ function coverageStatusBadgeClass(status: string): string {
   return 'border-success/40 bg-success/10 text-success';
 }
 
+// درج قابل للتوسيع (docs/08 §36.12) — بيفتح تحت صف "ذكاء التغطية" ويعرض قايمة الفنيين الفعليين
+// وراء الأرقام المجمّعة (العرض) لنفس زوج (منطقة، فئة)، بإعادة استخدام endpoint مصفوفة القوى
+// العاملة (§36.3، AdminTechnicianCategoryOpsService) بنفس الفلاتر — صفر استعلام جديد.
+function CoverageRowDrawer({
+  categoryId,
+  zoneId,
+  authedFetch,
+}: {
+  categoryId: string;
+  zoneId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+}) {
+  const [items, setItems] = useState<AdminCategoryOpsRowDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ category_id: categoryId, zone_id: zoneId, per_page: '10' });
+    authedFetch<{ items: AdminCategoryOpsRowDto[]; meta: { total: number } }>(`/admin/technicians/by-category?${params.toString()}`)
+      .then(({ items: rows }) => setItems(rows))
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الفنيين'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (error) return <p className="p-3 text-xs text-destructive">{error}</p>;
+  if (!items) return <p className="p-3 text-xs text-muted-foreground">بيحمّل الفنيين...</p>;
+  if (items.length === 0) return <p className="p-3 text-xs text-muted-foreground">مفيش فنيين مسجّلين فعليًا للزوج ده.</p>;
+
+  return (
+    <ul className="flex flex-col gap-1.5 p-3">
+      {items.map((t) => (
+        <li key={t.id} className="flex flex-wrap items-center gap-2 text-xs">
+          <Link href={`/technicians/${t.id}`} className="font-medium hover:underline">
+            {t.full_name}
+          </Link>
+          <span className="text-muted-foreground">{t.technician_code}</span>
+          <Badge variant="outline" className={capacityTierBadgeClass(t.capacity_tier_today)}>
+            {CAPACITY_TIER_LABELS[t.capacity_tier_today]}
+          </Badge>
+          <span className={t.online ? 'text-success' : 'text-muted-foreground'}>{t.online ? 'أونلاين' : 'أوفلاين'}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ذكاء تغطية القوى العاملة — فئة+منطقة (docs/08 §36.10). صف لكل زوج (منطقة، فئة) بيجمع العرض
 // (فنيين LIGHT/MEANINGFUL متاحين) والطلب (طلبات لسه بتدوّر) — صفر أزواج مصفّاة، حتى زوج بصفر فني
 // ولسه فيه طلبات بتدوّر (أخطر حالة) بيظهر. الفئة اختيارية هنا (بعكس §36.3/§36.4) — الهدف مسح شامل.
@@ -886,6 +1004,8 @@ function CoverageIntelligenceSection({
   const [items, setItems] = useState<CoverageRowDto[] | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  // درج قابل للتوسيع (docs/08 §36.12) — صف واحد مفتوح في نفس اللحظة، بمفتاح "zone_id-category_id".
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -979,6 +1099,7 @@ function CoverageIntelligenceSection({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>المنطقة</TableHead>
                 <TableHead>الفئة</TableHead>
                 <TableHead>فنيين متاحين اليوم</TableHead>
@@ -988,25 +1109,48 @@ function CoverageIntelligenceSection({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((row) => (
-                <TableRow key={`${row.zone_id}-${row.category_id}`}>
-                  <TableCell className="font-medium">{row.zone_name}</TableCell>
-                  <TableCell>{row.category_name}</TableCell>
-                  <TableCell>
-                    {row.technicians_light + row.technicians_meaningful}
-                    <span className="ms-1 text-xs text-muted-foreground">
-                      (خفيف {row.technicians_light} · متوسط {row.technicians_meaningful})
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{row.technicians_total}</TableCell>
-                  <TableCell>{row.dispatch_pending_count}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={coverageStatusBadgeClass(row.coverage_status)}>
-                      {COVERAGE_STATUS_LABELS[row.coverage_status] ?? row.coverage_status}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {items.map((row) => {
+                const key = `${row.zone_id}-${row.category_id}`;
+                const isExpanded = expandedKey === key;
+                return (
+                  <Fragment key={key}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-accent/50"
+                      onClick={() => setExpandedKey(isExpanded ? null : key)}
+                    >
+                      <TableCell>
+                        {isExpanded ? (
+                          <ChevronDown className="size-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronLeft className="size-4 text-muted-foreground" />
+                        )}
+                      </TableCell>
+                      <TableCell className="font-medium">{row.zone_name}</TableCell>
+                      <TableCell>{row.category_name}</TableCell>
+                      <TableCell>
+                        {row.technicians_light + row.technicians_meaningful}
+                        <span className="ms-1 text-xs text-muted-foreground">
+                          (خفيف {row.technicians_light} · متوسط {row.technicians_meaningful})
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{row.technicians_total}</TableCell>
+                      <TableCell>{row.dispatch_pending_count}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={coverageStatusBadgeClass(row.coverage_status)}>
+                          {COVERAGE_STATUS_LABELS[row.coverage_status] ?? row.coverage_status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="bg-accent/20 p-0">
+                          <CoverageRowDrawer categoryId={row.category_id} zoneId={row.zone_id} authedFetch={authedFetch} />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
             </TableBody>
           </Table>
           <Pagination page={page} totalPages={totalPages} total={total} itemLabel="زوج منطقة/فئة" onPageChange={setPage} />

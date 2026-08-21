@@ -274,6 +274,21 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     expect(emptyZone.meta.total).toBe(0);
   });
 
+  it('list() — فلتر q (docs/08 §36.12، بحث/فلترة شاملة) بيدوّر بالاسم أو كود الفني، case-insensitive', async () => {
+    const byName = await service.list({ categoryId: ids.category, q: 'online', page: 1, perPage: 50 });
+    expect(byName.items.some((r) => r.id === ids.techOnline)).toBe(true);
+    expect(byName.items.some((r) => r.id === ids.techBlocked)).toBe(false);
+
+    const byNameUpperCase = await service.list({ categoryId: ids.category, q: 'ONLINE', page: 1, perPage: 50 });
+    expect(byNameUpperCase.meta.total).toBe(byName.meta.total);
+
+    const byCode = await service.list({ categoryId: ids.category, q: `TCOPSonline`, page: 1, perPage: 50 });
+    expect(byCode.items.some((r) => r.id === ids.techOnline)).toBe(true);
+
+    const noMatch = await service.list({ categoryId: ids.category, q: 'مفيش-فني-بالاسم-ده', page: 1, perPage: 50 });
+    expect(noMatch.meta.total).toBe(0);
+  });
+
   it('list() — ترقيم صفحات حقيقي (page/perPage) بيحترم LIMIT/OFFSET والعدد الكلي', async () => {
     const page1 = await service.list({ categoryId: ids.category, page: 1, perPage: 2 });
     expect(page1.items.length).toBe(2);
