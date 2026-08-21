@@ -5804,3 +5804,32 @@ OTP/شات/دفع/تسعير، صفر مسار تجنيد فريق فيها). ب
 
 **لسه فاضل من §36 الجزء ج**: §36.18 (`technician-app` UI)، §36.19 (`apps/admin` رؤية/تحكم +
 إشعارات + اختبارات كاملة).
+
+## §39. بَقّتين حقيقيتين اتصلحوا — قائد طلب "اعتماد" مش شايف كارت التجنيد ومرفوض إلغاؤه بنفسه (بلاغ مالك 2026-08-21، اختبار فعلي لتطبيق الفني) — ✅ خلص
+
+المالك اختبر الفلو الفعلي لطلب `booking_mode=team` على تطبيق الفني الحقيقي، ولقى بَقّتين
+منفصلتين تمامًا (اتفحص الكود/الداتابيز قبل أي تعديل، حسب طلبه بالحرف):
+
+1. **كارت "طاقم الطلب" بلا زرار تجنيد**: `apps/technician-app` — `OrderExecutionScreen.initState()`
+   كانت بتحط `_order = widget.initialOrder` من غير fetch كامل، و`initialOrder` من أي فعل تنفيذي
+   (accept/depart/arrive/.../getActive) بيرجع `toDto()` القاعدية مش `toDtoWithTeamInfo()` (اللي
+   بتحسب `crew_status` — موجودة بس في `getOne()`/`listTeamAssigned()`). الإصلاح: `_refreshTeamInfoIfApplicable()`
+   جديدة في `initState()` بتنادي `_refreshFromServer()` الموجودة أصلاً (`getOne()`) لو
+   `bookingMode=='team'`. **صفر نظام تجنيد جديد** — نفس `RecruitTeamScreen`/endpoints التجنيد
+   الموجودة. تفاصيل كاملة: `apps/technician-app/README.md`.
+2. **رفض إلغاء القائد نفسه**: `apps/api` — `orders.service.ts` كانت بتخلط بين `team_role` (رتبة
+   الفني الشخصية في شركته/فريقه **الدائم**، `technician_companies`) وقيادته الفعلية **لهذا الطلب
+   بالذات** (`orders.technician_id`، §35/ADR-0021). `findOwnedByTechnicianOrThrow()` أصلاً بتثبت
+   القيادة قبل ما نوصل للفحص، فالفحص الإضافي كان بيرفض قائد حقيقي رتبته الشخصية "عادي" في شركة
+   منفصلة تمامًا — قرار مالوش علاقة بصلاحيته هنا. الإصلاح: حذف `canSelfCancelTeamOrder()` +
+   `TEAM_SELF_CANCEL_ALLOWED_ROLES` بالكامل من `getTechnicianCancellationPolicy()`/`technicianCancel()`
+   (dead code اتشال، `cancellation.team_workers_can_self_cancel` بقى orphan غير ضار — صفر UI/اختبار
+   كان بيستخدمه أصلاً). تفاصيل كاملة: `apps/api/src/modules/orders/README.md` § "صلاحيات
+   الفريق/الشركة".
+
+**التحقق**: `tsc --noEmit`/`nest build` نضاف، `flutter analyze` صفر تحذيرات جديدة. اختبار حي جديد
+`technician-team-order-leader-cancel.spec.ts` (قائد برتبة شركة `worker` منفصلة — `can_cancel: true`
++ إلغاء فعلي ناجح، ضد Postgres حقيقي). اختبارات مركّزة موجودة (`orders-cancel-prepaid-refund`،
+`admin-crew-management`، `order-team-recruiting`، `s22-cross-operation-concurrency`،
+`technician-active-order-recovery` — 47 اختبار) كلها لسه نضيفة، صفر regression. مفيش أي endpoint/
+منطق تجنيد جديد — الإصلاح بالكامل تصحيح جذر السبب، حسب طلب المالك بالحرف.

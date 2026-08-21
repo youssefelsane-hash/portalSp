@@ -23,7 +23,6 @@ import { WalletsService } from '../payments/wallets.service';
 import { SettingsService } from '../settings/settings.service';
 import { ComplaintCategory } from '../support/entities/complaint.entity';
 import { SupportService } from '../support/support.service';
-import { TechnicianTeamRole } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
@@ -58,14 +57,6 @@ const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
 // سياسة إلغاء الفني (docs/10) — fallback بس، المصدر الحقيقي إعدادات cancellation.* (migration 0070).
 const TECHNICIAN_CANCEL_WINDOW_MINUTES_FALLBACK = 10;
 const TECHNICIAN_CANCEL_MIN_MINUTES_BEFORE_SCHEDULED_FALLBACK = 60;
-// أدوار الفريق اللي تقدر تلغي طلب "اعتماد" (فريق) بنفسها من غير إذن — عضو عادي (worker) لازم
-// يعدّي من مديره/المالك، إلا لو cancellation.team_workers_can_self_cancel مفعّل.
-const TEAM_SELF_CANCEL_ALLOWED_ROLES = new Set<TechnicianTeamRole>([
-  TechnicianTeamRole.INDEPENDENT,
-  TechnicianTeamRole.OWNER,
-  TechnicianTeamRole.MANAGER,
-]);
-
 // إعادة الجدولة (docs/08 §22 بند 9-12) متاحة بس قبل ما الفني يبدأ يتحرّك فعليًا — بعد
 // technician_on_way الموعد بقى واقعي (الفني في الطريق)، تغييره في اللحظة دي مش "إعادة جدولة" لطلب
 // مستقبلي، ده تصادم مع رحلة شغالة فعلاً.
@@ -1141,12 +1132,6 @@ export class OrdersService {
     return !!row;
   }
 
-  /** هل عضو الفريق ده مسموحله يلغي طلب "اعتماد" (فريق) بنفسه — مالك/مدير دايمًا، عضو عادي بس لو إعداد صريح مفعّل. */
-  private async canSelfCancelTeamOrder(teamRole: TechnicianTeamRole): Promise<boolean> {
-    if (TEAM_SELF_CANCEL_ALLOWED_ROLES.has(teamRole)) return true;
-    return this.settingsService.getBoolean('cancellation.team_workers_can_self_cancel', false);
-  }
-
   /** بيستخدمه apps/technician-app قبل ما يعرض زرار "إلغاء" — استشاري بس، الفرض الحقيقي جوّه technicianCancel(). */
   async getTechnicianCancellationPolicy(userId: string, orderId: string): Promise<TechnicianCancellationPolicyResponseDto> {
     const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
@@ -1158,13 +1143,6 @@ export class OrdersService {
     const selfCancelEnabled = await this.settingsService.getBoolean('cancellation.technician_self_cancel_enabled', true);
     if (!selfCancelEnabled) {
       return { can_cancel: false, reason_if_not: 'إلغاء الفني الذاتي متوقف حاليًا — تواصل مع الدعم', window_expires_at: null };
-    }
-
-    if (order.bookingMode === BookingMode.TEAM) {
-      const technicianProfile = await this.techniciansService.findByUserIdOrThrow(userId);
-      if (!(await this.canSelfCancelTeamOrder(technicianProfile.teamRole))) {
-        return { can_cancel: false, reason_if_not: 'مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق', window_expires_at: null };
-      }
     }
 
     // ADR-0017 بند 9 — نفس الفحص في technicianCancel() (المصدر الحقيقي)، هنا استشاري بس عشان
@@ -1197,7 +1175,6 @@ export class OrdersService {
    */
   async technicianCancel(userId: string, orderId: string, dto: CancelOrderAsTechnicianDto): Promise<Order> {
     const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
-    const technicianProfile = await this.techniciansService.findByUserIdOrThrow(userId);
 
     if (!OrdersService.TECHNICIAN_CANCELLABLE_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
@@ -1210,16 +1187,6 @@ export class OrdersService {
     const selfCancelEnabled = await this.settingsService.getBoolean('cancellation.technician_self_cancel_enabled', true);
     if (!selfCancelEnabled) {
       throw new ApiException(ErrorCode.VAL_001, 'إلغاء الفني الذاتي متوقف حاليًا — تواصل مع الدعم', HttpStatus.FORBIDDEN);
-    }
-
-    // صلاحيات الفريق/الشركة — عضو عادي (worker) ميقدرش يلغي طلب "اعتماد" كامل إلا لو الباك-إند
-    // بيصرّح بكده صراحة (نفس مبدأ المالك). الفني المستقل/المالك/المدير مسموحلهم دايمًا.
-    if (order.bookingMode === BookingMode.TEAM && !(await this.canSelfCancelTeamOrder(technicianProfile.teamRole))) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق أو الدعم',
-        HttpStatus.FORBIDDEN,
-      );
     }
 
     // ADR-0018 §12 — طلب مجدول اتأكد تلقائيًا (autoConfirmScheduledOrder، بلا قبول فعلي من
@@ -1327,7 +1294,7 @@ export class OrdersService {
       await manager.save(
         manager.create(TechnicianOrderCancellation, {
           orderId: lockedOrder.id,
-          technicianId: technicianProfile.id,
+          technicianId: cancelledTechnicianId,
           technicianUserId: userId,
           cancellationReasonId: cancellationReason.id,
           reasonText: dto.reason ?? null,
@@ -1343,7 +1310,7 @@ export class OrdersService {
 
       if (feeCents > 0) {
         const technicianWallet = await this.walletsService.getOrCreateWallet(
-          technicianProfile.userId,
+          userId,
           WalletOwnerType.TECHNICIAN,
           manager,
         );
