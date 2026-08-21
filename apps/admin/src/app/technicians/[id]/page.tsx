@@ -453,7 +453,13 @@ export default function TechnicianDetailPage() {
                 بس ده محدّش لاحظه. متوسط التقييم تحت ده الرقم الحقيقي البديل. */}
             <p>متوسط التقييم: {detail.average_rating.toFixed(2)} ({detail.total_ratings_count} تقييم)</p>
             <p>طلبات مكتملة: {detail.completed_orders_count} · ملغاة: {detail.cancelled_orders_count}</p>
-            <p>متاح دلوقتي: {detail.is_available ? 'أيوة' : 'لأ'} · في الخدمة: {detail.is_on_duty ? 'أيوة' : 'لأ'}</p>
+            <p className="text-muted-foreground">
+              مؤشرات ذاتية قديمة (مش بتمنع استقبال الطلبات): متاح دلوقتي: {detail.is_available ? 'أيوة' : 'لأ'} ·
+              في الخدمة: {detail.is_on_duty ? 'أيوة' : 'لأ'}
+            </p>
+            <p className={detail.has_current_location ? undefined : 'font-medium text-warning'}>
+              الشرط الفعلي لاستقبال الطلبات — تحديد الموقع (GPS): {detail.has_current_location ? 'موجود ✓' : 'غير موجود — لازم الفني يفتح التطبيق ويسمح بالموقع'}
+            </p>
           </CardContent>
           {detail.verification_status !== 'approved' && detail.verification_status !== 'rejected' && (
             <CardFooter className="flex-col items-stretch gap-3">
