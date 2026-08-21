@@ -5504,4 +5504,39 @@ pool مش إصلاح حقيقي للبَقّة دي، اتثبت رياضيًا�
 
 ### الجزء د — التحقق
 
-تفاصيل الاختبارات والتحقق الحي الكامل تحت بعد التنفيذ.
+**اختبارات حية جديدة ضد Postgres/Redis حقيقيين** (مش mocks): `technician-team-booking-marketplace.spec.ts`
+(2 اختبار، `listForServiceBooking()`) — فني `new` يتحجب من اعتماد وعضو شركة (مستواه `new` برضه)
+ما بيظهرش كصف فردي، لكن شركته تظهر كارت منفصل بصح `staff_count`/`branch_count`. `matching-team-booking
+-level-gate.spec.ts` (2 اختبار، `findEligibleTechnicians()`) — نفس الفلترة على التوزيع التلقائي
+الفعلي. `technician-assignment-guard.spec.ts` اتوسّع بـ3 اختبار للبوابة النهائية (رفض `new`، قبول
+بعد ترقية `professional`، رجريشن `individual`). **تحقق HTTP حقيقي كامل** عبر `curl` ضد dev server
+شغال فعليًا: خدمة/نطاق/عنوان حقيقيين + 3 فنيين (new مستقل، professional مستقل، new عضو شركة) + شركة
+نشطة — بلا `booking_mode` رجّع التلاتة كأفراد؛ بـ`booking_mode=team` رجّع `professional` بس (سعره
+النهائي 20000 قرش محسوب صح) + كارت الشركة (`staff_count:1`, `branch_count:0`, `final_price_cents:null`)
+— صفر أفراد تحت محترف. بيانات التحقق اتنضّفت بعد الاختبار.
+
+**تعارض حقيقي اتلقط واتحل — سيشن مستقلة صلحت نفس البَقّة بالتوازي**: أثناء الـ`push`، اتلقط إن
+سيشن تانية (فرع نفسه) وصلها نفس بلاغ المالك واشتغلت على نفس الإصلاح الأساسي (`catalog_navigation.dart`'s
+فرع team/emergency) بشكل مستقل تمامًا — واتصلت PR كاملة لمركز عمليات أدمن (§36.4-14) بالتوازي كمان.
+`git merge` كشف تعارضات حقيقية في 6 ملفات (`catalog_navigation.dart`, `job_details_screen.dart`,
+`create_order_screen.dart`, `apps/customer-app/README.md`, `matching/README.md`, `docs/08` نفسه) —
+اتحلّت يدويًا كلها. **قرار تصميم عند التعارض**: السيشن التانية بنت `CompanyMarketplaceScreen` منفصلة
+(مكافئ `TechnicianMarketplaceScreen` بس للشركات، عبر `GET /technician-companies` غير المفلتر
+جغرافيًا/بالخدمة) — اتفضّلت النسخة المدمجة هنا (كارت شركة داخل نفس القايمة، فلترة صح بالخدمة/المنطقة/
+التوفر، مطابق لكلام المالك الحرفي "الشركات تظهر زي شخص عادي" في نفس القايمة)، و`CompanyMarketplaceScreen`
+اتشالت كملف يتيم بعد الدمج. **تعارض صامت إضافي اتلقط بعد الـmerge (git auto-merge بلا `CONFLICT` علامة)**:
+`technician_selection_screen.dart` طلع فيه حقول/باراميترات مكرّرة (`bookingMode` مرتين،
+`requestedTechnicianCompanyId` مرتين) لأن الفرعين ضافوا نفس المعنى في أماكن مختلفة من نفس الملف —
+git دمجهم "بنجاح" بلا أي علامة تعارض رغم إنه كود Dart غير صحيح (duplicate named parameter). اتلقط
+بمراجعة يدوية للملف بعد الـmerge مباشرة (مش بالاعتماد على `git status`/`flutter analyze` بس)، قبل
+أي commit — درس مهم: `git status`'s قايمة `UU` مش كافية لوحدها للثقة في نجاح دمج ملفات Dart/TS، خصوصًا
+لما الفرعين يضيفوا نفس المفهوم بصياغة مختلفة في أماكن مختلفة.
+
+**تحقق نهائي بعد الدمج**: `tsc --noEmit`/`nest build` نضاف في `apps/api` (بعد إعادة بناء
+`packages/shared-types` — الدمج جاب DTOs جديدة `operations.ts`/`matching-explainability.ts` محتاجة
+`npm run build` يدوي). 10 suites/74 اختبار مركّزة (matching + technicians + payments + orders، شاملة
+الملفات المدموجة زي `matching.service.ts`) نضاف. `apps/admin`: `tsc --noEmit`/`next build` (52 صفحة)
+نضاف بعد نفس إعادة بناء `shared-types`. `apps/customer-app`: `flutter analyze` (صفر تحذيرات جديدة،
+نفس الـ43 `info`-lint القديمة) و`flutter test` (7/7) نضاف. جناح jest الكامل (126+ suite) **لسه ما
+اتشغّلش بعد الدمج ده بالذات** — طلب مالك صريح 2026-08-21: تحقق مركّز لكل شريحة بدل الانتظار للمجموعة
+الكاملة بعد كل تعديل، وجناح شامل واحد قبل أي merge/release نهائي بدل كده.
