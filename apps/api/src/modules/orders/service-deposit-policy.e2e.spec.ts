@@ -262,6 +262,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       supportService,
       events,
       {} as never,
+      {} as never,
     );
   });
 

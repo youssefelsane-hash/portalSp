@@ -68,6 +68,7 @@ export interface AdminServiceResponseDto {
   cash_allowed: boolean;
   deposit_required: boolean;
   deposit_percentage: number | null;
+  allows_date_range_booking: boolean;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -103,6 +104,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     cash_allowed: service.cashAllowed,
     deposit_required: service.depositRequired,
     deposit_percentage: service.depositPercentage !== null ? Number(service.depositPercentage) : null,
+    allows_date_range_booking: service.allowsDateRangeBooking,
     min_technician_level: service.minTechnicianLevel,
     commission_percentage: Number(service.commissionPercentage),
     display_order: service.displayOrder,

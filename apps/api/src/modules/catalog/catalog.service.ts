@@ -207,8 +207,39 @@ export class CatalogService {
     // docs/08 §36.24، ADR-0025 — آخر باراميتر عمدًا (نفس مبدأ append-only في constructor فوق) —
     // اختياري بالكامل، صفر كسر لأي كولر موجود.
     technicianPricingTier?: TechnicianPricingTier,
+    // هجرة حجز الشغالة (ADR-0029، docs/08 §42 Phase A.4 Slice 1) — نفس مبدأ append-only فوق.
+    // مبلغ محسوب مسبقًا من الـcaller (hourlyRateCents × duration_hours أو monthlyRateCents كامل،
+    // CatalogService ماعندهاش أي علم بـDomesticWorkerProfile عمدًا — فصل مسؤوليات). إجباري فعليًا
+    // لخدمة pricingModel=worker_rate (يترمي خطأ لو مفقود)، متجاهَل تمامًا لأي نموذج تسعير تاني.
+    precomputedWorkerRateCents?: number,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
+
+    // هجرة حجز الشغالة (ADR-0029) — السعر هو معدّل الفني الشخصي بالحرف، بلا أي مضاعف مستوى/منطقة
+    // (الشغالة مالهاش TechnicianLevel أصلاً، وسعرها المتفق عليه هو النهائي). فرع مستقل تمامًا عن
+    // باقي النماذج، زي FORMULA بالظبط.
+    if (service.pricingModel === PricingModel.WORKER_RATE) {
+      if (precomputedWorkerRateCents === undefined) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'خدمة بسعر فني (worker_rate) محتاجة فني يتحدد الأول عشان السعر يتحسب',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return {
+        base_price_cents: precomputedWorkerRateCents,
+        inspection_fee_cents: service.inspectionFeeCents,
+        surge_multiplier: 1,
+        level_price_multiplier: 1,
+        estimated_total_cents: precomputedWorkerRateCents,
+        emergency_surcharge_cents: 0,
+        emergency_sla_minutes: null,
+        min_price_cents: null,
+        max_price_cents: null,
+        pricing_evaluation_id: null,
+        estimated_duration_days: null,
+      };
+    }
 
     // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — مسار مستقل بالكامل عن باقي نماذج
     // التسعير (مفيش تركيب مع zone override — المعادلة نفسها مسؤولة عن عوامل السعر اللي العميل

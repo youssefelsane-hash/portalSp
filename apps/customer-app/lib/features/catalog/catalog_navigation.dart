@@ -36,7 +36,9 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   DateTime? scheduledAtRangeEnd;
   if (bookingMode != BookingMode.emergency) {
     final choice = await Navigator.of(context).push<ScheduleChoice>(
-      MaterialPageRoute(builder: (_) => const ScheduleSelectionScreen()),
+      MaterialPageRoute(
+        builder: (_) => ScheduleSelectionScreen(allowsDateRangeBooking: service.allowsDateRangeBooking),
+      ),
     );
     if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
     scheduledAt = choice.scheduledAt;

@@ -287,3 +287,60 @@
   `create()` بالحرف، ورجريشن لخدمة `deposit_required=false` (الافتراضي).
 - **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4) أو توزيع أرباح
   الطاقم للشركات (Phase B.3).
+
+## `services.allows_date_range_booking` — قدرة "نطاق أيام مرن" (docs/08 §42 Phase A.2، ADR-0028)
+
+"مرن — اختار نطاق أيام" (`scheduled_at_range_end`، docs/08 §32.3) كانت موجودة ومختبرة حيًا من قبل
+— الشريحة دي حوّلتها من "متاحة لكل خدمة بلا شرط" لقدرة صريحة قابلة للإقفال، **بلا أي لمس لمنطق حل
+النطاق نفسه** (`OrdersService.create()`، `TechniciansService.hasEligibleTechnicianForDate()`).
+التفاصيل الكاملة والبدائل المرفوضة في `docs/adr/0028-service-date-range-booking-capability.md`.
+
+- **`services.allows_date_range_booking` عمود جديد** (`boolean NOT NULL DEFAULT true`، migration
+  0165) — نفس نمط `cash_allowed`/`deposit_required` بالحرف. **الافتراضي `true` عمدًا** (مختلف عن
+  `deposit_required`): الخيار متاح فعليًا لكل خدمة اليوم بلا فحص، فالعلم ده تحويل الوضع الحالي لقدرة
+  صريحة مش قيد رجعي.
+- **`OrdersService.create()`**: فحص جديد جوّه فرع `if (dto.scheduled_at_range_end)` الموجود بالفعل
+  — لو الخدمة `allows_date_range_booking=false`، يترفض `VAL_001` قبل ما الحلقة تدوّر على أيام. يوم
+  محدد بلا `scheduled_at_range_end` يفضل يشتغل عادي حتى لو الخدمة قافلة القدرة دي.
+- **`previewPrice()` صفر تغيير** — نفس نمط `cash_allowed`/`deposit_required` (مش متفحوصين هناك
+  كمان)، لأن الجدولة مالهاش أي أثر على السعر أصلاً (`PreviewOrderDto` مالهوش حقل جدولة خالص).
+- **`apps/admin`**: checkbox جديد "يسمح بحجز نطاق أيام مرن" في نفس فورم "تفاصيل الخدمة".
+- **`packages/shared-types`**: تمديد `AdminServiceResponseDto`/`CreateServiceBody`/`UpdateServiceBody`.
+- **`apps/customer-app`**: `CatalogService` model حقل جديد `allowsDateRangeBooking`؛
+  `ScheduleSelectionScreen` بقت بتاخد الحقل ده كـparameter إجباري وبتخفي كارت "مرن" لو `false` —
+  تجربة استخدام أحسن من رفض بعد الاختيار (نفس فلسفة إخفاء وضع "اعتماد" لو `allowsTeam=false`).
+  الاستدعاءين (`catalog_navigation.dart` و`create_order_screen.dart`'s `_pickSchedule()`) اتحدّثوا
+  الاتنين.
+- **اختبار حي جديد**: `orders/service-date-range-booking-allowed.e2e.spec.ts` (3/3 — نطاق مرن على
+  خدمة `allows_date_range_booking=false` يترفض، نفس الخدمة بيوم محدد بس تتسجّل عادي، خدمة عادية
+  بالافتراضي `true` تفضل تقبل النطاق المرن زي ما كانت — رجريشن صفري).
+- **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4).
+
+## `PricingModel.WORKER_RATE` — نموذج تسعير جديد لهجرة حجز الشغالة (docs/08 §42 Phase A.4 Slice 1، ADR-0029)
+
+أول شريحة من هجرة حجز الشغالة للمحرك الموحّد — أساس بس، **صفر تغيير سلوك لأي مسار موجود**. القرار
+المعماري الكامل (ليه مش `TechnicianProfile`، مين مسؤول عن الحساب، الشرايح الجاية) في
+`docs/adr/0029-domestic-worker-unified-booking-migration.md`.
+
+- **`services.pricing_model` قيمة جديدة `worker_rate`** (migration 0166، `ALTER TYPE ... ADD
+  VALUE`) — السعر مش من `base_price_cents` الكتالوج خالص، لازم فني (شغالة) يتحدد الأول عشان السعر
+  يتحسب من معدّله الشخصي.
+- **`CatalogService.estimate()`**: باراميتر اختياري جديد `precomputedWorkerRateCents` (آخر باراميتر،
+  نفس نمط `technicianPricingTier`) — لو الخدمة `worker_rate` والباراميتر ده مفقود، يترفض `VAL_001`
+  فورًا. لو موجود، بيترجع كـ`estimated_total_cents` بالحرف — **بلا `level_price_multiplier` أو
+  `zone override` خالص** (الشغالة مالهاش `TechnicianLevel`، وسعرها هو النهائي المتفق عليه شخصيًا).
+  `CatalogService` نفسها ماعندهاش أي علم بـ`DomesticWorkerProfile` عمدًا — حساب `hourlyRateCents ×
+  duration_hours` أو `monthlyRateCents` كامل مسؤولية الـcaller (Slice 2، لسه مش منفّذة).
+- **`orders.domestic_worker_profile_id`** (nullable FK، migration 0166) — مرجع الفني على الطلب،
+  **مش مقروء/مكتوب من أي كود لسه**.
+- **اختبار حي جديد**: `catalog/worker-rate-pricing.spec.ts` (3/3 — `precomputedWorkerRateCents`
+  مفقودة ترفض، موجودة بترجع بالحرف بلا zone override رغم وجوده على الخدمة، رجريشن لخدمة `fixed`
+  عادية صفر تأثير من الباراميتر الجديد).
+- **Slice 2a (خلصت)**: `OrdersService.create()` بقت بتاخد `domestic_worker_profile_id`/`duration_hours`
+  جديدين — العميل اختار فني (شغالة) بعينه مباشرة (زيرو مطابقة تلقائية، ADR-0004)، الطلب يتسجّل
+  `ACCEPTED` فورًا (السعر = `hourlyRateCents × duration_hours`). دفع مقدّم وتأكيد فني صريح مؤجّلين
+  عمدًا (تفاصيل كاملة في ADR-0029 §Slice 2a). اختبار حي:
+  `orders/domestic-worker-direct-booking.e2e.spec.ts` (5/5).
+- **خارج نطاق هذه الشريحة عمدًا**: دفع مقدّم لحجز شغالة، شات (Slice 2c/3)، واجهة Flutter/أدمن
+  (Slice 3)، التكرار الشهري عبر `RecurringOrderTemplate` (Slice 4)، وأي تغيير على
+  `domestic-workers` module الحالي (صفر لمس بالكامل).

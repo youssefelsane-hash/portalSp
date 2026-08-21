@@ -142,6 +142,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
       {} as never, // supportService
       { emit: () => undefined } as never, // events
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى (الاختبار بيمتحن WORK_COMPLETED مش IN_PROGRESS)
+      {} as never, // domesticWorkersService (ADR-0029)
     );
   });
 

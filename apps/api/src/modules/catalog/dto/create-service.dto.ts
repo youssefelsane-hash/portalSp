@@ -125,6 +125,12 @@ export class CreateServiceDto {
   @Max(99)
   deposit_percentage?: number;
 
+  // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — false يعني scheduled_at_range_end
+  // مرفوض صراحة وقت إنشاء الطلب (orders.service.ts)، والعميل هيشوف كارت "مرن" مختفي في customer-app.
+  @IsOptional()
+  @IsBoolean()
+  allows_date_range_booking?: boolean;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;

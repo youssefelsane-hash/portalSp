@@ -1184,3 +1184,28 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 
 اختبار حي (4/4): قبول صحيح، فرصتين بالتوازي على مكان واحد بس (واحد يفوز، التاني `declined`
 فعليًا)، إعادة فحص القدرة وقت القبول (الفني حظر اليوم بعد العرض)، والعدد مكتمل بالفعل (بلا سباق).
+
+## حجز فني (شغالة) مباشر — هجرة الشغالة للمحرك الموحّد (docs/08 §42 Phase A.4 Slice 2a، ADR-0029)
+
+`create()` بقت بتاخد `dto.domestic_worker_profile_id`/`dto.duration_hours` — العميل اختار فني
+(شغالة) بعينه من التصفح المباشر (زيرو مطابقة تلقائية، ADR-0004)، مش سايب المطابقة تختار. القرار
+الكامل (ليه مش نفس مسار `matching.service.ts accept()`، تفاصيل البحث اللي سبق الكود) في
+`docs/adr/0029-domestic-worker-unified-booking-migration.md`.
+
+- **فحوصات جديدة** (جوّه `create()`، بعد تحميل الخدمة والمنطقة): خدمة `pricingModel=worker_rate`
+  لازم `domestic_worker_profile_id` (والعكس)، ممنوعة مع `schedule_slot_id`/`requested_technician_id`
+  (الفني معروف بالفعل)، ممنوعة مع `payment_method` (دفع مقدّم مش مدعوم لسه — مؤجّل عمدًا)، الفني
+  لازم `verification_status=approved` وعنده `hourly_rate_cents` (نموذج بالساعة بس، الشهري مؤجّل
+  لـSlice 4).
+- **الطلب يتسجّل `ACCEPTED` مباشرة، مش `SEARCHING_TECHNICIAN`** — `assignedAt`/`acceptedAt` بيتسجّلوا
+  وقت الإنشاء، `technicianId` يفضل `null`، `domesticWorkerProfileId` مسجّل. السعر =
+  `hourlyRateCents × duration_hours` (بيتحسب هنا، بيتمرّر لـ`CatalogService.estimate()` كـ
+  `precomputedWorkerRateCents`، Phase A.4 Slice 1).
+- **صفر حدث جديد** — `ORDER_CREATED_EVENT` الموجود بيتصدّر عادي في نهاية `create()` زي أي طلب
+  (الطلب مش `PENDING_PAYMENT` أبدًا في المسار ده، فمفيش تأجيل). كل الـlisteners الموجودة اتأكد
+  إنها آمنة بلا تعديل — `OrderDispatchListener`/`CustomerStatsRecalculationListener`/
+  `EmergencyOrderRoutingListener` كلهم بيتفحصوا على `orderStatus`/`bookingMode` أصلاً، عدا
+  `OrderCreatedNotificationListener` اللي احتاج فرع رسالة صح (راجع `notifications/README.md`).
+- **اختبار حي جديد**: `domestic-worker-direct-booking.e2e.spec.ts` (5/5).
+- **خارج نطاق الشريحة دي عمدًا**: دفع مقدّم، تأكيد فني صريح (auto-confirm مؤقت دلوقتي)، شات، أي
+  واجهة Flutter/أدمن — التفاصيل الكاملة والشرايح الجاية في ADR-0029.

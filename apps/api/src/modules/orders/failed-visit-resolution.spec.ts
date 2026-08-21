@@ -314,6 +314,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
     );
   });
 

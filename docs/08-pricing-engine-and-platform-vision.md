@@ -6006,7 +6006,7 @@ build` (packages/shared-types) كلهم نضاف.
 `flutter analyze`/`tsc --noEmit` نضاف على كل التطبيقات الأربعة (api، admin، customer-app،
 technician-app). التفاصيل الكاملة في `apps/technician-app/README.md`، `apps/customer-app/README.md`.
 
-## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.3 خلصوا)
+## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3 خلصوا، A.4 بدأت — Slice 1/2a خلصوا)
 
 طلب مالك صريح واسع النطاق (مش إعادة بناء — تطوير وتوحيد): (أ) دمج حجز الشغالة/المربية والطلبات
 المتكررة في **محرك حجز واحد قابل للتهيئة** بدل ما كل خدمة غريبة تاخد مسارها المنفصل، و(ب) تطوير
@@ -6121,5 +6121,48 @@ migration 0164 + فحص `OrdersService.create()`/`previewPrice()` + checkbox+ح�
 `shared-types` + اختبار حي (`orders/service-deposit-policy.e2e.spec.ts`). التفاصيل الكاملة في
 `apps/api/src/modules/catalog/README.md` (قسم "services.deposit_required/deposit_percentage").
 صفر رجريشن — أي خدمة موجودة `deposit_required=false` (الافتراضي) فضلت تتحصّل بالإجمالي كامل زي ما
-كانت. **Phase A.2** (شكل الجدولة `allows_date_range_booking` + ربطها بـ`bulkSetAvailability`) لسه
-مفتوحة، الشريحة الجاية.
+كانت.
+
+### Phase A.2 — خلصت (2026-08-21، بعد A.3)
+
+`services.allows_date_range_booking` (migration 0165، افتراضي `true`) — القرار الكامل في
+`docs/adr/0028-service-date-range-booking-capability.md`. **تدقيق حي أثبت إن "ربطها بـ`bulkSetAvailability`"
+(نص الخطة الأصلي) موجود بالفعل** — `hasEligibleTechnicianForDate()` بتستخدم نفس
+`technicianAvailabilityCondition()` اللي بتفحص صفوف `blocked` من `bulkSetAvailability()`، فمفيش
+عمل إضافي هناك غير القراءة الدقيقة. الشريحة دي كانت بالكامل: تحويل "نطاق أيام مرن" (موجودة ومختبرة
+حيًا من §32) من "متاحة لكل خدمة بلا شرط" لقدرة صريحة، بلا أي لمس لمنطق حل النطاق نفسه. فحص
+`OrdersService.create()` + checkbox أدمن + تمديد `shared-types` + `apps/customer-app` (إخفاء كارت
+"مرن" لو الخدمة قافلاه، مش رفض بعد الاختيار) + اختبار حي (3/3). التفاصيل الكاملة في
+`apps/api/src/modules/catalog/README.md` (قسم "services.allows_date_range_booking"). صفر رجريشن —
+كل خدمة موجودة (`allows_date_range_booking=true` الافتراضي) فضلت تقبل النطاق المرن زي ما كانت.
+
+### Phase A.4 — بدأت (2026-08-21) — هجرة حجز الشغالة للمحرك الموحّد — Slice 1/2a خلصوا، باقي الشرائح مفتوحة
+
+طلب مالك صريح تاني (2026-08-21، بعد A.1-A.3): المسار النهائي لحجز الشغالة يستخدم نفس بنية
+Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ على قدراتها الخاصة (نطاق تاريخ،
+جدول، تكرار، قيود كاش، إيداع)، **والبيانات التاريخية تفضل صحيحة ومتاحة للأبد**. القرار الكامل
+(معماري، مش تفصيلي) + ترتيب الشرائح الآمن في `docs/adr/0029-domestic-worker-unified-booking-migration.md`
+— دي أخطر شريحة في محرك الحجز الموحّد كله (بيانات تاريخية حقيقية، migration لا rewrite، زي ما
+الخطة الأصلية سمّتها بالحرف)، فاتقسّمت لأربع شرائح فرعية آمنة بدل commit واحد ضخم:
+
+- **Slice 1 (خلصت، هذا الـcommit)**: الأساس بس — `pricing_model` enum قيمة جديدة `worker_rate`
+  (migration 0166) + `orders.domestic_worker_profile_id` (nullable، مش مستخدم لسه) + فرع
+  `CatalogService.estimate()` معزول (السعر من الفني الشخصي، بلا مضاعف مستوى/منطقة) + اختبار حي
+  (3/3). **صفر تغيير سلوك لأي مسار موجود** — القيمة الجديدة مش مستخدمة في أي `Service` حقيقي لسه،
+  و`domestic_worker_bookings`/`DomesticWorkerBookingsService` الحاليين زي ما هم بالظبط.
+- **Slice 2a (خلصت)**: `OrdersService.create()` — فرع "تخطي المطابقة" لحجز شغالة مباشر. بحث مستقل
+  حي أثبت إن `ORDER_ACCEPTED_EVENT` (مسار المطابقة العادي) مربوط بـ`chat_threads` FK صريح على
+  `technician_profiles` — مينفعش يتعاد استخدامه بلا تعديل schema. القرار: طلب `domestic_worker_profile_id`
+  بيتسجّل مباشرة `ACCEPTED` (السعر = `hourlyRateCents × duration_hours`)، بإعادة استخدام
+  `ORDER_CREATED_EVENT` الموجود (صفر حدث جديد) بعد التأكد إن كل listeners-ها آمنة. اختبار حي (5/5).
+  **مبسّطتان مؤقتتان موثّقتان صراحة**: دفع مقدّم مش مدعوم لسه (محتاج تعديل على
+  `PaymentsService.handlePaymentConfirmed()` — كود دفع مشترك حرج، مؤجّل لشريحة منفصلة)، وتأكيد
+  الفني تلقائي بدل خطوة موافقة صريحة (نفس مبدأ auto-confirm الموجود بالفعل لطلبات LIGHT-tier).
+- **Slice 2b (مفتوحة)**: دفع مقدّم لحجز شغالة مباشر + endpoint تأكيد/رفض صريح للفني.
+- **Slice 2c/3 (مفتوحة)**: شات لحجز شغالة (`chat_threads.domestic_worker_profile_id` عمود جديد +
+  `resolveParticipant()` + واجهة Flutter) + باقي واجهات Flutter/أدمن لمسار الحجز الجديد.
+- **Slice 4 (مفتوحة)**: تجديد الحجز الشهري (live-in) عبر `RecurringOrderTemplate` بدل آلية
+  `sweep()` البديلة الحالية (اللي بتفضل شغالة للحجوزات القديمة للأبد، بلا نقل قسري).
+- **فجوة تقنية موجودة بالفعل، مستقلة عن الشريحة دي**: تطبيقي Flutter وشاشة الأدمن لسه ما اتحدّثوش
+  لـADR-0019 (مفيش شاشة دفع InstaPay في تطبيق العميل، `awaiting_payment` مش معروفة في خرائط الحالة)
+  — موثّقة صراحة في ADR-0029 §السياق بند 6، مش من مسؤولية الشريحة دي.

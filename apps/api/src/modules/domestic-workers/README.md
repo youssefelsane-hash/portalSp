@@ -86,3 +86,13 @@ pending ويمنع اعتماد صفحة قديمة؛ نسختان من `sweep()
   موجود في الشهر الجديد. الإصلاح: نفس أسلوب `clamp` على آخر يوم فعلي في الشهر الجديد.
 
 مرجع كامل: `../../../../docs/08-pricing-engine-and-platform-vision.md` §12 و`../../../../docs/adr/0004-domestic-workers-vertical.md`.
+
+## هجرة للمحرك الموحّد (docs/08 §42 Phase A.4، ADR-0029) — قيد التنفيذ، صفر تغيير هنا لسه
+
+طلب مالك (2026-08-21): المسار النهائي لحجز الشغالة يستخدم بنية Service/Order/Pricing/Payment/
+Scheduling المشتركة (نفس محرك الحجز العادي)، مع الحفاظ على قدراته الخاصة. القرار الكامل والشرائح
+الآمنة في `../../../../docs/adr/0029-domestic-worker-unified-booking-migration.md`. **الموديول ده
+(الجدول/الـservices/الـcontrollers) صفر لمس فيه لحد كده** — Slice 1 (الوحيدة المنفّذة لحد الآن)
+لمست بس `Service.pricingModel` (قيمة جديدة `worker_rate`) و`orders.domestic_worker_profile_id`
+(عمود جديد، مش مقروء/مكتوب من أي كود هنا أو هناك لسه). أي حجز شغالة موجود دلوقتي يفضل يتقرا/يتعدّل
+بنفس الكود هنا للأبد — قرار "migrate forward" صريح، صفر migration رجعي للبيانات التاريخية.

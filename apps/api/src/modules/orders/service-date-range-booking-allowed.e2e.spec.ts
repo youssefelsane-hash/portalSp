@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
-import { Order, OrderStatus, OrderType } from './entities/order.entity';
+import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/entities/payment.entity';
@@ -46,13 +46,13 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 
 /**
- * Script 7 Phase 23 — بَقّة حقيقية اتلقطت: إعادة الزيارة تحت الضمان (order_type=revisit) بتاخد
- * warranty_expires_at جديدة بالكامل وقت اكتمالها (نفس settleAndComplete() لأي طلب مكتمل، بلا
- * استثناء) — من غير فحص صريح، كانت إعادة الزيارة نفسها تقدر تبقى original_order_id لإعادة زيارة
- * تانية، وهكذا للأبد: خدمة مجانية بلا نهاية بمجرد ما العميل يطلب إعادة زيارة قبل ما الضمان يخلص
- * في كل مرة، بلا أي تعويض للفني بعد الطلب الأصلي المدفوع.
+ * ADR-0028 (docs/08 §42 Phase A.2) — قدرة service.allows_date_range_booking. الاختبار ده بيغطي:
+ * 1. خدمة allows_date_range_booking=false + scheduled_at_range_end: يترفض VAL_001.
+ * 2. نفس الخدمة بيوم محدد بس (بلا range_end): تتسجّل عادي — الرفض بس للنطاق المرن نفسه.
+ * 3. خدمة عادية (allows_date_range_booking=true الافتراضي) + نطاق مرن: تفضل تشتغل زي ما كانت
+ *    بالظبط (رجريشن صفري — نفس سلوك المسار قبل القدرة دي خالص).
  */
-describe('OrdersService.create() — إعادة الزيارة تحت الضمان مسموحة مرة واحدة بس (Script 7 Phase 23)', () => {
+describe('OrdersService.create() — قدرة service.allows_date_range_booking (ADR-0028)', () => {
   let dataSource: DataSource;
   let ordersService: OrdersService;
   const runId = Date.now().toString(36);
@@ -61,7 +61,8 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     city: '',
     zone: '',
     category: '',
-    service: '',
+    serviceRangeDisabled: '',
+    serviceRangeEnabled: '',
     customerUser: '',
     customerProfile: '',
     address: '',
@@ -112,33 +113,40 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`, [
       ids.country,
-      `مدينة ضمان ${runId}`,
-      `Warranty City ${runId}`,
-      `test-city-wty-${runId}`,
+      `مدينة نطاق ${runId}`,
+      `Date Range City ${runId}`,
+      `test-city-range-${runId}`,
     ]);
     ids.city = city.id;
     const [zone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
       ids.city,
-      `نطاق ضمان ${runId}`,
-      `Warranty Zone ${runId}`,
+      `نطاق جيو ${runId}`,
+      `Date Range Zone ${runId}`,
     ]);
     ids.zone = zone.id;
     const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`, [
-      `فئة ضمان ${runId}`,
-      `Warranty Category ${runId}`,
-      `test-category-wty-${runId}`,
+      `فئة نطاق ${runId}`,
+      `Date Range Category ${runId}`,
+      `test-category-range-${runId}`,
     ]);
     ids.category = category.id;
-    const [service] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency)
-       VALUES ($1,$2,$3,'fixed',30000,20,30,false) RETURNING id`,
-      [ids.category, `خدمة ضمان ${runId}`, `test-service-wty-${runId}`],
+    const [serviceRangeDisabled] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_date_range_booking)
+       VALUES ($1,$2,$3,'fixed',50000,20,0,false) RETURNING id`,
+      [ids.category, `خدمة بلا نطاق ${runId}`, `test-service-no-range-${runId}`],
     );
-    ids.service = service.id;
+    ids.serviceRangeDisabled = serviceRangeDisabled.id;
+    // الافتراضي (allows_date_range_booking مش متبعت في الـINSERT، NOT NULL DEFAULT true بيمسكها).
+    const [serviceRangeEnabled] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
+       VALUES ($1,$2,$3,'fixed',50000,20,0) RETURNING id`,
+      [ids.category, `خدمة نطاق عادية ${runId}`, `test-service-default-range-${runId}`],
+    );
+    ids.serviceRangeEnabled = serviceRangeEnabled.id;
 
     const [customerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`, [
-      `+2033${runId}`.slice(0, 15),
-      `عميل ضمان ${runId}`,
+      `+2036${runId}`.slice(0, 15),
+      `عميل نطاق ${runId}`,
     ]);
     ids.customerUser = customerUser.id;
     const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [ids.customerUser]);
@@ -146,7 +154,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     const [address] = await q(
       `INSERT INTO addresses (user_id, city_id, street_name, location)
        VALUES ($1,$2,$3, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
-      [ids.customerUser, ids.city, `شارع ضمان ${runId}`],
+      [ids.customerUser, ids.city, `شارع نطاق ${runId}`],
     );
     ids.address = address.id;
 
@@ -168,7 +176,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       dataSource.getRepository(ServiceStandardData),
       settingsService,
       {} as never,
-      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
+      {} as never,
     );
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -180,7 +188,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
-      {} as never,
+      settingsService,
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
@@ -249,8 +257,8 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       paymentsService,
       supportService,
       events,
-      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
-      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
+      {} as never,
+      {} as never,
     );
   });
 
@@ -264,7 +272,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM services WHERE id = ANY($1)`, [[ids.serviceRangeDisabled, ids.serviceRangeEnabled]]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
@@ -273,58 +281,45 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     }
   });
 
-  /** بيبني طلب COMPLETED مباشرة عبر SQL خام — بديل واقعي لدورة الحجز/التنفيذ الكاملة، بيثبت بس
-   * حالة الطلب النهائية المطلوبة (مكتمل + ضمان لسه سارٍ) بأقل تعقيد ممكن للاختبار. */
-  async function createCompletedOrder(orderType: 'standard' | 'revisit', parentOrderId: string | null): Promise<string> {
-    const warrantyExpiresAt = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
-    const [{ next_human_readable_number: orderNumber }] = await dataSource.query<
-      { next_human_readable_number: string }[]
-    >("SELECT next_human_readable_number('ORD')");
-    const [row] = await q(
-      `INSERT INTO orders (
-         order_number, customer_id, service_id, address_id, service_zone_id, order_type, booking_mode,
-         order_status, estimated_price_cents, inspection_fee_cents, surge_amount_cents, total_amount_cents,
-         payment_status, placed_at, closed_at, warranty_expires_at, parent_order_id, source_channel
-       ) VALUES (
-         $1,$2,$3,$4,$5,$6,'individual','completed',$7,0,0,$7,'paid',now(),now(),$8,$9,'customer_app'
-       ) RETURNING id`,
-      [
-        orderNumber,
-        ids.customerProfile,
-        ids.service,
-        ids.address,
-        ids.zone,
-        orderType,
-        orderType === 'revisit' ? 0 : 30000,
-        warrantyExpiresAt,
-        parentOrderId,
-      ],
-    );
-    return row.id;
-  }
+  const tomorrow = () => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 3);
+    return d.toISOString().slice(0, 10);
+  };
+  const rangeEnd = () => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 8);
+    return d.toISOString().slice(0, 10);
+  };
 
-  it('إعادة زيارة لطلب أصلي عادي (standard) مكتمل تحت الضمان — بتنجح وبتبقى مجانية بالكامل', async () => {
-    const originalOrderId = await createCompletedOrder('standard', null);
-    const revisit = await ordersService.create(ids.customerUser, {
-      service_id: ids.service,
-      address_id: ids.address,
-      original_order_id: originalOrderId,
-    } as never);
-    expect(revisit.orderType).toBe(OrderType.REVISIT);
-    expect(revisit.totalAmountCents).toBe(0);
-    expect(revisit.parentOrderId).toBe(originalOrderId);
-  });
-
-  it('إعادة زيارة لإعادة زيارة تانية (سلسلة) — بترفض بوضوح، مش خدمة مجانية بلا نهاية', async () => {
-    const originalOrderId = await createCompletedOrder('standard', null);
-    const firstRevisitId = await createCompletedOrder('revisit', originalOrderId);
-
+  it('allows_date_range_booking=false + scheduled_at_range_end: يترفض بوضوح VAL_001', async () => {
     await expect(
       ordersService.create(ids.customerUser, {
-        service_id: ids.service,
+        service_id: ids.serviceRangeDisabled,
         address_id: ids.address,
-        original_order_id: firstRevisitId,
+        scheduled_at: tomorrow(),
+        scheduled_at_range_end: rangeEnd(),
       } as never),
     ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('allows_date_range_booking=false + يوم محدد بس (بلا range_end): يتسجّل عادي — الرفض للنطاق المرن نفسه بس', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.serviceRangeDisabled,
+      address_id: ids.address,
+      scheduled_at: tomorrow(),
+    } as never);
+    expect(order.serviceId).toBe(ids.serviceRangeDisabled);
+  });
+
+  it('allows_date_range_booking=true (الافتراضي): نطاق مرن لسه بيشتغل زي ما كان (رجريشن)', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.serviceRangeEnabled,
+      address_id: ids.address,
+      scheduled_at: tomorrow(),
+      scheduled_at_range_end: rangeEnd(),
+    } as never);
+    expect(order.serviceId).toBe(ids.serviceRangeEnabled);
+    expect(order.scheduledAt).not.toBeNull();
   });
 });

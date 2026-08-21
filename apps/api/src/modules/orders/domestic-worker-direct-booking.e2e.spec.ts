@@ -2,7 +2,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
-import { Order, OrderStatus, OrderType } from './entities/order.entity';
+import { Order, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment } from '../payments/entities/payment.entity';
@@ -13,6 +13,8 @@ import { WalletsService } from '../payments/wallets.service';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
 import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
+import { DomesticWorkerProfile, DomesticWorkerVerificationStatus } from '../domestic-workers/entities/domestic-worker-profile.entity';
+import { DomesticWorkersService } from '../domestic-workers/domestic-workers.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { Address } from '../customers/entities/address.entity';
@@ -46,13 +48,17 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 
 /**
- * Script 7 Phase 23 — بَقّة حقيقية اتلقطت: إعادة الزيارة تحت الضمان (order_type=revisit) بتاخد
- * warranty_expires_at جديدة بالكامل وقت اكتمالها (نفس settleAndComplete() لأي طلب مكتمل، بلا
- * استثناء) — من غير فحص صريح، كانت إعادة الزيارة نفسها تقدر تبقى original_order_id لإعادة زيارة
- * تانية، وهكذا للأبد: خدمة مجانية بلا نهاية بمجرد ما العميل يطلب إعادة زيارة قبل ما الضمان يخلص
- * في كل مرة، بلا أي تعويض للفني بعد الطلب الأصلي المدفوع.
+ * ADR-0029 (docs/08 §42 Phase A.4 Slice 2) — حجز فني (شغالة) مباشر عبر المحرك الموحّد، زيرو
+ * مطابقة تلقائية (ADR-0004). الاختبار ده بيغطي:
+ * 1. خدمة worker_rate بلا domestic_worker_profile_id: يترفض VAL_001.
+ * 2. خدمة worker_rate + domestic_worker_profile_id + duration_hours: يتسجّل ACCEPTED مباشرة
+ *    (مش SEARCHING_TECHNICIAN)، السعر = hourlyRateCents × duration_hours بالحرط، technicianId
+ *    يفضل null، domesticWorkerProfileId مسجّل صح.
+ * 3. domestic_worker_profile_id + payment_method (دفع مقدّم): يترفض — مش مدعوم لسه (ADR-0029).
+ * 4. domestic_worker_profile_id على خدمة fixed عادية (مش worker_rate): يترفض.
+ * 5. رجريشن: خدمة عادية بلا domestic_worker_profile_id لسه بتشتغل زي زمان (SEARCHING_TECHNICIAN).
  */
-describe('OrdersService.create() — إعادة الزيارة تحت الضمان مسموحة مرة واحدة بس (Script 7 Phase 23)', () => {
+describe('OrdersService.create() — حجز فني (شغالة) مباشر عبر المحرك الموحّد (ADR-0029، Phase A.4 Slice 2)', () => {
   let dataSource: DataSource;
   let ordersService: OrdersService;
   const runId = Date.now().toString(36);
@@ -61,10 +67,13 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     city: '',
     zone: '',
     category: '',
-    service: '',
+    workerRateService: '',
+    fixedService: '',
     customerUser: '',
     customerProfile: '',
     address: '',
+    workerUser: '',
+    workerProfile: '',
   };
 
   async function q(sql: string, params?: unknown[]) {
@@ -84,6 +93,8 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
         WebhookEvent,
         Wallet,
         WalletTransaction,
+        DomesticWorkerBooking,
+        DomesticWorkerProfile,
         CustomerProfile,
         Address,
         City,
@@ -112,33 +123,39 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug) VALUES ($1,$2,$3,$4) RETURNING id`, [
       ids.country,
-      `مدينة ضمان ${runId}`,
-      `Warranty City ${runId}`,
-      `test-city-wty-${runId}`,
+      `مدينة شغالة ${runId}`,
+      `DW Direct City ${runId}`,
+      `test-city-dw-direct-${runId}`,
     ]);
     ids.city = city.id;
     const [zone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
       ids.city,
-      `نطاق ضمان ${runId}`,
-      `Warranty Zone ${runId}`,
+      `نطاق شغالة ${runId}`,
+      `DW Direct Zone ${runId}`,
     ]);
     ids.zone = zone.id;
     const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`, [
-      `فئة ضمان ${runId}`,
-      `Warranty Category ${runId}`,
-      `test-category-wty-${runId}`,
+      `فئة شغالة ${runId}`,
+      `DW Direct Category ${runId}`,
+      `test-category-dw-direct-${runId}`,
     ]);
     ids.category = category.id;
-    const [service] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, allows_emergency)
-       VALUES ($1,$2,$3,'fixed',30000,20,30,false) RETURNING id`,
-      [ids.category, `خدمة ضمان ${runId}`, `test-service-wty-${runId}`],
+    // cash_allowed=true عمدًا (Slice 2a بيدعم كاش بس — دفع مقدّم مؤجّل لشريحة تانية، ADR-0029).
+    const [workerRateService] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, cash_allowed)
+       VALUES ($1,$2,$3,'worker_rate',0,true) RETURNING id`,
+      [ids.category, `خدمة شغالة ${runId}`, `test-service-dw-direct-${runId}`],
     );
-    ids.service = service.id;
+    ids.workerRateService = workerRateService.id;
+    const [fixedService] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents) VALUES ($1,$2,$3,'fixed',50000) RETURNING id`,
+      [ids.category, `خدمة عادية شغالة ${runId}`, `test-service-dw-direct-fixed-${runId}`],
+    );
+    ids.fixedService = fixedService.id;
 
     const [customerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`, [
-      `+2033${runId}`.slice(0, 15),
-      `عميل ضمان ${runId}`,
+      `+2037${runId}`.slice(0, 15),
+      `عميل شغالة ${runId}`,
     ]);
     ids.customerUser = customerUser.id;
     const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [ids.customerUser]);
@@ -146,9 +163,22 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     const [address] = await q(
       `INSERT INTO addresses (user_id, city_id, street_name, location)
        VALUES ($1,$2,$3, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
-      [ids.customerUser, ids.city, `شارع ضمان ${runId}`],
+      [ids.customerUser, ids.city, `شارع شغالة ${runId}`],
     );
     ids.address = address.id;
+
+    const [workerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'domestic_worker') RETURNING id`, [
+      `+2038${runId}`.slice(0, 15),
+      `شغالة ${runId}`,
+    ]);
+    ids.workerUser = workerUser.id;
+    // hourly_rate_cents=8000 (80ج/ساعة)، معتمدة (approved) — نفس شرط findByIdOrThrow/الفحص الجديد.
+    const [workerProfile] = await q(
+      `INSERT INTO domestic_worker_profiles (user_id, worker_code, hourly_rate_cents, verification_status)
+       VALUES ($1,$2,8000,'approved') RETURNING id`,
+      [ids.workerUser, `DW-${runId}`],
+    );
+    ids.workerProfile = workerProfile.id;
 
     const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
@@ -168,7 +198,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       dataSource.getRepository(ServiceStandardData),
       settingsService,
       {} as never,
-      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
+      {} as never,
     );
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
@@ -180,7 +210,11 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       {} as never,
       {} as unknown as AuditLogService,
       {} as never,
-      {} as never,
+      settingsService,
+    );
+    const domesticWorkersService = new DomesticWorkersService(
+      dataSource.getRepository(DomesticWorkerProfile),
+      { record: async () => undefined } as unknown as AuditLogService,
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
@@ -249,8 +283,8 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       paymentsService,
       supportService,
       events,
-      {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
-      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
+      {} as never,
+      domesticWorkersService,
     );
   });
 
@@ -264,7 +298,9 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM domestic_worker_profiles WHERE id = $1`, [ids.workerProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.workerUser]);
+      await q(`DELETE FROM services WHERE id = ANY($1)`, [[ids.workerRateService, ids.fixedService]]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
@@ -273,58 +309,60 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     }
   });
 
-  /** بيبني طلب COMPLETED مباشرة عبر SQL خام — بديل واقعي لدورة الحجز/التنفيذ الكاملة، بيثبت بس
-   * حالة الطلب النهائية المطلوبة (مكتمل + ضمان لسه سارٍ) بأقل تعقيد ممكن للاختبار. */
-  async function createCompletedOrder(orderType: 'standard' | 'revisit', parentOrderId: string | null): Promise<string> {
-    const warrantyExpiresAt = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
-    const [{ next_human_readable_number: orderNumber }] = await dataSource.query<
-      { next_human_readable_number: string }[]
-    >("SELECT next_human_readable_number('ORD')");
-    const [row] = await q(
-      `INSERT INTO orders (
-         order_number, customer_id, service_id, address_id, service_zone_id, order_type, booking_mode,
-         order_status, estimated_price_cents, inspection_fee_cents, surge_amount_cents, total_amount_cents,
-         payment_status, placed_at, closed_at, warranty_expires_at, parent_order_id, source_channel
-       ) VALUES (
-         $1,$2,$3,$4,$5,$6,'individual','completed',$7,0,0,$7,'paid',now(),now(),$8,$9,'customer_app'
-       ) RETURNING id`,
-      [
-        orderNumber,
-        ids.customerProfile,
-        ids.service,
-        ids.address,
-        ids.zone,
-        orderType,
-        orderType === 'revisit' ? 0 : 30000,
-        warrantyExpiresAt,
-        parentOrderId,
-      ],
-    );
-    return row.id;
-  }
-
-  it('إعادة زيارة لطلب أصلي عادي (standard) مكتمل تحت الضمان — بتنجح وبتبقى مجانية بالكامل', async () => {
-    const originalOrderId = await createCompletedOrder('standard', null);
-    const revisit = await ordersService.create(ids.customerUser, {
-      service_id: ids.service,
-      address_id: ids.address,
-      original_order_id: originalOrderId,
-    } as never);
-    expect(revisit.orderType).toBe(OrderType.REVISIT);
-    expect(revisit.totalAmountCents).toBe(0);
-    expect(revisit.parentOrderId).toBe(originalOrderId);
-  });
-
-  it('إعادة زيارة لإعادة زيارة تانية (سلسلة) — بترفض بوضوح، مش خدمة مجانية بلا نهاية', async () => {
-    const originalOrderId = await createCompletedOrder('standard', null);
-    const firstRevisitId = await createCompletedOrder('revisit', originalOrderId);
-
+  it('worker_rate بلا domestic_worker_profile_id: يترفض VAL_001', async () => {
     await expect(
       ordersService.create(ids.customerUser, {
-        service_id: ids.service,
+        service_id: ids.workerRateService,
         address_id: ids.address,
-        original_order_id: firstRevisitId,
       } as never),
     ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('worker_rate + domestic_worker_profile_id + duration_hours: يتسجّل ACCEPTED مباشرة، السعر = hourlyRateCents × duration_hours', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.workerRateService,
+      address_id: ids.address,
+      domestic_worker_profile_id: ids.workerProfile,
+      duration_hours: 3,
+    } as never);
+    expect(order.orderStatus).toBe(OrderStatus.ACCEPTED);
+    expect(order.technicianId).toBeNull();
+    expect(order.domesticWorkerProfileId).toBe(ids.workerProfile);
+    expect(order.totalAmountCents).toBe(8000 * 3);
+    expect(order.assignedAt).not.toBeNull();
+    expect(order.acceptedAt).not.toBeNull();
+  });
+
+  it('domestic_worker_profile_id + payment_method (دفع مقدّم): يترفض — مش مدعوم لسه (ADR-0029)', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.workerRateService,
+        address_id: ids.address,
+        domestic_worker_profile_id: ids.workerProfile,
+        duration_hours: 2,
+        payment_method: 'card',
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('domestic_worker_profile_id على خدمة fixed عادية (مش worker_rate): يترفض', async () => {
+    await expect(
+      ordersService.create(ids.customerUser, {
+        service_id: ids.fixedService,
+        address_id: ids.address,
+        domestic_worker_profile_id: ids.workerProfile,
+        duration_hours: 2,
+      } as never),
+    ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('رجريشن: خدمة عادية بلا domestic_worker_profile_id لسه بتشتغل زي زمان (SEARCHING_TECHNICIAN)', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.fixedService,
+      address_id: ids.address,
+    } as never);
+    expect(order.orderStatus).toBe(OrderStatus.SEARCHING_TECHNICIAN);
+    expect(order.domesticWorkerProfileId).toBeNull();
+    expect(order.totalAmountCents).toBe(50000);
   });
 });

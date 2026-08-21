@@ -312,7 +312,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // ده موعد الفني نفسه المعلن، مش موعد حر قابل للتعديل من هنا.
   Future<void> _pickSchedule() async {
     final choice = await Navigator.of(context).push<ScheduleChoice>(
-      MaterialPageRoute(builder: (_) => const ScheduleSelectionScreen()),
+      MaterialPageRoute(
+        builder: (_) => ScheduleSelectionScreen(allowsDateRangeBooking: widget.service.allowsDateRangeBooking),
+      ),
     );
     if (choice != null && mounted) {
       setState(() {
