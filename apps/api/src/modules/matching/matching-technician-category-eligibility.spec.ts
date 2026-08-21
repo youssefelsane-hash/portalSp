@@ -148,13 +148,20 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const technicianIds = [ids.technicianByCategoryProfile, ids.technicianByServiceProfile, ids.technicianNeitherProfile];
     try {
+      // بَقّة حقيقية اتلقطت وقت §35.20 (تحقق مركّز عبّر عنها تراكم 153 صف تجريبي فعلي في القاعدة
+      // عبر تشغيلات كتير سابقة): الترتيب القديم كان بيمسح technician_profiles **قبل** ما يجيب
+      // user_id بتاعهم (subquery على صفوف اتمسحت بالفعل بيرجع فاضي دايمًا)، فالمستخدمين (وبالتبعية
+      // أرقام هواتفهم) كانوا يفضلوا للأبد — تصادم `users_phone_number_key` مع تشغيلات لاحقة كان
+      // مسألة وقت بس. الإصلاح: نجيب user_id **قبل** أي حذف.
+      const technicianUsers = await q(`SELECT user_id FROM technician_profiles WHERE id = ANY($1::uuid[])`, [technicianIds]);
+      const technicianUserIds = technicianUsers.map((r: { user_id: string }) => r.user_id);
       await q(`DELETE FROM technician_categories WHERE technician_id = ANY($1::uuid[])`, [technicianIds]);
       await q(`DELETE FROM technician_services WHERE technician_id = ANY($1::uuid[])`, [technicianIds]);
       await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1::uuid[])`, [technicianIds]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [technicianIds]);
-      await q(`DELETE FROM users WHERE id IN (SELECT user_id FROM technician_profiles WHERE id = ANY($1::uuid[]))`, [technicianIds]);
+      if (technicianUserIds.length) await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [technicianUserIds]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
       await q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [[ids.serviceA, ids.serviceB]]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

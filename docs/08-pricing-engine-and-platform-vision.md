@@ -5631,3 +5631,85 @@ allSettled`) — واحد بس نجح، التاني اترفض، بالظبط �
 تحقق مركّز (طلب مالك 2026-08-21 — مش الجناح الكامل): `tsc --noEmit`/`nest build` نضاف،
 `order-team-accept-crew-opportunity.spec.ts` (4/4) + `order-team-recruiting.spec.ts` (15/15، صفر
 ريجريشن من التعديل) نضاف.
+
+## §35.20: اختبارات السيناريوهات + تحقق E2E حي — خلص (2026-08-21)
+
+**ملاحظة صراحة قبل أي حاجة تانية**: النص الحرفي لرسالة المالك اللي عرّفت السيناريوهات A-L (المُشار
+ليها بالاسم في كل قسم من §35.1 لحد هنا) مش موجود منقول بالحرف في أي مكان في `docs/08` أو
+`ADR-0021` — دوّرت (`grep`) في الملفين كاملين ومالقتش غير سيناريو I (تماسك حالة القائد بعد
+`reassignLeader()`، موثّق في §35.6/`admin-orders.service.ts:775`) وسيناريو L (منع تجاوز عدد الطاقم
+المطلوب، موثّق في §35.19 فوق) بالاسم الصريح. باقي الحروف (A-H، J، K) اتلمست ضمنيًا في تعليقات/كود
+مختلف الأقسام بس من غير تسمية صريحة بالحرف المطابق للرسالة الأصلية — على الأرجح اتلخّصت وقت ضغط
+سياق (compaction) سيشن سابقة قبل ما تتنسخ لـ`docs/08` كقائمة مستقلة. **قرار صريح**: بدل اختراع
+تسميات A-L مش مؤكدة، الجدول تحت منظّم بمساحة الميزة (feature area) وبيربط كل واحدة بالاختبار الحي
+الفعلي بتاعها — نفس منهج §20.14/§34.final ("مش سيناريوهات مخترعة").
+
+### جدول التغطية الحية — كل مساحة من §35 مربوطة باختبار Postgres حقيقي فعلي
+
+| مساحة الميزة | الاختبار الحي | الحالة |
+|---|---|---|
+| تكوين الطاقم الموحّد (فني/مساعد منفصلين، `computeCrewComposition()`) | `order-team-recruiting.spec.ts` | ✅ |
+| أولوية فريق القائد الدائم في التجنيد | `order-team-recruiting.spec.ts` | ✅ |
+| تجنيد يستهلك القدرة/الأهلية الحقيقية (LIGHT فوري، MEANINGFUL/HEAVY فرصة، BLOCKED رفض) | `order-team-recruiting.spec.ts` | ✅ |
+| بوابة اكتمال الطاقم عند `start()` | `order-team-recruiting.spec.ts` | ✅ |
+| واجهة `technician-app` (مطلوب/حالي/ناقص) | `apps/technician-app/test_live/` (تفاصيل §35.2) | ✅ |
+| تصعيد 24 ساعة للأدمن عند نقص الطاقم | `crew-shortage-escalation.spec.ts`، `order-crew-shortage-leader-reminder.spec.ts` | ✅ |
+| تحكم أدمن كامل بالطاقم (إضافة/إزالة/استبدال/تغيير قائد) + RBAC/audit | `admin-crew-management.spec.ts`، `admin-orders-concurrency.spec.ts` (سيناريو I) | ✅ |
+| تفسير المطابقة (فني/طلب) — "ليه مؤهّل/مش مؤهّل" | `matching-explainability.spec.ts` | ✅ |
+| بروفايل فني 360° | `admin-technician-360.spec.ts` | ✅ |
+| عرض عمليات الفئة | `admin-technician-category-ops.spec.ts` | ✅ |
+| اتصال/نشاط لحظي | `technician-activity.spec.ts` | ✅ |
+| كارت طاقم الطلب للأدمن ("مين ضاف مين") | `order-team-recruiting.spec.ts` (`listForOrder()` جزء منه) + تحقق E2E حي تحت | ✅ |
+| تايم لاين مطابقة الطلب | `admin-order-timeline.spec.ts` | ✅ |
+| بروفايل عميل 360° | `admin-customer-360.spec.ts` (§35.15) | ✅ |
+| إشعارات إكمال الفريق | `order-crew-shortage-leader-reminder.spec.ts` وملفات `notifications/listeners/order-crew-changed-notification.listener.ts` المرتبطة | ✅ |
+| RBAC/audit شامل على كل mutations §35 الجديدة | تدقيق كامل، §35.18 — 4 endpoints، صفر فجوة | ✅ |
+| أمان التزامن — منع تجاوز عدد الطاقم + إعادة فحص القدرة وقت القبول (سيناريو L) | `order-team-accept-crew-opportunity.spec.ts` (§35.19) + تحقق E2E حي تحت | ✅ |
+
+### تحقق E2E حي كامل (curl + JWT حقيقي بنفس سر `.env`، ضد Postgres/Redis حقيقيين، dev server شغال فعليًا)
+
+قصة كاملة متصلة (مش أجزاء منفصلة زي معظم التحقق الحي السابق لكل بند على حدة): عميل + فني قائد
+(professional) + طلب فريق حقيقي (`booking_mode=team`، `required_technicians=2`) عبر HTTP فعلي بالكامل:
+
+1. `GET .../recruit-candidates?role=technician` (توكن القائد) — رجّع الفني المرشّح بـ`capacity_tier:
+   LIGHT` صح.
+2. `POST .../recruit-candidates/:id` — إضافة فورية (`status:"added"`)، `crew_status` بقى
+   `crewComplete:true` فورًا في `GET /admin/orders/:id`.
+3. `POST /admin/orders/:id/team-members` (توكن أدمن `super_admin`) — إضافة عضو تالت قسرًا نجحت،
+   `audit_logs` سجّلت `order.crew_member_added` بالتفاصيل الصح.
+4. **نفس الطلب بتوكن الفني القائد (مش أدمن)** — اترفض 403 فعليًا (تأكيد حي لـ§35.18: الصلاحية
+   `orders.manage_crew` شغالة مش مجرد ديكوريتور).
+5. `GET /admin/orders/:id/team-members` — الاتنين ظاهرين بـ`added_by` الصح (`{type:"leader",...}`
+   للأول، `{type:"admin",...}` للتالت).
+6. `GET /admin/orders/:id/technicians/:techId/explain` — تفسير مطابقة حقيقي (`eligible:true`، 8
+   checks كلهم `passed:true`).
+7. `GET /admin/technicians/:id/360` + `GET /admin/customers/:id/360` — الاتنين رجّعوا بيانات الطلب
+   ده صح (`current_and_upcoming_jobs`/`current_and_upcoming_orders`).
+8. **سباق قبول متزامن حقيقي فعليًا (Scenario L، مش تسلسلي)**: طلب فريق تاني ناقص فني واحد، فرصتين
+   `crew_recruit` `offered` لفنيين مختلفين، قبول الاتنين بالتوازي الحقيقي (خلفيتين curl فعليتين،
+   مش `await` تسلسلي) — واحد بس رجع `200` واتضاف فعليًا، التاني رجع `409` برسالة واضحة، وأهم حاجة:
+   **الفرصة الخاسرة اتأكدت `declined` فعليًا في القاعدة** (مش `offered` عالقة) — تأكيد حي مباشر
+   لإصلاح البَقّة التانية في §35.19 تحت ضغط HTTP حقيقي، مش بس جوّه معاملة jest.
+
+كل بيانات التحقق (دولة/مدينة/نطاق/فئة/خدمة/مستخدمين/طلبات/فرص/أدوار) اتنضّفت بالكامل بعد التأكد —
+اتفحصت الأصفار حياً بعد التنظيف. **ملاحظة جانبية غير متعلقة بأي بَقّة**: `GET /admin/orders/:id/timeline`
+رجّع مصفوفة فاضية للطلب التجريبي لأن الطلب اتعمله INSERT مباشر بـSQL (تجاوز `OrdersService.create()`
+اللي بيكتب `order_status_history` الأولى) — قصور في تجهيز بيانات الاختبار نفسه مش في الكود، §35.14
+كانت أصلاً مختبرة حية بشكل منفصل بطلب حقيقي عبر الـAPI.
+
+### التحقق النهائي
+
+`tsc --noEmit`/`nest build` نضاف. `npx jest --runInBand src/modules/orders/ src/modules/technicians/
+src/modules/matching/` (الموديولات التلاتة المتأثرة بكل شغل §35) نضاف.
+
+**ريجريشن حقيقي اتلقط واتصلح أثناء تشغيل الدفعة دي بالذات (مش بَقّة كود، فجوة تزامن بين سيشنين
+متوازيين)**: `admin-orders-concurrency.spec.ts` (سيناريوهات `reassignLeader()`، بما فيهم سيناريو I)
+كانت بتفشل بـ`"مستوى الفني ده مش مؤهل يبقى قائد مهمة اعتماد"` — بوابة `eligible_for_team_booking`
+الجديدة من §38 (`assertCoreEligibility()`، migration `0158`) بقت جزء من `assertEligible()` اللي
+`reassignLeader()` بينادّيها، بس فيكستشر السپك ده (اتبنى قبل §38) بيستخدم مستوى `'new'` لكل
+فنييها — و`'new'` مزروع `eligible_for_team_booking=false` صراحة. §38 نفسها كانت من سيشن تانية
+شغالة بالتوازي (نفس التعارض الموثّق في §38's "الجزء د")، ومحدّش رجّع شغّل السپك ده بعد الدمج
+عشان يتأكد. الإصلاح: فنيّين مستهدَفين كقادة فعليًا بس (`newLeaderCProfile`/`newLeaderDProfile`)
+بقوا `professional` (مؤهّل) بدل `new` — الباقي (`leaderProfile`/`technicianA`/`technicianB`، مش
+مستهدفين كقادة اعتماد جداد) فضلوا `new` زي ما هما، صفر تغيير في تغطيتهم. 7/7 نجحوا بعد الإصلاح،
+صفر تعديل على كود الإنتاج (البوابة نفسها صح، الفيكستشر بس كان قديم).
