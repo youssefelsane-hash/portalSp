@@ -108,7 +108,18 @@ export class AdminOrdersController {
       // docs/08 §36.6 — rank_score/ترتيب حقيقي بين المرشّحين المؤهّلين فعليًا لنفس الطلب، مُعاد
       // استخدامه بالحرف من findEligibleTechnicians()، صفر ترتيب مُلفَّق.
       rank_info: explanation.rankInfo
-        ? { rank_score: explanation.rankInfo.rankScore, rank: explanation.rankInfo.rank, total_eligible: explanation.rankInfo.totalEligible }
+        ? {
+            rank_score: explanation.rankInfo.rankScore,
+            rank: explanation.rankInfo.rank,
+            total_eligible: explanation.rankInfo.totalEligible,
+            // docs/08 §36.20-21، ADR-0023 — تفكيك rank_score لمكوّناته الأربعة (جودة/قدرة/عدالة/موثوقية).
+            score_breakdown: {
+              priority_component: explanation.rankInfo.scoreBreakdown.priorityComponent,
+              workload_penalty: explanation.rankInfo.scoreBreakdown.workloadPenalty,
+              fairness_penalty: explanation.rankInfo.scoreBreakdown.fairnessPenalty,
+              reliability_adjustment: explanation.rankInfo.scoreBreakdown.reliabilityAdjustment,
+            },
+          }
         : null,
     };
   }

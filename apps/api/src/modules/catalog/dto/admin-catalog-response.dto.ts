@@ -4,7 +4,7 @@ import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
 import { ServiceProductivityActual } from '../entities/service-productivity-actual.entity';
 import { ServiceProductivitySuggestion } from '../entities/service-productivity-suggestion.entity';
 import { ServiceStandardData } from '../entities/service-standard-data.entity';
-import { ServiceZonePricing } from '../entities/service-zone-pricing.entity';
+import { ServiceZonePricing, ZonePricingMode } from '../entities/service-zone-pricing.entity';
 import { Service } from '../entities/service.entity';
 import { TechnicianService } from '../entities/technician-service.entity';
 
@@ -113,7 +113,10 @@ export interface ServiceZonePricingResponseDto {
   id: string;
   service_id: string;
   service_zone_id: string;
-  price_cents: number;
+  // docs/08 §36.22-23، ADR-0024 — بالظبط واحد من price_cents/modifier_percentage غير null حسب pricing_mode.
+  pricing_mode: ZonePricingMode;
+  price_cents: number | null;
+  modifier_percentage: number | null;
   inspection_fee_cents: number;
   surge_multiplier: number;
   valid_from: string;
@@ -127,7 +130,9 @@ export function toServiceZonePricingResponseDto(pricing: ServiceZonePricing): Se
     id: pricing.id,
     service_id: pricing.serviceId,
     service_zone_id: pricing.serviceZoneId,
+    pricing_mode: pricing.pricingMode,
     price_cents: pricing.priceCents,
+    modifier_percentage: pricing.modifierPercentage !== null ? Number(pricing.modifierPercentage) : null,
     inspection_fee_cents: pricing.inspectionFeeCents,
     surge_multiplier: Number(pricing.surgeMultiplier),
     valid_from: pricing.validFrom.toISOString(),

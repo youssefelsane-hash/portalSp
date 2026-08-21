@@ -5,6 +5,7 @@ import '../../core/auth_repository.dart';
 import '../../core/biometric_auth_service.dart';
 import '../onboarding/models.dart';
 import '../onboarding/onboarding_repository.dart';
+import '../preferred_crew/preferred_crew_screen.dart';
 
 // بروفايلي — نوع الفني + "معاه مساعد؟" (docs/06 §3.7-§3.8) — كانت فجوة موثّقة صراحة: الباك-إند
 // بيدعم طلب ربط مساعد بكود موظفه من زمان (الإدارة توافق بعد كده)، بس مفيش شاشة في التطبيق كانت
@@ -168,6 +169,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       : const Text('فك الربط'),
                                 ),
                             ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.groups_outlined),
+                          title: const Text('الفريق المفضّل'),
+                          subtitle: const Text('زمايلك المفضّلين لتجنيد طلبات "اعتماد" — أولوية بعد فريقك الدائم'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const PreferredCrewScreen()),
                           ),
                         ),
                       ),

@@ -70,6 +70,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _loadCancellationPolicyIfApplicable();
     _loadMedia();
     _loadTeamMembersIfApplicable();
+    _refreshTeamInfoIfApplicable();
   }
 
   // طاقم الطلب — بس لطلبات "اعتماد" (booking_mode='team'). فشل التحميل (مشكلة شبكة عابرة)
@@ -82,6 +83,19 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     } catch (_) {
       // تجاهل — راجع تعليق _loadMedia().
     }
+  }
+
+  // بَقّة حقيقية اتلقطت باختبار حي فعلي (تبليغ مالك 2026-08-21): `widget.initialOrder` بيجي من
+  // فعل تنفيذي (accept/depart/arrive/start/complete/cancel) أو استرجاع نشط (getActive()) — كل
+  // دول في الباك-إند بيرجّعوا toDto() القاعدية (technician-order-execution.controller.ts)، **مش**
+  // toDtoWithTeamInfo() اللي بتحسب `crew_status`/`team_leader_name` (دي بس في getOne()/
+  // listTeamAssigned()). يعني كارت تكوين الطاقم وزرار "ضم فني/مساعد" كانوا بيختفوا تمامًا لطلب
+  // فريق حقيقي حتى لو الفني هو القائد فعلاً — لحد ما حدث websocket يحصّل تحديث (order:status_changed)
+  // أو الفني يرجع من RecruitTeamScreen. نجيب تفاصيل الطلب الكاملة صراحة هنا (نفس _refreshFromServer،
+  // بتنادي getOne()) عشان الكارت يظهر فورًا من أول فتح للشاشة، مهما كان مصدر initialOrder.
+  Future<void> _refreshTeamInfoIfApplicable() async {
+    if (_order.bookingMode != 'team') return;
+    await _refreshFromServer();
   }
 
   // استرجاع الصور اللي اترفعت قبل كده — راجع التعليق في media_repository.dart. فشل التحميل

@@ -9,6 +9,8 @@ export interface RecruitCandidateResponseDto {
   distance_km: number | null;
   /** docs/08 §35 — من فريق القائد الدائم؟ بيترتّب أول القايمة (أولوية، مش استبعاد). */
   is_leader_team_member: boolean;
+  /** docs/08 §36.17، ADR-0022 — عضو مقبول في الفريق المفضّل الدائم بتاع القائد؟ أولوية تاني بعد الفريق الدائم مباشرة. */
+  is_preferred_crew_member: boolean;
   /** docs/08 §35 — LIGHT = تجنيد فوري، MEANINGFUL/HEAVY = فرصة اختيارية (لن يتم تحميل صامت). */
   capacity_tier: string;
 }
@@ -22,6 +24,7 @@ export function toRecruitCandidateResponseDto(row: RecruitCandidateRow): Recruit
     average_rating: row.averageRating,
     distance_km: row.distanceKm !== null ? Number(row.distanceKm) : null,
     is_leader_team_member: row.isLeaderTeamMember,
+    is_preferred_crew_member: row.isPreferredCrewMember,
     capacity_tier: row.capacityTier,
   };
 }

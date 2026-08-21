@@ -14,10 +14,19 @@ export interface TechnicianEligibilityCheckDto {
 // استخدامه بالحرف من MatchingService.findEligibleTechnicians() (نفس صيغة order_priority_weight/
 // workload_balance_weight/fairness_weight)، صفر صيغة ترتيب موازية مخترعة في الواجهة. null لو
 // الفني مش ضمن المجمّع المؤهّل فعليًا (نفس سبب eligible=false غالبًا).
+// docs/08 §36.20-21، ADR-0023 — تفكيك rank_score لمكوّناته الأربعة (جودة/قدرة/عدالة/موثوقية).
+export interface TechnicianRankScoreBreakdownDto {
+  priority_component: number;
+  workload_penalty: number;
+  fairness_penalty: number;
+  reliability_adjustment: number;
+}
+
 export interface TechnicianRankInfoDto {
   rank_score: number;
   rank: number;
   total_eligible: number;
+  score_breakdown: TechnicianRankScoreBreakdownDto;
 }
 
 // GET /admin/orders/:id/technicians/:technicianId/explain (§35.7/§36.6)

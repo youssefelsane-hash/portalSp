@@ -22,7 +22,7 @@ import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
-import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
+import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from './entities/technician-service.entity';
 
 @Injectable()
@@ -336,7 +336,24 @@ export class AdminCatalogService {
       isNew = true;
     }
 
-    pricing.priceCents = dto.price_cents;
+    // docs/08 §36.22-23، ADR-0024 — بالظبط واحد من price_cents/modifier_percentage مطلوب حسب
+    // الوضع (نفس فرض الداتابيز، بس هنا برسالة عربية واضحة للأدمن قبل ما يوصل لخطأ constraint خام).
+    const mode = dto.pricing_mode ?? ZonePricingMode.OVERRIDE;
+    if (mode === ZonePricingMode.OVERRIDE) {
+      if (dto.price_cents === undefined) {
+        throw new ApiException(ErrorCode.VAL_001, 'وضع الاستبدال الثابت محتاج price_cents', HttpStatus.BAD_REQUEST);
+      }
+      pricing.pricingMode = ZonePricingMode.OVERRIDE;
+      pricing.priceCents = dto.price_cents;
+      pricing.modifierPercentage = null;
+    } else {
+      if (dto.modifier_percentage === undefined) {
+        throw new ApiException(ErrorCode.VAL_001, 'وضع المُعدِّل النسبي محتاج modifier_percentage', HttpStatus.BAD_REQUEST);
+      }
+      pricing.pricingMode = ZonePricingMode.PERCENTAGE;
+      pricing.modifierPercentage = String(dto.modifier_percentage);
+      pricing.priceCents = null;
+    }
     if (dto.inspection_fee_cents !== undefined) pricing.inspectionFeeCents = dto.inspection_fee_cents;
     if (dto.surge_multiplier !== undefined) pricing.surgeMultiplier = String(dto.surge_multiplier);
     await this.zonePricing.save(pricing);
@@ -347,7 +364,13 @@ export class AdminCatalogService {
       action: isNew ? 'service_zone_pricing.created' : 'service_zone_pricing.updated',
       entityType: 'service_zone_pricing',
       entityId: pricing.id,
-      newValues: { price_cents: pricing.priceCents, service_zone_id: pricing.serviceZoneId, valid_from: pricing.validFrom },
+      newValues: {
+        pricing_mode: pricing.pricingMode,
+        price_cents: pricing.priceCents,
+        modifier_percentage: pricing.modifierPercentage,
+        service_zone_id: pricing.serviceZoneId,
+        valid_from: pricing.validFrom,
+      },
       meta,
     });
     return pricing;

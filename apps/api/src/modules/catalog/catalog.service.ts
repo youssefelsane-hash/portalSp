@@ -10,7 +10,7 @@ import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { PricingModel, Service } from './entities/service.entity';
-import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
+import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { BookingModeFilter } from './dto/list-services.dto';
 
 export interface PriceEstimate {
@@ -260,10 +260,16 @@ export class CatalogService {
         .orderBy('p.valid_from', 'DESC')
         .getOne();
       if (override) {
+        // docs/08 §36.22-23، ADR-0024 — percentage: نسبة مئوية فوق السعر الأساسي الحالي للخدمة،
+        // بتتحدّث تلقائيًا مع أي تغيير في base_price_cents. override: رقم مطلق زي القديم بالحرف.
+        const effectiveBaseCents =
+          override.pricingMode === ZonePricingMode.PERCENTAGE
+            ? Math.round(service.basePriceCents * (1 + Number(override.modifierPercentage) / 100))
+            : override.priceCents!;
         const surge = Number(override.surgeMultiplier);
-        const estimatedTotalCents = Math.round(override.priceCents * surge * levelMultiplier);
+        const estimatedTotalCents = Math.round(effectiveBaseCents * surge * levelMultiplier);
         return {
-          base_price_cents: override.priceCents,
+          base_price_cents: effectiveBaseCents,
           inspection_fee_cents: override.inspectionFeeCents,
           surge_multiplier: surge,
           level_price_multiplier: levelMultiplier,

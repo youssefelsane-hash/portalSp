@@ -97,6 +97,10 @@ interface Technician360Response {
     total_count: number;
     recent: { id: string; severity: string; status: string; created_at: string }[];
   };
+  // الفريق المفضّل (docs/08 §36.19، ADR-0022) — رؤية بس، بتُدار من الفني نفسه في تطبيقه (صفر
+  // موافقة أدمن مطلوبة في التصميم — تفضيل شخصي بحت، مش توظيف).
+  preferred_crew_as_owner: { id: string; technician_id: string; technician_code: string; full_name: string; status: string }[];
+  preferred_crew_as_member: { id: string; technician_id: string; technician_code: string; full_name: string; status: string }[];
 }
 
 export default function TechnicianDetailPage() {
@@ -611,6 +615,38 @@ export default function TechnicianDetailPage() {
                         {profile360.complaints.recent.map((c) => (
                           <li key={c.id} className="text-muted-foreground">
                             {c.severity} — {c.status} ({new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')})
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1 font-medium">فريقه المفضّل (بصفته صاحب الدعوة)</p>
+                    {profile360.preferred_crew_as_owner.length === 0 ? (
+                      <p className="text-muted-foreground">لسه محدش دعاه</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1">
+                        {profile360.preferred_crew_as_owner.map((m) => (
+                          <li key={m.id} className="text-muted-foreground">
+                            {m.full_name} ({m.technician_code}) — {m.status === 'accepted' ? 'عضو' : 'دعوة معلّقة'}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-1 font-medium">عضو مقبول في فرق مفضّلة تانية</p>
+                    {profile360.preferred_crew_as_member.length === 0 ? (
+                      <p className="text-muted-foreground">مش عضو في أي فريق مفضّل تاني</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1">
+                        {profile360.preferred_crew_as_member.map((m) => (
+                          <li key={m.id} className="text-muted-foreground">
+                            {m.full_name} ({m.technician_code})
                           </li>
                         ))}
                       </ul>

@@ -1,12 +1,25 @@
-import { IsDateString, IsInt, IsNumber, IsOptional, IsPositive, IsUUID, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsUUID, Min } from 'class-validator';
+import { ZonePricingMode } from '../entities/service-zone-pricing.entity';
 
 export class UpsertZonePricingDto {
   @IsUUID()
   service_zone_id: string;
 
+  // docs/08 §36.22-23، ADR-0024 — افتراضي override (السلوك القديم) لو مش مبعوت، للتوافق مع أي
+  // استهلاك قديم للـAPI ده. بالظبط واحد من price_cents/modifier_percentage مطلوب حسب الوضع —
+  // الفحص الفعلي في admin-catalog.service.ts (مش هنا، عشان الرسالة تبقى بالعربي وواضحة).
+  @IsOptional()
+  @IsEnum(ZonePricingMode)
+  pricing_mode?: ZonePricingMode;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
-  price_cents: number;
+  price_cents?: number;
+
+  @IsOptional()
+  @IsNumber()
+  modifier_percentage?: number;
 
   @IsOptional()
   @IsInt()

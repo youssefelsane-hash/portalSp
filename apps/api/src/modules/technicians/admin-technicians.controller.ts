@@ -177,6 +177,21 @@ export class AdminTechniciansController {
         requested_at: r.requestedAt.toISOString(),
         completed_at: r.completedAt ? r.completedAt.toISOString() : null,
       })),
+      // الفريق المفضّل (docs/08 §36.19) — رؤية بس، بتُدار من الفني نفسه (/technician/preferred-crew*).
+      preferred_crew_as_owner: p.preferredCrewAsOwner.map((r) => ({
+        id: r.id,
+        technician_id: r.technicianId,
+        technician_code: r.technicianCode,
+        full_name: r.fullName,
+        status: r.status,
+      })),
+      preferred_crew_as_member: p.preferredCrewAsMember.map((r) => ({
+        id: r.id,
+        technician_id: r.technicianId,
+        technician_code: r.technicianCode,
+        full_name: r.fullName,
+        status: r.status,
+      })),
     };
   }
 

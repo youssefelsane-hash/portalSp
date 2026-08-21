@@ -377,7 +377,7 @@
 - `cancellation.window_minutes_after_acceptance` (افتراضي 10) — النافذة المسموحة بعد القبول.
 - `cancellation.min_minutes_before_scheduled_start` (افتراضي 60) — لو الطلب مجدول (`scheduled_at`)، الإلغاء الذاتي بيتمنع لو اقتربنا من الموعد بأقل من ده، بغض النظر عن نافذة القبول.
 - `cancellation.auto_rematch_enabled` (افتراضي true) — لطلبات "auto-match" (مش طوارئ، مش اختيار عميل صريح): إعادة مطابقة تلقائية ولا استنى اختيار العميل.
-- `cancellation.team_workers_can_self_cancel` (افتراضي false) — عضو فريق عادي (`team_role=worker`) يقدر يلغي طلب "اعتماد" بنفسه ولا لأ.
+- ~~`cancellation.team_workers_can_self_cancel`~~ — **اتحذف استخدامها بالكامل (بَقّة حقيقية، 2026-08-21) — راجع "صلاحيات الفريق/الشركة" تحت.** الصف نفسه فضل موجود في `infra/migrations/0070_technician_cancellation_settings.sql` (migration موثّق ميتعدّلش)، بس مفيش كود بيقرأه دلوقتي — orphan غير ضار.
 - **مفيش رقم عقوبة/تصعيد مالي مُخترَع** — الغرامة نفسها بتيجي من `cancellation_reasons.fee_percentage` الموجود أصلاً (لكل سبب). أي محرك تصعيد/سمعة مستقبلي (`docs/10` بند "penalty/escalation thresholds architecturally supported but not hardcoded") يقدر يُبنى فوق `technician_order_cancellations` مباشرة (كل إلغاء مسجّل بالكامل، عدّ نافذة زمنية = `COUNT(*) WHERE technician_id=... AND cancelled_at > now() - interval`) — مفيش سكيما إضافية لازمة دلوقتي.
 
 ### جدول `technician_order_cancellations` (migration 0069) — سجل مخصوص، منفصل عن `order_status_history`
@@ -397,8 +397,12 @@
 
 **استبعاد الفني اللي لغى من إعادة المطابقة**: مجاني تمامًا — `findEligibleTechnicians()` في `matching.service.ts` أصلاً بتستبعد أي فني عنده صف `order_assignments` لنفس الطلب (من أي جولة سابقة)، وصف الفني اللي لغى فضل موجود (حالته `accepted`) — فمش هيترشح تاني لنفس الطلب أبدًا، حتى لو العميل طلب `requested_technician_id` بنفس الـid بالغلط (اتأكد حي).
 
-### صلاحيات الفريق/الشركة
-`booking_mode=team` + الفني اللي بيحاول يلغي `team_role=worker` (مش `owner`/`manager`/`independent`) → 403 `"مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق"`، إلا لو `cancellation.team_workers_can_self_cancel=true`. الفحص في `GET /technician/orders/:id/cancellation-policy` (استشاري) **و** `POST .../cancel` (فرض حقيقي) — نفس الدالة `canSelfCancelTeamOrder()`، مصدر حقيقة واحد.
+### صلاحيات الفريق/الشركة — بَقّة حقيقية اتصلحت (اختبار مالك فعلي لتطبيق الفني، 2026-08-21)
+**كانت**: `booking_mode=team` + الفني اللي بيحاول يلغي `team_role=worker` (مش `owner`/`manager`/`independent`) → 403 `"مينفعش تلغي الطلب ده بنفسك — لازم يعدّي من مدير الفريق"` عبر `canSelfCancelTeamOrder(technicianProfile.teamRole)`، إلا لو `cancellation.team_workers_can_self_cancel=true` (كان افتراضي false، بلا UI أدمن وبلا تغطية اختبارات).
+
+**المشكلة**: `teamRole` هنا رتبة الفني الشخصية في شركته/فريقه **الدائم** (`technician_companies`، هرمية OWNER/MANAGER/SUPERVISOR/WORKER) — مفهوم منفصل تمامًا عن قيادة **هذا الطلب بالذات** (`orders.technician_id`، حسب معمارية §35/ADR-0021). النتيجة: فني هو **قائد الطلب الفعلي** (`findOwnedByTechnicianOrThrow()` أثبتت كده فعلاً — الاستعلام صراحة `WHERE technician_id = profile.id`، فمينفعش يوصل لهذا الفحص أصلاً غير القائد الحقيقي) كان بيترفض إلغاؤه الذاتي **لمجرد** إن رتبته الشخصية في شركة منفصلة "عادي" — قرار مالوش علاقة بصلاحيته على هذا الطلب. اتصلح اتلقط باختبار حي فعلي من المالك لتطبيق الفني: كارت "طاقم الطلب" بيعرض "لسه محدش انضاف" بلا زرار تجنيد (بَقّة تانية منفصلة، تحت)، وزرار الإلغاء بيقول "لازم مدير الفريق" رغم إن الفني هو القائد المُعيَّن فعليًا.
+
+**الإصلاح**: حذف الفحص بالكامل من `getTechnicianCancellationPolicy()` و`technicianCancel()` — `findOwnedByTechnicianOrThrow()` نفسه هو الإثبات الوحيد المطلوب لقيادة الطلب (نفس مبدأ `OrderTeamService` بالحرف: القائد المُعيَّن على الطلب عنده صلاحية كاملة بلا بوابة رتبة شركة إضافية في أي مكان تاني بالنظام). `canSelfCancelTeamOrder()` و`TEAM_SELF_CANCEL_ALLOWED_ROLES` اتشالوا كـdead code. اختبار حي: `technician-team-order-leader-cancel.spec.ts` (قائد برتبة شركة `worker` منفصلة — `can_cancel: true` + إلغاء فعلي ناجح).
 
 ### النافذة الزمنية — `ORDR_004` (كود موجود من زمان، "انتهت مهلة الإلغاء المجاني"، أول استهلاك حقيقي هنا)
 `evaluateCancellationWindow()` — دالة واحدة يستخدمها الفحص الاستشاري (`GET .../cancellation-policy`) والفرض الحقيقي (`POST .../cancel`) بالحرف، فمفيش احتمال يختلفوا. برّه النافذة → 403 واضح يوجّه للدعم، **مش** تعطيل صامت للزرار بس (لو الواجهة فشلت تخفيه لأي سبب، الباك-إند بيرفض بردو).

@@ -101,11 +101,18 @@ export interface UpdateServiceBody extends Partial<CreateServiceBody> {
   is_active?: boolean;
 }
 
+// docs/08 §36.22-23، ADR-0024 — override (رقم مطلق، السلوك القديم) أو percentage (نسبة مئوية فوق
+// base_price_cents، بتتحدّث تلقائيًا مع أي تغيير في السعر الأساسي). بالظبط واحد من price_cents/
+// modifier_percentage غير null حسب pricing_mode.
+export type ZonePricingMode = 'override' | 'percentage';
+
 export interface ServiceZonePricingResponseDto {
   id: string;
   service_id: string;
   service_zone_id: string;
-  price_cents: number;
+  pricing_mode: ZonePricingMode;
+  price_cents: number | null;
+  modifier_percentage: number | null;
   inspection_fee_cents: number;
   surge_multiplier: number;
   valid_from: string;
@@ -116,7 +123,9 @@ export interface ServiceZonePricingResponseDto {
 
 export interface UpsertZonePricingBody {
   service_zone_id: string;
-  price_cents: number;
+  pricing_mode?: ZonePricingMode;
+  price_cents?: number;
+  modifier_percentage?: number;
   inspection_fee_cents?: number;
   surge_multiplier?: number;
   valid_from?: string;

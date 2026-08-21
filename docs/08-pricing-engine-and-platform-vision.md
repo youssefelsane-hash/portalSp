@@ -5713,3 +5713,207 @@ src/modules/matching/` (الموديولات التلاتة المتأثرة ب�
 بقوا `professional` (مؤهّل) بدل `new` — الباقي (`leaderProfile`/`technicianA`/`technicianB`، مش
 مستهدفين كقادة اعتماد جداد) فضلوا `new` زي ما هما، صفر تغيير في تغطيتهم. 7/7 نجحوا بعد الإصلاح،
 صفر تعديل على كود الإنتاج (البوابة نفسها صح، الفيكستشر بس كان قديم).
+
+## §35.final: الإغلاق النهائي — مبادرة §35 خلصت بالكامل (2026-08-21)
+
+كل بنود §35 (35.0 لحد 35.20) اتقفلوا. الاتنين اللي فضلوا "pending" في تتبع المهام (35.12، 35.13)
+مش فجوة — اتفوّق عليهم صراحة بواجهة أوسع وأحدث من §36 (مركز عمليات أدمن، تنبيهات §36.9، توزيع/عدالة
+§36.10) بنفس محرك البيانات، فمفيش داعي لبناء نسخة منفصلة أضيق كانت مخطّطة قبل §36.
+
+### جناح الريجريشن الكامل (طلب مالك صريح 2026-08-21 — نقطة التفتيش بعد دفعة شغل كاملة)
+
+`npx jest --runInBand` (كل apps/api، صفر فلترة موديول): **134/134 suite، 746/746 اختبار، صفر
+فشل**. `apps/api`: `tsc --noEmit`/`nest build` نضاف. `apps/admin`: `tsc --noEmit`/`next build`
+(52 صفحة) نضاف. `apps/customer-app`: `flutter analyze` (43 `info`-lint، نفس الأساس الموثّق من
+§38، صفر تحذير جديد) نضاف.
+
+**ملاحظة بيئة (مش ريجريشن)**: عدة محاولات لـ`flutter test test_live/` (المجلد كامل) رجّعوا
+`ThrottlerException: Too Many Requests` على معظم السيناريوهات — `ThrottlerModule` global
+(`ttl:60000, limit:60`، `app.module.ts`) بيتستنفذ تراكميًا من مجموع نداءات كل ملفات `test_live/`
+(19 ملف) مع بعض في نافذة الدقيقة الواحدة، بغض النظر عن `--concurrency` (اتأكد بتجربة `--concurrency=1`
+برضه فشلت). ده سلوك معروف عند تشغيل المجلد كامل دفعة واحدة (مش خاص بـ§35 — التحقق التاريخي في
+§38 كان بيشغّل تجميعة أصغر "7/7" عمدًا لنفس السبب)، **صفر علاقة بكود §35** (الاختبارات المتأثرة كلها
+OTP/شات/دفع/تسعير، صفر مسار تجنيد فريق فيها). بعد استنى نافذة فاضية تمامًا (صفر نداء) واختبار ملف
+واحد لوحده، الـthrottle اختفى فعلاً — بس ظهر فشل تاني غير متعلق (`كود التحقق غير صحيح`) سببه إعادة
+تشغيل الـdev server أكتر من مرة النهاردة (انقطاع الحاوية منتصف السيشن) خلط سطور الـlog اللي
+`_latestOtpFor()` بيدوّر فيها على آخر OTP بالرقم ده — فنية فحص الاختبار نفسها (قراءة OTP من stdout
+السيرفر) بتفترض سيرفر واحد مستمر من بداية التشغيل، مش عدة إعادة تشغيل يدوية متتالية. **صفر علاقة
+بكود §35 أو أي كود إنتاج** — `apps/api`'s الجناح الكامل (134/134) بيغطي مسار OTP نفسه حيًا بالفعل
+(`otp-flow` ضمن موديول `auth`)، و`flutter analyze` تأكد صفر تحذير جديد في الكود بتاع `apps/customer-app`
+نفسه. تحقق live E2E الحقيقي لـ§35 (§35.20 فوق) كان عبر curl+JWT مباشر، مش عبر `test_live/` أصلاً.
+
+### إجمالي مبادرة §35 — من الطلب الأصلي للإغلاق
+
+استكمال شكل "طلب/فريق" (§31) لنظام حقيقي: قائد + طاقم يكمل بعدين، أولوية فريق دائم بلا تجاوز
+أهلية/قدرة، ومركز عمليات أدمن كامل فوق نفس محرك المطابقة/القدرة/العدالة (صفر مصدر حقيقة تاني) —
+بروفايل فني/عميل 360، تفسير مطابقة، قمع طلب، تنبيهات، تحكم كامل بالطاقم، RBAC/audit شامل، أمان
+تزامن مُثبت حيًا (سيناريو L مرتين — jest transaction وHTTP حقيقي متزامن). **بَقّتين حقيقيتين
+جوهريتين اتلقطوا واتصلحوا أثناء البناء نفسه** (تفاصيل كاملة في §35.19): `listForOrder()` بعد
+القبول كان بيرجّع قايمة ناقصة (قراءة قبل الـcommit)، وتعليم فرصة خاسرة `declined` كان بيتلغي بصمت
+مع الـrollback. **بَقّتين تانيتين اتلقطوا وقت §35.20 تحديدًا** (تحقق مركّز أوسع من الشريحة الواحدة):
+ريجريشن فيكستشر `admin-orders-concurrency.spec.ts` بعد §38 (§35.19 فوق)، وتسريب بيانات دائم في
+`matching-technician-category-eligibility.spec.ts` بسبب ترتيب حذف غلط في `afterAll()` — كلاهما
+اتصلح بلا لمس كود الإنتاج (فيكستشرات/ترتيب تنظيف بس).
+
+جاهزة للدمج. مفيش PR اتفتحت — طلب صريح من المالك مطلوب قبل أي `gh pr create`.
+
+### §36.15 — إغلاق: تدقيق `assistant_link_status` + ADR-0022 (الفريق المفضّل)
+
+تدقيق حي (قراءة كود مباشرة، `technician-profile.entity.ts`) أكّد الفرق الجوهري اللي §36 كان
+مفترضه: `assistant_technician_id`/`assistant_link_status` علاقة **غير متماثلة واحد-لواحد** (فني
+رئيسي + مساعد تابع بالظبط)، محتاجة موافقة أدمن صريحة (`TechnicianAssistantLinkStatus`)، منفصلة
+تمامًا عن `order_team_members` (طاقم مؤقت لطلب واحد) و`technician_companies` (توظيف تنظيمي رسمي).
+
+**ADR-0022** (`docs/adr/0022-preferred-crew-peer-network.md`) بيوثّق تصميم "الفريق المفضّل" —
+نموذج تالت: شبكة تفضيل نظير-لنظير دائمة، جدول جديد `technician_preferred_crew_members` (اتجاه
+واحد owner→member، حالات invited/accepted/declined/removed، حد أقصى قابل للتعديل عبر settings،
+**صفر موافقة أدمن** — قرار مبرَّر: العلاقة دي تفضيل شخصي بحت بلا مسؤولية قانونية/أجر مرتبط مباشرة،
+عكس المساعد). الأولوية في التجنيد هتكون مستوى إضافي فوق `isLeaderTeamMember` الموجود من §35.1-3
+(`isLeaderTeamMember DESC, isPreferredCrewMember DESC, distanceKm ASC`) — إشارة ترتيب بس، صفر
+تجاوز لقواعد الأهلية/القدرة الموجودة. البدائل المرفوضة (صف متبادل تلقائي، موافقة أدمن، دمج مع
+`technician_companies`) موثّقة بالتفصيل في الـADR نفسه.
+
+### §36.16/36.17 — إغلاق: باك-إند الفريق المفضّل (عضوية/دعوة/قبول/رفض/مغادرة) + الأولوية في التجنيد
+
+منفَّذ بالكامل حسب ADR-0022:
+
+- **migration `0159_preferred_crew_members.sql`**: جدول `technician_preferred_crew_members` جديد
+  (`owner_technician_id`/`member_technician_id`/`status` enum `invited|accepted|declined|removed`)
+  + فهرس فريد جزئي (`WHERE status IN ('invited','accepted')` بس — علاقة "حية" واحدة بين نفس
+  الاتنين، مغادرة/إزالة بتفتح الباب لدعوة جديدة تاني) + `settings` key جديد
+  `matching.preferred_crew_max_size` (افتراضي 10).
+- **`TechnicianPreferredCrewMember` entity** + **`PreferredCrewService`**
+  (`apps/api/src/modules/technicians/preferred-crew.service.ts`) — `invite()`/`accept()`/
+  `decline()`/`remove()`/`leave()`/`listMine()`/`listInvitationsReceived()`/`getAcceptedMemberIds()`.
+  نفس نمط `TechniciansService.requestAssistant()` بالحرف (بحث بـ`technician_code`)، بس **صفر
+  موافقة أدمن** (قرار ADR-0022 — تفضيل شخصي بحت، مش توظيف).
+- **Endpoints** (`TechniciansController`، `technician/preferred-crew*`): `GET`/`POST` للقايمة/الدعوة،
+  `GET .../invitations` للدعوات الواردة، `POST .../invitations/:id/accept|decline`، `DELETE :id`
+  (إزالة من جانب الـowner)، `POST :id/leave` (مغادرة من جانب العضو).
+- **الأولوية في التجنيد (§36.17)**: `OrderTeamService.listRecruitCandidates()` بقى فيه
+  `isPreferredCrewMember` (نفس أسلوب `isLeaderTeamMember` — `EXISTS` subquery واحد، صفر N+1) —
+  الترتيب بقى `isLeaderTeamMember DESC, isPreferredCrewMember DESC, distanceKm ASC, ...`. صفر
+  تأثير على الاستبعاد — فني غير مؤهّل لسه بيتستبعد حتى لو في الفريق المفضّل. `RecruitCandidateRow`/
+  `RecruitCandidateResponseDto` اتوسّعوا بـ`is_preferred_crew_member`.
+- **اختبار حي جديد** (`preferred-crew.spec.ts`، 15/15): دعوة/قبول/رفض/إزالة/مغادرة، رفض دعوة النفس،
+  رفض كود مش موجود، رفض تعارض دعوة حية مكررة، دعوة جديدة ممكنة بعد مغادرة/رفض قديم، حد أقصى قابل
+  للتعديل بيمنع دعوة زيادة. اختبار تكامل في `order-team-recruiting.spec.ts` (16/16، +1 اختبار
+  جديد) بيثبت الترتيب الحقيقي: فريق دائم أول حاجة، فريق مفضّل بعده مباشرة، صفر تأثير على مرشّحين
+  تانيين.
+- **التحقق**: `tsc --noEmit`/`nest build` نضاف.
+
+**لسه فاضل من §36 الجزء ج**: §36.18 (`technician-app` UI)، §36.19 (`apps/admin` رؤية/تحكم +
+إشعارات + اختبارات كاملة).
+
+## §39. بَقّتين حقيقيتين اتصلحوا — قائد طلب "اعتماد" مش شايف كارت التجنيد ومرفوض إلغاؤه بنفسه (بلاغ مالك 2026-08-21، اختبار فعلي لتطبيق الفني) — ✅ خلص
+
+المالك اختبر الفلو الفعلي لطلب `booking_mode=team` على تطبيق الفني الحقيقي، ولقى بَقّتين
+منفصلتين تمامًا (اتفحص الكود/الداتابيز قبل أي تعديل، حسب طلبه بالحرف):
+
+1. **كارت "طاقم الطلب" بلا زرار تجنيد**: `apps/technician-app` — `OrderExecutionScreen.initState()`
+   كانت بتحط `_order = widget.initialOrder` من غير fetch كامل، و`initialOrder` من أي فعل تنفيذي
+   (accept/depart/arrive/.../getActive) بيرجع `toDto()` القاعدية مش `toDtoWithTeamInfo()` (اللي
+   بتحسب `crew_status` — موجودة بس في `getOne()`/`listTeamAssigned()`). الإصلاح: `_refreshTeamInfoIfApplicable()`
+   جديدة في `initState()` بتنادي `_refreshFromServer()` الموجودة أصلاً (`getOne()`) لو
+   `bookingMode=='team'`. **صفر نظام تجنيد جديد** — نفس `RecruitTeamScreen`/endpoints التجنيد
+   الموجودة. تفاصيل كاملة: `apps/technician-app/README.md`.
+2. **رفض إلغاء القائد نفسه**: `apps/api` — `orders.service.ts` كانت بتخلط بين `team_role` (رتبة
+   الفني الشخصية في شركته/فريقه **الدائم**، `technician_companies`) وقيادته الفعلية **لهذا الطلب
+   بالذات** (`orders.technician_id`، §35/ADR-0021). `findOwnedByTechnicianOrThrow()` أصلاً بتثبت
+   القيادة قبل ما نوصل للفحص، فالفحص الإضافي كان بيرفض قائد حقيقي رتبته الشخصية "عادي" في شركة
+   منفصلة تمامًا — قرار مالوش علاقة بصلاحيته هنا. الإصلاح: حذف `canSelfCancelTeamOrder()` +
+   `TEAM_SELF_CANCEL_ALLOWED_ROLES` بالكامل من `getTechnicianCancellationPolicy()`/`technicianCancel()`
+   (dead code اتشال، `cancellation.team_workers_can_self_cancel` بقى orphan غير ضار — صفر UI/اختبار
+   كان بيستخدمه أصلاً). تفاصيل كاملة: `apps/api/src/modules/orders/README.md` § "صلاحيات
+   الفريق/الشركة".
+
+**التحقق**: `tsc --noEmit`/`nest build` نضاف، `flutter analyze` صفر تحذيرات جديدة. اختبار حي جديد
+`technician-team-order-leader-cancel.spec.ts` (قائد برتبة شركة `worker` منفصلة — `can_cancel: true`
++ إلغاء فعلي ناجح، ضد Postgres حقيقي). اختبارات مركّزة موجودة (`orders-cancel-prepaid-refund`،
+`admin-crew-management`، `order-team-recruiting`، `s22-cross-operation-concurrency`،
+`technician-active-order-recovery` — 47 اختبار) كلها لسه نضيفة، صفر regression. مفيش أي endpoint/
+منطق تجنيد جديد — الإصلاح بالكامل تصحيح جذر السبب، حسب طلب المالك بالحرف.
+
+### §36.18 — إغلاق: `technician-app` UI للفريق المفضّل الدائم
+
+- **`lib/features/preferred_crew/`** (جديد): `models.dart` (`PreferredCrewMember`)،
+  `preferred_crew_repository.dart` (نداءات الـ7 endpoints)، `preferred_crew_screen.dart` — 3
+  أقسام: دعوة زميل بكوده، دعوات وصلتني (قبول/رفض)، فريقي المفضّل (إزالة). مدخل من `ProfileScreen`
+  (كارت "الفريق المفضّل" جديد جوّه بروفايلي).
+- **بَقّة حقيقية اتلقطت وقت بناء الشاشة** (قبل أي push للإنتاج): `leave()` كانت موجودة في
+  `PreferredCrewService` من §36.16 بلا أي endpoint/دالة تسرد "فرق أنا عضو مقبول فيها" — الفني
+  المدعو ما كانش عنده أي طريقة يوصل بيها لعضويته أصلاً عشان يقدر يسيبها. الإصلاح: `listMyMemberships()`
+  جديدة في `PreferredCrewService` + `GET /technician/preferred-crew/memberships` — قسم "أنا عضو
+  في فريق مفضّل عند" جديد في الشاشة بزرار "اترك الفريق". اختبار حي جديد يثبت البَقّة والإصلاح.
+- **إغلاق فجوة UI صغيرة من §36.17**: `RecruitCandidate`/`RecruitTeamScreen` (§35.2) اتوسّعوا
+  بـ`isPreferredCrewMember` + بادج "مفضّل" منفصل عن بادج "فريقك" — الباك-إند كان بيحسب الإشارة
+  دي من §36.17 بالفعل بلا أي عرض ليها في الواجهة.
+- **التحقق**: `flutter analyze` على كل التطبيق — صفر تحذيرات جديدة (19 info-lint موجودين أصلاً،
+  ولا واحد فيهم في ملفات الفريق المفضّل الجديدة أو التعديلات).
+
+### §36.19 — إغلاق: رؤية أدمن + إشعارات + اختبارات للفريق المفضّل
+
+- **رؤية أدمن (بروفايل 360)**: `AdminTechnician360Service.getProfile()` بقى فيه `preferredCrewAsOwner`/
+  `preferredCrewAsMember` (استعلام SQL مباشر، نفس نمط باقي أقسام الملف — صفر منطق تعديل جديد، **قراءة
+  بس**؛ العلاقة لسه بتُدار بالكامل من الفني نفسه في تطبيقه، بلا موافقة أدمن حسب تصميم ADR-0022). واجهة
+  `apps/admin/technicians/[id]` بقى فيها قسم "فريقه المفضّل"/"عضو مقبول في فرق مفضّلة تانية" جوّه كارت
+  النظرة التشغيلية الموجود، جنب سلوك الإلغاء/الشكاوى.
+- **إشعارات**: `PreferredCrewService` بيصدّر `PREFERRED_CREW_INVITED_EVENT`/`PREFERRED_CREW_ACCEPTED_EVENT`
+  (حدث بس، صفر معرفة بالإشعارات — نفس فلسفة `WORK_OPPORTUNITY_OFFERED_EVENT` بالحرف). **سبب معماري
+  مهم**: `NotificationsModule` بيستورد `TechniciansModule` بالفعل (مش العكس)، فحقن `NotificationsService`
+  مباشرة جوّه `PreferredCrewService` كان هيعمل استيراد دائري — الحل نفسه المُتّبع فعلاً لـ
+  `WorkOpportunityOfferedNotificationListener`: مستمع جديد (`PreferredCrewNotificationListener`) مسجّل
+  في `NotificationsModule` نفسه، بيستخدم `TechniciansService`+`NotificationsService` سوا بلا أي دورة.
+  `IN_APP` بس (مش عاجل زي فرصة عمل لطلب حقيقي).
+- **اختبارات**: `preferred-crew.spec.ts` اتوسّع لـ16/16 (كانت 15) — إضافتين: (1) `invite()`/`accept()`
+  بيصدّروا الحدث الصحيح بالـpayload الصح (event emitter حقيقي، مش mock)، (2) `listMyMemberships()`
+  الجديدة (البَقّة المذكورة في §36.18). `admin-technician-360.spec.ts` الموجود لسه 100% نضيف بعد
+  إضافة الحقلين الجديدين للـresponse (تغيير إضافي بس، صفر كسر). `tsc --noEmit`/`nest build` نضاف
+  على `apps/api` و`apps/admin` الاتنين.
+
+**§36 الجزء ج (الفريق المفضّل) خلص بالكامل الآن (§36.15-19)**. لسه فاضل من §36: الجزء د (§36.20-28،
+محرك سياسة المطابقة والتسعير القابل للتعديل — مستقل تمامًا عن الفريق المفضّل، من رسالة المالك التانية).
+
+### §36.20-21 — إغلاق: تدقيق أوزان المطابقة + ADR-0023 + وزن الموثوقية
+
+تدقيق حي (كود مباشر، مش تخمين) لكل الأوزان المطلوبة (جودة/قدرة/عدالة/مسافة/موثوقية): 4 من 5
+موجودين وشغالين فعليًا (`order_priority_weight`/`workload_balance_weight`/`fairness_weight`،
+والمسافة كـtiebreak حتمي بعد الترتيب مش وزن مخلوط — قرار واعي، الأسباب في ADR-0023). **الفجوة
+الحقيقية الوحيدة: الموثوقية** — تقييم الفني (`average_rating`) مالوش أي أثر على ترتيب المطابقة.
+سياسة HEAVY الاختيارية موجودة ومكتملة بالفعل (§34.1b، `matching.offer_heavy_workload_technicians`).
+
+**الإصلاح** (`docs/adr/0023-matching-policy-reliability-weight.md`): 3 إعدادات جديدة
+(`matching.reliability_weight` افتراضي 0=معطّل، `matching.reliability_baseline_rating` افتراضي
+4.0، `matching.reliability_min_ratings_count` افتراضي 3) + `reliability_adjustment` جديد في
+`rank_score` (`matching.service.ts`) — فني بصفر تقييمات محايد تمامًا (مش معاقَب على قلة بيانات،
+عكس معاملة `average_rating=0` كتقييم سيء فعلي). `EligibleTechnicianRow` بقى فيها تفكيك المكوّنات
+الأربعة، `MatchingExplainabilityService`/`GET /admin/orders/:id/technicians/:id/explain` بيرجّعوا
+`rank_info.score_breakdown` الجديد (صفر كسر للـresponse، إضافي بس) — `apps/admin` بيعرضه دلوقتي
+جوّه شاشة تفسير المطابقة الموجودة.
+
+اختبار حي جديد `matching-reliability-scoring.spec.ts` (3/3: الإعداد معطّل=صفر أثر، مفعّل=تقييم
+أعلى ياخد أولوية، فني جديد محايد). صفر رجريشن في specs المطابقة المجاورة (29/29). `tsc --noEmit`/
+`nest build` (apps/api)، `tsc --noEmit` (apps/admin)، `npm run build` (packages/shared-types) كلهم نضاف.
+
+**واجهة أدمن مخصّصة لتحرير الأوزان دي كـ"سياسة" موحّدة لسه مؤجّلة لـ§36.27** — القيم دي بالفعل
+قابلة للتعديل من `/admin/settings` العام من غير أي كود جديد (نفس مبدأ `fairness_weight`)، §36.27
+تحسين تجربة بس.
+
+### §36.22-23 — إغلاق: تسعير المنطقة كمُعدِّل نسبي + ADR-0024
+
+تدقيق حي لـ`catalog.service.ts.estimate()` أثبت إن `service_zone_pricing.price_cents` استبدال ثابت
+مطلق دايمًا (`formula` pricing model منفصل تمامًا، صفر تفاعل مع تسعير المنطقة أصلاً — قرار قديم
+متعمّد). **المشكلة**: لو الأدمن غيّر السعر الأساسي للخدمة بعدين، أي منطقة عندها override تفضل
+مسمّرة على القديم للأبد بصمت.
+
+**الإصلاح** (`docs/adr/0024-zone-price-percentage-modifier.md`): `pricing_mode` جديد (افتراضي
+`override`، صفر تغيير سلوك للصفوف الموجودة) — `override` (رقم مطلق، القديم بالحرف) أو `percentage`
+(نسبة مئوية فوق `base_price_cents`، بتتحدّث تلقائيًا). `price_cents` بقى Nullable، `modifier_percentage`
+عمود جديد، CHECK constraint يمنع الخلط. `apps/admin` بقى فيه اختيار وضع صريح في فورم تسعير المنطقة.
+
+اختبار حي جديد `zone-pricing-percentage-modifier.spec.ts` (4/4: override رجريشن، percentage صح،
+تحديث تلقائي مع تغيير السعر الأساسي، بلا zoneId = عادي). صفر رجريشن في `catalog-search`/
+`catalog-visibility` (17/17). `tsc --noEmit` (apps/api + apps/admin)، `npm run build` (shared-types)، نضاف.
+
+**لسه فاضل من الجزء د**: §36.24-26 (فئات تسعير فني، تسعير فريق، قفل السعر عند التأكيد)، §36.27
+(واجهة أدمن موحّدة للتكوين + تفسير سعر)، §36.28 (اختبارات شاملة + إغلاق نهائي).

@@ -45,6 +45,18 @@ export interface Technician360TeamRole {
   isOwner: boolean;
 }
 
+// الفريق المفضّل (docs/08 §36.19، ADR-0022) — رؤية أدمن قراءة بس، صفر endpoints جديدة للتعديل
+// (لسه بتُدار من الفني نفسه عبر /technician/preferred-crew* — العلاقة تفضيل شخصي بحت بلا موافقة
+// أدمن أصلاً، زي ما اتقرر في ADR-0022). asOwner = فنيين دعاهم/مقبولين في فريقه، asMember = فرق
+// فنيين تانيين هو عضو مقبول فيها.
+export interface Technician360PreferredCrewRow {
+  id: string;
+  technicianId: string;
+  technicianCode: string;
+  fullName: string;
+  status: string;
+}
+
 export interface Technician360JobRow {
   orderId: string;
   orderNumber: string;
@@ -115,6 +127,8 @@ export interface Technician360Profile {
   complaints: Technician360Complaints;
   wallet: Technician360Wallet | null;
   recentPayouts: Technician360PayoutRow[];
+  preferredCrewAsOwner: Technician360PreferredCrewRow[];
+  preferredCrewAsMember: Technician360PreferredCrewRow[];
 }
 
 /**
@@ -184,6 +198,8 @@ export class AdminTechnician360Service {
       complaintCounts,
       walletRows,
       payoutRows,
+      preferredCrewAsOwnerRows,
+      preferredCrewAsMemberRows,
     ] = await Promise.all([
       this.dataSource.query<{ category_id: string; name_ar: string; is_active: boolean; verification_status: string }[]>(
         `SELECT tc.category_id, sc.name_ar, tc.is_active, tc.verification_status
@@ -254,6 +270,24 @@ export class AdminTechnician360Service {
          FROM payouts WHERE technician_id = $1 ORDER BY requested_at DESC LIMIT 5`,
         [technicianProfileId],
       ),
+      this.dataSource.query<{ id: string; technician_id: string; technician_code: string; full_name: string; status: string }[]>(
+        `SELECT pcm.id, tp.id AS technician_id, tp.technician_code, u.full_name, pcm.status
+         FROM technician_preferred_crew_members pcm
+         JOIN technician_profiles tp ON tp.id = pcm.member_technician_id
+         JOIN users u ON u.id = tp.user_id
+         WHERE pcm.owner_technician_id = $1 AND pcm.deleted_at IS NULL AND pcm.status IN ('invited','accepted')
+         ORDER BY pcm.invited_at DESC`,
+        [technicianProfileId],
+      ),
+      this.dataSource.query<{ id: string; technician_id: string; technician_code: string; full_name: string; status: string }[]>(
+        `SELECT pcm.id, tp.id AS technician_id, tp.technician_code, u.full_name, pcm.status
+         FROM technician_preferred_crew_members pcm
+         JOIN technician_profiles tp ON tp.id = pcm.owner_technician_id
+         JOIN users u ON u.id = tp.user_id
+         WHERE pcm.member_technician_id = $1 AND pcm.deleted_at IS NULL AND pcm.status = 'accepted'
+         ORDER BY pcm.responded_at DESC`,
+        [technicianProfileId],
+      ),
     ]);
 
     return {
@@ -322,6 +356,20 @@ export class AdminTechnician360Service {
         payoutStatus: p.payout_status,
         requestedAt: p.requested_at,
         completedAt: p.completed_at,
+      })),
+      preferredCrewAsOwner: preferredCrewAsOwnerRows.map((r) => ({
+        id: r.id,
+        technicianId: r.technician_id,
+        technicianCode: r.technician_code,
+        fullName: r.full_name,
+        status: r.status,
+      })),
+      preferredCrewAsMember: preferredCrewAsMemberRows.map((r) => ({
+        id: r.id,
+        technicianId: r.technician_id,
+        technicianCode: r.technician_code,
+        fullName: r.full_name,
+        status: r.status,
       })),
     };
   }
