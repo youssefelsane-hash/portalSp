@@ -1,6 +1,6 @@
 # ADR-0030: سياسة إظهار المرشّحين المتعارضين جدوليًا (Schedule-Conflict Visibility) + إصلاح فجوة تعارض حجز الشغالة
 
-**الحالة:** معتمد (خطة كاملة + Slice A منفّذ — باقي الشرائح موثّقة تحت، لسه مفتوحة)
+**الحالة:** معتمد (خطة كاملة + Slice A/B منفّذين — باقي الشرائح موثّقة تحت، لسه مفتوحة)
 **التاريخ:** 2026-08-21
 
 ## السياق
@@ -86,15 +86,18 @@
   ناقص من Slice 2a (اتحسب للسعر وبس، اتفقد). لازم يتسجّل عشان فحص التعارض (وأي عرض "الحجز ده من
   الساعة كذا للساعة كذا" مستقبلي) يشتغل صح على المسار الجديد.
 
-### باقي الشرائح (مفتوحة، مش منفّذة هنا)
+### باقي الشرائح
 
-- **Slice B**: `TechniciansService.listForServiceBooking()` — لما `service.showUnavailableProviders=true`
-  و`scheduledAt` موجودة، الاستعلام يرجّع **دلوين**: مؤهّل+متاح (زي دلوقتي بالحرف) + مؤهّل+متعارض
-  (نفس بوابة الأهلية الصارمة، بس من غير شرط `technicianAvailabilityCondition()`)، وبيستخدم
-  `describeTechnicianCapacity()` الموجودة للسبب+النطاق المشغول لكل مرشّح متعارض. "متاح تاني إمتى"
-  محتاجة دالة جديدة (مفيش حاليًا) — تلف حوالين `technicianAvailabilityCondition()` بحلقة أيام لفني
-  واحد بعينه (عكس `hasEligibleTechnicianForDate()` اللي بتدوّر على أي فني)، بحد أقصى معقول (14 يوم
-  زي النطاق المرن، A.2).
+- **Slice B (خلصت)**: `TechniciansService.listForServiceBooking()` بقت بترجّع **دلوين** لما
+  `service.showUnavailableProviders=true` و`scheduledAt` موجودة: مؤهّل+متاح (زي دلوقتي بالحرف) +
+  مؤهّل+متعارض (`findScheduleConflictedTechnicians()` جديدة، نفس بوابة الأهلية الصارمة، بس بشرط
+  `technicianScheduleConflictCondition()` الجديد بدل `technicianAvailabilityCondition()`)، بيستخدم
+  `describeTechnicianCapacity()` الموجودة للسبب+النطاق المشغول لكل مرشّح متعارض، و
+  `findNextAvailableDateForTechnician()` الجديدة لـ"متاح تاني إمتى" (تلف حوالين
+  `hasEligibleTechnicianForDate()` الموسّعة بفلتر فني اختياري — نفس نمط A.2 بس لفني واحد بدل "أي
+  فني"، بحد أقصى 14 يوم). **`technician-eligibility.sql.ts` اتعمله refactor** عشان منطق التعارض
+  يتشارك بين الدالتين بدل نسخة منفصلة (تفاصيل + بَقّة حقيقية اتلقطت أثناء الـrefactor في
+  `apps/api/src/modules/technicians/README.md`). اختبار حي (3/3).
 - **Slice C**: `DomesticWorkersService.browseForCustomer()` — نفس الفكرة، بس المحرك كله لازم
   يتبني من الصفر (صفر تعارض موجود أصلاً قبل Slice A هنا). `BrowseWorkersQueryDto` محتاجة
   `scheduled_at`/`duration_hours` اختياريين (مش موجودين خالص دلوقتي).
@@ -133,3 +136,17 @@
   عبر المسارين مش مسار واحد بس.
 - **خارج نطاق Slice A عمدًا**: `show_unavailable_providers` مُضاف بالـschema بس **صفر قراءة له
   في أي استعلام لسه** (Slice B/C)، صفر واجهة Flutter (Slice D).
+
+## الأثر (Slice B، منفّذ في الـcommit ده)
+
+- `technician-eligibility.sql.ts`: `technicianAvailabilityCondition()` اتعمله refactor (منطق
+  التعارض اتفصل لدالة داخلية مشتركة `activeOrderConflictExistsExpr()` + `blockedExistsExpr()`) +
+  `technicianScheduleConflictCondition()` جديدة تركّب من نفس الدوال — صفر تكرار منطق.
+- `TechniciansService`: `hasEligibleTechnicianForDate()` بقت بتاخد `technicianId` اختياري +
+  `findNextAvailableDateForTechnician()` جديدة + `findScheduleConflictedTechnicians()` جديدة
+  (private) + `listForServiceBooking()` بترجّع الدلو الإضافي لما الشرط يتحقق.
+- `TechnicianBookingListItem`/`GET /services/:id/technicians`: حقول `availability_status`/
+  `unavailable_reason_ar`/`available_again_at` جديدة (`'available'` دايمًا للصفوف القديمة).
+- اختبار حي جديد: `schedule-conflict-visibility.spec.ts` (3/3) + تحقق صفر رجريشن على
+  `matching`/`technicians` بالكامل (152/155، نفس الفشلات المعروفة قبل وبعد بالحرف).
+- **خارج نطاق Slice B عمدًا**: تصفح الشغالة (Slice C)، واجهة Flutter (Slice D).

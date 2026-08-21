@@ -24,7 +24,7 @@ import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificate } from './entities/technician-certificate.entity';
 import { TechnicianCertificatesService } from './technician-certificates.service';
 import { SettingsService } from '../settings/settings.service';
-import { technicianAvailabilityCondition } from './technician-eligibility.sql';
+import { describeTechnicianCapacity, technicianAvailabilityCondition, technicianScheduleConflictCondition } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TechnicianBookingListItem {
@@ -54,6 +54,13 @@ export interface TechnicianBookingListItem {
   isCompany: boolean;
   staffCount: number | null;
   branchCount: number | null;
+  // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — 'available' دايمًا لكل
+  // الصفوف الحالية (رجريشن صفري). 'schedule_conflicted' بس لصفوف إضافية جديدة (Service.
+  // showUnavailableProviders=true + scheduledAt موجودة) — مؤهّل فعلاً بس مشغول بشغل تاني وقت
+  // الفترة المطلوبة، مش محظور/غير مؤهّل (الفئة دي تفضل مخفية تمامًا زي ما كانت دايمًا).
+  availabilityStatus: 'available' | 'schedule_conflicted';
+  unavailableReasonAr: string | null;
+  availableAgainAt: string | null;
 }
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
@@ -481,7 +488,27 @@ export class TechniciansService {
       isCompany: false,
       staffCount: null,
       branchCount: null,
+      availabilityStatus: 'available',
+      unavailableReasonAr: null,
+      availableAgainAt: null,
     }));
+
+    // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — دلو إضافي منفصل تمامًا
+    // عن الاستعلام فوق، بيتفعّل بس لو الخدمة مفعّلة له صراحة (الافتراضي false = صفر تغيير سلوك،
+    // صفر استعلام إضافي حتى). "متعارض" هنا يعني حرفيًا `technicianScheduleConflictCondition()` —
+    // مؤهّل فعلاً بس مشغول بشغل تاني، مش `blocked`/غير مؤهّل (دول يفضلوا مخفيين تمامًا زي زمان).
+    const conflictedItems =
+      scheduledAt && (await this.services.findOne({ where: { id: serviceId } }))?.showUnavailableProviders
+        ? await this.findScheduleConflictedTechnicians(
+            serviceId,
+            zone.id,
+            addressId,
+            scheduledAt,
+            individualItems.map((i) => i.technicianId),
+            isTeamBooking,
+            fullDayJobMinutes,
+          )
+        : [];
 
     // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38، طلب مالك صريح: "الشركات بتظهر كده كده
     // أساسي في اعتماد، زي شخص عادي جدًا"). individual/emergency (isTeamBooking=false) بلا أي
@@ -490,7 +517,7 @@ export class TechniciansService {
     // premium+ وقت الإنشاء، technician-companies.service.ts's canLeadTeam check)، وطلب المالك
     // كان "الشركات بتظهر كده كده" بلا أي شرط إضافي.
     if (!isTeamBooking) {
-      return { zoneId: zone.id, items: individualItems };
+      return { zoneId: zone.id, items: [...individualItems, ...conflictedItems] };
     }
 
     interface CompanyRow {
@@ -576,10 +603,15 @@ export class TechniciansService {
       isCompany: true,
       staffCount: Number(row.staff_count),
       branchCount: Number(row.branch_count),
+      availabilityStatus: 'available',
+      unavailableReasonAr: null,
+      availableAgainAt: null,
     }));
 
     // ترتيب موحّد بسيط (تقييم ثم قرب) بعد الدمج — recommendation_score البايزي محسوب بس للفنيين
     // الأفراد (فوق)، فمفيش مقياس واحد موحّد نقدر نستخدمه للاتنين مع بعض غير التقييم/المسافة.
+    // المتعارضين (ADR-0030) بيتضافوا آخر القايمة دايمًا (بغض النظر عن تقييمهم) — مؤهّل ومتاح فعلاً
+    // لازم يفضل ظاهر أولاً، "متعارض" معلومة إضافية مش بديل عن الترتيب العادي.
     const merged = [...individualItems, ...companyItems].sort((a, b) => {
       if (b.averageRating !== a.averageRating) return b.averageRating - a.averageRating;
       const da = a.distanceKm ?? Number.POSITIVE_INFINITY;
@@ -587,7 +619,127 @@ export class TechniciansService {
       return da - db;
     });
 
-    return { zoneId: zone.id, items: merged };
+    return { zoneId: zone.id, items: [...merged, ...conflictedItems] };
+  }
+
+  /**
+   * "مؤهّل بس متعارض جدوليًا" (ADR-0030) — نفس بوابة الأهلية الصارمة اللي `listForServiceBooking()`
+   * فوق بتستخدمها بالحرف (خدمة/فئة، منطقة، `current_location`)، الفرق الوحيد شرط التوافر
+   * (`technicianScheduleConflictCondition()` بدل `technicianAvailabilityCondition()`) + استبعاد
+   * أي فني ظهر بالفعل في الدلو "متاح" (`excludeTechnicianIds`). محدودة (`LIMIT 10`) — معلومة
+   * إضافية للعميل، مش قايمة أساسية يستاهل تحميل كامل زيها.
+   */
+  private async findScheduleConflictedTechnicians(
+    serviceId: string,
+    zoneId: string,
+    addressId: string,
+    scheduledAt: Date,
+    excludeTechnicianIds: string[],
+    isTeamBooking: boolean,
+    fullDayJobMinutes: number,
+  ): Promise<TechnicianBookingListItem[]> {
+    interface ConflictedRow {
+      technician_id: string;
+      full_name: string;
+      avatar_url: string | null;
+      bio: string | null;
+      average_rating: string;
+      total_ratings_count: number;
+      distance_km: string | null;
+      current_level: TechnicianLevel;
+      pricing_tier: TechnicianPricingTier;
+    }
+    const rows = await this.technicianProfiles.manager.query<ConflictedRow[]>(
+      `
+      SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
+             tp.average_rating, tp.total_ratings_count,
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier
+      FROM technician_profiles tp
+      JOIN users u ON u.id = tp.user_id
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+        AND ts.verification_status = 'approved'
+      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
+      LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
+      WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tc
+            WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
+              AND tc.is_active = true AND tc.verification_status = 'approved'
+          )
+        )
+        AND tp.current_location IS NOT NULL
+        AND NOT (tp.id = ANY($9::uuid[]))
+        AND ($10::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
+        ${technicianScheduleConflictCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: '$4',
+          excludeOrderIdParam: 'NULL',
+          activeStatusesParam: '$5',
+          engagedStatusesParam: '$6',
+          isEmergencyParam: '$7',
+          serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          fullDayThresholdMinutesParam: '$8',
+        })}
+      ORDER BY average_rating DESC, distance_km ASC NULLS LAST
+      LIMIT 10
+      `,
+      [
+        serviceId,
+        zoneId,
+        addressId,
+        scheduledAt,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        fullDayJobMinutes,
+        excludeTechnicianIds,
+        isTeamBooking,
+      ],
+    );
+
+    const dateOnly = scheduledAt.toISOString().slice(0, 10);
+    return Promise.all(
+      rows.map(async (row): Promise<TechnicianBookingListItem> => {
+        const capacity = await describeTechnicianCapacity(this.technicianProfiles.manager, {
+          technicianId: row.technician_id,
+          date: dateOnly,
+          fullDayThresholdMinutes: fullDayJobMinutes,
+        });
+        const searchFrom = capacity.occupiedTo ? new Date(`${capacity.occupiedTo}T00:00:00Z`) : scheduledAt;
+        const nextAvailable = await this.findNextAvailableDateForTechnician(
+          row.technician_id,
+          serviceId,
+          zoneId,
+          addressId,
+          new Date(searchFrom.getTime() + 24 * 60 * 60 * 1000),
+        );
+        return {
+          technicianId: row.technician_id,
+          fullName: row.full_name,
+          avatarUrl: row.avatar_url,
+          bio: row.bio,
+          averageRating: Number(row.average_rating),
+          totalRatingsCount: row.total_ratings_count,
+          serviceCompletedCount: 0,
+          distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
+          currentLevel: row.current_level,
+          pricingTier: row.pricing_tier,
+          isVerified: true,
+          onTimeRatePercent: null,
+          avgArrivalMinutes: null,
+          isCompany: false,
+          staffCount: null,
+          branchCount: null,
+          availabilityStatus: 'schedule_conflicted',
+          unavailableReasonAr: capacity.reasonAr,
+          availableAgainAt: nextAvailable,
+        };
+      }),
+    );
   }
 
   /**
@@ -598,7 +750,11 @@ export class TechniciansService {
    * تتكرر لحد 14 مرة. نفس شروط الأهلية الأساسية بالحرف (خدمة/فئة، منطقة، `current_location`،
    * `technicianAvailabilityCondition()` الموحّدة).
    */
-  async hasEligibleTechnicianForDate(serviceId: string, zoneId: string, addressId: string, date: Date): Promise<boolean> {
+  /**
+   * `technicianId` اختياري (ADR-0030) — لو موجود، بيقيّد الفحص على فني بعينه بدل "أي فني" — نفس
+   * الاستعلام بالحرف، استخدام مختلف بس (`findNextAvailableDateForTechnician()` تحت بتلف حواليه).
+   */
+  async hasEligibleTechnicianForDate(serviceId: string, zoneId: string, addressId: string, date: Date, technicianId?: string): Promise<boolean> {
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
     const [{ exists }] = await this.technicianProfiles.manager.query<{ exists: boolean }[]>(
       `
@@ -620,6 +776,7 @@ export class TechniciansService {
             )
           )
           AND tp.current_location IS NOT NULL
+          AND ($9::uuid IS NULL OR tp.id = $9)
           ${technicianAvailabilityCondition({
             technicianIdExpr: 'tp.id',
             scheduledAtParam: '$4',
@@ -632,9 +789,32 @@ export class TechniciansService {
           })}
       ) AS exists
       `,
-      [serviceId, zoneId, addressId, date, ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, false, fullDayJobMinutes],
+      [serviceId, zoneId, addressId, date, ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, false, fullDayJobMinutes, technicianId ?? null],
     );
     return exists;
+  }
+
+  /**
+   * "متاح تاني إمتى؟" (ADR-0030) — بتلف يوم بيوم (لحد `maxDays`) بعد `fromDate` لحد ما تلاقي أول
+   * يوم الفني بعينه فيه مؤهّل ومتاح فعليًا، بإعادة استخدام `hasEligibleTechnicianForDate()` نفسها
+   * (نفس نمط "مرن — اختار نطاق أيام" A.2، بس لفني واحد محدد بدل "أي فني"). `null` لو محدش لقى
+   * حل جوّه `maxDays` (الفني مشغول لفترة طويلة جدًا، أو بيانات مفقودة).
+   */
+  async findNextAvailableDateForTechnician(
+    technicianId: string,
+    serviceId: string,
+    zoneId: string,
+    addressId: string,
+    fromDate: Date,
+    maxDays = 14,
+  ): Promise<string | null> {
+    for (let offset = 0; offset <= maxDays; offset += 1) {
+      const candidateDay = new Date(fromDate.getTime() + offset * 24 * 60 * 60 * 1000);
+      // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا.
+      const eligible = await this.hasEligibleTechnicianForDate(serviceId, zoneId, addressId, candidateDay, technicianId);
+      if (eligible) return candidateDay.toISOString().slice(0, 10);
+    }
+    return null;
   }
 
   /**

@@ -6180,9 +6180,12 @@ Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ ع
   `orders.domestic_worker_duration_hours` (كان ناقص من A.4 Slice 2a) +
   `DomesticWorkersService.assertNoSchedulingConflict()` جديدة مطبَّقة على مسارين (القديم والجديد)
   — أي حجز/طلب شغالة متعارض زمنيًا مع حجز نشط موجود يترفض بوضوح دلوقتي. اختبار حي (5/5).
-- **Slice B (مفتوحة)**: `TechniciansService.listForServiceBooking()` — دلو "مؤهّل بس متعارض" جديد
-  لما `show_unavailable_providers=true`، بإعادة استخدام `describeTechnicianCapacity()` الموجودة
-  للسبب+النطاق المشغول، + دالة جديدة "متاح تاني إمتى" لفني بعينه.
+- **Slice B (خلصت)**: `TechniciansService.listForServiceBooking()` بترجّع دلو "مؤهّل بس متعارض"
+  جديد لما `show_unavailable_providers=true`+`scheduledAt`، بإعادة استخدام `describeTechnicianCapacity()`
+  الموجودة للسبب+النطاق المشغول + `findNextAvailableDateForTechnician()` جديدة لفني بعينه.
+  `technician-eligibility.sql.ts` اتعمله refactor (منطق التعارض مصدر واحد مشترك بين الدالتين) —
+  بَقّة حقيقية اتلقطت واتصلحت أثناء الـrefactor نفسه (تفاصيل في `technicians/README.md`)، اتحقق
+  من صفر رجريشن على `matching`/`technicians` بالكامل. اختبار حي (3/3).
 - **Slice C (مفتوحة)**: نفس الفكرة لتصفح الشغالة (`browseForCustomer()`) — المحرك كله لازم يتبني
   من الصفر (كان صفر تعارض قبل Slice A)، بدقة ساعة حقيقية (مش يوم زي الفنيين).
   `BrowseWorkersQueryDto` محتاجة `scheduled_at`/`duration_hours` جديدين.

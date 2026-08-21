@@ -12,6 +12,11 @@ export interface PublicWorkerListItem {
   profile: DomesticWorkerProfile;
   fullName: string;
   distanceKm: number | null;
+  // ADR-0030 Slice C — مطابقة لنفس الحقول في TechnicianBookingListItem (technicians.service.ts)
+  // بنفس الفلسفة، للاتساق المعماري بين مسارَي التصفّح (فني عادي / فني-شغالة).
+  availabilityStatus: 'available' | 'schedule_conflicted';
+  unavailableReasonAr: string | null;
+  availableAgainAt: string | null;
 }
 
 @Injectable()
@@ -59,8 +64,35 @@ export class DomesticWorkersService {
     opts?: { excludeBookingId?: string; excludeOrderId?: string },
   ): Promise<void> {
     const endsAt = durationHours === null ? null : new Date(startsAt.getTime() + durationHours * 3_600_000);
-    const [legacyConflict] = await this.profiles.manager.query<{ booking_number: string }[]>(
-      `SELECT booking_number FROM domestic_worker_bookings
+    const conflict = await this.findSchedulingConflict(workerId, startsAt, endsAt, opts);
+    if (conflict.conflicting) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني ده متعارض مع حجز/طلب موجود بالفعل (${conflict.sourceLabel}) في الفترة دي`,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
+  /**
+   * فحص التعارض الفعلي بلا استثناء (بدون throw) — المصدر المشترك بين assertNoSchedulingConflict
+   * (اعتراض إنشاء حجز/طلب جديد) وbrowseForCustomer (ADR-0030 Slice C: تصنيف "متاح/متعارض جدوليًا"
+   * بدل إخفاء كامل، لخدمات show_unavailable_providers=true). busyUntil=null معناه تعارض مفتوح
+   * النهاية (حجز شهري مقيم بلا تاريخ نهاية معروف) — نعرضه للعميل كـ"مشغولة لفترة غير محددة".
+   */
+  private async findSchedulingConflict(
+    workerId: string,
+    startsAt: Date,
+    endsAt: Date | null,
+    opts?: { excludeBookingId?: string; excludeOrderId?: string },
+  ): Promise<{ conflicting: boolean; busyUntil: Date | null; sourceLabel: string | null }> {
+    const [legacyConflict] = await this.profiles.manager.query<{ booking_number: string; busy_until: string | null }[]>(
+      `SELECT booking_number,
+              (CASE WHEN booking_type = 'monthly_live_in'
+                THEN COALESCE(current_period_end_at, pending_period_end_at)
+                ELSE scheduled_at + (COALESCE(duration_hours, 0) || ' hours')::interval
+              END) AS busy_until
+       FROM domestic_worker_bookings
        WHERE worker_id = $1 AND status NOT IN ('cancelled', 'completed')
          AND id IS DISTINCT FROM $4::uuid
          AND (
@@ -69,34 +101,36 @@ export class DomesticWorkersService {
            OR (booking_type = 'monthly_live_in' AND scheduled_at < COALESCE($3::timestamptz, 'infinity'::timestamptz)
                AND COALESCE(current_period_end_at, pending_period_end_at, 'infinity'::timestamptz) > $2)
          )
+       ORDER BY busy_until DESC NULLS FIRST
        LIMIT 1`,
       [workerId, startsAt, endsAt, opts?.excludeBookingId ?? null],
     );
     if (legacyConflict) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `الفني ده متعارض مع حجز موجود بالفعل (${legacyConflict.booking_number}) في الفترة دي`,
-        HttpStatus.CONFLICT,
-      );
+      return {
+        conflicting: true,
+        busyUntil: legacyConflict.busy_until ? new Date(legacyConflict.busy_until) : null,
+        sourceLabel: legacyConflict.booking_number,
+      };
     }
 
-    const [unifiedConflict] = await this.profiles.manager.query<{ order_number: string }[]>(
-      `SELECT order_number FROM orders
+    const [unifiedConflict] = await this.profiles.manager.query<{ order_number: string; busy_until: string }[]>(
+      `SELECT order_number, (scheduled_at + (domestic_worker_duration_hours || ' hours')::interval) AS busy_until
+       FROM orders
        WHERE domestic_worker_profile_id = $1
          AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
          AND id IS DISTINCT FROM $4::uuid
          AND scheduled_at IS NOT NULL AND domestic_worker_duration_hours IS NOT NULL
          AND scheduled_at < COALESCE($3::timestamptz, 'infinity'::timestamptz)
-         AND (scheduled_at + (domestic_worker_duration_hours || ' hours')::interval) > $2`,
+         AND (scheduled_at + (domestic_worker_duration_hours || ' hours')::interval) > $2
+       ORDER BY busy_until DESC
+       LIMIT 1`,
       [workerId, startsAt, endsAt, opts?.excludeOrderId ?? null],
     );
     if (unifiedConflict) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        `الفني ده متعارض مع طلب موجود بالفعل (${unifiedConflict.order_number}) في الفترة دي`,
-        HttpStatus.CONFLICT,
-      );
+      return { conflicting: true, busyUntil: new Date(unifiedConflict.busy_until), sourceLabel: unifiedConflict.order_number };
     }
+
+    return { conflicting: false, busyUntil: null, sourceLabel: null };
   }
 
   /** بروفايل عام — لازم معتمد فعلاً، وإلا 404 (مش عرض حالة داخلية للعميل). */
@@ -208,11 +242,22 @@ export class DomesticWorkersService {
     });
   }
 
-  /** تصفّح العميل — معتمدين ومتاحين بس، فلترة بتخصص اختيارية، ترتيب بالتقييم ثم القرب (نفس فلسفة §3). */
+  /**
+   * تصفّح العميل — معتمدين ومتاحين بس، فلترة بتخصص اختيارية، ترتيب بالتقييم ثم القرب (نفس فلسفة §3).
+   *
+   * ADR-0030 Slice C — لو اتحدد scheduledAt: بتفحص تعارض جدولي حقيقي (كانت فجوة صحة بيانات صريحة:
+   * صفر فحص تعارض في المسار ده قبل كده — عميل ممكن يشوف شغالة "متاحة" وهي محجوزة فعلًا في نفس
+   * الوقت). المتعارضين بيتفلتروا برّه القايمة تلقائيًا، إلا لو serviceId بيرجّع لخدمة
+   * show_unavailable_providers=true — وقتها بيرجعوا في الآخر بحالة schedule_conflicted بدل
+   * الإخفاء الكامل (نفس سياسة TechniciansService.listForServiceBooking()، وبس السياق هنا مختلف:
+   * التصفّح هنا بتخصص مش بخدمة كتالوج واحدة بالضرورة، فـserviceId اختياري — بدونه الافتراضي
+   * الآمن هو الإخفاء، زي الفلاج نفسه لما يكون false).
+   */
   async browseForCustomer(
     specialty: DomesticWorkerSpecialty | undefined,
     latitude: number | undefined,
     longitude: number | undefined,
+    scheduling?: { serviceId?: string; scheduledAt?: string; durationHours?: number },
   ): Promise<PublicWorkerListItem[]> {
     const rows = await this.profiles.manager.query<
       { id: string; full_name: string; distance_km: string | null }[]
@@ -236,12 +281,76 @@ export class DomesticWorkersService {
     const profiles = await this.profiles.find({ where: { id: In(profileIds) } });
     const profilesById = new Map(profiles.map((p) => [p.id, p]));
 
-    return rows
+    const baseItems = rows
       .map((row) => {
         const profile = profilesById.get(row.id);
         if (!profile) return null;
-        return { profile, fullName: row.full_name, distanceKm: row.distance_km !== null ? Number(row.distance_km) : null };
+        const item: PublicWorkerListItem = {
+          profile,
+          fullName: row.full_name,
+          distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
+          availabilityStatus: 'available',
+          unavailableReasonAr: null,
+          availableAgainAt: null,
+        };
+        return item;
       })
       .filter((x): x is PublicWorkerListItem => x !== null);
+
+    if (!scheduling?.scheduledAt) return baseItems;
+
+    const startsAt = new Date(scheduling.scheduledAt);
+    const durationHours = scheduling.durationHours ?? null;
+    const endsAt = durationHours === null ? null : new Date(startsAt.getTime() + durationHours * 3_600_000);
+    const showConflicted = scheduling.serviceId ? await this.serviceShowsUnavailableProviders(scheduling.serviceId) : false;
+
+    const available: PublicWorkerListItem[] = [];
+    const conflicted: PublicWorkerListItem[] = [];
+    for (const item of baseItems) {
+      const conflict = await this.findSchedulingConflict(item.profile.id, startsAt, endsAt);
+      if (!conflict.conflicting) {
+        available.push(item);
+        continue;
+      }
+      if (!showConflicted) continue;
+      const nextAvailableAt = await this.findNextAvailableAtForWorker(item.profile.id, startsAt, durationHours);
+      conflicted.push({
+        ...item,
+        availabilityStatus: 'schedule_conflicted',
+        unavailableReasonAr: conflict.busyUntil
+          ? `مشغولة لحد ${conflict.busyUntil.toLocaleString('ar-EG')}`
+          : 'مشغولة لفترة غير محددة (حجز شهري مقيم قائم)',
+        availableAgainAt: nextAvailableAt ? nextAvailableAt.toISOString() : null,
+      });
+      // Slice B بتلتزم بنفس الحد (LIMIT 10) عشان تتجنب توسّع بحث "المعاد الجاي" (14 يوم لكل واحد)
+      // على قايمة كبيرة — نفس التوازن المعماري.
+      if (conflicted.length >= 10) break;
+    }
+
+    return [...available, ...conflicted];
+  }
+
+  private async serviceShowsUnavailableProviders(serviceId: string): Promise<boolean> {
+    const [row] = await this.profiles.manager.query<{ show_unavailable_providers: boolean }[]>(
+      'SELECT show_unavailable_providers FROM services WHERE id = $1 AND deleted_at IS NULL',
+      [serviceId],
+    );
+    return row?.show_unavailable_providers ?? false;
+  }
+
+  /** بحث يومي بسيط عن أقرب معاد الشغالة بتبقى فيه متاحة (نفس فلسفة findNextAvailableDateForTechnician). */
+  private async findNextAvailableAtForWorker(
+    workerId: string,
+    fromStartsAt: Date,
+    durationHours: number | null,
+    maxDays = 14,
+  ): Promise<Date | null> {
+    for (let i = 1; i <= maxDays; i++) {
+      const candidateStart = new Date(fromStartsAt.getTime() + i * 24 * 3_600_000);
+      const candidateEnd = durationHours === null ? null : new Date(candidateStart.getTime() + durationHours * 3_600_000);
+      const conflict = await this.findSchedulingConflict(workerId, candidateStart, candidateEnd);
+      if (!conflict.conflicting) return candidateStart;
+    }
+    return null;
   }
 }

@@ -50,12 +50,19 @@ export interface PublicWorkerResponseDto {
   total_ratings_count: number;
   completed_bookings_count: number;
   distance_km: number | null;
+  // ADR-0030 Slice C — مطابقة لحقول التصفّح المكافئة عند الفني العادي (technician-booking-list-response.dto.ts).
+  availability_status: 'available' | 'schedule_conflicted';
+  unavailable_reason_ar: string | null;
+  available_again_at: string | null;
 }
 
 export function toPublicWorkerResponseDto(
   profile: DomesticWorkerProfile,
   fullName: string,
   distanceKm: number | null = null,
+  availabilityStatus: 'available' | 'schedule_conflicted' = 'available',
+  unavailableReasonAr: string | null = null,
+  availableAgainAt: string | null = null,
 ): PublicWorkerResponseDto {
   return {
     id: profile.id,
@@ -70,5 +77,8 @@ export function toPublicWorkerResponseDto(
     total_ratings_count: profile.totalRatingsCount,
     completed_bookings_count: profile.completedBookingsCount,
     distance_km: distanceKm,
+    availability_status: availabilityStatus,
+    unavailable_reason_ar: unavailableReasonAr,
+    available_again_at: availableAgainAt,
   };
 }

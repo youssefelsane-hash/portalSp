@@ -78,6 +78,45 @@ export function technicianAvailabilityCondition(opts: {
    */
   ignoreActiveOrderConflict?: boolean;
 }): string {
+  const { activeStatusesParam, engagedStatusesParam, isEmergencyParam, fullDayThresholdMinutesParam, ignoreActiveOrderConflict } = opts;
+  const activeOrderConflictConditions = ignoreActiveOrderConflict
+    ? // Postgres مايقدرش يستنتج نوع parameter من غير أي إشارة ليه في الاستعلام ("could not
+      // determine data type") — تعبيرات دايمًا صحيحة (tautology) لكل الـparameters الجديدة كمان
+      // (engagedStatusesParam/isEmergencyParam/fullDayThresholdMinutesParam) بلا أي تأثير فعلي.
+      `AND (${activeStatusesParam}::order_status[] IS NULL OR ${activeStatusesParam}::order_status[] IS NOT NULL)
+       AND (${engagedStatusesParam}::order_status[] IS NULL OR ${engagedStatusesParam}::order_status[] IS NOT NULL)
+       AND (${isEmergencyParam}::boolean IS NULL OR ${isEmergencyParam}::boolean IS NOT NULL)
+       AND (${fullDayThresholdMinutesParam}::int IS NULL OR ${fullDayThresholdMinutesParam}::int IS NOT NULL)`
+    : `AND NOT (${activeOrderConflictExistsExpr(opts)})`;
+  // (3) استثناء صريح (blocked) — الفني حدد بنفسه إنه مش متاح وقت الطلب ده (ASAP/طوارئ = دلوقتي)،
+  // كله بتوقيت مصر الصحيح مش UTC الخام. **دايمًا سارية حتى لو ignoreActiveOrderConflict=true**
+  // (ADR-0017 بند 10: الشرط ده مايتجاهلش أبدًا، الـfallback بيوسّع تعارض الطلبات بس، مش الاستثناء
+  // الذاتي الصريح) — لازم يفضل بعد الـreturn المبكّر القديم اللي كان بيتخطاه بالغلط في أول نسخة
+  // من الـrefactor ده (اتلقطت حيًا: matching-work-opportunity.spec.ts فشل بمعنى مختلف، "$10" مش
+  // مرتبط بأي تعبير — كان دليل غير مباشر إن الشرط (3) اختفى تمامًا مش بس السبب الظاهري).
+  return `
+    ${activeOrderConflictConditions}
+    AND NOT (${blockedExistsExpr(opts)})
+  `;
+}
+
+/**
+ * تعبير SQL بوليان خام (EXISTS...) بيرجع `true` لو الفني عنده تعارض طلب نشط فعلي وقت الطلب
+ * المرشّح — **مصدر الحقيقة الوحيد** لمنطق "التعارض" نفسه، مشترك بين `technicianAvailabilityCondition()`
+ * (بتنفيه: `NOT (...)`) و`technicianScheduleConflictCondition()` (بتستخدمه زي ما هو: العكس بالظبط —
+ * "مؤهّل بس متعارض"، ADR-0030). تعديل قاعدة التعارض هنا بيتفعّل تلقائيًا في الدالتين، صفر خطر
+ * انحراف (drift) بين نسختين منفصلتين لنفس المنطق.
+ */
+function activeOrderConflictExistsExpr(opts: {
+  technicianIdExpr: string;
+  scheduledAtParam: string;
+  excludeOrderIdParam: string;
+  activeStatusesParam: string;
+  engagedStatusesParam: string;
+  isEmergencyParam: string;
+  serviceDurationExpr: string;
+  fullDayThresholdMinutesParam: string;
+}): string {
   const {
     technicianIdExpr,
     scheduledAtParam,
@@ -87,37 +126,28 @@ export function technicianAvailabilityCondition(opts: {
     isEmergencyParam,
     serviceDurationExpr,
     fullDayThresholdMinutesParam,
-    ignoreActiveOrderConflict,
   } = opts;
-  const activeOrderConflictConditions = ignoreActiveOrderConflict
-    ? // Postgres مايقدرش يستنتج نوع parameter من غير أي إشارة ليه في الاستعلام ("could not
-      // determine data type") — تعبيرات دايمًا صحيحة (tautology) لكل الـparameters الجديدة كمان
-      // (engagedStatusesParam/isEmergencyParam/fullDayThresholdMinutesParam) بلا أي تأثير فعلي.
-      `AND (${activeStatusesParam}::order_status[] IS NULL OR ${activeStatusesParam}::order_status[] IS NOT NULL)
-       AND (${engagedStatusesParam}::order_status[] IS NULL OR ${engagedStatusesParam}::order_status[] IS NOT NULL)
-       AND (${isEmergencyParam}::boolean IS NULL OR ${isEmergencyParam}::boolean IS NOT NULL)
-       AND (${fullDayThresholdMinutesParam}::int IS NULL OR ${fullDayThresholdMinutesParam}::int IS NOT NULL)`
-    : `
+  return `
     -- اليوم المطلوب للطلب المرشّح نفسه (ASAP = النهاردة، مجدول = يوم scheduled_at) — بتوقيت مصر.
-    AND (
-      -- (1) طوارئ: استبعاد بس لو الفني منشغل جسديًا فعليًا دلوقتي (ADR-0018 §9 — طلب مقبول
+    (
+      -- (1) طوارئ: تعارض بس لو الفني منشغل جسديًا فعليًا دلوقتي (ADR-0018 §9 — طلب مقبول
       -- لسه ما بدأش مش "شغل" لغرض الطوارئ).
       (
         ${isEmergencyParam}::boolean IS TRUE
-        AND NOT EXISTS (
+        AND EXISTS (
           SELECT 1 FROM orders bo
           WHERE bo.technician_id = ${technicianIdExpr} AND bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
             AND bo.order_status = ANY(${engagedStatusesParam}::order_status[]) AND bo.deleted_at IS NULL
         )
       )
       OR
-      -- (2) أي طلب تاني (ASAP أو مجدول — نفس القاعدة بالحرف، docs/08 §32): استبعاد لو (أ) الفني
+      -- (2) أي طلب تاني (ASAP أو مجدول — نفس القاعدة بالحرف، docs/08 §32): تعارض لو (أ) الفني
       -- منشغل جسديًا فعليًا دلوقتي *واليوم المطلوب هو النهاردة*، أو (ب) فيه طلب تاني بموعد نفس
       -- اليوم المطلوب والشغل (القديم أو الجديد) شاغل يوم كامل. طلب accepted قصير لسه ما بدأش
-      -- مايستبعدش — نفس فلسفة الطلب المجدول تمامًا، بلا استثناء خاص لـASAP.
+      -- مايتعارضش — نفس فلسفة الطلب المجدول تمامًا، بلا استثناء خاص لـASAP.
       (
         ${isEmergencyParam}::boolean IS NOT TRUE
-        AND NOT EXISTS (
+        AND EXISTS (
           SELECT 1 FROM orders co
           JOIN services cs ON cs.id = co.service_id
           WHERE co.technician_id = ${technicianIdExpr} AND co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
@@ -137,18 +167,47 @@ export function technicianAvailabilityCondition(opts: {
         )
       )
     )`;
+}
+
+/** تعبير SQL بوليان خام لاستثناء `blocked` الصريح — نفس فلسفة {@link activeOrderConflictExistsExpr} فوق. */
+function blockedExistsExpr(opts: {
+  technicianIdExpr: string;
+  scheduledAtParam: string;
+  serviceDurationExpr: string;
+}): string {
+  const { technicianIdExpr, scheduledAtParam, serviceDurationExpr } = opts;
   return `
-    ${activeOrderConflictConditions}
-    -- (3) استثناء صريح (blocked) — الفني حدد بنفسه إنه مش متاح وقت الطلب ده (ASAP/طوارئ = دلوقتي)،
-    -- كله بتوقيت مصر الصحيح مش UTC الخام.
-    AND NOT EXISTS (
+    EXISTS (
       SELECT 1 FROM technician_schedule_slots tss
       WHERE tss.technician_id = ${technicianIdExpr} AND tss.status = 'blocked' AND tss.deleted_at IS NULL
         AND tss.slot_date = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
         AND tss.start_time < ((COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')
               + (${serviceDurationExpr} || ' minutes')::interval)::time
         AND tss.end_time > (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::time
-    )
+    )`;
+}
+
+/**
+ * "مؤهّل بس متعارض جدوليًا" (ADR-0030، docs/08 §42) — العكس الدقيق لـ`technicianAvailabilityCondition()`:
+ * فني عنده تعارض طلب نشط فعلي (نفس منطق {@link activeOrderConflictExistsExpr})، **لكن** مش
+ * `blocked` صراحة (استثناء ذاتي زي إجازة — ده يفضل مخفي تمامًا دايمًا، الفئة التالتة "غير مؤهّل"،
+ * مش "متعارض"). الـcaller مسؤول عن باقي بوابة الأهلية الصارمة (خدمة/فئة/منطقة/current_location) —
+ * نفس الـWHERE clause الأساسي المستخدم مع `technicianAvailabilityCondition()`، الفرق هنا في شرط
+ * التوافر بس.
+ */
+export function technicianScheduleConflictCondition(opts: {
+  technicianIdExpr: string;
+  scheduledAtParam: string;
+  excludeOrderIdParam: string;
+  activeStatusesParam: string;
+  engagedStatusesParam: string;
+  isEmergencyParam: string;
+  serviceDurationExpr: string;
+  fullDayThresholdMinutesParam: string;
+}): string {
+  return `
+    AND (${activeOrderConflictExistsExpr(opts)})
+    AND NOT (${blockedExistsExpr(opts)})
   `;
 }
 

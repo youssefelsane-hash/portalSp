@@ -131,6 +131,12 @@ export class CreateServiceDto {
   @IsBoolean()
   allows_date_range_booking?: boolean;
 
+  // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — true يعني فني مؤهّل بس
+  // متعارض مع الموعد المطلوب يفضل ظاهر بحالة "مش متاح للفترة دي" بدل ما يختفي تمامًا.
+  @IsOptional()
+  @IsBoolean()
+  show_unavailable_providers?: boolean;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;
