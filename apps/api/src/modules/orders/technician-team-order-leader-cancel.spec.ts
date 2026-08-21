@@ -169,6 +169,7 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
       {} as never, // supportService
       eventsStub,
       {} as never, // orderTeamService
+      {} as never, // domesticWorkersService (ADR-0029)
     );
   });
 

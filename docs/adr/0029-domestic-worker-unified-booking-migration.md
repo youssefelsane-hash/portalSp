@@ -1,6 +1,6 @@
 # ADR-0029: هجرة حجز الشغالة/المربية للمحرك الموحّد (Phase A.4)
 
-**الحالة:** معتمد (خطة كاملة + Slice 1 منفّذ — باقي الشرائح موثّقة تحت، لسه مفتوحة)
+**الحالة:** معتمد (خطة كاملة + Slice 1/Slice 2a منفّذين — باقي الشرائح موثّقة تحت، لسه مفتوحة)
 **التاريخ:** 2026-08-21
 
 ## السياق
@@ -95,16 +95,35 @@ Phase A.4 (docs/08 §42) — آخر شريحة في Part A، ومسمّاة صر
   entity field + فرع `CatalogService.estimate()` الجديد (معزول، قابل للاختبار مباشرة، صفر تغيير
   على أي فرع تاني). **صفر endpoint جديد، صفر تغيير سلوك لأي مسار موجود** — القيمة الجديدة
   `worker_rate` مش مستخدمة في أي `Service` حقيقي لسه.
-- **Slice 2 (التالية، مش منفّذة هنا)**: `OrdersService.create()` — فرع "تخطي المطابقة" لما
-  `dto.domestic_worker_profile_id` موجودة (تحميل الفني، حساب السعر من معدّله، إنشاء الطلب بحالة
-  معيّنة مباشرة بدل `SEARCHING_TECHNICIAN`). **هي الأخطر فعليًا** — لازم بحث مستقل قبلها في كل
-  الآثار الجانبية اللي بتحصل حاليًا وقت قبول فني عادي (إنشاء شات، إشعارات، حجز سلوت، إحصائيات) عشان
-  الطلب المُعيَّن مباشرة يوصل لنفس الحالة الوظيفية الكاملة، مش يفضل ناقص آثار جانبية بصمت. الخيارين
-  المرشّحين: (أ) الطلب بيتسجّل مباشرة `TECHNICIAN_ASSIGNED` وبتتنفّذ نفس effects دالة القبول يدويًا،
-  أو (ب) الطلب بيتسجّل `SEARCHING_TECHNICIAN` عادي بس بمرشّح واحد بس (الشغالة المختارة) والمطابقة
-  الحالية بتقبلها فورًا (إعادة استخدام أكبر، بس محتاج تأكيد إن منطق "قبول" الحالي مش مربوط بافتراضات
-  خاصة بـ`TechnicianProfile`). **قرار مؤجَّل عمدًا لحد ما البحث ده يتم** — مش تكاسل، ده بالظبط نوع
-  القرار اللي محتاج تصميم كافٍ قبل الكود (نفس فلسفة تأجيل الإيداع من ADR-0026 لحد ما ADR-0027 اتكتب).
+- **Slice 2a (خلصت)**: بحث مستقل (Explore agent) قبل الكود أثبت: (1) مفيش مسار موجود ممكن يتعاد
+  استخدامه بلا تعديل — `matching.service.ts`'s `accept()`/`confirmTechnicianForOrder()` مربوطين
+  بـ`ORDER_ACCEPTED_EVENT` اللي بيكسر `chat_threads` (FK صريح على `technician_profiles`، هجرة
+  شغالة مش هتعديها)، و`AdminOrdersService.reassign()` (أقرب حاجة موجودة فعليًا لـ"تعيين مباشر بلا
+  مطابقة") بيستخدم `ORDER_REASSIGNED_EVENT` اللي أصلاً ناقص شات/إشعار عميل حتى للطلبات العادية
+  (فجوة موجودة مستقلة، موثّقة هنا للأمانة). القرار النهائي: `OrdersService.create()` بقت بتاخد
+  `domestic_worker_profile_id`/`duration_hours` جديدين — لو موجودين، بتحمّل الفني وتتحقق من اعتماده،
+  تحسب السعر (`hourlyRateCents × duration_hours`، نموذج بالساعة بس)، وتسجّل الطلب **مباشرة**
+  `ACCEPTED` (مش `SEARCHING_TECHNICIAN`) مع `assignedAt`/`acceptedAt` وقتها، `technicianId=null`،
+  `domesticWorkerProfileId` مسجّل. `ORDER_CREATED_EVENT` الموجود بيتصدّر عادي (صفر حدث جديد) —
+  اتأكد حيًا إن كل الـlisteners الموجودة (`OrderDispatchListener`/`CustomerStatsRecalculationListener`/
+  `EmergencyOrderRoutingListener`) آمنة بلا تعديل (بتتفحص على `orderStatus`/`bookingMode` بالفعل)،
+  وبس `OrderCreatedNotificationListener` احتاج فرع رسالة صح (مش "بندوّرلك على فني" مضلّلة لفني
+  معروف بالفعل).
+  - **مبسّطتان مؤقتتان، موثّقتان صراحة، Slice 2b/2c تاليتين**:
+    1. **دفع مقدّم مش مدعوم لسه** — `dto.payment_method` مرفوض صراحة مع `domestic_worker_profile_id`
+       (الفني بياخد كاش وقت الزيارة بس دلوقتي). السبب: دعم الدفع المقدّم محتاج فرع مواز على
+       `PaymentsService.handlePaymentConfirmed()`'s `PENDING_PAYMENT→SEARCHING_TECHNICIAN` (لازم
+       `→ACCEPTED` بديلة لطلب فني معروف)، وده كود دفع مشترك حرج (كل طلب مدفوع مسبقًا في المنصة
+       بيعدّي منه) — تعديله يستأهل شريحة منفصلة بتصميم كافٍ، مش سطر إضافي متسرّع هنا.
+    2. **تأكيد الفني تلقائي (Slice 2a auto-confirms)** — الطلب بيتسجّل `ACCEPTED` فورًا بلا خطوة
+       "الفني يوافق صراحة" (المسار القديم `DomesticWorkerBookingsService.confirm()` عنده الخطوة
+       دي). ده تبسيط متعمّد مؤقت (نفس مبدأ `dispatchOrAutoConfirm()`'s LIGHT-tier auto-confirm
+       الموجود بالفعل لطلبات عادية — auto-confirm مش مفهوم غريب على المشروع). endpoint تأكيد/رفض
+       صريح للفني (شغالة) على طلب موجود مؤجّل لـSlice 2b.
+  - **شات مؤجّل عمدًا لـSlice 3** — `chat_threads.technician_id` FK صريح على `technician_profiles`،
+    مينفعش يستقبل `DomesticWorkerProfile.id`. يحتاج عمود `domestic_worker_profile_id` جديد على
+    `chat_threads` + تعديل `ChatService.resolveParticipant()` + واجهة Flutter (تطبيقي العميل/الفني
+    ماعندهمش أي شاشة شات للشغالة أصلاً دلوقتي) — شغل UI+schema حقيقي، مش تعديل صغير.
 - **Slice 3**: واجهات حقيقية (Flutter + أدمن) لمسار الحجز الجديد — أكبر شغل UI، بعد ما Slice 2
   يثبت نفسه حيًا.
 - **Slice 4**: `RecurringOrderTemplate` لتجديد الحجز الشهري بالمسار الجديد.
@@ -130,7 +149,19 @@ Phase A.4 (docs/08 §42) — آخر شريحة في Part A، ومسمّاة صر
   حقيقي (سلوك ناقص بصمت). "شرايح آمنة صغيرة" (طلب المالك صراحة) يعني الأساس المعزول أولاً، الجزء
   الأخطر لوحده بعده بتصميم كافٍ — بالظبط نفس ترتيب A.1→A.2→A.3.
 
-## الأثر (Slice 1، منفّذ في الـcommit ده)
+## الأثر (Slice 1 + Slice 2a، منفّذين)
+
+- `OrdersService.create()`: حقلين DTO جدد (`domestic_worker_profile_id`/`duration_hours`) + فحوصات
+  + فرع إنشاء طلب مباشر `ACCEPTED`. `DomesticWorkersService` بقت dependency جديدة (`OrdersModule`
+  بيستورد `DomesticWorkersModule`، صفر cycle — `DomesticWorkersModule` مابيستوردش `OrdersModule`).
+- `OrderCreatedNotificationListener`: فرع رسالة جديد لطلب فني (شغالة) مباشر.
+- **صفر تغيير على `matching`/`chat`/`assistant-matching` modules** — كل الـlisteners الموجودة على
+  `ORDER_CREATED_EVENT` اتأكد إنها آمنة بلا تعديل (تفاصيل فوق).
+- اختبار حي جديد: `orders/domestic-worker-direct-booking.e2e.spec.ts` (5/5).
+- **خارج نطاق Slice 2a عمدًا**: دفع مقدّم، تأكيد فني صريح، شات، نموذج شهري (monthly_live_in)،
+  أي واجهة Flutter/أدمن لمسار الحجز الجديد.
+
+### تفاصيل Slice 1 (للمرجع)
 
 - Migration جديدة (0166): `ALTER TYPE pricing_model ADD VALUE 'worker_rate'` +
   `orders.domestic_worker_profile_id` (nullable FK) — صفر كسر لأي خدمة/طلب موجود، صفر استخدام فعلي

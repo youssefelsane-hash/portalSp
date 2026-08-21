@@ -336,6 +336,11 @@
 - **اختبار حي جديد**: `catalog/worker-rate-pricing.spec.ts` (3/3 — `precomputedWorkerRateCents`
   مفقودة ترفض، موجودة بترجع بالحرف بلا zone override رغم وجوده على الخدمة، رجريشن لخدمة `fixed`
   عادية صفر تأثير من الباراميتر الجديد).
-- **خارج نطاق هذه الشريحة عمدًا**: `OrdersService.create()` (فرع تخطي المطابقة، Slice 2 — الأخطر
-  فعليًا)، أي واجهة (Slice 3)، التكرار الشهري عبر `RecurringOrderTemplate` (Slice 4)، وأي تغيير
-  على `domestic-workers` module الحالي (صفر لمس بالكامل).
+- **Slice 2a (خلصت)**: `OrdersService.create()` بقت بتاخد `domestic_worker_profile_id`/`duration_hours`
+  جديدين — العميل اختار فني (شغالة) بعينه مباشرة (زيرو مطابقة تلقائية، ADR-0004)، الطلب يتسجّل
+  `ACCEPTED` فورًا (السعر = `hourlyRateCents × duration_hours`). دفع مقدّم وتأكيد فني صريح مؤجّلين
+  عمدًا (تفاصيل كاملة في ADR-0029 §Slice 2a). اختبار حي:
+  `orders/domestic-worker-direct-booking.e2e.spec.ts` (5/5).
+- **خارج نطاق هذه الشريحة عمدًا**: دفع مقدّم لحجز شغالة، شات (Slice 2c/3)، واجهة Flutter/أدمن
+  (Slice 3)، التكرار الشهري عبر `RecurringOrderTemplate` (Slice 4)، وأي تغيير على
+  `domestic-workers` module الحالي (صفر لمس بالكامل).

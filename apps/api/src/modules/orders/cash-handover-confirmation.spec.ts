@@ -257,6 +257,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
     );
   });
 

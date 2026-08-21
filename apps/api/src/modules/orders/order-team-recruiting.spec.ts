@@ -258,6 +258,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
       {} as never, // supportService
       new EventEmitter2(), // events
       orderTeamService,
+      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
     );
   });
 

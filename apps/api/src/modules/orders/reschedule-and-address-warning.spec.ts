@@ -216,6 +216,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35)
+      {} as never, // domesticWorkersService (ADR-0029)
     );
   });
 
@@ -501,6 +502,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
       {} as never,
       events,
       {} as never, // orderTeamService (docs/08 §35)
+      {} as never, // domesticWorkersService (ADR-0029)
     );
   });
 
