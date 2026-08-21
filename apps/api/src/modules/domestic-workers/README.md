@@ -108,6 +108,23 @@ pending ويمنع اعتماد صفحة قديمة؛ نسختان من `sweep()
 القرار الكامل (بما فيه الشريحة الأكبر التالية — سياسة إظهار المرشّحين المتعارضين للعميل بدل
 إخفائهم تمامًا) في `../../../../docs/adr/0030-schedule-conflict-visibility-policy.md`.
 
+## تصفّح واعٍ بالتعارض الجدولي (ADR-0030 Slice C)
+
+`findSchedulingConflict()` جديدة (private) — نفس منطق `assertNoSchedulingConflict()` بالضبط، بس
+بترجع النتيجة (`{conflicting, busyUntil, sourceLabel}`) بدل ما ترمي؛ الدالتين بيستخدموا نفس
+الاستعلامين، صفر تكرار.
+
+`browseForCustomer()` بقت بتاخد باراميتر رابع اختياري `scheduling?: {serviceId, scheduledAt,
+durationHours}`. بدون `scheduledAt`: صفر تغيير عن السلوك القديم. مع `scheduledAt`: كل مرشّح بيتفحص
+تعارضه الحقيقي؛ المتعارض بيتشال تلقائيًا، إلا لو `serviceId` بيرجّع لخدمة
+`show_unavailable_providers=true` (`serviceShowsUnavailableProviders()` جديدة، SQL خام بدل
+استيراد `CatalogModule` — نفس نمط قراءة `users.full_name` الموجود هنا أصلاً) — وقتها بيرجع في آخر
+القايمة بحالة `schedule_conflicted` + سبب + `availableAgainAt` (بحث يومي 14 يوم عبر
+`findNextAvailableAtForWorker()` جديدة، مقصور على أول 10 متعارضين).
+
+`service_id` اختياري عمدًا في `BrowseWorkersQueryDto` — التصفّح هنا بتخصص (`DomesticWorkerSpecialty`)
+مش بخدمة كتالوج واحدة بالضرورة (عكس `GET /services/:id/technicians`)، فمفيش سياق خدمة مضمون دايمًا.
+
 ## هجرة للمحرك الموحّد (docs/08 §42 Phase A.4، ADR-0029) — قيد التنفيذ، صفر تغيير هنا لسه
 
 طلب مالك (2026-08-21): المسار النهائي لحجز الشغالة يستخدم بنية Service/Order/Pricing/Payment/

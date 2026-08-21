@@ -33,6 +33,13 @@ class PublicWorker {
   final int totalRatingsCount;
   final int completedBookingsCount;
   final double? distanceKm;
+  // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030 Slice C/D) — 'available' دايمًا لو
+  // البحث بلا معاد محدد. لو اتحدد معاد وService لسه مربوطش بسياق خدمة كتالوج معروف في مسار
+  // التصفّح ده (فجوة معمارية موثّقة صراحة في ADR-0030)، الشغالة المتعارضة بتتفلتر برّه القايمة
+  // بدل ما تترجع بحالة schedule_conflicted — فالحقل ده حاليًا 'available' دايمًا فعليًا هنا.
+  final String availabilityStatus;
+  final String? unavailableReasonAr;
+  final DateTime? availableAgainAt;
 
   PublicWorker({
     required this.id,
@@ -47,6 +54,9 @@ class PublicWorker {
     required this.totalRatingsCount,
     required this.completedBookingsCount,
     required this.distanceKm,
+    this.availabilityStatus = 'available',
+    this.unavailableReasonAr,
+    this.availableAgainAt,
   });
 
   factory PublicWorker.fromJson(Map<String, dynamic> json) => PublicWorker(
@@ -62,6 +72,10 @@ class PublicWorker {
         totalRatingsCount: json['total_ratings_count'] as int,
         completedBookingsCount: json['completed_bookings_count'] as int,
         distanceKm: (json['distance_km'] as num?)?.toDouble(),
+        availabilityStatus: json['availability_status'] as String? ?? 'available',
+        unavailableReasonAr: json['unavailable_reason_ar'] as String?,
+        availableAgainAt:
+            json['available_again_at'] != null ? DateTime.parse(json['available_again_at'] as String) : null,
       );
 }
 

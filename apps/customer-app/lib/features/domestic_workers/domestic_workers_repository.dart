@@ -8,11 +8,21 @@ class DomesticWorkersRepository {
 
   DomesticWorkersRepository(this.auth);
 
-  Future<List<PublicWorker>> browse({String? specialty, double? latitude, double? longitude}) async {
+  // ADR-0030 Slice C/D — scheduledAt اختياري: لو اتحدد، الباك-إند بيفحص تعارض جدولي حقيقي
+  // (كان صفر فحص قبل كده في المسار ده) ويفلتر الشغالات المتعارضة تلقائيًا. serviceId مش متوفر
+  // في الشاشة دي حاليًا (تصفّح بالتخصص، مش بخدمة كتالوج محددة — فجوة معمارية موثّقة في ADR-0030)،
+  // فالافتراضي الآمن هو الإخفاء الكامل بدل عرض حالة schedule_conflicted.
+  Future<List<PublicWorker>> browse({
+    String? specialty,
+    double? latitude,
+    double? longitude,
+    DateTime? scheduledAt,
+  }) async {
     final params = <String, String>{
       if (specialty != null) 'specialty': specialty,
       if (latitude != null) 'latitude': latitude.toString(),
       if (longitude != null) 'longitude': longitude.toString(),
+      if (scheduledAt != null) 'scheduled_at': scheduledAt.toUtc().toIso8601String(),
     };
     final query = params.isEmpty ? '' : '?${Uri(queryParameters: params).query}';
     final items = await auth.authedRequestList('/domestic-workers$query');

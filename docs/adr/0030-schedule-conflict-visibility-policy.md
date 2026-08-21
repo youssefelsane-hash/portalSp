@@ -1,6 +1,6 @@
 # ADR-0030: سياسة إظهار المرشّحين المتعارضين جدوليًا (Schedule-Conflict Visibility) + إصلاح فجوة تعارض حجز الشغالة
 
-**الحالة:** معتمد (خطة كاملة + Slice A/B منفّذين — باقي الشرائح موثّقة تحت، لسه مفتوحة)
+**الحالة:** معتمد ومنفّذ بالكامل (Slice A/B/C/D) — الشرائح الأربعة كلها مغطّاة بالتفصيل تحت
 **التاريخ:** 2026-08-21
 
 ## السياق
@@ -150,3 +150,54 @@
 - اختبار حي جديد: `schedule-conflict-visibility.spec.ts` (3/3) + تحقق صفر رجريشن على
   `matching`/`technicians` بالكامل (152/155، نفس الفشلات المعروفة قبل وبعد بالحرف).
 - **خارج نطاق Slice B عمدًا**: تصفح الشغالة (Slice C)، واجهة Flutter (Slice D).
+
+## الأثر (Slice C، منفّذ في الـcommit ده)
+
+- `DomesticWorkersService`: `assertNoSchedulingConflict()` اتفكّت لدالة داخلية مشتركة
+  `findSchedulingConflict()` (بترجّع النتيجة بدل ما ترمي — `{conflicting, busyUntil, sourceLabel}`)،
+  صفر تكرار منطق بين مسار الاعتراض عند الإنشاء ومسار التصفّح الجديد.
+- `browseForCustomer()` بقت بتاخد باراميتر رابع اختياري `scheduling?: {serviceId, scheduledAt,
+  durationHours}`. **بدون `scheduledAt`**: نفس السلوك القديم بالحرف (صفر تغيير). **مع `scheduledAt`**:
+  كل مرشّح بيتفحص تعارضه الحقيقي (نفس منطق `findSchedulingConflict`، دقة ساعة)؛ المتعارض بيتشال من
+  النتيجة تلقائيًا، إلا لو `serviceId` بيرجّع لخدمة `show_unavailable_providers=true` — وقتها بيترجع
+  في آخر القايمة بحالة `schedule_conflicted` + سبب + `availableAgainAt` (بحث يومي 14 يوم، نفس حد
+  Slice B، مقصور على أول 10 متعارضين لتفادي توسّع البحث).
+- **قرار التصميم المفتوح اللي اتحل**: `browseForCustomer()` أصلاً مش مربوطة بخدمة كتالوج واحدة
+  (تصفّح بتخصص `DomesticWorkerSpecialty`، مش `service_id`) — عكس الفني اللي بيتصفّح دايمًا جوّه
+  `GET /services/:id/technicians`. الحل: `service_id` بقى باراميتر **اختياري** في `BrowseWorkersQueryDto`؛
+  لو العميل لسه مختارش خدمة كتالوج بعينها (تصفّح استكشافي)، الافتراضي الآمن هو الإخفاء الكامل
+  (زي قيمة الفلاج الافتراضية `false`) — صفر معلومة مصطنعة بلا سياق خدمة معروف.
+  `serviceShowsUnavailableProviders()` جديدة (private) بتقرأ العلم بـSQL خام (بدون استيراد
+  `CatalogModule` — نفس نمط قراءة `users.full_name` الموجود في الملف ده أصلاً، تفاديًا لأي تبعية
+  دائرية بين الموديولين).
+- `BrowseWorkersQueryDto`: `service_id`/`scheduled_at`/`duration_hours` اختياريين جداد.
+- `PublicWorkerListItem`/`PublicWorkerResponseDto`: `availability_status`/`unavailable_reason_ar`/
+  `available_again_at` — مطابقة بالاسم لحقول `TechnicianBookingListItem` المكافئة (Slice B)، للاتساق
+  المعماري بين مساري التصفّح.
+- **خارج نطاق Slice C عمدًا**: واجهة Flutter (Slice D). اختبار حي مؤجَّل لدفعة الاختبار النهائية
+  الشاملة (طلب صريح من المالك 2026-08-21: "متعملش تستات غير في الآخر خالص").
+
+## الأثر (Slice D، منفّذ في الـcommit ده)
+
+- `apps/customer-app/lib/features/technicians/models.dart`: `TechnicianBookingListItem` بقت
+  فيها `availabilityStatus`/`unavailableReasonAr`/`availableAgainAt` (افتراضي `'available'`/
+  `null`/`null`، صفر كسر لأي بناء قديم).
+- `technician_marketplace_screen.dart`: كارت الفني المتعارض بيتعتّم + شارة "مش متاح للفترة دي" +
+  سبب، وزرار "جرّب <تاريخ>" بدل "اختار" لو `availableAgainAt` معروف. `_effectiveRequestedAt` state
+  جديدة تسمح بإعادة تحميل القايمة بتاريخ مختلف محليًا (بلا شاشة/فلو جديد) — بانر أعلى الشاشة يوضّح
+  التبديل مع رجوع للأصلي. `TechnicianOrCompanySelected` typedef بقى بثلات باراميترات
+  (`id, isCompany, effectiveRequestedAt`) — الاختيار بعد التبديل بيوصّل `CreateOrderScreen` بالتاريخ
+  الصحيح (`technician_selection_screen.dart`'s `_confirmSelection()` اتحدّثت لتاخده).
+- `apps/customer-app/lib/features/domestic_workers/`: `PublicWorker` نفس الحقول الثلاثة.
+  `DomesticWorkersScreen` بقى فيها `InputChip` اختياري "حدد الميعاد" — لو اتحدد، `scheduled_at`
+  بيتبعت لـ`GET /domestic-workers` فيفلتر المتعارضين تلقائيًا (إصلاح فجوة حقيقية كانت موجودة
+  فعليًا: صفر فحص تعارض في مسار التصفّح ده قبل الشريحة دي خالص).
+- **قرار مقصود، موثّق مش سهو**: تصفّح الشغالة (`DomesticWorkersScreen`) بيتفتح من زرار عام في
+  `home_screen.dart` بصفر خطوة اختيار خدمة كتالوج قبله — فمفيش `service_id` في السياق أصلاً. الشغالة
+  المتعارضة بتتفلتر (الإخفاء) دايمًا هنا بدل عرض `schedule_conflicted` — تفعيل العرض الكامل زي
+  الفني محتاج مرحلة اختيار خدمة كتالوج تتضاف الأول لمسار التصفّح، تغيير UX أكبر من الشريحة دي،
+  مؤجّل عمدًا وموثّق كفجوة صريحة (مش نص ميت — الحقول والـmodel جاهزين، البيانات هتتفعّل تلقائيًا
+  لو/لما `service_id` يتضاف للـquery مستقبلاً).
+- **قيد صريح**: مفيش Flutter SDK متاح في بيئة السيشن دي وقت الشريحة دي (مختلف عن قيود سابقة كان
+  فيها SDK موجود بس بلا جهاز/emulator) — مراجعة يدوية دقيقة (توازن الأقواس، الأنواع، كل نقاط
+  النداء) بدل `flutter analyze`/build فعلي، موثّق بصراحة في `apps/customer-app/README.md`.

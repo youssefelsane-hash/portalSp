@@ -23,6 +23,10 @@ class _DomesticWorkersScreenState extends State<DomesticWorkersScreen> {
   List<PublicWorker>? _workers;
   String? _error;
   String? _selectedSpecialty;
+  // ADR-0030 Slice D — تحديد المعاد هنا اختياري: بدونه صفر تغيير عن السلوك القديم (كل الشغالات
+  // المتاحات، بلا فحص تعارض). لو العميل حدده، بنبعته للباك-إند عشان يفلتر المتعارضين فعليًا —
+  // كانت فجوة حقيقية (عميل يقدر يشوف شغالة "متاحة" وهي محجوزة فعلًا في نفس الوقت).
+  DateTime? _scheduledAt;
 
   @override
   void initState() {
@@ -33,11 +37,45 @@ class _DomesticWorkersScreenState extends State<DomesticWorkersScreen> {
 
   Future<void> _load() async {
     try {
-      final workers = await _repository.browse(specialty: _selectedSpecialty);
+      final workers = await _repository.browse(specialty: _selectedSpecialty, scheduledAt: _scheduledAt);
       if (mounted) setState(() => _workers = workers);
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
+  }
+
+  Future<void> _pickScheduledAt() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _scheduledAt ?? now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 60)),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_scheduledAt ?? now),
+    );
+    if (time == null) return;
+    setState(() {
+      _scheduledAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _workers = null;
+    });
+    _load();
+  }
+
+  void _clearScheduledAt() {
+    setState(() {
+      _scheduledAt = null;
+      _workers = null;
+    });
+    _load();
+  }
+
+  String _formatScheduledAt(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.day}/${local.month} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
@@ -95,6 +133,20 @@ class _DomesticWorkersScreenState extends State<DomesticWorkersScreen> {
                         ),
                       ),
                   ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 12, left: 12, bottom: 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: InputChip(
+                  avatar: const Icon(Icons.event_outlined, size: 18),
+                  label: Text(
+                    _scheduledAt != null ? 'الميعاد: ${_formatScheduledAt(_scheduledAt!)}' : 'حدد الميعاد (اختياري)',
+                  ),
+                  onPressed: _pickScheduledAt,
+                  onDeleted: _scheduledAt != null ? _clearScheduledAt : null,
                 ),
               ),
             ),

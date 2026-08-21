@@ -84,6 +84,15 @@ class TechnicianBookingListItem {
   final bool isCompany;
   final int? staffCount;
   final int? branchCount;
+  // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030 Slice B/D) — 'available' دايمًا للسلوك
+  // القديم (بلا scheduled_at، أو service.showUnavailableProviders=false). 'schedule_conflicted'
+  // معناه الفني مؤهّل فعلاً بس محجوز في الفترة المطلوبة — الباك-إند بيرجّعه صراحة (بدل الإخفاء)
+  // بس للخدمات المفعّل فيها الإعداد ده.
+  final String availabilityStatus;
+  final String? unavailableReasonAr;
+  final DateTime? availableAgainAt;
+
+  bool get isScheduleConflicted => availabilityStatus == 'schedule_conflicted';
 
   TechnicianBookingListItem({
     required this.id,
@@ -103,6 +112,9 @@ class TechnicianBookingListItem {
     required this.isCompany,
     required this.staffCount,
     required this.branchCount,
+    this.availabilityStatus = 'available',
+    this.unavailableReasonAr,
+    this.availableAgainAt,
   });
 
   factory TechnicianBookingListItem.fromJson(Map<String, dynamic> json) => TechnicianBookingListItem(
@@ -123,6 +135,10 @@ class TechnicianBookingListItem {
         isCompany: json['is_company'] as bool? ?? false,
         staffCount: json['staff_count'] as int?,
         branchCount: json['branch_count'] as int?,
+        availabilityStatus: json['availability_status'] as String? ?? 'available',
+        unavailableReasonAr: json['unavailable_reason_ar'] as String?,
+        availableAgainAt:
+            json['available_again_at'] != null ? DateTime.parse(json['available_again_at'] as String) : null,
       );
 }
 
