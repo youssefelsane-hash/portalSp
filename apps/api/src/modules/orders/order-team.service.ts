@@ -59,6 +59,20 @@ export type RecruitOutcome =
   | { status: 'offer_sent'; opportunityId: string; capacityTier: TechnicianCapacityTier };
 
 /**
+ * علامة داخلية بس (docs/08 §35.19) — بَقّة حقيقية اتلقطت وقت كتابة اختبار التزامن: acceptCrewOpportunity()
+ * كانت بتعمل markDecided(..., 'declined') **جوّه** نفس المعاملة اللي هترمي استثناء وترتد (rollback)
+ * — يعني تعليم الفرصة declined كان بيتلغى تلقائيًا مع باقي المعاملة، فالفرصة كانت تفضل offered
+ * للأبد رغم إن الطلب اتحسم لصالح حد تاني. الحل: نرمي العلامة دي بدل ApiException مباشرة، نمسك بره
+ * المعاملة (بعد الـrollback)، نسجّل declined بكتابة منفصلة (خارج المعاملة الملغاة)، وبعدين نرمي
+ * الخطأ الحقيقي للمستخدم.
+ */
+class CrewOpportunityDeclinedError extends Error {
+  constructor(public readonly apiError: ApiException) {
+    super(apiError.message);
+  }
+}
+
+/**
  * تكوين الطاقم (docs/08 §35، ADR-0021 §1) — مصدر الحقيقة الوحيد لسؤال "الطاقم كامل؟"، فني/مساعد
  * منفصلين. بتستبدل computeCrewShortage() القديمة اللي كانت بتتجاهل required_assistants تمامًا
  * وبتحسب فني/مساعد كواحد — بَقّة حقيقية اتلقطت في مراجعة §35.0 (راجع ADR-0021 للسياق الكامل).
@@ -415,55 +429,76 @@ export class OrderTeamService {
    */
   async acceptCrewOpportunity(userId: string, opportunityId: string): Promise<OrderTeamMemberRow[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.orders.manager.transaction(async (manager) => {
-      const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, profile.id, opportunityId);
-      if (opportunity.context !== 'crew_recruit' || !opportunity.crew_role) {
-        throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تجنيد فريق', HttpStatus.BAD_REQUEST);
-      }
+    let orderId: string;
+    try {
+      // بَقّة حقيقية اتلقطت وقت كتابة اختبار التزامن (docs/08 §35.19): كان listForOrder() بيتنادى
+      // *جوّه* المعاملة، بس listForOrder() بيستخدم this.teamMembers.manager (اتصال منفصل مش جزء من
+      // المعاملة) — يعني كان بيقرأ قبل الـcommit فعليًا، فمكنش بيشوف صف order_team_members اللي
+      // لسه متضاف في نفس المعاملة (Read Committed: الاتصال التاني مايشوفش كتابة معلّقة لسه).
+      // الإصلاح: نرجّع orderId بس من جوّه المعاملة، وننادي listForOrder() بعد ما تتقفل (commit) فعليًا.
+      orderId = await this.orders.manager.transaction(async (manager) => {
+        const opportunity = await this.workOpportunities.getOwnedOfferedOrThrow(manager, profile.id, opportunityId);
+        if (opportunity.context !== 'crew_recruit' || !opportunity.crew_role) {
+          throw new ApiException(ErrorCode.VAL_001, 'الفرصة دي مش من نوع تجنيد فريق', HttpStatus.BAD_REQUEST);
+        }
 
-      const order = await manager
-        .createQueryBuilder(Order, 'o')
-        .setLock('pessimistic_write')
-        .where('o.id = :orderId', { orderId: opportunity.order_id })
-        .getOne();
-      if (!order || order.bookingMode !== BookingMode.TEAM || !order.technicianId) {
-        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
-      }
+        const order = await manager
+          .createQueryBuilder(Order, 'o')
+          .setLock('pessimistic_write')
+          .where('o.id = :orderId', { orderId: opportunity.order_id })
+          .getOne();
+        if (!order || order.bookingMode !== BookingMode.TEAM || !order.technicianId) {
+          throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
+        }
 
-      const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
-      await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
+        const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
+        await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
 
-      const composition = await this.getCrewComposition(order.id, order);
-      const role = opportunity.crew_role;
-      if (role === 'technician' && composition.missingTechnicians <= 0) {
-        await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
-        throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT);
-      }
-      if (role === 'assistant' && composition.missingAssistants <= 0) {
-        await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
-        throw new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT);
-      }
+        const composition = await this.getCrewComposition(order.id, order);
+        const role = opportunity.crew_role;
+        // بَقّة حقيقية تانية اتلقطت وقت كتابة اختبار التزامن (docs/08 §35.19): تعليم الفرصة
+        // declined هنا كان بيتعمل بـmarkDecided() *جوّه نفس المعاملة* اللي هترمي استثناء وترتد —
+        // يعني التعليم نفسه كان بيتلغى مع الـrollback، والفرصة كانت تفضل offered للأبد رغم إن
+        // مكانها راح لحد تاني. لازم نرمي CrewOpportunityDeclinedError بدل ApiException مباشرة،
+        // ونمسك بره المعاملة عشان نعلّم declined بكتابة منفصلة *بعد* الـrollback فعليًا.
+        if (role === 'technician' && composition.missingTechnicians <= 0) {
+          throw new CrewOpportunityDeclinedError(
+            new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT),
+          );
+        }
+        if (role === 'assistant' && composition.missingAssistants <= 0) {
+          throw new CrewOpportunityDeclinedError(
+            new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب اكتمل قبل ما توصل — الفرصة دي بقت مش متاحة', HttpStatus.CONFLICT),
+          );
+        }
 
-      const alreadyAdded = await manager.findOne(OrderTeamMember, { where: { orderId: order.id, technicianId: profile.id } });
-      if (alreadyAdded) {
-        await this.workOpportunities.markDecided(manager, opportunityId, 'declined');
-        throw new ApiException(ErrorCode.VAL_001, 'أنت مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
-      }
+        const alreadyAdded = await manager.findOne(OrderTeamMember, { where: { orderId: order.id, technicianId: profile.id } });
+        if (alreadyAdded) {
+          throw new CrewOpportunityDeclinedError(new ApiException(ErrorCode.VAL_001, 'أنت مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT));
+        }
 
-      const memberType = role === 'assistant' ? 'assistant' : 'team_member';
-      const member = manager.create(OrderTeamMember, {
-        orderId: order.id,
-        technicianId: profile.id,
-        roleLabel: role === 'assistant' ? 'مساعد' : 'عضو فريق',
-        addedByTechnicianId: order.technicianId,
-        memberType,
+        const memberType = role === 'assistant' ? 'assistant' : 'team_member';
+        const member = manager.create(OrderTeamMember, {
+          orderId: order.id,
+          technicianId: profile.id,
+          roleLabel: role === 'assistant' ? 'مساعد' : 'عضو فريق',
+          addedByTechnicianId: order.technicianId,
+          memberType,
+        });
+        await manager.save(member);
+        await this.workOpportunities.markDecided(manager, opportunityId, 'accepted');
+
+        this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(order.id, 'added', profile.id, null, 'technician'));
+        return order.id;
       });
-      await manager.save(member);
-      await this.workOpportunities.markDecided(manager, opportunityId, 'accepted');
-
-      this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(order.id, 'added', profile.id, null, 'technician'));
-      return this.listForOrder(order.id);
-    });
+    } catch (err) {
+      if (err instanceof CrewOpportunityDeclinedError) {
+        await this.workOpportunities.markDecided(this.orders.manager, opportunityId, 'declined');
+        throw err.apiError;
+      }
+      throw err;
+    }
+    return this.listForOrder(orderId);
   }
 
   /** فرص تجنيد الفريق المفتوحة للفني الحالي (docs/08 §35، للتطبيق — شاشة منفصلة عن الفرص العادية). */

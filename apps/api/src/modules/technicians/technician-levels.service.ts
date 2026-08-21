@@ -42,6 +42,7 @@ export class TechnicianLevelsService {
       order_priority_weight: config.orderPriorityWeight,
       decision_limit_cents: config.decisionLimitCents,
       can_lead_team: config.canLeadTeam,
+      eligible_for_team_booking: config.eligibleForTeamBooking,
     };
 
     if (dto.display_name_ar !== undefined) config.displayNameAr = dto.display_name_ar;
@@ -49,6 +50,7 @@ export class TechnicianLevelsService {
     if (dto.order_priority_weight !== undefined) config.orderPriorityWeight = dto.order_priority_weight;
     if (dto.decision_limit_cents !== undefined) config.decisionLimitCents = dto.decision_limit_cents;
     if (dto.can_lead_team !== undefined) config.canLeadTeam = dto.can_lead_team;
+    if (dto.eligible_for_team_booking !== undefined) config.eligibleForTeamBooking = dto.eligible_for_team_booking;
     await this.configs.save(config);
 
     await this.auditLog.record({
@@ -64,6 +66,7 @@ export class TechnicianLevelsService {
         order_priority_weight: config.orderPriorityWeight,
         decision_limit_cents: config.decisionLimitCents,
         can_lead_team: config.canLeadTeam,
+        eligible_for_team_booking: config.eligibleForTeamBooking,
       },
       meta,
     });

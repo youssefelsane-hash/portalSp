@@ -324,7 +324,15 @@ export class AdminOrdersService {
    */
   async listEligibleTechniciansForReassign(orderId: string) {
     const order = await this.findOrThrow(orderId);
-    return this.techniciansService.listForServiceBooking(order.serviceId, order.addressId, order.technicianId ?? undefined, order.scheduledAt);
+    // docs/08 §38 — طلب اعتماد لازم قايمة إعادة التعيين تفضل مقيّدة بنفس فلترة المستوى (محترف
+    // فأعلى) اللي assertCoreEligibility() هيرفض غيرها وقت التنفيذ فعليًا — نفس فلسفة التعليق فوق.
+    return this.techniciansService.listForServiceBooking(
+      order.serviceId,
+      order.addressId,
+      order.technicianId ?? undefined,
+      order.scheduledAt,
+      order.bookingMode === BookingMode.TEAM,
+    );
   }
 
   async reassign(

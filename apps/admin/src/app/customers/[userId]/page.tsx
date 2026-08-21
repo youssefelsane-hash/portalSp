@@ -23,6 +23,45 @@ const TIER_LABELS: Record<CustomerTier, string> = {
   vip: 'VIP',
 };
 
+// §35.15 — بروفايل عميل 360°: GET /admin/customers/:userId/360 (نفس نمط بروفايل الفني 360°،
+// apps/admin/src/app/technicians/[id]/page.tsx). shape يدوي هنا بدل shared-types لنفس السبب
+// (تجميعة قراءة بس خاصة بشاشة واحدة، مش عقد بين موديولات).
+interface Customer360Order {
+  order_id: string;
+  order_number: string;
+  order_status: string;
+  scheduled_at: string | null;
+  service_name_ar: string;
+}
+interface Customer360ComplaintRow {
+  id: string;
+  complaint_number: string;
+  severity: string;
+  status: string;
+  created_at: string;
+}
+interface Customer360Complaints {
+  open_count: number;
+  total_count: number;
+  recent: Customer360ComplaintRow[];
+}
+interface Customer360Address {
+  id: string;
+  label: string | null;
+  street_name: string;
+  building_number: string | null;
+  city_id: string | null;
+  area_id: string | null;
+  is_default: boolean;
+}
+interface Customer360Response {
+  addresses: Customer360Address[];
+  current_and_upcoming_orders: Customer360Order[];
+  complaints_filed: Customer360Complaints;
+  complaints_against: Customer360Complaints;
+  ratings_received: { average_rating: number | null; total_count: number };
+}
+
 export default function CustomerDetailPage() {
   const { userId } = useParams<{ userId: string }>();
   const { isLoading, authedFetch } = useAuth();
@@ -31,6 +70,8 @@ export default function CustomerDetailPage() {
   const [detail, setDetail] = useState<AdminCustomerResponseDto | null>(null);
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [profile360, setProfile360] = useState<Customer360Response | null>(null);
+  const [profile360Error, setProfile360Error] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [blockReason, setBlockReason] = useState('');
@@ -51,10 +92,17 @@ export default function CustomerDetailPage() {
       .catch((err) => setWalletError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل المحفظة'));
   }
 
+  function load360() {
+    authedFetch<Customer360Response>(`/admin/customers/${userId}/360`)
+      .then(setProfile360)
+      .catch((err) => setProfile360Error(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل النظرة التشغيلية'));
+  }
+
   useEffect(() => {
     if (isLoading) return;
     load();
     loadWallet();
+    load360();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, userId]);
 
@@ -299,6 +347,105 @@ export default function CustomerDetailPage() {
                       </li>
                     ))}
                   </ul>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">نظرة تشغيلية 360°</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5 text-sm">
+            {profile360Error && <p className="text-destructive">{profile360Error}</p>}
+            {!profile360 && !profile360Error && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {profile360 && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">
+                    التقييم اللي بياخده: {profile360.ratings_received.average_rating ?? '—'} (
+                    {profile360.ratings_received.total_count})
+                  </Badge>
+                </div>
+
+                <div>
+                  <p className="mb-2 font-medium">العناوين ({profile360.addresses.length})</p>
+                  {profile360.addresses.length === 0 ? (
+                    <p className="text-muted-foreground">مفيش عناوين مسجّلة</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {profile360.addresses.map((a) => (
+                        <li key={a.id} className="flex items-center gap-2 border-b pb-1 text-xs last:border-0">
+                          <span>
+                            {a.label ? `${a.label} — ` : ''}
+                            {a.street_name}
+                            {a.building_number ? `، مبنى ${a.building_number}` : ''}
+                          </span>
+                          {a.is_default && <Badge variant="secondary">افتراضي</Badge>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-2 font-medium">طلبات حالية/قادمة ({profile360.current_and_upcoming_orders.length})</p>
+                  {profile360.current_and_upcoming_orders.length === 0 ? (
+                    <p className="text-muted-foreground">مفيش طلبات حالية</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {profile360.current_and_upcoming_orders.map((o) => (
+                        <li key={o.order_id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
+                          <a href={`/orders/${o.order_id}`} className="underline">
+                            {o.order_number} — {o.service_name_ar}
+                          </a>
+                          <span className="text-muted-foreground">{o.order_status}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-2 font-medium">
+                    شكاوى رفعها العميل ({profile360.complaints_filed.open_count} مفتوحة من {profile360.complaints_filed.total_count})
+                  </p>
+                  {profile360.complaints_filed.recent.length === 0 ? (
+                    <p className="text-muted-foreground">مفيش شكاوى</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {profile360.complaints_filed.recent.map((c) => (
+                        <li key={c.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
+                          <span>{c.complaint_number}</span>
+                          <span className="text-muted-foreground">
+                            {c.severity} · {c.status}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <p className="mb-2 font-medium">
+                    شكاوى اتقالت على العميل ({profile360.complaints_against.open_count} مفتوحة من{' '}
+                    {profile360.complaints_against.total_count})
+                  </p>
+                  {profile360.complaints_against.recent.length === 0 ? (
+                    <p className="text-muted-foreground">مفيش شكاوى</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {profile360.complaints_against.recent.map((c) => (
+                        <li key={c.id} className="flex items-center justify-between border-b pb-1 text-xs last:border-0">
+                          <span>{c.complaint_number}</span>
+                          <span className="text-muted-foreground">
+                            {c.severity} · {c.status}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </>
             )}

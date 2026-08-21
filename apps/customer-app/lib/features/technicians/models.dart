@@ -80,6 +80,10 @@ class TechnicianBookingListItem {
   final bool isVerified;
   final int? onTimeRatePercent;
   final int? avgArrivalMinutes;
+  // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — id هنا يبقى معرّف الشركة لو isCompany.
+  final bool isCompany;
+  final int? staffCount;
+  final int? branchCount;
 
   TechnicianBookingListItem({
     required this.id,
@@ -96,6 +100,9 @@ class TechnicianBookingListItem {
     required this.isVerified,
     required this.onTimeRatePercent,
     required this.avgArrivalMinutes,
+    required this.isCompany,
+    required this.staffCount,
+    required this.branchCount,
   });
 
   factory TechnicianBookingListItem.fromJson(Map<String, dynamic> json) => TechnicianBookingListItem(
@@ -113,6 +120,9 @@ class TechnicianBookingListItem {
         isVerified: json['is_verified'] as bool? ?? false,
         onTimeRatePercent: json['on_time_rate'] as int?,
         avgArrivalMinutes: json['avg_arrival_minutes'] as int?,
+        isCompany: json['is_company'] as bool? ?? false,
+        staffCount: json['staff_count'] as int?,
+        branchCount: json['branch_count'] as int?,
       );
 }
 

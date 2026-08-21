@@ -46,14 +46,11 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   if (!context.mounted) return;
   Navigator.of(context).push(
     MaterialPageRoute(
-      // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36، 2026-08-21): اعتماد (team) كان متجمّع
-      // مع طوارئ في الفرع القديم ده — بيروح CreateOrderScreen على طول، فيتخطى خطوة العنوان/تفاصيل
-      // الشغل وخطوة اختيار الفريق المنفصلتين اللي فردي بياخدهم. طلب المالك صريح: "خلي الفلو بتاع
-      // اعتماد هو هو نفس الفلو بتاع شغلانة وسيطة أو خفيفة" — فردي واعتماد بقوا بياخدوا **نفس**
-      // الفرع (formula → JobDetailsScreen، سعر ثابت → TechnicianSelectionScreen مباشرة)، وbookingMode
-      // بتتمرر تحت عشان الشاشتين تعرفوا يفرّقوا (اختيار فني فردي مقابل اختيار شركة/فريق). طوارئ
-      // بس هو اللي فضل بيروح CreateOrderScreen مباشرة — تصرف مقصود وموثّق (استجابة فورية بالتعريف،
-      // نفس استثناء ScheduleSelectionScreen فوق).
+      // فلو "اعتماد" موحّد مع "فردي" بالحرف (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت
+      // بشكل مستقل في سيشنين متوازيين بنفس الفرع بالظبط) — الفرق الوحيد بينهم بقى فلترة مستوى
+      // الفني + دمج الشركات جوّه TechnicianMarketplaceScreen نفسها (booking_mode بيتمرر لحد هناك)،
+      // مش مسار تنقّل مختلف. الطوارئ بس (حجز فوري بالتصميم، مفيش اختيار يدوي خالص) بتروح
+      // CreateOrderScreen مباشرة زي ما كانت دايمًا.
       builder: (_) => bookingMode == BookingMode.emergency
           ? CreateOrderScreen(
               service: service,

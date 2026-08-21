@@ -3,7 +3,6 @@ import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
 import '../orders/create_order_screen.dart';
-import 'company_marketplace_screen.dart';
 import 'technician_marketplace_screen.dart';
 
 // اختيار الفني قبل الحجز (docs/08 §1.5، مُعاد تصميمها Script 6 Part 6-7) — كانت الشاشة دي
@@ -14,13 +13,6 @@ import 'technician_marketplace_screen.dart';
 // بتتحمّل أو تتعرض خالص لحد ما العميل يختار "يدوي" صراحة.
 class TechnicianSelectionScreen extends StatefulWidget {
   final CatalogService service;
-
-  // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36): اعتماد (BookingMode.team) كان بيتخطى
-  // الشاشة دي بالكامل ويقفز لـCreateOrderScreen على طول، عكس فردي. دلوقتي نفس الشاشة بتُستخدم
-  // للاتنين — "اختاروا لي الأنسب" يبقى تفويض تلقائي للمطابقة (فني أو شركة حسب الوضع)، و"اختار
-  // بنفسك" يفتح TechnicianMarketplaceScreen لفردي أو CompanyMarketplaceScreen لاعتماد. افتراضي
-  // individual عشان كل استدعاءات الشاشة دي القديمة (قبل الإصلاح ده) تفضل شغالة بلا أي تعديل.
-  final BookingMode bookingMode;
 
   // سياسة إلغاء الفني (docs/10) — لو اتبعت، الشاشة بتستخدمها بدل التنقل لـCreateOrderScreen
   // (نفس الشاشة، غرض مختلف: اختيار فني بديل لطلب موجود بالفعل، مش إنشاء طلب جديد). null يعني
@@ -45,6 +37,12 @@ class TechnicianSelectionScreen extends StatefulWidget {
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتمرر لـCreateOrderScreen بس (مش لقايمة الفنيين —
   // المعاينة هناك بتفترض يوم واحد، النطاق بيتحل فعليًا وقت إنشاء الطلب في الباك-إند).
   final DateTime? requestedAtRangeEnd;
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38، طلب مالك صريح 2026-08-21) — الشاشة دي بقت
+  // تُستخدم للوضعين بالحرف. individual (الافتراضي) = صفر تغيير عن السلوك الحالي. اعتماد الشركات
+  // في القايمة الموحّدة (TechnicianMarketplaceScreen) مربوط بـteam بس — onManualSelect (إعادة
+  // اختيار فني بديل لطلب موجود، order_detail_screen.dart) عمداً بيفضل individual دايمًا لحد ما
+  // مسار "استبدال قائد فريق" يتضاف صراحة لاحقًا (requestRematch() الحالي مالوش دعم شركة أصلاً).
+  final BookingMode bookingMode;
 
   const TechnicianSelectionScreen({
     super.key,
@@ -95,6 +93,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
 
   void _confirmSelection({String? requestedTechnicianId, String? requestedTechnicianCompanyId}) {
     if (widget.onManualSelect != null) {
+      // onManualSelect (reselection على طلب موجود) عمداً individual بس — راجع تعليق bookingMode
+      // فوق. requestedTechnicianCompanyId مستحيل يوصل هنا فعليًا (القايمة الموحّدة مش بتدمج
+      // شركات إلا لو bookingMode=team، وده مش بيحصل في المسار ده).
       widget.onManualSelect!(requestedTechnicianId);
       return;
     }
@@ -125,18 +126,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           excludeTechnicianId: widget.excludeTechnicianId,
           fieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
-          onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
-        ),
-      ),
-    );
-  }
-
-  // اعتماد (docs/08 §36 — إصلاح بَقّة) — مكافئ _openMarketplace فوق بالحرف بس لاختيار شركة/فريق.
-  void _openCompanyMarketplace() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CompanyMarketplaceScreen(
-          onSelect: (id) => _confirmSelection(requestedTechnicianCompanyId: id),
+          bookingMode: widget.bookingMode,
+          onSelect: (id, isCompany) => _confirmSelection(
+            requestedTechnicianId: isCompany ? null : id,
+            requestedTechnicianCompanyId: isCompany ? id : null,
+          ),
         ),
       ),
     );
@@ -153,7 +147,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         excludeTechnicianId: widget.excludeTechnicianId,
         fieldValues: widget.fieldValues,
         requestedAt: widget.requestedAt,
-        onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
+        bookingMode: widget.bookingMode,
+        onSelect: (id, isCompany) => _confirmSelection(
+          requestedTechnicianId: isCompany ? null : id,
+          requestedTechnicianCompanyId: isCompany ? id : null,
+        ),
       );
     }
 
@@ -203,9 +201,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                       icon: Icons.people_outline,
                       title: 'اختار الفريق بنفسك',
                       subtitle: widget.bookingMode == BookingMode.team
-                          ? 'شوف قايمة الشركات/الفرق المتاحة وقارن بينهم قبل ما تختار'
+                          ? 'شوف قايمة الفنيين المؤهّلين والشركات المتاحة وقارن بينهم قبل ما تختار'
                           : 'شوف قايمة الفنيين المتاحين وقارن بينهم قبل ما تختار',
-                      onTap: widget.bookingMode == BookingMode.team ? _openCompanyMarketplace : _openMarketplace,
+                      onTap: _openMarketplace,
                     ),
                     const Spacer(flex: 2),
                   ],

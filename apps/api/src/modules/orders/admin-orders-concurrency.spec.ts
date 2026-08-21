@@ -41,7 +41,7 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     return dataSource.query(sql, params);
   }
 
-  async function makeTechnician(label: string, opts: { companyId?: string | null } = {}) {
+  async function makeTechnician(label: string, opts: { companyId?: string | null; level?: string } = {}) {
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
       `+2047${runId}${label}`.slice(0, 15),
       `فني تزامن ${label} ${runId}`,
@@ -50,8 +50,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     const [profile] = await q(
       `INSERT INTO technician_profiles
          (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, verification_status, is_available, is_on_duty, current_location, company_id)
-       VALUES ($1,$2,'x',3,'new','approved',true,true,ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography,$3) RETURNING id`,
-      [user.id, `TCCC${label}${runId}`.slice(0, 20), opts.companyId ?? null],
+       VALUES ($1,$2,'x',3,$4,'approved',true,true,ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography,$3) RETURNING id`,
+      [user.id, `TCCC${label}${runId}`.slice(0, 20), opts.companyId ?? null, opts.level ?? 'new'],
     );
     const profileId = profile.id as string;
     await q(`INSERT INTO technician_services (technician_id, service_id, is_active) VALUES ($1,$2,true)`, [profileId, ids.service]);
@@ -141,8 +141,12 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
     ids.leaderProfile = await makeTechnician('leader');
     ids.technicianAProfile = await makeTechnician('a');
     ids.technicianBProfile = await makeTechnician('b');
-    ids.newLeaderCProfile = await makeTechnician('c');
-    ids.newLeaderDProfile = await makeTechnician('d');
+    // docs/08 §38 — بوابة "مستوى الفني مؤهّل يبقى قائد اعتماد" (technician_level_config.eligible_
+    // for_team_booking) بقت جزء من assertCoreEligibility() المستخدمة في reassignLeader(). المستوى
+    // الافتراضي 'new' هنا مش مؤهّل (مزروع false في migration 0158) — الاتنين دول بس هدفهم يبقوا
+    // قائد فعلي فمحتاجين مستوى مؤهّل، عكس باقي فنيي الملف ده (عضوية/تعيين فردي مش قيادة اعتماد).
+    ids.newLeaderCProfile = await makeTechnician('c', { level: 'professional' });
+    ids.newLeaderDProfile = await makeTechnician('d', { level: 'professional' });
 
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),

@@ -21,9 +21,9 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
   final DateTime? requestedAtRangeEnd;
-  // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36): اعتماد كان بيتخطى الشاشة دي بالكامل.
-  // افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات فردي formula) يفضل شغال
-  // بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت بشكل مستقل
+  // في سيشنين متوازيين) — افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات
+  // فردي formula) يفضل شغال بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
   final BookingMode bookingMode;
 
   const JobDetailsScreen({

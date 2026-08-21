@@ -116,7 +116,13 @@ export class TechnicianAssignmentGuardService {
     }
 
     const [capability] = await manager.query<
-      { has_service: boolean; has_zone: boolean; level_configured: boolean; decision_limit_cents: number | null }[]
+      {
+        has_service: boolean;
+        has_zone: boolean;
+        level_configured: boolean;
+        decision_limit_cents: number | null;
+        eligible_for_team_booking: boolean;
+      }[]
     >(
       `SELECT
          -- ADR-0018 §8 — خدمة معتمدة مباشرة أو فئة الخدمة معتمدة كلها (technician_categories) —
@@ -142,7 +148,9 @@ export class TechnicianAssignmentGuardService {
          EXISTS (
            SELECT 1 FROM technician_level_config WHERE level = $4
          ) AS level_configured,
-         (SELECT decision_limit_cents FROM technician_level_config WHERE level = $4) AS decision_limit_cents`,
+         (SELECT decision_limit_cents FROM technician_level_config WHERE level = $4) AS decision_limit_cents,
+         COALESCE((SELECT eligible_for_team_booking FROM technician_level_config WHERE level = $4), false)
+           AS eligible_for_team_booking`,
       [technician.id, order.serviceId, order.serviceZoneId, technician.currentLevel],
     );
     if (!capability?.has_service || !capability.has_zone) {
@@ -153,6 +161,11 @@ export class TechnicianAssignmentGuardService {
     }
     if (capability.decision_limit_cents !== null && order.totalAmountCents > Number(capability.decision_limit_cents)) {
       throw new ApiException(ErrorCode.ORDR_003, 'قيمة الطلب أعلى من حد قرار مستوى الفني', HttpStatus.CONFLICT);
+    }
+    // docs/08 §38 — بوابة نهائية (قبول ذاتي + تعيين قسري + تأكيد اختيار عميل صريح) تمنع أي تحايل
+    // على فلترة listForServiceBooking()/findEligibleTechnicians() عن طريق نداء API مباشر.
+    if (order.bookingMode === BookingMode.TEAM && !capability.eligible_for_team_booking) {
+      throw new ApiException(ErrorCode.ORDR_003, 'مستوى الفني ده مش مؤهل يبقى قائد مهمة اعتماد', HttpStatus.CONFLICT);
     }
   }
 }

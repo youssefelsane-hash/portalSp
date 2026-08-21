@@ -93,7 +93,7 @@
 - **`TechnicianSelectionScreen` لخدمات `pricing_model=formula` كانت بتعرض القايمة من غير سعر لكل فني — كان قرار هندسي مؤجَّل عمدًا (2026-08-13)، اتقفل فعليًا كـ P0-10 (مراجعة أمان/مالية شاملة، نفس اليوم)**: التقييم الأول اعتبره تحسين UX بحت مؤجَّل (الشاشة مش بتبعت `field_values` أصلاً، فالباك-إند بيرجّع `final_price_cents: null` بأمان — مفيش خطر مالي لأن `CreateOrderScreen` بيعرض السعر النهائي الدقيق قبل التأكيد بالظبط). مراجعة لاحقة رفعته لـ P0 لأنه فجوة تجربة حقيقية (عميل مش شايف فروق سعر بين الفنيين وهو بيختار، رغم إن ده بالظبط الهدف المعلن من "اختيار الفني قبل الحجز"). **الحل**: شاشة جديدة `JobDetailsScreen` (`orders/job_details_screen.dart`) — لخدمات formula بس، `services_screen.dart` بيوديها هي بدل `TechnicianSelectionScreen` مباشرة. بتجمع العنوان + `field_values` (نفس منطق رسم الحقول، اتقلع لملف مشترك `catalog/pricing_field_widgets.dart` عشان `CreateOrderScreen` تستخدمه برضه بدل التكرار)، وبعد "متابعة" بتودّي لـ`TechnicianSelectionScreen` ومعاها `initialAddress`+`fieldValues` (باراميترين اختياريين جداد) — `TechniciansRepository.listForService()` بقى ليها `fieldValues` اختياري كمان (بيتبعت كـJSON مُرمّز في query string، نفس نمط `field_values` في الباك-إند). القايمة دلوقتي بتعرض `final_price_cents` حقيقي لكل فني حسب مستواه. لو العميل اختار فني (أو "اختار لي تلقائيًا")، `CreateOrderScreen` بياخد `initialFieldValues` الجاهزة (باراميتر جديد) فيتفادى تكرار إدخال البيانات — الفورم لسه ظاهر ومعدّل (`initialValue` مضافة لحقل `number` في الملف المشترك، مكانتش موجودة قبل كده) لو العميل حاب يغيّر حاجة قبل التأكيد. مسار "اختيار فني عبر سلوت جدولة" (`TechnicianProfileScreen` → `CreateOrderScreen` مباشرة) والخدمات غير formula مش متأثرين خالص — نفس السلوك القديم بالحرف. **لسه محتاج تأكيد حي (Flutter SDK مش متاح في بيئة السيشن دي — `flutter analyze`/`flutter test` متعذّرين، اتعمل مراجعة يدوية دقيقة للكود بدل التحقق الآلي)**: مسار formula الكامل (JobDetailsScreen → قايمة فنيين بسعر حقيقي → CreateOrderScreen بقيم جاهزة → تأكيد) محتاج اختبار حي فعلي (`test_live/`) في أول سيشن بعدها يكون فيها Flutter SDK متاح.
 
 - **`TechnicianSelectionScreen` أُعيد تصميمها بالكامل لخطوة اختيار وضع واضحة (Script 6 Part 6-8، 2026-08-19)**: كانت الشاشة القديمة بتعرض كارت "اختار لي تلقائيًا" + قايمة الفنيين الكاملة (صور/تقييمات/أسعار) في نفس الشاشة مرة واحدة — عكس مبدأ progressive disclosure (docs/08 Part 18)، وتحميل بيانات زيادة عن اللازم للعميل اللي هيضغط "تلقائي" أصلاً. **الحل**: `TechnicianSelectionScreen` بقت خطوة اختيار بس — كارتين كبيرين واضحين ("اختاروا لي الأنسب" / "اختار الفريق بنفسك")، القايمة نفسها اتقلعت بالكامل لشاشة جديدة `technician_marketplace_screen.dart` (`TechnicianMarketplaceScreen`) ومش بتتحمّل أو تتعرض خالص لحد ما العميل يختار "يدوي" صراحة. في وضع الاستبدال بعد إلغاء فني (`onManualSelect != null` من `order_detail_screen.dart`)، خطوة الاختيار بتتخطى بالكامل — الزرار اللي جاب العميل هنا قرر "يدوي" بالفعل.
-  - **كروت السوق (`TechnicianMarketplaceScreen`) — بيانات حقيقية بس (Script 6 Part 7)**: صورة (`FallbackAvatar` جديدة في `design/` — أيقونة شخص افتراضية مش بس لو الرابط `null`، لكن كمان لو الرابط اتعمله 404/فشل تحميل، عبر `Image.network`'s `errorBuilder` — قبل كده `CircleAvatar.backgroundImage` كان بيعرض أيقونة كسر صورة افتراضية على أي فشل تحميل)، اسم، علامة توثيق (`Icons.verified` — كل فني في القايمة عدّى بالفعل بوابة الأهلية الصارمة في الباك-إند فهو موثّق دايمًا، بس الحقل `is_verified` بيترجع صريح من الـAPI بدل ما الشاشة تفترضه ضمنيًا)، تقييم+عدد المراجعات، طلبات مكتملة، مسافة، وقت وصول متوقع (`avg_arrival_minutes` — جديد، كورليتد subquery في `listForServiceBooking()` نفس منطق `getPublicProfile()` بالحرف)، نسبة الالتزام بالمواعيد (`on_time_rate` — جديد بنفس الطريقة)، مستوى الفني، والسعر النهائي الحقيقي (لو `field_values` متاحة). **مفيش "premium معتمد" لسه**: Part 10 طلب إعادة استخدام "Provider Approved Premium system لو موجود" — النظام ده مش موجود في الكود خالص (بحث شامل مأكدش)، فمفيش سعر تاني غير `final_price_cents` الموجود أصلاً. **فجوة موثّقة صراحة**: مفيش team size على الكروت دي عمداً — القايمة دي لـ`booking_mode=individual` بس (فني منفرد)، اختيار شركة/فريق كامل ليه مسار منفصل جوّه `CreateOrderScreen` مش لمسه هنا.
+  - **كروت السوق (`TechnicianMarketplaceScreen`) — بيانات حقيقية بس (Script 6 Part 7)**: صورة (`FallbackAvatar` جديدة في `design/` — أيقونة شخص افتراضية مش بس لو الرابط `null`، لكن كمان لو الرابط اتعمله 404/فشل تحميل، عبر `Image.network`'s `errorBuilder` — قبل كده `CircleAvatar.backgroundImage` كان بيعرض أيقونة كسر صورة افتراضية على أي فشل تحميل)، اسم، علامة توثيق (`Icons.verified` — كل فني في القايمة عدّى بالفعل بوابة الأهلية الصارمة في الباك-إند فهو موثّق دايمًا، بس الحقل `is_verified` بيترجع صريح من الـAPI بدل ما الشاشة تفترضه ضمنيًا)، تقييم+عدد المراجعات، طلبات مكتملة، مسافة، وقت وصول متوقع (`avg_arrival_minutes` — جديد، كورليتد subquery في `listForServiceBooking()` نفس منطق `getPublicProfile()` بالحرف)، نسبة الالتزام بالمواعيد (`on_time_rate` — جديد بنفس الطريقة)، مستوى الفني، والسعر النهائي الحقيقي (لو `field_values` متاحة). **مفيش "premium معتمد" لسه**: Part 10 طلب إعادة استخدام "Provider Approved Premium system لو موجود" — النظام ده مش موجود في الكود خالص (بحث شامل مأكدش)، فمفيش سعر تاني غير `final_price_cents` الموجود أصلاً. ~~**فجوة موثّقة صراحة**: مفيش team size على الكروت دي عمداً — القايمة دي لـ`booking_mode=individual` بس (فني منفرد)، اختيار شركة/فريق كامل ليه مسار منفصل جوّه `CreateOrderScreen` مش لمسه هنا.~~ — **اتقفلت (docs/08 §38، طلب مالك صريح 2026-08-21)**: الشاشة دي بقت بتُستخدم لـ`individual` **و**`team` مع بعض (`bookingMode` باراميتر جديد على `TechnicianMarketplaceScreen`/`TechnicianSelectionScreen`)، والشركات بقت تندمج كـكارت منفصل (`isCompany:true`) في نفس القايمة لما `bookingMode=team` — مش مسار منفصل جوّه `CreateOrderScreen` تاني. تفاصيل كاملة تحت.
   - **الفرز اليدوي (Part 8)**: `DropdownButton` فوق القايمة (الأنسب/الأعلى تقييمًا/الأقل سعرًا) بيبعت `sort=` للباك-إند (`recommended` مبعوتش خالص — الباك-إند بيعتبره الافتراضي). منفصل عمداً عن ترتيب "الأنسب" الافتراضي (محرك التوصية البايزي، تفاصيله في `apps/api/src/modules/technicians/README.md`).
   - **`flutter analyze` نضاف بالكامل** (صفر تحذيرات/أخطاء جديدة من التعديل، الـ43 تحذير الموجودة في المشروع كلها سابقة وغير متعلقة). **فجوة موثّقة صراحة**: مفيش اختبار حي بمتصفح/محاكي حقيقي (Xvfb+fluxbox methodology الموصوفة فوق) للشاشتين الجداد في السيشن دي — الباك-إند (السعر، الترتيب، الحقول الجديدة) مختبر حي بالكامل ضد Postgres حقيقي، بس تفاعل اللمس الفعلي للشاشتين لسه محتاج تأكيد حي في سيشن لاحقة ضمن Phase 10-12 (مصفوفة E2E الكاملة).
 
@@ -363,38 +363,57 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 الفردي ("شغلانة سريعة — حد يخلّصها بسرعة") اتشال كمان بنفس الطلب — بقى "فردي" بس (`BookingMode
 .labelAr`، `booking_mode_selector.dart`) — كان بيوحي باستعجال يتلخبط مع وضع "طوارئ" الفعلي.
 
-## بَقّة حقيقية اتلقطت واتصلحت — فلو "اعتماد" كان بيتخطى خطوات فردي كلها (بلاغ مالك مباشر، 2026-08-21)
+## توحيد فلو "اعتماد" مع "فردي" — طلب مالك صريح 2026-08-21 (docs/08 §36+§38)
 
-بلاغ المالك بالحرف: "لما بتختار فردي... مضبوط. ولكن لما بتيجي تختار اعتماد... بيدخلك على الصفحة
-بتاعت الدفع وتأكيد الطلب والبيانات، كله في نفس الصفحة، وده مش منطقي... خلي الفلو بتاع اعتماد هو
-هو نفس الفلو بتاع شغلانة وسيطة أو شغلانة خفيفة."
+**اتصلحت بشكل مستقل في سيشنين متوازيين بنفس الفرع** — نفس بلاغ المالك بالحرف ("لما بتيجي تختار
+اعتماد بيدخلك على صفحة الدفع وتأكيد الطلب والبيانات كله سوا... خلي الفلو بتاع اعتماد هو هو نفس
+فلو شغلانة وسيطة/خفيفة") وصل لسيشنين مختلفتين. الاتنين لقوا نفس السبب الجذري بالظبط
+(`catalog_navigation.dart`'s `navigateToServiceBooking()` كان بيجمع `team` مع `emergency` في نفس
+الفرع القديم — تصرف موروث من `docs/07` قبل ما فردي يتطوّر لخطوات منفصلة، P0-10/Script 6) ونفس
+الإصلاح الأساسي (`bookingMode == emergency` بدل `!= individual`، `bookingMode` بيتمرّر عبر السلسلة
+كلها). الفرق الوحيد: سيشن مختار شركة/فريق — الأولى بنت `CompanyMarketplaceScreen` منفصلة (مكافئ
+`TechnicianMarketplaceScreen` بس للشركات، عبر `GET /technician-companies` غير المفلتر جغرافيًا)،
+والتانية (هنا) دمجت الشركات كارت داخل نفس `TechnicianMarketplaceScreen` (فلترة صح بالخدمة/المنطقة/
+التوفر، مطابق لطلب المالك الحرفي "الشركات تظهر زي شخص عادي" في نفس القايمة). عند الدمج، اتفضّل
+النسخة المدمجة (فلترة أدق + شاشة واحدة أقل)، و`CompanyMarketplaceScreen` اتشالت كملف يتيم.
 
-السبب الجذري: `catalog_navigation.dart`'s `navigateToServiceBooking()` كان فيه فرع واحد بيجمع
-`BookingMode.team` مع `BookingMode.emergency` سوا (`bookingMode != BookingMode.individual`) —
-الاتنين كانوا بيروحوا `CreateOrderScreen` على طول بعد اليوم بس، من غير `JobDetailsScreen` (عنوان +
-مدخلات التسعير الديناميكي) ولا `TechnicianSelectionScreen` (تلقائي/يدوي). ده كان تصرف قديم من
-تصميم `docs/07` الأصلي (قبل أي من الشاشتين دول يتبنوا خالص) — فردي اتطوّر بعد كده (P0-10، Script 6
-Part 6-7) لخطوات منفصلة، اعتماد فضل زي ما كان بالضبط، صفر قرار تصميم متعمّد وراء الفرق ده (راجع
-تفاصيل التحقيق الكامل في تاريخ commit ده).
+المالك وصف فلو "فردي" (اختيار تلقائي أو تصفّح/مقارنة فنيين حقيقيين) بإنه ممتاز، وطلب إن "اعتماد"
+يبقى مطابق تمامًا ليه — كانت `catalog_navigation.dart` بتوجّه `team` (زي `emergency` بالظبط)
+مباشرة لـ`CreateOrderScreen` بلا خطوة "تلقائي/تصفّح" خالص، وده جوّاه radio group بدائي لاختيار
+شركة بس (`GET /technician-companies`) — مفيش أي طريقة يختار فني فرد بعينه كقائد في اعتماد، ومفيش
+كروت مقارنة، ومفيش فلترة مستوى.
 
-**الإصلاح**: اعتماد بقى بياخد **نفس** فرع فردي بالحرف (`service.pricingModel == 'formula'` →
-`JobDetailsScreen`، وإلا `TechnicianSelectionScreen` مباشرة) — طوارئ بس هو اللي فضل على
-`CreateOrderScreen` مباشرة (تصرف مقصود وموثّق: استجابة فورية بالتعريف، نفس استثناء
-`ScheduleSelectionScreen` الموجود بالفعل لنفس السبب). `bookingMode` بقى بيتمرّر عبر السلسلة كلها
-(`JobDetailsScreen` → `TechnicianSelectionScreen` → `CreateOrderScreen`) نفس نمط `requestedAt`/
-`initialAddress` تمامًا. جوّه `TechnicianSelectionScreen`، "اختاروا لي الأنسب" لاعتماد يعني تفويض
-تلقائي (بلا `requestedTechnicianCompanyId`، نفس معنى "تلقائي" لفردي بالحرف)، و"اختار الفريق
-بنفسك" بيفتح شاشة جديدة `company_marketplace_screen.dart` (`CompanyMarketplaceScreen`) — مكافئ
-`TechnicianMarketplaceScreen` بس لقايمة شركات (`GET /technician-companies`، نفس استعلام كان
-موجود بالفعل جوّه `CreateOrderScreen` كـradio list اختياري، دلوقتي بقى خطوة منفصلة). `CreateOrderScreen`
-كسبت `requestedTechnicianCompanyId` constructor param جديد (نفس معنى `requestedTechnicianId`
-الموجود لفردي) — بيتفحص وقت تحميل `_loadCompanies()` عشان يحدّد `_selectedCompany` مسبقًا، والقايمة
-الاختيارية جوّه الصفحة (كانت موجودة من زمان) فضلت زي ما هي — العميل لسه يقدر يغيّر رأيه قبل التأكيد
-النهائي (نفس فلسفة "تغيير العنوان").
+- **`catalog_navigation.dart`**: الشرط بقى `bookingMode == BookingMode.emergency` بدل
+  `bookingMode != BookingMode.individual` — `team` بقت تاخد نفس فرع `individual` بالحرف (فورمولا
+  → `JobDetailsScreen` أول حاجة، وإلا → `TechnicianSelectionScreen` مباشرة). `emergency` بلا أي
+  تغيير (حجز فوري بالتصميم، مفيش اختيار يدوي).
+- **`TechnicianSelectionScreen`/`TechnicianMarketplaceScreen`/`JobDetailsScreen`**: بقى عندهم
+  `bookingMode` باراميتر جديد (افتراضي `individual` — صفر تغيير لأي caller قديم ماعدلش)، بيتمرر
+  لحد `GET /services/:id/technicians?booking_mode=...` (الباك-إند بيفلتر مستوى الفني + يدمج
+  الشركات — تفاصيل كاملة `../api/src/modules/technicians/README.md` §38). `onSelect` بقى
+  `TechnicianOrCompanySelected` (`id, isCompany`) بدل `void Function(String id)` بسيط — كارت
+  الشركة بيبعت `isCompany:true`، فني فرد `false`.
+- **`TechnicianMarketplaceScreen`**: كارت شركة مستقل (`_buildCompanyCard`) لما `t.isCompany` —
+  أيقونة مبنى بدل صورة، عدد الفنيين/الفروع بدل مستوى/سعر (`final_price_cents=null` للشركات
+  صراحة — مفيش فني محدد بعد يتحسب عليه سعر، نفس مبدأ formula من غير field_values). عنوان الشاشة
+  بيتغيّر لـ"اختار قائد/شركة: ..." لما `bookingMode=team`.
+- **`CreateOrderScreen`**: الـ`RadioListTile` القديم للشركة اتشال بالكامل + `_selectedCompany`/
+  `_companies`/`_loadCompanies()` — الاختيار (فني أو شركة) بقى بيحصل فوق في الكروت الموحّدة، زي
+  `individual` بالظبط. `requestedTechnicianCompanyId` بقى constructor param جديد (بدل internal
+  state) يتمرر من `TechnicianSelectionScreen._confirmSelection()`.
+- **`GET /technician-companies` (`listActiveCompanies()`) فضل موجود بلا تغيير** — endpoint عام
+  مستقل، مش استبدال، لسه مستخدم من موديل `TechnicianCompanySummary` بس مفيش caller حاليًا في
+  التطبيق (الاختيار بقى بيحصل عبر القايمة الموحّدة). مش اتشال — endpoint حقيقي شغال، ممكن يستخدم
+  مستقبلاً.
+- **نطاق موثّق صراحة**: كارت الشركة المدمج ده لوضعي `team`/`individual` القايمة نفسها (endpoint
+  واحد يرجّع الاتنين حسب `booking_mode`) — بس فعليًا الشركات بترجع من الباك-إند بس لما
+  `booking_mode=team` (تفاصيل السبب في `../api/src/modules/technicians/README.md` §38). زرار
+  "اختار الفريق بنفسك" في مسار reselection على طلب موجود (`order_detail_screen.dart`'s
+  `_openManualReselection()`) عمداً فضل `bookingMode=individual` (الافتراضي) — `requestRematch()`
+  الحالي مالوش دعم اختيار شركة أصلاً.
 
-**تحقّق**: `flutter analyze` نضاف بالكامل (صفر تحذيرات/أخطاء جديدة من الملفات المتأثرة أو الملف
-الجديد). `flutter test` (الجناح الموجود، 7/7) نضاف. **فجوة موثّقة صراحة**: مفيش تحقق حي بمنهجية
-Xvfb+fluxbox+xdotool الموصوفة فوق للمسار الجديد بالذات (محتاج بيانات تطوير: خدمة formula + خدمة
-سعر ثابت الاتنين بيدعموا اعتماد، وشركة فعّالة مزروعة) — الثقة مبنية على تتبّع الكود بعناية ومطابقته
-بالحرف لنفس النمط المُختبَر حيًا فعلاً لفردي (نفس الملفات، نفس الـconstructor parameters، صفر منطق
-جديد مخترع). محتاج تأكيد حي في سيشن لاحقة.
+`flutter analyze` نضاف على الملفات السبعة المعدّلة (`catalog_navigation.dart`,
+`job_details_screen.dart`, `technician_selection_screen.dart`, `technician_marketplace_screen.dart`,
+`technicians_repository.dart`, `models.dart` (technicians)، `create_order_screen.dart`) — صفر
+تحذيرات جديدة، بس نفس الـ`info`-level lints القديمة الموجودة من قبل. تفاصيل الباك-إند الكاملة
+(الفلترة، دمج الشركات، اختبارات حية) في `../api/src/modules/technicians/README.md` §38.

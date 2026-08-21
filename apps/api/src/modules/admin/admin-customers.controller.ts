@@ -7,6 +7,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AddressesService } from '../customers/addresses.service';
 import { toAddressResponseDto } from '../customers/dto/address-response.dto';
+import { AdminCustomer360Service } from './admin-customer-360.service';
 import { AdminCustomersService } from './admin-customers.service';
 import { BlockCustomerDto } from './dto/block-customer.dto';
 import { ListCustomersQueryDto } from './dto/list-customers-query.dto';
@@ -19,6 +20,7 @@ export class AdminCustomersController {
   constructor(
     private readonly customersService: AdminCustomersService,
     private readonly addressesService: AddressesService,
+    private readonly customer360Service: AdminCustomer360Service,
   ) {}
 
   @Get()
@@ -29,6 +31,51 @@ export class AdminCustomersController {
   @Get(':userId')
   getDetail(@Param('userId', ParseUUIDPipe) userId: string) {
     return this.customersService.getDetail(userId);
+  }
+
+  // بروفايل 360° (docs/08 §35.15) — نظرة تشغيلية إضافية (عناوين/طلبات حالية/شكاوى بالاتجاهين/
+  // تقييم بياخده) فوق البيانات الأساسية اللي getDetail بيرجّعها بالفعل. نفس مستوى الثقة بالظبط
+  // زي بروفايل الفني 360° (admin-technicians.controller.ts's getProfile360) — RolesGuard كفاية،
+  // مفيش تعديل هنا. نفس أسلوب الماب اليدوي camelCase→snake_case بالظبط.
+  @Get(':userId/360')
+  async get360(@Param('userId', ParseUUIDPipe) userId: string) {
+    const p = await this.customer360Service.getProfile(userId);
+    return {
+      addresses: p.addresses,
+      current_and_upcoming_orders: p.currentAndUpcomingOrders.map((o) => ({
+        order_id: o.orderId,
+        order_number: o.orderNumber,
+        order_status: o.orderStatus,
+        scheduled_at: o.scheduledAt ? o.scheduledAt.toISOString() : null,
+        service_name_ar: o.serviceNameAr,
+      })),
+      complaints_filed: {
+        open_count: p.complaintsFiled.openCount,
+        total_count: p.complaintsFiled.totalCount,
+        recent: p.complaintsFiled.recent.map((c) => ({
+          id: c.id,
+          complaint_number: c.complaintNumber,
+          severity: c.severity,
+          status: c.status,
+          created_at: c.createdAt.toISOString(),
+        })),
+      },
+      complaints_against: {
+        open_count: p.complaintsAgainst.openCount,
+        total_count: p.complaintsAgainst.totalCount,
+        recent: p.complaintsAgainst.recent.map((c) => ({
+          id: c.id,
+          complaint_number: c.complaintNumber,
+          severity: c.severity,
+          status: c.status,
+          created_at: c.createdAt.toISOString(),
+        })),
+      },
+      ratings_received: {
+        average_rating: p.ratingsReceived.averageRating,
+        total_count: p.ratingsReceived.totalCount,
+      },
+    };
   }
 
   // Call Center — عناوين العميل قبل إنشاء طلب نيابة عنه (Script 4 §33-37). نفس

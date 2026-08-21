@@ -81,7 +81,16 @@ export class InstaPayProvider implements PaymentProvider, OnModuleInit {
     const expiresAt = new Date(Date.now() + windowHours * 60 * 60 * 1000);
     return {
       kind: 'reference',
-      referenceCode: input.paymentId,
+      // بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): الشاشة كانت بتعرض `input.paymentId`
+      // (UUID داخلي، `payments.id`) كـ"الكود اللي لازم تذكره وقت التحويل" — بينما نص التعليمات
+      // تحت ده بالظبط كان بيطلب من العميل يكتب `input.orderNumber` (رقم الطلب/الحجز القصير
+      // القابل للقراءة) في ملاحظة التحويل الفعلية. قيمتين مختلفتين تمامًا، والعميل عمليًا مستحيل
+      // يكتب UUID كامل في خانة ملاحظة تحويل بنكي قصيرة أصلاً. `referenceCode` هنا عرض للعميل بس
+      // (لا يتخزّن — `payments.gateway_reference` بياخد `providerReference` تحت منفصل تمامًا)،
+      // فتغييره آمن 100%: بقى نفس `orderNumber` المكتوب في التعليمات بالحرف — العميل يقدر ينسخه
+      // ويحطّه في التحويل، وموظف الـFinance في `/instapay-confirmations` (عمود "الطلب") يقدر
+      // يتحقق منه مباشرة بمقارنته بنفس القيمة دي.
+      referenceCode: input.orderNumber,
       instructionsAr:
         `حوّل ${(input.amountCents / 100).toFixed(2)} ج.م عبر InstaPay لـ ${this.ipaAddress} ` +
         `(${this.recipientName}) — واكتب رقم طلبك ${input.orderNumber} في ملاحظة التحويل. ` +

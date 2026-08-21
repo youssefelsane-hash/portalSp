@@ -26,6 +26,10 @@ export class TechnicianLevelConfig {
   @Column({ name: 'can_lead_team', type: 'boolean', default: false })
   canLeadTeam: boolean;
 
+  // منفصل عمداً عن can_lead_team (إنشاء/امتلاك شركة) — أهلية قيادة مهمة "اعتماد" واحدة (docs/08 §38).
+  @Column({ name: 'eligible_for_team_booking', type: 'boolean', default: false })
+  eligibleForTeamBooking: boolean;
+
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 }

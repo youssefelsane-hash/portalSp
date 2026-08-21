@@ -129,6 +129,36 @@ ADR-0010 — مفيش داعي منحها صراحة). اختبار regression �
   موجود ومختبر backend بس صفر زرار في `/employees/[userId]` — راجع تحديث أعلى القسم) — اتقفلت
   الاتنين مع بعض، نفس الفورم/التأكيد (`ConfirmDialog`) في `/customers/[userId]` و`/employees/[userId]`.
 
+### بروفايل عميل 360° (`GET /admin/customers/:userId/360`) — §35.15
+
+نفس فلسفة بروفايل الفني 360° (`AdminTechnician360Service`، `../technicians/README.md`) بس أخف —
+صفحة العميل الأساسية (فوق) بالفعل بتغطي الفئة/عدد الطلبات/الإنفاق/نقاط الولاء/متوسط التقييم اللي
+العميل *بيدّيه*/الحظر/المحفظة. الكارت الجديد ده (`AdminCustomer360Service`،
+`admin-customer-360.service.ts`) بيضيف بس اللي مش موجود فعلاً في الصفحة:
+
+- **العناوين**: `AddressesService.findAllForUser()` — نفس دالة `GET /admin/customers/:userId/addresses`
+  الموجودة من زمان بس مش معروضة في الواجهة (فجوة حقيقية اكتشفناها وقفلناها هنا).
+- **طلبات حالية/قادمة**: نفس منطق `Technician360JobRow` بس مفلترة بـ`customer_id` بدل `technician_id`.
+  **بَقّة حقيقية اتلقطت وقت كتابة الاختبار الحي**: `orders.customer_id` بيشاور على
+  `customer_profiles.id`، **مش** `users.id` مباشرة (`infra/migrations/0007_orders.sql`) — أول
+  نسخة من الاستعلام فلترت غلط بـ`o.customer_id = $1` مع تمرير `userId` مباشرة ورجعت مصفوفة فاضية
+  دايمًا. اتصلحت بـ`JOIN customer_profiles cp ON cp.id = o.customer_id WHERE cp.user_id = $1`.
+- **الشكاوى بالاتجاهين** (`complaints` جدول ثنائي فعلاً، `filed_by_user_id`/`against_user_id`):
+  شكاوى العميل رفعها هو (على فني)، وشكاوى اتقالت عليه (من فني)، كل واحدة بعدد مفتوح/كلي + آخر 10.
+- **التقييم اللي العميل *بياخده***: عكس `average_rating_given` (عمود محسوب موجود بالفعل في
+  `customer_profiles`)، مفيش عمود مماثل لـ"التقييم المُستلَم" — بيتحسب لايف من
+  `ratings WHERE rated_user_id = $1 AND rating_type = 'technician_to_customer'`.
+
+**قراءة بس، إعادة استخدام صريحة** (نفس مبدأ الفني 360°) — `GET :userId/360` على
+`AdminCustomersController` نفسه، `@Roles(ADMIN)` بلا `@RequirePermission` مخصوصة (نفس مستوى
+`getDetail()` العادي، مش أعلى). عكس بروفايل الفني، `getProfile()` هنا **مابترميش خطأ** لو المستخدم
+مش موجود — بترجع مجموعات فاضية بدل استثناء، لأنها تجميعة اختيارية إضافية فوق صفحة أصلاً بتفشل
+بوضوح لو العميل نفسه مش موجود (`getDetail()`)، مش نقطة الدخول الوحيدة زي صفحة الفني 360°.
+
+اختبار حي ضد Postgres حقيقي في `admin-customer-360.spec.ts` (عنوان + طلب حالي + شكوى في كل اتجاه +
+تقييم مُستلَم، زائد حالة "مستخدم مش موجود" بترجع مجموعات فاضية بلا استثناء). الواجهة: كارت
+"نظرة تشغيلية 360°" جديد في `/customers/[userId]` (`apps/admin`) — نفس نمط صفحة الفني 360° تمامًا.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` §13.7 و `../../../../docs/01-master-plan.md` §2.4.
 
 ## بَقّة مالية حقيقية اتلقطت واتصلحت: حذف عميل عنده رصيد محفظة (Script 7 Phase 25، 2026-08-19)

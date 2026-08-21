@@ -610,6 +610,12 @@ reschedule)` (الطلب `DISPUTED` بعد no-show) — صفر تكرار منط
   توقيت، صفر أثر على التسوية** — الطلب مايتسوّاش لوحده، ده إثبات حرفي إن تأكيد العميل وحده
   مايكفيش. Idempotent (بيتجاهل التكرار لو اتأكد قبل كده) — نفس متطلب حماية الضغط المزدوج/إعادة
   المحاولة الشبكية المعتاد في المشروع كله.
+  **بَقّة حقيقية اتصلحت (docs/08 §37، 2026-08-21)**: الدالة دي ماكانتش بتفحص `orderStatus` خالص —
+  عميل على طلب `pending_payment` (قبل التوزيع، صفر فني معيّن بالتصميم) كان يقدر يأكّد "تسليم كاش"
+  ويسجّل تأكيد يتيم، والواجهة بترجّع "في انتظار تأكيد الفني" رغم مفيش فني أصلاً. بقى بيفحص نفس
+  `CASH_HANDOVER_PAYABLE_STATUSES` اللي `reportCashNotReceived()` تحت بتفحصها بالحرف، زائد إعداد
+  جديد `payments.cash_enabled` (`true` افتراضيًا، migration `0157`) — الأدمن يقدر يعطّل الكاش
+  كوسيلة دفع كاملةً من `/settings` (`group_name='payments'`).
 - **`Order.technicianCashNotReceivedAt`** — الفني يبلّغ "لم أستلم" (`POST /technician/orders/:id
   /cash-not-received`، `OrdersService.reportCashNotReceived()`). متاح بس على `WORK_COMPLETED`/
   `AWAITING_PAYMENT` (نفس `PAYABLE_ORDER_STATUSES` في `PaymentsService`). الطلب يتحول `DISPUTED`
@@ -1155,3 +1161,22 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 تمامًا لـDTOs الجديدة — `matching-funnel` رجّع `pool`/`dispatch_assignments` صح لطلب حقيقي مُلغى،
 `explain` رجّع 8 checks + `capacity_tier`/`distance_km` صح لفني حقيقي. `apps/admin`: `next build`
 كامل نضاف صفر أخطاء.
+
+## بَقّتين تزامن حقيقيتين اتلقطوا واتصلحوا في `acceptCrewOpportunity()` (docs/08 §35.19)
+
+الآلية الأساسية (قفل `pessimistic_write` على الطلب + إعادة فحص `composition`/الأهلية تحت القفل)
+كانت موجودة من §35.1 نفسها، بس مفيش أي اختبار حي كان بيثبتها — أول اختبار حي كُتب لها
+(`order-team-accept-crew-opportunity.spec.ts`) كشف بَقّتين حقيقيتين:
+
+1. **قايمة الرد بعد القبول ناقصة العضو اللي اتضاف لسه**: `this.listForOrder(order.id)` كان
+   بيتنادى *جوّه* المعاملة نفسها، بس `listForOrder()` بيستخدم `this.teamMembers.manager` (اتصال
+   منفصل) — تحت Read Committed، ده مايشوفش كتابة معلّقة لسه من معاملة تانية. الإصلاح: المعاملة
+   بترجّع `orderId` بس، و`listForOrder()` بتتنادى بعد الـcommit فعليًا.
+2. **تعليم فرصة خاسرة `declined` كان بيتلغي بصمت مع الـrollback**: `markDecided(..., 'declined')`
+   كان بيتعمل **قبل** الاستثناء اللي بيخلي المعاملة كلها ترتد — يعني التعليم نفسه كان بيتلغى مع
+   باقي المعاملة، والفرصة كانت تفضل `offered` للأبد شكليًا رغم إنها فعليًا راحت لحد تاني. الإصلاح:
+   `CrewOpportunityDeclinedError` (علامة داخلية) بتتمسك بره المعاملة بعد الـrollback، و`markDecided`
+   بيتعمل بكتابة منفصلة قبل رمي الخطأ الحقيقي.
+
+اختبار حي (4/4): قبول صحيح، فرصتين بالتوازي على مكان واحد بس (واحد يفوز، التاني `declined`
+فعليًا)، إعادة فحص القدرة وقت القبول (الفني حظر اليوم بعد العرض)، والعدد مكتمل بالفعل (بلا سباق).
