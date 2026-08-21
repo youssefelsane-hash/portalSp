@@ -47,6 +47,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
   let ordersService: OrdersService;
   let paymentsService: PaymentsService;
   let cache: RedisCacheService;
+  let settingsService: SettingsService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -72,6 +73,10 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
   }
 
   const techUserPayload = () => ({ sub: ids.techUser, userType: UserType.TECHNICIAN, amr: ['otp'] as ('otp' | 'webauthn')[] });
+
+  async function settingsUpdate(actorUserId: string, key: string, value: unknown) {
+    await settingsService.update(actorUserId, key, value);
+  }
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -160,7 +165,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
     ids.techProfile = techProfile.id;
 
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
-    const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
+    settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),
       dataSource.getRepository(TechnicianCompany),
@@ -270,6 +275,12 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+    // settingsService.update() (اختبار payments.cash_enabled) بيسجّل ids.customerUser كـ
+    // updated_by_user_id على صف settings مشترك حقيقي — لازم نمسحه قبل حذف المستخدم، وإلا
+    // FK constraint هيرفض. صف عام حقيقي (مش بيانات اختبار)، فبنصفّر العمود بس مش بنمسح الصف.
+    await q(`UPDATE settings SET updated_by_user_id = NULL WHERE updated_by_user_id = ANY($1::uuid[])`, [
+      [ids.customerUser, ids.techUser],
+    ]);
     await q(`DELETE FROM users WHERE id IN ($1, $2)`, [ids.customerUser, ids.techUser]);
     await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
@@ -364,5 +375,29 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
         admin_notes: 'محاولة غلط',
       }),
     ).rejects.toThrow();
+  });
+
+  // بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): طلب pending_payment (قبل التوزيع، صفر فني
+  // معيّن بالتصميم — راجع order-state-machine.ts) كان يقبل "تأكيد تسليم كاش" رغم استحالة وجود فني
+  // يستلم الكاش أصلاً، وبيسجّل تأكيد يتيم بيظهر للعميل كـ"في انتظار تأكيد الفني" رغم مفيش فني خالص.
+  it('مينفعش تأكّد تسليم كاش لطلب pending_payment — صفر فني معيّن بالتصميم', async () => {
+    const orderId = await insertOrder(`pp-${runId}`, OrderStatus.PENDING_PAYMENT);
+    await expect(ordersService.confirmCashHandover(ids.customerUser, orderId)).rejects.toThrow();
+
+    const order = await dataSource.getRepository(Order).findOneOrFail({ where: { id: orderId } });
+    expect(order.customerCashConfirmedAt).toBeNull();
+  });
+
+  it('الدفع كاش المعطّل من إعدادات المنصّة (payments.cash_enabled=false) بيرفض التأكيد بوضوح', async () => {
+    await settingsUpdate(ids.customerUser, 'payments.cash_enabled', false);
+    try {
+      const orderId = await insertOrder(`ce-${runId}`, OrderStatus.WORK_COMPLETED);
+      await expect(ordersService.confirmCashHandover(ids.customerUser, orderId)).rejects.toThrow();
+
+      const order = await dataSource.getRepository(Order).findOneOrFail({ where: { id: orderId } });
+      expect(order.customerCashConfirmedAt).toBeNull();
+    } finally {
+      await settingsUpdate(ids.customerUser, 'payments.cash_enabled', true);
+    }
   });
 });

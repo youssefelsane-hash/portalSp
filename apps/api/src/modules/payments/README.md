@@ -457,3 +457,46 @@ InstaPay ممكن تتغير... بس ما يحقش لحد يغيّرها غير 
 `false` تاني، وتحديث إعداد تاني غير علاقة (`payments.instapay_confirmation_window_hours`) صفر
 تأثير. `docs/03-external-integrations.md` §8 اتحدّث بالكامل من ".env + restart" لـ"/admin/settings
 كـsuper_admin".
+
+## كود InstaPay المعروض كان غلط + إعداد `payments.cash_enabled` — بَقّة صاحب المشروع 2026-08-21 (docs/08 §37)
+
+**بَقّة عرض حقيقية في `InstaPayProvider.createPayment()`**: `referenceCode` المُرجعة للعميل كانت
+`input.paymentId` (UUID داخلي، `payments.id`) — بينما نص `instructionsAr` بالظبط كان بيطلب من
+العميل يكتب `input.orderNumber` (رقم الطلب القصير القابل للقراءة) في ملاحظة التحويل. قيمتين
+مختلفتين تمامًا، والعميل عمليًا مستحيل يكتب UUID كامل في خانة ملاحظة تحويل بنكي قصيرة. الإصلاح:
+`referenceCode: input.orderNumber` — نفس القيمة المكتوبة في التعليمات بالحرف. آمن 100% لأن
+`referenceCode` عرض للعميل بس ومش بيتخزّن خالص (`payments.gateway_reference` بياخد
+`providerReference` منفصل تمامًا، لسه `input.paymentId` زي ما كانت). ده بيقفل شكوى المالك إن الكود
+"مش ظاهر عند الأدمين في حتة يتحقق بيها" — بعد الإصلاح الكود = رقم الطلب اللي `/instapay-confirmations`
+في `apps/admin` أصلاً بيعرضه كعمود أول (`order_number`)، فموظف الـFinance يقارنهم مباشرة. شاشة
+`instapay_reference_screen.dart` اتظبطت بصريًا كمان (الكود كـCard مستقل بخط أكبر `32px` وزرار نسخ
+بارز، التعليمات في Card منفصل تحته) — تفاصيل كاملة في `../orders/README.md`.
+
+**بَقّة منطقية حقيقية اتلقطت في `OrdersService.confirmCashHandover()`**: الدالة دي ماكانتش بتفحص
+`orderStatus` خالص، بعكس شقيقتها `reportCashNotReceived()` اللي بتفحص `CASH_HANDOVER_PAYABLE_STATUSES`
+(`WORK_COMPLETED`/`AWAITING_PAYMENT` — الحالتين الوحيدتين اللي فني بيكون معيّن فيهم فعليًا بالتصميم).
+عميل على طلب `pending_payment` (قبل التوزيع، صفر فني معيّن بالتصميم — `order-state-machine.ts`)
+كان يقدر يدوس "دفعت كاش للفني" (زرار في `order_detail_screen.dart` كان ظاهر بلا أي شرط غير
+`_payableOrderStatuses` العام) ويسجّل تأكيد يتيم (`customerCashConfirmedAt`) من غير أي فني موجود
+أصلاً يأكّده — الواجهة كانت بترجّع "في انتظار تأكيد الفني" لطلب مالوش فني خالص. اتصلحت طبقتين
+مع بعض (defense-in-depth): (1) الباك-إند بقى بيفحص نفس `CASH_HANDOVER_PAYABLE_STATUSES` بالحرف
+قبل أي تسجيل (`ORDR_003`, `409`)، (2) الواجهة بقت بتخفي زرار الكاش خالص لو `order.technicianId ==
+null` (شرط أنضف من تكرار أسماء الحالات — بيعبّر مباشرة عن "هل فيه فني موجود يستلم الكاش أصلاً").
+
+**إعداد جديد مطلوب صراحةً من المالك — تفعيل/تعطيل الكاش من الإعدادات**: `payments.cash_enabled`
+(migration `0157`, `boolean`, افتراضي `true` — عكس `payments.fawry_enabled` عمداً، لأن الكاش هو
+وسيلة الدفع الأساسية الفعلية حاليًا مش بوابة اختيارية لسه معطّلة). اتفعّل في نقطتين مترابطتين:
+(1) `OrdersService.confirmCashHandover()` بيرفض بوضوح ("الدفع كاش معطّل حاليًا") لو الإعداد `false`،
+(2) `PaymentChannelsController.list()` — الكاش كان الوسيلة الوحيدة اللي `CashProvider.isConfigured`
+بتاعتها ثابتة `readonly true` دايمًا (مفيش بوابة خارجية تتفحص اعتمادها زي Paymob/Fawry)، فمكانش فيه
+أي طريقة الأدمن يعطّلها أصلاً من `/settings` زي باقي الوسائل. اتحل بتقاطع صريح جوّه الكنترولر نفسه
+(`is_available = isConfigured && cashEnabled` للكاش بس، باقي الوسائل زي ما هي) بدل تعديل واجهة
+`PaymentProvider` المشتركة — الكاش الاستثناء الوحيد اللي `isConfigured` بيه مايكفيش لوحده.
+
+اتأكد حي بالكامل (Postgres/Redis حقيقيين، مش mocks): طلب `pending_payment` حقيقي (بلا فني) —
+`confirm-cash-handover` رجّع `409`/`ORDR_003` بدل التسجيل اليتيم القديم. الإعداد الجديد اتفحص
+بمفتاح Redis الصح (`settings:payments.cash_enabled`) مع إبطال يدوي بعد كل تعديل SQL خام.
+`cash-handover-confirmation.spec.ts` (8 اختبار) + `payment-channels.controller.spec.ts` (2 اختبار
+جديد) — الكود المعروض اتأكد حيًا بإعداد InstaPay مؤقت + إعادة تشغيل السيرفر: `reference_code` في
+رد الـAPI طابق `order_number` المكتوب في `instructions_ar` بالظبط. 126/126 suite، 703/703 اختبار،
+صفر ريجريشن. تفاصيل التحقيق والتحقق الكاملة: `docs/08-pricing-engine-and-platform-vision.md` §37.

@@ -46,10 +46,11 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   if (!context.mounted) return;
   Navigator.of(context).push(
     MaterialPageRoute(
-      // نفس منطق ServicesScreen الأصلي بالحرف (P0-10، 2026-08-13): فردي وpricing_model=formula
-      // لازم يجمع تفاصيل الشغل (JobDetailsScreen) قبل قايمة الفنيين، فردي وسعر ثابت يروح لقايمة
-      // الفنيين مباشرة، اعتماد/طوارئ يروحوا CreateOrderScreen (فيها اختيار شركة/فريق أو توزيع تلقائي).
-      builder: (_) => bookingMode != BookingMode.individual
+      // فلو "اعتماد" موحّد مع "فردي" بالحرف (docs/08 §38، طلب مالك صريح 2026-08-21) — الفرق
+      // الوحيد بينهم بقى فلترة مستوى الفني + دمج الشركات جوّه TechnicianMarketplaceScreen نفسها
+      // (booking_mode بيتمرر لحد هناك)، مش مسار تنقّل مختلف. الطوارئ بس (حجز فوري بالتصميم،
+      // مفيش اختيار يدوي خالص) بتروح CreateOrderScreen مباشرة زي ما كانت دايمًا.
+      builder: (_) => bookingMode == BookingMode.emergency
           ? CreateOrderScreen(
               service: service,
               bookingMode: bookingMode,
@@ -57,8 +58,18 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
               requestedAtRangeEnd: scheduledAtRangeEnd,
             )
           : service.pricingModel == 'formula'
-              ? JobDetailsScreen(service: service, requestedAt: scheduledAt, requestedAtRangeEnd: scheduledAtRangeEnd)
-              : TechnicianSelectionScreen(service: service, requestedAt: scheduledAt, requestedAtRangeEnd: scheduledAtRangeEnd),
+              ? JobDetailsScreen(
+                  service: service,
+                  bookingMode: bookingMode,
+                  requestedAt: scheduledAt,
+                  requestedAtRangeEnd: scheduledAtRangeEnd,
+                )
+              : TechnicianSelectionScreen(
+                  service: service,
+                  bookingMode: bookingMode,
+                  requestedAt: scheduledAt,
+                  requestedAtRangeEnd: scheduledAtRangeEnd,
+                ),
     ),
   );
 }

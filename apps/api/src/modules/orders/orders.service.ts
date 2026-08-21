@@ -1945,6 +1945,26 @@ export class OrdersService {
    */
   async confirmCashHandover(userId: string, orderId: string): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
+
+    // بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): الدالة دي ماكانتش بتفحص حالة الطلب
+    // خالص — عميل على طلب `pending_payment` (قبل التوزيع، صفر فني معيّن أصلاً بالتصميم، راجع
+    // order-state-machine.ts) كان يقدر يدوس "دفعت كاش للفني" ويسجّل تأكيد يتيم (`customerCashConfirmedAt`)
+    // من غير أي فني موجود يأكّده أصلاً — الواجهة كانت بترجع "في انتظار تأكيد الفني" لطلب مالوش
+    // فني خالص. نفس شرط `reportCashNotReceived()` بالحرف (`CASH_HANDOVER_PAYABLE_STATUSES`) —
+    // الحالتين دول (`work_completed`/`awaiting_payment`) الوحيدين اللي فني بيكون معيّن فيهم فعليًا.
+    if (!CASH_HANDOVER_PAYABLE_STATUSES.has(order.orderStatus)) {
+      throw new ApiException(
+        ErrorCode.ORDR_003,
+        `مينفعش تأكّد تسليم كاش والطلب في حالة ${order.orderStatus}`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const cashEnabled = await this.settingsService.getBoolean('payments.cash_enabled', true);
+    if (!cashEnabled) {
+      throw new ApiException(ErrorCode.ORDR_003, 'الدفع كاش معطّل حاليًا', HttpStatus.CONFLICT);
+    }
+
     if (!order.customerCashConfirmedAt) {
       order.customerCashConfirmedAt = new Date();
       await this.orders.save(order);

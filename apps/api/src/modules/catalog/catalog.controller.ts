@@ -111,6 +111,7 @@ export class CatalogController {
       query.address_id,
       query.exclude_technician_id,
       query.scheduled_at ? new Date(query.scheduled_at) : null,
+      query.booking_mode === 'team',
     );
     const service = await this.catalogService.findServiceOrThrow(id);
     const isEmergency = query.booking_mode === 'emergency';
@@ -125,6 +126,10 @@ export class CatalogController {
         ? items.map((item) => ({ item, estimate: null }))
         : await Promise.all(
             items.map(async (item) => {
+              // الشركات (docs/08 §38) مالهاش فني محدد بعد — أي سعر نهائي هنا هيبقى تخمين على فني
+              // عشوائي من الشركة، يتعارض مع مبدأ "مفيش مفاجأة سعر" الأساسي في المشروع. null صريح
+              // زي estimate:null الموجود بالفعل لخدمات formula من غير field_values.
+              if (item.isCompany) return { item, estimate: null };
               const estimate = await this.catalogService.estimate(
                 id,
                 zoneId,

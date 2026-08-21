@@ -21,8 +21,16 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
   final DateTime? requestedAtRangeEnd;
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38) — بتتمرر جاهزة لـTechnicianSelectionScreen.
+  final BookingMode bookingMode;
 
-  const JobDetailsScreen({super.key, required this.service, this.requestedAt, this.requestedAtRangeEnd});
+  const JobDetailsScreen({
+    super.key,
+    required this.service,
+    this.requestedAt,
+    this.requestedAtRangeEnd,
+    this.bookingMode = BookingMode.individual,
+  });
 
   @override
   State<JobDetailsScreen> createState() => _JobDetailsScreenState();
@@ -101,6 +109,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           fieldValues: Map<String, dynamic>.from(_fieldValues),
           requestedAt: widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
+          bookingMode: widget.bookingMode,
         ),
       ),
     );

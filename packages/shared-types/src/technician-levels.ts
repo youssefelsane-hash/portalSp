@@ -5,6 +5,7 @@ export interface TechnicianLevelConfigResponseDto {
   order_priority_weight: number;
   decision_limit_cents: number | null;
   can_lead_team: boolean;
+  eligible_for_team_booking: boolean;
   updated_at: string;
 }
 
@@ -14,4 +15,5 @@ export interface UpdateTechnicianLevelConfigBody {
   order_priority_weight?: number;
   decision_limit_cents?: number | null;
   can_lead_team?: boolean;
+  eligible_for_team_booking?: boolean;
 }

@@ -43,6 +43,13 @@ export interface TechnicianBookingListItem {
   isVerified: boolean;
   onTimeRatePercent: number | null;
   avgArrivalMinutes: number | null;
+  // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — false دايمًا لصفوف الفنيين الأفراد.
+  // للشركات: technicianId = technician_companies.id، currentLevel مالوش معنى حقيقي (بيتحط
+  // TEAM_LEADER كتمثيل بس، مش مخزّن ولا بيتفحص)، isVerified=true دايمًا (الشركة أصلاً معتمدة
+  // بوجود مالك/مدير مستواه premium+ وقت الإنشاء — technician-companies.service.ts).
+  isCompany: boolean;
+  staffCount: number | null;
+  branchCount: number | null;
 }
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
@@ -315,6 +322,10 @@ export class TechniciansService {
     addressId: string,
     excludeTechnicianId?: string,
     scheduledAt?: Date | null,
+    // docs/08 §38 (طلب مالك صريح 2026-08-21) — "اعتماد" لازم يفضل نفس قايمة "فردي" بالحرف إلا
+    // فلترة مستوى الفني (محترف فأعلى، technician_level_config.eligible_for_team_booking). false
+    // افتراضيًا (فردي/طوارئ) = صفر تغيير عن السلوك الحالي.
+    isTeamBooking = false,
   ): Promise<{ zoneId: string; items: TechnicianBookingListItem[] }> {
     interface AddressRow {
       city_id: string | null;
@@ -385,6 +396,7 @@ export class TechniciansService {
         AND ts.verification_status = 'approved'
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN services svc ON svc.id = $1
+      LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
@@ -407,6 +419,10 @@ export class TechniciansService {
         -- (لازمة لأي توزيع فعلي بغض النظر عن ASAP/مجدول)، فبقى شرط هنا كمان.
         AND tp.current_location IS NOT NULL
         AND ($4::uuid IS NULL OR tp.id != $4)
+        -- docs/08 §38 — نفس فلترة findEligibleTechnicians()/assertCoreEligibility() بالحرف، عشان
+        -- قايمة التصفّح متعرضش فني هيترفض وقت التأكيد الفعلي. individual/emergency ($12=false)
+        -- بلا أي تغيير عن السلوك الحالي.
+        AND ($12::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
         -- ADR-0017 بند 4/6 (مُصحَّحة بـADR-0018) — نفس مصدر التوافر المستخدم في المطابقة الفعلية
         -- (matching.service.ts) وتعيين الأدمن القسري، عشان القايمة دي تعكس مين فعلاً هيتقبل
         -- فعليًا لليوم المطلوب، مش بس "مؤهّل بشكل عام". isEmergencyParam دايمًا false هنا —
@@ -437,28 +453,132 @@ export class TechniciansService {
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         false,
         fullDayJobMinutes,
+        isTeamBooking,
       ],
     );
 
-    return {
-      zoneId: zone.id,
-      items: rows.map((row) => ({
-        technicianId: row.technician_id,
-        fullName: row.full_name,
-        avatarUrl: row.avatar_url,
-        bio: row.bio,
-        averageRating: Number(row.average_rating),
-        totalRatingsCount: row.total_ratings_count,
-        serviceCompletedCount: row.service_completed_count,
-        distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
-        currentLevel: row.current_level,
-        // المرحلة 1 الصارمة فوق فلترت verification_status='approved' بالفعل — أي صف راجع هنا
-        // فني موثّق فعلاً، مفيش سبب يبقى false أبداً هنا لكن الحقل بيترجع صريح مش ضمني.
-        isVerified: true,
-        onTimeRatePercent: row.on_time_rate !== null ? Number(row.on_time_rate) : null,
-        avgArrivalMinutes: row.avg_arrival_minutes !== null ? Number(row.avg_arrival_minutes) : null,
-      })),
-    };
+    const individualItems: TechnicianBookingListItem[] = rows.map((row) => ({
+      technicianId: row.technician_id,
+      fullName: row.full_name,
+      avatarUrl: row.avatar_url,
+      bio: row.bio,
+      averageRating: Number(row.average_rating),
+      totalRatingsCount: row.total_ratings_count,
+      serviceCompletedCount: row.service_completed_count,
+      distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
+      currentLevel: row.current_level,
+      // المرحلة 1 الصارمة فوق فلترت verification_status='approved' بالفعل — أي صف راجع هنا
+      // فني موثّق فعلاً، مفيش سبب يبقى false أبداً هنا لكن الحقل بيترجع صريح مش ضمني.
+      isVerified: true,
+      onTimeRatePercent: row.on_time_rate !== null ? Number(row.on_time_rate) : null,
+      avgArrivalMinutes: row.avg_arrival_minutes !== null ? Number(row.avg_arrival_minutes) : null,
+      isCompany: false,
+      staffCount: null,
+      branchCount: null,
+    }));
+
+    // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38، طلب مالك صريح: "الشركات بتظهر كده كده
+    // أساسي في اعتماد، زي شخص عادي جدًا"). individual/emergency (isTeamBooking=false) بلا أي
+    // تغيير — الشركة كوحدة حجز مالهاش معنى واضح لـ"فني واحد بيتولى الشغلانة بنفسه" أو التوزيع
+    // الفوري. بلا فلتر مستوى هنا عمداً — الشركة أصلاً موثوقة كوحدة (مالكها/مديرها لازم كان
+    // premium+ وقت الإنشاء، technician-companies.service.ts's canLeadTeam check)، وطلب المالك
+    // كان "الشركات بتظهر كده كده" بلا أي شرط إضافي.
+    if (!isTeamBooking) {
+      return { zoneId: zone.id, items: individualItems };
+    }
+
+    interface CompanyRow {
+      company_id: string;
+      name: string;
+      avg_rating: string | null;
+      total_ratings: string | null;
+      distance_km: string | null;
+      staff_count: string;
+      branch_count: string;
+    }
+    const companyRows = await this.technicianProfiles.manager.query<CompanyRow[]>(
+      `
+      SELECT tc.id AS company_id, tc.name,
+             AVG(tp.average_rating) AS avg_rating,
+             SUM(tp.total_ratings_count) AS total_ratings,
+             MIN(ST_Distance(tp.current_location, a.location) / 1000.0) AS distance_km,
+             (SELECT COUNT(*) FROM technician_profiles WHERE company_id = tc.id) AS staff_count,
+             (SELECT COUNT(*) FROM technician_company_branches WHERE company_id = tc.id) AS branch_count
+      FROM technician_companies tc
+      -- نفس شروط أهلية الفرد بالحرف (خدمة/فئة، منطقة، current_location، توافر) فوق، **بدون**
+      -- فلتر مستوى — على الأقل عضو واحد مؤهّل فعليًا للخدمة/المنطقة/الموعد ده كافي عشان الشركة
+      -- تظهر (الفني الفعلي اللي هيبقى قائد المهمة بيتحدد وقت التوزيع الحقيقي، مش هنا).
+      JOIN technician_profiles tp ON tp.company_id = tc.id
+        AND tp.verification_status = 'approved' AND tp.deleted_at IS NULL
+        AND tp.current_location IS NOT NULL
+      LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
+        AND ts.verification_status = 'approved'
+      JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
+      JOIN services svc ON svc.id = $1
+      CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
+      WHERE tc.is_active = true
+        AND (
+          ts.id IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM technician_categories catg
+            WHERE catg.technician_id = tp.id AND catg.category_id = svc.category_id
+              AND catg.is_active = true AND catg.verification_status = 'approved'
+          )
+        )
+        ${technicianAvailabilityCondition({
+          technicianIdExpr: 'tp.id',
+          scheduledAtParam: '$4',
+          excludeOrderIdParam: 'NULL',
+          activeStatusesParam: '$5',
+          engagedStatusesParam: '$6',
+          isEmergencyParam: '$7',
+          serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
+          fullDayThresholdMinutesParam: '$8',
+        })}
+      GROUP BY tc.id, tc.name
+      LIMIT 20
+      `,
+      [
+        serviceId,
+        zone.id,
+        addressId,
+        scheduledAt ?? null,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        fullDayJobMinutes,
+      ],
+    );
+
+    const companyItems: TechnicianBookingListItem[] = companyRows.map((row) => ({
+      technicianId: row.company_id,
+      fullName: row.name,
+      avatarUrl: null,
+      bio: null,
+      averageRating: row.avg_rating !== null ? Number(row.avg_rating) : 0,
+      totalRatingsCount: row.total_ratings !== null ? Number(row.total_ratings) : 0,
+      serviceCompletedCount: 0,
+      distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
+      // تمثيلي بس (مفيش فني محدد بعد) — أعلى مستوى عشان مايتفسّرش غلط كـ"تحت محترف".
+      currentLevel: TechnicianLevel.TEAM_LEADER,
+      isVerified: true,
+      onTimeRatePercent: null,
+      avgArrivalMinutes: null,
+      isCompany: true,
+      staffCount: Number(row.staff_count),
+      branchCount: Number(row.branch_count),
+    }));
+
+    // ترتيب موحّد بسيط (تقييم ثم قرب) بعد الدمج — recommendation_score البايزي محسوب بس للفنيين
+    // الأفراد (فوق)، فمفيش مقياس واحد موحّد نقدر نستخدمه للاتنين مع بعض غير التقييم/المسافة.
+    const merged = [...individualItems, ...companyItems].sort((a, b) => {
+      if (b.averageRating !== a.averageRating) return b.averageRating - a.averageRating;
+      const da = a.distanceKm ?? Number.POSITIVE_INFINITY;
+      const db = b.distanceKm ?? Number.POSITIVE_INFINITY;
+      return da - db;
+    });
+
+    return { zoneId: zone.id, items: merged };
   }
 
   /**

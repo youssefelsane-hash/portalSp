@@ -37,6 +37,12 @@ class TechnicianSelectionScreen extends StatefulWidget {
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتمرر لـCreateOrderScreen بس (مش لقايمة الفنيين —
   // المعاينة هناك بتفترض يوم واحد، النطاق بيتحل فعليًا وقت إنشاء الطلب في الباك-إند).
   final DateTime? requestedAtRangeEnd;
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38، طلب مالك صريح 2026-08-21) — الشاشة دي بقت
+  // تُستخدم للوضعين بالحرف. individual (الافتراضي) = صفر تغيير عن السلوك الحالي. اعتماد الشركات
+  // في القايمة الموحّدة (TechnicianMarketplaceScreen) مربوط بـteam بس — onManualSelect (إعادة
+  // اختيار فني بديل لطلب موجود، order_detail_screen.dart) عمداً بيفضل individual دايمًا لحد ما
+  // مسار "استبدال قائد فريق" يتضاف صراحة لاحقًا (requestRematch() الحالي مالوش دعم شركة أصلاً).
+  final BookingMode bookingMode;
 
   const TechnicianSelectionScreen({
     super.key,
@@ -47,6 +53,7 @@ class TechnicianSelectionScreen extends StatefulWidget {
     this.fieldValues,
     this.requestedAt,
     this.requestedAtRangeEnd,
+    this.bookingMode = BookingMode.individual,
   });
 
   @override
@@ -84,8 +91,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     setState(() => _selectedAddress = address);
   }
 
-  void _confirmSelection({String? requestedTechnicianId}) {
+  void _confirmSelection({String? requestedTechnicianId, String? requestedTechnicianCompanyId}) {
     if (widget.onManualSelect != null) {
+      // onManualSelect (reselection على طلب موجود) عمداً individual بس — راجع تعليق bookingMode
+      // فوق. requestedTechnicianCompanyId مستحيل يوصل هنا فعليًا (القايمة الموحّدة مش بتدمج
+      // شركات إلا لو bookingMode=team، وده مش بيحصل في المسار ده).
       widget.onManualSelect!(requestedTechnicianId);
       return;
     }
@@ -93,8 +103,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
       MaterialPageRoute(
         builder: (_) => CreateOrderScreen(
           service: widget.service,
-          bookingMode: BookingMode.individual,
+          bookingMode: widget.bookingMode,
           requestedTechnicianId: requestedTechnicianId,
+          requestedTechnicianCompanyId: requestedTechnicianCompanyId,
           initialAddress: _selectedAddress,
           initialFieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
@@ -115,7 +126,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           excludeTechnicianId: widget.excludeTechnicianId,
           fieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
-          onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
+          bookingMode: widget.bookingMode,
+          onSelect: (id, isCompany) => _confirmSelection(
+            requestedTechnicianId: isCompany ? null : id,
+            requestedTechnicianCompanyId: isCompany ? id : null,
+          ),
         ),
       ),
     );
@@ -132,7 +147,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         excludeTechnicianId: widget.excludeTechnicianId,
         fieldValues: widget.fieldValues,
         requestedAt: widget.requestedAt,
-        onSelect: (id) => _confirmSelection(requestedTechnicianId: id),
+        bookingMode: widget.bookingMode,
+        onSelect: (id, isCompany) => _confirmSelection(
+          requestedTechnicianId: isCompany ? null : id,
+          requestedTechnicianCompanyId: isCompany ? id : null,
+        ),
       );
     }
 

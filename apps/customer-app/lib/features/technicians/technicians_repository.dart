@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../../core/api_client.dart' as api_client;
 import '../../core/auth_repository.dart';
+import '../catalog/models.dart' show BookingMode, BookingModeJson;
 import 'models.dart';
 
 class TechniciansRepository {
@@ -29,6 +30,9 @@ class TechniciansRepository {
     // نتأكد إن الفني فعلاً يقدر ينفّذ في الموعد ده بالذات (مش عام "متاح دلوقتي" وبس). الباك-إند
     // بيستخدم نفس شرط الأهلية بالحرف اللي المطابقة الحقيقية بتستخدمه (technician-eligibility.sql.ts).
     DateTime? scheduledAt,
+    // فلو "اعتماد" موحّد مع "فردي" (docs/08 §38) — لو team، الباك-إند بيفلتر مستوى الفني
+    // (محترف فأعلى) وبيدمج الشركات في نفس القايمة. null/individual/emergency = صفر تغيير.
+    BookingMode? bookingMode,
   }) async {
     // سياسة إلغاء الفني (docs/10) — excludeTechnicianId بيتبعت وقت اختيار فني بديل بعد ما فني
     // لغى، عشان نفس الفني مايظهرش تاني في القايمة.
@@ -39,6 +43,7 @@ class TechniciansRepository {
     }
     if (sort != null) query.write('&sort=$sort');
     if (scheduledAt != null) query.write('&scheduled_at=${Uri.encodeComponent(scheduledAt.toUtc().toIso8601String())}');
+    if (bookingMode != null) query.write('&booking_mode=${bookingMode.apiValue}');
     final items = await api_client.apiRequestList('/services/$serviceId/technicians?address_id=$addressId$query');
     return items.map(TechnicianBookingListItem.fromJson).toList();
   }

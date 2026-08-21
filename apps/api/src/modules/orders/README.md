@@ -610,6 +610,12 @@ reschedule)` (الطلب `DISPUTED` بعد no-show) — صفر تكرار منط
   توقيت، صفر أثر على التسوية** — الطلب مايتسوّاش لوحده، ده إثبات حرفي إن تأكيد العميل وحده
   مايكفيش. Idempotent (بيتجاهل التكرار لو اتأكد قبل كده) — نفس متطلب حماية الضغط المزدوج/إعادة
   المحاولة الشبكية المعتاد في المشروع كله.
+  **بَقّة حقيقية اتصلحت (docs/08 §37، 2026-08-21)**: الدالة دي ماكانتش بتفحص `orderStatus` خالص —
+  عميل على طلب `pending_payment` (قبل التوزيع، صفر فني معيّن بالتصميم) كان يقدر يأكّد "تسليم كاش"
+  ويسجّل تأكيد يتيم، والواجهة بترجّع "في انتظار تأكيد الفني" رغم مفيش فني أصلاً. بقى بيفحص نفس
+  `CASH_HANDOVER_PAYABLE_STATUSES` اللي `reportCashNotReceived()` تحت بتفحصها بالحرف، زائد إعداد
+  جديد `payments.cash_enabled` (`true` افتراضيًا، migration `0157`) — الأدمن يقدر يعطّل الكاش
+  كوسيلة دفع كاملةً من `/settings` (`group_name='payments'`).
 - **`Order.technicianCashNotReceivedAt`** — الفني يبلّغ "لم أستلم" (`POST /technician/orders/:id
   /cash-not-received`، `OrdersService.reportCashNotReceived()`). متاح بس على `WORK_COMPLETED`/
   `AWAITING_PAYMENT` (نفس `PAYABLE_ORDER_STATUSES` في `PaymentsService`). الطلب يتحول `DISPUTED`

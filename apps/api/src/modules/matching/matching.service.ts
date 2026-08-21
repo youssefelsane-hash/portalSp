@@ -275,6 +275,12 @@ export class MatchingService {
           WHERE dlc.level = tp.current_level
             AND (dlc.decision_limit_cents IS NULL OR dlc.decision_limit_cents >= $18::int)
         )
+        -- docs/08 §38 (طلب مالك صريح 2026-08-21) — طلبات "اعتماد" لازم قائدها (فني الطلب) يكون
+        -- مستواه مؤهّل (technician_level_config.eligible_for_team_booking، افتراضيًا محترف فأعلى) —
+        -- نفس فلسفة فلترة decision_limit_cents فوق بالحرف: مصدر حقيقة واحد مع assertCoreEligibility()
+        -- (technician-assignment-guard.service.ts)، بدل ما نسيب التوزيع التلقائي يكتشف فني اعتماد
+        -- غير مؤهّل وبعدين يفشل بصمت وقت التأكيد النهائي. individual/emergency ($19=false) بلا أي تغيير.
+        AND ($19::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
         ${technicianAvailabilityCondition({
           technicianIdExpr: 'tp.id',
           scheduledAtParam: '$10',
@@ -309,6 +315,7 @@ export class MatchingService {
         String(fairnessLookbackDays),
         fairnessDeclineWeight,
         order.totalAmountCents,
+        order.bookingMode === BookingMode.TEAM,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);

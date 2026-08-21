@@ -893,23 +893,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         ),
                         // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو العميل هيدفع كاش
                         // في إيد الفني (مش من خلال التطبيق)، بعد ما يسلّم يضغط هنا يأكّد.
-                        const SizedBox(height: 8),
-                        if (order.customerCashConfirmedAt == null)
-                          OutlinedButton.icon(
-                            onPressed: _confirmingCashHandover ? null : _confirmCashHandover,
-                            icon: const Icon(Icons.money_outlined),
-                            label: _confirmingCashHandover
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Text('دفعت الفلوس كاش للفني'),
-                          )
-                        else
-                          Row(
-                            children: const [
-                              Icon(Icons.check_circle_outline, color: Colors.green, size: 18),
-                              SizedBox(width: 6),
-                              Expanded(child: Text('اتسجّل إنك سلّمت الكاش — في انتظار تأكيد الفني')),
-                            ],
-                          ),
+                        //
+                        // بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): الزرار ده كان بيظهر
+                        // حتى لطلب `pending_payment` (قبل التوزيع، صفر فني معيّن بالتصميم — راجع
+                        // order-state-machine.ts) — عميل جرّب InstaPay بس ما حوّلش فعليًا، رجع
+                        // يختار وسيلة تانية، لقى زرار "دفعت كاش للفني" ودسّ عليه، فسجّل تأكيد
+                        // يتيم وظهرله "في انتظار تأكيد الفني" رغم إن مفيش فني أصلاً. تسليم كاش
+                        // منطقيًا محتاج فني موجود يستلمه — `technicianId != null` بيضمن كده بدل
+                        // ما نكرر أسماء حالات هنا (نفس فلسفة الفحص الجديد في
+                        // OrdersService.confirmCashHandover()، دفاع مزدوج).
+                        if (order.technicianId != null) ...[
+                          const SizedBox(height: 8),
+                          if (order.customerCashConfirmedAt == null)
+                            OutlinedButton.icon(
+                              onPressed: _confirmingCashHandover ? null : _confirmCashHandover,
+                              icon: const Icon(Icons.money_outlined),
+                              label: _confirmingCashHandover
+                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Text('دفعت الفلوس كاش للفني'),
+                            )
+                          else
+                            Row(
+                              children: const [
+                                Icon(Icons.check_circle_outline, color: Colors.green, size: 18),
+                                SizedBox(width: 6),
+                                Expanded(child: Text('اتسجّل إنك سلّمت الكاش — في انتظار تأكيد الفني')),
+                              ],
+                            ),
+                        ],
                       ],
                       if (customerCancellableStatuses.contains(order.orderStatus)) ...[
                         const SizedBox(height: 16),

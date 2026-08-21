@@ -624,3 +624,20 @@ dlc WHERE dlc.level = tp.current_level AND (dlc.decision_limit_cents IS NULL OR 
 سعري بحت). تفاصيل كاملة (بما فيها أثر الإصلاح على 4 specs موجودة كانت بتنادي `findEligibleTechnicians()`
 مباشرة بكائن `Order` جزئي بلا `totalAmountCents`، وفجوتين تانيتين غير مرتبطتين اتلقطوا في نفس
 التحقيق) في `docs/08-pricing-engine-and-platform-vision.md` §36.1 (تعميق).
+
+## بوابة مستوى "اعتماد" في `findEligibleTechnicians()` — كانت فجوة حقيقية (docs/08 §38، طلب مالك صريح 2026-08-21)
+
+نفس نمط الاكتشاف فوق (`decision_limit_cents`) بالظبط، بس لمفهوم تاني: `booking_mode` (فردي/اعتماد/
+طوارئ) مكانش بيأثر على أهلية `findEligibleTechnicians()` خالص غير `isEmergencyParam` (تسعير/دفعات
+بس). يعني طلب "اعتماد" كان ممكن يتوزّع تلقائيًا على فني مستواه `new` كقائد مهمة — تناقض مباشر مع
+قايمة التصفّح اليدوي (`../technicians/README.md`) اللي المفروض تعكس نفس الأهلية بالظبط.
+
+**الإصلاح**: شرط WHERE إضافي واحد (`AND ($19::boolean IS NOT TRUE OR tlc.eligible_for_team_booking
+= true)`) بيستخدم نفس `technician_level_config tlc` الـLEFT JOIN الموجود بالفعل فوق لـ
+`decision_limit_cents`/`order_priority_weight` — صفر JOIN جديد. `$19 = order.bookingMode ===
+BookingMode.TEAM`. `individual`/`emergency` بلا أي تغيير. نفس الفلترة اتضافت في `assertCoreEligibility()`
+(البوابة النهائية، `../technicians/README.md`) و`listForServiceBooking()` و`listEligibleTechniciansForReassign()`
+(إعادة تعيين الأدمن) — 4 نقاط إنفاذ متسقة، تفاصيل كاملة `../technicians/README.md`.
+
+اختبار حي `matching-team-booking-level-gate.spec.ts` (2 اختبار) — فني `new` يتحجب من طلب `TEAM`
+ويترشّح عادي لطلب `INDIVIDUAL` (رجريشن).

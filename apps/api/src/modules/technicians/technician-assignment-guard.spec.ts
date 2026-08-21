@@ -233,4 +233,60 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       await setTechnicianOnline(true);
     }
   });
+
+  // docs/08 §38 (طلب مالك صريح 2026-08-21) — "اعتماد" لازم قائدها مستواه محترف فأعلى
+  // (technician_level_config.eligible_for_team_booking). البوابة النهائية دي لازم تمنع أي تحايل
+  // على فلترة listForServiceBooking()/findEligibleTechnicians() عن طريق نداء API مباشر.
+  describe('بوابة مستوى "اعتماد" (eligible_for_team_booking) — docs/08 §38', () => {
+    it('طلب اعتماد يترفض لفني مستواه new (eligible_for_team_booking=false افتراضيًا)', async () => {
+      const [order] = await dataSource.query(
+        `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+         VALUES ($1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
+        [`TAG-team-new-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+      );
+      orderIds.push(order.id as string);
+      const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });
+      expect(candidate.bookingMode).toBe(BookingMode.TEAM);
+
+      await dataSource.manager.transaction(async (manager) => {
+        const technician = await guard.lockTechnician(manager, ids.technicianProfile);
+        await expect(guard.assertEligible(manager, technician, candidate)).rejects.toBeInstanceOf(ApiException);
+      });
+    });
+
+    it('نفس الطلب يعدّي بعد ما الفني يترقّى professional (eligible_for_team_booking=true)', async () => {
+      await dataSource.query(`UPDATE technician_profiles SET current_level = 'professional' WHERE id = $1`, [ids.technicianProfile]);
+      try {
+        const [order] = await dataSource.query(
+          `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+           VALUES ($1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
+          [`TAG-team-pro-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+        );
+        orderIds.push(order.id as string);
+        const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });
+
+        await dataSource.manager.transaction(async (manager) => {
+          const technician = await guard.lockTechnician(manager, ids.technicianProfile);
+          await expect(guard.assertEligible(manager, technician, candidate)).resolves.toBeUndefined();
+        });
+      } finally {
+        await dataSource.query(`UPDATE technician_profiles SET current_level = 'new' WHERE id = $1`, [ids.technicianProfile]);
+      }
+    });
+
+    it('طلب فردي (individual) بلا أي تأثير — فني new يعدّي عادي (regression)', async () => {
+      const [order] = await dataSource.query(
+        `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
+         VALUES ($1,$2,$3,$4,$5,$6,10000,'individual') RETURNING id`,
+        [`TAG-ind-new-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+      );
+      orderIds.push(order.id as string);
+      const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });
+
+      await dataSource.manager.transaction(async (manager) => {
+        const technician = await guard.lockTechnician(manager, ids.technicianProfile);
+        await expect(guard.assertEligible(manager, technician, candidate)).resolves.toBeUndefined();
+      });
+    });
+  });
 });

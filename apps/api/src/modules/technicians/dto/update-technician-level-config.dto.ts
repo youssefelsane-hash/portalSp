@@ -27,4 +27,8 @@ export class UpdateTechnicianLevelConfigDto {
   @IsOptional()
   @IsBoolean()
   can_lead_team?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  eligible_for_team_booking?: boolean;
 }

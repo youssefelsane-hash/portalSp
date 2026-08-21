@@ -70,33 +70,62 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // البطاقة دي هي أهم حاجة في الشاشة (تنظيم واضح، طلب صريح من صاحب المشروع
+              // 2026-08-21) — الكود ده لازم يتكتب في ملاحظة التحويل فعليًا (نفس القيمة بالحرف في
+              // instructionsAr تحت)، فهي أول حاجة العميل يشوفها، بلون مميّز، مش كارت عادي وسط
+              // كارت تاني. قبل كده كان الكود المعروض مختلف عن الكود المطلوب فعليًا في التعليمات
+              // (بَقّة حقيقية اتصلحت في الباك-إند — راجع instapay-provider.service.ts).
               Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(widget.reference.instructionsAr, style: const TextStyle(fontSize: 15, height: 1.5)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                   child: Column(
                     children: [
-                      const Text('الكود المرجعي — لازم تذكره وقت التحويل', style: TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 8),
-                      SelectableText(
-                        widget.reference.referenceCode,
-                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.tag, size: 18, color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          const SizedBox(width: 6),
+                          Text(
+                            'اكتب الكود ده في ملاحظة التحويل',
+                            style: TextStyle(color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.w600),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 12),
-                      TextButton.icon(
-                        icon: const Icon(Icons.copy),
+                      SelectableText(
+                        widget.reference.referenceCode,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.copy, size: 18),
                         label: const Text('نسخ الكود'),
                         onPressed: () {
                           Clipboard.setData(ClipboardData(text: widget.reference.referenceCode));
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتنسخ الكود')));
                         },
                       ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, size: 20, color: Theme.of(context).colorScheme.secondary),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(widget.reference.instructionsAr, style: const TextStyle(fontSize: 15, height: 1.6))),
                     ],
                   ),
                 ),

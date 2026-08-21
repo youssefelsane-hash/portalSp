@@ -7,6 +7,7 @@ export interface TechnicianLevelConfigResponseDto {
   order_priority_weight: number;
   decision_limit_cents: number | null;
   can_lead_team: boolean;
+  eligible_for_team_booking: boolean;
   updated_at: string;
 }
 
@@ -18,6 +19,7 @@ export function toTechnicianLevelConfigResponseDto(config: TechnicianLevelConfig
     order_priority_weight: config.orderPriorityWeight,
     decision_limit_cents: config.decisionLimitCents,
     can_lead_team: config.canLeadTeam,
+    eligible_for_team_booking: config.eligibleForTeamBooking,
     updated_at: config.updatedAt.toISOString(),
   };
 }

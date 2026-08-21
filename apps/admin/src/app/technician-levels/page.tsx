@@ -41,6 +41,7 @@ export default function TechnicianLevelsPage() {
       order_priority_weight: Number(form.get('order_priority_weight')),
       decision_limit_cents: noLimit ? null : Math.round(Number(form.get('decision_limit_egp')) * 100),
       can_lead_team: form.get('can_lead_team') === 'on',
+      eligible_for_team_booking: form.get('eligible_for_team_booking') === 'on',
     };
     setIsSaving(true);
     setError(null);
@@ -143,6 +144,14 @@ export default function TechnicianLevelsPage() {
                       <input type="checkbox" name="can_lead_team" defaultChecked={config.can_lead_team} />
                       يقدر ينشئ/يقود شركة أو فريق
                     </label>
+                    <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        name="eligible_for_team_booking"
+                        defaultChecked={config.eligible_for_team_booking}
+                      />
+                      يظهر ويترشّح كقائد مهمة في حجوزات "اعتماد"
+                    </label>
                     <div className="flex gap-2 sm:col-span-2">
                       <Button type="submit" size="sm" disabled={isSaving}>
                         حفظ
@@ -169,6 +178,10 @@ export default function TechnicianLevelsPage() {
                     <div>
                       <dt className="text-muted-foreground">قيادة فريق</dt>
                       <dd>{config.can_lead_team ? 'مسموح' : 'غير مسموح'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">قائد مهمة "اعتماد"</dt>
+                      <dd>{config.eligible_for_team_booking ? 'مؤهّل' : 'غير مؤهّل'}</dd>
                     </div>
                   </dl>
                 )}

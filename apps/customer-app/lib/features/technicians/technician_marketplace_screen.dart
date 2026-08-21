@@ -11,6 +11,9 @@ import 'models.dart';
 import 'technician_profile_screen.dart';
 import 'technicians_repository.dart';
 
+// دالة اختيار موحّدة (docs/08 §38): إما فني فرد (id, isCompany:false) أو شركة (id, isCompany:true).
+typedef TechnicianOrCompanySelected = void Function(String id, bool isCompany);
+
 enum TechnicianSortOption { recommended, lowestPrice, highestRating }
 
 extension on TechnicianSortOption {
@@ -36,13 +39,16 @@ extension on TechnicianSortOption {
 class TechnicianMarketplaceScreen extends StatefulWidget {
   final CatalogService service;
   final Address address;
-  final void Function(String technicianId) onSelect;
+  final TechnicianOrCompanySelected onSelect;
   final String? excludeTechnicianId;
   final Map<String, dynamic>? fieldValues;
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — بتتبعت لـGET /services/:id/technicians عشان
   // الأهلية المعروضة هنا تطابق فعليًا نفس منطق المطابقة الحقيقي (ADR-0017) لنفس تاريخ الطلب،
   // مش أهلية عامة "دلوقتي" ممكن متبقاش صحيحة وقت الموعد الفعلي.
   final DateTime? requestedAt;
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38) — الشاشة دي بقت بتُستخدم للوضعين. team بيخلي
+  // الباك-إند يفلتر مستوى الفني (محترف فأعلى) ويدمج الشركات في نفس القايمة.
+  final BookingMode bookingMode;
 
   const TechnicianMarketplaceScreen({
     super.key,
@@ -52,6 +58,7 @@ class TechnicianMarketplaceScreen extends StatefulWidget {
     this.excludeTechnicianId,
     this.fieldValues,
     this.requestedAt,
+    this.bookingMode = BookingMode.individual,
   });
 
   @override
@@ -82,6 +89,7 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
         fieldValues: widget.fieldValues,
         sort: _sort.apiValue,
         scheduledAt: widget.requestedAt,
+        bookingMode: widget.bookingMode,
       );
       if (mounted) setState(() => _technicians = items);
     } on ApiException catch (err) {
@@ -106,7 +114,13 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text('اختار الفني: ${widget.service.nameAr}')),
+        appBar: AppBar(
+          title: Text(
+            widget.bookingMode == BookingMode.team
+                ? 'اختار قائد/شركة: ${widget.service.nameAr}'
+                : 'اختار الفني: ${widget.service.nameAr}',
+          ),
+        ),
         body: Column(
           children: [
             Padding(
@@ -158,6 +172,7 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
   }
 
   Widget _buildCard(TechnicianBookingListItem t) {
+    if (t.isCompany) return _buildCompanyCard(t);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -253,12 +268,85 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                       child: const Text('البروفايل'),
                     ),
                     FilledButton(
-                      onPressed: () => widget.onSelect(t.id),
+                      onPressed: () => widget.onSelect(t.id, false),
                       child: const Text('اختار'),
                     ),
                   ],
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — كارت مستقل عمداً بدل تعقيد _buildCard
+  // بشروط كتير: مفيش مستوى/بروفايل فردي/سعر نهائي محدد للشركة ككل (الفني الفعلي بيتحدد وقت
+  // التوزيع)، وبدل كده بتعرض عدد الفنيين/الفروع.
+  Widget _buildCompanyCard(TechnicianBookingListItem c) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+              child: const Icon(Icons.apartment_outlined),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(c.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                      const Chip(
+                        label: Text('شركة/فريق'),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text('${c.staffCount ?? 0} فني · ${c.branchCount ?? 0} فرع'),
+                  if (c.totalRatingsCount > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.star, size: 14, color: Colors.amber),
+                          Text(' ${c.averageRating.toStringAsFixed(1)} (${c.totalRatingsCount})'),
+                        ],
+                      ),
+                    ),
+                  if (c.distanceKm != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.place_outlined, size: 14, color: Colors.grey),
+                          Text('${c.distanceKm!.toStringAsFixed(1)} كم'),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: FilledButton(
+                      onPressed: () => widget.onSelect(c.id, true),
+                      child: const Text('اختار'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

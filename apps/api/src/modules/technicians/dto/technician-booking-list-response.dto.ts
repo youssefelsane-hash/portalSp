@@ -19,6 +19,10 @@ export interface TechnicianBookingListItemResponseDto {
   is_verified: boolean;
   on_time_rate: number | null;
   avg_arrival_minutes: number | null;
+  // اندماج الشركات في نفس القايمة (docs/08 §38) — id هنا يبقى technician_companies.id للشركات.
+  is_company: boolean;
+  staff_count: number | null;
+  branch_count: number | null;
 }
 
 export function toTechnicianBookingListItemResponseDto(
@@ -40,5 +44,8 @@ export function toTechnicianBookingListItemResponseDto(
     is_verified: item.isVerified,
     on_time_rate: item.onTimeRatePercent,
     avg_arrival_minutes: item.avgArrivalMinutes,
+    is_company: item.isCompany,
+    staff_count: item.staffCount,
+    branch_count: item.branchCount,
   };
 }

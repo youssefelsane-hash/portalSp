@@ -13,8 +13,6 @@ import '../payments/card_payment_screen.dart';
 import '../payments/instapay_reference_screen.dart';
 import '../payments/payments_repository.dart';
 import '../support/support_contact_screen.dart';
-import '../technicians/models.dart';
-import '../technicians/technicians_repository.dart';
 import 'models.dart';
 import 'order_detail_screen.dart';
 import 'orders_repository.dart';
@@ -24,6 +22,10 @@ class CreateOrderScreen extends StatefulWidget {
   final CatalogService service;
   final BookingMode bookingMode;
   final String? requestedTechnicianId;
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38) — اختيار الشركة بقى بيحصل فوق في
+  // TechnicianMarketplaceScreen (كارت موحّد مع الفنيين الأفراد)، مش هنا (الـRadioListTile
+  // القديم اتشال — كان مفروض على العميل يوصل لآخر الشاشة الأولى عشان يختار شركة).
+  final String? requestedTechnicianCompanyId;
   // الجدولة الحقيقية للفني (docs/08 §2-§3) — العميل اختار سلوت محدد من TechnicianProfileScreen.
   // requestedTechnicianId مش لازم يتبعت معاها (الباك-إند بيستنتجه من السلوت نفسه)، بس لو اتبعت
   // برضه لازم تكون بتاعة نفس فني السلوت وإلا الطلب هيترفض بوضوح.
@@ -51,6 +53,7 @@ class CreateOrderScreen extends StatefulWidget {
     required this.service,
     required this.bookingMode,
     this.requestedTechnicianId,
+    this.requestedTechnicianCompanyId,
     this.scheduleSlotId,
     this.initialAddress,
     this.initialFieldValues,
@@ -64,7 +67,6 @@ class CreateOrderScreen extends StatefulWidget {
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
-  late final TechniciansRepository _techniciansRepository;
   late final PaymentsRepository _paymentsRepository;
   // دفع قبل التوزيع (ADR-0013، docs/08 §19 بند 1) — null = الافتراضي القديم (دفع بعد الشغل).
   // 'card'/'instapay' بس مدعومين هنا (نفس قيد CreateOrderDto.payment_method في الباك-إند —
@@ -93,9 +95,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _error;
   List<ServiceAddon> _addons = [];
   final Set<String> _selectedAddonIds = {};
-  // "اعتماد" (docs/06 §1.5) — اختياري، بس متاح لما bookingMode=team بس.
-  List<TechnicianCompanySummary>? _companies;
-  TechnicianCompanySummary? _selectedCompany;
 
   // محرك التسعير الديناميكي (docs/08 §1) — كانت فجوة موثّقة صراحة: apps/customer-app مفيهوش
   // شاشة تدخل بيها القيم اللازمة لحساب سعر خدمات pricing_model=formula، فالعميل مكانش يقدر
@@ -138,7 +137,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   void initState() {
     super.initState();
     _repository = OrdersRepository(context.read<AuthRepository>());
-    _techniciansRepository = TechniciansRepository(context.read<AuthRepository>());
     _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
     _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
     _selectedAddress = widget.initialAddress;
@@ -146,7 +144,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _requestedAtRangeEnd = widget.requestedAtRangeEnd;
     if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
-    if (widget.bookingMode == BookingMode.team) _loadCompanies();
     if (_isFormulaPricing) {
       _loadPricingFields();
     } else {
@@ -281,17 +278,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       if (mounted && generation == _previewRequestGeneration) setState(() => _previewError = err.message);
     } finally {
       if (mounted && generation == _previewRequestGeneration) setState(() => _previewLoading = false);
-    }
-  }
-
-  // فشل تحميل الشركات مش لازم يمنع الحجز نفسه — العميل يقدر يسيب المطابقة تختار له فني/فريق
-  // مؤهّل تلقائيًا (نفس فلسفة _loadAddons تحت).
-  Future<void> _loadCompanies() async {
-    try {
-      final companies = await _techniciansRepository.listActiveCompanies();
-      if (mounted) setState(() => _companies = companies);
-    } on ApiException {
-      // تجاهل — اختيار الشركة اختياري بحتة
     }
   }
 
@@ -506,7 +492,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         promoCode: _promoController.text.trim(),
         buildingCode: _buildingController.text.trim(),
         addonIds: _selectedAddonIds.toList(),
-        requestedTechnicianCompanyId: _selectedCompany?.id,
+        requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
@@ -799,32 +785,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         ),
                       )
                       .toList(),
-                ),
-              ),
-            ],
-            if (widget.bookingMode == BookingMode.team && (_companies?.isNotEmpty ?? false)) ...[
-              const SizedBox(height: 16),
-              Text('اختار شركة/فريق (اختياري)', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Card(
-                child: Column(
-                  children: [
-                    RadioListTile<TechnicianCompanySummary?>(
-                      value: null,
-                      groupValue: _selectedCompany,
-                      onChanged: (value) => setState(() => _selectedCompany = value),
-                      title: const Text('بدون تفضيل — نختارلك أنسب فريق متاح'),
-                    ),
-                    ..._companies!.map(
-                      (company) => RadioListTile<TechnicianCompanySummary?>(
-                        value: company,
-                        groupValue: _selectedCompany,
-                        onChanged: (value) => setState(() => _selectedCompany = value),
-                        title: Text(company.name),
-                        subtitle: Text('${company.staffCount} فني · ${company.branchCount} فرع'),
-                      ),
-                    ),
-                  ],
                 ),
               ),
             ],
