@@ -15,6 +15,7 @@ import { ProductivityLearningService } from './productivity-learning.service';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
+import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceProductivitySuggestion } from './entities/service-productivity-suggestion.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
@@ -29,6 +30,7 @@ import { TechnicianService } from './entities/technician-service.entity';
       Service,
       ServiceZonePricing,
       ServiceLevelPricing,
+      ServicePricingTierPricing,
       ServiceAddon,
       ServiceStandardData,
       ServiceProductivityActual,

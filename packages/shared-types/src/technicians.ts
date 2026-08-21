@@ -1,6 +1,9 @@
 // مطابق لـ apps/api/src/modules/technicians/dto/admin-technician-response.dto.ts وentities/technician-profile.entity.ts
 export type TechnicianLevel = 'new' | 'verified' | 'professional' | 'premium' | 'team_leader';
 
+// فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن TechnicianLevel التشغيلي فوق.
+export type TechnicianPricingTier = 'standard' | 'expert' | 'senior' | 'premium';
+
 export type TechnicianVerificationStatus =
   | 'pending'
   | 'documents_submitted'
@@ -21,6 +24,7 @@ export interface AdminTechnicianResponseDto {
   technician_code: string;
   years_of_experience: number;
   current_level: TechnicianLevel;
+  pricing_tier: TechnicianPricingTier;
   quality_score: number;
   average_rating: number;
   total_ratings_count: number;

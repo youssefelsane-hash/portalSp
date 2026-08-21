@@ -10,6 +10,7 @@ import { TechnicianService, TechnicianServiceVerificationStatus } from '../catal
 import {
   TechnicianAssistantLinkStatus,
   TechnicianLevel,
+  TechnicianPricingTier,
   TechnicianProfile,
   TechnicianTeamRole,
 } from './entities/technician-profile.entity';
@@ -37,6 +38,9 @@ export interface TechnicianBookingListItem {
   distanceKm: number | null;
   // مضاعف سعر مستوى الفني (docs/08) — العميل لازم يشوف رتبة كل فني مرشّح قبل ما يختاره.
   currentLevel: TechnicianLevel;
+  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — مستقلة عن currentLevel، بتتبعت لـestimate()
+  // عشان final_price_cents هنا يطابق تمامًا اللي هيتحسب فعليًا وقت الحجز الفعلي.
+  pricingTier: TechnicianPricingTier;
   // Script 6 Part 7 — بيانات مقارنة حقيقية للسوق (مفيش بيانات مصطنعة). isVerified دايمًا true
   // هنا فعليًا (المرحلة 1 الصارمة فوق بتفلتر verification_status='approved' بس) — بيترجع
   // كحقل صريح بدل ما apps/customer-app تفترض ده ضمنيًا من مجرد ظهور الفني في القايمة.
@@ -360,6 +364,7 @@ export class TechniciansService {
       service_completed_count: number;
       distance_km: string | null;
       current_level: TechnicianLevel;
+      pricing_tier: TechnicianPricingTier;
       on_time_rate: string | null;
       avg_arrival_minutes: string | null;
     }
@@ -367,7 +372,7 @@ export class TechniciansService {
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
              tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level,
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
                AS recommendation_score,
              -- Script 6 Part 7 — مؤشرات أداء حقيقية لكروت المقارنة في السوق (مش أرقام مصطنعة).
@@ -467,6 +472,7 @@ export class TechniciansService {
       serviceCompletedCount: row.service_completed_count,
       distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
       currentLevel: row.current_level,
+      pricingTier: row.pricing_tier,
       // المرحلة 1 الصارمة فوق فلترت verification_status='approved' بالفعل — أي صف راجع هنا
       // فني موثّق فعلاً، مفيش سبب يبقى false أبداً هنا لكن الحقل بيترجع صريح مش ضمني.
       isVerified: true,
@@ -561,6 +567,9 @@ export class TechniciansService {
       distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
       // تمثيلي بس (مفيش فني محدد بعد) — أعلى مستوى عشان مايتفسّرش غلط كـ"تحت محترف".
       currentLevel: TechnicianLevel.TEAM_LEADER,
+      // تمثيلي بس زي currentLevel فوق — estimate() أصلاً مبيتحسبش للشركات (isCompany:true بترجع
+      // estimate:null في catalog.controller.ts)، فالقيمة دي مالهاش أي أثر على السعر المعروض.
+      pricingTier: TechnicianPricingTier.STANDARD,
       isVerified: true,
       onTimeRatePercent: null,
       avgArrivalMinutes: null,

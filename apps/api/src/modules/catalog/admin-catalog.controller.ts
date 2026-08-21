@@ -14,6 +14,7 @@ import {
   toEligibleTechnicianResponseDto,
   toServiceAddonResponseDto,
   toServiceLevelPricingResponseDto,
+  toServicePricingTierPricingResponseDto,
   toServiceProductivityActualResponseDto,
   toServiceProductivitySuggestionResponseDto,
   toServiceStandardDataResponseDto,
@@ -30,6 +31,7 @@ import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { UpdateServiceStandardDataDto } from './dto/update-service-standard-data.dto';
 import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
+import { UpsertPricingTierPricingDto } from './dto/upsert-pricing-tier-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 
 @Controller('admin')
@@ -209,6 +211,37 @@ export class AdminCatalogController {
     @AuditContext() audit: AuditMeta,
   ) {
     await this.adminCatalogService.deactivateLevelPricing(admin.sub, pricingId, audit);
+    return { id: pricingId, deactivated: true };
+  }
+
+  // ── فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة عن تسعير المستوى فوق ───────────
+
+  @Get('services/:id/pricing-tier-pricing')
+  async listPricingTierPricing(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.adminCatalogService.listPricingTierPricing(id);
+    return rows.map(toServicePricingTierPricingResponseDto);
+  }
+
+  @Put('services/:id/pricing-tier-pricing')
+  @RequirePermission('catalog.manage')
+  async upsertPricingTierPricing(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpsertPricingTierPricingDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return toServicePricingTierPricingResponseDto(await this.adminCatalogService.upsertPricingTierPricing(admin.sub, id, dto, audit));
+  }
+
+  @Delete('services/pricing-tier-pricing/:pricingId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('catalog.manage')
+  async deactivatePricingTierPricing(
+    @CurrentUser() admin: JwtPayload,
+    @Param('pricingId', ParseUUIDPipe) pricingId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    await this.adminCatalogService.deactivatePricingTierPricing(admin.sub, pricingId, audit);
     return { id: pricingId, deactivated: true };
   }
 

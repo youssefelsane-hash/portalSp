@@ -193,6 +193,7 @@ describe('OrdersService.create() — standard_data_id/requested_units لازم �
       dataSource.getRepository(ServiceStandardData),
       settingsService,
       {} as never,
+      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
     const techniciansService = new TechniciansService(
       dataSource.getRepository(TechnicianProfile),

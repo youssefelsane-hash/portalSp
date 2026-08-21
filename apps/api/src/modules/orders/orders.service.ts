@@ -296,6 +296,9 @@ export class OrdersService {
       ? await this.techniciansService.findByProfileIdOrThrow(scheduleSlot.technicianId)
       : null;
     const knownTechnicianLevel = scheduleSlotTechnicianProfile?.currentLevel ?? requestedTechnicianProfile?.currentLevel;
+    // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — نفس منطق knownTechnicianLevel فوق بالحرف،
+    // مصدر مستقل (technician_profiles.pricing_tier) عشان الفصل الكامل عن currentLevel التشغيلي.
+    const knownTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
 
     const estimate = await this.catalogService.estimate(
       service.id,
@@ -303,6 +306,7 @@ export class OrdersService {
       knownTechnicianLevel,
       bookingMode === BookingMode.EMERGENCY,
       dto.field_values,
+      knownTechnicianPricingTier,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -679,6 +683,7 @@ export class OrdersService {
       ? await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id)
       : null;
     const previewTechnicianLevel = scheduleSlotTechnicianProfile?.currentLevel ?? requestedTechnicianProfile?.currentLevel;
+    const previewTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
 
     const estimate = await this.catalogService.estimate(
       service.id,
@@ -686,6 +691,7 @@ export class OrdersService {
       previewTechnicianLevel,
       bookingMode === BookingMode.EMERGENCY,
       dto.field_values,
+      previewTechnicianPricingTier,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);

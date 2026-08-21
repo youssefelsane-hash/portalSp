@@ -1,6 +1,7 @@
 import { ServiceAddon } from '../entities/service-addon.entity';
 import { ServiceCategory } from '../entities/service-category.entity';
 import { ServiceLevelPricing } from '../entities/service-level-pricing.entity';
+import { ServicePricingTierPricing } from '../entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from '../entities/service-productivity-actual.entity';
 import { ServiceProductivitySuggestion } from '../entities/service-productivity-suggestion.entity';
 import { ServiceStandardData } from '../entities/service-standard-data.entity';
@@ -181,6 +182,27 @@ export function toServiceLevelPricingResponseDto(pricing: ServiceLevelPricing): 
     id: pricing.id,
     service_id: pricing.serviceId,
     technician_level: pricing.technicianLevel,
+    price_multiplier: Number(pricing.priceMultiplier),
+    is_active: pricing.isActive,
+    created_at: pricing.createdAt.toISOString(),
+  };
+}
+
+// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — نفس نمط ServiceLevelPricingResponseDto فوق بالحرف.
+export interface ServicePricingTierPricingResponseDto {
+  id: string;
+  service_id: string;
+  pricing_tier: string;
+  price_multiplier: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export function toServicePricingTierPricingResponseDto(pricing: ServicePricingTierPricing): ServicePricingTierPricingResponseDto {
+  return {
+    id: pricing.id,
+    service_id: pricing.serviceId,
+    pricing_tier: pricing.pricingTier,
     price_multiplier: Number(pricing.priceMultiplier),
     is_active: pricing.isActive,
     created_at: pricing.createdAt.toISOString(),

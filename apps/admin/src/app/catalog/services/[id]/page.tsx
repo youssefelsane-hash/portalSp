@@ -11,13 +11,16 @@ import type {
   RecordProductivityActualBody,
   ServiceAddonResponseDto,
   ServiceLevelPricingResponseDto,
+  ServicePricingTierPricingResponseDto,
   ServiceProductivityActualResponseDto,
   ServiceProductivitySuggestionResponseDto,
   ServiceStandardDataResponseDto,
   ServiceZonePricingResponseDto,
   TechnicianLevel,
+  TechnicianPricingTier,
   UpdateServiceBody,
   UpsertLevelPricingBody,
+  UpsertPricingTierPricingBody,
   UpsertZonePricingBody,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -52,6 +55,14 @@ const TECHNICIAN_LEVEL_LABELS: Record<TechnicianLevel, string> = {
   team_leader: 'قائد فريق',
 };
 
+// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن TECHNICIAN_LEVEL_LABELS فوق.
+const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
+  standard: 'قياسي',
+  expert: 'خبير',
+  senior: 'كبير',
+  premium: 'مميّز',
+};
+
 export default function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
@@ -63,6 +74,7 @@ export default function ServiceDetailPage() {
   // docs/08 §36.22-23، ADR-0024 — تبديل الفورم بين override (رقم مطلق) وpercentage (نسبة مئوية).
   const [zpMode, setZpMode] = useState<'override' | 'percentage'>('override');
   const [levelPricing, setLevelPricing] = useState<ServiceLevelPricingResponseDto[] | null>(null);
+  const [pricingTierPricing, setPricingTierPricing] = useState<ServicePricingTierPricingResponseDto[] | null>(null);
   const [addons, setAddons] = useState<ServiceAddonResponseDto[] | null>(null);
   const [standardData, setStandardData] = useState<ServiceStandardDataResponseDto[] | null>(null);
   const [actualsByStandardData, setActualsByStandardData] = useState<Record<string, ServiceProductivityActualResponseDto[]>>({});
@@ -89,6 +101,9 @@ export default function ServiceDetailPage() {
     authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones).catch(() => setZones([]));
     authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing).catch(() => setZonePricing([]));
     authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing).catch(() => setLevelPricing([]));
+    authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`)
+      .then(setPricingTierPricing)
+      .catch(() => setPricingTierPricing([]));
     authedFetch<ServiceAddonResponseDto[]>(`/admin/services/${id}/addons`).then(setAddons).catch(() => setAddons([]));
     authedFetch<ServiceStandardDataResponseDto[]>(`/admin/services/${id}/standard-data`).then(setStandardData).catch(() => setStandardData([]));
     loadPendingSuggestions();
@@ -168,6 +183,28 @@ export default function ServiceDetailPage() {
       await authedFetch(`/admin/services/${id}/level-pricing`, { method: 'PUT', body: JSON.stringify(body) });
       (e.target as HTMLFormElement).reset();
       authedFetch<ServiceLevelPricingResponseDto[]>(`/admin/services/${id}/level-pricing`).then(setLevelPricing);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // فئة تسعير الفني (docs/08 §36.24، ADR-0025) — نفس نمط handleUpsertLevelPricing فوق بالحرف،
+  // بس مربوطة بـTechnicianPricingTier التجاري مش TechnicianLevel التشغيلي.
+  async function handleUpsertPricingTierPricing(e: FormEvent) {
+    e.preventDefault();
+    const form = new FormData(e.target as HTMLFormElement);
+    const body: UpsertPricingTierPricingBody = {
+      pricing_tier: form.get('pricing_tier') as TechnicianPricingTier,
+      price_multiplier: Number(form.get('price_multiplier')),
+    };
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/${id}/pricing-tier-pricing`, { method: 'PUT', body: JSON.stringify(body) });
+      (e.target as HTMLFormElement).reset();
+      authedFetch<ServicePricingTierPricingResponseDto[]>(`/admin/services/${id}/pricing-tier-pricing`).then(setPricingTierPricing);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
@@ -706,6 +743,58 @@ export default function ServiceDetailPage() {
                   {levelPricing.map((p) => (
                     <TableRow key={p.id}>
                       <TableCell>{TECHNICIAN_LEVEL_LABELS[p.technician_level]}</TableCell>
+                      <TableCell dir="ltr">{p.price_multiplier}×</TableCell>
+                      <TableCell>
+                        <Badge variant={p.is_active ? 'secondary' : 'outline'}>{p.is_active ? 'نشط' : 'معطّل'}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">فئة تسعير الفني (تجارية، منفصلة عن المستوى)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleUpsertPricingTierPricing} className="mb-4 flex flex-col gap-2 rounded-md border p-3">
+              <Label htmlFor="ptp_tier">فئة التسعير</Label>
+              <SelectNative id="ptp_tier" name="pricing_tier" required defaultValue="">
+                <option value="" disabled>
+                  اختار فئة
+                </option>
+                {Object.entries(PRICING_TIER_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </SelectNative>
+              <Label htmlFor="ptp_multiplier">مضاعف السعر</Label>
+              <Input id="ptp_multiplier" name="price_multiplier" type="number" min="0.1" step="0.05" required />
+              <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
+                حفظ مضاعف الفئة
+              </Button>
+            </form>
+            {!pricingTierPricing ? (
+              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+            ) : pricingTierPricing.length === 0 ? (
+              <EmptyState title="مفيش تسعير مخصص لفئات التسعير — بيرجع لتسعير المستوى (أو السعر الأساسي)" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>الفئة</TableHead>
+                    <TableHead>المضاعف</TableHead>
+                    <TableHead>الحالة</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pricingTierPricing.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell>{PRICING_TIER_LABELS[p.pricing_tier]}</TableCell>
                       <TableCell dir="ltr">{p.price_multiplier}×</TableCell>
                       <TableCell>
                         <Badge variant={p.is_active ? 'secondary' : 'outline'}>{p.is_active ? 'نشط' : 'معطّل'}</Badge>

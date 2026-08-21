@@ -15,10 +15,12 @@ import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { UpdateServiceStandardDataDto } from './dto/update-service-standard-data.dto';
 import { UpsertLevelPricingDto } from './dto/upsert-level-pricing.dto';
+import { UpsertPricingTierPricingDto } from './dto/upsert-pricing-tier-pricing.dto';
 import { UpsertZonePricingDto } from './dto/upsert-zone-pricing.dto';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
+import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
@@ -32,6 +34,7 @@ export class AdminCatalogService {
     @InjectRepository(Service) private readonly services: Repository<Service>,
     @InjectRepository(ServiceZonePricing) private readonly zonePricing: Repository<ServiceZonePricing>,
     @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
+    @InjectRepository(ServicePricingTierPricing) private readonly pricingTierPricing: Repository<ServicePricingTierPricing>,
     @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
     @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
     @InjectRepository(ServiceProductivityActual) private readonly productivityActuals: Repository<ServiceProductivityActual>,
@@ -545,6 +548,61 @@ export class AdminCatalogService {
       actorRole: 'admin',
       action: 'service_level_pricing.deactivated',
       entityType: 'service_level_pricing',
+      entityId: pricing.id,
+      meta,
+    });
+  }
+
+  // ── فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة عن تسعير المستوى فوق ───────────
+
+  listPricingTierPricing(serviceId: string): Promise<ServicePricingTierPricing[]> {
+    return this.pricingTierPricing.find({ where: { serviceId }, order: { pricingTier: 'ASC' } });
+  }
+
+  async upsertPricingTierPricing(
+    adminUserId: string,
+    serviceId: string,
+    dto: UpsertPricingTierPricingDto,
+    meta?: AuditActorMeta,
+  ): Promise<ServicePricingTierPricing> {
+    await this.findServiceOrThrow(serviceId);
+
+    let pricing = await this.pricingTierPricing.findOne({
+      where: { serviceId, pricingTier: dto.pricing_tier },
+    });
+    const isNew = !pricing;
+    if (!pricing) {
+      pricing = this.pricingTierPricing.create({ serviceId, pricingTier: dto.pricing_tier });
+    }
+    pricing.priceMultiplier = String(dto.price_multiplier);
+    pricing.isActive = true;
+    await this.pricingTierPricing.save(pricing);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: isNew ? 'service_pricing_tier_pricing.created' : 'service_pricing_tier_pricing.updated',
+      entityType: 'service_pricing_tier_pricing',
+      entityId: pricing.id,
+      newValues: { pricing_tier: pricing.pricingTier, price_multiplier: pricing.priceMultiplier },
+      meta,
+    });
+    return pricing;
+  }
+
+  async deactivatePricingTierPricing(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
+    const pricing = await this.pricingTierPricing.findOne({ where: { id } });
+    if (!pricing) {
+      throw new ApiException(ErrorCode.VAL_001, 'تسعير فئة الفني غير موجود', HttpStatus.NOT_FOUND);
+    }
+    pricing.isActive = false;
+    await this.pricingTierPricing.save(pricing);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_pricing_tier_pricing.deactivated',
+      entityType: 'service_pricing_tier_pricing',
       entityId: pricing.id,
       meta,
     });

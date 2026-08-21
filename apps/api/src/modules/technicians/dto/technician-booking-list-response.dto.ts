@@ -14,6 +14,10 @@ export interface TechnicianBookingListItemResponseDto {
   // بيها قبل ما يختاره، مش بعد التأكيد. final_price_cents = null لخدمات pricing_model=formula
   // (المضاعف مش بيتطبّق عليها أصلاً، وتفصيل السعر محتاج field_values مش متاحة في القايمة دي).
   technician_level: string;
+  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — مستقلة عن technician_level فوق، بتتبعت
+  // نفس نمط الشفافية (final_price_cents/level_price_multiplier) عشان العميل/الدعم يقدروا يفهموا
+  // أساس السعر المعروض بالظبط.
+  pricing_tier: string;
   final_price_cents: number | null;
   level_price_multiplier: number | null;
   is_verified: boolean;
@@ -39,6 +43,7 @@ export function toTechnicianBookingListItemResponseDto(
     completed_orders_count: item.serviceCompletedCount,
     distance_km: item.distanceKm !== null ? Math.round(item.distanceKm * 100) / 100 : null,
     technician_level: item.currentLevel,
+    pricing_tier: item.pricingTier,
     final_price_cents: estimate ? estimate.estimated_total_cents + estimate.inspection_fee_cents + estimate.emergency_surcharge_cents : null,
     level_price_multiplier: estimate ? estimate.level_price_multiplier : null,
     is_verified: item.isVerified,

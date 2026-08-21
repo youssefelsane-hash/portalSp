@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsEnum, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import { TechnicianLevel } from '../../technicians/entities/technician-profile.entity';
+import { TechnicianLevel, TechnicianPricingTier } from '../../technicians/entities/technician-profile.entity';
 
 // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختار منهم قبل ما يشوف الخدمات.
 // نفس القيم بالحرف زي orders.entity.ts's BookingMode (متعمّد تكرار بسيط بدل import من موديول
@@ -43,6 +43,12 @@ export class EstimateQueryDto {
   @IsOptional()
   @IsEnum(TechnicianLevel)
   technician_level?: TechnicianLevel;
+
+  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — إضافية زي technician_level فوق بالحرف،
+  // منفصلة تمامًا (تسعير تجاري مش مستوى تشغيلي).
+  @IsOptional()
+  @IsEnum(TechnicianPricingTier)
+  pricing_tier?: TechnicianPricingTier;
 
   // لمعاينة رسوم الطوارئ + الـ SLA المعلن قبل التأكيد (docs/08 §8) — لو "emergency"، الرد
   // بيتضمن emergency_surcharge_cents/emergency_sla_minutes الفعليين.
