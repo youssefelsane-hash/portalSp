@@ -110,3 +110,23 @@ export interface ExceptionCenterResponseDto {
   crew_shortage: { items: CrewShortageExceptionItemDto[]; total: number };
   stale_dispatch: { items: StaleDispatchExceptionItemDto[]; total: number };
 }
+
+// ذكاء تغطية القوى العاملة — فئة+منطقة (docs/08 §36.10، GET /admin/operations/coverage). صف لكل
+// زوج (منطقة، فئة) بيجمع العرض (فنيين LIGHT/MEANINGFUL متاحين النهاردة) والطلب (طلبات لسه بتدوّر) —
+// راجع تعليق admin-coverage-intelligence.service.ts للتفصيل الكامل. zoneId عنده فنيين صفر ولسه فيه
+// طلبات بتدوّر بيظهر برضه (أخطر حالة تغطية)، مش بس الأزواج اللي فيها فنيين مسجّلين بالفعل.
+export type CoverageStatusDto = 'critical' | 'tight' | 'healthy';
+
+export interface CoverageRowDto {
+  zone_id: string;
+  zone_name: string;
+  category_id: string;
+  category_name: string;
+  technicians_total: number;
+  technicians_light: number;
+  technicians_meaningful: number;
+  technicians_heavy: number;
+  technicians_blocked: number;
+  dispatch_pending_count: number;
+  coverage_status: CoverageStatusDto;
+}

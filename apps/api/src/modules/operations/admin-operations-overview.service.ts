@@ -14,7 +14,9 @@ const GENERIC_SERVICE_DURATION_MINUTES = 60;
 
 // الحالات اللي الطلب فيها "لسه محتاج فني يتوزّع عليه" (docs/08 §36.2) — نفس الحالتين اللي
 // findEligibleTechnicians/dispatchNextRound بيحاولوا يقفلوهم، مُعاد استخدامهم هنا كمؤشر عملياتي بس.
-const DISPATCH_PENDING_STATUSES = [OrderStatus.SEARCHING_TECHNICIAN, OrderStatus.AWAITING_TECHNICIAN_RESELECTION];
+// مُصدَّرة (مش local بس) عشان AdminCoverageIntelligenceService (§36.10) تعيد استخدامها بالحرف —
+// نفس تعريف "طلب لسه بيدوّر على فني" لازم يفضل واحد.
+export const DISPATCH_PENDING_STATUSES = [OrderStatus.SEARCHING_TECHNICIAN, OrderStatus.AWAITING_TECHNICIAN_RESELECTION];
 
 export interface OperationsOverview {
   dispatchPendingCount: number;

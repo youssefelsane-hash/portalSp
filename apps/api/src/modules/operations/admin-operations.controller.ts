@@ -5,10 +5,12 @@ import { AdminOperationsOverviewService } from './admin-operations-overview.serv
 import { AdminWorkloadForecastService } from './admin-workload-forecast.service';
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
+import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
 import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
 import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
 import { ExceptionCenterQueryDto } from './dto/exception-center-query.dto';
+import { CoverageIntelligenceQueryDto } from './dto/coverage-intelligence-query.dto';
 
 // مركز العمليات (docs/08 §36.2 فصاعدًا) — بداية قسم جديد كامل بيتوسّع مرحلة بمرحلة (§36.3-14).
 @Controller('admin/operations')
@@ -19,6 +21,7 @@ export class AdminOperationsController {
     private readonly workloadForecastService: AdminWorkloadForecastService,
     private readonly dispatchDeliveryService: AdminDispatchDeliveryService,
     private readonly exceptionCenterService: AdminExceptionCenterService,
+    private readonly coverageIntelligenceService: AdminCoverageIntelligenceService,
   ) {}
 
   @Get('overview')
@@ -145,6 +148,35 @@ export class AdminOperationsController {
         })),
         total: result.staleDispatch.total,
       },
+    };
+  }
+
+  // ذكاء تغطية القوى العاملة — فئة+منطقة (docs/08 §36.10). صف لكل زوج (منطقة، فئة) بيجمع العرض
+  // (فنيين LIGHT/MEANINGFUL متاحين النهاردة) والطلب (طلبات لسه بتدوّر) — راجع تعليق
+  // admin-coverage-intelligence.service.ts للتفصيل الكامل.
+  @Get('coverage')
+  async getCoverage(@Query() query: CoverageIntelligenceQueryDto) {
+    const { items, meta } = await this.coverageIntelligenceService.getCoverage({
+      categoryId: query.category_id ?? null,
+      zoneId: query.zone_id ?? null,
+      page: query.page ?? 1,
+      perPage: query.per_page ?? 20,
+    });
+    return {
+      items: items.map((r) => ({
+        zone_id: r.zoneId,
+        zone_name: r.zoneName,
+        category_id: r.categoryId,
+        category_name: r.categoryName,
+        technicians_total: r.techniciansTotal,
+        technicians_light: r.techniciansLight,
+        technicians_meaningful: r.techniciansMeaningful,
+        technicians_heavy: r.techniciansHeavy,
+        technicians_blocked: r.techniciansBlocked,
+        dispatch_pending_count: r.dispatchPendingCount,
+        coverage_status: r.coverageStatus,
+      })),
+      meta,
     };
   }
 }

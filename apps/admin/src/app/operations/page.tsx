@@ -7,13 +7,14 @@ import type {
   AdminCityResponseDto,
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
+  CoverageRowDto,
   DispatchDeliveryItemDto,
   DispatchDeliveryResponseDto,
   ExceptionCenterResponseDto,
   OperationsOverview,
   WorkloadForecastRowDto,
 } from '@baytak/shared-types';
-import { AlertTriangle, Bell, ClipboardList, Radio, Send, Users } from 'lucide-react';
+import { AlertTriangle, Bell, ClipboardList, Compass, Radio, Send, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -745,6 +746,168 @@ function DispatchDeliverySection({
   );
 }
 
+const COVERAGE_PER_PAGE = 20;
+
+const COVERAGE_STATUS_LABELS: Record<string, string> = {
+  critical: 'حرج',
+  tight: 'ضيّق',
+  healthy: 'سليم',
+};
+
+function coverageStatusBadgeClass(status: string): string {
+  if (status === 'critical') return 'border-danger/40 bg-danger/10 text-danger';
+  if (status === 'tight') return 'border-warning/40 bg-warning/10 text-warning';
+  return 'border-success/40 bg-success/10 text-success';
+}
+
+// ذكاء تغطية القوى العاملة — فئة+منطقة (docs/08 §36.10). صف لكل زوج (منطقة، فئة) بيجمع العرض
+// (فنيين LIGHT/MEANINGFUL متاحين) والطلب (طلبات لسه بتدوّر) — صفر أزواج مصفّاة، حتى زوج بصفر فني
+// ولسه فيه طلبات بتدوّر (أخطر حالة) بيظهر. الفئة اختيارية هنا (بعكس §36.3/§36.4) — الهدف مسح شامل.
+function CoverageIntelligenceSection({
+  categoryId,
+  authedFetch,
+}: {
+  categoryId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+}) {
+  const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
+  const [cityId, setCityId] = useState<string>('');
+  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
+  const [zoneId, setZoneId] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [items, setItems] = useState<CoverageRowDto[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
+  }, [authedFetch]);
+
+  useEffect(() => {
+    setZoneId('');
+    if (!cityId) {
+      setZones(null);
+      return;
+    }
+    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
+      .then(setZones)
+      .catch(() => undefined);
+  }, [authedFetch, cityId]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [categoryId, zoneId]);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({ page: String(page), per_page: String(COVERAGE_PER_PAGE) });
+    if (categoryId) params.set('category_id', categoryId);
+    if (zoneId) params.set('zone_id', zoneId);
+    authedFetch<{ items: CoverageRowDto[]; meta: { total: number } }>(`/admin/operations/coverage?${params.toString()}`)
+      .then(({ items: rows, meta }) => {
+        setItems(rows);
+        setTotal(meta.total ?? rows.length);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل ذكاء تغطية القوى العاملة'))
+      .finally(() => setLoading(false));
+  }, [authedFetch, categoryId, zoneId, page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / COVERAGE_PER_PAGE));
+
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Compass className="size-4" />
+        ذكاء تغطية القوى العاملة (منطقة × فئة)
+      </h2>
+
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="coverage_city" className="text-sm text-muted-foreground">
+            المدينة
+          </Label>
+          <SelectNative id="coverage_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+            <option value="">كل المدن</option>
+            {cities?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="coverage_zone" className="text-sm text-muted-foreground">
+            النطاق
+          </Label>
+          <SelectNative
+            id="coverage_zone"
+            value={zoneId}
+            onChange={(e) => setZoneId(e.target.value)}
+            disabled={!cityId}
+            className="max-w-xs"
+          >
+            <option value="">{cityId ? 'كل نطاقات المدينة' : 'اختر مدينة الأول'}</option>
+            {zones?.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+      </div>
+
+      {error && <p className="text-destructive">{error}</p>}
+
+      {!error && loading && !items && <TableSkeleton rows={5} columns={7} />}
+
+      {!error && !loading && items && items.length === 0 && (
+        <EmptyState title="مفيش بيانات تغطية" description="مفيش فنيين مسجّلين أو طلبات بتدوّر لأي منطقة/فئة دلوقتي." />
+      )}
+
+      {!error && !loading && items && items.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>المنطقة</TableHead>
+                <TableHead>الفئة</TableHead>
+                <TableHead>فنيين متاحين اليوم</TableHead>
+                <TableHead>إجمالي فنيين مسجّلين</TableHead>
+                <TableHead>طلبات بتدوّر</TableHead>
+                <TableHead>الحالة</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={`${row.zone_id}-${row.category_id}`}>
+                  <TableCell className="font-medium">{row.zone_name}</TableCell>
+                  <TableCell>{row.category_name}</TableCell>
+                  <TableCell>
+                    {row.technicians_light + row.technicians_meaningful}
+                    <span className="ms-1 text-xs text-muted-foreground">
+                      (خفيف {row.technicians_light} · متوسط {row.technicians_meaningful})
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{row.technicians_total}</TableCell>
+                  <TableCell>{row.dispatch_pending_count}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={coverageStatusBadgeClass(row.coverage_status)}>
+                      {COVERAGE_STATUS_LABELS[row.coverage_status] ?? row.coverage_status}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="زوج منطقة/فئة" onPageChange={setPage} />
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function OperationsOverviewPage() {
   const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
@@ -847,11 +1010,13 @@ export default function OperationsOverviewPage() {
 
           <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
 
+          <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} />
+
           <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <p>
-              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (ذكاء التغطية، تحكم أدمن،
-              بحث/فلترة شاملة...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
+              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (تحكم أدمن،
+              بحث/فلترة شاملة، بروفايل فني 360...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
             </p>
           </section>
         </div>
