@@ -12,6 +12,7 @@ import type {
   SelfDeclareCategoryBody,
   TechnicianCategoryResponseDto,
   TechnicianLevel,
+  TechnicianPricingTier,
   TechnicianZoneResponseDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -32,6 +33,8 @@ import {
   VERIFICATION_STATUS_LABELS,
   LEVEL_LABELS,
   ALL_LEVELS,
+  PRICING_TIER_LABELS,
+  ALL_PRICING_TIERS,
   NEXT_VERIFICATION_STEP,
   CAPACITY_TIER_LABELS,
   capacityTierBadgeClass,
@@ -114,6 +117,7 @@ export default function TechnicianDetailPage() {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<TechnicianLevel | ''>('');
+  const [selectedPricingTier, setSelectedPricingTier] = useState<TechnicianPricingTier | ''>('');
 
   const [zones, setZones] = useState<TechnicianZoneResponseDto[] | null>(null);
   const [allZones, setAllZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
@@ -156,6 +160,7 @@ export default function TechnicianDetailPage() {
       .then((data) => {
         setDetail(data);
         setSelectedLevel(data.current_level);
+        setSelectedPricingTier(data.pricing_tier);
         loadWallet(data.user_id);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل بيانات الفني'));
@@ -250,6 +255,18 @@ export default function TechnicianDetailPage() {
       authedFetch(`/admin/technicians/${id}/level`, {
         method: 'PATCH',
         body: JSON.stringify({ level: selectedLevel }),
+      }),
+    );
+  }
+
+  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن handleChangeLevel فوق.
+  async function handleChangePricingTier(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedPricingTier) return;
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/pricing-tier`, {
+        method: 'PATCH',
+        body: JSON.stringify({ pricing_tier: selectedPricingTier }),
       }),
     );
   }
@@ -522,6 +539,34 @@ export default function TechnicianDetailPage() {
             <CardFooter>
               <Button type="submit" size="sm" disabled={isSaving || selectedLevel === detail.current_level}>
                 حفظ المستوى
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
+
+        <Card>
+          <form onSubmit={handleChangePricingTier}>
+            <CardHeader>
+              <CardTitle className="text-base">فئة التسعير</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {ALL_PRICING_TIERS.map((tier) => (
+                  <Button
+                    key={tier}
+                    type="button"
+                    size="sm"
+                    variant={selectedPricingTier === tier ? 'default' : 'outline'}
+                    onClick={() => setSelectedPricingTier(tier)}
+                  >
+                    {PRICING_TIER_LABELS[tier]}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button type="submit" size="sm" disabled={isSaving || selectedPricingTier === detail.pricing_tier}>
+                حفظ فئة التسعير
               </Button>
             </CardFooter>
           </form>

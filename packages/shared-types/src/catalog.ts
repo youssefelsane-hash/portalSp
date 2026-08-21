@@ -1,5 +1,5 @@
 // مطابق لـ apps/api/src/modules/catalog/dto/admin-catalog-response.dto.ts وentities
-import type { TechnicianLevel } from './technicians';
+import type { TechnicianLevel, TechnicianPricingTier } from './technicians';
 
 // 'formula' — محرك التسعير الديناميكي (docs/08 §1، ADR-0001)، راجع pricing.ts لباقي أنواعه.
 export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote' | 'formula';
@@ -160,6 +160,22 @@ export interface ServiceLevelPricingResponseDto {
 
 export interface UpsertLevelPricingBody {
   technician_level: TechnicianLevel;
+  price_multiplier: number;
+}
+
+// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — مرآة كاملة لـServiceLevelPricingResponseDto/
+// UpsertLevelPricingBody فوق بالحرف، بس مربوطة بـTechnicianPricingTier (تجاري) مش TechnicianLevel.
+export interface ServicePricingTierPricingResponseDto {
+  id: string;
+  service_id: string;
+  pricing_tier: TechnicianPricingTier;
+  price_multiplier: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface UpsertPricingTierPricingBody {
+  pricing_tier: TechnicianPricingTier;
   price_multiplier: number;
 }
 

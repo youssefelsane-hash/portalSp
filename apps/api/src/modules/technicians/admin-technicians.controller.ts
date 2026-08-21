@@ -13,6 +13,7 @@ import { TechnicianCertificatesService } from './technician-certificates.service
 import { toAdminTechnicianDetailResponseDto, toAdminTechnicianResponseDto } from './dto/admin-technician-response.dto';
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
+import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
@@ -468,6 +469,19 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const { profile, user } = await this.adminTechniciansService.changeLevel(admin.sub, id, dto, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة عن current_level التشغيلي.
+  @Patch(':id/pricing-tier')
+  @RequirePermission('technicians.approve')
+  async changePricingTier(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ChangeTechnicianPricingTierDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.changePricingTier(admin.sub, id, dto, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 

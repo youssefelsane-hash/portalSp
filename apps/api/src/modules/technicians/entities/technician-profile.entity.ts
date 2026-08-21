@@ -11,6 +11,16 @@ export enum TechnicianLevel {
   TEAM_LEADER = 'team_leader',
 }
 
+// فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن TechnicianLevel فوق. TechnicianLevel
+// تشغيلي (حد قرار/أولوية مطابقة/أهلية قيادة فريق/تقدّم KPI)؛ pricing_tier مضاعف سعر تجاري بحت
+// (service_pricing_tier_pricing) يقرره الأدمن بشكل مستقل تمامًا — صفر ربط تلقائي بينهم.
+export enum TechnicianPricingTier {
+  STANDARD = 'standard',
+  EXPERT = 'expert',
+  SENIOR = 'senior',
+  PREMIUM = 'premium',
+}
+
 export enum TechnicianVerificationStatus {
   PENDING = 'pending',
   DOCUMENTS_SUBMITTED = 'documents_submitted',
@@ -70,6 +80,15 @@ export class TechnicianProfile {
     default: TechnicianLevel.NEW,
   })
   currentLevel: TechnicianLevel;
+
+  @Column({
+    name: 'pricing_tier',
+    type: 'enum',
+    enum: TechnicianPricingTier,
+    enumName: 'technician_pricing_tier',
+    default: TechnicianPricingTier.STANDARD,
+  })
+  pricingTier: TechnicianPricingTier;
 
   @Column({ name: 'quality_score', type: 'numeric', precision: 5, scale: 2, default: 0 })
   qualityScore: string;

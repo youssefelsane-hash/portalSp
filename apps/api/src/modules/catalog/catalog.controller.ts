@@ -56,6 +56,7 @@ export class CatalogController {
       query.technician_level,
       query.booking_mode === 'emergency',
       query.field_values,
+      query.pricing_tier,
     );
   }
 
@@ -136,6 +137,7 @@ export class CatalogController {
                 item.currentLevel,
                 isEmergency,
                 query.field_values,
+                item.pricingTier,
               );
               return { item, estimate };
             }),

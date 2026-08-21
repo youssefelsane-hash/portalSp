@@ -18,6 +18,7 @@ import {
 } from '../../common/events/technician-service-verification-changed.event';
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
+import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ApproveTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -323,6 +324,38 @@ export class AdminTechniciansService {
       entityId: profile.id,
       oldValues: { current_level: previousLevel },
       newValues: { current_level: profile.currentLevel, reason: dto.reason ?? null },
+      meta,
+    });
+
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
+  // فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن changeLevel() فوق. صفر جدول
+  // تاريخ مخصّص (عكس current_level) — قرار تجاري بسيط، مفيش تدرّج ترقية/تنزيل يستاهل تتبّع.
+  async changePricingTier(
+    adminUserId: string,
+    technicianProfileId: string,
+    dto: ChangeTechnicianPricingTierDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianWithUser> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (profile.pricingTier === dto.pricing_tier) {
+      throw new ApiException(ErrorCode.VAL_001, 'الفني أصلاً على فئة التسعير دي', HttpStatus.CONFLICT);
+    }
+
+    const previousTier = profile.pricingTier;
+    profile.pricingTier = dto.pricing_tier;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician.pricing_tier_changed',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { pricing_tier: previousTier },
+      newValues: { pricing_tier: profile.pricingTier, reason: dto.reason ?? null },
       meta,
     });
 

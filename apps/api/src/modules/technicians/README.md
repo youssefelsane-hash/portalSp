@@ -769,3 +769,20 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   رفض دعوة النفس/كود مش موجود/تعارض دعوة حية، حد أقصى قابل للتعديل، `listMyMemberships()` الجديدة،
   وتصدير الحدثين الصحيح بالـpayload الصح. اختبار تكامل في `order-team-recruiting.spec.ts` بيثبت
   الترتيب الحقيقي مع `OrderTeamService`.
+
+## فئة تسعير الفني — `technician_profiles.pricing_tier` (docs/08 §36.24، ADR-0025)
+
+طلب مالك صريح: فئة تسعير تجارية (`standard`/`expert`/`senior`/`premium`) **منفصلة تمامًا** عن
+`TechnicianLevel` التشغيلي فوق (نفس العمود المستخدم لحد القرار المالي/أولوية المطابقة/أهلية
+"اعتماد"/تقدّم KPI). التفاصيل الكاملة (العمود، الجدول الجديد، منطق تسعير الفئة) في
+`../catalog/README.md`'s "فئة تسعير الفني" — هنا بس جانب الإدارة/الأهلية.
+
+- **`PATCH /admin/technicians/:id/pricing-tier`** (`admin-technicians.service.ts`'s `changePricingTier()`)
+  — نفس نمط `changeLevel()`/`PATCH .../level` بالحرف، لكن **صفر جدول تاريخ مخصّص** (عكس
+  `technician_level_history`) — قرار تجاري بسيط، مفيش تدرّج ترقية/تنزيل يستاهل تتبّع. بيرفض 409 لو
+  الفني أصلاً على نفس الفئة، وبيسجّل في `audit_logs` زي أي تغيير أدمن تاني.
+  `TechnicianBookingListItem` (اختيار الفني قبل الحجز) بقى فيه `pricingTier` جنب `currentLevel`
+  الموجود — بيتحسب من `technician_profiles.pricing_tier` مباشرة (نفس صف `current_level`).
+- **اختبار حي** (`technician-pricing-tier-assignment.spec.ts`، 3/3): `changePricingTier()` بيغيّر
+  `pricing_tier` بس وcurrent_level يفضل زي ما هو، `changeLevel()` بيغيّر current_level بس وpricing_tier
+  يفضل زي ما هو (استقلال في الاتجاهين)، 409 لو نفس الفئة الحالية.

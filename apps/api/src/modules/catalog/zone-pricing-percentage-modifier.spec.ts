@@ -81,6 +81,7 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
       dataSource.getRepository(ServiceStandardData),
       {} as never,
       {} as never,
+      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
   });
 

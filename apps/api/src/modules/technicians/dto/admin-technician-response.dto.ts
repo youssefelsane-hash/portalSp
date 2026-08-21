@@ -14,6 +14,7 @@ export interface AdminTechnicianResponseDto {
   technician_code: string;
   years_of_experience: number;
   current_level: string;
+  pricing_tier: string;
   quality_score: number;
   average_rating: number;
   total_ratings_count: number;
@@ -36,6 +37,7 @@ export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: U
     technician_code: profile.technicianCode,
     years_of_experience: profile.yearsOfExperience,
     current_level: profile.currentLevel,
+    pricing_tier: profile.pricingTier,
     quality_score: Number(profile.qualityScore),
     average_rating: Number(profile.averageRating),
     total_ratings_count: profile.totalRatingsCount,

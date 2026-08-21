@@ -4,10 +4,11 @@ import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { SettingsService } from '../settings/settings.service';
-import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
+import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
+import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { PricingModel, Service } from './entities/service.entity';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
@@ -67,7 +68,33 @@ export class CatalogService {
     @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
     private readonly settingsService: SettingsService,
     private readonly pricingEngineService: PricingEngineService,
+    // docs/08 §36.24، ADR-0025 — آخر بند عمدًا (نفس نمط orderTeamService في orders.service.ts)
+    // عشان ياخد أقل بلاست-رديوس ممكن على الاختبارات القديمة الكتير اللي بتبني CatalogService بـpositional args.
+    @InjectRepository(ServicePricingTierPricing) private readonly pricingTierPricing: Repository<ServicePricingTierPricing>,
   ) {}
+
+  /**
+   * مضاعف السعر النهائي — فئة تسعير الفني (docs/08 §36.24، ADR-0025) لو موجودة وفيها صف نشط،
+   * وإلا fallback كامل لتسعير المستوى التشغيلي القديم (service_level_pricing)، وإلا 1 لو مفيش أي
+   * صف. **صفر كسر لأي مسار موجود** — technicianPricingTier باراميتر جديد اختياري بالكامل.
+   */
+  private async resolveLevelPriceMultiplier(
+    serviceId: string,
+    technicianLevel?: TechnicianLevel,
+    technicianPricingTier?: TechnicianPricingTier,
+  ): Promise<number> {
+    if (technicianPricingTier) {
+      const tierRow = await this.pricingTierPricing.findOne({
+        where: { serviceId, pricingTier: technicianPricingTier, isActive: true },
+      });
+      if (tierRow) return Number(tierRow.priceMultiplier);
+    }
+    if (technicianLevel) {
+      const levelRow = await this.levelPricing.findOne({ where: { serviceId, technicianLevel, isActive: true } });
+      if (levelRow) return Number(levelRow.priceMultiplier);
+    }
+    return 1;
+  }
 
   findAddons(serviceId: string): Promise<ServiceAddon[]> {
     return this.addons.find({ where: { serviceId, isActive: true }, order: { displayOrder: 'ASC' } });
@@ -177,6 +204,9 @@ export class CatalogService {
     technicianLevel?: TechnicianLevel,
     isEmergency = false,
     fieldValues?: Record<string, string | number | boolean>,
+    // docs/08 §36.24، ADR-0025 — آخر باراميتر عمدًا (نفس مبدأ append-only في constructor فوق) —
+    // اختياري بالكامل، صفر كسر لأي كولر موجود.
+    technicianPricingTier?: TechnicianPricingTier,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
 
@@ -193,15 +223,7 @@ export class CatalogService {
     // حسابها — مش جزء من المعادلة نفسها (الفني مش من مدخلات الفورم اللي العميل بيملاها).
     if (service.pricingModel === PricingModel.FORMULA) {
       const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
-      let formulaLevelMultiplier = 1;
-      if (technicianLevel) {
-        const levelRow = await this.levelPricing.findOne({
-          where: { serviceId, technicianLevel, isActive: true },
-        });
-        if (levelRow) {
-          formulaLevelMultiplier = Number(levelRow.priceMultiplier);
-        }
-      }
+      const formulaLevelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
       const formulaTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
       const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
         ? await Promise.all([
@@ -224,15 +246,7 @@ export class CatalogService {
       };
     }
 
-    let levelMultiplier = 1;
-    if (technicianLevel) {
-      const levelRow = await this.levelPricing.findOne({
-        where: { serviceId, technicianLevel, isActive: true },
-      });
-      if (levelRow) {
-        levelMultiplier = Number(levelRow.priceMultiplier);
-      }
-    }
+    const levelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
 
     // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد
     // من migration 0007 الأولى، بيتفعّل هنا. منفصلة عن commission.emergency_adjustment_percentage

@@ -90,6 +90,7 @@ describe('CatalogService — خدمة/فئة/إضافة معطّلة أو محذ
       dataSource.getRepository(ServiceStandardData),
       {} as never,
       {} as never,
+      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
   });
 

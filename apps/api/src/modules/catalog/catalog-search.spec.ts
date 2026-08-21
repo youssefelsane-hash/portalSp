@@ -65,6 +65,7 @@ describe('CatalogService.searchServices() — بحث بلغة طبيعية بس�
       dataSource.getRepository(ServiceStandardData),
       {} as never,
       {} as never,
+      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
   });
 

@@ -260,6 +260,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       dataSource.getRepository(ServiceStandardData),
       settingsService,
       {} as never,
+      {} as never, // docs/08 §36.24 ADR-0025 — ServicePricingTierPricing repo جديد
     );
     const technicianLevelsService = new TechnicianLevelsService(
       dataSource.getRepository(TechnicianLevelConfig),

@@ -198,3 +198,32 @@
   أساسي عادي بلا أي تعديل.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
+
+## فئة تسعير الفني — `technician_profiles.pricing_tier` (docs/08 §36.24، ADR-0025)
+
+تدقيق حي أثبت إن `service_level_pricing.technician_level` مربوط مباشرة بـ`TechnicianLevel` التشغيلي
+(نفس العمود المستخدم لحد القرار المالي، أولوية المطابقة، أهلية "اعتماد"، والـKPI). طلب المالك فئة
+تسعير تجارية منفصلة تمامًا. التفاصيل الكاملة والبدائل المرفوضة في `docs/adr/0025-technician-pricing-tier.md`.
+
+- **`TechnicianPricingTier` enum جديد بالكامل** (`standard`/`expert`/`senior`/`premium`) — أسماء
+  مختلفة عمدًا عن `TechnicianLevel` (صفر تشابه حتى في التسمية).
+- **`technician_profiles.pricing_tier` عمود جديد** (افتراضي `standard` لكل الصفوف — صفر اشتقاق
+  تلقائي من `current_level`، الأدمن لازم يصنّف صراحة عبر `PATCH /admin/technicians/:id/pricing-tier`).
+- **`service_pricing_tier_pricing` جدول جديد** (مرآة كاملة لـ`service_level_pricing`: service_id،
+  pricing_tier، price_multiplier، is_active) — صفر تعديل على الجدول القديم.
+- **`CatalogService.resolveLevelPriceMultiplier()`**: فرع أولوية جديد — فئة تسعير نشطة (لو الفني
+  عنده `pricingTier` وفيه صف نشط) → **غير كده fallback كامل** لتسعير المستوى القديم → مضاعف=1 لو
+  مفيش أي صف. `estimate()` بقى ياخد `technicianPricingTier?` كباراميتر إضافي اختياري (آخر باراميتر
+  عمدًا، صفر كسر لأي كولر موجود).
+- **`GET /services/:id/estimate`**: `pricing_tier` query param جديد اختياري جنب `technician_level`
+  الموجود. **`orders.service.ts`/`catalog.controller.ts`'s `listTechniciansForService`**: تمرير
+  `technician.pricingTier` جنب `technician.currentLevel` — بمجرد ما أدمن يضيف صف تسعير-فئة، بيتفعّل
+  تلقائيًا في كل مسارات التسعير الحقيقية بلا كود إضافي.
+- **إدارة الفئة نفسها**: `GET/PUT /admin/services/:id/pricing-tier-pricing`،
+  `DELETE /admin/services/pricing-tier-pricing/:pricingId` (نفس نمط level-pricing بالحرف).
+- **`apps/admin`**: قسم "فئة التسعير" في بروفايل الفني (منفصل عن قسم "المستوى") + فورم "فئة تسعير
+  الفني" جديد في صفحة تفاصيل الخدمة.
+- **اختبارات حية جديدة**: `technician-pricing-tier.spec.ts` (4/4 — الفئة تغلب المستوى، fallback
+  للمستوى من غير فئة، رجريشن كامل لخدمة من غير أي صف فئة، فئة بلا صف نشط = مضاعف 1)،
+  `../technicians/technician-pricing-tier-assignment.spec.ts` (3/3 — استقلال `changePricingTier()`/
+  `changeLevel()` في الاتجاهين + 409 لنفس الفئة).

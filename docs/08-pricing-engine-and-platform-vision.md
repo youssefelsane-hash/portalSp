@@ -5917,3 +5917,34 @@ OTP/شات/دفع/تسعير، صفر مسار تجنيد فريق فيها). ب
 
 **لسه فاضل من الجزء د**: §36.24-26 (فئات تسعير فني، تسعير فريق، قفل السعر عند التأكيد)، §36.27
 (واجهة أدمن موحّدة للتكوين + تفسير سعر)، §36.28 (اختبارات شاملة + إغلاق نهائي).
+
+### §36.24 — إغلاق: فئات تسعير الفني (Standard/Expert/Senior/Premium) + ADR-0025
+
+تدقيق حي أثبت إن `service_level_pricing.technician_level` (مضاعف السعر اللي بيشوفه العميل) مربوط
+مباشرة بـ`TechnicianLevel` التشغيلي (`new`/`verified`/`professional`/`premium`/`team_leader`) — نفس
+العمود المستخدم لحد القرار المالي، أولوية المطابقة، أهلية قيادة "اعتماد"، وتقدّم الـKPI. طلب المالك
+صراحة: فئة تسعير تجارية **منفصلة تمامًا**.
+
+**الحل** (`docs/adr/0025-technician-pricing-tier.md`): `TechnicianPricingTier` enum جديد بالكامل
+(`standard`/`expert`/`senior`/`premium`، أسماء مختلفة عمدًا عن `TechnicianLevel`) + عمود
+`technician_profiles.pricing_tier` (افتراضي `standard` لكل الصفوف — **صفر اشتقاق تلقائي من
+current_level**، نفس مبدأ رفض الاشتقاق التلقائي في ADR-0024) + جدول جديد `service_pricing_tier_pricing`
+(مرآة كاملة لـ`service_level_pricing`، صفر تعديل على الجدول القديم). ترتيب الأولوية الجديد في
+`CatalogService.resolveLevelPriceMultiplier()`: فئة تسعير نشطة (لو موجودة) → تسعير مستوى قديم
+(fallback) → مضاعف=1. **صفر كسر لأي مسار موجود** — الباراميتر الجديد اختياري بالكامل.
+
+الأدمن يصنّف الفني صراحة عبر `PATCH /admin/technicians/:id/pricing-tier` (نفس نمط `PATCH .../level`
+بالحرف، منفصل تمامًا — تغيير واحد ميأثرش على التاني). `GET /services/:id/estimate` بقى فيه
+`pricing_tier` query param جديد اختياري جنب `technician_level` الموجود. اتوصّل في كل مسارات التسعير
+الحقيقية: `orders.service.ts`'s `create()`/`previewOrder()`، و`catalog.controller.ts`'s
+`estimate()`/`listTechniciansForService()` (كل فني مرشّح بيرجع `pricing_tier` بتاعه، والسعر النهائي
+المعروض بيحسبها فعليًا). `apps/admin`: قسم "فئة التسعير" في بروفايل الفني (`/technicians/:id`) + فورم
+"فئة تسعير الفني" جديد في صفحة تفاصيل الخدمة (نفس نمط فورم تسعير المستوى بالحرف).
+
+اختبارات حية جديدة: `technician-pricing-tier.spec.ts` (4/4 — الفئة تغلب المستوى، من غير فئة يفضل
+يستخدم المستوى، رجريشن كامل لخدمة من غير أي صف فئة، فئة من غير صف نشط = مضاعف 1)،
+`technician-pricing-tier-assignment.spec.ts` (3/3 — `changePricingTier()` بيغيّر `pricing_tier` بس
+وcurrent_level يفضل زي ما هو، `changeLevel()` بيغيّر current_level بس وpricing_tier يفضل زي ما هو
+(استقلال في الاتجاهين)، 409 لو نفس الفئة الحالية). صفر رجريشن — الجولة الكاملة لـjest (كل الموديولات)
+عدّت نضاف. `tsc --noEmit`/`nest build` (apps/api)، `tsc --noEmit`/`next build` (apps/admin)، `npm run
+build` (packages/shared-types) كلهم نضاف.

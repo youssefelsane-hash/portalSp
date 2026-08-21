@@ -1,4 +1,4 @@
-import type { TechnicianCapacityTier, TechnicianLevel, TechnicianVerificationStatus } from '@baytak/shared-types';
+import type { TechnicianCapacityTier, TechnicianLevel, TechnicianPricingTier, TechnicianVerificationStatus } from '@baytak/shared-types';
 
 // تصريح مهارات ذاتي (Script 4 §2-7)
 export const SKILL_LEVEL_LABELS: Record<string, string> = {
@@ -27,6 +27,16 @@ export const LEVEL_LABELS: Record<TechnicianLevel, string> = {
 };
 
 export const ALL_LEVELS: TechnicianLevel[] = ['new', 'verified', 'professional', 'premium', 'team_leader'];
+
+// فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن LEVEL_LABELS/ALL_LEVELS فوق.
+export const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
+  standard: 'قياسي',
+  expert: 'خبير',
+  senior: 'كبير',
+  premium: 'مميّز',
+};
+
+export const ALL_PRICING_TIERS: TechnicianPricingTier[] = ['standard', 'expert', 'senior', 'premium'];
 
 // لغة بصرية موحّدة لتصنيف القدرة الاستيعابية (LIGHT/MEANINGFUL/HEAVY/BLOCKED) — نُقلت هنا من
 // operations/page.tsx (docs/08 §36.3) عشان تُستخدَم كمان في مفتّش المطابقة بصفحة تفاصيل الطلب
