@@ -163,6 +163,16 @@ class _RecruitCandidateCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text('فريقك', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onPrimaryContainer)),
+              )
+            // أولوية الفريق المفضّل (docs/08 §36.17) — مستوى تاني بعد فريقك الدائم، بادج منفصل.
+            else if (candidate.isPreferredCrewMember)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text('مفضّل', style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSecondaryContainer)),
               ),
           ],
         ),

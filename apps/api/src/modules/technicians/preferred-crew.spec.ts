@@ -1,5 +1,12 @@
 import { DataSource } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
+import {
+  PREFERRED_CREW_INVITED_EVENT,
+  PREFERRED_CREW_ACCEPTED_EVENT,
+  PreferredCrewInvitedEvent,
+  PreferredCrewAcceptedEvent,
+} from '../../common/events/preferred-crew.event';
 import { PreferredCrewMemberStatus, TechnicianPreferredCrewMember } from './entities/technician-preferred-crew-member.entity';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { PreferredCrewService } from './preferred-crew.service';
@@ -8,6 +15,9 @@ import { PreferredCrewService } from './preferred-crew.service';
 // دائمة، اتجاه واحد بس (owner→member)، صفر موافقة أدمن — منفصلة تمامًا عن order_team_members/
 // technician_companies/assistant_link_status.
 const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+// حدث invite()/accept() (docs/08 §36.19) — real emitter بسيط كفاية هنا، صفر أثر جانبي حقيقي
+// (مفيش مستمع مسجّل في اختبار وحدة الخدمة ده، الاستماع الفعلي في notifications module).
+const eventsStub = new EventEmitter2();
 
 describe('PreferredCrewService — الفريق المفضّل (docs/08 §36.16، ADR-0022)', () => {
   let dataSource: DataSource;
@@ -56,6 +66,7 @@ describe('PreferredCrewService — الفريق المفضّل (docs/08 §36.16�
       dataSource.getRepository(TechnicianPreferredCrewMember),
       dataSource.getRepository(TechnicianProfile),
       settingsServiceStub,
+      eventsStub,
     );
   });
 
@@ -83,11 +94,17 @@ describe('PreferredCrewService — الفريق المفضّل (docs/08 §36.16�
 
   let invitationId = '';
 
-  it('invite() — دعوة ناجحة (status=invited)', async () => {
+  it('invite() — دعوة ناجحة (status=invited) وبتصدّر PREFERRED_CREW_INVITED_EVENT (docs/08 §36.19)', async () => {
+    const invitedHandler = jest.fn();
+    eventsStub.on(PREFERRED_CREW_INVITED_EVENT, invitedHandler);
     const [memberRow] = await q(`SELECT technician_code FROM technician_profiles WHERE id = $1`, [ids.memberProfile]);
     const invitation = await service.invite(ids.ownerUser, memberRow.technician_code);
     invitationId = invitation.id;
     expect(invitation.status).toBe(PreferredCrewMemberStatus.INVITED);
+    expect(invitedHandler).toHaveBeenCalledTimes(1);
+    const [event] = invitedHandler.mock.calls[0] as [PreferredCrewInvitedEvent];
+    expect(event).toMatchObject({ membershipId: invitation.id, ownerTechnicianId: ids.ownerProfile, memberTechnicianId: ids.memberProfile });
+    eventsStub.off(PREFERRED_CREW_INVITED_EVENT, invitedHandler);
   });
 
   it('invite() — نفس الزوج ده تاني (لسه invited) يترفض بتعارض', async () => {
@@ -109,10 +126,16 @@ describe('PreferredCrewService — الفريق المفضّل (docs/08 §36.16�
     await expect(service.accept(ids.otherUser, invitationId)).rejects.toMatchObject({ code: 'VAL_001' });
   });
 
-  it('accept() — المدعو بيقبل، الحالة تبقى accepted', async () => {
+  it('accept() — المدعو بيقبل، الحالة تبقى accepted وبتصدّر PREFERRED_CREW_ACCEPTED_EVENT', async () => {
+    const acceptedHandler = jest.fn();
+    eventsStub.on(PREFERRED_CREW_ACCEPTED_EVENT, acceptedHandler);
     const row = await service.accept(ids.memberUser, invitationId);
     expect(row.status).toBe(PreferredCrewMemberStatus.ACCEPTED);
     expect(row.respondedAt).not.toBeNull();
+    expect(acceptedHandler).toHaveBeenCalledTimes(1);
+    const [event] = acceptedHandler.mock.calls[0] as [PreferredCrewAcceptedEvent];
+    expect(event).toMatchObject({ membershipId: row.id, ownerTechnicianId: ids.ownerProfile, memberTechnicianId: ids.memberProfile });
+    eventsStub.off(PREFERRED_CREW_ACCEPTED_EVENT, acceptedHandler);
   });
 
   it('listMine() — العضو المقبول ظاهر في قايمة الـowner', async () => {
@@ -124,10 +147,19 @@ describe('PreferredCrewService — الفريق المفضّل (docs/08 §36.16�
     await expect(service.accept(ids.memberUser, invitationId)).rejects.toMatchObject({ code: 'VAL_001' });
   });
 
+  it('listMyMemberships() — العضو المقبول بيشوف فرق مفضّلة هو عضو فيها (بَقّة حقيقية اتلقطت وقت بناء UI §36.18: leave() كانت موجودة بلا أي مسار يوصّلها)', async () => {
+    const rows = await service.listMyMemberships(ids.memberUser);
+    expect(rows.some((r) => r.id === invitationId && r.technicianId === ids.ownerProfile)).toBe(true);
+    const otherRows = await service.listMyMemberships(ids.otherUser);
+    expect(otherRows.find((r) => r.id === invitationId)).toBeUndefined();
+  });
+
   it('leave() — العضو يمشي من تلقاء نفسه', async () => {
     await service.leave(ids.memberUser, invitationId);
     const rows = await service.listMine(ids.ownerUser);
     expect(rows.find((r) => r.id === invitationId)).toBeUndefined();
+    const memberships = await service.listMyMemberships(ids.memberUser);
+    expect(memberships.find((r) => r.id === invitationId)).toBeUndefined();
   });
 
   it('بعد المغادرة — دعوة جديدة لنفس الزوج ممكنة (صف جديد، مش تعارض مع القديم المُزال)', async () => {
@@ -163,6 +195,7 @@ describe('PreferredCrewService — الفريق المفضّل (docs/08 §36.16�
       dataSource.getRepository(TechnicianPreferredCrewMember),
       dataSource.getRepository(TechnicianProfile),
       limitedSettings,
+      eventsStub,
     );
     const [memberRow] = await q(`SELECT technician_code FROM technician_profiles WHERE id = $1`, [ids.memberProfile]);
     const [otherRow] = await q(`SELECT technician_code FROM technician_profiles WHERE id = $1`, [ids.otherProfile]);

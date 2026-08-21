@@ -5833,3 +5833,43 @@ OTP/شات/دفع/تسعير، صفر مسار تجنيد فريق فيها). ب
 `admin-crew-management`، `order-team-recruiting`، `s22-cross-operation-concurrency`،
 `technician-active-order-recovery` — 47 اختبار) كلها لسه نضيفة، صفر regression. مفيش أي endpoint/
 منطق تجنيد جديد — الإصلاح بالكامل تصحيح جذر السبب، حسب طلب المالك بالحرف.
+
+### §36.18 — إغلاق: `technician-app` UI للفريق المفضّل الدائم
+
+- **`lib/features/preferred_crew/`** (جديد): `models.dart` (`PreferredCrewMember`)،
+  `preferred_crew_repository.dart` (نداءات الـ7 endpoints)، `preferred_crew_screen.dart` — 3
+  أقسام: دعوة زميل بكوده، دعوات وصلتني (قبول/رفض)، فريقي المفضّل (إزالة). مدخل من `ProfileScreen`
+  (كارت "الفريق المفضّل" جديد جوّه بروفايلي).
+- **بَقّة حقيقية اتلقطت وقت بناء الشاشة** (قبل أي push للإنتاج): `leave()` كانت موجودة في
+  `PreferredCrewService` من §36.16 بلا أي endpoint/دالة تسرد "فرق أنا عضو مقبول فيها" — الفني
+  المدعو ما كانش عنده أي طريقة يوصل بيها لعضويته أصلاً عشان يقدر يسيبها. الإصلاح: `listMyMemberships()`
+  جديدة في `PreferredCrewService` + `GET /technician/preferred-crew/memberships` — قسم "أنا عضو
+  في فريق مفضّل عند" جديد في الشاشة بزرار "اترك الفريق". اختبار حي جديد يثبت البَقّة والإصلاح.
+- **إغلاق فجوة UI صغيرة من §36.17**: `RecruitCandidate`/`RecruitTeamScreen` (§35.2) اتوسّعوا
+  بـ`isPreferredCrewMember` + بادج "مفضّل" منفصل عن بادج "فريقك" — الباك-إند كان بيحسب الإشارة
+  دي من §36.17 بالفعل بلا أي عرض ليها في الواجهة.
+- **التحقق**: `flutter analyze` على كل التطبيق — صفر تحذيرات جديدة (19 info-lint موجودين أصلاً،
+  ولا واحد فيهم في ملفات الفريق المفضّل الجديدة أو التعديلات).
+
+### §36.19 — إغلاق: رؤية أدمن + إشعارات + اختبارات للفريق المفضّل
+
+- **رؤية أدمن (بروفايل 360)**: `AdminTechnician360Service.getProfile()` بقى فيه `preferredCrewAsOwner`/
+  `preferredCrewAsMember` (استعلام SQL مباشر، نفس نمط باقي أقسام الملف — صفر منطق تعديل جديد، **قراءة
+  بس**؛ العلاقة لسه بتُدار بالكامل من الفني نفسه في تطبيقه، بلا موافقة أدمن حسب تصميم ADR-0022). واجهة
+  `apps/admin/technicians/[id]` بقى فيها قسم "فريقه المفضّل"/"عضو مقبول في فرق مفضّلة تانية" جوّه كارت
+  النظرة التشغيلية الموجود، جنب سلوك الإلغاء/الشكاوى.
+- **إشعارات**: `PreferredCrewService` بيصدّر `PREFERRED_CREW_INVITED_EVENT`/`PREFERRED_CREW_ACCEPTED_EVENT`
+  (حدث بس، صفر معرفة بالإشعارات — نفس فلسفة `WORK_OPPORTUNITY_OFFERED_EVENT` بالحرف). **سبب معماري
+  مهم**: `NotificationsModule` بيستورد `TechniciansModule` بالفعل (مش العكس)، فحقن `NotificationsService`
+  مباشرة جوّه `PreferredCrewService` كان هيعمل استيراد دائري — الحل نفسه المُتّبع فعلاً لـ
+  `WorkOpportunityOfferedNotificationListener`: مستمع جديد (`PreferredCrewNotificationListener`) مسجّل
+  في `NotificationsModule` نفسه، بيستخدم `TechniciansService`+`NotificationsService` سوا بلا أي دورة.
+  `IN_APP` بس (مش عاجل زي فرصة عمل لطلب حقيقي).
+- **اختبارات**: `preferred-crew.spec.ts` اتوسّع لـ16/16 (كانت 15) — إضافتين: (1) `invite()`/`accept()`
+  بيصدّروا الحدث الصحيح بالـpayload الصح (event emitter حقيقي، مش mock)، (2) `listMyMemberships()`
+  الجديدة (البَقّة المذكورة في §36.18). `admin-technician-360.spec.ts` الموجود لسه 100% نضيف بعد
+  إضافة الحقلين الجديدين للـresponse (تغيير إضافي بس، صفر كسر). `tsc --noEmit`/`nest build` نضاف
+  على `apps/api` و`apps/admin` الاتنين.
+
+**§36 الجزء ج (الفريق المفضّل) خلص بالكامل الآن (§36.15-19)**. لسه فاضل من §36: الجزء د (§36.20-28،
+محرك سياسة المطابقة والتسعير القابل للتعديل — مستقل تمامًا عن الفريق المفضّل، من رسالة المالك التانية).

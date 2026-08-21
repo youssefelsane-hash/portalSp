@@ -728,7 +728,7 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
 `branch_count:0`, `final_price_cents:null`) — صفر أفراد تحت محترف. كل بيانات الاختبار اتنضّفت
 بعد التحقق.
 
-## الفريق المفضّل — `PreferredCrewService` (docs/08 §36.16-17، ADR-0022)
+## الفريق المفضّل — `PreferredCrewService` (docs/08 §36.16-19، ADR-0022)
 
 شبكة تفضيل نظير-لنظير دائمة — نموذج **تالت** منفصل تمامًا عن `order_team_members` (طاقم مؤقت لطلب
 واحد)، `technician_companies` (توظيف رسمي)، و`assistant_technician_id`/`assistant_link_status`
@@ -749,8 +749,23 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   `isLeaderTeamMember DESC, isPreferredCrewMember DESC, distanceKm ASC, ...`. صفر تأثير على
   الاستبعاد — فني غير مؤهّل لسه بيتستبعد حتى لو في الفريق المفضّل.
 - **Endpoints** (`technician/preferred-crew*`، `TechniciansController`): `GET`/`POST` للقايمة/
-  الدعوة، `GET .../invitations`، `POST .../invitations/:id/accept|decline`، `DELETE :id` (إزالة
-  من الـowner)، `POST :id/leave` (مغادرة من العضو).
-- **اختبار حي** (`preferred-crew.spec.ts`، 15/15): دورة حياة كاملة (دعوة→قبول→مغادرة→دعوة جديدة)،
-  رفض دعوة النفس/كود مش موجود/تعارض دعوة حية، حد أقصى قابل للتعديل. اختبار تكامل في
-  `order-team-recruiting.spec.ts` بيثبت الترتيب الحقيقي مع `OrderTeamService`.
+  الدعوة، `GET .../invitations`، `GET .../memberships` (§36.18 — راجع البَقّة تحت)،
+  `POST .../invitations/:id/accept|decline`، `DELETE :id` (إزالة من الـowner)، `POST :id/leave`
+  (مغادرة من العضو).
+- **بَقّة حقيقية اتلقطت وقت بناء UI التطبيق (§36.18)**: `leave()` كانت موجودة من §36.16 بلا أي
+  مسار يوصّل الفني العضو لعضويته أصلاً — `listInvitationsReceived()` بترجّع `status='invited'` بس
+  (بتختفي بمجرد القبول)، و`listMine()` من منظور الـowner بس. يعني الفني المدعو اللي قبل دعوة ماكانش
+  عنده أي endpoint يشوف بيه "أنا عضو في فريق مين" عشان يقدر يسيبه. الإصلاح: `listMyMemberships()`
+  جديدة + `GET /technician/preferred-crew/memberships`.
+- **إشعارات (§36.19)**: `PreferredCrewService` بيصدّر `PREFERRED_CREW_INVITED_EVENT`/
+  `PREFERRED_CREW_ACCEPTED_EVENT` (حدث بس، صفر معرفة بالإشعارات) — المستمع الفعلي
+  (`PreferredCrewNotificationListener`) في `notifications` module، **مش هنا**: `NotificationsModule`
+  بيستورد `TechniciansModule` بالفعل، فحقن `NotificationsService` مباشرة هنا كان هيعمل استيراد دائري
+  (نفس الحل المتّبع أصلاً لـ`WorkOpportunityOfferedNotificationListener`).
+- **رؤية أدمن (§36.19)**: `AdminTechnician360Service.getProfile()` بيرجّع `preferredCrewAsOwner`/
+  `preferredCrewAsMember` — قراءة بس، العلاقة لسه بتُدار بالكامل من الفني نفسه (صفر endpoint تعديل
+  أدمن جديد، حسب تصميم ADR-0022).
+- **اختبار حي** (`preferred-crew.spec.ts`، 16/16): دورة حياة كاملة (دعوة→قبول→مغادرة→دعوة جديدة)،
+  رفض دعوة النفس/كود مش موجود/تعارض دعوة حية، حد أقصى قابل للتعديل، `listMyMemberships()` الجديدة،
+  وتصدير الحدثين الصحيح بالـpayload الصح. اختبار تكامل في `order-team-recruiting.spec.ts` بيثبت
+  الترتيب الحقيقي مع `OrderTeamService`.

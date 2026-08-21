@@ -156,6 +156,7 @@ class RecruitCandidate {
   final double averageRating;
   final double? distanceKm;
   final bool isLeaderTeamMember;
+  final bool isPreferredCrewMember;
   final String capacityTier;
 
   RecruitCandidate({
@@ -166,6 +167,7 @@ class RecruitCandidate {
     required this.averageRating,
     required this.distanceKm,
     required this.isLeaderTeamMember,
+    required this.isPreferredCrewMember,
     required this.capacityTier,
   });
 
@@ -177,6 +179,7 @@ class RecruitCandidate {
         averageRating: double.tryParse(json['average_rating']?.toString() ?? '') ?? 0,
         distanceKm: json['distance_km'] != null ? (json['distance_km'] as num).toDouble() : null,
         isLeaderTeamMember: json['is_leader_team_member'] as bool? ?? false,
+        isPreferredCrewMember: json['is_preferred_crew_member'] as bool? ?? false,
         capacityTier: json['capacity_tier'] as String? ?? 'LIGHT',
       );
 }

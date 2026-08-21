@@ -111,6 +111,13 @@ export class TechniciansController {
     return rows.map(toPreferredCrewMemberResponseDto);
   }
 
+  // فرق مفضّلة أنا عضو مقبول فيها (بصفتي member) — لازمة لـleave() يبقى قابل للاستخدام فعليًا من الواجهة.
+  @Get('preferred-crew/memberships')
+  async listPreferredCrewMemberships(@CurrentUser() user: JwtPayload) {
+    const rows = await this.preferredCrewService.listMyMemberships(user.sub);
+    return rows.map(toPreferredCrewMemberResponseDto);
+  }
+
   @Post('preferred-crew')
   async invitePreferredCrewMember(@CurrentUser() user: JwtPayload, @Body() dto: InvitePreferredCrewMemberDto) {
     const row = await this.preferredCrewService.invite(user.sub, dto.member_technician_code);

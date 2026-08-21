@@ -1,8 +1,15 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { SettingsService } from '../settings/settings.service';
+import {
+  PREFERRED_CREW_INVITED_EVENT,
+  PREFERRED_CREW_ACCEPTED_EVENT,
+  PreferredCrewInvitedEvent,
+  PreferredCrewAcceptedEvent,
+} from '../../common/events/preferred-crew.event';
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { PreferredCrewMemberStatus, TechnicianPreferredCrewMember } from './entities/technician-preferred-crew-member.entity';
 
@@ -30,6 +37,7 @@ export class PreferredCrewService {
     @InjectRepository(TechnicianPreferredCrewMember) private readonly members: Repository<TechnicianPreferredCrewMember>,
     @InjectRepository(TechnicianProfile) private readonly technicianProfiles: Repository<TechnicianProfile>,
     private readonly settingsService: SettingsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   private async findProfileByUserIdOrThrow(userId: string): Promise<TechnicianProfile> {
@@ -90,6 +98,36 @@ export class PreferredCrewService {
     }));
   }
 
+  /**
+   * فرق مفضّلة أنا عضو مقبول فيها (بصفتي member) — منفصلة عمدًا عن listInvitationsReceived()
+   * (بترجّع status='invited' بس، تختفي منها بمجرد القبول). بَقّة حقيقية اتلقطت وقت بناء UI
+   * التطبيق (§36.18): بلا الدالة دي، leave() كانت موجودة بالباك-إند بلا أي مسار يوصّل الفني
+   * لعضويته الفعلية عشان يقدر يستخدمها أصلاً.
+   */
+  async listMyMemberships(userId: string): Promise<PreferredCrewRow[]> {
+    const member = await this.findProfileByUserIdOrThrow(userId);
+    const rows = await this.members.manager.query<
+      { id: string; technician_id: string; technician_code: string; full_name: string; status: PreferredCrewMemberStatus; invited_at: Date; responded_at: Date | null }[]
+    >(
+      `SELECT pcm.id, tp.id AS technician_id, tp.technician_code, u.full_name, pcm.status, pcm.invited_at, pcm.responded_at
+       FROM technician_preferred_crew_members pcm
+       JOIN technician_profiles tp ON tp.id = pcm.owner_technician_id
+       JOIN users u ON u.id = tp.user_id
+       WHERE pcm.member_technician_id = $1 AND pcm.deleted_at IS NULL AND pcm.status = 'accepted'
+       ORDER BY pcm.responded_at DESC`,
+      [member.id],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      technicianId: r.technician_id,
+      technicianCode: r.technician_code,
+      fullName: r.full_name,
+      status: r.status,
+      invitedAt: r.invited_at,
+      respondedAt: r.responded_at,
+    }));
+  }
+
   /** دعوة زميل بكود موظفه — نفس نمط requestAssistant() بالحرف (البحث بـtechnician_code). */
   async invite(userId: string, memberTechnicianCode: string): Promise<TechnicianPreferredCrewMember> {
     const owner = await this.findProfileByUserIdOrThrow(userId);
@@ -123,7 +161,9 @@ export class PreferredCrewService {
       status: PreferredCrewMemberStatus.INVITED,
       invitedAt: new Date(),
     });
-    return this.members.save(invitation);
+    const saved = await this.members.save(invitation);
+    this.events.emit(PREFERRED_CREW_INVITED_EVENT, new PreferredCrewInvitedEvent(saved.id, owner.id, member.id));
+    return saved;
   }
 
   private async findOwnedInvitationOrThrow(memberUserId: string, invitationId: string): Promise<TechnicianPreferredCrewMember> {
@@ -139,7 +179,12 @@ export class PreferredCrewService {
     const invitation = await this.findOwnedInvitationOrThrow(memberUserId, invitationId);
     invitation.status = PreferredCrewMemberStatus.ACCEPTED;
     invitation.respondedAt = new Date();
-    return this.members.save(invitation);
+    const saved = await this.members.save(invitation);
+    this.events.emit(
+      PREFERRED_CREW_ACCEPTED_EVENT,
+      new PreferredCrewAcceptedEvent(saved.id, saved.ownerTechnicianId, saved.memberTechnicianId),
+    );
+    return saved;
   }
 
   async decline(memberUserId: string, invitationId: string): Promise<void> {
