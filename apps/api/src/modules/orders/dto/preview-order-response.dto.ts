@@ -32,4 +32,12 @@ export interface PreviewOrderResponseDto {
   /** مضاعف سعر مستوى الفني (docs/08) — 1 لو الفني مش معروف وقت المعاينة (مطابقة تلقائية).
    * base_price_cents فوق أصلاً مضروب فيه — الحقل ده للعرض/الشفافية بس، مش لإعادة الحساب يدويًا. */
   level_price_multiplier: number;
+  /** سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — null لخدمة deposit_required=false. لو موجود،
+   * ده المبلغ اللي هيتحصّل وقت تأكيد الحجز (بكارت/InstaPay إجباري)، والباقي بيتحصّل بعد الشغل. */
+  deposit_amount_cents: number | null;
+  /** المبلغ المطلوب فعليًا وقت تأكيد الحجز = deposit_amount_cents لو موجود، وإلا total_amount_cents كامل. */
+  due_now_cents: number;
+  /** = total_amount_cents - deposit_amount_cents، أو null لو مفيش إيداع (يبقى remaining=0 ضمنيًا،
+   * الإجمالي كله اتحصّل أو هيتحصّل بعد الشغل زي أي طلب عادي). */
+  remaining_amount_cents: number | null;
 }

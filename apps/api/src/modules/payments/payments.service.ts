@@ -185,7 +185,11 @@ export class PaymentsService {
    */
   private async amountOwedNow(order: Order, manager?: EntityManager): Promise<number> {
     if (order.paymentStatus !== OrderPaymentStatus.PAID) {
-      return order.totalAmountCents;
+      // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — الطلب السطر الحرج الوحيد اللي الميزة
+      // كلها محتاجاه. لو الطلب عنده مبلغ إيداع محسوب (snapshot وقت الإنشاء، depositAmountCents)،
+      // أول دفعة (وقت PENDING_PAYMENT) تحصّل الإيداع بس مش الإجمالي — الباقي هيتحصّل تلقائيًا
+      // كدلتا لما paymentStatus يوصل PAID (نفس الفرع تحت بالحرف، صفر تعديل إضافي مطلوب).
+      return order.depositAmountCents ?? order.totalAmountCents;
     }
     const paymentsRepo = manager ? manager.getRepository(Payment) : this.payments;
     const succeededPayments = await paymentsRepo.find({

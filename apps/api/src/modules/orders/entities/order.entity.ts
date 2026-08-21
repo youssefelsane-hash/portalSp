@@ -141,6 +141,12 @@ export class Order {
   @Column({ name: 'total_amount_cents', type: 'integer', default: 0 })
   totalAmountCents: number;
 
+  // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — snapshot وقت إنشاء الطلب من
+  // service.depositPercentage (نفس فلسفة standardDataId/requiredTechnicians فوق: تغيير النسبة
+  // على الخدمة بعدين ميأثرش على طلبات قديمة). null = خدمة deposit_required=false أو إجمالي صفر.
+  @Column({ name: 'deposit_amount_cents', type: 'integer', nullable: true })
+  depositAmountCents: number | null;
+
   // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم دي snapshot وقت الحجز من
   // CatalogService.estimateDuration()، مش مربوطة ديناميكياً بـservice_standard_data بعد كده
   // (لو الأدمن غيّر الإعداد بعدين، الطلب القديم يفضل موضّح بالقيم اللي اتحسبت بيها وقتها).

@@ -112,6 +112,19 @@ export class CreateServiceDto {
   @IsBoolean()
   cash_allowed?: boolean;
 
+  // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — true يعني الطلب لازم دفع مقدّم إلكتروني
+  // إجباري (كاش مرفوض صراحة وقت إنشاء الطلب، orders.service.ts) بمبلغ deposit_percentage% من
+  // الإجمالي، والباقي يتحصّل تلقائيًا بعد اكتمال الشغل (نفس مسار البند الإضافي، ADR-0015).
+  @IsOptional()
+  @IsBoolean()
+  deposit_required?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  @Max(99)
+  deposit_percentage?: number;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;

@@ -32,6 +32,10 @@ export interface OrderResponseDto {
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
+  /** سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — null لطلب على خدمة deposit_required=false.
+   * لو موجود، ده مبلغ الإيداع المحصّل وقت التأكيد؛ الباقي (total_amount_cents - القيمة دي)
+   * بيتحصّل تلقائيًا بعد اكتمال الشغل (نفس مسار البند الإضافي، ADR-0015). */
+  deposit_amount_cents: number | null;
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;
@@ -100,6 +104,7 @@ export function toOrderResponseDto(
     discount_amount_cents: order.discountAmountCents,
     promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,
+    deposit_amount_cents: order.depositAmountCents,
     payment_status: order.paymentStatus,
     placed_at: order.placedAt ? order.placedAt.toISOString() : null,
     cancelled_at: order.cancelledAt ? order.cancelledAt.toISOString() : null,
