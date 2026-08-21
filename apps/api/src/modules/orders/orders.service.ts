@@ -259,12 +259,15 @@ export class OrdersService {
       if (!dto.domestic_worker_profile_id) {
         throw new ApiException(ErrorCode.VAL_001, 'خدمة سعر فني محتاجة تختار فني (شغالة) بعينه الأول', HttpStatus.BAD_REQUEST);
       }
-      if (dto.schedule_slot_id || dto.requested_technician_id) {
+      if (dto.schedule_slot_id || dto.requested_technician_id || dto.scheduled_at_range_end) {
         throw new ApiException(
           ErrorCode.VAL_001,
-          'مينفعش تحدد سلوت وقت أو فني تفضيل مع حجز فني (شغالة) مباشر — الفني معروف بالفعل',
+          'مينفعش تحدد سلوت وقت أو فني تفضيل أو نطاق أيام مرن مع حجز فني (شغالة) مباشر — الفني ومعاده معروفين بالفعل',
           HttpStatus.BAD_REQUEST,
         );
+      }
+      if (!dto.scheduled_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد الحجز', HttpStatus.BAD_REQUEST);
       }
       // دفع مقدّم (card/instapay) مش مدعوم لسه لمسار الحجز المباشر ده — محتاج تعديل على
       // PaymentsService.handlePaymentConfirmed() (فرع PENDING_PAYMENT→SEARCHING_TECHNICIAN
@@ -291,6 +294,12 @@ export class OrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'الفني ده مش متاح بالحجز بالساعة', HttpStatus.BAD_REQUEST);
       }
       precomputedWorkerRateCents = domesticWorkerProfile.hourlyRateCents * dto.duration_hours;
+      // فحص تعارض جدولي حقيقي (ADR-0030) — كانت فجوة صحة بيانات: صفر فحص من أي نوع قبل كده.
+      await this.domesticWorkersService.assertNoSchedulingConflict(
+        domesticWorkerProfile.id,
+        new Date(dto.scheduled_at),
+        dto.duration_hours,
+      );
     } else if (dto.domestic_worker_profile_id) {
       throw new ApiException(ErrorCode.VAL_001, 'اختيار فني (شغالة) بعينه متاح بس لخدمات سعر الفني', HttpStatus.BAD_REQUEST);
     }
@@ -501,6 +510,8 @@ export class OrdersService {
         // مؤقت — راجع ADR-0029 لتأجيل تأكيد الفني الصريح لـSlice 2b).
         orderStatus: domesticWorkerProfile ? OrderStatus.ACCEPTED : OrderStatus.SEARCHING_TECHNICIAN,
         domesticWorkerProfileId: domesticWorkerProfile?.id ?? null,
+        // ADR-0030 — كان ناقص من Slice 2a، لازم لفحص التعارض الجدولي ولأي عرض مستقبلي.
+        domesticWorkerDurationHours: domesticWorkerProfile ? (dto.duration_hours ?? null) : null,
         assignedAt: domesticWorkerProfile ? now : null,
         acceptedAt: domesticWorkerProfile ? now : null,
         problemDescription: dto.problem_description ?? null,

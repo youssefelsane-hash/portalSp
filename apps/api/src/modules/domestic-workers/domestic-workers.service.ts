@@ -37,6 +37,68 @@ export class DomesticWorkersService {
     return profile;
   }
 
+  /**
+   * فحص تعارض جدولي حقيقي (ADR-0030) — إصلاح فجوة صحة بيانات كانت موجودة: صفر فحص تعارض من أي
+   * نوع لحجز الشغالة قبل كده، في أي مسار (القديم `domestic_worker_bookings` ولا الجديد
+   * `orders.domestic_worker_profile_id`، ADR-0029 Slice 2a) — عميلين كانوا يقدروا يحجزوا نفس
+   * الشغالة لنفس الوقت بالظبط بلا أي رفض. الدالة دي بتفحص المسارين مصدر واحد، مش منطق مكرر.
+   *
+   * حجز `hourly` (قديم أو جديد) بمداه الحقيقي `[scheduledAt, scheduledAt+durationHours)`. حجز
+   * `monthly_live_in` نشط (قديم بس — الجديد مؤجّل لـPhase A.4 Slice 4) بيُعتبر شاغل **كل** وقت
+   * الشغالة طول مدته (`scheduledAt` → `currentPeriodEndAt`/`pendingPeriodEndAt`، أو مفتوح لو
+   * الاتنين null) — شغالة مقيمة مينفعش تاخد شغلانة بالساعة في نفس الوقت.
+   *
+   * `durationHours=null` معناها فترة مفتوحة (بلا نهاية معروفة) — نفس معنى حجز شهري مقيم جديد بيبدأ
+   * وهيفضل شاغل الشغالة "للأبد" لحد ما يتلغي/يخلص، فبيتفحص ضد أي حجز تاني (بالساعة أو شهري) بلا
+   * حد أقصى لتاريخ النهاية.
+   */
+  async assertNoSchedulingConflict(
+    workerId: string,
+    startsAt: Date,
+    durationHours: number | null,
+    opts?: { excludeBookingId?: string; excludeOrderId?: string },
+  ): Promise<void> {
+    const endsAt = durationHours === null ? null : new Date(startsAt.getTime() + durationHours * 3_600_000);
+    const [legacyConflict] = await this.profiles.manager.query<{ booking_number: string }[]>(
+      `SELECT booking_number FROM domestic_worker_bookings
+       WHERE worker_id = $1 AND status NOT IN ('cancelled', 'completed')
+         AND id IS DISTINCT FROM $4::uuid
+         AND (
+           (booking_type = 'hourly' AND scheduled_at < COALESCE($3::timestamptz, 'infinity'::timestamptz)
+             AND (scheduled_at + (COALESCE(duration_hours, 0) || ' hours')::interval) > $2)
+           OR (booking_type = 'monthly_live_in' AND scheduled_at < COALESCE($3::timestamptz, 'infinity'::timestamptz)
+               AND COALESCE(current_period_end_at, pending_period_end_at, 'infinity'::timestamptz) > $2)
+         )
+       LIMIT 1`,
+      [workerId, startsAt, endsAt, opts?.excludeBookingId ?? null],
+    );
+    if (legacyConflict) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني ده متعارض مع حجز موجود بالفعل (${legacyConflict.booking_number}) في الفترة دي`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const [unifiedConflict] = await this.profiles.manager.query<{ order_number: string }[]>(
+      `SELECT order_number FROM orders
+       WHERE domestic_worker_profile_id = $1
+         AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
+         AND id IS DISTINCT FROM $4::uuid
+         AND scheduled_at IS NOT NULL AND domestic_worker_duration_hours IS NOT NULL
+         AND scheduled_at < COALESCE($3::timestamptz, 'infinity'::timestamptz)
+         AND (scheduled_at + (domestic_worker_duration_hours || ' hours')::interval) > $2`,
+      [workerId, startsAt, endsAt, opts?.excludeOrderId ?? null],
+    );
+    if (unifiedConflict) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني ده متعارض مع طلب موجود بالفعل (${unifiedConflict.order_number}) في الفترة دي`,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
   /** بروفايل عام — لازم معتمد فعلاً، وإلا 404 (مش عرض حالة داخلية للعميل). */
   async getPublicProfileOrThrow(id: string): Promise<{ profile: DomesticWorkerProfile; fullName: string }> {
     const profile = await this.findByIdOrThrow(id);

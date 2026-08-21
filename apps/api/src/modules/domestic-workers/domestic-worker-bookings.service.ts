@@ -88,11 +88,15 @@ export class DomesticWorkerBookingsService implements OnModuleInit, OnModuleDest
       if (!worker.hourlyRateCents) {
         throw new ApiException(ErrorCode.VAL_001, 'مقدّم الخدمة ده مالوش سعر بالساعة محدد', HttpStatus.BAD_REQUEST);
       }
+      // فحص تعارض جدولي حقيقي (ADR-0030) — كانت فجوة صحة بيانات: صفر فحص من أي نوع قبل كده.
+      await this.workersService.assertNoSchedulingConflict(worker.id, scheduledAt, dto.duration_hours);
       priceCents = worker.hourlyRateCents * dto.duration_hours;
     } else {
       if (!worker.monthlyRateCents) {
         throw new ApiException(ErrorCode.VAL_001, 'مقدّم الخدمة ده مالوش سعر شهري محدد', HttpStatus.BAD_REQUEST);
       }
+      // حجز شهري مقيم جديد بيشغل الفني "للأبد" لحد ما يتلغي/يخلص (durationHours=null، ADR-0030).
+      await this.workersService.assertNoSchedulingConflict(worker.id, scheduledAt, null);
       priceCents = worker.monthlyRateCents;
     }
 

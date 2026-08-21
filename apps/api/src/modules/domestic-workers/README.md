@@ -87,6 +87,27 @@ pending ويمنع اعتماد صفحة قديمة؛ نسختان من `sweep()
 
 مرجع كامل: `../../../../docs/08-pricing-engine-and-platform-vision.md` §12 و`../../../../docs/adr/0004-domestic-workers-vertical.md`.
 
+## فحص تعارض جدولي حقيقي — إصلاح فجوة صحة بيانات (ADR-0030)
+
+**اكتشاف حي (Explore agent) أثناء تصميم ميزة إظهار المرشّحين المتعارضين**: صفر فحص تعارض جدولي
+من أي نوع لحجز الشغالة كان موجود قبل كده — لا في المسار القديم (`DomesticWorkerBookingsService.create()`)
+ولا في مسار الطلبات الموحّد الجديد (`OrdersService.create()`، ADR-0029 Slice 2a). عميلين كانوا
+يقدروا يحجزوا نفس الشغالة لنفس الوقت بالظبط بلا أي رفض — بَقّة صحة بيانات حقيقية، مش مجرد فجوة UX.
+
+- **`DomesticWorkersService.assertNoSchedulingConflict(workerId, startsAt, durationHours, opts?)`
+  جديدة** — بتفحص المسارين (القديم `domestic_worker_bookings` والجديد
+  `orders.domestic_worker_profile_id`) عن أي حجز/طلب نشط بيتقاطع زمنيًا. حجز `hourly` بمداه الحقيقي؛
+  حجز `monthly_live_in` نشط بيُعتبر شاغل كل وقت الفني طول مدته. `durationHours=null` معناها فترة
+  مفتوحة (حجز شهري جديد بيبدأ الآن).
+- **مطبَّقة على المسارين** — `DomesticWorkerBookingsService.create()` (الفرعين hourly وmonthly) و
+  `OrdersService.create()`'s فرع الشغالة، نفس الدالة، صفر منطق مكرر.
+- **`orders.domestic_worker_duration_hours` عمود جديد** (migration 0167) — كان ناقص من Slice 2a
+  (اتحسب للسعر بس واتفقد)، لازم لفحص التعارض يشتغل على المسار الجديد.
+- اختبار حي جديد: `scheduling-conflict.spec.ts` (5/5).
+
+القرار الكامل (بما فيه الشريحة الأكبر التالية — سياسة إظهار المرشّحين المتعارضين للعميل بدل
+إخفائهم تمامًا) في `../../../../docs/adr/0030-schedule-conflict-visibility-policy.md`.
+
 ## هجرة للمحرك الموحّد (docs/08 §42 Phase A.4، ADR-0029) — قيد التنفيذ، صفر تغيير هنا لسه
 
 طلب مالك (2026-08-21): المسار النهائي لحجز الشغالة يستخدم بنية Service/Order/Pricing/Payment/

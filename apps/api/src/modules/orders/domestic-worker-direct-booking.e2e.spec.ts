@@ -324,6 +324,7 @@ describe('OrdersService.create() — حجز فني (شغالة) مباشر عب�
       address_id: ids.address,
       domestic_worker_profile_id: ids.workerProfile,
       duration_hours: 3,
+      scheduled_at: '2027-01-10T10:00:00Z',
     } as never);
     expect(order.orderStatus).toBe(OrderStatus.ACCEPTED);
     expect(order.technicianId).toBeNull();
@@ -340,6 +341,7 @@ describe('OrdersService.create() — حجز فني (شغالة) مباشر عب�
         address_id: ids.address,
         domestic_worker_profile_id: ids.workerProfile,
         duration_hours: 2,
+        scheduled_at: '2027-01-20T10:00:00Z',
         payment_method: 'card',
       } as never),
     ).rejects.toMatchObject({ code: 'VAL_001' });
