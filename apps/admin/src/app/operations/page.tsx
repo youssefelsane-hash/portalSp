@@ -1263,14 +1263,6 @@ export default function OperationsOverviewPage() {
           <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
 
           <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} />
-
-          <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-            <p>
-              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (بحث/فلترة شاملة،
-              بروفايل فني 360...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
-            </p>
-          </section>
         </div>
       )}
     </AppShell>

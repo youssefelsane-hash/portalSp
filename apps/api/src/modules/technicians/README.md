@@ -808,3 +808,30 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   !== null`، قراءة بس صفر استعلام إضافي — العمود أصلاً محمّل مع الصف). `apps/admin`'s صفحة تفاصيل
   الفني بقت بتوضّح إن `is_available`/`is_on_duty` "مؤشرات ذاتية قديمة (مش بتمنع استقبال الطلبات)"
   وتعرض الشرط الحقيقي (وجود GPS) بشكل صريح، بلون تحذيري لو مفيش موقع محفوظ.
+
+## بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-21) — "أونلاين دلوقتي" كان دايمًا `false` لكل الفنيين
+
+نفس اليوم، بلاغ تاني: صفحة "مركز العمليات" (`/operations`) بتعرض "حالة الاتصال" لكل الفنيين وكانت
+دايمًا "أوفلاين" — محدّش ظاهر أونلاين خالص، حتى فنيين مسجّلين دخول فعليًا دلوقتي.
+
+**السبب الحقيقي — مش بَقّة في `RealtimeSessionRegistry` نفسه** (تسجيل/قراءة `user_id` سليمين
+100%، مثبت بـ`order-tracking-gateway-presence.spec.ts` الجديد تحت). المشكلة إن
+`apps/technician-app` ماكانش بيفتح أي اتصال Socket.IO خالص لحد ما الفني يفتح شاشة تنفيذ طلب نشط
+(`order_execution_screen.dart`'s `TechnicianTrackingClient`، وبس وقت `order_status` فعّال). فني
+قاعد على الشاشة الرئيسية بلا طلب نشط معندوش أي socket مفتوح أصلاً — فـ`isUserOnline()` بترجع
+`false` بحق، مش بسبب أي خطأ في القراءة.
+
+**الإصلاح** (`apps/technician-app/lib/main.dart`'s `_AuthGate`): اتصال "حضور" مستقل — نفس
+`TechnicianTrackingClient`/namespace `/tracking` الموجود، **بلا `order_id` وبلا `tracking:join`
+خالص** (`OrderTrackingGateway.handleConnection()` بيسجّل الفني في `RealtimeSessionRegistry` وقت
+الاتصال نفسه، قبل أي انضمام لغرفة — مفيش حاجة تتطلّب order_id أصلاً). بيتفتح بمجرد ما الفني
+يسجّل دخول (`AuthRepository.isAuthenticated`)، وبيتقفل عند تسجيل الخروج أو لما التطبيق يروح
+الخلفية (`AppLifecycleState.paused`/`detached`، عبر `WidgetsBindingObserver`) ويترجع يفتح تاني
+عند الرجوع (`resumed`). **آمن تمامًا مع اتصال تتبع الطلب الموجود** — `RealtimeSessionRegistry`
+بيستخدم `Set<Socket>` لكل `user_id` مش قيمة واحدة، فالاتنين بيشتغلوا مع بعض من غير تعارض (لو فني
+عنده طلب نشط، عنده socket حضور + socket تتبع في نفس الوقت، وبيفضل أونلاين لحد ما الاتنين يتقطعوا).
+
+- **اختبار حي جديد** (`order-tracking-gateway-presence.spec.ts`، 4/4، `RealtimeSessionRegistry`
+  حقيقي مش mock): اتصال بلا `order_id`/`tracking:join` خالص بيسجّل الفني أونلاين فعليًا، قطع
+  الاتصال بيرجّعه أوفلاين، اتصالين متزامنين (حضور + تتبع) بيفضلوا أونلاين لحد ما الاتنين يتقطعوا.
+- `flutter analyze` نضاف (صفر تحذيرات جديدة من التعديل).

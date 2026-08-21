@@ -272,3 +272,23 @@ flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api
 بالفعل بلا أي عرض ليها.
 
 اتأكد بـ`flutter analyze` على كل التطبيق — صفر تحذيرات جديدة.
+
+## بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-21) — "أونلاين دلوقتي" في الأدمن كان دايمًا `false`
+
+`TechnicianTrackingClient` (فوق) كان بيتصل بس لما `OrderExecutionScreen` يفتح على طلب في حالة
+نشطة — يعني فني مسجّل دخول وقاعد على `AvailableOrdersScreen` بلا طلب حالي معندوش أي socket
+مفتوح خالص، فمؤشر "أونلاين دلوقتي" في الأدمن (docs/08 §35.10) كان بيظهر أوفلاين له دايمًا حتى لو
+فاتح التطبيق فعليًا دلوقتي.
+
+**الإصلاح** (`lib/main.dart`'s `_AuthGate`): اتصال "حضور" مستقل — نفس `TechnicianTrackingClient`
+بالحرف بس بلا `orderId` (`connect(accessToken: ...)` من غير باراميتر تاني)، فمفيش `tracking:join`
+ولا انضمام لأي غرفة — الباك-إند (`OrderTrackingGateway.handleConnection()`) بيسجّل الفني في
+`RealtimeSessionRegistry` وقت الاتصال نفسه، قبل أي غرفة أصلاً. بيتفتح بمجرد
+`AuthRepository.isAuthenticated` (مباشرة بعد تسجيل الدخول، أو فورًا لو جلسة محفوظة سليمة)، وبيتقفل
+عند تسجيل الخروج أو رجوع التطبيق للخلفية (`WidgetsBindingObserver`'s `AppLifecycleState.paused`/
+`detached`)، ويترجع يفتح عند العودة (`resumed`). **منفصل تمامًا عن اتصال تتبع الطلب الموجود** —
+الاتنين ممكن يشتغلوا مع بعض من غير تعارض (`RealtimeSessionRegistry` بيستخدم `Set<Socket>` لكل
+`user_id`).
+
+اتأكد حي بـ`order-tracking-gateway-presence.spec.ts` (apps/api) — اتصال بلا order_id لوحده كافي
+يسجّل الفني أونلاين فعليًا ضد `RealtimeSessionRegistry` حقيقي (مش mock). `flutter analyze` نضاف.
