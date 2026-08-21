@@ -21,8 +21,18 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
   final DateTime? requestedAtRangeEnd;
+  // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36): اعتماد كان بيتخطى الشاشة دي بالكامل.
+  // افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات فردي formula) يفضل شغال
+  // بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
+  final BookingMode bookingMode;
 
-  const JobDetailsScreen({super.key, required this.service, this.requestedAt, this.requestedAtRangeEnd});
+  const JobDetailsScreen({
+    super.key,
+    required this.service,
+    this.bookingMode = BookingMode.individual,
+    this.requestedAt,
+    this.requestedAtRangeEnd,
+  });
 
   @override
   State<JobDetailsScreen> createState() => _JobDetailsScreenState();
@@ -97,6 +107,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       MaterialPageRoute(
         builder: (_) => TechnicianSelectionScreen(
           service: widget.service,
+          bookingMode: widget.bookingMode,
           initialAddress: _selectedAddress,
           fieldValues: Map<String, dynamic>.from(_fieldValues),
           requestedAt: widget.requestedAt,

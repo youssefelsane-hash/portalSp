@@ -45,12 +45,17 @@ class CreateOrderScreen extends StatefulWidget {
   // بيختار أقرب يوم فعليًا متاح جوّه [requestedAt, requestedAtRangeEnd] بدل requestedAt الحرفي.
   // بتتصفّر تلقائيًا لو العميل غيّر الموعد من هنا (نفس فلسفة _pickSchedule تحت).
   final DateTime? requestedAtRangeEnd;
+  // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36): اعتماد بقى بياخد نفس فلو فردي (TechnicianSelectionScreen
+  // → CompanyMarketplaceScreen اختياري) قبل ما يوصل هنا — نفس فلسفة requestedTechnicianId فوق
+  // بالحرف، بس لشركة بدل فني فرد.
+  final String? requestedTechnicianCompanyId;
 
   const CreateOrderScreen({
     super.key,
     required this.service,
     required this.bookingMode,
     this.requestedTechnicianId,
+    this.requestedTechnicianCompanyId,
     this.scheduleSlotId,
     this.initialAddress,
     this.initialFieldValues,
@@ -289,7 +294,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<void> _loadCompanies() async {
     try {
       final companies = await _techniciansRepository.listActiveCompanies();
-      if (mounted) setState(() => _companies = companies);
+      if (!mounted) return;
+      setState(() {
+        _companies = companies;
+        // اعتماد (docs/08 §36 — إصلاح بَقّة): العميل ممكن يكون اختار شركة بالفعل من
+        // CompanyMarketplaceScreen قبل ما يوصل هنا — نفضّل اختياره، مش نمسحه.
+        if (widget.requestedTechnicianCompanyId != null) {
+          for (final c in companies) {
+            if (c.id == widget.requestedTechnicianCompanyId) {
+              _selectedCompany = c;
+              break;
+            }
+          }
+        }
+      });
     } on ApiException {
       // تجاهل — اختيار الشركة اختياري بحتة
     }
