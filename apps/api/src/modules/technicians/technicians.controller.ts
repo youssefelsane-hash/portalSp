@@ -28,6 +28,9 @@ import { TechnicianDocumentsService } from './technician-documents.service';
 import { TechnicianScheduleService } from './technician-schedule.service';
 import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificatesService } from './technician-certificates.service';
+import { PreferredCrewService } from './preferred-crew.service';
+import { InvitePreferredCrewMemberDto } from './dto/invite-preferred-crew-member.dto';
+import { toPreferredCrewMemberResponseDto } from './dto/preferred-crew-member-response.dto';
 import { toTechnicianProfileResponseDto } from './dto/technician-profile-response.dto';
 import { toTechnicianDocumentResponseDto } from './dto/technician-document-response.dto';
 import { toPortfolioLinkResponseDto } from './dto/portfolio-link-response.dto';
@@ -62,6 +65,7 @@ export class TechniciansController {
     private readonly scheduleService: TechnicianScheduleService,
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly technicianCategoriesService: TechnicianCategoriesService,
+    private readonly preferredCrewService: PreferredCrewService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -92,6 +96,53 @@ export class TechniciansController {
   async removeAssistant(@CurrentUser() user: JwtPayload) {
     const profile = await this.techniciansService.removeAssistant(user.sub);
     return { assistant_link_status: profile.assistantLinkStatus, assistant_technician_id: profile.assistantTechnicianId };
+  }
+
+  // الفريق المفضّل (docs/08 §36.16، ADR-0022) — شبكة تفضيل نظير-لنظير دائمة، صفر موافقة أدمن.
+  @Get('preferred-crew')
+  async listPreferredCrew(@CurrentUser() user: JwtPayload) {
+    const rows = await this.preferredCrewService.listMine(user.sub);
+    return rows.map(toPreferredCrewMemberResponseDto);
+  }
+
+  @Get('preferred-crew/invitations')
+  async listPreferredCrewInvitations(@CurrentUser() user: JwtPayload) {
+    const rows = await this.preferredCrewService.listInvitationsReceived(user.sub);
+    return rows.map(toPreferredCrewMemberResponseDto);
+  }
+
+  @Post('preferred-crew')
+  async invitePreferredCrewMember(@CurrentUser() user: JwtPayload, @Body() dto: InvitePreferredCrewMemberDto) {
+    const row = await this.preferredCrewService.invite(user.sub, dto.member_technician_code);
+    return { id: row.id, status: row.status };
+  }
+
+  @Post('preferred-crew/invitations/:id/accept')
+  @HttpCode(HttpStatus.OK)
+  async acceptPreferredCrewInvitation(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    const row = await this.preferredCrewService.accept(user.sub, id);
+    return { id: row.id, status: row.status };
+  }
+
+  @Post('preferred-crew/invitations/:id/decline')
+  @HttpCode(HttpStatus.OK)
+  async declinePreferredCrewInvitation(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.preferredCrewService.decline(user.sub, id);
+    return { success: true };
+  }
+
+  @Delete('preferred-crew/:id')
+  @HttpCode(HttpStatus.OK)
+  async removePreferredCrewMember(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.preferredCrewService.remove(user.sub, id);
+    return { success: true };
+  }
+
+  @Post('preferred-crew/:id/leave')
+  @HttpCode(HttpStatus.OK)
+  async leavePreferredCrew(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.preferredCrewService.leave(user.sub, id);
+    return { success: true };
   }
 
   @Get('level')

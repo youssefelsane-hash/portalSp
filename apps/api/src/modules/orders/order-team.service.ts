@@ -40,6 +40,7 @@ export interface RecruitCandidateRow {
   averageRating: string;
   distanceKm: string | null;
   isLeaderTeamMember: boolean;
+  isPreferredCrewMember: boolean;
   capacityTier: TechnicianCapacityTier;
 }
 
@@ -262,6 +263,10 @@ export class OrderTeamService {
    * `technician_companies.id` بتاع القائد) بيترتّب أولاً — أعضاء فريقه الدائم بيظهروا فوق أي فني
    * تاني لو مؤهّلين، من غير ما نستبعد الباقي.
    *
+   * **أولوية الفريق المفضّل (docs/08 §36.17، ADR-0022)**: `isPreferredCrewMember` (عضو مقبول في
+   * الفريق المفضّل الدائم بتاع القائد) بيترتّب تاني حاجة بعد `isLeaderTeamMember` مباشرة — مستوى
+   * أولوية إضافي، صفر تأثير على الاستبعاد (فني غير مؤهّل لسه بيتستبعد حتى لو في الفريق المفضّل).
+   *
    * ملاحظة أداء: تصنيف القدرة (`classifyTechnicianCapacity`) بيتحسب لكل مرشّح على حدة (N استعلام
    * بعد LIMIT 30) بدل تكرار منطق الـCTE المعقّد بتاعها inline هنا — إعادة استخدام الدالة الواحدة
    * (ADR-0021 §5: "صفر مصدر حقيقة تاني") أهم من توفير استعلام واحد في مسار مش ساخن (يتنادى من
@@ -288,7 +293,12 @@ export class OrderTeamService {
       SELECT tp.id AS "technicianId", u.full_name AS "fullName", u.avatar_url AS "avatarUrl",
              tp.current_level AS "currentLevel", tp.average_rating AS "averageRating",
              ST_Distance(tp.current_location, a.location) / 1000.0 AS "distanceKm",
-             (tp.company_id IS NOT NULL AND tp.company_id = $4::uuid) AS "isLeaderTeamMember"
+             (tp.company_id IS NOT NULL AND tp.company_id = $4::uuid) AS "isLeaderTeamMember",
+             EXISTS (
+               SELECT 1 FROM technician_preferred_crew_members pcm
+               WHERE pcm.owner_technician_id = $2 AND pcm.member_technician_id = tp.id
+                 AND pcm.status = 'accepted' AND pcm.deleted_at IS NULL
+             ) AS "isPreferredCrewMember"
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       JOIN orders o ON o.id = $1
@@ -311,7 +321,7 @@ export class OrderTeamService {
         AND CASE tp.current_level
               WHEN 'new' THEN 0 WHEN 'verified' THEN 1 WHEN 'professional' THEN 2
               WHEN 'premium' THEN 3 WHEN 'team_leader' THEN 4 END <= $3
-      ORDER BY "isLeaderTeamMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC
+      ORDER BY "isLeaderTeamMember" DESC, "isPreferredCrewMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC
       LIMIT 30
       `,
       [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],

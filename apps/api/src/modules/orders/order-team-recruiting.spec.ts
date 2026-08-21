@@ -307,6 +307,36 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     expect(junior?.capacityTier).toBe('LIGHT');
   });
 
+  it('listRecruitCandidates — عضو الفريق المفضّل المقبول بيترتّب بعد فريق القائد الدائم مباشرة (docs/08 §36.17، ADR-0022)', async () => {
+    const orderId = await insertOrder(`list-preferred-${runId}`, { requiredTechnicians: 3 });
+    await q(
+      `INSERT INTO technician_preferred_crew_members (owner_technician_id, member_technician_id, status, invited_at, responded_at)
+       VALUES ($1,$2,'accepted', now(), now())`,
+      [ids.leaderProfile, ids.juniorProfile],
+    );
+    try {
+      const candidates = await orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'technician');
+      // teamMateProfile لسه أول واحد (فريق دائم بيسبق الفريق المفضّل) — صفر تغيير في السلوك القديم.
+      expect(candidates[0].technicianId).toBe(ids.teamMateProfile);
+      const junior = candidates.find((c) => c.technicianId === ids.juniorProfile);
+      expect(junior?.isPreferredCrewMember).toBe(true);
+      // juniorProfile (فريق مفضّل) لازم يترتّب قبل seniorProfile-equivalent (أي مرشّح تاني مش
+      // فريق دائم ولا فريق مفضّل) — هنا الوحيد المتاح تاني هو wrongCategoryProfile المستبعد أصلاً،
+      // فالتحقق الحقيقي إن juniorProfile index أقل من أي مرشّح تاني isPreferredCrewMember=false.
+      const others = candidates.filter((c) => c.technicianId !== ids.teamMateProfile && c.technicianId !== ids.juniorProfile);
+      const juniorIndex = candidates.indexOf(junior!);
+      for (const other of others) {
+        expect(other.isPreferredCrewMember).toBe(false);
+        expect(juniorIndex).toBeLessThan(candidates.indexOf(other));
+      }
+    } finally {
+      await q(`DELETE FROM technician_preferred_crew_members WHERE owner_technician_id = $1 AND member_technician_id = $2`, [
+        ids.leaderProfile,
+        ids.juniorProfile,
+      ]);
+    }
+  });
+
   it('listRecruitCandidates — يرفض لو الدور المطلوب مكتمل بالفعل', async () => {
     const orderId = await insertOrder(`list-role-complete-${runId}`, { requiredTechnicians: 1, requiredAssistants: 0 });
     await expect(orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'technician')).rejects.toThrow();

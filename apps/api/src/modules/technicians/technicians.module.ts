@@ -41,6 +41,8 @@ import { TechnicianActivityService } from './technician-activity.service';
 import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
 import { AdminTechnician360Service } from './admin-technician-360.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
+import { PreferredCrewService } from './preferred-crew.service';
+import { TechnicianPreferredCrewMember } from './entities/technician-preferred-crew-member.entity';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianDocument } from './entities/technician-document.entity';
@@ -67,6 +69,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
       TechnicianScheduleSlot,
       TechnicianService,
       TechnicianCategory,
+      TechnicianPreferredCrewMember,
       Service,
       ServiceCategory,
       User,
@@ -106,6 +109,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     AdminTechnicianCategoryOpsService,
     AdminTechnician360Service,
     ScheduleSlotReleaseListener,
+    PreferredCrewService,
     storageServiceProvider,
   ],
   exports: [
@@ -118,6 +122,7 @@ import { TechnicianZone } from './entities/technician-zone.entity';
     TechnicianCategoriesService,
     TechnicianWorkOpportunitiesService,
     TechnicianActivityService,
+    PreferredCrewService,
   ],
 })
 export class TechniciansModule {}

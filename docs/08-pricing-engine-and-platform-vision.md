@@ -5756,3 +5756,51 @@ OTP/شات/دفع/تسعير، صفر مسار تجنيد فريق فيها). ب
 اتصلح بلا لمس كود الإنتاج (فيكستشرات/ترتيب تنظيف بس).
 
 جاهزة للدمج. مفيش PR اتفتحت — طلب صريح من المالك مطلوب قبل أي `gh pr create`.
+
+### §36.15 — إغلاق: تدقيق `assistant_link_status` + ADR-0022 (الفريق المفضّل)
+
+تدقيق حي (قراءة كود مباشرة، `technician-profile.entity.ts`) أكّد الفرق الجوهري اللي §36 كان
+مفترضه: `assistant_technician_id`/`assistant_link_status` علاقة **غير متماثلة واحد-لواحد** (فني
+رئيسي + مساعد تابع بالظبط)، محتاجة موافقة أدمن صريحة (`TechnicianAssistantLinkStatus`)، منفصلة
+تمامًا عن `order_team_members` (طاقم مؤقت لطلب واحد) و`technician_companies` (توظيف تنظيمي رسمي).
+
+**ADR-0022** (`docs/adr/0022-preferred-crew-peer-network.md`) بيوثّق تصميم "الفريق المفضّل" —
+نموذج تالت: شبكة تفضيل نظير-لنظير دائمة، جدول جديد `technician_preferred_crew_members` (اتجاه
+واحد owner→member، حالات invited/accepted/declined/removed، حد أقصى قابل للتعديل عبر settings،
+**صفر موافقة أدمن** — قرار مبرَّر: العلاقة دي تفضيل شخصي بحت بلا مسؤولية قانونية/أجر مرتبط مباشرة،
+عكس المساعد). الأولوية في التجنيد هتكون مستوى إضافي فوق `isLeaderTeamMember` الموجود من §35.1-3
+(`isLeaderTeamMember DESC, isPreferredCrewMember DESC, distanceKm ASC`) — إشارة ترتيب بس، صفر
+تجاوز لقواعد الأهلية/القدرة الموجودة. البدائل المرفوضة (صف متبادل تلقائي، موافقة أدمن، دمج مع
+`technician_companies`) موثّقة بالتفصيل في الـADR نفسه.
+
+### §36.16/36.17 — إغلاق: باك-إند الفريق المفضّل (عضوية/دعوة/قبول/رفض/مغادرة) + الأولوية في التجنيد
+
+منفَّذ بالكامل حسب ADR-0022:
+
+- **migration `0159_preferred_crew_members.sql`**: جدول `technician_preferred_crew_members` جديد
+  (`owner_technician_id`/`member_technician_id`/`status` enum `invited|accepted|declined|removed`)
+  + فهرس فريد جزئي (`WHERE status IN ('invited','accepted')` بس — علاقة "حية" واحدة بين نفس
+  الاتنين، مغادرة/إزالة بتفتح الباب لدعوة جديدة تاني) + `settings` key جديد
+  `matching.preferred_crew_max_size` (افتراضي 10).
+- **`TechnicianPreferredCrewMember` entity** + **`PreferredCrewService`**
+  (`apps/api/src/modules/technicians/preferred-crew.service.ts`) — `invite()`/`accept()`/
+  `decline()`/`remove()`/`leave()`/`listMine()`/`listInvitationsReceived()`/`getAcceptedMemberIds()`.
+  نفس نمط `TechniciansService.requestAssistant()` بالحرف (بحث بـ`technician_code`)، بس **صفر
+  موافقة أدمن** (قرار ADR-0022 — تفضيل شخصي بحت، مش توظيف).
+- **Endpoints** (`TechniciansController`، `technician/preferred-crew*`): `GET`/`POST` للقايمة/الدعوة،
+  `GET .../invitations` للدعوات الواردة، `POST .../invitations/:id/accept|decline`، `DELETE :id`
+  (إزالة من جانب الـowner)، `POST :id/leave` (مغادرة من جانب العضو).
+- **الأولوية في التجنيد (§36.17)**: `OrderTeamService.listRecruitCandidates()` بقى فيه
+  `isPreferredCrewMember` (نفس أسلوب `isLeaderTeamMember` — `EXISTS` subquery واحد، صفر N+1) —
+  الترتيب بقى `isLeaderTeamMember DESC, isPreferredCrewMember DESC, distanceKm ASC, ...`. صفر
+  تأثير على الاستبعاد — فني غير مؤهّل لسه بيتستبعد حتى لو في الفريق المفضّل. `RecruitCandidateRow`/
+  `RecruitCandidateResponseDto` اتوسّعوا بـ`is_preferred_crew_member`.
+- **اختبار حي جديد** (`preferred-crew.spec.ts`، 15/15): دعوة/قبول/رفض/إزالة/مغادرة، رفض دعوة النفس،
+  رفض كود مش موجود، رفض تعارض دعوة حية مكررة، دعوة جديدة ممكنة بعد مغادرة/رفض قديم، حد أقصى قابل
+  للتعديل بيمنع دعوة زيادة. اختبار تكامل في `order-team-recruiting.spec.ts` (16/16، +1 اختبار
+  جديد) بيثبت الترتيب الحقيقي: فريق دائم أول حاجة، فريق مفضّل بعده مباشرة، صفر تأثير على مرشّحين
+  تانيين.
+- **التحقق**: `tsc --noEmit`/`nest build` نضاف.
+
+**لسه فاضل من §36 الجزء ج**: §36.18 (`technician-app` UI)، §36.19 (`apps/admin` رؤية/تحكم +
+إشعارات + اختبارات كاملة).
