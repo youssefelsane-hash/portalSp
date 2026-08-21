@@ -6006,7 +6006,7 @@ build` (packages/shared-types) كلهم نضاف.
 `flutter analyze`/`tsc --noEmit` نضاف على كل التطبيقات الأربعة (api، admin، customer-app،
 technician-app). التفاصيل الكاملة في `apps/technician-app/README.md`، `apps/customer-app/README.md`.
 
-## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1 خلصت)
+## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.3 خلصوا)
 
 طلب مالك صريح واسع النطاق (مش إعادة بناء — تطوير وتوحيد): (أ) دمج حجز الشغالة/المربية والطلبات
 المتكررة في **محرك حجز واحد قابل للتهيئة** بدل ما كل خدمة غريبة تاخد مسارها المنفصل، و(ب) تطوير
@@ -6107,5 +6107,19 @@ technician-app). التفاصيل الكاملة في `apps/technician-app/READM
 `services.cash_allowed` (migration 0163، افتراضي `true`) + فحص `OrdersService.create()` + checkbox
 أدمن + تمديد `shared-types` + اختبار حي (3/3). التفاصيل الكاملة في
 `apps/api/src/modules/catalog/README.md` (قسم "services.cash_allowed"). صفر رجريشن — كل خدمة
-موجودة فضلت تقبل كاش بالظبط زي ما كانت. الشريحة الحالية قيد التنفيذ دلوقتي: **Phase A.2** (شكل
-الجدولة `allows_date_range_booking` + ربطها بـ`bulkSetAvailability`).
+موجودة فضلت تقبل كاش بالظبط زي ما كانت.
+
+### Phase A.3 — خلصت (2026-08-21، اتنفّذت قبل A.2 — سياسة الإيداع، فرع البروانش المخصّص لها)
+
+سياسة إيداع (`deposit_required`/`deposit_percentage` على `Service`، `deposit_amount_cents` snapshot
+على `Order`) — القرار الكامل والبدائل المرفوضة في `docs/adr/0027-service-deposit-policy.md`.
+**الاكتشاف الجوهري**: صفر آلية تحصيل جديدة مطلوبة — الإيداع هو أول دفعة أقل من الإجمالي، والباقي
+بيتحصّل تلقائيًا عبر آلية `AWAITING_PAYMENT`/`settleAlreadyPaidOrder()` الموجودة بالفعل لتحصيل
+البند الإضافي (ADR-0015) — السطر الحرج الوحيد اللي اتغيّر هو `PaymentsService.amountOwedNow()`
+(الحالة غير-المدفوعة بترجع `depositAmountCents ?? totalAmountCents` بدل `totalAmountCents` دايمًا).
+migration 0164 + فحص `OrdersService.create()`/`previewPrice()` + checkbox+حقل نسبة بالأدمن + تمديد
+`shared-types` + اختبار حي (`orders/service-deposit-policy.e2e.spec.ts`). التفاصيل الكاملة في
+`apps/api/src/modules/catalog/README.md` (قسم "services.deposit_required/deposit_percentage").
+صفر رجريشن — أي خدمة موجودة `deposit_required=false` (الافتراضي) فضلت تتحصّل بالإجمالي كامل زي ما
+كانت. **Phase A.2** (شكل الجدولة `allows_date_range_booking` + ربطها بـ`bulkSetAvailability`) لسه
+مفتوحة، الشريحة الجاية.

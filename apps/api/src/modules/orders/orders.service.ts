@@ -199,6 +199,18 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الدفع كاش مش متاح لهذه الخدمة — لازم تختار كارت أو InstaPay', HttpStatus.BAD_REQUEST);
     }
 
+    // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — كاش مينفعش يتقسّم "إيداع دلوقتي + باقي
+    // بعدين" فعليًا (بيتحصّل يدًا بيد مرة واحدة وقت الاستلام)، فخدمة deposit_required=true لازم
+    // دفع مقدّم إلكتروني إجباري بغض النظر عن cash_allowed. نفس استثناء إعادة الزيارة فوق بالحرف
+    // (مجانية بالكامل، مفيش إيداع يتحصّل أصلاً).
+    if (!dto.payment_method && !dto.original_order_id && service.depositRequired) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'هذه الخدمة تتطلب دفع إيداع مقدّم — لازم تختار كارت أو InstaPay',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // Script 7 Phase 7 — بَقّة حقيقية اتلقطت: الطوارئ (docs/06) معناها استجابة فورية بالتعريف
     // (نفس التعليق موثّق تحت لـ`schedule_slot_id`)، لكن الفحص القديم كان بيمنع `schedule_slot_id`
     // بس مع الطوارئ — `dto.scheduled_at` الحر (بلا سلوت محدد) كان بيعدّي عادي، فيتسجّل طلب
@@ -540,6 +552,14 @@ export class OrdersService {
         await manager.save(order);
       }
 
+      // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — snapshot مبلغ الإيداع بعد كل الخصومات
+      // (نفس سبب ترتيب requiresPrepay تحت بالحرف: النسبة بتتحسب على الإجمالي النهائي مش الخام).
+      // إعادة الزيارة (originalOrder) وأي إجمالي صفر مستثنيان — مفيش إيداع لمبلغ صفر أصلاً.
+      if (!originalOrder && service.depositRequired && order.totalAmountCents > 0) {
+        order.depositAmountCents = Math.round((order.totalAmountCents * Number(service.depositPercentage)) / 100);
+        await manager.save(order);
+      }
+
       // دفع قبل التوزيع (ADR-0013 §3/§4/§12) — بيتحدد هنا (بعد كل الخصومات، مش وقت إنشاء الصف
       // فوق) عشان لو خصم كامل (كود/عمارة) خلّى الإجمالي صفر، الطلب يتوزّع فورًا زي أي طلب مجاني
       // عادي بدل ما يعلّق PENDING_PAYMENT لمبلغ صفر مالوش معنى يتدفع. الطلب بيتسجّل SEARCHING_TECHNICIAN
@@ -731,6 +751,13 @@ export class OrdersService {
       discountSource = 'building';
     }
 
+    const totalAmountCents = subtotalBeforeDiscountCents - discountCents;
+    // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نفس حساب create() بالحرف (راجع تعليق
+    // depositAmountCents هناك). المعاينة لازم تطابق المحصّل الفعلي 100% (نفس مبدأ الملف كله).
+    const depositAmountCents = service.depositRequired && totalAmountCents > 0
+      ? Math.round((totalAmountCents * Number(service.depositPercentage)) / 100)
+      : null;
+
     return {
       base_price_cents: estimate.estimated_total_cents,
       inspection_fee_cents: estimate.inspection_fee_cents,
@@ -743,9 +770,12 @@ export class OrdersService {
       subtotal_before_discount_cents: subtotalBeforeDiscountCents,
       discount_cents: discountCents,
       discount_source: discountSource,
-      total_amount_cents: subtotalBeforeDiscountCents - discountCents,
+      total_amount_cents: totalAmountCents,
       estimated_duration_days: estimate.estimated_duration_days,
       level_price_multiplier: estimate.level_price_multiplier,
+      deposit_amount_cents: depositAmountCents,
+      due_now_cents: depositAmountCents ?? totalAmountCents,
+      remaining_amount_cents: depositAmountCents !== null ? totalAmountCents - depositAmountCents : null,
     };
   }
 

@@ -87,6 +87,16 @@ export class Service {
   @Column({ name: 'cash_allowed', type: 'boolean', default: true })
   cashAllowed: boolean;
 
+  // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نفس نمط cash_allowed بالحرف. الافتراضي false
+  // متعمّد (صفر تغيير سلوك). depositPercentage محصورة 1-99 على مستوى الـDB (migration 0164) ولازم
+  // تكون موجودة لو depositRequired=true — القيد ده مفروض بالـCHECK constraint وبالتحقق في
+  // AdminCatalogService.
+  @Column({ name: 'deposit_required', type: 'boolean', default: false })
+  depositRequired: boolean;
+
+  @Column({ name: 'deposit_percentage', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  depositPercentage: string | null;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',
