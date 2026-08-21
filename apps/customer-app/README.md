@@ -417,3 +417,21 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 `technicians_repository.dart`, `models.dart` (technicians)، `create_order_screen.dart`) — صفر
 تحذيرات جديدة، بس نفس الـ`info`-level lints القديمة الموجودة من قبل. تفاصيل الباك-إند الكاملة
 (الفلترة، دمج الشركات، اختبارات حية) في `../api/src/modules/technicians/README.md` §38.
+
+## وسائل الدفع المحفوظة — شاشة جديدة بالكامل (بلاغ مالك 2026-08-21، سويبة "backend بلا واجهة")
+
+`lib/features/payment_methods/` جديد بالكامل (`models.dart`, `payment_methods_repository.dart`,
+`payment_methods_screen.dart`) — كانت فجوة موثّقة صراحة: `GET/PATCH/DELETE /payment-methods`
+(docs/08 §21.3، `SavedPaymentMethodsService`) شغال ومختبر بالكامل بالباك-إند من زمان بلا أي شاشة
+في `apps/customer-app` تستهلكه — العميل معندوش طريقة يشوف كروته المحفوظة، يغيّر الافتراضية، أو
+يحذف كارت قديم.
+
+- **صفر "إضافة كارت" في الشاشة عمدًا** — نفس قرار الباك-إند (`saved-payment-methods.controller.ts`
+  تعليقه صريح): الحفظ بيحصل تلقائيًا عبر ويب-هوك حفظ الكارت وقت أول دفع حقيقي، مش عبر إدخال بيانات
+  كارت مباشر عندنا (صفر رقم كارت خام في قاعدة بياناتنا مطلقًا).
+  `masked_pan`/`card_brand` بس بيتعرضوا.
+- زرار جديد "وسائل الدفع المحفوظة" في `AccountScreen` (`lib/features/account/account_screen.dart`).
+- قايمة، تعيين افتراضي (`PATCH .../default`)، حذف بتأكيد (`showConfirmDialog` الموحّد، `DELETE`).
+  حالة فاضية توضّح إن الحفظ تلقائي، مش خطأ.
+
+`flutter analyze` نضاف على الملفين الجداد + `account_screen.dart` — صفر تحذيرات.

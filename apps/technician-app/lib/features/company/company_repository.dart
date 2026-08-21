@@ -32,6 +32,23 @@ class CompanyRepository {
     return CompanyBranch.fromJson(data!);
   }
 
+  // كانت فجوة موثّقة صراحة: PATCH /technician/company/branches/:branchId شغال ومختبر بالكامل
+  // بالباك-إند (اسم/عنوان/تفعيل) بلا أي كود في التطبيق بينادي عليه — الفرع كان إنشاء بس، تعديل
+  // اسم الفرع بعد الإنشاء ماكانش ممكن إلا بحذفه وعمل واحد جديد.
+  Future<CompanyBranch> updateBranch(
+    String branchId, {
+    String? name,
+    String? addressLine,
+    bool? isActive,
+  }) async {
+    final data = await auth.authedRequest('PATCH', '/technician/company/branches/$branchId', body: {
+      if (name != null && name.isNotEmpty) 'name': name,
+      if (addressLine != null) 'address_line': addressLine,
+      if (isActive != null) 'is_active': isActive,
+    });
+    return CompanyBranch.fromJson(data!);
+  }
+
   Future<StaffMember> addStaff({
     required String technicianCode,
     required String teamRole,

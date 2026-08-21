@@ -8,6 +8,8 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../media/media_repository.dart' show MediaRepository, OrderMediaItem;
+import '../ratings/rating_dialog.dart';
+import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
 import '../support/support_contact_screen.dart';
 import '../tracking/tracking_client.dart';
@@ -46,12 +48,17 @@ class OrderExecutionScreen extends StatefulWidget {
 class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   late final OrdersRepository _repository;
   late final MediaRepository _mediaRepository;
+  late final RatingsRepository _ratingsRepository;
   late final String _accessToken;
   final _trackingClient = TechnicianTrackingClient();
   late Order _order;
   bool _acting = false;
   bool _uploadingPhoto = false;
   bool _trackingConnected = false;
+  // تقييم الفني للعميل (technician_to_customer) — كانت فجوة موثّقة صراحة، راجع
+  // ../ratings/ratings_repository.dart. مفيش GET يتحقق مسبقًا لو اتقيّم قبل كده (نفس فجوة
+  // customer-app بالضبط) — 409 بيتعامل معاه كنجاح ضمني (setState(_rated = true)).
+  bool _rated = false;
   String? _error;
   String? _photoMessage;
   CancellationPolicy? _cancellationPolicy;
@@ -64,6 +71,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     final auth = context.read<AuthRepository>();
     _repository = OrdersRepository(auth);
     _mediaRepository = MediaRepository(auth);
+    _ratingsRepository = RatingsRepository(auth);
     _accessToken = auth.accessToken!;
     _order = widget.initialOrder;
     _connectTrackingIfActive();
@@ -422,6 +430,32 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  Future<void> _rateCustomer() async {
+    final result = await showTechnicianRatingDialog(context);
+    if (result == null) return;
+    try {
+      await _ratingsRepository.rate(
+        _order.id,
+        overallRating: result.overallRating,
+        punctualityRating: result.punctualityRating,
+        professionalismRating: result.professionalismRating,
+        comment: result.comment,
+      );
+      if (mounted) {
+        setState(() => _rated = true);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('شكراً على تقييمك 🙏')));
+      }
+    } on ApiException catch (err) {
+      // 409 لو العميل قيّم الأول — نفس تعامل customer-app بالحرف (اعتبرها "اتقيّم" مش خطأ).
+      if (mounted) {
+        if (err.statusCode == 409) {
+          setState(() => _rated = true);
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      }
+    }
+  }
+
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
   @override
@@ -616,9 +650,20 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               ),
             ],
             const SizedBox(height: 24),
-            if (isDone)
-              const Center(child: Text('الطلب اتقفل — شكراً على شغلك 👍'))
-            else if (nextAction != null)
+            if (isDone) ...[
+              const Center(child: Text('الطلب اتقفل — شكراً على شغلك 👍')),
+              const SizedBox(height: 12),
+              if (_rated)
+                const Center(child: Text('اتقيّم العميل، شكراً 🙏'))
+              else
+                Center(
+                  child: OutlinedButton.icon(
+                    onPressed: _rateCustomer,
+                    icon: const Icon(Icons.star_outline),
+                    label: const Text('قيّم العميل'),
+                  ),
+                ),
+            ] else if (nextAction != null)
               FilledButton(
                 onPressed: _acting ? null : () => _runAction(nextAction),
                 child: _acting
