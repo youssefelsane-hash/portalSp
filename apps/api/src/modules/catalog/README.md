@@ -344,3 +344,16 @@
 - **خارج نطاق هذه الشريحة عمدًا**: دفع مقدّم لحجز شغالة، شات (Slice 2c/3)، واجهة Flutter/أدمن
   (Slice 3)، التكرار الشهري عبر `RecurringOrderTemplate` (Slice 4)، وأي تغيير على
   `domestic-workers` module الحالي (صفر لمس بالكامل).
+
+**تصحيح مالك (ADR-0031، 2026-08-21)**: خطة الهجرة فوق (Slice 1/2a) هتتلغي — الاتجاه الصحيح إلغاء
+`DomesticWorkerProfile`/`PricingModel.WORKER_RATE` بالكامل، مش نقلهم. راجع
+`docs/adr/0031-unified-provider-system-and-avatar-visibility.md`.
+
+## ظهور صورة البروفايل — `CatalogController` بقى محتاج `StorageService` (ADR-0031)
+
+`GET /services/:id/technicians` كان بيرجّع `avatar_url` خام من `users.avatar_url` بلا أي resolve —
+لو الفني عنده صورة معتمدة (`users.avatar_storage_key`)، لازم تتفك برابط طازج (presigned S3 URLs
+بتنتهي). `CatalogController` بقى فيه `@Inject(STORAGE_SERVICE)` جديد، وبعد ما `TechniciansService.listForServiceBooking()`
+ترجع، كل الصفوف بتتحلّ دفعة واحدة (`Promise.all(items.map(resolveAvatarUrl))`) قبل التحويل لـDTO —
+صفر تغيير على شكل `TechnicianBookingListItem` نفسه غير حقل `avatarStorageKey` إضافي. تفاصيل كاملة
+في `apps/api/src/modules/technicians/README.md`.

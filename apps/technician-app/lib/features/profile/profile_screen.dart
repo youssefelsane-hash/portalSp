@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -25,6 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _acting = false;
   bool _biometricAvailable = false;
   bool _biometricEnabled = false;
+  bool _uploadingPhoto = false;
 
   @override
   void initState() {
@@ -87,6 +89,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // ADR-0031 (بلاغ مالك 2026-08-21) — كانت بَقّة حقيقية: مفيش شاشة في التطبيق كانت بترفع/تعرض
+  // صورة شخصية أصلاً بعد اعتماد الفني (OnboardingScreen بتتفتح مرة واحدة قبل الاعتماد بس، راجع
+  // main.dart's _VerificationGate). نفس document_type=photo القديم، نفس endpoint، بس متاح دلوقتي
+  // من هنا كمان — الصورة بتظهر فورًا (GET /technician/me بترجّع آخر صورة رفعها الفني نفسه، بغض
+  // النظر عن حالة المراجعة)، وبعد اعتماد الأدمن ليها بتبقى هي الأفتار اللي العميل بيشوفه.
+  Future<void> _changePhoto() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return;
+    setState(() {
+      _uploadingPhoto = true;
+      _error = null;
+    });
+    try {
+      final bytes = await picked.readAsBytes();
+      await _repository.uploadDocument(documentType: 'photo', fileBytes: bytes, filename: picked.name);
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
   Future<void> _removeAssistant() async {
     setState(() {
       _acting = true;
@@ -116,6 +141,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
+                      Center(
+                        child: Column(
+                          children: [
+                            Stack(
+                              children: [
+                                CircleAvatar(
+                                  radius: 48,
+                                  backgroundImage: me.avatarUrl != null ? NetworkImage(me.avatarUrl!) : null,
+                                  child: me.avatarUrl == null ? const Icon(Icons.person, size: 48) : null,
+                                ),
+                                Positioned(
+                                  bottom: 0,
+                                  left: 0,
+                                  child: CircleAvatar(
+                                    radius: 16,
+                                    child: _uploadingPhoto
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          )
+                                        : IconButton(
+                                            icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                                            onPressed: _changePhoto,
+                                            tooltip: 'غيّر صورتك',
+                                          ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (me.verificationStatus == 'approved')
+                              const Padding(
+                                padding: EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'صورتك المعتمدة هي اللي العميل بيشوفها — أي صورة جديدة تترفع لازم اعتماد الأدمن الأول',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),

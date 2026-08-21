@@ -40,6 +40,12 @@ export class User {
   @Column({ name: 'avatar_url', type: 'text', nullable: true })
   avatarUrl: string | null;
 
+  // ADR-0031 — المصدر المعتمد (بعد موافقة الأدمن) لأفتار الفني/الشغالة، موجود لو فيه صورة معتمدة.
+  // storage key ثابت مش رابط جاهز (presigned S3 URLs بتنتهي) — يتفك عبر resolveAvatarUrl() وقت
+  // كل قراءة، نفس نمط branding/technician_documents/technician_certificates بالحرف.
+  @Column({ name: 'avatar_storage_key', type: 'text', nullable: true })
+  avatarStorageKey: string | null;
+
   @Index()
   @Column({ name: 'user_type', type: 'enum', enum: UserType, enumName: 'user_type' })
   userType: UserType;

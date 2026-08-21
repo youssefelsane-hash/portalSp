@@ -313,3 +313,21 @@ flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api
 
 اتأكد بـ`flutter analyze` على كل التطبيق — صفر تحذيرات جديدة (بس نفس `use_null_aware_elements`
 info الموجودة بالفعل في repositories تانية، مش رجريشن).
+
+## صورة البروفايل — كانت معدومة في "بروفايلي" بعد الاعتماد (ADR-0031، بلاغ مالك 2026-08-21)
+
+بَقّة حقيقية: `OnboardingScreen` هي الشاشة الوحيدة اللي فيها رفع مستندات (بما فيهم `photo`)، وبتختفي
+للأبد بعد أول اعتماد (`main.dart`'s `_VerificationGate` بتوجّه أي فني `approved` مباشرة
+لـ`AvailableOrdersScreen`) — فني معتمد معندوش أي طريقة يشوف/يغيّر صورته الشخصية من التطبيق خالص،
+وأصلاً مفيش أي شاشة كانت بتعرض الصورة كصورة (مجرد `ListTile` نصي بحالة المراجعة).
+
+- **`TechnicianMe.avatarUrl`** جديد (`onboarding/models.dart`) — من `GET /technician/me`، بيرجّع
+  آخر صورة رفعها الفني نفسه (بغض النظر عن حالة المراجعة — معاينة ذاتية فورية، مش الأفتار المعتمد
+  اللي العميل بيشوفه، تفاصيل الفرق الكامل في `apps/api/src/modules/technicians/README.md`).
+- **`ProfileScreen`** بقى فيها `CircleAvatar` + زرار كاميرا صغير فوق كارت "بروفايلي" — بيعيد استخدام
+  `OnboardingRepository.uploadDocument(documentType:'photo')` الموجودة أصلاً (`image_picker`، نفس
+  نمط `OnboardingScreen._pickAndUpload()` بالحرف)، صفر endpoint جديد. تنبيه صغير للفني: صورته
+  المعتمدة (اللي العميل بيشوفها) لازم تعتمد الأدمن عليها الأول.
+
+مفيش Flutter SDK في بيئة السيشن دي وقت الشريحة دي — مراجعة يدوية دقيقة (توازن الودجت، الأنواع)
+بدل `flutter analyze` فعلي، موثّق بصراحة مش ادّعاء اختبار حصل.

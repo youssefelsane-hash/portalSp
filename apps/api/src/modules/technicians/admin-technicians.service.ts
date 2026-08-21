@@ -22,7 +22,7 @@ import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ApproveTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
-import { DocumentReviewStatus, TechnicianDocument } from './entities/technician-document.entity';
+import { DocumentReviewStatus, TechnicianDocument, TechnicianDocumentType } from './entities/technician-document.entity';
 import { TechnicianLevelChangeType, TechnicianLevelHistory } from './entities/technician-level-history.entity';
 import { TechnicianAssistantLinkStatus, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
@@ -266,6 +266,16 @@ export class AdminTechniciansService {
     document.reviewedByUserId = adminUserId;
     document.reviewedAt = new Date();
     await this.documents.save(document);
+
+    // ADR-0031 — اعتماد مستند "صورة شخصية" (photo) هو اللحظة اللي الصورة تبقى فيها الأفتار
+    // الرسمي المعروض للعميل (قبل الاعتماد، العميل مش المفروض يشوفها خالص — الفني نفسه بس بيشوفها
+    // فورًا وقت الرفع عبر GET /technician/me، مصدر منفصل تمامًا، راجع technicians.controller.ts).
+    if (dto.review_status === DocumentReviewStatus.APPROVED && document.documentType === TechnicianDocumentType.PHOTO) {
+      const profile = await this.technicianProfiles.findOne({ where: { id: technicianProfileId } });
+      if (profile) {
+        await this.users.update(profile.userId, { avatarStorageKey: document.storageKey });
+      }
+    }
 
     await this.auditLog.record({
       actorUserId: adminUserId,
