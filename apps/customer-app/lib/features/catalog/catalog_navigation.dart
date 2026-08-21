@@ -46,10 +46,15 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   if (!context.mounted) return;
   Navigator.of(context).push(
     MaterialPageRoute(
-      // نفس منطق ServicesScreen الأصلي بالحرف (P0-10، 2026-08-13): فردي وpricing_model=formula
-      // لازم يجمع تفاصيل الشغل (JobDetailsScreen) قبل قايمة الفنيين، فردي وسعر ثابت يروح لقايمة
-      // الفنيين مباشرة، اعتماد/طوارئ يروحوا CreateOrderScreen (فيها اختيار شركة/فريق أو توزيع تلقائي).
-      builder: (_) => bookingMode != BookingMode.individual
+      // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36، 2026-08-21): اعتماد (team) كان متجمّع
+      // مع طوارئ في الفرع القديم ده — بيروح CreateOrderScreen على طول، فيتخطى خطوة العنوان/تفاصيل
+      // الشغل وخطوة اختيار الفريق المنفصلتين اللي فردي بياخدهم. طلب المالك صريح: "خلي الفلو بتاع
+      // اعتماد هو هو نفس الفلو بتاع شغلانة وسيطة أو خفيفة" — فردي واعتماد بقوا بياخدوا **نفس**
+      // الفرع (formula → JobDetailsScreen، سعر ثابت → TechnicianSelectionScreen مباشرة)، وbookingMode
+      // بتتمرر تحت عشان الشاشتين تعرفوا يفرّقوا (اختيار فني فردي مقابل اختيار شركة/فريق). طوارئ
+      // بس هو اللي فضل بيروح CreateOrderScreen مباشرة — تصرف مقصود وموثّق (استجابة فورية بالتعريف،
+      // نفس استثناء ScheduleSelectionScreen فوق).
+      builder: (_) => bookingMode == BookingMode.emergency
           ? CreateOrderScreen(
               service: service,
               bookingMode: bookingMode,
@@ -57,8 +62,18 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
               requestedAtRangeEnd: scheduledAtRangeEnd,
             )
           : service.pricingModel == 'formula'
-              ? JobDetailsScreen(service: service, requestedAt: scheduledAt, requestedAtRangeEnd: scheduledAtRangeEnd)
-              : TechnicianSelectionScreen(service: service, requestedAt: scheduledAt, requestedAtRangeEnd: scheduledAtRangeEnd),
+              ? JobDetailsScreen(
+                  service: service,
+                  bookingMode: bookingMode,
+                  requestedAt: scheduledAt,
+                  requestedAtRangeEnd: scheduledAtRangeEnd,
+                )
+              : TechnicianSelectionScreen(
+                  service: service,
+                  bookingMode: bookingMode,
+                  requestedAt: scheduledAt,
+                  requestedAtRangeEnd: scheduledAtRangeEnd,
+                ),
     ),
   );
 }

@@ -3,6 +3,7 @@ import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/models.dart';
 import '../orders/create_order_screen.dart';
+import 'company_marketplace_screen.dart';
 import 'technician_marketplace_screen.dart';
 
 // اختيار الفني قبل الحجز (docs/08 §1.5، مُعاد تصميمها Script 6 Part 6-7) — كانت الشاشة دي
@@ -13,6 +14,13 @@ import 'technician_marketplace_screen.dart';
 // بتتحمّل أو تتعرض خالص لحد ما العميل يختار "يدوي" صراحة.
 class TechnicianSelectionScreen extends StatefulWidget {
   final CatalogService service;
+
+  // إصلاح بَقّة حقيقية اتبلّغت من المالك (docs/08 §36): اعتماد (BookingMode.team) كان بيتخطى
+  // الشاشة دي بالكامل ويقفز لـCreateOrderScreen على طول، عكس فردي. دلوقتي نفس الشاشة بتُستخدم
+  // للاتنين — "اختاروا لي الأنسب" يبقى تفويض تلقائي للمطابقة (فني أو شركة حسب الوضع)، و"اختار
+  // بنفسك" يفتح TechnicianMarketplaceScreen لفردي أو CompanyMarketplaceScreen لاعتماد. افتراضي
+  // individual عشان كل استدعاءات الشاشة دي القديمة (قبل الإصلاح ده) تفضل شغالة بلا أي تعديل.
+  final BookingMode bookingMode;
 
   // سياسة إلغاء الفني (docs/10) — لو اتبعت، الشاشة بتستخدمها بدل التنقل لـCreateOrderScreen
   // (نفس الشاشة، غرض مختلف: اختيار فني بديل لطلب موجود بالفعل، مش إنشاء طلب جديد). null يعني
@@ -41,6 +49,7 @@ class TechnicianSelectionScreen extends StatefulWidget {
   const TechnicianSelectionScreen({
     super.key,
     required this.service,
+    this.bookingMode = BookingMode.individual,
     this.onManualSelect,
     this.excludeTechnicianId,
     this.initialAddress,
@@ -84,7 +93,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     setState(() => _selectedAddress = address);
   }
 
-  void _confirmSelection({String? requestedTechnicianId}) {
+  void _confirmSelection({String? requestedTechnicianId, String? requestedTechnicianCompanyId}) {
     if (widget.onManualSelect != null) {
       widget.onManualSelect!(requestedTechnicianId);
       return;
@@ -93,8 +102,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
       MaterialPageRoute(
         builder: (_) => CreateOrderScreen(
           service: widget.service,
-          bookingMode: BookingMode.individual,
+          bookingMode: widget.bookingMode,
           requestedTechnicianId: requestedTechnicianId,
+          requestedTechnicianCompanyId: requestedTechnicianCompanyId,
           initialAddress: _selectedAddress,
           initialFieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
@@ -121,6 +131,17 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     );
   }
 
+  // اعتماد (docs/08 §36 — إصلاح بَقّة) — مكافئ _openMarketplace فوق بالحرف بس لاختيار شركة/فريق.
+  void _openCompanyMarketplace() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CompanyMarketplaceScreen(
+          onSelect: (id) => _confirmSelection(requestedTechnicianCompanyId: id),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final address = _selectedAddress;
@@ -139,7 +160,13 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: Text('اختار الفني: ${widget.service.nameAr}')),
+        appBar: AppBar(
+          title: Text(
+            widget.bookingMode == BookingMode.team
+                ? 'اختار الفريق: ${widget.service.nameAr}'
+                : 'اختار الفني: ${widget.service.nameAr}',
+          ),
+        ),
         body: address == null
             ? const SizedBox.shrink() // لسه بيختار عنوان (AddressesScreen فوقها)
             : Padding(
@@ -157,7 +184,7 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                     ),
                     const Spacer(),
                     Text(
-                      'إزاي حابب تختار الفني؟',
+                      widget.bookingMode == BookingMode.team ? 'إزاي حابب تختار الفريق/الشركة؟' : 'إزاي حابب تختار الفني؟',
                       style: Theme.of(context).textTheme.titleLarge,
                       textAlign: TextAlign.center,
                     ),
@@ -165,7 +192,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                     _ChoiceCard(
                       icon: Icons.bolt,
                       title: 'اختاروا لي الأنسب',
-                      subtitle: 'هنبعت الطلب لأنسب فني متاح فورًا حسب تقييمه وقربه منك',
+                      subtitle: widget.bookingMode == BookingMode.team
+                          ? 'هنبعت الطلب لأنسب فريق/شركة متاحة فورًا حسب تقييمها وقربها منك'
+                          : 'هنبعت الطلب لأنسب فني متاح فورًا حسب تقييمه وقربه منك',
                       onTap: () => _confirmSelection(),
                       highlighted: true,
                     ),
@@ -173,8 +202,10 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
                     _ChoiceCard(
                       icon: Icons.people_outline,
                       title: 'اختار الفريق بنفسك',
-                      subtitle: 'شوف قايمة الفنيين المتاحين وقارن بينهم قبل ما تختار',
-                      onTap: _openMarketplace,
+                      subtitle: widget.bookingMode == BookingMode.team
+                          ? 'شوف قايمة الشركات/الفرق المتاحة وقارن بينهم قبل ما تختار'
+                          : 'شوف قايمة الفنيين المتاحين وقارن بينهم قبل ما تختار',
+                      onTap: widget.bookingMode == BookingMode.team ? _openCompanyMarketplace : _openMarketplace,
                     ),
                     const Spacer(flex: 2),
                   ],

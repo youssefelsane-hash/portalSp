@@ -362,3 +362,39 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 الشاشات فوق (`requestedAtRangeEnd` جنب `requestedAt`) لحد `CreateOrderScreen`. وصف وضع الحجز
 الفردي ("شغلانة سريعة — حد يخلّصها بسرعة") اتشال كمان بنفس الطلب — بقى "فردي" بس (`BookingMode
 .labelAr`، `booking_mode_selector.dart`) — كان بيوحي باستعجال يتلخبط مع وضع "طوارئ" الفعلي.
+
+## بَقّة حقيقية اتلقطت واتصلحت — فلو "اعتماد" كان بيتخطى خطوات فردي كلها (بلاغ مالك مباشر، 2026-08-21)
+
+بلاغ المالك بالحرف: "لما بتختار فردي... مضبوط. ولكن لما بتيجي تختار اعتماد... بيدخلك على الصفحة
+بتاعت الدفع وتأكيد الطلب والبيانات، كله في نفس الصفحة، وده مش منطقي... خلي الفلو بتاع اعتماد هو
+هو نفس الفلو بتاع شغلانة وسيطة أو شغلانة خفيفة."
+
+السبب الجذري: `catalog_navigation.dart`'s `navigateToServiceBooking()` كان فيه فرع واحد بيجمع
+`BookingMode.team` مع `BookingMode.emergency` سوا (`bookingMode != BookingMode.individual`) —
+الاتنين كانوا بيروحوا `CreateOrderScreen` على طول بعد اليوم بس، من غير `JobDetailsScreen` (عنوان +
+مدخلات التسعير الديناميكي) ولا `TechnicianSelectionScreen` (تلقائي/يدوي). ده كان تصرف قديم من
+تصميم `docs/07` الأصلي (قبل أي من الشاشتين دول يتبنوا خالص) — فردي اتطوّر بعد كده (P0-10، Script 6
+Part 6-7) لخطوات منفصلة، اعتماد فضل زي ما كان بالضبط، صفر قرار تصميم متعمّد وراء الفرق ده (راجع
+تفاصيل التحقيق الكامل في تاريخ commit ده).
+
+**الإصلاح**: اعتماد بقى بياخد **نفس** فرع فردي بالحرف (`service.pricingModel == 'formula'` →
+`JobDetailsScreen`، وإلا `TechnicianSelectionScreen` مباشرة) — طوارئ بس هو اللي فضل على
+`CreateOrderScreen` مباشرة (تصرف مقصود وموثّق: استجابة فورية بالتعريف، نفس استثناء
+`ScheduleSelectionScreen` الموجود بالفعل لنفس السبب). `bookingMode` بقى بيتمرّر عبر السلسلة كلها
+(`JobDetailsScreen` → `TechnicianSelectionScreen` → `CreateOrderScreen`) نفس نمط `requestedAt`/
+`initialAddress` تمامًا. جوّه `TechnicianSelectionScreen`، "اختاروا لي الأنسب" لاعتماد يعني تفويض
+تلقائي (بلا `requestedTechnicianCompanyId`، نفس معنى "تلقائي" لفردي بالحرف)، و"اختار الفريق
+بنفسك" بيفتح شاشة جديدة `company_marketplace_screen.dart` (`CompanyMarketplaceScreen`) — مكافئ
+`TechnicianMarketplaceScreen` بس لقايمة شركات (`GET /technician-companies`، نفس استعلام كان
+موجود بالفعل جوّه `CreateOrderScreen` كـradio list اختياري، دلوقتي بقى خطوة منفصلة). `CreateOrderScreen`
+كسبت `requestedTechnicianCompanyId` constructor param جديد (نفس معنى `requestedTechnicianId`
+الموجود لفردي) — بيتفحص وقت تحميل `_loadCompanies()` عشان يحدّد `_selectedCompany` مسبقًا، والقايمة
+الاختيارية جوّه الصفحة (كانت موجودة من زمان) فضلت زي ما هي — العميل لسه يقدر يغيّر رأيه قبل التأكيد
+النهائي (نفس فلسفة "تغيير العنوان").
+
+**تحقّق**: `flutter analyze` نضاف بالكامل (صفر تحذيرات/أخطاء جديدة من الملفات المتأثرة أو الملف
+الجديد). `flutter test` (الجناح الموجود، 7/7) نضاف. **فجوة موثّقة صراحة**: مفيش تحقق حي بمنهجية
+Xvfb+fluxbox+xdotool الموصوفة فوق للمسار الجديد بالذات (محتاج بيانات تطوير: خدمة formula + خدمة
+سعر ثابت الاتنين بيدعموا اعتماد، وشركة فعّالة مزروعة) — الثقة مبنية على تتبّع الكود بعناية ومطابقته
+بالحرف لنفس النمط المُختبَر حيًا فعلاً لفردي (نفس الملفات، نفس الـconstructor parameters، صفر منطق
+جديد مخترع). محتاج تأكيد حي في سيشن لاحقة.
