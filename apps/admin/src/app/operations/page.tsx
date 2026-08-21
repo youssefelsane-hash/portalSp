@@ -89,21 +89,119 @@ function verificationBadgeVariant(status: AdminCategoryOpsRowDto['verification_s
   return 'outline' as const;
 }
 
+// إعادة تعيين سريعة لصف "توزيع متأخر" (docs/08 §36.11 — تحكم أدمن من مركز العمليات، استهلاك
+// أوامر §35.3 الموجودة بالحرف: GET /admin/orders/:id/eligible-technicians +
+// POST /admin/orders/:id/reassign، صفر endpoint جديد). نفس الأوامر المستخدمة فعليًا في صفحة
+// تفاصيل الطلب (`orders/[id]/page.tsx`)، بس مُتاحة هنا كإجراء سريع بلا ما الأدمن يضطر يفتح
+// الطلب لوحده. مبنية كمكوّن فرعي عشان حالة "الفورم مفتوح/مقفول" تفضل مستقلة لكل صف.
+function StaleDispatchReassignAction({
+  orderId,
+  authedFetch,
+  onReassigned,
+}: {
+  orderId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  onReassigned: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [eligible, setEligible] = useState<{ technicianId: string; fullName: string }[] | null>(null);
+  const [technicianId, setTechnicianId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  function toggleOpen() {
+    setOpen((prev) => !prev);
+    setActionError(null);
+    if (!eligible) {
+      authedFetch<{ zoneId: string; items: { technicianId: string; fullName: string }[] }>(
+        `/admin/orders/${orderId}/eligible-technicians`,
+      )
+        .then(({ items }) => setEligible(items))
+        .catch(() => setEligible([]));
+    }
+  }
+
+  async function handleReassign() {
+    if (!technicianId) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      await authedFetch(`/admin/orders/${orderId}/reassign`, {
+        method: 'POST',
+        body: JSON.stringify({ technician_id: technicianId }),
+      });
+      setOpen(false);
+      setTechnicianId('');
+      onReassigned();
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button type="button" onClick={toggleOpen} className="text-xs text-primary hover:underline">
+        {open ? 'إلغاء' : 'إعادة تعيين لفني تاني'}
+      </button>
+      {open && (
+        <div className="flex flex-wrap items-center gap-2">
+          {eligible === null ? (
+            <span className="text-xs text-muted-foreground">بيحمّل الفنيين المؤهّلين...</span>
+          ) : eligible.length === 0 ? (
+            <span className="text-xs text-muted-foreground">مفيش فني مؤهّل متاح دلوقتي للطلب ده</span>
+          ) : (
+            <>
+              <SelectNative
+                value={technicianId}
+                onChange={(e) => setTechnicianId(e.target.value)}
+                className="h-8 max-w-[220px] text-xs"
+              >
+                <option value="">اختار فني</option>
+                {eligible.map((t) => (
+                  <option key={t.technicianId} value={t.technicianId}>
+                    {t.fullName}
+                  </option>
+                ))}
+              </SelectNative>
+              <button
+                type="button"
+                onClick={handleReassign}
+                disabled={!technicianId || saving}
+                className="rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+              >
+                {saving ? 'جاري...' : 'تأكيد'}
+              </button>
+            </>
+          )}
+          {actionError && <span className="text-xs text-destructive">{actionError}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // مركز الاستثناءات/التنبيهات (docs/08 §36.9) — "فوق تصعيد §35.4 + تنبيهات جديدة". لمحة "محتاج
 // تصرّف دلوقتي" (نوعين: نقص طاقم مصعّد + توزيع متأخر)، مش جدول قابل للتصفح — نفس فلسفة كارت
 // "يحتاج انتباه" في `/` (apps/admin/src/app/page.tsx)، بس مُركّزة على نطاق العمليات/المطابقة.
+// §36.11: صف "توزيع متأخر" فيه كمان إجراء سريع (إعادة تعيين) — راجع StaleDispatchReassignAction
+// فوق. صف "نقص طاقم" بيفضل رابط بس (تعديل الطاقم محتاج اختيار دور فني/مساعد، مكانه الطبيعي صفحة
+// الطلب نفسها اللي فيها الأداة دي بالفعل — صفر تكرار UI).
 function ExceptionCenterSection({
   categoryId,
   authedFetch,
+  hasPermission,
 }: {
   categoryId: string;
   authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  hasPermission: ReturnType<typeof useAuth>['hasPermission'];
 }) {
   const [data, setData] = useState<ExceptionCenterResponseDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  function refresh() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
@@ -112,6 +210,11 @@ function ExceptionCenterSection({
       .then(setData)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مركز الاستثناءات'))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authedFetch, categoryId]);
 
   const crewCount = data?.crew_shortage.total ?? 0;
@@ -171,18 +274,23 @@ function ExceptionCenterSection({
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium">توزيع متأخر — لسه «مُرسل» بعد ما فات معاده ({staleCount})</span>
               </div>
-              <ul className="flex flex-col gap-1.5">
+              <ul className="flex flex-col gap-2">
                 {data.stale_dispatch.items.map((item) => (
-                  <li key={item.assignment_id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
-                      عرض الطلب
-                    </Link>
-                    <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
-                      {item.full_name}
-                    </Link>
-                    <span className="text-xs text-muted-foreground">
-                      فات معاده: {new Date(item.expires_at).toLocaleString('ar-EG-u-nu-latn')}
-                    </span>
+                  <li key={item.assignment_id} className="flex flex-col gap-1 border-b pb-2 text-sm last:border-b-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                        عرض الطلب
+                      </Link>
+                      <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
+                        {item.full_name}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">
+                        فات معاده: {new Date(item.expires_at).toLocaleString('ar-EG-u-nu-latn')}
+                      </span>
+                    </div>
+                    {hasPermission('orders.reassign') && (
+                      <StaleDispatchReassignAction orderId={item.order_id} authedFetch={authedFetch} onReassigned={refresh} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -909,7 +1017,7 @@ function CoverageIntelligenceSection({
 }
 
 export default function OperationsOverviewPage() {
-  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
   const [categoryId, setCategoryId] = useState<string>('');
   const [overview, setOverview] = useState<OperationsOverview | null>(null);
@@ -1002,7 +1110,7 @@ export default function OperationsOverviewPage() {
             </div>
           </section>
 
-          <ExceptionCenterSection categoryId={categoryId} authedFetch={authedFetch} />
+          <ExceptionCenterSection categoryId={categoryId} authedFetch={authedFetch} hasPermission={hasPermission} />
 
           <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
 
@@ -1015,8 +1123,8 @@ export default function OperationsOverviewPage() {
           <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <p>
-              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (تحكم أدمن،
-              بحث/فلترة شاملة، بروفايل فني 360...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
+              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (بحث/فلترة شاملة،
+              بروفايل فني 360...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
             </p>
           </section>
         </div>
