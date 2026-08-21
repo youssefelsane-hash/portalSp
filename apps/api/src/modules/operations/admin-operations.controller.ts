@@ -4,9 +4,11 @@ import { UserType } from '../auth/entities/user.entity';
 import { AdminOperationsOverviewService } from './admin-operations-overview.service';
 import { AdminWorkloadForecastService } from './admin-workload-forecast.service';
 import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
+import { AdminExceptionCenterService } from './admin-exception-center.service';
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
 import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
 import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
+import { ExceptionCenterQueryDto } from './dto/exception-center-query.dto';
 
 // مركز العمليات (docs/08 §36.2 فصاعدًا) — بداية قسم جديد كامل بيتوسّع مرحلة بمرحلة (§36.3-14).
 @Controller('admin/operations')
@@ -16,6 +18,7 @@ export class AdminOperationsController {
     private readonly overviewService: AdminOperationsOverviewService,
     private readonly workloadForecastService: AdminWorkloadForecastService,
     private readonly dispatchDeliveryService: AdminDispatchDeliveryService,
+    private readonly exceptionCenterService: AdminExceptionCenterService,
   ) {}
 
   @Get('overview')
@@ -104,6 +107,43 @@ export class AdminOperationsController {
           is_stale: r.isStale,
         })),
         meta: result.feed.meta,
+      },
+    };
+  }
+
+  // مركز الاستثناءات/التنبيهات (docs/08 §36.9) — "فوق تصعيد §35.4 + تنبيهات جديدة". قايمة "محتاج
+  // تصرّف دلوقتي" محدودة (EXCEPTION_LIST_LIMIT)، مش جدول قابل للتصفح — راجع تعليق
+  // admin-exception-center.service.ts للتفصيل الكامل (النوعين وسبب اختيارهم).
+  @Get('exceptions')
+  async getExceptions(@Query() query: ExceptionCenterQueryDto) {
+    const result = await this.exceptionCenterService.getExceptions({
+      categoryId: query.category_id ?? null,
+      zoneId: query.zone_id ?? null,
+    });
+    return {
+      crew_shortage: {
+        items: result.crewShortage.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          scheduled_at: i.scheduledAt,
+          escalated_at: i.escalatedAt,
+          missing_technicians: i.missingTechnicians,
+          missing_assistants: i.missingAssistants,
+          is_overdue: i.isOverdue,
+        })),
+        total: result.crewShortage.total,
+      },
+      stale_dispatch: {
+        items: result.staleDispatch.items.map((i) => ({
+          assignment_id: i.assignmentId,
+          order_id: i.orderId,
+          technician_id: i.technicianId,
+          technician_code: i.technicianCode,
+          full_name: i.fullName,
+          sent_at: i.sentAt,
+          expires_at: i.expiresAt,
+        })),
+        total: result.staleDispatch.total,
       },
     };
   }

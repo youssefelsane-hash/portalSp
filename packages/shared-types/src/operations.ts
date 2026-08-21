@@ -82,3 +82,31 @@ export interface DispatchDeliveryResponseDto {
   summary: DispatchDeliverySummaryDto;
   feed: { items: DispatchDeliveryItemDto[]; meta: { page: number; perPage: number; total: number } };
 }
+
+// مركز الاستثناءات/التنبيهات (docs/08 §36.9، GET /admin/operations/exceptions) — "فوق تصعيد §35.4
+// + تنبيهات جديدة". قايمة "محتاج تصرّف دلوقتي" محدودة (لمحة، مش جدول قابل للتصفح) — راجع تعليق
+// admin-exception-center.service.ts للتفصيل الكامل. صفر نوع استثناء بعتبة وقت مخترعة.
+export interface CrewShortageExceptionItemDto {
+  order_id: string;
+  order_number: string;
+  scheduled_at: string;
+  escalated_at: string;
+  missing_technicians: number;
+  missing_assistants: number;
+  is_overdue: boolean;
+}
+
+export interface StaleDispatchExceptionItemDto {
+  assignment_id: string;
+  order_id: string;
+  technician_id: string;
+  technician_code: string;
+  full_name: string;
+  sent_at: string;
+  expires_at: string;
+}
+
+export interface ExceptionCenterResponseDto {
+  crew_shortage: { items: CrewShortageExceptionItemDto[]; total: number };
+  stale_dispatch: { items: StaleDispatchExceptionItemDto[]; total: number };
+}

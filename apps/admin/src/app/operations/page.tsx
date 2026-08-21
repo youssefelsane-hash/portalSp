@@ -9,10 +9,11 @@ import type {
   AdminServiceZoneResponseDto,
   DispatchDeliveryItemDto,
   DispatchDeliveryResponseDto,
+  ExceptionCenterResponseDto,
   OperationsOverview,
   WorkloadForecastRowDto,
 } from '@baytak/shared-types';
-import { AlertTriangle, ClipboardList, Radio, Send, Users } from 'lucide-react';
+import { AlertTriangle, Bell, ClipboardList, Radio, Send, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -85,6 +86,111 @@ function verificationBadgeVariant(status: AdminCategoryOpsRowDto['verification_s
   if (status === 'approved') return 'secondary' as const;
   if (status === 'rejected' || status === 'suspended') return 'destructive' as const;
   return 'outline' as const;
+}
+
+// مركز الاستثناءات/التنبيهات (docs/08 §36.9) — "فوق تصعيد §35.4 + تنبيهات جديدة". لمحة "محتاج
+// تصرّف دلوقتي" (نوعين: نقص طاقم مصعّد + توزيع متأخر)، مش جدول قابل للتصفح — نفس فلسفة كارت
+// "يحتاج انتباه" في `/` (apps/admin/src/app/page.tsx)، بس مُركّزة على نطاق العمليات/المطابقة.
+function ExceptionCenterSection({
+  categoryId,
+  authedFetch,
+}: {
+  categoryId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+}) {
+  const [data, setData] = useState<ExceptionCenterResponseDto | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams();
+    if (categoryId) params.set('category_id', categoryId);
+    authedFetch<ExceptionCenterResponseDto>(`/admin/operations/exceptions?${params.toString()}`)
+      .then(setData)
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مركز الاستثناءات'))
+      .finally(() => setLoading(false));
+  }, [authedFetch, categoryId]);
+
+  const crewCount = data?.crew_shortage.total ?? 0;
+  const staleCount = data?.stale_dispatch.total ?? 0;
+  const totalCount = crewCount + staleCount;
+
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Bell className="size-4" />
+        مركز الاستثناءات/التنبيهات
+      </h2>
+
+      {error && <p className="text-destructive">{error}</p>}
+      {!error && loading && !data && <Skeleton className="h-24" />}
+
+      {!error && data && totalCount === 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-s-4 border-s-success p-4">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-success-bg text-success">
+            <Bell className="size-5" />
+          </div>
+          <span className="text-sm font-medium">مفيش استثناءات محتاجة تصرّف دلوقتي</span>
+        </div>
+      )}
+
+      {!error && data && totalCount > 0 && (
+        <div className="flex flex-col gap-4">
+          {crewCount > 0 && (
+            <div className="rounded-lg border border-s-4 border-s-danger p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">نقص طاقم مصعّد ولسه مفتوح ({crewCount})</span>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {data.crew_shortage.items.map((item) => (
+                  <li key={item.order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                      {item.order_number}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(item.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                    {item.is_overdue && <Badge variant="destructive">فات معاده</Badge>}
+                    {item.missing_technicians > 0 && (
+                      <span className="text-xs text-muted-foreground">ناقص {item.missing_technicians} فني</span>
+                    )}
+                    {item.missing_assistants > 0 && (
+                      <span className="text-xs text-muted-foreground">ناقص {item.missing_assistants} مساعد</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {staleCount > 0 && (
+            <div className="rounded-lg border border-s-4 border-s-warning p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">توزيع متأخر — لسه «مُرسل» بعد ما فات معاده ({staleCount})</span>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {data.stale_dispatch.items.map((item) => (
+                  <li key={item.assignment_id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                      عرض الطلب
+                    </Link>
+                    <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
+                      {item.full_name}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      فات معاده: {new Date(item.expires_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 const MATRIX_PER_PAGE = 20;
@@ -733,6 +839,8 @@ export default function OperationsOverviewPage() {
             </div>
           </section>
 
+          <ExceptionCenterSection categoryId={categoryId} authedFetch={authedFetch} />
+
           <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
 
           <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
@@ -742,8 +850,8 @@ export default function OperationsOverviewPage() {
           <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <p>
-              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (تايم لاين، مركز التنبيهات، ذكاء
-              التغطية...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
+              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (ذكاء التغطية، تحكم أدمن،
+              بحث/فلترة شاملة...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
             </p>
           </section>
         </div>
