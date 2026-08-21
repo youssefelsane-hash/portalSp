@@ -835,3 +835,36 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   حقيقي مش mock): اتصال بلا `order_id`/`tracking:join` خالص بيسجّل الفني أونلاين فعليًا، قطع
   الاتصال بيرجّعه أوفلاين، اتصالين متزامنين (حضور + تتبع) بيفضلوا أونلاين لحد ما الاتنين يتقطعوا.
 - `flutter analyze` نضاف (صفر تحذيرات جديدة من التعديل).
+
+## سياسة إظهار المرشّحين المتعارضين جدوليًا — Slice B (ADR-0030، docs/08 §42)
+
+`listForServiceBooking()` (اختيار الفني قبل الحجز، صُنّاع) بقت بترجّع دلو تاني اختياري "مؤهّل بس
+متعارض" جنب الدلو "متاح" الأصلي، لما `Service.showUnavailableProviders=true` و`scheduledAt`
+موجودة. القرار الكامل + التدقيق الحي الكامل لكل آلية الأهلية الموجودة في
+`docs/adr/0030-schedule-conflict-visibility-policy.md`.
+
+- **`technician-eligibility.sql.ts` refactor (حرج، اتحقق منه بعناية)** — منطق التعارض نفسه
+  (`activeOrderConflictExistsExpr()`) اتفصل لدالة داخلية مشتركة، و`technicianAvailabilityCondition()`
+  (بتنفيه) و`technicianScheduleConflictCondition()` الجديدة (بتستخدمه زي ما هو) بيتركّبوا منها —
+  صفر نسخة منفصلة لنفس المنطق، صفر خطر انحراف مستقبلي. **بَقّة حقيقية اتلقطت واتصلحت أثناء
+  الـrefactor نفسه** (قبل أي commit): أول نسخة كانت بتخطّي استثناء `blocked` الصريح بالكامل لما
+  `ignoreActiveOrderConflict=true` (ADR-0017 بند 10) — الشرط ده المفروض يفضل ساري دايمًا، مش بس
+  الشرط العادي. اتلقطت حيًا (`matching-work-opportunity.spec.ts` فشل بخطأ "could not determine
+  data type" — دليل غير مباشر إن الشرط اختفى تمامًا مش مجرد تفاصيل نوع). اتحقق من صفر رجريشن على
+  `matching`/`technicians` بالكامل (152/155، نفس الـ3 فشلات المعروفة القديمة بلا علاقة) قبل وبعد.
+- **`describeTechnicianCapacity()`/`classifyTechnicianCapacity()` (docs/08 §34.4، ADR-0020 §W)
+  بقت مُعاد استخدامها هنا** — كانت تشخيصية للأدمن بس، دلوقتي كمان مصدر "السبب" (`unavailable_reason_ar`)
+  للعميل. `findNextAvailableDateForTechnician()` جديدة (تلف حوالين `hasEligibleTechnicianForDate()`
+  الموسّعة بفلتر `technicianId` اختياري، نفس نمط "مرن — اختار نطاق أيام" A.2 بس لفني واحد بدل "أي
+  فني") — "متاح تاني إمتى".
+- **`findScheduleConflictedTechnicians()` جديدة** — نفس بوابة الأهلية الصارمة لـ`listForServiceBooking()`
+  بالحرف، بس بشرط التوافر المعاكس + استبعاد أي فني ظهر في الدلو "متاح" بالفعل. محدودة (`LIMIT 10`)،
+  دايمًا آخر القايمة (المتاح فعليًا يفضل الأولوية).
+- **`TechnicianBookingListItem`/`GET /services/:id/technicians`**: حقول جديدة
+  `availability_status`/`unavailable_reason_ar`/`available_again_at`. `'available'` دايمًا لكل
+  الصفوف الحالية — رجريشن صفري.
+- **اختبار حي جديد**: `schedule-conflict-visibility.spec.ts` (3/3 — الافتراضي `false` يخفي
+  المتعارض تمامًا، `true`+`scheduledAt` نفس يوم التعارض يظهره بسبب+معاد توافر، `true` بلا
+  `scheduledAt` صفر تأثير).
+- **خارج نطاق الشريحة دي عمدًا**: تصفح الشغالة (Slice C — كان صفر تعارض قبل ADR-0030 Slice A،
+  المحرك كله لازم يتبني من الصفر بدقة ساعة)، واجهة Flutter (Slice D).

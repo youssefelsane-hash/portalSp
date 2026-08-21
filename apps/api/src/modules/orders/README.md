@@ -1209,3 +1209,6 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 - **اختبار حي جديد**: `domestic-worker-direct-booking.e2e.spec.ts` (5/5).
 - **خارج نطاق الشريحة دي عمدًا**: دفع مقدّم، تأكيد فني صريح (auto-confirm مؤقت دلوقتي)، شات، أي
   واجهة Flutter/أدمن — التفاصيل الكاملة والشرايح الجاية في ADR-0029.
+- **تحديث (ADR-0030)**: الفرع ده بقى بيفحص تعارض جدولي حقيقي قبل الإنشاء
+  (`DomesticWorkersService.assertNoSchedulingConflict()`) + بيسجّل `domesticWorkerDurationHours`
+  على الطلب (كان ناقص). تفاصيل كاملة في `../domestic-workers/README.md`.

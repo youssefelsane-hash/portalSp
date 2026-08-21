@@ -13,8 +13,14 @@ export class PublicDomesticWorkersController {
 
   @Get()
   async browse(@Query() query: BrowseWorkersQueryDto) {
-    const items = await this.workersService.browseForCustomer(query.specialty, query.latitude, query.longitude);
-    return items.map((i) => toPublicWorkerResponseDto(i.profile, i.fullName, i.distanceKm));
+    const items = await this.workersService.browseForCustomer(query.specialty, query.latitude, query.longitude, {
+      serviceId: query.service_id,
+      scheduledAt: query.scheduled_at,
+      durationHours: query.duration_hours,
+    });
+    return items.map((i) =>
+      toPublicWorkerResponseDto(i.profile, i.fullName, i.distanceKm, i.availabilityStatus, i.unavailableReasonAr, i.availableAgainAt),
+    );
   }
 
   @Get(':id')

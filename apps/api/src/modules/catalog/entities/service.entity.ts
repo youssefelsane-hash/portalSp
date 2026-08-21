@@ -107,6 +107,12 @@ export class Service {
   @Column({ name: 'allows_date_range_booking', type: 'boolean', default: true })
   allowsDateRangeBooking: boolean;
 
+  // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — نفس نمط cash_allowed
+  // بالحرف. الافتراضي false عمدًا (سلوك جديد كليًا، صفر خدمة موجودة بتعرض مرشّحين متعارضين
+  // النهاردة). صفر قراءة له في أي استعلام لسه (Slice B/C من ADR-0030).
+  @Column({ name: 'show_unavailable_providers', type: 'boolean', default: false })
+  showUnavailableProviders: boolean;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',

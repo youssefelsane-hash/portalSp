@@ -27,6 +27,12 @@ export interface TechnicianBookingListItemResponseDto {
   is_company: boolean;
   staff_count: number | null;
   branch_count: number | null;
+  // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — 'available' دايمًا لأي
+  // فني كان بيظهر قبل كده (رجريشن صفري). 'schedule_conflicted' بس لصفوف إضافية جديدة، مؤهّل فعلاً
+  // بس مشغول بشغل تاني وقت الفترة المطلوبة — مش محظور/غير مؤهّل.
+  availability_status: 'available' | 'schedule_conflicted';
+  unavailable_reason_ar: string | null;
+  available_again_at: string | null;
 }
 
 export function toTechnicianBookingListItemResponseDto(
@@ -52,5 +58,8 @@ export function toTechnicianBookingListItemResponseDto(
     is_company: item.isCompany,
     staff_count: item.staffCount,
     branch_count: item.branchCount,
+    availability_status: item.availabilityStatus,
+    unavailable_reason_ar: item.unavailableReasonAr,
+    available_again_at: item.availableAgainAt,
   };
 }

@@ -153,6 +153,11 @@ export class Order {
   @Column({ name: 'domestic_worker_profile_id', type: 'uuid', nullable: true })
   domesticWorkerProfileId: string | null;
 
+  // ADR-0030 — كان ناقص من Slice 2a (اتحسب للسعر بس واتفقد). لازم لفحص التعارض الجدولي
+  // (DomesticWorkersService.assertNoSchedulingConflict()) ولأي عرض مستقبلي لمدى وقت الحجز.
+  @Column({ name: 'domestic_worker_duration_hours', type: 'smallint', nullable: true })
+  domesticWorkerDurationHours: number | null;
+
   // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم دي snapshot وقت الحجز من
   // CatalogService.estimateDuration()، مش مربوطة ديناميكياً بـservice_standard_data بعد كده
   // (لو الأدمن غيّر الإعداد بعدين، الطلب القديم يفضل موضّح بالقيم اللي اتحسبت بيها وقتها).
