@@ -72,12 +72,25 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     return row ? Number(row.balance_cents) : 0;
   }
 
+  let orderSeq = 0;
+
   async function insertWorkCompletedOrder(label: string, totalAmountCents: number, serviceId: string) {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    // بَقّة حقيقية اتلقطت (docs/08 §36.14 — تحقق نهائي شامل): order_number عموده VARCHAR(24)،
+    // وكان بيتقص من الآخر (`TESTCSD-${label}`.slice(0, 24)) — أي label طويل (زي
+    // "refund-two-payments") كان بياكل الـrunId نفسه بالكامل، يسيب order_number **ثابت** بين كل
+    // تشغيلة → تصادم `orders_order_number_key` مع أي تشغيلة سابقة اتقطعت قبل afterAll. أول
+    // محاولة إصلاح (قص label بدل runId) جابت بَقّة تانية: أي تلات labels بادئها متشابه ("refund-
+    // cash"/"refund-wallet"/"refund-two-payments") كانوا بيتقصّوا لنفس الـ7 حروف ("refund-")
+    // فيتصادموا مع بعض جوّه نفس التشغيلة. الإصلاح الصح: نسيب label للتوثيق/debug بس (مش جزء من
+    // order_number خالص) ونبني التفرد من مصدرين مضمونين مساحتهم: runId (بين التشغيلات) + عدّاد
+    // تسلسلي orderSeq (جوّه نفس التشغيلة) — الاتنين مع بعض أقصر بكتير من 24 حرف دايمًا.
+    orderSeq += 1;
+    const orderNumber = `TESTCSD-${runId}-${orderSeq}`.slice(0, 24);
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents)
        VALUES ($1,$2,$3,$4,$5,$6,'work_completed','unpaid',$7,0) RETURNING id`,
-      [`TESTCSD-${label}`.slice(0, 24), ids.customerProfile, ids.techProfile, serviceId, ids.address, ids.zone, totalAmountCents],
+      [orderNumber, ids.customerProfile, ids.techProfile, serviceId, ids.address, ids.zone, totalAmountCents],
     );
     return order.id as string;
   }
@@ -279,7 +292,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
 
   it('طلب كاش بالكامل — الفني مديون للمنصة بالعمولة، مش المنصة مدينة له بالأرباح', async () => {
     const before = await techWalletBalance();
-    const orderId = await insertWorkCompletedOrder(`cash-${runId}`, 100000, ids.service20); // 1000ج، عمولة 20% = 200ج
+    const orderId = await insertWorkCompletedOrder(`cash`, 100000, ids.service20); // 1000ج، عمولة 20% = 200ج
 
     const payment = await service.collectCash(ids.techUser, orderId);
     expect(payment.amountCents).toBe(100000);
@@ -304,7 +317,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
 
   it('طلب إلكتروني بالكامل (محفظة) — المنصة مدينة للفني بالأرباح (regression: زي زمان بالحرف)', async () => {
     const before = await techWalletBalance();
-    const orderId = await insertWorkCompletedOrder(`wallet-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`wallet`, 100000, ids.service20);
 
     // نفس مسار payWithWallet's Payment insertion بس مباشر (العميل هنا مش الاختبار الأساسي)
     await dataSource.query(
@@ -340,7 +353,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   });
 
   it('timeout ثم webhook ناجح متأخر يصحح PROCESSING مرة واحدة ولا يطلب دفعًا ثانيًا', async () => {
-    const orderId = await insertWorkCompletedOrder(`late-webhook-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`late-webhook`, 100000, ids.service20);
     const [payment] = await dataSource.query(
       `INSERT INTO payments
          (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status,
@@ -398,7 +411,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   });
 
   it('فشل event بعد commit يُسترد من checkpoint دائم بلا إعادة التسوية المالية', async () => {
-    const orderId = await insertWorkCompletedOrder(`effects-recovery-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`effects-recovery`, 100000, ids.service20);
     const [payment] = await dataSource.query(
       `INSERT INTO payments
          (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key)
@@ -482,7 +495,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     // 10000 مقدّم كارت + 2000 دلتا كاش = 12000 إجمالي. عمولة 20% = 2400. أرباح الفني = 9600.
     // الفني ماسك 2000 كاش بس من الـ9600 المفروضة له — المنصة تدفعله الفرق (7600) بس، مش الـ9600 كاملة.
     const before = await techWalletBalance();
-    const orderId = await insertWorkCompletedOrder(`mixed-${runId}`, 120000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`mixed`, 120000, ids.service20);
     await dataSource.query(
       `UPDATE orders SET payment_status = 'paid' WHERE id = $1`,
       [orderId],
@@ -514,7 +527,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
 
   it('طلب كاش بعمولة صفر — مفيش حركة محفظة خالص (الفني ماسك بالظبط نصيبه العادل)', async () => {
     const before = await techWalletBalance();
-    const orderId = await insertWorkCompletedOrder(`zero-${runId}`, 50000, ids.serviceZero);
+    const orderId = await insertWorkCompletedOrder(`zero`, 50000, ids.serviceZero);
 
     await service.collectCash(ids.techUser, orderId);
 
@@ -538,7 +551,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     const customerWalletBefore = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]);
     const customerBalanceBefore = customerWalletBefore.length > 0 ? Number(customerWalletBefore[0].balance_cents) : 0;
 
-    const orderId = await insertWorkCompletedOrder(`refund-cash-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`refund-cash`, 100000, ids.service20);
     await service.collectCash(ids.techUser, orderId);
 
     const techBalanceAfterSettlement = await techWalletBalance();
@@ -567,7 +580,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   });
 
   it('استرداد كامل لطلب إلكتروني — رصيد الفني يرجع صفر (عكس الائتمان، regression)', async () => {
-    const orderId = await insertWorkCompletedOrder(`refund-wallet-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`refund-wallet`, 100000, ids.service20);
     await dataSource.query(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
        VALUES ($1,$2,$3,$4,'wallet','succeeded',$5, now())`,
@@ -594,7 +607,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   });
 
   it('استرداد دفعتين مختلفتين بالتوازي يجمع حالة الطلب مرة واحدة بلا lost update أو عكس مزدوج', async () => {
-    const orderId = await insertWorkCompletedOrder(`refund-two-payments-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`refund-two-payments`, 100000, ids.service20);
     const payments = await dataSource.query(
       `INSERT INTO payments
          (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status,
@@ -687,7 +700,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     const customerWalletBefore = await dataSource.query(`SELECT balance_cents FROM wallets WHERE owner_user_id = $1`, [ids.customerUser]);
     const customerBalanceBefore = customerWalletBefore.length > 0 ? Number(customerWalletBefore[0].balance_cents) : 0;
 
-    const orderId = await insertWorkCompletedOrder(`partial-cash-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`partial-cash`, 100000, ids.service20);
     await service.collectCash(ids.techUser, orderId);
 
     const refund = await service.refundOrder(ids.customerUser, orderId, 'تصحيح سعر نهائي — 100ج زيادة', 10000);
@@ -707,7 +720,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   });
 
   it('استرداد جزئي لطلب إلكتروني (تصحيح سعر نهائي لأقل) — رصيد الفني يرجع مطابق للعمولة المصححة بالظبط', async () => {
-    const orderId = await insertWorkCompletedOrder(`partial-wallet-${runId}`, 100000, ids.service20);
+    const orderId = await insertWorkCompletedOrder(`partial-wallet`, 100000, ids.service20);
     await dataSource.query(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
        VALUES ($1,$2,$3,$4,'wallet','succeeded',$5, now())`,
