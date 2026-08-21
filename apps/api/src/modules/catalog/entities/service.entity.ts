@@ -10,6 +10,10 @@ export enum PricingModel {
   // (service_pricing_fields/service_pricing_rules) بدل base_price_cents ثابت. راجع
   // apps/api/src/modules/pricing/README.md للتفاصيل الكاملة.
   FORMULA = 'formula',
+  // هجرة حجز الشغالة للمحرك الموحّد (ADR-0029، docs/08 §42 Phase A.4) — السعر من معدّل الفني
+  // (الشغالة) الشخصي (hourlyRateCents/monthlyRateCents على DomesticWorkerProfile)، مش من
+  // base_price_cents الكتالوج. راجع CatalogService.estimate() للتفاصيل.
+  WORKER_RATE = 'worker_rate',
 }
 
 @Entity('services')

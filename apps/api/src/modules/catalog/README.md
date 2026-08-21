@@ -315,3 +315,27 @@
   خدمة `allows_date_range_booking=false` يترفض، نفس الخدمة بيوم محدد بس تتسجّل عادي، خدمة عادية
   بالافتراضي `true` تفضل تقبل النطاق المرن زي ما كانت — رجريشن صفري).
 - **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4).
+
+## `PricingModel.WORKER_RATE` — نموذج تسعير جديد لهجرة حجز الشغالة (docs/08 §42 Phase A.4 Slice 1، ADR-0029)
+
+أول شريحة من هجرة حجز الشغالة للمحرك الموحّد — أساس بس، **صفر تغيير سلوك لأي مسار موجود**. القرار
+المعماري الكامل (ليه مش `TechnicianProfile`، مين مسؤول عن الحساب، الشرايح الجاية) في
+`docs/adr/0029-domestic-worker-unified-booking-migration.md`.
+
+- **`services.pricing_model` قيمة جديدة `worker_rate`** (migration 0166، `ALTER TYPE ... ADD
+  VALUE`) — السعر مش من `base_price_cents` الكتالوج خالص، لازم فني (شغالة) يتحدد الأول عشان السعر
+  يتحسب من معدّله الشخصي.
+- **`CatalogService.estimate()`**: باراميتر اختياري جديد `precomputedWorkerRateCents` (آخر باراميتر،
+  نفس نمط `technicianPricingTier`) — لو الخدمة `worker_rate` والباراميتر ده مفقود، يترفض `VAL_001`
+  فورًا. لو موجود، بيترجع كـ`estimated_total_cents` بالحرف — **بلا `level_price_multiplier` أو
+  `zone override` خالص** (الشغالة مالهاش `TechnicianLevel`، وسعرها هو النهائي المتفق عليه شخصيًا).
+  `CatalogService` نفسها ماعندهاش أي علم بـ`DomesticWorkerProfile` عمدًا — حساب `hourlyRateCents ×
+  duration_hours` أو `monthlyRateCents` كامل مسؤولية الـcaller (Slice 2، لسه مش منفّذة).
+- **`orders.domestic_worker_profile_id`** (nullable FK، migration 0166) — مرجع الفني على الطلب،
+  **مش مقروء/مكتوب من أي كود لسه**.
+- **اختبار حي جديد**: `catalog/worker-rate-pricing.spec.ts` (3/3 — `precomputedWorkerRateCents`
+  مفقودة ترفض، موجودة بترجع بالحرف بلا zone override رغم وجوده على الخدمة، رجريشن لخدمة `fixed`
+  عادية صفر تأثير من الباراميتر الجديد).
+- **خارج نطاق هذه الشريحة عمدًا**: `OrdersService.create()` (فرع تخطي المطابقة، Slice 2 — الأخطر
+  فعليًا)، أي واجهة (Slice 3)، التكرار الشهري عبر `RecurringOrderTemplate` (Slice 4)، وأي تغيير
+  على `domestic-workers` module الحالي (صفر لمس بالكامل).
