@@ -46,10 +46,11 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   if (!context.mounted) return;
   Navigator.of(context).push(
     MaterialPageRoute(
-      // فلو "اعتماد" موحّد مع "فردي" بالحرف (docs/08 §38، طلب مالك صريح 2026-08-21) — الفرق
-      // الوحيد بينهم بقى فلترة مستوى الفني + دمج الشركات جوّه TechnicianMarketplaceScreen نفسها
-      // (booking_mode بيتمرر لحد هناك)، مش مسار تنقّل مختلف. الطوارئ بس (حجز فوري بالتصميم،
-      // مفيش اختيار يدوي خالص) بتروح CreateOrderScreen مباشرة زي ما كانت دايمًا.
+      // فلو "اعتماد" موحّد مع "فردي" بالحرف (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت
+      // بشكل مستقل في سيشنين متوازيين بنفس الفرع بالظبط) — الفرق الوحيد بينهم بقى فلترة مستوى
+      // الفني + دمج الشركات جوّه TechnicianMarketplaceScreen نفسها (booking_mode بيتمرر لحد هناك)،
+      // مش مسار تنقّل مختلف. الطوارئ بس (حجز فوري بالتصميم، مفيش اختيار يدوي خالص) بتروح
+      // CreateOrderScreen مباشرة زي ما كانت دايمًا.
       builder: (_) => bookingMode == BookingMode.emergency
           ? CreateOrderScreen(
               service: service,

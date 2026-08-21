@@ -18,6 +18,8 @@ export interface CategoryOpsFilters {
   zoneId?: string;
   verificationStatus?: TechnicianVerificationStatus;
   level?: TechnicianLevel;
+  /** بحث بالاسم/كود الفني (docs/08 §36.12) — ILIKE بسيط، صفر full-text search محرّك جديد. */
+  q?: string;
   page: number;
   perPage: number;
 }
@@ -116,10 +118,19 @@ export class AdminTechnicianCategoryOpsService {
             WHERE tz.technician_id = tp.id AND tz.service_zone_id = $4 AND tz.is_active = true
           )
         )
+        AND ($7::text IS NULL OR u.full_name ILIKE '%' || $7 || '%' OR tp.technician_code ILIKE '%' || $7 || '%')
       ORDER BY u.full_name ASC
       LIMIT $5 OFFSET $6
       `,
-      [filters.categoryId, filters.verificationStatus ?? null, filters.level ?? null, filters.zoneId ?? null, filters.perPage, offset],
+      [
+        filters.categoryId,
+        filters.verificationStatus ?? null,
+        filters.level ?? null,
+        filters.zoneId ?? null,
+        filters.perPage,
+        offset,
+        filters.q?.trim() || null,
+      ],
     );
 
     const total = rawRows.length > 0 ? Number(rawRows[0].total_count) : 0;

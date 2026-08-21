@@ -32,3 +32,4 @@ export * from './technician-progression';
 export * from './branding';
 export * from './security';
 export * from './operations';
+export * from './matching-explainability';

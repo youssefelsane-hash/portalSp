@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
+import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
@@ -393,6 +394,15 @@ export class OrderTeamService {
       'crew_recruit',
       role,
     );
+    // docs/08 §36.1 — إشعار حقيقي بدل ما الفني يعتمد على فتح/تحديث شاشة الطلبات المتاحة بنفسه
+    // عشان يكتشف الفرصة. created:false يعني كانت موجودة بالفعل (idempotent re-check)، مفيش داعي
+    // إشعار مكرر.
+    if (opportunity.created) {
+      this.events.emit(
+        WORK_OPPORTUNITY_OFFERED_EVENT,
+        new WorkOpportunityOfferedEvent(opportunity.id, orderId, order.orderNumber, technicianId, 'crew_recruit', tier),
+      );
+    }
     return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };
   }
 

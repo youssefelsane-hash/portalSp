@@ -319,4 +319,16 @@ status) اتفحص خصيصًا واتلقى **مش موصّل فعليًا لأ
 قائد، مسك آمن للاستثناء. `OrderCrewChangedNotificationListener` (موجود مسبقًا، مش من §35.17) بيغطي
 "انضميت لطلب X"/"اتشلت من طلب X" — راجع `modules/orders/README.md` لتفاصيل الحدث اللي بيغذّيه.
 
+## فرصة عمل اختيارية — إشعار جديد (docs/08 §36.1، بَقّة حقيقية اتصلحت 2026-08-20)
+
+`technician_work_opportunities` (`technicians/technician-work-opportunities.service.ts`، migration
+`0153`) كان بيتعمله INSERT فعليًا (context=`assignment` من `MatchingService.autoConfirmScheduledOrder()`،
+context=`crew_recruit` من `OrderTeamService.recruitMember()`) — بس صفر حدث/إشعار كان بيوصل للفني،
+عكس عرض `order_assignments`. `WorkOpportunityOfferedNotificationListener` (جديد) بيستمع لـ
+`WORK_OPPORTUNITY_OFFERED_EVENT` (`common/events/work-opportunity-offered.event.ts`، بيتصدّر بس
+لما `offerIfNotExists()` يرجّع `created:true` — إعادة الفحص idempotent ما بتكررش الإشعار)، نفس نمط
+`OrderOfferNotificationListener` بالحرف، نص عربي مختلف حسب context (`دعوة انضمام لفريق` مقابل
+`فرصة شغل إضافي`)، one-shot بلا workflow (نفس فلسفة عرض `order_assignments` العادي). تفاصيل كاملة
+للتحقيق والسبب الجذري في `docs/08-pricing-engine-and-platform-vision.md` §36.1.
+
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { TechnicianLevel, TechnicianVerificationStatus } from '../entities/technician-profile.entity';
 
 export class ListCategoryOpsQueryDto {
@@ -17,6 +17,13 @@ export class ListCategoryOpsQueryDto {
   @IsOptional()
   @IsEnum(TechnicianLevel)
   level?: TechnicianLevel;
+
+  // بحث بالاسم/كود الفني (docs/08 §36.12) — تعديل جراحي واحد إضافي على نفس نمط فلتر zone_id
+  // الموجود بالفعل (تعليق الخدمة نفسها)، صفر منطق أهلية/تصنيف جديد.
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
 
   @IsOptional()
   @Type(() => Number)

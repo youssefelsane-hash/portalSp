@@ -21,15 +21,17 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
   final DateTime? requestedAtRangeEnd;
-  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38) — بتتمرر جاهزة لـTechnicianSelectionScreen.
+  // توحيد فلو "اعتماد" مع "فردي" (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت بشكل مستقل
+  // في سيشنين متوازيين) — افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات
+  // فردي formula) يفضل شغال بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
   final BookingMode bookingMode;
 
   const JobDetailsScreen({
     super.key,
     required this.service,
+    this.bookingMode = BookingMode.individual,
     this.requestedAt,
     this.requestedAtRangeEnd,
-    this.bookingMode = BookingMode.individual,
   });
 
   @override
@@ -105,11 +107,11 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       MaterialPageRoute(
         builder: (_) => TechnicianSelectionScreen(
           service: widget.service,
+          bookingMode: widget.bookingMode,
           initialAddress: _selectedAddress,
           fieldValues: Map<String, dynamic>.from(_fieldValues),
           requestedAt: widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
-          bookingMode: widget.bookingMode,
         ),
       ),
     );

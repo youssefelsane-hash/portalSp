@@ -6,6 +6,7 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
+import { WORK_OPPORTUNITY_OFFERED_EVENT } from '../../common/events/work-opportunity-offered.event';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
 
@@ -230,6 +231,59 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
 
     const [decided] = await q(`SELECT status FROM technician_work_opportunities WHERE id = $1`, [opportunities[0].id]);
     expect(decided.status).toBe('accepted');
+  });
+
+  // بَقّة حقيقية اتلقطت (docs/08 §36.1، بلاغ مالك 2026-08-20): إنشاء صف technician_work_opportunities
+  // ماكانش بيصدّر أي حدث خالص — عكس عرض order_assignments العادي (ORDER_OFFER_CREATED_EVENT). فني
+  // مالوش أي إشعار حقيقي إن فرصة اختيارية موجودة، لازم يفتح/يحدّث شاشة الطلبات المتاحة بنفسه عشان
+  // يكتشفها. الاختبار ده بيثبت الإصلاح: حدث WORK_OPPORTUNITY_OFFERED_EVENT بيتصدّر مرة واحدة بس
+  // (مش عند إعادة نداء idempotent) بالبيانات الصح.
+  it('فرصة اختيارية جديدة (context=assignment) بتصدّر حدث مرة واحدة بس — إصلاح البَقّة (docs/08 §36.1)', async () => {
+    // meaningfulTechProfile دلوقتي عنده طلب accepted فعلي (من الاختبار اللي فات) — لسه MEANINGFUL
+    // لطلب تاني نفس اليوم.
+    const emit = jest.fn();
+    const eventMatchingService = new MatchingService(
+      dataSource.getRepository(OrderAssignment),
+      dataSource.getRepository(Order),
+      dataSource,
+      new TechniciansService(
+        dataSource.getRepository(TechnicianProfile),
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      ),
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
+      {
+        getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+        getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
+      } as never,
+      { emit } as never,
+      { add: async () => undefined } as never,
+      workOpportunities,
+    );
+
+    const orderId = await insertOrder('event-meaningful');
+    await q(`UPDATE orders SET requested_technician_id = $1 WHERE id = $2`, [ids.meaningfulTechProfile, orderId]);
+
+    await eventMatchingService.autoConfirmScheduledOrder(orderId);
+    const offeredCalls = emit.mock.calls.filter(([eventName]) => eventName === WORK_OPPORTUNITY_OFFERED_EVENT);
+    expect(offeredCalls).toHaveLength(1);
+    const [, payload] = offeredCalls[0];
+    expect(payload.orderId).toBe(orderId);
+    expect(payload.technicianId).toBe(ids.meaningfulTechProfile);
+    expect(payload.context).toBe('assignment');
+    expect(payload.capacityTier).toBe('MEANINGFUL');
+
+    // نداء تاني idempotent — عرض offered حي بالفعل، مفيش حدث تاني يتصدّر.
+    emit.mockClear();
+    await eventMatchingService.autoConfirmScheduledOrder(orderId);
+    expect(emit.mock.calls.filter(([eventName]) => eventName === WORK_OPPORTUNITY_OFFERED_EVENT)).toHaveLength(0);
   });
 
   it('فني HEAVY (شاغل يوم كامل) — لسه بيتعرضله فرصة، مش يفضل الطلب stalled بلا حل (docs/08 §34.1b بند 4)', async () => {

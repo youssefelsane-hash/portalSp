@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type {
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
@@ -27,8 +28,16 @@ import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS, ALL_LEVELS, NEXT_VERIFICATION_STEP } from '@/lib/technician-labels';
+import {
+  VERIFICATION_STATUS_LABELS,
+  LEVEL_LABELS,
+  ALL_LEVELS,
+  NEXT_VERIFICATION_STEP,
+  CAPACITY_TIER_LABELS,
+  capacityTierBadgeClass,
+} from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
+import type { TechnicianCapacityTier } from '@baytak/shared-types';
 
 // بَقّة حقيقية اتلقطت (مستندات/شهادات الفني بترجع 404 عند فتحها من الأدمن، 2026-08-19) — نفس
 // حل orders/[id]/page.tsx بالحرف: file_url راجع من LocalDiskStorageService نسبي عمداً
@@ -60,6 +69,34 @@ interface ProductivityReport {
   overall_score: number | null;
   explanation: string;
   breakdown: ProductivityMetricBreakdown[];
+}
+
+// §36.13 — بروفايل فني 360° (docs/08 §35.11، ADR-0021 §5): GET /admin/technicians/:id/360 موجود
+// ومختبر حي من زمان (admin-technician-360.spec.ts) بلا أي واجهة تعرضه. نفس نمط ProductivityReport
+// فوق بالحرف: endpoint أدمن-بس ضيّق (تجميعة قراءة، مفيش mutation)، مش موجود في @baytak/shared-types
+// عمدًا. هنا بنعرض بس الحقول اللي **مش** مكرَّرة من كروت الصفحة الموجودة أصلاً (البيانات/المحفظة/
+// الإنتاجية) — النشاط اللحظي، القدرة الاستيعابية النهاردة، الفريق، الشغل الحالي/الجاي، الأيام
+// المحجوبة، الفرص المفتوحة، سلوك الإلغاء، والشكاوى.
+interface Technician360Response {
+  online: boolean;
+  last_active_at: string | null;
+  capacity_today: { tier: TechnicianCapacityTier; reason_ar: string; occupied_from: string | null; occupied_to: string | null };
+  team_role: { company_id: string; company_name: string; is_owner: boolean } | null;
+  current_and_upcoming_jobs: {
+    order_id: string;
+    order_number: string;
+    order_status: string;
+    scheduled_at: string | null;
+    service_name_ar: string;
+  }[];
+  blocked_dates: { slot_date: string; start_time: string; end_time: string }[];
+  open_opportunities_count: number;
+  cancellation_behavior: { total_cancellations: number; recent_cancellations: number };
+  complaints: {
+    open_count: number;
+    total_count: number;
+    recent: { id: string; severity: string; status: string; created_at: string }[];
+  };
 }
 
 export default function TechnicianDetailPage() {
@@ -95,6 +132,15 @@ export default function TechnicianDetailPage() {
   const [productivityError, setProductivityError] = useState<string | null>(null);
   const [loadingProductivity, setLoadingProductivity] = useState(false);
 
+  const [profile360, setProfile360] = useState<Technician360Response | null>(null);
+  const [profile360Error, setProfile360Error] = useState<string | null>(null);
+
+  function load360() {
+    authedFetch<Technician360Response>(`/admin/technicians/${id}/360`)
+      .then(setProfile360)
+      .catch((err) => setProfile360Error(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل النظرة التشغيلية'));
+  }
+
   function loadWallet(userId: string) {
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
       .then(setWallet)
@@ -124,6 +170,7 @@ export default function TechnicianDetailPage() {
     load();
     loadZones();
     loadCategories();
+    load360();
     authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setAllZones);
     authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setAllCategories);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -474,6 +521,105 @@ export default function TechnicianDetailPage() {
               </Button>
             </CardFooter>
           </form>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">نظرة تشغيلية 360°</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 text-sm">
+            {profile360Error && <p className="text-destructive">{profile360Error}</p>}
+            {!profile360 && !profile360Error && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {profile360 && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={profile360.online ? 'secondary' : 'outline'}>
+                    {profile360.online ? 'أونلاين دلوقتي' : 'أوفلاين'}
+                  </Badge>
+                  {!profile360.online && profile360.last_active_at && (
+                    <span className="text-muted-foreground">
+                      آخر نشاط: {new Date(profile360.last_active_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </span>
+                  )}
+                  <Badge variant="outline" className={capacityTierBadgeClass(profile360.capacity_today.tier)}>
+                    {CAPACITY_TIER_LABELS[profile360.capacity_today.tier]}
+                  </Badge>
+                  <span className="text-muted-foreground">{profile360.capacity_today.reason_ar}</span>
+                  {profile360.team_role && (
+                    <Badge variant="outline">
+                      {profile360.team_role.is_owner ? 'مالك فريق' : 'عضو فريق'} — {profile360.team_role.company_name}
+                    </Badge>
+                  )}
+                  <Badge variant="outline">{profile360.open_opportunities_count} فرصة مفتوحة</Badge>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-2 font-medium">الشغل الحالي/الجاي</p>
+                    {profile360.current_and_upcoming_jobs.length === 0 ? (
+                      <p className="text-muted-foreground">مفيش شغل حالي أو قادم</p>
+                    ) : (
+                      <ul className="flex flex-col gap-2">
+                        {profile360.current_and_upcoming_jobs.map((j) => (
+                          <li key={j.order_id} className="border-b pb-2 last:border-0">
+                            <Link href={`/orders/${j.order_id}`} className="underline">
+                              #{j.order_number} — {j.service_name_ar}
+                            </Link>
+                            <p className="text-muted-foreground">
+                              {j.order_status}
+                              {j.scheduled_at ? ` · ${new Date(j.scheduled_at).toLocaleString('ar-EG-u-nu-latn')}` : ''}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 font-medium">أيام محجوبة قادمة</p>
+                    {profile360.blocked_dates.length === 0 ? (
+                      <p className="text-muted-foreground">مفيش أيام محجوبة</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1">
+                        {profile360.blocked_dates.map((b, i) => (
+                          <li key={i} className="text-muted-foreground">
+                            {b.slot_date} ({b.start_time}–{b.end_time})
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-1 font-medium">سلوك الإلغاء</p>
+                    <p className="text-muted-foreground">
+                      إجمالي: {profile360.cancellation_behavior.total_cancellations} · آخر 90 يوم:{' '}
+                      {profile360.cancellation_behavior.recent_cancellations}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-1 font-medium">
+                      الشكاوى ({profile360.complaints.open_count} مفتوحة من {profile360.complaints.total_count})
+                    </p>
+                    {profile360.complaints.recent.length === 0 ? (
+                      <p className="text-muted-foreground">مفيش شكاوى</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1">
+                        {profile360.complaints.recent.map((c) => (
+                          <li key={c.id} className="text-muted-foreground">
+                            {c.severity} — {c.status} ({new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')})
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
         </Card>
 
         {detail.assistant_link_status !== 'none' && (

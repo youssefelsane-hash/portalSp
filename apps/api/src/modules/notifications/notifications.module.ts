@@ -54,6 +54,7 @@ import { TechnicianCancellationNotificationListener } from './listeners/technici
 import { OrderCrewChangedNotificationListener } from './listeners/order-crew-changed-notification.listener';
 import { TechnicianServiceVerificationNotificationListener } from './listeners/technician-service-verification-notification.listener';
 import { TechnicianCategoryVerificationNotificationListener } from './listeners/technician-category-verification-notification.listener';
+import { WorkOpportunityOfferedNotificationListener } from './listeners/work-opportunity-offered-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
 import { NotificationRoutingService } from './notification-routing.service';
@@ -120,6 +121,7 @@ import { NotificationsService } from './notifications.service';
     TechnicianCancellationNotificationListener,
     OrderAssistantAssignedManuallyNotificationListener,
     OrderOfferNotificationListener,
+    WorkOpportunityOfferedNotificationListener,
     OrderOfferResolutionListener,
     EmergencyDispatchStrugglingRoutingListener,
     OrderNoTechnicianFoundRoutingListener,

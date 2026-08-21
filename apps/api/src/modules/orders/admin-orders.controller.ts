@@ -105,6 +105,11 @@ export class AdminOrdersController {
       capacity_tier: explanation.capacityTier,
       distance_km: explanation.distanceKm,
       checks: explanation.checks.map((c) => ({ key: c.key, passed: c.passed, label_ar: c.labelAr })),
+      // docs/08 §36.6 — rank_score/ترتيب حقيقي بين المرشّحين المؤهّلين فعليًا لنفس الطلب، مُعاد
+      // استخدامه بالحرف من findEligibleTechnicians()، صفر ترتيب مُلفَّق.
+      rank_info: explanation.rankInfo
+        ? { rank_score: explanation.rankInfo.rankScore, rank: explanation.rankInfo.rank, total_eligible: explanation.rankInfo.totalEligible }
+        : null,
     };
   }
 
