@@ -399,6 +399,7 @@ export default function ServiceDetailPage() {
       cash_allowed: form.get('cash_allowed') === 'on',
       deposit_required: form.get('deposit_required') === 'on',
       deposit_percentage: depositPercentage ? Number(depositPercentage) : undefined,
+      allows_date_range_booking: form.get('allows_date_range_booking') === 'on',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
@@ -632,6 +633,15 @@ export default function ServiceDetailPage() {
               <label className="flex items-center gap-2">
                 <input type="checkbox" name="deposit_required" defaultChecked={service.deposit_required} />
                 محتاجة إيداع مقدّم (النسبة % فوق، والباقي يتحصّل بعد الشغل)
+              </label>
+              {/* قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) */}
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="allows_date_range_booking"
+                  defaultChecked={service.allows_date_range_booking}
+                />
+                يسمح بحجز &quot;نطاق أيام مرن&quot; (لو اتلغى، العميل لازم يحدد يوم واحد بس)
               </label>
             </div>
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">

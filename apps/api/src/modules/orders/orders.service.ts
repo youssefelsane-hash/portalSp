@@ -286,6 +286,11 @@ export class OrdersService {
     // (MatchingRecoveryService.sweep() هتعيد المحاولة تلقائيًا بعد إنشاء الطلب).
     let resolvedScheduledAtIso: string | undefined = dto.scheduled_at;
     if (dto.scheduled_at_range_end) {
+      // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — نفس نمط allows_individual/
+      // cash_allowed بالحرف. صفر لمس لمنطق حل النطاق تحت — بوابة دخول بس.
+      if (!service.allowsDateRangeBooking) {
+        throw new ApiException(ErrorCode.VAL_001, 'حجز نطاق أيام مرن مش متاح لهذه الخدمة — لازم تحدد يوم واحد', HttpStatus.BAD_REQUEST);
+      }
       if (!dto.scheduled_at) {
         throw new ApiException(ErrorCode.VAL_001, 'نطاق الأيام المرن محتاج تاريخ بداية (scheduled_at)', HttpStatus.BAD_REQUEST);
       }

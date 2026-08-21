@@ -55,6 +55,7 @@ export interface ServiceResponseDto {
   cash_allowed: boolean;
   deposit_required: boolean;
   deposit_percentage: number | null;
+  allows_date_range_booking: boolean;
   min_technician_level: string;
 }
 
@@ -81,6 +82,7 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     cash_allowed: service.cashAllowed,
     deposit_required: service.depositRequired,
     deposit_percentage: service.depositPercentage !== null ? Number(service.depositPercentage) : null,
+    allows_date_range_booking: service.allowsDateRangeBooking,
     min_technician_level: service.minTechnicianLevel,
   };
 }

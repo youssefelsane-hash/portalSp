@@ -209,6 +209,7 @@ export class AdminCatalogService {
       cashAllowed: dto.cash_allowed ?? true,
       depositRequired: dto.deposit_required ?? false,
       depositPercentage: dto.deposit_percentage !== undefined ? String(dto.deposit_percentage) : null,
+      allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
       minTechnicianLevel: dto.min_technician_level,
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
@@ -268,6 +269,7 @@ export class AdminCatalogService {
     if (service.depositRequired && service.depositPercentage === null) {
       throw new ApiException(ErrorCode.VAL_001, 'نسبة الإيداع مطلوبة لو الخدمة محتاجة إيداع', HttpStatus.BAD_REQUEST);
     }
+    if (dto.allows_date_range_booking !== undefined) service.allowsDateRangeBooking = dto.allows_date_range_booking;
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

@@ -287,3 +287,31 @@
   `create()` بالحرف، ورجريشن لخدمة `deposit_required=false` (الافتراضي).
 - **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4) أو توزيع أرباح
   الطاقم للشركات (Phase B.3).
+
+## `services.allows_date_range_booking` — قدرة "نطاق أيام مرن" (docs/08 §42 Phase A.2، ADR-0028)
+
+"مرن — اختار نطاق أيام" (`scheduled_at_range_end`، docs/08 §32.3) كانت موجودة ومختبرة حيًا من قبل
+— الشريحة دي حوّلتها من "متاحة لكل خدمة بلا شرط" لقدرة صريحة قابلة للإقفال، **بلا أي لمس لمنطق حل
+النطاق نفسه** (`OrdersService.create()`، `TechniciansService.hasEligibleTechnicianForDate()`).
+التفاصيل الكاملة والبدائل المرفوضة في `docs/adr/0028-service-date-range-booking-capability.md`.
+
+- **`services.allows_date_range_booking` عمود جديد** (`boolean NOT NULL DEFAULT true`، migration
+  0165) — نفس نمط `cash_allowed`/`deposit_required` بالحرف. **الافتراضي `true` عمدًا** (مختلف عن
+  `deposit_required`): الخيار متاح فعليًا لكل خدمة اليوم بلا فحص، فالعلم ده تحويل الوضع الحالي لقدرة
+  صريحة مش قيد رجعي.
+- **`OrdersService.create()`**: فحص جديد جوّه فرع `if (dto.scheduled_at_range_end)` الموجود بالفعل
+  — لو الخدمة `allows_date_range_booking=false`، يترفض `VAL_001` قبل ما الحلقة تدوّر على أيام. يوم
+  محدد بلا `scheduled_at_range_end` يفضل يشتغل عادي حتى لو الخدمة قافلة القدرة دي.
+- **`previewPrice()` صفر تغيير** — نفس نمط `cash_allowed`/`deposit_required` (مش متفحوصين هناك
+  كمان)، لأن الجدولة مالهاش أي أثر على السعر أصلاً (`PreviewOrderDto` مالهوش حقل جدولة خالص).
+- **`apps/admin`**: checkbox جديد "يسمح بحجز نطاق أيام مرن" في نفس فورم "تفاصيل الخدمة".
+- **`packages/shared-types`**: تمديد `AdminServiceResponseDto`/`CreateServiceBody`/`UpdateServiceBody`.
+- **`apps/customer-app`**: `CatalogService` model حقل جديد `allowsDateRangeBooking`؛
+  `ScheduleSelectionScreen` بقت بتاخد الحقل ده كـparameter إجباري وبتخفي كارت "مرن" لو `false` —
+  تجربة استخدام أحسن من رفض بعد الاختيار (نفس فلسفة إخفاء وضع "اعتماد" لو `allowsTeam=false`).
+  الاستدعاءين (`catalog_navigation.dart` و`create_order_screen.dart`'s `_pickSchedule()`) اتحدّثوا
+  الاتنين.
+- **اختبار حي جديد**: `orders/service-date-range-booking-allowed.e2e.spec.ts` (3/3 — نطاق مرن على
+  خدمة `allows_date_range_booking=false` يترفض، نفس الخدمة بيوم محدد بس تتسجّل عادي، خدمة عادية
+  بالافتراضي `true` تفضل تقبل النطاق المرن زي ما كانت — رجريشن صفري).
+- **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4).

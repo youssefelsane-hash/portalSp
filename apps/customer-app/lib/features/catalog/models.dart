@@ -89,6 +89,9 @@ class CatalogService {
   // بـbooking_mode=individual افتراضي حتى لو الخدمة أصلاً مش بتدعمه، فيفشل توليد الطلب بصمت للأبد.
   final bool allowsIndividual;
   final bool allowsTeam;
+  // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — لو false، ScheduleSelectionScreen
+  // بتخفي كارت "مرن — اختار نطاق أيام" بدل ما تسيب العميل يختاره ويترفض من الباك-إند بعدين.
+  final bool allowsDateRangeBooking;
 
   CatalogService({
     required this.id,
@@ -103,6 +106,7 @@ class CatalogService {
     required this.allowsEmergency,
     required this.allowsIndividual,
     required this.allowsTeam,
+    required this.allowsDateRangeBooking,
   });
 
   factory CatalogService.fromJson(Map<String, dynamic> json) => CatalogService(
@@ -118,6 +122,7 @@ class CatalogService {
         allowsEmergency: json['allows_emergency'] as bool,
         allowsIndividual: json['allows_individual'] as bool,
         allowsTeam: json['allows_team'] as bool,
+        allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
       );
 
   // أول وضع حجز متاح فعليًا للخدمة دي، بترتيب أولوية فرد > فريق > طوارئ — مستخدم في القوالب

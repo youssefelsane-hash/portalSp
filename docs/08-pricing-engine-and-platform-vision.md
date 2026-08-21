@@ -6006,7 +6006,7 @@ build` (packages/shared-types) كلهم نضاف.
 `flutter analyze`/`tsc --noEmit` نضاف على كل التطبيقات الأربعة (api، admin، customer-app،
 technician-app). التفاصيل الكاملة في `apps/technician-app/README.md`، `apps/customer-app/README.md`.
 
-## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.3 خلصوا)
+## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3 خلصوا)
 
 طلب مالك صريح واسع النطاق (مش إعادة بناء — تطوير وتوحيد): (أ) دمج حجز الشغالة/المربية والطلبات
 المتكررة في **محرك حجز واحد قابل للتهيئة** بدل ما كل خدمة غريبة تاخد مسارها المنفصل، و(ب) تطوير
@@ -6121,5 +6121,17 @@ migration 0164 + فحص `OrdersService.create()`/`previewPrice()` + checkbox+ح�
 `shared-types` + اختبار حي (`orders/service-deposit-policy.e2e.spec.ts`). التفاصيل الكاملة في
 `apps/api/src/modules/catalog/README.md` (قسم "services.deposit_required/deposit_percentage").
 صفر رجريشن — أي خدمة موجودة `deposit_required=false` (الافتراضي) فضلت تتحصّل بالإجمالي كامل زي ما
-كانت. **Phase A.2** (شكل الجدولة `allows_date_range_booking` + ربطها بـ`bulkSetAvailability`) لسه
-مفتوحة، الشريحة الجاية.
+كانت.
+
+### Phase A.2 — خلصت (2026-08-21، بعد A.3)
+
+`services.allows_date_range_booking` (migration 0165، افتراضي `true`) — القرار الكامل في
+`docs/adr/0028-service-date-range-booking-capability.md`. **تدقيق حي أثبت إن "ربطها بـ`bulkSetAvailability`"
+(نص الخطة الأصلي) موجود بالفعل** — `hasEligibleTechnicianForDate()` بتستخدم نفس
+`technicianAvailabilityCondition()` اللي بتفحص صفوف `blocked` من `bulkSetAvailability()`، فمفيش
+عمل إضافي هناك غير القراءة الدقيقة. الشريحة دي كانت بالكامل: تحويل "نطاق أيام مرن" (موجودة ومختبرة
+حيًا من §32) من "متاحة لكل خدمة بلا شرط" لقدرة صريحة، بلا أي لمس لمنطق حل النطاق نفسه. فحص
+`OrdersService.create()` + checkbox أدمن + تمديد `shared-types` + `apps/customer-app` (إخفاء كارت
+"مرن" لو الخدمة قافلاه، مش رفض بعد الاختيار) + اختبار حي (3/3). التفاصيل الكاملة في
+`apps/api/src/modules/catalog/README.md` (قسم "services.allows_date_range_booking"). صفر رجريشن —
+كل خدمة موجودة (`allows_date_range_booking=true` الافتراضي) فضلت تقبل النطاق المرن زي ما كانت.

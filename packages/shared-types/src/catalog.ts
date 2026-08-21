@@ -63,6 +63,7 @@ export interface AdminServiceResponseDto {
   cash_allowed: boolean;
   deposit_required: boolean;
   deposit_percentage: number | null;
+  allows_date_range_booking: boolean;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -96,6 +97,7 @@ export interface CreateServiceBody {
   cash_allowed?: boolean;
   deposit_required?: boolean;
   deposit_percentage?: number;
+  allows_date_range_booking?: boolean;
   min_technician_level?: string;
   commission_percentage?: number;
   display_order?: number;

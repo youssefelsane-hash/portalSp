@@ -28,7 +28,10 @@ DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day)
 const int _maxFlexibleRangeDays = 14;
 
 class ScheduleSelectionScreen extends StatelessWidget {
-  const ScheduleSelectionScreen({super.key});
+  // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — لو false، كارت "مرن" بيتخفي
+  // بدل ما العميل يختاره ويترفض من الباك-إند بعدين (orders.service.ts).
+  final bool allowsDateRangeBooking;
+  const ScheduleSelectionScreen({super.key, required this.allowsDateRangeBooking});
 
   Future<void> _pickSpecificDate(BuildContext context) async {
     final now = DateTime.now();
@@ -81,13 +84,15 @@ class ScheduleSelectionScreen extends StatelessWidget {
                 highlighted: true,
                 onTap: () => _pickSpecificDate(context),
               ),
-              const SizedBox(height: 12),
-              _ScheduleOptionCard(
-                icon: Icons.event_repeat_outlined,
-                title: 'مرن — اختار نطاق أيام',
-                subtitle: 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
-                onTap: () => _pickFlexibleRange(context),
-              ),
+              if (allowsDateRangeBooking) ...[
+                const SizedBox(height: 12),
+                _ScheduleOptionCard(
+                  icon: Icons.event_repeat_outlined,
+                  title: 'مرن — اختار نطاق أيام',
+                  subtitle: 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
+                  onTap: () => _pickFlexibleRange(context),
+                ),
+              ],
             ],
           ),
         ),

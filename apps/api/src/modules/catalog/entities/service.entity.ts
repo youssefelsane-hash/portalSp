@@ -97,6 +97,12 @@ export class Service {
   @Column({ name: 'deposit_percentage', type: 'numeric', precision: 5, scale: 2, nullable: true })
   depositPercentage: string | null;
 
+  // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — نفس نمط cash_allowed بالحرف. الافتراضي
+  // true عمدًا: الخيار متاح فعليًا لكل خدمة اليوم بلا فحص، فالعلم ده تحويل الوضع الحالي لقدرة صريحة
+  // مش قيد جديد. صفر لمس لمنطق حل النطاق نفسه (orders.service.ts) — بوابة دخول بس.
+  @Column({ name: 'allows_date_range_booking', type: 'boolean', default: true })
+  allowsDateRangeBooking: boolean;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',
