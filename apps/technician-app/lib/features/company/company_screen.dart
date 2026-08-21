@@ -120,6 +120,62 @@ class _CompanyScreenState extends State<CompanyScreen> {
     }
   }
 
+  // تعديل فرع بعد إنشائه — كانت فجوة موثّقة صراحة (راجع تعليق updateBranch() في
+  // company_repository.dart). نفس نمط _addBranch بالحرف، بس بيبدأ من قيم الفرع الحالية.
+  Future<void> _editBranch(CompanyBranch branch) async {
+    final nameController = TextEditingController(text: branch.name);
+    final addressController = TextEditingController(text: branch.addressLine ?? '');
+    var isActive = branch.isActive;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('تعديل الفرع'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameController, decoration: const InputDecoration(labelText: 'اسم الفرع')),
+                const SizedBox(height: 8),
+                TextField(controller: addressController, decoration: const InputDecoration(labelText: 'العنوان (اختياري)')),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('نشط'),
+                  value: isActive,
+                  onChanged: (v) => setDialogState(() => isActive = v),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('إلغاء')),
+              FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('حفظ')),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (result != true || !mounted) return;
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      await _repository.updateBranch(
+        branch.id,
+        name: nameController.text.trim(),
+        addressLine: addressController.text.trim(),
+        isActive: isActive,
+      );
+      await _load();
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _addStaff() async {
     final code = _staffCodeController.text.trim();
     if (code.isEmpty) return;
@@ -281,7 +337,18 @@ class _CompanyScreenState extends State<CompanyScreen> {
             child: ListTile(
               title: Text(branch.name),
               subtitle: branch.addressLine != null ? Text(branch.addressLine!) : null,
-              trailing: branch.isActive ? null : const Text('غير نشط'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!branch.isActive) const Padding(padding: EdgeInsets.only(left: 8), child: Text('غير نشط')),
+                  if (_canManage)
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'تعديل الفرع',
+                      onPressed: _acting ? null : () => _editBranch(branch),
+                    ),
+                ],
+              ),
             ),
           ),
         if (_canManage) ...[

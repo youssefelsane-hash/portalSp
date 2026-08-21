@@ -33,4 +33,16 @@ class NotificationsRepository {
     final data = await auth.authedRequest('PATCH', '/notifications/read-all');
     return data!['updated_count'] as int;
   }
+
+  // تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — مطابق لـ customer-app بالحرف. كانت
+  // فجوة موثّقة صراحة: الباك-إند عام لأي نوع مستخدم (مفيش @Roles)، بس الفني معندوش شاشة يوصّلها
+  // أصلاً — الشاشة موجودة للعميل بس.
+  Future<List<NotificationChannelPreference>> fetchPreferences() async {
+    final items = await auth.authedRequestList('/me/notification-preferences');
+    return items.map(NotificationChannelPreference.fromJson).toList();
+  }
+
+  Future<void> updatePreference(String channel, bool isEnabled) async {
+    await auth.authedRequest('PATCH', '/me/notification-preferences/$channel', body: {'is_enabled': isEnabled});
+  }
 }

@@ -31,3 +31,24 @@ class AppNotification {
         createdAt: json['created_at'] as String,
       );
 }
+
+// تفضيلات إشعارات المستخدم بالقناة (docs/10 بند 37) — مطابق لـ
+// apps/api/src/modules/notifications/notifications.controller.ts listMyPreferences().
+class NotificationChannelPreference {
+  final String channel;
+  final bool isEnabled;
+
+  NotificationChannelPreference({required this.channel, required this.isEnabled});
+
+  factory NotificationChannelPreference.fromJson(Map<String, dynamic> json) => NotificationChannelPreference(
+        channel: json['channel'] as String,
+        isEnabled: json['is_enabled'] as bool,
+      );
+}
+
+const Map<String, String> notificationChannelLabelsAr = {
+  'push': 'إشعارات فورية (Push)',
+  'sms': 'رسائل SMS',
+  'whatsapp': 'واتساب',
+  'email': 'بريد إلكتروني',
+};

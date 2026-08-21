@@ -5,6 +5,7 @@ import '../../core/auth_repository.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'models.dart';
+import 'notification_preferences_screen.dart';
 import 'notifications_repository.dart';
 
 // صندوق إشعارات داخل التطبيق (docs/08) — كانت فجوة موثّقة صراحة: GET/PATCH /notifications/*
@@ -69,6 +70,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           title: const Text('الإشعارات'),
           actions: [
             if (hasUnread) TextButton(onPressed: _markAllRead, child: const Text('تعليم الكل كمقروء')),
+            IconButton(
+              icon: const Icon(Icons.tune),
+              tooltip: 'تفضيلات الإشعارات',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NotificationPreferencesScreen()),
+              ),
+            ),
           ],
         ),
         body: RefreshIndicator(

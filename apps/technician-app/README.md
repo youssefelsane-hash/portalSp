@@ -292,3 +292,24 @@ flutter run --dart-define=API_BASE_URL=http://<عنوان الباك-إند>/api
 
 اتأكد حي بـ`order-tracking-gateway-presence.spec.ts` (apps/api) — اتصال بلا order_id لوحده كافي
 يسجّل الفني أونلاين فعليًا ضد `RealtimeSessionRegistry` حقيقي (مش mock). `flutter analyze` نضاف.
+
+## سويبة تنظيف "backend شغال بلا واجهة" (بلاغ مالك 2026-08-21) — ثلاث فجوات اتقفلت
+
+- **تفضيلات إشعارات القناة** (`lib/features/notifications/notification_preferences_screen.dart`
+  جديدة، `models.dart`/`notifications_repository.dart` اتوسّعوا): `GET/PATCH /me/notification-preferences`
+  كان شغال ومختبر عام لأي نوع مستخدم بلا `@Roles`، بس الشاشة كانت موجودة لـ`apps/customer-app` بس.
+  نفس الشاشة بالحرف اتنقلت هنا، زرار جديد (أيقونة `Icons.tune`) في AppBar `NotificationsScreen`.
+- **تقييم الفني للعميل** (`lib/features/ratings/` جديد بالكامل — `ratings_repository.dart`،
+  `rating_dialog.dart`): `POST /technician/orders/:id/rate` (`technician_to_customer`، `ratings.service.ts`'s
+  `rateAsTechnician()`) كان شغال ومختبر بالكامل بلا أي كود في التطبيق بينادي عليه خالص. زرار "قيّم
+  العميل" جديد في `order_execution_screen.dart` بعد إقفال الطلب (`isDone`). أبعاد التقييم مختلفة عمدًا
+  عن تقييم العميل للفني (`overall`/`punctuality`/`professionalism` بس — "التزم بميعاد الزيارة"/"تعامل
+  محترم" بدل "جودة شغل"/"نظافة"/"عدالة سعر" اللي مالهاش معنى معكوس)، وصفر صور/Google review prompt
+  (الاتنين خاصين بـ`customer_to_technician` بس فعليًا في الباك-إند).
+- **تعديل فرع بعد إنشائه** (`company_repository.dart`'s `updateBranch()` جديدة، زرار تعديل جديد
+  في `company_screen.dart`): `PATCH /technician/company/branches/:branchId` كان شغال ومختبر بالكامل
+  (اسم/عنوان/تفعيل) بلا أي استدعاء له في التطبيق — الفرع كان إنشاء بس، تصحيح اسم فرع غلط بعد
+  الإنشاء ماكانش ممكن إلا بحذفه وعمل واحد جديد.
+
+اتأكد بـ`flutter analyze` على كل التطبيق — صفر تحذيرات جديدة (بس نفس `use_null_aware_elements`
+info الموجودة بالفعل في repositories تانية، مش رجريشن).

@@ -8,6 +8,7 @@ import '../favorites/favorites_screen.dart';
 import '../loyalty/loyalty_repository.dart';
 import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
+import '../payment_methods/payment_methods_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
 import '../referrals/referrals_screen.dart';
 import '../support/complaints_screen.dart';
@@ -117,6 +118,12 @@ class _AccountScreenState extends State<AccountScreen> {
               title: const Text('المفضّلة'),
               trailing: const Icon(Icons.chevron_left),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FavoritesScreen())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.credit_card_outlined),
+              title: const Text('وسائل الدفع المحفوظة'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaymentMethodsScreen())),
             ),
             ListTile(
               leading: const Icon(Icons.stars_outlined),
