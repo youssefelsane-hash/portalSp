@@ -23,6 +23,13 @@ export interface AdminTechnicianResponseDto {
   verification_status: string;
   is_available: boolean;
   is_on_duty: boolean;
+  // بَقّة ثقة حقيقية اتلقطت (بلاغ المالك، 2026-08-21): is_available/is_on_duty فوق شكلهم بيوحي
+  // إنهم بيمنعوا الفني من استقبال طلبات — مش صحيح، اتشالوا من الأهلية بالكامل من ADR-0017 (نموذج
+  // Opt-out، الفني متاح افتراضيًا). الشرط الحقيقي الوحيد المتبقي اللي ممكن يمنع فني معتمد بمنطقة/
+  // فئة سليمة من استقبال طلبات هو عدم وجود current_location خالص (لسه مفتحش تطبيق الفني بصلاحية
+  // الموقع) — findEligibleTechnicians() (matching.service.ts) بيشترطه صراحة. الحقل ده بيعرضه
+  // للأدمن عشان يبقى واضح إن ده السبب الفعلي، مش الفلاجين القديمين فوق.
+  has_current_location: boolean;
   created_at: string;
   assistant_link_status: string;
   assistant_technician_id: string | null;
@@ -46,6 +53,7 @@ export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: U
     verification_status: profile.verificationStatus,
     is_available: profile.isAvailable,
     is_on_duty: profile.isOnDuty,
+    has_current_location: profile.currentLocation !== null,
     created_at: profile.createdAt.toISOString(),
     assistant_link_status: profile.assistantLinkStatus,
     assistant_technician_id: profile.assistantTechnicianId,

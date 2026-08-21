@@ -33,6 +33,7 @@ export interface AdminTechnicianResponseDto {
   verification_status: TechnicianVerificationStatus;
   is_available: boolean;
   is_on_duty: boolean;
+  has_current_location: boolean;
   created_at: string;
   assistant_link_status: 'none' | 'pending_approval' | 'approved';
   assistant_technician_id: string | null;

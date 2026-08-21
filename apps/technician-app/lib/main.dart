@@ -13,6 +13,7 @@ import 'features/domestic_worker/worker_home_screen.dart';
 import 'features/onboarding/onboarding_repository.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/orders/available_orders_screen.dart';
+import 'features/tracking/tracking_client.dart';
 
 void main() {
   assertProductionApiConfig();
@@ -62,8 +63,79 @@ class _DeviceSecurityGate extends StatelessWidget {
   }
 }
 
-class _AuthGate extends StatelessWidget {
+// بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-21): "أونلاين دلوقتي" (docs/08 §35.10، ADR-0021 §6)
+// كان دايمًا بيظهر "أوفلاين" لكل الفنيين — مش بَقّة في RealtimeSessionRegistry نفسه (تسجيل
+// الـuserId ونفس المفتاح في القراءة سليمين)، المشكلة إن التطبيق ماكانش بيفتح أي اتصال Socket.IO
+// خالص لحد ما فني يفتح شاشة تنفيذ طلب نشط (`order_execution_screen.dart`'s
+// TechnicianTrackingClient) — فني مسجّل دخول وقاعد على الشاشة الرئيسية بلا طلب نشط معندوش أي
+// socket خالص، فـisUserOnline() بترجع false بحق. الإصلاح: اتصال "حضور" مستقل (نفس namespace
+// `/tracking`، بلا orderId — التسجيل في RealtimeSessionRegistry بيحصل وقت handleConnection قبل
+// أي انضمام لغرفة، فمفيش داعي لـorder_id خالص) بيتفتح طول ما الفني مسجّل دخول والتطبيق في
+// المقدمة، منفصل تمامًا عن اتصال تتبع الطلب (الاتنين ممكن يشتغلوا مع بعض — الـregistry بيدعم
+// أكتر من socket لكل user_id، Set مش قيمة واحدة).
+class _AuthGate extends StatefulWidget {
   const _AuthGate();
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
+  final _presence = TechnicianTrackingClient();
+  bool _presenceConnected = false;
+  AuthRepository? _auth;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.read<AuthRepository>();
+    if (!identical(auth, _auth)) {
+      _auth?.removeListener(_syncPresence);
+      _auth = auth;
+      _auth!.addListener(_syncPresence);
+      _syncPresence();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _syncPresence();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      _disconnectPresence();
+    }
+  }
+
+  void _syncPresence() {
+    final auth = _auth;
+    if (auth == null) return;
+    if (auth.isAuthenticated && !_presenceConnected) {
+      _presence.connect(accessToken: auth.accessToken!);
+      _presenceConnected = true;
+    } else if (!auth.isAuthenticated) {
+      _disconnectPresence();
+    }
+  }
+
+  void _disconnectPresence() {
+    if (!_presenceConnected) return;
+    _presence.dispose();
+    _presenceConnected = false;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _auth?.removeListener(_syncPresence);
+    _presence.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
