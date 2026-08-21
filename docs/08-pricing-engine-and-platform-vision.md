@@ -5566,5 +5566,29 @@ WHERE cp.user_id = $1`. **فرق تصميم مقصود عن الفني 360°**: 
 مركّز على `src/modules/admin/`+`src/modules/customers/` (8 suites/33 اختبار) نضاف. `apps/admin`
 `tsc --noEmit`/`next build` (52 صفحة) نضاف. موثّق في `apps/api/src/modules/admin/README.md`.
 
-**لسه فاضل من §35**: 35.12-35.13 (متفوّق عليهم بـ§36.9-10)، 35.18-35.20 (RBAC/audit شامل، أمان
-التزامن، اختبارات السيناريوهات الكاملة A-L، تحقق E2E حي)، 35.final (الإغلاق النهائي).
+**لسه فاضل من §35**: 35.12-35.13 (متفوّق عليهم بـ§36.9-10)، 35.19-35.20 (أمان التزامن، اختبارات
+السيناريوهات الكاملة A-L، تحقق E2E حي)، 35.final (الإغلاق النهائي).
+
+## §35.18: تدقيق RBAC/audit شامل على كل mutations أدمن جديدة من §35 — خلص (2026-08-21، صفر إصلاح لازم)
+
+تدقيق كامل (بحث شامل + مراجعة يدوية مباشرة، مش تفويض فهم) لكل endpoint إداري (`POST`/`PATCH`/`PUT`/
+`DELETE` تحت `/admin/...`) اتضاف كجزء من مبادرة §35. **النتيجة**: الـmutations الوحيدة الجديدة فعلاً
+هي الأربعة بتوع تحكم الأدمن بالطاقم (§35.6، `admin-orders.controller.ts`):
+
+- `POST /admin/orders/:id/team-members` (إضافة عضو)
+- `POST /admin/orders/:id/team-members/:memberId/remove` (إزالة عضو)
+- `POST /admin/orders/:id/team-members/:memberId/replace` (استبدال عضو)
+- `POST /admin/orders/:id/reassign-leader` (تغيير القائد)
+
+الأربعة عندهم `@RequirePermission('orders.manage_crew')` (زائد `@Roles(ADMIN)` على مستوى الكنترولر)،
+والصلاحية دي حقيقية ومزروعة فعلاً (`infra/migrations/0132_admin_crew_management_permission.sql`،
+ممنوحة لـ`super_admin`+`ops_manager`) — مش string اتكتب غلط هيمنع الوصول بصمت. كل الأربعة بتسجّل في
+`audit_logs` عبر `AuditLogService.record()` (`order.crew_member_added`/`_removed`/`_replaced`،
+`order.leader_reassigned`) في `admin-orders.service.ts`. تغيير القائد عمدًا بنفس صلاحية الإضافة/
+الإزالة (مش صلاحية `super_admin` منفصلة) — قرار موثّق مسبقًا في §35.3/§35.6 نفسها ("قرار تشغيلي
+يومي زي إضافة عضو، مش قرار super_admin منفصل")، والتنفيذ مطابق للنية الموثّقة بالحرف.
+
+باقي أسطح §35 (بروفايل الفني 360°، عرض عمليات الفئة، matching explainability/funnel، بروفايل
+العميل 360° §35.15، تايم لاين المطابقة) كلها **قراءة بس صراحة** (`GET` فقط، صفر `@Post`/`@Patch`/
+`@Delete`) — مفيش mutation جديدة فيها تحتاج فحص RBAC أصلاً، ده موثّق بالفعل في تعليقات كل واحدة
+منها وقت البناء ("قراءة بس، صفر منطق مطوّر جديد"). **صفر فجوة اتلقطت، صفر تعديل كود لازم.**
