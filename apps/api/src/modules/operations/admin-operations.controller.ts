@@ -3,8 +3,10 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { AdminOperationsOverviewService } from './admin-operations-overview.service';
 import { AdminWorkloadForecastService } from './admin-workload-forecast.service';
+import { AdminDispatchDeliveryService } from './admin-dispatch-delivery.service';
 import { OperationsOverviewQueryDto } from './dto/operations-overview-query.dto';
 import { WorkloadForecastQueryDto } from './dto/workload-forecast-query.dto';
+import { DispatchDeliveryQueryDto } from './dto/dispatch-delivery-query.dto';
 
 // مركز العمليات (docs/08 §36.2 فصاعدًا) — بداية قسم جديد كامل بيتوسّع مرحلة بمرحلة (§36.3-14).
 @Controller('admin/operations')
@@ -13,6 +15,7 @@ export class AdminOperationsController {
   constructor(
     private readonly overviewService: AdminOperationsOverviewService,
     private readonly workloadForecastService: AdminWorkloadForecastService,
+    private readonly dispatchDeliveryService: AdminDispatchDeliveryService,
   ) {}
 
   @Get('overview')
@@ -50,6 +53,58 @@ export class AdminOperationsController {
         days: r.days.map((d) => ({ date: d.date, tier: d.tier, is_multi_day: d.isMultiDay })),
       })),
       meta,
+    };
+  }
+
+  // مراقبة تسليم الطلبات — REQ SENT + حالات حقيقية بس (docs/08 §36.7). صفر طبقة تتبّع توصيل موازية:
+  // بيعرض order_assignments + technician_work_opportunities الحقيقيين زي ما همّ. الرد متعشّش
+  // (`feed: {items, meta}` مش items/meta على المستوى الأول) — لازم عشان ResponseInterceptor بيعمل
+  // auto-unwrap لأي رد فيه items+meta على المستوى الأول ويقطع summary بصمت، راجع تعليق
+  // admin-dispatch-delivery.service.ts للتفصيل الكامل (بَقّة حقيقية اتلقطت بـcurl حي).
+  @Get('dispatch-delivery')
+  async getDispatchDelivery(@Query() query: DispatchDeliveryQueryDto) {
+    const result = await this.dispatchDeliveryService.getDeliveryObservability({
+      categoryId: query.category_id ?? null,
+      zoneId: query.zone_id ?? null,
+      hours: query.hours ?? 24,
+      page: query.page ?? 1,
+      perPage: query.per_page ?? 20,
+    });
+    return {
+      summary: {
+        assignments: {
+          sent: result.summary.assignments.sent,
+          viewed: result.summary.assignments.viewed,
+          accepted: result.summary.assignments.accepted,
+          rejected: result.summary.assignments.rejected,
+          timeout: result.summary.assignments.timeout,
+          cancelled: result.summary.assignments.cancelled,
+          stale_sent_count: result.summary.assignments.staleSentCount,
+        },
+        work_opportunities: {
+          offered: result.summary.workOpportunities.offered,
+          accepted: result.summary.workOpportunities.accepted,
+          declined: result.summary.workOpportunities.declined,
+          closed: result.summary.workOpportunities.closed,
+        },
+      },
+      feed: {
+        items: result.feed.items.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          order_id: r.orderId,
+          technician_id: r.technicianId,
+          technician_code: r.technicianCode,
+          full_name: r.fullName,
+          status: r.status,
+          context: r.context,
+          sent_at: r.sentAt,
+          responded_at: r.respondedAt,
+          expires_at: r.expiresAt,
+          is_stale: r.isStale,
+        })),
+        meta: result.feed.meta,
+      },
     };
   }
 }

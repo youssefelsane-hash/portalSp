@@ -7,10 +7,12 @@ import type {
   AdminCityResponseDto,
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
+  DispatchDeliveryItemDto,
+  DispatchDeliveryResponseDto,
   OperationsOverview,
   WorkloadForecastRowDto,
 } from '@baytak/shared-types';
-import { AlertTriangle, ClipboardList, Radio, Users } from 'lucide-react';
+import { AlertTriangle, ClipboardList, Radio, Send, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -419,6 +421,224 @@ function NearFutureWorkloadSection({
   );
 }
 
+const DELIVERY_PER_PAGE = 15;
+const DELIVERY_HOURS_OPTIONS = [1, 6, 24, 72, 168] as const;
+
+const DELIVERY_KIND_LABELS: Record<string, string> = {
+  assignment: 'تعيين مباشر',
+  work_opportunity_assignment: 'فرصة تولّي طلب',
+  work_opportunity_crew_recruit: 'تجنيد فريق',
+};
+
+const DELIVERY_STATUS_LABELS: Record<string, string> = {
+  sent: 'مُرسل',
+  viewed: 'تمت المشاهدة',
+  accepted: 'مقبول',
+  rejected: 'مرفوض',
+  timeout: 'انتهت المهلة',
+  cancelled: 'ملغي',
+  offered: 'معروض',
+  declined: 'مرفوض',
+  closed: 'مُغلق',
+};
+
+function deliveryKindLabel(item: DispatchDeliveryItemDto): string {
+  if (item.kind === 'assignment') return DELIVERY_KIND_LABELS.assignment;
+  return item.context === 'crew_recruit' ? DELIVERY_KIND_LABELS.work_opportunity_crew_recruit : DELIVERY_KIND_LABELS.work_opportunity_assignment;
+}
+
+function deliveryStatusBadgeClass(status: string): string {
+  if (['accepted'].includes(status)) return 'border-success/40 bg-success/10 text-success';
+  if (['rejected', 'declined', 'timeout', 'cancelled'].includes(status)) return 'border-danger/40 bg-danger/10 text-danger';
+  if (['viewed'].includes(status)) return 'border-warning/40 bg-warning/10 text-warning';
+  return 'border-muted-foreground/30 bg-muted text-muted-foreground';
+}
+
+// مراقبة تسليم الطلبات — REQ SENT + حالات حقيقية بس (docs/08 §36.7). صفر حالة توصيل مخترعة: بيعرض
+// order_assignments (البث المباشر لكل جولة) وtechnician_work_opportunities (فرص الشغل الإضافي/
+// تجنيد الفريق) الحقيقيين زي ما همّ، مع stale_sent_count المُستنتج مباشرة من expires_at الحقيقي
+// (مش عتبة وقت تعسفية). بعكس الأقسام فوق، الفئة هنا اختيارية (فلتر الصفحة الرئيسي)، مش شرط.
+function DispatchDeliverySection({
+  categoryId,
+  authedFetch,
+}: {
+  categoryId: string;
+  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+}) {
+  const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
+  const [cityId, setCityId] = useState<string>('');
+  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
+  const [zoneId, setZoneId] = useState<string>('');
+  const [hours, setHours] = useState<number>(24);
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<DispatchDeliveryResponseDto | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
+  }, [authedFetch]);
+
+  useEffect(() => {
+    setZoneId('');
+    if (!cityId) {
+      setZones(null);
+      return;
+    }
+    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
+      .then(setZones)
+      .catch(() => undefined);
+  }, [authedFetch, cityId]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [categoryId, zoneId, hours]);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({ hours: String(hours), page: String(page), per_page: String(DELIVERY_PER_PAGE) });
+    if (categoryId) params.set('category_id', categoryId);
+    if (zoneId) params.set('zone_id', zoneId);
+    authedFetch<DispatchDeliveryResponseDto>(`/admin/operations/dispatch-delivery?${params.toString()}`)
+      .then(setData)
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مراقبة تسليم الطلبات'))
+      .finally(() => setLoading(false));
+  }, [authedFetch, categoryId, zoneId, hours, page]);
+
+  const totalPages = Math.max(1, Math.ceil((data?.feed.meta.total ?? 0) / DELIVERY_PER_PAGE));
+
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <Send className="size-4" />
+        مراقبة تسليم الطلبات
+      </h2>
+
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="delivery_city" className="text-sm text-muted-foreground">
+            المدينة
+          </Label>
+          <SelectNative id="delivery_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+            <option value="">كل المدن</option>
+            {cities?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="delivery_zone" className="text-sm text-muted-foreground">
+            النطاق
+          </Label>
+          <SelectNative
+            id="delivery_zone"
+            value={zoneId}
+            onChange={(e) => setZoneId(e.target.value)}
+            disabled={!cityId}
+            className="max-w-xs"
+          >
+            <option value="">{cityId ? 'كل نطاقات المدينة' : 'اختر مدينة الأول'}</option>
+            {zones?.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name_ar}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="delivery_hours" className="text-sm text-muted-foreground">
+            النافذة الزمنية
+          </Label>
+          <SelectNative id="delivery_hours" value={String(hours)} onChange={(e) => setHours(Number(e.target.value))} className="max-w-xs">
+            {DELIVERY_HOURS_OPTIONS.map((h) => (
+              <option key={h} value={h}>
+                {h < 24 ? `آخر ${h} ساعة` : `آخر ${h / 24} يوم`}
+              </option>
+            ))}
+          </SelectNative>
+        </div>
+      </div>
+
+      {error && <p className="text-destructive">{error}</p>}
+
+      {!error && loading && !data && <TableSkeleton rows={5} columns={6} />}
+
+      {!error && data && (
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+            <CapacityTierRow label="مُرسل" value={data.summary.assignments.sent} tone="muted" />
+            <CapacityTierRow label="تمت المشاهدة" value={data.summary.assignments.viewed} tone="muted" />
+            <CapacityTierRow label="مقبول" value={data.summary.assignments.accepted} tone="success" />
+            <CapacityTierRow label="مرفوض" value={data.summary.assignments.rejected} tone="danger" />
+            <CapacityTierRow label="انتهت المهلة" value={data.summary.assignments.timeout} tone="warning" />
+            <CapacityTierRow label="ملغي" value={data.summary.assignments.cancelled} tone="muted" />
+            <CapacityTierRow label="مُرسل متأخر" value={data.summary.assignments.stale_sent_count} tone="danger" />
+          </div>
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <CapacityTierRow label="فرص شغل معروضة" value={data.summary.work_opportunities.offered} tone="muted" />
+            <CapacityTierRow label="فرص مقبولة" value={data.summary.work_opportunities.accepted} tone="success" />
+            <CapacityTierRow label="فرص مرفوضة" value={data.summary.work_opportunities.declined} tone="danger" />
+            <CapacityTierRow label="فرص مُغلقة" value={data.summary.work_opportunities.closed} tone="muted" />
+          </div>
+
+          {data.feed.items.length === 0 && (
+            <EmptyState title="مفيش تسليمات في النافذة الزمنية دي" description="جرّب توسيع النافذة الزمنية أو تغيير الفلاتر." />
+          )}
+
+          {data.feed.items.length > 0 && (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>النوع</TableHead>
+                    <TableHead>الفني</TableHead>
+                    <TableHead>الطلب</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead>اتبعت</TableHead>
+                    <TableHead>اترد عليه</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.feed.items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="text-sm">{deliveryKindLabel(item)}</TableCell>
+                      <TableCell>
+                        <Link href={`/technicians/${item.technician_id}`} className="font-medium hover:underline">
+                          {item.full_name}
+                        </Link>
+                        <div className="text-xs text-muted-foreground">{item.technician_code}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Link href={`/orders/${item.order_id}`} className="hover:underline">
+                          عرض الطلب
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={deliveryStatusBadgeClass(item.status)}>
+                          {DELIVERY_STATUS_LABELS[item.status] ?? item.status}
+                        </Badge>
+                        {item.is_stale && <div className="mt-1 text-[10px] text-danger">متأخر عن معاده</div>}
+                      </TableCell>
+                      <TableCell className="text-xs">{new Date(item.sent_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                      <TableCell className="text-xs">
+                        {item.responded_at ? new Date(item.responded_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination page={page} totalPages={totalPages} total={data.feed.meta.total} itemLabel="تسليمة" onPageChange={setPage} />
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function OperationsOverviewPage() {
   const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
@@ -517,11 +737,13 @@ export default function OperationsOverviewPage() {
 
           <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
 
+          <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
+
           <section className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <p>
-              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (مفتّش المطابقة، "ليه/ليه لأ؟"،
-              تايم لاين، مركز التنبيهات، ذكاء التغطية...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
+              مركز العمليات لسه بيتوسّع مرحلة بمرحلة (docs/08 §36). الأقسام الجاية (تايم لاين، مركز التنبيهات، ذكاء
+              التغطية...) هتتضاف هنا فوق نفس الصفحة دي، مش صفحات منفصلة متفرقة.
             </p>
           </section>
         </div>

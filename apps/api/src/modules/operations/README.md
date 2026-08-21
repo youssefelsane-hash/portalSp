@@ -111,3 +111,46 @@ crew shortage مفتوح/مقفول، فلتر الفئة، وكل الـ4 tiers
 `/operations`، وأرقام حقيقية من الداتابيز ظهرت صح. **فجوة موثّقة صراحة**: مفيش بنية Playwright
 تلقائية دائمة مثبّتة في المشروع (لا config، لا dependency، لا specs) رغم إشارة `apps/admin/README.md`
 لها — التحقق ده كان سكريبت مؤقت غير محفوظ. بناء بنية اختبار حقيقية دائمة خارج نطاق §36.2.
+
+## §36.7 — مراقبة تسليم الطلبات (REQ SENT + حالات حقيقية بس)
+
+`admin-dispatch-delivery.service.ts` (`AdminDispatchDeliveryService.getDeliveryObservability()`) —
+`GET /admin/operations/dispatch-delivery?category_id=&zone_id=&hours=&page=&per_page=`. صفر طبقة
+تتبّع توصيل موازية جديدة: بيجمع مصدرين حقيقيين موجودين بالفعل ويعرضهم زي ما همّ —
+
+- `order_assignments` (`matching/entities/order-assignment.entity.ts`، `AssignmentStatus`:
+  sent/viewed/accepted/rejected/timeout/cancelled) — البث المباشر/الطوارئ لكل جولة. عنده
+  `expires_at` حقيقي، فـ`stale_sent_count`/`is_stale` مُستنتجين مباشرة منه (صف لسه `sent` بعد ما فات
+  معاده — على الأغلب `matching-round-expiry.processor.ts` لسه ما لحقهوش)، مش عتبة وقت تعسفية مخترعة.
+- `technician_work_opportunities` (`technicians/technician-work-opportunities.service.ts`،
+  `WorkOpportunityStatus`: offered/accepted/declined/closed) — فرص الشغل الإضافي الاختياري/تجنيد
+  الفريق (§34.1/§35). مفيهاش `expires_at` أصلاً (migration 0153) فـ`is_stale` بتفضل `false` دايمًا
+  لهم عمدًا. `context` (`assignment`/`crew_recruit`) بيتضمّن كمان.
+
+الفئة والنطاق هنا **اختياريان** (بعكس §36.3/§36.4)، لأن الشاشة observability عبر النظام كله بطبيعتها،
+مش تصفح فني بفئة محدد.
+
+### بَقّة حقيقية اتلقطت وقت التحقق الحي (مش نظرية) — `ResponseInterceptor` بيقطع `summary` بصمت
+
+المحاولة الأولى رجّعت `{summary, items, meta}` على المستوى الأول من الـcontroller.
+`common/interceptors/response.interceptor.ts`'s `isPaginatedShape()` بيفحص وجود مفتاحي `items`+`meta`
+بس (مش حصريتهم) — فأي رد فيه المفتاحين دول، بغض النظر عن أي مفاتيح تانية جنبهم، بيتقطع لـ
+`data = payload.items` مباشرة، و`summary` بيختفي بصمت تام (لا خطأ، لا تحذير). اتلقطت فعليًا بـcurl حي
+ضد Postgres حقيقي — `data.summary` كانت مفقودة تمامًا من الرد. **الحل**: تعشيش `items`/`meta` تحت
+مفتاح `feed` منفصل (`{summary, feed: {items, meta}}`) — الـinterceptor بيفحص المستوى الأول بس، فمبيلمسش
+`feed` جوّه. راجع تعليق `admin-dispatch-delivery.service.ts` للتفصيل الكامل. **ملحوظة لأي موديول
+جديد تاني بيرجّع بيانات مجمّعة (summary) جنب قايمة مُرقّمة**: لازم نفس البنية المتعشّشة، مش items/meta
+على نفس مستوى أي مفتاح تاني.
+
+### اختبارات
+
+`admin-dispatch-delivery.spec.ts` — اختبار حي (8/8) ضد Postgres حقيقي: كل حالات `order_assignments`
+الست، `stale_sent_count`/`is_stale` (قبل/بعد المعاد)، `technician_work_opportunities` (offered/
+accepted/closed + `context`)، فلتر `category_id`/`zone_id` (عبر `orders.service_zone_id`/
+`services.category_id`)، فلتر `hours` (نافذة الرجوع)، وترقيم الصفحات. تحقّق حي إضافي بـcurl ضد
+`apps/api` dev server شغال فعليًا (JWT حقيقي، مستخدم أدمن حقيقي بالداتابيز) — أكّد شكل الرد النهائي
+بعد إصلاح البَقّة فوق.
+
+**فجوة موثّقة صراحة**: مفيش UI لـ"إعادة إرسال يدوي" لصف `sent` متأخر من الشاشة دي — العرض observability
+بس دلوقتي (المالك محدّدش "REQ SENT" كإجراء تصحيحي، بس كمراقبة). لو اتطلب لاحقًا، محتاج endpoint
+تحكم جديد في `matching`/`technicians` (خارج نطاق §36.7).
