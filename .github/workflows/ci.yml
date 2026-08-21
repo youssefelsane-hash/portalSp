@@ -72,7 +72,13 @@ jobs:
 
       - name: npx jest
         working-directory: apps/api
-        run: npm test
+        # --runInBand إجباري هنا: عشرات الـspecs بتشارك حالة حقيقية على نفس قاعدة بيانات CI
+        # الواحدة (محفظة المنصة النظامية، صفوف seed ثابتة) بافتراض تنفيذ متسلسل — بالظبط زي
+        # القاعدة المتّبعة يدويًا قبل كل commit (راجع CLAUDE.md). تشغيل jest الافتراضي (عمّال
+        # متوازيين) كان بيسبب سباقات حقيقية (deadlock على orders، duplicate key على
+        # payments/idempotency، انحراف رصيد محفظة المنصة بين specs متزامنة) — مش بَقّة في كود
+        # الميزة، فجوة في CI نفسه اتلقطت وهي بتكسر main بالفعل (run #207/#209).
+        run: npx jest --runInBand
         env:
           DATABASE_URL: postgres://baytak:baytak@localhost:5432/baytak
           REDIS_URL: redis://localhost:6379
