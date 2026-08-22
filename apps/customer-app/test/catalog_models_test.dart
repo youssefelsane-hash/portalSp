@@ -38,6 +38,8 @@ void main() {
       'allows_emergency': false,
       'allows_individual': true,
       'allows_team': false,
+      'allows_date_range_booking': true,
+      'requires_precise_schedule': false,
       'min_technician_level': 'new',
     };
     final service = CatalogService.fromJson(json);
