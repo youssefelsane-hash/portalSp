@@ -947,18 +947,18 @@ function coverageStatusBadgeClass(status: string): string {
 function CoverageRowDrawer({
   categoryId,
   zoneId,
-  authedFetch,
+  authedFetchPaginated,
 }: {
   categoryId: string;
   zoneId: string;
-  authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  authedFetchPaginated: ReturnType<typeof useAuth>['authedFetchPaginated'];
 }) {
   const [items, setItems] = useState<AdminCategoryOpsRowDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams({ category_id: categoryId, zone_id: zoneId, per_page: '10' });
-    authedFetch<{ items: AdminCategoryOpsRowDto[]; meta: { total: number } }>(`/admin/technicians/by-category?${params.toString()}`)
+    authedFetchPaginated<AdminCategoryOpsRowDto>(`/admin/technicians/by-category?${params.toString()}`)
       .then(({ items: rows }) => setItems(rows))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الفنيين'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -992,9 +992,11 @@ function CoverageRowDrawer({
 function CoverageIntelligenceSection({
   categoryId,
   authedFetch,
+  authedFetchPaginated,
 }: {
   categoryId: string;
   authedFetch: ReturnType<typeof useAuth>['authedFetch'];
+  authedFetchPaginated: ReturnType<typeof useAuth>['authedFetchPaginated'];
 }) {
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [cityId, setCityId] = useState<string>('');
@@ -1033,14 +1035,14 @@ function CoverageIntelligenceSection({
     const params = new URLSearchParams({ page: String(page), per_page: String(COVERAGE_PER_PAGE) });
     if (categoryId) params.set('category_id', categoryId);
     if (zoneId) params.set('zone_id', zoneId);
-    authedFetch<{ items: CoverageRowDto[]; meta: { total: number } }>(`/admin/operations/coverage?${params.toString()}`)
+    authedFetchPaginated<CoverageRowDto>(`/admin/operations/coverage?${params.toString()}`)
       .then(({ items: rows, meta }) => {
         setItems(rows);
         setTotal(meta.total ?? rows.length);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل ذكاء تغطية القوى العاملة'))
       .finally(() => setLoading(false));
-  }, [authedFetch, categoryId, zoneId, page]);
+  }, [authedFetchPaginated, categoryId, zoneId, page]);
 
   const totalPages = Math.max(1, Math.ceil(total / COVERAGE_PER_PAGE));
 
@@ -1144,7 +1146,7 @@ function CoverageIntelligenceSection({
                     {isExpanded && (
                       <TableRow>
                         <TableCell colSpan={7} className="bg-accent/20 p-0">
-                          <CoverageRowDrawer categoryId={row.category_id} zoneId={row.zone_id} authedFetch={authedFetch} />
+                          <CoverageRowDrawer categoryId={row.category_id} zoneId={row.zone_id} authedFetchPaginated={authedFetchPaginated} />
                         </TableCell>
                       </TableRow>
                     )}
@@ -1262,7 +1264,7 @@ export default function OperationsOverviewPage() {
 
           <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
 
-          <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} />
+          <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
         </div>
       )}
     </AppShell>
