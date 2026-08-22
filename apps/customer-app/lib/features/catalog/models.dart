@@ -92,6 +92,10 @@ class CatalogService {
   // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — لو false، ScheduleSelectionScreen
   // بتخفي كارت "مرن — اختار نطاق أيام" بدل ما تسيب العميل يختاره ويترفض من الباك-إند بعدين.
   final bool allowsDateRangeBooking;
+  // قدرة دفع لكل خدمة (ADR-0026، docs/08 §42 Phase A.1) — كانت فجوة موثّقة صراحة: العمود موجود
+  // في رد الباك-إند من زمان بس مش مقروء هنا خالص، فـCreateOrderScreen كان بيعرض "ادفع بعد الخدمة"
+  // (كاش) لكل خدمة بلا استثناء حتى لو الباك-إند هيرفضها. false يعني الكاش ممنوع صراحة.
+  final bool cashAllowed;
   // دقة الوقت (ADR-0031 Slice B) — لو true، العميل لازم يحدد بداية + مدة بالساعات (duration_hours)
   // بدل يوم كامل بس. نفس نمط allowsDateRangeBooking بالحرف.
   final bool requiresPreciseSchedule;
@@ -115,6 +119,7 @@ class CatalogService {
     required this.allowsIndividual,
     required this.allowsTeam,
     required this.allowsDateRangeBooking,
+    required this.cashAllowed,
     required this.requiresPreciseSchedule,
     required this.requiresStartTimeOnly,
     required this.requiresHoursOnly,
@@ -135,6 +140,7 @@ class CatalogService {
         allowsIndividual: json['allows_individual'] as bool,
         allowsTeam: json['allows_team'] as bool,
         allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
+        cashAllowed: json['cash_allowed'] as bool? ?? true,
         requiresPreciseSchedule: json['requires_precise_schedule'] as bool? ?? false,
         requiresStartTimeOnly: json['requires_start_time_only'] as bool? ?? false,
         requiresHoursOnly: json['requires_hours_only'] as bool? ?? false,

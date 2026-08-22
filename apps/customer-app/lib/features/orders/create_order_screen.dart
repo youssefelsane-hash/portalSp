@@ -164,6 +164,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _loadAvailablePaymentMethods();
   }
 
+  // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
+  // — الاتنين بيفرضوا دفع إلكتروني إجباري وقت التأكيد (orders.service.ts بيرفض غير كده بوضوح).
+  bool get _requiresElectronicPayment => !widget.service.cashAllowed || _pricePreview?.depositAmountCents != null;
+
+  // طلب مالك مباشر (2026-08-22): بَقّة تجربة كانت موجودة — "ادفع بعد الخدمة" (كاش) كان ظاهر دايمًا
+  // بغض النظر عن service.cashAllowed/deposit_required، فالعميل يختاره ويترفض بعد ما يدوس "تأكيد
+  // الطلب" برسالة حمرا بدل ما يعرف من الأول. الحل: نخفي الخيار ده تمامًا لما يبقى غير متاح، ونختار
+  // أول طريقة إلكترونية متاحة تلقائيًا بدل ما نسيب الفورم بلا اختيار صالح.
+  void _reconcilePaymentMethodSelection() {
+    if (_selectedPaymentMethod != null && !_availablePaymentMethods.contains(_selectedPaymentMethod)) {
+      _selectedPaymentMethod = null;
+    }
+    if (_requiresElectronicPayment && _selectedPaymentMethod == null) {
+      if (_availablePaymentMethods.contains('card')) {
+        _selectedPaymentMethod = 'card';
+      } else if (_availablePaymentMethods.contains('instapay')) {
+        _selectedPaymentMethod = 'instapay';
+      }
+    }
+  }
+
   // فشل الجلب هنا مش خطير — بيسيب _availablePaymentMethods فاضية، يعني خياري الدفع الإلكتروني
   // مش هيظهروا (بدل ما يظهروا ويترفضوا لاحقًا)، و"ادفع بعد الخدمة" يفضل شغال عادي دايمًا.
   Future<void> _loadAvailablePaymentMethods() async {
@@ -172,10 +193,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       if (!mounted) return;
       setState(() {
         _availablePaymentMethods = methods;
-        // نادرة (نفس finding #48: البوابة اتقفلت والعميل الشاشة فاتحة قدامه) — نرجّع افتراضي آمن.
-        if (_selectedPaymentMethod != null && !methods.contains(_selectedPaymentMethod)) {
-          _selectedPaymentMethod = null;
-        }
+        _reconcilePaymentMethodSelection();
       });
     } catch (_) {
       // صامت عمدًا — نفس فلسفة كل مكان تاني في المشروع: فشل خدمة/endpoint ثانوي ميوقفش الشاشة.
@@ -300,7 +318,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         promoCode: promoCode,
         buildingCode: buildingCode,
       );
-      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
+      if (mounted && generation == _previewRequestGeneration) {
+        setState(() {
+          _pricePreview = result;
+          _reconcilePaymentMethodSelection();
+        });
+      }
     } on ApiException catch (err) {
       if (mounted && generation == _previewRequestGeneration) setState(() => _previewError = err.message);
     } finally {
@@ -450,7 +473,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       );
       // فشل التحقق بيسيب آخر معاينة صح (من غير خصم) ظاهرة، مش بيمسحها — العميل يشوف
       // "الكود ده مش موجود" جنب حقل الكود، مش رقم فاضي بدل السعر الصحيح.
-      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
+      if (mounted && generation == _previewRequestGeneration) {
+        setState(() {
+          _pricePreview = result;
+          _reconcilePaymentMethodSelection();
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _promoError = err.message);
     } finally {
@@ -492,7 +520,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         addonIds: _selectedAddonIds.toList(),
         buildingCode: code,
       );
-      if (mounted && generation == _previewRequestGeneration) setState(() => _pricePreview = result);
+      if (mounted && generation == _previewRequestGeneration) {
+        setState(() {
+          _pricePreview = result;
+          _reconcilePaymentMethodSelection();
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _buildingError = err.message);
     } finally {
@@ -708,6 +741,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         const Divider(height: 12),
         _buildPriceLine('الإجمالي', _formatEgp(preview.totalAmountCents), bold: true),
+        // سياسة إيداع (ADR-0027) — كانت فجوة موثّقة صراحة: الرقم ده كان محسوب بالباك-إند من زمان
+        // (PreviewOrderResponseDto.deposit_amount_cents) بلا أي عرض هنا، فالعميل كان يشوف إجمالي
+        // الطلب بس من غير ما يعرف إن جزء بس هيتحصّل دلوقتي والباقي بعدين.
+        if (preview.depositAmountCents != null) ...[
+          _buildPriceLine(
+            'المطلوب دلوقتي (إيداع)',
+            _formatEgp(preview.depositAmountCents!),
+            bold: true,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          _buildPriceLine('الباقي بعد ما الشغل يخلص', _formatEgp(preview.remainingAmountCents ?? 0)),
+        ],
         if (_previewLoading)
           const Padding(
             padding: EdgeInsets.only(top: 4),
@@ -1048,16 +1093,68 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             const SizedBox(height: 16),
             Text('طريقة الدفع', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
+            // طلب مالك مباشر (2026-08-22) — رسالة واضحة قبل ما العميل يحاول يدفع، بدل ما يختار
+            // "بعد الخدمة" ويترفض برسالة حمرا بعد ما يدوس "تأكيد الطلب".
+            if (_pricePreview?.depositAmountCents != null) ...[
+              Card(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'الخدمة دي محتاجة دفع إيداع ${_formatEgp(_pricePreview!.depositAmountCents!)} دلوقتي، '
+                          'والباقي (${_formatEgp(_pricePreview!.remainingAmountCents ?? 0)}) هيتحصّل تلقائيًا بعد ما '
+                          'الشغل يخلص. الدفع لازم يكون بالبطاقة أو InstaPay.',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ] else if (!widget.service.cashAllowed) ...[
+              Card(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline),
+                      SizedBox(width: 8),
+                      Expanded(child: Text('الخدمة دي محتاجة دفع إلكتروني (بطاقة أو InstaPay) مقدّم — الدفع كاش مش متاح لها.')),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (_requiresElectronicPayment && _availablePaymentMethods.isEmpty) ...[
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('مفيش طريقة دفع إلكتروني متاحة دلوقتي — جرّب تاني بعد شوية.'),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Card(
               child: Column(
                 children: [
-                  RadioListTile<String?>(
-                    value: null,
-                    groupValue: _selectedPaymentMethod,
-                    onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                    title: const Text('ادفع بعد الخدمة (زي العادة)'),
-                    subtitle: const Text('كاش أو من المحفظة بعد ما الفني يخلّص الشغل'),
-                  ),
+                  if (!_requiresElectronicPayment)
+                    RadioListTile<String?>(
+                      value: null,
+                      groupValue: _selectedPaymentMethod,
+                      onChanged: (value) => setState(() => _selectedPaymentMethod = value),
+                      title: const Text('ادفع بعد الخدمة (زي العادة)'),
+                      subtitle: const Text('كاش أو من المحفظة بعد ما الفني يخلّص الشغل'),
+                    ),
                   if (_availablePaymentMethods.contains('card'))
                     RadioListTile<String?>(
                       value: 'card',

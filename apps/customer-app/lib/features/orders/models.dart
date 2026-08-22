@@ -166,6 +166,12 @@ class OrderPricePreview {
   final String? discountSource;
   final int totalAmountCents;
   final double? estimatedDurationDays;
+  // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — كانت فجوة موثّقة صراحة: الباك-إند بيرجّعها
+  // من زمان (PreviewOrderResponseDto) بس مش مقروءة هنا خالص، فالعميل ما كانش يعرف إن الخدمة
+  // محتاجة إيداع غير بعد ما يحاول يدفع كاش ويترفض. null يعني مفيش إيداع مطلوب.
+  final int? depositAmountCents;
+  final int dueNowCents;
+  final int? remainingAmountCents;
 
   OrderPricePreview({
     required this.basePriceCents,
@@ -181,6 +187,9 @@ class OrderPricePreview {
     required this.discountSource,
     required this.totalAmountCents,
     required this.estimatedDurationDays,
+    required this.depositAmountCents,
+    required this.dueNowCents,
+    required this.remainingAmountCents,
   });
 
   factory OrderPricePreview.fromJson(Map<String, dynamic> json) => OrderPricePreview(
@@ -199,6 +208,9 @@ class OrderPricePreview {
         discountSource: json['discount_source'] as String?,
         totalAmountCents: json['total_amount_cents'] as int,
         estimatedDurationDays: (json['estimated_duration_days'] as num?)?.toDouble(),
+        depositAmountCents: json['deposit_amount_cents'] as int?,
+        dueNowCents: json['due_now_cents'] as int? ?? json['total_amount_cents'] as int,
+        remainingAmountCents: json['remaining_amount_cents'] as int?,
       );
 }
 

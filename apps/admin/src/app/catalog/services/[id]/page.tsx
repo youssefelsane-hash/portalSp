@@ -35,6 +35,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { SelectNative } from '@/components/ui/select-native';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import { PricingBuilder } from './pricing-builder';
@@ -478,295 +479,327 @@ export default function ServiceDetailPage() {
           <CardTitle className="text-base">تفاصيل الخدمة</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleUpdateServiceDetails} className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_name_en">الاسم بالإنجليزي</Label>
-                <Input id="svc_name_en" name="name_en" defaultValue={service.name_en ?? ''} dir="ltr" />
+          <form onSubmit={handleUpdateServiceDetails} className="flex flex-col gap-6">
+            {/* تنظيم بصري بس (طلب مالك صريح 2026-08-22) — نفس الحقول والأسماء والمناولات بالحرف،
+                مجرد تجميعها في أقسام واضحة بدل كتلة واحدة طويلة. صفر تغيير منطقي. */}
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">المعلومات الأساسية</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_name_en">الاسم بالإنجليزي</Label>
+                  <Input id="svc_name_en" name="name_en" defaultValue={service.name_en ?? ''} dir="ltr" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_icon_url">رابط الأيقونة</Label>
+                  <Input id="svc_icon_url" name="icon_url" defaultValue={service.icon_url ?? ''} dir="ltr" />
+                </div>
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_icon_url">رابط الأيقونة</Label>
-                <Input id="svc_icon_url" name="icon_url" defaultValue={service.icon_url ?? ''} dir="ltr" />
+                <Label htmlFor="svc_desc">وصف مختصر</Label>
+                <Input id="svc_desc" name="short_description_ar" defaultValue={service.short_description_ar ?? ''} />
               </div>
-            </div>
-            <Label htmlFor="svc_desc">وصف مختصر</Label>
-            <Input id="svc_desc" name="short_description_ar" defaultValue={service.short_description_ar ?? ''} />
-            <Label htmlFor="svc_full_desc">وصف كامل</Label>
-            <Textarea id="svc_full_desc" name="full_description_ar" defaultValue={service.full_description_ar ?? ''} rows={2} />
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة)</Label>
-              <Input
-                id="svc_search_keywords"
-                name="search_keywords"
-                defaultValue={service.search_keywords.join(', ')}
-                placeholder="مثال: سخان مياه, تسريب حوض, صرف مسدود"
-              />
-              <p className="text-sm text-muted-foreground">
-                دي المرادفات/الكلمات العامية اللي العميل بيكتبها في مربّع البحث (customer-app/customer-web) —
-                البحث مش بالذكاء الاصطناعي، لازم كل خدمة تتحط لها كلماتها يدويًا هنا.
-              </p>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
-              <SelectNative
-                id="svc_pricing_model"
-                name="pricing_model"
-                defaultValue={service.pricing_model}
-                className="max-w-xs"
-                onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
-              >
-                {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </SelectNative>
-              {pricingModelLive === 'formula' && (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_full_desc">وصف كامل</Label>
+                <Textarea id="svc_full_desc" name="full_description_ar" defaultValue={service.full_description_ar ?? ''} rows={2} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="svc_search_keywords">كلمات بحث بلغة العميل العادية (مفصولة بفاصلة)</Label>
+                <Input
+                  id="svc_search_keywords"
+                  name="search_keywords"
+                  defaultValue={service.search_keywords.join(', ')}
+                  placeholder="مثال: سخان مياه, تسريب حوض, صرف مسدود"
+                />
                 <p className="text-sm text-muted-foreground">
-                  السعر الأساسي تحت مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي.
+                  دي المرادفات/الكلمات العامية اللي العميل بيكتبها في مربّع البحث (customer-app/customer-web) —
+                  البحث مش بالذكاء الاصطناعي، لازم كل خدمة تتحط لها كلماتها يدويًا هنا.
                 </p>
-              )}
-              {pricingModelLive === 'hourly' && (
-                <p className="text-sm text-muted-foreground">
-                  السعر الأساسي تحت هو <strong>سعر الساعة الواحدة</strong> — بيتضرب تلقائيًا في عدد الساعات
-                  اللي العميل بيختارها وقت الحجز (مش سعر إجمالي ثابت).
-                </p>
-              )}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+            <Separator />
+
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">التسعير</h3>
               <div className="flex flex-col gap-1">
-                {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
-                    غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
-                <Label htmlFor="svc_base_price">
-                  {pricingModelLive === 'hourly' ? 'سعر الساعة (جنيه)' : 'السعر الأساسي (جنيه)'}
-                </Label>
-                <Input
-                  id="svc_base_price"
-                  name="base_price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={service.base_price_cents / 100}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_inspection_fee">رسوم الكشف (جنيه)</Label>
-                <Input
-                  id="svc_inspection_fee"
-                  name="inspection_fee"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={service.inspection_fee_cents / 100}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_min_price">أقل سعر (جنيه)</Label>
-                <Input
-                  id="svc_min_price"
-                  name="min_price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={service.min_price_cents !== null ? service.min_price_cents / 100 : ''}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_max_price">أعلى سعر (جنيه)</Label>
-                <Input
-                  id="svc_max_price"
-                  name="max_price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={service.max_price_cents !== null ? service.max_price_cents / 100 : ''}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_unit">اسم الوحدة</Label>
-                <Input id="svc_unit" name="unit_name_ar" defaultValue={service.unit_name_ar ?? ''} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_warranty">أيام الضمان</Label>
-                <Input id="svc_warranty" name="warranty_days" type="number" min="0" defaultValue={service.warranty_days} required />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_duration">المدة المتوقعة (دقيقة)</Label>
-                <Input
-                  id="svc_duration"
-                  name="estimated_duration_minutes"
-                  type="number"
-                  min="1"
-                  defaultValue={service.estimated_duration_minutes ?? ''}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_commission">نسبة عمولة المنصة %</Label>
-                <Input
-                  id="svc_commission"
-                  name="commission_percentage"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.01"
-                  defaultValue={service.commission_percentage}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نسبة الإيداع من الإجمالي،
-                    فعّالة بس لو checkbox "محتاجة إيداع" تحت متفعّل. */}
-                <Label htmlFor="svc_deposit_pct">نسبة الإيداع %</Label>
-                <Input
-                  id="svc_deposit_pct"
-                  name="deposit_percentage"
-                  type="number"
-                  min="1"
-                  max="99"
-                  step="0.01"
-                  defaultValue={service.deposit_percentage ?? ''}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_min_level">أقل مستوى فني مسموح</Label>
-                <SelectNative id="svc_min_level" name="min_technician_level" defaultValue={service.min_technician_level}>
-                  {Object.entries(TECHNICIAN_LEVEL_LABELS).map(([value, label]) => (
+                <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
+                <SelectNative
+                  id="svc_pricing_model"
+                  name="pricing_model"
+                  defaultValue={service.pricing_model}
+                  className="max-w-xs"
+                  onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
+                >
+                  {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>
                   ))}
                 </SelectNative>
+                {pricingModelLive === 'formula' && (
+                  <p className="text-sm text-muted-foreground">
+                    السعر الأساسي تحت مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي.
+                  </p>
+                )}
+                {pricingModelLive === 'hourly' && (
+                  <p className="text-sm text-muted-foreground">
+                    السعر الأساسي تحت هو <strong>سعر الساعة الواحدة</strong> — بيتضرب تلقائيًا في عدد الساعات
+                    اللي العميل بيختارها وقت الحجز (مش سعر إجمالي ثابت).
+                  </p>
+                )}
               </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_display_order">ترتيب العرض</Label>
-                <Input id="svc_display_order" name="display_order" type="number" min="0" defaultValue={service.display_order} />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="flex flex-col gap-1">
+                  {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
+                      غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
+                  <Label htmlFor="svc_base_price">
+                    {pricingModelLive === 'hourly' ? 'سعر الساعة (جنيه)' : 'السعر الأساسي (جنيه)'}
+                  </Label>
+                  <Input
+                    id="svc_base_price"
+                    name="base_price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    defaultValue={service.base_price_cents / 100}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_inspection_fee">رسوم الكشف (جنيه)</Label>
+                  <Input
+                    id="svc_inspection_fee"
+                    name="inspection_fee"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    defaultValue={service.inspection_fee_cents / 100}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_min_price">أقل سعر (جنيه)</Label>
+                  <Input
+                    id="svc_min_price"
+                    name="min_price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    defaultValue={service.min_price_cents !== null ? service.min_price_cents / 100 : ''}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_max_price">أعلى سعر (جنيه)</Label>
+                  <Input
+                    id="svc_max_price"
+                    name="max_price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    defaultValue={service.max_price_cents !== null ? service.max_price_cents / 100 : ''}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_unit">اسم الوحدة</Label>
+                  <Input id="svc_unit" name="unit_name_ar" defaultValue={service.unit_name_ar ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_commission">نسبة عمولة المنصة %</Label>
+                  <Input
+                    id="svc_commission"
+                    name="commission_percentage"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    defaultValue={service.commission_percentage}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نسبة الإيداع من الإجمالي،
+                      فعّالة بس لو checkbox "محتاجة إيداع" تحت متفعّل. */}
+                  <Label htmlFor="svc_deposit_pct">نسبة الإيداع %</Label>
+                  <Input
+                    id="svc_deposit_pct"
+                    name="deposit_percentage"
+                    type="number"
+                    min="1"
+                    max="99"
+                    step="0.01"
+                    defaultValue={service.deposit_percentage ?? ''}
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_launch_phase">مرحلة الإطلاق</Label>
-                <Input id="svc_launch_phase" name="launch_phase" type="number" min="1" defaultValue={service.launch_phase} />
+              <div className="flex flex-wrap gap-4 text-sm">
+                {/* محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1) */}
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="cash_allowed" defaultChecked={service.cash_allowed} />
+                  يسمح بالدفع كاش (لو اتلغى، لازم كارت/InstaPay مقدّم)
+                </label>
+                {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) */}
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="deposit_required" defaultChecked={service.deposit_required} />
+                  محتاجة إيداع مقدّم (النسبة % فوق، والباقي يتحصّل بعد الشغل)
+                </label>
               </div>
             </div>
-            <div className="flex flex-wrap gap-4 text-sm">
-              <label className="flex items-center gap-2">
+
+            <Separator />
+
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">الحجز والجدولة</h3>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="allows_scheduling" defaultChecked={service.allows_scheduling} />
+                  يسمح بالحجز المجدول
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="allows_emergency" defaultChecked={service.allows_emergency} />
+                  يسمح بطلب طارئ
+                </label>
+                {/* هيكل الحجز الجديد — صُنّاع (docs/06 §1) */}
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="allows_individual" defaultChecked={service.allows_individual} />
+                  يسمح بوضع &quot;شغلانة سريعة&quot; (فرد)
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
+                  يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
+                </label>
+                {/* قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) */}
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    name="allows_date_range_booking"
+                    defaultChecked={service.allows_date_range_booking}
+                  />
+                  يسمح بحجز &quot;نطاق أيام مرن&quot; (لو اتلغى، العميل لازم يحدد يوم واحد بس)
+                </label>
+                {/* سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) */}
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    name="show_unavailable_providers"
+                    defaultChecked={service.show_unavailable_providers}
+                  />
+                  يظهر الفنيين المتعارضين جدوليًا بحالة &quot;مش متاح للفترة دي&quot; بدل الإخفاء الكامل
+                </label>
+              </div>
+
+              {/* أوضاع توقيت الخدمة (ADR-0032، طلب مالك صريح 2026-08-22) — تبادلية: وضع واحد بس
+                  فعّال لكل خدمة، اختيار واحد بيلغي الباقي أوتوماتيك. requires_precise_schedule
+                  (ADR-0031 Slice B) جزء من نفس المجموعة دلوقتي، صفر تغيير على معناها/سلوكها. */}
+              <div className="flex flex-col gap-2 rounded-md border p-3">
+                <p className="text-sm font-medium">أوضاع توقيت الخدمة (وضع واحد بس ممكن يتفعّل)</p>
+                <p className="text-xs text-muted-foreground">
+                  لو الخدمة بتتحجز بيوم كامل عادي من غير تفاصيل وقت إضافية (زي معظم الصيانة العادية) —
+                  سيب الأربعة دول كلهم فاضيين. اختار وضع بس لو الخدمة محتاجة تفاصيل وقت زيادة:
+                </p>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="requires_precise_schedule"
+                    checked={schedulingMode === 'precise'}
+                    onChange={(e) => setSchedulingMode(e.target.checked ? 'precise' : 'none')}
+                  />
+                  <span>
+                    دقة وقت (بداية + مدة بالساعات مع بعض)
+                    <br />
+                    <span className="text-xs text-muted-foreground">
+                      مثال: جليسة أطفال بالساعة، تنظيف بالساعة — العميل بيحدد امتى هيبدأ وقد إيه هيستمر مع بعض.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="requires_start_time_only"
+                    checked={schedulingMode === 'start_only'}
+                    onChange={(e) => setSchedulingMode(e.target.checked ? 'start_only' : 'none')}
+                  />
+                  <span>
+                    وقت بداية بس (من غير مدة)
+                    <br />
+                    <span className="text-xs text-muted-foreground">
+                      مثال: عقد شهري بيتحدد امتى يبدأ بس، من غير تحديد مدة أو نهاية وقت الحجز.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="requires_hours_only"
+                    checked={schedulingMode === 'hours_only'}
+                    onChange={(e) => setSchedulingMode(e.target.checked ? 'hours_only' : 'none')}
+                  />
+                  <span>
+                    عدد ساعات بس (من غير وقت بداية محدد)
+                    <br />
+                    <span className="text-xs text-muted-foreground">
+                      مثال: &quot;قد إيه محتاج تنظيف؟&quot; — العميل بيحدد عدد الساعات بس، من غير ميعاد وصول دقيق.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="requires_start_and_end"
+                    checked={schedulingMode === 'start_and_end'}
+                    onChange={(e) => setSchedulingMode(e.target.checked ? 'start_and_end' : 'none')}
+                  />
+                  <span>
+                    تاريخ ووقت بداية + تاريخ ووقت نهاية
+                    <br />
+                    <span className="text-xs text-muted-foreground">
+                      مثال: تنظيف شهري/إقامة بمدة محددة — العميل بيحدد بداية العقد ونهايته بالظبط.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">التنفيذ والتصنيف</h3>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_warranty">أيام الضمان</Label>
+                  <Input id="svc_warranty" name="warranty_days" type="number" min="0" defaultValue={service.warranty_days} required />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_duration">المدة المتوقعة (دقيقة)</Label>
+                  <Input
+                    id="svc_duration"
+                    name="estimated_duration_minutes"
+                    type="number"
+                    min="1"
+                    defaultValue={service.estimated_duration_minutes ?? ''}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_min_level">أقل مستوى فني مسموح</Label>
+                  <SelectNative id="svc_min_level" name="min_technician_level" defaultValue={service.min_technician_level}>
+                    {Object.entries(TECHNICIAN_LEVEL_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </SelectNative>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_display_order">ترتيب العرض</Label>
+                  <Input id="svc_display_order" name="display_order" type="number" min="0" defaultValue={service.display_order} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_launch_phase">مرحلة الإطلاق</Label>
+                  <Input id="svc_launch_phase" name="launch_phase" type="number" min="1" defaultValue={service.launch_phase} />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" name="requires_photos" defaultChecked={service.requires_photos} />
                 محتاجة صور قبل/بعد
               </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="allows_scheduling" defaultChecked={service.allows_scheduling} />
-                يسمح بالحجز المجدول
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="allows_emergency" defaultChecked={service.allows_emergency} />
-                يسمح بطلب طارئ
-              </label>
-              {/* هيكل الحجز الجديد — صُنّاع (docs/06 §1) */}
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="allows_individual" defaultChecked={service.allows_individual} />
-                يسمح بوضع &quot;شغلانة سريعة&quot; (فرد)
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
-                يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
-              </label>
-              {/* محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1) */}
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="cash_allowed" defaultChecked={service.cash_allowed} />
-                يسمح بالدفع كاش (لو اتلغى، لازم كارت/InstaPay مقدّم)
-              </label>
-              {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) */}
-              <label className="flex items-center gap-2">
-                <input type="checkbox" name="deposit_required" defaultChecked={service.deposit_required} />
-                محتاجة إيداع مقدّم (النسبة % فوق، والباقي يتحصّل بعد الشغل)
-              </label>
-              {/* قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) */}
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  name="allows_date_range_booking"
-                  defaultChecked={service.allows_date_range_booking}
-                />
-                يسمح بحجز &quot;نطاق أيام مرن&quot; (لو اتلغى، العميل لازم يحدد يوم واحد بس)
-              </label>
-              {/* سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) */}
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  name="show_unavailable_providers"
-                  defaultChecked={service.show_unavailable_providers}
-                />
-                يظهر الفنيين المتعارضين جدوليًا بحالة &quot;مش متاح للفترة دي&quot; بدل الإخفاء الكامل
-              </label>
             </div>
 
-            {/* أوضاع توقيت الخدمة (ADR-0032، طلب مالك صريح 2026-08-22) — تبادلية: وضع واحد بس
-                فعّال لكل خدمة، اختيار واحد بيلغي الباقي أوتوماتيك. requires_precise_schedule
-                (ADR-0031 Slice B) جزء من نفس المجموعة دلوقتي، صفر تغيير على معناها/سلوكها. */}
-            <div className="flex flex-col gap-2 rounded-md border p-3">
-              <p className="text-sm font-medium">أوضاع توقيت الخدمة (وضع واحد بس ممكن يتفعّل)</p>
-              <p className="text-xs text-muted-foreground">
-                لو الخدمة بتتحجز بيوم كامل عادي من غير تفاصيل وقت إضافية (زي معظم الصيانة العادية) —
-                سيب الأربعة دول كلهم فاضيين. اختار وضع بس لو الخدمة محتاجة تفاصيل وقت زيادة:
-              </p>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="requires_precise_schedule"
-                  checked={schedulingMode === 'precise'}
-                  onChange={(e) => setSchedulingMode(e.target.checked ? 'precise' : 'none')}
-                />
-                <span>
-                  دقة وقت (بداية + مدة بالساعات مع بعض)
-                  <br />
-                  <span className="text-xs text-muted-foreground">
-                    مثال: جليسة أطفال بالساعة، تنظيف بالساعة — العميل بيحدد امتى هيبدأ وقد إيه هيستمر مع بعض.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="requires_start_time_only"
-                  checked={schedulingMode === 'start_only'}
-                  onChange={(e) => setSchedulingMode(e.target.checked ? 'start_only' : 'none')}
-                />
-                <span>
-                  وقت بداية بس (من غير مدة)
-                  <br />
-                  <span className="text-xs text-muted-foreground">
-                    مثال: عقد شهري بيتحدد امتى يبدأ بس، من غير تحديد مدة أو نهاية وقت الحجز.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="requires_hours_only"
-                  checked={schedulingMode === 'hours_only'}
-                  onChange={(e) => setSchedulingMode(e.target.checked ? 'hours_only' : 'none')}
-                />
-                <span>
-                  عدد ساعات بس (من غير وقت بداية محدد)
-                  <br />
-                  <span className="text-xs text-muted-foreground">
-                    مثال: &quot;قد إيه محتاج تنظيف؟&quot; — العميل بيحدد عدد الساعات بس، من غير ميعاد وصول دقيق.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="requires_start_and_end"
-                  checked={schedulingMode === 'start_and_end'}
-                  onChange={(e) => setSchedulingMode(e.target.checked ? 'start_and_end' : 'none')}
-                />
-                <span>
-                  تاريخ ووقت بداية + تاريخ ووقت نهاية
-                  <br />
-                  <span className="text-xs text-muted-foreground">
-                    مثال: تنظيف شهري/إقامة بمدة محددة — العميل بيحدد بداية العقد ونهايته بالظبط.
-                  </span>
-                </span>
-              </label>
-            </div>
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
               حفظ تفاصيل الخدمة
             </Button>
