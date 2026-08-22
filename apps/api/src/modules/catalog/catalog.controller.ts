@@ -60,6 +60,7 @@ export class CatalogController {
       query.booking_mode === 'emergency',
       query.field_values,
       query.pricing_tier,
+      query.duration_hours,
     );
   }
 
@@ -148,6 +149,7 @@ export class CatalogController {
                 isEmergency,
                 query.field_values,
                 item.pricingTier,
+                query.duration_hours,
               );
               return { item, estimate };
             }),

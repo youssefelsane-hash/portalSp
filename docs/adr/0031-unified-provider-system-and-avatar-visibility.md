@@ -1,7 +1,7 @@
 # ADR-0031: نظام مزوّد واحد موحّد — إلغاء بنية الشغالة المنفصلة + تصحيح اتجاه Phase A.4
 
 **الحالة:** معتمد ومنفّذ بالكامل تقريبًا — يستبدل بنية "الشغالة كنوع مستخدم منفصل" في ADR-0004،
-ويلغي مسار الهجرة الموصوف في ADR-0029. **Slice A/B/C/D/E/F كلهم منفّذين** (تفاصيل تحت) —
+ويلغي مسار الهجرة الموصوف في ADR-0029. **Slice A/B/C/D/E/F/H كلهم منفّذين** (تفاصيل تحت) —
 Slice G (تعميم `resolveAvatarUrl()` على سطوح داخلية تانية) لسه مفتوحة، غير حرجة. دي نقطة التتبع
 الحية بديلة عن `docs/08 §42`'s الفرع القديم.
 
@@ -164,6 +164,16 @@ is allowed, a service can have a yes/no option for whether precise time selectio
   `/domestic-worker-earnings`** (كانوا مش موثّقين في الجرد الأول، اتلقطوا أثناء التنظيف).
 - **Slice G (مفتوحة، غير حرجة)**: تعميم `resolveAvatarUrl()` على سطوح داخلية تانية (favorites،
   team recruit) — مؤجّلة.
+- **Slice H (خلصت، 2026-08-22)**: `PricingModel.HOURLY` (قدرة عامة موجودة أصلاً على `Service`،
+  مش جديدة) ماكانتش ليها فرع حساب في `CatalogService.estimate()` — فجوة موثّقة صراحة اتقفلت.
+  `estimate()` بقى فيها `durationHours` (باراميتر اختياري append-only) بيضرب `base_price_cents`
+  في عدد الساعات لخدمات `hourly` بس، قبل مضاعف مستوى الفني. `create()`/`previewPrice()`/
+  `/services/:id/estimate`/`/services/:id/technicians` كلهم بيمرروا `duration_hours` دلوقتي —
+  الحقل نفسه اللي `requires_precise_schedule` (Slice B) بيتطلّبه، فمفيش تضارب: أي خدمة تانية
+  `duration_hours` مرفوضة عليها أصلاً على مستوى `CreateOrderDto` validation. بَقّة بيانات مرتبطة
+  اتلقطت واتصلحت بـ`migration 0171`: `migration 0170` كانت حاطة `pricing_model='hourly'` غلط
+  على خدمة "تنظيف شهري/إقامة" (سعر شهري ثابت فعليًا). اختبار حي جديد: `catalog/hourly-pricing.spec.ts`
+  (3/3). تفاصيل كاملة في `apps/api/src/modules/catalog/README.md` و`orders/README.md`.
 
 ## البدائل اللي اتقيّمت
 

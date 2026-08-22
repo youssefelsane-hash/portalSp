@@ -6006,7 +6006,7 @@ build` (packages/shared-types) كلهم نضاف.
 `flutter analyze`/`tsc --noEmit` نضاف على كل التطبيقات الأربعة (api، admin، customer-app،
 technician-app). التفاصيل الكاملة في `apps/technician-app/README.md`، `apps/customer-app/README.md`.
 
-## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3/A.4 خلصوا (A.4 بعد تصحيح الاتجاه، ADR-0031 Slice A-F) — Part B لسه مفتوحة)
+## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3/A.4 خلصوا (A.4 بعد تصحيح الاتجاه، ADR-0031 Slice A-F/H) — Part B لسه مفتوحة)
 
 **تصحيح مالك مهم (2026-08-21، لاحقًا نفس اليوم)**: اتجاه Phase A.4 تحت (نقل `DomesticWorkerProfile`
 للمحرك الموحّد) **اتلغى واتستبدل بالكامل** — القرار الصحيح مش "انقل الكيان المنفصل"، هو "الغِ الكيان
@@ -6229,8 +6229,7 @@ Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ ع
   (`avatar-visibility.spec.ts`، 5/5) + صفر رجريشن على `technicians`/`catalog`/`auth` (171/171).
 - **Slice B (خلصت)**: `services.requires_precise_schedule` (migration 0169) + admin checkbox +
   `OrdersService.create()` فحص تعارض ساعي حقيقي (`assertNoPreciseScheduleConflict()`) لما فني
-  معروف صراحة سلفًا + Flutter (وقت بداية + مدة). فجوة موثّقة: محرك التسعير لسه مابيضربش السعر في
-  المدة (تفاصيل في `orders/README.md`).
+  معروف صراحة سلفًا + Flutter (وقت بداية + مدة). فجوة الضرب في المدة اتقفلت لاحقًا (Slice H تحت).
 - **Slice C (خلصت)**: فئة "خدمات منزلية" + 4 خدمات (migration 0170) + إلغاء `PricingModel.WORKER_RATE`
   من TS.
 - **Slice D (خلصت)**: إلغاء مسار التسجيل التاني في `apps/technician-app` (segmented control +
@@ -6244,3 +6243,9 @@ Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ ع
   (اتلقطوا أثناء التنظيف، مش موثّقين في الجرد الأول).
 - **Slice G (مفتوحة، غير حرجة)**: تعميم `resolveAvatarUrl()` على سطوح داخلية تانية (favorites،
   team recruit) — مؤجّلة، موثّقة كفجوة صريحة في ADR-0031.
+- **Slice H (خلصت، 2026-08-22)**: `CatalogService.estimate()` بقى بتضرب `base_price_cents` في
+  `duration_hours` فعليًا لخدمات `pricing_model=hourly` (كانت فجوة موثّقة من Slice B فوق) —
+  `durationHours` باراميتر append-only جديد، `create()`/`previewPrice()`/معاينة الأسعار العامة
+  كلهم بيمرروه. بَقّة بيانات مرتبطة اتصلحت (`migration 0171`): خدمة "تنظيف شهري/إقامة" كانت
+  `pricing_model='hourly'` غلط في migration 0170 (سعرها شهري ثابت فعليًا). اختبار حي
+  `catalog/hourly-pricing.spec.ts` (3/3). تفاصيل كاملة في ADR-0031 و`catalog/README.md`.

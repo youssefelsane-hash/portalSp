@@ -1232,11 +1232,17 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
   مباشرة (مفيش جدول حجوزات منفصل تاني).
 - `orders.duration_hours` (كان `domestic_worker_duration_hours`، اتسمّى بعد الإلغاء) بيتسجّل بس
   لما الفلاج مفعّل.
-- **فجوة موثّقة صراحة، مش سهو**: `CatalogService.estimate()` لسه مابيضربش `base_price_cents` في
-  `duration_hours` لأي `pricing_model` (بما فيهم `hourly` نفسه — فرع مخصص موجود بس لـ`formula`).
-  يعني خدمة `requires_precise_schedule=true` بسعرها الحالي بترجع `base_price_cents` كسعر إجمالي
-  ثابت، مش سعر × ساعات فعليًا. تفعيل ضرب حقيقي محتاج شريحة تصميم منفصلة في محرك التسعير
-  (`docs/adr/0001-...`/`pricing/README.md`)، مش تعديل متسرّع هنا.
+- **الفجوة القديمة اتقفلت (ADR-0031 Slice H، 2026-08-22)**: `CatalogService.estimate()` بقى فيها
+  باراميتر `durationHours` جديد (append-only، آخر باراميتر) — لخدمات `pricing_model=hourly` بس،
+  `base_price_cents` بيتضرب في `durationHours` (لو اتبعتت) قبل تطبيق مضاعف مستوى الفني/تخصيص
+  المنطقة، عشان `base_price_cents` يفضل معناه "سعر الساعة" مش سعر إجمالي ثابت. `create()`/
+  `previewPrice()` بيمرروا `dto.duration_hours` (نفس الحقل اللي `requiresPreciseSchedule` بيتطلّبه
+  فوق)، و`/services/:id/estimate`/`/services/:id/technicians` بيمرروا `duration_hours` من query
+  string كمان (معاينة صحيحة قبل التأكيد، نفس فلسفة "مفيش مفاجأة سعر"). خدمة `hourly` من غير
+  `duration_hours` بترجع للسلوك القديم بالحرف (`base_price_cents` كسعر ثابت) — صفر كسر.
+  **بَقّة بيانات حقيقية اتلقطت في نفس المراجعة**: `migration 0170` كانت حاطة `pricing_model='hourly'`
+  على كل الأربع خدمات المنزلية بما فيهم "تنظيف شهري/إقامة" (سعر شهري ثابت فعليًا، مش بالساعة) —
+  اتصلحت بـ`migration 0171` (تحديث بيانات، مش تعديل migration قديمة اتعمل commit).
 - **خارج نطاق الشريحة دي عمدًا**: فحص التعارض الساعي وقت المطابقة التلقائية نفسها (auto-match
   بلا فني مفضّل) — بوابة الأهلية اليومية العادية (`technicianAvailabilityCondition()`) هي اللي
   بتشتغل وقتها، مفيش دقة ساعة إضافية عند التوزيع الفعلي لسه.

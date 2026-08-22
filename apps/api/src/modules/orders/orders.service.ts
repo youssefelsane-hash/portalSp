@@ -360,6 +360,7 @@ export class OrdersService {
       bookingMode === BookingMode.EMERGENCY,
       dto.field_values,
       knownTechnicianPricingTier,
+      dto.duration_hours,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -755,6 +756,7 @@ export class OrdersService {
       bookingMode === BookingMode.EMERGENCY,
       dto.field_values,
       previewTechnicianPricingTier,
+      dto.duration_hours,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
