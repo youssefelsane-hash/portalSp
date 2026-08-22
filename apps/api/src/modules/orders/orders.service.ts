@@ -243,9 +243,10 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
 
-    // دقة الوقت (ADR-0031 Slice B) — نفس نمط cash_allowed/allowsDateRangeBooking بالحرف. لما
-    // الخدمة محتاجة دقة وقت (جليسة أطفال بالساعة، تنظيف بالساعة...)، العميل لازم يحدد duration_hours
-    // صراحة — فحص التعارض الفعلي بدقة ساعة بيحصل تحت بعد ما نعرف الفني المحدد (لو موجود).
+    // أوضاع التوقيت الأربعة (ADR-0032) — تبادلية على مستوى الـDB (CHECK constraint
+    // chk_services_scheduling_mode_exclusive، على الأكتر وضع واحد فعّال لكل خدمة). هنا بنتحقق
+    // من الحقول المطلوبة/الممنوعة حسب الوضع الفعّال للخدمة دي بالظبط. requiresPreciseSchedule
+    // (ADR-0031 Slice B) — صفر تغيير سلوك.
     if (service.requiresPreciseSchedule) {
       if (!dto.scheduled_at) {
         throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد الحجز لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
@@ -253,12 +254,50 @@ export class OrdersService {
       if (!dto.duration_hours) {
         throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
       }
-    } else if (dto.duration_hours) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'duration_hours متاحة بس للخدمات اللي محتاجة دقة وقت (requires_precise_schedule)',
-        HttpStatus.BAD_REQUEST,
-      );
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else if (service.requiresStartTimeOnly) {
+      if (!dto.scheduled_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد بداية الخدمة دي', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.duration_hours) {
+        throw new ApiException(ErrorCode.VAL_001, 'duration_hours مش مطلوبة لخدمة محتاجة وقت بداية بس', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else if (service.requiresHoursOnly) {
+      if (!dto.duration_hours) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else if (service.requiresStartAndEnd) {
+      if (!dto.scheduled_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد تاريخ ووقت بداية الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (!dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد تاريخ ووقت نهاية الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (new Date(dto.scheduled_end_at) <= new Date(dto.scheduled_at)) {
+        throw new ApiException(ErrorCode.VAL_001, 'وقت النهاية لازم يكون بعد وقت البداية', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.duration_hours) {
+        throw new ApiException(ErrorCode.VAL_001, 'duration_hours مش مطلوبة لخدمة محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else {
+      if (dto.duration_hours) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'duration_hours متاحة بس للخدمات اللي محتاجة دقة وقت أو عدد ساعات',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
     }
 
     // "إعادة الحجز" — نتأكد إن الـ id فعلاً فني حقيقي بس (404 واضح لو لأ)، مش هل هو متاح/مؤهّل
@@ -471,8 +510,9 @@ export class OrdersService {
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
         orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
-        // دقة الوقت (ADR-0031 Slice B) — بس لخدمات requiresPreciseSchedule=true (اتفحصت فوق).
-        durationHours: service.requiresPreciseSchedule ? (dto.duration_hours ?? null) : null,
+        // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — الاتنين بيسجّلوا
+        // duration_hours، اتفحصت فوق إنها موجودة/ممنوعة حسب الوضع الفعّال للخدمة.
+        durationHours: service.requiresPreciseSchedule || service.requiresHoursOnly ? (dto.duration_hours ?? null) : null,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
         // سلوت الجدولة (لو اتحجز) بيحدد الموعد المطلوب فعليًا — أدق من resolvedScheduledAtIso
@@ -484,6 +524,8 @@ export class OrdersService {
           : resolvedScheduledAtIso
             ? new Date(resolvedScheduledAtIso)
             : null,
+        // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true (اتفحصت فوق).
+        scheduledEndAt: service.requiresStartAndEnd && dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
         recurringTemplateId: recurringIdentity?.templateId ?? null,
         recurringOccurrenceAt: recurringIdentity?.scheduledFor ?? null,
         // إعادة الزيارة بتفضّل نفس الفني الأصلي دايماً، وسلوت الجدولة (لو اتحجز) بيحدد فني

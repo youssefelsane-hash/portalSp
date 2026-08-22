@@ -377,7 +377,9 @@
 - **الـcallers**: `OrdersService.create()`/`previewPrice()` بيمرروا `dto.duration_hours` (نفس الحقل
   اللي `service.requiresPreciseSchedule` بيتطلّبه — يعني عمليًا الضرب مبيحصلش غير للخدمات اللي
   محتاجة دقة وقت، لأن `duration_hours` مرفوض تمامًا لأي خدمة تانية على مستوى `CreateOrderDto`
-  validation، مش على مستوى `estimate()` نفسها). `GET /services/:id/estimate` و
+  validation، مش على مستوى `estimate()` نفسها. **تحديث (ADR-0032، 2026-08-22)**: `requires_hours_only`
+  بقى كمان بيسمح بـ`duration_hours`، فالضرب هنا بيستفيد أوتوماتيك منها بلا أي تعديل — راجع القسم
+  تحت). `GET /services/:id/estimate` و
   `GET /services/:id/technicians` (الاتنين `catalog.controller.ts`) بيمرروا `duration_hours` من
   query string كمان — معاينة سعر صحيحة قبل ما العميل يأكّد، نفس فلسفة "مفيش مفاجأة سعر بعد التأكيد".
 - **بَقّة بيانات اتلقطت في نفس المراجعة**: seed بيانات "خدمات منزلية" (`migration 0170`) كانت حاطة
@@ -388,3 +390,21 @@
 - **اختبار حي جديد**: `catalog/hourly-pricing.spec.ts` (3/3 — خدمة hourly من غير duration_hours
   بترجع السلوك القديم بالحرف، بـduration_hours=3 السعر يتضاعف×3، خدمة fixed بتتجاهل duration_hours
   تمامًا حتى لو اتبعتت غلط).
+
+## أوضاع توقيت الخدمة الأربعة (ADR-0032، 2026-08-22)
+
+`Service` بقى فيها 4 أعلام `boolean` تبادلية (وضع واحد بس فعّال لكل خدمة، `CHECK constraint
+chk_services_scheduling_mode_exclusive` على مستوى الـDB): `requiresPreciseSchedule` (موجودة،
+ADR-0031 Slice B، صفر تغيير سلوك)، وجداد `requiresStartTimeOnly`/`requiresHoursOnly`/
+`requiresStartAndEnd`. القرار الكامل، الأمثلة، والبدائل اللي اتقيّمت في
+`docs/adr/0032-service-scheduling-modes.md`.
+
+- **مفيش أي تغيير هنا في `catalog.service.ts`/`estimate()`** — `requiresHoursOnly` بيستفيد
+  أوتوماتيك من الضرب الموجود بالفعل فوق (Slice H) لأنه مبني على `pricing_model=hourly` +
+  `duration_hours` بس، مش على وضع التوقيت. `requiresStartAndEnd` **مالوش أي أثر على السعر خالص**
+  — عمدًا، مفيش ضرب تلقائي بعدد الأيام (مش مطلوب من المالك).
+- **`AdminCatalogService.assertSchedulingModeExclusive()`** — تحقق تطبيقي واضح (رسالة عربية) قبل
+  الحفظ (create/update)، خط دفاع أول قبل CHECK constraint الـDB (خط دفاع أخير، مش الوحيد).
+- **الأدمن**: فورم تعديل الخدمة (`apps/admin/src/app/catalog/services/[id]/page.tsx`) فيه قسم
+  "أوضاع توقيت الخدمة" — 4 checkboxes تبادلية بصريًا + مثال استخدام تحت كل واحد. حقل "السعر
+  الأساسي" بقى تسميته "سعر الساعة (جنيه)" ديناميكيًا لما `pricing_model=hourly`.

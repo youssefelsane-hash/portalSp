@@ -143,6 +143,21 @@ export class CreateServiceDto {
   @IsBoolean()
   requires_precise_schedule?: boolean;
 
+  // 3 أوضاع توقيت جديدة (ADR-0032) — تبادلية مع requires_precise_schedule فوق ومع بعض (CHECK
+  // constraint chk_services_scheduling_mode_exclusive على مستوى الـDB + تحقق صريح في
+  // AdminCatalogService.assertSchedulingModeExclusive()).
+  @IsOptional()
+  @IsBoolean()
+  requires_start_time_only?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_hours_only?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_start_and_end?: boolean;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;

@@ -119,6 +119,20 @@ export class Service {
   @Column({ name: 'requires_precise_schedule', type: 'boolean', default: false })
   requiresPreciseSchedule: boolean;
 
+  // 3 أوضاع توقيت جديدة (ADR-0032، migration 0172) — تبادلية مع requires_precise_schedule فوق
+  // ومع بعض (CHECK constraint chk_services_scheduling_mode_exclusive على مستوى الـDB: على الأكتر
+  // وضع واحد فعّال). كل وضع بيطلب حقول مختلفة وقت إنشاء الطلب (OrdersService.create()):
+  // requiresStartTimeOnly → scheduled_at بس، requiresHoursOnly → duration_hours بس،
+  // requiresStartAndEnd → scheduled_at + scheduled_end_at (عمود جديد على orders) الاتنين.
+  @Column({ name: 'requires_start_time_only', type: 'boolean', default: false })
+  requiresStartTimeOnly: boolean;
+
+  @Column({ name: 'requires_hours_only', type: 'boolean', default: false })
+  requiresHoursOnly: boolean;
+
+  @Column({ name: 'requires_start_and_end', type: 'boolean', default: false })
+  requiresStartAndEnd: boolean;
+
   @Column({
     name: 'min_technician_level',
     type: 'enum',

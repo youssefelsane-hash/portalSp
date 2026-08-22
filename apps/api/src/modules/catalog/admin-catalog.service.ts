@@ -165,6 +165,30 @@ export class AdminCatalogService {
     });
   }
 
+  // أوضاع التوقيت الأربعة (ADR-0032) — تحقق واضح على مستوى التطبيق قبل ما يوصل لـCHECK constraint
+  // الخام على الـDB (chk_services_scheduling_mode_exclusive)، عشان الأدمن ياخد رسالة عربية مفهومة
+  // بدل خطأ Postgres خام.
+  private assertSchedulingModeExclusive(modes: {
+    requiresPreciseSchedule: boolean;
+    requiresStartTimeOnly: boolean;
+    requiresHoursOnly: boolean;
+    requiresStartAndEnd: boolean;
+  }): void {
+    const activeCount = [
+      modes.requiresPreciseSchedule,
+      modes.requiresStartTimeOnly,
+      modes.requiresHoursOnly,
+      modes.requiresStartAndEnd,
+    ].filter(Boolean).length;
+    if (activeCount > 1) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'وضع توقيت واحد بس يقدر يكون فعّال لكل خدمة (دقة وقت / بداية بس / عدد ساعات بس / بداية ونهاية)',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   private async findServiceOrThrow(id: string): Promise<Service> {
     const service = await this.services.findOne({ where: { id } });
     if (!service) {
@@ -184,6 +208,12 @@ export class AdminCatalogService {
     if (dto.deposit_required && dto.deposit_percentage === undefined) {
       throw new ApiException(ErrorCode.VAL_001, 'نسبة الإيداع مطلوبة لو الخدمة محتاجة إيداع', HttpStatus.BAD_REQUEST);
     }
+    this.assertSchedulingModeExclusive({
+      requiresPreciseSchedule: dto.requires_precise_schedule ?? false,
+      requiresStartTimeOnly: dto.requires_start_time_only ?? false,
+      requiresHoursOnly: dto.requires_hours_only ?? false,
+      requiresStartAndEnd: dto.requires_start_and_end ?? false,
+    });
 
     const service = this.services.create({
       categoryId: dto.category_id,
@@ -212,6 +242,9 @@ export class AdminCatalogService {
       allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
       requiresPreciseSchedule: dto.requires_precise_schedule ?? false,
+      requiresStartTimeOnly: dto.requires_start_time_only ?? false,
+      requiresHoursOnly: dto.requires_hours_only ?? false,
+      requiresStartAndEnd: dto.requires_start_and_end ?? false,
       minTechnicianLevel: dto.min_technician_level,
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
@@ -274,6 +307,15 @@ export class AdminCatalogService {
     if (dto.allows_date_range_booking !== undefined) service.allowsDateRangeBooking = dto.allows_date_range_booking;
     if (dto.show_unavailable_providers !== undefined) service.showUnavailableProviders = dto.show_unavailable_providers;
     if (dto.requires_precise_schedule !== undefined) service.requiresPreciseSchedule = dto.requires_precise_schedule;
+    if (dto.requires_start_time_only !== undefined) service.requiresStartTimeOnly = dto.requires_start_time_only;
+    if (dto.requires_hours_only !== undefined) service.requiresHoursOnly = dto.requires_hours_only;
+    if (dto.requires_start_and_end !== undefined) service.requiresStartAndEnd = dto.requires_start_and_end;
+    this.assertSchedulingModeExclusive({
+      requiresPreciseSchedule: service.requiresPreciseSchedule,
+      requiresStartTimeOnly: service.requiresStartTimeOnly,
+      requiresHoursOnly: service.requiresHoursOnly,
+      requiresStartAndEnd: service.requiresStartAndEnd,
+    });
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

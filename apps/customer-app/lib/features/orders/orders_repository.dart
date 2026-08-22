@@ -73,8 +73,11 @@ class OrdersRepository {
     // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
     // لشاشة الدفع فورًا بعد ده، التوزيع مش هيبدأ غير بعد ما الدفع يتأكد فعليًا.
     String? paymentMethod,
-    // دقة الوقت (ADR-0031 Slice B) — إجباري لخدمة service.requiresPreciseSchedule=true بس.
+    // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — إجباري لخدمة
+    // service.requiresPreciseSchedule=true أو service.requiresHoursOnly=true بس.
     int? durationHours,
+    // وضع "بداية+نهاية" (ADR-0032) — إجباري لخدمة service.requiresStartAndEnd=true بس، ISO 8601 UTC.
+    String? scheduledEndAt,
     // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — لازم يتولّد مرة واحدة
     // بس من الكولر (CreateOrderScreen، نفس درس generateIdempotencyKey() في
     // payments_repository.dart بالحرف) ويتبعت هنا — أي retry (double-tap، timeout شبكة) بنفس
@@ -108,6 +111,7 @@ class OrdersRepository {
       if (scheduledAt != null) 'scheduled_at': scheduledAt,
       if (scheduledAtRangeEnd != null) 'scheduled_at_range_end': scheduledAtRangeEnd,
       if (durationHours != null) 'duration_hours': durationHours,
+      if (scheduledEndAt != null) 'scheduled_end_at': scheduledEndAt,
       if (originalOrderId != null) 'original_order_id': originalOrderId,
     });
     return Order.fromJson(data!);

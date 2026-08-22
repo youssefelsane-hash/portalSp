@@ -6249,3 +6249,52 @@ Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ ع
   كلهم بيمرروه. بَقّة بيانات مرتبطة اتصلحت (`migration 0171`): خدمة "تنظيف شهري/إقامة" كانت
   `pricing_model='hourly'` غلط في migration 0170 (سعرها شهري ثابت فعليًا). اختبار حي
   `catalog/hourly-pricing.spec.ts` (3/3). تفاصيل كاملة في ADR-0031 و`catalog/README.md`.
+
+## §43. أوضاع توقيت الخدمة الأربعة — طلب مالك صريح 2026-08-22 (فوق §42/ADR-0031) — ✅ خلصت (باك-إند + أدمن + customer-app)
+
+طلب مالك مباشر بعد اختبار حي: خدمة "تنظيف شهري/إقامة" بتاخد تاريخ بداية بس (مفيش تاريخ نهاية —
+العميل مش قادر يحدد مدة العقد)، و`requires_precise_schedule` الموجودة (ADR-0031 Slice B) بتربط
+"بداية" و"مدة بالساعات" مع بعض دايمًا رغم إن بعض الخدمات محتاجة واحدة منهم بس. زائد: تسمية حقل
+"السعر الأساسي" في فورم الأدمن لازم توضّح إنه سعر الساعة لخدمات `pricing_model=hourly` (السلوك
+نفسه شغال من Slice H فوق — توضيح بصري بس، صفر منطق تسعير جديد). القرار الكامل + البدائل اللي
+اتقيّمت في `docs/adr/0032-service-scheduling-modes.md`.
+
+**القرار (مؤكَّد من المالك عبر سؤالين مباشرين)**: 4 أوضاع توقيت **تبادلية** على `Service` — واحد
+بس ممكن يكون فعّال لكل خدمة (CHECK constraint `chk_services_scheduling_mode_exclusive` على مستوى
+الـDB + تحقق تطبيقي في `AdminCatalogService`، مش بس اعتماد على الأدمن يلتزم بصريًا): `requires_
+precise_schedule` (موجودة، صفر تغيير سلوك) + 3 جداد `requires_start_time_only`/`requires_hours_
+only`/`requires_start_and_end`. الوضع الرابع بيسجّل `orders.scheduled_end_at` (عمود جديد،
+`CHECK scheduled_end_at > scheduled_at`). `allows_date_range_booking` (ADR-0028) فضل **مستقل
+تمامًا** عن الأربعة دول (قرار عمل صريح من المالك عبر سؤال مباشر) — مرونة يوم بحث، مش وصف مدة خدمة.
+
+- **الباك-إند (خلص)**: migration 0172 (3 أعمدة `services` + `orders.scheduled_end_at` + الاتنين
+  CHECK constraints) — اتطبّق واتحقق منه حي. `Service`/`Order` entities، `CreateOrderDto`
+  (`scheduled_end_at` جديد)، `OrdersService.create()` (تحقق كامل حسب الوضع الفعّال: حقول مطلوبة/
+  ممنوعة لكل وضع من الأربعة + الحالة الافتراضية "بلا وضع" = حجز بيوم كامل زي زمان)، `durationHours`/
+  `scheduledEndAt` بيتسجّلوا على الطلب فعليًا حسب الوضع. `previewPrice()` **اتسيبت من غير تعديل
+  عمدًا** — الحقول التنفيذية الجديدة (`scheduled_at`/`scheduled_end_at`) مالهاش أي أثر على السعر
+  أصلاً (نفس فلسفة `PreviewOrderDto`'s تعليق: `scheduled_at` مستبعد عمدًا من الأول لنفس السبب)،
+  فمفيش داعي حقيقي للتكرار. `AdminCatalogService.assertSchedulingModeExclusive()` جديدة —
+  بترفض بوضوح (رسالة عربية) لو أكتر من وضع اتفعّل مع بعض في create أو update، قبل ما توصل لخطأ
+  Postgres خام. DTOs الاستجابة (`admin-catalog-response.dto.ts`، `service-response.dto.ts`،
+  `order-response.dto.ts`) بترجّع الحقول الجديدة.
+- **`apps/admin` (خلص)**: فورم تعديل الخدمة بقى فيه قسم "أوضاع توقيت الخدمة" — 4 checkboxes
+  تبادلية بصريًا (اختيار واحد بيلغي الباقي فورًا، `useState` واحد `schedulingMode` بدل 4 حقول
+  منفصلة) مع سطر توضيحي/مثال تحت كل واحد (طلب صريح: "أشوف إيه العلامات الصح المتناسبة معاها").
+  حقل "السعر الأساسي" بقى تسميته ديناميكية ("سعر الساعة (جنيه)") + سطر توضيحي لما `pricing_model=
+  hourly` يتفعّل (`onChange` على `SelectNative` بدل `defaultValue` الثابت).
+- **`apps/customer-app` (خلص)**: `CatalogService` (Dart model) بقى فيه الـ3 حقول الجديدة.
+  `create_order_screen.dart` — واجهة مختلفة حسب الوضع الفعّال: `requiresHoursOnly` بيخفي صف
+  اختيار اليوم بالكامل ويعرض حقل "عدد الساعات" بس (ASAP)، `requiresStartAndEnd` بيعرض صفين
+  منفصلين (تاريخ+وقت بداية، تاريخ+وقت نهاية) بأداة اختيار جديدة (`_pickFullDateTime`، تاريخ ووقت
+  في خطوة واحدة، مستقلة تمامًا عن `_pickSchedule`/`_preciseTime` بتوع الوضع القديم)،
+  `requiresStartTimeOnly` بيعيد استخدام نفس أداة اليوم+الساعة بتاعة `requiresPreciseSchedule`
+  (`_combinedPreciseScheduledAt()`) من غير ما يطلب مدة بالساعات. تحقق عميل واضح قبل الإرسال لكل
+  وضع (رسالة عربية بدل خطأ باك-إند خام). **مفيش Flutter SDK في بيئة السيشن دي وقت التنفيذ** —
+  مراجعة يدوية دقيقة للكود (تحقق syntax/logic) بدل `flutter analyze`/`flutter test` حي، نفس
+  الفجوة الموثّقة سابقًا في Phase A.2 Slice D فوق — موثّقة صراحة هنا كفجوة تحقق، مش سهو.
+- **`packages/shared-types`**: الحقول الثلاثة الجديدة اتضافت لـ`AdminServiceResponseDto`/
+  `CreateServiceBody` في `catalog.ts`، `npm run build` اتنفّذ (نجح بلا أخطاء).
+- **مؤجّل عمدًا (فجوة موثّقة، مش سهو)**: `technician-app` مش بتعرض `orders.scheduled_end_at` في
+  أي شاشة تفاصيل طلب لسه (مفيش طلب فعلي بالوضع ده اتعمل بعد للاختبار الحي بيه) — نفس نمط باقي
+  الحقول الجديدة اللي بتتضاف تدريجيًا لشاشات الفني حسب الأولوية.

@@ -66,6 +66,9 @@ export interface AdminServiceResponseDto {
   allows_date_range_booking: boolean;
   show_unavailable_providers: boolean;
   requires_precise_schedule: boolean;
+  requires_start_time_only: boolean;
+  requires_hours_only: boolean;
+  requires_start_and_end: boolean;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -102,6 +105,9 @@ export interface CreateServiceBody {
   allows_date_range_booking?: boolean;
   show_unavailable_providers?: boolean;
   requires_precise_schedule?: boolean;
+  requires_start_time_only?: boolean;
+  requires_hours_only?: boolean;
+  requires_start_and_end?: boolean;
   min_technician_level?: string;
   commission_percentage?: number;
   display_order?: number;
