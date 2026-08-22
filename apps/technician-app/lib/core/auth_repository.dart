@@ -69,7 +69,7 @@ class AuthRepository extends ChangeNotifier {
   }
 
   Future<String> _doRefresh() async {
-    final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey);
+    final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5));
     if (storedRefreshToken == null) {
       throw ApiException(code: 'AUTH_NO_SESSION', message: 'مفيش جلسة', statusCode: 401);
     }
@@ -85,9 +85,15 @@ class AuthRepository extends ChangeNotifier {
   // Secret Service مش متاح، إلخ) — فشلها ميستحقّش يوقف تسجيل الدخول (access_token في الذاكرة
   // اشتغل فعلاً)، بس هيمنع استمرار الجلسة بعد إعادة فتح التطبيق. نفس مبدأ "فشل الـ infra
   // الثانوي ميكسرش العملية الحقيقية للمستخدم" المتّبع في الباك-إند (queue/cache).
+  //
+  // بَقّة حقيقية اتلقطت (بلاغ مالك 2026-08-22): try/catch فوق بيحمي من استثناء صريح، لكن
+  // Keystore ملتف على بعض الأجهزة الحقيقية بيعلّق (hang) بدل ما يرمي — والـawait وقتها
+  // مابيرجعش أبدًا، فمفيش catch اتصلحه، والتطبيق كله بيقعد على شاشة تحميل للأبد (نفس الحاجة
+  // تحصل مع read() في init()/_doRefresh() تحت). .timeout() هنا بيحوّل أي hang لـTimeoutException
+  // حقيقي بعد 5 ثواني، يقع في نفس catch الموجود بالفعل.
   Future<void> _persistRefreshToken(String refreshToken) async {
     try {
-      await _secureStorage.write(key: _refreshTokenKey, value: refreshToken);
+      await _secureStorage.write(key: _refreshTokenKey, value: refreshToken).timeout(const Duration(seconds: 5));
     } catch (e) {
       debugPrint('فشل حفظ refresh_token بأمان — الجلسة الحالية سليمة، بس مش هتفضل بعد إعادة فتح التطبيق: $e');
     }
@@ -95,7 +101,11 @@ class AuthRepository extends ChangeNotifier {
 
   Future<void> init() async {
     try {
-      final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey);
+      // بَقّة حقيقية اتلقطت (بلاغ مالك 2026-08-22): على بعض الأجهزة الحقيقية، Keystore ملتف
+      // بيخلي read() يعلّق (hang) بدل ما يرمي استثناء — التطبيق كان بيقعد على شاشة تحميل للأبد
+      // من غير أي طلب شبكة يتبعت خالص (init() مابيوصلش لـ_refresh() أصلاً). .timeout() هنا
+      // بيضمن إن أسوأ حالة هي "الفني محتاج يسجّل دخول تاني" مش "التطبيق ميفتحش خالص".
+      final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5));
       if (storedRefreshToken == null) {
         _accessToken = null;
         _user = null;
@@ -207,7 +217,8 @@ class AuthRepository extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    final storedRefreshToken = await _secureStorage.read(key: _refreshTokenKey);
+    final storedRefreshToken =
+        await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5), onTimeout: () => null);
     if (storedRefreshToken != null) {
       await apiRequest('POST', '/auth/logout', body: {'refresh_token': storedRefreshToken}).catchError((_) => null);
     }
