@@ -6099,8 +6099,13 @@ technician-app). التفاصيل الكاملة في `apps/technician-app/READM
   (صفر مفهوم مماثل موجود خالص حاليًا).
 - **Phase A.4**: هجرة حجز الشغالة نفسه للمحرك الموحّد (الأخطر — بيانات تاريخية حقيقية، migration
   لا rewrite).
-- **Phase B.1**: `orders.assigned_company_id` + فلتر company_id على Workforce Matrix = أول شاشة
-  Company Workspace حقيقية (قراءة بس، صفر مخاطرة).
+- **Phase B.1 (خلصت، 2026-08-22)**: `orders.assigned_company_id` + `GET /technician/company/orders`
+  + `GET /admin/technician-companies/:id/orders` = أول شاشة Company Workspace حقيقية (قراءة بس،
+  صفر مخاطرة، بالظبط زي ما اتخطّط). التفاصيل الكاملة في `docs/adr/0033-company-workspace-orders.md`
+  و`apps/api/src/modules/technicians/README.md` (قسم "مساحة عمل الشركة"). **فرق عن الخطة الأصلية**:
+  فلتر `company_id` على Workforce Matrix اتأجّل (مش جزء من طلب المالك الفعلي — كان بس اقتراح "أقرب
+  لبنة جاهزة"، الطلب الحقيقي كان شاشة الفني نفسه + الأدمن، مش أداة تشغيل داخلية) — ممكن يتضاف لاحقًا
+  لو المالك طلبها.
 - **Phase B.2**: توجيه إشعارات لدور الشركة (owner/manager) بدل القائد بس.
 - **Phase B.3**: توزيع أرباح الطاقم (القرار المالي المؤجّل فوق) — أهم فجوة في المنصة كلها لو
   الشركات هتبقى منتج جدي.

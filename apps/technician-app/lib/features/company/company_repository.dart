@@ -82,4 +82,10 @@ class CompanyRepository {
     });
     return StaffMember.fromJson(data!);
   }
+
+  // مساحة عمل الشركة (ADR-0033) — الشغل الجاي للشركة، متاحة لأي عضو (نفس مستوى fetchMine فوق).
+  Future<List<CompanyOrderSummary>> fetchOrders() async {
+    final items = await auth.authedRequestList('/technician/company/orders');
+    return items.map(CompanyOrderSummary.fromJson).toList();
+  }
 }

@@ -37,3 +37,18 @@ export interface CompanyDetailResponseDto {
   branches: BranchResponseDto[];
   staff: StaffMemberResponseDto[];
 }
+
+// مساحة عمل الشركة (ADR-0033) — GET /admin/technician-companies/:id/orders و
+// GET /technician/company/orders.
+export interface CompanyOrderSummaryResponseDto {
+  id: string;
+  order_number: string;
+  service_name_ar: string;
+  order_status: string;
+  booking_mode: string;
+  scheduled_at: string | null;
+  created_at: string;
+  technician_name: string | null;
+  zone_name_ar: string | null;
+  total_amount_cents: number;
+}

@@ -682,6 +682,19 @@ export class MatchingService {
    * بيتنادى من مسارين دلوقتي (docs/08 §34.1b، ADR-0020 §4): التأكيد التلقائي لمرشّح `LIGHT`، وقبول
    * الفني الصريح لفرصة شغل إضافي (`acceptWorkOpportunity`).
    */
+  // مساحة عمل الشركة (ADR-0033) — snapshot الشركة الحالية للفني وقت التعيين، مش استعلام حي.
+  // بترجع null بأمان للفني المستقل (company_id=null) — نفس سلوك orders.assigned_company_id
+  // الافتراضي لأي طلب فردي عادي. SQL مباشر عمدًا (مش techniciansService.findByProfileIdOrThrow)
+  // — نفس نمط باقي الملف ده (استعلامات دقيقة صغيرة عبر this.dataSource)، وبيتجنّب حقن تبعية
+  // جديدة على TechniciansService في مسار مُختبر بـstub خفيف (matching.service.spec.ts).
+  private async resolveAssignedCompanyId(technicianId: string): Promise<string | null> {
+    const rows = await this.dataSource.query<{ company_id: string | null }[]>(
+      `SELECT company_id FROM technician_profiles WHERE id = $1`,
+      [technicianId],
+    );
+    return rows[0]?.company_id ?? null;
+  }
+
   private async confirmTechnicianForOrder(
     manager: EntityManager,
     order: Order,
@@ -706,6 +719,7 @@ export class MatchingService {
       return { kind: 'noop' };
     }
     order.technicianId = technicianId;
+    order.assignedCompanyId = await this.resolveAssignedCompanyId(technicianId);
     order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
     order.assignedAt = now;
     await manager.save(order);
@@ -1046,6 +1060,9 @@ export class MatchingService {
         throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
       }
       order.technicianId = profile.id;
+      // مساحة عمل الشركة (ADR-0033) — profile هنا اتحمّل بالفعل (findByUserIdOrThrow فوق)، صفر
+      // داعي لاستعلام إضافي زي resolveAssignedCompanyId() تحت.
+      order.assignedCompanyId = profile.companyId;
       order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
       order.assignedAt = now;
       await manager.save(order);

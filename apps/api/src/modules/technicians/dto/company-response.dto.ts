@@ -98,3 +98,48 @@ export interface CompanyDetailResponseDto {
   branches: BranchResponseDto[];
   staff: StaffMemberResponseDto[];
 }
+
+// مساحة عمل الشركة (ADR-0033) — صف خام من استعلام TechnicianCompaniesService.listOrders() (SQL
+// مباشر، مش TypeORM entity — orders.assigned_company_id مالوش علاقة مباشرة كـrelation لسه).
+export interface CompanyOrderRow {
+  id: string;
+  orderNumber: string;
+  serviceNameAr: string;
+  orderStatus: string;
+  bookingMode: string;
+  scheduledAt: Date | null;
+  createdAt: Date;
+  technicianName: string | null;
+  zoneNameAr: string | null;
+  totalAmountCents: number;
+}
+
+// صف ملخّص واحد — مش OrderResponseDto الكامل (تفاصيل التنفيذ الكاملة مش لازمة هنا، القائمة دي
+// نظرة عامة/متابعة بس، نفس فلسفة docs/adr/0033-company-workspace-orders.md).
+export interface CompanyOrderSummaryResponseDto {
+  id: string;
+  order_number: string;
+  service_name_ar: string;
+  order_status: string;
+  booking_mode: string;
+  scheduled_at: string | null;
+  created_at: string;
+  technician_name: string | null;
+  zone_name_ar: string | null;
+  total_amount_cents: number;
+}
+
+export function toCompanyOrderSummaryResponseDto(row: CompanyOrderRow): CompanyOrderSummaryResponseDto {
+  return {
+    id: row.id,
+    order_number: row.orderNumber,
+    service_name_ar: row.serviceNameAr,
+    order_status: row.orderStatus,
+    booking_mode: row.bookingMode,
+    scheduled_at: row.scheduledAt ? new Date(row.scheduledAt).toISOString() : null,
+    created_at: new Date(row.createdAt).toISOString(),
+    technician_name: row.technicianName,
+    zone_name_ar: row.zoneNameAr,
+    total_amount_cents: Number(row.totalAmountCents),
+  };
+}

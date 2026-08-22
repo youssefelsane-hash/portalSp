@@ -101,6 +101,13 @@ export class Order {
   @Column({ name: 'requested_technician_company_id', type: 'uuid', nullable: true })
   requestedTechnicianCompanyId: string | null;
 
+  // مساحة عمل الشركة (ADR-0033، migration 0173) — snapshot الشركة اللي الطلب اتعيّن لها فعليًا
+  // وقت التعيين (MatchingService)، مش استعلام حي. null لأي طلب فني مستقل. مختلفة عن
+  // requestedTechnicianCompanyId فوق (تفضيل العميل الأولي، ممكن يختلف عن النتيجة الفعلية) —
+  // وبعد ما تتسجّل، مبتتغيّرش حتى لو الفني سايب الشركة بعدين (نفس فلسفة الحفاظ على التاريخ).
+  @Column({ name: 'assigned_company_id', type: 'uuid', nullable: true })
+  assignedCompanyId: string | null;
+
   @Column({ name: 'order_status', type: 'enum', enum: OrderStatus, enumName: 'order_status', default: OrderStatus.DRAFT })
   orderStatus: OrderStatus;
 
