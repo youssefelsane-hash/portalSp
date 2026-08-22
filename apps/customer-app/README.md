@@ -508,3 +508,21 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 
 مفيش Flutter SDK في بيئة السيشن دي وقت الشريحة دي (نفس فجوة الشريحة اللي فوقها بالحرف) — مراجعة
 يدوية دقيقة للكود بدل `flutter analyze`/`flutter test` حي، موثّق صراحة كفجوة تحقق مش سهو.
+
+## وضوح تجربة الإيداع/الكاش قبل الدفع — طلب مالك مباشر 2026-08-22
+
+بلاغ مالك: العميل كان يختار "ادفع بعد الخدمة" (كاش) لخدمة `deposit_required=true` أو
+`cash_allowed=false` ويترفض برسالة حمرا بعد ما يدوس "تأكيد الطلب"، بدل ما يعرف من الأول. الباك-إند
+كان بالفعل بيحسب ويرجّع كل حاجة (`PreviewOrderResponseDto.deposit_amount_cents`/`due_now_cents`/
+`remaining_amount_cents`، ADR-0026/ADR-0027) — الفجوة كانت في `catalog/models.dart`/`orders/models.dart`
+مش بيقروا الحقول دي خالص. **سؤال توضيحي اتأكّد**: الإيداع يفضل زي ما هو (نسبة ثابتة يحددها الأدمن)،
+التحسين في الوضوح بس — صفر خيار "ادفع كامل" جديد.
+
+- `CatalogService.cashAllowed` و`OrderPricePreview.depositAmountCents`/`dueNowCents`/`remainingAmountCents` جديدة.
+- `create_order_screen.dart`: `_requiresElectronicPayment` (`!cashAllowed || depositAmountCents != null`)
+  — خيار "ادفع بعد الخدمة" بيتخفي تمامًا لما يبقى غير متاح، `_reconcilePaymentMethodSelection()`
+  بتختار أول طريقة إلكترونية متاحة تلقائيًا. بانر توضيحي فوق "طريقة الدفع" + سطرين جداد في "ملخص
+  السعر" (المطلوب دلوقتي/الباقي بعد الشغل). رسالة لو مفيش أي طريقة دفع إلكتروني متاحة أصلاً.
+- مفيش أي تعديل باك-إند — كل الحقول جاهزة من زمان، الفجوة كانت في العرض بس. تفاصيل كاملة في
+  `docs/08-pricing-engine-and-platform-vision.md` §44.
+- مفيش Flutter SDK في بيئة السيشن دي وقت التنفيذ — مراجعة يدوية بدل `flutter analyze`.
