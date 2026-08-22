@@ -135,6 +135,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _durationError;
   Timer? _durationDebounce;
 
+  // وضع "بداية+نهاية" (ADR-0032) — service.requiresStartAndEnd=true محتاجة تاريخ ووقت كاملين
+  // للاتنين، مستقلة تمامًا عن _requestedAt/_preciseTime فوق (عقد شهري/إقامة بمدة محددة).
+  DateTime? _startAndEndStart;
+  DateTime? _startAndEndEnd;
+
   // Script 2 Part I (findings #46/#47/#48) — فاضية لحد ما /payment-channels يرد؛ زرار "ادفع بعد
   // الخدمة" (value: null) دايمًا ظاهر بغض النظر عن القيمة دي لأنه مش بيعتمد على أي provider خارجي.
   Set<String> _availablePaymentMethods = {};
@@ -360,6 +365,40 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (picked != null && mounted) setState(() => _preciseTime = picked);
   }
 
+  // وضع "بداية+نهاية" (ADR-0032) — تاريخ ووقت كاملين في نفس الخطوة (بعكس _pickSchedule/
+  // _pickPreciseTime اللي بيقسّموا اليوم والساعة على شاشتين منفصلتين، لأن دي مستقلة تمامًا).
+  Future<DateTime?> _pickFullDateTime(DateTime? initial) async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial ?? now.add(const Duration(days: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: initial != null ? TimeOfDay.fromDateTime(initial) : const TimeOfDay(hour: 10, minute: 0),
+    );
+    if (time == null || !mounted) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _pickStartAndEndStart() async {
+    final picked = await _pickFullDateTime(_startAndEndStart);
+    if (picked != null && mounted) setState(() => _startAndEndStart = picked);
+  }
+
+  Future<void> _pickStartAndEndEnd() async {
+    final picked = await _pickFullDateTime(_startAndEndEnd);
+    if (picked != null && mounted) setState(() => _startAndEndEnd = picked);
+  }
+
+  String _formatFullDateTime(DateTime at) {
+    final two = (int n) => n.toString().padLeft(2, '0');
+    return '${two(at.day)}/${two(at.month)}/${at.year} — ${two(at.hour)}:${two(at.minute)}';
+  }
+
   // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد). null بس في وضع الطوارئ
   // (الصف ده مش ظاهر أصلاً وقتها — راجع _buildScheduleRow تحت).
   String _formatRequestedAt() {
@@ -508,6 +547,28 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       setState(() => _error = 'استنى لحد ما السعر يتحسب');
       return;
     }
+    // أوضاع التوقيت الثلاثة الجديدة (ADR-0032) — تحقق عميل واضح قبل ما نوصل لرسالة الباك-إند
+    // الخام، نفس فلسفة تحقق العنوان/بيانات السعر فوق.
+    if (widget.scheduleSlotId == null && widget.service.requiresStartAndEnd) {
+      if (_startAndEndStart == null || _startAndEndEnd == null) {
+        setState(() => _error = 'حدد تاريخ ووقت البداية والنهاية');
+        return;
+      }
+      if (!_startAndEndEnd!.isAfter(_startAndEndStart!)) {
+        setState(() => _error = 'وقت النهاية لازم يكون بعد وقت البداية');
+        return;
+      }
+    }
+    if (widget.scheduleSlotId == null &&
+        widget.service.requiresHoursOnly &&
+        int.tryParse(_durationHoursController.text.trim()) == null) {
+      setState(() => _error = 'حدد عدد الساعات المطلوبة');
+      return;
+    }
+    if (widget.scheduleSlotId == null && widget.service.requiresStartTimeOnly && _combinedPreciseScheduledAt() == null) {
+      setState(() => _error = 'حدد تاريخ ووقت بداية الخدمة');
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -520,19 +581,29 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         requestedTechnicianId: widget.requestedTechnicianId,
         scheduleSlotId: widget.scheduleSlotId,
         // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
-        // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
-        scheduledAt: widget.scheduleSlotId == null
-            ? (widget.service.requiresPreciseSchedule
-                    ? _combinedPreciseScheduledAt()
-                    : _requestedAt)
-                ?.toUtc()
-                .toIso8601String()
+        // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه. وضع "بداية+نهاية" (ADR-0032)
+        // بيستخدم _startAndEndStart المستقل، و"عدد ساعات بس" مالوش scheduled_at خالص (ASAP).
+        scheduledAt: widget.scheduleSlotId != null
+            ? null
+            : widget.service.requiresStartAndEnd
+                ? _startAndEndStart?.toUtc().toIso8601String()
+                : widget.service.requiresHoursOnly
+                    ? null
+                    : (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly
+                            ? _combinedPreciseScheduledAt()
+                            : _requestedAt)
+                        ?.toUtc()
+                        .toIso8601String(),
+        // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد أو وضع
+        // "بداية+نهاية"/"عدد ساعات بس" الجديدين (نفس منطق scheduledAt فوق بالحرف).
+        scheduledAtRangeEnd: widget.scheduleSlotId == null && !widget.service.requiresStartAndEnd && !widget.service.requiresHoursOnly
+            ? _requestedAtRangeEnd?.toUtc().toIso8601String()
             : null,
-        // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد (نفس منطق
-        // scheduledAt فوق بالحرف).
-        scheduledAtRangeEnd:
-            widget.scheduleSlotId == null ? _requestedAtRangeEnd?.toUtc().toIso8601String() : null,
-        durationHours: widget.service.requiresPreciseSchedule ? int.tryParse(_durationHoursController.text.trim()) : null,
+        durationHours: (widget.service.requiresPreciseSchedule || widget.service.requiresHoursOnly)
+            ? int.tryParse(_durationHoursController.text.trim())
+            : null,
+        // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true.
+        scheduledEndAt: widget.service.requiresStartAndEnd ? _startAndEndEnd?.toUtc().toIso8601String() : null,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
         buildingCode: _buildingController.text.trim(),
@@ -792,34 +863,75 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
             ] else if (widget.bookingMode != BookingMode.emergency) ...[
               const SizedBox(height: 16),
-              Text('الموعد المطلوب', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Card(
-                child: ListTile(
-                  leading: Icon(_requestedAtRangeEnd != null ? Icons.event_repeat_outlined : Icons.event_outlined),
-                  title: Text(_formatRequestedAt()),
-                  trailing: const Icon(Icons.chevron_left),
-                  onTap: _pickSchedule,
-                ),
-              ),
-              // دقة الوقت (ADR-0031 Slice B) — خدمات زي جليسة الأطفال/التنظيف بالساعة محتاجة
-              // وقت بداية دقيق + مدة، مش يوم كامل بس.
-              if (widget.service.requiresPreciseSchedule) ...[
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.schedule_outlined),
-                    title: Text(_preciseTime != null ? 'الساعة ${_preciseTime!.format(context)}' : 'حدد وقت البداية'),
-                    trailing: const Icon(Icons.chevron_left),
-                    onTap: _pickPreciseTime,
-                  ),
-                ),
+              // وضع "عدد ساعات بس" (ADR-0032) — ASAP، من غير وقت بداية محدد خالص، فصف اختيار
+              // اليوم بيتخفي تمامًا.
+              if (widget.service.requiresHoursOnly) ...[
+                Text('عدد الساعات المطلوبة', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _durationHoursController,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'عدد الساعات', border: OutlineInputBorder()),
                 ),
+              ]
+              // وضع "بداية+نهاية" (ADR-0032) — تاريخ ووقت كاملين مستقلين للاتنين، مالوش علاقة
+              // بصف اختيار اليوم العادي (_pickSchedule) خالص.
+              else if (widget.service.requiresStartAndEnd) ...[
+                Text('مدة الخدمة', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.event_outlined),
+                    title: Text(
+                      _startAndEndStart != null ? _formatFullDateTime(_startAndEndStart!) : 'حدد تاريخ ووقت البداية',
+                    ),
+                    trailing: const Icon(Icons.chevron_left),
+                    onTap: _pickStartAndEndStart,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.event_available_outlined),
+                    title: Text(
+                      _startAndEndEnd != null ? _formatFullDateTime(_startAndEndEnd!) : 'حدد تاريخ ووقت النهاية',
+                    ),
+                    trailing: const Icon(Icons.chevron_left),
+                    onTap: _pickStartAndEndEnd,
+                  ),
+                ),
+              ] else ...[
+                Text('الموعد المطلوب', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: Icon(_requestedAtRangeEnd != null ? Icons.event_repeat_outlined : Icons.event_outlined),
+                    title: Text(_formatRequestedAt()),
+                    trailing: const Icon(Icons.chevron_left),
+                    onTap: _pickSchedule,
+                  ),
+                ),
+                // دقة الوقت (ADR-0031 Slice B) + وضع "بداية بس" (ADR-0032) — الاتنين محتاجين
+                // وقت بداية دقيق فوق اليوم المختار، بس دقة الوقت وحدها محتاجة مدة كمان تحت.
+                if (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly) ...[
+                  const SizedBox(height: 8),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.schedule_outlined),
+                      title: Text(_preciseTime != null ? 'الساعة ${_preciseTime!.format(context)}' : 'حدد وقت البداية'),
+                      trailing: const Icon(Icons.chevron_left),
+                      onTap: _pickPreciseTime,
+                    ),
+                  ),
+                ],
+                if (widget.service.requiresPreciseSchedule) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _durationHoursController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
+                  ),
+                ],
               ],
             ],
             if (_isFormulaPricing) ..._buildPricingFieldsSection() else ..._buildStandardDataSection(),

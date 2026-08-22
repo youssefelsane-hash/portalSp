@@ -1246,3 +1246,30 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 - **خارج نطاق الشريحة دي عمدًا**: فحص التعارض الساعي وقت المطابقة التلقائية نفسها (auto-match
   بلا فني مفضّل) — بوابة الأهلية اليومية العادية (`technicianAvailabilityCondition()`) هي اللي
   بتشتغل وقتها، مفيش دقة ساعة إضافية عند التوزيع الفعلي لسه.
+
+## أوضاع توقيت الخدمة الأربعة (ADR-0032، 2026-08-22) — 3 قدرات جديدة جنب `requires_precise_schedule`
+
+طلب مالك مباشر: خدمة شهرية بتاخد تاريخ بداية بس (مفيش نهاية)، و`requires_precise_schedule` بتربط
+بداية+مدة مع بعض دايمًا رغم إن بعض الخدمات محتاجة واحدة بس. القرار الكامل في
+`docs/adr/0032-service-scheduling-modes.md`. `Service` بقى فيها 4 أعلام **تبادلية** (وضع واحد بس
+فعّال، `CHECK constraint chk_services_scheduling_mode_exclusive` — migration 0172):
+
+1. `requiresPreciseSchedule` (فوق، صفر تغيير سلوك).
+2. `requiresStartTimeOnly` — `scheduled_at` إجباري، `duration_hours`/`scheduled_end_at` ممنوعين.
+3. `requiresHoursOnly` — `duration_hours` إجباري (بلا `scheduled_at` خالص — ASAP)، `scheduled_end_at`
+   ممنوع. بيستفيد أوتوماتيك من ضرب `duration_hours` الموجود فوق (`CatalogService.estimate()`) —
+   صفر لمس هناك.
+4. `requiresStartAndEnd` — `scheduled_at`+`scheduled_end_at` إجباريين الاتنين (`scheduled_end_at`
+   عمود جديد على `orders`، `CHECK scheduled_end_at > scheduled_at`)، `duration_hours` ممنوع.
+   **مالوش أي أثر على السعر** — عمدًا، مفيش ضرب تلقائي بعدد الأيام.
+
+`OrdersService.create()` بيتحقق من الحقول المطلوبة/الممنوعة حسب الوضع الفعّال للخدمة قبل أي حاجة
+تانية (قبل حتى فحص فني مطلوب/سلوت جدولة). `previewPrice()` **اتسيبت من غير تعديل عمدًا** —
+`scheduled_at`/`scheduled_end_at` مالهمش أي أثر على السعر أصلاً (نفس فلسفة `PreviewOrderDto` القديمة:
+`scheduled_at` مستبعد من الأول لنفس السبب — `duration_hours` وحده استثناء لأنه بيأثر على السعر
+فعليًا لخدمات hourly، وده موجود بالفعل). `allows_date_range_booking` (ADR-0028) فضل **مستقل تمامًا**
+عن الأربعة دول (تأكيد مالك صريح) — مرونة يوم بحث، مش وصف مدة خدمة، فمفيش أي تعارض منطقي معاه.
+
+`AdminCatalogService.assertSchedulingModeExclusive()` جديدة (private) — تحقق واضح برسالة عربية
+قبل الحفظ في create/update، خط دفاع أول قبل CHECK constraint الـDB. `apps/customer-app`'s
+`create_order_screen.dart` بقى فيها واجهة مختلفة لكل وضع (تفاصيل في `apps/customer-app/README.md`).

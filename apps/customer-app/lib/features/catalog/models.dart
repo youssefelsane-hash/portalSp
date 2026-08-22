@@ -95,6 +95,11 @@ class CatalogService {
   // دقة الوقت (ADR-0031 Slice B) — لو true، العميل لازم يحدد بداية + مدة بالساعات (duration_hours)
   // بدل يوم كامل بس. نفس نمط allowsDateRangeBooking بالحرف.
   final bool requiresPreciseSchedule;
+  // 3 أوضاع توقيت جديدة (ADR-0032) — تبادلية مع requiresPreciseSchedule فوق ومع بعض (الباك-إند
+  // بيضمن ده بـCHECK constraint، على الأكتر وضع واحد true في نفس الوقت لأي خدمة).
+  final bool requiresStartTimeOnly;
+  final bool requiresHoursOnly;
+  final bool requiresStartAndEnd;
 
   CatalogService({
     required this.id,
@@ -111,6 +116,9 @@ class CatalogService {
     required this.allowsTeam,
     required this.allowsDateRangeBooking,
     required this.requiresPreciseSchedule,
+    required this.requiresStartTimeOnly,
+    required this.requiresHoursOnly,
+    required this.requiresStartAndEnd,
   });
 
   factory CatalogService.fromJson(Map<String, dynamic> json) => CatalogService(
@@ -128,6 +136,9 @@ class CatalogService {
         allowsTeam: json['allows_team'] as bool,
         allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
         requiresPreciseSchedule: json['requires_precise_schedule'] as bool? ?? false,
+        requiresStartTimeOnly: json['requires_start_time_only'] as bool? ?? false,
+        requiresHoursOnly: json['requires_hours_only'] as bool? ?? false,
+        requiresStartAndEnd: json['requires_start_and_end'] as bool? ?? false,
       );
 
   // أول وضع حجز متاح فعليًا للخدمة دي، بترتيب أولوية فرد > فريق > طوارئ — مستخدم في القوالب

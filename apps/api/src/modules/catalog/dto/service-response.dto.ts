@@ -58,6 +58,9 @@ export interface ServiceResponseDto {
   allows_date_range_booking: boolean;
   show_unavailable_providers: boolean;
   requires_precise_schedule: boolean;
+  requires_start_time_only: boolean;
+  requires_hours_only: boolean;
+  requires_start_and_end: boolean;
   min_technician_level: string;
 }
 
@@ -87,6 +90,9 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     allows_date_range_booking: service.allowsDateRangeBooking,
     show_unavailable_providers: service.showUnavailableProviders,
     requires_precise_schedule: service.requiresPreciseSchedule,
+    requires_start_time_only: service.requiresStartTimeOnly,
+    requires_hours_only: service.requiresHoursOnly,
+    requires_start_and_end: service.requiresStartAndEnd,
     min_technician_level: service.minTechnicianLevel,
   };
 }

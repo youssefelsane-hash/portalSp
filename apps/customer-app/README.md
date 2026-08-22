@@ -483,3 +483,28 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
   فيها `showTimePicker` + حقل "عدد الساعات" لما الفلاج مفعّل، بيتبعتوا كـ`scheduled_at`/`duration_hours`
   حقيقيين (`OrdersRepository.create()` بقى فيها `durationHours` جديد).
 - مفيش Flutter SDK في بيئة السيشن دي وقت الشريحة دي — مراجعة يدوية بدل `flutter analyze`.
+
+## أوضاع توقيت الخدمة الأربعة (ADR-0032، 2026-08-22)
+
+طلب مالك مباشر: خدمة شهرية بتاخد بداية بس (مفيش نهاية)، و`requiresPreciseSchedule` فوق بتربط
+بداية+مدة دايمًا رغم إن بعض الخدمات محتاجة واحدة بس. `CatalogService` (`catalog/models.dart`) بقى
+فيها 3 أعلام جديدة تبادلية مع `requiresPreciseSchedule`: `requiresStartTimeOnly`/`requiresHoursOnly`/
+`requiresStartAndEnd` (الباك-إند بيضمن التبادلية بـCHECK constraint — تفاصيل كاملة في
+`docs/adr/0032-service-scheduling-modes.md` و`apps/api/src/modules/orders/README.md`).
+
+`create_order_screen.dart` بقى فيها واجهة مختلفة حسب الوضع الفعّال للخدمة (بدل صف "الموعد المطلوب"
+الثابت):
+
+- **`requiresHoursOnly`** — صف اختيار اليوم بيتخفي بالكامل (ASAP)، بيظهر بس حقل "عدد الساعات".
+- **`requiresStartAndEnd`** — صفين مستقلين (تاريخ+وقت بداية، تاريخ+وقت نهاية) بأداة اختيار جديدة
+  `_pickFullDateTime()` (تاريخ ووقت في نداء واحد)، مستقلة تمامًا عن `_pickSchedule`/`_preciseTime`
+  بتوع الوضع القديم — حالة جديدة `_startAndEndStart`/`_startAndEndEnd`.
+- **`requiresStartTimeOnly`** — بيعيد استخدام نفس أداة اليوم (`_pickSchedule`) + الساعة
+  (`_pickPreciseTime`/`_combinedPreciseScheduledAt()`) بتاعة `requiresPreciseSchedule`، من غير ما
+  يطلب/يعرض حقل "عدد الساعات" خالص.
+- تحقق عميل واضح في `_submit()` لكل وضع (رسالة عربية مباشرة بدل الاستنى لخطأ الباك-إند).
+- `OrdersRepository.create()` بقى فيها `scheduledEndAt` جديد (`orders_repository.dart`)، بيتبعت
+  `scheduled_end_at` بس لما `requiresStartAndEnd` مفعّلة.
+
+مفيش Flutter SDK في بيئة السيشن دي وقت الشريحة دي (نفس فجوة الشريحة اللي فوقها بالحرف) — مراجعة
+يدوية دقيقة للكود بدل `flutter analyze`/`flutter test` حي، موثّق صراحة كفجوة تحقق مش سهو.

@@ -117,10 +117,18 @@ export class CreateOrderDto {
   payment_method?: 'card' | 'instapay';
 
   // دقة الوقت (ADR-0031 Slice B) — إجباري لخدمة service.requiresPreciseSchedule=true (جليسة
-  // أطفال بالساعة، تنظيف بالساعة...)، ممنوع لأي خدمة تانية. تفاصيل فحص التعارض بدقة ساعة كاملة
-  // في orders.service.ts.
+  // أطفال بالساعة، تنظيف بالساعة...) أو service.requiresHoursOnly=true (ADR-0032)، ممنوع لأي خدمة
+  // تانية. تفاصيل فحص التعارض بدقة ساعة كاملة في orders.service.ts.
   @IsOptional()
   @IsNumber()
   @IsPositive()
   duration_hours?: number;
+
+  // وضع "بداية+نهاية" (ADR-0032، migration 0172) — إجباري بس لخدمة service.requiresStartAndEnd=true
+  // (عقد شهري/إقامة بمدة محددة)، ممنوع لأي خدمة تانية. لازم يكون بعد scheduled_at — orders.service.ts
+  // بيتحقق منها صراحة، وCHECK constraint على مستوى الـDB (chk_orders_scheduled_end_after_start) بيضمنها
+  // كخط دفاع أخير.
+  @IsOptional()
+  @IsDateString()
+  scheduled_end_at?: string;
 }

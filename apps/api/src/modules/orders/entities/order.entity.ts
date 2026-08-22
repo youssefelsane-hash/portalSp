@@ -113,6 +113,11 @@ export class Order {
   @Column({ name: 'scheduled_at', type: 'timestamptz', nullable: true })
   scheduledAt: Date | null;
 
+  // وضع "بداية+نهاية" (ADR-0032، migration 0172) — بس لخدمات service.requiresStartAndEnd=true.
+  // CHECK constraint chk_orders_scheduled_end_after_start على مستوى الـDB يضمن > scheduled_at.
+  @Column({ name: 'scheduled_end_at', type: 'timestamptz', nullable: true })
+  scheduledEndAt: Date | null;
+
   // تصعيد نقص الطاقم (docs/08 §35.5، migration 0156) — علامة "اتصعّد للأدمن مرة" (لمنع التكرار)،
   // مش تذكير متكرر. راجع CrewShortageEscalationService للتفاصيل الكاملة.
   @Column({ name: 'crew_shortage_escalated_at', type: 'timestamptz', nullable: true })

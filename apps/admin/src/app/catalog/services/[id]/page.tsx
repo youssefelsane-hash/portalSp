@@ -84,6 +84,14 @@ export default function ServiceDetailPage() {
   const [showNewAddon, setShowNewAddon] = useState(false);
   const [showNewStandardData, setShowNewStandardData] = useState(false);
   const [actualsFormOpenFor, setActualsFormOpenFor] = useState<string | null>(null);
+  // تسمية ديناميكية لحقل السعر الأساسي (طلب مالك صريح 2026-08-22) — لما نوع التسعير bالساعة،
+  // الحقل ده فعليًا "سعر الساعة" وبيتضرب في عدد الساعات المختارة (ADR-0031 Slice H).
+  const [pricingModelLive, setPricingModelLive] = useState<PricingModel>('fixed');
+  // أوضاع توقيت الخدمة الأربعة (ADR-0032) — تبادلية بصريًا هنا (اختيار واحد بيلغي الباقي) قبل
+  // ما توصل لتحقق الباك-إند/CHECK constraint. 'none' يعني حجز بيوم كامل بس (السلوك الافتراضي القديم).
+  const [schedulingMode, setSchedulingMode] = useState<
+    'none' | 'precise' | 'start_only' | 'hours_only' | 'start_and_end'
+  >('none');
 
   // مرحلة 2 من محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — endpoint الاقتراحات
   // عام (كل الخدمات)، بنفلتر هنا لاقتراحات standard_data بتوع الخدمة دي بس.
@@ -120,6 +128,22 @@ export default function ServiceDetailPage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
+
+  useEffect(() => {
+    if (!service) return;
+    setPricingModelLive(service.pricing_model);
+    setSchedulingMode(
+      service.requires_precise_schedule
+        ? 'precise'
+        : service.requires_start_time_only
+          ? 'start_only'
+          : service.requires_hours_only
+            ? 'hours_only'
+            : service.requires_start_and_end
+              ? 'start_and_end'
+              : 'none',
+    );
+  }, [service]);
 
   function zoneName(zoneId: string): string {
     const zone = zones?.find((z) => z.id === zoneId);
@@ -402,6 +426,9 @@ export default function ServiceDetailPage() {
       allows_date_range_booking: form.get('allows_date_range_booking') === 'on',
       show_unavailable_providers: form.get('show_unavailable_providers') === 'on',
       requires_precise_schedule: form.get('requires_precise_schedule') === 'on',
+      requires_start_time_only: form.get('requires_start_time_only') === 'on',
+      requires_hours_only: form.get('requires_hours_only') === 'on',
+      requires_start_and_end: form.get('requires_start_and_end') === 'on',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
       commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
@@ -481,16 +508,28 @@ export default function ServiceDetailPage() {
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
-              <SelectNative id="svc_pricing_model" name="pricing_model" defaultValue={service.pricing_model} className="max-w-xs">
+              <SelectNative
+                id="svc_pricing_model"
+                name="pricing_model"
+                defaultValue={service.pricing_model}
+                className="max-w-xs"
+                onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
+              >
                 {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
                 ))}
               </SelectNative>
-              {service.pricing_model === 'formula' && (
+              {pricingModelLive === 'formula' && (
                 <p className="text-sm text-muted-foreground">
                   السعر الأساسي تحت مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي.
+                </p>
+              )}
+              {pricingModelLive === 'hourly' && (
+                <p className="text-sm text-muted-foreground">
+                  السعر الأساسي تحت هو <strong>سعر الساعة الواحدة</strong> — بيتضرب تلقائيًا في عدد الساعات
+                  اللي العميل بيختارها وقت الحجز (مش سعر إجمالي ثابت).
                 </p>
               )}
             </div>
@@ -498,7 +537,9 @@ export default function ServiceDetailPage() {
               <div className="flex flex-col gap-1">
                 {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
                     غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
-                <Label htmlFor="svc_base_price">السعر الأساسي (جنيه)</Label>
+                <Label htmlFor="svc_base_price">
+                  {pricingModelLive === 'hourly' ? 'سعر الساعة (جنيه)' : 'السعر الأساسي (جنيه)'}
+                </Label>
                 <Input
                   id="svc_base_price"
                   name="base_price"
@@ -654,14 +695,76 @@ export default function ServiceDetailPage() {
                 />
                 يظهر الفنيين المتعارضين جدوليًا بحالة &quot;مش متاح للفترة دي&quot; بدل الإخفاء الكامل
               </label>
-              {/* دقة الوقت (ADR-0031 Slice B) */}
-              <label className="flex items-center gap-2">
+            </div>
+
+            {/* أوضاع توقيت الخدمة (ADR-0032، طلب مالك صريح 2026-08-22) — تبادلية: وضع واحد بس
+                فعّال لكل خدمة، اختيار واحد بيلغي الباقي أوتوماتيك. requires_precise_schedule
+                (ADR-0031 Slice B) جزء من نفس المجموعة دلوقتي، صفر تغيير على معناها/سلوكها. */}
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <p className="text-sm font-medium">أوضاع توقيت الخدمة (وضع واحد بس ممكن يتفعّل)</p>
+              <p className="text-xs text-muted-foreground">
+                لو الخدمة بتتحجز بيوم كامل عادي من غير تفاصيل وقت إضافية (زي معظم الصيانة العادية) —
+                سيب الأربعة دول كلهم فاضيين. اختار وضع بس لو الخدمة محتاجة تفاصيل وقت زيادة:
+              </p>
+              <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
                   name="requires_precise_schedule"
-                  defaultChecked={service.requires_precise_schedule}
+                  checked={schedulingMode === 'precise'}
+                  onChange={(e) => setSchedulingMode(e.target.checked ? 'precise' : 'none')}
                 />
-                محتاجة دقة وقت (بداية + مدة بالساعات) بدل حجز بيوم كامل بس
+                <span>
+                  دقة وقت (بداية + مدة بالساعات مع بعض)
+                  <br />
+                  <span className="text-xs text-muted-foreground">
+                    مثال: جليسة أطفال بالساعة، تنظيف بالساعة — العميل بيحدد امتى هيبدأ وقد إيه هيستمر مع بعض.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="requires_start_time_only"
+                  checked={schedulingMode === 'start_only'}
+                  onChange={(e) => setSchedulingMode(e.target.checked ? 'start_only' : 'none')}
+                />
+                <span>
+                  وقت بداية بس (من غير مدة)
+                  <br />
+                  <span className="text-xs text-muted-foreground">
+                    مثال: عقد شهري بيتحدد امتى يبدأ بس، من غير تحديد مدة أو نهاية وقت الحجز.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="requires_hours_only"
+                  checked={schedulingMode === 'hours_only'}
+                  onChange={(e) => setSchedulingMode(e.target.checked ? 'hours_only' : 'none')}
+                />
+                <span>
+                  عدد ساعات بس (من غير وقت بداية محدد)
+                  <br />
+                  <span className="text-xs text-muted-foreground">
+                    مثال: &quot;قد إيه محتاج تنظيف؟&quot; — العميل بيحدد عدد الساعات بس، من غير ميعاد وصول دقيق.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="requires_start_and_end"
+                  checked={schedulingMode === 'start_and_end'}
+                  onChange={(e) => setSchedulingMode(e.target.checked ? 'start_and_end' : 'none')}
+                />
+                <span>
+                  تاريخ ووقت بداية + تاريخ ووقت نهاية
+                  <br />
+                  <span className="text-xs text-muted-foreground">
+                    مثال: تنظيف شهري/إقامة بمدة محددة — العميل بيحدد بداية العقد ونهايته بالظبط.
+                  </span>
+                </span>
               </label>
             </div>
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
