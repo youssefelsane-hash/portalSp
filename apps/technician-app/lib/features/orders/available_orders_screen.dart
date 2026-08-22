@@ -57,6 +57,15 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Order? _activeOrder;
   String? _error;
   bool _isActing = false;
+  // بَقّة حقيقية اتلقطت (بلاغ مالك مباشر 2026-08-22): المحاولة الصامتة الوحيدة تحت كانت بتفشل
+  // بصمت أول مرة كتير (سباق توقيت شائع بين requestPermission() ورد فعل نظام أندرويد الفعلي، أو
+  // GPS لسه مالوش fix)، ومفيش أي أثر مرئي للفني يعرف بيه إن موقعه اتسجّل ولا لأ — الحل الوحيد
+  // اللي كان شغال كان تسجيل خروج/دخول متكرر (كل initState جديد = محاولة صامتة جديدة). دلوقتي:
+  // (1) 3 محاولات تلقائية صامتة بفواصل زمنية (سباق التوقيت بيتحل لوحده غالبًا خلال ثواني)،
+  // (2) شريط دائم ظاهر طول ما الموقع مسجّلش، فيه زرار "فعّل الموقع الآن" بيدي feedback واضح
+  // (نجاح/فشل) — الفني عارف بالظبط هو شغال ولا لأ من غير ما يخمّن.
+  bool _locationCaptured = false;
+  bool _locationCapturing = false;
 
   @override
   void initState() {
@@ -66,34 +75,68 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       context.read<AuthRepository>(),
     );
     _recoverActiveOrThenLoad();
-    _captureInitialLocation();
+    _captureInitialLocationWithRetries();
   }
 
   // بَقّة حقيقية اتلقطت (بلاغ المالك — سيناريو "يوسف"): current_location مالوش أي مسار شرعي
   // يتحدد بيه أول مرة قبل ما الفني ياخد طلب فعلي — matching.service.ts بيشترط current_location
-  // IS NOT NULL صراحة، فالفني الجديد كان ميقدرش يتوصّله أي طلب أبدًا حتى لو مؤهّل تمامًا. بيتنادى
-  // مرة واحدة (best-effort، صامت تمامًا — مفيش رسالة خطأ للمستخدم) أول ما الشاشة الرئيسية تفتح.
+  // IS NOT NULL صراحة، فالفني الجديد كان ميقدرش يتوصّله أي طلب أبدًا حتى لو مؤهّل تمامًا.
   // مش بديل عن تتبّع الموقع اللحظي وقت التنفيذ (order_execution_screen.dart's _shareLocation عبر
   // WebSocket) — ده بس أول قيمة تخلي الفني "قابل للتوزيع عليه" من الأساس.
-  Future<void> _captureInitialLocation() async {
+  //
+  // 3 محاولات صامتة بفواصل متزايدة (0، 3، 8 ثواني) — سباق التوقيت الشائع (permission dialog
+  // لسه بيتحل، أو GPS لسه مالوش fix أول ثواني) بيتحل لوحده غالبًا خلال المحاولات دي، من غير
+  // أي إزعاج للفني. لو الثلاثة فشلوا (رفض إذن فعلي، أو GPS مقفول من الجهاز)، الشريط تحت بيفضل
+  // ظاهر لحد ما يدوس "فعّل الموقع الآن" بنفسه.
+  Future<void> _captureInitialLocationWithRetries() async {
+    for (final delay in const [Duration.zero, Duration(seconds: 3), Duration(seconds: 8)]) {
+      if (delay > Duration.zero) await Future.delayed(delay);
+      if (!mounted || _locationCaptured) return;
+      final ok = await _captureLocationOnce();
+      if (ok) return;
+    }
+  }
+
+  /// بيرجّع true لو نجح فعليًا. showFeedback بيتفعّل بس لما الفني يدوس الزرار يدويًا — المحاولات
+  /// التلقائية الصامتة فوق مالهاش أي feedback عشان مايبقاش فيه إزعاج SnackBar بلا سبب واضح للفني.
+  Future<bool> _captureLocationOnce({bool showFeedback = false}) async {
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) return;
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        if (showFeedback) _showLocationSnack('لازم تفعّل GPS/خدمة الموقع من إعدادات الجهاز الأول');
+        return false;
+      }
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        return;
+        if (showFeedback) _showLocationSnack('محتاجين إذن الموقع عشان الطلبات توصلك — فعّله من إعدادات التطبيق');
+        return false;
       }
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
       );
       await _onboardingRepository.updateLocation(position.latitude, position.longitude);
+      if (mounted) setState(() => _locationCaptured = true);
+      if (showFeedback) _showLocationSnack('تم تحديث موقعك بنجاح ✓');
+      return true;
     } catch (_) {
-      // صامت عمدًا — أول ما الفني ياخد طلب فعلي، تتبّع التنفيذ اللحظي هيحدّث الموقع تاني.
+      if (showFeedback) _showLocationSnack('فشلت المحاولة — تأكد إن الجي بي إس مفعّل وحاول تاني');
+      return false;
     }
   }
 
+  Future<void> _retryLocationManually() async {
+    if (_locationCapturing) return;
+    setState(() => _locationCapturing = true);
+    await _captureLocationOnce(showFeedback: true);
+    if (mounted) setState(() => _locationCapturing = false);
+  }
+
+  void _showLocationSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   // كانت فجوة موثّقة: لو التطبيق اتقفل في نص دورة تنفيذ طلب، الشاشة الرئيسية كانت بترجع
   // بالضرورة لقايمة الطلبات المتاحة من غير أي أثر للطلب اللي كان شغال عليه. دلوقتي بتتحقق
@@ -358,6 +401,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         ),
         body: Column(
           children: [
+            if (!_locationCaptured)
+              _LocationCaptureBanner(
+                isCapturing: _locationCapturing,
+                onRetry: _retryLocationManually,
+              ),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _load,
@@ -506,6 +554,50 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ],
         ],
       ],
+    );
+  }
+}
+
+// شريط دائم لحد ما موقع الفني يتسجّل بنجاح (بلاغ مالك مباشر 2026-08-22) — راجع تعليق
+// _captureInitialLocationWithRetries فوق للسياق الكامل. تنبيه واضح + زرار فعل واحد، مش رسالة
+// عابرة بتختفي — الفني من غير موقع مسجّل معندوش أي فرصة يتوصّله طلب خالص (matching.service.ts).
+class _LocationCaptureBanner extends StatelessWidget {
+  const _LocationCaptureBanner({required this.isCapturing, required this.onRetry});
+
+  final bool isCapturing;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.location_off_outlined, color: scheme.onErrorContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'موقعك لسه مسجّلش — الطلبات مش هتوصلك من غيره',
+                style: TextStyle(color: scheme.onErrorContainer, fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 8),
+            isCapturing
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onErrorContainer),
+                  )
+                : TextButton(
+                    onPressed: onRetry,
+                    child: Text('فعّل الموقع الآن', style: TextStyle(color: scheme.onErrorContainer)),
+                  ),
+          ],
+        ),
+      ),
     );
   }
 }
