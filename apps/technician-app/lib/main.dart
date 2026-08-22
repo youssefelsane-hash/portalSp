@@ -9,7 +9,6 @@ import 'core/device_security.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
-import 'features/domestic_worker/worker_home_screen.dart';
 import 'features/onboarding/onboarding_repository.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/orders/available_orders_screen.dart';
@@ -149,10 +148,8 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
       return const BiometricUnlockScreen();
     }
     if (!auth.isAuthenticated) return const LoginScreen();
-    // بروفايل الشغالة/العامل المنزلي (ADR-0005) — امتداد لتطبيق الفني، تفرّع بعد الدخول حسب
-    // نوع الحساب. الشغالة مالهاش مسار تحقق مستندات زي الفني (KYC كامل) — WorkerHomeScreen نفسها
-    // بتعرض حالة الاعتماد وتسمح بتقديم البروفايل للمراجعة، فمفيش داعي لـ_VerificationGate هنا.
-    if (auth.user?.userType == 'domestic_worker') return const WorkerHomeScreen();
+    // مزوّد خدمة واحد موحّد (ADR-0031) — صفر تفرّع بعد الدخول حسب نوع حساب: كل فني (بما فيهم
+    // الشغالة/المربية، بقت تسجّل بنفس المسار بالظبط) بيعدّي نفس بوابة الاعتماد (KYC كامل).
     return const _VerificationGate();
   }
 }

@@ -12,7 +12,6 @@ import { WalletTransaction } from '../payments/entities/wallet-transaction.entit
 import { WalletsService } from '../payments/wallets.service';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
-import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { Address } from '../customers/entities/address.entity';
@@ -200,7 +199,6 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
-      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       walletsService,
       catalogService,
@@ -252,7 +250,6 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
-      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
     );
   });
 

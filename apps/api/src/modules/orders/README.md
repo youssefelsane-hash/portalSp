@@ -1185,7 +1185,13 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 اختبار حي (4/4): قبول صحيح، فرصتين بالتوازي على مكان واحد بس (واحد يفوز، التاني `declined`
 فعليًا)، إعادة فحص القدرة وقت القبول (الفني حظر اليوم بعد العرض)، والعدد مكتمل بالفعل (بلا سباق).
 
-## حجز فني (شغالة) مباشر — هجرة الشغالة للمحرك الموحّد (docs/08 §42 Phase A.4 Slice 2a، ADR-0029)
+## حجز فني (شغالة) مباشر — هجرة الشغالة للمحرك الموحّد (docs/08 §42 Phase A.4 Slice 2a، ADR-0029) [مُلغى]
+
+**تصحيح مالك (ADR-0031، 2026-08-21)**: القسم ده بالكامل بقى تاريخي — `domestic_worker_profile_id`/
+`PricingModel.WORKER_RATE`/`DomesticWorkersModule` اتلغوا تمامًا (migration 0169). الشغالة بقت
+فني عادي، بتستخدم `create()` العادي زي أي فني تاني. `duration_hours` (بقى عمود عام `orders.duration_hours`)
+معمّم لأي خدمة `requires_precise_schedule=true` (ADR-0031 Slice B)، مش خاص بالشغالة. اتسابت السجلات
+تحت كمرجع تاريخي لإيه اللي اتجرّب وليه اتصحّح، مش كخطوات لسه سارية.
 
 `create()` بقت بتاخد `dto.domestic_worker_profile_id`/`dto.duration_hours` — العميل اختار فني
 (شغالة) بعينه من التصفح المباشر (زيرو مطابقة تلقائية، ADR-0004)، مش سايب المطابقة تختار. القرار
@@ -1212,3 +1218,25 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 - **تحديث (ADR-0030)**: الفرع ده بقى بيفحص تعارض جدولي حقيقي قبل الإنشاء
   (`DomesticWorkersService.assertNoSchedulingConflict()`) + بيسجّل `domesticWorkerDurationHours`
   على الطلب (كان ناقص). تفاصيل كاملة في `../domestic-workers/README.md`.
+
+## دقة الوقت — قدرة عامة جديدة على `Service` (ADR-0031 Slice B، 2026-08-21)
+
+مزوّد خدمة واحد موحّد (نظام الشغالة المنفصل اتلغى بالكامل، القسم اللي فوق تاريخي) — `requires_precise_schedule`
+عمود جديد على `Service` (نفس نمط `cash_allowed`/`allows_date_range_booking` بالحرف)، **عام لأي خدمة**
+مش خاص بالخدمات المنزلية. لما مفعّل:
+
+- `create()` بيتطلّب `scheduled_at` + `duration_hours` صراحة (بدل يوم بس).
+- لو فني معروف صراحة سلفًا (`requested_technician_id` أو `schedule_slot_id`) — فحص تعارض حقيقي
+  بدقة ساعة عبر `assertNoPreciseScheduleConflict()` جديدة (private) — نفس فكرة
+  `DomesticWorkersService.findSchedulingConflict()` القديمة (اتلغت)، بس معمّمة على `orders.technician_id`
+  مباشرة (مفيش جدول حجوزات منفصل تاني).
+- `orders.duration_hours` (كان `domestic_worker_duration_hours`، اتسمّى بعد الإلغاء) بيتسجّل بس
+  لما الفلاج مفعّل.
+- **فجوة موثّقة صراحة، مش سهو**: `CatalogService.estimate()` لسه مابيضربش `base_price_cents` في
+  `duration_hours` لأي `pricing_model` (بما فيهم `hourly` نفسه — فرع مخصص موجود بس لـ`formula`).
+  يعني خدمة `requires_precise_schedule=true` بسعرها الحالي بترجع `base_price_cents` كسعر إجمالي
+  ثابت، مش سعر × ساعات فعليًا. تفعيل ضرب حقيقي محتاج شريحة تصميم منفصلة في محرك التسعير
+  (`docs/adr/0001-...`/`pricing/README.md`)، مش تعديل متسرّع هنا.
+- **خارج نطاق الشريحة دي عمدًا**: فحص التعارض الساعي وقت المطابقة التلقائية نفسها (auto-match
+  بلا فني مفضّل) — بوابة الأهلية اليومية العادية (`technicianAvailabilityCondition()`) هي اللي
+  بتشتغل وقتها، مفيش دقة ساعة إضافية عند التوزيع الفعلي لسه.

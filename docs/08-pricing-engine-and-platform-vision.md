@@ -6006,7 +6006,7 @@ build` (packages/shared-types) كلهم نضاف.
 `flutter analyze`/`tsc --noEmit` نضاف على كل التطبيقات الأربعة (api، admin، customer-app،
 technician-app). التفاصيل الكاملة في `apps/technician-app/README.md`، `apps/customer-app/README.md`.
 
-## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3 خلصوا، A.4 اتصحّح اتجاهها — راجع ADR-0031)
+## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3/A.4 خلصوا (A.4 بعد تصحيح الاتجاه، ADR-0031 Slice A-F) — Part B لسه مفتوحة)
 
 **تصحيح مالك مهم (2026-08-21، لاحقًا نفس اليوم)**: اتجاه Phase A.4 تحت (نقل `DomesticWorkerProfile`
 للمحرك الموحّد) **اتلغى واتستبدل بالكامل** — القرار الصحيح مش "انقل الكيان المنفصل"، هو "الغِ الكيان
@@ -6227,12 +6227,20 @@ Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ ع
   `ProfileScreen` (`apps/technician-app`) بقى فيها معاينة + رفع مباشر (كان معدوم بالكامل بعد أول
   اعتماد — `OnboardingScreen` وحدها فيها رفع، وبتختفي للأبد بعد الاعتماد). اختبار حي جديد
   (`avatar-visibility.spec.ts`، 5/5) + صفر رجريشن على `technicians`/`catalog`/`auth` (171/171).
-- **Slice B (مفتوحة)**: `requires_precise_schedule` — القدرة العامة لدقة الوقت.
-- **Slice C (مفتوحة)**: فئة "خدمات منزلية" + خدماتها في الكتالوج + إلغاء `PricingModel.WORKER_RATE`.
-- **Slice D (مفتوحة)**: إلغاء مسار التسجيل التاني في `apps/technician-app` (segmented control +
-  `WorkerHomeScreen` + `features/domestic_worker/`).
-- **Slice E (مفتوحة)**: إلغاء `DomesticWorkersModule` بالكامل من الباك-إند (entities، جداول،
-  migration `DROP TABLE`، كل الكود المرتبط من ADR-0029/ADR-0030).
-- **Slice F (مفتوحة)**: إلغاء `apps/customer-app`'s `features/domestic_workers/` بالكامل.
+- **Slice B (خلصت)**: `services.requires_precise_schedule` (migration 0169) + admin checkbox +
+  `OrdersService.create()` فحص تعارض ساعي حقيقي (`assertNoPreciseScheduleConflict()`) لما فني
+  معروف صراحة سلفًا + Flutter (وقت بداية + مدة). فجوة موثّقة: محرك التسعير لسه مابيضربش السعر في
+  المدة (تفاصيل في `orders/README.md`).
+- **Slice C (خلصت)**: فئة "خدمات منزلية" + 4 خدمات (migration 0170) + إلغاء `PricingModel.WORKER_RATE`
+  من TS.
+- **Slice D (خلصت)**: إلغاء مسار التسجيل التاني في `apps/technician-app` (segmented control +
+  `WorkerHomeScreen` + `features/domestic_worker/` — كلهم اتشالوا بالكامل).
+- **Slice E (خلصت)**: إلغاء `DomesticWorkersModule` بالكامل من الباك-إند (entities، جداول،
+  migration 0169 `DROP TABLE`، ~250 سطر منطق دفع InstaPay خاص بالشغالة في `payments.service.ts`،
+  كل الكود المرتبط من ADR-0029/ADR-0030) — اتحقق منها بتشغيل التطبيق فعليًا (`npm run start:dev`)
+  مش `tsc` بس (DI resolution errors مش بتتكشف بـtype-check وحده).
+- **Slice F (خلصت)**: إلغاء `apps/customer-app`'s `features/domestic_workers/` بالكامل + كارت
+  "الخدمات المنزلية" المثبّت + **`apps/admin`'s `/domestic-workers`/`/domestic-worker-earnings`**
+  (اتلقطوا أثناء التنظيف، مش موثّقين في الجرد الأول).
 - **Slice G (مفتوحة، غير حرجة)**: تعميم `resolveAvatarUrl()` على سطوح داخلية تانية (favorites،
   team recruit) — مؤجّلة، موثّقة كفجوة صريحة في ADR-0031.

@@ -5,7 +5,6 @@ import * as bcrypt from 'bcryptjs';
 import { DataSource } from 'typeorm';
 import { AuthService } from './auth.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
-import { DomesticWorkerProfile } from '../domestic-workers/entities/domestic-worker-profile.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { OtpCode, OtpPurpose } from './entities/otp-code.entity';
@@ -69,7 +68,7 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
-      entities: [User, OtpCode, RefreshToken, CustomerProfile, TechnicianProfile, DomesticWorkerProfile, Wallet],
+      entities: [User, OtpCode, RefreshToken, CustomerProfile, TechnicianProfile, Wallet],
     });
     await dataSource.initialize();
 
@@ -98,7 +97,6 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
       await dataSource.query(`DELETE FROM wallets WHERE owner_user_id = ANY($1::uuid[])`, [userIds]);
       await dataSource.query(`DELETE FROM customer_profiles WHERE user_id = ANY($1::uuid[])`, [userIds]);
       await dataSource.query(`DELETE FROM technician_profiles WHERE user_id = ANY($1::uuid[])`, [userIds]);
-      await dataSource.query(`DELETE FROM domestic_worker_profiles WHERE user_id = ANY($1::uuid[])`, [userIds]);
       await dataSource.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [userIds]);
     }
     await dataSource.query(`DELETE FROM otp_codes WHERE phone_number = ANY($1::text[])`, [phones]);
@@ -209,15 +207,16 @@ describe('Auth OTP and registration integrity (real PostgreSQL)', () => {
     expect(await dataSource.getRepository(RefreshToken).count({ where: { userId: user.id } })).toBe(1);
   });
 
-  it.each([
-    [UserType.TECHNICIAN, phones[4], TechnicianProfile],
-    [UserType.DOMESTIC_WORKER, phones[5], DomesticWorkerProfile],
-  ] as const)('creates the required profile and wallet atomically for %s registration', async (userType, phone, profile) => {
+  it('creates the required profile and wallet atomically for technician registration', async () => {
+    const phone = phones[4];
     await insertOtp(phone, '123456', OtpPurpose.REGISTER);
-    await service.register({ phone_number: phone, otp_code: '123456', full_name: `Atomic ${userType}`, user_type: userType }, null);
+    await service.register(
+      { phone_number: phone, otp_code: '123456', full_name: 'Atomic technician', user_type: UserType.TECHNICIAN },
+      null,
+    );
     const user = await dataSource.getRepository(User).findOneByOrFail({ phoneNumber: phone });
 
-    expect(await dataSource.getRepository(profile).count({ where: { userId: user.id } })).toBe(1);
+    expect(await dataSource.getRepository(TechnicianProfile).count({ where: { userId: user.id } })).toBe(1);
     expect(await dataSource.getRepository(Wallet).count({ where: { ownerUserId: user.id } })).toBe(1);
   });
 

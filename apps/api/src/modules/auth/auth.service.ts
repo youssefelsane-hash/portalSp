@@ -30,7 +30,6 @@ import { WebAuthnService } from './webauthn.service';
 import { RecoveryVerifyDto } from './dto/recovery-verify.dto';
 import { NotificationRoutingService } from '../notifications/notification-routing.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
-import { DomesticWorkerProfile } from '../domestic-workers/entities/domestic-worker-profile.entity';
 import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 
@@ -284,18 +283,15 @@ export class AuthService {
     if (user.userType === UserType.CUSTOMER) {
       await manager.getRepository(CustomerProfile).save({ userId: user.id });
       walletOwnerType = WalletOwnerType.CUSTOMER;
-    } else if (user.userType === UserType.TECHNICIAN) {
+    } else {
+      // مزوّد خدمة واحد موحّد (ADR-0031) — أي حساب مش CUSTOMER هنا فني عادي، بما فيهم الشغالة/
+      // المربية (بقت تسجّل بنفس المسار بالظبط، صفر نوع حساب/كيان مستقل، RegisterDto بيقيّد
+      // user_type لـCUSTOMER|TECHNICIAN بس أصلاً).
       const [{ next_technician_code: technicianCode }] = await manager.query<{ next_technician_code: string }[]>(
         'SELECT next_technician_code()',
       );
       await manager.getRepository(TechnicianProfile).save({ userId: user.id, technicianCode });
       walletOwnerType = WalletOwnerType.TECHNICIAN;
-    } else {
-      const [{ next_human_readable_number: workerCode }] = await manager.query<
-        { next_human_readable_number: string }[]
-      >("SELECT next_human_readable_number('DW')");
-      await manager.getRepository(DomesticWorkerProfile).save({ userId: user.id, workerCode });
-      walletOwnerType = WalletOwnerType.DOMESTIC_WORKER;
     }
     await manager.getRepository(Wallet).save({ ownerUserId: user.id, ownerType: walletOwnerType });
   }

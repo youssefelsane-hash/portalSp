@@ -116,17 +116,9 @@ export class CreateOrderDto {
   @IsIn(['card', 'instapay'])
   payment_method?: 'card' | 'instapay';
 
-  // هجرة حجز الشغالة للمحرك الموحّد (ADR-0029، docs/08 §42 Phase A.4 Slice 2) — العميل اختار
-  // فني (شغالة) بعينه من التصفح المباشر (GET /domestic-workers)، زيرو مطابقة تلقائية (ADR-0004).
-  // إجباري لخدمة pricingModel=worker_rate، ممنوع لأي خدمة تانية. متبادل استبعادياً مع
-  // schedule_slot_id/requested_technician_id — تفاصيل كاملة في orders.service.ts.
-  @IsOptional()
-  @IsUUID()
-  domestic_worker_profile_id?: string;
-
-  // عدد ساعات الحجز — إجباري لو domestic_worker_profile_id موجودة (نموذج hourly بس Slice 2a،
-  // monthly_live_in مؤجّل لـSlice 4 عبر RecurringOrderTemplate). نفس حدود
-  // CreateWorkerBookingDto.duration_hours (الموديول القديم) بالحرف.
+  // دقة الوقت (ADR-0031 Slice B) — إجباري لخدمة service.requiresPreciseSchedule=true (جليسة
+  // أطفال بالساعة، تنظيف بالساعة...)، ممنوع لأي خدمة تانية. تفاصيل فحص التعارض بدقة ساعة كاملة
+  // في orders.service.ts.
   @IsOptional()
   @IsNumber()
   @IsPositive()

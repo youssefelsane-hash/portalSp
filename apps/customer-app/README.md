@@ -469,3 +469,17 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
   موجود — مختلف عن قيود سابقة كان فيها SDK موجود بس الجهاز/الـemulator ناقص). الكود اتراجع يدويًا
   بعناية (توازن الأقواس، تطابق الأنواع، كل نقاط النداء المعدّلة) بدل `flutter analyze`/build فعلي —
   موثّق بصراحة، مش ادّعاء اختبار حصل.
+
+## إلغاء `features/domestic_workers/` بالكامل — نظام مزوّد واحد موحّد (ADR-0031، 2026-08-21)
+
+تصحيح مالك: الشغالة/المربية بقت فني عادي، مش نظام مزوّد منفصل. `features/domestic_workers/`
+(`DomesticWorkersScreen`, `WorkerDetailScreen`, `WorkerBookingsScreen`) اتشالت بالكامل، وكارت
+"الخدمات المنزلية" المثبّت في `home_screen.dart` اتشال — "خدمات منزلية" بقت فئة كتالوج عادية
+(migration 0170)، العميل بيتصفّحها/يحجزها بنفس `TechnicianSelectionScreen`/`TechnicianMarketplaceScreen`
+زي أي فئة تانية. تفاصيل القرار الكامل في `docs/adr/0031-unified-provider-system-and-avatar-visibility.md`.
+
+- **`CatalogService.requiresPreciseSchedule`** جديد (`catalog/models.dart`) — لخدمات زي جليسة
+  الأطفال/التنظيف بالساعة، لسه محتاجة وقت بداية دقيق + مدة (مش يوم بس). `CreateOrderScreen` بقى
+  فيها `showTimePicker` + حقل "عدد الساعات" لما الفلاج مفعّل، بيتبعتوا كـ`scheduled_at`/`duration_hours`
+  حقيقيين (`OrdersRepository.create()` بقى فيها `durationHours` جديد).
+- مفيش Flutter SDK في بيئة السيشن دي وقت الشريحة دي — مراجعة يدوية بدل `flutter analyze`.

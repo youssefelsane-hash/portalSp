@@ -7,7 +7,6 @@ import { Refund } from '../payments/entities/refund.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
-import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { OrdersService } from './orders.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
@@ -146,7 +145,6 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
-      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       {} as never, // walletsService — مش متنادى (technicianId=null دايمًا هنا)
       {} as never, // catalogService
@@ -189,7 +187,6 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       {} as never, // supportService
       { emit: () => undefined } as never, // events
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
-      {} as never, // domesticWorkersService (ADR-0029) — مش متنادى في المسار ده
     );
   });
 

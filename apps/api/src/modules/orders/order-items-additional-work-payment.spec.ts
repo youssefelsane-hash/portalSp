@@ -10,7 +10,6 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from '../payments/entiti
 import { Refund } from '../payments/entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from '../payments/entities/webhook-event.entity';
-import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { SavedPaymentMethod } from '../payments/entities/saved-payment-method.entity';
 import { SavedPaymentMethodsService } from '../payments/saved-payment-methods.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -207,7 +206,6 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
-      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       {} as never, // walletsService — مش متنادى (الاختبارات دي بتغطي مسار الدفع الإضافي بس، مش التسوية)
       catalogService,

@@ -124,6 +124,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   List<ServiceStandardDataRow> _standardDataRows = [];
   ServiceStandardDataRow? _selectedStandardData;
   final _requestedUnitsController = TextEditingController();
+
+  // دقة الوقت (ADR-0031 Slice B) — service.requiresPreciseSchedule=true محتاجة وقت بداية دقيق
+  // (مش يوم بس، ADR-0018) + مدة بالساعات. TimeOfDay منفصل عن _requestedAt (اللي بيحمل اليوم بس
+  // من ScheduleSelectionScreen)، بيتدمجوا مع بعض وقت الإرسال (_combinedPreciseScheduledAt).
+  TimeOfDay? _preciseTime;
+  final _durationHoursController = TextEditingController();
   DurationEstimate? _durationEstimate;
   bool _estimatingDuration = false;
   String? _durationError;
@@ -176,6 +182,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _priceDebounce?.cancel();
     _durationDebounce?.cancel();
     _requestedUnitsController.dispose();
+    _durationHoursController.dispose();
     super.dispose();
   }
 
@@ -322,6 +329,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         _requestedAtRangeEnd = choice.rangeEnd;
       });
     }
+  }
+
+  // دقة الوقت (ADR-0031 Slice B) — بيدمج اليوم المختار من ScheduleSelectionScreen (_requestedAt)
+  // مع الساعة المختارة هنا (_preciseTime) في وقت UTC واحد يتبعت في scheduled_at بدل اليوم المجرّد.
+  DateTime? _combinedPreciseScheduledAt() {
+    final day = _requestedAt;
+    final time = _preciseTime;
+    if (day == null || time == null) return null;
+    return DateTime(day.year, day.month, day.day, time.hour, time.minute);
+  }
+
+  Future<void> _pickPreciseTime() async {
+    final picked = await showTimePicker(context: context, initialTime: _preciseTime ?? const TimeOfDay(hour: 10, minute: 0));
+    if (picked != null && mounted) setState(() => _preciseTime = picked);
   }
 
   // يوم بس، بلا ساعة (ADR-0018 §2 — العميل بيختار اليوم، مش وقت محدد). null بس في وضع الطوارئ
@@ -485,11 +506,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         scheduleSlotId: widget.scheduleSlotId,
         // السلوت (لو موجود) بيغلب الموعد الحر عند الباك-إند بالفعل — بس نتجنّب تعارض ظاهري
         // بينهم لو العميل غيّر الموعد هنا بعد ما اختار سلوت فني بعينه.
-        scheduledAt: widget.scheduleSlotId == null ? _requestedAt?.toUtc().toIso8601String() : null,
+        scheduledAt: widget.scheduleSlotId == null
+            ? (widget.service.requiresPreciseSchedule
+                    ? _combinedPreciseScheduledAt()
+                    : _requestedAt)
+                ?.toUtc()
+                .toIso8601String()
+            : null,
         // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتجاهل بأمان لو فيه سلوت محدد (نفس منطق
         // scheduledAt فوق بالحرف).
         scheduledAtRangeEnd:
             widget.scheduleSlotId == null ? _requestedAtRangeEnd?.toUtc().toIso8601String() : null,
+        durationHours: widget.service.requiresPreciseSchedule ? int.tryParse(_durationHoursController.text.trim()) : null,
         problemDescription: _descriptionController.text.trim(),
         promoCode: _promoController.text.trim(),
         buildingCode: _buildingController.text.trim(),
@@ -759,6 +787,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   onTap: _pickSchedule,
                 ),
               ),
+              // دقة الوقت (ADR-0031 Slice B) — خدمات زي جليسة الأطفال/التنظيف بالساعة محتاجة
+              // وقت بداية دقيق + مدة، مش يوم كامل بس.
+              if (widget.service.requiresPreciseSchedule) ...[
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.schedule_outlined),
+                    title: Text(_preciseTime != null ? 'الساعة ${_preciseTime!.format(context)}' : 'حدد وقت البداية'),
+                    trailing: const Icon(Icons.chevron_left),
+                    onTap: _pickPreciseTime,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _durationHoursController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
+                ),
+              ],
             ],
             if (_isFormulaPricing) ..._buildPricingFieldsSection() else ..._buildStandardDataSection(),
             if (_addons.isNotEmpty) ...[

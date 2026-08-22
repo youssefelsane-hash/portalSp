@@ -331,7 +331,11 @@ context=`crew_recruit` من `OrderTeamService.recruitMember()`) — بس صفر 
 `فرصة شغل إضافي`)، one-shot بلا workflow (نفس فلسفة عرض `order_assignments` العادي). تفاصيل كاملة
 للتحقيق والسبب الجذري في `docs/08-pricing-engine-and-platform-vision.md` §36.1.
 
-## حجز فني (شغالة) مباشر — رسالة `order_created` مختلفة (docs/08 §42 Phase A.4 Slice 2a، ADR-0029)
+## حجز فني (شغالة) مباشر — رسالة `order_created` مختلفة (docs/08 §42 Phase A.4 Slice 2a، ADR-0029) [مُلغى]
+
+**تصحيح مالك (ADR-0031، 2026-08-21)**: الفرع `isDomesticWorkerAssignment` اتشال — الشغالة بقت
+فني عادي، كل الطلبات بتتسجّل `SEARCHING_TECHNICIAN` زي أي طلب تاني، فرسالة "بندوّرلك على أقرب
+فني متاح" صحيحة دايمًا دلوقتي. القسم تحت تاريخي بس.
 
 `OrderCreatedNotificationListener` بيستقبل `ORDER_CREATED_EVENT` لأي طلب، بما فيها طلبات حجز فني
 (شغالة) مباشر اللي بتتسجّل `ACCEPTED` من الإنشاء (زيرو مطابقة تلقائية، مش `SEARCHING_TECHNICIAN`).

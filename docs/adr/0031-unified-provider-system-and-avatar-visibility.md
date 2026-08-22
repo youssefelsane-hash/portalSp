@@ -1,9 +1,9 @@
 # ADR-0031: نظام مزوّد واحد موحّد — إلغاء بنية الشغالة المنفصلة + تصحيح اتجاه Phase A.4
 
-**الحالة:** معتمد — يستبدل بنية "الشغالة كنوع مستخدم منفصل" في ADR-0004، ويلغي مسار الهجرة الموصوف
-في ADR-0029 (كان قايم على نقل نفس البنية المنفصلة للمحرك الموحّد، مش إلغاءها). Slice A (تصحيح
-ظهور صورة البروفايل) منفّذ في الـcommit ده. باقي الشرائح (توحيد التسجيل/الكتالوج/الحجز) موثّقة تحت،
-لسه مفتوحة — دي نقطة التتبع الحية بديلة عن `docs/08 §42`'s الفرع القديم.
+**الحالة:** معتمد ومنفّذ بالكامل تقريبًا — يستبدل بنية "الشغالة كنوع مستخدم منفصل" في ADR-0004،
+ويلغي مسار الهجرة الموصوف في ADR-0029. **Slice A/B/C/D/E/F كلهم منفّذين** (تفاصيل تحت) —
+Slice G (تعميم `resolveAvatarUrl()` على سطوح داخلية تانية) لسه مفتوحة، غير حرجة. دي نقطة التتبع
+الحية بديلة عن `docs/08 §42`'s الفرع القديم.
 
 **التاريخ:** 2026-08-21
 
@@ -135,24 +135,35 @@ is allowed, a service can have a yes/no option for whether precise time selectio
 
 ## الشرائح (خطة التنفيذ الكاملة)
 
-- **Slice A (خلصت، الـcommit ده)**: إصلاح ظهور صورة البروفايل — تفاصيل فوق.
-- **Slice B (مفتوحة)**: `requires_precise_schedule` — migration + `Service` entity + admin
-  checkbox + `OrdersService.create()` تحقق دقة ساعة + Flutter (بداية+مدة/نهاية بدل يوم بس لما
-  الفلاج مفعّل). **سؤال تصميم مفتوح**: هل فحص التعارض الساعي بيتعمّم داخل
-  `technician-eligibility.sql.ts` (SQL مباشر، أداء أحسن للمطابقة) ولا يتبنى كدالة TS منفصلة زي
-  `findSchedulingConflict()` القديمة (أسهل قراءة، أقل تكرار مع فحص الإنشاء)؟ يتقرر قبل التنفيذ.
-- **Slice C (مفتوحة)**: فئة "خدمات منزلية" + خدماتها في الكتالوج (بيانات أدمن، صفر كود جديد أصلاً
-  لو الفلاجات فوق جاهزة) + إلغاء `PricingModel.WORKER_RATE` (رجوع لـ`hourly` العادي).
-- **Slice D (مفتوحة)**: إلغاء مسار التسجيل التاني — `login_screen.dart`'s segmented control،
-  `main.dart`'s `WorkerHomeScreen` branch، `features/domestic_worker/` بالكامل.
-- **Slice E (مفتوحة)**: إلغاء الباك-إند بالكامل — `DomesticWorkersModule`، الـentities، الجداول
-  (migration جديدة `DROP TABLE`)، كل الكود المرتبط (`orders.domestic_worker_profile_id`/
-  `domestic_worker_duration_hours` من ADR-0029/ADR-0030، `WORKER_RATE` من `OrdersService.create()`).
-- **Slice F (مفتوحة)**: إلغاء `apps/customer-app`'s `features/domestic_workers/` بالكامل —
-  العميل بيتصفّح/يحجز "جليسة أطفال" بنفس `TechnicianSelectionScreen`/`TechnicianMarketplaceScreen`
-  زي أي خدمة تانية.
-- **Slice G (مفتوحة)**: تحسين تابع لظهور الصورة — باقي سطوح `avatar_url` الداخلية (favorites،
-  team recruit) لو الوقت سمح، مش حرج.
+- **Slice A (خلصت)**: إصلاح ظهور صورة البروفايل — تفاصيل فوق.
+- **Slice B (خلصت)**: `services.requires_precise_schedule` (migration 0169) + admin checkbox +
+  `OrdersService.create()` بيتطلّب `scheduled_at`/`duration_hours` صراحة لما مفعّل + فحص تعارض
+  حقيقي بدقة ساعة (`assertNoPreciseScheduleConflict()` جديدة، private) لو فني معروف صراحة سلفًا
+  (`requested_technician_id`/`schedule_slot_id`). **القرار على السؤال المفتوح**: اتبنت كدالة TS
+  منفصلة (زي `findSchedulingConflict()` القديمة) بدل تعميم `technician-eligibility.sql.ts` —
+  الفحص هنا وقت إنشاء الطلب بس (زيرو تكرار عالي التردد زي المطابقة)، دالة TS أوضح وأسهل صيانة.
+  `orders.duration_hours` (كان `domestic_worker_duration_hours`) بقى عمود عام. Flutter
+  (`create_order_screen.dart`): `showTimePicker` + حقل "عدد الساعات" لما `service.requiresPreciseSchedule`.
+  **فجوة موثّقة صراحة**: `CatalogService.estimate()` لسه مابيضربش السعر في `duration_hours` لأي
+  نموذج تسعير (تفاصيل في `orders/README.md`) — قرار تصميم منفصل لمحرك التسعير، مش هنا.
+- **Slice C (خلصت)**: فئة "خدمات منزلية" + 4 خدمات (migration 0170: جليسة أطفال بالساعة، مربية،
+  تنظيف بالساعة، تنظيف شهري/إقامة) — بيانات أدمن عادية، صفر كود جديد. `PricingModel.WORKER_RATE`
+  اتلغى من TS (قيمة enum الـPostgres فضلت orphaned عمدًا، تفاصيل تحت).
+- **Slice D (خلصت)**: إلغاء مسار التسجيل التاني في `apps/technician-app` — `login_screen.dart`'s
+  segmented control اتشال، `main.dart`'s `WorkerHomeScreen` branch اتشال، `features/domestic_worker/`
+  اتشالت بالكامل.
+- **Slice E (خلصت)**: إلغاء الباك-إند بالكامل — `apps/api/src/modules/domestic-workers/` اتشالت
+  (كل الملفات)، migration 0169 بتـ`DROP TABLE` لـ`domestic_worker_profiles`/`domestic_worker_bookings`/
+  `domestic_worker_earning_approvals` + تنظيف `payments`/`refunds` (`domestic_worker_booking_id`
+  والقيد `CHECK` بتاعه) + `orders.domestic_worker_profile_id`. لمسة عميقة في `payments.service.ts`
+  (كانت فيها ~250 سطر منطق دفع/استرداد InstaPay خاص بحجز الشغالة، اتشالت كاملة) — اتحقق منها
+  ببناء التطبيق الفعلي (`npm run start:dev`) مش بس `tsc`، لأن حذف Repository من موضع مش-آخر في
+  constructor مش بيتكشف بـtype-check وحده (DI resolution error وقت الـruntime بس).
+- **Slice F (خلصت)**: إلغاء `apps/customer-app`'s `features/domestic_workers/` بالكامل + كارت
+  "الخدمات المنزلية" المثبّت في `home_screen.dart` + **`apps/admin`'s `/domestic-workers` و
+  `/domestic-worker-earnings`** (كانوا مش موثّقين في الجرد الأول، اتلقطوا أثناء التنظيف).
+- **Slice G (مفتوحة، غير حرجة)**: تعميم `resolveAvatarUrl()` على سطوح داخلية تانية (favorites،
+  team recruit) — مؤجّلة.
 
 ## البدائل اللي اتقيّمت
 

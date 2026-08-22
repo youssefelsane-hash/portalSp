@@ -7,7 +7,6 @@ import { Payment } from './entities/payment.entity';
 import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
-import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction, WalletTxType } from './entities/wallet-transaction.entity';
 import { WalletAdjustment } from './entities/wallet-adjustment.entity';
@@ -146,7 +145,6 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
-      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       walletsService,
       catalogService,

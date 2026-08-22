@@ -40,7 +40,6 @@ import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module
 import { HealthModule } from './modules/common/health/health.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { BuildingsModule } from './modules/buildings/buildings.module';
-import { DomesticWorkersModule } from './modules/domestic-workers/domestic-workers.module';
 import { AcademyModule } from './modules/academy/academy.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { BrandingModule } from './modules/branding/branding.module';
@@ -90,7 +89,6 @@ import { SecurityModule } from './modules/security/security.module';
     CatalogModule,
     PricingModule,
     BuildingsModule,
-    DomesticWorkersModule,
     // MatchingModule قبل OrdersModule عمداً — تفاصيل كاملة في matching/matching.module.ts.
     // NestJS بيسجّل مسارات الـ controllers بترتيب تحميل الموديولات، ومسارات حرفية زي
     // GET /technician/orders/available (في MatchingModule) لازم تتسجّل قبل GET

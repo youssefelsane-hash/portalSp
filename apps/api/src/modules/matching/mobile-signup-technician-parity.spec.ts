@@ -8,7 +8,6 @@ import { OtpCode, OtpPurpose } from '../auth/entities/otp-code.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User, UserType } from '../auth/entities/user.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
-import { DomesticWorkerProfile } from '../domestic-workers/entities/domestic-worker-profile.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { TechnicianCategory } from '../catalog/entities/technician-category.entity';
@@ -128,7 +127,6 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
         TechnicianCategory,
         ServiceCategory,
         Service,
-        DomesticWorkerProfile,
         Wallet,
         Order,
         OrderAssignment,

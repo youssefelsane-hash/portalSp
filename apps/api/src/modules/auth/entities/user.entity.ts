@@ -9,9 +9,10 @@ export enum UserType {
   TECHNICIAN = 'technician',
   ADMIN = 'admin',
   PARTNER = 'partner',
-  // قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — شغالة/مربية/مقيمة، كيان مستقل عن technician.
-  DOMESTIC_WORKER = 'domestic_worker',
 }
+// ملحوظة: قيمة enum قديمة 'domestic_worker' كانت هنا (ADR-0004) — اتشالت من TS بعد إلغاء نظام
+// المزوّد المنفصل (ADR-0031). الشغالة/المربية بقت UserType.TECHNICIAN عادي زي أي فني تاني.
+// قيمة الـPostgres enum type فضلت من غير تعديل عمدًا (orphaned بس غير مؤذية).
 
 @Entity('users')
 export class User {

@@ -137,6 +137,12 @@ export class CreateServiceDto {
   @IsBoolean()
   show_unavailable_providers?: boolean;
 
+  // دقة الوقت (ADR-0031 Slice B) — true يعني العميل لازم يحدد بداية + مدة بالساعات وقت الحجز
+  // (duration_hours إجباري)، وفحص التعارض بدقة ساعة حقيقية بدل يوم بس.
+  @IsOptional()
+  @IsBoolean()
+  requires_precise_schedule?: boolean;
+
   @IsOptional()
   @IsEnum(TechnicianLevel)
   min_technician_level?: TechnicianLevel;

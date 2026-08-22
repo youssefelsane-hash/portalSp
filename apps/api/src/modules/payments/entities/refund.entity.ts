@@ -30,8 +30,8 @@ export class Refund {
   @Column({ name: 'payment_id', type: 'uuid' })
   paymentId: string;
 
-  // NULL لو الاسترداد ده لحجز خدمة منزلية بدل طلب — راجع domesticWorkerBookingId تحت. بالظبط
-  // واحد من الاتنين مش NULL (قيد CHECK في migration 0149، docs/adr/0019).
+  // كان ممكن يبقى NULL لو الاسترداد لحجز خدمة منزلية (بنية منفصلة اتلغت، ADR-0031) — العمود لسه
+  // nullable في الـDB، بس دايمًا موجود عمليًا الآن.
   @Column({ name: 'order_id', type: 'uuid', nullable: true })
   orderId: string | null;
 
@@ -69,9 +69,4 @@ export class Refund {
   // محفظة بس (مفيش بوابة اتحاول أصلاً، ADR-0013 §9). مضافة في migration 0093.
   @Column({ name: 'provider_refund_id', type: 'varchar', length: 120, nullable: true })
   providerRefundId: string | null;
-
-  // إعادة استخدام نفس جدول refunds لحجوزات الخدمات المنزلية (docs/adr/0019) — mutually exclusive
-  // مع orderId عبر CHECK.
-  @Column({ name: 'domestic_worker_booking_id', type: 'uuid', nullable: true })
-  domesticWorkerBookingId: string | null;
 }

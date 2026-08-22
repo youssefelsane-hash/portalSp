@@ -14,7 +14,6 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { PricingModel } from '../catalog/entities/service.entity';
 import { GeoService } from '../geo/geo.service';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
@@ -48,8 +47,6 @@ import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderTeamService } from './order-team.service';
-import { DomesticWorkersService } from '../domestic-workers/domestic-workers.service';
-import { DomesticWorkerProfile, DomesticWorkerVerificationStatus } from '../domestic-workers/entities/domestic-worker-profile.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
@@ -109,9 +106,6 @@ export class OrdersService {
     // docs/08 §35، ADR-0021 §1 — آخر بند عمدًا (بعد events) عشان ياخد أقل بلاست-رديوس ممكن على
     // الاختبارات القديمة الكتير اللي بتبني OrdersService بـpositional args (append واحد بس).
     private readonly orderTeamService: OrderTeamService,
-    // هجرة حجز الشغالة (ADR-0029، docs/08 §42 Phase A.4 Slice 2) — نفس نمط orderTeamService فوق
-    // بالحرف: آخر بند عمدًا، أقل بلاست-رديوس ممكن.
-    private readonly domesticWorkersService: DomesticWorkersService,
   ) {}
 
   findAllForCustomerUser(userId: string): Promise<Order[]> {
@@ -249,59 +243,22 @@ export class OrdersService {
       throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقتك لسه', HttpStatus.BAD_REQUEST);
     }
 
-    // هجرة حجز الشغالة للمحرك الموحّد (ADR-0029، docs/08 §42 Phase A.4 Slice 2) — خدمة
-    // pricingModel=worker_rate لازم domestic_worker_profile_id (زيرو مطابقة تلقائية، ADR-0004:
-    // العميل تصفّح واختار فني بعينه)، والعكس بالعكس (مينفعش تختار فني على خدمة كتالوج عادية).
-    // متبادلة استبعاديًا مع أي مسار تاني لتحديد الفني/الجدولة — الفني هنا معروف ومتحدد سلفًا.
-    let domesticWorkerProfile: DomesticWorkerProfile | null = null;
-    let precomputedWorkerRateCents: number | undefined;
-    if (service.pricingModel === PricingModel.WORKER_RATE) {
-      if (!dto.domestic_worker_profile_id) {
-        throw new ApiException(ErrorCode.VAL_001, 'خدمة سعر فني محتاجة تختار فني (شغالة) بعينه الأول', HttpStatus.BAD_REQUEST);
-      }
-      if (dto.schedule_slot_id || dto.requested_technician_id || dto.scheduled_at_range_end) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'مينفعش تحدد سلوت وقت أو فني تفضيل أو نطاق أيام مرن مع حجز فني (شغالة) مباشر — الفني ومعاده معروفين بالفعل',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+    // دقة الوقت (ADR-0031 Slice B) — نفس نمط cash_allowed/allowsDateRangeBooking بالحرف. لما
+    // الخدمة محتاجة دقة وقت (جليسة أطفال بالساعة، تنظيف بالساعة...)، العميل لازم يحدد duration_hours
+    // صراحة — فحص التعارض الفعلي بدقة ساعة بيحصل تحت بعد ما نعرف الفني المحدد (لو موجود).
+    if (service.requiresPreciseSchedule) {
       if (!dto.scheduled_at) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد الحجز', HttpStatus.BAD_REQUEST);
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد الحجز لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
       }
-      // دفع مقدّم (card/instapay) مش مدعوم لسه لمسار الحجز المباشر ده — محتاج تعديل على
-      // PaymentsService.handlePaymentConfirmed() (فرع PENDING_PAYMENT→SEARCHING_TECHNICIAN
-      // مش مناسب هنا خالص، لازم فرع مواز →ACCEPTED) وده تغيير على كود دفع مشترك حرج (كل طلب
-      // مدفوع مسبقًا في المنصة بيعدّي منه) يستأهل شريحة منفصلة بتصميم كافٍ، مش تعديل متسرّع هنا.
-      // مؤجّل عمدًا (موثّق في ADR-0029) — دلوقتي الفني بياخد كاش وقت الزيارة بس.
-      if (dto.payment_method) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'الدفع المقدّم لحجز فني (شغالة) مباشر مش مدعوم لسه — الفني هياخد كاش وقت الزيارة',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      domesticWorkerProfile = await this.domesticWorkersService.findByIdOrThrow(dto.domestic_worker_profile_id);
-      if (domesticWorkerProfile.verificationStatus !== DomesticWorkerVerificationStatus.APPROVED) {
-        throw new ApiException(ErrorCode.VAL_001, 'الفني (الشغالة) ده مش معتمد لسه', HttpStatus.BAD_REQUEST);
-      }
-      // نموذج بالساعة بس في الشريحة دي — الشهري (monthly_live_in) محتاج تجديد دوري
-      // (RecurringOrderTemplate)، مؤجّل عمدًا لـSlice 4 (ADR-0029).
       if (!dto.duration_hours) {
-        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة', HttpStatus.BAD_REQUEST);
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
       }
-      if (domesticWorkerProfile.hourlyRateCents === null) {
-        throw new ApiException(ErrorCode.VAL_001, 'الفني ده مش متاح بالحجز بالساعة', HttpStatus.BAD_REQUEST);
-      }
-      precomputedWorkerRateCents = domesticWorkerProfile.hourlyRateCents * dto.duration_hours;
-      // فحص تعارض جدولي حقيقي (ADR-0030) — كانت فجوة صحة بيانات: صفر فحص من أي نوع قبل كده.
-      await this.domesticWorkersService.assertNoSchedulingConflict(
-        domesticWorkerProfile.id,
-        new Date(dto.scheduled_at),
-        dto.duration_hours,
+    } else if (dto.duration_hours) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'duration_hours متاحة بس للخدمات اللي محتاجة دقة وقت (requires_precise_schedule)',
+        HttpStatus.BAD_REQUEST,
       );
-    } else if (dto.domestic_worker_profile_id) {
-      throw new ApiException(ErrorCode.VAL_001, 'اختيار فني (شغالة) بعينه متاح بس لخدمات سعر الفني', HttpStatus.BAD_REQUEST);
     }
 
     // "إعادة الحجز" — نتأكد إن الـ id فعلاً فني حقيقي بس (404 واضح لو لأ)، مش هل هو متاح/مؤهّل
@@ -338,6 +295,15 @@ export class OrdersService {
       if (dto.requested_technician_id && dto.requested_technician_id !== scheduleSlot.technicianId) {
         throw new ApiException(ErrorCode.VAL_001, 'السلوت المختار بتاع فني مختلف عن الفني المطلوب — اختار واحد بس', HttpStatus.BAD_REQUEST);
       }
+    }
+
+    // دقة الوقت (ADR-0031 Slice B) — فحص تعارض حقيقي بدقة ساعة (مش يوم، ADR-0018) لما الفني
+    // معروف صراحة سلفًا (تفضيل أو سلوت). لو العميل سايب المطابقة تختار (auto-match)، بوابة الأهلية
+    // العادية بمستوى اليوم (technicianAvailabilityCondition) هي اللي بتشتغل وقت التوزيع — فحص
+    // ساعي إضافي وقت التوزيع التلقائي نفسه مؤجّل عمدًا (فجوة موثّقة، مش سهو).
+    const preciseScheduleTechnicianId = scheduleSlot?.technicianId ?? requestedTechnicianProfile?.id ?? null;
+    if (service.requiresPreciseSchedule && preciseScheduleTechnicianId && dto.scheduled_at && dto.duration_hours) {
+      await this.assertNoPreciseScheduleConflict(preciseScheduleTechnicianId, new Date(dto.scheduled_at), dto.duration_hours);
     }
 
     // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — بندوّر يوم بيوم داخل
@@ -394,7 +360,6 @@ export class OrdersService {
       bookingMode === BookingMode.EMERGENCY,
       dto.field_values,
       knownTechnicianPricingTier,
-      precomputedWorkerRateCents,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -504,16 +469,9 @@ export class OrdersService {
             : (dto.order_type ?? OrderType.STANDARD),
         bookingMode,
         requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
-        // هجرة حجز الشغالة (ADR-0029، Phase A.4 Slice 2) — العميل اختار فني (شغالة) بعينه مباشرة،
-        // زيرو مطابقة تلقائية (ADR-0004) — الطلب يتسجّل مُتفَق عليه من الإنشاء، مش SEARCHING_TECHNICIAN.
-        // assignedAt/acceptedAt بيتسجّلوا فورًا (نفس معنى قبول الفني الفوري، Slice 2a بتأكيد تلقائي
-        // مؤقت — راجع ADR-0029 لتأجيل تأكيد الفني الصريح لـSlice 2b).
-        orderStatus: domesticWorkerProfile ? OrderStatus.ACCEPTED : OrderStatus.SEARCHING_TECHNICIAN,
-        domesticWorkerProfileId: domesticWorkerProfile?.id ?? null,
-        // ADR-0030 — كان ناقص من Slice 2a، لازم لفحص التعارض الجدولي ولأي عرض مستقبلي.
-        domesticWorkerDurationHours: domesticWorkerProfile ? (dto.duration_hours ?? null) : null,
-        assignedAt: domesticWorkerProfile ? now : null,
-        acceptedAt: domesticWorkerProfile ? now : null,
+        orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        // دقة الوقت (ADR-0031 Slice B) — بس لخدمات requiresPreciseSchedule=true (اتفحصت فوق).
+        durationHours: service.requiresPreciseSchedule ? (dto.duration_hours ?? null) : null,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
         // سلوت الجدولة (لو اتحجز) بيحدد الموعد المطلوب فعليًا — أدق من resolvedScheduledAtIso
@@ -1004,6 +962,33 @@ export class OrdersService {
    * bookSlot() الذرّية وراها) — لو السلوت الجديد اتحجز من عميل تاني بينهم، الحجز يفشل والقديم
    * يترجع تلقائيًا (rollback)، صفر حجز مزدوج صامت ممكن يحصل بأي حال.
    */
+  /**
+   * دقة الوقت (ADR-0031 Slice B) — فحص تعارض حقيقي بدقة ساعة لفني معروف صراحة سلفًا (تفضيل أو
+   * سلوت)، لخدمات `requires_precise_schedule=true`. نفس فكرة `DomesticWorkersService.findSchedulingConflict()`
+   * القديمة (اتلغت مع بنية الشغالة المنفصلة، ADR-0031) بس معمّمة على `orders.technician_id` لأي
+   * فني عادي بدل جدول حجوزات منفصل. مقصورة على `orders` بس — الفني هنا فني عادي، مفيش جدول تاني.
+   */
+  private async assertNoPreciseScheduleConflict(technicianId: string, startsAt: Date, durationHours: number): Promise<void> {
+    const endsAt = new Date(startsAt.getTime() + durationHours * 3_600_000);
+    const [conflict] = await this.dataSource.query<{ order_number: string }[]>(
+      `SELECT order_number FROM orders
+       WHERE technician_id = $1
+         AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
+         AND scheduled_at IS NOT NULL AND duration_hours IS NOT NULL
+         AND scheduled_at < $3
+         AND (scheduled_at + (duration_hours || ' hours')::interval) > $2
+       LIMIT 1`,
+      [technicianId, startsAt, endsAt],
+    );
+    if (conflict) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني ده متعارض مع طلب موجود بالفعل (${conflict.order_number}) في الفترة دي`,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
+
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
     return this.rescheduleCore(order, dto.new_slot_id, {

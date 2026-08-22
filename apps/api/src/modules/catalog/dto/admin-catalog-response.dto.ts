@@ -70,6 +70,7 @@ export interface AdminServiceResponseDto {
   deposit_percentage: number | null;
   allows_date_range_booking: boolean;
   show_unavailable_providers: boolean;
+  requires_precise_schedule: boolean;
   min_technician_level: string;
   commission_percentage: number;
   display_order: number;
@@ -107,6 +108,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     deposit_percentage: service.depositPercentage !== null ? Number(service.depositPercentage) : null,
     allows_date_range_booking: service.allowsDateRangeBooking,
     show_unavailable_providers: service.showUnavailableProviders,
+    requires_precise_schedule: service.requiresPreciseSchedule,
     min_technician_level: service.minTechnicianLevel,
     commission_percentage: Number(service.commissionPercentage),
     display_order: service.displayOrder,

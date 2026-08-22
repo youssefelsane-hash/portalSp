@@ -10,11 +10,11 @@ export enum PricingModel {
   // (service_pricing_fields/service_pricing_rules) بدل base_price_cents ثابت. راجع
   // apps/api/src/modules/pricing/README.md للتفاصيل الكاملة.
   FORMULA = 'formula',
-  // هجرة حجز الشغالة للمحرك الموحّد (ADR-0029، docs/08 §42 Phase A.4) — السعر من معدّل الفني
-  // (الشغالة) الشخصي (hourlyRateCents/monthlyRateCents على DomesticWorkerProfile)، مش من
-  // base_price_cents الكتالوج. راجع CatalogService.estimate() للتفاصيل.
-  WORKER_RATE = 'worker_rate',
 }
+// ملحوظة: قيمة enum قديمة 'worker_rate' كانت هنا (ADR-0029، هجرة حجز الشغالة القديمة) — اتشالت
+// من TS بعد إلغاء البنية دي بالكامل (ADR-0031). قيمة الـPostgres enum type نفسها (`pricing_model`)
+// فضلت من غير تعديل عمدًا (إعادة بناء enum type محتاج إعادة إنشاء العمود، خطر أكبر من فايدة لقيمة
+// مالهاش أي صف بيستخدمها بعد التنظيف) — orphaned بس غير مؤذية، موثّق هنا بدل ما تتنسى.
 
 @Entity('services')
 export class Service {
@@ -112,6 +112,12 @@ export class Service {
   // النهاردة). صفر قراءة له في أي استعلام لسه (Slice B/C من ADR-0030).
   @Column({ name: 'show_unavailable_providers', type: 'boolean', default: false })
   showUnavailableProviders: boolean;
+
+  // دقة الوقت (ADR-0031 Slice B) — نفس نمط cash_allowed بالحرف. الافتراضي false (الجدولة تبقى
+  // بمستوى اليوم، ADR-0018) — true يعني العميل لازم يحدد بداية + مدة بالساعات وقت الحجز، وفحص
+  // التعارض بيبقى بدقة ساعة حقيقية (OrdersService.create()) بدل يوم بس.
+  @Column({ name: 'requires_precise_schedule', type: 'boolean', default: false })
+  requiresPreciseSchedule: boolean;
 
   @Column({
     name: 'min_technician_level',

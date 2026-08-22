@@ -14,7 +14,6 @@ import { MfaPolicyService } from './mfa-policy.service';
 import { NotificationRoutingService } from '../notifications/notification-routing.service';
 import { WebAuthnService } from './webauthn.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
-import { DomesticWorkerProfile } from '../domestic-workers/entities/domestic-worker-profile.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 
@@ -72,7 +71,6 @@ function createFakeDataSource(
 ): DataSource {
   const customerProfiles = new FakeRepository<CustomerProfile>();
   const technicianProfiles = new FakeRepository<TechnicianProfile>();
-  const domesticWorkerProfiles = new FakeRepository<DomesticWorkerProfile>();
   const wallets = new FakeRepository<Wallet>();
   const manager = {
     createQueryBuilder: (entity: unknown) => {
@@ -128,7 +126,6 @@ function createFakeDataSource(
       if (entity === OtpCode) return otpCodes;
       if (entity === CustomerProfile) return customerProfiles;
       if (entity === TechnicianProfile) return technicianProfiles;
-      if (entity === DomesticWorkerProfile) return domesticWorkerProfiles;
       if (entity === Wallet) return wallets;
       return users;
     },

@@ -16,10 +16,10 @@ export class RegisterDto {
   @Length(2, 120)
   full_name: string;
 
-  // التسجيل الذاتي مسموح للعميل أو الفني أو مقدّم خدمة منزلية (شغالة/مربية/مقيمة، docs/08 §12) —
-  // الأدمن يتضاف يدوياً من لوحة التحكم بس.
-  @IsIn([UserType.CUSTOMER, UserType.TECHNICIAN, UserType.DOMESTIC_WORKER])
-  user_type: UserType.CUSTOMER | UserType.TECHNICIAN | UserType.DOMESTIC_WORKER;
+  // التسجيل الذاتي مسموح للعميل أو الفني بس (مزوّد خدمة واحد موحّد، ADR-0031 — الشغالة/المربية
+  // بقت تسجّل بنفس مسار الفني بالظبط، صفر نوع حساب مستقل). الأدمن يتضاف يدوياً من لوحة التحكم بس.
+  @IsIn([UserType.CUSTOMER, UserType.TECHNICIAN])
+  user_type: UserType.CUSTOMER | UserType.TECHNICIAN;
 
   // اختياري — كود ترشيح مستخدم موجود (users.referral_code). لو اتبعت وكان غلط، التسجيل بيترفض
   // برسالة واضحة بدل ما نتجاهله بصمت (نظام الترشيحات، راجع referrals module).
