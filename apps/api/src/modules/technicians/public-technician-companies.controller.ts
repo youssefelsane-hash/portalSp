@@ -1,5 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { resolveAvatarUrl } from '../../common/storage/resolve-avatar-url';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { toPublicCompanyResponseDto } from './dto/company-response.dto';
 import { TechnicianCompaniesService } from './technician-companies.service';
@@ -10,11 +12,19 @@ import { TechnicianCompaniesService } from './technician-companies.service';
 @Controller('technician-companies')
 @Roles(UserType.CUSTOMER)
 export class PublicTechnicianCompaniesController {
-  constructor(private readonly companiesService: TechnicianCompaniesService) {}
+  constructor(
+    private readonly companiesService: TechnicianCompaniesService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+  ) {}
 
   @Get()
   async list() {
     const rows = await this.companiesService.listActiveForCustomers();
-    return rows.map(({ company, branchCount, staffCount }) => toPublicCompanyResponseDto(company, branchCount, staffCount));
+    return Promise.all(
+      rows.map(async ({ company, branchCount, staffCount, ownerAvatarUrl, ownerAvatarStorageKey }) => {
+        const avatarUrl = await resolveAvatarUrl(this.storage, ownerAvatarUrl, ownerAvatarStorageKey);
+        return toPublicCompanyResponseDto(company, branchCount, staffCount, avatarUrl);
+      }),
+    );
   }
 }

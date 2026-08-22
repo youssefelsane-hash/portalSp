@@ -383,8 +383,17 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
     const fieldValues: Record<string, string | number | boolean> = {};
     for (const field of fields ?? []) {
       const raw = previewValues[field.field_key];
+      // بَقّة حقيقية اتلقطت (مراجعة مالك مباشرة): حقل checkbox من غير اختيار صريح ("—" الافتراضي
+      // في الـ<select>) كان بيتجاهل تمامًا زي أي حقل تاني فاضي — لو الحقل مطلوب، المعادلة كانت
+      // بترفض "الحقل مطلوب" لحد ما الأدمن يختار "صح" صراحة مرة (حتى لو رجع اختار "خطأ" بعد كده
+      // بيشتغل عادي). نفس الافتراض الضمني اللي الباك-إند نفسه بيطبّقه لحقول checkbox من غير
+      // default_value (resolveDefaultValue في pricing-engine.service.ts): false، مش تجاهل.
+      if (field.field_type === 'checkbox') {
+        fieldValues[field.field_key] = raw === 'true';
+        continue;
+      }
       if (raw === undefined || raw === '') continue;
-      fieldValues[field.field_key] = field.field_type === 'checkbox' ? raw === 'true' : raw;
+      fieldValues[field.field_key] = raw;
     }
     return fieldValues;
   }
@@ -421,8 +430,14 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
     const fieldValues: Record<string, string | number | boolean> = {};
     for (const field of fields ?? []) {
       const raw = ruleTestFieldValues[field.field_key];
+      // نفس إصلاح collectPreviewFieldValues فوق — حقل checkbox من غير اختيار صريح لازم يتفسّر
+      // false مش يتجاهل تمامًا.
+      if (field.field_type === 'checkbox') {
+        fieldValues[field.field_key] = raw === 'true';
+        continue;
+      }
       if (raw === undefined || raw === '') continue;
-      fieldValues[field.field_key] = field.field_type === 'checkbox' ? raw === 'true' : raw;
+      fieldValues[field.field_key] = raw;
     }
     setIsSaving(true);
     setError(null);

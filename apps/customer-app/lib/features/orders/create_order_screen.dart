@@ -228,7 +228,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     setState(() => _loadingPricingFields = true);
     try {
       final fields = await _catalogRepository.fetchPricingFields(widget.service.id);
-      if (mounted) setState(() => _pricingFields = fields);
+      if (mounted) {
+        setState(() {
+          _pricingFields = fields;
+          // بَقّة حقيقية اتلقطت (مراجعة مالك مباشرة): SwitchListTile بتاعة حقل checkbox بترسم
+          // "متفعّلش" افتراضيًا (`?? false`) من غير ما القيمة دي تتحط في _fieldValues فعليًا —
+          // لو الحقل مطلوب، الغياب ده بيخلي _pricingFieldsComplete/الباك-إند يرفضوا "الحقل مطلوب"
+          // لحد ما العميل يلمس السويتش مرة (حتى لو رجع سيبه false تاني بعد كده بيشتغل عادي).
+          // الإصلاح: نفس الافتراض الضمني اللي الباك-إند بيطبّقه (resolveDefaultValue في
+          // pricing-engine.service.ts) — false صريحة من أول ما الفورم يتحمّل، مش لما العميل يدوس.
+          for (final field in fields) {
+            if (field.fieldType == 'checkbox' && !_fieldValues.containsKey(field.fieldKey)) {
+              _fieldValues[field.fieldKey] = false;
+            }
+          }
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _pricingFieldsError = err.message);
     } finally {

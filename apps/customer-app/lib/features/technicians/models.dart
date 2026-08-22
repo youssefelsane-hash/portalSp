@@ -5,12 +5,15 @@ class TechnicianCompanySummary {
   final String name;
   final int branchCount;
   final int staffCount;
+  // صورة الشركة (ADR-0031) — أفتار المالك المعتمد نفسه، مفيش رفع منفصل للشركة.
+  final String? avatarUrl;
 
   TechnicianCompanySummary({
     required this.id,
     required this.name,
     required this.branchCount,
     required this.staffCount,
+    required this.avatarUrl,
   });
 
   factory TechnicianCompanySummary.fromJson(Map<String, dynamic> json) => TechnicianCompanySummary(
@@ -18,6 +21,7 @@ class TechnicianCompanySummary {
         name: json['name'] as String,
         branchCount: json['branch_count'] as int,
         staffCount: json['staff_count'] as int,
+        avatarUrl: json['avatar_url'] as String?,
       );
 }
 

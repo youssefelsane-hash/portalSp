@@ -64,7 +64,18 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     setState(() => _loadingPricingFields = true);
     try {
       final fields = await _catalogRepository.fetchPricingFields(widget.service.id);
-      if (mounted) setState(() => _pricingFields = fields);
+      if (mounted) {
+        setState(() {
+          _pricingFields = fields;
+          // بَقّة حقيقية اتلقطت (مراجعة مالك مباشرة، نفس الإصلاح في create_order_screen.dart) —
+          // راجع التعليق الكامل هناك.
+          for (final field in fields) {
+            if (field.fieldType == 'checkbox' && !_fieldValues.containsKey(field.fieldKey)) {
+              _fieldValues[field.fieldKey] = false;
+            }
+          }
+        });
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _pricingFieldsError = err.message);
     } finally {
