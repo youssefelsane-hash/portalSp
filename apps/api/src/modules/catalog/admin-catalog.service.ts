@@ -211,6 +211,7 @@ export class AdminCatalogService {
       depositPercentage: dto.deposit_percentage !== undefined ? String(dto.deposit_percentage) : null,
       allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
+      requiresPreciseSchedule: dto.requires_precise_schedule ?? false,
       minTechnicianLevel: dto.min_technician_level,
       commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
@@ -272,6 +273,7 @@ export class AdminCatalogService {
     }
     if (dto.allows_date_range_booking !== undefined) service.allowsDateRangeBooking = dto.allows_date_range_booking;
     if (dto.show_unavailable_providers !== undefined) service.showUnavailableProviders = dto.show_unavailable_providers;
+    if (dto.requires_precise_schedule !== undefined) service.requiresPreciseSchedule = dto.requires_precise_schedule;
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

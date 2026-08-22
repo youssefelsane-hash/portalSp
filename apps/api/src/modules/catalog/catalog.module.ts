@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
+import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { Order } from '../orders/entities/order.entity';
 import { OrderTeamMember } from '../orders/entities/order-team-member.entity';
 import { PricingModule } from '../pricing/pricing.module';
@@ -51,7 +52,15 @@ import { TechnicianService } from './entities/technician-service.entity';
     PricingModule,
   ],
   controllers: [CatalogController, AdminCatalogController],
-  providers: [CatalogService, AdminCatalogService, ProductivityLearningService, OrderCompletedProductivityCaptureListener],
+  providers: [
+    CatalogService,
+    AdminCatalogService,
+    ProductivityLearningService,
+    OrderCompletedProductivityCaptureListener,
+    // ADR-0031 — CatalogController بقى محتاج STORAGE_SERVICE عشان يفكّ avatar_storage_key
+    // الفنيين لرابط طازج قبل الرد على GET /services/:id/technicians.
+    storageServiceProvider,
+  ],
   exports: [CatalogService],
 })
 export class CatalogModule {}

@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
+import { resolveAvatarUrl } from '../../common/storage/resolve-avatar-url';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { toTechnicianBookingListItemResponseDto } from '../technicians/dto/technician-booking-list-response.dto';
 import { TechniciansService } from '../technicians/technicians.service';
 import { CatalogService } from './catalog.service';
@@ -16,6 +18,7 @@ export class CatalogController {
   constructor(
     private readonly catalogService: CatalogService,
     private readonly techniciansService: TechniciansService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   @Public()
@@ -57,6 +60,7 @@ export class CatalogController {
       query.booking_mode === 'emergency',
       query.field_values,
       query.pricing_tier,
+      query.duration_hours,
     );
   }
 
@@ -114,6 +118,13 @@ export class CatalogController {
       query.scheduled_at ? new Date(query.scheduled_at) : null,
       query.booking_mode === 'team',
     );
+    // ADR-0031 — avatar_storage_key (لو موجود) هو المصدر المعتمد، بيتفك لرابط طازة هنا قبل الرد
+    // (presigned S3 URLs بتنتهي، مش نستخدم avatarUrl الخام مباشرة). صفر أثر لو مفيش صور معتمدة أصلاً.
+    await Promise.all(
+      items.map(async (item) => {
+        item.avatarUrl = await resolveAvatarUrl(this.storage, item.avatarUrl, item.avatarStorageKey);
+      }),
+    );
     const service = await this.catalogService.findServiceOrThrow(id);
     const isEmergency = query.booking_mode === 'emergency';
     // خدمات formula محتاجة field_values عشان estimate() تقدر تحسب سعر أصلاً (المعادلة نفسها
@@ -138,6 +149,7 @@ export class CatalogController {
                 isEmergency,
                 query.field_values,
                 item.pricingTier,
+                query.duration_hours,
               );
               return { item, estimate };
             }),

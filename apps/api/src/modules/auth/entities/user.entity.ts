@@ -9,9 +9,10 @@ export enum UserType {
   TECHNICIAN = 'technician',
   ADMIN = 'admin',
   PARTNER = 'partner',
-  // قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — شغالة/مربية/مقيمة، كيان مستقل عن technician.
-  DOMESTIC_WORKER = 'domestic_worker',
 }
+// ملحوظة: قيمة enum قديمة 'domestic_worker' كانت هنا (ADR-0004) — اتشالت من TS بعد إلغاء نظام
+// المزوّد المنفصل (ADR-0031). الشغالة/المربية بقت UserType.TECHNICIAN عادي زي أي فني تاني.
+// قيمة الـPostgres enum type فضلت من غير تعديل عمدًا (orphaned بس غير مؤذية).
 
 @Entity('users')
 export class User {
@@ -39,6 +40,12 @@ export class User {
 
   @Column({ name: 'avatar_url', type: 'text', nullable: true })
   avatarUrl: string | null;
+
+  // ADR-0031 — المصدر المعتمد (بعد موافقة الأدمن) لأفتار الفني/الشغالة، موجود لو فيه صورة معتمدة.
+  // storage key ثابت مش رابط جاهز (presigned S3 URLs بتنتهي) — يتفك عبر resolveAvatarUrl() وقت
+  // كل قراءة، نفس نمط branding/technician_documents/technician_certificates بالحرف.
+  @Column({ name: 'avatar_storage_key', type: 'text', nullable: true })
+  avatarStorageKey: string | null;
 
   @Index()
   @Column({ name: 'user_type', type: 'enum', enum: UserType, enumName: 'user_type' })

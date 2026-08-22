@@ -92,6 +92,9 @@ class CatalogService {
   // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — لو false، ScheduleSelectionScreen
   // بتخفي كارت "مرن — اختار نطاق أيام" بدل ما تسيب العميل يختاره ويترفض من الباك-إند بعدين.
   final bool allowsDateRangeBooking;
+  // دقة الوقت (ADR-0031 Slice B) — لو true، العميل لازم يحدد بداية + مدة بالساعات (duration_hours)
+  // بدل يوم كامل بس. نفس نمط allowsDateRangeBooking بالحرف.
+  final bool requiresPreciseSchedule;
 
   CatalogService({
     required this.id,
@@ -107,6 +110,7 @@ class CatalogService {
     required this.allowsIndividual,
     required this.allowsTeam,
     required this.allowsDateRangeBooking,
+    required this.requiresPreciseSchedule,
   });
 
   factory CatalogService.fromJson(Map<String, dynamic> json) => CatalogService(
@@ -123,6 +127,7 @@ class CatalogService {
         allowsIndividual: json['allows_individual'] as bool,
         allowsTeam: json['allows_team'] as bool,
         allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
+        requiresPreciseSchedule: json['requires_precise_schedule'] as bool? ?? false,
       );
 
   // أول وضع حجز متاح فعليًا للخدمة دي، بترتيب أولوية فرد > فريق > طوارئ — مستخدم في القوالب

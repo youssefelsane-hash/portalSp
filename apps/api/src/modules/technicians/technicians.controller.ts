@@ -25,6 +25,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { TechniciansService } from './technicians.service';
 import { TechnicianDocumentsService } from './technician-documents.service';
+import { TechnicianDocumentType } from './entities/technician-document.entity';
 import { TechnicianScheduleService } from './technician-schedule.service';
 import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificatesService } from './technician-certificates.service';
@@ -75,8 +76,14 @@ export class TechniciansController {
     // تصنيف نوع الفني الأربعة (docs/06 §3.8) — محسوب لحظياً من بيانات موجودة (مش عمود مخزّن)،
     // راجع technicians/README.md.
     const technicianType = await this.techniciansService.classifyType(profile);
+    // ADR-0031 — "الصورة تظهر في بروفايله فورًا مجرد ما بترفع" (بلاغ مالك 2026-08-21): آخر مستند
+    // "صورة شخصية" رفعه الفني نفسه، بغض النظر عن حالة المراجعة — مصدر منفصل تمامًا عن
+    // avatar_storage_key (المعتمد للعميل، بعد موافقة الأدمن بس، راجع GET /technicians/:id/profile).
+    const latestPhoto = await this.technicianDocumentsService.findLatestOfType(profile.id, TechnicianDocumentType.PHOTO);
+    const avatarUrl = latestPhoto ? (await toTechnicianDocumentResponseDto(latestPhoto, this.storage)).file_url : null;
     return {
       ...toTechnicianProfileResponseDto(profile),
+      avatar_url: avatarUrl,
       technician_type: technicianType,
       assistant_link_status: profile.assistantLinkStatus,
       assistant_technician_id: profile.assistantTechnicianId,

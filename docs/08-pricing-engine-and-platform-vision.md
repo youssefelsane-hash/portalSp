@@ -6006,7 +6006,15 @@ build` (packages/shared-types) كلهم نضاف.
 `flutter analyze`/`tsc --noEmit` نضاف على كل التطبيقات الأربعة (api، admin، customer-app،
 technician-app). التفاصيل الكاملة في `apps/technician-app/README.md`، `apps/customer-app/README.md`.
 
-## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3 خلصوا، A.4 بدأت — Slice 1/2a خلصوا)
+## §42. محرك حجز موحّد (Part A) + منصة شركات حقيقية (Part B) — طلب مالك استراتيجي كبير 2026-08-21 — 🔄 قيد التنفيذ (Phase A.1/A.2/A.3/A.4 خلصوا (A.4 بعد تصحيح الاتجاه، ADR-0031 Slice A-F/H) — Part B لسه مفتوحة)
+
+**تصحيح مالك مهم (2026-08-21، لاحقًا نفس اليوم)**: اتجاه Phase A.4 تحت (نقل `DomesticWorkerProfile`
+للمحرك الموحّد) **اتلغى واتستبدل بالكامل** — القرار الصحيح مش "انقل الكيان المنفصل"، هو "الغِ الكيان
+المنفصل نفسه، خلّي الشغالة/المربية فني عادي بمسار تسجيل/اعتماد/كتالوج واحد". الخطة الكاملة الجديدة
++ إصلاح فوري لبَقّة ظهور صورة البروفايل (كانت موجودة أصلاً لأي فني، مش خاصة بالشغالة) في
+`docs/adr/0031-unified-provider-system-and-avatar-visibility.md`. Slice 1/2a/A/C تحت **هيتلغوا**
+(موثّق ليه في ADR-0031)، مش أساس يُبنى عليه أكتر — اتسابوا هنا كسجل تاريخي لإيه اللي اتجرّب وليه
+اتصحّح، مش كخطوات لسه سارية.
 
 طلب مالك صريح واسع النطاق (مش إعادة بناء — تطوير وتوحيد): (أ) دمج حجز الشغالة/المربية والطلبات
 المتكررة في **محرك حجز واحد قابل للتهيئة** بدل ما كل خدمة غريبة تاخد مسارها المنفصل، و(ب) تطوير
@@ -6186,11 +6194,58 @@ Service/Order/Pricing/Payment/Scheduling المشتركة، مع الحفاظ ع
   `technician-eligibility.sql.ts` اتعمله refactor (منطق التعارض مصدر واحد مشترك بين الدالتين) —
   بَقّة حقيقية اتلقطت واتصلحت أثناء الـrefactor نفسه (تفاصيل في `technicians/README.md`)، اتحقق
   من صفر رجريشن على `matching`/`technicians` بالكامل. اختبار حي (3/3).
-- **Slice C (مفتوحة)**: نفس الفكرة لتصفح الشغالة (`browseForCustomer()`) — المحرك كله لازم يتبني
-  من الصفر (كان صفر تعارض قبل Slice A)، بدقة ساعة حقيقية (مش يوم زي الفنيين).
-  `BrowseWorkersQueryDto` محتاجة `scheduled_at`/`duration_hours` جديدين.
-- **Slice D (مفتوحة)**: واجهة Flutter — كارت "مش متاح للفترة دي" + "متاح تاني إمتى" + مسار "احجزه
-  بدلاً" — صفر سابقة UI موجودة لحالة "معروض بس مش قابل للاختيار" في التطبيق.
+- **Slice C (خلصت)**: `browseForCustomer()` بقت بتفحص تعارض حقيقي (دقة ساعة، مش يوم) لما
+  `scheduled_at` يتبعت — `findSchedulingConflict()` داخلية مشتركة مع `assertNoSchedulingConflict()`
+  (صفر تكرار منطق). `service_id` اختياري في `BrowseWorkersQueryDto` (التصفّح هنا بالتخصص مش بخدمة
+  كتالوج بالضرورة — بدونه الافتراضي الآمن هو الإخفاء، زي قيمة الفلاج). تفاصيل كاملة في
+  `docs/adr/0030-schedule-conflict-visibility-policy.md`.
+- **Slice D (خلصت)**: واجهة Flutter — `TechnicianMarketplaceScreen` بقى فيها كارت "مش متاح للفترة
+  دي" (تعتيم+شارة+سبب) وزرار "جرّب <تاريخ>" بيعيد التحميل بمعاد تاني محليًا (نفس الشاشة، بلا فلو
+  جديد)، و`DomesticWorkersScreen` بقى فيها فلتر ميعاد اختياري بيفلتر المتعارضين فعليًا (إصلاح فجوة
+  حقيقية كانت موجودة). العرض الكامل لحالة "متعارض" لسه مؤجّل لتصفّح الشغالة تحديدًا (مفيش `service_id`
+  في سياق الشاشة دي اليوم — موثّق كفجوة صريحة، مش سهو). مفيش Flutter SDK في بيئة السيشن وقت الشريحة
+  دي — مراجعة يدوية بدل `flutter analyze`، تفاصيل في `apps/customer-app/README.md`.
 - **فجوة تقنية موجودة بالفعل، مستقلة عن الشريحة دي**: تطبيقي Flutter وشاشة الأدمن لسه ما اتحدّثوش
   لـADR-0019 (مفيش شاشة دفع InstaPay في تطبيق العميل، `awaiting_payment` مش معروفة في خرائط الحالة)
   — موثّقة صراحة في ADR-0029 §السياق بند 6، مش من مسؤولية الشريحة دي.
+
+### Phase A.4 (اتصحّحت) — نظام مزوّد واحد موحّد، إلغاء بنية الشغالة المنفصلة (ADR-0031، 2026-08-21)
+
+**نقطة التتبع الحية الصحيحة لباقي شغل A.4 — بديلة عن قسم "Phase A.4" فوق (Slice 1/2a/A/C هناك
+هيتلغوا، مش يُبنى عليهم).** القرار الكامل + السياق + التدقيق الحي في
+`docs/adr/0031-unified-provider-system-and-avatar-visibility.md`. خلاصة الاتجاه: الشغالة/المربية/
+عامل التنظيف بالساعة = فني عادي (`UserType.TECHNICIAN`)، بيسجّل بنفس مسار `apps/technician-app`،
+الأدمن بيعتمده بنفس شاشة اعتماد الفنيين، بيختار خدماته من فئة كتالوج عادية "خدمات منزلية" —
+**صفر كيان/تسجيل/اعتماد/حجز/دفع منفصل**. القدرة العامة الجديدة المطلوبة: `requires_precise_schedule`
+(دقة ساعة بدل يوم، لأي `Service` — مش خاصة بالخدمات المنزلية).
+
+- **Slice A (خلصت، هذا الـcommit)**: إصلاح ظهور صورة البروفايل — بَقّة حقيقية كانت موجودة لأي فني
+  (مش خاصة بالشغالة أصلاً): `users.avatar_storage_key` (migration 0168) + `resolveAvatarUrl()` +
+  `AdminTechniciansService.reviewDocument()` بيحدّثه عند اعتماد مستند `photo` + `GET /technician/me`
+  بيرجّع معاينة ذاتية فورية (آخر صورة رفعها الفني، بغض النظر عن حالة المراجعة) + `GET
+  /technicians/:id/profile`/`GET /services/:id/technicians` بيرجّعوا الأفتار الرسمي المعتمد.
+  `ProfileScreen` (`apps/technician-app`) بقى فيها معاينة + رفع مباشر (كان معدوم بالكامل بعد أول
+  اعتماد — `OnboardingScreen` وحدها فيها رفع، وبتختفي للأبد بعد الاعتماد). اختبار حي جديد
+  (`avatar-visibility.spec.ts`، 5/5) + صفر رجريشن على `technicians`/`catalog`/`auth` (171/171).
+- **Slice B (خلصت)**: `services.requires_precise_schedule` (migration 0169) + admin checkbox +
+  `OrdersService.create()` فحص تعارض ساعي حقيقي (`assertNoPreciseScheduleConflict()`) لما فني
+  معروف صراحة سلفًا + Flutter (وقت بداية + مدة). فجوة الضرب في المدة اتقفلت لاحقًا (Slice H تحت).
+- **Slice C (خلصت)**: فئة "خدمات منزلية" + 4 خدمات (migration 0170) + إلغاء `PricingModel.WORKER_RATE`
+  من TS.
+- **Slice D (خلصت)**: إلغاء مسار التسجيل التاني في `apps/technician-app` (segmented control +
+  `WorkerHomeScreen` + `features/domestic_worker/` — كلهم اتشالوا بالكامل).
+- **Slice E (خلصت)**: إلغاء `DomesticWorkersModule` بالكامل من الباك-إند (entities، جداول،
+  migration 0169 `DROP TABLE`، ~250 سطر منطق دفع InstaPay خاص بالشغالة في `payments.service.ts`،
+  كل الكود المرتبط من ADR-0029/ADR-0030) — اتحقق منها بتشغيل التطبيق فعليًا (`npm run start:dev`)
+  مش `tsc` بس (DI resolution errors مش بتتكشف بـtype-check وحده).
+- **Slice F (خلصت)**: إلغاء `apps/customer-app`'s `features/domestic_workers/` بالكامل + كارت
+  "الخدمات المنزلية" المثبّت + **`apps/admin`'s `/domestic-workers`/`/domestic-worker-earnings`**
+  (اتلقطوا أثناء التنظيف، مش موثّقين في الجرد الأول).
+- **Slice G (مفتوحة، غير حرجة)**: تعميم `resolveAvatarUrl()` على سطوح داخلية تانية (favorites،
+  team recruit) — مؤجّلة، موثّقة كفجوة صريحة في ADR-0031.
+- **Slice H (خلصت، 2026-08-22)**: `CatalogService.estimate()` بقى بتضرب `base_price_cents` في
+  `duration_hours` فعليًا لخدمات `pricing_model=hourly` (كانت فجوة موثّقة من Slice B فوق) —
+  `durationHours` باراميتر append-only جديد، `create()`/`previewPrice()`/معاينة الأسعار العامة
+  كلهم بيمرروه. بَقّة بيانات مرتبطة اتصلحت (`migration 0171`): خدمة "تنظيف شهري/إقامة" كانت
+  `pricing_model='hourly'` غلط في migration 0170 (سعرها شهري ثابت فعليًا). اختبار حي
+  `catalog/hourly-pricing.spec.ts` (3/3). تفاصيل كاملة في ADR-0031 و`catalog/README.md`.

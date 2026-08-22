@@ -316,7 +316,12 @@
   بالافتراضي `true` تفضل تقبل النطاق المرن زي ما كانت — رجريشن صفري).
 - **خارج نطاق الشريحة دي عمدًا**: صفر لمس لـ`domestic_worker_bookings` (Phase A.4).
 
-## `PricingModel.WORKER_RATE` — نموذج تسعير جديد لهجرة حجز الشغالة (docs/08 §42 Phase A.4 Slice 1، ADR-0029)
+## [مُلغى] `PricingModel.WORKER_RATE` — نموذج تسعير جديد لهجرة حجز الشغالة (docs/08 §42 Phase A.4 Slice 1، ADR-0029)
+
+**تصحيح لاحق (ADR-0031، 2026-08-21/22)**: القسم ده كله تاريخي — `PricingModel.WORKER_RATE` وموديول
+`domestic-workers` كله اتلغيا بالكامل (نظام مزوّد واحد موحّد، مفيش بنية شغالة منفصلة). القدرة اللي
+حلّت محله فعليًا هي `PricingModel.HOURLY` **العامة** (موجودة من الأول، مش جديدة) + `durationHours`
+باراميتر جديد في `estimate()` — موثّقة في القسم الجديد في آخر الملف ده.
 
 أول شريحة من هجرة حجز الشغالة للمحرك الموحّد — أساس بس، **صفر تغيير سلوك لأي مسار موجود**. القرار
 المعماري الكامل (ليه مش `TechnicianProfile`، مين مسؤول عن الحساب، الشرايح الجاية) في
@@ -344,3 +349,42 @@
 - **خارج نطاق هذه الشريحة عمدًا**: دفع مقدّم لحجز شغالة، شات (Slice 2c/3)، واجهة Flutter/أدمن
   (Slice 3)، التكرار الشهري عبر `RecurringOrderTemplate` (Slice 4)، وأي تغيير على
   `domestic-workers` module الحالي (صفر لمس بالكامل).
+
+**تصحيح مالك (ADR-0031، 2026-08-21)**: خطة الهجرة فوق (Slice 1/2a) هتتلغي — الاتجاه الصحيح إلغاء
+`DomesticWorkerProfile`/`PricingModel.WORKER_RATE` بالكامل، مش نقلهم. راجع
+`docs/adr/0031-unified-provider-system-and-avatar-visibility.md`.
+
+## ظهور صورة البروفايل — `CatalogController` بقى محتاج `StorageService` (ADR-0031)
+
+`GET /services/:id/technicians` كان بيرجّع `avatar_url` خام من `users.avatar_url` بلا أي resolve —
+لو الفني عنده صورة معتمدة (`users.avatar_storage_key`)، لازم تتفك برابط طازج (presigned S3 URLs
+بتنتهي). `CatalogController` بقى فيه `@Inject(STORAGE_SERVICE)` جديد، وبعد ما `TechniciansService.listForServiceBooking()`
+ترجع، كل الصفوف بتتحلّ دفعة واحدة (`Promise.all(items.map(resolveAvatarUrl))`) قبل التحويل لـDTO —
+صفر تغيير على شكل `TechnicianBookingListItem` نفسه غير حقل `avatarStorageKey` إضافي. تفاصيل كاملة
+في `apps/api/src/modules/technicians/README.md`.
+
+## `estimate()` بقى بيضرب سعر الساعة في `duration_hours` لخدمات `pricing_model=hourly` (ADR-0031 Slice H، 2026-08-22)
+
+**فجوة حقيقية اتلقطت واتقفلت** — `PricingModel.HOURLY` قدرة عامة موجودة أصلاً على `Service` من قبل
+كل شغل ADR-0031 (مش حاجة جديدة)، لكن `CatalogService.estimate()` ماكانش فيها أي فرع حساب مخصوص ليها
+(فرع مخصص موجود بس لـ`FORMULA`) — يعني أي خدمة `hourly` كانت بترجع `base_price_cents` كسعر إجمالي
+ثابت، مش سعر ساعة × عدد الساعات فعليًا.
+
+- **الإصلاح**: باراميتر اختياري جديد `durationHours` — آخر باراميتر في `estimate()` (نفس نمط
+  `technicianPricingTier` فوقه بالحرف، append-only صفر كسر). لو `service.pricingModel === HOURLY`
+  و`durationHours` اتبعتت، السعر الأساسي (سواء من `service.basePriceCents` أو `zone override`)
+  بيتضرب فيها **قبل** تطبيق `levelMultiplier`/الطوارئ — نفس ترتيب باقي عوامل السعر تمامًا.
+- **الـcallers**: `OrdersService.create()`/`previewPrice()` بيمرروا `dto.duration_hours` (نفس الحقل
+  اللي `service.requiresPreciseSchedule` بيتطلّبه — يعني عمليًا الضرب مبيحصلش غير للخدمات اللي
+  محتاجة دقة وقت، لأن `duration_hours` مرفوض تمامًا لأي خدمة تانية على مستوى `CreateOrderDto`
+  validation، مش على مستوى `estimate()` نفسها). `GET /services/:id/estimate` و
+  `GET /services/:id/technicians` (الاتنين `catalog.controller.ts`) بيمرروا `duration_hours` من
+  query string كمان — معاينة سعر صحيحة قبل ما العميل يأكّد، نفس فلسفة "مفيش مفاجأة سعر بعد التأكيد".
+- **بَقّة بيانات اتلقطت في نفس المراجعة**: seed بيانات "خدمات منزلية" (`migration 0170`) كانت حاطة
+  `pricing_model='hourly'` على الأربع خدمات كلهم بما فيهم "تنظيف شهري/إقامة" (سعر شهري ثابت فعليًا،
+  مش بالساعة) — لولا `requires_precise_schedule=false` بتاعتها كانت هتمنع `duration_hours` من
+  الوصول أصلاً، السعر مكنش هيتأثر عمليًا، لكن `pricing_model` الصحيح دلالياً `fixed`. اتصلحت بـ
+  `migration 0171` (تحديث بيانات فقط — `migration 0170` اتعمل commit قبل كده، ما بتتعدلش).
+- **اختبار حي جديد**: `catalog/hourly-pricing.spec.ts` (3/3 — خدمة hourly من غير duration_hours
+  بترجع السلوك القديم بالحرف، بـduration_hours=3 السعر يتضاعف×3، خدمة fixed بتتجاهل duration_hours
+  تمامًا حتى لو اتبعتت غلط).

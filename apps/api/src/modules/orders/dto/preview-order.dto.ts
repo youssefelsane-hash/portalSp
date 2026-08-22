@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsEnum, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsEnum, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
 import { BookingMode } from '../entities/order.entity';
 
 // معاينة السعر الحقيقي قبل تأكيد الحجز (docs/08 §1، طلب صريح: "عرض السعر قبل التأكيد لازم
@@ -6,7 +6,8 @@ import { BookingMode } from '../entities/order.entity';
 // requested_technician_id وschedule_slot_id (بَقّة حقيقية اتلقطت: كان مضاعف سعر مستوى الفني
 // بيتحسب صح في create() بس مش في المعاينة لو العميل اختار سلوت جدولة تحديدًا، فرق السعر بين
 // المعاينة والطلب الفعلي كان ممكن يحصل). عمدًا من غير حقول تنفيذ تانية زي scheduled_at اللي
-// فعلاً مش بتأثر على السعر.
+// فعلاً مش بتأثر على السعر — duration_hours استثناء (ADR-0031 Slice B/H): بيأثر فعليًا على
+// السعر لخدمات pricing_model=hourly، فلازم يتبعت هنا زي create().
 export class PreviewOrderDto {
   @IsUUID()
   service_id: string;
@@ -50,4 +51,10 @@ export class PreviewOrderDto {
   @IsOptional()
   @IsUUID()
   schedule_slot_id?: string;
+
+  // دقة الوقت (ADR-0031 Slice B/H) — نفس CreateOrderDto.duration_hours بالحرف.
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  duration_hours?: number;
 }

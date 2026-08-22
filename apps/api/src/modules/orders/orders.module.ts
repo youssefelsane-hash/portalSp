@@ -4,7 +4,6 @@ import { AuditModule } from '../audit/audit.module';
 import { BuildingsModule } from '../buildings/buildings.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { CustomersModule } from '../customers/customers.module';
-import { DomesticWorkersModule } from '../domestic-workers/domestic-workers.module';
 import { GeoModule } from '../geo/geo.module';
 import { MatchingModule } from '../matching/matching.module';
 import { PaymentsModule } from '../payments/payments.module';
@@ -55,7 +54,6 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     ]),
     CustomersModule,
     CatalogModule,
-    DomesticWorkersModule,
     GeoModule,
     TechniciansModule,
     PricingModule,

@@ -5,9 +5,10 @@ export enum WalletOwnerType {
   TECHNICIAN = 'technician',
   PARTNER = 'partner',
   PLATFORM = 'platform',
-  // قطاع الخدمات المنزلية (docs/08 §12، ADR-0004) — شغالة/مربية/مقيمة، تصنيف مستقل عن technician.
-  DOMESTIC_WORKER = 'domestic_worker',
 }
+// ملحوظة: قيمة enum قديمة 'domestic_worker' كانت هنا (ADR-0004) — اتشالت من TS بعد إلغاء نظام
+// المزوّد المنفصل (ADR-0031، الشغالة بقت فني عادي WalletOwnerType.TECHNICIAN). قيمة الـPostgres
+// enum type فضلت من غير تعديل عمدًا (نفس قرار PricingModel.WORKER_RATE — orphaned بس غير مؤذية).
 
 // حساب المنصة الثابت — infra/migrations/0019_platform_system_account.sql
 export const PLATFORM_SYSTEM_USER_ID = '00000000-0000-7000-8000-000000000001';

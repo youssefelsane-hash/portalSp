@@ -65,7 +65,9 @@ export class TechnicianCompaniesService {
 
   private async countBranchesAndStaff(
     companies: TechnicianCompany[],
-  ): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
+  ): Promise<
+    { company: TechnicianCompany; branchCount: number; staffCount: number; ownerAvatarUrl: string | null; ownerAvatarStorageKey: string | null }[]
+  > {
     if (companies.length === 0) return [];
     const companyIds = companies.map((c) => c.id);
     const branchCounts = await this.branches
@@ -85,17 +87,32 @@ export class TechnicianCompaniesService {
     const branchCountByCompany = new Map(branchCounts.map((r) => [r.companyId, Number(r.count)]));
     const staffCountByCompany = new Map(staffCounts.map((r) => [r.companyId, Number(r.count)]));
 
-    return companies.map((company) => ({
-      company,
-      branchCount: branchCountByCompany.get(company.id) ?? 0,
-      staffCount: staffCountByCompany.get(company.id) ?? 0,
-    }));
+    // صورة الشركة (ADR-0031 — "أسهل وأسرع طريقة" بطلب صريح من المالك): مفيش رفع/تخزين منفصل
+    // للشركة خالص — بنستخدم أفتار المالك (owner_user_id) المعتمد نفسه، نفس فلسفة "الصورة اللي
+    // اتفرفعت وقت التحقق" لأن المالك أصلاً فني عادي عدّى بنفس مسار رفع/اعتماد صورة Slice A.
+    // صفر عمود/endpoint/رفع جديد — استخدام مباشر لـusers.avatar_storage_key الموجود بالفعل.
+    const ownerUserIds = companies.map((c) => c.ownerUserId);
+    const owners = await this.users.find({ where: { id: In(ownerUserIds) } });
+    const ownerById = new Map(owners.map((u) => [u.id, u]));
+
+    return companies.map((company) => {
+      const owner = ownerById.get(company.ownerUserId);
+      return {
+        company,
+        branchCount: branchCountByCompany.get(company.id) ?? 0,
+        staffCount: staffCountByCompany.get(company.id) ?? 0,
+        ownerAvatarUrl: owner?.avatarUrl ?? null,
+        ownerAvatarStorageKey: owner?.avatarStorageKey ?? null,
+      };
+    });
   }
 
   // "اعتماد" (docs/06 §1.5) — العميل يتصفّح الشركات/الفرق النشطة عشان يختار واحدة يحجزها كاملة
   // بدل ما يسيب المطابقة تختار. عام لأي عميل (@Roles(CUSTOMER) على الـ controller)، مقصور على
   // الشركات النشطة بس (عكس listForAdmin اللي بيرجّع الكل للإشراف).
-  async listActiveForCustomers(): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
+  async listActiveForCustomers(): Promise<
+    { company: TechnicianCompany; branchCount: number; staffCount: number; ownerAvatarUrl: string | null; ownerAvatarStorageKey: string | null }[]
+  > {
     const companies = await this.companies.find({ where: { isActive: true }, order: { createdAt: 'DESC' } });
     return this.countBranchesAndStaff(companies);
   }

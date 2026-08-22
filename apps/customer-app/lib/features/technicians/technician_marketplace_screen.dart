@@ -12,7 +12,9 @@ import 'technician_profile_screen.dart';
 import 'technicians_repository.dart';
 
 // دالة اختيار موحّدة (docs/08 §38): إما فني فرد (id, isCompany:false) أو شركة (id, isCompany:true).
-typedef TechnicianOrCompanySelected = void Function(String id, bool isCompany);
+// الباراميتر التالت (ADR-0030 Slice D) بيحمل التاريخ الفعّال وقت الاختيار — ممكن يكون مختلف عن
+// requestedAt الأصلي لو العميل جرّب "احجزه في المعاد ده بدلاً" على كارت متعارض جدوليًا.
+typedef TechnicianOrCompanySelected = void Function(String id, bool isCompany, DateTime? effectiveRequestedAt);
 
 enum TechnicianSortOption { recommended, lowestPrice, highestRating }
 
@@ -71,10 +73,16 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
   bool _loading = false;
   String? _error;
   TechnicianSortOption _sort = TechnicianSortOption.recommended;
+  // ADR-0030 Slice D — "احجزه في المعاد ده بدلاً" على كارت متعارض جدوليًا بيغيّر التاريخ الفعّال
+  // هنا محليًا (بيعيد تحميل القايمة بيه) بدل ما يفتح شاشة جدولة منفصلة — نفس شاشة المقارنة،
+  // بس بتاريخ جديد. لو العميل اختار فعلاً بعد كده، لازم CreateOrderScreen ياخد التاريخ الجديد ده
+  // مش widget.requestedAt الأصلي، فبيتبعت مع onSelect.
+  late DateTime? _effectiveRequestedAt;
 
   @override
   void initState() {
     super.initState();
+    _effectiveRequestedAt = widget.requestedAt;
     _repository = TechniciansRepository(context.read<AuthRepository>());
     _load();
   }
@@ -88,7 +96,7 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
         excludeTechnicianId: widget.excludeTechnicianId,
         fieldValues: widget.fieldValues,
         sort: _sort.apiValue,
-        scheduledAt: widget.requestedAt,
+        scheduledAt: _effectiveRequestedAt,
         bookingMode: widget.bookingMode,
       );
       if (mounted) setState(() => _technicians = items);
@@ -109,6 +117,17 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
     _load();
   }
 
+  void _tryNextAvailable(DateTime availableAgainAt) {
+    setState(() {
+      _effectiveRequestedAt = availableAgainAt;
+      _technicians = null;
+      _error = null;
+    });
+    _load();
+  }
+
+  void _select(String id, bool isCompany) => widget.onSelect(id, isCompany, _effectiveRequestedAt);
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -123,13 +142,37 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
         ),
         body: Column(
           children: [
+            if (_effectiveRequestedAt != widget.requestedAt)
+              Material(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.event_available_outlined, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text('بتشوف الفنيين المتاحين في ${_formatDateTime(_effectiveRequestedAt!)}')),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _effectiveRequestedAt = widget.requestedAt;
+                            _technicians = null;
+                          });
+                          _load();
+                        },
+                        child: const Text('رجوع للمعاد الأصلي'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    _technicians != null ? '${_technicians!.length} فني متاح' : ' ',
+                    _technicians != null ? _countLabel(_technicians!) : ' ',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   DropdownButton<TechnicianSortOption>(
@@ -173,9 +216,13 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
 
   Widget _buildCard(TechnicianBookingListItem t) {
     if (t.isCompany) return _buildCompanyCard(t);
+    final conflicted = t.isScheduleConflicted;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
+      color: conflicted ? Theme.of(context).colorScheme.surfaceContainerHighest : null,
+      child: Opacity(
+        opacity: conflicted ? 0.7 : 1,
+        child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -206,6 +253,25 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                           ),
                         ],
                       ),
+                      if (conflicted)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 6,
+                            children: [
+                              Chip(
+                                avatar: const Icon(Icons.event_busy_outlined, size: 16),
+                                label: const Text('مش متاح للفترة دي'),
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                              ),
+                              if (t.unavailableReasonAr != null)
+                                Text(t.unavailableReasonAr!, style: const TextStyle(fontSize: 12)),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 4),
                       Row(
                         children: [
@@ -267,18 +333,42 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                       ),
                       child: const Text('البروفايل'),
                     ),
-                    FilledButton(
-                      onPressed: () => widget.onSelect(t.id, false),
-                      child: const Text('اختار'),
-                    ),
+                    if (!conflicted)
+                      FilledButton(
+                        onPressed: () => _select(t.id, false),
+                        child: const Text('اختار'),
+                      )
+                    else if (t.availableAgainAt != null)
+                      FilledButton.tonal(
+                        onPressed: () => _tryNextAvailable(t.availableAgainAt!),
+                        child: Text('جرّب ${_formatDateTime(t.availableAgainAt!)}'),
+                      ),
                   ],
                 ),
               ],
             ),
+            if (conflicted && t.availableAgainAt == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text('معاد التوافر الجاي مش معروف دلوقتي', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
           ],
+        ),
         ),
       ),
     );
+  }
+
+  String _formatDateTime(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.day}/${local.month} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _countLabel(List<TechnicianBookingListItem> items) {
+    final conflictedCount = items.where((t) => t.isScheduleConflicted).length;
+    final availableCount = items.length - conflictedCount;
+    if (conflictedCount == 0) return '$availableCount فني متاح';
+    return '$availableCount متاح · $conflictedCount مش متاح للفترة دي';
   }
 
   // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — كارت مستقل عمداً بدل تعقيد _buildCard
@@ -341,7 +431,7 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                   Align(
                     alignment: AlignmentDirectional.centerEnd,
                     child: FilledButton(
-                      onPressed: () => widget.onSelect(c.id, true),
+                      onPressed: () => _select(c.id, true),
                       child: const Text('اختار'),
                     ),
                   ),

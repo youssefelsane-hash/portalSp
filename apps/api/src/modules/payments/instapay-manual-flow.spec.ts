@@ -5,7 +5,6 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment
 import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
-import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 
@@ -145,7 +144,6 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
-      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       {} as never,
       {} as never,
@@ -292,7 +290,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       expect(rejected.failedAt).not.toBeNull();
       expect(eventsEmit).toHaveBeenCalledWith(
         'payment.instapay_rejected',
-        expect.objectContaining({ referenceType: 'order', referenceId: ids.order, reason: 'الكود المرجعي مش مطابق' }),
+        expect.objectContaining({ orderId: ids.order, reason: 'الكود المرجعي مش مطابق' }),
       );
 
       const [row] = await dataSource.query(`SELECT payment_status, failure_code FROM payments WHERE id = $1`, [

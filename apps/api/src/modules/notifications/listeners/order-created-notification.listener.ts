@@ -24,17 +24,11 @@ export class OrderCreatedNotificationListener {
       if (!order) return; // اتلغى/اتحذف قبل ما نوصله — مش خطأ نستحق نسجّله
 
       const customer = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
-      // هجرة حجز الشغالة (ADR-0029، docs/08 §42 Phase A.4 Slice 2) — طلب بفني (شغالة) مُتفَق عليه
-      // مسبقًا (زيرو مطابقة تلقائية) بيوصل هنا أصلاً ACCEPTED، مش SEARCHING_TECHNICIAN — رسالة
-      // "بندوّرلك على فني" مضلّلة وغلط هنا، الفني معروف بالفعل.
-      const isDomesticWorkerAssignment = order.domesticWorkerProfileId !== null;
       await this.notificationsService.notify({
         userId: customer.userId,
         notificationType: 'order_created',
-        titleAr: isDomesticWorkerAssignment ? 'حجزك اتأكّد' : 'طلبك اتسجّل بنجاح',
-        bodyAr: isDomesticWorkerAssignment
-          ? `حجز رقم ${order.orderNumber} — الفني اللي اخترته اتأكّد على الموعد ده.`
-          : `طلب رقم ${order.orderNumber} — بندوّرلك على أقرب فني متاح دلوقتي.`,
+        titleAr: 'طلبك اتسجّل بنجاح',
+        bodyAr: `طلب رقم ${order.orderNumber} — بندوّرلك على أقرب فني متاح دلوقتي.`,
         referenceType: 'order',
         referenceId: order.id,
         deepLink: `/orders/${order.id}`,

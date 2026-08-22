@@ -868,3 +868,37 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   `scheduledAt` صفر تأثير).
 - **خارج نطاق الشريحة دي عمدًا**: تصفح الشغالة (Slice C — كان صفر تعارض قبل ADR-0030 Slice A،
   المحرك كله لازم يتبني من الصفر بدقة ساعة)، واجهة Flutter (Slice D).
+
+## ظهور صورة البروفايل — كانت بَقّة حقيقية لأي فني (ADR-0031)
+
+**اكتشاف حي (بلاغ مالك 2026-08-21)**: مستند `TechnicianDocumentType.PHOTO` ("صورة شخصية") كان
+بيتعامل زي أي مستند KYC عادي (`technician_documents`، مراجعة أدمن) — **صفر ربط بـ`users.avatar_url`
+في أي مكان بالكود**، لا وقت الرفع ولا وقت الاعتماد. أخطر من كده: `apps/technician-app`'s
+`_VerificationGate` (`main.dart`) بتوجّه أي فني `approved` مباشرة لـ`AvailableOrdersScreen` للأبد —
+`OnboardingScreen` (المكان الوحيد اللي فيه رفع مستندات) بتختفي تمامًا بعد أول اعتماد، يعني فني
+معتمد معندوش أي طريقة يغيّر/يشوف صورته من التطبيق خالص.
+
+- **`users.avatar_storage_key`** (عمود جديد، migration 0168) — المصدر المعتمد (بعد موافقة الأدمن)،
+  storage key ثابت مش رابط presigned جاهز (بينتهي بعد 7 أيام في S3 — نفس نمط
+  `branding_assets`/`technician_documents`/`technician_certificates` بالحرف).
+  `AdminTechniciansService.reviewDocument()` بيحدّثه بس لما يعتمد مستند `documentType=photo`.
+- **`resolveAvatarUrl(storage, avatarUrl, avatarStorageKey)`** جديدة (`common/storage/`) —
+  `avatarStorageKey` موجود → `storage.getUrl()` طازج دايمًا؛ غير كده → `avatarUrl` الخام كما هو
+  (توافق خلفي). متوصّلة لأهم سطحين "العميل بيتصفّح/يختار مزوّد": `GET /technicians/:id/profile`
+  (كان أصلاً async+storage-aware للشهادات) و`GET /services/:id/technicians` (`CatalogController`
+  بقى محتاج `StorageService` جديد، بيحلّ كل الصفوف دفعة واحدة بـ`Promise.all` بعد الاستعلام).
+- **معاينة ذاتية فورية منفصلة تمامًا** — `GET /technician/me` بيرجّع `avatar_url` = آخر مستند
+  `photo` رفعه الفني نفسه (`TechnicianDocumentsService.findLatestOfType()` جديدة)، **بغض النظر
+  عن حالة المراجعة** — الفني بيشوف اللي رفعه هو فورًا، بلا أي بوابة اعتماد. مصدر مختلف تمامًا عن
+  `avatar_storage_key` فوق (اللي بس بيتحدّث بعد الاعتماد، للعميل).
+- **`ProfileScreen` (`apps/technician-app`)** — كانت شاشة "بروفايلي" بلا أي عرض/رفع صورة خالص.
+  بقى فيها `CircleAvatar` (من `TechnicianMe.avatarUrl` الجديد) + زرار كاميرا صغير بيعيد استخدام
+  `OnboardingRepository.uploadDocument(documentType:'photo')` الموجودة أصلاً — صفر endpoint جديد،
+  صفر منطق رفع مكرر.
+- **خارج نطاق الإصلاح ده عمدًا**: سطوح داخلية تانية (`favorites`، `order-team`/team recruit) لسه
+  بتعرض `avatar_url` الخام بلا resolve — مش "تصفّح/اختيار مزوّد" مباشر، مؤجّلة (ADR-0031 Slice G).
+- اختبار حي جديد: `avatar-visibility.spec.ts` (5/5) — معاينة ذاتية فورية بغض النظر عن حالة
+  المراجعة، `avatar_storage_key` بيتحدّث بس عند الاعتماد (مش الرفض)، `resolveAvatarUrl()` أولوية
+  المفتاح على الرابط الخام. صفر رجريشن على `technicians`/`catalog`/`auth` بالكامل (171/171).
+- **ده جزء من تصحيح اتجاه Phase A.4 الأكبر (إلغاء بنية الشغالة المنفصلة، مش نقلها) — التفاصيل
+  الكاملة في `docs/adr/0031-unified-provider-system-and-avatar-visibility.md`.**

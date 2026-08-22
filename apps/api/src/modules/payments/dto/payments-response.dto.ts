@@ -57,9 +57,7 @@ export function toWalletTransactionResponseDto(tx: WalletTransaction): WalletTra
 export interface PaymentResponseDto {
   id: string;
   payment_number: string;
-  /** null لو الدفعة دي لحجز خدمة منزلية بدل طلب — راجع domestic_worker_booking_id (docs/adr/0019). */
   order_id: string | null;
-  domestic_worker_booking_id: string | null;
   amount_cents: number;
   payment_method: string;
   payment_status: string;
@@ -76,7 +74,6 @@ export function toPaymentResponseDto(payment: Payment): PaymentResponseDto {
     id: payment.id,
     payment_number: payment.paymentNumber,
     order_id: payment.orderId,
-    domestic_worker_booking_id: payment.domesticWorkerBookingId,
     amount_cents: payment.amountCents,
     payment_method: payment.paymentMethod,
     payment_status: payment.paymentStatus,
@@ -202,9 +199,7 @@ export interface RefundResponseDto {
   id: string;
   refund_number: string;
   payment_id: string;
-  /** null لو الاسترداد ده لحجز خدمة منزلية بدل طلب — راجع domestic_worker_booking_id (docs/adr/0019). */
   order_id: string | null;
-  domestic_worker_booking_id: string | null;
   amount_cents: number;
   refund_type: string;
   refund_method: string;
@@ -221,7 +216,6 @@ export function toRefundResponseDto(refund: Refund): RefundResponseDto {
     refund_number: refund.refundNumber,
     payment_id: refund.paymentId,
     order_id: refund.orderId,
-    domestic_worker_booking_id: refund.domesticWorkerBookingId,
     amount_cents: refund.amountCents,
     refund_type: refund.refundType,
     refund_method: refund.refundMethod,

@@ -31,6 +31,9 @@ export interface TechnicianBookingListItem {
   technicianId: string;
   fullName: string;
   avatarUrl: string | null;
+  // ADR-0031 — لو موجود، ده المصدر الرسمي المعتمد (بيتفك لرابط طازة عبر storage.getUrl() في
+  // catalog.controller.ts قبل الرد، مش avatarUrl الخام مباشرة — presigned URLs بتنتهي).
+  avatarStorageKey: string | null;
   bio: string | null;
   averageRating: number;
   totalRatingsCount: number;
@@ -365,6 +368,7 @@ export class TechniciansService {
       technician_id: string;
       full_name: string;
       avatar_url: string | null;
+      avatar_storage_key: string | null;
       bio: string | null;
       average_rating: string;
       total_ratings_count: number;
@@ -377,7 +381,7 @@ export class TechniciansService {
     }
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
-      SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
+      SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
@@ -473,6 +477,7 @@ export class TechniciansService {
       technicianId: row.technician_id,
       fullName: row.full_name,
       avatarUrl: row.avatar_url,
+      avatarStorageKey: row.avatar_storage_key,
       bio: row.bio,
       averageRating: Number(row.average_rating),
       totalRatingsCount: row.total_ratings_count,
@@ -587,6 +592,7 @@ export class TechniciansService {
       technicianId: row.company_id,
       fullName: row.name,
       avatarUrl: null,
+      avatarStorageKey: null,
       bio: null,
       averageRating: row.avg_rating !== null ? Number(row.avg_rating) : 0,
       totalRatingsCount: row.total_ratings !== null ? Number(row.total_ratings) : 0,
@@ -642,6 +648,7 @@ export class TechniciansService {
       technician_id: string;
       full_name: string;
       avatar_url: string | null;
+      avatar_storage_key: string | null;
       bio: string | null;
       average_rating: string;
       total_ratings_count: number;
@@ -651,7 +658,7 @@ export class TechniciansService {
     }
     const rows = await this.technicianProfiles.manager.query<ConflictedRow[]>(
       `
-      SELECT tp.id AS technician_id, u.full_name, u.avatar_url, tp.bio,
+      SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier
       FROM technician_profiles tp
@@ -721,6 +728,7 @@ export class TechniciansService {
           technicianId: row.technician_id,
           fullName: row.full_name,
           avatarUrl: row.avatar_url,
+          avatarStorageKey: row.avatar_storage_key,
           bio: row.bio,
           averageRating: Number(row.average_rating),
           totalRatingsCount: row.total_ratings_count,
@@ -826,6 +834,7 @@ export class TechniciansService {
     profile: TechnicianProfile;
     fullName: string;
     avatarUrl: string | null;
+    avatarStorageKey: string | null;
     zones: { id: string; nameAr: string }[];
     services: { id: string; nameAr: string; basePriceCents: number }[];
     recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
@@ -840,9 +849,10 @@ export class TechniciansService {
     interface UserRow {
       full_name: string;
       avatar_url: string | null;
+      avatar_storage_key: string | null;
     }
     const [user] = await this.technicianProfiles.manager.query<UserRow[]>(
-      `SELECT full_name, avatar_url FROM users u JOIN technician_profiles tp ON tp.user_id = u.id WHERE tp.id = $1`,
+      `SELECT full_name, avatar_url, avatar_storage_key FROM users u JOIN technician_profiles tp ON tp.user_id = u.id WHERE tp.id = $1`,
       [technicianProfileId],
     );
 
@@ -928,6 +938,7 @@ export class TechniciansService {
       profile,
       fullName: user.full_name,
       avatarUrl: user.avatar_url,
+      avatarStorageKey: user.avatar_storage_key,
       zones: zones.map((z) => ({ id: z.id, nameAr: z.name_ar })),
       services: services.map((s) => ({ id: s.id, nameAr: s.name_ar, basePriceCents: s.base_price_cents })),
       portfolioLinks,

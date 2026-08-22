@@ -706,3 +706,16 @@ BookingMode.TEAM`. `individual`/`emergency` بلا أي تغيير. نفس ال�
   الإعداد مفعّل = تقييم أعلى ياخد أولوية، فني جديد بصفر تقييمات محايد (مش معاقَب كإنه "تقييمه صفر").
   اتأكد كمان زيرو رجريشن في `matching-fairness-scoring`/`matching-workload-balance`/
   `matching.service`/`matching-explainability` (29/29).
+
+## فجوة موثّقة: `runId` مبني على `Date.now().toString(36)` بيتقطع في `matching-accept-concurrency.spec.ts`
+
+اكتُشفت 2026-08-22 أثناء تحقيق ADR-0031 (مش لها أي علاقة بيه). دالة `insertOrder()` بتبني
+`order_number` بالشكل `` `P7-${label}-${runId}`.slice(0, 24) `` حيث `runId = Date.now().toString(36)`
+(12 خانة تقريبًا، مش عشوائي حقيقي زي `randomUUID()` المستخدم في specs تانية). لبعض الـlabels
+الطويلة (زي `expired-still-valid`) الـ`slice(0,24)` بتقطع كل `runId` تقريبًا وتسيب حرف واحد بس —
+وده الحرف الأكثر دلالة (leading digit) اللي بيفضل ثابت لملايين السنين مش بيتغيّر مع الوقت الفعلي.
+النتيجة: أي تشغيل تاني لنفس الملف بعد تشغيل ناجح سابق (من غير تنضيف يدوي) بيصطدم بـ
+`orders_order_number_key` unique constraint على نفس الـorder_number القديم. اتأكدت إنها مش رجريشن
+من شغل ADR-0031 (الدالة والـrunId موجودين قبل أي تعديل في السيشن ده، ومفيهاش أي علاقة بمنطق
+الشغالة/الفني الموحّد). الإصلاح الصح: استبدال `runId` بـ`randomUUID()` زي باقي الـspecs — لسه
+مفتوحة، مش حرجة (بتفشل بس لو الملف اتشغّل أكتر من مرة في نفس الجلسة من غير تنضيف يدوي للـDB).

@@ -19,18 +19,17 @@ export class PaymentInstaPayRejectedNotificationListener {
   async handle(event: PaymentInstaPayRejectedEvent): Promise<void> {
     try {
       const customer = await this.customerProfiles.findByProfileIdOrThrow(event.customerId);
-      const deepLinkBase = event.referenceType === 'order' ? '/orders' : '/domestic-worker-bookings';
       await this.notificationsService.notify({
         userId: customer.userId,
         notificationType: 'payment_instapay_rejected',
         titleAr: 'مقدرناش نأكّد تحويل InstaPay',
         bodyAr: `${event.reason} — تقدر تعيد التحويل صح أو تختار وسيلة دفع تانية.`,
-        referenceType: event.referenceType,
-        referenceId: event.referenceId,
-        deepLink: `${deepLinkBase}/${event.referenceId}`,
+        referenceType: 'order',
+        referenceId: event.orderId,
+        deepLink: `/orders/${event.orderId}`,
       });
     } catch (err) {
-      this.logger.error(`فشل إشعار رفض InstaPay ${event.referenceId}`, err instanceof Error ? err.stack : err);
+      this.logger.error(`فشل إشعار رفض InstaPay ${event.orderId}`, err instanceof Error ? err.stack : err);
     }
   }
 }

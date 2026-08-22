@@ -29,18 +29,23 @@ export interface PublicCompanyResponseDto {
   name: string;
   branch_count: number;
   staff_count: number;
+  // صورة الشركة (ADR-0031) — أفتار المالك المعتمد نفسه، مفيش رفع منفصل للشركة. الرابط بيتفك طازة
+  // في الـcontroller (resolveAvatarUrl) قبل ما يتحط هنا — راجع company-response.dto.ts caller.
+  avatar_url: string | null;
 }
 
 export function toPublicCompanyResponseDto(
   company: TechnicianCompany,
   branchCount: number,
   staffCount: number,
+  ownerAvatarUrl: string | null,
 ): PublicCompanyResponseDto {
   return {
     id: company.id,
     name: company.name,
     branch_count: branchCount,
     staff_count: staffCount,
+    avatar_url: ownerAvatarUrl,
   };
 }
 

@@ -1,3 +1,4 @@
+import { resolveAvatarUrl } from '../../../common/storage/resolve-avatar-url';
 import { StorageService } from '../../../common/storage/storage.service';
 import { TechnicianProfile } from '../entities/technician-profile.entity';
 import { TechnicianPortfolioLink } from '../entities/technician-portfolio-link.entity';
@@ -36,6 +37,7 @@ export async function toPublicTechnicianProfileResponseDto(
     profile: TechnicianProfile;
     fullName: string;
     avatarUrl: string | null;
+    avatarStorageKey: string | null;
     zones: { id: string; nameAr: string }[];
     services: { id: string; nameAr: string; basePriceCents: number }[];
     recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
@@ -55,7 +57,7 @@ export async function toPublicTechnicianProfileResponseDto(
     id: profile.id,
     technician_code: profile.technicianCode,
     full_name: data.fullName,
-    avatar_url: data.avatarUrl,
+    avatar_url: await resolveAvatarUrl(storage, data.avatarUrl, data.avatarStorageKey),
     bio: profile.bio,
     years_of_experience: profile.yearsOfExperience,
     verification_status: profile.verificationStatus,

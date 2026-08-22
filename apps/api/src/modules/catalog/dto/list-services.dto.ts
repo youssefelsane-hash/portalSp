@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsIn, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsIn, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { TechnicianLevel, TechnicianPricingTier } from '../../technicians/entities/technician-profile.entity';
 
 // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار اللي العميل بيختار منهم قبل ما يشوف الخدمات.
@@ -71,4 +71,11 @@ export class EstimateQueryDto {
   })
   @IsObject()
   field_values?: Record<string, string | number | boolean>;
+
+  // دقة الوقت (ADR-0031 Slice B/H) — بس لخدمات pricing_model=hourly، اختياري بالكامل (خدمة
+  // hourly من غيرها بترجع سعر الساعة الخام زي ما كان). راجع CatalogService.estimate().
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  duration_hours?: number;
 }

@@ -6,7 +6,6 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment
 import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
-import { DomesticWorkerBooking } from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { Wallet, PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { WalletsService } from './wallets.service';
@@ -199,7 +198,6 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       dataSource.getRepository(Refund),
       dataSource.getRepository(User),
       dataSource.getRepository(WebhookEvent),
-      dataSource.getRepository(DomesticWorkerBooking),
       dataSource,
       walletsService,
       catalogService,

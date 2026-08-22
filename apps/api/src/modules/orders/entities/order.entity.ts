@@ -147,16 +147,10 @@ export class Order {
   @Column({ name: 'deposit_amount_cents', type: 'integer', nullable: true })
   depositAmountCents: number | null;
 
-  // هجرة حجز الشغالة للمحرك الموحّد (ADR-0029، docs/08 §42 Phase A.4 Slice 1) — مرجع الفني
-  // (الشغالة) لطلب بخدمة pricingModel=worker_rate. مش مقروء/مكتوب من أي كود لسه (Slice 2).
-  // طلب بالعمود ده مش null لازم technicianId يفضل null دايمًا (قاعدة عمل، مش DB constraint).
-  @Column({ name: 'domestic_worker_profile_id', type: 'uuid', nullable: true })
-  domesticWorkerProfileId: string | null;
-
-  // ADR-0030 — كان ناقص من Slice 2a (اتحسب للسعر بس واتفقد). لازم لفحص التعارض الجدولي
-  // (DomesticWorkersService.assertNoSchedulingConflict()) ولأي عرض مستقبلي لمدى وقت الحجز.
-  @Column({ name: 'domestic_worker_duration_hours', type: 'smallint', nullable: true })
-  domesticWorkerDurationHours: number | null;
+  // دقة الوقت (ADR-0031 Slice B) — مدة الحجز بالساعات، بس لخدمات service.requiresPreciseSchedule=true
+  // (نفس العمود كان domestic_worker_duration_hours، معمّم بعد إلغاء بنية الشغالة المنفصلة).
+  @Column({ name: 'duration_hours', type: 'smallint', nullable: true })
+  durationHours: number | null;
 
   // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم دي snapshot وقت الحجز من
   // CatalogService.estimateDuration()، مش مربوطة ديناميكياً بـservice_standard_data بعد كده

@@ -17,18 +17,9 @@ import {
   PAYMENT_INSTAPAY_TRANSFER_REPORTED_EVENT,
   PaymentInstaPayTransferReportedEvent,
 } from '../../common/events/payment-instapay-transfer-reported.event';
-import {
-  DOMESTIC_WORKER_BOOKING_PAYMENT_CONFIRMED_EVENT,
-  DomesticWorkerBookingPaymentConfirmedEvent,
-} from '../../common/events/domestic-worker-booking-payment-confirmed.event';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
-import {
-  DomesticWorkerBooking,
-  DomesticWorkerBookingStatus,
-  DomesticWorkerBookingType,
-} from '../domestic-workers/entities/domestic-worker-booking.entity';
 import { LoyaltySource } from '../promotions/entities/loyalty-transaction.entity';
 import { LoyaltyService } from '../promotions/loyalty.service';
 import { SettingsService } from '../settings/settings.service';
@@ -80,7 +71,6 @@ export class PaymentsService {
     @InjectRepository(Refund) private readonly refunds: Repository<Refund>,
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(WebhookEvent) private readonly webhookEvents: Repository<WebhookEvent>,
-    @InjectRepository(DomesticWorkerBooking) private readonly domesticWorkerBookings: Repository<DomesticWorkerBooking>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly walletsService: WalletsService,
     private readonly catalogService: CatalogService,
@@ -689,10 +679,8 @@ export class PaymentsService {
 
     const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(payment.customerId);
     const user = await this.users.findOne({ where: { id: customerProfile.userId } });
-    // مرجع بشري نصي بس (بيتعرض للعميل/البوابة) — طلب عادي أو حجز خدمة منزلية (docs/adr/0019).
-    const referenceNumber = payment.orderId
-      ? (await this.orders.findOne({ where: { id: payment.orderId } }))?.orderNumber
-      : (await this.domesticWorkerBookings.findOne({ where: { id: payment.domesticWorkerBookingId! } }))?.bookingNumber;
+    // مرجع بشري نصي بس (بيتعرض للعميل/البوابة).
+    const referenceNumber = (await this.orders.findOne({ where: { id: payment.orderId! } }))?.orderNumber;
     if (!user || !referenceNumber) {
       throw new ApiException(ErrorCode.VAL_001, 'بيانات الدفعة غير مكتملة لإعادة المحاولة', HttpStatus.CONFLICT);
     }
@@ -854,113 +842,6 @@ export class PaymentsService {
   }
 
   /**
-   * بدء دفع InstaPay لحجز خدمة منزلية بعد ما الشغالة توافق (status=awaiting_payment) — إعادة
-   * استخدام PaymentProviderRegistry/InstaPayProvider ونفس منطق idempotency في payWithProvider
-   * بالحرف، بس بيتحقق من ملكية/حالة الحجز بدل الطلب (docs/adr/0019). مفيش endpoint مواز لكارت/فوري
-   * هنا عمدًا — التوجيه صريح بإعادة استخدام InstaPay بس.
-   */
-  async payDomesticWorkerBookingWithInstaPay(
-    userId: string,
-    bookingId: string,
-    idempotencyKey: string,
-  ): Promise<{ payment: Payment; referenceCode: string; instructionsAr: string }> {
-    const { payment, result } = await this.payDomesticWorkerBookingWithProvider(
-      userId,
-      bookingId,
-      idempotencyKey,
-      PaymentMethod.INSTAPAY,
-    );
-    if (result.kind !== 'reference') {
-      throw new Error('InstaPay provider لازم يرجّع reference دايماً — نتيجة غير متوقعة');
-    }
-    return { payment, referenceCode: result.referenceCode, instructionsAr: result.instructionsAr };
-  }
-
-  private async payDomesticWorkerBookingWithProvider(
-    userId: string,
-    bookingId: string,
-    idempotencyKey: string,
-    method: PaymentMethod,
-  ): Promise<{ payment: Payment; result: import('./gateways/payment-provider.interface').CreatePaymentResult }> {
-    const provider = this.paymentProviders.getProvider(method);
-
-    const existing = await this.payments.findOne({ where: { idempotencyKey } });
-    if (existing) {
-      if (existing.domesticWorkerBookingId !== bookingId) {
-        throw new ApiException(ErrorCode.PAY_003, 'مفتاح idempotency ده مستخدم قبل كده لحجز مختلف', HttpStatus.CONFLICT);
-      }
-      const cachedResult = (existing.gatewayResponse as { cached_result?: unknown } | null)?.cached_result;
-      if (cachedResult) {
-        return {
-          payment: existing,
-          result: cachedResult as import('./gateways/payment-provider.interface').CreatePaymentResult,
-        };
-      }
-      if (existing.paymentStatus === PaymentGatewayStatus.PROCESSING) {
-        throw new ApiException(
-          ErrorCode.PAY_003,
-          'نتيجة محاولة الدفع السابقة لسه قيد التحقق عند البوابة — لا تعيد الدفع الآن',
-          HttpStatus.CONFLICT,
-        );
-      }
-      if (existing.paymentStatus !== PaymentGatewayStatus.PENDING && existing.paymentStatus !== PaymentGatewayStatus.FAILED) {
-        throw new ApiException(ErrorCode.PAY_003, 'الدفعة دي في حالة نهائية بالفعل', HttpStatus.CONFLICT);
-      }
-      return { payment: existing, result: await this.initiateProviderCharge(existing, method) };
-    }
-
-    if (!provider.isConfigured) {
-      throw new ApiException(ErrorCode.PAY_001, `الدفع بـ${method} مش متاح دلوقتي — جرّب طريقة تانية`, HttpStatus.SERVICE_UNAVAILABLE);
-    }
-
-    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
-    const booking = await this.domesticWorkerBookings.findOne({ where: { id: bookingId, customerId: customerProfile.id } });
-    if (!booking) {
-      throw new ApiException(ErrorCode.VAL_001, 'الحجز غير موجود', HttpStatus.NOT_FOUND);
-    }
-    if (booking.status !== DomesticWorkerBookingStatus.AWAITING_PAYMENT) {
-      throw new ApiException(ErrorCode.VAL_001, 'الحجز مش في حالة انتظار دفع', HttpStatus.CONFLICT);
-    }
-
-    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
-    const payment = this.payments.create({
-      paymentNumber,
-      orderId: null,
-      domesticWorkerBookingId: booking.id,
-      customerId: customerProfile.id,
-      amountCents: booking.priceCents,
-      paymentMethod: method,
-      paymentGateway: provider.providerKey,
-      paymentStatus: PaymentGatewayStatus.PENDING,
-      idempotencyKey,
-    });
-    await this.payments.save(payment);
-
-    return { payment, result: await this.initiateProviderCharge(payment, method) };
-  }
-
-  /** نسخة الحجز من confirmInstaPayTransferByCustomer فوق — نفس المنطق بالحرف (docs/adr/0019). */
-  async confirmDomesticWorkerBookingInstaPayTransferByCustomer(userId: string, bookingId: string): Promise<Payment> {
-    const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
-    const booking = await this.domesticWorkerBookings.findOne({ where: { id: bookingId, customerId: customerProfile.id } });
-    if (!booking) {
-      throw new ApiException(ErrorCode.VAL_001, 'الحجز غير موجود', HttpStatus.NOT_FOUND);
-    }
-    const payment = await this.payments.findOne({
-      where: { domesticWorkerBookingId: bookingId, paymentMethod: PaymentMethod.INSTAPAY, paymentStatus: PaymentGatewayStatus.PENDING },
-      order: { initiatedAt: 'DESC' },
-    });
-    if (!payment) {
-      throw new ApiException(ErrorCode.PAY_003, 'مفيش دفعة InstaPay معلّقة للحجز ده', HttpStatus.CONFLICT);
-    }
-    if (!payment.customerConfirmedTransferAt) {
-      payment.customerConfirmedTransferAt = new Date();
-      await this.payments.save(payment);
-    }
-    return payment;
-  }
-
-  /**
    * رفض إداري لدفعة InstaPay معلّقة (مقابل confirmInstaPayPayment) — كانت فجوة حقيقية: التأكيد
    * موجود بس الرفض لأ، بعكس طلبات الصرف اللي عندها approve/reject/complete. الدفعة بترجع
    * `failed` (سبب/نص حر من الأدمن)، الطلب يفضل PENDING_PAYMENT (العميل يقدر يعيد المحاولة
@@ -1008,7 +889,6 @@ export class PaymentsService {
             payment_status: lockedPayment.paymentStatus,
             reason,
             order_id: lockedPayment.orderId,
-            domestic_worker_booking_id: lockedPayment.domesticWorkerBookingId,
             reference: lockedPayment.gatewayReference,
           },
           meta,
@@ -1018,12 +898,7 @@ export class PaymentsService {
 
       this.events.emit(
         PAYMENT_INSTAPAY_REJECTED_EVENT,
-        new PaymentInstaPayRejectedEvent(
-          lockedPayment.orderId ? 'order' : 'domestic_worker_booking',
-          (lockedPayment.orderId ?? lockedPayment.domesticWorkerBookingId)!,
-          lockedPayment.customerId,
-          reason,
-        ),
+        new PaymentInstaPayRejectedEvent(lockedPayment.orderId!, lockedPayment.customerId, reason),
       );
 
       return lockedPayment;
@@ -1040,7 +915,7 @@ export class PaymentsService {
   async confirmInstaPayPayment(adminUserId: string, paymentId: string, meta?: AuditActorMeta): Promise<Payment> {
     const previousStatus = (await this.payments.findOne({ where: { id: paymentId } }))?.paymentStatus ?? null;
 
-    const { payment, dispatchInfo, bookingPaymentConfirmed } = await this.dataSource.transaction(async (manager) => {
+    const { payment, dispatchInfo } = await this.dataSource.transaction(async (manager) => {
       const lockedPayment = await manager
         .createQueryBuilder(Payment, 'p')
         .setLock('pessimistic_write')
@@ -1065,7 +940,6 @@ export class PaymentsService {
               payment_status: lockedPayment.paymentStatus,
               amount_cents: lockedPayment.amountCents,
               order_id: lockedPayment.orderId,
-              domestic_worker_booking_id: lockedPayment.domesticWorkerBookingId,
               reference: lockedPayment.gatewayReference,
             },
             meta,
@@ -1075,45 +949,13 @@ export class PaymentsService {
       if (lockedPayment.paymentStatus !== PaymentGatewayStatus.PENDING) {
         // Idempotency — نقر مزدوج/إعادة إرسال بيرجع نفس الدفعة من غير أي أثر مالي إضافي.
         await recordAudit();
-        return { payment: lockedPayment, dispatchInfo: null, bookingPaymentConfirmed: null };
+        return { payment: lockedPayment, dispatchInfo: null };
       }
 
       lockedPayment.paymentStatus = PaymentGatewayStatus.SUCCEEDED;
       lockedPayment.completedAt = new Date();
       lockedPayment.collectedByUserId = adminUserId;
       await manager.save(lockedPayment);
-
-      // حجز خدمة منزلية (docs/adr/0019) — مسار أبسط بكتير من الطلب: بلا أي توزيع/matching (الشغالة
-      // اتحددت وقت الحجز نفسه)، بس تحويل حالة الحجز من "انتظار دفع" لـ"دفع مؤكّد".
-      if (!lockedPayment.orderId) {
-        const lockedBooking = await manager
-          .createQueryBuilder(DomesticWorkerBooking, 'b')
-          .setLock('pessimistic_write')
-          .where('b.id = :bookingId', { bookingId: lockedPayment.domesticWorkerBookingId! })
-          .getOne();
-        if (!lockedBooking) {
-          throw new ApiException(ErrorCode.VAL_001, 'الحجز غير موجود', HttpStatus.NOT_FOUND);
-        }
-        if (lockedBooking.status !== DomesticWorkerBookingStatus.AWAITING_PAYMENT) {
-          throw new ApiException(ErrorCode.VAL_001, 'الحجز مش في حالة انتظار دفع', HttpStatus.CONFLICT);
-        }
-        if (lockedBooking.bookingType === DomesticWorkerBookingType.HOURLY) {
-          lockedBooking.status = DomesticWorkerBookingStatus.CONFIRMED;
-        } else {
-          lockedBooking.currentPeriodEndAt = lockedBooking.pendingPeriodEndAt;
-          lockedBooking.status = DomesticWorkerBookingStatus.ACTIVE;
-        }
-        lockedBooking.confirmedAt = new Date();
-        lockedBooking.pendingPeriodEndAt = null;
-        await manager.save(lockedBooking);
-
-        await recordAudit();
-        return {
-          payment: lockedPayment,
-          dispatchInfo: null,
-          bookingPaymentConfirmed: { bookingId: lockedBooking.id, paymentId: lockedPayment.id },
-        };
-      }
 
       const lockedOrder = await manager
         .createQueryBuilder(Order, 'o')
@@ -1136,7 +978,6 @@ export class PaymentsService {
           technicianId: lockedOrder.technicianId,
           serviceId: lockedOrder.serviceId,
         },
-        bookingPaymentConfirmed: null,
       };
     });
 
@@ -1145,14 +986,6 @@ export class PaymentsService {
       // إشعار عميل مخصوص "تحويلك اتأكّد" — نظير payment.instapay_rejected بالحرف، مش هيتصدّر
       // تاني في نقر مزدوج (dispatchInfo فاضل null في مسار الـidempotency فوق).
       this.events.emit(PAYMENT_INSTAPAY_CONFIRMED_EVENT, new PaymentInstaPayConfirmedEvent(dispatchInfo.orderId, dispatchInfo.customerId));
-    }
-    if (bookingPaymentConfirmed) {
-      // بره أي transaction عمدًا — نفس فلسفة emitPaymentConfirmedEvents فوق. المستمع
-      // (DomesticWorkerBookingsService) بيسجّل استحقاق الشغالة الشهري PENDING (docs/adr/0019).
-      this.events.emit(
-        DOMESTIC_WORKER_BOOKING_PAYMENT_CONFIRMED_EVENT,
-        new DomesticWorkerBookingPaymentConfirmedEvent(bookingPaymentConfirmed.bookingId, bookingPaymentConfirmed.paymentId),
-      );
     }
 
     return payment;
@@ -2458,141 +2291,6 @@ export class PaymentsService {
     return finalRefund;
   }
 
-  /**
-   * استرداد تلقائي لحجز خدمة منزلية دفعه العميل عبر InstaPay وأتأكد إداريًا، ثم اتلغى قبل اكتمال
-   * الخدمة (docs/adr/0019، توجيه صريح من المالك: "handle cancellation and refunds consistently").
-   * نسخة مبسّطة من `refundCancelledPrepaidOrder()` فوق بنفس نمط الأمان بمراحله الثلاث بالحرف (صف
-   * `Refund` بحالة `PROCESSING` قبل أي نداء خارجي، النداء نفسه برّه أي transaction، تسجيل النتيجة
-   * في transaction منفصلة) — نفس السبب: `provider.refund()` نداء HTTP خارجي حقيقي. أبسط من نسخة
-   * الطلب لأن مفيش تعقيد "مكوّنات مالية متعددة" هنا (دفعة واحدة بس لكل دورة تأكيد). استرداد كامل
-   * فقط — نفس قرار v1 الموثّق في `DomesticWorkerBookingsService.cancel()` (مفيش استرداد جزئي).
-   * InstaPay بالذات `supportsRefund=false` (نفس الكاش/فوري — مفيش refund API)، فالمسار الفعلي
-   * دايمًا `WALLET_CREDIT` فوري، مش نداء بوابة حقيقي — موثّق هنا صراحة، مش افتراض ضمني.
-   *
-   * Idempotent: بترجع `null` بهدوء لو مفيش دفعة ناجحة أو لو فيه `Refund` مسجّل بالفعل لنفس الدفعة.
-   */
-  async refundCancelledDomesticWorkerBooking(bookingId: string, reasonNotes: string): Promise<Refund | null> {
-    const prepared = await this.dataSource.transaction(async (manager) => {
-      const booking = await manager
-        .createQueryBuilder(DomesticWorkerBooking, 'b')
-        .setLock('pessimistic_write')
-        .where('b.id = :bookingId', { bookingId })
-        .getOne();
-      if (!booking || booking.status !== DomesticWorkerBookingStatus.CANCELLED) return null;
-
-      const payment = await manager.findOne(Payment, {
-        where: { domesticWorkerBookingId: bookingId, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
-        order: { completedAt: 'DESC' },
-      });
-      if (!payment) return null;
-
-      const existingRefund = await manager.findOne(Refund, { where: { paymentId: payment.id } });
-      if (existingRefund) return null;
-
-      const provider = this.paymentProviders.getProvider(payment.paymentMethod);
-      const goesThroughGateway = provider.supportsRefund && !!payment.gatewayTransactionId;
-
-      const refundNumber = await this.nextRefundNumber(manager);
-      const refund = manager.create(Refund, {
-        refundNumber,
-        paymentId: payment.id,
-        orderId: null,
-        domesticWorkerBookingId: booking.id,
-        amountCents: payment.amountCents,
-        refundType: RefundType.FULL,
-        reasonNotes,
-        refundMethod: goesThroughGateway ? RefundMethod.ORIGINAL_METHOD : RefundMethod.WALLET_CREDIT,
-        refundStatus: goesThroughGateway ? RefundStatus.PROCESSING : RefundStatus.COMPLETED,
-        requestedByUserId: PLATFORM_SYSTEM_USER_ID,
-        approvedByUserId: PLATFORM_SYSTEM_USER_ID,
-        requestedAt: new Date(),
-        approvedAt: new Date(),
-        completedAt: goesThroughGateway ? null : new Date(),
-        providerRefundId: null,
-      });
-      await manager.save(refund);
-
-      return { booking, payment, goesThroughGateway, provider, refund };
-    });
-
-    if (!prepared) return null;
-    const { booking, payment, goesThroughGateway, provider, refund } = prepared;
-
-    let providerSucceeded = true;
-    let providerRefundId: string | null = null;
-    if (goesThroughGateway) {
-      const providerResult = await provider.refund({
-        providerReference: payment.gatewayTransactionId!,
-        amountCents: payment.amountCents,
-        reasonAr: reasonNotes,
-      });
-      providerSucceeded = providerResult.succeeded;
-      providerRefundId = providerResult.succeeded ? providerResult.providerRefundId : null;
-    }
-
-    return this.dataSource.transaction(async (manager) => {
-      const recordRefundAudit = () =>
-        this.auditLog.record(
-          {
-            actorUserId: PLATFORM_SYSTEM_USER_ID,
-            actorRole: 'system',
-            action:
-              refund.refundStatus === RefundStatus.REJECTED
-                ? 'domestic_worker_booking.refund_rejected'
-                : 'domestic_worker_booking.refunded',
-            entityType: 'domestic_worker_booking',
-            entityId: bookingId,
-            newValues: {
-              refund_id: refund.id,
-              amount_cents: refund.amountCents,
-              refund_status: refund.refundStatus,
-              trigger: 'customer_cancel',
-            },
-          },
-          manager,
-        );
-
-      if (goesThroughGateway && !providerSucceeded) {
-        refund.refundStatus = RefundStatus.REJECTED;
-        await manager.save(refund);
-        await recordRefundAudit();
-        return refund;
-      }
-
-      if (goesThroughGateway) {
-        refund.refundStatus = RefundStatus.COMPLETED;
-        refund.providerRefundId = providerRefundId;
-        refund.completedAt = new Date();
-        await manager.save(refund);
-      }
-
-      if (refund.refundMethod === RefundMethod.WALLET_CREDIT) {
-        const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(booking.customerId);
-        const customerWallet = await this.walletsService.getOrCreateWallet(customerProfile.userId, WalletOwnerType.CUSTOMER);
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
-
-        await this.walletsService.doubleEntry(
-          {
-            fromWalletId: platformWallet.id,
-            toWalletId: customerWallet.id,
-            amountCents: payment.amountCents,
-            transactionType: WalletTxType.REFUND,
-            referenceType: 'refund',
-            referenceId: refund.id,
-            descriptionAr: `استرجاع حجز خدمة منزلية ${booking.bookingNumber} — إلغاء العميل`,
-            allowNegativeBalance: true,
-          },
-          manager,
-        );
-      }
-
-      payment.paymentStatus = PaymentGatewayStatus.REFUNDED;
-      await manager.save(payment);
-
-      await recordRefundAudit();
-      return refund;
-    });
-  }
 
   /**
    * ADR-0015 — بتتنادى من `PrepaidOrderSettlementListener` لما طلب يوصل `WORK_COMPLETED`.

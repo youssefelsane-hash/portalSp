@@ -7,7 +7,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { UploadDocumentDto } from './dto/upload-document.dto';
-import { TechnicianDocument } from './entities/technician-document.entity';
+import { TechnicianDocument, TechnicianDocumentType } from './entities/technician-document.entity';
 import { TechniciansService } from './technicians.service';
 
 export interface IncomingFile {
@@ -50,6 +50,15 @@ export class TechnicianDocumentsService {
 
   listForTechnician(technicianId: string): Promise<TechnicianDocument[]> {
     return this.documents.find({ where: { technicianId }, order: { createdAt: 'DESC' } });
+  }
+
+  /**
+   * أحدث مستند من نوع معيّن، بغض النظر عن حالة المراجعة (ADR-0031) — مستخدمة عشان الفني يشوف
+   * آخر صورة رفعها هو نفسه فورًا في بروفايله (GET /technician/me)، حتى قبل ما الأدمن يعتمدها.
+   * مصدر منفصل تمامًا عن users.avatar_storage_key (المصدر المعتمد للعميل، بعد الاعتماد بس).
+   */
+  async findLatestOfType(technicianId: string, documentType: TechnicianDocumentType): Promise<TechnicianDocument | null> {
+    return this.documents.findOne({ where: { technicianId, documentType }, order: { createdAt: 'DESC' } });
   }
 
   async findOwnedByTechnicianOrThrow(technicianId: string, documentId: string): Promise<TechnicianDocument> {

@@ -91,7 +91,11 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
     setState(() => _selectedAddress = address);
   }
 
-  void _confirmSelection({String? requestedTechnicianId, String? requestedTechnicianCompanyId}) {
+  void _confirmSelection({
+    String? requestedTechnicianId,
+    String? requestedTechnicianCompanyId,
+    DateTime? effectiveRequestedAt,
+  }) {
     if (widget.onManualSelect != null) {
       // onManualSelect (reselection على طلب موجود) عمداً individual بس — راجع تعليق bookingMode
       // فوق. requestedTechnicianCompanyId مستحيل يوصل هنا فعليًا (القايمة الموحّدة مش بتدمج
@@ -108,7 +112,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           requestedTechnicianCompanyId: requestedTechnicianCompanyId,
           initialAddress: _selectedAddress,
           initialFieldValues: widget.fieldValues,
-          requestedAt: widget.requestedAt,
+          // ADR-0030 Slice D — لو العميل جرّب "احجزه في المعاد ده بدلاً" على فني كان متعارض
+          // جدوليًا، effectiveRequestedAt بيحمل المعاد الجديد ده بدل widget.requestedAt الأصلي.
+          requestedAt: effectiveRequestedAt ?? widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
         ),
       ),
@@ -127,9 +133,10 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           fieldValues: widget.fieldValues,
           requestedAt: widget.requestedAt,
           bookingMode: widget.bookingMode,
-          onSelect: (id, isCompany) => _confirmSelection(
+          onSelect: (id, isCompany, effectiveRequestedAt) => _confirmSelection(
             requestedTechnicianId: isCompany ? null : id,
             requestedTechnicianCompanyId: isCompany ? id : null,
+            effectiveRequestedAt: effectiveRequestedAt,
           ),
         ),
       ),
@@ -148,7 +155,9 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
         fieldValues: widget.fieldValues,
         requestedAt: widget.requestedAt,
         bookingMode: widget.bookingMode,
-        onSelect: (id, isCompany) => _confirmSelection(
+        // onManualSelect (استبدال فني لطلب موجود بالفعل) بيستخدم requestedTechnicianId بس —
+        // معاد الطلب نفسه ثابت بالفعل، فمفيش داعي لـeffectiveRequestedAt هنا.
+        onSelect: (id, isCompany, _) => _confirmSelection(
           requestedTechnicianId: isCompany ? null : id,
           requestedTechnicianCompanyId: isCompany ? id : null,
         ),
