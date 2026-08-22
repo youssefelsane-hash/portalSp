@@ -8,6 +8,7 @@ import { AddStaffDto } from './dto/add-staff.dto';
 import {
   toBranchResponseDto,
   toCompanyResponseDto,
+  toCompanyOrderSummaryResponseDto,
   toStaffMemberResponseDto,
   CompanyDetailResponseDto,
 } from './dto/company-response.dto';
@@ -49,6 +50,14 @@ export class TechnicianCompaniesController {
   @Patch()
   async update(@CurrentUser() user: JwtPayload, @Body() dto: UpdateCompanyDto, @AuditContext() audit: AuditMeta) {
     return toCompanyResponseDto(await this.companiesService.update(user.sub, dto, audit));
+  }
+
+  // مساحة عمل الشركة (ADR-0033) — أي عضو (مش owner/manager بس) يقدر يشوف الشغل الجاي للشركة،
+  // نفس مستوى دخول GET / فوق. قراءة بس.
+  @Get('orders')
+  async listOrders(@CurrentUser() user: JwtPayload) {
+    const rows = await this.companiesService.listOrders(user.sub);
+    return rows.map(toCompanyOrderSummaryResponseDto);
   }
 
   @Post('branches')

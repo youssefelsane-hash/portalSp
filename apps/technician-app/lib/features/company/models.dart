@@ -92,3 +92,75 @@ const Map<String, String> teamRoleLabelsAr = {
 };
 
 const List<String> assignableTeamRoles = ['manager', 'supervisor', 'worker'];
+
+// مساحة عمل الشركة (ADR-0033) — مطابق لـCompanyOrderSummaryResponseDto بالباك-إند. نظرة عامة/
+// متابعة بس (رقم طلب، خدمة، حالة، موعد، فني مسؤول، منطقة، إجمالي) — مش تفاصيل تنفيذ كاملة.
+class CompanyOrderSummary {
+  final String id;
+  final String orderNumber;
+  final String serviceNameAr;
+  final String orderStatus;
+  final String bookingMode;
+  final DateTime? scheduledAt;
+  final DateTime createdAt;
+  final String? technicianName;
+  final String? zoneNameAr;
+  final int totalAmountCents;
+
+  CompanyOrderSummary({
+    required this.id,
+    required this.orderNumber,
+    required this.serviceNameAr,
+    required this.orderStatus,
+    required this.bookingMode,
+    required this.scheduledAt,
+    required this.createdAt,
+    required this.technicianName,
+    required this.zoneNameAr,
+    required this.totalAmountCents,
+  });
+
+  factory CompanyOrderSummary.fromJson(Map<String, dynamic> json) => CompanyOrderSummary(
+        id: json['id'] as String,
+        orderNumber: json['order_number'] as String,
+        serviceNameAr: json['service_name_ar'] as String,
+        orderStatus: json['order_status'] as String,
+        bookingMode: json['booking_mode'] as String,
+        scheduledAt: json['scheduled_at'] != null ? DateTime.parse(json['scheduled_at'] as String) : null,
+        createdAt: DateTime.parse(json['created_at'] as String),
+        technicianName: json['technician_name'] as String?,
+        zoneNameAr: json['zone_name_ar'] as String?,
+        totalAmountCents: json['total_amount_cents'] as int,
+      );
+}
+
+// نفس تجميع ACTIVE_TECHNICIAN_ORDER_STATUSES بالباك-إند (order-state-machine.ts)، مترجم للعرض بس.
+const Set<String> activeCompanyOrderStatuses = {
+  'accepted',
+  'technician_on_way',
+  'technician_arrived',
+  'in_progress',
+  'awaiting_quote_approval',
+};
+
+const Map<String, String> orderStatusLabelsAr = {
+  'draft': 'مسودة',
+  'pending_payment': 'في انتظار الدفع',
+  'searching_technician': 'بيدوّر على فني',
+  'technician_assigned': 'اتعيّن فني',
+  'accepted': 'مؤكّد',
+  'technician_on_way': 'الفني في الطريق',
+  'technician_arrived': 'الفني وصل',
+  'in_progress': 'جاري التنفيذ',
+  'awaiting_quote_approval': 'مستني موافقة عرض سعر',
+  'work_completed': 'الشغل خلص',
+  'awaiting_payment': 'مستني الدفع',
+  'completed': 'مكتمل',
+  'cancelled_by_customer': 'ألغاه العميل',
+  'cancelled_by_technician': 'ألغاه الفني',
+  'cancelled_by_system': 'اتلغى تلقائيًا',
+  'expired': 'انتهت صلاحيته',
+  'disputed': 'متنازع عليه',
+  'refunded': 'مسترد',
+  'awaiting_technician_reselection': 'مستني اختيار فني تاني',
+};

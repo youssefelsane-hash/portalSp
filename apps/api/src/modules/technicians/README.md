@@ -902,3 +902,28 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   المفتاح على الرابط الخام. صفر رجريشن على `technicians`/`catalog`/`auth` بالكامل (171/171).
 - **ده جزء من تصحيح اتجاه Phase A.4 الأكبر (إلغاء بنية الشغالة المنفصلة، مش نقلها) — التفاصيل
   الكاملة في `docs/adr/0031-unified-provider-system-and-avatar-visibility.md`.**
+
+## مساحة عمل الشركة — `GET /technician/company/orders` (ADR-0033، 2026-08-22)
+
+طلب مالك مباشر: شاشة "شركتي/فريقي" (فوق) كانت بتغطي الإدارة الذاتية (فروع/أعضاء/رتب) بس، صفر
+ربط بالشغل الفعلي الجاي للشركة — مهم كـ"دعاية" لجذب شركات حقيقية للمنصة. القرار الكامل في
+`docs/adr/0033-company-workspace-orders.md` (كان موثّق كقرار متّخذ في `docs/08` §42 Phase B.1 من
+جلسة سابقة، اتنفّذ دلوقتي فعليًا).
+
+- **`orders.assigned_company_id`** (migration 0173) — snapshot، مش استعلام حي: بيتسجّل مرة واحدة
+  في `MatchingService` (المكانين الوحيدين اللي `order.technicianId`/`ACCEPTED` بيتسجّلوا فيهم —
+  `confirmTechnicianForOrder()` التأكيد التلقائي و`accept()` القبول الصريح) من `companyId` بتاع
+  الفني وقتها. **بعد كده مش بيتغيّر** حتى لو الفني سايب الشركة (نفس فلسفة الحفاظ على التاريخ).
+- **`TechnicianCompaniesService.listOrders(userId)`/`listOrdersForAdmin(companyId)`** — SQL
+  مباشر (4 جداول join: orders/services/service_zones/technician_profiles+users)، آخر 100 طلب
+  للشركة، الأحدث أولًا. `GET /technician/company/orders` (أي عضو، نفس مستوى `GET /technician/company`)
+  و`GET /admin/technician-companies/:id/orders` (إشراف read-only). صف ملخّص بس (`CompanyOrderSummaryResponseDto`)
+  — مش تفاصيل تنفيذ كاملة، القائمة دي متابعة/نظرة عامة.
+- **صفر endpoint إحصائيات منفصل عمدًا** ("نشط دلوقتي"/"مكتمل"/إجمالي القيمة) — كل حاجة محسوبة على
+  مستوى العرض (`apps/admin`، `apps/technician-app`) من نفس القائمة، بإعادة استخدام تجميع
+  `ACTIVE_TECHNICIAN_ORDER_STATUSES` (`order-state-machine.ts`) مترجم محليًا. طلب مالك صريح: "ما
+  ترهصش الدنيا... اختار الأسهل".
+- **خارج نطاق ADR-0033 عمدًا**: توزيع أرباح الطاقم (Phase B.3 في `docs/08` §42) — فجوة مالية
+  حقيقية موجودة من قبل (قائد الطلب بياخد كل الفلوس، أعضاء الفريق صفر)، قرار مالي مستقل، مش بيتحل
+  هنا. حجز الشغالة المباشر (ADR-0031 Phase A.4) برضه خارج النطاق — مسار بيتخطى `MatchingService`
+  بالكامل، مفهوم "شركة" مش منطبق عليه.

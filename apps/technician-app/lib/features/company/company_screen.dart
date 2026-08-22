@@ -21,6 +21,9 @@ class _CompanyScreenState extends State<CompanyScreen> {
   late final CompanyRepository _repository;
   late final OnboardingRepository _onboardingRepository;
   CompanyDetail? _detail;
+  // مساحة عمل الشركة (ADR-0033) — null لحد ما تحميل الطلبات يخلص (لو فشل بيرجع [] بأمان، صفر
+  // تأثير على باقي الشاشة اللي كانت شغالة من قبل).
+  List<CompanyOrderSummary>? _orders;
   bool _notMember = false;
   String? _myTechnicianCode;
   String? _error;
@@ -53,6 +56,12 @@ class _CompanyScreenState extends State<CompanyScreen> {
       _myTechnicianCode = me.technicianCode;
       final detail = await _repository.fetchMine();
       if (mounted) setState(() => _detail = detail);
+      // مساحة عمل الشركة — تحميل مستقل عمدًا (لا يعطّل عرض باقي تفاصيل الشركة لو فشل).
+      _repository.fetchOrders().then((orders) {
+        if (mounted) setState(() => _orders = orders);
+      }).catchError((_) {
+        if (mounted) setState(() => _orders = []);
+      });
     } on ApiException catch (err) {
       if (err.statusCode == 404) {
         if (mounted) setState(() => _notMember = true);
@@ -253,6 +262,13 @@ class _CompanyScreenState extends State<CompanyScreen> {
     }
   }
 
+  String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
+
+  String _formatOrderDate(DateTime at) {
+    final two = (int n) => n.toString().padLeft(2, '0');
+    return '${two(at.day)}/${two(at.month)} — ${two(at.hour)}:${two(at.minute)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -307,6 +323,95 @@ class _CompanyScreenState extends State<CompanyScreen> {
     );
   }
 
+  Widget _buildSectionHeader(BuildContext context, IconData icon, String title) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 8),
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
+      ],
+    );
+  }
+
+  // مساحة عمل الشركة (ADR-0033) — كروت إحصائيات سريعة ("عارف تفاصيل من الموقع والموقع بيفيده"،
+  // طلب مالك صريح 2026-08-22). صفر endpoint إحصائيات منفصل عمدًا — كل حاجة محسوبة محليًا من
+  // نفس قائمة _orders (تجميع models.dart's activeCompanyOrderStatuses).
+  Widget _buildOrdersOverview(BuildContext context) {
+    final orders = _orders;
+    if (orders == null) {
+      return const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LinearProgressIndicator());
+    }
+    final activeCount = orders.where((o) => activeCompanyOrderStatuses.contains(o.orderStatus)).length;
+    final completedCount = orders.where((o) => o.orderStatus == 'completed').length;
+    final totalCents = orders.fold<int>(0, (sum, o) => sum + o.totalAmountCents);
+    Widget stat(String label, String value) => Expanded(
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+              child: Column(
+                children: [
+                  Text(value, style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 2),
+                  Text(label, style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
+                ],
+              ),
+            ),
+          ),
+        );
+    return Row(
+      children: [
+        stat('إجمالي الطلبات', '${orders.length}'),
+        const SizedBox(width: 8),
+        stat('جارية دلوقتي', '$activeCount'),
+        const SizedBox(width: 8),
+        stat('مكتملة', '$completedCount'),
+        const SizedBox(width: 8),
+        stat('إجمالي القيمة', _formatEgp(totalCents)),
+      ],
+    );
+  }
+
+  Widget _buildOrdersSection(BuildContext context) {
+    final orders = _orders;
+    if (orders == null) return const SizedBox.shrink();
+    if (orders.isEmpty) {
+      return const EmptyState(icon: Icons.work_outline, title: 'مفيش طلبات اتعيّنت للشركة دي لسه');
+    }
+    return Column(
+      children: [
+        for (final order in orders)
+          Card(
+            child: ListTile(
+              title: Text(order.serviceNameAr),
+              subtitle: Text(
+                [
+                  order.orderNumber,
+                  if (order.technicianName != null) order.technicianName!,
+                  if (order.scheduledAt != null) _formatOrderDate(order.scheduledAt!),
+                ].join(' — '),
+              ),
+              trailing: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Chip(
+                    label: Text(
+                      orderStatusLabelsAr[order.orderStatus] ?? order.orderStatus,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(_formatEgp(order.totalAmountCents), style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildDetail(BuildContext context, CompanyDetail detail) {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -329,7 +434,13 @@ class _CompanyScreenState extends State<CompanyScreen> {
           Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ],
         const SizedBox(height: 16),
-        Text('الفروع', style: Theme.of(context).textTheme.titleMedium),
+        _buildOrdersOverview(context),
+        const SizedBox(height: 24),
+        _buildSectionHeader(context, Icons.work_outline, 'الشغل الجاري للشركة'),
+        const SizedBox(height: 8),
+        _buildOrdersSection(context),
+        const SizedBox(height: 24),
+        _buildSectionHeader(context, Icons.store_outlined, 'الفروع'),
         const SizedBox(height: 8),
         if (detail.branches.isEmpty) const EmptyState(icon: Icons.store_outlined, title: 'مفيش فروع مضافة لسه'),
         for (final branch in detail.branches)
@@ -366,7 +477,7 @@ class _CompanyScreenState extends State<CompanyScreen> {
           OutlinedButton(onPressed: _acting ? null : _addBranch, child: const Text('إضافة فرع')),
         ],
         const SizedBox(height: 24),
-        Text('الأعضاء', style: Theme.of(context).textTheme.titleMedium),
+        _buildSectionHeader(context, Icons.people_outline, 'الأعضاء'),
         const SizedBox(height: 8),
         for (final member in detail.staff)
           Card(

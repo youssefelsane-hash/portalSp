@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import type { CompanyDetailResponseDto } from '@baytak/shared-types';
+import type { CompanyDetailResponseDto, CompanyOrderSummaryResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -12,6 +12,12 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
+import { ORDER_STATUS_LABELS, BOOKING_MODE_LABELS } from '@/lib/order-labels';
+import { formatEgp } from '@/lib/format';
+
+// مساحة عمل الشركة (ADR-0033) — نفس تجميع الحالات المستخدم لـ"نشط" في apps/technician-app
+// (ACTIVE_TECHNICIAN_ORDER_STATUSES بالباك-إند)، مترجم هنا للعرض بس — صفر endpoint إحصائيات منفصل.
+const ACTIVE_ORDER_STATUSES = new Set(['accepted', 'technician_on_way', 'technician_arrived', 'in_progress', 'awaiting_quote_approval']);
 
 const TEAM_ROLE_LABELS: Record<string, string> = {
   independent: 'مستقل',
@@ -25,6 +31,7 @@ export default function TechnicianCompanyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
   const [detail, setDetail] = useState<CompanyDetailResponseDto | null>(null);
+  const [orders, setOrders] = useState<CompanyOrderSummaryResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,8 +39,14 @@ export default function TechnicianCompanyDetailPage() {
     authedFetch<CompanyDetailResponseDto>(`/admin/technician-companies/${id}`)
       .then(setDetail)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل تفاصيل الشركة'));
+    authedFetch<CompanyOrderSummaryResponseDto[]>(`/admin/technician-companies/${id}/orders`)
+      .then(setOrders)
+      .catch(() => setOrders([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
+
+  const activeOrdersCount = orders?.filter((o) => ACTIVE_ORDER_STATUSES.has(o.order_status)).length ?? 0;
+  const completedOrdersCount = orders?.filter((o) => o.order_status === 'completed').length ?? 0;
 
   return (
     <AppShell>
@@ -50,6 +63,35 @@ export default function TechnicianCompanyDetailPage() {
               </Badge>
             }
           />
+
+          {orders && (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">إجمالي الطلبات</p>
+                  <p className="text-2xl font-bold">{orders.length}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">جارية دلوقتي</p>
+                  <p className="text-2xl font-bold">{activeOrdersCount}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">مكتملة</p>
+                  <p className="text-2xl font-bold">{completedOrdersCount}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">إجمالي القيمة</p>
+                  <p className="text-2xl font-bold">{formatEgp(orders.reduce((sum, o) => sum + o.total_amount_cents, 0))}</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           <Card>
             <CardHeader>
@@ -133,6 +175,54 @@ export default function TechnicianCompanyDetailPage() {
                   ))}
                 </TableBody>
               </Table>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">الطلبات ({orders?.length ?? 0})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!orders ? (
+                <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+              ) : orders.length === 0 ? (
+                <EmptyState title="مفيش طلبات اتعيّنت للشركة دي لسه" />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>رقم الطلب</TableHead>
+                      <TableHead>الخدمة</TableHead>
+                      <TableHead>الحالة</TableHead>
+                      <TableHead>وضع الحجز</TableHead>
+                      <TableHead>الموعد</TableHead>
+                      <TableHead>الفني المسؤول</TableHead>
+                      <TableHead>المنطقة</TableHead>
+                      <TableHead>الإجمالي</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {orders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell dir="ltr" className="text-start">
+                          {order.order_number}
+                        </TableCell>
+                        <TableCell>{order.service_name_ar}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{ORDER_STATUS_LABELS[order.order_status as keyof typeof ORDER_STATUS_LABELS] ?? order.order_status}</Badge>
+                        </TableCell>
+                        <TableCell>{BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</TableCell>
+                        <TableCell>
+                          {order.scheduled_at ? new Date(order.scheduled_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                        </TableCell>
+                        <TableCell>{order.technician_name ?? '—'}</TableCell>
+                        <TableCell>{order.zone_name_ar ?? '—'}</TableCell>
+                        <TableCell>{formatEgp(order.total_amount_cents)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </div>

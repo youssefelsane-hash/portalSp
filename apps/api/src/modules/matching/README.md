@@ -719,3 +719,16 @@ BookingMode.TEAM`. `individual`/`emergency` بلا أي تغيير. نفس ال�
 من شغل ADR-0031 (الدالة والـrunId موجودين قبل أي تعديل في السيشن ده، ومفيهاش أي علاقة بمنطق
 الشغالة/الفني الموحّد). الإصلاح الصح: استبدال `runId` بـ`randomUUID()` زي باقي الـspecs — لسه
 مفتوحة، مش حرجة (بتفشل بس لو الملف اتشغّل أكتر من مرة في نفس الجلسة من غير تنضيف يدوي للـDB).
+
+## `orders.assigned_company_id` — snapshot الشركة وقت التعيين (ADR-0033، 2026-08-22)
+
+مساحة عمل الشركة (`docs/adr/0033-company-workspace-orders.md`) محتاجة تعرف "الطلب ده اتعيّن
+لشركة كام" بشكل ثابت تاريخيًا. `resolveAssignedCompanyId(technicianId)` جديدة (private) — بتقرا
+`TechnicianProfile.companyId` بتاع الفني اللي بيتعيّن، وبتتسجّل على `order.assignedCompanyId` في
+نفس اللحظة اللي `order.technicianId`/`orderStatus=ACCEPTED` بيتسجّلوا فيها. مكانين بس فعليًا في
+الملف ده (المصدر الوحيد لـ`ACCEPTED`): `confirmTechnicianForOrder()` (التأكيد التلقائي لمرشّح
+`LIGHT`) و`accept()` (قبول الفني الصريح لطوارئ/فرصة شغل). في `accept()` بالذات، `profile` كان
+محمّل بالفعل (`findByUserIdOrThrow` في أول الدالة) فبنقرا `profile.companyId` مباشرة من غير نداء
+لـ`resolveAssignedCompanyId()` — صفر استعلام إضافي. `null` بأمان لأي فني مستقل (`companyId=null`).
+**بعد التسجيل، العمود ده مش بيتلمس تاني من أي مكان في الملف ده أو غيره** — قرار "الحفاظ على
+التاريخ" (لو الفني سايب الشركة بعدين، الطلبات القديمة تفضل مسجّلة على الشركة اللي كانت فعلاً).

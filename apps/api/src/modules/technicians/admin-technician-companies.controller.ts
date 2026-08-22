@@ -4,6 +4,7 @@ import { UserType } from '../auth/entities/user.entity';
 import {
   toBranchResponseDto,
   toCompanyResponseDto,
+  toCompanyOrderSummaryResponseDto,
   toStaffMemberResponseDto,
 } from './dto/company-response.dto';
 import { TechnicianCompaniesService } from './technician-companies.service';
@@ -33,5 +34,12 @@ export class AdminTechnicianCompaniesController {
       branches: detail.branches.map(toBranchResponseDto),
       staff: detail.staff.map(({ profile, user }) => toStaffMemberResponseDto(profile, user.fullName)),
     };
+  }
+
+  // مساحة عمل الشركة (ADR-0033) — إشراف read-only، نفس نمط باقي الكونترولر ده.
+  @Get(':id/orders')
+  async listOrders(@Param('id', ParseUUIDPipe) id: string) {
+    const rows = await this.companiesService.listOrdersForAdmin(id);
+    return rows.map(toCompanyOrderSummaryResponseDto);
   }
 }

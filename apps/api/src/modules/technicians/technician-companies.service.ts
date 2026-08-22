@@ -11,6 +11,7 @@ import { UpdateBranchDto } from './dto/update-branch.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
+import { CompanyOrderRow } from './dto/company-response.dto';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
 import { TechnicianCompany } from './entities/technician-company.entity';
 import { TechnicianProfile, TechnicianTeamRole } from './entities/technician-profile.entity';
@@ -213,6 +214,40 @@ export class TechnicianCompaniesService {
   async listForAdmin(): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
     const companies = await this.companies.find({ order: { createdAt: 'DESC' } });
     return this.countBranchesAndStaff(companies);
+  }
+
+  // مساحة عمل الشركة (ADR-0033) — آخر 100 طلب اتعيّنوا للشركة (الأحدث أولًا)، الأحدث بيتصدّر
+  // القائمة لأن ده اللي مالك الشركة محتاج يتابعه فعليًا. SQL مباشر مش TypeORM query builder —
+  // الاستعلام بسيط وواضح أكتر بالـSQL الخام هنا (4 جداول join).
+  private async queryOrdersForCompany(companyId: string): Promise<CompanyOrderRow[]> {
+    return this.dataSource.query<CompanyOrderRow[]>(
+      `
+      SELECT o.id, o.order_number AS "orderNumber", s.name_ar AS "serviceNameAr",
+             o.order_status AS "orderStatus", o.booking_mode AS "bookingMode",
+             o.scheduled_at AS "scheduledAt", o.created_at AS "createdAt",
+             u.full_name AS "technicianName", sz.name_ar AS "zoneNameAr",
+             o.total_amount_cents AS "totalAmountCents"
+      FROM orders o
+      JOIN services s ON s.id = o.service_id
+      LEFT JOIN service_zones sz ON sz.id = o.service_zone_id
+      LEFT JOIN technician_profiles tp ON tp.id = o.technician_id
+      LEFT JOIN users u ON u.id = tp.user_id
+      WHERE o.assigned_company_id = $1
+      ORDER BY o.created_at DESC
+      LIMIT 100
+      `,
+      [companyId],
+    );
+  }
+
+  async listOrders(userId: string): Promise<CompanyOrderRow[]> {
+    const profile = await this.requireMembership(userId);
+    return this.queryOrdersForCompany(profile.companyId!);
+  }
+
+  async listOrdersForAdmin(companyId: string): Promise<CompanyOrderRow[]> {
+    await this.findCompanyOrThrow(companyId);
+    return this.queryOrdersForCompany(companyId);
   }
 
   async update(userId: string, dto: UpdateCompanyDto, meta?: AuditActorMeta): Promise<TechnicianCompany> {
