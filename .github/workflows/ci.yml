@@ -18,6 +18,9 @@ jobs:
   api:
     name: API — typecheck + build + test
     runs-on: ubuntu-latest
+    # شبكة أمان (2026-08-22) — لو --forceExit فوق ماحلّش handle-leak جديد لسه ماتلقطش، الـjob
+    # يفشل بوضوح بعد 15 دقيقة بدل ما يفضل عالق للأبد (default runner timeout ساعات، مش دقايق).
+    timeout-minutes: 15
     services:
       postgres:
         # نفس صورة infra/docker/docker-compose.yml بالحرف — الـmigrations محتاجة PostGIS فعلي.
@@ -78,7 +81,13 @@ jobs:
         # متوازيين) كان بيسبب سباقات حقيقية (deadlock على orders، duplicate key على
         # payments/idempotency، انحراف رصيد محفظة المنصة بين specs متزامنة) — مش بَقّة في كود
         # الميزة، فجوة في CI نفسه اتلقطت وهي بتكسر main بالفعل (run #207/#209).
-        run: npx jest --runInBand
+        #
+        # --forceExit مضافة (2026-08-22) — بَقّة موثّقة سابقًا في docs/08 (§36.9 ملحوظة تشغيلية):
+        # jest بلا --forceExit بيعلّق لأكتر من 15 دقيقة بعد ما كل الاختبارات تخلص فعليًا فعلاً
+        # (handle مسرّب من BullMQ/Redis في سبيك ما، مش السبب الجذري لسه اتحقق فيه) — بيمنع Node
+        # process من الخروج طبيعيًا. كانت موثّقة كـ"لسه محتاجة تحقيق منفصل" بس CI ماكانش
+        # مستخدمها فعليًا، فكل push كان بيقعد يعلّق للأبد بدل ما يفشل بوضوح أو يعدّي.
+        run: npx jest --runInBand --forceExit
         env:
           DATABASE_URL: postgres://baytak:baytak@localhost:5432/baytak
           REDIS_URL: redis://localhost:6379
