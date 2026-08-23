@@ -50,4 +50,31 @@ certificates، موقعين)، `support.controller.ts` (مرفقات الشكا�
 متسمّي `image/jpeg` عشان يعدّي فلتر "صور بس" — الاتنين بيترفضوا بوضوح. `tsc --noEmit` →
 `nest build` → `jest` (30 suite، 160 اختبار) كلهم عدّوا نضيف.
 
+## `LocalDiskStorageService` كان بيرجّع رابط نسبي بس — بَقّة حقيقية اتلقطت واتصلحت (2026-08-23)
+
+كانت بَقّة حقيقية، مش موثّقة قبل كده: `LocalDiskStorageService.save()`/`.getUrl()` كانوا بيرجّعوا
+`/uploads/${key}` — مسار نسبي من غير scheme/host، عكس `S3StorageService.getUrl()` اللي بترجّع
+presigned URL **مطلق** دايمًا (`https://<bucket-host>/...`). المسار النسبي ده شغال بس لو
+الـconsumer بيحمّل الصورة من نفس أصل الـAPI بالظبط — مش الحال أبدًا: `apps/admin` على origin/port
+مختلف (3001 مقابل 3000)، وكذلك `apps/customer-web`/تطبيقات Flutter (كلهم بينادوا الـAPI عبر CORS
+عمدًا، راجع `apps/admin/src/lib/api-client.ts`). المتصفح كان بيحل `<img src="/uploads/...">` ضد
+أصل الصفحة الحالية (مثلاً `localhost:3001`) بدل أصل الـAPI (`localhost:3000`) — صورة معطوبة تمامًا
+(404 أو توجيه غلط لصفحة تانية حسب routing الـfrontend نفسه).
+
+**اتلقطت** لما المالك رفع لوجو JPG حقيقي من `/branding` (لوحة الأدمن، تخزين محلي في بيئة التطوير) —
+البادچ اتحدّث لـ"مرفوع" والتوست "اترفع بنجاح" ظهر (يعني الرفع + الـDB + إبطال الكاش كلهم شغالين
+صح)، بس مكان الصورة فضل فاضي (broken image icon) لأن الرابط الراجع كان بيتحل غلط في متصفح الأدمن.
+**اتأكد حي**: Playwright + CDP virtual WebAuthn authenticator (تسجيل دخول admin تجريبي حقيقي →
+ceremony=registration → رفع JPG حقيقي → `403 AUTH_006` → `StepUpDialog` → تأكيد → `201`) — الصورة
+فضلت معطوبة قبل الإصلاح (تأكدت من `GET /branding`: الرابط راجع `/uploads/...` بلا host)، وظهرت صح
+بعد الإصلاح (الرابط بقى `http://localhost:3000/uploads/...`، و`curl` على الرابط رجّع `200`).
+
+**الإصلاح**: `LocalDiskStorageService` بقى بياخد `storage.localPublicBaseUrl` جديد (`ConfigService`،
+افتراضي `http://localhost:<PORT>` — شغال بدون أي تعديل env لبيئة التطوير المحلية، قابل للتظبيط عبر
+`STORAGE_LOCAL_PUBLIC_BASE_URL` لو احتجت دومين تاني) ويبني الرابط الكامل بيه (`buildUrl()`) بدل
+مسار نسبي — نفس فلسفة S3 presigned URLs بالظبط (رابط قابل للاستخدام من أي أصل، مش بس أصل الـAPI).
+مفيش تأثير على الإنتاج — الإنتاج مرفوض يقلع بـ`STORAGE_PROVIDER=local` أصلاً (docs/08 §19 بند 16،
+`S3_PROVIDER=s3` إجباري)، فالبَقّة دي كانت محصورة في بيئة التطوير المحلية بس، لكنها بتأثر فعليًا على
+أي مطوّر بيختبر البراندنج/صور الطلبات/مستندات الفنيين محليًا بلا S3.
+
 مرجع كامل: `../../../../docs/01-master-plan.md`، `../../../../docs/03-external-integrations.md`

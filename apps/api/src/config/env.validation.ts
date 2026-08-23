@@ -101,6 +101,12 @@ export const envValidationSchema = Joi.object({
     .default('local')
     .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().invalid('local').required() }),
   STORAGE_LOCAL_DIR: Joi.string().default('./uploads'),
+  // بَقّة حقيقية (2026-08-23): LocalDiskStorageService.getUrl() كان بيرجّع مسار نسبي بس (`/uploads/...`
+  // من غير scheme/host) — شغال بس لما الـconsumer على نفس أصل الـAPI بالظبط. أي frontend على أصل
+  // تاني (apps/admin على 3001، apps/customer-web، تطبيقات Flutter) كان بيحل المسار ضد أصل نفسه هو
+  // مش أصل الـAPI → صورة معطوبة تمامًا (404/307 حسب توجيه الـfrontend نفسه). لازم رابط مطلق كامل
+  // زي S3 presigned URLs بالظبط. افتراضي `http://localhost:<PORT>` يشتغل بدون أي إعداد لبيئة التطوير.
+  STORAGE_LOCAL_PUBLIC_BASE_URL: Joi.string().uri().allow('').optional(),
   S3_ENDPOINT: Joi.string().uri().allow('').optional(),
   S3_REGION: Joi.string().default('us-east-1'),
   S3_BUCKET: Joi.string().allow('').optional(),

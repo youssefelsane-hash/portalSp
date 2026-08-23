@@ -13,22 +13,35 @@ import { StorageService } from './storage.service';
 @Injectable()
 export class LocalDiskStorageService implements StorageService {
   private readonly baseDir: string;
+  private readonly publicBaseUrl: string;
   private readonly logger = new Logger('StorageService(local)');
 
   constructor(config: ConfigService) {
     this.baseDir = config.get<string>('storage.localDir')!;
+    this.publicBaseUrl = config.get<string>('storage.localPublicBaseUrl')!;
   }
 
   async save(key: string, buffer: Buffer, _mimeType: string): Promise<string> {
     const filePath = join(this.baseDir, key);
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, buffer);
-    return `/uploads/${key}`;
+    return this.buildUrl(key);
   }
 
   // مسار محلي ثابت أصلاً (مفيش presigning)، فمفيش حاجة تتجدد — نفس النتيجة اللي save() برجعها.
   async getUrl(key: string): Promise<string> {
-    return `/uploads/${key}`;
+    return this.buildUrl(key);
+  }
+
+  // بَقّة حقيقية (2026-08-23) — رابط نسبي (`/uploads/...` من غير scheme/host) شغال بس لو
+  // الـconsumer على نفس أصل الـAPI بالظبط. apps/admin (3001)، apps/customer-web، وتطبيقات
+  // Flutter كلهم على أصل مختلف عن الـAPI حتى في التطوير المحلي (CORS مفعّل عمداً لكده) —
+  // المتصفح كان بيحل المسار النسبي ضد أصل الصفحة نفسها (admin/customer-web) مش أصل الـAPI،
+  // فالصورة بتيجي 404/توجيه غلط بدل الملف الحقيقي (نفس فلسفة S3 presigned URLs اللي هي دايمًا
+  // مطلقة أصلاً). اتلقطت لما المالك رفع لوجو JPG حقيقي من `/branding` وظهر بادچ "مرفوع" ونجح
+  // التوست بس مكان الصورة فضل فاضي (broken image) — الرفع والـDB والـcache كلهم كانوا شغالين صح.
+  private buildUrl(key: string): string {
+    return `${this.publicBaseUrl}/uploads/${key}`;
   }
 
   async delete(key: string): Promise<void> {

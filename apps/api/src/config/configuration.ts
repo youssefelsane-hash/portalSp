@@ -43,6 +43,9 @@ export default () => ({
     // 'local' (افتراضي، للتطوير) أو 's3' — راجع common/storage/storage.provider.ts
     provider: process.env.STORAGE_PROVIDER ?? 'local',
     localDir: process.env.STORAGE_LOCAL_DIR ?? './uploads',
+    // لازم رابط مطلق (scheme+host+port) — راجع الشرح الكامل في env.validation.ts جنب
+    // STORAGE_LOCAL_PUBLIC_BASE_URL وlocal-disk-storage.service.ts. الافتراضي بيطابق PORT نفسه.
+    localPublicBaseUrl: process.env.STORAGE_LOCAL_PUBLIC_BASE_URL || `http://localhost:${process.env.PORT ?? '3000'}`,
     s3: {
       // كل القيم دي مطلوبة فعلياً بس لو STORAGE_PROVIDER=s3 — تفاصيل الحصول عليها:
       // docs/03-external-integrations.md → قسم S3-compatible storage
