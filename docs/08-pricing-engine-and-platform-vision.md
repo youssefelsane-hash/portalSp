@@ -6382,3 +6382,15 @@ only`/`requires_start_and_end`. الوضع الرابع بيسجّل `orders.sch
 
 تفاصيل التنفيذ الكاملة (كود، اتحقق حي، لقطات شاشة) في `apps/customer-web/README.md` و
 `apps/api/src/modules/settings/README.md`.
+
+## §47. نفس تصميم hero/ثقة/نصايح/دعم مطبّق على `apps/customer-app` (Flutter) — طلب مالك مباشر 2026-08-23 — ✅ خلص
+
+طلب مالك مباشر بعد ما شاف §45/§46 على الويب بس: "طبّق الكلام ده كله على الأبليكيشن برضه، عايز
+الكلام يتطبق في كل حتة كله نفس الشكل". `apps/customer-app/lib/features/catalog/home_screen.dart`
+بقى فيه نفس الهيكل بالحرف — hero دوّار (نفس 3 تدرّجات، تلاشي كل 6 ثواني)، رسالة الثقة (نفس
+`GET /settings/homepage-content`)، "الأكثر طلبًا" بأيقونة+اسم بدل pills، قسم "نصايح مفيدة"
+(placeholder بصري بس، نفس محتوى الويب بالحرف)، وقسم "الدعم" مختصر آخر الشاشة (إعادة استخدام
+`SupportContactRepository` الموجودة من زمان). **صفر تعديل باك-إند إضافي** — الاتنين endpoints
+(homepage-content، support-contact) كانوا جاهزين بالفعل من §46. تفاصيل كاملة في
+`apps/customer-app/README.md`. مفيش Flutter SDK في بيئة السيشن — مراجعة يدوية دقيقة جدًا بدل
+`flutter analyze`، موثّق صراحة.

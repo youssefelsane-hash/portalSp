@@ -526,3 +526,31 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 - مفيش أي تعديل باك-إند — كل الحقول جاهزة من زمان، الفجوة كانت في العرض بس. تفاصيل كاملة في
   `docs/08-pricing-engine-and-platform-vision.md` §44.
 - مفيش Flutter SDK في بيئة السيشن دي وقت التنفيذ — مراجعة يدوية بدل `flutter analyze`.
+
+## Hero دوّار + رسالة ثقة + نصايح + دعم في الشاشة الرئيسية — طلب مالك مباشر 2026-08-23 ("نفس الشكل في كل حتة")
+
+نفس التصميم اللي اتعمل لـ`apps/customer-web` (§45/§46 في `docs/08-pricing-engine-and-platform-vision.md`)
+مطبّق دلوقتي في `home_screen.dart` بالحرف — طلب مالك صريح إن الشكل يبقى موحّد بين الويب والموبايل.
+
+- **hero دوّار**: `_buildHero()` جديدة — `AnimatedContainer` بتلاشى بين 3 تدرّجات لونية كل 6 ثواني
+  (`Timer.periodic`، نفس `_heroGradients` بالحرف زي `apps/customer-web/src/app/page.tsx`'s
+  `HERO_SLIDES`)، فوقها لوحة شفافة غامقة (`Colors.black.withValues(alpha: 0.35)`) فيها التاجلاين +
+  حقل البحث (`_HeroSearchField` جديدة — نفس تفاعل `_SearchEntryField` القديمة بالضبط، تاب بيفتح
+  `SearchResultsScreen`، بس بخلفية بيضاء صريحة تفضل واضحة فوق أي لون من الـhero).
+- **رسالة الثقة/الضمان**: `HomepageContentRepository` جديدة (`homepage_content_repository.dart`،
+  نفس نمط `SupportContactRepository` بالحرف) بتجيب `GET /settings/homepage-content` — نفس
+  الـendpoint اللي `apps/customer-web` بيستخدمه، **صفر تعديل باك-إند إضافي**. معروضة بلا صندوق فوق
+  صورة الـhero مباشرة (أيقونة + نص أبيض بظل خفيف)، مش فوق اللوحة الشفافة.
+- **"الأكثر طلبًا"**: كانت `ActionChip`s (pills نصية بس) — بقت `_FeaturedCategoryItem` جديدة (أيقونة
+  دائرية فوق + اسم تحت، بلا صندوق) — `category.iconUrl` لو موجود، وإلا حرف أول الاسم كـfallback،
+  نفس هيكل الويب بالحرف.
+- **"نصايح مفيدة"**: قسم جديد أسفل "كل الفئات" — نفس محتوى `HOME_TIPS` بالويب بالحرف (placeholder
+  بصري بس، صفر نظام مقالات/CMS، نفس السبب: طلب مالك صريح "ما تبذلش مجهود كتير").
+- **قسم "الدعم"**: عرض مختصر آخر الشاشة (تليفون/واتساب) بإعادة استخدام `SupportContactRepository`
+  **الموجودة بالفعل من زمان** (كانت مستهلكة بس في `SupportContactScreen` المنفصلة، الوصول ليها لسه
+  موجود من زرار الـAppBar). مبيظهرش لو `enabled=false` أو مفيش رقم حقيقي.
+- **"كل الفئات"** والمنطق كله (تحميل الفئات، البحث، التنقل) بلا أي تغيير — شكل بس، نفس فلسفة
+  الشرائح السابقة تمامًا.
+- مفيش Flutter SDK في بيئة السيشن دي وقت التنفيذ — مراجعة يدوية دقيقة جدًا (تتبّع يدوي لكل قوس
+  فتح/قفل في `_buildHero()` بعد إعادة الهيكلة، تحقق من كل استخدام `String?` بعد null-check صريح)
+  بدل `flutter analyze`/`flutter test` حي، موثّق صراحة كفجوة تحقق مش سهو.
