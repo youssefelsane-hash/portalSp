@@ -17,6 +17,7 @@ import '../support/support_contact_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
 import 'category_card.dart';
+import 'branding_repository.dart';
 import 'homepage_content_repository.dart';
 import 'models.dart';
 import 'search_results_screen.dart';
@@ -45,25 +46,12 @@ const List<List<Color>> _heroGradients = [
   [Color(0xFF2F5AA6), Color(0xFF4D78C4), Color(0xFF7FA6E0)],
 ];
 
-// نفس محتوى apps/customer-web's HOME_TIPS بالحرف (تفاصيل السبب/النطاق في تعليقها هناك) — نفس
-// الأسباب هنا: placeholder بصري بس، صفر نظام مقالات/CMS حقيقي.
-const List<({Color color, String title, String body})> _homeTips = [
-  (
-    color: AppColors.primary,
-    title: 'إزاي تختار الفني المناسب لشغلانتك؟',
-    body: 'شوف تقييمات الفنيين وعدد الشغلانات اللي خلّصوها قبل ما تأكّد الحجز — كل حاجة ظاهرة قدامك في بروفايله.',
-  ),
-  (
-    color: AppColors.success,
-    title: 'أسئلة تسألها قبل أي شغلانة كهرباء',
-    body: 'اسأل عن الضمان، ومدة التنفيذ المتوقعة، وهل السعر شامل قطع الغيار ولا لأ.',
-  ),
-  (
-    color: AppColors.warning,
-    title: 'الفرق بين الصيانة الدورية والطارئة',
-    body: 'الصيانة الدورية بتوفّرلك فلوس على المدى الطويل — اعرف إمتى تحتاج كل نوع.',
-  ),
-];
+// كانت _homeTips ثابتة في الكود (placeholder بصري بس) — بقت مُدارة من الأدمن (homepage.tips
+// setting، بلاغ مالك صريح 2026-08-23: "مش لاقي له مكان أرفع منه الصور") عبر
+// HomepageContentRepository تحت، نفس apps/customer-web بالحرف. لو الأدمن ما حطش imageUrl، بيرجع
+// لنفس التدرّجات اللونية دي كـfallback (مُتسلسلة حسب index، نفس apps/customer-web's
+// TIP_FALLBACK_BACKGROUNDS بالحرف).
+const List<Color> _tipFallbackColors = [AppColors.primary, AppColors.success, AppColors.warning];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -76,10 +64,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final _repository = CatalogRepository();
   final _homepageContentRepository = HomepageContentRepository();
   final _supportContactRepository = SupportContactRepository();
+  final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
   String? _error;
   String _trustMessage = '';
+  List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
+  BrandingLogo? _brandingLogo;
   int _activeSlide = 0;
   Timer? _slideTimer;
 
@@ -87,13 +78,19 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _load();
-    // رسالة الثقة/الضمان وبيانات الدعم — تحميل مستقل عمدًا (فشل أي واحد فيهم ميأثرش على باقي
-    // الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
+    // رسالة الثقة/الضمان ونصايح مفيدة وبيانات الدعم ولوجو البراندنج — تحميل مستقل عمدًا (فشل أي
+    // واحد فيهم ميأثرش على باقي الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
     _homepageContentRepository.fetch().then((content) {
-      if (mounted) setState(() => _trustMessage = content.trustMessage);
+      if (mounted) setState(() {
+        _trustMessage = content.trustMessage;
+        _tips = content.tips;
+      });
     }).catchError((_) {});
     _supportContactRepository.fetch().then((contact) {
       if (mounted) setState(() => _supportContact = contact);
+    }).catchError((_) {});
+    _brandingRepository.fetchPrimaryLogo().then((logo) {
+      if (mounted) setState(() => _brandingLogo = logo);
     }).catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (mounted) setState(() => _activeSlide = (_activeSlide + 1) % _heroGradients.length);
@@ -127,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('صُنّاع'),
+          title: _buildAppBarTitle(),
           actions: [
             IconButton(
               icon: const Icon(Icons.receipt_long),
@@ -324,8 +321,27 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // "نصايح مفيدة" — placeholder بصري بس، تفاصيل في تعليق _homeTips فوق.
+  // عنوان الـAppBar — لوجو البراندنج الحقيقي (لو الأدمن رفع واحد، isDefault=false دايمًا صورة
+  // raster حقيقية) بدل النص الثابت "صُنّاع" (بلاغ مالك صريح 2026-08-23: "الصور مش بتظهر على
+  // الأبليكيشن" — التطبيق أصلاً مكانش بيستهلك /branding خالص). errorBuilder يرجع للنص لو تحميل
+  // الصورة فشل لأي سبب (شبكة، رابط اترفض)، مش بيوقف التطبيق أبدًا.
+  Widget _buildAppBarTitle() {
+    final logo = _brandingLogo;
+    if (logo == null || logo.isDefault || logo.url.isEmpty) {
+      return const Text('صُنّاع');
+    }
+    return Image.network(
+      logo.url,
+      height: 32,
+      fit: BoxFit.contain,
+      errorBuilder: (_, _, _) => const Text('صُنّاع'),
+    );
+  }
+
+  // "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (تفاصيل في تعليق _tipFallbackColors فوق). مبتظهرش
+  // خالص لو الأدمن مسحها كلها (نفس فلسفة رسالة الثقة/بيانات الدعم — بيختفي بهدوء بدل قسم فاضي).
   Widget _buildTipsSection(BuildContext context) {
+    if (_tips.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 28),
       child: Column(
@@ -339,10 +355,11 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 190,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: _homeTips.length,
+              itemCount: _tips.length,
               separatorBuilder: (_, _) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
-                final tip = _homeTips[index];
+                final tip = _tips[index];
+                final imageUrl = tip.imageUrl;
                 return SizedBox(
                   width: 220,
                   child: Card(
@@ -350,7 +367,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Container(height: 80, color: tip.color),
+                        if (imageUrl != null && imageUrl.isNotEmpty)
+                          Image.network(
+                            imageUrl,
+                            height: 80,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) =>
+                                Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
+                          )
+                        else
+                          Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
                         Padding(
                           padding: const EdgeInsets.all(12),
                           child: Column(

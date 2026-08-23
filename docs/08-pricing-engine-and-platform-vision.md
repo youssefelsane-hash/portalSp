@@ -6433,3 +6433,72 @@ t=0/t=6s/t=12s وأظهر تغيير حقيقي في الاتنين). المشك
 حتة". `tsc --noEmit` عدّى نضيف على `apps/api`/`apps/customer-web` الاتنين، `nest build`/`jest` على
 `apps/api` عدّوا نضيف كمان (تفاصيل في الـcommit). مفيش Flutter SDK في بيئة السيشن — تعديل Dart
 كان بس تغيير قيم Color literals جوّه مصفوفة موجودة، صفر تغيير هيكلي، مراجعة يدوية بس كفاية هنا.
+
+## §48.1 — متابعة مباشرة على §48: "نصايح مفيدة" بقت مُدارة من الأدمن (رابط بس) + لوجو البراندنج ظهر في `apps/customer-app` (بلاغ مالك صريح 2026-08-23، نفس اليوم) — ✅ خلص
+
+بعد §48، المالك بعت رسالتين متتاليتين وهو بيختبر البناء الجديد فعليًا على جهازه:
+
+1. **"نصايح مفيدة... أنا مش لاقي له مكان أرفع منه الصور، إنت غالبًا نسيت تعمله حاجة في الأدمن"** —
+   `HOME_TIPS`/`_homeTips` كانت ثابتة في الكود من زمان (طلب مالك أصلي §46/§47: "placeholder بصري
+   بس، ما تبذلش مجهود كتير")، بس مفيش حتى مكان للأدمن يغيّر النص نفسه فضلاً عن الصور. **سُئل المالك
+   صراحة عبر `AskUserQuestion`**: رفع ملف حقيقي (زي البراندنج) ولا حقل رابط (URL) بس؟ اختار **رابط
+   بس** (فورم بسيط: عنوان + نص + رابط صورة).
+2. **"هو برضه للأسف الصور مش بتظهر على الأبليكيشن... لو موضوع الصور مش تمام أو فيه مشاكل أو صعبة
+   في العمل، خليها لينكات، خلي كله لينكات. أنا جربت اللينكات صراحة شغالة كلها"** — مع سكرين شوت
+   لصفحة `/branding` بالأدمن (بقت شغالة، صور حقيقية بعد إصلاح §48) وسكرين شوت للـ`customer-app`
+   بتاعه (`AppBar` لسه نص "صُنّاع" ثابت، مش الصورة). تدقيق كامل (`grep` شامل على `apps/customer-app/lib`)
+   أثبت: **التطبيق أصلاً مكانش بيستهلك `GET /branding` خالص** — مش بَقّة في التخزين (اتصلحت في
+   §48)، فجوة تطبيق كاملة: موديول البراندنج (ADR-0014) بُني للأدمن/الويب بس، مش اتوصّل لـFlutter.
+
+**التنفيذ (نفس اليوم، docs 08 §48.1)**:
+
+- **`homepage.tips` setting جديد** (`infra/migrations/0175`, `value_type='json'`, نفس نمط
+  `productivity.metrics_config`/`homepage.trust_message`) — مصفوفة `{title, body, image_url}`،
+  قيمة افتراضية مطابقة تمامًا للنصوص الثابتة القديمة (`image_url: null` للتلاتة، صفر تغيير بصري
+  فوري). `HomepageContentResponseDto` (`apps/api/src/modules/settings/homepage-content.controller.ts`)
+  بقى فيه `tips: HomepageTipDto[]` جنب `trust_message` — صفر endpoint جديد، نفس `GET /settings/homepage-content`
+  الموجود. **عمداً `image_url` رابط حر بس** (مفيش `StorageService`/magic-byte validation زي
+  البراندنج) — قرار المالك المباشر فوق، أبسط وأسرع وأثبت بالاستخدام الفعلي عنده.
+- **`apps/admin/src/app/homepage-content/page.tsx` جديدة** (nav item جديد تحت "البراندنج") — فورم
+  رسالة الثقة + قايمة نصايح قابلة للإضافة/التعديل/الحذف (عنوان/نص/رابط صورة لكل واحدة)، حفظ منفصل
+  لكل قسم عبر `PATCH /admin/settings/:key` الموجود بالفعل (Step-Up تلقائي، صفر endpoint إضافي).
+  اختيار صفحة مخصّصة بدل الاعتماد على `/settings` العامة (raw JSON textarea) — تجربة أدمن حقيقية
+  لمصفوفة كروت، مش نص JSON يدوي يتعرّض لغلطة syntax.
+- **`apps/customer-web`/`apps/customer-app`**: `HOME_TIPS`/`_homeTips` الثابتة اتشالت بالكامل —
+  بقوا بيتقروا من `fetchHomepageContent()`/`HomepageContentRepository.fetch()`. `image_url` لو
+  موجود بيتعرض (`<img>`/`Image.network`)، لو فاضي بيرجع لنفس التدرّجات اللونية القديمة كـfallback
+  (`TIP_FALLBACK_BACKGROUNDS`/`_tipFallbackColors`، مُتسلسلة حسب index — صفر مكان صورة فاضي). القسم
+  كله بيختفي بهدوء لو الأدمن مسح كل النصايح (نفس فلسفة `trustMessage`/`supportContact`).
+- **`BrandingRepository` جديدة في `apps/customer-app`** (`branding_repository.dart`، نفس نمط
+  `SupportContactRepository` بالحرف) — بتجيب `primary_logo` بس من `GET /branding` (`@Public()`).
+  `HomeScreen`'s `AppBar` title بقى `_buildAppBarTitle()`: لو `is_default` (لسه ما اترفعش لوجو
+  حقيقي — الـfallback SVG data URI مش قابل للعرض بـ`Image.network` أصلاً من غير `flutter_svg`
+  غير موجودة في المشروع)، النص الثابت "صُنّاع" بيفضل زي ما هو؛ لو الأدمن رفع لوجو حقيقي
+  (`is_default=false`، دايمًا PNG/JPEG/WEBP حقيقي — `validateBrandingFile` بيرفض أي حاجة تانية)،
+  الصورة الحقيقية بتظهر بدله (`errorBuilder` يرجع للنص لو فشل التحميل لأي سبب، صفر كسر للتطبيق).
+
+**اتأكد حي بالكامل** (نفس منهجية §48 — Postgres/Redis محليين، `apps/api`+`apps/admin`+`apps/customer-web`
+شغالين فعليًا، Playwright + CDP virtual WebAuthn authenticator):
+
+- Migration 0175 اتطبّقت (`npm run migrate`)، `GET /settings/homepage-content` رجّع `tips` بالقيم
+  الافتراضية الصح فورًا.
+- `apps/admin/src/app/homepage-content/page.tsx`: تسجيل دخول admin تجريبي كامل (OTP → تسجيل
+  Passkey) → تعديل رابط صورة نصيحة حقيقية → `PATCH /admin/settings/homepage.tips` رجّع `403
+  AUTH_006` → `StepUpDialog` → تأكيد → `200` — `GET /settings/homepage-content` العام عكس القيمة
+  الجديدة فورًا (اتأكد بـ`curl` مباشر بعد الحفظ، مش افتراض).
+- `apps/customer-web`'s "نصايح مفيدة" عرضت الرابط الجديد فعليًا (`<img>`) — رابط اختبار خارجي واحد
+  (`picsum.photos`) اترفض بـ`403` من الـproxy بتاع بيئة السيشن نفسها (مش كود المشروع، اتأكد بـ`curl`
+  مباشر لنفس الرابط برّه المتصفح)؛ استبدال بـdata URI مضمّن أثبت إن `<img>`/pipeline العرض نفسه
+  شغال 100% صح — البيئة الحقيقية للمالك (بره الـsandbox) مفيش عندها نفس القيد، وهو نفسه أكّد
+  "جربت اللينكات صراحة شغالة كلها".
+- `tsc --noEmit` نظيف على `apps/api`/`apps/admin`/`apps/customer-web` الثلاثة، `nest build` نظيف
+  على `apps/api`. Full jest suite على `apps/api` (147 suite، 794 اختبار): 3 فشل مش لهم أي علاقة
+  بالتعديلات دي (اتأكد بـ`git diff --stat` — التعديلات في `settings`/`app-shell`/`page.tsx` بس،
+  مفيش لمسة لـ`orders`/`matching` خالص) — اتنين معروفين مسبقًا كفجوة seed data محلية
+  (`mobile-signup-technician-parity.spec.ts`, `technician-team-order-leader-cancel.spec.ts`)،
+  والتالت (`matching-accept-concurrency.spec.ts`) تصادم `order_number` فريد من إعادة استخدام نفس
+  الـDB المحلية عبر جلسات اختبار حي متعددة في نفس السيشن — مش regression.
+- مفيش Flutter SDK في بيئة السيشن — تعديل `home_screen.dart`/`branding_repository.dart` الجديدة
+  اتراجعت يدويًا (تتبّع أقواس، فحص توازن `{}/()/[]` بـPython)، صفر `flutter analyze` حي.
+
+Bracket-balance check نهائي على `home_screen.dart`: `{}` 32/32، `()` 347/347، `[]` 33/33 — متوازن.
