@@ -39,6 +39,22 @@ export interface ServiceCategoryDto {
   is_featured: boolean;
 }
 
+// مطابق لـ apps/api/src/modules/settings/homepage-content.controller.ts
+export interface HomepageContentDto {
+  trust_message: string;
+}
+
+// مطابق لـ apps/api/src/modules/settings/support-contact.controller.ts — نفس البيانات
+// المعروضة في apps/customer-app/apps/technician-app's شاشة الدعم، دلوقتي متاحة لـcustomer-web كمان.
+export interface SupportContactDto {
+  enabled: boolean;
+  phone_number: string | null;
+  whatsapp_number: string | null;
+  whatsapp_url: string | null;
+  email: string | null;
+  help_url: string | null;
+}
+
 export interface ServiceDto {
   id: string;
   category_id: string;
