@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { AuditModule } from '../audit/audit.module';
 import { Setting } from './entities/setting.entity';
+import { HomepageContentController } from './homepage-content.controller';
 import { SettingsService } from './settings.service';
 import { SupportContactController } from './support-contact.controller';
 
@@ -11,7 +12,7 @@ import { SupportContactController } from './support-contact.controller';
 // ما أي حد فيهم يعتمد على admin نفسه.
 @Module({
   imports: [TypeOrmModule.forFeature([Setting]), AuditModule],
-  controllers: [SupportContactController],
+  controllers: [SupportContactController, HomepageContentController],
   providers: [SettingsService, RedisCacheService],
   exports: [SettingsService],
 })
