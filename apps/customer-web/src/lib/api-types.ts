@@ -62,6 +62,15 @@ export interface SupportContactDto {
   help_url: string | null;
 }
 
+// مطابق لـ apps/api/src/modules/branding/dto/branding-response.dto.ts's BrandingAssetResponseDto —
+// بس أصل الـ`splash` (خلفية الشاشة الرئيسية وراء صندوق البحث)، بقية الأصول (logo_mark/...) مش
+// مستهلكة في customer-web لسه. `is_default=true` = الأدمن ما رفعش صورة، استخدم تدرّج الـHERO_SLIDES
+// المحلي بدلها (راجع page.tsx).
+export interface BrandingAssetDto {
+  url: string;
+  is_default: boolean;
+}
+
 export interface ServiceDto {
   id: string;
   category_id: string;

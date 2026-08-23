@@ -35,5 +35,10 @@ export const BRANDING_ASSET_LABELS_AR: Record<BrandingAssetType, string> = {
   logo_light: 'نسخة فاتحة',
   logo_dark: 'نسخة غامقة',
   login_logo: 'لوجو شاشة الدخول',
-  splash: 'شاشة البداية (Splash)',
+  // بلاغ مالك صريح 2026-08-23: كان اسمها "شاشة البداية (Splash)" — عمل تحمل ديه توهم إنها
+  // خلفية الـsplash التقنية بس، بينما هي فعليًا الصورة اللي وراء صندوق البحث في الشاشة الرئيسية
+  // (أول ما تفتح التطبيق). نفس asset_type='splash' في الـDB/الـAPI زي ما هو (مفيش migration)،
+  // الاسم المعروض بس اتوضّح. راجع apps/customer-web/src/app/page.tsx و
+  // apps/customer-app/lib/features/catalog/home_screen.dart للاستهلاك الفعلي.
+  splash: 'خلفية الشاشة الرئيسية (وراء صندوق البحث)',
 };

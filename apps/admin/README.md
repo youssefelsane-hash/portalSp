@@ -334,4 +334,15 @@ attributes قبل/بعد أثبت تطابق 100%. تفاصيل في `docs/08-pr
 (نص URL بس)**. حفظ منفصل لكل قسم، Step-Up تلقائي زي أي صفحة تانية (`authedFetch`). تفاصيل الجذر
 الكامل والاختبار الحي: `apps/api/src/modules/settings/README.md`.
 
+## `/branding`'s "شاشة البداية (Splash)" اتغيّر اسمها — كانت فجوة استهلاك حقيقية (بلاغ مالك صريح 2026-08-23)
+
+المالك رفع صورة فعلاً لأصل "شاشة البداية (Splash)" في `/branding`، البادچ اتحدّث لـ"مرفوع" بنجاح،
+بس مفيش أي تغيير ظهر في `customer-web`/`customer-app` — لأنه فهم الاسم على إنه "الصورة اللي وراء
+صندوق البحث في الشاشة الرئيسية" (أول حاجة تفتح مع التطبيق)، بينما الأصل ده أصلاً مكانش بيُستهلك
+في أي حتة خالص (`asset_type='splash'` موجود في الـAPI من زمان، بس صفر consumer). الاسم اتوضّح في
+`BRANDING_ASSET_LABELS_AR` (`@baytak/shared-types`) لـ"خلفية الشاشة الرئيسية (وراء صندوق البحث)" —
+`asset_type` نفسه فضل `splash` زي ما هو (صفر migration)، والاستهلاك الفعلي اتضاف في
+`apps/customer-web`/`apps/customer-app`. تفاصيل كاملة: `docs/08-pricing-engine-and-platform-vision.md`
+§48.2، `apps/customer-web/README.md`، `apps/customer-app/README.md`.
+
 مرجع كامل: `../../docs/01-master-plan.md`
