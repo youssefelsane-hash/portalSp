@@ -132,7 +132,11 @@ export class BrandingService {
       throw err;
     }
 
-    const key = `branding/${assetType}/${randomUUID()}`;
+    const extension =
+  file.mimetype === 'image/png' ? 'png' :
+  file.mimetype === 'image/webp' ? 'webp' : 'jpg';
+
+const key = `branding/${assetType}/${randomUUID()}.${extension}`;
     const existing = await this.assets.findOne({ where: { assetType } });
     const previousValues = existing
       ? { storage_key: existing.storageKey, mime_type: existing.mimeType, width_px: existing.widthPx, height_px: existing.heightPx }
