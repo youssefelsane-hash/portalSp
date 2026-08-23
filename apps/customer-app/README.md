@@ -565,3 +565,20 @@ initState()` لما مفيش `initialAddress` جاهز) كانت بتنادي `_
 نفس القيم بالحرف اللي اتطبّقت على `apps/customer-web` (docs/08 §48) — اتأكد بصريًا عبر Playwright
 على نسخة الويب المطابقة (صفر Flutter SDK متاح لتصوير التطبيق نفسه، بس نفس الـColor literals
 بالحرف بين الاتنين، تعديل قيم بس صفر تغيير هيكلي).
+
+### "نصايح مفيدة" بقت مُدارة من الأدمن + لوجو البراندنج ظهر في الـAppBar (بلاغ مالك صريح 2026-08-23)
+
+- **`_homeTips` كانت ثابتة في الكود** — بقت `_tips` (`HomepageContentRepository.fetch()`'s
+  `content.tips`، نفس `homepage.tips` setting اللي `apps/customer-web` بيستهلكها بالحرف، docs/08
+  §48). كل نصيحة فيها `imageUrl` اختياري (**رابط نص بس، مفيش رفع ملف** — طلب مالك صريح: "خلي كله
+  لينكات") يتعرض بـ`Image.network` مع `errorBuilder` يرجع للتدرّج اللوني الافتراضي (`_tipFallbackColors`)
+  لو فشل التحميل لأي سبب. القسم كله بيختفي (`SizedBox.shrink()`) لو `_tips.isEmpty`.
+- **لوجو البراندنج ظهر في الـAppBar** — كانت بَقّة حقيقية: التطبيق أصلاً **مكانش بيستهلك
+  `GET /branding` خالص** (`grep` شامل قبل الإصلاح أثبت صفر استخدام)، فعنوان الـAppBar كان
+  `Text('صُنّاع')` ثابت حتى لو الأدمن رفع لوجو حقيقي من `/branding` (بلاغ مالك صريح: "الصور مش
+  بتظهر على الأبليكيشن"). `BrandingRepository` جديدة (`branding_repository.dart`، نفس نمط
+  `SupportContactRepository` بالحرف) بتجيب `primary_logo` بس من `GET /branding` — لو `is_default`
+  (لسه ما اترفعش لوجو حقيقي، الـfallback SVG data URI مش قابل للعرض بـ`Image.network` أصلاً بدون
+  `flutter_svg` غير موجودة في المشروع)، النص الثابت "صُنّاع" بيفضل زي ما هو؛ لو الأدمن رفع لوجو
+  حقيقي (`is_default=false`، دايمًا PNG/JPEG/WEBP — `validateBrandingFile` بيرفض أي حاجة تانية)،
+  الصورة الحقيقية بتظهر بدله (`errorBuilder` يرجع للنص لو فشل التحميل).

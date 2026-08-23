@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { fetchCategories } from '@/lib/catalog';
 import { fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
-import { ServiceCategoryDto, SupportContactDto } from '@/lib/api-types';
+import { HomepageTipDto, ServiceCategoryDto, SupportContactDto } from '@/lib/api-types';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
@@ -37,25 +37,15 @@ const HERO_PATTERN =
   "url(\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEuMiIgZmlsbD0iI2ZmZmZmZiIgZmlsbC1vcGFjaXR5PSIwLjA5Ii8+PC9zdmc+\")";
 
 // قسم "نصايح مفيدة" أسفل الصفحة (طلب مالك صريح 2026-08-22، تصميم مرجعي: كارت "Popular cost
-// guides" في Angi.com) — **placeholder بصري بس عمدًا**: محتوى نصي مبدئي بس، مفيش نظام مقالات/CMS
-// حقيقي اتبنى (مش مطلوب — "ما تبذلش مجهود كتير، يدوب الديزاين يبقى شكله حلو"). صفر رابط "اقرأ
-// أكتر" فعلي عمدًا (مفيش صفحة مقال حقيقية للرابط ده يوديك لها لسه) — الكروت معروضة كمعلومة بس.
-const HOME_TIPS = [
-  {
-    background: 'linear-gradient(135deg, #2f5aa6 0%, #4d78c4 100%)',
-    title: 'إزاي تختار الفني المناسب لشغلانتك؟',
-    body: 'شوف تقييمات الفنيين وعدد الشغلانات اللي خلّصوها قبل ما تأكّد الحجز — كل حاجة ظاهرة قدامك في بروفايله.',
-  },
-  {
-    background: 'linear-gradient(135deg, #3c8b4a 0%, #6fbf7a 100%)',
-    title: 'أسئلة تسألها قبل أي شغلانة كهرباء',
-    body: 'اسأل عن الضمان، ومدة التنفيذ المتوقعة، وهل السعر شامل قطع الغيار ولا لأ.',
-  },
-  {
-    background: 'linear-gradient(135deg, #c98a1f 0%, #e0ac4e 100%)',
-    title: 'الفرق بين الصيانة الدورية والطارئة',
-    body: 'الصيانة الدورية بتوفّرلك فلوس على المدى الطويل — اعرف إمتى تحتاج كل نوع.',
-  },
+// guides" في Angi.com) — **كان placeholder بصري بس** (محتوى ثابت في الكود، `HOME_TIPS` قديمًا) —
+// بقى مُدار من الأدمن بالكامل (`homepage.tips` setting، بلاغ مالك صريح 2026-08-23: "مش لاقي له
+// مكان أرفع منه الصور") عبر `fetchHomepageContent()` تحت، إدارة كاملة من `/homepage-content` في
+// apps/admin. `image_url` لسه اختياري — لو الأدمن ما حطش رابط صورة، بيرجع للتدرّج اللوني الافتراضي
+// (نفس الشكل القديم بالحرف، مُتسلسل حسب index) بدل ما يفضل مكان الصورة فاضي.
+const TIP_FALLBACK_BACKGROUNDS = [
+  'linear-gradient(135deg, #2f5aa6 0%, #4d78c4 100%)',
+  'linear-gradient(135deg, #3c8b4a 0%, #6fbf7a 100%)',
+  'linear-gradient(135deg, #c98a1f 0%, #e0ac4e 100%)',
 ];
 
 export default function HomePage() {
@@ -65,16 +55,20 @@ export default function HomePage() {
   const [query, setQuery] = useState('');
   const [activeSlide, setActiveSlide] = useState(0);
   const [trustMessage, setTrustMessage] = useState('');
+  const [tips, setTips] = useState<HomepageTipDto[]>([]);
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
 
   useEffect(() => {
     fetchCategories()
       .then(setCategories)
       .catch(() => setError('تعذّر تحميل الفئات — حاول تاني'));
-    // رسالة الثقة/الضمان ودعم العملاء — نص/بيانات إدارية بتتغيّر، صفر تأثير على باقي الصفحة لو
-    // الجلب فشل (بيسيبوا فاضيين، الأقسام المعتمدة عليهم بتختفي بهدوء تحت).
+    // رسالة الثقة/الضمان ونصايح مفيدة ودعم العملاء — نص/بيانات إدارية بتتغيّر، صفر تأثير على باقي
+    // الصفحة لو الجلب فشل (بيسيبوا فاضيين، الأقسام المعتمدة عليهم بتختفي بهدوء تحت).
     fetchHomepageContent()
-      .then((content) => setTrustMessage(content.trust_message))
+      .then((content) => {
+        setTrustMessage(content.trust_message);
+        setTips(content.tips);
+      })
       .catch(() => {});
     fetchSupportContact()
       .then(setSupportContact)
@@ -207,22 +201,31 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* "نصايح مفيدة" — placeholder بصري بس، تفاصيل في تعليق HOME_TIPS فوق. */}
-        <div className="mt-12">
-          <h2 className="mb-1 text-lg font-semibold">نصايح مفيدة</h2>
-          <p className="mb-4 text-sm text-muted">حاجات كويس تعرفها قبل ما تحجز أي شغلانة</p>
-          <div className="flex gap-4 overflow-x-auto pb-2">
-            {HOME_TIPS.map((tip, i) => (
-              <div key={i} className="w-64 shrink-0 overflow-hidden rounded-xl border border-border bg-surface">
-                <div className="h-32 w-full" style={{ background: tip.background }} />
-                <div className="p-4">
-                  <h3 className="font-semibold">{tip.title}</h3>
-                  <p className="mt-1 text-sm text-muted">{tip.body}</p>
+        {/* "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (homepage.tips)، تفاصيل في التعليق فوق
+            TIP_FALLBACK_BACKGROUNDS. مبتظهرش خالص لو الأدمن مسحها كلها (نفس فلسفة trustMessage/
+            supportContact — بيختفي بهدوء بدل قسم فاضي). */}
+        {tips.length > 0 && (
+          <div className="mt-12">
+            <h2 className="mb-1 text-lg font-semibold">نصايح مفيدة</h2>
+            <p className="mb-4 text-sm text-muted">حاجات كويس تعرفها قبل ما تحجز أي شغلانة</p>
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {tips.map((tip, i) => (
+                <div key={i} className="w-64 shrink-0 overflow-hidden rounded-xl border border-border bg-surface">
+                  {tip.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- رابط خارجي حر بيحطه الأدمن، مش أصل static معروف وقت البناء
+                    <img src={tip.image_url} alt={tip.title} className="h-32 w-full object-cover" />
+                  ) : (
+                    <div className="h-32 w-full" style={{ background: TIP_FALLBACK_BACKGROUNDS[i % TIP_FALLBACK_BACKGROUNDS.length] }} />
+                  )}
+                  <div className="p-4">
+                    <h3 className="font-semibold">{tip.title}</h3>
+                    <p className="mt-1 text-sm text-muted">{tip.body}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* الدعم — طلب مالك صريح 2026-08-22: نفس بيانات تواصل خدمة العملاء المعروضة بالفعل في
             apps/customer-app/apps/technician-app (GET /settings/support-contact)، دلوقتي متاحة

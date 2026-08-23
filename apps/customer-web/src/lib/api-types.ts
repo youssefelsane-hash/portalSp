@@ -40,8 +40,15 @@ export interface ServiceCategoryDto {
 }
 
 // مطابق لـ apps/api/src/modules/settings/homepage-content.controller.ts
+export interface HomepageTipDto {
+  title: string;
+  body: string;
+  image_url: string | null;
+}
+
 export interface HomepageContentDto {
   trust_message: string;
+  tips: HomepageTipDto[];
 }
 
 // مطابق لـ apps/api/src/modules/settings/support-contact.controller.ts — نفس البيانات
