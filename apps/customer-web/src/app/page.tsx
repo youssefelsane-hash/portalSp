@@ -4,25 +4,23 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { fetchCategories } from '@/lib/catalog';
-import { fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
+import { fetchHeroBackground, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
 import { HomepageTipDto, ServiceCategoryDto, SupportContactDto } from '@/lib/api-types';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
 // الـAPIs بالضبط (§59: مفيش محرك اكتشاف خدمة منفصل للويب).
 
-// خلفية hero دوّارة (طلب مالك صريح 2026-08-22، مبني على تصميم مرجعي — Angi.com). الشكل بس، صفر
-// تغيير على منطق البحث/الفئات تحت. **مؤقتة عمدًا**: لسه مفيش صور فوتوغرافية حقيقية للفنيين في
-// الشغل في المشروع (اتفحص — مفيش أي أصل صورة في apps/customer-web/public غير أيقونة التطبيق)،
-// فبدلها تدرّجات لونية بهوية العلامة (--primary وتوابعها) + نمط نقطي خفيف عشان الخلفية متبقاش
-// مسطّحة. لما الصور الحقيقية تتجهّز، استبدال المصفوفة دي بروابط الصور الفعلية كفاية — الكاروسيل
-// والتلاشي (fade) جاهزين بالفعل.
-// بَقّة حقيقية (2026-08-23، ملاحظة مالك: "الخلفية دايمًا زرقة ما بتتغيرش") — التلات تدرّجات
-// كانوا فعليًا شغالين (rotation نفسه اتأكد حي بـPlaywright قبل كده)، بس slide 1 وslide 3 كانوا
-// شبه متطابقين بصريًا (نفس عائلة الأزرق النافي بنفس درجة الإضاءة تقريبًا) — نظرة سريعة من
-// المستخدم بتوقع تلاقيه على واحد من الاتنين مرتين ورا بعض فتحس إن "مفيش تغيير خالص". الحل:
-// سلّم إضاءة واضح (غامق/متوسط/فاتح) بدل تنويع هوية اللون — يفضل داخل عائلة الأزرق نفسها
-// (نفس المبدأ الحاكم في CLAUDE.md، "نفس الشكل في كل حتة")، بس كل سلايد بقى مميّز بصريًا فورًا.
+// خلفية hero (طلب مالك صريح 2026-08-22، مبني على تصميم مرجعي — Angi.com). الشكل بس، صفر تغيير
+// على منطق البحث/الفئات تحت.
+//
+// بَقّة حقيقية تانية (2026-08-23، ملاحظة مالك: "رفعت صورة من البراندنج، الأبليكيشن مش بيتغيّر")
+// — الأدمن كان عنده أصل براندنج اسمه "شاشة البداية (Splash)" مرفوع بالفعل ونجاح واضح، بس الصفحة
+// دي أصلاً مكانت بتستهلكهوش خالص (فجوة استهلاك، مش بَقّة تخزين — تخزين البراندنج نفسه اتصلح
+// قبل كده). دلوقتي `fetchHeroBackground()` (`GET /branding`'s `splash` asset) بيتجاب، ولو الأدمن
+// رفع صورة حقيقية (`is_default=false`) بتحل محل التدرّجات تمامًا كخلفية hero ثابتة. `HERO_SLIDES`
+// فضلت **fallback** بس لحد ما الأدمن يرفع صورة — تدرّجات لونية بهوية العلامة + نمط نقطي خفيف
+// عشان الخلفية متبقاش مسطّحة، بتدور كل 6 ثواني زي الأول بالظبط.
 const HERO_SLIDES = [
   { background: 'linear-gradient(135deg, #1c3a6e 0%, #2f5aa6 55%, #4d78c4 100%)' },
   { background: 'linear-gradient(135deg, #0f1115 0%, #22314f 45%, #2f5aa6 100%)' },
@@ -54,6 +52,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeSlide, setActiveSlide] = useState(0);
+  const [heroBackgroundUrl, setHeroBackgroundUrl] = useState<string | null>(null);
   const [trustMessage, setTrustMessage] = useState('');
   const [tips, setTips] = useState<HomepageTipDto[]>([]);
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
@@ -73,15 +72,19 @@ export default function HomePage() {
     fetchSupportContact()
       .then(setSupportContact)
       .catch(() => {});
+    // خلفية الـhero (splash) — لو الأدمن رفع صورة حقيقية بتحل محل تدرّجات HERO_SLIDES تمامًا.
+    fetchHeroBackground()
+      .then((asset) => setHeroBackgroundUrl(asset.is_default ? null : asset.url))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (HERO_SLIDES.length <= 1) return;
+    if (heroBackgroundUrl || HERO_SLIDES.length <= 1) return;
     const timer = setInterval(() => {
       setActiveSlide((current) => (current + 1) % HERO_SLIDES.length);
     }, HERO_SLIDE_DURATION_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [heroBackgroundUrl]);
 
   const featured = categories?.filter((c) => c.is_featured) ?? [];
 
@@ -94,14 +97,26 @@ export default function HomePage() {
     <div>
       <section className="relative isolate overflow-hidden">
         <div aria-hidden className="absolute inset-0">
-          {HERO_SLIDES.map((slide, i) => (
-            <div
-              key={i}
-              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-              style={{ background: slide.background, backgroundImage: `${HERO_PATTERN}, ${slide.background}`, opacity: i === activeSlide ? 1 : 0 }}
+          {heroBackgroundUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- رابط ديناميكي من البراندنج (محلي/S3)، مش أصل static معروف وقت البناء
+            <img
+              src={heroBackgroundUrl}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              // فشل تحميل الصورة (شبكة، رابط اترفض) بيرجّع للتدرّج الدوّار بدل خلفية فاضية —
+              // نفس فلسفة onError في apps/customer-app's DecorationImage بالحرف.
+              onError={() => setHeroBackgroundUrl(null)}
             />
-          ))}
-          {/* تدرّج غامق أسفل الصورة لضمان وضوح النص/الفورم فوقها في أي slide */}
+          ) : (
+            HERO_SLIDES.map((slide, i) => (
+              <div
+                key={i}
+                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                style={{ background: slide.background, backgroundImage: `${HERO_PATTERN}, ${slide.background}`, opacity: i === activeSlide ? 1 : 0 }}
+              />
+            ))
+          )}
+          {/* تدرّج غامق أسفل الصورة لضمان وضوح النص/الفورم فوقها، سواء صورة حقيقية أو تدرّج fallback */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
         </div>
 

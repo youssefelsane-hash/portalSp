@@ -71,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
+  BrandingLogo? _heroBackground;
   int _activeSlide = 0;
   Timer? _slideTimer;
 
@@ -91,6 +92,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }).catchError((_) {});
     _brandingRepository.fetchPrimaryLogo().then((logo) {
       if (mounted) setState(() => _brandingLogo = logo);
+    }).catchError((_) {});
+    // خلفية الـhero (splash) — لو الأدمن رفع صورة حقيقية بتحل محل تدرّجات _heroGradients تمامًا
+    // وبيقف دوران الـslides (مفيش داعي نلف على تدرّجات محلية محدش هيشوفها).
+    _brandingRepository.fetchHeroBackground().then((asset) {
+      if (!mounted || asset == null || asset.isDefault) return;
+      setState(() => _heroBackground = asset);
+      _slideTimer?.cancel();
     }).catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (mounted) setState(() => _activeSlide = (_activeSlide + 1) % _heroGradients.length);
@@ -249,14 +257,21 @@ class _HomeScreenState extends State<HomeScreen> {
   // متدرّجة دوّارة فيها التاجلاين + البحث، ورسالة الثقة/الضمان تحتها مباشرة فوق الصورة نفسها
   // (بلا صندوق عمدًا) — مطابق تمامًا لهيكل apps/customer-web's hero.
   Widget _buildHero(BuildContext context) {
+    final heroImageUrl = _heroBackground?.url;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 900),
       decoration: BoxDecoration(
+        // التدرّج فضل مرسوم دايمًا كـfallback حقيقي (مش بس شكلي) — لو صورة الأدمن فشلت تتحمّل
+        // (شبكة، رابط اترفض)، onError بيمنع أي استثناء، والتدرّج تحته لسه ظاهر بدل خلفية فاضية
+        // تمامًا. لو الصورة اتحمّلت صح، بتغطّي التدرّج بالكامل (BoxFit.cover).
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: _heroGradients[_activeSlide],
         ),
+        image: heroImageUrl != null
+            ? DecorationImage(image: NetworkImage(heroImageUrl), fit: BoxFit.cover, onError: (_, _) {})
+            : null,
       ),
       child: Container(
               decoration: BoxDecoration(
