@@ -14,11 +14,11 @@ class OrderAddress {
   });
 
   factory OrderAddress.fromJson(Map<String, dynamic> json) => OrderAddress(
-    streetName: json['street_name'] as String,
-    landmark: json['landmark'] as String?,
-    latitude: (json['latitude'] as num).toDouble(),
-    longitude: (json['longitude'] as num).toDouble(),
-  );
+        streetName: json['street_name'] as String,
+        landmark: json['landmark'] as String?,
+        latitude: (json['latitude'] as num).toDouble(),
+        longitude: (json['longitude'] as num).toDouble(),
+      );
 }
 
 // تكوين الطاقم الموحّد (docs/08 §35، ADR-0021 §1) — فني/مساعد منفصلين، بتستبدل teamShortage/
@@ -44,14 +44,14 @@ class CrewStatus {
   });
 
   factory CrewStatus.fromJson(Map<String, dynamic> json) => CrewStatus(
-    requiredTechnicians: json['requiredTechnicians'] as int,
-    requiredAssistants: json['requiredAssistants'] as int,
-    assignedTechnicians: json['assignedTechnicians'] as int,
-    assignedAssistants: json['assignedAssistants'] as int,
-    missingTechnicians: json['missingTechnicians'] as int,
-    missingAssistants: json['missingAssistants'] as int,
-    crewComplete: json['crewComplete'] as bool,
-  );
+        requiredTechnicians: json['requiredTechnicians'] as int,
+        requiredAssistants: json['requiredAssistants'] as int,
+        assignedTechnicians: json['assignedTechnicians'] as int,
+        assignedAssistants: json['assignedAssistants'] as int,
+        missingTechnicians: json['missingTechnicians'] as int,
+        missingAssistants: json['missingAssistants'] as int,
+        crewComplete: json['crewComplete'] as bool,
+      );
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts — نسخة الفني (منفصلة عن
@@ -104,31 +104,27 @@ class Order {
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
-    id: json['id'] as String,
-    orderNumber: json['order_number'] as String,
-    orderStatus: json['order_status'] as String,
-    problemDescription: json['problem_description'] as String?,
-    totalAmountCents: json['total_amount_cents'] as int,
-    paidAmountCents: json['paid_amount_cents'] as int? ?? 0,
-    financedOrderAmountCents: json['financed_order_amount_cents'] as int? ?? 0,
-    refundedAmountCents: json['refunded_amount_cents'] as int? ?? 0,
-    installmentOutstandingCents:
-        json['installment_outstanding_cents'] as int? ?? 0,
-    amountDueToTechnicianCents:
-        (json['amount_due_to_technician_cents'] as int?) ??
-        (json['total_amount_cents'] as int),
-    paymentStatus: json['payment_status'] as String,
-    bookingMode: json['booking_mode'] as String? ?? 'individual',
-    requiredTechnicians: json['required_technicians'] as int?,
-    address: json['address'] != null
-        ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
-        : null,
-    scheduledAt: json['scheduled_at'] as String?,
-    crewStatus: json['crew_status'] != null
-        ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>)
-        : null,
-    teamLeaderName: json['team_leader_name'] as String?,
-  );
+        id: json['id'] as String,
+        orderNumber: json['order_number'] as String,
+        orderStatus: json['order_status'] as String,
+        problemDescription: json['problem_description'] as String?,
+        totalAmountCents: json['total_amount_cents'] as int,
+        paidAmountCents: json['paid_amount_cents'] as int? ?? 0,
+        financedOrderAmountCents: json['financed_order_amount_cents'] as int? ?? 0,
+        refundedAmountCents: json['refunded_amount_cents'] as int? ?? 0,
+        installmentOutstandingCents: json['installment_outstanding_cents'] as int? ?? 0,
+        amountDueToTechnicianCents:
+            (json['amount_due_to_technician_cents'] as int?) ?? (json['total_amount_cents'] as int),
+        paymentStatus: json['payment_status'] as String,
+        bookingMode: json['booking_mode'] as String? ?? 'individual',
+        requiredTechnicians: json['required_technicians'] as int?,
+        address: json['address'] != null
+            ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
+            : null,
+        scheduledAt: json['scheduled_at'] as String?,
+        crewStatus: json['crew_status'] != null ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>) : null,
+        teamLeaderName: json['team_leader_name'] as String?,
+      );
 }
 
 // تسلسل دورة عمل الفني بعد القبول — مطابق لـ order-state-machine.ts بالظبط
@@ -172,12 +168,12 @@ class OrderItem {
   });
 
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
-    id: json['id'] as String,
-    itemType: json['item_type'] as String,
-    nameAr: json['name_ar'] as String,
-    totalPriceCents: json['total_price_cents'] as int,
-    isCustomerApproved: json['is_customer_approved'] as bool,
-  );
+        id: json['id'] as String,
+        itemType: json['item_type'] as String,
+        nameAr: json['name_ar'] as String,
+        totalPriceCents: json['total_price_cents'] as int,
+        isCustomerApproved: json['is_customer_approved'] as bool,
+      );
 }
 
 const Map<String, String> technicianActionLabelsAr = {
