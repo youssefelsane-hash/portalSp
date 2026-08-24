@@ -114,6 +114,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'المالية',
     items: [
       { href: '/projects', label: 'المشروعات', icon: Building2, permission: 'projects.view' },
+      { href: '/warranty-plans', label: 'خطط الضمان', icon: ShieldCheck, permission: 'warranty.manage' },
       { href: '/warranty-claims', label: 'مطالبات الضمان', icon: ShieldCheck, permission: 'warranty.view' },
       { href: '/installments', label: 'التقسيط', icon: Landmark, permission: 'installments.view' },
       { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
