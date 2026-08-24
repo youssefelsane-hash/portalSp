@@ -14,7 +14,6 @@ import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
 import '../support/support_contact_repository.dart';
 import '../support/support_contact_screen.dart';
-import '../projects/my_projects_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
 import 'category_card.dart';
@@ -23,6 +22,7 @@ import 'homepage_content_repository.dart';
 import 'models.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
+import '../projects/create_project_screen.dart';
 
 // Script 3 §2/§3/§5/§32 — أول شاشة بعد تسجيل الدخول، محل BookingModeScreen القديمة اللي كانت
 // بتسأل "فرد ولا فريق؟" فورًا (anti-pattern صريح — العميل ما بيشوفش وصف مشكلته أصلاً قبل سؤال
@@ -175,9 +175,10 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: EdgeInsets.zero,
             children: [
               _buildHero(context),
+              const SizedBox(height: 12),
               // Banner المشروعات (docs/01B مهمة A §2)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: Card(
                   color: Theme.of(context).colorScheme.primaryContainer,
                   margin: EdgeInsets.zero,
@@ -185,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(12),
                     onTap: () {
                       Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => const MyProjectsScreen(),
+                        builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
                       ));
                     },
                     child: Padding(
@@ -303,6 +304,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final heroImageUrl = _heroBackground?.url;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 900),
+      margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
         // التدرّج فضل مرسوم دايمًا كـfallback حقيقي (مش بس شكلي) — لو صورة الأدمن فشلت تتحمّل
         // (شبكة، رابط اترفض)، onError بيمنع أي استثناء، والتدرّج تحته لسه ظاهر بدل خلفية فاضية
@@ -324,30 +326,30 @@ class _HomeScreenState extends State<HomeScreen> {
                   colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.35),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Column(
                       children: [
-                        Text('أساعدك إزاي؟', style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w500)),
+                        Text('أساعدك إزاي؟', style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w500)),
                         const SizedBox(height: 4),
                         const Text(
                           'محتاج مساعدة في إيه؟',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 6),
                         Text(
                           'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
                         ),
                         const SizedBox(height: 16),
                         _HeroSearchField(onTap: _openSearch),
