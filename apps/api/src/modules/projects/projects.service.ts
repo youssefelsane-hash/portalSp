@@ -324,23 +324,80 @@ export class ProjectsService {
   }
 
   async getProjectRoom(projectId: string) {
-    const project = await this.findOne(projectId);
-    const quotes = await this.listQuotesForProject(projectId);
-    const milestones = await this.listProjectMilestones(projectId);
-    const orders = await this.dataSource.query(
-      `SELECT o.id, o.order_number, o.order_status::text AS status, o.total_amount_cents
-       FROM orders o WHERE o.project_id = $1 AND o.deleted_at IS NULL ORDER BY o.created_at ASC`,
+    const [project] = await this.dataSource.query<Record<string, unknown>[]>(
+      `SELECT p.*, u.full_name AS customer_full_name, u.phone_number AS customer_phone,
+              a.street_name AS address_street
+       FROM projects p
+       JOIN customer_profiles cp ON cp.id = p.customer_id
+       JOIN users u ON u.id = cp.user_id
+       JOIN addresses a ON a.id = p.address_id
+       WHERE p.id = $1 AND p.deleted_at IS NULL`,
       [projectId],
     );
+    if (!project) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
+
+    const [quotes, milestones, orders, warranties, activity] = await Promise.all([
+      this.dataSource.query(
+        `SELECT q.id, q.project_id, q.version, q.status, q.work_lines, q.material_lines,
+                q.total_work_cents, q.total_materials_cents, q.discount_cents, q.total_cents,
+                q.duration_days, q.scope_included, q.scope_excluded, q.assumptions,
+                q.proposed_company_id, q.expires_at, q.sent_at, q.approved_at, q.rejected_reason,
+                q.created_at, creator.full_name AS created_by_name,
+                CASE WHEN q.status = 'approved' THEN customer.full_name ELSE NULL END AS approved_by_name
+         FROM project_quotes q
+         LEFT JOIN users creator ON creator.id = q.created_by
+         JOIN projects p ON p.id = q.project_id
+         JOIN customer_profiles cp ON cp.id = p.customer_id
+         JOIN users customer ON customer.id = cp.user_id
+         WHERE q.project_id = $1
+         ORDER BY q.version DESC`,
+        [projectId],
+      ),
+      this.dataSource.query(
+        `SELECT id, project_id, sequence_number, name_ar, amount_cents, expected_date,
+                completion_criteria, execution_status, approval_status, payment_status,
+                payout_status, is_down_payment, approved_by_customer, approved_at, paid_at,
+                payout_released_at, created_at, updated_at
+         FROM project_milestones WHERE project_id = $1 ORDER BY sequence_number ASC`,
+        [projectId],
+      ),
+      this.dataSource.query(
+      `SELECT o.id, o.order_number, o.order_status::text AS status, o.total_amount_cents
+       FROM orders o WHERE o.project_id = $1 AND o.deleted_at IS NULL ORDER BY o.created_at ASC`,
+        [projectId],
+      ),
+      this.dataSource.query(
+        `SELECT cw.id, cw.name_ar, cw.coverage_months, cw.coverage_days, cw.expires_at, cw.claims_used
+         FROM customer_warranties cw WHERE cw.project_id = $1 ORDER BY cw.created_at DESC`,
+        [projectId],
+      ),
+      this.dataSource.query(
+        `SELECT al.id, al.action, al.actor_role, al.new_values, al.created_at,
+                COALESCE(actor.full_name,
+                  CASE WHEN al.actor_role = 'customer' THEN 'العميل' ELSE 'النظام' END) AS actor_name
+         FROM audit_logs al
+         LEFT JOIN users actor ON actor.id = al.actor_user_id
+         WHERE (al.entity_type = 'project' AND al.entity_id = $1)
+            OR (al.entity_type = 'project_quote' AND al.entity_id IN (
+              SELECT id FROM project_quotes WHERE project_id = $1
+            ))
+         ORDER BY al.created_at ASC`,
+        [projectId],
+      ),
+    ]);
+
     return {
       project,
       quotes,
       milestones,
       orders,
+      warranties,
+      activity,
       summary: {
-        total_financed_cents: project.approvedQuoteTotalCents ?? 0,
-        paid_cents: project.paidCents ?? 0,
-        remaining_cents: (project.approvedQuoteTotalCents ?? 0) - (project.paidCents ?? 0),
+        total_financed_cents: Number(project.approved_quote_total_cents ?? 0),
+        paid_cents: Number(project.paid_cents ?? 0),
+        remaining_cents: Number(project.remaining_cents ?? 0),
+        milestone_count: milestones.length,
       },
     };
   }
