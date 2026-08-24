@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { normalizeServiceOptions, type ServiceOption, type ServicesResponse } from './warranty-plan-services';
 
 interface WarrantyPlanRow {
   id: string; slug: string; name_ar: string; warranty_type: string;
@@ -31,15 +32,15 @@ export default function AdminWarrantyPlansPage() {
   const [plans, setPlans] = useState<WarrantyPlanRow[] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [services, setServices] = useState<{ id: string; name_ar: string }[]>([]);
+  const [services, setServices] = useState<ServiceOption[]>([]);
 
   const load = () => {
     authedFetch<WarrantyPlanRow[]>('/admin/warranty-plans').then(setPlans).catch((e) => setError(e instanceof ApiError ? e.message : 'خطأ'));
   };
   useEffect(() => {
     load();
-    authedFetch<{ items: { id: string; name_ar: string }[] }>('/admin/services?per_page=200&is_active=true')
-      .then((result) => setServices(result.items))
+    authedFetch<ServicesResponse>('/admin/services?per_page=200&is_active=true')
+      .then((result) => setServices(normalizeServiceOptions(result)))
       .catch(() => setServices([]));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -110,7 +111,7 @@ export default function AdminWarrantyPlansPage() {
   );
 }
 
-function CreateWarrantyPlanForm({ onCreated, services }: { onCreated: () => void; services: { id: string; name_ar: string }[] }) {
+function CreateWarrantyPlanForm({ onCreated, services }: { onCreated: () => void; services: ServiceOption[] }) {
   const { authedFetch } = useAuth();
   const [name, setName] = useState('');
   const [type, setType] = useState('extended_workmanship');
