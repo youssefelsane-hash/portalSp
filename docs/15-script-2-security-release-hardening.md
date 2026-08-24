@@ -27,6 +27,22 @@
 → push. لا تبدأ مرحلة اختيارية جديدة على هذا الفرع من دون finding جديد، لأن Final Script 2
 Release Gate أدناه مغلق بالفعل.
 
+### Checkpoint 2026-08-24 23:17 — دورة المشروع بين العميل والإدارة
+
+**مكتمل في `c77c86d`:** أُصلح خطأ Flutter الذي كان يرسل `POST /me/projects` بنجاح ثم يعمل cast
+للـFuture نفسه فيعرض "حصل خطأ" رغم حفظ المشروع. الإنشاء ينتظر الرد الآن، والميزانية المكتوبة
+بالجنيه تتحول إلى قروش. غرفة المشروع الموحدة تعرض للطرفين وصف العميل والعنوان والميزانية وكل
+بنود عرض السعر والنطاق والمدة وتواريخ الإرسال والموافقة واسم الفاعل، مع activity timeline وخطوة
+تالية واضحة. شاشة العميل تعرض العرض قابلاً للتوسيع، ولوحة الإدارة تُظهر اعتماد العميل وتفتح إنشاء
+المراحل بعده.
+
+**التحقق:** PostgreSQL `projects-integration.spec.ts` ‏7/7 مع `--detectOpenHandles`، regression
+Flutter الجديد `projects_repo_test.dart` ‏1/1، كل customer-app tests ‏8/8، Flutter analyze بلا
+ملاحظات، API build، Admin TypeScript/ESLint/production build، و`git diff --check` كلها PASS.
+
+**غير المكتمل:** لا شيء. **نقطة الاستئناف:** اختبار يدوي جديد لدورة مشروع حقيقية؛ إذا ظهر finding
+جديد يبدأ من `c77c86d` ولا يعاد تنفيذ هذه الدفعة.
+
 **2026-08-17 — مراجعة Phase C/D "غير المراجعة" (SCRIPT2_CHECKPOINT_NOTE.md) + استكمال Part F/G:**
 الدفعة الأخيرة اللي codex سابها "not fully reviewed" (recurring-order occurrence claims/recovery،
 matching recovery، assistant-matching recovery، chat recovery، background worker invariants،
