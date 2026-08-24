@@ -11,6 +11,23 @@ import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
+interface PaymentChannelStatus {
+  method: string;
+  is_enabled: boolean;
+  is_configured: boolean;
+  is_available: boolean;
+  unavailable_reason: string | null;
+}
+
+const PAYMENT_CHANNEL_LABELS: Record<string, string> = {
+  cash: 'الدفع بعد الخدمة (كاش)',
+  wallet: 'محفظة العميل',
+  card: 'بطاقة Paymob',
+  installment: 'التقسيط',
+  instapay: 'InstaPay',
+  fawry_reference: 'فوري',
+};
+
 function SettingValueEditor({
   setting,
   onSave,
@@ -105,11 +122,15 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [paymentChannels, setPaymentChannels] = useState<PaymentChannelStatus[]>([]);
 
   function load() {
     authedFetch<SettingResponseDto[]>('/admin/settings')
       .then(setSettings)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الإعدادات'));
+    authedFetch<PaymentChannelStatus[]>('/payment-channels')
+      .then(setPaymentChannels)
+      .catch(() => setPaymentChannels([]));
   }
 
   useEffect(() => {
@@ -140,6 +161,24 @@ export default function SettingsPage() {
       <PageHeader title="الإعدادات" />
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!settings && !error && <p className="text-muted-foreground">جاري التحميل…</p>}
+
+      {paymentChannels.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">جاهزية طرق الدفع الظاهرة للعميل</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+            {paymentChannels.map((channel) => (
+              <div key={channel.method} className="rounded-md border p-3">
+                <p className="font-medium">{PAYMENT_CHANNEL_LABELS[channel.method] ?? channel.method}</p>
+                <p className={channel.is_available ? 'text-sm text-green-700' : 'text-sm text-destructive'}>
+                  {channel.is_available ? 'جاهزة وتظهر للعميل' : channel.unavailable_reason ?? 'غير جاهزة'}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {groups.map((group) => (
         <Card key={group} className="mb-6">

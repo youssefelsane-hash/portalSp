@@ -1,5 +1,16 @@
 # Script 2 — Security, Realtime, Durable Events, Storage & Release Hardening
 
+## Checkpoint 2026-08-24 — checkout payments and optional service warranty
+
+- `0182_checkout_payment_channels_and_optional_warranty.sql`: مفاتيح تفعيل card/wallet/instapay/
+  installments، وsnapshot ضمان اختياري على الطلب.
+- طرق الدفع الخمس ظاهرة في checkout بحالة وسبب، بدل إخفاء Paymob/التقسيط/Fawry صامتًا. Fawry
+  أصبح مسار prepayment مدعومًا.
+- خطة الضمان تُربط بخدمة من لوحة الأدمن، يختارها العميل اختياريًا، وسعرها يظهر منفصلًا ويضاف
+  للإجمالي قبل حساب الإيداع. إصدار الضمان عند إكمال الطلب يستخدم snapshot وقت الحجز.
+- تحقق: API build، Admin typecheck، 36 اختبار Jest/PostgreSQL/Redis مع detectOpenHandles، و10
+  اختبارات Flutter. migration 0182 طبقت بعد تطابق checksums 0001-0181.
+
 هذا الملف سجل checkpoints للـScript 2 فقط. الأساس هو Script 1 SHA `6ebbe88`، والعمل بدأ على
 `codex/script-2-security-release-hardening` (Phase A/B مذكورين تحت)، اتدمج في `main` عبر PR #122،
 واستُكمل بعدها على `claude/home-services-app-plan-v13gb2` (Phase C/D review + Part F/G).

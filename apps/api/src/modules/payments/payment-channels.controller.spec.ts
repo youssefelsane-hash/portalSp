@@ -6,6 +6,7 @@ import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { PaymentChannelsController } from './payment-channels.controller';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymentMethod } from './entities/payment.entity';
+import { PaymobProvider } from './gateways/paymob-provider.service';
 
 // اختبار حي ضد Postgres/Redis حقيقيين — بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): الكاش
 // كان الوسيلة الوحيدة اللي `isConfigured` بتاعتها ثابتة `true` دايمًا (بلا بوابة خارجية تتفحص)،
@@ -33,7 +34,11 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     await dataSource.initialize();
     cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
-    controller = new PaymentChannelsController(fakeRegistry, settingsService);
+    controller = new PaymentChannelsController(
+      fakeRegistry,
+      settingsService,
+      { getConfigurationStatus: () => ({ configured: false, missingFields: ['API Key'] }) } as PaymobProvider,
+    );
   });
 
   afterAll(async () => {

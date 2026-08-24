@@ -199,8 +199,17 @@ export class Order {
   @Column({ name: 'idempotency_key', type: 'varchar', length: 80, nullable: true })
   idempotencyKey: string | null;
 
-  @Column({ name: 'payment_method', type: 'enum', enum: ['cash', 'card', 'wallet', 'bank_transfer', 'corporate_credit'], enumName: 'payment_method', nullable: true })
+  @Column({ name: 'payment_method', type: 'enum', enum: ['cash', 'card', 'wallet', 'bank_transfer', 'corporate_credit', 'fawry_reference', 'instapay'], enumName: 'payment_method', nullable: true })
   paymentMethod: string | null;
+
+  @Column({ name: 'warranty_plan_id', type: 'uuid', nullable: true })
+  warrantyPlanId: string | null;
+
+  @Column({ name: 'warranty_price_cents', type: 'integer', default: 0 })
+  warrantyPriceCents: number;
+
+  @Column({ name: 'warranty_plan_snapshot', type: 'jsonb', nullable: true })
+  warrantyPlanSnapshot: Record<string, unknown> | null;
 
   @Column({ name: 'payment_status', type: 'enum', enum: OrderPaymentStatus, enumName: 'order_payment_status', default: OrderPaymentStatus.UNPAID })
   paymentStatus: OrderPaymentStatus;

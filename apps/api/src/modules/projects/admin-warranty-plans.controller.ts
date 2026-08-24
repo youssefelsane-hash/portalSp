@@ -22,7 +22,28 @@ export class AdminWarrantyPlansController {
   @Get()
   @RequirePermission('warranty.view')
   async list() {
-    return this.plans.find({ order: { createdAt: 'DESC' } });
+    const plans = await this.plans.find({ order: { createdAt: 'DESC' } });
+    return plans.map((plan) => ({
+      id: plan.id,
+      slug: plan.slug,
+      name_ar: plan.nameAr,
+      warranty_type: plan.warrantyType,
+      target_service_id: plan.targetServiceId,
+      target_category_id: plan.targetCategoryId,
+      target_project_type: plan.targetProjectType,
+      pricing_model: plan.pricingModel,
+      price_value: plan.priceValue,
+      coverage_months: plan.coverageMonths,
+      max_coverage_cents: plan.maxCoverageCents,
+      max_claims: plan.maxClaims,
+      terms_ar: plan.termsAr,
+      exclusions_ar: plan.exclusionsAr,
+      liability_bearer: plan.liabilityBearer,
+      is_active: plan.isActive,
+      version: plan.version,
+      created_at: plan.createdAt.toISOString(),
+      updated_at: plan.updatedAt.toISOString(),
+    }));
   }
 
   @Post()
@@ -94,6 +115,9 @@ export class AdminWarrantyPlansController {
         plan.nameAr = name;
       }
       if (dto.is_active !== undefined) plan.isActive = Boolean(dto.is_active);
+      if (dto.target_service_id !== undefined) {
+        plan.targetServiceId = dto.target_service_id ? String(dto.target_service_id) : null;
+      }
       if (dto.price_value !== undefined) {
         const price = Number(dto.price_value);
         if (!Number.isFinite(price) || price < 0) {

@@ -930,6 +930,12 @@ export default function OrderDetailPage() {
                 )}
               </p>
             )}
+            {order.optional_warranty && (
+              <p className="rounded-md border border-blue-200 bg-blue-50 p-2 text-blue-900">
+                ضمان إضافي: {order.optional_warranty.name_ar} ({order.optional_warranty.coverage_months} شهر)
+                {' · '}تكلفته {formatEgp(order.warranty_price_cents)} ضمن إجمالي الطلب
+              </p>
+            )}
           </CardContent>
           {isOrderCancellable(order.order_status) && (
             <CardFooter className="flex-col items-stretch gap-3">

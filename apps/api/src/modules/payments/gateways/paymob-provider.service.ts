@@ -133,6 +133,20 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
   private hmacSecret: string | undefined;
   private readonly envFallback: Record<string, string | undefined>;
 
+  getConfigurationStatus(): { configured: boolean; missingFields: string[] } {
+    const required: [string, string | undefined][] = [
+      ['API Key', this.apiKey],
+      ['Secret Key', this.secretKey],
+      ['Public Key', this.publicKey],
+      ['Card Integration ID', this.integrationIdCard],
+      ['HMAC Secret', this.hmacSecret],
+    ];
+    return {
+      configured: this.isConfigured,
+      missingFields: required.filter(([, value]) => !value?.trim()).map(([label]) => label),
+    };
+  }
+
   constructor(config: ConfigService, @Optional() private readonly settingsService?: SettingsService) {
     this.envFallback = {
       baseUrl: config.get<string>('payments.paymob.baseUrl'),

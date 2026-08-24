@@ -34,6 +34,9 @@ class Order {
   final String? problemDescription;
   final int? estimatedPriceCents;
   final int totalAmountCents;
+  final int warrantyPriceCents;
+  final String? optionalWarrantyNameAr;
+  final int? optionalWarrantyCoverageMonths;
   final String paymentStatus;
   final String? placedAt;
   final String? cancelledAt;
@@ -81,6 +84,9 @@ class Order {
     required this.problemDescription,
     required this.estimatedPriceCents,
     required this.totalAmountCents,
+    this.warrantyPriceCents = 0,
+    this.optionalWarrantyNameAr,
+    this.optionalWarrantyCoverageMonths,
     required this.paymentStatus,
     required this.placedAt,
     required this.cancelledAt,
@@ -118,6 +124,10 @@ class Order {
         problemDescription: json['problem_description'] as String?,
         estimatedPriceCents: json['estimated_price_cents'] as int?,
         totalAmountCents: json['total_amount_cents'] as int,
+        warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
+        optionalWarrantyNameAr: (json['optional_warranty'] as Map<String, dynamic>?)?['name_ar'] as String?,
+        optionalWarrantyCoverageMonths:
+            (json['optional_warranty'] as Map<String, dynamic>?)?['coverage_months'] as int?,
         paymentStatus: json['payment_status'] as String,
         placedAt: json['placed_at'] as String?,
         cancelledAt: json['cancelled_at'] as String?,
@@ -169,6 +179,7 @@ class OrderPricePreview {
   final int? emergencySlaMinutes;
   final List<OrderPricePreviewAddon> addons;
   final int addonsTotalCents;
+  final int warrantyPriceCents;
   final int subtotalBeforeDiscountCents;
   final int discountCents;
   final String? discountSource;
@@ -190,6 +201,7 @@ class OrderPricePreview {
     required this.emergencySlaMinutes,
     required this.addons,
     required this.addonsTotalCents,
+    required this.warrantyPriceCents,
     required this.subtotalBeforeDiscountCents,
     required this.discountCents,
     required this.discountSource,
@@ -211,6 +223,7 @@ class OrderPricePreview {
             .map((e) => OrderPricePreviewAddon.fromJson(e as Map<String, dynamic>))
             .toList(),
         addonsTotalCents: json['addons_total_cents'] as int,
+        warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
         subtotalBeforeDiscountCents: json['subtotal_before_discount_cents'] as int,
         discountCents: json['discount_cents'] as int,
         discountSource: json['discount_source'] as String?,

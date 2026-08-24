@@ -458,6 +458,27 @@ InstaPay ممكن تتغير... بس ما يحقش لحد يغيّرها غير 
 تأثير. `docs/03-external-integrations.md` §8 اتحدّث بالكامل من ".env + restart" لـ"/admin/settings
 كـsuper_admin".
 
+## ظهور طرق الدفع في checkout + تشخيص Paymob — إصلاح 2026-08-24
+
+`GET /payment-channels` هو مصدر الحقيقة المشترك للعميل ولوحة الأدمن. الرد لا يخفي الطريقة غير
+الجاهزة؛ يرجع `is_enabled` و`is_configured` و`is_available` و`unavailable_reason` من غير أي سر.
+شاشة العميل تعرض خمس اختيارات مفهومة: الدفع بعد الخدمة (يجمع cash/wallet)، بطاقة Paymob،
+التقسيط، InstaPay، وفوري. غير الجاهز يظهر disabled مع السبب بدل أن يختفي بلا تفسير.
+
+- بطاقة Paymob تظهر قابلة للاختيار عندما `payments.card_enabled=true` وتكون القيم الخمس غير
+  فارغة: API Key وSecret Key وPublic Key وCard Integration ID وHMAC Secret. Mobile Wallet
+  Integration ID اختياري ولا يمنع البطاقة.
+- القيم الوهمية تجعل الخيار ظاهرًا للاختبار الشكلي فقط؛ Paymob الحقيقي سيرفض إنشاء الدفع حتى
+  تستبدل بمفاتيح حساب التاجر الصحيحة.
+- التقسيط يحتاج `payments.installments_enabled=true` وPaymob مكتملًا وخطة نشطة مربوطة بالخدمة
+  من تبويب الأدمن "التقسيط > الخطط والخدمات". عدم وجود بطاقة محفوظة لا يخفي الخطة، لكنه يمنع
+  التقديم للخطة التي تشترط التحصيل التلقائي ويشرح للعميل كيف يحفظ بطاقة.
+- InstaPay يحتاج التفعيل وبيانات المستلم، وفوري يحتاج `payments.fawry_enabled=true` وبيانات
+  بوابته. Fawry مدعوم الآن كدفع مسبق ويبقي الطلب `pending_payment` حتى تأكيد البوابة.
+
+لو فشل endpoint، الشاشة تعرض إعادة محاولة ولا تحول الفشل إلى قائمة فارغة صامتة. وفي
+`/admin/settings` توجد لوحة جاهزية تعرض نفس الحكم الذي سيراه العميل فورًا.
+
 ## كود InstaPay المعروض كان غلط + إعداد `payments.cash_enabled` — بَقّة صاحب المشروع 2026-08-21 (docs/08 §37)
 
 **بَقّة عرض حقيقية في `InstaPayProvider.createPayment()`**: `referenceCode` المُرجعة للعميل كانت

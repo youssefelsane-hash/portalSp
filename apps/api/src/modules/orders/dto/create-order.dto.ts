@@ -109,12 +109,18 @@ export class CreateOrderDto {
 
   // دفع قبل التوزيع (ADR-0013 §3/§4 — "PAY BEFORE DISPATCH") — اختياري بالكامل، لو مبعتش
   // الطلب بيتوزّع فورًا زي السلوك الحالي (دفع بعد الشغل عبر collect-cash/pay-with-wallet/...).
-  // لو "card" أو "instapay"، الطلب بيتعمل PENDING_PAYMENT بدل SEARCHING_TECHNICIAN، والتوزيع
-  // بيتأجل لحد ما POST /orders/:id/pay-with-card أو pay-with-instapay يتأكد فعليًا. كاش/محفظة
+  // لو "card" أو "instapay" أو "fawry_reference"، الطلب بيتعمل PENDING_PAYMENT بدل
+  // SEARCHING_TECHNICIAN، والتوزيع بيتأجل لحد ما الدفع يتأكد فعليًا. كاش/محفظة
   // مالهمش داعي هنا — دفعهم بيحصل بعد اكتمال الشغل زي زمان، مش قبل التوزيع.
   @IsOptional()
-  @IsIn(['card', 'instapay'])
-  payment_method?: 'card' | 'instapay';
+  @IsIn(['card', 'instapay', 'fawry_reference'])
+  payment_method?: 'card' | 'instapay' | 'fawry_reference';
+
+  // ضمان إضافي اختياري مربوط بالخدمة. السعر ونسخة الشروط بيتحسبوا ويتجمّدوا من الباك-إند؛
+  // العميل لا يرسل أي مبلغ قابل للتلاعب.
+  @IsOptional()
+  @IsUUID()
+  warranty_plan_id?: string;
 
   // دقة الوقت (ADR-0031 Slice B) — إجباري لخدمة service.requiresPreciseSchedule=true (جليسة
   // أطفال بالساعة، تنظيف بالساعة...) أو service.requiresHoursOnly=true (ADR-0032)، ممنوع لأي خدمة

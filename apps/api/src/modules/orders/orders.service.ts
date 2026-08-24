@@ -78,6 +78,20 @@ const FAILED_VISIT_REPORTABLE_STATUSES = new Set<OrderStatus>([OrderStatus.TECHN
 // (docs/08 §22 بند 13-14).
 const CASH_HANDOVER_PAYABLE_STATUSES = new Set<OrderStatus>([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 
+interface OptionalWarrantySelection {
+  id: string;
+  version: number;
+  name_ar: string;
+  warranty_type: string;
+  pricing_model: 'fixed' | 'percentage';
+  price_value: number;
+  coverage_months: number;
+  max_coverage_cents: number | null;
+  max_claims: number;
+  terms_ar: string | null;
+  exclusions_ar: string | null;
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -109,6 +123,35 @@ export class OrdersService {
     // الاختبارات القديمة الكتير اللي بتبني OrdersService بـpositional args (append واحد بس).
     private readonly orderTeamService: OrderTeamService,
   ) {}
+
+  private async resolveOptionalWarranty(
+    planId: string | undefined,
+    serviceId: string,
+  ): Promise<OptionalWarrantySelection | null> {
+    if (!planId) return null;
+    const [plan] = await this.dataSource.query<OptionalWarrantySelection[]>(
+      `SELECT wp.id, wp.version, wp.name_ar, wp.warranty_type, wp.pricing_model,
+              wp.price_value::float AS price_value, wp.coverage_months,
+              wp.max_coverage_cents, wp.max_claims, wp.terms_ar, wp.exclusions_ar
+       FROM warranty_plans wp
+       JOIN services s ON s.id = $2
+       WHERE wp.id = $1 AND wp.is_active = true
+         AND wp.slug <> 'system-service-workmanship'
+         AND (wp.target_service_id = s.id OR wp.target_category_id = s.category_id)`,
+      [planId, serviceId],
+    );
+    if (!plan) {
+      throw new ApiException(ErrorCode.VAL_001, 'خطة الضمان غير متاحة لهذه الخدمة', HttpStatus.BAD_REQUEST);
+    }
+    return plan;
+  }
+
+  private optionalWarrantyPrice(plan: OptionalWarrantySelection | null, serviceTotalCents: number): number {
+    if (!plan) return 0;
+    return plan.pricing_model === 'fixed'
+      ? Math.round(plan.price_value)
+      : Math.round((serviceTotalCents * plan.price_value) / 100);
+  }
 
   findAllForCustomerUser(userId: string): Promise<Order[]> {
     return this.customerProfiles.findByUserIdOrThrow(userId).then((profile) =>
@@ -177,6 +220,7 @@ export class OrdersService {
 
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+    const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
 
     // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار (فرد/اعتماد/طوارئ) بتترجم مباشرة لتحقق
     // إن الخدمة المطلوبة أصلاً بتدعم الوضع ده (allows_individual/allows_team/allows_emergency
@@ -198,7 +242,7 @@ export class OrdersService {
     // مستثناة عمدًا — مجانية بالكامل دايمًا (originalOrder ? undefined : ...)، فمفيش كاش فعلي
     // يتحصّل أصلاً عشان يتفحص.
     if (!dto.payment_method && !dto.original_order_id && !service.cashAllowed) {
-      throw new ApiException(ErrorCode.VAL_001, 'الدفع كاش مش متاح لهذه الخدمة — لازم تختار كارت أو InstaPay', HttpStatus.BAD_REQUEST);
+      throw new ApiException(ErrorCode.VAL_001, 'الدفع كاش مش متاح لهذه الخدمة — لازم تختار بطاقة أو InstaPay أو فوري', HttpStatus.BAD_REQUEST);
     }
 
     // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — كاش مينفعش يتقسّم "إيداع دلوقتي + باقي
@@ -208,7 +252,7 @@ export class OrdersService {
     if (!dto.payment_method && !dto.original_order_id && service.depositRequired) {
       throw new ApiException(
         ErrorCode.VAL_001,
-        'هذه الخدمة تتطلب دفع إيداع مقدّم — لازم تختار كارت أو InstaPay',
+        'هذه الخدمة تتطلب دفع إيداع مقدّم — لازم تختار بطاقة أو InstaPay أو فوري',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -487,12 +531,34 @@ export class OrdersService {
       }
     }
 
+    if (originalOrder && optionalWarranty) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'إعادة الزيارة تحت الضمان مجانية ولا تقبل شراء ضمان إضافي',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // "كرّر الحجز ده" (migration 0176) — بوابة الدخول للقالب المتكرر المُنشأ من مسار الحجز
     // العادي. نفس فلسفة كل بوابات القدرة فوق: رفض واضح وقت الطلب بدل حالة نصف جاهزة.
     // التكرار معناه "نفس الحجز ده يتكرر" فمحتاج موعد فعلي محدد + خدمة مفعّل فيها التكرار +
     // مش طوارئ/إعادة زيارة (الاتنين ليهم دلالة زمنية مختلفة تمامًا عن التكرار المجدول).
     let repeatPlanFrequency: RecurringOrderFrequency | null = null;
     if (dto.repeat_frequency) {
+      if (optionalWarranty) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الضمان الإضافي يُختار لكل طلب على حدة ولا يمكن تثبيته على حجز متكرر',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (dto.payment_method === 'fawry_reference') {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'فوري متاح للحجز الحالي فقط؛ الحجز المتكرر يحتاج بطاقة أو InstaPay',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       if (originalOrder) {
         throw new ApiException(ErrorCode.VAL_001, 'إعادة الزيارة تحت الضمان مينفعش تتكرر', HttpStatus.BAD_REQUEST);
       }
@@ -609,6 +675,9 @@ export class OrdersService {
             : (dto.requested_technician_id ?? null),
         parentOrderId: originalOrder ? originalOrder.id : null,
         buildingId: building ? building.id : null,
+        warrantyPlanId: optionalWarranty?.id ?? null,
+        warrantyPriceCents: 0,
+        warrantyPlanSnapshot: optionalWarranty ? { ...optionalWarranty } : null,
         // إعادة زيارة تحت الضمان = مجانية بالكامل (docs/08 §7) — مفيش سعر تقديري، مفيش إضافات
         // كتالوج، مفيش كود خصم؛ الطلب ده لنفس المشكلة الأصلية بس مش فرصة شراء إضافية.
         estimatedPriceCents: originalOrder ? 0 : estimate.estimated_total_cents,
@@ -698,6 +767,14 @@ export class OrdersService {
         const discountCents = Math.round((order.totalAmountCents * Number(building.discountPercentage)) / 100);
         order.discountAmountCents = discountCents;
         order.totalAmountCents -= discountCents;
+        await manager.save(order);
+      }
+
+      // الضمان الإضافي بيتسعّر بعد خصم الخدمة ثم يُضاف كسطر مستقل. الخطة نفسها اتقرأت من
+      // الباك-إند واتحفظت snapshot، لذلك العميل لا يقدر يرسل سعرًا ولا يتأثر الطلب بتعديل لاحق.
+      if (optionalWarranty) {
+        order.warrantyPriceCents = this.optionalWarrantyPrice(optionalWarranty, order.totalAmountCents);
+        order.totalAmountCents += order.warrantyPriceCents;
         await manager.save(order);
       }
 
@@ -792,7 +869,9 @@ export class OrdersService {
             problemDescription: dto.problem_description ?? null,
             // نفس قيد chk_recurring_order_templates_payment_method (card/instapay بس — كاش/محفظة
             // دفعهم بعد الشغل، مالهمش معنى "قبل التوزيع" بيتكرر).
-            paymentMethod: requestedPrepayMethod ?? null,
+            // القوالب المتكررة الحالية تدعم card/instapay فقط. Fawry يحتاج كودًا مرجعيًا جديدًا
+            // لكل نوبة وتدفق إشعار منفصل، لذلك لا نخزن قيمة غير مسموحة في القالب.
+            paymentMethod: requestedPrepayMethod === 'fawry_reference' ? null : requestedPrepayMethod ?? null,
             nextRunAt: nextOccurrence(order.scheduledAt, repeatPlanFrequency),
             isActive: true,
           }),
@@ -909,6 +988,7 @@ export class OrdersService {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+    const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
 
     const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
     const bookingModeAllowed =
@@ -981,7 +1061,9 @@ export class OrdersService {
       discountSource = 'building';
     }
 
-    const totalAmountCents = subtotalBeforeDiscountCents - discountCents;
+    const serviceTotalAfterDiscountCents = subtotalBeforeDiscountCents - discountCents;
+    const warrantyPriceCents = this.optionalWarrantyPrice(optionalWarranty, serviceTotalAfterDiscountCents);
+    const totalAmountCents = serviceTotalAfterDiscountCents + warrantyPriceCents;
     // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نفس حساب create() بالحرف (راجع تعليق
     // depositAmountCents هناك). المعاينة لازم تطابق المحصّل الفعلي 100% (نفس مبدأ الملف كله).
     const depositAmountCents = service.depositRequired && totalAmountCents > 0
@@ -997,6 +1079,15 @@ export class OrdersService {
       emergency_sla_minutes: estimate.emergency_sla_minutes,
       addons: addons.map((addon) => ({ id: addon.id, name_ar: addon.nameAr, price_cents: addon.priceCents })),
       addons_total_cents: addonsTotalCents,
+      optional_warranty: optionalWarranty
+        ? {
+            id: optionalWarranty.id,
+            name_ar: optionalWarranty.name_ar,
+            coverage_months: optionalWarranty.coverage_months,
+            price_cents: warrantyPriceCents,
+          }
+        : null,
+      warranty_price_cents: warrantyPriceCents,
       subtotal_before_discount_cents: subtotalBeforeDiscountCents,
       discount_cents: discountCents,
       discount_source: discountSource,

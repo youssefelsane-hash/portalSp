@@ -10,6 +10,7 @@ import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart';
 import '../catalog/pricing_field_widgets.dart';
 import '../payments/card_payment_screen.dart';
+import '../payments/fawry_reference_screen.dart';
 import '../payments/instapay_reference_screen.dart';
 import '../payments/payments_repository.dart';
 import '../support/support_contact_screen.dart';
@@ -69,7 +70,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
   late final PaymentsRepository _paymentsRepository;
   // دفع قبل التوزيع (ADR-0013، docs/08 §19 بند 1) — null = الافتراضي القديم (دفع بعد الشغل).
-  // 'card'/'instapay' بس مدعومين هنا (نفس قيد CreateOrderDto.payment_method في الباك-إند —
+  // card/instapay/fawry_reference دفع مسبق. installment اختيار تجهيز طلب التقسيط بعد إنشاء الطلب.
   // كاش/محفظة مالهمش معنى "قبل" التوزيع، دفعهم بيحصل بعد الشغل زي ما هو دايمًا).
   String? _selectedPaymentMethod;
   final _catalogRepository = CatalogRepository();
@@ -148,7 +149,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   // Script 2 Part I (findings #46/#47/#48) — فاضية لحد ما /payment-channels يرد؛ زرار "ادفع بعد
   // الخدمة" (value: null) دايمًا ظاهر بغض النظر عن القيمة دي لأنه مش بيعتمد على أي provider خارجي.
-  Set<String> _availablePaymentMethods = {};
+  Map<String, PaymentChannelAvailability> _paymentChannels = {};
+  List<OptionalWarrantyPlan> _optionalWarranties = [];
+  bool _hasInstallmentPlans = false;
+  String? _selectedWarrantyPlanId;
+  String? _checkoutOptionsError;
+
+  Set<String> get _availablePaymentMethods => _paymentChannels.values
+      .where((channel) => channel.available)
+      .map((channel) => channel.method)
+      .toSet();
 
   @override
   void initState() {
@@ -167,7 +177,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _loadStandardData();
     }
     if (_selectedAddress != null) _refreshPreview();
-    _loadAvailablePaymentMethods();
+    _loadCheckoutOptions();
   }
 
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
@@ -178,6 +188,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // فيها التكرار + مش طوارئ + فيه موعد محدد نهائيًا (سلوت فني أو يوم محدد). خدمات "عدد ساعات
   // بس" مالهاش موعد محدد أصلاً فمينفعش تتكرر (نفس شرط الباك-إند بالحرف).
   bool get _canRepeat {
+    if (_selectedWarrantyPlanId != null) return false;
     if (!widget.service.allowsRecurringBooking) return false;
     if (widget.bookingMode == BookingMode.emergency) return false;
     if (widget.scheduleSlotId != null) return true;
@@ -195,7 +206,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // الطلب" برسالة حمرا بدل ما يعرف من الأول. الحل: نخفي الخيار ده تمامًا لما يبقى غير متاح، ونختار
   // أول طريقة إلكترونية متاحة تلقائيًا بدل ما نسيب الفورم بلا اختيار صالح.
   void _reconcilePaymentMethodSelection() {
-    if (_selectedPaymentMethod != null && !_availablePaymentMethods.contains(_selectedPaymentMethod)) {
+    if (_selectedPaymentMethod != null &&
+        (!_availablePaymentMethods.contains(_selectedPaymentMethod) ||
+            (_selectedPaymentMethod == 'installment' && (!_hasInstallmentPlans || _requiresElectronicPayment)))) {
       _selectedPaymentMethod = null;
     }
     if (_requiresElectronicPayment && _selectedPaymentMethod == null) {
@@ -203,23 +216,42 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         _selectedPaymentMethod = 'card';
       } else if (_availablePaymentMethods.contains('instapay')) {
         _selectedPaymentMethod = 'instapay';
+      } else if (_availablePaymentMethods.contains('fawry_reference')) {
+        _selectedPaymentMethod = 'fawry_reference';
       }
     }
   }
 
   // فشل الجلب هنا مش خطير — بيسيب _availablePaymentMethods فاضية، يعني خياري الدفع الإلكتروني
   // مش هيظهروا (بدل ما يظهروا ويترفضوا لاحقًا)، و"ادفع بعد الخدمة" يفضل شغال عادي دايمًا.
-  Future<void> _loadAvailablePaymentMethods() async {
+  Future<void> _loadCheckoutOptions() async {
+    List<PaymentChannelAvailability> channels = [];
+    List<OptionalWarrantyPlan> warranties = [];
+    var hasInstallmentPlans = false;
+    String? channelError;
     try {
-      final methods = await _repository.fetchAvailablePaymentMethods();
-      if (!mounted) return;
-      setState(() {
-        _availablePaymentMethods = methods;
-        _reconcilePaymentMethodSelection();
-      });
+      channels = await _repository.fetchPaymentChannels();
     } catch (_) {
-      // صامت عمدًا — نفس فلسفة كل مكان تاني في المشروع: فشل خدمة/endpoint ثانوي ميوقفش الشاشة.
+      channelError = 'تعذر تحميل طرق الدفع — اضغط لإعادة المحاولة';
     }
+    try {
+      warranties = await _repository.fetchOptionalWarranties(widget.service.id);
+    } catch (_) {
+      // الضمان اختياري؛ فشله لا يخفي طرق الدفع.
+    }
+    try {
+      hasInstallmentPlans = await _repository.hasInstallmentPlans(widget.service.id);
+    } catch (_) {
+      // ستظهر طريقة التقسيط مع سبب عدم الجاهزية بدل اختفاء بقية القنوات.
+    }
+    if (!mounted) return;
+    setState(() {
+      _paymentChannels = {for (final channel in channels) channel.method: channel};
+      _optionalWarranties = warranties;
+      _hasInstallmentPlans = hasInstallmentPlans;
+      _checkoutOptionsError = channelError;
+      _reconcilePaymentMethodSelection();
+    });
   }
 
   @override
@@ -339,6 +371,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         addonIds: _selectedAddonIds.toList(),
         promoCode: promoCode,
         buildingCode: buildingCode,
+        warrantyPlanId: _selectedWarrantyPlanId,
       );
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
@@ -492,6 +525,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
         promoCode: code,
+        warrantyPlanId: _selectedWarrantyPlanId,
       );
       // فشل التحقق بيسيب آخر معاينة صح (من غير خصم) ظاهرة، مش بيمسحها — العميل يشوف
       // "الكود ده مش موجود" جنب حقل الكود، مش رقم فاضي بدل السعر الصحيح.
@@ -541,6 +575,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
         buildingCode: code,
+        warrantyPlanId: _selectedWarrantyPlanId,
       );
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
@@ -572,6 +607,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         if (!mounted) return;
         await Navigator.of(context).push<bool>(
           MaterialPageRoute(builder: (_) => InstaPayReferenceScreen(orderId: orderId, reference: reference)),
+        );
+      } else if (method == 'fawry_reference') {
+        final reference = await _paymentsRepository.payWithFawryReference(orderId, idempotencyKey);
+        if (!mounted) return;
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => FawryReferenceScreen(orderId: orderId, reference: reference)),
         );
       }
     } on ApiException catch (err) {
@@ -667,7 +708,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
-        paymentMethod: _selectedPaymentMethod,
+        paymentMethod: _selectedPaymentMethod == 'installment' ? null : _selectedPaymentMethod,
+        warrantyPlanId: _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
         // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
         repeatFrequency: _canRepeat ? _repeatFrequency : null,
@@ -678,7 +720,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       // فشل/إلغاء العميل لشاشة الدفع هنا مش نهاية العالم: الطلب فضل pending_payment،
       // sweepPendingPayment() في الباك-إند هيلغيه تلقائيًا لو العميل ماكملش خلال المهلة
       // (orders.payment_timeout_minutes) — مفيش طلب معلّق للأبد.
-      if (order.orderStatus == 'pending_payment' && _selectedPaymentMethod != null) {
+      if (order.orderStatus == 'pending_payment' && _selectedPaymentMethod != null && _selectedPaymentMethod != 'installment') {
         await _startPrepayment(order.id, _selectedPaymentMethod!);
       }
       if (mounted) {
@@ -707,6 +749,28 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [Text(label, style: style), Text(value, style: style)],
       ),
+    );
+  }
+
+  Widget _paymentOption({
+    required String method,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    bool extraAllowed = true,
+    String? extraUnavailableReason,
+  }) {
+    final channel = _paymentChannels[method];
+    final available = channel?.available == true && extraAllowed;
+    final reason = extraUnavailableReason ?? channel?.unavailableReason ??
+        (_checkoutOptionsError != null ? 'تعذر التحقق من جاهزية الطريقة' : 'جاري التحقق من الجاهزية');
+    return RadioListTile<String?>(
+      value: method,
+      groupValue: _selectedPaymentMethod,
+      onChanged: available ? (value) => setState(() => _selectedPaymentMethod = value) : null,
+      secondary: Icon(icon),
+      title: Text(title),
+      subtitle: Text(available ? subtitle : reason),
     );
   }
 
@@ -756,6 +820,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
         if (preview.addonsTotalCents > 0) _buildPriceLine('الإضافات', '+${_formatEgp(preview.addonsTotalCents)}'),
         if (preview.discountCents > 0) _buildPriceLine('الخصم', '-${_formatEgp(preview.discountCents)}', color: Colors.green),
+        if (preview.warrantyPriceCents > 0)
+          _buildPriceLine('الضمان الاختياري', '+${_formatEgp(preview.warrantyPriceCents)}', color: Colors.blue),
         if (preview.estimatedDurationDays != null)
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
@@ -1149,6 +1215,60 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               const SizedBox(height: 8),
             ],
+            if (_optionalWarranties.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('ضمان إضافي (اختياري)', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                'سعر الضمان يضاف منفصلًا ويظهر في الإجمالي، والإيداع يُعاد حسابه على الإجمالي الجديد.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: Column(
+                  children: [
+                    RadioListTile<String?>(
+                      value: null,
+                      groupValue: _selectedWarrantyPlanId,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedWarrantyPlanId = value;
+                          if (value != null) _repeatFrequency = null;
+                        });
+                        _refreshPreview(
+                          promoCode: _promoController.text.trim().isEmpty ? null : _promoController.text.trim(),
+                          buildingCode: _buildingController.text.trim().isEmpty ? null : _buildingController.text.trim(),
+                        );
+                      },
+                      title: const Text('بدون ضمان إضافي'),
+                      subtitle: Text(widget.service.warrantyDays > 0
+                          ? 'الضمان الأساسي المجاني للخدمة يظل موجودًا'
+                          : 'لن تضاف تكلفة ضمان'),
+                    ),
+                    ..._optionalWarranties.map((plan) => RadioListTile<String?>(
+                          value: plan.id,
+                          groupValue: _selectedWarrantyPlanId,
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedWarrantyPlanId = value;
+                              if (value != null) _repeatFrequency = null;
+                            });
+                            _refreshPreview(
+                              promoCode: _promoController.text.trim().isEmpty ? null : _promoController.text.trim(),
+                              buildingCode: _buildingController.text.trim().isEmpty ? null : _buildingController.text.trim(),
+                            );
+                          },
+                          title: Text('${plan.nameAr} — ${plan.coverageMonths} شهر'),
+                          subtitle: Text(
+                            plan.pricingModel == 'fixed'
+                                ? '+${_formatEgp(plan.priceValue.round())}'
+                                : '+${plan.priceValue.toStringAsFixed(plan.priceValue % 1 == 0 ? 0 : 1)}% من سعر الخدمة بعد الخصم',
+                          ),
+                        )),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Text('ملخص السعر', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -1177,7 +1297,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         child: Text(
                           'الخدمة دي محتاجة دفع إيداع ${_formatEgp(_pricePreview!.depositAmountCents!)} دلوقتي، '
                           'والباقي (${_formatEgp(_pricePreview!.remainingAmountCents ?? 0)}) هيتحصّل تلقائيًا بعد ما '
-                          'الشغل يخلص. الدفع لازم يكون بالبطاقة أو InstaPay.',
+                          'الشغل يخلص. الدفع لازم يكون بالبطاقة أو InstaPay أو فوري.',
                         ),
                       ),
                     ],
@@ -1195,19 +1315,20 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     children: [
                       Icon(Icons.info_outline),
                       SizedBox(width: 8),
-                      Expanded(child: Text('الخدمة دي محتاجة دفع إلكتروني (بطاقة أو InstaPay) مقدّم — الدفع كاش مش متاح لها.')),
+                      Expanded(child: Text('الخدمة دي محتاجة دفع إلكتروني (بطاقة أو InstaPay أو فوري) مقدّم — الدفع بعد الخدمة مش متاح لها.')),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 8),
             ],
-            if (_requiresElectronicPayment && _availablePaymentMethods.isEmpty) ...[
+            if (_checkoutOptionsError != null) ...[
               Card(
                 color: Theme.of(context).colorScheme.errorContainer,
-                child: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('مفيش طريقة دفع إلكتروني متاحة دلوقتي — جرّب تاني بعد شوية.'),
+                child: ListTile(
+                  title: Text(_checkoutOptionsError!),
+                  trailing: const Icon(Icons.refresh),
+                  onTap: _loadCheckoutOptions,
                 ),
               ),
               const SizedBox(height: 8),
@@ -1215,30 +1336,53 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             Card(
               child: Column(
                 children: [
-                  if (!_requiresElectronicPayment)
-                    RadioListTile<String?>(
-                      value: null,
-                      groupValue: _selectedPaymentMethod,
-                      onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                      title: const Text('ادفع بعد الخدمة (زي العادة)'),
-                      subtitle: const Text('كاش أو من المحفظة بعد ما الفني يخلّص الشغل'),
-                    ),
-                  if (_availablePaymentMethods.contains('card'))
-                    RadioListTile<String?>(
-                      value: 'card',
-                      groupValue: _selectedPaymentMethod,
-                      onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                      title: const Text('ادفع الآن بالبطاقة أو محفظة إلكترونية'),
-                      subtitle: const Text('يبدأ البحث عن فني فورًا بعد ما الدفع يتأكّد'),
-                    ),
-                  if (_availablePaymentMethods.contains('instapay'))
-                    RadioListTile<String?>(
-                      value: 'instapay',
-                      groupValue: _selectedPaymentMethod,
-                      onChanged: (value) => setState(() => _selectedPaymentMethod = value),
-                      title: const Text('ادفع الآن بـ InstaPay'),
-                      subtitle: const Text('تحويل بكود مرجعي، تأكيد الفريق قد ياخد وقت أطول'),
-                    ),
+                  RadioListTile<String?>(
+                    value: null,
+                    groupValue: _requiresElectronicPayment ? '__electronic_required__' : _selectedPaymentMethod,
+                    onChanged: !_requiresElectronicPayment &&
+                            ((_paymentChannels['cash']?.available ?? false) ||
+                                (_paymentChannels['wallet']?.available ?? false))
+                        ? (value) => setState(() => _selectedPaymentMethod = value)
+                        : null,
+                    secondary: const Icon(Icons.payments_outlined),
+                    title: const Text('ادفع بعد الخدمة (كاش أو محفظة)'),
+                    subtitle: Text(_requiresElectronicPayment
+                        ? 'غير متاح لأن الخدمة تتطلب دفعًا إلكترونيًا مقدمًا'
+                        : ((_paymentChannels['cash']?.available ?? false) ||
+                                (_paymentChannels['wallet']?.available ?? false))
+                            ? 'تدفع بعد ما الفني يخلّص الشغل'
+                            : 'الكاش والمحفظة مقفولان من إعدادات الأدمن'),
+                  ),
+                  _paymentOption(
+                    method: 'card',
+                    title: 'الدفع بالبطاقة عبر Paymob',
+                    subtitle: 'يفتح بوابة Paymob الآمنة ويبدأ التنفيذ بعد تأكيد الدفع',
+                    icon: Icons.credit_card_outlined,
+                  ),
+                  _paymentOption(
+                    method: 'installment',
+                    title: 'التقسيط',
+                    subtitle: 'أنشئ الطلب ثم اختر الخطة وقدّمها لمراجعة الإدارة',
+                    icon: Icons.calendar_month_outlined,
+                    extraAllowed: !_requiresElectronicPayment && _hasInstallmentPlans,
+                    extraUnavailableReason: _requiresElectronicPayment
+                        ? 'التقسيط الحالي يحتاج مراجعة إدارة ولا يغطي الإيداع الفوري لهذه الخدمة'
+                        : _paymentChannels['installment']?.available == true && !_hasInstallmentPlans
+                            ? 'لا توجد خطة تقسيط مرتبطة بهذه الخدمة — اربطها من لوحة الأدمن'
+                            : null,
+                  ),
+                  _paymentOption(
+                    method: 'instapay',
+                    title: 'الدفع عبر InstaPay',
+                    subtitle: 'تحويل بكود مرجعي وتأكيد يدوي من فريق المالية',
+                    icon: Icons.send_outlined,
+                  ),
+                  _paymentOption(
+                    method: 'fawry_reference',
+                    title: 'الدفع في فوري',
+                    subtitle: 'تحصل على كود مرجعي صالح للدفع في أقرب منفذ فوري',
+                    icon: Icons.storefront_outlined,
+                  ),
                 ],
               ),
             ),

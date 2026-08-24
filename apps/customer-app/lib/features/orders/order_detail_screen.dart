@@ -705,6 +705,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                   ),
                                 ),
                               ],
+                              if (order.optionalWarrantyNameAr != null) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primaryContainer,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'الضمان الإضافي: ${order.optionalWarrantyNameAr} '
+                                    '(${order.optionalWarrantyCoverageMonths} شهر) — '
+                                    'تكلفته ${(order.warrantyPriceCents / 100).toStringAsFixed(0)} ج.م ضمن الإجمالي',
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

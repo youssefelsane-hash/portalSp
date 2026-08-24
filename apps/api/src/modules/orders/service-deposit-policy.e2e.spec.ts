@@ -1,11 +1,11 @@
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
 import { Order } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { PaymentsService } from '../payments/payments.service';
-import { Payment } from '../payments/entities/payment.entity';
+import { Payment, PaymentMethod } from '../payments/entities/payment.entity';
 import { Refund } from '../payments/entities/refund.entity';
 import { Wallet } from '../payments/entities/wallet.entity';
 import { WalletTransaction } from '../payments/entities/wallet-transaction.entity';
@@ -70,6 +70,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     customerUser: '',
     customerProfile: '',
     address: '',
+    warrantyPlan: '',
   };
 
   async function q(sql: string, params?: unknown[]) {
@@ -147,6 +148,14 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       [ids.category, `خدمة عادية إيداع ${runId}`, `test-service-no-deposit-${runId}`],
     );
     ids.serviceNoDeposit = serviceNoDeposit.id;
+    const [warrantyPlan] = await q(
+      `INSERT INTO warranty_plans (
+         slug, name_ar, warranty_type, target_service_id, pricing_model, price_value,
+         coverage_months, max_claims, terms_ar
+       ) VALUES ($1,$2,'extended_workmanship',$3,'percentage',30,12,2,$4) RETURNING id`,
+      [`test-order-warranty-${runId}`, `ضمان إضافي ${runId}`, ids.serviceDeposit, 'شروط ثابتة وقت الشراء'],
+    );
+    ids.warrantyPlan = warrantyPlan.id;
 
     const [customerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`, [
       `+2034${runId}`.slice(0, 15),
@@ -268,11 +277,14 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
+      await q(`DELETE FROM customer_warranties WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      await q(`DELETE FROM loyalty_transactions WHERE user_id = $1`, [ids.customerUser]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [
         ids.customerProfile,
       ]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM warranty_plans WHERE id = $1`, [ids.warrantyPlan]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
@@ -306,6 +318,61 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     expect(order.depositAmountCents).toBe(30000);
     expect(order.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
     expect(order.paymentStatus).toBe(OrderPaymentStatus.UNPAID);
+  });
+
+  it('Fawry يعمل كدفع مسبق حقيقي ولا يبدأ توزيع الطلب قبل تأكيد المرجع', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.serviceDeposit,
+      address_id: ids.address,
+      payment_method: 'fawry_reference',
+    });
+    expect(order.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
+    expect(order.depositAmountCents).toBe(30000);
+  });
+
+  it('الضمان الاختياري 30% يضاف للإجمالي، يعيد حساب الإيداع، ويصدر من snapshot غير قابل للتغيير', async () => {
+    const preview = await ordersService.previewPrice(ids.customerUser, {
+      service_id: ids.serviceDeposit,
+      address_id: ids.address,
+      warranty_plan_id: ids.warrantyPlan,
+    });
+    expect(preview.warranty_price_cents).toBe(30000);
+    expect(preview.total_amount_cents).toBe(130000);
+    expect(preview.deposit_amount_cents).toBe(39000);
+
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.serviceDeposit,
+      address_id: ids.address,
+      payment_method: 'card',
+      warranty_plan_id: ids.warrantyPlan,
+    });
+    expect(order.warrantyPriceCents).toBe(30000);
+    expect(order.totalAmountCents).toBe(130000);
+    expect(order.depositAmountCents).toBe(39000);
+    expect(order.warrantyPlanSnapshot).toMatchObject({ coverage_months: 12, price_value: 30 });
+
+    await q(`UPDATE warranty_plans SET coverage_months=24, price_value=50, version=version+1 WHERE id=$1`, [ids.warrantyPlan]);
+    order.orderStatus = OrderStatus.WORK_COMPLETED;
+    await dataSource.transaction(async (manager) => {
+      await manager.save(order);
+      await (paymentsService as unknown as {
+        settleAndComplete: (
+          manager: EntityManager,
+          order: Order,
+          method: PaymentMethod,
+          userId: string,
+          role: 'customer',
+        ) => Promise<Order>;
+      }).settleAndComplete(manager, order, PaymentMethod.CARD, ids.customerUser, 'customer');
+    });
+
+    const [warranty] = await q(
+      `SELECT price_paid_cents, coverage_months, terms_ar FROM customer_warranties WHERE order_id=$1`,
+      [order.id],
+    );
+    expect(Number(warranty.price_paid_cents)).toBe(30000);
+    expect(warranty.coverage_months).toBe(12);
+    expect(warranty.terms_ar).toBe('شروط ثابتة وقت الشراء');
   });
 
   it('amountOwedNow() — السطر الحرج (ADR-0027): قبل أي دفع بترجع مبلغ الإيداع، وبعد ما الإيداع يتحصّل بترجع الباقي (الدلتا)', async () => {

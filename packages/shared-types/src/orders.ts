@@ -45,6 +45,9 @@ export interface OrderResponseDto {
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
+  warranty_plan_id: string | null;
+  warranty_price_cents: number;
+  optional_warranty: { name_ar: string; coverage_months: number } | null;
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;

@@ -284,15 +284,55 @@ export class PaymentsService {
     order.paidAt = now;
     order.orderStatus = OrderStatus.COMPLETED;
     order.closedAt = now;
-    // الضمان (docs/08 §7) — بيتفعّل بس لو الخدمة عندها warranty_days > 0. صفر = مفيش ضمان،
-    // warranty_expires_at بيفضل null (مش تاريخ في الماضي مضلّل).
-    order.warrantyExpiresAt = warrantyDays > 0 ? new Date(now.getTime() + warrantyDays * 24 * 60 * 60 * 1000) : null;
+    const selectedWarranty = order.warrantyPlanSnapshot as {
+      version?: number;
+      name_ar?: string;
+      warranty_type?: string;
+      coverage_months?: number;
+      max_coverage_cents?: number | null;
+      max_claims?: number;
+      terms_ar?: string | null;
+      exclusions_ar?: string | null;
+    } | null;
+    if (order.warrantyPlanId && selectedWarranty) {
+      const expiresAt = new Date(now);
+      expiresAt.setUTCMonth(expiresAt.getUTCMonth() + Number(selectedWarranty.coverage_months ?? 0));
+      order.warrantyExpiresAt = expiresAt;
+    } else {
+      // الضمان المجاني الافتراضي يظل مبنيًا على warranty_days للخدمة عند عدم شراء خطة إضافية.
+      order.warrantyExpiresAt = warrantyDays > 0 ? new Date(now.getTime() + warrantyDays * 24 * 60 * 60 * 1000) : null;
+    }
     await manager.save(order);
 
-    // نوحّد ضمان الطلب القديم مع منتج الضمان الظاهر للعميل. نفس المعاملة المالية تضمن إن الطلب
-    // لا يكتمل أبدًا من غير سجل الضمان، والفهرس الفريد يجعل إعادة التسوية idempotent. الخطط
-    // المدفوعة مستبعدة عمدًا؛ الاختيار لخطة workmanship مجانية مطابقة ثم الخطة النظامية.
-    if (warrantyDays > 0 && order.warrantyExpiresAt) {
+    // نوحّد الضمان المدفوع المختار أو ضمان التنفيذ المجاني مع المنتج الظاهر للعميل. نفس المعاملة
+    // المالية تضمن إن الطلب لا يكتمل من غير سجل الضمان، والفهرس الفريد يجعل إعادة التسوية idempotent.
+    if (order.warrantyPlanId && selectedWarranty && order.warrantyExpiresAt) {
+      await manager.query(
+        `INSERT INTO customer_warranties (
+           plan_id, plan_version, order_id, project_id, customer_id, name_ar, warranty_type,
+           price_paid_cents, coverage_months, coverage_days, max_coverage_cents, max_claims,
+           terms_ar, exclusions_ar, starts_at, expires_at, claims_used
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,$11,$12,$13,$14,$15,0)
+         ON CONFLICT (order_id) WHERE order_id IS NOT NULL DO NOTHING`,
+        [
+          order.warrantyPlanId,
+          Number(selectedWarranty.version ?? 1),
+          order.id,
+          order.projectId,
+          order.customerId,
+          String(selectedWarranty.name_ar ?? 'ضمان إضافي'),
+          String(selectedWarranty.warranty_type ?? 'extended_workmanship'),
+          order.warrantyPriceCents,
+          Number(selectedWarranty.coverage_months ?? 1),
+          selectedWarranty.max_coverage_cents ?? order.totalAmountCents,
+          Number(selectedWarranty.max_claims ?? 1),
+          selectedWarranty.terms_ar ?? null,
+          selectedWarranty.exclusions_ar ?? null,
+          now,
+          order.warrantyExpiresAt,
+        ],
+      );
+    } else if (warrantyDays > 0 && order.warrantyExpiresAt) {
       await manager.query(
         `WITH chosen_plan AS (
            SELECT wp.*

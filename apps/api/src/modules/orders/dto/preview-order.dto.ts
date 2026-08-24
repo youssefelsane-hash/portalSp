@@ -52,6 +52,10 @@ export class PreviewOrderDto {
   @IsUUID()
   schedule_slot_id?: string;
 
+  @IsOptional()
+  @IsUUID()
+  warranty_plan_id?: string;
+
   // دقة الوقت (ADR-0031 Slice B/H) — نفس CreateOrderDto.duration_hours بالحرف.
   @IsOptional()
   @IsNumber()

@@ -20,12 +20,19 @@ export interface PreviewOrderResponseDto {
   emergency_sla_minutes: number | null;
   addons: PreviewOrderAddonDto[];
   addons_total_cents: number;
+  optional_warranty: {
+    id: string;
+    name_ar: string;
+    coverage_months: number;
+    price_cents: number;
+  } | null;
+  warranty_price_cents: number;
   /** الإجمالي قبل أي خصم = base_price_cents + inspection_fee_cents + emergency_surcharge_cents + addons_total_cents. */
   subtotal_before_discount_cents: number;
   discount_cents: number;
   /** 'promo_code' | 'building' | null — مصدر الخصم المطبّق (متبادلان استبعاديًا، نفس قيد ADR-0003). */
   discount_source: 'promo_code' | 'building' | null;
-  /** الإجمالي النهائي = subtotal_before_discount_cents - discount_cents. نفس القيمة بالحرف اللي
+  /** الإجمالي النهائي = subtotal_before_discount_cents - discount_cents + warranty_price_cents. نفس القيمة بالحرف اللي
    * POST /orders هيحسبها كـ total_amount_cents لو اتبعتت نفس المدخلات بالظبط. */
   total_amount_cents: number;
   estimated_duration_days: number | null;

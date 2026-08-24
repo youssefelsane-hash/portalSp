@@ -1,5 +1,5 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { HttpStatus, Injectable, Inject } from '@nestjs/common';
+import { HttpStatus, Injectable, Inject, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
@@ -27,6 +27,7 @@ import { InstallmentPlanDocumentRequirement } from './entities/installment-plan-
 import { InstallmentPlan } from './entities/installment-plan.entity';
 import { InstallmentApplication } from './entities/installment-application.entity';
 import { InstallmentApplicationStatus } from './entities/installment-status.enum';
+import { SettingsService } from '../settings/settings.service';
 
 export interface IncomingFile {
   buffer: Buffer;
@@ -58,7 +59,15 @@ export class InstallmentsService {
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    @Optional() private readonly settingsService?: SettingsService,
   ) {}
+
+  private async assertInstallmentsEnabled(): Promise<void> {
+    const enabled = await this.settingsService?.getBoolean('payments.installments_enabled', true) ?? true;
+    if (!enabled) {
+      throw new ApiException(ErrorCode.VAL_001, 'التقسيط متوقف مؤقتًا من إعدادات الإدارة', HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
 
   // ===================== الخطط (أدمن) =====================
 
@@ -209,6 +218,7 @@ export class InstallmentsService {
   }
 
   async listPlansForService(serviceId: string): Promise<Record<string, unknown>[]> {
+    if (!(await this.settingsService?.getBoolean('payments.installments_enabled', true) ?? true)) return [];
     // raw query عمدًا مع أسماء snake_case مطابقة للرد المتوقع في الواجهات
     return this.dataSource.query(
       `SELECT p.id, p.name_ar, p.installment_count, p.interval_days,
@@ -245,6 +255,7 @@ export class InstallmentsService {
     paymentMethodId?: string;
     acceptedPolicyVersionIds: string[];
   }): Promise<InstallmentApplication> {
+    await this.assertInstallmentsEnabled();
     const profile = await this.customerProfiles.findByUserIdOrThrow(params.userId);
 
     // الخطة ومتطلباتها قبل فتح الـtransaction (قراءات مستقلة)
