@@ -87,6 +87,22 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
     );
   }
 
+  // نفس قفل/فلترة الـspecs المجاورة (71_208_019 + templateIds) — القالب هنا كان بيفضل مستحق
+  // نشط طول الملف، فأي sweep غير مفلتر من worker موازي كان يقدر يخطف نوبته ويفسد العدّادات.
+  // القفل بيتاخد **مرة واحدة** والسباق بين الـinstances بيحصل جواه (لو كل instance خد القفل
+  // لوحده كانوا اتسلسلوا ومش سباق خالص).
+  async function sweepConcurrently(services: RecurringOrdersService[]): Promise<void> {
+    const runner = dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.query(`SELECT pg_advisory_lock($1)`, [71_208_019]);
+    try {
+      await Promise.all(services.map((service) => service.sweep({ templateIds: [ids.template] })));
+    } finally {
+      await runner.query(`SELECT pg_advisory_unlock($1)`, [71_208_019]);
+      await runner.release();
+    }
+  }
+
   it('creates at most one order when two API instances sweep the same occurrence', async () => {
     const create = jest.fn(
       async (_userId: string, _dto: unknown, identity: { templateId: string; scheduledFor: Date }) => {
@@ -112,7 +128,9 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
 
     const first = buildService(create);
     const second = buildService(create);
-    await Promise.all([first.sweep(), second.sweep()]);
+    // نفس لحظة التنافس بالظبط، بس جوّه القفل المشترك — السباق الحقيقي جوّه sweep نفسه
+    // (SKIP LOCKED + claim) مش بين الـworkers بتاعي وباقي ملفات الاختبار.
+    await sweepConcurrently([first, second]);
 
     const [state] = await dataSource.query(
       `SELECT
@@ -150,7 +168,7 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
     );
 
     const create = jest.fn();
-    await buildService(create).sweep();
+    await sweepConcurrently([buildService(create)]);
 
     const [occurrence] = await dataSource.query(
       `SELECT status, attempt_count, order_id
@@ -173,7 +191,7 @@ describe('RecurringOrdersService multi-instance occurrence claims (PostgreSQL)',
     );
 
     const create = jest.fn();
-    await buildService(create).sweep();
+    await sweepConcurrently([buildService(create)]);
 
     const [occurrence] = await dataSource.query(
       `SELECT status, attempt_count, last_error

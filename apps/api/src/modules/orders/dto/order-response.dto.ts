@@ -50,6 +50,12 @@ export interface OrderResponseDto {
   original_order_id: string | null;
   /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
   building_id: string | null;
+  /** موجود بس لو الطلب اتولّد تلقائيًا من خطة حجز متكرر (migration 0124) — بيشاور على الخطة
+   * نفسها (GET /admin/recurring-orders). null = طلب عادي (حجز يدوي/إعادة زيارة/طوارئ). */
+  recurring_template_id: string | null;
+  /** موعد النوبة اللي اتولّد منها الطلب (نفس scheduled_for في recurring_order_occurrences) —
+   * مفتاح الـidempotency الدائم للتوليد. null لطلبات عادية. */
+  recurring_occurrence_at: string | null;
   /** محرك الإنتاجية (docs/06 §3.3-§3.6) — snapshot وقت الحجز، null لو الخدمة formula/fixed
    * بلا بيانات قياسية مُستخدمة. required_technicians/required_assistants هي الطاقم الفعلي
    * (بالحد الأدنى لو العميل ما حددش)، estimated_duration_days المدة المتوقعة بالأيام. */
@@ -117,6 +123,8 @@ export function toOrderResponseDto(
     warranty_expires_at: order.warrantyExpiresAt ? order.warrantyExpiresAt.toISOString() : null,
     original_order_id: order.parentOrderId,
     building_id: order.buildingId,
+    recurring_template_id: order.recurringTemplateId,
+    recurring_occurrence_at: order.recurringOccurrenceAt ? order.recurringOccurrenceAt.toISOString() : null,
     standard_data_id: order.standardDataId,
     required_technicians: order.requiredTechnicians,
     required_assistants: order.requiredAssistants,

@@ -66,10 +66,12 @@ describe('PricingEngineService — default_value بتتجاوز فحص min/max �
 
     const fieldsService = new PricingFieldsService(
       dataSource.getRepository(ServicePricingField),
+      dataSource.getRepository(ServicePricingRule),
       { record: auditLogRecord } as unknown as AuditLogService,
     );
     const rulesService = new PricingRulesService(
       dataSource.getRepository(ServicePricingRule),
+      dataSource.getRepository(ServicePricingField),
       { record: auditLogRecord } as unknown as AuditLogService,
     );
 

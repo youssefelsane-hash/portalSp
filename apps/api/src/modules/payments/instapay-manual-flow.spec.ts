@@ -167,6 +167,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       { emit: eventsEmit, emitAsync: async () => undefined } as never,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
   });
 

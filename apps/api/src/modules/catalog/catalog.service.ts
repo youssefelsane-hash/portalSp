@@ -32,6 +32,12 @@ export interface PriceEstimate {
   /** معرّف صف `service_pricing_evaluations` (تدقيق/snapshot تاريخي لمعادلة formula وقت الحساب) —
    * null لأي نموذج تسعير تاني. OrdersService.create() بيربطه بالطلب بعد ما يتأكّد فعلاً
    * (linkEvaluationToOrder) عشان السعر النهائي يفضل قابل للتتبّع حتى لو الأدمن غيّر القواعد بعدين. */
+  /** مخرجات تشغيلية من معادلة formula (docs/01B §10 تكامل المحركات) — null لباقي النماذج.
+   * OrdersService.create() بيستهلكهم لملء orders.required_technicians/assistants/days
+   * لو مفيش مسار standard_data، وبوابة رفض الطوارئ غير المناسبة. */
+  required_technicians?: number | null;
+  required_assistants?: number | null;
+  suitable_for_emergency?: boolean | null;
   pricing_evaluation_id: string | null;
   /** المدة المتوقعة بالأيام — بس لو معادلة formula بتحدد `estimated_duration_days` صراحة
    * (اختياري في FinalPriceFormulaPayload). null لباقي نماذج التسعير أو لو المعادلة مش بتحسبها
@@ -232,7 +238,15 @@ export class CatalogService {
     if (service.pricingModel === PricingModel.FORMULA) {
       const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
       const formulaLevelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
-      const formulaTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
+      // docs/01B — حدود min/max_price_cents بتتفرض على السعر النهائي بعد مضاعف المستوى وقبل
+      // رسوم الطوارئ (سياسة عمل على سعر الخدمة نفسه). كانت بتترجع للعرض بس بدون تطبيق.
+      let clampedTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
+      if (result.minPriceCents !== null && clampedTotalCents < result.minPriceCents) {
+        clampedTotalCents = result.minPriceCents;
+      }
+      if (result.maxPriceCents !== null && clampedTotalCents > result.maxPriceCents) {
+        clampedTotalCents = result.maxPriceCents;
+      }
       const [emergencySurchargePercentage, emergencySlaMinutes] = isEmergency
         ? await Promise.all([
             this.settingsService.getNumber('pricing.emergency_surcharge_percentage', EMERGENCY_SURCHARGE_PERCENTAGE_FALLBACK),
@@ -244,13 +258,16 @@ export class CatalogService {
         inspection_fee_cents: service.inspectionFeeCents,
         surge_multiplier: 1,
         level_price_multiplier: formulaLevelMultiplier,
-        estimated_total_cents: formulaTotalCents,
-        emergency_surcharge_cents: Math.round((formulaTotalCents * emergencySurchargePercentage) / 100),
+        estimated_total_cents: clampedTotalCents,
+        emergency_surcharge_cents: Math.round((clampedTotalCents * emergencySurchargePercentage) / 100),
         emergency_sla_minutes: emergencySlaMinutes,
         min_price_cents: result.minPriceCents,
         max_price_cents: result.maxPriceCents,
         pricing_evaluation_id: result.evaluationId,
         estimated_duration_days: result.estimatedDurationDays,
+        required_technicians: result.requiredTechnicians,
+        required_assistants: result.requiredAssistants,
+        suitable_for_emergency: result.suitableForEmergency,
       };
     }
 

@@ -131,6 +131,12 @@ export class CreateServiceDto {
   @IsBoolean()
   allows_date_range_booking?: boolean;
 
+  // قدرة "الحجز المتكرر" (migration 0176) — false (الافتراضي) يعني مفيش خيارات تكرار للخدمة دي
+  // خالص (لا في واجهة العميل ولا في POST /me/recurring-orders ولا repeat_frequency في POST /orders).
+  @IsOptional()
+  @IsBoolean()
+  allows_recurring_booking?: boolean;
+
   // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — true يعني فني مؤهّل بس
   // متعارض مع الموعد المطلوب يفضل ظاهر بحالة "مش متاح للفترة دي" بدل ما يختفي تمامًا.
   @IsOptional()

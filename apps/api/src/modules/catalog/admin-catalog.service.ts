@@ -240,6 +240,7 @@ export class AdminCatalogService {
       depositRequired: dto.deposit_required ?? false,
       depositPercentage: dto.deposit_percentage !== undefined ? String(dto.deposit_percentage) : null,
       allowsDateRangeBooking: dto.allows_date_range_booking ?? true,
+      allowsRecurringBooking: dto.allows_recurring_booking ?? false,
       showUnavailableProviders: dto.show_unavailable_providers ?? false,
       requiresPreciseSchedule: dto.requires_precise_schedule ?? false,
       requiresStartTimeOnly: dto.requires_start_time_only ?? false,
@@ -305,6 +306,7 @@ export class AdminCatalogService {
       throw new ApiException(ErrorCode.VAL_001, 'نسبة الإيداع مطلوبة لو الخدمة محتاجة إيداع', HttpStatus.BAD_REQUEST);
     }
     if (dto.allows_date_range_booking !== undefined) service.allowsDateRangeBooking = dto.allows_date_range_booking;
+    if (dto.allows_recurring_booking !== undefined) service.allowsRecurringBooking = dto.allows_recurring_booking;
     if (dto.show_unavailable_providers !== undefined) service.showUnavailableProviders = dto.show_unavailable_providers;
     if (dto.requires_precise_schedule !== undefined) service.requiresPreciseSchedule = dto.requires_precise_schedule;
     if (dto.requires_start_time_only !== undefined) service.requiresStartTimeOnly = dto.requires_start_time_only;

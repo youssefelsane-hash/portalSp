@@ -9,6 +9,8 @@ import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
 import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
 import { createOrder, formatEgp } from '@/lib/orders';
+import { fetchApplicablePolicies } from '@/lib/installments';
+import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { MapPicker } from '@/components/map-picker';
@@ -62,6 +64,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   const [scheduleType, setScheduleType] = useState<'asap' | 'later'>('asap');
   const [scheduledAt, setScheduledAt] = useState('');
+  // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
+  const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
+  // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
+  const [postpaidPolicies, setPostpaidPolicies] = useState<ApplicablePaymentPolicyDto[]>([]);
   const [problemDescription, setProblemDescription] = useState('');
   const [promoCode, setPromoCode] = useState('');
 
@@ -71,11 +77,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // نسخ السياسات اللي العميل وافق عليها فعلاً (checkbox لكل سياسة إجبارية)
+  const [acceptedPolicyVersions, setAcceptedPolicyVersions] = useState<Set<string>>(new Set());
   // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — lazy initializer بيتنفذ
   // مرة واحدة بس مدى عمر الكومبوننت ده (نفس درس generateIdempotencyKey() في customer-app's
   // payments_repository.dart — توليد مفتاح جديد جوّه handleSubmit نفسها كان هيلغي الحماية لأي
   // retry). أي محاولة تانية (double-click، إعادة إرسال بعد timeout) بتستخدم نفس المفتاح.
   const [orderIdempotencyKey] = useState(() => crypto.randomUUID());
+
+  // شروط ما بعد الخدمة المطبقة على الخدمة دي (لو مفعّلة من الأدمن)
+  useEffect(() => {
+    fetchApplicablePolicies(id, 'postpaid_service')
+      .then(setPostpaidPolicies)
+      .catch(() => setPostpaidPolicies([]));
+  }, [id]);
 
   useEffect(() => {
     fetchService(id)
@@ -172,6 +187,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
           problem_description: problemDescription || undefined,
           scheduled_at: scheduleType === 'later' && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+          repeat_frequency: repeatFrequency,
+          accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: promoCode || undefined,
           field_values: service.pricing_model === 'formula' ? fieldValues : undefined,
           payment_method: paymentMethod === 'card' ? 'card' : undefined,
@@ -217,10 +234,13 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }
 
   const modes = availableBookingModes(service);
+  const allRequiredAccepted =
+    postpaidPolicies.filter((p) => p.isRequired).every((p) => acceptedPolicyVersions.has(p.currentVersionId));
   const canSubmit =
     !!selectedAddressId &&
     (scheduleType === 'asap' || !!scheduledAt) &&
     (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
+    allRequiredAccepted &&
     !submitting &&
     !submitted;
 
@@ -423,6 +443,38 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
+      {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
+          منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
+      {service.allows_recurring_booking && bookingMode !== 'emergency' && scheduleType === 'later' && scheduledAt && (
+        <section className="mt-6">
+          <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
+          <div className="flex gap-2">
+            {(
+              [
+                { value: '', label: 'مرة واحدة' },
+                { value: 'weekly', label: 'أسبوعي' },
+                { value: 'monthly', label: 'شهري' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value || 'none'}
+                onClick={() => setRepeatFrequency(opt.value || undefined)}
+                className={`rounded-lg border px-4 py-2 text-sm ${
+                  (repeatFrequency ?? '') === opt.value ? 'border-primary bg-primary/10 text-primary' : 'border-border'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {repeatFrequency && (
+            <p className="mt-2 text-sm text-muted">
+              الحجز ده أول موعد، والمواعيد الجاية هيتولّد منها طلبات عادية بنفس التفاصيل — سعر كل موعد بيتحسب بسعر الخدمة وقتها.
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="mt-6">
         <h2 className="mb-2 font-semibold">وصف المشكلة (اختياري)</h2>
         <textarea
@@ -463,6 +515,40 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               بطاقة الآن
             </button>
           </div>
+        </section>
+      )}
+
+      {/* شروط الدفع بعد الخدمة — لو الأدمن مفعّلها على الخدمة دي. مفيش صندوق فاضي لو
+          مفيش سياسات، والباك-إند بيرفض أي طلب بيتخطى الموافقة حتى لو اتخطت الواجهة. */}
+      {postpaidPolicies.length > 0 && (
+        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="mb-2 font-semibold">شروط الدفع</h2>
+          {postpaidPolicies.map((policy) => {
+            const checked = acceptedPolicyVersions.has(policy.currentVersionId);
+            return (
+              <label key={policy.policyId} className="mt-2 flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    const next = new Set(acceptedPolicyVersions);
+                    if (e.target.checked) next.add(policy.currentVersionId);
+                    else next.delete(policy.currentVersionId);
+                    setAcceptedPolicyVersions(next);
+                  }}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="font-medium">{policy.titleAr}</span>
+                  {policy.isRequired && <span className="text-danger"> *</span>}
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-muted">اقرأ الشروط</summary>
+                    <p className="mt-1 whitespace-pre-line rounded bg-surface-variant p-3 text-xs">{policy.bodyAr}</p>
+                  </details>
+                </span>
+              </label>
+            );
+          })}
         </section>
       )}
 

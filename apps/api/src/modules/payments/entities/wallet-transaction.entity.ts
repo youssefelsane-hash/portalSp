@@ -14,6 +14,9 @@ export enum WalletTxType {
   PENALTY = 'penalty',
   BONUS = 'bonus',
   REFERRAL_REWARD = 'referral_reward',
+  // تحصيل قسط تقسيط ناجح (عميل → منصة) — migration 0177. منفصل عن order_earning عشان
+  // التقارير المالية تفصل إيراد جدولة التقسيط عن تسوية الطلبات العادية.
+  INSTALLMENT_COLLECTION = 'installment_collection',
   ADJUSTMENT = 'adjustment',
 }
 

@@ -6544,3 +6544,41 @@ Bracket-balance check نهائي على `home_screen.dart`: `{}` 32/32، `()` 34
 Flutter SDK في بيئة السيشن — تعديل `home_screen.dart`/`branding_repository.dart` اتراجع يدويًا
 (فحص توازن أقواس بـPython: `{}` 35/35، `()` 364/364، `[]` 33/33 — متوازن). بيانات الاختبار (صورة
 splash تجريبية، passkey، role assignment) اتنضّفت من الـDB بعد التأكد.
+
+---
+
+## §55 الحجز المتكرر = قدرة رسمية بتغذّي مسار الحجز العادي (2026-08-24)
+
+**الطلب**: التكرار مش نظام منفصل — خطة/تعريف جدولة بس بيولّد طلبات عادية كاملة عبر نفس
+`OrdersService.create()` (تسعير لحظة التوليد، دفع عادي، توزيع عادي، أدمن تشغيل عادي).
+
+**اتعمل (migration 0176)**:
+1. `services.allows_recurring_booking` (افتراضي false) — قدرة يتحكم فيها الأدمن؛ false = مفيش
+   أي أثر للتكرار على العميل ولا على الـAPI. نفس نمط allows_individual/cash_allowed بالحرف.
+2. `POST /orders` بيقبل `repeat_frequency` — الطلب بيتعمل طبيعي زي زمان + قالب متكرر بيتإنشى
+   جوّه نفس الـtransaction (ذرّي)، أول موعد له بعد الموعد المحجوز مباشرة.
+3. القالب بقى يحمل `field_values`/`duration_hours`/`scheduled_end_at`/`requested_technician_company_id`
+   — كل نوبة بتتسعّر بمحرك التسعير **الحي وقت توليدها** (مفيش تجميد سعر)، والطلبات المتولدة
+   بتحتفظ بـsnapshot سعرها العادي.
+4. عميل متبلوك/محذوف بيوقف التوليد بنفس سياسة retry→manual_review المرئية (+ إشعار ops_manager).
+5. إشعار `recurring_order_awaiting_payment` جديد للعميل لما نوبة متولدة تقع في PENDING_PAYMENT.
+6. `/admin/orders?recurring=true|false` فلتر جديد؛ تفاصيل الطلب فيها `recurring_template_id`؛
+   `/admin/recurring-orders` بقت "خطط" مُثراة (اسم/تليفون العميل، الخدمة، العنوان، آخر حجز).
+7. customer-app: اختيار مرة واحدة/أسبوعي/شهري جوّه شاشة تأكيد الحجز (لو الخدمة مفعّل فيها
+   التكرار) + شاشة الخطط متصفية بالقدرة. customer-web: نفس الاختيار في صفحة الخدمة.
+
+**اتأكد حي** (Postgres حقيقي + API شغال): حجز أسبوعي بـrepeat_frequency → طلب ORD-…413 عادي
+(standard/searching/300ج) + قالب next_run=+7d بنفس التوقيت؛ sweep الإنتاج (60s) ولّد ORD-…414
+(type=recurring) واتوزّع واتقبل من فني عبر المحرك العادي تلقائيًا؛ `?recurring=true` عرضه لوحده،
+`?recurring=false` صفر تسريب؛ إلغاء الخطة ماولّدش حاجة بعدها وما لمسش الطلبات السابقة.
+31 اختبار في 6 ملفات specs كلها خضراء متوازية (capability / repeat-plan ذرّي / تكامل توليد
+8 حالات / concurrency / reliability / payment-method). `tsc --noEmit`+`nest build` نظاف،
+`flutter analyze` صفر errors/warnings للتطبيقين، `next build` ناجح للأدمن والويب.
+
+**قرارات عمل محتاجة (مش متنفذة عمدًا)**: مهلة الدفع 15 دقيقة بتطبق على المتولدات تلقائيًا زي أي
+طلب — لو محتاجين نافذة أطول للمتولدات (العميل مش واقف على التطبيق لحظة التوليد) ده قرار منفصل؛
+والشحن التلقائي بكارت محفوظ مش مفعّل — card بتروح PENDING_PAYMENT عادية لحد ما التأكيد الأمني
+للتوكنيزيشن يتم ضد Paymob الحقيقي.
+
+**فجوة معروفة متعلقة (خارج النطاق، موثقة في payments/README.md)**: تعارض InstaPay (تأكيد يدوي
+حتى 24 ساعة) مع sweep إلغاء PENDING_PAYMENT بعد 15 دقيقة — بيضرب أي طلب instapay مش بس المتكرر.

@@ -28,6 +28,25 @@ export class RecurringOrderTemplate {
   @Column({ name: 'requested_technician_id', type: 'uuid', nullable: true })
   requestedTechnicianId: string | null;
 
+  // "اعتماد" — تفضيل شركة/فريق محدد لكل طلب متولّد (نفس دلالة CreateOrderDto.requested_technician_company_id
+  // بالحرف: تفضيل مش ضمان، ومسموح بس مع booking_mode=team). migration 0176.
+  @Column({ name: 'requested_technician_company_id', type: 'uuid', nullable: true })
+  requestedTechnicianCompanyId: string | null;
+
+  // مدخلات التسعير/التوقيت اللي بيتكرروا مع كل طلب متولّد (migration 0176) — القيم دي **مدخلات**
+  // مش سعر: السعر بيتحدد من محرك التسعير الحي وقت توليد كل طلب (مفيش تجميد للسعر القديم)، بس
+  // المدخلات نفسها هي اختيار العميل الأصلي اللي عايزه يتكرر. بدونهم، أي قالب لخدمة formula بحقول
+  // إجبارية أو خدمة بتوقيت دقيق كان هيولّد طلبات بتفشل عند التحقق للأبد.
+  // promo_code/building_code/addon_ids مش بتتخزن عمدًا — خصومات وإضافات لمرة واحدة مش بتتكرر.
+  @Column({ name: 'field_values', type: 'jsonb', nullable: true })
+  fieldValues: Record<string, string | number | boolean> | null;
+
+  @Column({ name: 'duration_hours', type: 'integer', nullable: true })
+  durationHours: number | null;
+
+  @Column({ name: 'scheduled_end_at', type: 'timestamptz', nullable: true })
+  scheduledEndAt: Date | null;
+
   @Column({ type: 'enum', enum: RecurringOrderFrequency, enumName: 'recurring_order_frequency' })
   frequency: RecurringOrderFrequency;
 

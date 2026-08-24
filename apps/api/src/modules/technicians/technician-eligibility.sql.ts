@@ -161,6 +161,7 @@ function activeOrderConflictExistsExpr(opts: {
                 AND co.order_status = ANY(${engagedStatusesParam}::order_status[])
               )
               OR COALESCE(co.estimated_duration_days, 0) >= 1
+              OR COALESCE(co.duration_hours, 0) * 60 >= ${fullDayThresholdMinutesParam}::int
               OR COALESCE(cs.estimated_duration_minutes, 60) >= ${fullDayThresholdMinutesParam}::int
               OR ${serviceDurationExpr} >= ${fullDayThresholdMinutesParam}::int
             )

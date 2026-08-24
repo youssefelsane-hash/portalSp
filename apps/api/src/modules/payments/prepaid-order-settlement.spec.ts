@@ -211,6 +211,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       { emit: () => undefined } as never, // events
       {} as never, // paymentProviders — مش متنادى (collectCash بس هنا)
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
+      {} as never, // installments repo (migration 0177)
     );
   });
 

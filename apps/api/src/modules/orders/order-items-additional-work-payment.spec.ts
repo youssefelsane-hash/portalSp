@@ -219,6 +219,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
       events,
       paymentProviders,
       savedPaymentMethods,
+      {} as never, // installments repo (migration 0177)
     );
 
     orderItemsService = new OrderItemsService(

@@ -78,6 +78,10 @@ class OrdersRepository {
     int? durationHours,
     // وضع "بداية+نهاية" (ADR-0032) — إجباري لخدمة service.requiresStartAndEnd=true بس، ISO 8601 UTC.
     String? scheduledEndAt,
+    // "كرّر الحجز ده" (migration 0176) — 'weekly'/'monthly'/'yearly'. الطلب بيتعمل بالمسار العادي
+    // زي زمان، وقالب متكرر بيتإنشاء بنفس العملية أول موعد له بعد الموعد المحجوز. الباك-إند بيرفضه
+    // للطوارئ/إعادة الزيارة والخدمات غير مفعّل فيها التكرار (allows_recurring_booking=false).
+    String? repeatFrequency,
     // Idempotency-Key (docs/01 §1.4، migration 0139، Script 7 Phase 9) — لازم يتولّد مرة واحدة
     // بس من الكولر (CreateOrderScreen، نفس درس generateIdempotencyKey() في
     // payments_repository.dart بالحرف) ويتبعت هنا — أي retry (double-tap، timeout شبكة) بنفس
@@ -112,6 +116,7 @@ class OrdersRepository {
       if (scheduledAtRangeEnd != null) 'scheduled_at_range_end': scheduledAtRangeEnd,
       if (durationHours != null) 'duration_hours': durationHours,
       if (scheduledEndAt != null) 'scheduled_end_at': scheduledEndAt,
+      if (repeatFrequency != null) 'repeat_frequency': repeatFrequency,
       if (originalOrderId != null) 'original_order_id': originalOrderId,
     });
     return Order.fromJson(data!);

@@ -218,6 +218,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

@@ -55,10 +55,12 @@ describe('PricingEngineService — قيمة افتراضية لحقل CHECKBOX �
 
     const fieldsService = new PricingFieldsService(
       dataSource.getRepository(ServicePricingField),
+      dataSource.getRepository(ServicePricingRule),
       { record: auditLogRecord } as unknown as AuditLogService,
     );
     const rulesService = new PricingRulesService(
       dataSource.getRepository(ServicePricingRule),
+      dataSource.getRepository(ServicePricingField),
       { record: auditLogRecord } as unknown as AuditLogService,
     );
 

@@ -33,6 +33,7 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       {} as never,
       paymentProviders as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
     return { service, paymentRepository, provider, paymentProviders };
   };

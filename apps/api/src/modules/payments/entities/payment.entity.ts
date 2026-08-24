@@ -107,6 +107,11 @@ export class Payment {
   // مربوطة بدفعة order_items.batch_id لو دي محاولة تحصيل شغل إضافي (docs/08 §21) — null للدفعة
   // الأصلية للطلب. finalizeGatewayWebhook() بيستخدمه عشان يعرف يوجّه صح (مايستدعيش settleAndComplete
   // للدفعات دي — الطلب لسه شغال، مش بيقفل).
+  /** قسط التقسيط المرتبط (migration 0177) — فرع webhook منفصل عن الطلب/شغل إضافي.
+   * موجود = الدفعة دي تحصيل قسط، ودورة الطلب نفسها مايتلمسش خالص. */
+  @Column({ name: 'installment_id', type: 'uuid', nullable: true })
+  installmentId: string | null;
+
   @Column({ name: 'order_item_batch_id', type: 'uuid', nullable: true })
   orderItemBatchId: string | null;
 }

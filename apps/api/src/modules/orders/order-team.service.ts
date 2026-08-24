@@ -245,6 +245,10 @@ export class OrderTeamService {
   }
 
   private async getServiceDurationMinutes(order: Order): Promise<number> {
+    // docs/01B — مدة الطلب الحقيقية (ADR-0031/0032) بتتقدم على دقائق الخدمة الثابتة
+    if (order.durationHours != null && order.durationHours > 0) {
+      return order.durationHours * 60;
+    }
     const [service] = await this.teamMembers.manager.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],

@@ -91,6 +91,9 @@ export interface ServiceDto {
   allows_emergency: boolean;
   allows_individual: boolean;
   allows_team: boolean;
+  // قدرة "الحجز المتكرر" (migration 0176) — nullable في النوع عشان ردود قديمة محتملة،
+  // fallback false في الاستخدام.
+  allows_recurring_booking?: boolean;
 }
 
 export interface PricingFieldOptionDto {

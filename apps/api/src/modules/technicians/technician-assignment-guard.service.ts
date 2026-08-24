@@ -45,6 +45,9 @@ export class TechnicianAssignmentGuardService {
       `SELECT EXISTS (
          SELECT 1 FROM technician_profiles tp
          WHERE tp.id = $1
+         -- $2 (serviceId) بقى غير مستخدم لما مدة المرشّح بقت تتقري من صف الطلب نفسه (o2) —
+         -- tautology عشان Postgres يستنتج نوع الـparameter بدل "could not determine data type"
+         AND ($2::uuid IS NULL OR $2::uuid IS NOT NULL)
          ${technicianAvailabilityCondition({
            technicianIdExpr: 'tp.id',
            scheduledAtParam: '$4',
@@ -52,7 +55,7 @@ export class TechnicianAssignmentGuardService {
            activeStatusesParam: '$5',
            engagedStatusesParam: '$6',
            isEmergencyParam: '$7',
-           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $2)',
+           serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)",
            fullDayThresholdMinutesParam: '$8',
          })}
        ) AS available`,
@@ -87,15 +90,19 @@ export class TechnicianAssignmentGuardService {
       'matching.full_day_job_minutes',
       FULL_DAY_JOB_MINUTES_FALLBACK,
     );
-    const [service] = await manager.query<{ estimated_duration_minutes: number | null }[]>(
+    const [svc] = await manager.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
     );
+    // docs/01B — مدة المرشّح الحقيقية: duration_hours (ADR-0031/0032) بتتقدم على دقائق الخدمة الثابتة
     const tier = await classifyTechnicianCapacity(manager, {
       technicianId: technician.id,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
-      serviceDurationMinutes: service?.estimated_duration_minutes ?? 60,
+      serviceDurationMinutes:
+        order.durationHours != null && order.durationHours > 0
+          ? order.durationHours * 60
+          : svc?.estimated_duration_minutes ?? 60,
       fullDayThresholdMinutes: fullDayJobMinutes,
     });
     if (tier === 'BLOCKED') {

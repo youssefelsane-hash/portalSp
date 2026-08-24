@@ -137,7 +137,9 @@ describe('RecurringOrdersService — موثوقية التوليد (retry/dead-l
       );
       await runner.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [ids.template]);
       try {
-        await service.sweep();
+        // الفلترة بقالب الاختبار ده بس — worker موازي (ملف تكامل حي مثلاً) ميتسرقش منه،
+        // ولو اتصرف عن قوالب تانية بالغلط ميبقاش ممكن أصلًا.
+        await service.sweep({ templateIds: [ids.template] });
       } finally {
         await runner.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [ids.template]);
       }

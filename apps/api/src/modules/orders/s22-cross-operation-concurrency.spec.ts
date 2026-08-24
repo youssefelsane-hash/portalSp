@@ -288,6 +288,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
 
     const supportService = new SupportService(

@@ -182,3 +182,14 @@ export interface PricingRuleTestRunResultDto {
   passed: boolean;
   error: string | null;
 }
+
+// حدود محرك المعادلات — نفس القيم في apps/api/src/modules/pricing/formula-limits.ts بالحرف.
+// مصدر واحد للأرقام بين الـAPI والواجهة عشان المحرر يمنع البناء فوق الحد بدل ما الـAPI يرفض بعدين.
+export const FORMULA_LIMITS = {
+  /** أقصى عمق متداخل مسموح لأي شجرة معادلة. */
+  MAX_DEPTH: 48,
+  /** أقصى عدد عقد إجمالي في payload معادلة final_price كاملة. */
+  MAX_NODE_COUNT: 1500,
+  /** أقصى حجم JSON بالبايت للـpayload المخزن. */
+  MAX_PAYLOAD_JSON_BYTES: 128 * 1024,
+} as const;

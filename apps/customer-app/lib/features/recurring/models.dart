@@ -8,6 +8,8 @@ class RecurringTemplate {
   final String? requestedTechnicianId;
   final String frequency;
   final String? problemDescription;
+  // دفع قبل التوزيع (ADR-0013) — 'card'/'instapay' أو null (دفع بعد الشغل زي العادة).
+  final String? paymentMethod;
   final String nextRunAt;
   final String? lastGeneratedOrderId;
   final bool isActive;
@@ -20,6 +22,7 @@ class RecurringTemplate {
     required this.requestedTechnicianId,
     required this.frequency,
     required this.problemDescription,
+    required this.paymentMethod,
     required this.nextRunAt,
     required this.lastGeneratedOrderId,
     required this.isActive,
@@ -33,6 +36,8 @@ class RecurringTemplate {
         requestedTechnicianId: json['requested_technician_id'] as String?,
         frequency: json['frequency'] as String,
         problemDescription: json['problem_description'] as String?,
+        // nullable مع fallback عشان التوافق مع ردود قديمة محتملة قبل migration 0101
+        paymentMethod: json['payment_method'] as String?,
         nextRunAt: json['next_run_at'] as String,
         lastGeneratedOrderId: json['last_generated_order_id'] as String?,
         isActive: json['is_active'] as bool,

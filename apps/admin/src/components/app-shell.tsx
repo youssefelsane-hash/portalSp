@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   ListX,
+  ShieldCheck,
   LogOut,
   Map,
   Megaphone,
@@ -71,7 +72,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/operations', label: 'مركز العمليات', icon: Activity },
       { href: '/orders', label: 'الطلبات', icon: ClipboardList },
-      { href: '/recurring-orders', label: 'الطلبات المتكررة', icon: CalendarClock, permission: 'recurring_orders.view' },
+      { href: '/recurring-orders', label: 'الحجوزات المتكررة', icon: CalendarClock, permission: 'recurring_orders.view' },
       { href: '/support', label: 'الشكاوى', icon: Megaphone },
       { href: '/support-tickets', label: 'تذاكر الدعم', icon: LifeBuoy },
       { href: '/support-chat', label: 'محادثات الدعم', icon: MessageSquare },
@@ -112,6 +113,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'المالية',
     items: [
+      { href: '/projects', label: 'المشروعات', icon: Building2, permission: 'projects.view' },
+      { href: '/warranty-claims', label: 'مطالبات الضمان', icon: ShieldCheck, permission: 'warranty.view' },
+      { href: '/installments', label: 'التقسيط', icon: Landmark, permission: 'installments.view' },
       { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
       { href: '/instapay-confirmations', label: 'تأكيدات InstaPay', icon: Landmark, permission: 'payments.confirm_manual' },
       { href: '/promotions', label: 'أكواد الخصم', icon: Tag },

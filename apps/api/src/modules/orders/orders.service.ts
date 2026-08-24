@@ -44,6 +44,8 @@ import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-di
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
 import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
+import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
 import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderTeamService } from './order-team.service';
@@ -424,6 +426,23 @@ export class OrdersService {
       durationEstimate = await this.catalogService.estimateDuration(service.id, dto.standard_data_id, dto.requested_units);
     }
 
+    // docs/01B — تكامل Price Engine → Booking: مخرجات المعادلة التشغيلية (طاقم/مدة/ملاءمة
+    // طوارئ) بتوصل هنا رسميًا. الأولوية لمسار الإنتاجية القياسي (standard_data) لو العميل
+    // استخدمه صراحةً — ده المسار المقتبس من العميل؛ مخرجات المعادلة بتملأ الفراغ.
+    const formulaCrewTechnicians =
+      !durationEstimate && estimate.required_technicians != null ? estimate.required_technicians : null;
+    const formulaCrewAssistants =
+      !durationEstimate && estimate.required_assistants != null ? estimate.required_assistants : null;
+    const formulaDurationDays =
+      !durationEstimate && estimate.estimated_duration_days != null ? estimate.estimated_duration_days : null;
+    if (bookingMode === BookingMode.EMERGENCY && estimate.suitable_for_emergency === false) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش مناسبة لطلب طوارئ بالمواصفات دي حسب سياسة التسعير — احجزها بموعد عادي',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // إعادة زيارة تحت الضمان (docs/08 §7) — لازم: بتاعة نفس العميل، مكتملة فعلاً، لنفس الخدمة
     // ونفس العنوان بالظبط (نفس المشكلة المفروض)، وتحت warranty_expires_at الفعلي لسه. تفضيل
     // (مش ضمان) بيروح لنفس الفني الأصلي — requested_technician_id بتاعه بيتجاهَل ويتحل محله.
@@ -466,6 +485,57 @@ export class OrdersService {
           HttpStatus.BAD_REQUEST,
         );
       }
+    }
+
+    // "كرّر الحجز ده" (migration 0176) — بوابة الدخول للقالب المتكرر المُنشأ من مسار الحجز
+    // العادي. نفس فلسفة كل بوابات القدرة فوق: رفض واضح وقت الطلب بدل حالة نصف جاهزة.
+    // التكرار معناه "نفس الحجز ده يتكرر" فمحتاج موعد فعلي محدد + خدمة مفعّل فيها التكرار +
+    // مش طوارئ/إعادة زيارة (الاتنين ليهم دلالة زمنية مختلفة تمامًا عن التكرار المجدول).
+    let repeatPlanFrequency: RecurringOrderFrequency | null = null;
+    if (dto.repeat_frequency) {
+      if (originalOrder) {
+        throw new ApiException(ErrorCode.VAL_001, 'إعادة الزيارة تحت الضمان مينفعش تتكرر', HttpStatus.BAD_REQUEST);
+      }
+      if (bookingMode === BookingMode.EMERGENCY) {
+        throw new ApiException(ErrorCode.VAL_001, 'طلبات الطوارئ استجابة فورية — مينفعش تتكرر بموعد ثابت', HttpStatus.BAD_REQUEST);
+      }
+      if (!service.allowsRecurringBooking) {
+        throw new ApiException(ErrorCode.VAL_001, 'الحجز المتكرر مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (!scheduleSlot && !resolvedScheduledAtIso) {
+        throw new ApiException(ErrorCode.VAL_001, 'التكرار محتاج موعد محدد — حدد يوم التنفيذ الأول', HttpStatus.BAD_REQUEST);
+      }
+      repeatPlanFrequency = dto.repeat_frequency as RecurringOrderFrequency;
+    }
+
+    // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: طلب غير مدفوع مقدّمًا على
+    // خدمة عليها سياسة required لازم يحمل قبول النسخة الحالية، وإلا رفض واضح. الطلبات المدفوعة
+    // مقدمًا (كارت/InstaPay) وإعادة الزيارة المجانية مستثناة — الشروط دي عن "الدفع لاحقًا".
+    let postpaidPolicyVersionIds: string[] = [];
+    if (!dto.payment_method && !originalOrder) {
+      const required = await this.dataSource.query<{ id: string; title_ar: string }[]>(
+        `SELECT v.id, p.title_ar
+         FROM payment_policies p
+         JOIN LATERAL (
+           SELECT id, version FROM payment_policy_versions
+           WHERE policy_id = p.id ORDER BY version DESC LIMIT 1
+         ) v ON true
+         WHERE p.is_active = true AND p.is_required = true AND p.applies_to = 'postpaid_service'
+           AND (p.target_service_id IS NULL OR p.target_service_id = $1)
+           AND (p.target_category_id IS NULL OR p.target_category_id = $2)
+         ORDER BY p.target_service_id NULLS LAST`,
+        [service.id, service.categoryId],
+      );
+      const acceptedSet = new Set(dto.accepted_policy_version_ids ?? []);
+      const missing = required.filter((r) => !acceptedSet.has(r.id));
+      if (missing.length > 0) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `لازم توافق على شروط الدفع: ${missing.map((m) => m.title_ar).join('، ')}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      postpaidPolicyVersionIds = required.map((r) => r.id);
     }
 
     // نظام العمائر (docs/08 §13، ADR-0003) — متبادل استبعادياً مع promo_code (مش الاتنين مع
@@ -556,9 +626,9 @@ export class OrdersService {
         createdByAdminUserId: callCenterContext?.adminUserId ?? null,
         // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
         standardDataId: durationEstimate ? dto.standard_data_id! : null,
-        requiredTechnicians: durationEstimate?.assigned_technicians ?? null,
-        requiredAssistants: durationEstimate?.assigned_assistants ?? null,
-        estimatedDurationDays: durationEstimate?.estimated_days ?? null,
+        requiredTechnicians: durationEstimate?.assigned_technicians ?? formulaCrewTechnicians,
+        requiredAssistants: durationEstimate?.assigned_assistants ?? formulaCrewAssistants,
+        estimatedDurationDays: durationEstimate?.estimated_days ?? formulaDurationDays,
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
         idempotencyKey: idempotencyKey ?? null,
@@ -657,6 +727,46 @@ export class OrdersService {
           changeSource: OrderChangeSource.CUSTOMER,
         }),
       );
+
+      // إثبات قبول شروط الدفع (migration 0177) — جوّه نفس transaction الطلب: القبول بيرتبط
+      // بالطلب الفعلي (context order)، ولو الطلب فشل مفيش إثبات يتيم.
+      for (const versionId of postpaidPolicyVersionIds) {
+        await manager.query(
+          `INSERT INTO payment_policy_acceptances (policy_version_id, user_id, context_type, context_id)
+           VALUES ($1,$2,'order',$3)`,
+          [versionId, userId, order.id],
+        );
+      }
+
+      // "كرّر الحجز ده" (migration 0176) — القالب بيتإنشاء جوّه نفس transaction الطلب (ذرّي:
+      // لو إنشاء الطلب فشل مفيش قالب يتيم، ولو القالب فشل الطلب بيترول باك كمان). الموعد الأول
+      // للقالب = التكرار الجاي **بعد** الحجز المحجوز فعلاً — الحجز الحالي هو الطلب العادي اللي
+      // اتعمل فوق، والقالب مسؤول عن المواعيد اللي بعده بس.
+      if (repeatPlanFrequency && order.scheduledAt) {
+        await manager.save(
+          manager.create(RecurringOrderTemplate, {
+            customerId: customerProfile.id,
+            serviceId: service.id,
+            addressId: address.id,
+            bookingMode,
+            // تفضيل الفني الفعلي المرتبط بالحجز ده (سلوت/تفضيل صريح) بيتكرر كـ"تفضيل مش ضمان"
+            // بنفس دلالات requested_technician_id العادية — لو مش متاح وقت التوليد الطلب المتولّد
+            // بيتوزّع عادي زي أي طلب.
+            requestedTechnicianId: order.requestedTechnicianId,
+            requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
+            frequency: repeatPlanFrequency,
+            fieldValues: dto.field_values ?? null,
+            durationHours: order.durationHours,
+            scheduledEndAt: order.scheduledEndAt,
+            problemDescription: dto.problem_description ?? null,
+            // نفس قيد chk_recurring_order_templates_payment_method (card/instapay بس — كاش/محفظة
+            // دفعهم بعد الشغل، مالهمش معنى "قبل التوزيع" بيتكرر).
+            paymentMethod: requestedPrepayMethod ?? null,
+            nextRunAt: nextOccurrence(order.scheduledAt, repeatPlanFrequency),
+            isActive: true,
+          }),
+        );
+      }
 
       return order;
       });
@@ -1663,7 +1773,13 @@ export class OrdersService {
     // بوابة اكتمال الطاقم (docs/08 §35، ADR-0021 §1/§3) — القائد يقدر يتحرّك/يوصل بطاقم ناقص
     // (ممكن باقي الطاقم يوصل بعده)، بس مايبدأش الشغل الفعلي (IN_PROGRESS) قبل ما الطاقم يكتمل —
     // نفس فلسفة بوابة after_photo فوق: قرار مالك صريح مفروض على الباك-إند مش بس زرار الواجهة.
-    if (to === OrderStatus.IN_PROGRESS && order.bookingMode === BookingMode.TEAM) {
+    // docs/01B — تكامل Booking → Execution: البوابة بتنطبق على طلب الفريق (زي ما كانت) **وكمان**
+    // على أي طلب محرك التسعير/الإنتاجية حسبله طاقم أكتر من واحد مهما كان وضع الحجز — عميل
+    // اختار فني فرد مايبقاش سبب لتخطي متطلبات الطاقم المحسوبة.
+    if (
+      to === OrderStatus.IN_PROGRESS &&
+      (order.bookingMode === BookingMode.TEAM || ((order.requiredTechnicians ?? 1) > 1 || (order.requiredAssistants ?? 0) > 0))
+    ) {
       const crew = await this.orderTeamService.getCrewComposition(order.id, order);
       if (!crew.crewComplete) {
         throw new ApiException(

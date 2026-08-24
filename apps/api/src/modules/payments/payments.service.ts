@@ -45,6 +45,15 @@ import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WalletsService } from './wallets.service';
 import { PLATFORM_SYSTEM_USER_ID } from './entities/wallet.entity';
 import { SavedPaymentMethodsService } from './saved-payment-methods.service';
+import { SavedPaymentMethod } from './entities/saved-payment-method.entity';
+import { Installment } from '../installments/entities/installment.entity';
+import { InstallmentStatus } from '../installments/entities/installment-status.enum';
+import {
+  INSTALLMENT_PAYMENT_FAILED_EVENT,
+  INSTALLMENT_PAYMENT_SUCCEEDED_EVENT,
+  INSTALLMENTS_PLAN_COMPLETED_EVENT,
+  InstallmentPaymentResolvedPayload,
+} from '../../common/events/installment.events';
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
@@ -84,7 +93,20 @@ export class PaymentsService {
     private readonly events: EventEmitter2,
     private readonly paymentProviders: PaymentProviderRegistry,
     private readonly savedPaymentMethods: SavedPaymentMethodsService,
+    // docs/08 §56 — آخر بند عمدًا (نفس فلسفة orderTeamService فوق): الاختبارات القديمة اللي
+    // بتبني PaymentsService بـpositional args ما تتكسرش.
+    @InjectRepository(Installment) private readonly installments: Repository<Installment>,
   ) {}
+
+  /** نفس isIdempotencyKeyViolation في orders.service — 23505 raw → استرجاع بدل 500. */
+  private isUniqueViolation(err: unknown): boolean {
+    return (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code: unknown }).code === '23505'
+    );
+  }
 
   /**
    * عمولة المنصة = عمولة الخدمة الأساسية + فرق مستوى الفني (سالب عادةً — مستوى أعلى يعني عمولة
@@ -1342,7 +1364,11 @@ export class PaymentsService {
     }
 
     try {
-      if (payment.orderItemBatchId) {
+      if (payment.installmentId) {
+        // تأكيد تحصيل قسط تقسيط (migration 0177) — مفيش أي لمس لحالة الطلب أصلاً: دورة التقسيط
+        // منفصلة عن دورة الطلب (قرار موثق في installments/README.md §النموذج المالي).
+        await this.finalizeInstallmentPayment(payment, succeeded, gatewayTransactionId, failureReason);
+      } else if (payment.orderItemBatchId) {
         // تأكيد دفع شغل إضافي (docs/08 §21) — الطلب لسه شغال (مش بيقفل هنا)، فمايستدعيش
         // assertPayable()/handlePaymentConfirmed() خالص (كانوا هيرفضوا بوضوح لطلب IN_PROGRESS).
         // نفس حماية دفعة الطلب الأصلية فوق (dedup، توقيع، مطابقة مبلغ) سرت عليه بالفعل قبل السطر ده.
@@ -1670,8 +1696,225 @@ export class PaymentsService {
     await this.payments.save(payment);
   }
 
-  private async nextPaymentNumber(manager: EntityManager): Promise<string> {
-    const [{ next_human_readable_number: number }] = await manager.query<
+  // ===================== محرك تحصيل الأقساط (migration 0177) =====================
+  // نفس مبادئ attemptAdditionalWorkCharge بالحرف: Payment idempotent + وسيلة محفوظة tokenized
+  // + نداء متزامن مجرد مؤشر والـwebhook هو مصدر الحقيقة. الفرق الوحيد: الـPayment مرتبط بـ
+  // installment_id (فرع جديد في finalizeGatewayWebhook) مش orderItemBatchId.
+
+  /**
+   * تحصيل قسط مستحق — بيتنادى من InstallmentCollectionService.sweep() بس بعد claim ذرّي
+   * (scheduled → processing بـSKIP LOCKED). ممنوع نداء يدوي من أي مسار تاني.
+   */
+  async attemptInstallmentCharge(installmentId: string): Promise<void> {
+    const installment = await this.installments.findOne({ where: { id: installmentId } });
+    if (!installment || installment.status !== 'processing') return; // دفاعي — claim هو اللي بيضبط الحالة
+
+    const [application] = await this.dataSource.query<
+      { id: string; customer_id: string; order_id: string; payment_method_id: string | null; allowed_provider: string }[]
+    >(`SELECT id, customer_id, order_id, payment_method_id, allowed_provider FROM installment_applications WHERE id = $1`, [
+      installment.applicationId,
+    ]);
+    if (!application) {
+      await this.failInstallmentAttempt(installment, null, 'طلب التقسيط غير موجود');
+      return;
+    }
+
+    // الـclaim في InstallmentCollectionService رافع attempt_count بالفعل (جوّه نفس القفل) —
+    // الرقم هنا هو رقم المحاولة الحالي، ومفتاح idempotency مبني عليه: أي إعادة تنفيذ لنفس
+    // المحاولة بترجع لنفس صف الدفعة بدل ما ينشئ شحنة جديدة.
+    const attemptNo = installment.attemptCount;
+    const paymentNumber = await this.dataSource.transaction((manager) => this.nextPaymentNumber(manager));
+    // Idempotency على مستوى المحاولة: نفس القسط + نفس رقم المحاولة = صف دفعة واحد حتى لو
+    // sweep اتنادى مرتين/انتهار وانتعاد — مفيش شحن مزدوج ممكن من التكرار.
+    const idempotencyKey = `installment:${installment.id}:${attemptNo}`;
+    const payment = this.payments.create({
+      paymentNumber,
+      orderId: application.order_id,
+      customerId: application.customer_id,
+      amountCents: installment.amountCents,
+      paymentMethod: PaymentMethod.CARD,
+      paymentGateway: application.allowed_provider,
+      paymentStatus: PaymentGatewayStatus.PENDING,
+      idempotencyKey,
+      installmentId: installment.id,
+    });
+    try {
+      await this.payments.save(payment);
+    } catch (err) {
+      if (this.isUniqueViolation(err)) {
+        // المحاولة دي اتبنت قبل كده (crash بعد الحفظ قبل المتابعة) — مفيش شحن جديد خالص
+        return;
+      }
+      throw err;
+    }
+
+    installment.paymentId = payment.id;
+    installment.lastAttemptAt = new Date();
+    await this.installments.save(installment);
+
+    const savedMethod = application.payment_method_id
+      ? await this.dataSource.getRepository(SavedPaymentMethod).findOne({ where: { id: application.payment_method_id } })
+      : await this.savedPaymentMethods.findDefaultForCustomer(application.customer_id);
+    if (!savedMethod || savedMethod.isRevoked) {
+      await this.failInstallmentAttempt(installment, payment, 'مفيش بطاقة محفوظة صالحة للتحصيل التلقائي', 'NO_SAVED_PAYMENT_METHOD');
+      return;
+    }
+    const provider = this.paymentProviders.getByProviderKey(savedMethod.provider);
+    if (!provider.supportsTokenization) {
+      await this.failInstallmentAttempt(
+        installment,
+        payment,
+        `${savedMethod.provider} مش بيدعم التحصيل التلقائي بوسيلة محفوظة`,
+        'TOKENIZATION_NOT_SUPPORTED',
+      );
+      return;
+    }
+
+    const customerProfile = await this.customerProfiles.findByProfileIdOrThrow(application.customer_id);
+    const user = await this.users.findOne({ where: { id: customerProfile.userId } });
+    if (!user) {
+      await this.failInstallmentAttempt(installment, payment, 'حساب العميل غير موجود', 'CUSTOMER_NOT_FOUND');
+      return;
+    }
+
+    const [firstName, ...rest] = user.fullName.trim().split(/\s+/);
+    try {
+      const result = await provider.chargeToken({
+        paymentId: payment.id,
+        orderNumber: `INSTALLMENT-${payment.paymentNumber}`,
+        amountCents: installment.amountCents,
+        currencyCode: 'EGP',
+        providerToken: savedMethod.providerToken,
+        customerFirstName: firstName || 'NA',
+        customerLastName: rest.join(' ') || 'NA',
+        customerEmail: user.email ?? `customer-${user.id}@baytak.app`,
+        customerPhone: user.phoneNumber,
+      });
+      if (result.succeeded) {
+        // PENDING عمدًا — webhook هو المؤكد النهائي (نفس اتفاقية payWithCard/addl-work بالحرف)
+        if (result.providerReference) payment.gatewayTransactionId = result.providerReference;
+      } else {
+        payment.paymentStatus = PaymentGatewayStatus.FAILED;
+        payment.failureCode = 'GATEWAY_DECLINED';
+        payment.failureMessage = result.failureReason;
+        payment.failedAt = new Date();
+      }
+    } catch (err) {
+      // timeout شبكة ≠ فشل مؤكد عند البوابة: PROCESSING + reconcile لاحقًا (نفس initiateProviderCharge)
+      payment.paymentStatus = PaymentGatewayStatus.PROCESSING;
+      payment.failureMessage = err instanceof Error ? err.message : String(err);
+    }
+    await this.payments.save(payment);
+  }
+
+  /** فشل مبكر (بلا بوابة أو برفض مزامن): القسط يرجع failed قابل لإعادة الجدولة، الدفعة failed. */
+  private async failInstallmentAttempt(
+    installment: Installment,
+    payment: Payment | null,
+    messageAr: string,
+    code?: string,
+  ): Promise<void> {
+    if (payment) {
+      payment.paymentStatus = PaymentGatewayStatus.FAILED;
+      payment.failureCode = code ?? 'GATEWAY_DECLINED';
+      payment.failureMessage = messageAr;
+      payment.failedAt = new Date();
+      await this.payments.save(payment);
+    }
+    installment.status = InstallmentStatus.FAILED;
+    installment.lastError = messageAr;
+    if (payment) installment.paymentId = payment.id;
+    await this.installments.save(installment);
+    const [app] = await this.dataSource.query<{ customer_id: string; order_id: string }[]>(
+      `SELECT customer_id, order_id FROM installment_applications WHERE id = $1`,
+      [installment.applicationId],
+    );
+    this.events.emit(INSTALLMENT_PAYMENT_FAILED_EVENT, {
+      installmentId: installment.id,
+      applicationId: installment.applicationId,
+      orderId: app?.order_id,
+      customerId: app?.customer_id,
+      sequenceNumber: installment.sequenceNumber,
+      amountCents: installment.amountCents,
+      failureReason: messageAr,
+    } satisfies InstallmentPaymentResolvedPayload);
+  }
+
+  /** فرع webhook الأقساط — paid/failed نهائي + قيد double-entry للنجاح + أحداث العميل. */
+  private async finalizeInstallmentPayment(
+    payment: Payment,
+    succeeded: boolean,
+    gatewayTransactionId: string,
+    failureReason: string | null,
+  ): Promise<void> {
+    payment.gatewayTransactionId = gatewayTransactionId;
+    payment.paymentStatus = succeeded ? PaymentGatewayStatus.SUCCEEDED : PaymentGatewayStatus.FAILED;
+    if (succeeded) {
+      payment.completedAt = new Date();
+    } else {
+      payment.failedAt = new Date();
+    }
+    await this.payments.save(payment);
+    if (!payment.installmentId) return; // دفاعي
+
+    // حالة القسط بتتحدث من processing/scheduled فقط (idempotent ضد webhook مكرر خارجيًا كمان)
+    const updatedRaw = await this.dataSource.query<
+      Record<string, unknown>[] | [Record<string, unknown>[], number]
+    >(
+      `UPDATE installments
+       SET status = CASE WHEN $2 THEN 'paid' ELSE 'failed' END,
+           paid_at = CASE WHEN $2 THEN now() ELSE paid_at END,
+           last_error = CASE WHEN $2 THEN NULL ELSE $3 END,
+           updated_at = now()
+       WHERE id = $1 AND status IN ('processing', 'scheduled')
+       RETURNING application_id, sequence_number, amount_cents`,
+      [payment.installmentId, succeeded, failureReason],
+    );
+    // نفس TypeORM quirk الموثقة في recurring-orders claim: UPDATE..RETURNING ممكن ترجع
+    // [rows, affectedCount] — بنفك الغلاف لو موجود.
+    const updated = Array.isArray(updatedRaw[0]) ? (updatedRaw[0] as Record<string, unknown>[]) : (updatedRaw as Record<string, unknown>[]);
+    if (updated.length === 0) return;
+
+    const inst = updated[0];
+    if (!inst || inst.amount_cents === undefined) return;
+    const [app] = await this.dataSource.query<{ customer_id: string; order_id: string }[]>(
+      `SELECT customer_id, order_id FROM installment_applications WHERE id = $1`,
+      [inst.application_id],
+    );
+    const payload: InstallmentPaymentResolvedPayload = {
+      installmentId: payment.installmentId!,
+      applicationId: inst.application_id as string,
+      orderId: app?.order_id ?? payment.orderId ?? '',
+      customerId: app?.customer_id ?? payment.customerId,
+      sequenceNumber: Number(inst.sequence_number),
+      amountCents: Number(inst.amount_cents),
+      failureReason,
+    };
+
+    if (succeeded) {
+      // **قرار محاسبي متعمد** (نفس نمط دفعات الكارت للطلبات اليوم): التحصيل من بوابة خارجية
+      // مابدخلش wallet ledger مباشرةً — حركة المحافظ بتحصل بس عند تسوية الفني
+      // (settleAndComplete). تتبع التحصيل هنا عايش في payments + حالة القسط، وده بيحافظ على
+      // تماسك الدفتر الحالي زي ما هو بدل اختراع دلالة رصيد جديدة. راجع installments/README.md.
+      this.events.emit(INSTALLMENT_PAYMENT_SUCCEEDED_EVENT, payload);
+
+      const [{ remaining }] = await this.dataSource.query<{ remaining: string }[]>(
+        `SELECT COUNT(*)::text AS remaining FROM installments
+         WHERE application_id = $1 AND status NOT IN ('paid', 'refunded')`,
+        [payload.applicationId],
+      );
+      if (Number(remaining) === 0) {
+        this.events.emit(INSTALLMENTS_PLAN_COMPLETED_EVENT, {
+          applicationId: payload.applicationId,
+          customerId: payload.customerId,
+        });
+      }
+    } else {
+      this.events.emit(INSTALLMENT_PAYMENT_FAILED_EVENT, payload);
+    }
+  }
+
+  private async nextPaymentNumber(manager: EntityManager): Promise<string> {    const [{ next_human_readable_number: number }] = await manager.query<
       { next_human_readable_number: string }[]
     >("SELECT next_human_readable_number('PAY')");
     return number;

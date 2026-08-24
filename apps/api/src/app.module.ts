@@ -26,6 +26,10 @@ import { AssistantMatchingModule } from './modules/assistant-matching/assistant-
 import { ChatModule } from './modules/chat/chat.module';
 import { InternalChatModule } from './modules/internal-chat/internal-chat.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { InstallmentsModule } from './modules/installments/installments.module';
+import { PaymentPoliciesModule } from './modules/payment-policies/payment-policies.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { AdminRealtimeModule } from './common/websocket/admin-realtime.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -104,6 +108,10 @@ import { SecurityModule } from './modules/security/security.module';
     ChatModule,
     InternalChatModule,
     PaymentsModule,
+    InstallmentsModule,
+    PaymentPoliciesModule,
+    ProjectsModule,
+    AdminRealtimeModule,
     RatingsModule,
     SupportModule,
     NotificationsModule,

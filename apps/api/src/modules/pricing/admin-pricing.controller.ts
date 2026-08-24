@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put , Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -112,7 +112,23 @@ export class AdminPricingController {
   @HttpCode(HttpStatus.OK)
   @RequirePermission('catalog.manage')
   async evaluateDraft(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EvaluateDraftPricingDto) {
-    return toPricingEvaluationResponseDto(await this.pricingEngineService.evaluateDraft(id, dto.field_values, dto.formula_payload));
+    const detailed = await this.pricingEngineService.evaluateDraftDetailed(id, dto.field_values, dto.formula_payload);
+    // حقول اختيارية إضافية للإدارة فقط (docs/01B §5/§6) — ما تكسرش أي مستهلك قديم.
+    // لو مفيش override، الـtrace/الشرح بيترسموا ضد القاعدة الحية المحفوظة نفسها.
+    let trace = detailed.trace;
+    let explanation = detailed.explanation;
+    return { ...toPricingEvaluationResponseDto(detailed.result), trace, explanation };
+  }
+
+  /** find-usages (docs/01B §13) — إيه اللي بيستخدم حقل/ثابت/جدول بحث بالمسارات. */
+  @Get('services/:id/pricing-usages')
+  @RequirePermission('catalog.manage')
+  async pricingUsages(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('field_key') fieldKey?: string,
+    @Query('rule_key') ruleKey?: string,
+  ) {
+    return this.rulesService.findUsages(id, { field_key: fieldKey || undefined, rule_key: ruleKey || undefined });
   }
 
   @Get('services/:id/pricing-tests')

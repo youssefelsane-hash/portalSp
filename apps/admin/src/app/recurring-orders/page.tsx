@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { AdminRecurringTemplateResponseDto } from '@baytak/shared-types';
+import type { AdminRecurringPlanResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -17,14 +17,13 @@ import { BOOKING_MODE_LABELS, RECURRING_FREQUENCY_LABELS } from '@/lib/order-lab
 
 const PER_PAGE = 20;
 
-// وضوح الطلبات المتكررة للتشغيل (docs/08 §32) — كانت فجوة موثّقة صراحة: القوالب المتكررة
-// (`recurring_order_templates`) بتولّد طلبات حقيقية كل موعد من غير أي مسار أدمن يشوفها خالص —
-// مفيش طريقة يتابع بيها فريق العمليات قالب معطوب. عمود "الفشل" (docs/08 §19 بند 20) بيعرض
-// consecutive_failure_count/last_failure_reason — القالب مايتخطاش أي موعد صامت (retry/dead-letter
-// في RecurringOrdersService)، وأي نوبة فشل بتوصل للسقف بتبعت إشعار ops_manager كمان.
+// خطط الحجز المتكرر (migration 0176) — الصفحة دي بتعرض **تعريف التكرار نفسه**: مين/إيه/فين/
+// إزاي بيتكرر، والموعد الجاي وآخر حجز اتولّد وحالة الفشل. الطلبات المتولّدة نفسها مش هنا —
+// بتتشاف من صفحة /orders العادية بفلتر "متكررة" وبتتصرف زي أي طلب عادي بالحرف (نفس التفاصيل/
+// الأدوات/التتبع). أي حجز متولّد بيرجع لخطته من خلال recurring_template_id على الطلب.
 export default function RecurringOrdersPage() {
   const { isLoading, authedFetchPaginated } = useAuth();
-  const [templates, setTemplates] = useState<AdminRecurringTemplateResponseDto[] | null>(null);
+  const [plans, setPlans] = useState<AdminRecurringPlanResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [activeFilter, setActiveFilter] = useState<'all' | 'true' | 'false'>('all');
@@ -34,19 +33,27 @@ export default function RecurringOrdersPage() {
     if (isLoading) return;
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (activeFilter !== 'all') params.set('is_active', activeFilter);
-    authedFetchPaginated<AdminRecurringTemplateResponseDto>(`/admin/recurring-orders?${params.toString()}`)
+    authedFetchPaginated<AdminRecurringPlanResponseDto>(`/admin/recurring-orders?${params.toString()}`)
       .then(({ items, meta }) => {
-        setTemplates(items);
+        setPlans(items);
         setTotal(meta.total ?? items.length);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الطلبات المتكررة'));
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل خطط الحجز المتكرر'));
   }, [isLoading, page, activeFilter, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
   return (
     <AppShell>
-      <PageHeader title="الطلبات المتكررة" />
+      <PageHeader title="الحجوزات المتكررة (الخطط)" />
+
+      <p className="mb-4 text-sm text-muted-foreground">
+        التعريفات اللي بتولّد طلبات عادية تلقائيًا كل موعد — الطلبات نفسها في{' '}
+        <Link href="/orders" className="underline">
+          صفحة الطلبات
+        </Link>{' '}
+        (فلتر &quot;متكررة&quot;).
+      </p>
 
       <div className="mb-4 flex gap-2">
         {(['all', 'true', 'false'] as const).map((value) => (
@@ -65,54 +72,75 @@ export default function RecurringOrdersPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !templates && <TableSkeleton columns={8} />}
-      {templates && templates.length === 0 && <EmptyState title="مفيش قوالب متكررة مطابقة" />}
+      {!error && !plans && <TableSkeleton columns={8} />}
+      {plans && plans.length === 0 && <EmptyState title="مفيش خطط متكررة مطابقة" />}
 
-      {templates && templates.length > 0 && (
+      {plans && plans.length > 0 && (
         <>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>العميل</TableHead>
                 <TableHead>الخدمة</TableHead>
+                <TableHead>العنوان</TableHead>
                 <TableHead>التكرار</TableHead>
-                <TableHead>وضع الحجز</TableHead>
+                <TableHead>الدفع</TableHead>
                 <TableHead>الموعد الجاي</TableHead>
-                <TableHead>آخر طلب اتولّد</TableHead>
+                <TableHead>آخر حجز</TableHead>
                 <TableHead>الحالة</TableHead>
                 <TableHead>الفشل</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {templates.map((template) => (
-                <TableRow key={template.id}>
-                  <TableCell dir="ltr" className="font-mono text-xs">
-                    {template.customer_id}
-                  </TableCell>
-                  <TableCell dir="ltr" className="font-mono text-xs">
-                    {template.service_id}
-                  </TableCell>
-                  <TableCell>{RECURRING_FREQUENCY_LABELS[template.frequency] ?? template.frequency}</TableCell>
-                  <TableCell>{BOOKING_MODE_LABELS[template.booking_mode] ?? template.booking_mode}</TableCell>
-                  <TableCell>{new Date(template.next_run_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+              {plans.map((plan) => (
+                <TableRow key={plan.id}>
                   <TableCell>
-                    {template.last_generated_order_id ? (
-                      <Link href={`/orders/${template.last_generated_order_id}`} className="underline">
-                        عرض الطلب
+                    <div className="text-sm">{plan.customer_full_name}</div>
+                    <div dir="ltr" className="font-mono text-xs text-muted-foreground">
+                      {plan.customer_phone}
+                    </div>
+                  </TableCell>
+                  <TableCell>{plan.service_name_ar}</TableCell>
+                  <TableCell>{plan.address_label ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                  <TableCell>
+                    {RECURRING_FREQUENCY_LABELS[plan.frequency] ?? plan.frequency}
+                    <div className="text-xs text-muted-foreground">
+                      {BOOKING_MODE_LABELS[plan.booking_mode] ?? plan.booking_mode}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {plan.payment_method ? (
+                      <Badge variant="outline">{plan.payment_method === 'card' ? 'مقدّم (كارت)' : 'مقدّم (InstaPay)'}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">بعد الشغل</span>
+                    )}
+                  </TableCell>
+                  <TableCell>{new Date(plan.next_run_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
+                  <TableCell>
+                    {plan.last_generated_order_id ? (
+                      <Link href={`/orders/${plan.last_generated_order_id}`} className="underline">
+                        {plan.last_order_number ?? 'عرض الطلب'}
                       </Link>
                     ) : (
                       <span className="text-muted-foreground">لسه مفيش</span>
                     )}
+                    {plan.last_occurrence_at && (
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(plan.last_occurrence_at).toLocaleString('ar-EG-u-nu-latn')}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={template.is_active ? 'secondary' : 'outline'}>
-                      {template.is_active ? 'نشط' : 'موقوف'}
-                    </Badge>
+                    {plan.cancelled_at ? (
+                      <Badge variant="outline">اتلغت</Badge>
+                    ) : (
+                      <Badge variant={plan.is_active ? 'secondary' : 'outline'}>{plan.is_active ? 'نشطة' : 'موقوفة'}</Badge>
+                    )}
                   </TableCell>
                   <TableCell>
-                    {template.last_failure_reason ? (
-                      <Badge variant="destructive" title={template.last_failure_reason}>
-                        فشل ({template.consecutive_failure_count}/3) — {new Date(template.last_failed_at!).toLocaleString('ar-EG-u-nu-latn')}
+                    {plan.last_failure_reason ? (
+                      <Badge variant="destructive" title={plan.last_failure_reason}>
+                        فشل ({plan.consecutive_failure_count}/3) — {new Date(plan.last_failed_at!).toLocaleString('ar-EG-u-nu-latn')}
                       </Badge>
                     ) : (
                       <span className="text-muted-foreground">—</span>
@@ -123,7 +151,7 @@ export default function RecurringOrdersPage() {
             </TableBody>
           </Table>
 
-          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="قالب" onPageChange={setPage} />
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="خطة" onPageChange={setPage} />
         </>
       )}
     </AppShell>

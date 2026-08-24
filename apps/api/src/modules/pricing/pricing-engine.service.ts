@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload } from './formula-evaluator';
+import { describeFormulaPayload, evaluateFormulaNodeWithTrace } from './formula-evaluator';
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
@@ -72,6 +73,33 @@ export class PricingEngineService {
    * يتبعت override من غير ما يتخزن — لو مبعوتش، بيقرا القاعدة الحية الحالية (نفس سلوك evaluate()
    * تمامًا، مفيد لتشغيل حالات اختبار محفوظة ضد الوضع الحالي بدون تعديل).
    */
+  /**
+   * نسخة الإدارة من المعاينة بترجع كمان خطوات الحساب (docs/01B §5) والشرح الهيكلي (§6).
+   * نفس دلالات evaluateDraft بالحرف — دي مجرد غلاف بيضيف عرضًا مساعدًا للأدمن.
+   */
+  async evaluateDraftDetailed(
+    serviceId: string,
+    rawFieldValues: Record<string, string | number | boolean>,
+    formulaPayloadOverride?: Record<string, unknown>,
+  ): Promise<{
+    result: PricingEvaluationResult;
+    trace: { path: string; expression: string; value: number }[];
+    explanation: string[];
+  }> {
+    const payload = formulaPayloadOverride
+      ? (validateFinalPriceFormulaPayload(formulaPayloadOverride), formulaPayloadOverride as unknown as FinalPriceFormulaPayload)
+      : null;
+    const { context, finalPricePayload } = await this.prepareEvaluation(serviceId, rawFieldValues);
+    const finalPayload = payload ?? finalPricePayload;
+    if (!finalPayload) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مفيهاش معادلة تسعير سارية دلوقتي', HttpStatus.CONFLICT);
+    }
+    // التتبع بنفس evaluator الإنتاج — القيم متطابقة بالحرف، ده عرض بس
+    const traced = evaluateFormulaNodeWithTrace(finalPayload.price_cents, context);
+    const result = this.computeResult(finalPayload, context);
+    return { result, trace: traced.trace, explanation: describeFormulaPayload(finalPayload) };
+  }
+
   async evaluateDraft(
     serviceId: string,
     rawFieldValues: Record<string, string | number | boolean>,

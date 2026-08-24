@@ -56,6 +56,7 @@ export interface ServiceResponseDto {
   deposit_required: boolean;
   deposit_percentage: number | null;
   allows_date_range_booking: boolean;
+  allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
   requires_precise_schedule: boolean;
   requires_start_time_only: boolean;
@@ -88,6 +89,7 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     deposit_required: service.depositRequired,
     deposit_percentage: service.depositPercentage !== null ? Number(service.depositPercentage) : null,
     allows_date_range_booking: service.allowsDateRangeBooking,
+    allows_recurring_booking: service.allowsRecurringBooking,
     show_unavailable_providers: service.showUnavailableProviders,
     requires_precise_schedule: service.requiresPreciseSchedule,
     requires_start_time_only: service.requiresStartTimeOnly,

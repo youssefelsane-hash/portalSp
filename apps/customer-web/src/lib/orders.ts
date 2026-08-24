@@ -16,6 +16,11 @@ export interface CreateOrderBody {
   promo_code?: string;
   field_values?: Record<string, string | number | boolean>;
   payment_method?: 'card' | 'instapay';
+  // "كرّر الحجز ده" (migration 0176) — الطلب بيتعمل بالمسار العادي + قالب متكرر بيتإنشاء بنفس
+  // العملية أول موعد له بعد الموعد المحجوز. الباك-إند بيرفضه للطوارئ/الخدمات غير مفعّل فيها التكرار.
+  repeat_frequency?: 'weekly' | 'monthly' | 'yearly';
+  // نسخ سياسات الدفع المقبولة (migration 0177) — إجبارية من الباك-إند لو الخدمة عليها شروط
+  accepted_policy_version_ids?: string[];
 }
 
 export interface OrderAddressResponseDto {

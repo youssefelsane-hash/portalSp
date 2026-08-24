@@ -23,6 +23,7 @@ import '../tracking/tracking_client.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
+import '../installments/installment_section.dart';
 
 // نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط.
 // pending_payment (docs/08 §19 بند 1) — دفع قبل التوزيع (ADR-0013): لو محاولة الدفع الأولى وقت
@@ -639,6 +640,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
+                      // "ادفع بالتقسيط" — بيظهر بس لو الخدمة عليها خطط متاحة
+                      InstallmentSection(
+                        key: ValueKey('inst_${order.id}'),
+                        auth: context.read<AuthRepository>(),
+                        orderId: order.id,
+                        serviceId: order.serviceId,
+                      ),
+                      const SizedBox(height: 8),
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),

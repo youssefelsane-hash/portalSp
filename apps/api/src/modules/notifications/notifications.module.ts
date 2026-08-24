@@ -48,6 +48,8 @@ import { PayoutCompletedRoutingListener } from './listeners/payout-completed-rou
 import { PayoutRequiresReviewRoutingListener } from './listeners/payout-requires-review-routing.listener';
 import { RatingSubmittedNotificationListener } from './listeners/rating-submitted-notification.listener';
 import { RecurringTemplateGenerationFailingRoutingListener } from './listeners/recurring-template-generation-failing-routing.listener';
+import { RecurringOrderAwaitingPaymentNotificationListener } from './listeners/recurring-order-awaiting-payment-notification.listener';
+import { InstallmentNotificationListener } from './listeners/installment-notification.listener';
 import { ReferralRewardNotificationListener } from './listeners/referral-reward-notification.listener';
 import { SecurityEventRoutingListener } from './listeners/security-event-routing.listener';
 import { TechnicianCancellationNotificationListener } from './listeners/technician-cancellation-notification.listener';
@@ -115,6 +117,8 @@ import { NotificationsService } from './notifications.service';
     RatingSubmittedNotificationListener,
     SecurityEventRoutingListener,
     RecurringTemplateGenerationFailingRoutingListener,
+    RecurringOrderAwaitingPaymentNotificationListener,
+    InstallmentNotificationListener,
     ReferralRewardNotificationListener,
     AssistantPersonalAssignedNotificationListener,
     AssistantOpportunityNotificationListener,

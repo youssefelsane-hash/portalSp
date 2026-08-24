@@ -193,6 +193,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       { emit: () => undefined } as never, // events
       { getProvider: () => provider } as never, // paymentProviders — الـfake provider بتاعنا
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
+      {} as never, // installments repo (migration 0177)
     );
   }
 

@@ -21,6 +21,7 @@ import {
 import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/chat';
 import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
+import { InstallmentSection } from './installment-section';
 
 // ترتيب رحلة الطلب الطبيعية للعرض كخط زمني — الحالات الاستثنائية (إلغاء/نزاع) بتتعرض لوحدها.
 const TIMELINE_STATUSES = [
@@ -130,6 +131,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {order.order_status === 'awaiting_quote_approval' && (
         <QuoteApprovalSection authedFetch={authedFetch} orderId={order.id} onResolved={refresh} />
       )}
+
+      {/* التقسيط — لو الخدمة عليها خطط متاحة، العميل يقدر يقدّم طلب (مراجعة بشر بعدها) */}
+      <InstallmentSection authedFetch={authedFetch} orderId={order.id} serviceId={order.service_id} onApplied={refresh} />
 
       {order.payment_status !== 'paid' && order.order_status === 'work_completed' && !order.customer_cash_confirmed_at && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4">

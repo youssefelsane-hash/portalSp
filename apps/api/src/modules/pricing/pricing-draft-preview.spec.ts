@@ -56,7 +56,7 @@ describe('PricingEngineService.evaluateDraft() + PricingRuleTestsService (Script
     ids.adminUser = adminUser.id;
 
     // حقل رقمي "area" — نفس نمط المعادلة الحقيقية المستخدمة في اختبارات formula-evaluator.
-    const fieldsService = new PricingFieldsService(dataSource.getRepository(ServicePricingField), { record: auditLogRecord } as unknown as AuditLogService);
+    const fieldsService = new PricingFieldsService(dataSource.getRepository(ServicePricingField), dataSource.getRepository(ServicePricingRule), { record: auditLogRecord } as unknown as AuditLogService);
     await fieldsService.create(ids.adminUser, ids.service, {
       field_key: 'area',
       label_ar: 'المساحة',
@@ -64,7 +64,7 @@ describe('PricingEngineService.evaluateDraft() + PricingRuleTestsService (Script
       is_required: true,
     });
 
-    const rulesService = new PricingRulesService(dataSource.getRepository(ServicePricingRule), { record: auditLogRecord } as unknown as AuditLogService);
+    const rulesService = new PricingRulesService(dataSource.getRepository(ServicePricingRule), dataSource.getRepository(ServicePricingField), { record: auditLogRecord } as unknown as AuditLogService);
     // القاعدة الحية: price_cents = area × 100 (100 قرش للمتر)
     await rulesService.upsert(ids.adminUser, ids.service, {
       rule_type: PricingRuleType.FORMULA,

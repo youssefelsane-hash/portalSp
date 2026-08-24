@@ -425,6 +425,7 @@ export default function ServiceDetailPage() {
       deposit_required: form.get('deposit_required') === 'on',
       deposit_percentage: depositPercentage ? Number(depositPercentage) : undefined,
       allows_date_range_booking: form.get('allows_date_range_booking') === 'on',
+      allows_recurring_booking: form.get('allows_recurring_booking') === 'on',
       show_unavailable_providers: form.get('show_unavailable_providers') === 'on',
       requires_precise_schedule: form.get('requires_precise_schedule') === 'on',
       requires_start_time_only: form.get('requires_start_time_only') === 'on',
@@ -672,6 +673,16 @@ export default function ServiceDetailPage() {
                     defaultChecked={service.allows_date_range_booking}
                   />
                   يسمح بحجز &quot;نطاق أيام مرن&quot; (لو اتلغى، العميل لازم يحدد يوم واحد بس)
+                </label>
+                {/* قدرة "الحجز المتكرر" (migration 0176) — لو مفعّلة، العميل يقدر يختار أسبوعي/
+                    شهري وقت الحجز، وكل موعد بيتولّد طلب عادي كامل بنفس مسار الحجز العادي. */}
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    name="allows_recurring_booking"
+                    defaultChecked={service.allows_recurring_booking}
+                  />
+                  يسمح بالحجز المتكرر (أسبوعي/شهري — كل موعد بيولّد طلب عادي كامل بسعر اللحظة)
                 </label>
                 {/* سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) */}
                 <label className="flex items-center gap-2">

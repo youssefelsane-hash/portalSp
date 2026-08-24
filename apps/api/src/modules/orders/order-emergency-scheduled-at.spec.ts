@@ -212,6 +212,7 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

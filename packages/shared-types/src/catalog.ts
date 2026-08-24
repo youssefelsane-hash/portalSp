@@ -64,6 +64,7 @@ export interface AdminServiceResponseDto {
   deposit_required: boolean;
   deposit_percentage: number | null;
   allows_date_range_booking: boolean;
+  allows_recurring_booking: boolean;
   show_unavailable_providers: boolean;
   requires_precise_schedule: boolean;
   requires_start_time_only: boolean;
@@ -103,6 +104,7 @@ export interface CreateServiceBody {
   deposit_required?: boolean;
   deposit_percentage?: number;
   allows_date_range_booking?: boolean;
+  allows_recurring_booking?: boolean;
   show_unavailable_providers?: boolean;
   requires_precise_schedule?: boolean;
   requires_start_time_only?: boolean;

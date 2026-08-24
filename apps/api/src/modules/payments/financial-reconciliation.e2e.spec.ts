@@ -250,6 +250,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
       events,
       fakePaymentProviders,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
 
     payoutsService = new PayoutsService(

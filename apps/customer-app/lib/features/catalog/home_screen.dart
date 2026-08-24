@@ -14,6 +14,7 @@ import '../notifications/notifications_screen.dart';
 import '../orders/orders_screen.dart';
 import '../support/support_contact_repository.dart';
 import '../support/support_contact_screen.dart';
+import '../projects/my_projects_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
 import 'category_card.dart';
@@ -174,6 +175,48 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: EdgeInsets.zero,
             children: [
               _buildHero(context),
+              // Banner المشروعات (docs/01B مهمة A §2)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Card(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  margin: EdgeInsets.zero,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const MyProjectsScreen(),
+                      ));
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Icon(Icons.home_work_outlined, size: 32,
+                              color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('بتشطب شقة أو عندك مشروع كبير؟',
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.bold)),
+                                Text('ابدأ مشروعك مع صُنّاع',
+                                    style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                        fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_left, color: Theme.of(context).colorScheme.onPrimaryContainer),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(

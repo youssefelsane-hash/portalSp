@@ -131,4 +131,24 @@ export class CreateOrderDto {
   @IsOptional()
   @IsDateString()
   scheduled_end_at?: string;
+
+  // "كرّر الحجز ده" (migration 0176) — لو اتبعت، الطلب الحالي بيتعمل بالمسار العادي الكامل
+  // زي زمان، **وزي عليه** قالب متكرر بيتإنشاء بنفس الـtransaction (ذرّي) أول موعد له بعد الموعد
+  // المحجوز مباشرة (أسبوعي = +7 أيام بنفس التوقيت، شهري = نفس اليوم/التوقيت الشهر الجاي مع
+  // clamp لآخر يوم فعلي في الشهر — راجع recurring-schedule.util.ts). مرفوض صراحة للطوارئ
+  // وإعادة الزيارة تحت الضمان والخدمات غير مفعّل فيها التكرار وغير المحددة بموعد.
+  // yearly متاح في الـAPI للاتساق مع POST /me/recurring-orders — الواجهات بتعرض أسبوعي/شهري.
+  @IsOptional()
+  @IsIn(['weekly', 'monthly', 'yearly'])
+  repeat_frequency?: 'weekly' | 'monthly' | 'yearly';
+
+  // نسخ سياسات/شروط الدفع اللي العميل قبلها (migration 0177) — إجبارية من الباك-إند للطلبات
+  // غير المدفوعة مقدّمًا لو الخدمة عليها سياسة required (applies_to=postpaid_service). الباك-إند
+  // بيرفض أي طلب بيحاول يتخطى الموافقة حتى لو الواجهة عرضت الـcheckbox.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  accepted_policy_version_ids?: string[];
 }

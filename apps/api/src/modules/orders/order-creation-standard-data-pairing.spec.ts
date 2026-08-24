@@ -235,6 +235,7 @@ describe('OrdersService.create() — standard_data_id/requested_units لازم �
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

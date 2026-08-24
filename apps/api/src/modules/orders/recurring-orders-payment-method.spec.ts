@@ -54,7 +54,8 @@ describe('RecurringOrdersService.generateFromTemplate() — payment_method يو�
     try {
       await runner.query(`UPDATE recurring_order_templates SET is_active = true WHERE id = $1`, [templateId]);
       try {
-        await service.sweep();
+        // نفس فلترة reliability spec — sweep مقصور على قالب الاختبار ده بس
+        await service.sweep({ templateIds: [templateId] });
       } finally {
         await runner.query(`UPDATE recurring_order_templates SET is_active = false WHERE id = $1`, [templateId]);
       }

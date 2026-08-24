@@ -57,6 +57,11 @@ export interface OrderResponseDto {
   original_order_id: string | null;
   /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
   building_id: string | null;
+  /** موجود بس لو الطلب اتولّد تلقائيًا من خطة حجز متكرر (migration 0124) — بيشاور على الخطة
+   * في GET /admin/recurring-orders. null = طلب عادي (حجز يدوي). */
+  recurring_template_id: string | null;
+  /** موعد النوبة اللي اتولّد منها (مفتاح idempotency التوليد). null لطلبات عادية. */
+  recurring_occurrence_at: string | null;
   /** محرك الإنتاجية (docs/06 §3.3-§3.6) — snapshot وقت الحجز من service_standard_data، null لو
    * الخدمة formula (استخدم pricing_evaluation بدلاً منه) أو fixed بلا بيانات قياسية. */
   standard_data_id: string | null;
@@ -92,6 +97,9 @@ export interface CreateOrderForCustomerBody {
   addon_ids?: string[];
   field_values?: Record<string, unknown>;
   payment_method?: string;
+  // "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل بالمسار العادي + قالب متكرر بيتإنشاء
+  // بنفس الـtransaction أول موعد له بعد الموعد المحجوز.
+  repeat_frequency?: 'weekly' | 'monthly' | 'yearly';
 }
 
 export interface CreateOrderForCustomerResponseDto extends OrderResponseDto {
@@ -131,11 +139,17 @@ export interface RecurringTemplateResponseDto {
   address_id: string;
   booking_mode: string;
   requested_technician_id: string | null;
+  requested_technician_company_id: string | null;
   frequency: RecurringOrderFrequency;
   problem_description: string | null;
   // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة: العمود ده اتضاف لـapps/api's
   // RecurringTemplateResponseDto وماتزامنش هنا وقتها.
   payment_method: 'card' | 'instapay' | null;
+  // مدخلات التسعير/التوقيت المتكررة (migration 0176) — مدخلات مش سعر؛ القيمة بتتحسب من محرك
+  // التسعير الحي وقت توليد كل طلب.
+  field_values: Record<string, string | number | boolean> | null;
+  duration_hours: number | null;
+  scheduled_end_at: string | null;
   next_run_at: string;
   last_generated_order_id: string | null;
   is_active: boolean;
@@ -146,8 +160,36 @@ export interface RecurringTemplateResponseDto {
   last_failed_at: string | null;
 }
 
+// نسخة قديمة محفوظة للتوافق — نفس RecurringTemplateResponseDto زائد customer_id.
 export interface AdminRecurringTemplateResponseDto extends RecurringTemplateResponseDto {
   customer_id: string;
+}
+
+// صف "خطط الحجز المتكرر" للأدمن (migration 0176) — نتيجة GET /admin/recurring-orders المُثراة
+// بأسماء العميل/الخدمة/العنوان وآخر حجز متولّد. دي تعريف التكرار نفسه؛ الطلبات المتولّدة منه
+// بتتشاف من /admin/orders?recurring=true وبتتصرف زي أي طلب عادي بالظبط.
+export interface AdminRecurringPlanResponseDto {
+  id: string;
+  customer_id: string;
+  customer_full_name: string;
+  customer_phone: string;
+  service_id: string;
+  service_name_ar: string;
+  address_id: string;
+  address_label: string | null;
+  booking_mode: string;
+  frequency: RecurringOrderFrequency;
+  payment_method: 'card' | 'instapay' | null;
+  next_run_at: string;
+  last_generated_order_id: string | null;
+  last_order_number: string | null;
+  last_occurrence_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  cancelled_at: string | null;
+  consecutive_failure_count: number;
+  last_failure_reason: string | null;
+  last_failed_at: string | null;
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/technician-order-cancellation-response.dto.ts (docs/10)

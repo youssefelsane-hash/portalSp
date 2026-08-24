@@ -327,7 +327,7 @@ export class MatchingService {
           activeStatusesParam: '$6',
           engagedStatusesParam: '$11',
           isEmergencyParam: '$12',
-          serviceDurationExpr: 'COALESCE(s.estimated_duration_minutes, 60)',
+          serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
           fullDayThresholdMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
@@ -765,13 +765,18 @@ export class MatchingService {
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
       [order.serviceId],
     );
-    return classifyTechnicianCapacity(this.dataSource, {
+    const tier = await classifyTechnicianCapacity(this.dataSource, {
       technicianId,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
       serviceDurationMinutes: service[0]?.estimated_duration_minutes ?? 60,
       fullDayThresholdMinutes: fullDayJobMinutes,
     });
+    if (process.env.DEBUG_MATCHING) {
+      // eslint-disable-next-line no-console
+      console.log('[DEBUG tier]', technicianId, tier, 'candMinutes=', service[0]?.estimated_duration_minutes);
+    }
+    return tier;
   }
 
   async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
@@ -825,6 +830,10 @@ export class MatchingService {
         }
       }
 
+      if (process.env.DEBUG_MATCHING) {
+        // eslint-disable-next-line no-console
+        console.log('[DEBUG matching] candidates:', JSON.stringify(candidates), 'tiersChecked:', candidates.length);
+      }
       if (!lightPick && !meaningfulPick) {
         // مفيش LIGHT ولا MEANINGFUL في الدفعة (كلهم HEAVY أو اتستبعدوا) — نجرّب توسيع البحث
         // (ignoreActiveOrderConflict، نفس آلية ADR-0017 §10) عشان نلاقي مرشّح HEAVY نعرضله فرصة،
@@ -848,7 +857,11 @@ export class MatchingService {
         const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, technicianId);
         try {
           await this.assignmentGuard.assertEligible(manager, lockedTechnician, order);
-        } catch {
+        } catch (err) {
+          if (process.env.DEBUG_MATCHING) {
+            // eslint-disable-next-line no-console
+            console.log('[DEBUG assertEligible-fail]', err instanceof Error ? err.message : err);
+          }
           return { kind: 'stalled' as const, order };
         }
         const confirmResult = await this.confirmTechnicianForOrder(manager, order, technicianId, lightPick.distanceKm);

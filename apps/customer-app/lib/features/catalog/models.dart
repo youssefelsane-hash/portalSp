@@ -92,6 +92,10 @@ class CatalogService {
   // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — لو false، ScheduleSelectionScreen
   // بتخفي كارت "مرن — اختار نطاق أيام" بدل ما تسيب العميل يختاره ويترفض من الباك-إند بعدين.
   final bool allowsDateRangeBooking;
+  // قدرة "الحجز المتكرر" (migration 0176) — لو false، مفيش خيارات تكرار (مرة واحدة/أسبوعي/شهري)
+  // ظاهرة في CreateOrderScreen خالص، والباك-إند بيرفض repeat_frequency للخدمة دي برضه.
+  // nullable مع fallback false عشان التوافق مع ردود قديمة محتملة.
+  final bool allowsRecurringBooking;
   // قدرة دفع لكل خدمة (ADR-0026، docs/08 §42 Phase A.1) — كانت فجوة موثّقة صراحة: العمود موجود
   // في رد الباك-إند من زمان بس مش مقروء هنا خالص، فـCreateOrderScreen كان بيعرض "ادفع بعد الخدمة"
   // (كاش) لكل خدمة بلا استثناء حتى لو الباك-إند هيرفضها. false يعني الكاش ممنوع صراحة.
@@ -119,6 +123,7 @@ class CatalogService {
     required this.allowsIndividual,
     required this.allowsTeam,
     required this.allowsDateRangeBooking,
+    required this.allowsRecurringBooking,
     required this.cashAllowed,
     required this.requiresPreciseSchedule,
     required this.requiresStartTimeOnly,
@@ -140,6 +145,7 @@ class CatalogService {
         allowsIndividual: json['allows_individual'] as bool,
         allowsTeam: json['allows_team'] as bool,
         allowsDateRangeBooking: json['allows_date_range_booking'] as bool,
+        allowsRecurringBooking: json['allows_recurring_booking'] as bool? ?? false,
         cashAllowed: json['cash_allowed'] as bool? ?? true,
         requiresPreciseSchedule: json['requires_precise_schedule'] as bool? ?? false,
         requiresStartTimeOnly: json['requires_start_time_only'] as bool? ?? false,

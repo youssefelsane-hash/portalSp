@@ -33,25 +33,35 @@ const QUICK_FILTERS: { value: OrderStatus | 'all'; label: string }[] = [
   { value: 'disputed', label: ORDER_STATUS_LABELS.disputed },
 ];
 
+// فلتر أصل الطلب (migration 0176) — الطلبات المتولّدة من خطط متكررة بتظهر هنا جنب العادية
+// بكل تفاصيلها (نفس الصفحة، نفس التفاصيل، مفيش شاشة طلبات "متكررة" منفصلة مخففة).
+const ORIGIN_FILTERS: { value: 'all' | 'false' | 'true'; label: string }[] = [
+  { value: 'all', label: 'كل الطلبات' },
+  { value: 'false', label: 'عادية' },
+  { value: 'true', label: 'متكررة' },
+];
+
 export default function OrdersPage() {
   const { isLoading, authedFetchPaginated, hasPermission } = useAuth();
   const [orders, setOrders] = useState<OrderResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
+  const [originFilter, setOriginFilter] = useState<'all' | 'false' | 'true'>('all');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (statusFilter !== 'all') params.set('order_status', statusFilter);
+    if (originFilter !== 'all') params.set('recurring', originFilter);
     authedFetchPaginated<OrderResponseDto>(`/admin/orders?${params.toString()}`)
       .then(({ items, meta }) => {
         setOrders(items);
         setTotal(meta.total ?? items.length);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الطلبات'));
-  }, [isLoading, page, statusFilter, authedFetchPaginated]);
+  }, [isLoading, page, statusFilter, originFilter, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
@@ -77,6 +87,23 @@ export default function OrdersPage() {
             variant={statusFilter === filter.value ? 'default' : 'outline'}
             onClick={() => {
               setStatusFilter(filter.value);
+              setPage(1);
+            }}
+          >
+            {filter.label}
+          </Button>
+        ))}
+      </div>
+
+      {/* فلتر أصل الطلب — عادي vs متولّد من خطة متكررة (نفس تصميم الفلاتر السريعة فوق) */}
+      <div className="mb-4 flex gap-2">
+        {ORIGIN_FILTERS.map((filter) => (
+          <Button
+            key={filter.value}
+            size="sm"
+            variant={originFilter === filter.value ? 'default' : 'outline'}
+            onClick={() => {
+              setOriginFilter(filter.value);
               setPage(1);
             }}
           >

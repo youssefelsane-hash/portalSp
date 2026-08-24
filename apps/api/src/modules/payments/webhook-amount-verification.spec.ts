@@ -62,6 +62,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
       {} as never,
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
+      {} as never, // installments repo (migration 0177)
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

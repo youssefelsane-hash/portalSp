@@ -220,6 +220,7 @@ describe('OrdersService.create() — Idempotency-Key يمنع تكرار الط�
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

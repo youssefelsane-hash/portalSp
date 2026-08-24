@@ -646,7 +646,14 @@ export default function OrderDetailPage() {
               {ORDER_STATUS_LABELS[order.order_status]}
             </StatusChip>
             {order.order_type === 'emergency' && <Badge variant="destructive">طوارئ</Badge>}
-            {order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}
+            {order.recurring_template_id ? (
+              // طلب متولّد من خطة متكررة — لينك مباشر للخطة نفسها (تعريف التكرار) في صفحة الخطط
+              <Link href="/recurring-orders">
+                <Badge variant="outline">متولّد من حجز متكرر</Badge>
+              </Link>
+            ) : (
+              <>{order.order_type === 'recurring' && <Badge variant="outline">متكرر</Badge>}</>
+            )}
             {order.original_order_id && (
               <Link href={`/orders/${order.original_order_id}`}>
                 <Badge variant="outline">إعادة زيارة — الطلب الأصلي</Badge>

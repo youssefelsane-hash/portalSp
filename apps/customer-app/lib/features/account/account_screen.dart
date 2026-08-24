@@ -10,6 +10,7 @@ import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
 import '../payment_methods/payment_methods_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
+import '../projects/my_projects_screen.dart';
 import '../referrals/referrals_screen.dart';
 import '../support/complaints_screen.dart';
 import '../technician_referral/technician_referral_screen.dart';
@@ -133,8 +134,14 @@ class _AccountScreenState extends State<AccountScreen> {
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoyaltyScreen())),
             ),
             ListTile(
+              leading: const Icon(Icons.home_work_outlined),
+              title: const Text('مشاريعي'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyProjectsScreen())),
+            ),
+            ListTile(
               leading: const Icon(Icons.repeat),
-              title: const Text('الطلبات المتكررة'),
+              title: const Text('الحجوزات المتكررة'),
               trailing: const Icon(Icons.chevron_left),
               onTap: () =>
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RecurringOrdersScreen())),

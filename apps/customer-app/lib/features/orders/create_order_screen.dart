@@ -140,6 +140,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   DateTime? _startAndEndStart;
   DateTime? _startAndEndEnd;
 
+  // "كرّر الحجز ده" (migration 0176) — null = مرة واحدة (الافتراضي، صفر تغيير سلوك). الطلب
+  // الحالي بيتعمل بالمسار العادي زي زمان، والباك-إند بينشئ قالب متكرر بنفس العملية أول موعد
+  // له بعد الموعد المحجوز. الباك-إند بيرفضه للطوارئ/إعادة الزيارة/الخدمات غير مفعّل فيها
+  // التكرار — هنا بنخفي الاختيار خالص في الحالات دي بدل ما نسيبه يترفض بعد التأكيد.
+  String? _repeatFrequency;
+
   // Script 2 Part I (findings #46/#47/#48) — فاضية لحد ما /payment-channels يرد؛ زرار "ادفع بعد
   // الخدمة" (value: null) دايمًا ظاهر بغض النظر عن القيمة دي لأنه مش بيعتمد على أي provider خارجي.
   Set<String> _availablePaymentMethods = {};
@@ -167,6 +173,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // خدمة ممنوع فيها الكاش (service.cashAllowed=false) أو محتاجة إيداع مقدّم (pricePreview.depositAmountCents)
   // — الاتنين بيفرضوا دفع إلكتروني إجباري وقت التأكيد (orders.service.ts بيرفض غير كده بوضوح).
   bool get _requiresElectronicPayment => !widget.service.cashAllowed || _pricePreview?.depositAmountCents != null;
+
+  // "كرّر الحجز ده" (migration 0176) — الاختيار بيظهر بس لما التكرار ممكن فعلاً: خدمة مفعّل
+  // فيها التكرار + مش طوارئ + فيه موعد محدد نهائيًا (سلوت فني أو يوم محدد). خدمات "عدد ساعات
+  // بس" مالهاش موعد محدد أصلاً فمينفعش تتكرر (نفس شرط الباك-إند بالحرف).
+  bool get _canRepeat {
+    if (!widget.service.allowsRecurringBooking) return false;
+    if (widget.bookingMode == BookingMode.emergency) return false;
+    if (widget.scheduleSlotId != null) return true;
+    if (widget.service.requiresHoursOnly) return false;
+    final DateTime? at = widget.service.requiresStartAndEnd
+        ? _startAndEndStart
+        : (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly)
+            ? _combinedPreciseScheduledAt()
+            : _requestedAt;
+    return at != null;
+  }
 
   // طلب مالك مباشر (2026-08-22): بَقّة تجربة كانت موجودة — "ادفع بعد الخدمة" (كاش) كان ظاهر دايمًا
   // بغض النظر عن service.cashAllowed/deposit_required، فالعميل يختاره ويترفض بعد ما يدوس "تأكيد
@@ -646,6 +668,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
         paymentMethod: _selectedPaymentMethod,
+        // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
+        // مش قابلة للتكرار (طوارئ/خدمة مقفول التكرار/مفيش موعد محدد) القيمة هنا null أصلاً.
+        repeatFrequency: _canRepeat ? _repeatFrequency : null,
         idempotencyKey: _orderIdempotencyKey,
       );
       // دفع قبل التوزيع (docs/08 §19 بند 1) — الطلب رجع pending_payment، لازم نوجّه العميل
@@ -1080,6 +1105,49 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             if (_buildingError != null) ...[
               const SizedBox(height: 4),
               Text(_buildingError!, style: const TextStyle(color: Colors.red)),
+            ],
+            // "كرّر الحجز ده" (migration 0176) — مرة واحدة (الافتراضي) / أسبوعي / شهري.
+            // الطلب الحالي بيتعمل دلوقتي زي العادة بالظبط، والمواعيد الجاية بيتولّد منها طلبات
+            // عادية كاملة بنفس التفاصيل — سعر كل موعد بيتحسب بسعر الخدمة وقتها (مش سعر مجمد).
+            if (_canRepeat) ...[
+              const SizedBox(height: 16),
+              Text('تكرار الحجز', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Card(
+                child: Column(
+                  children: [
+                    RadioListTile<String?>(
+                      value: null,
+                      groupValue: _repeatFrequency,
+                      onChanged: (value) => setState(() => _repeatFrequency = value),
+                      title: const Text('مرة واحدة'),
+                    ),
+                    RadioListTile<String?>(
+                      value: 'weekly',
+                      groupValue: _repeatFrequency,
+                      onChanged: (value) => setState(() => _repeatFrequency = value),
+                      title: const Text('أسبوعي — نفس اليوم والوقت كل أسبوع'),
+                    ),
+                    RadioListTile<String?>(
+                      value: 'monthly',
+                      groupValue: _repeatFrequency,
+                      onChanged: (value) => setState(() => _repeatFrequency = value),
+                      title: const Text('شهري — نفس اليوم كل شهر'),
+                    ),
+                  ],
+                ),
+              ),
+              if (_repeatFrequency != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'هيعتبر الحجز ده أول موعد، والمواعيد الجاية هيتولّد منها طلبات عادية بنفس التفاصيل '
+                    '(نفس الفني لو متاح، وسعر كل موعد بيتحسب بسعر الخدمة وقتها). تقدر توقف التكرار في أي وقت من '
+                    '"الحجوزات المتكررة" في حسابك.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              const SizedBox(height: 8),
             ],
             const SizedBox(height: 16),
             Text('ملخص السعر', style: Theme.of(context).textTheme.titleMedium),

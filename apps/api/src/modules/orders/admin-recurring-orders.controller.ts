@@ -3,12 +3,12 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { ListRecurringTemplatesQueryDto } from './dto/list-recurring-templates-query.dto';
-import { toAdminRecurringTemplateResponseDto } from './dto/recurring-template-response.dto';
+import { toAdminRecurringPlanResponseDto } from './dto/recurring-template-response.dto';
 import { RecurringOrdersService } from './recurring-orders.service';
 
-// وضوح الطلبات المتكررة للتشغيل (docs/08 §32) — كانت فجوة موثّقة صراحة: مفيش أي مسار للأدمن
-// يشوف القوالب المتكررة خالص رغم إنها بتولّد طلبات حقيقية كل موعد (recurring-orders.service.ts).
-// قراءة بس حاليًا — تعطيل/تفعيل قالب معيّن من الأدمن (نيابة عن العميل) نطاق مستقل لاحق لو احتجناه.
+// خطط الحجز المتكرر للتشغيل — دي تعريفات التكرار (مين/إيه/إمتى بيتكرر) مش الطلبات نفسها؛
+// الطلبات المتولّدة بتتشاف من /admin/orders بفلتر recurring=true وبتتصرف زي أي طلب عادي بالظبط.
+// قراءة بس حاليًا — تعطيل/تفعيل خطة معيّنة من الأدمن (نيابة عن العميل) نطاق مستقل لاحق لو احتجناه.
 //
 // بَقّة أمنية حقيقية اتلقطت واتصلحت (مراجعة أمان شاملة 2026-08-13، P0-2): كان محمي بـ@Roles(ADMIN)
 // بس — أي حساب أدمن كان يقدر يشوف القوالب المتكررة. recurring_orders.view جديدة (migration 0085).
@@ -25,6 +25,6 @@ export class AdminRecurringOrdersController {
       query.page ?? 1,
       query.per_page ?? 20,
     );
-    return { items: items.map(toAdminRecurringTemplateResponseDto), meta };
+    return { items: items.map(toAdminRecurringPlanResponseDto), meta };
   }
 }

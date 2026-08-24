@@ -11,9 +11,10 @@ import '../catalog/models.dart';
 import 'models.dart';
 import 'recurring_orders_repository.dart';
 
-// الطلبات المتكررة (docs/08 §11) — كانت فجوة موثّقة صراحة: API كامل (إنشاء/عرض/إيقاف/حذف)
-// موجود ومختبر في الباك-إند من زمان، بس مفيش شاشة في apps/customer-app كانت بتستخدمه — العميل
-// كان مضطر يحجز كل مرة يدويًا حتى لو الخدمة (مثلاً تنظيف شهري) متكررة فعليًا.
+// الحجوزات المتكررة (خطط التكرار) — كل خطة هي تعريف "مين/إيه/فين بيتكرر"، والطلبات المتولّدة
+// منها طلبات عادية كاملة بتظهر في شاشة الطلبات العادية وتتصرف زي أي حجز بالظبط. الإنشاء من هنا
+// متاح بس للخدمات اللي الأدمن فعّل عليها التكرار (allows_recurring_booking) — باقي الخدمات
+// مش ظاهرة في القايمة أصلاً بدل ما تنشئ خطة تترفض فورًا.
 class RecurringOrdersScreen extends StatefulWidget {
   const RecurringOrdersScreen({super.key});
 
@@ -94,16 +95,19 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
   }
 
   Future<void> _openCreateSheet() async {
-    if (_services.isEmpty || _addresses.isEmpty) {
+    // الخدمات القابلة للتكرار بس (migration 0176) — الباقي مش بيتعرض أصلاً بدل ما العميل
+    // يختاره ويترفض من الباك-إند.
+    final repeatable = _services.where((s) => s.allowsRecurringBooking && s.defaultAllowedBookingMode != null).toList();
+    if (repeatable.isEmpty || _addresses.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('محتاج تضيف عنوان واحد على الأقل عشان تنشئ قالب متكرر')),
+        const SnackBar(content: Text('مفيش خدمات متاحة للتكرار حاليًا — أو محتاج تضيف عنوان واحد على الأقل')),
       );
       return;
     }
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _CreateTemplateSheet(repository: _repository, services: _services, addresses: _addresses),
+      builder: (_) => _CreateTemplateSheet(repository: _repository, services: repeatable, addresses: _addresses),
     );
     if (result == true) await _load();
   }
@@ -113,7 +117,7 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('الطلبات المتكررة')),
+        appBar: AppBar(title: const Text('الحجوزات المتكررة')),
         floatingActionButton: FloatingActionButton(onPressed: _openCreateSheet, child: const Icon(Icons.add)),
         body: RefreshIndicator(
           onRefresh: _load,
@@ -125,7 +129,7 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
                       ? ListView(
                           children: const [
                             SizedBox(height: 80),
-                            EmptyState(icon: Icons.repeat_outlined, title: 'مفيش طلبات متكررة لسه'),
+                            EmptyState(icon: Icons.repeat_outlined, title: 'مفيش حجوزات متكررة لسه'),
                           ],
                         )
                       : ListView(
@@ -138,7 +142,8 @@ class _RecurringOrdersScreenState extends State<RecurringOrdersScreen> {
                                   subtitle: Text(
                                     '${_addressLabel(template.addressId)}\n'
                                     '${recurringFrequencyLabelsAr[template.frequency] ?? template.frequency} — '
-                                    'الموعد الجاي: ${template.nextRunAt.substring(0, 10)}',
+                                    'الحجز الجاي: ${template.nextRunAt.substring(0, 10)}'
+                                    '${template.paymentMethod != null ? '\nمقدّم (${template.paymentMethod == 'card' ? 'كارت' : 'InstaPay'})' : ''}',
                                   ),
                                   isThreeLine: true,
                                   trailing: PopupMenuButton<String>(
@@ -246,7 +251,7 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('طلب متكرر جديد', style: Theme.of(context).textTheme.titleMedium),
+              Text('حجز متكرر جديد', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _serviceId,

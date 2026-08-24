@@ -158,6 +158,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       { emit: () => undefined } as never, // events
       { getProvider: () => makeFakeProvider() } as never, // paymentProviders
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
+      {} as never, // installments repo (migration 0177)
     );
 
     // OrdersService.cancel() الحقيقية — بس التبعيات اللي فعليًا بتتنادى في المسار ده (طلب بلا

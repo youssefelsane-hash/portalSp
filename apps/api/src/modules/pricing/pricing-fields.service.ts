@@ -6,6 +6,11 @@ import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CreatePricingFieldDto } from './dto/create-pricing-field.dto';
 import { UpdatePricingFieldDto } from './dto/update-pricing-field.dto';
 import { PricingFieldType, ServicePricingField } from './entities/service-pricing-field.entity';
+import { ServicePricingRule } from './entities/service-pricing-rule.entity';
+import {
+  indexFormulaReferences,
+  loadActiveFormulaPayloads,
+} from './pricing-references.util';
 
 // أنواع حقول مش مدعومة في apps/customer-app لسه (راجع create_order_screen.dart's isSupported) —
 // كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): حقل إجباري من النوع ده يخلي العميل عاجز
@@ -25,8 +30,29 @@ const UNSUPPORTED_FIELD_TYPES = new Set<PricingFieldType>([
 export class PricingFieldsService {
   constructor(
     @InjectRepository(ServicePricingField) private readonly fields: Repository<ServicePricingField>,
+    @InjectRepository(ServicePricingRule) private readonly rules: Repository<ServicePricingRule>,
     private readonly auditLog: AuditLogService,
   ) {}
+
+  /**
+   * حارس التغييرات التدميرية (docs/01B §14) — الحقل المستخدم في معادلة نشطة مينفعش يتشال/
+   * يتعطل/يتغير نوعه، لأن ده بيكسر تسعير حقيقي للعملاء. تعديل الـlabel/الترتيب مسموح دايمًا
+   * (الـlabel مش جزء من هوية المرجع في الشجرة).
+   */
+  private async assertFieldNotReferenced(serviceId: string, fieldKey: string, actionAr: string): Promise<void> {
+    const formulas = await loadActiveFormulaPayloads(this.rules, serviceId);
+    if (formulas.length === 0) return;
+    const index = indexFormulaReferences(formulas);
+    const usages = index.fields.get(fieldKey);
+    if (usages && usages.length > 0) {
+      const first = usages[0];
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `مينفعش ${actionAr} — الحقل "${fieldKey}" مستخدم في معادلة التسعير النشطة (${usages.length} موضع، أولها: ${first.path})`,
+        HttpStatus.CONFLICT,
+      );
+    }
+  }
 
   listForService(serviceId: string): Promise<ServicePricingField[]> {
     return this.fields.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
@@ -91,6 +117,25 @@ export class PricingFieldsService {
 
     this.assertSupportedIfRequired(dto.field_type ?? field.fieldType, dto.is_required ?? field.isRequired);
 
+    // حارس §14 — التعديلات دي بتغير هوية/صلاحية المرجع نفسه؛ label/display_order/is_required/unit/min/max/default مسموحين دايمًا
+    const destructive =
+      (dto.is_active === false && field.isActive) ||
+      (dto.field_type !== undefined && dto.field_type !== field.fieldType) ||
+      (dto.options !== undefined &&
+        Array.isArray(field.options) &&
+        Array.isArray(dto.options) &&
+        // تقليص الخيارات: خيار قائم قيمته اختفت من القايمة الجديدة — ممكن يكسر if/lookup عليه
+        (field.options as { value: string }[]).some((existing) =>
+          !(dto.options as { value: string }[]).some((incoming) => incoming.value === existing.value),
+        ));
+    if (destructive) {
+      await this.assertFieldNotReferenced(
+        field.serviceId,
+        field.fieldKey,
+        dto.is_active === false ? 'تعطّل الحقل ده' : 'تغيّر نوع/خيارات الحقل ده',
+      );
+    }
+
     if (dto.label_ar !== undefined) field.labelAr = dto.label_ar;
     if (dto.field_type !== undefined) field.fieldType = dto.field_type;
     if (dto.is_required !== undefined) field.isRequired = dto.is_required;
@@ -118,6 +163,7 @@ export class PricingFieldsService {
 
   async delete(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
     const field = await this.findOrThrow(id);
+    await this.assertFieldNotReferenced(field.serviceId, field.fieldKey, 'تحذف الحقل ده');
     await this.fields.softDelete(id);
     await this.auditLog.record({
       actorUserId: adminUserId,

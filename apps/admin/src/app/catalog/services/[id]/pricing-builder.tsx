@@ -44,6 +44,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import { FormulaTreeEditor, type FormulaEditorContext } from './formula-tree-editor';
+import { FORMULA_LIMITS } from '@baytak/shared-types';
 
 const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
   number: 'رقم',
@@ -123,10 +124,49 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
 
   const [showJsonView, setShowJsonView] = useState(false);
   const [jsonText, setJsonText] = useState<string | null>(null);
+
+  // مؤشر التعقيد (docs/01B §4) — عمق/عقد الشجرة الحالية مقابل حدود FORMULA_LIMITS المشتركة
+  const [breadcrumb, setBreadcrumb] = useState<string[] | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
 
   // سياق المحرر البصري — أسماء الحقول/الثوابت/جداول البحث المتاحة، عشان FormulaTreeEditor يعرضها
   // كـdropdowns بدل ما الأدمن يكتب field_key بإيده (زي ما كان لازم في وضع JSON القديم).
+  function maxDepthOf(node: FormulaNode | undefined): number {
+    if (!node || typeof node !== 'object') return 0;
+    const kids: FormulaNode[] = [];
+    if ('operands' in node && Array.isArray((node as { operands?: FormulaNode[] }).operands)) {
+      kids.push(...(node as unknown as { operands: FormulaNode[] }).operands);
+    }
+    if ('base' in node) kids.push((node as unknown as { base: FormulaNode }).base);
+    if ('percent' in node) kids.push((node as unknown as { percent: FormulaNode }).percent);
+    if ('value' in node && (node.type === 'round' || node.type === 'ceil' || node.type === 'floor')) {
+      kids.push((node as unknown as { value: FormulaNode }).value);
+    }
+    if (node.type === 'if') {
+      kids.push((node as unknown as { then: FormulaNode; else: FormulaNode }).then);
+      kids.push((node as unknown as { then: FormulaNode; else: FormulaNode }).else);
+    }
+    return 1 + Math.max(0, ...kids.map(maxDepthOf));
+  }
+
+  function countNodes(node: FormulaNode | undefined): number {
+    if (!node || typeof node !== 'object') return 0;
+    let total = 1;
+    if ('operands' in node && Array.isArray((node as { operands?: FormulaNode[] }).operands)) {
+      for (const o of (node as unknown as { operands: FormulaNode[] }).operands) total += countNodes(o);
+    }
+    if ('base' in node) total += countNodes((node as unknown as { base: FormulaNode }).base);
+    if ('percent' in node) total += countNodes((node as unknown as { percent: FormulaNode }).percent);
+    if ('value' in node && (node.type === 'round' || node.type === 'ceil' || node.type === 'floor')) {
+      total += countNodes((node as unknown as { value: FormulaNode }).value);
+    }
+    if (node.type === 'if') {
+      total += countNodes((node as unknown as { then: FormulaNode; else: FormulaNode }).then);
+      total += countNodes((node as unknown as { then: FormulaNode; else: FormulaNode }).else);
+    }
+    return total;
+  }
+
   const formulaContext: FormulaEditorContext = {
     fieldKeys: (fields ?? []).filter((f) => f.is_active).map((f) => f.field_key),
     constantKeys: (rules ?? []).filter((r) => r.rule_type === 'constant' && r.is_active).map((r) => r.rule_key),
@@ -136,7 +176,9 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
   };
 
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
-  const [previewResult, setPreviewResult] = useState<PricingEvaluationResponseDto | null>(null);
+  const [previewResult, setPreviewResult] = useState<
+    (PricingEvaluationResponseDto & { trace?: { path: string; expression: string; value: number }[]; explanation?: string[] }) | null
+  >(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
 
@@ -789,11 +831,36 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
           </p>
 
           <div className="mb-4">
-            <Label className="mb-1 block font-medium">السعر النهائي (price_cents) — إجباري</Label>
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <Label className="block font-medium">السعر النهائي (price_cents) — إجباري</Label>
+              {(() => {
+                const depth = maxDepthOf(payload?.price_cents);
+                const nodes = countNodes(payload?.price_cents);
+                const depthTone = depth >= FORMULA_LIMITS.MAX_DEPTH ? 'bg-destructive text-white' : depth >= FORMULA_LIMITS.MAX_DEPTH * 0.85 ? 'bg-orange-500 text-white' : 'bg-muted text-muted-foreground';
+                const nodesTone = nodes > FORMULA_LIMITS.MAX_NODE_COUNT ? 'bg-destructive text-white' : nodes >= FORMULA_LIMITS.MAX_NODE_COUNT * 0.9 ? 'bg-orange-500 text-white' : 'bg-muted text-muted-foreground';
+                return (
+                  <>
+                    <span className={`rounded px-1.5 py-0.5 text-xs ${depthTone}`} title="أقصى عمق في الشجرة مقابل الحد">
+                      العمق: {depth}/{FORMULA_LIMITS.MAX_DEPTH}
+                    </span>
+                    <span className={`rounded px-1.5 py-0.5 text-xs ${nodesTone}`} title="عدد العقد مقابل الحد">
+                      العقد: {nodes}/{FORMULA_LIMITS.MAX_NODE_COUNT}
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+            {breadcrumb && (
+              <p dir="ltr" className="mb-2 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground" title={breadcrumb.join(' → ')}>
+                {breadcrumb.join(' → ')}
+              </p>
+            )}
             <FormulaTreeEditor
               node={payload.price_cents}
               onChange={(n) => setPayload({ ...payload, price_cents: n })}
               context={formulaContext}
+              path={['price_cents']}
+              onNavigate={setBreadcrumb}
             />
           </div>
 
@@ -818,7 +885,13 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                   {labelAr}
                 </label>
                 {current !== undefined && (
-                  <FormulaTreeEditor node={current} onChange={(n) => setPayload({ ...payload, [key]: n })} context={formulaContext} />
+                  <FormulaTreeEditor
+                    node={current}
+                    onChange={(n) => setPayload({ ...payload, [key]: n })}
+                    context={formulaContext}
+                    path={[key]}
+                    onNavigate={setBreadcrumb}
+                  />
                 )}
               </div>
             );
@@ -959,6 +1032,32 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                       الطاقم المطلوب: {previewResult.required_technicians} فني
                       {previewResult.required_assistants ? ` + ${previewResult.required_assistants} مساعد` : ''}
                     </p>
+                  )}
+
+                  {/* خطوات الحساب (docs/01B §5) — نفس أرقام الإنتاج، عرض للأدمن بس */}
+                  {previewResult.trace && previewResult.trace.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">خطوات الحساب</summary>
+                      <ul dir="ltr" className="mt-1 space-y-0.5 font-mono text-xs text-muted-foreground">
+                        {previewResult.trace.map((step, i) => (
+                          <li key={i}>
+                            {step.expression} <span className="opacity-60">[{step.path}]</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+
+                  {/* الشرح الهيكلي (§6) — شرح فقط، مصدر التسعير هو المعادلة نفسها */}
+                  {previewResult.explanation && previewResult.explanation.length > 0 && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">شرح المعادلة</summary>
+                      <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                        {previewResult.explanation.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    </details>
                   )}
                 </div>
               )}

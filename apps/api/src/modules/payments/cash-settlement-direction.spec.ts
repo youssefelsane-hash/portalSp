@@ -257,6 +257,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       // كافي عشان الفحص يعدّي بأمان.
       { getProvider: () => ({ supportsRefund: false, refund: async () => ({ succeeded: false }) }) } as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
+      {} as never, // installments repo (migration 0177)
     );
   });
 

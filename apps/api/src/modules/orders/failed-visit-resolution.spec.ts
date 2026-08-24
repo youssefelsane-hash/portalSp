@@ -273,6 +273,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       events,
       { getProvider: () => makeFakeProvider() } as never, // paymentProviders
       {} as never, // savedPaymentMethods
+      {} as never, // installments repo (migration 0177)
     );
 
     const supportService = new SupportService(

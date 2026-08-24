@@ -169,3 +169,76 @@ DROPDOWN بـ`default_value` مش من ضمن `options` — بيتقيّم كـ"
 `9999900` قرش. بيانات الاختبار اتنضّفت.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md`، `../../../../docs/01-master-plan.md` §2.4، `../../../../docs/08-pricing-engine-and-platform-vision.md`، `../../../../docs/adr/0001-dynamic-pricing-engine.md`.
+
+## تحديث محرك المعادلات (docs/01B — 2026-08-24): عمق 48 + حدود تعقيد + تحقق مراجع
+
+### إيه اللي اتغيّر بالظبط
+1. **العمق**: `MAX_FORMULA_DEPTH` من 12 → **48** (`formula-limits.ts`/FORMULA_LIMITS المشتركة
+   مع الواجهة). نقطة الفرض واحدة في `validateFormulaNode` — نفس المكان الوحيد زي ما كان.
+2. **حدود تعقيد جديدة فوق العمق** (العمق لوحده مش حماية كافية):
+   - `MAX_NODE_COUNT = 1500` عقدة لكل payload كامل (كل المخرجات).
+   - `MAX_PAYLOAD_JSON_BYTES = 128KB`.
+3. **أخطاء بمسار العقدة**: أي رفض هيوضّح مكانه (`price_cents → add.operands[3]: ...`) —
+   الواجهة بتعرض المسار ده عشان الأدمن يوصل للعقدة مباشرة.
+4. **التحقق من المراجع وقت الحفظ** (`PricingRulesService.assertFormulaReferencesValid`):
+   field_ref/constant_ref/lookup_ref/if-condition ضد حقول الخدمة النشطة والثوابت/الجداول
+   السارية — مرفوض برسالة مسماة. **المعاينة (evaluateDraft) متعمّدًا بتفحص الشكل بس** عشان
+   تسمح بتجربة مراجع لسه هتتعمل قبل الحفظ. القاعدة القديمة المحفوظة مابتتلمش لو اتعطّل حقل —
+   خط الدفاع التاني هو رفض التقييم وقت التنفيذ (الموجود أصلًا).
+5. **واجهة الأدمن** (`formula-tree-editor.tsx`/pricing-builder): طي/فتح لكل عقدة تركيبية بملخص
+   سطر واحد، badge عمق على العقد العميقة (تحذير من 85%)، شريط breadcrumb (زرار ⌖)، ومؤشر
+   عمق/عقد live فوق المحرر ضد FORMULA_LIMITS المشتركة.
+
+### اللي اتحافظ عليه بدون تغيير (موجود ويعمل)
+- الـAST والـoperators الـ15 كلها (allowlist، صفر eval) — نفس الصيغة المخزنة، صفر migration.
+- evaluateDraft = نفس evaluator الإنتاج (preview == production) + حالات اختبار محفوظة.
+- النشر بنظام valid_from scheduling؛ الطلبات بـsnapshot سعرها (مثبت حي: تغيير الثابت بعد
+  حجز ما غيّرش total_cents للطلب القديم).
+- المخرجات المتعددة (min/max/duration/crew/emergency) كلها بنفس grammar.
+
+### قرارات مؤجلة (موثقة، مش سهو)
+- **Reusable sub-expressions** (docs/01B §7): مفيش آلية قائمة والمعادلات الحالية shallow
+  (أعمق حاجة < 20 عقدة) — التكلفة/الفايدة مش لصالحها دلوقتي. متابعة لما تظهر معادلات فعلية
+  بتكرر أشجار كبيرة.
+- **Lookup ranges/tiers** (§12): المطابقة النصية الحالية دقيقة مقصودة؛ نطاقات رقمية هتبقى
+  node type جديد لو الأعمال طلبتها (مش تغيير صامت في الدلالة).
+
+### الموجة 2 (نفس اليوم): حواجز التغييرات التدميرية + trace + شرح (docs/01B §5/§6/§13/§14)
+- **حقول (§14)**: حذف/تعطيل/تغيير نوع/تقليص خيارات حقل مستخدم في معادلة نشطة = مرفوض 409
+  بمسار الاستخدام. label/display_order/is_required/unit/min/max/default مسموحة دايمًا.
+- **ثوابت/جداول بحث (§13)**: تعطيل مستخدم = مرفوض 409 بمسار أول استخدام. المعادلة نفسها تتعطل عادي.
+- **find-usages**: GET /admin/services/:id/pricing-usages?field_key|rule_key — مواضع بالمسارات.
+- **trace (§5)**: evaluateDraft بيرجّع خطوات الحساب (ربط الأوراق ثم العمليات لأعلى لحد الناتج)
+  بنفس أرقام الإنتاج — عرض للأدمن بس، مش مصدر تسعير.
+- **شرح هيكلي (§6)**: سطر لكل مخرج («ضرب(حقل hours × ثابت hourly_rate)») — explanation-only.
+- اختبارات: pricing-lifecycle-guards.spec.ts (8 حالات حية) — إجمالي موديول التسعير 71 ✓.
+
+### الموجة 3 — تكامل السلسلة الكاملة Price→Booking→Schedule→Matching (docs/01B §22، 2026-08-24)
+1. **مخرجات المعادلة التشغيلية وصلت للطلب**: required_technicians/assistants/days/suitable_for_
+   emergency من معادلة formula بتملى orders.* لو مفيش standard_data (الأولوية للإنتاجية القياسية
+   لما العميل يستخدمها صراحةً). كانت بتتحسب وتتسجل في evaluations وتُهمل تمامًا.
+2. **بوابة الطوارئ الديناميكية**: suitable_for_emergency=false في المعادلة يرفض booking_mode=
+   emergency بوضوح (كانت قيمة ميتة).
+3. **min/max clamp فعلي**: الحدود بتتفرض على estimated_total_cents بعد مضاعف المستوى وقبل رسوم
+   الطوارئ — كانت بتترجع للعرض بس والسعر النهائي بيعدّيها.
+4. **الجدولة بمدة الطلب الحقيقية**: توافر/تعارض الفني بقى بيقرا مدة المرشّح من orders.duration_hours
+   (ADR-0031/0032) بدل دقائق الخدمة الثابتة، + الشرط المتماثل: طلب تاني duration_hours*60 ≥ عتبة
+   اليوم الكامل = تعارض. المصدر الموحد: serviceDurationExpr في technician-eligibility.sql.ts مع
+   fallback آمن لدقائق الخدمة الثابتة (مهم لمرشّح مش محفوظ بعد — اختبار blocked-day).
+5. **بوابة الطاقم عند بدء التنفيذ اتوسعت**: كانت مقصورة على booking_mode=team — دلوقتي أي طلب
+   محسوب له طاقم > 1 (أي وضع) لازم الطاقم يكتمل قبل IN_PROGRESS. نفس الرسالة/الدالة
+   (getCrewComposition) — صفر منطق موازٍ؛ نسخة مكررة أقل شمولاً اتبنت بالغلط أثناء الشغل واتشالت.
+
+### الموجة 4 — Admin Live Updates (docs/01B مهمة B، 2026-08-24)
+**البنية**: namespace `/admin` جديد (`admin-realtime.gateway.ts`) — نفس بنية /tracking و/chat بالحرف
+(RealtimeAccessService للـJWT handshake، RealtimeSessionRegistry للإبطال اللحظي عبر pg_notify).
+الأحداث: @OnEvent على ~25 حدث دومين موجود أصلاً (orders/technicians/payments/payouts/installments/
+recurring/support/complaints/ratings/settings/security) → بث إلى غرف `admin:topic:{topic}`.
+
+**الأمان**: handshake يرفض غير الأدمن؛ الاشتراك في topic بيفحص الصلاحية حيًا (TOPIC_PERMISSIONS
+في admin-topics.ts — installments.view / recurring_orders.view / payouts.view / settings.manage /
+security.alerts.view)؛ الإبطال اللحظي عبر pg_notify مفعل تلقائياً من السجل المشترك.
+
+**العميل** (apps/admin): `lib/admin-live.ts` (socket singleton + connection state)، 
+`components/live-indicator.tsx` (مؤشر أخضر/أصفر/أحمر في الشيل)، صفحة الطلبات + التفاصيل +
+recurring + installments + payouts بتستخدم `useAdminLive` لإعادة الجلب الصامت عند الأحداث.

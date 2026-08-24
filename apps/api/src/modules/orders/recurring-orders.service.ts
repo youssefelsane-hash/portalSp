@@ -1,7 +1,11 @@
 import { HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import {
+  RECURRING_ORDER_AWAITING_PAYMENT_EVENT,
+  RecurringOrderAwaitingPaymentEvent,
+} from '../../common/events/recurring-order-awaiting-payment.event';
 import {
   RECURRING_TEMPLATE_GENERATION_FAILING_EVENT,
   RecurringTemplateGenerationFailingEvent,
@@ -16,6 +20,7 @@ import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto'
 import { UpdateRecurringTemplateDto } from './dto/update-recurring-template.dto';
 import { BookingMode, OrderType } from './entities/order.entity';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
+import { nextOccurrence } from './recurring-schedule.util';
 import { OrdersService } from './orders.service';
 
 const SWEEP_INTERVAL_MS = 60_000;
@@ -44,43 +49,31 @@ type ClaimedOccurrenceRow = {
   previous_status: string;
 };
 
-// آخر يوم فعلي في شهر (UTC) — بيتحسب بـ"اليوم صفر" من الشهر اللي بعده (خدعة JS Date معروفة).
-function lastDayOfUtcMonth(year: number, monthIndex0: number): number {
-  return new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
-}
-
-// كانت بَقّة حقيقية: `setMonth(getMonth() + 1)`/`setFullYear(getFullYear() + 1)` بتفيض بصمت لو
-// اليوم مش موجود في الشهر الجديد (31 يناير + شهر = JS بتحسبها "31 فبراير" فتتدحرج لـ3 مارس، مش
-// آخر يوم في فبراير زي المتوقع؛ 29 فبراير (سنة كبيسة) + سنة = 1 مارس مش 28 فبراير). الأثر: طلب
-// متكرر شهري مضبوط يوم 29/30/31 كان بيتزحلق تاريخه شهر بعد شهر بدل ما يفضل ثابت على آخر يوم في
-// الشهر. الإصلاح: نحسب الشهر/السنة الجديدة على "اليوم 1" الأول (مفيش فيضان ممكن)، وبعدين نـclamp
-// اليوم المطلوب لآخر يوم فعلي في الشهر الجديد.
-function nextOccurrence(from: Date, frequency: RecurringOrderFrequency): Date {
-  const day = from.getUTCDate();
-  switch (frequency) {
-    case RecurringOrderFrequency.WEEKLY: {
-      const next = new Date(from);
-      next.setUTCDate(next.getUTCDate() + 7);
-      return next;
-    }
-    case RecurringOrderFrequency.MONTHLY: {
-      const year = from.getUTCFullYear();
-      const monthIndex0 = from.getUTCMonth() + 1;
-      const clampedDay = Math.min(day, lastDayOfUtcMonth(year, monthIndex0));
-      const next = new Date(from);
-      next.setUTCFullYear(year, monthIndex0, clampedDay);
-      return next;
-    }
-    case RecurringOrderFrequency.YEARLY: {
-      const year = from.getUTCFullYear() + 1;
-      const monthIndex0 = from.getUTCMonth();
-      const clampedDay = Math.min(day, lastDayOfUtcMonth(year, monthIndex0));
-      const next = new Date(from);
-      next.setUTCFullYear(year, monthIndex0, clampedDay);
-      return next;
-    }
-  }
-}
+// صف قائمة خطط الحجز المتكرر للأدمن — نتيجة الـJOIN المُثري في listAllForAdmin() (snake_case
+// زي أي نتيجة query خام، وبتتحول لـDTO عبر toAdminRecurringPlanResponseDto).
+export type AdminRecurringPlanRow = {
+  id: string;
+  customer_id: string;
+  customer_full_name: string;
+  customer_phone: string;
+  service_id: string;
+  service_name_ar: string;
+  address_id: string;
+  address_label: string | null;
+  booking_mode: string;
+  frequency: string;
+  payment_method: 'card' | 'instapay' | null;
+  next_run_at: Date;
+  last_generated_order_id: string | null;
+  last_order_number: string | null;
+  last_occurrence_at: Date | null;
+  is_active: boolean;
+  created_at: Date;
+  cancelled_at: Date | null;
+  consecutive_failure_count: number;
+  last_failure_reason: string | null;
+  last_failed_at: Date | null;
+};
 
 /**
  * الجدولة المستقبلية/المتكررة (docs/08 §11) — order_type='recurring' كان قيمة enum من الأول
@@ -130,6 +123,29 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       await this.techniciansService.findByProfileIdOrThrow(dto.requested_technician_id);
     }
 
+    // قدرة "الحجز المتكرر" لكل خدمة (migration 0176) — نفس نمط بوابة allows_individual/
+    // cash_allowed بالحرف: الخدمة مش مفعّل فيها التكرار يعني مفيش قالب متكرر خالص، بدل ما
+    // ينشئ قالب يفشل عند التوليد بصمت كل موعد.
+    if (!service.allowsRecurringBooking) {
+      throw new ApiException(ErrorCode.VAL_001, 'الحجز المتكرر مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+    }
+
+    if (dto.requested_technician_company_id) {
+      const bookingModeForCompany = dto.booking_mode ?? BookingMode.INDIVIDUAL;
+      if (bookingModeForCompany !== BookingMode.TEAM) {
+        throw new ApiException(ErrorCode.VAL_001, 'اختيار شركة/فريق محدد متاح بس لوضع "اعتماد"', HttpStatus.BAD_REQUEST);
+      }
+      // فحص وجود/نشاط الشركة مباشرة بالـSQL — نفس فحص TechnicianCompaniesService.findActiveCompanyOrThrow
+      // بدون حقن تبعية إضافية (الموديولات هنا في موديول واحد، والفحص استعلام واحد بسيط).
+      const [company] = await this.templates.manager.query<{ exists: boolean }[]>(
+        `SELECT EXISTS(SELECT 1 FROM technician_companies WHERE id = $1 AND is_active = true AND deleted_at IS NULL) AS exists`,
+        [dto.requested_technician_company_id],
+      );
+      if (!company?.exists) {
+        throw new ApiException(ErrorCode.VAL_001, 'الشركة غير موجودة أو غير نشطة', HttpStatus.NOT_FOUND);
+      }
+    }
+
     // نفس فحص OrdersService.create() بالحرف — كانت فجوة حقيقية اتلقطت وقت بناء واجهة العميل:
     // مفيش تحقق هنا خالص، يعني العميل كان يقدر ينشئ قالب متكرر بـbooking_mode مش متاح للخدمة
     // (مثلاً "فرد" لخدمة بتدعم "فريق" بس) وياخد رد 200 ناجح — بعدين generateFromTemplate() كانت
@@ -146,6 +162,43 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
+    // أوضاع التوقيت الأربعة (ADR-0032) — نفس فحوصات OrdersService.create() بالحرف: القالب اللي
+    // هيتولّد منه طلب لازم يحمل نفس الحقول المطلوبة للوضع الفعّال، وإلا كل موعد هيترفض عند
+    // إنشاء الطلب ويوصل dead-letter من غير فايدة. فحص مبكر هنا = رفض واضح وقت الإنشاء بدل فشل صامت مؤجل.
+    if (service.requiresPreciseSchedule) {
+      if (!dto.duration_hours) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else if (service.requiresHoursOnly) {
+      if (!dto.duration_hours) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else if (service.requiresStartAndEnd) {
+      if (!dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد تاريخ ووقت نهاية الخدمة', HttpStatus.BAD_REQUEST);
+      }
+      if (dto.duration_hours) {
+        throw new ApiException(ErrorCode.VAL_001, 'duration_hours مش مطلوبة لخدمة محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    } else {
+      if (dto.duration_hours) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'duration_hours متاحة بس للخدمات اللي محتاجة دقة وقت أو عدد ساعات',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (dto.scheduled_end_at) {
+        throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
+      }
+    }
+
     const startsAt = new Date(dto.starts_at);
     if (startsAt.getTime() <= Date.now()) {
       throw new ApiException(ErrorCode.VAL_001, 'أول موعد تنفيذ لازم يكون في المستقبل', HttpStatus.BAD_REQUEST);
@@ -157,7 +210,11 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       addressId: dto.address_id,
       bookingMode: dto.booking_mode,
       requestedTechnicianId: dto.requested_technician_id ?? null,
+      requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
       frequency: dto.frequency,
+      fieldValues: dto.field_values ?? null,
+      durationHours: dto.duration_hours ?? null,
+      scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
       problemDescription: dto.problem_description ?? null,
       paymentMethod: dto.payment_method ?? null,
       nextRunAt: startsAt,
@@ -171,23 +228,57 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     return this.templates.find({ where: { customerId: customerProfile.id }, order: { createdAt: 'DESC' } });
   }
 
-  // للأدمن/التشغيل بس (docs/08 §32: وضوح الطلبات المتكررة) — كانت فجوة موثّقة صراحة: مفيش أي
-  // مسار للأدمن يشوف القوالب المتكررة خالص، فمينفعش يتابع/يشخّص قالب معطوب (consecutive_failure_count/
-  // last_failure_reason/last_failed_at — راجع generateFromTemplate()/recordFailure() فوق).
+  // للأدمن/التشغيل بس — "خطط الحجز المتكرر" (تعريف التكرار نفسه، مش الطلبات المتولّدة منه —
+  // الطلبات بتتشاف من /admin/orders بفلتر التكرار). صفوف مُثراة بأسماء/أرقام حقيقية بدل UUIDs خام
+  // (كانت فجوة عرض: العمليات كانت مضطرة تنسخ UUID العميل وتدوّر عليه يدويًا).
   async listAllForAdmin(
     isActive: boolean | undefined,
     page: number,
     perPage: number,
-  ): Promise<{ items: RecurringOrderTemplate[]; meta: { page: number; per_page: number; total: number } }> {
-    const where: FindOptionsWhere<RecurringOrderTemplate> = {};
-    if (isActive !== undefined) where.isActive = isActive;
-    const [items, total] = await this.templates.findAndCount({
-      where,
-      order: { nextRunAt: 'ASC' },
-      skip: (page - 1) * perPage,
-      take: perPage,
-    });
-    return { items, meta: { page, per_page: perPage, total } };
+  ): Promise<{ items: AdminRecurringPlanRow[]; meta: { page: number; per_page: number; total: number } }> {
+    const offset = (page - 1) * perPage;
+    const [rows, countRows] = await Promise.all([
+      this.templates.manager.query<AdminRecurringPlanRow[]>(
+        `SELECT t.id,
+                t.customer_id,
+                u.full_name AS customer_full_name,
+                u.phone_number AS customer_phone,
+                t.service_id,
+                s.name_ar AS service_name_ar,
+                t.address_id,
+                COALESCE(a.label, a.street_name) AS address_label,
+                t.booking_mode,
+                t.frequency,
+                t.payment_method,
+                t.next_run_at,
+                t.last_generated_order_id,
+                o.order_number AS last_order_number,
+                o.scheduled_at AS last_occurrence_at,
+                t.is_active,
+                t.created_at,
+                t.deleted_at AS cancelled_at,
+                t.consecutive_failure_count,
+                t.last_failure_reason,
+                t.last_failed_at
+         FROM recurring_order_templates t
+         JOIN customer_profiles cp ON cp.id = t.customer_id
+         JOIN users u ON u.id = cp.user_id
+         JOIN services s ON s.id = t.service_id
+         JOIN addresses a ON a.id = t.address_id
+         LEFT JOIN orders o ON o.id = t.last_generated_order_id
+         WHERE t.deleted_at IS NULL AND ($1::boolean IS NULL OR t.is_active = $1)
+         ORDER BY t.next_run_at ASC, t.id ASC
+         LIMIT $2 OFFSET $3`,
+        [isActive ?? null, perPage, offset],
+      ),
+      this.templates.manager.query<{ total: string }[]>(
+        `SELECT COUNT(*)::text AS total
+         FROM recurring_order_templates t
+         WHERE t.deleted_at IS NULL AND ($1::boolean IS NULL OR t.is_active = $1)`,
+        [isActive ?? null],
+      ),
+    ]);
+    return { items: rows, meta: { page, per_page: perPage, total: Number(countRows[0]?.total ?? 0) } };
   }
 
   private async findOwnedOrThrow(userId: string, templateId: string): Promise<RecurringOrderTemplate> {
@@ -210,9 +301,12 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     await this.templates.softDelete(template.id);
   }
 
-  async sweep(): Promise<number> {
-    await this.materializeDueOccurrences(SWEEP_BATCH_SIZE);
-    const occurrences = await this.claimOccurrences(SWEEP_BATCH_SIZE);
+  // templateIds اختياري — بيقصر الدورة دي على قوالب بعينها بدل كل الجدول. الإنتاج بيناديها
+  // من غير حاجة (فلترة كاملة)، وبتستخدم في الاختبارات الحية عشان worker موازي مايعالجش قوالب
+  // ملف اختبار تاني شغال على نفس القاعدة (بَقّة عزل اختبار موثّقة في الـspecs المجاورة).
+  async sweep(options?: { templateIds?: string[] }): Promise<number> {
+    await this.materializeDueOccurrences(SWEEP_BATCH_SIZE, options?.templateIds);
+    const occurrences = await this.claimOccurrences(SWEEP_BATCH_SIZE, options?.templateIds);
 
     let generatedCount = 0;
     for (const occurrence of occurrences) {
@@ -224,12 +318,13 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     return generatedCount;
   }
 
-  private async materializeDueOccurrences(limit: number): Promise<void> {
+  private async materializeDueOccurrences(limit: number, templateIds?: string[]): Promise<void> {
     await this.templates.manager.query(
       `WITH due AS (
          SELECT id, next_run_at
          FROM recurring_order_templates
          WHERE is_active = true AND deleted_at IS NULL AND next_run_at <= now()
+           AND ($2::uuid[] IS NULL OR id = ANY($2))
          ORDER BY next_run_at, id
          LIMIT $1
          FOR UPDATE SKIP LOCKED
@@ -237,11 +332,11 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
        INSERT INTO recurring_order_occurrences (template_id, scheduled_for)
        SELECT id, next_run_at FROM due
        ON CONFLICT (template_id, scheduled_for) DO NOTHING`,
-      [limit],
+      [limit, templateIds ?? null],
     );
   }
 
-  private async claimOccurrences(limit: number): Promise<ClaimedOccurrence[]> {
+  private async claimOccurrences(limit: number, templateIds?: string[]): Promise<ClaimedOccurrence[]> {
     const result = await this.templates.manager.query<ClaimedOccurrenceRow[] | [ClaimedOccurrenceRow[], number]>(
       `WITH candidates AS (
          SELECT id, status AS previous_status
@@ -254,6 +349,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
            status = 'processing'
            AND claimed_at <= now() - ($3::integer * interval '1 millisecond')
          )
+         AND ($4::uuid[] IS NULL OR template_id = ANY($4))
          ORDER BY scheduled_for, id
          LIMIT $1
          FOR UPDATE SKIP LOCKED
@@ -273,7 +369,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
                  occurrence.scheduled_for,
                  occurrence.attempt_count,
                  candidates.previous_status`,
-      [limit, MAX_CONSECUTIVE_FAILURES, CLAIM_LEASE_MS],
+      [limit, MAX_CONSECUTIVE_FAILURES, CLAIM_LEASE_MS, templateIds ?? null],
     );
     // TypeORM's PostgreSQL runner returns UPDATE ... RETURNING as
     // [rows, affectedCount], unlike SELECT/INSERT which return rows directly.
@@ -333,6 +429,20 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
     let customerProfile;
     try {
       customerProfile = await this.customerProfiles.findByProfileIdOrThrow(template.customerId);
+      // عميل متبلوك/محذوف — مفيش طلبات جديدة تتولّد له (نفس فلسفة فحص الحالة اللحظي في
+      // JwtStrategy على كل request، بس هنا للتوليد الداخلي اللي بيتجاوز الـHTTP layer خالص).
+      // الفشل بيمشي في نفس مسار recordFailure العادي (retry ثم dead-letter مرئي) بدل ما يفضل
+      // القالب بيولّد طلبات لعميل ممنوع من المنصة بصمت.
+      const [status] = await this.templates.manager.query<{ is_blocked: boolean; deleted_at: Date | null }[]>(
+        `SELECT u.is_blocked, u.deleted_at
+         FROM users u
+         JOIN customer_profiles cp ON cp.user_id = u.id
+         WHERE cp.id = $1`,
+        [template.customerId],
+      );
+      if (Boolean(status?.is_blocked || status?.deleted_at)) {
+        throw new Error('العميل متبلوك/محذوف — التوليد موقوف لحد ما الحالة تتغير');
+      }
     } catch (err) {
       await this.recordFailure(occurrence, template, err);
       return false;
@@ -344,7 +454,15 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       booking_mode: template.bookingMode,
       order_type: OrderType.RECURRING,
       requested_technician_id: template.requestedTechnicianId ?? undefined,
+      requested_technician_company_id: template.requestedTechnicianCompanyId ?? undefined,
       problem_description: template.problemDescription ?? undefined,
+      // مدخلات التسعير/التوقيت المحفوظة مع القالب (migration 0176) — **مدخلات مش سعر**: القيمة
+      // الفعلية بيتحسبها محرك التسعير الحي جوّه OrdersService.create() وقت التوليد بالظبط، فتغيير
+      // أسعار/قواعد الخدمة بيأثر على الطلبات الجديدة بس، والطلبات المتولّدة فعلاً بتحتفظ بـsnapshot
+      // سعرها العادي زي أي طلب.
+      field_values: template.fieldValues ?? undefined,
+      duration_hours: template.durationHours ?? undefined,
+      scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : undefined,
       // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة حقيقية: صفر payment_method هنا خالص،
       // فكل طلب متولّد من قالب متكرر كان non-prepaid دايمًا مهما كان تفضيل العميل وقت إنشاء
       // القالب. لو الطلب المتولّد بقى PENDING_PAYMENT، sweepPendingPayment() (docs/08 §19 بند
@@ -359,6 +477,17 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
         scheduledFor: occurrence.scheduledFor,
       });
       await this.completeOccurrence(occurrence, order.id);
+      // طلب متولّد محتاج دفع مقدّم (كارت/InstaPay) — ORDER_CREATED_EVENT مش بيتصدّر لطلبات
+      // PENDING_PAYMENT (تصميم pay-before-dispatch في OrdersService.create()) يعني مفيش إشعار
+      // "طلبك اتسجّل" هيوصل. من غير الإشعار هنا، عميل اشترك في تكرار شهري كان هيلاقي طلبه اتلغى
+      // تلقائيًا بعد مهلة الدفع من غير ما يعرف أصلاً إن فيه طلب استنى دفعه. نفس نمط
+      // OrderCreatedNotificationListener (إشعار مباشر للعميل، fire-and-forget آمن).
+      if (order.orderStatus === 'pending_payment') {
+        this.eventEmitter.emit(
+          RECURRING_ORDER_AWAITING_PAYMENT_EVENT,
+          new RecurringOrderAwaitingPaymentEvent(order.id, order.orderNumber, order.customerId),
+        );
+      }
       return true;
     } catch (err) {
       // OrdersService emits critical dispatch only after its DB transaction. If

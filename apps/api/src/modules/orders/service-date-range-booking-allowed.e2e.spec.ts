@@ -218,6 +218,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

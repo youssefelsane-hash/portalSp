@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Between, DataSource, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, DataSource, FindOptionsWhere, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_REASSIGNED_EVENT, OrderReassignedEvent } from '../../common/events/order-reassigned.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
@@ -78,6 +78,10 @@ export class AdminOrdersService {
     const perPage = query.per_page ?? 20;
     const where: FindOptionsWhere<Order> = {};
     if (query.order_status) where.orderStatus = query.order_status;
+    // فلتر التكرار — IsNull/Not(IsNull) على recurring_template_id (العمود دايمًا زوجي مع
+    // recurring_occurrence_at عبر CHECK constraint chk_orders_recurring_identity_pair).
+    if (query.recurring === 'true') where.recurringTemplateId = Not(IsNull());
+    if (query.recurring === 'false') where.recurringTemplateId = IsNull();
     if (query.from && query.to) {
       where.placedAt = Between(new Date(query.from), new Date(query.to));
     } else if (query.from) {

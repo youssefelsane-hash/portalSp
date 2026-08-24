@@ -1,4 +1,5 @@
 import { RecurringOrderTemplate } from '../entities/recurring-order-template.entity';
+import { AdminRecurringPlanRow } from '../recurring-orders.service';
 
 export interface RecurringTemplateResponseDto {
   id: string;
@@ -6,9 +7,15 @@ export interface RecurringTemplateResponseDto {
   address_id: string;
   booking_mode: string;
   requested_technician_id: string | null;
+  requested_technician_company_id: string | null;
   frequency: string;
   problem_description: string | null;
   payment_method: 'card' | 'instapay' | null;
+  // مدخلات التسعير/التوقيت المتكررة (migration 0176) — مدخلات مش سعر، القيمة بتتحسب وقت توليد
+  // كل طلب من محرك التسعير الحي.
+  field_values: Record<string, string | number | boolean> | null;
+  duration_hours: number | null;
+  scheduled_end_at: string | null;
   next_run_at: string;
   last_generated_order_id: string | null;
   is_active: boolean;
@@ -27,9 +34,13 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     address_id: template.addressId,
     booking_mode: template.bookingMode,
     requested_technician_id: template.requestedTechnicianId,
+    requested_technician_company_id: template.requestedTechnicianCompanyId,
     frequency: template.frequency,
     problem_description: template.problemDescription,
     payment_method: template.paymentMethod,
+    field_values: template.fieldValues,
+    duration_hours: template.durationHours,
+    scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : null,
     next_run_at: template.nextRunAt.toISOString(),
     last_generated_order_id: template.lastGeneratedOrderId,
     is_active: template.isActive,
@@ -40,15 +51,57 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
   };
 }
 
-// نسخة الأدمن — نفس شكل RecurringTemplateResponseDto زائد customer_id (العميل نفسه بيعرف إنه
-// قالبه، الأدمن محتاج يعرف مين صاحبه — docs/08 §32).
-export interface AdminRecurringTemplateResponseDto extends RecurringTemplateResponseDto {
+// نسخة الأدمن — صف مُثرى من listAllForAdmin() (JOIN جاهز بأسماء العميل/الخدمة/العنوان وآخر
+// حجز متولّد) — دي "خطة الحجز المتكرر" نفسها؛ الطلبات المتولّدة منه بتتشاف من /admin/orders.
+export interface AdminRecurringPlanResponseDto {
+  id: string;
   customer_id: string;
+  customer_full_name: string;
+  customer_phone: string;
+  service_id: string;
+  service_name_ar: string;
+  address_id: string;
+  address_label: string | null;
+  booking_mode: string;
+  frequency: string;
+  payment_method: 'card' | 'instapay' | null;
+  next_run_at: string;
+  last_generated_order_id: string | null;
+  last_order_number: string | null;
+  last_occurrence_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  cancelled_at: string | null;
+  consecutive_failure_count: number;
+  last_failure_reason: string | null;
+  last_failed_at: string | null;
 }
 
-export function toAdminRecurringTemplateResponseDto(template: RecurringOrderTemplate): AdminRecurringTemplateResponseDto {
+const iso = (value: Date | string | null): string | null =>
+  value === null ? null : new Date(value).toISOString();
+
+export function toAdminRecurringPlanResponseDto(row: AdminRecurringPlanRow): AdminRecurringPlanResponseDto {
   return {
-    ...toRecurringTemplateResponseDto(template),
-    customer_id: template.customerId,
+    id: row.id,
+    customer_id: row.customer_id,
+    customer_full_name: row.customer_full_name,
+    customer_phone: row.customer_phone,
+    service_id: row.service_id,
+    service_name_ar: row.service_name_ar,
+    address_id: row.address_id,
+    address_label: row.address_label,
+    booking_mode: row.booking_mode,
+    frequency: row.frequency,
+    payment_method: row.payment_method,
+    next_run_at: iso(row.next_run_at)!,
+    last_generated_order_id: row.last_generated_order_id,
+    last_order_number: row.last_order_number,
+    last_occurrence_at: iso(row.last_occurrence_at),
+    is_active: row.is_active,
+    created_at: iso(row.created_at)!,
+    cancelled_at: iso(row.cancelled_at),
+    consecutive_failure_count: Number(row.consecutive_failure_count),
+    last_failure_reason: row.last_failure_reason,
+    last_failed_at: iso(row.last_failed_at),
   };
 }

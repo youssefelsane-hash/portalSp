@@ -1,5 +1,5 @@
 import { ApiException } from '../../common/exceptions/api.exception';
-import { evaluateFormulaNode, FormulaEvaluationContext, validateFormulaNode } from './formula-evaluator';
+import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload, validateFormulaNode } from './formula-evaluator';
 import { FormulaNode } from './pricing-formula.types';
 
 function context(overrides: Partial<FormulaEvaluationContext> = {}): FormulaEvaluationContext {
@@ -34,12 +34,25 @@ describe('formula-evaluator', () => {
       expect(() => validateFormulaNode(null)).toThrow(ApiException);
     });
 
-    it('يرفض شجرة أعمق من الحد المسموح (دفاع ضد DoS)', () => {
+    it('عمق 20 و32 و47 و48 صالحين — والحد الجديد 48 (docs/01B §2)', () => {
+      for (const depth of [20, 32, 47, 48]) {
+        let node: FormulaNode = { type: 'literal', value: 1 };
+        for (let i = 0; i < depth - 1; i++) {
+          node = { type: 'add', operands: [node] };
+        }
+        expect(() => validateFormulaNode(node)).not.toThrow();
+      }
+    });
+
+    it('يرفض شجرة أعمق من الحد المسموح 49 (دفاع ضد DoS) وبمسار واضح', () => {
       let node: FormulaNode = { type: 'literal', value: 1 };
-      for (let i = 0; i < 20; i++) {
+      // 49 مستوى تداخل → أول ما يتعدى 48 يترفض بمسار العقدة
+      for (let i = 0; i < 49; i++) {
         node = { type: 'add', operands: [node] };
       }
       expect(() => validateFormulaNode(node)).toThrow(ApiException);
+      expect(() => validateFinalPriceFormulaPayload({ price_cents: node })).toThrow(/أعمق من الحد المسموح \(48 مستوى\)/);
+      expect(() => validateFinalPriceFormulaPayload({ price_cents: node })).toThrow(/price_cents → add.operands\[0\]/);
     });
 
     it('يرفض condition.op غير مسموح', () => {

@@ -216,6 +216,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
       events,
       {} as never,
       {} as never,
+      {} as never, // installments repo (migration 0177)
     );
 
     const supportService = new SupportService(

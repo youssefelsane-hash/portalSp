@@ -42,6 +42,8 @@ import { Wallet } from './entities/wallet.entity';
 import { WalletTransaction } from './entities/wallet-transaction.entity';
 import { WalletAdjustment } from './entities/wallet-adjustment.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
+import { Installment } from '../installments/entities/installment.entity';
+import { InstallmentCollectionService } from './installment-collection.service';
 
 @Module({
   imports: [
@@ -59,6 +61,7 @@ import { WebhookEvent } from './entities/webhook-event.entity';
       User,
       WebhookEvent,
       TechnicianProfile,
+      Installment,
     ]),
     CustomersModule,
     TechniciansModule,
@@ -85,6 +88,9 @@ import { WebhookEvent } from './entities/webhook-event.entity';
     WalletProvisioningListener,
     PrepaidOrderSettlementListener,
     WebhookRecoveryService,
+    // sweep تحصيل الأقساط المستحقة (migration 0177) — نفس فلسفة OrderAutoCancelService:
+    // setInterval بـPostgres مباشرة، مش BullMQ repeatable (راجع technicians/README.md).
+    InstallmentCollectionService,
     // بوابة Fawry الأصلية (كود مرجعي فوري) — لسه محقونة مباشرة، FawryProvider بيغلّفها بس
     // (ADR-0013). لو مفيش env vars مُعدّة، isConfigured بيبقى false وبيرفض بوضوح.
     { provide: FAWRY_GATEWAY, useClass: FawryGatewayService },
