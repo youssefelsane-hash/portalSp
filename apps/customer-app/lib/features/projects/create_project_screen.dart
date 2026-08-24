@@ -3,7 +3,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_repository.dart';
 import '../addresses/models.dart';
-import 'project_room_screen.dart';
+import 'my_projects_screen.dart';
 
 class CreateProjectScreen extends StatefulWidget {
   final AuthRepository auth;
@@ -101,15 +101,19 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     setState(() { _submitting = true; _error = null; });
     try {
       final repo = ProjectsRepo(widget.auth);
-      final project = await repo.create(
+      await repo.create(
         projectType: _selectedType, nameAr: _nameController.text.trim(),
         description: _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
         addressId: _selectedAddress!.id, budget: _budget,
       ).timeout(const Duration(seconds: 15));
       if (!mounted) return;
-      // نجاح واضح — نروح لغرفة المشروع مباشرة
+      // نجاح واضح — SnackBar + الرجوع لقائمة المشاريع
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('تم إنشاء المشروع بنجاح — طلب المعاينة في الطريق'),
+        backgroundColor: Colors.green,
+      ));
       Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => ProjectRoomScreen(auth: widget.auth, projectId: project['id'])));
+        builder: (_) => const MyProjectsScreen()));
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     } catch (e) {

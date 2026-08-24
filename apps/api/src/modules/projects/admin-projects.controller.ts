@@ -51,7 +51,11 @@ export class AdminProjectsController {
 
   @Post(':id/milestones')
   @RequirePermission('projects.manage')
-  async createMilestones(@Param('id', ParseUUIDPipe) id: string, @Body() dto: { milestones: unknown[] }) {
-    return this.projectsService.createMilestones(id, id, dto.milestones as never);
+  async createMilestones(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { milestones: unknown[] },
+  ) {
+    return this.projectsService.createMilestones(admin.sub, id, dto.milestones as never);
   }
 }

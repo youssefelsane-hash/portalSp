@@ -19,8 +19,17 @@ export class ProjectsService {
     private readonly auditLog: AuditLogService,
   ) {}
 
-  async listAll(): Promise<Project[]> {
-    return this.projects.find({ order: { createdAt: 'DESC' } });
+  async listAll(): Promise<Record<string, unknown>[]> {
+    return this.dataSource.query(
+      `SELECT p.*, u.full_name AS customer_full_name, u.phone_number AS customer_phone,
+              a.street_name AS address_street
+       FROM projects p
+       JOIN customer_profiles cp ON cp.id = p.customer_id
+       JOIN users u ON u.id = cp.user_id
+       JOIN addresses a ON a.id = p.address_id
+       WHERE p.deleted_at IS NULL
+       ORDER BY p.created_at DESC`,
+    );
   }
 
   async create(userId: string, dto: {

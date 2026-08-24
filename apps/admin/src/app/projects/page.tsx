@@ -17,7 +17,7 @@ const egp = (c: number) => `${(c / 100).toLocaleString('ar-EG-u-nu-latn')} ج.م
 
 interface ProjectRow {
   id: string; project_number: string; name_ar: string; project_type: string;
-  status: string; customer_full_name?: string;
+  status: string; customer_full_name?: string; customer_phone?: string; description_ar?: string; budget_estimate_cents?: number;
   approved_quote_total_cents: number | null; paid_cents: number;
 }
 
@@ -73,6 +73,7 @@ export default function AdminProjectsPage() {
         <Table>
           <TableHeader><TableRow>
             <TableHead>رقم</TableHead><TableHead>الاسم</TableHead>
+            <TableHead>العميل</TableHead>
             <TableHead>النوع</TableHead><TableHead>الحالة</TableHead>
             <TableHead>العقد</TableHead><TableHead>مدفوع</TableHead><TableHead>إجراءات</TableHead>
           </TableRow></TableHeader>
@@ -100,6 +101,10 @@ function ProjectRowItem({ project, expanded, onToggle, onRefresh }: {
           <button onClick={onToggle} className="font-mono text-xs underline">{project.project_number}</button>
         </TableCell>
         <TableCell className="font-medium">{project.name_ar}</TableCell>
+        <TableCell>
+          <div className="text-sm">{project.customer_full_name || '—'}</div>
+          {project.customer_phone && <div dir="ltr" className="font-mono text-xs text-muted-foreground">{project.customer_phone}</div>}
+        </TableCell>
         <TableCell><Badge variant="outline">{project.project_type}</Badge></TableCell>
         <TableCell><Badge variant={project.status === 'active' ? 'secondary' : 'outline'}>{STATUS_LABELS[project.status] ?? project.status}</Badge></TableCell>
         <TableCell>{project.approved_quote_total_cents != null ? egp(project.approved_quote_total_cents) : '—'}</TableCell>
@@ -121,7 +126,7 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
 
   return (
     <TableRow>
-      <TableCell colSpan={7} className="bg-muted/30 p-4 space-y-4">
+      <TableCell colSpan={8} className="bg-muted/30 p-4 space-y-4">
         {/* الانتقالات */}
         <div>
           <p className="mb-2 font-medium text-sm">الانتقالات:</p>

@@ -54,25 +54,23 @@ class MyProjectsScreen extends StatefulWidget {
 }
 
 class _MyProjectsScreenState extends State<MyProjectsScreen> {
-  late final ProjectsRepository _repo;
   List<ProjectModel>? _projects;
   bool _loading = true;
+  String? _error;
 
   @override void initState() { super.initState(); _load(); }
-
-  String? _error;
 
   Future<void> _load() async {
     if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
       final auth = context.read<AuthRepository>();
-      _repo = ProjectsRepository(auth);
-      final projects = await _repo.list().timeout(const Duration(seconds: 10));
+      final repo = ProjectsRepository(auth);
+      final projects = await repo.list().timeout(const Duration(seconds: 10));
       if (mounted) setState(() { _projects = projects; _loading = false; });
     } on ApiException catch (e) {
       if (mounted) setState(() { _loading = false; _error = e.message; });
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() { _loading = false; _error = 'حصل خطأ، حاول تاني'; });
     }
   }
@@ -83,59 +81,67 @@ class _MyProjectsScreenState extends State<MyProjectsScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: const Text('مشاريعي')),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text(_error!, style: const TextStyle(color: Colors.red)),
-                    const SizedBox(height: 12),
-                    FilledButton(onPressed: _load, child: const Text('حاول تاني')),
-                  ]))
-                : _projects == null || _projects!.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.home_work_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(height: 16),
-                          Text('عندك شقة جديدة أو تجديد كبير؟',
-                              style: Theme.of(context).textTheme.titleMedium),
-                          const SizedBox(height: 8),
-                          Text('صوّر المكان واحكي لنا اللي محتاجه،\nوصُنّاع ترتب لك المعاينة والعرض والمراحل.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.grey)),
-                          const SizedBox(height: 20),
-                          FilledButton.icon(
-                            icon: const Icon(Icons.add),
-                            label: const Text('ابدأ مشروعك'),
-                            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
-                            )),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _projects!.length,
-                    itemBuilder: (context, i) {
-                      final p = _projects![i];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        child: ListTile(
-                          title: Text(p.nameAr, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text('${p.projectNumber} · ${projectStatusLabelsAr[p.status] ?? p.status}'),
-                          trailing: const Icon(Icons.chevron_left),
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => ProjectRoomScreen(auth: context.read<AuthRepository>(), projectId: p.id),
-                          )),
-                        ),
-                      );
-                    },
-                  ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
+          )).then((_) => _load()),
+          child: const Icon(Icons.add),
+        ),
+        body: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(_error!, style: const TextStyle(color: Colors.red)),
+        const SizedBox(height: 12),
+        FilledButton(onPressed: _load, child: const Text('حاول تاني')),
+      ]));
+    }
+    final projects = _projects;
+    if (projects == null || projects.isEmpty) {
+      return Center(child: Padding(padding: const EdgeInsets.all(32), child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.home_work_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(height: 16),
+          Text('عندك شقة جديدة أو تجديد كبير؟', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Text('صوّر المكان واحكي لنا اللي محتاجه،\nوصُنّاع ترتب لك المعاينة والعرض والمراحل.',
+              textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            icon: const Icon(Icons.add),
+            label: const Text('ابدأ مشروعك'),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
+            )).then((_) => _load()),
+          ),
+        ],
+      )));
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: projects.length,
+        itemBuilder: (context, i) {
+          final p = projects[i];
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ListTile(
+              title: Text(p.nameAr, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text('${p.projectNumber} · ${projectStatusLabelsAr[p.status] ?? p.status}'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => ProjectRoomScreen(auth: context.read<AuthRepository>(), projectId: p.id),
+              )),
+            ),
+          );
+        },
       ),
     );
   }

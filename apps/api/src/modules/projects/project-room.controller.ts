@@ -21,7 +21,7 @@ export class ProjectRoomController {
       `SELECT p.* FROM projects p
        JOIN customer_profiles cp ON cp.id = p.customer_id
        WHERE p.id = $1 AND cp.user_id = $2 AND p.deleted_at IS NULL`,
-      [id, profile?.id ?? null],
+      [id, user.sub],
     );
     if (!project) return { error: 'المشروع غير موجود' };
 
