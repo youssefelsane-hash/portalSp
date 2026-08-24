@@ -259,32 +259,57 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
   });
 
   afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
-    // wallet_transactions بتتحذف بـwallet_id (مش بس reference_id=order) — قيود الاسترداد بترجع
-    // referenceType='refund'/referenceId=refund.id، مش الطلب نفسه.
-    await q(
-      `DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`,
-      [ids.techUser, ids.customerUser],
-    );
-    await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-csd-%${runId}%`]);
-    await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
-    await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
-    await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCSD-%`]);
-    await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);
-    await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
-    await q(`DELETE FROM loyalty_transactions WHERE user_id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
-    await q(`DELETE FROM services WHERE id IN ($1, $2)`, [ids.service20, ids.serviceZero]);
-    await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
-    await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
-    await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    // الدولة (مصر) مش بتاعتنا — صف ثابت مزروع مسبقًا (migration 0004)، مُعاد استخدامه بس، مفيش حذف هنا عمدًا.
-    cache.onModuleDestroy();
-    await dataSource.destroy();
+    try {
+      await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
+      // بعض أحداث الاختبار تنشئ chat thread تلقائيًا؛ لازم يتشال قبل الطلب صاحب الـFK.
+      await q(
+        `DELETE FROM chat_messages WHERE thread_id IN (
+           SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)
+         )`,
+        [`TESTCSD-%`],
+      );
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
+      // wallet_transactions بتتحذف بـwallet_id (مش بس reference_id=order) — قيود الاسترداد بترجع
+      // referenceType='refund'/referenceId=refund.id، مش الطلب نفسه.
+      await q(
+        `DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`,
+        [ids.techUser, ids.customerUser],
+      );
+      await q(`DELETE FROM webhook_events WHERE external_event_id LIKE $1`, [`evt-csd-%${runId}%`]);
+      await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTCSD-%`]);
+      await q(
+        `DELETE FROM installments WHERE application_id IN (
+           SELECT id FROM installment_applications
+           WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)
+         )`,
+        [`TESTCSD-%`],
+      );
+      await q(
+        `DELETE FROM installment_applications
+         WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`,
+        [`TESTCSD-%`],
+      );
+      await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTCSD-%`]);
+      await q(`DELETE FROM installment_plans WHERE name_ar LIKE $1`, [`TESTCSD-%`]);
+      await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM loyalty_transactions WHERE user_id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
+      await q(`DELETE FROM services WHERE id IN ($1, $2)`, [ids.service20, ids.serviceZero]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+      // الدولة (مصر) مش بتاعتنا — صف ثابت مزروع مسبقًا، مُعاد استخدامه بس.
+    } finally {
+      await cache?.onModuleDestroy();
+      if (dataSource.isInitialized) await dataSource.destroy();
+    }
   });
 
   it('طلب كاش بالكامل — الفني مديون للمنصة بالعمولة، مش المنصة مدينة له بالأرباح', async () => {
@@ -347,6 +372,44 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     const creditTx = txs.find((t) => t.direction === 'credit');
     expect(creditTx?.transactionType).toBe(WalletTxType.ORDER_EARNING);
     expect(creditTx?.amountCents).toBe(80000);
+  });
+
+  it('طلب مغطى بتقسيط معتمد يرفض تحصيل الكاش ويتسوّى تلقائيًا لصالح الفني مرة واحدة', async () => {
+    const before = await techWalletBalance();
+    const orderId = await insertWorkCompletedOrder('installment-covered', 100000, ids.service20);
+    const [plan] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO installment_plans (name_ar, installment_count, requires_saved_card)
+       VALUES ($1,3,false) RETURNING id`,
+      [`TESTCSD-plan-${runId}`],
+    );
+    await dataSource.query(
+      `INSERT INTO installment_applications
+         (order_id, customer_id, plan_id, status, service_price_cents, financing_percentage,
+          fixed_fee_cents, financing_fee_cents, total_financed_cents, down_payment_percentage,
+          down_payment_cents, financed_balance_cents, installment_count, regular_installment_cents,
+          final_installment_cents, interval_days, first_due_at, activated_at)
+       VALUES ($1,$2,$3,'approved',100000,0,0,0,100000,0,0,100000,3,33333,33334,30,now(),now())`,
+      [orderId, ids.customerProfile, plan.id],
+    );
+
+    await expect(service.collectCash(ids.techUser, orderId)).rejects.toMatchObject({ status: 409 });
+    expect(
+      Number(
+        (await dataSource.query<{ count: string }[]>(
+          `SELECT COUNT(*)::text AS count FROM payments WHERE order_id=$1 AND payment_method='cash'`,
+          [orderId],
+        ))[0].count,
+      ),
+    ).toBe(0);
+
+    await service.settleAlreadyPaidOrder(orderId);
+    const settled = await dataSource.getRepository(Order).findOneByOrFail({ id: orderId });
+    expect(settled.orderStatus).toBe(OrderStatus.COMPLETED);
+    expect(settled.paymentStatus).toBe(OrderPaymentStatus.PAID);
+    expect((await techWalletBalance()) - before).toBe(80000);
+
+    await service.settleAlreadyPaidOrder(orderId);
+    expect((await techWalletBalance()) - before).toBe(80000);
   });
 
   it('timeout ثم webhook ناجح متأخر يصحح PROCESSING مرة واحدة ولا يطلب دفعًا ثانيًا', async () => {

@@ -93,6 +93,18 @@ export interface InstaPayPendingPaymentResponseDto {
 }
 
 export interface OrderFinancialSummaryResponseDto {
+  total_amount_cents: number;
+  /** كل ما دفعه العميل فعليًا حتى الآن، شامل الأقساط المحصلة، بعد الاستردادات المكتملة. */
+  paid_amount_cents: number;
+  /** دفعات الطلب المباشرة فقط (إيداع/كارت/كاش)، بعد الاستردادات؛ لا تشمل تحصيل الأقساط. */
+  direct_paid_amount_cents: number;
+  refunded_amount_cents: number;
+  /** أصل سعر الطلب الذي غطته خطة تقسيط معتمدة وتتحمل المنصة تحصيله لاحقًا. */
+  financed_order_amount_cents: number;
+  /** مديونية العميل المتبقية في جدول التقسيط، وليست مبلغًا يجوز للفني تحصيله كاش. */
+  installment_outstanding_cents: number;
+  /** الرقم الوحيد الذي يجوز للفني طلبه من العميل عند إنهاء الزيارة. */
+  amount_due_to_technician_cents: number;
   platform_commission_cents: number;
   technician_earning_cents: number;
   cancellation_fee_cents: number;

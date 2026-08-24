@@ -34,6 +34,13 @@ export interface OrderResponseDto {
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
+  /** مسارات الفني تضيف الحقول دي من دفتر الدفعات؛ باقي القوائم قد لا تحملها لتجنب N+1. */
+  paid_amount_cents?: number;
+  direct_paid_amount_cents?: number;
+  financed_order_amount_cents?: number;
+  refunded_amount_cents?: number;
+  installment_outstanding_cents?: number;
+  amount_due_to_technician_cents?: number;
   warranty_plan_id: string | null;
   warranty_price_cents: number;
   optional_warranty: {
