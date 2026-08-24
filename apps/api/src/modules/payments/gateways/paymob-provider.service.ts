@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OnEvent } from '@nestjs/event-emitter';
 import { createHmac, timingSafeEqual } from 'crypto';
 import {
   CaptureResult,
@@ -18,6 +19,10 @@ import {
   VoidResult,
   WebhookVerificationResult,
 } from './payment-provider.interface';
+import { SettingsService } from '../../settings/settings.service';
+import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../../common/events/setting-updated.event';
+
+const PAYMOB_SETTING_PREFIX = 'payments.paymob.';
 
 interface PaymobIntentionResponse {
   client_secret: string;
@@ -107,44 +112,87 @@ interface PaymobTokenWebhookObj {
  * الاتنين بيتعايشوا هنا عمداً، مش خطأ.
  */
 @Injectable()
-export class PaymobProvider implements PaymentProvider {
+export class PaymobProvider implements PaymentProvider, OnModuleInit {
   readonly providerKey = 'paymob';
-  readonly isConfigured: boolean;
+  isConfigured = false;
   readonly supportsRefund = true;
   readonly supportsVoid = true;
   readonly supportsCapture = true;
-  readonly supportsTokenization: boolean;
+  supportsTokenization = false;
   private readonly logger = new Logger('PaymentProvider(paymob)');
 
-  private readonly baseUrl: string;
-  private readonly apiKey: string | undefined;
-  private readonly secretKey: string | undefined;
-  private readonly publicKey: string | undefined;
-  private readonly integrationIdCard: string | undefined;
+  private baseUrl: string;
+  private apiKey: string | undefined;
+  private secretKey: string | undefined;
+  private publicKey: string | undefined;
+  private integrationIdCard: string | undefined;
   // docs/08 §19 بند 15 — Mobile Wallet (Vodafone Cash/إلخ) عبر نفس حساب Paymob التاجر، اختياري
   // بالكامل. لو موجودة، بتتضاف لقايمة payment_methods جنب الكارت في createPayment() — Paymob's
   // Unified Checkout بيعرض خيار المحفظة تلقائيًا في نفس الصفحة، صفر منطق backend إضافي مطلوب.
-  private readonly integrationIdMobileWallet: string | undefined;
-  private readonly hmacSecret: string | undefined;
+  private integrationIdMobileWallet: string | undefined;
+  private hmacSecret: string | undefined;
+  private readonly envFallback: Record<string, string | undefined>;
 
-  constructor(config: ConfigService) {
-    this.baseUrl = config.get<string>('payments.paymob.baseUrl')!;
-    this.apiKey = config.get<string>('payments.paymob.apiKey') || undefined;
-    this.secretKey = config.get<string>('payments.paymob.secretKey') || undefined;
-    this.publicKey = config.get<string>('payments.paymob.publicKey') || undefined;
-    this.integrationIdCard = config.get<string>('payments.paymob.integrationIdCard') || undefined;
-    this.integrationIdMobileWallet = config.get<string>('payments.paymob.integrationIdMobileWallet') || undefined;
-    this.hmacSecret = config.get<string>('payments.paymob.hmacSecret') || undefined;
-    this.isConfigured = Boolean(this.secretKey && this.publicKey && this.integrationIdCard && this.hmacSecret);
-    // نفس شرط isConfigured بالظبط — تحصيل التوكن محتاج نفس مفاتيح إنشاء الدفعة الأصلية (secretKey
-    // + apiKey لـlegacyAuthToken() + integrationIdCard)، صفر إعداد إضافي مطلوب.
+  constructor(config: ConfigService, @Optional() private readonly settingsService?: SettingsService) {
+    this.envFallback = {
+      baseUrl: config.get<string>('payments.paymob.baseUrl'),
+      apiKey: config.get<string>('payments.paymob.apiKey') || undefined,
+      secretKey: config.get<string>('payments.paymob.secretKey') || undefined,
+      publicKey: config.get<string>('payments.paymob.publicKey') || undefined,
+      integrationIdCard: config.get<string>('payments.paymob.integrationIdCard') || undefined,
+      integrationIdMobileWallet: config.get<string>('payments.paymob.integrationIdMobileWallet') || undefined,
+      hmacSecret: config.get<string>('payments.paymob.hmacSecret') || undefined,
+    };
+    this.baseUrl = this.envFallback.baseUrl || 'https://accept.paymob.com';
+    this.applyConfiguration(this.envFallback);
+  }
+
+  async onModuleInit(): Promise<void> {
+    if (this.settingsService) await this.reloadFromSettings();
+  }
+
+  @OnEvent(SETTING_UPDATED_EVENT)
+  async handleSettingUpdated(event: SettingUpdatedEvent): Promise<void> {
+    if (!event.key.startsWith(PAYMOB_SETTING_PREFIX)) return;
+    await this.reloadFromSettings();
+  }
+
+  private applyConfiguration(values: Record<string, string | undefined>): void {
+    this.baseUrl = values.baseUrl || 'https://accept.paymob.com';
+    this.apiKey = values.apiKey || undefined;
+    this.secretKey = values.secretKey || undefined;
+    this.publicKey = values.publicKey || undefined;
+    this.integrationIdCard = values.integrationIdCard || undefined;
+    this.integrationIdMobileWallet = values.integrationIdMobileWallet || undefined;
+    this.hmacSecret = values.hmacSecret || undefined;
+    this.isConfigured = Boolean(
+      this.apiKey && this.secretKey && this.publicKey && this.integrationIdCard && this.hmacSecret,
+    );
     this.supportsTokenization = this.isConfigured;
 
     if (!this.isConfigured) {
       this.logger.warn(
-        'PAYMOB_SECRET_KEY/PAYMOB_PUBLIC_KEY/PAYMOB_INTEGRATION_ID_CARD/PAYMOB_HMAC_SECRET ناقصين — الدفع بالبطاقة هيرفض بوضوح لحد ما تتظبط',
+        'إعدادات Paymob الأساسية ناقصة — الدفع بالبطاقة هيرفض بوضوح لحد ما تتظبط',
       );
     }
+  }
+
+  private async reloadFromSettings(): Promise<void> {
+    if (!this.settingsService) return;
+    const [
+      baseUrl, apiKey, secretKey, publicKey, integrationIdCard, integrationIdMobileWallet, hmacSecret,
+    ] = await Promise.all([
+      this.settingsService.getString('payments.paymob.base_url', this.envFallback.baseUrl || 'https://accept.paymob.com'),
+      this.settingsService.getSecret('payments.paymob.api_key', this.envFallback.apiKey || ''),
+      this.settingsService.getSecret('payments.paymob.secret_key', this.envFallback.secretKey || ''),
+      this.settingsService.getString('payments.paymob.public_key', this.envFallback.publicKey || ''),
+      this.settingsService.getString('payments.paymob.integration_id_card', this.envFallback.integrationIdCard || ''),
+      this.settingsService.getString('payments.paymob.integration_id_mobile_wallet', this.envFallback.integrationIdMobileWallet || ''),
+      this.settingsService.getSecret('payments.paymob.hmac_secret', this.envFallback.hmacSecret || ''),
+    ]);
+    this.applyConfiguration({
+      baseUrl, apiKey, secretKey, publicKey, integrationIdCard, integrationIdMobileWallet, hmacSecret,
+    });
   }
 
   private async legacyAuthToken(): Promise<string> {

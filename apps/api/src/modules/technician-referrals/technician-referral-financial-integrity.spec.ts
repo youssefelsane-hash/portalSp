@@ -435,7 +435,10 @@ describe('Technician referral Phase 4 financial integrity', () => {
     expect(manual.status).toBe(TechnicianReferralBonusStatus.MANUAL_REVIEW);
     expect(manual.bonusAmountCents).toBe(5500);
     expect(manual.rejectionReason).toContain('غير متسقة');
-    expect(await service.reconcilePendingBonuses(25)).toBe(0);
+    await service.reconcilePendingBonuses(25);
+    const stillManual = await dataSource.getRepository(TechnicianReferralBonus).findOneByOrFail({ orderId });
+    expect(stillManual.status).toBe(TechnicianReferralBonusStatus.MANUAL_REVIEW);
+    expect(stillManual.walletDebitTxId).toBeNull();
     expect(await dataSource.getRepository(TechnicianReferralBonus).count({ where: { orderId } })).toBe(1);
   });
 });

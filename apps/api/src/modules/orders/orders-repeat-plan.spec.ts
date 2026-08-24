@@ -55,6 +55,7 @@ import { ComplaintAttachment } from '../support/entities/complaint-attachment.en
 describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي + خطة متكررة ذرّياً', () => {
   let dataSource: DataSource;
   let ordersService: OrdersService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     city: '',
@@ -155,7 +156,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
     );
     ids.address = address.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(
       dataSource.getRepository(Setting),
       { record: async () => undefined } as unknown as AuditLogService,
@@ -286,9 +287,9 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
     try {
       await q(`DELETE FROM recurring_order_occurrences WHERE template_id IN (SELECT id FROM recurring_order_templates WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`UPDATE recurring_order_templates SET last_generated_order_id = NULL WHERE customer_id = $1`, [ids.customerProfile]);
-      await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM order_status_history WHERE order_id = ANY($1)`, [ids.createdOrderIds]);
       await q(`DELETE FROM orders WHERE id = ANY($1)`, [ids.createdOrderIds]);
+      await q(`DELETE FROM recurring_order_templates WHERE customer_id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
@@ -297,6 +298,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     } finally {
+      cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });
@@ -347,11 +349,12 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
     } as never);
     ids.createdOrderIds.push(order.id);
 
-    // الطلب نفسه: مسار عادي تمامًا — نوع standard (مش recurring!)، سعر الخدمة وقت الإنشاء،
-    // ومفيش عليه recurring_template_id (ده أول حجز، مش نوبة متولّدة).
+    // الطلب نفسه يظل standard للتوافق، لكنه أول نوبة مكتملة من القالب ومرتبط به حتى يظهر في
+    // القوائم العامة وسجل الحجز المتكرر معًا.
     expect(order.orderType).toBe('standard');
     expect(order.totalAmountCents).toBe(30000);
-    expect(order.recurringTemplateId).toBeNull();
+    expect(order.recurringTemplateId).not.toBeNull();
+    expect(order.recurringOccurrenceAt?.toISOString()).toBe(scheduledAt);
     expect(order.scheduledAt?.toISOString()).toBe(scheduledAt);
     expect(order.orderStatus).toBe('pending_payment'); // دفع مقدّم كارت — نفس قواعد ADR-0013 العادية
 
@@ -365,6 +368,14 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
     });
     // أول موعد للخطة = الموعد المحجوز + 7 أيام **بنفس التوقيت** (مش "بكرة" ولا clamp غلط)
     expect(new Date(templates[0].next_run_at).toISOString()).toBe('2026-09-08T10:00:00.000Z');
+    const [occurrence] = await q(
+      `SELECT status, order_id, scheduled_for::text AS scheduled_for
+       FROM recurring_order_occurrences WHERE template_id = $1`,
+      [order.recurringTemplateId],
+    );
+    expect(occurrence.status).toBe('completed');
+    expect(occurrence.order_id).toBe(order.id);
+    expect(new Date(occurrence.scheduled_for).toISOString()).toBe(scheduledAt);
   });
 
   it('شهري يوم 31: أول موعد للخطة يتـclamp لآخر يوم فعلي في الشهر الجاي (سنة كبيسة → 29)', async () => {

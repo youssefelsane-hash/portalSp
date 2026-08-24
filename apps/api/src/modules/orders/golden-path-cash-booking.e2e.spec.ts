@@ -62,6 +62,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
   let paymentsService: PaymentsService;
   let ratingsService: RatingsService;
   let walletsService: WalletsService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     country: '',
@@ -174,7 +175,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     );
     ids.technicianProfile = technicianProfile.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const geoService = new GeoService(dataSource.getRepository(City), dataSource.getRepository(Area), dataSource.getRepository(ServiceZone), dataSource);
     const addressesService = new AddressesService(
@@ -208,10 +209,11 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
-    const technicianLevelsService = new TechnicianLevelsService(
-      dataSource.getRepository(TechnicianLevelConfig),
-      {} as unknown as AuditLogService,
-    );
+    // اعزل المسار الذهبي عن إعدادات مستويات الفنيين المشتركة التي قد تعدلها اختبارات/إدارة
+    // أخرى؛ هذا الاختبار يثبت عمولة الخدمة 20% تحديدًا، وليس سياسة ترقية المستوى.
+    const technicianLevelsService = {
+      getOrThrow: async () => ({ commissionAdjustmentPercentage: '0' }),
+    } as unknown as TechnicianLevelsService;
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
     const scheduleService = new TechnicianScheduleService(dataSource.getRepository(TechnicianScheduleSlot));
     const events = new EventEmitter2();
@@ -301,6 +303,8 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
       await q(`DELETE FROM wallets WHERE owner_user_id = ANY($1)`, [[ids.customerUser, ids.technicianUser]]);
       await q(`DELETE FROM payments WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM loyalty_transactions WHERE user_id = ANY($1)`, [[ids.customerUser, ids.technicianUser]]);
+      await q(`DELETE FROM warranty_claims WHERE order_id = $1`, [ids.order]);
+      await q(`DELETE FROM customer_warranties WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
       await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technicianProfile]);
@@ -312,6 +316,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     } finally {
+      cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });
@@ -374,6 +379,13 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     expect(settledOrder.platformCommissionCents).toBe(20000); // 20% من 100000
     expect(settledOrder.technicianEarningCents).toBe(80000);
     expect(settledOrder.warrantyExpiresAt).not.toBeNull(); // service.warranty_days=14 > 0
+    const [customerWarranty] = await q(
+      `SELECT order_id, coverage_days, expires_at FROM customer_warranties WHERE order_id=$1`,
+      [order.id],
+    );
+    expect(customerWarranty.order_id).toBe(order.id);
+    expect(customerWarranty.coverage_days).toBe(14);
+    expect(new Date(customerWarranty.expires_at).getTime()).toBe(settledOrder.warrantyExpiresAt!.getTime());
 
     // كاش كامل → الفني ماسك المبلغ كامل يدًا بيد → مديون للمنصة بالعمولة (COMMISSION_DEDUCTION)،
     // مش العكس (راجع BUG سابق في settleAndComplete موثّق في payments/README.md).

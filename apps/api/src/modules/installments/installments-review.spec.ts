@@ -22,6 +22,7 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
   let dataSource: DataSource;
   let service: InstallmentsService;
   let policiesService: PaymentPoliciesService;
+  let auditLog: AuditLogService;
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
   const ids = {
     customerUser: '',
@@ -101,11 +102,11 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
       [plan.id],
     );
 
-    // سياسة تقسيط إجبارية على الخدمة دي بنسخة v1
+    // Category-targeted policy: checkout sends only service_id, so the API must infer its category.
     const [policy] = await q(
-      `INSERT INTO payment_policies (slug, title_ar, applies_to, target_service_id, is_required, is_active)
+      `INSERT INTO payment_policies (slug, title_ar, applies_to, target_category_id, is_required, is_active)
        VALUES ($1,'شروط التقسيط للتحقق','installment',$2,true,true) RETURNING id`,
-      [`inst-policy-${runId}`, ids.service],
+      [`inst-policy-${runId}`, ids.category],
     );
     const [version] = await q(
       `INSERT INTO payment_policy_versions (policy_id, version, body_ar) VALUES ($1,1,'نص شروط كافي للتحقق من الإصدار الأول') RETURNING id`,
@@ -114,13 +115,13 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
     ids.policyVersion = version.id;
 
     const events = new EventEmitter2();
-    const auditMock = { record: async () => undefined } as unknown as AuditLogService;
+    auditLog = { record: jest.fn(async () => undefined) } as unknown as AuditLogService;
     policiesService = new PaymentPoliciesService(
       dataSource.getRepository(PaymentPolicy),
       dataSource.getRepository(PaymentPolicyVersion),
       dataSource.getRepository(PaymentPolicyAcceptance),
       dataSource,
-      auditMock,
+      auditLog,
     );
     service = new InstallmentsService(
       dataSource.getRepository(InstallmentPlan),
@@ -130,7 +131,7 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
       new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource),
       policiesService,
       events,
-      auditMock,
+      auditLog,
       {} as never, // storage — مسارات الرفع مش متغطية هنا (مغطاة في live verify)
     );
   });
@@ -238,6 +239,81 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
         acceptedPolicyVersionIds: [ids.policyVersion],
       }),
     ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('الخطة الظاهرة للعميل تتضمن بوابة الدفع المطلوبة', async () => {
+    const plans = await service.listPlansForService(ids.service);
+    expect(plans).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: ids.plan, allowed_provider: 'paymob' }),
+    ]));
+  });
+
+  it('فشل التدقيق يلغي تقديم التقسيط وقبول الشروط ذريًا', async () => {
+    const orderId = await seedOrder(500_000);
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated installment audit failure'));
+    try {
+      await expect(service.submitApplication({
+        userId: ids.customerUser,
+        orderId,
+        planId: ids.plan,
+        acceptedPolicyVersionIds: [ids.policyVersion],
+      })).rejects.toThrow('simulated installment audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+    const [state] = await q<{ applications: number; acceptances: number }[]>(
+      `SELECT
+         (SELECT count(*)::integer FROM installment_applications WHERE order_id=$1) AS applications,
+         (SELECT count(*)::integer FROM payment_policy_acceptances
+          WHERE context_type='installment_application'
+            AND context_id IN (SELECT id FROM installment_applications WHERE order_id=$1)) AS acceptances`,
+      [orderId],
+    );
+    expect(state).toEqual({ applications: 0, acceptances: 0 });
+  });
+
+  it('فشل تدقيق ربط الخطة لا يترك تغييرًا نصف مكتمل', async () => {
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated link audit failure'));
+    try {
+      await expect(service.setPlanForService(ids.adminUser, ids.service, ids.plan, false))
+        .rejects.toThrow('simulated link audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+    const [row] = await q<{ linked: boolean }[]>(
+      `SELECT EXISTS(SELECT 1 FROM service_installment_plans WHERE service_id=$1 AND plan_id=$2) AS linked`,
+      [ids.service, ids.plan],
+    );
+    expect(row.linked).toBe(true);
+  });
+
+  it('نشر نسختين متزامنتين يتسلسل بقفل السياسة', async () => {
+    const [policy] = await q<{ id: string }[]>(
+      `SELECT id FROM payment_policies WHERE slug=$1`,
+      [`inst-policy-${runId}`],
+    );
+    const [first, second] = await Promise.all([
+      policiesService.publishNewVersion(ids.adminUser, policy.id, 'نص شروط جديد كامل للتحقق من التسلسل الأول'),
+      policiesService.publishNewVersion(ids.adminUser, policy.id, 'نص شروط جديد كامل للتحقق من التسلسل الثاني'),
+    ]);
+    expect([first.version, second.version].sort()).toEqual([2, 3]);
+    await q(`DELETE FROM payment_policy_versions WHERE policy_id=$1 AND version > 1`, [policy.id]);
+  });
+
+  it('فشل تدقيق تعديل السياسة يعيد القيمة الأصلية', async () => {
+    const [policy] = await q<{ id: string; title_ar: string }[]>(
+      `SELECT id, title_ar FROM payment_policies WHERE slug=$1`,
+      [`inst-policy-${runId}`],
+    );
+    const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated policy audit failure'));
+    try {
+      await expect(policiesService.updatePolicyMeta(ids.adminUser, policy.id, { title_ar: 'عنوان لا يجب أن يثبت' }))
+        .rejects.toThrow('simulated policy audit failure');
+    } finally {
+      failure.mockRestore();
+    }
+    const [unchanged] = await q<{ title_ar: string }[]>(`SELECT title_ar FROM payment_policies WHERE id=$1`, [policy.id]);
+    expect(unchanged.title_ar).toBe(policy.title_ar);
   });
 
   it('اعتماد أدمن: جدولة ذرّية مجموعها = الإجمالي الممول بالظبط — واعتماد تاني متزامن يفشل 409', async () => {

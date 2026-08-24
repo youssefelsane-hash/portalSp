@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import type { ReactNode } from 'react';
 import { Tajawal } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/lib/auth-context';
@@ -23,7 +24,7 @@ export const viewport: Viewport = {
   themeColor: '#2f5aa6',
 };
 
-export default function RootLayout({ children }: LayoutProps<'/'>) {
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="ar" dir="rtl" className={`${tajawal.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground">

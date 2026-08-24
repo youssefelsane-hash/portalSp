@@ -26,39 +26,63 @@ error` وتمنع السيرفر يشتغل خالص، عكس الموثّق ف�
 **ليه Paymob بالذات**: أشهر بوابة دفع مصرية، مطابقة لعملة EGP اللي كل أسعار baytak بيها بالفعل،
 وموثّقة في `docs/01-master-plan.md` من الأول كخيار أساسي.
 
-**الكود**: `apps/api/src/modules/payments/gateways/paymob-gateway.service.ts` (تكامل حقيقي مع
-Accept API v1) — تفاصيل معمارية كاملة في `apps/api/src/modules/payments/README.md`.
+**الكود**: `apps/api/src/modules/payments/gateways/paymob-provider.service.ts` (تكامل حقيقي مع
+Intention API وUnified Checkout) — تفاصيل معمارية كاملة في
+`docs/adr/0013-payment-provider-abstraction.md`.
 
 ### الخطوات
 
 1. اعمل حساب على [accept.paymob.com](https://accept.paymob.com) (Egypt أو المنطقة المناسبة لك).
-2. من لوحة التحكم → **Settings → Account Info**: هتلاقي **API Key** — ده `PAYMOB_API_KEY`.
-3. من **Developers → Payment Integrations**: اعمل integration جديد لنوع **Online Card** — هتاخد
-   **Integration ID** رقمي — ده `PAYMOB_INTEGRATION_ID_CARD`.
-4. من **Developers → iframes**: اعمل iframe جديد واربطه بالـ integration اللي عملته فوق —
-   هتاخد **Iframe ID** — ده `PAYMOB_IFRAME_ID`.
-5. من نفس صفحة الـ Payment Integration اللي عملته: هتلاقي **HMAC Secret** (منفصل تماماً عن الـ
-   API Key — ده اللي بيتحقق منه توقيع ردود الـ webhook) — ده `PAYMOB_HMAC_SECRET`.
-6. من **Developers → Webhooks**: ضيف الـ callback URL بتاعك:
+2. من لوحة التحكم هات **API Key**، **Secret Key**، **Public Key**، و**HMAC
+   Secret**. الأول مطلوب لاستعلامات العمليات، الثاني لـIntention API، الثالث
+   لرابط Unified Checkout، والرابع للتحقق من webhook.
+3. من **Developers → Payment Integrations** اعمل integration لنوع **Online Card**
+   واحفظ **Integration ID**. لا تحتاج Iframe ID؛ التنفيذ الحالي لا يستخدم
+   التدفق القديم.
+4. اختياريًا، اعمل integration منفصلة لـ**Mobile Wallet** واحفظ Integration ID
+   الخاص بها.
+5. من **Developers → Webhooks** ضيف الـcallback URL:
    `https://YOUR_DOMAIN/api/v1/webhooks/paymob` (استبدل `YOUR_DOMAIN` بدومين السيرفر الحقيقي وقت
    النشر).
 
-### مكان القيم
+### مكان القيم — لوحة الإدارة (المفضل)
 
-في `apps/api/.env`:
+من **الإعدادات → payments_paymob** أدخل:
+
+| مفتاح الإعداد | القيمة |
+|---|---|
+| `payments.paymob.base_url` | `https://accept.paymob.com` |
+| `payments.paymob.api_key` | API Key |
+| `payments.paymob.secret_key` | Secret Key |
+| `payments.paymob.public_key` | Public Key |
+| `payments.paymob.integration_id_card` | Online Card Integration ID |
+| `payments.paymob.integration_id_mobile_wallet` | Mobile Wallet Integration ID (اختياري) |
+| `payments.paymob.hmac_secret` | HMAC Secret |
+
+`api_key` و`secret_key` و`hmac_secret` تُخزّن بتشفير AES-256-GCM، ولا يعيدها
+الـAPI أو يعرضها في سجل التدقيق. يجب ضبط `SETTINGS_ENCRYPTION_KEY` بقيمة عشوائية
+ثابتة 32 حرفًا على الأقل في بيئة الـAPI؛ هذا المفتاح الرئيسي لا يوضع في لوحة
+الإدارة. الحفظ يُعيد تحميل مزود Paymob فورًا في النسخة التي استلمت التعديل؛
+في نشر متعدد النسخ أعد تشغيل باقي النسخ بعد التعديل.
+
+### خطة الاحتياط بـenv
+
+يقرأ المزود القيم التالية كـfallback إذا كان إعداد لوحة الإدارة فارغًا:
 ```
 PAYMOB_BASE_URL=https://accept.paymob.com
-PAYMOB_API_KEY=<من الخطوة 2>
-PAYMOB_INTEGRATION_ID_CARD=<من الخطوة 3>
-PAYMOB_IFRAME_ID=<من الخطوة 4>
-PAYMOB_HMAC_SECRET=<من الخطوة 5>
+PAYMOB_API_KEY=
+PAYMOB_SECRET_KEY=
+PAYMOB_PUBLIC_KEY=
+PAYMOB_INTEGRATION_ID_CARD=
+PAYMOB_INTEGRATION_ID_MOBILE_WALLET=
+PAYMOB_HMAC_SECRET=
 ```
 
 ### التأكد إنها اشتغلت
 
-بعد ملء القيم وإعادة تشغيل `apps/api`، جرّب `POST /orders/:id/pay-with-card` على طلب حقيقي
-بحالة `work_completed`/`awaiting_payment` — المفروض ترجع `redirect_url` حقيقي بيبدأ بـ
-`https://accept.paymob.com/api/acceptance/iframes/...`. افتحه في متصفح، أكمل بيانات بطاقة اختبار
+بعد حفظ القيم، جرّب `POST /orders/:id/pay-with-card` على طلب حقيقي
+بحالة `work_completed`/`awaiting_payment` — المفروض ترجع `redirect_url` لـ
+`https://accept.paymob.com/unifiedcheckout/...`. افتحه في متصفح، أكمل بيانات بطاقة اختبار
 (Paymob بتوفر بطاقات اختبار في وضع Test Mode)، وتأكد إن `POST /webhooks/paymob` استقبل الرد
 وقفل الطلب `completed`/`paid` فعلاً (`GET /orders/:id`).
 
@@ -518,9 +542,12 @@ log-only/معطّلة بأمان، مش هتكسر حاجة):
 
 ```bash
 # Paymob (§1)
+SETTINGS_ENCRYPTION_KEY=
 PAYMOB_API_KEY=
+PAYMOB_SECRET_KEY=
+PAYMOB_PUBLIC_KEY=
 PAYMOB_INTEGRATION_ID_CARD=
-PAYMOB_IFRAME_ID=
+PAYMOB_INTEGRATION_ID_MOBILE_WALLET=
 PAYMOB_HMAC_SECRET=
 
 # FawryPay (§2) — تحذير: راجع "تحذير مهم قبل الاستخدام الإنتاجي" في القسم ده قبل الاعتماد عليها

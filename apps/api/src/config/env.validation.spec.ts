@@ -7,6 +7,7 @@ const MINIMAL_VALID_PRODUCTION_ENV = {
   DATABASE_URL: 'postgres://user:pass@host:5432/db',
   JWT_ACCESS_SECRET: 'a'.repeat(32),
   JWT_REFRESH_SECRET: 'b'.repeat(32),
+  SETTINGS_ENCRYPTION_KEY: 'c'.repeat(32),
   CORS_ORIGIN: 'https://app.example.com',
   WEBAUTHN_RP_ID: 'example.com',
   WEBAUTHN_ORIGIN: 'https://app.example.com',

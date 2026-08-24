@@ -1,4 +1,5 @@
 import { Setting } from '../entities/setting.entity';
+import { isSecretSettingKey } from '../settings.service';
 
 export interface SettingResponseDto {
   id: string;
@@ -16,7 +17,7 @@ export function toSettingResponseDto(setting: Setting): SettingResponseDto {
   return {
     id: setting.id,
     key: setting.key,
-    value: setting.value,
+    value: isSecretSettingKey(setting.key) ? (setting.value ? '********' : '') : setting.value,
     value_type: setting.valueType,
     group_name: setting.groupName,
     description: setting.description,

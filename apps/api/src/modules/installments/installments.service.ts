@@ -115,40 +115,59 @@ export class InstallmentsService {
         entityId: plan.id,
         newValues: { name_ar: plan.nameAr, count: plan.installmentCount },
         meta,
-      });
+      }, manager);
       return plan;
     });
   }
 
   async updatePlan(adminUserId: string, planId: string, dto: Record<string, unknown>, meta?: AuditActorMeta): Promise<InstallmentPlan> {
-    const plan = await this.plans.findOne({ where: { id: planId } });
-    if (!plan) throw new ApiException(ErrorCode.VAL_001, 'خطة التقسيط غير موجودة', HttpStatus.NOT_FOUND);
-    // التغييرات prospective — الطلبات القائمة ماسكة snapshot خاص بيها، ده التعديل بيأثر
-    // على التقديمات الجديدة بس. ممنوع تعديل snapshot تاريخي.
-    const map: Record<string, keyof InstallmentPlan> = {
-      name_ar: 'nameAr',
-      interval_days: 'intervalDays',
-      is_active: 'isActive',
-    };
-    for (const [dtoKey, entityKey] of Object.entries(map)) {
-      if (dto[dtoKey] !== undefined) (plan as unknown as Record<string, unknown>)[entityKey] = dto[dtoKey];
-    }
-    if (dto.financing_percentage !== undefined) plan.financingPercentage = String(dto.financing_percentage);
-    if (dto.down_payment_percentage !== undefined) plan.downPaymentPercentage = String(dto.down_payment_percentage);
-    if (dto.fixed_fee_cents !== undefined) plan.fixedFeeCents = Number(dto.fixed_fee_cents);
-    if (dto.min_order_amount_cents !== undefined) plan.minOrderAmountCents = dto.min_order_amount_cents as number | null;
-    if (dto.max_order_amount_cents !== undefined) plan.maxOrderAmountCents = dto.max_order_amount_cents as number | null;
-    await this.plans.save(plan);
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'installment_plan.updated',
-      entityType: 'installment_plan',
-      entityId: plan.id,
-      newValues: { ...dto },
-      meta,
+    return this.dataSource.transaction(async (manager) => {
+      const plan = await manager
+        .createQueryBuilder(InstallmentPlan, 'plan')
+        .setLock('pessimistic_write')
+        .where('plan.id = :planId', { planId })
+        .getOne();
+      if (!plan) throw new ApiException(ErrorCode.VAL_001, 'خطة التقسيط غير موجودة', HttpStatus.NOT_FOUND);
+      const oldValues = {
+        name_ar: plan.nameAr,
+        interval_days: plan.intervalDays,
+        financing_percentage: plan.financingPercentage,
+        down_payment_percentage: plan.downPaymentPercentage,
+        fixed_fee_cents: plan.fixedFeeCents,
+        min_order_amount_cents: plan.minOrderAmountCents,
+        max_order_amount_cents: plan.maxOrderAmountCents,
+        is_active: plan.isActive,
+      };
+      // Existing applications retain their immutable snapshots; these fields affect new applications only.
+      const map: Record<string, keyof InstallmentPlan> = {
+        name_ar: 'nameAr',
+        interval_days: 'intervalDays',
+        is_active: 'isActive',
+      };
+      for (const [dtoKey, entityKey] of Object.entries(map)) {
+        if (dto[dtoKey] !== undefined) (plan as unknown as Record<string, unknown>)[entityKey] = dto[dtoKey];
+      }
+      if (dto.financing_percentage !== undefined) plan.financingPercentage = String(dto.financing_percentage);
+      if (dto.down_payment_percentage !== undefined) plan.downPaymentPercentage = String(dto.down_payment_percentage);
+      if (dto.fixed_fee_cents !== undefined) plan.fixedFeeCents = Number(dto.fixed_fee_cents);
+      if (dto.min_order_amount_cents !== undefined) plan.minOrderAmountCents = dto.min_order_amount_cents as number | null;
+      if (dto.max_order_amount_cents !== undefined) plan.maxOrderAmountCents = dto.max_order_amount_cents as number | null;
+      if (plan.minOrderAmountCents != null && plan.maxOrderAmountCents != null && plan.minOrderAmountCents > plan.maxOrderAmountCents) {
+        throw new ApiException(ErrorCode.VAL_001, 'الحد الأدنى أكبر من الأقصى', HttpStatus.BAD_REQUEST);
+      }
+      await manager.save(plan);
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'installment_plan.updated',
+        entityType: 'installment_plan',
+        entityId: plan.id,
+        oldValues,
+        newValues: { ...dto },
+        meta,
+      }, manager);
+      return plan;
     });
-    return plan;
   }
 
   async listPlans(): Promise<InstallmentPlan[]> {
@@ -165,25 +184,27 @@ export class InstallmentsService {
   }
 
   async setPlanForService(adminUserId: string, serviceId: string, planId: string, enabled: boolean, meta?: AuditActorMeta): Promise<void> {
-    if (enabled) {
-      await this.dataSource.query(
-        `INSERT INTO service_installment_plans (service_id, plan_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [serviceId, planId],
-      );
-    } else {
-      await this.dataSource.query(`DELETE FROM service_installment_plans WHERE service_id = $1 AND plan_id = $2`, [
-        serviceId,
-        planId,
-      ]);
-    }
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: enabled ? 'installment_plan.enabled_for_service' : 'installment_plan.disabled_for_service',
-      entityType: 'service',
-      entityId: serviceId,
-      newValues: { plan_id: planId },
-      meta,
+    await this.dataSource.transaction(async (manager) => {
+      if (enabled) {
+        await manager.query(
+          `INSERT INTO service_installment_plans (service_id, plan_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+          [serviceId, planId],
+        );
+      } else {
+        await manager.query(`DELETE FROM service_installment_plans WHERE service_id = $1 AND plan_id = $2`, [
+          serviceId,
+          planId,
+        ]);
+      }
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: enabled ? 'installment_plan.enabled_for_service' : 'installment_plan.disabled_for_service',
+        entityType: 'service',
+        entityId: serviceId,
+        newValues: { plan_id: planId, enabled },
+        meta,
+      }, manager);
     });
   }
 
@@ -195,7 +216,7 @@ export class InstallmentsService {
               p.fixed_fee_cents,
               p.down_payment_percentage::float AS down_payment_percentage,
               p.min_order_amount_cents, p.max_order_amount_cents,
-              p.requires_saved_card
+              p.requires_saved_card, p.allowed_provider
        FROM installment_plans p
        JOIN service_installment_plans sp ON sp.plan_id = p.id
        WHERE sp.service_id = $1 AND p.is_active = true AND p.deleted_at IS NULL`,
@@ -341,21 +362,21 @@ export class InstallmentsService {
           [versionId, params.userId, saved.id],
         );
       }
-      return saved;
-    }).then((application: InstallmentApplication) => {
-      this.auditLog.record({
+      await this.auditLog.record({
         actorUserId: params.userId,
         actorRole: 'customer',
         action: 'installment_application.submitted',
         entityType: 'installment_application',
-        entityId: application.id,
+        entityId: saved.id,
         newValues: {
-          order_id: application.orderId,
-          plan_id: application.planId,
-          total_financed_cents: application.totalFinancedCents,
-          installments: application.installmentCount,
+          order_id: saved.orderId,
+          plan_id: saved.planId,
+          total_financed_cents: saved.totalFinancedCents,
+          installments: saved.installmentCount,
         },
-      }).catch(() => undefined);
+      }, manager);
+      return saved;
+    }).then((application: InstallmentApplication) => {
 
       this.events.emit(
         INSTALLMENT_APPLICATION_SUBMITTED_EVENT,
@@ -405,13 +426,13 @@ export class InstallmentsService {
       }
       app.status = InstallmentApplicationStatus.CANCELLED;
       await manager.save(app);
-    });
-    await this.auditLog.record({
-      actorUserId: userId,
-      actorRole: 'customer',
-      action: 'installment_application.cancelled',
-      entityType: 'installment_application',
-      entityId: applicationId,
+      await this.auditLog.record({
+        actorUserId: userId,
+        actorRole: 'customer',
+        action: 'installment_application.cancelled',
+        entityType: 'installment_application',
+        entityId: applicationId,
+      }, manager);
     });
   }
 
@@ -561,7 +582,7 @@ export class InstallmentsService {
           entityId: app.id,
           newValues: { reason: decision.reason },
           meta,
-        });
+        }, manager);
         return app;
       }
 
@@ -607,7 +628,7 @@ export class InstallmentsService {
         entityId: app.id,
         newValues: { total_financed_cents: app.totalFinancedCents, schedule_rows: amounts.length },
         meta,
-      });
+      }, manager);
       return app;
     });
 

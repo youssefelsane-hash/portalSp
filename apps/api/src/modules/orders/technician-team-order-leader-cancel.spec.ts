@@ -38,7 +38,7 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
     customerProfile: '',
     address: '',
     order: '',
-    cancellationReasonId: '019fe079-9264-7ab2-9133-5e72530ec783', // "الفني مش قدر يوصل" — technician/بلا رسوم/بلا نص حر إجباري (مصدر: cancellation_reasons المزروعة)
+    cancellationReasonId: '',
   };
 
   beforeAll(async () => {
@@ -123,6 +123,13 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
     );
     ids.order = order.id;
 
+    const [cancellationReason] = await q(
+      `INSERT INTO cancellation_reasons (reason_ar, reason_en, applies_to, requires_free_text, charges_fee)
+       VALUES ($1,$2,'technician',false,false) RETURNING id`,
+      [`سبب إلغاء قائد ${runId}`, `Leader cancellation ${runId}`],
+    );
+    ids.cancellationReasonId = cancellationReason.id;
+
     const settingsServiceStub = {
       getBoolean: async (_key: string, fallback: boolean) => (_key === 'cancellation.technician_self_cancel_enabled' ? true : fallback),
       getNumber: async (_key: string, fallback: number) => fallback,
@@ -177,6 +184,7 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
     await q(`DELETE FROM technician_order_cancellations WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM order_status_history WHERE order_id = $1`, [ids.order]);
     await q(`DELETE FROM orders WHERE id = $1`, [ids.order]);
+    await q(`DELETE FROM cancellation_reasons WHERE id = $1`, [ids.cancellationReasonId]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
     await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technicianProfile]);

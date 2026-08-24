@@ -22,10 +22,11 @@ import { Service } from '../catalog/entities/service.entity';
 describe('ProjectsService — المشروعات والمراحل والعروض (PostgreSQL)', () => {
   let dataSource: DataSource;
   let projectsService: ProjectsService;
+  let auditLog: AuditLogService;
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
   const ids = {
     customerUser: '', customerProfile: '', category: '', service: '',
-    address: '', city: '', zone: '', project: '', adminUser: '',
+    address: '', city: '', zone: '', project: '', adminUser: '', otherUser: '', otherProfile: '',
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,7 +46,8 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     const [city] = await q(`INSERT INTO cities (country_id,name_ar,name_en,slug) VALUES ($1,$2,$3,$4) RETURNING id`,
       [country.id, `مدينة مشروع ${runId}`, `Proj City ${runId}`, `proj-city-${runId}`]);
     ids.city = city.id;
-    await q(`INSERT INTO service_zones (city_id,name_ar,name_en) VALUES ($1,$2,$3)`, [ids.city, `نطاق ${runId}`, `Proj Zone ${runId}`]);
+    const [zone] = await q(`INSERT INTO service_zones (city_id,name_ar,name_en) VALUES ($1,$2,$3) RETURNING id`, [ids.city, `نطاق ${runId}`, `Proj Zone ${runId}`]);
+    ids.zone = zone.id;
     const [category] = await q(`INSERT INTO service_categories (name_ar,name_en,slug) VALUES ($1,$2,$3) RETURNING id`,
       [`فئة مشروع ${runId}`, `Proj Cat ${runId}`, `proj-cat-${runId}`]);
     ids.category = category.id;
@@ -60,6 +62,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     ids.customerUser = customerUser.id;
     const [profile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [ids.customerUser]);
     ids.customerProfile = profile.id;
+    const [otherUser] = await q(`INSERT INTO users (phone_number,full_name,user_type) VALUES ($1,$2,'customer') RETURNING id`,
+      [`+2080${runId}`.slice(0, 15), `عميل آخر ${runId}`]);
+    ids.otherUser = otherUser.id;
+    const [otherProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [ids.otherUser]);
+    ids.otherProfile = otherProfile.id;
     const [addr] = await q(
       `INSERT INTO addresses (user_id,city_id,street_name,location)
        VALUES ($1,$2,$3, ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
@@ -71,8 +78,8 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [`+2060${runId}`.slice(0, 15), `أدمن مشروع ${runId}`]);
     ids.adminUser = admin.id;
 
-    const auditMock = { record: async () => undefined } as unknown as AuditLogService;
-    projectsService = new ProjectsService(dataSource.getRepository(Project), dataSource.getRepository(ProjectQuote), dataSource.getRepository(ProjectMilestone), dataSource, auditMock);
+    auditLog = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditLogService;
+    projectsService = new ProjectsService(dataSource.getRepository(Project), dataSource.getRepository(ProjectQuote), dataSource.getRepository(ProjectMilestone), dataSource, auditLog);
   });
 
   afterAll(async () => {
@@ -86,8 +93,8 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       }
       await q(`DELETE FROM orders WHERE customer_id=$1`, [ids.customerProfile]);
       await q(`DELETE FROM addresses WHERE id=$1`, [ids.address]);
-      await q(`DELETE FROM customer_profiles WHERE id=$1`, [ids.customerProfile]);
-      await q(`DELETE FROM users WHERE id IN ($1,$2)`, [ids.customerUser, ids.adminUser]);
+      await q(`DELETE FROM customer_profiles WHERE id IN ($1,$2)`, [ids.customerProfile, ids.otherProfile]);
+      await q(`DELETE FROM users WHERE id IN ($1,$2,$3)`, [ids.customerUser, ids.adminUser, ids.otherUser]);
       await q(`DELETE FROM services WHERE id=$1`, [ids.service]);
       await q(`DELETE FROM service_categories WHERE id=$1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id=$1`, [ids.zone]);
@@ -108,25 +115,32 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     expect(project.projectNumber).toMatch(/^PRJ-/);
     expect(project.status).toBe('survey_requested');
     expect(project.budgetEstimateCents).toBe(500000);
+    await expect(projectsService.findOneOwned(ids.otherUser, project.id)).rejects.toMatchObject({ code: 'VAL_001' });
+
+    const page = await projectsService.listAll(1, 1);
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].id).toBe(project.id);
+    expect(page.meta).toMatchObject({ page: 1, per_page: 1 });
+    expect(page.meta.total).toBeGreaterThanOrEqual(1);
   });
 
-  it('انتقال صحيح: survey_requested → survey_scheduled → quote_preparing → awaiting_customer_approval', async () => {
+  it('انتقال صحيح حتى تحضير العرض، وانتظار موافقة العميل لا يبدأ إلا بإرسال عرض', async () => {
     let p = await projectsService.transition(ids.adminUser, ids.project, 'survey_scheduled');
     expect(p.status).toBe('survey_scheduled');
     p = await projectsService.transition(ids.adminUser, ids.project, 'quote_preparing');
     expect(p.status).toBe('quote_preparing');
-    p = await projectsService.transition(ids.adminUser, ids.project, 'awaiting_customer_approval');
-    expect(p.status).toBe('awaiting_customer_approval');
+    await expect(projectsService.transition(ids.adminUser, ids.project, 'awaiting_customer_approval'))
+      .rejects.toMatchObject({ status: 409 });
   });
 
   it('عرض سعر v1: إنشاء وإرسال واعتماد — المجاميع محسوبة من الباك-إند', async () => {
     const quote = await projectsService.createQuote(ids.adminUser, ids.project, {
       work_lines: [
-        { quantity: 100, unit_price_cents: 5000 },
-        { quantity: 20, unit_price_cents: 3000 },
+        { description_ar: 'دهان الحوائط', quantity: 100, unit: 'متر', unit_price_cents: 5000 },
+        { description_ar: 'تركيب الجبس', quantity: 20, unit: 'متر', unit_price_cents: 3000 },
       ],
       material_lines: [
-        { quantity: 50, unit_price_cents: 2000 },
+        { description_ar: 'خامات الدهان', responsibility: 'provider_supplied', quantity: 50, unit: 'لتر', unit_price_cents: 2000 },
       ],
       scope_included: 'دهان + جبس + سباكة',
       duration_days: 45,
@@ -135,9 +149,15 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     expect(quote.totalWorkCents).toBe(560000);
     expect(quote.totalMaterialsCents).toBe(100000);
     expect(quote.totalCents).toBe(660000);
+    expect(quote.workLines[0]).toMatchObject({ description_ar: 'دهان الحوائط', unit: 'متر' });
+    expect(quote.materialLines[0]).toMatchObject({ description_ar: 'خامات الدهان', responsibility: 'provider_supplied' });
 
-    const sent = await projectsService.sendQuote(ids.adminUser, quote.id, 14);
+    const sent = await projectsService.sendQuote(ids.adminUser, quote.id, 14, ids.project);
     expect(sent.status).toBe('sent');
+    await expect(projectsService.transition(ids.adminUser, ids.project, 'awaiting_deposit'))
+      .rejects.toMatchObject({ status: 409 });
+
+    await expect(projectsService.approveQuote(ids.otherUser, quote.id)).rejects.toMatchObject({ code: 'VAL_001' });
 
     const approved = await projectsService.approveQuote(ids.customerUser, quote.id);
     expect(approved.status).toBe('awaiting_deposit');
@@ -154,6 +174,16 @@ describe('ProjectsService — المشروعات والمراحل والعروض
   });
 
   it('مراحل: إنشاء 3 مراحل مجموعها = قيمة العرض المعتمد بالظبط', async () => {
+    const auditRecord = auditLog.record as jest.MockedFunction<AuditLogService['record']>;
+    auditRecord.mockRejectedValueOnce(new Error('audit unavailable'));
+    await expect(projectsService.createMilestones(ids.adminUser, ids.project, [
+      { name_ar: 'عربون', amount_cents: 100000 },
+      { name_ar: 'تأسيس', amount_cents: 200000 },
+      { name_ar: 'تشطيبات نهائية', amount_cents: 360000 },
+    ])).rejects.toThrow('audit unavailable');
+    const [{ count }] = await q<{ count: string }[]>(`SELECT COUNT(*)::text AS count FROM project_milestones WHERE project_id=$1`, [ids.project]);
+    expect(Number(count)).toBe(0);
+
     const milestones = await projectsService.createMilestones(ids.adminUser, ids.project, [
       { name_ar: 'عربون', amount_cents: 100000 },
       { name_ar: 'تأسيس', amount_cents: 200000 },
@@ -167,7 +197,7 @@ describe('ProjectsService — المشروعات والمراحل والعروض
   it('مجموع المراحل ≠ العرض: يترفض', async () => {
     await expect(projectsService.createMilestones(ids.adminUser, ids.project, [
       { name_ar: 'غلط', amount_cents: 999999 },
-    ])).rejects.toThrow(/لا يساوي/);
+    ])).rejects.toThrow(/اتعملت بالفعل|لا يساوي/);
   });
 
   it('بوابة إطلاق المستحق: مرحلة مش مكتملة → false، مكتملة + مدفوعة + موافقة → true', async () => {

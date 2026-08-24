@@ -9,6 +9,7 @@ class InstallmentPlan {
   final double financingPercentage;
   final double downPaymentPercentage;
   final bool requiresSavedCard;
+  final String allowedProvider;
   final List<InstallmentDocRequirement> documentRequirements;
 
   InstallmentPlan({
@@ -19,6 +20,7 @@ class InstallmentPlan {
     required this.financingPercentage,
     required this.downPaymentPercentage,
     required this.requiresSavedCard,
+    required this.allowedProvider,
     required this.documentRequirements,
   });
 
@@ -32,6 +34,7 @@ class InstallmentPlan {
         downPaymentPercentage:
             (json['down_payment_percentage'] as num?)?.toDouble() ?? 0,
         requiresSavedCard: json['requires_saved_card'] as bool? ?? true,
+        allowedProvider: json['allowed_provider'] as String? ?? 'paymob',
         documentRequirements: (json['document_requirements'] as List<dynamic>?)
                 ?.map((d) => InstallmentDocRequirement.fromJson(d))
                 .toList() ??
@@ -52,6 +55,22 @@ class InstallmentDocRequirement {
       );
 }
 
+class InstallmentPolicy {
+  final String titleAr;
+  final String bodyAr;
+  final bool isRequired;
+  final String currentVersionId;
+
+  InstallmentPolicy({required this.titleAr, required this.bodyAr, required this.isRequired, required this.currentVersionId});
+
+  factory InstallmentPolicy.fromJson(Map<String, dynamic> json) => InstallmentPolicy(
+        titleAr: json['titleAr'] as String,
+        bodyAr: json['bodyAr'] as String,
+        isRequired: json['isRequired'] as bool? ?? true,
+        currentVersionId: json['currentVersionId'] as String,
+      );
+}
+
 /// خدمة التقسيط — استدعاءات API للعميل
 class InstallmentRepository {
   final AuthRepository auth;
@@ -64,6 +83,12 @@ class InstallmentRepository {
     return items.map(InstallmentPlan.fromJson).toList();
   }
 
+  Future<List<InstallmentPolicy>> fetchPolicies(String serviceId) async {
+    final items = await auth.authedRequestList(
+        '/checkout/payment-policies?applies_to=installment&service_id=$serviceId');
+    return items.map(InstallmentPolicy.fromJson).toList();
+  }
+
   /// تقديم طلب تقسيط على طلب موجود
   Future<Map<String, dynamic>> submitApplication({
     required String orderId,
@@ -71,11 +96,14 @@ class InstallmentRepository {
     required List<String> acceptedPolicyVersionIds,
     String? paymentMethodId,
   }) async {
+    final body = <String, dynamic>{
+      'plan_id': planId,
+      'accepted_policy_version_ids': acceptedPolicyVersionIds,
+    };
+    if (paymentMethodId != null) {
+      body['payment_method_id'] = paymentMethodId;
+    }
     return (await auth.authedRequest('POST', '/orders/$orderId/installment-application',
-        body: {
-          'plan_id': planId,
-          if (paymentMethodId != null) 'payment_method_id': paymentMethodId,
-          'accepted_policy_version_ids': acceptedPolicyVersionIds,
-        }))!;
+        body: body))!;
   }
 }

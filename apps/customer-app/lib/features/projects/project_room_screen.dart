@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../orders/order_detail_screen.dart';
 
 class ProjectRoom {
   final Map<String, dynamic> project;
   final List<Map<String, dynamic>> milestones;
   final List<Map<String, dynamic>> quotes;
   final List<Map<String, dynamic>> orders;
+  final List<Map<String, dynamic>> warranties;
   final Map<String, dynamic> summary;
 
   ProjectRoom({
@@ -14,6 +16,7 @@ class ProjectRoom {
     required this.milestones,
     required this.quotes,
     required this.orders,
+    required this.warranties,
     required this.summary,
   });
 
@@ -22,6 +25,7 @@ class ProjectRoom {
         milestones: (json['milestones'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
         quotes: (json['quotes'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
         orders: (json['orders'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
+        warranties: (json['warranties'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
         summary: json['summary'] ?? {},
       );
 }
@@ -38,6 +42,10 @@ class ProjectsRepository {
   Future<ProjectRoom> room(String projectId) async {
     final data = await auth.authedRequest('GET', '/me/projects/$projectId/room');
     return ProjectRoom.fromJson(data!);
+  }
+
+  Future<void> approveQuote(String projectId, String quoteId) async {
+    await auth.authedRequest('POST', '/me/projects/$projectId/quotes/$quoteId/approve');
   }
 }
 
@@ -61,16 +69,17 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen> with SingleTicker
   late TabController _tabController;
   ProjectRoom? _room;
   bool _loading = true;
+  String? _error;
 
-  @override void initState() { super.initState(); _tabController = TabController(length: 3, vsync: this); _load(); }
+  @override void initState() { super.initState(); _tabController = TabController(length: 4, vsync: this); _load(); }
 
   Future<void> _load() async {
     try {
       final repo = ProjectsRepository(widget.auth);
       final room = await repo.room(widget.projectId);
       if (mounted) setState(() { _room = room; _loading = false; });
-    } on ApiException {
-      if (mounted) setState(() { _loading = false; });
+    } on ApiException catch (error) {
+      if (mounted) setState(() { _loading = false; _error = error.message; });
     }
   }
 
@@ -79,19 +88,21 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen> with SingleTicker
     return Directionality(
       textDirection: TextDirection.rtl,
       child: DefaultTabController(
-        length: 3,
+        length: 4,
         child: Scaffold(
           appBar: AppBar(
-            title: Text(_room?._safeString('project')?['name_ar'] ?? 'المشروع'),
+            title: Text(_room?.project['name_ar']?.toString() ?? 'المشروع'),
             bottom: TabBar(controller: _tabController, tabs: const [
-              Tab(text: 'المراحل'), Tab(text: 'العروض'), Tab(text: 'الطلبات'),
+              Tab(text: 'المراحل'), Tab(text: 'العروض'), Tab(text: 'الطلبات'), Tab(text: 'الضمانات'),
             ]),
           ),
           body: _loading
               ? const Center(child: CircularProgressIndicator())
-              : TabBarView(controller: _tabController, children: [
-                  _buildMilestones(), _buildQuotes(), _buildOrders(),
-                ]),
+              : _error != null
+                  ? Center(child: Text(_error!))
+                  : TabBarView(controller: _tabController, children: [
+                      _buildMilestones(), _buildQuotes(), _buildOrders(), _buildWarranties(),
+                    ]),
         ),
       ),
     );
@@ -133,8 +144,24 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen> with SingleTicker
         return Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(
           title: Text('عرض v${q['version']}'),
           subtitle: Text('$total ج.م · ${q['status']}'),
-          trailing: Icon(q['status'] == 'approved' ? Icons.check_circle : Icons.description,
-              color: q['status'] == 'approved' ? Colors.green : null),
+          trailing: q['status'] == 'sent'
+              ? FilledButton(
+                  onPressed: () async {
+                    try {
+                      await ProjectsRepository(widget.auth)
+                          .approveQuote(widget.projectId, q['id'].toString());
+                      await _load();
+                    } on ApiException catch (error) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(this.context)
+                            .showSnackBar(SnackBar(content: Text(error.message)));
+                      }
+                    }
+                  },
+                  child: const Text('موافقة'),
+                )
+              : Icon(q['status'] == 'approved' ? Icons.check_circle : Icons.description,
+                  color: q['status'] == 'approved' ? Colors.green : null),
         ));
       },
     );
@@ -152,15 +179,32 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen> with SingleTicker
           title: Text(o['order_number']?.toString() ?? ''),
           subtitle: Text(o['status']?.toString() ?? ''),
           trailing: Text('${((o['total_amount_cents'] as num?) ?? 0) / 100} ج.م'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => OrderDetailScreen(orderId: o['id'].toString()),
+          )),
         ));
       },
     );
   }
-}
 
-extension _SafeMap on ProjectRoom? {
-  Map<String, dynamic>? _safeString(String key) {
-    if (this == null) return null;
-    return this!.project[key] is Map ? this!.project[key] : this!.project;
+  Widget _buildWarranties() {
+    final warranties = _room?.warranties ?? [];
+    if (warranties.isEmpty) return const Center(child: Text('مفيش ضمانات مرتبطة بالمشروع'));
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: warranties.length,
+      itemBuilder: (context, index) {
+        final warranty = warranties[index];
+        return Card(
+          child: ListTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: Text(warranty['name_ar']?.toString() ?? 'ضمان'),
+            subtitle: Text(
+              'ساري حتى ${DateTime.parse(warranty['expires_at'].toString()).toLocal().toString().substring(0, 10)}',
+            ),
+          ),
+        );
+      },
+    );
   }
 }

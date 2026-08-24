@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { UserType } from '../auth/entities/user.entity';
@@ -46,8 +47,8 @@ export class MyProjectsController {
   async create(@CurrentUser() user: JwtPayload, @Body() dto: {
     project_type: string; name_ar: string; description_ar?: string;
     address_id: string; budget_estimate_cents?: number;
-  }) {
-    const project = await this.projectsService.create(user.sub, dto);
+  }, @AuditContext() meta: AuditMeta) {
+    const project = await this.projectsService.create(user.sub, dto, meta);
     return toProjectResponseDto(project);
   }
 
@@ -58,20 +59,23 @@ export class MyProjectsController {
   }
 
   @Get(':id')
-  async detail(@Param('id', ParseUUIDPipe) id: string) {
-    return toProjectResponseDto(await this.projectsService.findOne(id));
+  async detail(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return toProjectResponseDto(await this.projectsService.findOneOwned(user.sub, id));
   }
 
   @Get(':id/quotes')
-  async quotes(@Param('id', ParseUUIDPipe) id: string) {
+  async quotes(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    await this.projectsService.findOneOwned(user.sub, id);
     return this.projectsService.listQuotesForProject(id);
   }
 
   @Post(':id/quotes/:quoteId/approve')
   async approveQuote(
     @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) projectId: string,
     @Param('quoteId', ParseUUIDPipe) quoteId: string,
+    @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.approveQuote(user.sub, quoteId);
+    return this.projectsService.approveQuote(user.sub, quoteId, projectId, meta);
   }
 }

@@ -51,13 +51,14 @@ export class PaymentPoliciesService {
               p.id, p.slug, p.title_ar, p.is_required,
               v.id AS version_id, v.version, v.body_ar
        FROM payment_policies p
+       LEFT JOIN services selected_service ON selected_service.id = $2
        JOIN LATERAL (
          SELECT id, version, body_ar FROM payment_policy_versions
          WHERE policy_id = p.id ORDER BY version DESC LIMIT 1
        ) v ON true
        WHERE p.is_active = true AND p.applies_to = $1
          AND (p.target_service_id IS NULL OR p.target_service_id = $2)
-         AND (p.target_category_id IS NULL OR p.target_category_id = $3)
+         AND (p.target_category_id IS NULL OR p.target_category_id = COALESCE($3, selected_service.category_id))
        ORDER BY p.id, p.target_service_id NULLS LAST, v.version DESC`,
       [params.appliesTo, params.serviceId ?? null, params.categoryId ?? null],
     );
@@ -165,7 +166,7 @@ export class PaymentPoliciesService {
         entityId: policy.id,
         newValues: { slug: policy.slug, applies_to: policy.appliesTo },
         meta,
-      });
+      }, manager);
       return policy;
     });
   }
@@ -176,23 +177,36 @@ export class PaymentPoliciesService {
     dto: { title_ar?: string; is_required?: boolean; is_active?: boolean; display_order?: number },
     meta?: AuditActorMeta,
   ): Promise<PaymentPolicy> {
-    const policy = await this.policies.findOne({ where: { id: policyId } });
-    if (!policy) throw new ApiException(ErrorCode.VAL_001, 'السياسة غير موجودة', HttpStatus.NOT_FOUND);
-    if (dto.title_ar !== undefined) policy.titleAr = dto.title_ar;
-    if (dto.is_required !== undefined) policy.isRequired = dto.is_required;
-    if (dto.is_active !== undefined) policy.isActive = dto.is_active;
-    if (dto.display_order !== undefined) policy.displayOrder = dto.display_order;
-    await this.policies.save(policy);
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'payment_policy.updated',
-      entityType: 'payment_policy',
-      entityId: policy.id,
-      newValues: { ...dto },
-      meta,
+    return this.dataSource.transaction(async (manager) => {
+      const policy = await manager
+        .createQueryBuilder(PaymentPolicy, 'policy')
+        .setLock('pessimistic_write')
+        .where('policy.id = :policyId', { policyId })
+        .getOne();
+      if (!policy) throw new ApiException(ErrorCode.VAL_001, 'السياسة غير موجودة', HttpStatus.NOT_FOUND);
+      const oldValues = {
+        title_ar: policy.titleAr,
+        is_required: policy.isRequired,
+        is_active: policy.isActive,
+        display_order: policy.displayOrder,
+      };
+      if (dto.title_ar !== undefined) policy.titleAr = dto.title_ar;
+      if (dto.is_required !== undefined) policy.isRequired = dto.is_required;
+      if (dto.is_active !== undefined) policy.isActive = dto.is_active;
+      if (dto.display_order !== undefined) policy.displayOrder = dto.display_order;
+      await manager.save(policy);
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'payment_policy.updated',
+        entityType: 'payment_policy',
+        entityId: policy.id,
+        oldValues,
+        newValues: { ...dto },
+        meta,
+      }, manager);
+      return policy;
     });
-    return policy;
   }
 
   /**
@@ -209,6 +223,12 @@ export class PaymentPoliciesService {
       throw new ApiException(ErrorCode.VAL_001, 'نص السياسة قصير جدًا', HttpStatus.BAD_REQUEST);
     }
     return this.dataSource.transaction(async (manager) => {
+      const policy = await manager
+        .createQueryBuilder(PaymentPolicy, 'policy')
+        .setLock('pessimistic_write')
+        .where('policy.id = :policyId', { policyId })
+        .getOne();
+      if (!policy) throw new ApiException(ErrorCode.VAL_001, 'السياسة غير موجودة', HttpStatus.NOT_FOUND);
       const [{ next }] = await manager.query<{ next: number }[]>(
         `SELECT COALESCE(MAX(version), 0) + 1 AS next FROM payment_policy_versions WHERE policy_id = $1`,
         [policyId],
@@ -222,7 +242,7 @@ export class PaymentPoliciesService {
         entityId: version.id,
         newValues: { policy_id: policyId, version: version.version },
         meta,
-      });
+      }, manager);
       return version;
     });
   }

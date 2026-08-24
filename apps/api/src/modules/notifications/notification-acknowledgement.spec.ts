@@ -27,22 +27,6 @@ async function safeStep(label: string, fn: () => Promise<unknown>): Promise<void
   }
 }
 
-// حد زمني للتنضيف النهائي (destroy الاتصالات) عشان اتصال عالق ميعلقش عملية الـjest كلها
-// لأجل غير مسمى — أفضل نسيب handle مفتوح ويكتشفه --detectOpenHandles من إننا نعلّق العملية.
-function withTimeout(promise: Promise<unknown>, ms: number, label: string): Promise<void> {
-  return Promise.race([
-    promise.then(() => undefined),
-    new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        // eslint-disable-next-line no-console
-        console.error(`[notification-acknowledgement.spec] "${label}" تجاوز ${ms}ms — متابعة من غير انتظار`);
-        resolve();
-      }, ms);
-      timer.unref?.();
-    }),
-  ]);
-}
-
 describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part E', () => {
   let dataSource: DataSource;
   let cache: RedisCacheService;
@@ -140,10 +124,9 @@ describe('Notification acknowledgement integrity (PostgreSQL) — Script 2 Part 
       await safeStep('حذف المستخدم التجريبي', () => q(`DELETE FROM users WHERE id = $1`, [ids.user]));
     }
 
-    // التدمير النهائي دايمًا بيتنفذ بغض النظر عن نتيجة أي خطوة فوق، وبحد زمني عشان
-    // اتصال عالق ميعلقش عملية jest كلها.
-    await withTimeout(dataSource.destroy(), 5_000, 'dataSource.destroy()');
-    await withTimeout(Promise.resolve(cache.onModuleDestroy?.()), 5_000, 'cache.onModuleDestroy()');
+    // Redis يتقفل الأول؛ ترك Promise destroy شغالة بعد انتهاء الاختبار كان هو الـopen handle.
+    await cache.onModuleDestroy();
+    await dataSource.destroy();
   });
 
   function notificationsService(dispatcher: { dispatch: (...args: unknown[]) => unknown }): NotificationsService {

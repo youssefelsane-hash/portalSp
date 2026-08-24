@@ -22,6 +22,7 @@ import { WorkforceActivityService } from './workforce-activity.service';
 // سباق حقيقية مختلفة في الموديول ده تحديدًا.
 describe('Security/Workforce — اختبارات سباق صريحة (Script 5 Part 20 A-E)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let securityEvents: SecurityEventsService;
   let workforce: WorkforceActivityService;
   let permissionsService: PermissionsService;
@@ -38,7 +39,7 @@ describe('Security/Workforce — اختبارات سباق صريحة (Script 5 
     await dataSource.initialize();
 
     const auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settings = new SettingsService(dataSource.getRepository(Setting), auditLog, cache);
     securityEvents = new SecurityEventsService(
       dataSource,
@@ -96,6 +97,7 @@ describe('Security/Workforce — اختبارات سباق صريحة (Script 5 
     await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM refresh_tokens WHERE user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [actors]);
+    await cache?.onModuleDestroy();
     await dataSource.destroy();
   });
 

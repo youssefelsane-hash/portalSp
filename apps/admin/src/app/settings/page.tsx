@@ -20,13 +20,22 @@ function SettingValueEditor({
   onSave: (value: unknown) => void;
   isSaving: boolean;
 }) {
+  const isSecret = new Set([
+    'payments.paymob.api_key',
+    'payments.paymob.secret_key',
+    'payments.paymob.hmac_secret',
+  ]).has(setting.key);
   const [draft, setDraft] = useState(
-    setting.value_type === 'boolean' || setting.value_type === 'number' || setting.value_type === 'string'
+    isSecret
+      ? ''
+      : setting.value_type === 'boolean' || setting.value_type === 'number' || setting.value_type === 'string'
       ? String(setting.value)
       : JSON.stringify(setting.value, null, 2),
   );
 
-  const isDirty = draft !== String(setting.value) && !(setting.value_type === 'json' && draft === JSON.stringify(setting.value, null, 2));
+  const isDirty = isSecret
+    ? draft.length > 0
+    : draft !== String(setting.value) && !(setting.value_type === 'json' && draft === JSON.stringify(setting.value, null, 2));
 
   function handleSave() {
     let parsed: unknown = draft;
@@ -75,7 +84,9 @@ function SettingValueEditor({
   return (
     <div className="flex items-center gap-2">
       <Input
+        type={isSecret ? 'password' : undefined}
         value={draft}
+        placeholder={isSecret && setting.value ? 'مُعدّ بالفعل — اكتب قيمة جديدة للتغيير' : undefined}
         onChange={(e) => setDraft(e.target.value)}
         dir={setting.value_type === 'number' ? 'ltr' : undefined}
         className="max-w-xs"

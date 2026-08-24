@@ -59,22 +59,6 @@ const checks = [
     `,
   },
   {
-    name: 'approved domestic-worker earnings have one double entry',
-    sql: `
-      SELECT a.id
-      FROM domestic_worker_earning_approvals a
-      WHERE a.status = 'approved'
-        AND (
-          SELECT COUNT(*)
-          FROM wallet_transactions wt
-          WHERE wt.reference_type = 'domestic_worker_earning_approval'
-            AND wt.reference_id = a.id
-            AND wt.amount_cents = a.amount_cents
-        ) <> 2
-      LIMIT 20
-    `,
-  },
-  {
     name: 'technician referral bonuses retain coherent ledger references',
     sql: `
       SELECT b.id

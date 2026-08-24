@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { Toaster } from "@/components/ui/sonner";
@@ -19,7 +20,7 @@ export const metadata: Metadata = {
   description: "لوحة تحكم عمليات baytak — العملاء، الفنيين، الطلبات، الأرباح، الشكاوى، الإحصائيات",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html
       lang="ar"

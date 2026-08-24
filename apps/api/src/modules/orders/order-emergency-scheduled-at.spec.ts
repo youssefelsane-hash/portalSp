@@ -55,6 +55,7 @@ import { BookingMode } from './entities/order.entity';
  */
 describe('OrdersService.create() — الطوارئ مينفعش تتحدد بموعد مستقبلي (Script 7 Phase 7)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let ordersService: OrdersService;
   const runId = Date.now().toString(36);
   const ids = {
@@ -151,7 +152,7 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
     );
     ids.address = address.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const geoService = new GeoService(dataSource.getRepository(City), dataSource.getRepository(Area), dataSource.getRepository(ServiceZone), dataSource);
     const addressesService = new AddressesService(
@@ -269,6 +270,7 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     } finally {
+      await cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });

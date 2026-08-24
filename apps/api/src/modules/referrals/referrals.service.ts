@@ -76,6 +76,18 @@ export class ReferralsService {
     const rewardValueEgp = await this.settingsService.getNumber('referral.reward_value_egp', 150);
     const validityDays = await this.settingsService.getNumber('referral.reward_validity_days', 90);
     const result = await this.dataSource.transaction(async (manager) => {
+      // كل إحالات نفس المُرشِّح تدخل من بوابة واحدة قبل عدّ milestones وإصدار الكوبون.
+      const scopeLock = await manager.query<{ referrer_user_id: string }[]>(
+        `SELECT r.referrer_user_id,
+                pg_advisory_xact_lock(hashtextextended(r.referrer_user_id::text, 0)) AS locked
+         FROM referrals r
+         JOIN customer_profiles cp ON cp.user_id = r.referred_user_id
+         WHERE cp.id = $1 AND r.status = 'pending' AND r.deleted_at IS NULL
+         LIMIT 1`,
+        [customerProfileId],
+      );
+      if (!scopeLock[0]) return null;
+
       const customerProfile = await manager.findOne(CustomerProfile, { where: { id: customerProfileId } });
       if (!customerProfile) return null;
       const order = await manager.findOne(Order, {
@@ -95,7 +107,7 @@ export class ReferralsService {
       const referrer = await manager
         .createQueryBuilder(User, 'user')
         .setLock('pessimistic_write')
-        .where('user.id = :referrerUserId', { referrerUserId: referral.referrerUserId })
+        .where('user.id = :referrerUserId', { referrerUserId: scopeLock[0].referrer_user_id })
         .getOne();
       if (!referrer) return null;
 

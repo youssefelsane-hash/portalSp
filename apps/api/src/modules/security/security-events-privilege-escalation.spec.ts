@@ -22,6 +22,7 @@ import { SecurityEventsService } from './security-events.service';
 // بـcurl ضد dev server شغال (موثّق في README).
 describe('SecurityEventsService — تصعيد صلاحيات → حدث أمني (Script 5 Part 4/5/24)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let permissionsService: PermissionsService;
   let securityEvents: SecurityEventsService;
 
@@ -42,7 +43,7 @@ describe('SecurityEventsService — تصعيد صلاحيات → حدث أمن�
     await dataSource.initialize();
 
     const auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settings = new SettingsService(dataSource.getRepository(Setting), auditLog, cache);
     securityEvents = new SecurityEventsService(
       dataSource,
@@ -97,6 +98,7 @@ describe('SecurityEventsService — تصعيد صلاحيات → حدث أمن�
     await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1) OR entity_id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [[ids.actorLow, ids.target]]);
     await q(`DELETE FROM roles WHERE id = $1`, [ids.roleLow]);
+    await cache?.onModuleDestroy();
     await dataSource.destroy();
   });
 

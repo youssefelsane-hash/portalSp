@@ -17,6 +17,7 @@ export default () => ({
   },
 
   security: {
+    settingsEncryptionKey: process.env.SETTINGS_ENCRYPTION_KEY,
     // مفصولة بفاصلة (زي "https://admin.baytak.com,https://baytak.com") — فاضي = مفتوح للكل،
     // مرفوض في الإنتاج عبر env.validation.ts (CORS_ORIGIN مطلوبة هناك لو NODE_ENV=production).
     corsOrigins: (process.env.CORS_ORIGIN ?? '')

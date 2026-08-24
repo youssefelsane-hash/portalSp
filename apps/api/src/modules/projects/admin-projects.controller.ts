@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -13,8 +14,8 @@ export class AdminProjectsController {
 
   @Get()
   @RequirePermission('projects.view')
-  async list() {
-    return this.projectsService.listAll();
+  async list(@Query('page') page?: string, @Query('per_page') perPage?: string) {
+    return this.projectsService.listAll(Number(page) || 1, Number(perPage) || 20);
   }
 
   @Get(':id/room')
@@ -29,8 +30,9 @@ export class AdminProjectsController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: { to: string; reason?: string },
+    @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.transition(admin.sub, id, dto.to as never, dto.reason);
+    return this.projectsService.transition(admin.sub, id, dto.to as never, dto.reason, meta);
   }
 
   @Post(':id/quotes')
@@ -39,14 +41,20 @@ export class AdminProjectsController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: Record<string, unknown>,
+    @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.createQuote(admin.sub, id, dto as never);
+    return this.projectsService.createQuote(admin.sub, id, dto as never, meta);
   }
 
   @Post(':id/quotes/:quoteId/send')
   @RequirePermission('projects.manage')
-  async sendQuote(@Param('id', ParseUUIDPipe) projectId: string, @Param('quoteId', ParseUUIDPipe) quoteId: string) {
-    return this.projectsService.sendQuote(projectId, quoteId, 14);
+  async sendQuote(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) projectId: string,
+    @Param('quoteId', ParseUUIDPipe) quoteId: string,
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.sendQuote(admin.sub, quoteId, 14, projectId, meta);
   }
 
   @Post(':id/milestones')
@@ -55,7 +63,8 @@ export class AdminProjectsController {
     @CurrentUser() admin: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: { milestones: unknown[] },
+    @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.createMilestones(admin.sub, id, dto.milestones as never);
+    return this.projectsService.createMilestones(admin.sub, id, dto.milestones as never, meta);
   }
 }

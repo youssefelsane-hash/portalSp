@@ -17,6 +17,7 @@ import { SecurityEventsService } from './security-events.service';
 //     جديد تجميعي، منفصل عن الأحداث الأصلية.
 describe('SecurityEventsService — تصعيد ورفض متكرر (Script 5 Part 10)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let securityEvents: SecurityEventsService;
 
   const runId = Date.now().toString(36);
@@ -31,7 +32,7 @@ describe('SecurityEventsService — تصعيد ورفض متكرر (Script 5 Par
     await dataSource.initialize();
 
     const auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settings = new SettingsService(dataSource.getRepository(Setting), auditLog, cache);
     securityEvents = new SecurityEventsService(
       dataSource,
@@ -64,6 +65,7 @@ describe('SecurityEventsService — تصعيد ورفض متكرر (Script 5 Par
     await q(`DELETE FROM employee_daily_activity WHERE user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM audit_logs WHERE actor_user_id = ANY($1)`, [actors]);
     await q(`DELETE FROM users WHERE id = ANY($1)`, [actors]);
+    await cache?.onModuleDestroy();
     await dataSource.destroy();
   });
 
