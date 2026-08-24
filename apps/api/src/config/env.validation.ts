@@ -33,6 +33,11 @@ export const envValidationSchema = Joi.object({
     .invalid(Joi.ref('JWT_ACCESS_SECRET')) // نفس السر لـaccess وrefresh يلغي فائدة فصلهم بالكامل
     .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-refresh-secret') }),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
+  SETTINGS_ENCRYPTION_KEY: Joi.string()
+    .min(32)
+    .allow('')
+    .optional()
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-settings-encryption-key').required() }),
 
   // قائمة أصول (origins) مسموح لها بنداء الـAPI من متصفح، مفصولة بفاصلة — راجع الشرح الكامل في
   // main.ts. فاضي/غير موجود = مفتوح للكل (`*`)، مقبول في التطوير بس مرفوض صراحة في staging/production.

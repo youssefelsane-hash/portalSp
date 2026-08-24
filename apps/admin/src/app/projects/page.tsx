@@ -7,6 +7,7 @@ import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
+import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
@@ -32,8 +33,8 @@ const STATUS_LABELS: Record<string, string> = {
 const TRANSITIONS: Record<string, {to: string; label: string; needsReason?: boolean}[]> = {
   survey_requested: [{to:'survey_scheduled',label:'جدولة المعاينة'},{to:'cancelled',label:'إلغاء',needsReason:true}],
   survey_scheduled: [{to:'quote_preparing',label:'تحضير عرض'},{to:'cancelled',label:'إلغاء',needsReason:true}],
-  quote_preparing: [{to:'awaiting_customer_approval',label:'إرسال العرض للعميل'},{to:'cancelled',label:'إلغاء',needsReason:true}],
-  awaiting_customer_approval: [{to:'awaiting_deposit',label:'العميل قَبِل العرض'}],
+  quote_preparing: [{to:'cancelled',label:'إلغاء',needsReason:true}],
+  awaiting_customer_approval: [],
   awaiting_deposit: [{to:'active',label:'استلام العربون — بدء التنفيذ'},{to:'cancelled',label:'إلغاء',needsReason:true}],
   active: [
     {to:'paused',label:'إيقاف مؤقت',needsReason:true},
@@ -56,17 +57,30 @@ export default function AdminProjectsPage() {
 
   const load = useCallback(() => {
     if (isLoading) return;
-    setError(null);
     authedFetchPaginated<ProjectRow>(`/admin/projects?page=${page}&per_page=20`)
-      .then(({ items, meta }) => { setProjects(items); setTotal(meta.total ?? items.length); })
+      .then(({ items, meta }) => {
+        setProjects(items);
+        setTotal(meta.total ?? items.length);
+        setError(null);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'خطأ'));
   }, [isLoading, page, authedFetchPaginated]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (isLoading) return;
+    void authedFetchPaginated<ProjectRow>(`/admin/projects?page=${page}&per_page=20`)
+      .then(({ items, meta }) => {
+        setProjects(items);
+        setTotal(meta.total ?? items.length);
+        setError(null);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'خطأ'));
+  }, [isLoading, page, authedFetchPaginated]);
 
   return (
     <AppShell>
       <PageHeader title="المشروعات والتشطيب" />
+      {error && <p className="mb-4 text-destructive">{error}</p>}
       {!projects && <TableSkeleton columns={6} />}
       {projects && projects.length === 0 && <EmptyState title="مفيش مشروعات" />}
       {projects && projects.length > 0 && (
@@ -86,6 +100,15 @@ export default function AdminProjectsPage() {
             ))}
           </TableBody>
         </Table>
+      )}
+      {projects && total > 0 && (
+        <Pagination
+          page={page}
+          totalPages={Math.max(1, Math.ceil(total / 20))}
+          total={total}
+          itemLabel="مشروع"
+          onPageChange={setPage}
+        />
       )}
     </AppShell>
   );
@@ -141,11 +164,6 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
         {/* إنشاء عرض سعر */}
         {project.status === 'quote_preparing' && (
           <QuoteCreationSection projectId={project.id} onCreated={onRefresh} />
-        )}
-
-        {/* إرسال العرض */}
-        {project.status === 'awaiting_customer_approval' && (
-          <SendQuoteSection projectId={project.id} onSent={onRefresh} />
         )}
 
         {/* إنشاء مراحل */}
@@ -215,9 +233,10 @@ function QuoteCreationSection({ projectId, onCreated }: { projectId: string; onC
       ? [{ description_ar: matDesc.trim(), responsibility: matResponsibility, quantity: matQty, unit: 'وحدة', unit_price_cents: matPrice }]
       : [];
     try {
-      await authedFetch(`/admin/projects/${projectId}/quotes`, {
+      const quote = await authedFetch<{ id: string }>(`/admin/projects/${projectId}/quotes`, {
         method: 'POST', body: JSON.stringify({ work_lines, material_lines, scope_included: scope, duration_days: duration }),
       });
+      await authedFetch(`/admin/projects/${projectId}/quotes/${quote.id}/send`, { method: 'POST' });
       onCreated();
     } catch (err) { setError(err instanceof ApiError ? err.message : 'خطأ'); }
     finally { setBusy(false); }
@@ -235,7 +254,11 @@ function QuoteCreationSection({ projectId, onCreated }: { projectId: string; onC
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div><Label className="text-xs">وصف المادة</Label><Input value={matDesc} onChange={(e) => setMatDesc(e.target.value)} placeholder="اختياري" /></div>
-        <div>
+        <div className="grid grid-cols-2 gap-1">
+          <div><Label className="text-xs">الكمية</Label><Input type="number" min={1} value={matQty} onChange={(e) => setMatQty(Number(e.target.value))} /></div>
+          <div><Label className="text-xs">سعر الوحدة (قرش)</Label><Input type="number" min={0} value={matPrice} onChange={(e) => setMatPrice(Number(e.target.value))} /></div>
+        </div>
+        <div className="col-span-2">
           <Label className="text-xs">جهة التوفير</Label>
           <select value={matResponsibility} onChange={(e) => setMatResponsibility(e.target.value)} className="w-full rounded border px-2 py-1 text-sm">
             <option value="provider_supplied">الشركة/الفني</option>
@@ -248,26 +271,9 @@ function QuoteCreationSection({ projectId, onCreated }: { projectId: string; onC
         <div><Label className="text-xs">النطاق المشمول</Label><Input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="اختياري" /></div>
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
-      <Button size="sm" disabled={busy} onClick={() => void create()}>{busy ? '…' : 'إنشاء العرض'}</Button>
+      <Button size="sm" disabled={busy} onClick={() => void create()}>{busy ? '…' : 'إنشاء العرض وإرساله للعميل'}</Button>
     </div>
   );
-}
-
-// ── إرسال العرض ──
-function SendQuoteSection({ projectId, onSent }: { projectId: string; onSent: () => void }) {
-  const { authedFetch } = useAuth();
-  const [busy, setBusy] = useState(false);
-  async function send() {
-    setBusy(true);
-    try {
-      // نجيب آخر quote في حالة sent ونرسله
-      await authedFetch(`/admin/projects/${projectId}/quotes`, { method: 'GET' });
-      // للتبسيط: نستخدم أول quote في حالة draft ونرسله
-      // في الواقع، الأدمن بيعمل العرض ثم يضغط إرسال
-      onSent();
-    } catch {} finally { setBusy(false); }
-  }
-  return <p className="text-sm text-muted-foreground">العرض معروض على العميل للموافقة…</p>;
 }
 
 // ── إنشاء مراحل ──
@@ -334,6 +340,9 @@ function MilestoneCreationSection({ projectId, approvedTotal, onCreated }: {
           </label>
         </div>
       ))}
+      <Button size="sm" variant="outline" type="button" onClick={addMilestone}>
+        + إضافة مرحلة
+      </Button>
       {error && <p className="text-destructive text-sm">{error}</p>}
       <Button size="sm" disabled={busy || !matches} onClick={() => void create()}>
         {busy ? '…' : 'إنشاء المراحل'}

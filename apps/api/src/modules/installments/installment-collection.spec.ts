@@ -34,6 +34,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
   let paymentsService: PaymentsService;
   let collectionService: InstallmentCollectionService;
   let secondCollectionService: InstallmentCollectionService;
+  let cache: RedisCacheService;
   const runId = Date.now().toString(36);
   const ids = {
     customerUser: '',
@@ -127,7 +128,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
     );
     ids.installmentIds.push(inst.id);
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(
       dataSource.getRepository(Setting),
       { record: async () => undefined } as unknown as AuditLogService,
@@ -193,6 +194,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM installment_plans WHERE id = $1`, [ids.plan]);
     } finally {
+      cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });

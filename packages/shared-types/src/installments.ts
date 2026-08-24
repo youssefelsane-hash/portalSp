@@ -9,6 +9,7 @@ export interface InstallmentPlanPublicDto {
   fixed_fee_cents: number;
   down_payment_percentage: number;
   requires_saved_card: boolean;
+  allowed_provider: string;
   document_requirements: { doc_type: string; label_ar: string }[];
 }
 

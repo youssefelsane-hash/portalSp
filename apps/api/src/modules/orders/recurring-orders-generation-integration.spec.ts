@@ -58,6 +58,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
   let dataSource: DataSource;
   let ordersService: OrdersService;
   let recurringService: RecurringOrdersService;
+  let cache: RedisCacheService;
   const emitSpy = jest.fn();
   const runId = Date.now().toString(36);
   const ids = {
@@ -151,7 +152,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
     );
     ids.address = address.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(
       dataSource.getRepository(Setting),
       { record: async () => undefined } as unknown as AuditLogService,
@@ -303,6 +304,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     } finally {
+      cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });

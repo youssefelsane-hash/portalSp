@@ -11,6 +11,7 @@ import '../orders/orders_screen.dart';
 import '../payment_methods/payment_methods_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
 import '../projects/my_projects_screen.dart';
+import '../warranty/warranties_screen.dart';
 import '../referrals/referrals_screen.dart';
 import '../support/complaints_screen.dart';
 import '../technician_referral/technician_referral_screen.dart';
@@ -145,6 +146,14 @@ class _AccountScreenState extends State<AccountScreen> {
               trailing: const Icon(Icons.chevron_left),
               onTap: () =>
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RecurringOrdersScreen())),
+            ),
+            ListTile(
+              leading: const Icon(Icons.verified_user_outlined),
+              title: const Text('ضماناتي'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const WarrantiesScreen()),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.card_giftcard_outlined),

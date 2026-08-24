@@ -740,8 +740,13 @@ export class OrdersService {
         );
       }
 
-      // ربط المشروع والمرحلة (migration 0179) — لو العميل حجز من ضمن مشروع
+      // ربط المشروع والمرحلة (migration 0179) — المرحلة لا معنى لها من غير مشروع، ولازم تكون
+      // تابعة لنفس المشروع المملوك للعميل. الفحص القديم كان يسمح milestone_id منفردة أو مرحلة
+      // من مشروع مختلف، فينتج طلب بعلاقات متعارضة لا تظهر صح في غرفة المشروع.
       if (dto.project_id || dto.milestone_id) {
+        if (dto.milestone_id && !dto.project_id) {
+          throw new ApiException(ErrorCode.VAL_001, 'اختيار مرحلة محتاج تحديد المشروع التابع لها', HttpStatus.BAD_REQUEST);
+        }
         if (dto.project_id) {
           const [proj] = await manager.query(
             `SELECT id FROM projects WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL AND status IN ('active','awaiting_milestone_approval')`,
@@ -751,10 +756,13 @@ export class OrdersService {
         }
         if (dto.milestone_id) {
           const [ms] = await manager.query(
-            `SELECT m.id FROM project_milestones m JOIN projects p ON p.id = m.project_id WHERE m.id = $1 AND p.customer_id = $2`,
-            [dto.milestone_id, customerProfile.id],
+            `SELECT m.id
+             FROM project_milestones m
+             JOIN projects p ON p.id = m.project_id
+             WHERE m.id = $1 AND m.project_id = $2 AND p.customer_id = $3 AND p.deleted_at IS NULL`,
+            [dto.milestone_id, dto.project_id, customerProfile.id],
           );
-          if (!ms && dto.project_id) throw new ApiException(ErrorCode.VAL_001, 'المرحلة غير موجودة', HttpStatus.BAD_REQUEST);
+          if (!ms) throw new ApiException(ErrorCode.VAL_001, 'المرحلة غير موجودة داخل المشروع المحدد', HttpStatus.BAD_REQUEST);
         }
       }
       order.projectId = dto.project_id ?? null;
@@ -762,10 +770,11 @@ export class OrdersService {
 
       // "كرّر الحجز ده" (migration 0176) — القالب بيتإنشاء جوّه نفس transaction الطلب (ذرّي:
       // لو إنشاء الطلب فشل مفيش قالب يتيم، ولو القالب فشل الطلب بيترول باك كمان). الموعد الأول
-      // للقالب = التكرار الجاي **بعد** الحجز المحجوز فعلاً — الحجز الحالي هو الطلب العادي اللي
-      // اتعمل فوق، والقالب مسؤول عن المواعيد اللي بعده بس.
+      // للقالب = التكرار الجاي **بعد** الحجز المحجوز فعلاً. الحجز الحالي يظل order_type=standard
+      // للتوافق، لكنه يُربط بالقالب ويُسجل كنوبة completed؛ وبكده يظهر في "كل الطلبات" وفي سجل
+      // الحجز المتكرر بنفس الهوية بدل ما يبدو كطلب عادي منفصل.
       if (repeatPlanFrequency && order.scheduledAt) {
-        await manager.save(
+        const template = await manager.save(
           manager.create(RecurringOrderTemplate, {
             customerId: customerProfile.id,
             serviceId: service.id,
@@ -788,6 +797,17 @@ export class OrdersService {
             isActive: true,
           }),
         );
+        order.recurringTemplateId = template.id;
+        order.recurringOccurrenceAt = order.scheduledAt;
+        await manager.save(order);
+        await manager.query(
+          `INSERT INTO recurring_order_occurrences
+             (template_id, scheduled_for, status, attempt_count, completed_at, order_id)
+           VALUES ($1, $2, 'completed', 1, now(), $3)`,
+          [template.id, order.scheduledAt, order.id],
+        );
+        template.lastGeneratedOrderId = order.id;
+        await manager.save(template);
       }
 
       return order;

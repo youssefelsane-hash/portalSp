@@ -16,12 +16,14 @@ export class AdminSettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
   @Get()
+  @RequirePermission('settings.manage')
   async list(@Query('group') group?: string) {
     const settings = await this.settingsService.list(group);
     return settings.map(toSettingResponseDto);
   }
 
   @Get(':key')
+  @RequirePermission('settings.manage')
   async getOne(@Param('key') key: string) {
     return toSettingResponseDto(await this.settingsService.getOrThrow(key));
   }

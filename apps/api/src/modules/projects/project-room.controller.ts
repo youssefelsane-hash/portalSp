@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Param, ParseUUIDPipe } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { UserType } from '../auth/entities/user.entity';
+import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 
 /** endpoint واحد يرجّع كل بيانات المشروع — timeline + quotes + milestones + payments. */
 @Controller('me/projects')
@@ -14,16 +15,13 @@ export class ProjectRoomController {
 
   @Get(':id/room')
   async projectRoom(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    const [profile] = await this.dataSource.query<{ id: string }[]>(
-      `SELECT id FROM customer_profiles WHERE user_id = $1`, [user.sub],
-    );
     const [project] = await this.dataSource.query<Record<string, unknown>[]>(
       `SELECT p.* FROM projects p
        JOIN customer_profiles cp ON cp.id = p.customer_id
        WHERE p.id = $1 AND cp.user_id = $2 AND p.deleted_at IS NULL`,
       [id, user.sub],
     );
-    if (!project) return { error: 'المشروع غير موجود' };
+    if (!project) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
 
     const quotes = await this.dataSource.query(
       `SELECT id, version, status, total_cents, duration_days FROM project_quotes WHERE project_id = $1 ORDER BY version DESC`, [id],

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../installments/installments_repository.dart';
+import '../payment_methods/models.dart';
+import '../payment_methods/payment_methods_repository.dart';
 
 /// قسم "ادفع بالتقسيط" على شاشة تفاصيل الطلب — بيظهر بس لو الخدمة عليها خطط متاحة.
 ///
@@ -26,6 +28,9 @@ class InstallmentSection extends StatefulWidget {
 class _InstallmentSectionState extends State<InstallmentSection> {
   List<InstallmentPlan>? _plans;
   InstallmentPlan? _selectedPlan;
+  List<InstallmentPolicy> _policies = [];
+  List<SavedPaymentMethod> _paymentMethods = [];
+  String? _selectedPaymentMethodId;
   bool _accepted = false;
   bool _submitting = false;
   String? _error;
@@ -40,7 +45,18 @@ class _InstallmentSectionState extends State<InstallmentSection> {
     try {
       final repo = InstallmentRepository(widget.auth);
       final plans = await repo.fetchPlans(widget.serviceId);
-      if (mounted) setState(() => _plans = plans);
+      final policies = await repo.fetchPolicies(widget.serviceId);
+      final methods = await PaymentMethodsRepository(widget.auth).list();
+      if (mounted) {
+        setState(() {
+          _plans = plans;
+          _policies = policies;
+          _paymentMethods = methods;
+          final defaults = methods.where((method) => method.isDefault);
+          _selectedPaymentMethodId =
+              defaults.isNotEmpty ? defaults.first.id : (methods.isNotEmpty ? methods.first.id : null);
+        });
+      }
     } on ApiException {
       if (mounted) setState(() => _plans = []);
     }
@@ -54,7 +70,9 @@ class _InstallmentSectionState extends State<InstallmentSection> {
       await repo.submitApplication(
         orderId: widget.orderId,
         planId: _selectedPlan!.id,
-        acceptedPolicyVersionIds: [], // الباك-إند بيتحقق من السياسات المطلوبة
+        acceptedPolicyVersionIds:
+            _policies.where((policy) => policy.isRequired).map((policy) => policy.currentVersionId).toList(),
+        paymentMethodId: _selectedPlan!.requiresSavedCard ? _selectedPaymentMethodId : null,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -82,21 +100,78 @@ class _InstallmentSectionState extends State<InstallmentSection> {
           children: [
             Text('ادفع بالتقسيط', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            ...plans.map((plan) => RadioListTile<String>(
-                  value: plan.id,
-                  groupValue: _selectedPlan?.id,
-                  onChanged: (v) => setState(() {
-                    _selectedPlan = plans.firstWhere((p) => p.id == v);
-                  }),
-                  title: Text(plan.nameAr),
-                  subtitle: Text(
-                    '${plan.installmentCount} أقساط كل ${plan.intervalDays} يوم'
-                    '${plan.financingPercentage > 0 ? ' · تمويل ${plan.financingPercentage.toStringAsFixed(0)}%' : ''}'
-                    '${plan.downPaymentPercentage > 0 ? ' · مقدم ${plan.downPaymentPercentage.toStringAsFixed(0)}%' : ''}',
+            ...plans.map((plan) => Card(
+                  color: _selectedPlan?.id == plan.id
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : null,
+                  child: ListTile(
+                    onTap: () => setState(() {
+                      _selectedPlan = plan;
+                      final compatible = _paymentMethods
+                          .where((method) => method.provider == plan.allowedProvider);
+                      _selectedPaymentMethodId = compatible.any(
+                              (method) => method.id == _selectedPaymentMethodId)
+                          ? _selectedPaymentMethodId
+                          : (compatible.isNotEmpty ? compatible.first.id : null);
+                    }),
+                    leading: Icon(
+                      _selectedPlan?.id == plan.id
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked,
+                    ),
+                    title: Text(plan.nameAr),
+                    subtitle: Text(
+                      '${plan.installmentCount} أقساط كل ${plan.intervalDays} يوم'
+                      '${plan.financingPercentage > 0 ? ' · تمويل ${plan.financingPercentage.toStringAsFixed(0)}%' : ''}'
+                      '${plan.downPaymentPercentage > 0 ? ' · مقدم ${plan.downPaymentPercentage.toStringAsFixed(0)}%' : ''}',
+                    ),
                   ),
                 )),
             if (_selectedPlan != null) ...[
               const SizedBox(height: 8),
+              if (_selectedPlan!.requiresSavedCard) ...[
+                if (_paymentMethods
+                    .where((method) => method.provider == _selectedPlan!.allowedProvider)
+                    .isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'الخطة تحتاج بطاقة Paymob محفوظة. ادفع مرة بالكارت مع اختيار الحفظ ثم ارجع للتقديم.',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(_selectedPlan!.id),
+                    initialValue: _paymentMethods.any((method) =>
+                            method.id == _selectedPaymentMethodId &&
+                            method.provider == _selectedPlan!.allowedProvider)
+                        ? _selectedPaymentMethodId
+                        : null,
+                    decoration: const InputDecoration(labelText: 'بطاقة التحصيل التلقائي'),
+                    items: _paymentMethods
+                        .where((method) => method.provider == _selectedPlan!.allowedProvider)
+                        .map((method) => DropdownMenuItem(
+                              value: method.id,
+                              child: Text('${method.cardBrand ?? 'بطاقة'} ${method.maskedPan ?? ''}'),
+                            ))
+                        .toList(),
+                    onChanged: (value) => setState(() => _selectedPaymentMethodId = value),
+                  ),
+                const SizedBox(height: 8),
+              ],
+              if (_policies.isNotEmpty)
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: const Text('شروط التقسيط'),
+                  children: _policies
+                      .map((policy) => ListTile(
+                            dense: true,
+                            title: Text(policy.titleAr),
+                            subtitle: Text(policy.bodyAr),
+                          ))
+                      .toList(),
+                ),
               CheckboxListTile(
                 value: _accepted,
                 onChanged: (v) => setState(() => _accepted = v ?? false),
@@ -111,7 +186,14 @@ class _InstallmentSectionState extends State<InstallmentSection> {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: FilledButton(
-                  onPressed: _submitting || !_accepted ? null : _submit,
+                  onPressed: _submitting ||
+                          !_accepted ||
+                          (_selectedPlan!.requiresSavedCard &&
+                              !_paymentMethods.any((method) =>
+                                  method.id == _selectedPaymentMethodId &&
+                                  method.provider == _selectedPlan!.allowedProvider))
+                      ? null
+                      : _submit,
                   child: _submitting
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Text('قدّم طلب التقسيط'),

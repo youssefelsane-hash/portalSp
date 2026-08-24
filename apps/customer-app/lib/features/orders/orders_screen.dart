@@ -67,7 +67,11 @@ class _OrdersScreenState extends State<OrdersScreen> {
                             return Card(
                               child: ListTile(
                                 title: Text(order.orderNumber),
-                                subtitle: Text(orderStatusLabelsAr[order.orderStatus] ?? order.orderStatus),
+                                subtitle: Text(
+                                  '${orderStatusLabelsAr[order.orderStatus] ?? order.orderStatus}'
+                                  '${order.recurringTemplateId != null ? '\nحجز متكرر${order.recurringOccurrenceAt != null ? ' · ${order.recurringOccurrenceAt!.substring(0, 10)}' : ''}' : ''}',
+                                ),
+                                isThreeLine: order.recurringTemplateId != null,
                                 trailing: Text(_formatEgp(order.totalAmountCents)),
                                 onTap: () => Navigator.of(context).push(
                                   MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: order.id)),

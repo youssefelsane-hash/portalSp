@@ -64,6 +64,10 @@ class Order {
   final String? technicianCashNotReceivedAt;
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — null = ASAP (اختيار العميل الصريح وقت الحجز، مش سهو).
   final String? scheduledAt;
+  // أول حجز في الخطة والطلبات المولدة لاحقًا يحملان نفس هوية التكرار، فيظهران في "طلباتي"
+  // وفي قسم الحجوزات المتكررة من غير فقدان أو ازدواج دلالي.
+  final String? recurringTemplateId;
+  final String? recurringOccurrenceAt;
 
   Order({
     required this.id,
@@ -95,6 +99,8 @@ class Order {
     this.customerCashConfirmedAt,
     this.technicianCashNotReceivedAt,
     this.scheduledAt,
+    this.recurringTemplateId,
+    this.recurringOccurrenceAt,
   });
 
   bool get isUnderWarranty =>
@@ -132,6 +138,8 @@ class Order {
         customerCashConfirmedAt: json['customer_cash_confirmed_at'] as String?,
         technicianCashNotReceivedAt: json['technician_cash_not_received_at'] as String?,
         scheduledAt: json['scheduled_at'] as String?,
+        recurringTemplateId: json['recurring_template_id'] as String?,
+        recurringOccurrenceAt: json['recurring_occurrence_at'] as String?,
       );
 }
 

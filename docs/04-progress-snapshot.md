@@ -136,7 +136,7 @@
 
 | الخدمة | المتغيرات | الحالة |
 |---|---|---|
-| Paymob (دفع بطاقة) | `PAYMOB_API_KEY`, `PAYMOB_INTEGRATION_ID_CARD`, `PAYMOB_IFRAME_ID`, `PAYMOB_HMAC_SECRET` | ❌ مش متحطة |
+| Paymob (دفع بطاقة) | من `apps/admin` → الإعدادات: API/Secret/Public keys + Card Integration ID + HMAC، مع `SETTINGS_ENCRYPTION_KEY` في بيئة API | ⚪ جاهز للإدخال؛ يظل معطلًا بأمان حتى وضع مفاتيح التاجر |
 | FawryPay (دفع كود مرجعي) | `FAWRY_MERCHANT_CODE`, `FAWRY_SECURE_KEY` | ❌ مش متحطة + توقيع محتاج تأكيد من التوثيق الرسمي قبل إنتاج |
 | S3/تخزين صور | `S3_*` (أو أي بديل متوافق) | ❌ مش متحطة (بيستخدم تخزين محلي فعلاً دلوقتي) |
 | FCM (إشعارات push) | `FIREBASE_SERVICE_ACCOUNT_JSON` + `google-services.json`/`GoogleService-Info.plist` | ❌ مش متحطة |

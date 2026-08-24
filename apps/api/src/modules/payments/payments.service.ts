@@ -289,6 +289,38 @@ export class PaymentsService {
     order.warrantyExpiresAt = warrantyDays > 0 ? new Date(now.getTime() + warrantyDays * 24 * 60 * 60 * 1000) : null;
     await manager.save(order);
 
+    // نوحّد ضمان الطلب القديم مع منتج الضمان الظاهر للعميل. نفس المعاملة المالية تضمن إن الطلب
+    // لا يكتمل أبدًا من غير سجل الضمان، والفهرس الفريد يجعل إعادة التسوية idempotent. الخطط
+    // المدفوعة مستبعدة عمدًا؛ الاختيار لخطة workmanship مجانية مطابقة ثم الخطة النظامية.
+    if (warrantyDays > 0 && order.warrantyExpiresAt) {
+      await manager.query(
+        `WITH chosen_plan AS (
+           SELECT wp.*
+           FROM warranty_plans wp
+           JOIN services s ON s.id = $1
+           WHERE wp.is_active = true AND wp.warranty_type = 'workmanship'
+             AND wp.pricing_model = 'fixed' AND wp.price_value = 0
+             AND (wp.target_service_id = s.id OR wp.target_category_id = s.category_id
+                  OR wp.slug = 'system-service-workmanship')
+           ORDER BY CASE WHEN wp.target_service_id = s.id THEN 0
+                         WHEN wp.target_category_id = s.category_id THEN 1 ELSE 2 END,
+                    wp.version DESC
+           LIMIT 1
+         )
+         INSERT INTO customer_warranties (
+           plan_id, plan_version, order_id, project_id, customer_id, name_ar, warranty_type,
+           price_paid_cents, coverage_months, coverage_days, max_coverage_cents, max_claims,
+           terms_ar, exclusions_ar, starts_at, expires_at, claims_used
+         )
+         SELECT id, version, $2, $3, $4, name_ar, warranty_type, 0,
+                GREATEST(1, CEIL($5::numeric / 30)::integer), $5,
+                COALESCE(max_coverage_cents, $6), max_claims, terms_ar, exclusions_ar, $7, $8, 0
+         FROM chosen_plan
+         ON CONFLICT (order_id) WHERE order_id IS NOT NULL DO NOTHING`,
+        [order.serviceId, order.id, order.projectId, order.customerId, warrantyDays, order.totalAmountCents, now, order.warrantyExpiresAt],
+      );
+    }
+
     await manager.save(
       manager.create(OrderStatusHistory, {
         orderId: order.id,

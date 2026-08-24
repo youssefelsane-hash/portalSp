@@ -12,8 +12,6 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
-const egp = (c: number) => `${(c / 100).toLocaleString('ar-EG-u-nu-latn')} ج.م`;
-
 interface ClaimRow {
   id: string; warranty_id: string; customer_id: string;
   status: string; defect_description: string;
@@ -27,6 +25,29 @@ const CLAIM_STATUS_LABELS: Record<string, string> = {
   resolved:'تم الحل', closed:'مغلق',
 };
 
+const CLAIM_ACTIONS: Record<string, { status: string; label: string; needsReason?: boolean }[]> = {
+  open: [
+    { status: 'under_review', label: 'بدء المراجعة' },
+    { status: 'rejected', label: 'رفض', needsReason: true },
+  ],
+  under_review: [
+    { status: 'inspection_scheduled', label: 'جدولة معاينة' },
+    { status: 'approved', label: 'قبول' },
+    { status: 'rejected', label: 'رفض', needsReason: true },
+  ],
+  inspection_scheduled: [
+    { status: 'approved', label: 'قبول' },
+    { status: 'rejected', label: 'رفض', needsReason: true },
+  ],
+  approved: [
+    { status: 'repair_in_progress', label: 'بدء الإصلاح' },
+    { status: 'resolved', label: 'تم الحل' },
+  ],
+  repair_in_progress: [{ status: 'resolved', label: 'تم الحل' }],
+  resolved: [{ status: 'closed', label: 'إغلاق' }],
+  rejected: [{ status: 'closed', label: 'إغلاق' }],
+};
+
 export default function AdminWarrantyClaimsPage() {
   const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [claims, setClaims] = useState<ClaimRow[] | null>(null);
@@ -37,11 +58,14 @@ export default function AdminWarrantyClaimsPage() {
 
   useEffect(() => {
     if (isLoading) return;
-    setError(null);
     const params = new URLSearchParams({ page: String(page), per_page: '20' });
     if (statusFilter !== 'all') params.set('status', statusFilter);
     authedFetchPaginated<ClaimRow>(`/admin/warranty-claims?${params.toString()}`)
-      .then(({ items, meta }) => { setClaims(items); setTotal(meta.total ?? items.length); })
+      .then(({ items, meta }) => {
+        setClaims(items);
+        setTotal(meta.total ?? items.length);
+        setError(null);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'خطأ'));
   }, [isLoading, page, statusFilter, authedFetchPaginated]);
 
@@ -55,15 +79,16 @@ export default function AdminWarrantyClaimsPage() {
       const params = new URLSearchParams({ page: String(page), per_page: '20' });
       if (statusFilter !== 'all') params.set('status', statusFilter);
       authedFetchPaginated<ClaimRow>(`/admin/warranty-claims?${params.toString()}`)
-        .then(({ items }) => setClaims(items));
+        .then(({ items, meta }) => { setClaims(items); setTotal(meta.total ?? items.length); });
     } catch (err) { setError(err instanceof ApiError ? err.message : 'خطأ'); }
   }
 
   return (
     <AppShell>
       <PageHeader title="مطالبات الضمان" />
+      {error && <p className="mb-4 text-destructive">{error}</p>}
       <div className="mb-4 flex gap-2 flex-wrap">
-        {['all','open','under_review','approved','repair_in_progress','resolved'].map((s) => (
+        {['all','open','under_review','inspection_scheduled','approved','rejected','repair_in_progress','resolved','closed'].map((s) => (
           <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
             className={`rounded px-3 py-1 text-sm ${statusFilter === s ? 'bg-primary text-white' : 'border'}`}>
             {CLAIM_STATUS_LABELS[s] ?? s}
@@ -86,20 +111,32 @@ export default function AdminWarrantyClaimsPage() {
                 <TableCell><Badge variant={c.status === 'open' ? 'destructive' : 'outline'}>{CLAIM_STATUS_LABELS[c.status] ?? c.status}</Badge></TableCell>
                 <TableCell className="text-sm">{new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')}</TableCell>
                 <TableCell>
-                  {(c.status === 'open' || c.status === 'under_review') && (
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="outline" onClick={() => reviewClaim(c.id, 'approved')}>قبول</Button>
-                      <Button size="sm" variant="outline" onClick={() => {
+                  <div className="flex flex-wrap gap-1">
+                    {(CLAIM_ACTIONS[c.status] ?? []).map((action) => (
+                      <Button key={action.status} size="sm" variant="outline" onClick={() => {
+                        if (!action.needsReason) {
+                          void reviewClaim(c.id, action.status);
+                          return;
+                        }
                         const reason = window.prompt('سبب الرفض:');
-                        if (reason?.trim()) reviewClaim(c.id, 'rejected', reason.trim());
-                      }}>رفض</Button>
-                    </div>
-                  )}
+                        if (reason?.trim()) void reviewClaim(c.id, action.status, reason.trim());
+                      }}>{action.label}</Button>
+                    ))}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+      )}
+      {claims && total > 0 && (
+        <Pagination
+          page={page}
+          totalPages={Math.max(1, Math.ceil(total / 20))}
+          total={total}
+          itemLabel="مطالبة"
+          onPageChange={setPage}
+        />
       )}
     </AppShell>
   );

@@ -26,6 +26,8 @@ export class CustomerWarranty {
   pricePaidCents: number;
   @Column({ name: 'coverage_months', type: 'integer' })
   coverageMonths: number;
+  @Column({ name: 'coverage_days', type: 'integer', nullable: true })
+  coverageDays: number | null;
   @Column({ name: 'max_coverage_cents', type: 'integer', nullable: true })
   maxCoverageCents: number | null;
   @Column({ name: 'max_claims', type: 'integer' })
