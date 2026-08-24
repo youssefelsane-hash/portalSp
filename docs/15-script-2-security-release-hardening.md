@@ -4,6 +4,29 @@
 `codex/script-2-security-release-hardening` (Phase A/B مذكورين تحت)، اتدمج في `main` عبر PR #122،
 واستُكمل بعدها على `claude/home-services-app-plan-v13gb2` (Phase C/D review + Part F/G).
 
+## Checkpoint 2026-08-24 — تكامل ميزات ما بعد Script 2
+
+**الحالة: مكتمل ومتحقق ومرفوع. لا يوجد تنفيذ نصف مكتمل في working tree.**
+
+- `a515f56`: ربط أول طلب متكرر بالقالب والـoccurrence مع بقائه ضمن كل الطلبات، إصلاح ملكية
+  المشاريع والمراحل وربط العميل/API/الإدارة، إصدار الضمان داخل التسوية المالية وحماية المطالبات
+  المتزامنة، إظهار سياسات التقسيط الصحيحة، وتجهيز Paymob بإعدادات إدارة مشفرة وإعادة تحميل فورية.
+- `759dbd2`: عزل fixtures اختبارات PostgreSQL، تسلسل سباقات referral، إغلاق كل Redis clients،
+  وتصحيح invariant check قديم كان ما زال يفحص جدولاً ألغته migration `0169`.
+- migrations `0180` و`0181` مطبقتان وchecksums مطابقة. فحوصات invariants المالية كلها PASS.
+- الفحص المحلي الكامل: `159` Jest suites و`887` tests على PostgreSQL الحقيقي مع
+  `--detectOpenHandles` وخروج تلقائي نظيف. API/shared builds وadmin/customer TypeScript وFlutter
+  tests/analyze نجحت، ولا توجد أسرار أو ملفات `.env` فعلية مضافة.
+- GitHub Actions run `32777119708`: الأربعة checks نجحت (API، Admin، customer-app APK،
+  technician-app APK). PR #200 احتوى SHA `759dbd2` وتم دمجه بواسطة المالك.
+
+**غير المكتمل:** لا شيء ضمن Script 2 أو دفعة التكامل الحالية.
+
+**نقطة الاستئناف الدقيقة:** استقبال نتائج الاختبار اليدوي للمالك؛ أي regression مثبت يبدأ كتغيير
+صغير متماسك على `codex/script-2-security-release-hardening` وفق دورة implement → verify → commit
+→ push. لا تبدأ مرحلة اختيارية جديدة على هذا الفرع من دون finding جديد، لأن Final Script 2
+Release Gate أدناه مغلق بالفعل.
+
 **2026-08-17 — مراجعة Phase C/D "غير المراجعة" (SCRIPT2_CHECKPOINT_NOTE.md) + استكمال Part F/G:**
 الدفعة الأخيرة اللي codex سابها "not fully reviewed" (recurring-order occurrence claims/recovery،
 matching recovery، assistant-matching recovery، chat recovery، background worker invariants،
