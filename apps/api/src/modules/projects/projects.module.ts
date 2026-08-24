@@ -14,6 +14,7 @@ import { AdminWarrantyPlansController } from './admin-warranty-plans.controller'
 import { ProjectRoomController } from './project-room.controller';
 import { MyWarrantyController } from './my-warranty.controller';
 import { MilestoneAutoApproveService } from './milestone-auto-approve.service';
+import { CustomerWarrantyPlansController } from './customer-warranty-plans.controller';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { MilestoneAutoApproveService } from './milestone-auto-approve.service';
     AuditModule,
     SettingsModule,
   ],
-  controllers: [MyProjectsController, MyWarrantyController, AdminProjectsController, AdminWarrantyClaimsController, ProjectRoomController, AdminWarrantyPlansController],
+  controllers: [MyProjectsController, MyWarrantyController, CustomerWarrantyPlansController, AdminProjectsController, AdminWarrantyClaimsController, ProjectRoomController, AdminWarrantyPlansController],
   providers: [ProjectsService, MilestoneAutoApproveService],
   exports: [ProjectsService],
 })

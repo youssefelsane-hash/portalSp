@@ -146,6 +146,12 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
     expect(summary.platformCommissionCents).toBe(20000);
     expect(summary.technicianEarningCents).toBe(80000);
     expect(summary.cancellationFeeCents).toBe(5000);
+    expect(summary.totalAmountCents).toBe(100000);
+    expect(summary.paidAmountCents).toBe(85000);
+    expect(summary.directPaidAmountCents).toBe(85000);
+    expect(summary.refundedAmountCents).toBe(15000);
+    expect(summary.financedOrderAmountCents).toBe(0);
+    expect(summary.amountDueToTechnicianCents).toBe(15000);
 
     expect(summary.payments).toHaveLength(1);
     expect(summary.payments[0].paymentMethod).toBe(PaymentMethod.CARD);
@@ -163,5 +169,73 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
     await expect(service.getFinancialSummaryForOrder('00000000-0000-0000-0000-000000000000')).rejects.toThrow(
       'الطلب غير موجود',
     );
+  });
+
+  it('طلب 6200 جنيه + إيداع 15% يعرض 930 مدفوع و5270 فقط للتحصيل', async () => {
+    const [order] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+         payment_status, total_amount_cents, deposit_amount_cents, placed_at)
+       VALUES ($1,$2,$3,$4,$5,'work_completed','paid',620000,93000,now()) RETURNING id`,
+      [`TESTDEP15-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    try {
+      await dataSource.query(
+        `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method,
+           payment_status, idempotency_key, completed_at)
+         VALUES ($1,$2,$3,93000,'card','succeeded',$4,now())`,
+        [`PAYDEP15-${runId}`.slice(0, 24), order.id, ids.customerProfile, `idem-dep15-${runId}`],
+      );
+
+      const summary = await service.getFinancialSummaryForOrder(order.id);
+      expect(summary.totalAmountCents).toBe(620000);
+      expect(summary.paidAmountCents).toBe(93000);
+      expect(summary.directPaidAmountCents).toBe(93000);
+      expect(summary.amountDueToTechnicianCents).toBe(527000);
+    } finally {
+      await dataSource.query(`DELETE FROM payments WHERE order_id=$1`, [order.id]);
+      await dataSource.query(`DELETE FROM orders WHERE id=$1`, [order.id]);
+    }
+  });
+
+  it('خطة تقسيط معتمدة تغطي أصل الطلب ولا تحوّل باقي الأقساط لمبلغ كاش على الفني', async () => {
+    const [order] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status,
+         payment_status, total_amount_cents, placed_at)
+       VALUES ($1,$2,$3,$4,$5,'work_completed','unpaid',620000,now()) RETURNING id`,
+      [`TESTINST-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+    const [plan] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO installment_plans (name_ar, installment_count, requires_saved_card)
+       VALUES ($1,3,false) RETURNING id`,
+      [`خطة اختبار ${runId}`],
+    );
+    const [application] = await dataSource.query<{ id: string }[]>(
+      `INSERT INTO installment_applications
+         (order_id, customer_id, plan_id, status, service_price_cents, financing_percentage,
+          fixed_fee_cents, financing_fee_cents, total_financed_cents, down_payment_percentage,
+          down_payment_cents, financed_balance_cents, installment_count, regular_installment_cents,
+          final_installment_cents, interval_days, first_due_at, activated_at)
+       VALUES ($1,$2,$3,'approved',620000,10,0,62000,682000,0,0,682000,3,227333,227334,30,now(),now())
+       RETURNING id`,
+      [order.id, ids.customerProfile, plan.id],
+    );
+    try {
+      await dataSource.query(
+        `INSERT INTO installments (application_id, sequence_number, due_at, amount_cents)
+         VALUES ($1,1,now(),227333),($1,2,now() + interval '30 days',227333),($1,3,now() + interval '60 days',227334)`,
+        [application.id],
+      );
+
+      const summary = await service.getFinancialSummaryForOrder(order.id);
+      expect(summary.paidAmountCents).toBe(0);
+      expect(summary.financedOrderAmountCents).toBe(620000);
+      expect(summary.installmentOutstandingCents).toBe(682000);
+      expect(summary.amountDueToTechnicianCents).toBe(0);
+    } finally {
+      await dataSource.query(`DELETE FROM installments WHERE application_id=$1`, [application.id]);
+      await dataSource.query(`DELETE FROM installment_applications WHERE id=$1`, [application.id]);
+      await dataSource.query(`DELETE FROM installment_plans WHERE id=$1`, [plan.id]);
+      await dataSource.query(`DELETE FROM orders WHERE id=$1`, [order.id]);
+    }
   });
 });

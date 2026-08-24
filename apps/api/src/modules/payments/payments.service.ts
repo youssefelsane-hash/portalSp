@@ -70,6 +70,16 @@ type PaymentConfirmedEffects = {
   serviceId: string;
 };
 
+export type OrderCollectionBreakdown = {
+  totalAmountCents: number;
+  paidAmountCents: number;
+  directPaidAmountCents: number;
+  refundedAmountCents: number;
+  financedOrderAmountCents: number;
+  installmentOutstandingCents: number;
+  amountDueToTechnicianCents: number;
+};
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -196,24 +206,106 @@ export class PaymentsService {
    * الإصلاح: مجموع **كل** الدفعات الناجحة للطلب، مش أولها بس.
    */
   private async amountOwedNow(order: Order, manager?: EntityManager): Promise<number> {
-    if (order.paymentStatus !== OrderPaymentStatus.PAID) {
+    if (order.paymentStatus !== OrderPaymentStatus.PAID && order.orderStatus === OrderStatus.PENDING_PAYMENT) {
       // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — الطلب السطر الحرج الوحيد اللي الميزة
       // كلها محتاجاه. لو الطلب عنده مبلغ إيداع محسوب (snapshot وقت الإنشاء، depositAmountCents)،
       // أول دفعة (وقت PENDING_PAYMENT) تحصّل الإيداع بس مش الإجمالي — الباقي هيتحصّل تلقائيًا
       // كدلتا لما paymentStatus يوصل PAID (نفس الفرع تحت بالحرف، صفر تعديل إضافي مطلوب).
       return order.depositAmountCents ?? order.totalAmountCents;
     }
-    const paymentsRepo = manager ? manager.getRepository(Payment) : this.payments;
-    const succeededPayments = await paymentsRepo.find({
-      where: { orderId: order.id, paymentStatus: PaymentGatewayStatus.SUCCEEDED },
-    });
-    if (succeededPayments.length === 0) {
-      // دفاعي بحت — مفروض مستحيل عمليًا (paymentStatus=PAID لازم كان مسبوق بدفعة ناجحة)، لو حصل
-      // نرجّع صفر بدل ما نحصّل مبلغ عشوائي مش موثوق.
-      return 0;
+    return (await this.getCollectionBreakdownForOrder(order, manager)).amountDueToTechnicianCents;
+  }
+
+  /**
+   * مصدر واحد للرقم الذي يجوز للفني تحصيله من العميل. دفعات الأقساط تسدد مديونية العميل
+   * للمنصة ولا تُحصّل مرة ثانية عند الزيارة، والخطة المعتمدة تغطي أصل سعر الخدمة وفق نموذج
+   * "مخاطرة المنصة" الموثق في installments/README. أي شغل إضافي بعد snapshot الخطة يظل ظاهرًا
+   * كرصيد مباشر مستحق. الاستردادات المكتملة فقط تعكس المبلغ المدفوع؛ pending/rejected لا تؤثر.
+   */
+  async getCollectionBreakdownForOrder(
+    orderOrId: Order | string,
+    manager?: EntityManager,
+  ): Promise<OrderCollectionBreakdown> {
+    const runner = manager ?? this.dataSource.manager;
+    const order =
+      typeof orderOrId === 'string'
+        ? await runner.getRepository(Order).findOne({ where: { id: orderOrId } })
+        : orderOrId;
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
     }
-    const totalCollectedCents = succeededPayments.reduce((sum, p) => sum + p.amountCents, 0);
-    return Math.max(0, order.totalAmountCents - totalCollectedCents);
+
+    const [money] = await runner.query<
+      {
+        direct_paid_cents: string;
+        installment_paid_cents: string;
+        direct_refunded_cents: string;
+        installment_refunded_cents: string;
+      }[]
+    >(
+      `SELECT
+         COALESCE(SUM(p.amount_cents) FILTER (
+           WHERE p.installment_id IS NULL
+             AND p.payment_status IN ('succeeded','partially_refunded','refunded')
+         ), 0)::text AS direct_paid_cents,
+         COALESCE(SUM(p.amount_cents) FILTER (
+           WHERE p.installment_id IS NOT NULL
+             AND p.payment_status IN ('succeeded','partially_refunded','refunded')
+         ), 0)::text AS installment_paid_cents,
+         COALESCE((
+           SELECT SUM(r.amount_cents) FROM refunds r
+           JOIN payments rp ON rp.id = r.payment_id
+           WHERE r.order_id = $1 AND r.refund_status = 'completed' AND rp.installment_id IS NULL
+         ), 0)::text AS direct_refunded_cents,
+         COALESCE((
+           SELECT SUM(r.amount_cents) FROM refunds r
+           JOIN payments rp ON rp.id = r.payment_id
+           WHERE r.order_id = $1 AND r.refund_status = 'completed' AND rp.installment_id IS NOT NULL
+         ), 0)::text AS installment_refunded_cents
+       FROM payments p
+       WHERE p.order_id = $1`,
+      [order.id],
+    );
+    const [financing] = await runner.query<
+      { service_price_cents: number; total_financed_cents: number; paid_cents: string }[]
+    >(
+      `SELECT a.service_price_cents, a.total_financed_cents,
+              COALESCE(SUM(i.amount_cents) FILTER (WHERE i.status = 'paid'), 0)::text AS paid_cents
+       FROM installment_applications a
+       LEFT JOIN installments i ON i.application_id = a.id
+       WHERE a.order_id = $1 AND a.status = 'approved' AND a.deleted_at IS NULL
+       GROUP BY a.id
+       ORDER BY a.activated_at DESC NULLS LAST
+       LIMIT 1`,
+      [order.id],
+    );
+
+    const directRefundedCents = Number(money?.direct_refunded_cents ?? 0);
+    const installmentRefundedCents = Number(money?.installment_refunded_cents ?? 0);
+    const directPaidAmountCents = Math.max(0, Number(money?.direct_paid_cents ?? 0) - directRefundedCents);
+    const installmentPaidAmountCents = Math.max(
+      0,
+      Number(money?.installment_paid_cents ?? financing?.paid_cents ?? 0) - installmentRefundedCents,
+    );
+    const uncoveredAfterDirectPayment = Math.max(0, order.totalAmountCents - directPaidAmountCents);
+    const financedOrderAmountCents = financing
+      ? Math.min(uncoveredAfterDirectPayment, Number(financing.service_price_cents))
+      : 0;
+
+    return {
+      totalAmountCents: order.totalAmountCents,
+      paidAmountCents: directPaidAmountCents + installmentPaidAmountCents,
+      directPaidAmountCents,
+      refundedAmountCents: directRefundedCents + installmentRefundedCents,
+      financedOrderAmountCents,
+      installmentOutstandingCents: financing
+        ? Math.max(0, Number(financing.total_financed_cents) - installmentPaidAmountCents)
+        : 0,
+      amountDueToTechnicianCents: Math.max(
+        0,
+        order.totalAmountCents - directPaidAmountCents - financedOrderAmountCents,
+      ),
+    };
   }
 
   /**
@@ -284,15 +376,55 @@ export class PaymentsService {
     order.paidAt = now;
     order.orderStatus = OrderStatus.COMPLETED;
     order.closedAt = now;
-    // الضمان (docs/08 §7) — بيتفعّل بس لو الخدمة عندها warranty_days > 0. صفر = مفيش ضمان،
-    // warranty_expires_at بيفضل null (مش تاريخ في الماضي مضلّل).
-    order.warrantyExpiresAt = warrantyDays > 0 ? new Date(now.getTime() + warrantyDays * 24 * 60 * 60 * 1000) : null;
+    const selectedWarranty = order.warrantyPlanSnapshot as {
+      version?: number;
+      name_ar?: string;
+      warranty_type?: string;
+      coverage_months?: number;
+      max_coverage_cents?: number | null;
+      max_claims?: number;
+      terms_ar?: string | null;
+      exclusions_ar?: string | null;
+    } | null;
+    if (order.warrantyPlanId && selectedWarranty) {
+      const expiresAt = new Date(now);
+      expiresAt.setUTCMonth(expiresAt.getUTCMonth() + Number(selectedWarranty.coverage_months ?? 0));
+      order.warrantyExpiresAt = expiresAt;
+    } else {
+      // الضمان المجاني الافتراضي يظل مبنيًا على warranty_days للخدمة عند عدم شراء خطة إضافية.
+      order.warrantyExpiresAt = warrantyDays > 0 ? new Date(now.getTime() + warrantyDays * 24 * 60 * 60 * 1000) : null;
+    }
     await manager.save(order);
 
-    // نوحّد ضمان الطلب القديم مع منتج الضمان الظاهر للعميل. نفس المعاملة المالية تضمن إن الطلب
-    // لا يكتمل أبدًا من غير سجل الضمان، والفهرس الفريد يجعل إعادة التسوية idempotent. الخطط
-    // المدفوعة مستبعدة عمدًا؛ الاختيار لخطة workmanship مجانية مطابقة ثم الخطة النظامية.
-    if (warrantyDays > 0 && order.warrantyExpiresAt) {
+    // نوحّد الضمان المدفوع المختار أو ضمان التنفيذ المجاني مع المنتج الظاهر للعميل. نفس المعاملة
+    // المالية تضمن إن الطلب لا يكتمل من غير سجل الضمان، والفهرس الفريد يجعل إعادة التسوية idempotent.
+    if (order.warrantyPlanId && selectedWarranty && order.warrantyExpiresAt) {
+      await manager.query(
+        `INSERT INTO customer_warranties (
+           plan_id, plan_version, order_id, project_id, customer_id, name_ar, warranty_type,
+           price_paid_cents, coverage_months, coverage_days, max_coverage_cents, max_claims,
+           terms_ar, exclusions_ar, starts_at, expires_at, claims_used
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,$10,$11,$12,$13,$14,$15,0)
+         ON CONFLICT (order_id) WHERE order_id IS NOT NULL DO NOTHING`,
+        [
+          order.warrantyPlanId,
+          Number(selectedWarranty.version ?? 1),
+          order.id,
+          order.projectId,
+          order.customerId,
+          String(selectedWarranty.name_ar ?? 'ضمان إضافي'),
+          String(selectedWarranty.warranty_type ?? 'extended_workmanship'),
+          order.warrantyPriceCents,
+          Number(selectedWarranty.coverage_months ?? 1),
+          selectedWarranty.max_coverage_cents ?? order.totalAmountCents,
+          Number(selectedWarranty.max_claims ?? 1),
+          selectedWarranty.terms_ar ?? null,
+          selectedWarranty.exclusions_ar ?? null,
+          now,
+          order.warrantyExpiresAt,
+        ],
+      );
+    } else if (warrantyDays > 0 && order.warrantyExpiresAt) {
       await manager.query(
         `WITH chosen_plan AS (
            SELECT wp.*
@@ -448,6 +580,13 @@ export class PaymentsService {
       // المبلغ المستحق دلوقتي (ADR-0015) — الإجمالي كامل للطلب العادي، أو الدلتا بس لو الطلب كان
       // مدفوع مسبقًا ولسه مستني تحصيل بند إضافي (AWAITING_PAYMENT).
       const owedNowCents = await this.amountOwedNow(order, manager);
+      if (owedNowCents <= 0) {
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          'مفيش مبلغ كاش مطلوب من العميل — الطلب مغطى بدفعة سابقة أو بخطة تقسيط معتمدة',
+          HttpStatus.CONFLICT,
+        );
+      }
 
       const paymentNumber = await this.nextPaymentNumber(manager);
       const payment = manager.create(Payment, {
@@ -506,6 +645,13 @@ export class PaymentsService {
         throw new ApiException(ErrorCode.ORDR_003, 'الطلب ده مش نزاع تسليم كاش قيد المراجعة', HttpStatus.CONFLICT);
       }
       const owedNowCents = await this.amountOwedNow(order, manager);
+      if (owedNowCents <= 0) {
+        throw new ApiException(
+          ErrorCode.PAY_003,
+          'مفيش مبلغ كاش مطلوب من العميل — الطلب مغطى بدفعة سابقة أو بخطة تقسيط معتمدة',
+          HttpStatus.CONFLICT,
+        );
+      }
 
       const paymentNumber = await this.nextPaymentNumber(manager);
       const payment = manager.create(Payment, {
@@ -1968,6 +2114,13 @@ export class PaymentsService {
    * الحاكم ("لو الداتا موجودة، اربطها/اعرضها بس").
    */
   async getFinancialSummaryForOrder(orderId: string): Promise<{
+    totalAmountCents: number;
+    paidAmountCents: number;
+    directPaidAmountCents: number;
+    refundedAmountCents: number;
+    financedOrderAmountCents: number;
+    installmentOutstandingCents: number;
+    amountDueToTechnicianCents: number;
     platformCommissionCents: number;
     technicianEarningCents: number;
     cancellationFeeCents: number;
@@ -1989,11 +2142,13 @@ export class PaymentsService {
     if (!order) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
     }
-    const [payments, refunds] = await Promise.all([
+    const [payments, refunds, collection] = await Promise.all([
       this.payments.find({ where: { orderId }, order: { initiatedAt: 'ASC' } }),
       this.refunds.find({ where: { orderId }, order: { requestedAt: 'ASC' } }),
+      this.getCollectionBreakdownForOrder(order),
     ]);
     return {
+      ...collection,
       platformCommissionCents: order.platformCommissionCents,
       technicianEarningCents: order.technicianEarningCents,
       cancellationFeeCents: order.cancellationFeeCents,
@@ -2582,9 +2737,12 @@ export class PaymentsService {
         .getOne();
       if (!order) return null;
       if (order.orderStatus !== OrderStatus.WORK_COMPLETED) return null;
-      if (order.paymentStatus !== OrderPaymentStatus.PAID) return null; // مش طلب مدفوع مسبقًا
+      const breakdown = await this.getCollectionBreakdownForOrder(order, manager);
+      const financiallyCovered =
+        order.paymentStatus === OrderPaymentStatus.PAID || breakdown.financedOrderAmountCents > 0;
+      if (!financiallyCovered) return null;
 
-      const owedNowCents = await this.amountOwedNow(order, manager);
+      const owedNowCents = breakdown.amountDueToTechnicianCents;
       const previousStatus = order.orderStatus;
 
       if (owedNowCents <= 0) {
@@ -2652,15 +2810,21 @@ export class PaymentsService {
 
   /** Rebuilds a missed WORK_COMPLETED event from durable order state in a bounded batch. */
   async reconcilePrepaidWorkCompleted(batchSize = 25): Promise<number> {
-    const candidates = await this.orders.find({
-      select: ['id'],
-      where: {
-        orderStatus: OrderStatus.WORK_COMPLETED,
-        paymentStatus: OrderPaymentStatus.PAID,
-      },
-      order: { updatedAt: 'ASC' },
-      take: Math.max(1, Math.floor(batchSize)),
-    });
+    const candidates = await this.dataSource.query<{ id: string }[]>(
+      `SELECT o.id
+       FROM orders o
+       WHERE o.order_status = 'work_completed'
+         AND (
+           o.payment_status = 'paid'
+           OR EXISTS (
+             SELECT 1 FROM installment_applications a
+             WHERE a.order_id = o.id AND a.status = 'approved' AND a.deleted_at IS NULL
+           )
+         )
+       ORDER BY o.updated_at ASC
+       LIMIT $1`,
+      [Math.max(1, Math.floor(batchSize))],
+    );
 
     let processed = 0;
     for (const candidate of candidates) {

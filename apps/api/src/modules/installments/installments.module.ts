@@ -10,6 +10,7 @@ import { InstallmentPlanDocumentRequirement } from './entities/installment-plan-
 import { InstallmentsController } from './installments.controller';
 import { AdminInstallmentsController } from './admin-installments.controller';
 import { InstallmentsService } from './installments.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { InstallmentsService } from './installments.service';
     CustomersModule,
     AuditModule,
     PaymentPoliciesModule,
+    SettingsModule,
   ],
   controllers: [InstallmentsController, AdminInstallmentsController],
   providers: [InstallmentsService, storageServiceProvider],

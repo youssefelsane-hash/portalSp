@@ -45,6 +45,16 @@ export interface OrderResponseDto {
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
+  /** موجودة في تفاصيل الفني؛ القوائم العامة قد تحذفها لتجنب استعلام مالي لكل صف. */
+  paid_amount_cents?: number;
+  direct_paid_amount_cents?: number;
+  financed_order_amount_cents?: number;
+  refunded_amount_cents?: number;
+  installment_outstanding_cents?: number;
+  amount_due_to_technician_cents?: number;
+  warranty_plan_id: string | null;
+  warranty_price_cents: number;
+  optional_warranty: { name_ar: string; coverage_months: number } | null;
   payment_status: string;
   placed_at: string | null;
   cancelled_at: string | null;

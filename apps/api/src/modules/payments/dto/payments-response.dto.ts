@@ -230,5 +230,8 @@ export function toRefundResponseDto(refund: Refund): RefundResponseDto {
 // Script 2 Part I (findings #46/#47) — راجع payment-provider.registry.ts's listAll() للسياق الكامل.
 export interface PaymentChannelResponseDto {
   method: string;
+  is_enabled: boolean;
+  is_configured: boolean;
   is_available: boolean;
+  unavailable_reason: string | null;
 }

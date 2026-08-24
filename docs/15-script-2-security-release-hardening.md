@@ -1,8 +1,58 @@
 # Script 2 — Security, Realtime, Durable Events, Storage & Release Hardening
 
+## Checkpoint 2026-08-24 — checkout payments and optional service warranty
+
+- `0182_checkout_payment_channels_and_optional_warranty.sql`: مفاتيح تفعيل card/wallet/instapay/
+  installments، وsnapshot ضمان اختياري على الطلب.
+- طرق الدفع الخمس ظاهرة في checkout بحالة وسبب، بدل إخفاء Paymob/التقسيط/Fawry صامتًا. Fawry
+  أصبح مسار prepayment مدعومًا.
+- خطة الضمان تُربط بخدمة من لوحة الأدمن، يختارها العميل اختياريًا، وسعرها يظهر منفصلًا ويضاف
+  للإجمالي قبل حساب الإيداع. إصدار الضمان عند إكمال الطلب يستخدم snapshot وقت الحجز.
+- تحقق: API build، Admin typecheck، 36 اختبار Jest/PostgreSQL/Redis مع detectOpenHandles، و10
+  اختبارات Flutter. migration 0182 طبقت بعد تطابق checksums 0001-0181.
+
 هذا الملف سجل checkpoints للـScript 2 فقط. الأساس هو Script 1 SHA `6ebbe88`، والعمل بدأ على
 `codex/script-2-security-release-hardening` (Phase A/B مذكورين تحت)، اتدمج في `main` عبر PR #122،
 واستُكمل بعدها على `claude/home-services-app-plan-v13gb2` (Phase C/D review + Part F/G).
+
+## Checkpoint 2026-08-24 — تكامل ميزات ما بعد Script 2
+
+**الحالة: مكتمل ومتحقق ومرفوع. لا يوجد تنفيذ نصف مكتمل في working tree.**
+
+- `a515f56`: ربط أول طلب متكرر بالقالب والـoccurrence مع بقائه ضمن كل الطلبات، إصلاح ملكية
+  المشاريع والمراحل وربط العميل/API/الإدارة، إصدار الضمان داخل التسوية المالية وحماية المطالبات
+  المتزامنة، إظهار سياسات التقسيط الصحيحة، وتجهيز Paymob بإعدادات إدارة مشفرة وإعادة تحميل فورية.
+- `759dbd2`: عزل fixtures اختبارات PostgreSQL، تسلسل سباقات referral، إغلاق كل Redis clients،
+  وتصحيح invariant check قديم كان ما زال يفحص جدولاً ألغته migration `0169`.
+- migrations `0180` و`0181` مطبقتان وchecksums مطابقة. فحوصات invariants المالية كلها PASS.
+- الفحص المحلي الكامل: `159` Jest suites و`887` tests على PostgreSQL الحقيقي مع
+  `--detectOpenHandles` وخروج تلقائي نظيف. API/shared builds وadmin/customer TypeScript وFlutter
+  tests/analyze نجحت، ولا توجد أسرار أو ملفات `.env` فعلية مضافة.
+- GitHub Actions run `32777119708`: الأربعة checks نجحت (API، Admin، customer-app APK،
+  technician-app APK). PR #200 احتوى SHA `759dbd2` وتم دمجه بواسطة المالك.
+
+**غير المكتمل:** لا شيء ضمن Script 2 أو دفعة التكامل الحالية.
+
+**نقطة الاستئناف الدقيقة:** استقبال نتائج الاختبار اليدوي للمالك؛ أي regression مثبت يبدأ كتغيير
+صغير متماسك على `codex/script-2-security-release-hardening` وفق دورة implement → verify → commit
+→ push. لا تبدأ مرحلة اختيارية جديدة على هذا الفرع من دون finding جديد، لأن Final Script 2
+Release Gate أدناه مغلق بالفعل.
+
+### Checkpoint 2026-08-24 23:17 — دورة المشروع بين العميل والإدارة
+
+**مكتمل في `c77c86d`:** أُصلح خطأ Flutter الذي كان يرسل `POST /me/projects` بنجاح ثم يعمل cast
+للـFuture نفسه فيعرض "حصل خطأ" رغم حفظ المشروع. الإنشاء ينتظر الرد الآن، والميزانية المكتوبة
+بالجنيه تتحول إلى قروش. غرفة المشروع الموحدة تعرض للطرفين وصف العميل والعنوان والميزانية وكل
+بنود عرض السعر والنطاق والمدة وتواريخ الإرسال والموافقة واسم الفاعل، مع activity timeline وخطوة
+تالية واضحة. شاشة العميل تعرض العرض قابلاً للتوسيع، ولوحة الإدارة تُظهر اعتماد العميل وتفتح إنشاء
+المراحل بعده.
+
+**التحقق:** PostgreSQL `projects-integration.spec.ts` ‏7/7 مع `--detectOpenHandles`، regression
+Flutter الجديد `projects_repo_test.dart` ‏1/1، كل customer-app tests ‏8/8، Flutter analyze بلا
+ملاحظات، API build، Admin TypeScript/ESLint/production build، و`git diff --check` كلها PASS.
+
+**غير المكتمل:** لا شيء. **نقطة الاستئناف:** اختبار يدوي جديد لدورة مشروع حقيقية؛ إذا ظهر finding
+جديد يبدأ من `c77c86d` ولا يعاد تنفيذ هذه الدفعة.
 
 **2026-08-17 — مراجعة Phase C/D "غير المراجعة" (SCRIPT2_CHECKPOINT_NOTE.md) + استكمال Part F/G:**
 الدفعة الأخيرة اللي codex سابها "not fully reviewed" (recurring-order occurrence claims/recovery،

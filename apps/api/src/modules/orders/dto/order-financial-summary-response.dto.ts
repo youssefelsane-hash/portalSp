@@ -27,6 +27,13 @@ export interface OrderRefundSummaryDto {
 }
 
 export interface OrderFinancialSummaryResponseDto {
+  total_amount_cents: number;
+  paid_amount_cents: number;
+  direct_paid_amount_cents: number;
+  refunded_amount_cents: number;
+  financed_order_amount_cents: number;
+  installment_outstanding_cents: number;
+  amount_due_to_technician_cents: number;
   platform_commission_cents: number;
   technician_earning_cents: number;
   cancellation_fee_cents: number;
@@ -35,6 +42,13 @@ export interface OrderFinancialSummaryResponseDto {
 }
 
 export function toOrderFinancialSummaryResponseDto(summary: {
+  totalAmountCents: number;
+  paidAmountCents: number;
+  directPaidAmountCents: number;
+  refundedAmountCents: number;
+  financedOrderAmountCents: number;
+  installmentOutstandingCents: number;
+  amountDueToTechnicianCents: number;
   platformCommissionCents: number;
   technicianEarningCents: number;
   cancellationFeeCents: number;
@@ -53,6 +67,13 @@ export function toOrderFinancialSummaryResponseDto(summary: {
   refunds: Pick<Refund, 'id' | 'amountCents' | 'refundType' | 'refundMethod' | 'refundStatus' | 'completedAt'>[];
 }): OrderFinancialSummaryResponseDto {
   return {
+    total_amount_cents: summary.totalAmountCents,
+    paid_amount_cents: summary.paidAmountCents,
+    direct_paid_amount_cents: summary.directPaidAmountCents,
+    refunded_amount_cents: summary.refundedAmountCents,
+    financed_order_amount_cents: summary.financedOrderAmountCents,
+    installment_outstanding_cents: summary.installmentOutstandingCents,
+    amount_due_to_technician_cents: summary.amountDueToTechnicianCents,
     platform_commission_cents: summary.platformCommissionCents,
     technician_earning_cents: summary.technicianEarningCents,
     cancellation_fee_cents: summary.cancellationFeeCents,

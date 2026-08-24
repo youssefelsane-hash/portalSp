@@ -18,6 +18,12 @@ interface WarrantyPlanRow {
   pricing_model: string; price_value: string; coverage_months: number;
   max_coverage_cents: number | null; max_claims: number;
   is_active: boolean; version: number;
+  target_service_id: string | null;
+  targetServiceId?: string | null;
+}
+
+function linkedServiceId(plan: WarrantyPlanRow): string {
+  return plan.target_service_id ?? plan.targetServiceId ?? '';
 }
 
 export default function AdminWarrantyPlansPage() {
@@ -25,15 +31,31 @@ export default function AdminWarrantyPlansPage() {
   const [plans, setPlans] = useState<WarrantyPlanRow[] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [services, setServices] = useState<{ id: string; name_ar: string }[]>([]);
 
   const load = () => {
     authedFetch<WarrantyPlanRow[]>('/admin/warranty-plans').then(setPlans).catch((e) => setError(e instanceof ApiError ? e.message : 'خطأ'));
   };
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+    authedFetch<{ items: { id: string; name_ar: string }[] }>('/admin/services?per_page=200&is_active=true')
+      .then((result) => setServices(result.items))
+      .catch(() => setServices([]));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggleActive(plan: WarrantyPlanRow) {
     try {
       await authedFetch(`/admin/warranty-plans/${plan.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !plan.is_active }) });
+      load();
+    } catch (err) { setError(err instanceof ApiError ? err.message : 'خطأ'); }
+  }
+
+  async function assignService(plan: WarrantyPlanRow, serviceId: string) {
+    try {
+      await authedFetch(`/admin/warranty-plans/${plan.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ target_service_id: serviceId || null }),
+      });
       load();
     } catch (err) { setError(err instanceof ApiError ? err.message : 'خطأ'); }
   }
@@ -46,7 +68,7 @@ export default function AdminWarrantyPlansPage() {
       </div>
       {error && <p className="text-destructive mb-4">{error}</p>}
 
-      {showCreate && <CreateWarrantyPlanForm onCreated={() => { setShowCreate(false); load(); }} />}
+      {showCreate && <CreateWarrantyPlanForm services={services} onCreated={() => { setShowCreate(false); load(); }} />}
 
       {!plans && <TableSkeleton columns={6} />}
       {plans && plans.length === 0 && <EmptyState title="مفيش خطط ضمان" />}
@@ -54,7 +76,7 @@ export default function AdminWarrantyPlansPage() {
         <Table>
           <TableHeader><TableRow>
             <TableHead>الاسم</TableHead><TableHead>النوع</TableHead>
-            <TableHead>السعر</TableHead><TableHead>التغطية</TableHead>
+            <TableHead>الخدمة</TableHead><TableHead>السعر</TableHead><TableHead>التغطية</TableHead>
             <TableHead>عدد المطالبات</TableHead><TableHead>نشطة</TableHead><TableHead>إجراءات</TableHead>
           </TableRow></TableHeader>
           <TableBody>
@@ -62,6 +84,16 @@ export default function AdminWarrantyPlansPage() {
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name_ar}</TableCell>
                 <TableCell><Badge variant="outline">{p.warranty_type === 'workmanship' ? 'ضمان تنفيذ' : 'ضمان ممتد'}</Badge></TableCell>
+                <TableCell>
+                  <select
+                    value={linkedServiceId(p)}
+                    onChange={(event) => void assignService(p, event.target.value)}
+                    className="w-full rounded border px-2 py-1 text-sm"
+                  >
+                    <option value="">غير مربوط</option>
+                    {services.map((service) => <option key={service.id} value={service.id}>{service.name_ar}</option>)}
+                  </select>
+                </TableCell>
                 <TableCell>{p.pricing_model === 'fixed' ? `${(Number(p.price_value) / 100).toLocaleString()} ج.م` : `${p.price_value}%`}</TableCell>
                 <TableCell>{p.coverage_months} شهر</TableCell>
                 <TableCell>{p.max_claims}</TableCell>
@@ -78,7 +110,7 @@ export default function AdminWarrantyPlansPage() {
   );
 }
 
-function CreateWarrantyPlanForm({ onCreated }: { onCreated: () => void }) {
+function CreateWarrantyPlanForm({ onCreated, services }: { onCreated: () => void; services: { id: string; name_ar: string }[] }) {
   const { authedFetch } = useAuth();
   const [name, setName] = useState('');
   const [type, setType] = useState('extended_workmanship');
@@ -86,13 +118,14 @@ function CreateWarrantyPlanForm({ onCreated }: { onCreated: () => void }) {
   const [priceValue, setPriceValue] = useState(0);
   const [coverageMonths, setCoverageMonths] = useState(12);
   const [maxClaims, setMaxClaims] = useState(1);
+  const [serviceId, setServiceId] = useState('');
   const [terms, setTerms] = useState('');
   const [exclusions, setExclusions] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function submit() {
-    if (!name.trim() || coverageMonths < 1) { setError('املأ الاسم ومدة التغطية'); return; }
+    if (!name.trim() || coverageMonths < 1 || !serviceId) { setError('املأ الاسم والمدة واختر الخدمة'); return; }
     setSaving(true); setError(null);
     try {
       await authedFetch('/admin/warranty-plans', {
@@ -101,6 +134,7 @@ function CreateWarrantyPlanForm({ onCreated }: { onCreated: () => void }) {
           slug: `wp-${Date.now()}`, name_ar: name.trim(), warranty_type: type,
           pricing_model: pricingModel, price_value: pricingModel === 'fixed' ? Math.round(priceValue * 100) : priceValue,
           coverage_months: coverageMonths, max_claims: maxClaims,
+          target_service_id: serviceId,
           terms_ar: terms.trim() || undefined, exclusions_ar: exclusions.trim() || undefined,
         }),
       });
@@ -113,6 +147,11 @@ function CreateWarrantyPlanForm({ onCreated }: { onCreated: () => void }) {
     <div className="mb-6 rounded-md border p-4 space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div><Label>اسم الخطة *</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً: ضمان سنتين" /></div>
+        <div><Label>الخدمة التي يظهر عليها الضمان *</Label>
+          <select value={serviceId} onChange={(e) => setServiceId(e.target.value)} className="w-full rounded border px-2 py-1 text-sm">
+            <option value="">اختر الخدمة</option>
+            {services.map((service) => <option key={service.id} value={service.id}>{service.name_ar}</option>)}
+          </select></div>
         <div><Label>النوع</Label>
           <select value={type} onChange={(e) => setType(e.target.value)} className="w-full rounded border px-2 py-1 text-sm">
             <option value="extended_workmanship">ضمان ممتد</option>

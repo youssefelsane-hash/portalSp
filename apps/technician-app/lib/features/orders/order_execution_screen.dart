@@ -416,6 +416,11 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             orderStatus: 'completed',
             problemDescription: _order.problemDescription,
             totalAmountCents: _order.totalAmountCents,
+            paidAmountCents: _order.totalAmountCents,
+            financedOrderAmountCents: _order.financedOrderAmountCents,
+            refundedAmountCents: _order.refundedAmountCents,
+            installmentOutstandingCents: _order.installmentOutstandingCents,
+            amountDueToTechnicianCents: 0,
             paymentStatus: 'paid',
             bookingMode: _order.bookingMode,
             requiredTechnicians: _order.requiredTechnicians,
@@ -460,7 +465,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final nextAction = nextTechnicianAction[_order.orderStatus];
+    final configuredNextAction = nextTechnicianAction[_order.orderStatus];
+    final nextAction = configuredNextAction == 'collect_cash' && _order.amountDueToTechnicianCents <= 0
+        ? null
+        : configuredNextAction;
     final isDone = _order.orderStatus == 'completed';
 
     return Directionality(
@@ -503,7 +511,24 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    Text('القيمة: ${_formatEgp(_order.totalAmountCents)}'),
+                    Text('إجمالي الطلب: ${_formatEgp(_order.totalAmountCents)}'),
+                    if (_order.paidAmountCents > 0)
+                      Text('المدفوع بالفعل: ${_formatEgp(_order.paidAmountCents)}'),
+                    if (_order.financedOrderAmountCents > 0)
+                      Text('مغطى بالتقسيط: ${_formatEgp(_order.financedOrderAmountCents)}'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'المطلوب تحصيله من العميل: ${_formatEgp(_order.amountDueToTechnicianCents)}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: _order.amountDueToTechnicianCents > 0 ? Colors.orange.shade800 : Colors.green,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    if (_order.installmentOutstandingCents > 0)
+                      Text(
+                        'باقي التقسيط تحصّله المنصة، مش الفني: ${_formatEgp(_order.installmentOutstandingCents)}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     if (_order.problemDescription != null) ...[
                       const SizedBox(height: 8),
                       Text('المشكلة: ${_order.problemDescription}'),
@@ -640,7 +665,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو المفروض العميل يدفع كاش
             // ("محتاج تحصيل") ومستلمتش الفلوس فعلاً، بلّغ بدل ما تقفل الطلب "حصّلت الكاش" كذب.
             if ((_order.orderStatus == 'work_completed' || _order.orderStatus == 'awaiting_payment') &&
-                _order.paymentStatus != 'paid') ...[
+                _order.amountDueToTechnicianCents > 0) ...[
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: _acting ? null : _reportCashNotReceived,
@@ -663,6 +688,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                     label: const Text('قيّم العميل'),
                   ),
                 ),
+            ] else if (configuredNextAction == 'collect_cash' && _order.amountDueToTechnicianCents <= 0) ...[
+              const Center(
+                child: Text(
+                  'لا تحصّل أي كاش من العميل — المبلغ مغطى بالفعل، وجارٍ إقفال التسوية تلقائيًا.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                ),
+              ),
             ] else if (nextAction != null)
               FilledButton(
                 onPressed: _acting ? null : () => _runAction(nextAction),

@@ -3,6 +3,38 @@ import '../../core/auth_repository.dart';
 import '../catalog/models.dart';
 import 'models.dart';
 
+class PaymentChannelAvailability {
+  final String method;
+  final bool enabled;
+  final bool configured;
+  final bool available;
+  final String? unavailableReason;
+
+  PaymentChannelAvailability.fromJson(Map<String, dynamic> json)
+      : method = json['method'] as String,
+        enabled = json['is_enabled'] as bool? ?? true,
+        configured = json['is_configured'] as bool? ?? (json['is_available'] as bool? ?? false),
+        available = json['is_available'] as bool? ?? false,
+        unavailableReason = json['unavailable_reason'] as String?;
+}
+
+class OptionalWarrantyPlan {
+  final String id;
+  final String nameAr;
+  final String pricingModel;
+  final double priceValue;
+  final int coverageMonths;
+  final String? termsAr;
+
+  OptionalWarrantyPlan.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as String,
+        nameAr = json['name_ar'] as String,
+        pricingModel = json['pricing_model'] as String,
+        priceValue = (json['price_value'] as num).toDouble(),
+        coverageMonths = json['coverage_months'] as int,
+        termsAr = json['terms_ar'] as String?;
+}
+
 class OrdersRepository {
   final AuthRepository auth;
 
@@ -27,9 +59,19 @@ class OrdersRepository {
   // Script 2 Part I (findings #46/#47/#48) — كانت شاشة اختيار طريقة الدفع بتعرض 'card'/'instapay'
   // دايمًا بغض النظر عن كون Paymob/InstaPay مُعدّين في الباك-إند فعليًا، فالعميل كان يقدر يختار
   // طريقة الباك-إند هيرفضها بعد ما البحث عن فني يبدأ. بيرجّع set بالطرق المتاحة فعليًا بس.
-  Future<Set<String>> fetchAvailablePaymentMethods() async {
+  Future<List<PaymentChannelAvailability>> fetchPaymentChannels() async {
     final items = await auth.authedRequestList('/payment-channels');
-    return items.where((item) => item['is_available'] == true).map((item) => item['method'] as String).toSet();
+    return items.map(PaymentChannelAvailability.fromJson).toList();
+  }
+
+  Future<List<OptionalWarrantyPlan>> fetchOptionalWarranties(String serviceId) async {
+    final items = await auth.authedRequestList('/services/$serviceId/warranty-plans');
+    return items.map(OptionalWarrantyPlan.fromJson).toList();
+  }
+
+  Future<bool> hasInstallmentPlans(String serviceId) async {
+    final items = await auth.authedRequestList('/installment-plans?service_id=$serviceId');
+    return items.isNotEmpty;
   }
 
   Future<Order> create({
@@ -73,6 +115,7 @@ class OrdersRepository {
     // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
     // لشاشة الدفع فورًا بعد ده، التوزيع مش هيبدأ غير بعد ما الدفع يتأكد فعليًا.
     String? paymentMethod,
+    String? warrantyPlanId,
     // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — إجباري لخدمة
     // service.requiresPreciseSchedule=true أو service.requiresHoursOnly=true بس.
     int? durationHours,
@@ -98,6 +141,7 @@ class OrdersRepository {
       if (standardDataId != null) 'standard_data_id': standardDataId,
       if (requestedUnits != null) 'requested_units': requestedUnits,
       if (paymentMethod != null) 'payment_method': paymentMethod,
+      if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
       // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
       'booking_mode': bookingMode.apiValue,
       if (problemDescription != null && problemDescription.isNotEmpty)
@@ -141,6 +185,7 @@ class OrdersRepository {
     String? buildingCode,
     String? requestedTechnicianId,
     String? scheduleSlotId,
+    String? warrantyPlanId,
   }) async {
     final data = await auth.authedRequest('POST', '/orders/preview', body: {
       'service_id': serviceId,
@@ -152,6 +197,7 @@ class OrdersRepository {
       if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
       if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
       if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
+      if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
     });
     return OrderPricePreview.fromJson(data!);
   }

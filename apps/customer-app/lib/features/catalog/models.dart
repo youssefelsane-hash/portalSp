@@ -81,6 +81,7 @@ class CatalogService {
   final String pricingModel;
   final int basePriceCents;
   final int inspectionFeeCents;
+  final int warrantyDays;
   final bool allowsScheduling;
   final bool allowsEmergency;
   // هيكل الحجز الجديد (docs/06 §1) — كانت فجوة موثّقة صراحة: الموديول القديم كان بيقرا
@@ -118,6 +119,7 @@ class CatalogService {
     required this.pricingModel,
     required this.basePriceCents,
     required this.inspectionFeeCents,
+    this.warrantyDays = 0,
     required this.allowsScheduling,
     required this.allowsEmergency,
     required this.allowsIndividual,
@@ -140,6 +142,7 @@ class CatalogService {
         pricingModel: json['pricing_model'] as String,
         basePriceCents: json['base_price_cents'] as int,
         inspectionFeeCents: json['inspection_fee_cents'] as int,
+        warrantyDays: json['warranty_days'] as int? ?? 0,
         allowsScheduling: json['allows_scheduling'] as bool,
         allowsEmergency: json['allows_emergency'] as bool,
         allowsIndividual: json['allows_individual'] as bool,

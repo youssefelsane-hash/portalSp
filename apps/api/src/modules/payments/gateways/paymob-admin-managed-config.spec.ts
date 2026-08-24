@@ -17,6 +17,7 @@ describe('PaymobProvider — encrypted admin-managed configuration (PostgreSQL)'
   let settings: SettingsService;
   let provider: PaymobProvider;
   let adminUserId: string;
+  const originalSettings = new Map<string, { value: unknown; updated_by_user_id: string | null }>();
   const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const keys = {
     api: 'payments.paymob.api_key',
@@ -38,6 +39,15 @@ describe('PaymobProvider — encrypted admin-managed configuration (PostgreSQL)'
       [`+2015${runId}`.slice(0, 14), `Paymob config test ${runId}`],
     );
     adminUserId = admin.id as string;
+
+    for (const key of Object.values(keys)) {
+      const [row] = await dataSource.query<{ value: string; updated_by_user_id: string | null }[]>(
+        `SELECT value, updated_by_user_id FROM settings WHERE key=$1`,
+        [key],
+      );
+      if (row) originalSettings.set(key, row);
+      await dataSource.query(`UPDATE settings SET value='""', updated_by_user_id=NULL WHERE key=$1`, [key]);
+    }
 
     const values = new Map<string, string>();
     const cache = {
@@ -67,10 +77,18 @@ describe('PaymobProvider — encrypted admin-managed configuration (PostgreSQL)'
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
-    for (const key of Object.values(keys)) await settings.update(adminUserId, key, '');
-    await dataSource.query(`UPDATE settings SET updated_by_user_id=NULL WHERE updated_by_user_id=$1`, [adminUserId]);
-    await dataSource.query(`DELETE FROM users WHERE id=$1`, [adminUserId]);
-    await dataSource.destroy();
+    try {
+      for (const [key, original] of originalSettings) {
+        await dataSource.query(
+          `UPDATE settings SET value=$2::jsonb, updated_by_user_id=$3 WHERE key=$1`,
+          [key, JSON.stringify(original.value), original.updated_by_user_id],
+        );
+      }
+      await dataSource.query(`UPDATE settings SET updated_by_user_id=NULL WHERE updated_by_user_id=$1`, [adminUserId]);
+      await dataSource.query(`DELETE FROM users WHERE id=$1`, [adminUserId]);
+    } finally {
+      await dataSource.destroy();
+    }
   });
 
   it('activates immediately only after every required value is saved', async () => {

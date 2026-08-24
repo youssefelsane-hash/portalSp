@@ -108,6 +108,7 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     const project = await projectsService.create(ids.customerUser, {
       project_type: 'finishing',
       name_ar: `تشطيب شقة ${runId}`,
+      description_ar: `وصف العميل الكامل ${runId}`,
       address_id: ids.address,
       budget_estimate_cents: 500_000,
     });
@@ -164,6 +165,29 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     expect(approved.approvedQuoteTotalCents).toBe(660000);
     expect(approved.totalWorkValueCents).toBe(560000);
     expect(approved.totalMaterialsValueCents).toBe(100000);
+
+    const room = await projectsService.getProjectRoom(ids.project);
+    expect(room.project).toMatchObject({
+      id: ids.project,
+      description_ar: `وصف العميل الكامل ${runId}`,
+      budget_estimate_cents: 500_000,
+      status: 'awaiting_deposit',
+    });
+    expect(room.quotes[0]).toMatchObject({
+      status: 'approved',
+      work_lines: expect.arrayContaining([
+        expect.objectContaining({ description_ar: 'دهان الحوائط', quantity: 100 }),
+      ]),
+      material_lines: expect.arrayContaining([
+        expect.objectContaining({ description_ar: 'خامات الدهان', responsibility: 'provider_supplied' }),
+      ]),
+      scope_included: 'دهان + جبس + سباكة',
+      duration_days: 45,
+      approved_by_name: `عميل مشروع ${runId}`,
+    });
+    expect(room.quotes[0].sent_at).toBeTruthy();
+    expect(room.quotes[0].approved_at).toBeTruthy();
+    expect(room.activity).toEqual(expect.any(Array));
   });
 
   it('العرض المعتمد غير قابل للتعديل — نسخة جديدة بس', async () => {

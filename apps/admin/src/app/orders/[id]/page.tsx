@@ -930,6 +930,12 @@ export default function OrderDetailPage() {
                 )}
               </p>
             )}
+            {order.optional_warranty && (
+              <p className="rounded-md border border-blue-200 bg-blue-50 p-2 text-blue-900">
+                ضمان إضافي: {order.optional_warranty.name_ar} ({order.optional_warranty.coverage_months} شهر)
+                {' · '}تكلفته {formatEgp(order.warranty_price_cents)} ضمن إجمالي الطلب
+              </p>
+            )}
           </CardContent>
           {isOrderCancellable(order.order_status) && (
             <CardFooter className="flex-col items-stretch gap-3">
@@ -1283,6 +1289,24 @@ export default function OrderDetailPage() {
             {!financialSummary && <p className="text-muted-foreground">جاري التحميل…</p>}
             {financialSummary && (
               <>
+                <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/30 p-3">
+                  <p>إجمالي الطلب: {formatEgp(financialSummary.total_amount_cents)}</p>
+                  <p className="text-success">مدفوع فعليًا: {formatEgp(financialSummary.paid_amount_cents)}</p>
+                  {financialSummary.financed_order_amount_cents > 0 && (
+                    <p>مغطى بالتقسيط: {formatEgp(financialSummary.financed_order_amount_cents)}</p>
+                  )}
+                  <p className={financialSummary.amount_due_to_technician_cents > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-success'}>
+                    المطلوب من الفني تحصيله: {formatEgp(financialSummary.amount_due_to_technician_cents)}
+                  </p>
+                  {financialSummary.installment_outstanding_cents > 0 && (
+                    <p className="col-span-2 text-xs text-muted-foreground">
+                      باقي جدول التقسيط على العميل: {formatEgp(financialSummary.installment_outstanding_cents)} — تحصّله المنصة، وليس الفني.
+                    </p>
+                  )}
+                  {financialSummary.refunded_amount_cents > 0 && (
+                    <p className="text-destructive">مسترد فعليًا: {formatEgp(financialSummary.refunded_amount_cents)}</p>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <p>عمولة المنصة: {formatEgp(financialSummary.platform_commission_cents)}</p>
                   <p>أرباح الفني: {formatEgp(financialSummary.technician_earning_cents)}</p>

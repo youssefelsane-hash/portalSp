@@ -34,6 +34,19 @@ export interface OrderResponseDto {
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
+  /** مسارات الفني تضيف الحقول دي من دفتر الدفعات؛ باقي القوائم قد لا تحملها لتجنب N+1. */
+  paid_amount_cents?: number;
+  direct_paid_amount_cents?: number;
+  financed_order_amount_cents?: number;
+  refunded_amount_cents?: number;
+  installment_outstanding_cents?: number;
+  amount_due_to_technician_cents?: number;
+  warranty_plan_id: string | null;
+  warranty_price_cents: number;
+  optional_warranty: {
+    name_ar: string;
+    coverage_months: number;
+  } | null;
   /** سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — null لطلب على خدمة deposit_required=false.
    * لو موجود، ده مبلغ الإيداع المحصّل وقت التأكيد؛ الباقي (total_amount_cents - القيمة دي)
    * بيتحصّل تلقائيًا بعد اكتمال الشغل (نفس مسار البند الإضافي، ADR-0015). */
@@ -113,6 +126,14 @@ export function toOrderResponseDto(
     discount_amount_cents: order.discountAmountCents,
     promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,
+    warranty_plan_id: order.warrantyPlanId,
+    warranty_price_cents: order.warrantyPriceCents,
+    optional_warranty: order.warrantyPlanSnapshot
+      ? {
+          name_ar: String(order.warrantyPlanSnapshot.name_ar ?? 'ضمان إضافي'),
+          coverage_months: Number(order.warrantyPlanSnapshot.coverage_months ?? 0),
+        }
+      : null,
     deposit_amount_cents: order.depositAmountCents,
     payment_status: order.paymentStatus,
     placed_at: order.placedAt ? order.placedAt.toISOString() : null,
