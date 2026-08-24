@@ -83,7 +83,12 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             const SizedBox(height: 24),
             SizedBox(width: double.infinity, child: FilledButton(
               onPressed: _submitting || _selectedAddress == null ? null : _submit,
-              child: _submitting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              child: _submitting
+                  ? const Row(mainAxisSize: MainAxisSize.min, children: [
+                      SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      SizedBox(width: 8),
+                      Text('جاري الإنشاء…'),
+                    ])
                   : const Text('ابدأ المشروع — اطلب معاينة'))),
           ]),
         ),
@@ -100,12 +105,15 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         projectType: _selectedType, nameAr: _nameController.text.trim(),
         description: _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
         addressId: _selectedAddress!.id, budget: _budget,
-      );
+      ).timeout(const Duration(seconds: 15));
       if (!mounted) return;
+      // نجاح واضح — نروح لغرفة المشروع مباشرة
       Navigator.of(context).pushReplacement(MaterialPageRoute(
         builder: (_) => ProjectRoomScreen(auth: widget.auth, projectId: project['id'])));
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'حصل خطأ، حاول تاني');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

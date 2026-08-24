@@ -79,7 +79,8 @@ export default function AdminProjectsPage() {
             {projects.map((p) => (
               <ProjectRowExpandable key={p.id} project={p}
                 expanded={expandedId === p.id}
-                onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)} />
+                onToggle={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                onRefresh={() => window.location.reload()} />
             ))}
           </TableBody>
         </Table>
@@ -89,8 +90,8 @@ export default function AdminProjectsPage() {
   );
 }
 
-function ProjectRowExpandable({ project, expanded, onToggle }: {
-  project: ProjectRow; expanded: boolean; onToggle: () => void;
+function ProjectRowExpandable({ project, expanded, onToggle, onRefresh }: {
+  project: ProjectRow; expanded: boolean; onToggle: () => void; onRefresh: () => void;
 }) {
   const transitions = TRANSITIONS[project.status] ?? [];
   return (
@@ -116,7 +117,7 @@ function ProjectRowExpandable({ project, expanded, onToggle }: {
             <p className="mb-2 font-medium text-sm">الانتقالات المتاحة:</p>
             <div className="flex flex-wrap gap-2">
               {transitions.length > 0 ? transitions.map((t) => (
-                <TransitionButton key={t.to + t.label} projectId={project.id} to={t.to} label={t.label} />
+                <TransitionButton key={t.to + t.label} projectId={project.id} to={t.to} label={t.label} onDone={onRefresh} />
               )) : <span className="text-sm text-muted-foreground">مفيش انتقالات متاحة</span>}
             </div>
           </TableCell>
@@ -126,19 +127,34 @@ function ProjectRowExpandable({ project, expanded, onToggle }: {
   );
 }
 
-function TransitionButton({ projectId, to, label }: { projectId: string; to: string; label: string }) {
+function TransitionButton({ projectId, to, label, onDone }: { projectId: string; to: string; label: string; onDone: () => void }) {
   const { authedFetch } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   async function go() {
-    if ((to === 'cancelled' || to === 'disputed') && !window.prompt(`سبب ${label}:`)) return;
-    setBusy(true);
+    let reason: string | null = null;
+    if (to === 'cancelled' || to === 'disputed' || to === 'paused') {
+      reason = window.prompt(`سبب ${label} (إجباري):`);
+      if (!reason?.trim()) return;
+    }
+    setBusy(true); setError(null);
     try {
       await authedFetch(`/admin/projects/${projectId}/transition`, {
-        method: 'POST', body: JSON.stringify({ to }),
+        method: 'POST', body: JSON.stringify({ to, reason }),
       });
-    } catch {} finally { setBusy(false); }
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ');
+    } finally { setBusy(false); }
   }
-  return <Button size="sm" variant="outline" disabled={busy} onClick={() => void go()}>{label}</Button>;
+  return (
+    <>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => void go()}>
+        {busy ? '…' : label}
+      </Button>
+      {error && <p className="text-xs text-destructive mt-1">{error}</p>}
+    </>
+  );
 }
 
 function Pagination({ page, totalPages, total, itemLabel, onPageChange }: {

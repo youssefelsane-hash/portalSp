@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import 'project_room_screen.dart';
+import 'create_project_screen.dart';
 
 class ProjectModel {
   final String id;
@@ -59,14 +60,20 @@ class _MyProjectsScreenState extends State<MyProjectsScreen> {
 
   @override void initState() { super.initState(); _load(); }
 
+  String? _error;
+
   Future<void> _load() async {
+    if (!mounted) return;
+    setState(() { _loading = true; _error = null; });
     try {
       final auth = context.read<AuthRepository>();
       _repo = ProjectsRepository(auth);
-      final projects = await _repo.list();
+      final projects = await _repo.list().timeout(const Duration(seconds: 10));
       if (mounted) setState(() { _projects = projects; _loading = false; });
-    } on ApiException {
-      if (mounted) setState(() => _loading = false);
+    } on ApiException catch (e) {
+      if (mounted) setState(() { _loading = false; _error = e.message; });
+    } catch (e) {
+      if (mounted) setState(() { _loading = false; _error = 'حصل خطأ، حاول تاني'; });
     }
   }
 
@@ -78,7 +85,13 @@ class _MyProjectsScreenState extends State<MyProjectsScreen> {
         appBar: AppBar(title: const Text('مشاريعي')),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
-            : _projects == null || _projects!.isEmpty
+            : _error != null
+                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(_error!, style: const TextStyle(color: Colors.red)),
+                    const SizedBox(height: 12),
+                    FilledButton(onPressed: _load, child: const Text('حاول تاني')),
+                  ]))
+                : _projects == null || _projects!.isEmpty
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.all(32),
@@ -93,6 +106,14 @@ class _MyProjectsScreenState extends State<MyProjectsScreen> {
                           Text('صوّر المكان واحكي لنا اللي محتاجه،\nوصُنّاع ترتب لك المعاينة والعرض والمراحل.',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey)),
+                          const SizedBox(height: 20),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.add),
+                            label: const Text('ابدأ مشروعك'),
+                            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
+                            )),
+                          ),
                         ],
                       ),
                     ),

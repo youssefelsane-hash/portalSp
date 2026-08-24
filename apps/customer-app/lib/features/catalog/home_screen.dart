@@ -190,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ));
                     },
                     child: Padding(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
                           Icon(Icons.home_work_outlined, size: 32,
@@ -200,7 +200,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('بتشطب شقة أو عندك مشروع كبير؟',
+                                Text('بتشطب شقتك؟',
                                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                         fontWeight: FontWeight.bold)),
                                 Text('ابدأ مشروعك مع صُنّاع',
@@ -326,12 +326,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 56),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.35),
                       borderRadius: BorderRadius.circular(20),
