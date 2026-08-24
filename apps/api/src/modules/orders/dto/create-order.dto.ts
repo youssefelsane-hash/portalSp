@@ -151,4 +151,13 @@ export class CreateOrderDto {
   @ArrayUnique()
   @IsUUID('all', { each: true })
   accepted_policy_version_ids?: string[];
+
+  // ربط الطلب بمشروع و/أو مرحلة (docs/01B مهمة A) — اختياري، بيتحقق من الملكية في السيرفس
+  @IsOptional()
+  @IsUUID()
+  project_id?: string;
+
+  @IsOptional()
+  @IsUUID()
+  milestone_id?: string;
 }

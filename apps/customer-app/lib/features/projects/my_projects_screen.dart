@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import 'project_room_screen.dart';
 
 class ProjectModel {
   final String id;
@@ -107,6 +108,9 @@ class _MyProjectsScreenState extends State<MyProjectsScreen> {
                           title: Text(p.nameAr, style: const TextStyle(fontWeight: FontWeight.w600)),
                           subtitle: Text('${p.projectNumber} · ${projectStatusLabelsAr[p.status] ?? p.status}'),
                           trailing: const Icon(Icons.chevron_left),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => ProjectRoomScreen(auth: context.read<AuthRepository>(), projectId: p.id),
+                          )),
                         ),
                       );
                     },

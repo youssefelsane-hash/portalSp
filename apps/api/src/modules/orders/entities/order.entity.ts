@@ -138,6 +138,14 @@ export class Order {
   @Column({ name: 'recurring_occurrence_at', type: 'timestamptz', nullable: true })
   recurringOccurrenceAt: Date | null;
 
+  /** المشروع المرتبط (migration 0179) — null لطلبات عادية */
+  @Column({ name: 'project_id', type: 'uuid', nullable: true })
+  projectId: string | null;
+
+  /** المرحلة المرتبطة (migration 0179) — null لطلبات مش مرتبطة بمرحلة محددة */
+  @Column({ name: 'milestone_id', type: 'uuid', nullable: true })
+  milestoneId: string | null;
+
   @Column({ name: 'estimated_price_cents', type: 'integer', nullable: true })
   estimatedPriceCents: number | null;
 

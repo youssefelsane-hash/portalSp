@@ -596,6 +596,8 @@ export class OrdersService {
             : null,
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true (اتفحصت فوق).
         scheduledEndAt: service.requiresStartAndEnd && dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
+        projectId: dto.project_id ?? null,
+        milestoneId: dto.milestone_id ?? null,
         recurringTemplateId: recurringIdentity?.templateId ?? null,
         recurringOccurrenceAt: recurringIdentity?.scheduledFor ?? null,
         // إعادة الزيارة بتفضّل نفس الفني الأصلي دايماً، وسلوت الجدولة (لو اتحجز) بيحدد فني
@@ -737,6 +739,26 @@ export class OrdersService {
           [versionId, userId, order.id],
         );
       }
+
+      // ربط المشروع والمرحلة (migration 0179) — لو العميل حجز من ضمن مشروع
+      if (dto.project_id || dto.milestone_id) {
+        if (dto.project_id) {
+          const [proj] = await manager.query(
+            `SELECT id FROM projects WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL AND status IN ('active','awaiting_milestone_approval')`,
+            [dto.project_id, customerProfile.id],
+          );
+          if (!proj) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود أو غير نشط', HttpStatus.BAD_REQUEST);
+        }
+        if (dto.milestone_id) {
+          const [ms] = await manager.query(
+            `SELECT m.id FROM project_milestones m JOIN projects p ON p.id = m.project_id WHERE m.id = $1 AND p.customer_id = $2`,
+            [dto.milestone_id, customerProfile.id],
+          );
+          if (!ms && dto.project_id) throw new ApiException(ErrorCode.VAL_001, 'المرحلة غير موجودة', HttpStatus.BAD_REQUEST);
+        }
+      }
+      order.projectId = dto.project_id ?? null;
+      order.milestoneId = dto.milestone_id ?? null;
 
       // "كرّر الحجز ده" (migration 0176) — القالب بيتإنشاء جوّه نفس transaction الطلب (ذرّي:
       // لو إنشاء الطلب فشل مفيش قالب يتيم، ولو القالب فشل الطلب بيترول باك كمان). الموعد الأول
