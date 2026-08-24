@@ -18,6 +18,7 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
     zone: '',
     city: '',
     country: '',
+    category: '',
     service: '',
     customerProfile: '',
     address: '',
@@ -43,10 +44,8 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
 
     // نطاق خدمة خاص بالملف ده، مش "SELECT ... LIMIT 1" مقترَض (كان بيسبب سباق حقيقي مع ملفات
     // jest تانية بتنشئ نطاقها وتحذفه على CI — راجع نفس الإصلاح في admin-crew-management.spec.ts).
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة تايملاين ${runId}`, `Timeline Country ${runId}`, 'X' + runId.slice(0, 1).toUpperCase(), '+000', 'EGP'],
-    );
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The fixture requires the seeded EG country');
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       country.id,
       `مدينة تايملاين ${runId}`,
@@ -66,6 +65,7 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
       `Timeline Category ${runId}`,
       `test-timeline-cat-${runId}`,
     ]);
+    ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days)
        VALUES ($1,$2,$3,'fixed',30000,20,0) RETURNING id`,
@@ -150,9 +150,9 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.leaderProfile]);
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }

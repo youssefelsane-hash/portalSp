@@ -14,6 +14,7 @@ import { EmployeePresenceState, WorkforceActivityService } from './workforce-act
 // الاختبار يقدر يتحقق من انتقال ACTIVE→IDLE من غير ما يستنى 5 دقايق حقيقية.
 describe('WorkforceActivityService — حالة الجلسة/وقت العمل/إلغاء جلسة بعينها (Script 5)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let service: WorkforceActivityService;
   const runId = Date.now().toString(36);
   const ids = { user: '', employeeProfileId: '', sessionA: '', sessionB: '' };
@@ -27,7 +28,7 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
     await dataSource.initialize();
 
     const auditLog = new AuditLogService(dataSource.getRepository(AuditLog));
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settings = new SettingsService(dataSource.getRepository(Setting), auditLog, cache);
     service = new WorkforceActivityService(dataSource, dataSource.getRepository(RefreshToken), settings, auditLog);
 
@@ -56,6 +57,7 @@ describe('WorkforceActivityService — حالة الجلسة/وقت العمل/�
     await q(`DELETE FROM employee_profiles WHERE user_id = $1`, [ids.user]);
     await q(`DELETE FROM users WHERE id = $1`, [ids.user]);
     await q(`DELETE FROM settings WHERE key = 'workforce.idle_threshold_seconds'`);
+    await cache?.onModuleDestroy();
     await dataSource.destroy();
   });
 

@@ -69,7 +69,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     customerProfile: '',
     address: '',
     adminUser: '',
-    realCategoryId: '', // "تسليك مواسير" الحقيقية من الكتالوج، مش فئة اختبار مصطنعة
+    realCategoryId: '',
     realServiceId: '',
     fixtureProfileId: '',
     newLevelProfileId: '',
@@ -92,10 +92,10 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     return String(call[0]).split('→ ').at(-1)!.trim();
   }
 
-  async function insertOrder(label: string, zoneId: string, hoursFromNow: number) {
+  async function insertOrder(label: string, zoneId: string, hoursFromNow: number, totalAmountCents = 30000) {
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, booking_mode, total_amount_cents, technician_earning_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,30000,0,$8) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,0,$9) RETURNING id`,
       [
         `TESTSIGNUP-${label}`.slice(0, 24),
         ids.customerProfile,
@@ -104,6 +104,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
         zoneId,
         OrderStatus.SEARCHING_TECHNICIAN,
         BookingMode.INDIVIDUAL,
+        totalAmountCents,
         new Date(Date.now() + hoursFromNow * 60 * 60 * 1000),
       ],
     );
@@ -135,16 +136,21 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     });
     await dataSource.initialize();
 
-    // فئة/خدمة "تسليك مواسير" الحقيقية — نفس الصف اللي المالك سأل عنه بالتحديد، مش fixture.
-    const [realService] = await q(`SELECT id, category_id FROM services WHERE name_ar = 'تسليك مواسير' LIMIT 1`);
-    if (!realService) throw new Error('خدمة "تسليك مواسير" غير موجودة في الكتالوج — لازم seed أولاً');
-    ids.realServiceId = realService.id;
-    ids.realCategoryId = realService.category_id;
-
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة تسجيل ${runId}`, `Signup Country ${runId}`, 'S' + runId.slice(0, 1).toUpperCase(), '+004', 'EGP'],
+    // الاختبار يملك كتالوجه؛ الاعتماد على seed اختياري كان يكسر CI على قاعدة migrated نظيفة.
+    const [category] = await q(
+      `INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`,
+      [`سباكة تسجيل ${runId}`, `Signup Plumbing ${runId}`, `signup-plumbing-${runId}`],
     );
+    ids.realCategoryId = category.id;
+    const [realService] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage)
+       VALUES ($1,'تسليك مواسير',$2,'fixed',30000,20) RETURNING id`,
+      [ids.realCategoryId, `signup-drain-${runId}`],
+    );
+    ids.realServiceId = realService.id;
+
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The fixture requires the seeded EG country');
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       ids.country,
@@ -187,8 +193,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     ids.adminUser = adminUser.id;
 
     // ── فني fixture — INSERT خام مباشر، بالظبط زي كل specs المشروع التانية ──
-    // المستوى VERIFIED (حد قرار 500 جنيه) مش NEW (200 جنيه) عمدًا — "تسليك مواسير" التسعيرة
-    // الحقيقية 300 جنيه، وهي بالظبط البَقّة الحقيقية اللي اتلقطت هنا (راجع الاختبار الثالث تحت):
+    // المستوى VERIFIED مش NEW عمدًا لعزل مقارنة مساري التسجيل عن سياسة حد القرار المتغيرة.
     // فني NEW حقيقي مايقدرش أصلاً ياخد الخدمة دي، مش مسألة "مسار تسجيل" خالص.
     const [fixtureUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
       `+2072${runId}`.slice(0, 15),
@@ -296,10 +301,8 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     // changeLevel() — نفس الطريقة اللي فني حقيقي بيترقّى بيها فعليًا (KPI/يدوي)، مش SQL خام.
     await adminTechniciansService.changeLevel(ids.adminUser, realProfile.id, { level: TechnicianLevel.VERIFIED });
 
-    // ── فني NEW ثالث معزول (نطاق تالت) — يثبت البَقّة الحقيقية: مستوى NEW (حد قرار 200 جنيه
-    // فعليًا في الداتابيز) مايقدرش يوصله "تسليك مواسير" (300 جنيه) خالص، بغض النظر عن مسار
-    // الإنشاء. ده هو التفسير الحقيقي لأعراض "الفني بيوقف يستقبل فرص" لما تتكرر مع خدمة غالية —
-    // مش حاجة خاصة بالتسجيل الحقيقي مقابل fixture.
+    // ── فني NEW ثالث معزول (نطاق تالت) — يثبت أن حد القرار الحالي يطبق أثناء الاكتشاف نفسه،
+    // بغض النظر عن مسار إنشاء الحساب.
     const [zoneNew] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
       ids.city,
       `نطاق NEW ${runId}`,
@@ -351,7 +354,8 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
       await q(`DELETE FROM service_zones WHERE id = ANY($1)`, [[ids.zoneFixture, ids.zoneReal, ids.zoneNew]]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.realServiceId]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.realCategoryId]);
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }
@@ -420,8 +424,12 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     expect(listedOrderIds).toEqual(expect.arrayContaining([order2, order3]));
   });
 
-  it('بَقّة حقيقية موثّقة: فني NEW (حد قرار 200 جنيه) مايترشّحش خالص لـ"تسليك مواسير" (300 جنيه) — الطلب يفضل بلا فني بدل ما يترشّح ويفشل بصمت', async () => {
-    const order1 = await insertOrder('newlevel-1', ids.zoneNew, 2);
+  it('فني NEW لا يترشح فوق حد قراره الحالي، ويترشح تحته', async () => {
+    const [levelConfig] = await q(`SELECT decision_limit_cents FROM technician_level_config WHERE level = 'new'`);
+    const decisionLimit = Number(levelConfig?.decision_limit_cents);
+    expect(decisionLimit).toBeGreaterThan(1);
+
+    const order1 = await insertOrder('newlevel-1', ids.zoneNew, 2, decisionLimit + 1);
     const dispatchResult = await matchingService.dispatchOrAutoConfirm(order1);
     expect(dispatchResult.dispatched).toBe(0);
 
@@ -439,26 +447,13 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     ]);
     expect(opp).toBeUndefined();
 
-    // نفس الفني NEW نفسه بيترشّح عادي لطلب أرخص من حد قراره (150 جنيه < 200 جنيه) — يثبت إن
+    // نفس الفني NEW نفسه بيترشّح عادي لطلب أرخص من حد قراره الحالي — يثبت إن
     // الاستبعاد سعري بحت مربوط بقيمة الطلب الفعلية (order.total_amount_cents)، مش استبعاد عام
     // لمستوى NEW من المطابقة كلها. طلب على نفس الخدمة الحقيقية بس بسعر إجمالي مختلف (formula/
     // خصم واقعي)، مش خدمة تانية مصطنعة.
-    const [cheapOrder] = await q(
-      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, booking_mode, total_amount_cents, technician_earning_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,15000,0,$8) RETURNING id`,
-      [
-        `TESTSIGNUP-newlevel-cheap`.slice(0, 24),
-        ids.customerProfile,
-        ids.realServiceId,
-        ids.address,
-        ids.zoneNew,
-        OrderStatus.SEARCHING_TECHNICIAN,
-        BookingMode.INDIVIDUAL,
-        new Date(Date.now() + 2 * 60 * 60 * 1000),
-      ],
-    );
-    await matchingService.dispatchOrAutoConfirm(cheapOrder.id);
-    const [cheapRow] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [cheapOrder.id]);
+    const cheapOrderId = await insertOrder('newlevel-cheap', ids.zoneNew, 2, decisionLimit - 1);
+    await matchingService.dispatchOrAutoConfirm(cheapOrderId);
+    const [cheapRow] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [cheapOrderId]);
     expect(cheapRow.order_status).toBe(OrderStatus.ACCEPTED);
     expect(cheapRow.technician_id).toBe(ids.newLevelProfileId);
   });

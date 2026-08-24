@@ -65,6 +65,7 @@ import { Installment } from '../installments/entities/installment.entity';
  */
 describe('Full-chain integration — Price Engine outputs → Order snapshot (PostgreSQL)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let ordersService: OrdersService;
   let rulesService: PricingRulesService;
   let fieldsService: PricingFieldsService;
@@ -162,7 +163,7 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     );
     ids.serviceFormula = svc.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(
       dataSource.getRepository(Setting),
       { record: async () => undefined } as unknown as AuditLogService,
@@ -285,6 +286,7 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       await q(`DELETE FROM customer_profiles WHERE id=$1`, [ids.customerProfile]);
       await q(`DELETE FROM users WHERE id=$1`, [ids.customerUser]);
     } finally {
+      await cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });
@@ -393,4 +395,3 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     expect(created.totalAmountCents).toBe(125000); // 250×500
   });
 });
-

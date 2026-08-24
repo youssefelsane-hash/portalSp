@@ -271,6 +271,8 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
     await q(`DELETE FROM wallet_transactions WHERE wallet_id IN (SELECT id FROM wallets WHERE owner_user_id IN ($1, $2))`, [ids.techUser, ids.customerUser]);
     await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
     await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TCASH-%`]);
+    await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1))`, [`TCASH-%`]);
+    await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TCASH-%`]);
     await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TCASH-%`]);
     await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);

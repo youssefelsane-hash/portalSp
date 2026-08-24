@@ -34,6 +34,9 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     address: '',
   };
   const orderIds: string[] = [];
+  let activeTodayOrderId = '';
+
+  const nextOrderNumber = () => `TAG-${runId.slice(-8)}-${orderIds.length}`;
 
   async function insertOrder(opts: {
     label: string;
@@ -45,7 +48,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8) RETURNING id`,
       [
-        `TAG-${opts.label}-${runId}`.slice(0, 24),
+        nextOrderNumber(),
         ids.customerProfile,
         opts.assignedToTechnician ? ids.technicianProfile : null,
         ids.service,
@@ -74,10 +77,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة اختبار ${runId}`, `Test Country ${runId}`, Math.random().toString(36).slice(2, 4).toUpperCase(), '+000', 'EGP'],
-    );
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The fixture requires the seeded EG country');
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       ids.country,
@@ -136,6 +137,8 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE order_id = ANY($1::uuid[]))`, [orderIds]);
+    await q(`DELETE FROM chat_threads WHERE order_id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
     await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.technicianProfile]);
     await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.technicianProfile]);
@@ -147,12 +150,11 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
     await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     await dataSource.destroy();
   });
 
   it('طلب مجدول بعد أسبوع مايترفضش بسبب طلب نشط تاني النهاردة (البَقّة الأساسية)', async () => {
-    await insertOrder({ label: 'active-today', orderStatus: OrderStatus.ACCEPTED, scheduledAt: null, assignedToTechnician: true });
+    activeTodayOrderId = (await insertOrder({ label: 'active-today', orderStatus: OrderStatus.ACCEPTED, scheduledAt: null, assignedToTechnician: true })).id;
     const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     const candidate = await insertOrder({ label: 'scheduled-week', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: weekFromNow });
 
@@ -196,7 +198,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
   it('ASAP لسه بيترفض صح لو الفني منشغل جسديًا فعليًا دلوقتي (technician_on_way) — الحماية الحقيقية اتحافظ عليها', async () => {
     // نفس طلب "active-today" بس بقى في الطريق فعليًا دلوقتي — ده الحالة الوحيدة اللي المفروض
     // تستبعد فني من طلب ASAP جديد (ازدواج حجز حقيقي: فني واحد ياخد شغلانتين فوريتين في نفس اللحظة).
-    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE order_number = $1`, [`TAG-active-today-${runId}`.slice(0, 24)]);
+    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [activeTodayOrderId]);
     try {
       const candidate = await insertOrder({ label: 'asap-engaged', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
 
@@ -205,7 +207,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
         await expect(guard.assertEligible(manager, technician, candidate)).rejects.toBeInstanceOf(ApiException);
       });
     } finally {
-      await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE order_number = $1`, [`TAG-active-today-${runId}`.slice(0, 24)]);
+      await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [activeTodayOrderId]);
     }
   });
 
@@ -213,12 +215,12 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     // فحص "الفني عنده طلب نشط بالفعل" مالوش استثناء طوارئ (مايترفعش أصلاً — نفس السلوك قبل هذا
     // الإصلاح)، فلازم نقفل الطلب النشط من الاختبار الأول الأول عشان نعزل فحص isOnDuty/isAvailable
     // اللي فعلاً عنده استثناء الطوارئ (الفحص اللي إحنا بنتأكد منه هنا تحديدًا).
-    await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE order_number = $1`, [`TAG-active-today-${runId}`.slice(0, 24)]);
+    await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [activeTodayOrderId]);
     await setTechnicianOnline(false);
     const [order] = await dataSource.query(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
        VALUES ($1,$2,$3,$4,$5,$6,10000,'emergency') RETURNING id`,
-      [`TAG-emg-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+      [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
     );
     orderIds.push(order.id as string);
     const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });
@@ -242,7 +244,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       const [order] = await dataSource.query(
         `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
          VALUES ($1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
-        [`TAG-team-new-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+        [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
       );
       orderIds.push(order.id as string);
       const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });
@@ -260,7 +262,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
         const [order] = await dataSource.query(
           `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
            VALUES ($1,$2,$3,$4,$5,$6,10000,'team') RETURNING id`,
-          [`TAG-team-pro-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+          [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
         );
         orderIds.push(order.id as string);
         const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });
@@ -278,7 +280,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       const [order] = await dataSource.query(
         `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, booking_mode)
          VALUES ($1,$2,$3,$4,$5,$6,10000,'individual') RETURNING id`,
-        [`TAG-ind-new-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
+        [nextOrderNumber(), ids.customerProfile, ids.service, ids.address, ids.zone, OrderStatus.SEARCHING_TECHNICIAN],
       );
       orderIds.push(order.id as string);
       const candidate = await dataSource.getRepository(Order).findOneOrFail({ where: { id: order.id as string } });

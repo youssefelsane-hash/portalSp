@@ -11,7 +11,10 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
 
   let dataSource: DataSource;
   const runId = Date.now().toString(36);
-  const ids = { zone: '', service: '', technician: '', customer: '', address: '' };
+  const ids = {
+    city: '', zone: '', category: '', service: '', technician: '', technicianUser: '',
+    customer: '', customerUser: '', address: '',
+  };
   const orderIds: string[] = [];
   const FULL_DAY_MINUTES = 360;
 
@@ -62,14 +65,13 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     });
     await dataSource.initialize();
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة قدرة ${runId}`, `Cap Country ${runId}`, Math.random().toString(36).slice(2, 4).toUpperCase(), '+000', 'EGP'],
-    );
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The fixture requires the seeded EG country');
     const [city] = await q(
       `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
       [country.id, `مدينة قدرة ${runId}`, `Cap City ${runId}`, `cap-city-${runId}`],
     );
+    ids.city = city.id;
     const [zone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
       city.id,
       `نطاق قدرة ${runId}`,
@@ -81,6 +83,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
       `Cap Category ${runId}`,
       `cap-category-${runId}`,
     ]);
+    ids.category = category.id;
     const [service] = await q(
       `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, estimated_duration_minutes)
        VALUES ($1,$2,$3,'fixed',10000,60) RETURNING id`,
@@ -92,6 +95,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
       `+201${runId}`.slice(0, 14),
       `فني قدرة ${runId}`,
     ]);
+    ids.technicianUser = user.id;
     const [technician] = await q(
       `INSERT INTO technician_profiles (user_id, technician_code, verification_status, current_location)
        VALUES ($1,$2,'approved', ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
@@ -103,6 +107,7 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
       `+202${runId}`.slice(0, 14),
       `عميل قدرة ${runId}`,
     ]);
+    ids.customerUser = customerUser.id;
     const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [customerUser.id]);
     ids.customer = customerProfile.id;
     const [address] = await q(
@@ -118,6 +123,13 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.technician]);
       await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technician]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customer]);
+      await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.technicianUser, ids.customerUser]]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     } finally {
       await dataSource.destroy();
     }

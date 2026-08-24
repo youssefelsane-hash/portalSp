@@ -25,6 +25,7 @@ import { OrderCrewShortageEscalatedEvent } from '../../../common/events/order-cr
 // (NotificationsService حقيقي بديسباتشر in-memory بدل الحقيقي، عشان نتأكد من صف notifications الفعلي).
 describe('OrderCrewShortageLeaderReminderListener (docs/08 §35.17)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let listener: OrderCrewShortageLeaderReminderListener;
   let notificationsService: NotificationsService;
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
@@ -123,7 +124,7 @@ describe('OrderCrewShortageLeaderReminderListener (docs/08 §35.17)', () => {
       {} as never,
     );
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), {} as unknown as AuditLogService, cache);
     const workflowService = new NotificationWorkflowService(
       dataSource.getRepository(NotificationWorkflow),
@@ -157,6 +158,7 @@ describe('OrderCrewShortageLeaderReminderListener (docs/08 §35.17)', () => {
       if (ids.city) await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
       if (ids.country) await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
+      await cache?.onModuleDestroy();
       if (dataSource?.isInitialized) await dataSource.destroy();
     }
   }, 15000);

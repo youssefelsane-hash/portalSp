@@ -19,7 +19,6 @@ import { ServiceStandardData } from '../catalog/entities/service-standard-data.e
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
-import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { TechnicianLevelConfig } from '../technicians/entities/technician-level-config.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
@@ -180,10 +179,8 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       {} as never, // geoService
       {} as never, // settingsService
     );
-    const technicianLevelsService = new TechnicianLevelsService(
-      dataSource.getRepository(TechnicianLevelConfig),
-      {} as unknown as AuditLogService,
-    );
+    // سياسة المستوى إعداد عالمي متغير؛ هذا الاختبار يعزل تسوية الدفع المسبق فقط.
+    const technicianLevelsService = { getOrThrow: async () => ({ commissionAdjustmentPercentage: '0' }) } as never;
     const walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);

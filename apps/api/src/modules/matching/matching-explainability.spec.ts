@@ -93,10 +93,8 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     );
     service = new MatchingExplainabilityService(dataSource, settingsServiceStub, matchingServiceForRanking);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة تفسير ${runId}`, `Explain Country ${runId}`, 'X' + runId.slice(0, 1).toUpperCase(), '+000', 'EGP'],
-    );
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The fixture requires the seeded EG country');
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       ids.country,
@@ -210,7 +208,6 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = ANY($1::uuid[])`, [[ids.zone, ids.otherZone]]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }
@@ -245,9 +242,7 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
   });
 
   it('حد قرار مستوى الفني أقل من قيمة الطلب — decision_limit_ok=false، eligible=false (docs/08 §36.6، بَقّة حقيقية اتصلحت)', async () => {
-    // فني جديد بمستوى 'new' (حد قرار 200 جنيه حقيقي من technician_level_config) — الطلب هنا
-    // 300 جنيه (total_amount_cents=30000)، يعني نفس البَقّة اللي §36.1(تعميق) صلّحها في
-    // findEligibleTechnicians() كانت لسه موجودة هنا في explainTechnicianForOrder() لحد الإصلاح ده.
+    // فني جديد وحد قراره قابل للتعديل من الأدمن؛ الاختبار يستخدم القيمة الحية بدل افتراض seed ثابت.
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
       nextPhone(),
       `فني حد قرار تفسير ${runId}`,
@@ -265,15 +260,21 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
     ]);
     await q(`INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`, [lowLimitProfile, ids.zone]);
 
-    const order = await orderRow();
-    const result = await service.explainTechnicianForOrder(order, lowLimitProfile);
-    expect(result.eligible).toBe(false);
-    expect(result.checks.find((c) => c.key === 'decision_limit_ok')?.passed).toBe(false);
-    expect(result.rankInfo).toBeNull();
-
-    await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [lowLimitProfile]);
-    await q(`DELETE FROM technician_services WHERE technician_id = $1`, [lowLimitProfile]);
-    await q(`DELETE FROM technician_profiles WHERE id = $1`, [lowLimitProfile]);
+    try {
+      const [levelConfig] = await q(`SELECT decision_limit_cents FROM technician_level_config WHERE level = 'new'`);
+      const decisionLimit = Number(levelConfig?.decision_limit_cents);
+      expect(decisionLimit).toBeGreaterThan(0);
+      const order = await orderRow();
+      order.totalAmountCents = decisionLimit + 1;
+      const result = await service.explainTechnicianForOrder(order, lowLimitProfile);
+      expect(result.eligible).toBe(false);
+      expect(result.checks.find((c) => c.key === 'decision_limit_ok')?.passed).toBe(false);
+      expect(result.rankInfo).toBeNull();
+    } finally {
+      await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [lowLimitProfile]);
+      await q(`DELETE FROM technician_services WHERE technician_id = $1`, [lowLimitProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [lowLimitProfile]);
+    }
   });
 
   it('فني بفئة/خدمة مختلفة — category_eligible=false، eligible=false', async () => {

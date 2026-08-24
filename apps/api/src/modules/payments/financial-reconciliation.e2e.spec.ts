@@ -24,7 +24,6 @@ import { ServiceStandardData } from '../catalog/entities/service-standard-data.e
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
-import { TechnicianLevelsService } from '../technicians/technician-levels.service';
 import { TechnicianLevelConfig } from '../technicians/entities/technician-level-config.entity';
 import { LoyaltyService } from '../promotions/loyalty.service';
 import { LoyaltyTransaction } from '../promotions/entities/loyalty-transaction.entity';
@@ -49,6 +48,7 @@ import { Address } from '../customers/entities/address.entity';
  */
 describe('التسوية المالية — سلسلة تسوية/استرداد/صرف حقيقية (Script 7 Phase 35)', () => {
   let dataSource: DataSource;
+  let cache: RedisCacheService;
   let paymentsService: PaymentsService;
   let walletsService: WalletsService;
   let payoutsService: PayoutsService;
@@ -175,7 +175,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
     );
     ids.order = order.id;
 
-    const cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
+    cache = new RedisCacheService({ get: () => process.env.REDIS_URL ?? 'redis://localhost:6379' } as never);
     const settingsService = new SettingsService(dataSource.getRepository(Setting), { record: async () => undefined } as unknown as AuditLogService, cache);
     const catalogService = new CatalogService(
       dataSource.getRepository(ServiceCategory),
@@ -202,10 +202,8 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
     );
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     walletsService = new WalletsService(dataSource.getRepository(Wallet), dataSource.getRepository(WalletTransaction), dataSource);
-    const technicianLevelsService = new TechnicianLevelsService(
-      dataSource.getRepository(TechnicianLevelConfig),
-      {} as unknown as AuditLogService,
-    );
+    // دفتر القيود هنا مبني على عمولة الخدمة 20%؛ فرق المستوى سياسة مستقلة قابلة للتعديل.
+    const technicianLevelsService = { getOrThrow: async () => ({ commissionAdjustmentPercentage: '0' }) } as never;
     const loyaltyService = new LoyaltyService(dataSource.getRepository(CustomerProfile), dataSource.getRepository(LoyaltyTransaction), dataSource);
     const events = new EventEmitter2();
     const statsStub = { enqueueRecalculation: async () => undefined } as never;
@@ -292,6 +290,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
     } finally {
+      await cache?.onModuleDestroy();
       await dataSource.destroy();
     }
   });
