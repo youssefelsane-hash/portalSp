@@ -220,9 +220,17 @@ export class CatalogService {
     // موجود، وأي خدمة hourly من غير durationHours (زي "تنظيف شهري/إقامة" في migration 0170،
     // requires_precise_schedule=false) بترجع للسلوك القديم بالحرف (base_price_cents كسعر ثابت).
     durationHours?: number,
+    // خدمات "بالوحدة" لازم تضرب سعر الوحدة في الكمية اللي العميل أكدها. append-only عشان أي
+    // caller قديم يفضل بنفس سلوك الوحدة الواحدة، بينما OrdersService يفرض وجودها للحجز الحقيقي.
+    pricingQuantity?: number,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
-    const hourlyMultiplier = service.pricingModel === PricingModel.HOURLY && durationHours ? durationHours : 1;
+    const quantityMultiplier =
+      service.pricingModel === PricingModel.HOURLY && durationHours
+        ? durationHours
+        : service.pricingModel === PricingModel.PER_UNIT && pricingQuantity
+          ? pricingQuantity
+          : 1;
 
     // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — مسار مستقل بالكامل عن باقي نماذج
     // التسعير (مفيش تركيب مع zone override — المعادلة نفسها مسؤولة عن عوامل السعر اللي العميل
@@ -305,7 +313,7 @@ export class CatalogService {
           override.pricingMode === ZonePricingMode.PERCENTAGE
             ? Math.round(service.basePriceCents * (1 + Number(override.modifierPercentage) / 100))
             : override.priceCents!;
-        const effectiveBaseCents = Math.round(overrideUnitCents * hourlyMultiplier);
+        const effectiveBaseCents = Math.round(overrideUnitCents * quantityMultiplier);
         const surge = Number(override.surgeMultiplier);
         const estimatedTotalCents = Math.round(effectiveBaseCents * surge * levelMultiplier);
         return {
@@ -324,7 +332,7 @@ export class CatalogService {
       }
     }
 
-    const baseCents = Math.round(service.basePriceCents * hourlyMultiplier);
+    const baseCents = Math.round(service.basePriceCents * quantityMultiplier);
     const estimatedTotalCents = Math.round(baseCents * levelMultiplier);
     return {
       base_price_cents: baseCents,

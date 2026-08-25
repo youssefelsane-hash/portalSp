@@ -56,6 +56,7 @@ export class TechnicianAssignmentGuardService {
            engagedStatusesParam: '$6',
            isEmergencyParam: '$7',
            serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)",
+           preciseDurationHoursExpr: '(SELECT o2.duration_hours FROM orders o2 WHERE o2.id = $3::uuid)',
            fullDayThresholdMinutesParam: '$8',
          })}
        ) AS available`,

@@ -341,6 +341,8 @@
 
 **الحل**: `OrdersService.previewPrice()` (وراءه `POST /orders/preview`، عميل مُسجّل، نفس صلاحيات `POST /orders`) — دالة **read-only بالكامل** (مفيش transaction ولا كتابة) بتكرر **بالحرف** نفس تسلسل تحديد المنطقة وحساب السعر في `create()` فوق (نفس `geoService.findZoneForPoint()`، نفس `catalogService.estimate()`، نفس حساب `addonsTotalCents`، نفس `promoCodesService.preview()`/خصم العمارة). أي تعديل مستقبلي في منطق تسعير `create()` **لازم يتعدّل هنا بالتوازي** — نفس الالتزام الموثّق سابقًا لـ`PromotionsService.previewForOrder()` (اللي بيعمل نفس الحاجة لكن لمعاينة كود الخصم بس، مش تفصيل السعر الكامل).
 
+**تسعير بالوحدة (migrations 0183-0184)**: `pricing_model=per_unit` لم يعد يعني وحدة واحدة ضمنيًا في الحجز الحقيقي. `pricing_quantity` مطلوبة في `/orders/preview` و`POST /orders`، ويضرب المحرك سعر الوحدة (ومن ضمنه سعر المنطقة) في الكمية قبل مستوى الفني والطوارئ والضمان والإيداع. القيمة تُحفظ snapshot على `orders.pricing_quantity`، وتُحفظ كمدخل حي في `recurring_order_templates.pricing_quantity` حتى تعيد كل نوبة حساب السعر الحالي بنفس كمية العميل. الحقل مستقل عمدًا عن `requested_units`: الأخير يخص إنتاجية الطاقم وقد تكون وحدته مختلفة. `0184` يحوّل الطلبات والقوالب القديمة إلى كمية `1` صريحة، وهي نفس دلالتها السابقة، للحفاظ على التاريخ وعدم تعطيل التكرارات القائمة.
+
 الرد (`PreviewOrderResponseDto`) بيرجّع كل بند سعر منفصل (`base_price_cents`, `inspection_fee_cents`, `min/max_price_cents` لـformula، `emergency_surcharge_cents`+`emergency_sla_minutes`، قايمة `addons` + إجماليها، `subtotal_before_discount_cents`، `discount_cents`+`discount_source`، `total_amount_cents` النهائي، و`estimated_duration_days` — الأخير مصدره الجديد `PriceEstimate.estimated_duration_days` في `catalog.service.ts` (مسحوب من `estimated_duration_days` الاختياري في `FinalPriceFormulaPayload` لخدمات formula بس، `null` لباقي النماذج).
 
 **فجوة تانية أصغر اتقفلت في نفس البناء**: `catalog.controller.ts`'s `POST /services/:id/estimate` (endpoint عام أقدم، بياخد `zone_id` مباشرة بدل `address_id`) كان بيتجاهل `field_values` تمامًا حتى لو اتبعتت — أي معاينة عبره لخدمة formula كانت بترجع صفر. `EstimateQueryDto` بقى فيه `field_values?` (نفس نمط `ValidatePromoCodeQueryDto`: JSON string جوّه query لأن الـendpoint POST بلا body).
@@ -1244,6 +1246,7 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
 - **الفجوة القديمة اتقفلت (ADR-0031 Slice H، 2026-08-22)**: `CatalogService.estimate()` بقى فيها
   باراميتر `durationHours` جديد (append-only، آخر باراميتر) — لخدمات `pricing_model=hourly` بس،
   `base_price_cents` بيتضرب في `durationHours` (لو اتبعتت) قبل تطبيق مضاعف مستوى الفني/تخصيص
+
   المنطقة، عشان `base_price_cents` يفضل معناه "سعر الساعة" مش سعر إجمالي ثابت. `create()`/
   `previewPrice()` بيمرروا `dto.duration_hours` (نفس الحقل اللي `requiresPreciseSchedule` بيتطلّبه
   فوق)، و`/services/:id/estimate`/`/services/:id/technicians` بيمرروا `duration_hours` من query
@@ -1252,9 +1255,13 @@ ADR-0018 §5 منفّذ بالفعل مش مطلوب جديد) في `docs/08-pri
   **بَقّة بيانات حقيقية اتلقطت في نفس المراجعة**: `migration 0170` كانت حاطة `pricing_model='hourly'`
   على كل الأربع خدمات المنزلية بما فيهم "تنظيف شهري/إقامة" (سعر شهري ثابت فعليًا، مش بالساعة) —
   اتصلحت بـ`migration 0171` (تحديث بيانات، مش تعديل migration قديمة اتعمل commit).
-- **خارج نطاق الشريحة دي عمدًا**: فحص التعارض الساعي وقت المطابقة التلقائية نفسها (auto-match
-  بلا فني مفضّل) — بوابة الأهلية اليومية العادية (`technicianAvailabilityCondition()`) هي اللي
-  بتشتغل وقتها، مفيش دقة ساعة إضافية عند التوزيع الفعلي لسه.
+- **سلامة تعارض الوقت الدقيق (2026-08-25)**: قاعدة “أكثر من شغلانة قصيرة في اليوم” العامة لا
+  تعني السماح بحجزين في الساعة نفسها لخدمة تحمل `duration_hours`. مصدر الأهلية المشترك
+  `technicianAvailabilityCondition()` يفحص هذه الطلبات كنطاقات نصف مفتوحة
+  `[scheduled_at, scheduled_at + duration_hours)` تحت قفل صف الفني وقت القبول/التعيين. لذلك
+  طلبان متداخلان متزامنان لا ينجح منهما إلا واحد، بينما 10–12 و12–14 مسموحان. الخدمات
+  المحجوزة باليوم تحتفظ بقواعد اليوم الحالية دون تغيير. هذا أغلق أيضًا فجوة المطابقة التلقائية
+  القديمة؛ الفحص النهائي لا يعتمد على كون العميل اختار الفني مقدمًا.
 
 ## أوضاع توقيت الخدمة الأربعة (ADR-0032، 2026-08-22) — 3 قدرات جديدة جنب `requires_precise_schedule`
 

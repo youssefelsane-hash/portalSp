@@ -384,6 +384,7 @@ customer_notes              TEXT          NULL
 scheduled_at                TIMESTAMPTZ   NULL
 scheduled_slot_start        TIMESTAMPTZ   NULL
 scheduled_slot_end          TIMESTAMPTZ   NULL
+pricing_quantity            NUMERIC(10,2) NULL                -- كمية سعر الوحدة snapshot؛ مستقلة عن requested_units الخاصة بالإنتاجية
 
 -- التسعير (كله بالقرش)
 estimated_price_cents       INTEGER       NULL

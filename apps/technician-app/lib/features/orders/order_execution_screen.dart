@@ -8,6 +8,7 @@ import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../chat/chat_screen.dart';
 import '../media/media_repository.dart' show MediaRepository, OrderMediaItem;
+import '../../core/media_url.dart';
 import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
@@ -848,7 +849,7 @@ class _PhotoGallery extends StatelessWidget {
               itemBuilder: (context, index) => ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.network(
-                  media[index].fileUrl,
+                  resolveMediaUrl(media[index].fileUrl),
                   width: 72,
                   height: 72,
                   fit: BoxFit.cover,

@@ -57,7 +57,18 @@ export class AdminTechniciansController {
   @Get()
   async list(@Query() query: ListTechniciansQueryDto) {
     const { items, meta } = await this.adminTechniciansService.list(query);
-    return { items: items.map(({ profile, user }) => toAdminTechnicianResponseDto(profile, user)), meta };
+    const activity = await this.technicianActivityService.getActivitySnapshot(items.map(({ user }) => user.id));
+    return {
+      items: items.map(({ profile, user }) => {
+        const snapshot = activity.get(user.id);
+        return {
+          ...toAdminTechnicianResponseDto(profile, user),
+          online: snapshot?.online ?? false,
+          last_active_at: snapshot?.lastActiveAt?.toISOString() ?? null,
+        };
+      }),
+      meta,
+    };
   }
 
   // مركز عمليات فئة (docs/08 §35.9، ADR-0021 §5) — "Admin → Technicians → كهرباء". مسجّل قبل

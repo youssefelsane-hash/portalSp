@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { BookingMode } from '../entities/order.entity';
 import { RecurringOrderFrequency } from '../entities/recurring-order-template.entity';
 
@@ -37,6 +37,12 @@ export class CreateRecurringTemplateDto {
   @IsOptional()
   @IsObject()
   field_values?: Record<string, string | number | boolean>;
+
+  // مدخل سعر الوحدة الذي يتكرر مع كل طلب، بينما السعر نفسه يظل حيًا ويُحسب وقت كل نوبة.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  pricing_quantity?: number;
 
   // إجبارية لخدمة requiresPreciseSchedule/requiresHoursOnly (نفس قيود CreateOrderDto بالحرف).
   @IsOptional()

@@ -4,6 +4,7 @@ import { RecurringOrdersService } from './recurring-orders.service';
 import { nextOccurrence } from './recurring-schedule.util';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { BookingMode } from './entities/order.entity';
+import { PricingModel } from '../catalog/entities/service.entity';
 
 // قدرة "الحجز المتكرر" لكل خدمة (migration 0176) — بوابة دخول على مستوى إنشاء القالب: خدمة
 // allows_recurring_booking=false يعني مفيش قالب متكرر خالص، برفض واضح VAL_001 وقت الطلب بدل
@@ -29,6 +30,7 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
           requiresStartTimeOnly: false,
           requiresHoursOnly: false,
           requiresStartAndEnd: false,
+          pricingModel: PricingModel.FIXED,
           ...serviceOverrides,
         }),
       } as never,
@@ -100,6 +102,38 @@ describe('RecurringOrdersService.create() — قدرة allows_recurring_booking 
       duration_hours: 3,
     } as never);
     expect(saved.durationHours).toBe(3);
+    expect(templatesRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('خدمة بالوحدة من غير كمية: تترفض قبل إنشاء قالب هيفشل عند كل نوبة', async () => {
+    const { service, templatesRepo } = buildService({
+      allowsRecurringBooking: true,
+      pricingModel: PricingModel.PER_UNIT,
+    });
+    await expect(
+      service.create('user-1', {
+        service_id: 'service-1',
+        address_id: 'address-1',
+        frequency: RecurringOrderFrequency.WEEKLY,
+        starts_at: futureIso(),
+      } as never),
+    ).rejects.toMatchObject({ code: ErrorCode.VAL_001 });
+    expect(templatesRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('خدمة بالوحدة تحفظ الكمية كمدخل لكل طلب متولد', async () => {
+    const { service, templatesRepo } = buildService({
+      allowsRecurringBooking: true,
+      pricingModel: PricingModel.PER_UNIT,
+    });
+    const saved = await service.create('user-1', {
+      service_id: 'service-1',
+      address_id: 'address-1',
+      frequency: RecurringOrderFrequency.MONTHLY,
+      starts_at: futureIso(),
+      pricing_quantity: 3.5,
+    } as never);
+    expect(saved.pricingQuantity).toBe('3.5');
     expect(templatesRepo.save).toHaveBeenCalledTimes(1);
   });
 

@@ -1,6 +1,7 @@
 import { createServer, type Server as HttpServer } from 'http';
 import type { AddressInfo } from 'net';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import { Server as SocketIoServer } from 'socket.io';
@@ -29,6 +30,7 @@ describe('OrderTrackingGateway — اتصال حضور بلا order_id يسجّ�
   let httpServer: HttpServer;
   let ioServer: SocketIoServer;
   let jwt: JwtService;
+  let events: EventEmitter2;
   let port: number;
 
   const runId = Date.now().toString(36);
@@ -91,6 +93,7 @@ describe('OrderTrackingGateway — اتصال حضور بلا order_id يسجّ�
     // بس تتأكد إن register() اتنادت.
     sessionRegistry = new RealtimeSessionRegistry(dataSource);
     await sessionRegistry.onModuleInit();
+    events = new EventEmitter2();
 
     const customerProfilesService = new CustomerProfilesService(dataSource.getRepository(CustomerProfile), dataSource);
     const techniciansService = new TechniciansService(
@@ -112,6 +115,7 @@ describe('OrderTrackingGateway — اتصال حضور بلا order_id يسجّ�
       techniciansService,
       new RealtimeAccessService(dataSource.getRepository(User), jwt, configStub),
       sessionRegistry,
+      events,
     );
 
     httpServer = createServer();
@@ -163,6 +167,11 @@ describe('OrderTrackingGateway — اتصال حضور بلا order_id يسجّ�
   });
 
   it('اتصالين متزامنين (نفس الفني — presence + tracking فعلي) — لسه أونلاين لحد ما الاتنين يتقطعوا', async () => {
+    const transitions: boolean[] = [];
+    const listener = (event: { userId: string; online: boolean }) => {
+      if (event.userId === ids.technicianUser) transitions.push(event.online);
+    };
+    events.on('technician.presence_changed', listener);
     const presence = await connectClient(signToken(ids.technicianUser));
     await new Promise((resolve) => setTimeout(resolve, 100));
     const tracking = await connectClient(signToken(ids.technicianUser));
@@ -177,5 +186,7 @@ describe('OrderTrackingGateway — اتصال حضور بلا order_id يسجّ�
     tracking.disconnect();
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(sessionRegistry.isUserOnline(ids.technicianUser)).toBe(false);
+    expect(transitions).toEqual([true, false]);
+    events.off('technician.presence_changed', listener);
   });
 });

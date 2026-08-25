@@ -67,6 +67,9 @@ export function technicianAvailabilityCondition(opts: {
   isEmergencyParam: string;
   /** تعبير SQL لمدة الخدمة المقدّرة بالدقايق للطلب المرشّح، مثلاً `COALESCE(s.estimated_duration_minutes, 60)`. */
   serviceDurationExpr: string;
+  /** مدة دقيقة بالساعات للطلب المرشّح، أو NULL للخدمات المحجوزة باليوم. وجودها يحوّل التعارض
+   * إلى تقاطع وقت حقيقي بنطاق نصف مفتوح بدل قاعدة اليوم العامة. */
+  preciseDurationHoursExpr?: string;
   /** parameter لـ`matching.full_day_job_minutes` (إعداد قابل للتعديل، افتراضي 360) — ADR-0018 §2/§9. */
   fullDayThresholdMinutesParam: string;
   /**
@@ -115,6 +118,7 @@ function activeOrderConflictExistsExpr(opts: {
   engagedStatusesParam: string;
   isEmergencyParam: string;
   serviceDurationExpr: string;
+  preciseDurationHoursExpr?: string;
   fullDayThresholdMinutesParam: string;
 }): string {
   const {
@@ -125,6 +129,7 @@ function activeOrderConflictExistsExpr(opts: {
     engagedStatusesParam,
     isEmergencyParam,
     serviceDurationExpr,
+    preciseDurationHoursExpr = 'NULL',
     fullDayThresholdMinutesParam,
   } = opts;
   return `
@@ -155,6 +160,19 @@ function activeOrderConflictExistsExpr(opts: {
             AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date
                 = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
             AND (
+              -- الخدمات ذات الوقت الدقيق تحجز نافذة فعلية. النطاق نصف مفتوح يسمح بموعدين
+              -- متجاورين، ويرفض فقط التقاطع الحقيقي حتى لو كانت الخدمتان قصيرتين.
+              (
+                ${scheduledAtParam}::timestamptz IS NOT NULL
+                AND (${preciseDurationHoursExpr}) IS NOT NULL
+                AND co.scheduled_at IS NOT NULL
+                AND co.duration_hours IS NOT NULL
+                AND co.scheduled_at < ${scheduledAtParam}::timestamptz
+                    + ((${preciseDurationHoursExpr}) || ' hours')::interval
+                AND co.scheduled_at + (co.duration_hours || ' hours')::interval
+                    > ${scheduledAtParam}::timestamptz
+              )
+              OR
               (
                 (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
                   = (now() AT TIME ZONE 'Africa/Cairo')::date
@@ -204,6 +222,7 @@ export function technicianScheduleConflictCondition(opts: {
   engagedStatusesParam: string;
   isEmergencyParam: string;
   serviceDurationExpr: string;
+  preciseDurationHoursExpr?: string;
   fullDayThresholdMinutesParam: string;
 }): string {
   return `

@@ -14,6 +14,7 @@ import { BuildingsService } from '../buildings/buildings.service';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { PricingModel } from '../catalog/entities/service.entity';
 import { GeoService } from '../geo/geo.service';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
@@ -221,6 +222,7 @@ export class OrdersService {
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
+    this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
     // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار (فرد/اعتماد/طوارئ) بتترجم مباشرة لتحقق
     // إن الخدمة المطلوبة أصلاً بتدعم الوضع ده (allows_individual/allows_team/allows_emergency
@@ -446,6 +448,7 @@ export class OrdersService {
       dto.field_values,
       knownTechnicianPricingTier,
       dto.duration_hours,
+      dto.pricing_quantity,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -702,6 +705,7 @@ export class OrdersService {
         estimatedDurationDays: durationEstimate?.estimated_days ?? formulaDurationDays,
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
+        pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,
         idempotencyKey: idempotencyKey ?? null,
       });
       await manager.save(order);
@@ -864,6 +868,7 @@ export class OrdersService {
             requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
             frequency: repeatPlanFrequency,
             fieldValues: dto.field_values ?? null,
+            pricingQuantity: order.pricingQuantity,
             durationHours: order.durationHours,
             scheduledEndAt: order.scheduledEndAt,
             problemDescription: dto.problem_description ?? null,
@@ -989,6 +994,7 @@ export class OrdersService {
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
+    this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
     const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
     const bookingModeAllowed =
@@ -1031,6 +1037,7 @@ export class OrdersService {
       dto.field_values,
       previewTechnicianPricingTier,
       dto.duration_hours,
+      dto.pricing_quantity,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -1273,6 +1280,15 @@ export class OrdersService {
         `الفني ده متعارض مع طلب موجود بالفعل (${conflict.order_number}) في الفترة دي`,
         HttpStatus.CONFLICT,
       );
+    }
+  }
+
+  private assertPricingQuantity(pricingModel: PricingModel, quantity?: number): void {
+    if (pricingModel === PricingModel.PER_UNIT && quantity == null) {
+      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    }
+    if (pricingModel !== PricingModel.PER_UNIT && quantity != null) {
+      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
     }
   }
 

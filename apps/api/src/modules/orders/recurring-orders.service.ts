@@ -14,6 +14,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { PricingModel } from '../catalog/entities/service.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
@@ -162,6 +163,13 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
+    if (service.pricingModel === PricingModel.PER_UNIT && dto.pricing_quantity == null) {
+      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    }
+    if (service.pricingModel !== PricingModel.PER_UNIT && dto.pricing_quantity != null) {
+      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    }
+
     // أوضاع التوقيت الأربعة (ADR-0032) — نفس فحوصات OrdersService.create() بالحرف: القالب اللي
     // هيتولّد منه طلب لازم يحمل نفس الحقول المطلوبة للوضع الفعّال، وإلا كل موعد هيترفض عند
     // إنشاء الطلب ويوصل dead-letter من غير فايدة. فحص مبكر هنا = رفض واضح وقت الإنشاء بدل فشل صامت مؤجل.
@@ -213,6 +221,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
+      pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,
       durationHours: dto.duration_hours ?? null,
       scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
       problemDescription: dto.problem_description ?? null,
@@ -461,6 +470,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       // أسعار/قواعد الخدمة بيأثر على الطلبات الجديدة بس، والطلبات المتولّدة فعلاً بتحتفظ بـsnapshot
       // سعرها العادي زي أي طلب.
       field_values: template.fieldValues ?? undefined,
+      pricing_quantity: template.pricingQuantity == null ? undefined : Number(template.pricingQuantity),
       duration_hours: template.durationHours ?? undefined,
       scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : undefined,
       // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة حقيقية: صفر payment_method هنا خالص،

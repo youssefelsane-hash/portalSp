@@ -48,11 +48,14 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     technicianId?: string,
     status = OrderStatus.SEARCHING_TECHNICIAN,
     estimatedDurationDays?: number,
+    scheduledAt?: Date,
+    durationHours?: number,
   ): Promise<string> {
     const [order] = await dataSource.query(
       `INSERT INTO orders
-         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, estimated_duration_days)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8) RETURNING id`,
+         (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status,
+          total_amount_cents, estimated_duration_days, scheduled_at, duration_hours)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8,$9,$10) RETURNING id`,
       [
         `P7-${label}-${runId}`.slice(0, 24),
         ids.customerProfile,
@@ -62,6 +65,8 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
         ids.zone,
         status,
         estimatedDurationDays ?? null,
+        scheduledAt ?? null,
+        durationHours ?? null,
       ],
     );
     orderIds.push(order.id as string);
@@ -349,6 +354,47 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       [ids.technicianAProfile],
     );
     expect(count).toBe(1);
+  });
+
+  it('طلبان بوقت دقيق متداخلان لنفس الفني: القفل يعيد الفحص وواحد فقط ينجح', async () => {
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'completed'
+       WHERE technician_id = $1
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
+      [ids.technicianAProfile],
+    );
+    const start = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    start.setUTCHours(10, 0, 0, 0);
+    const orderA = await insertOrder('precise-overlap-a', undefined, OrderStatus.SEARCHING_TECHNICIAN, undefined, start, 2);
+    const orderB = await insertOrder('precise-overlap-b', undefined, OrderStatus.SEARCHING_TECHNICIAN, undefined, start, 2);
+    await insertAssignment(orderA, ids.technicianAProfile);
+    await insertAssignment(orderB, ids.technicianAProfile);
+
+    const outcomes = await Promise.allSettled([
+      matchingService.accept(ids.technicianAUser, orderA),
+      matchingService.accept(ids.technicianAUser, orderB),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+  });
+
+  it('موعدان دقيقان متجاوران لنفس الفني مسموحان: 10-12 ثم 12-14', async () => {
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'completed'
+       WHERE technician_id = $1
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
+      [ids.technicianAProfile],
+    );
+    const firstStart = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000);
+    firstStart.setUTCHours(10, 0, 0, 0);
+    const secondStart = new Date(firstStart.getTime() + 2 * 60 * 60 * 1000);
+    const orderA = await insertOrder('precise-adjacent-a', undefined, OrderStatus.SEARCHING_TECHNICIAN, undefined, firstStart, 2);
+    const orderB = await insertOrder('precise-adjacent-b', undefined, OrderStatus.SEARCHING_TECHNICIAN, undefined, secondStart, 2);
+    await insertAssignment(orderA, ids.technicianAProfile);
+    await insertAssignment(orderB, ids.technicianAProfile);
+
+    await expect(matchingService.accept(ids.technicianAUser, orderA)).resolves.toMatchObject({ id: orderA });
+    await expect(matchingService.accept(ids.technicianAUser, orderB)).resolves.toMatchObject({ id: orderB });
   });
 
   it('قبول فني × إعادة تعيين أدمن: المؤشر والعرض المقبول ينتميان لفائز واحد', async () => {
