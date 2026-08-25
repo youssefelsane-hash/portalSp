@@ -32,6 +32,23 @@ export class CustomerProfilesService {
     return profile;
   }
 
+  async findContactInfoByProfileIdOrThrow(profileId: string | null | undefined): Promise<{ name: string; phone: string }> {
+    if (!profileId) {
+      throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
+    const [contact] = await this.dataSource.query<Array<{ name: string; phone: string }>>(
+      `SELECT u.full_name AS name, u.phone_number AS phone
+       FROM customer_profiles cp
+       JOIN users u ON u.id = cp.user_id
+       WHERE cp.id = $1 AND cp.deleted_at IS NULL AND u.deleted_at IS NULL`,
+      [profileId],
+    );
+    if (!contact) {
+      throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return contact;
+  }
+
   /**
    * فحص "عميل جديد" الحقيقي وقت الاستخدام — عمداً مش `customerProfile.totalOrdersCount`
    * (بَقّة حقيقية اتلقطت في مراجعة شاملة 2026-08-12: العمود ده بيتحدّث async عبر BullMQ job

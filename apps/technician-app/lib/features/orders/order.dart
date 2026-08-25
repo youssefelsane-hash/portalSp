@@ -77,6 +77,8 @@ class Order {
   final int? requiredTechnicians;
   // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
   final String? scheduledAt;
+  final String? customerName;
+  final String? customerPhone;
   // تكوين الطاقم (docs/08 §35، ADR-0021 §1) — موجود بس لقائد الطلب على booking_mode='team'
   // (getOne بتحسبه). بيستبدل teamShortage/teamMembersNeeded القديمين بالكامل.
   final CrewStatus? crewStatus;
@@ -99,6 +101,8 @@ class Order {
     this.requiredTechnicians,
     this.address,
     this.scheduledAt,
+    this.customerName,
+    this.customerPhone,
     this.crewStatus,
     this.teamLeaderName,
   });
@@ -122,6 +126,8 @@ class Order {
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,
         scheduledAt: json['scheduled_at'] as String?,
+        customerName: json['customer_name'] as String?,
+        customerPhone: json['customer_phone'] as String?,
         crewStatus: json['crew_status'] != null ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>) : null,
         teamLeaderName: json['team_leader_name'] as String?,
       );

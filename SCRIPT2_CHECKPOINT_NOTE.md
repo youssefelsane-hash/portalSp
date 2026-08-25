@@ -26,7 +26,11 @@
   while awaiting a decision. The customer sees a prominent approve/keep-current card in order
   details. Focused model tests passed in both apps and changed-file analysis has no errors/warnings
   (only pre-existing informational deprecations elsewhere in the same large screens).
-- Next task: confirmed-order mutual contact visibility, then global realtime message alerts.
+- Completed: mutual contact visibility now uses one shared confirmed-order status invariant. The
+  technician receives customer name/phone only after acceptance and only after order ownership or
+  team-membership authorization; offer/pre-acceptance payloads do not query or expose it. API build,
+  focused Jest with open-handle detection, and changed-file Dart analysis passed.
+- Next task: global realtime message alerts and floating unread entry point.
 
 ---
 

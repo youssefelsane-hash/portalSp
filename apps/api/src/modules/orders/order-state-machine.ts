@@ -155,6 +155,10 @@ export const TECHNICIAN_CONTACT_VISIBLE_STATUSES: ReadonlySet<OrderStatus> = new
   OrderStatus.COMPLETED,
 ]);
 
+// بعد قبول الحجز، الطرفان يحتاجان قناة اتصال مباشرة لنفس الزيارة. استخدام نفس المجموعة يمنع
+// اختلافًا خطيرًا مثل إظهار رقم العميل قبل قبول الفني أو إخفائه عنه أثناء التنفيذ.
+export const CUSTOMER_CONTACT_VISIBLE_STATUSES = TECHNICIAN_CONTACT_VISIBLE_STATUSES;
+
 export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   return ORDER_TRANSITIONS[from].includes(to);
 }

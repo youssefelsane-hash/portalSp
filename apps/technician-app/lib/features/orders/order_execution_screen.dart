@@ -287,6 +287,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  Future<void> _callCustomer(String phone) async {
+    final opened = await launchUrl(Uri(scheme: 'tel', path: phone));
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر فتح تطبيق الاتصال')));
+    }
+  }
+
   @override
   void dispose() {
     _trackingClient.dispose();
@@ -593,6 +600,22 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 ),
               ),
             ),
+            if (_order.customerPhone != null) ...[
+              const SizedBox(height: 12),
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: ListTile(
+                  leading: const Icon(Icons.person_pin_circle_outlined),
+                  title: Text(_order.customerName ?? 'العميل'),
+                  subtitle: Text(_order.customerPhone!),
+                  trailing: IconButton(
+                    tooltip: 'اتصل بالعميل',
+                    onPressed: () => _callCustomer(_order.customerPhone!),
+                    icon: const Icon(Icons.call),
+                  ),
+                ),
+              ),
+            ],
             if (_order.bookingMode == 'team') ...[
               const SizedBox(height: 12),
               _TeamRosterCard(members: _teamMembers, requiredTechnicians: _order.requiredTechnicians),

@@ -84,6 +84,9 @@ export interface OrderResponseDto {
    * الكولر (orders.controller.ts) هو المسؤول عن حساب الشرط ده وتمرير القيمة، مش الدالة دي. */
   technician_name?: string;
   technician_phone?: string;
+  /** موجود فقط في مسارات الفني بعد قبول الحجز، وبعد تحقق ملكية/عضوية الطلب. */
+  customer_name?: string;
+  customer_phone?: string;
   /** تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل وحده مايسوّيش الطلب، بس
    * لازم يظهر في الواجهة عشان العميل يعرف إنه أكّد بالفعل (يمنع تكرار الزرار). */
   customer_cash_confirmed_at: string | null;
@@ -106,6 +109,7 @@ export function toOrderResponseDto(
   order: Order,
   address?: Address | null,
   technicianContact?: { name: string; phone: string } | null,
+  customerContact?: { name: string; phone: string } | null,
 ): OrderResponseDto {
   return {
     id: order.id,
@@ -163,6 +167,8 @@ export function toOrderResponseDto(
       : undefined,
     technician_name: technicianContact?.name,
     technician_phone: technicianContact?.phone,
+    customer_name: customerContact?.name,
+    customer_phone: customerContact?.phone,
     customer_cash_confirmed_at: order.customerCashConfirmedAt ? order.customerCashConfirmedAt.toISOString() : null,
     technician_cash_not_received_at: order.technicianCashNotReceivedAt
       ? order.technicianCashNotReceivedAt.toISOString()

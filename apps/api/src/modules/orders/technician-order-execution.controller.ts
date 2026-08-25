@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { AddressesService } from '../customers/addresses.service';
+import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toOrderResponseDto } from './dto/order-response.dto';
@@ -28,6 +29,7 @@ import { CrewRole, OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
+import { CUSTOMER_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -42,6 +44,7 @@ export class TechnicianOrderExecutionController {
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
     private readonly addressesService: AddressesService,
+    private readonly customerProfilesService: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly paymentsService: PaymentsService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
@@ -52,12 +55,15 @@ export class TechnicianOrderExecutionController {
   // فالعنوان بتاعه مضمون الوصول ليه. بيتنادى بعد كل فعل تنفيذي عشان زرار "افتح الملاحة" في
   // apps/technician-app يفضل شغال طول دورة التنفيذ، مش بس أول تحميل للشاشة.
   private async toDto(order: Order) {
-    const [address, money] = await Promise.all([
+    const [address, money, customerContact] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
       this.paymentsService.getCollectionBreakdownForOrder(order),
+      CUSTOMER_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
+        ? this.customerProfilesService.findContactInfoByProfileIdOrThrow(order.customerId)
+        : null,
     ]);
     return {
-      ...toOrderResponseDto(order, address),
+      ...toOrderResponseDto(order, address, null, customerContact),
       paid_amount_cents: money.paidAmountCents,
       direct_paid_amount_cents: money.directPaidAmountCents,
       financed_order_amount_cents: money.financedOrderAmountCents,
