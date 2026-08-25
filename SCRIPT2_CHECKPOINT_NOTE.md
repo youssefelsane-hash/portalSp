@@ -13,8 +13,11 @@
 - Known tooling issue: repository API lint script currently invokes ESLint 9 without an
   `eslint.config.*` file and fails before linting any source. This predates the checkpoint; TypeScript,
   build, tests, and diff checks are green.
-- Next task: continue the schedule/booking concurrency audit, then bounded technician reschedule
-  requests, confirmed-order contact visibility, and global realtime message alerts.
+- Completed after the pricing checkpoint: precise-time assignment now rejects overlapping ranges
+  under the technician lock while allowing adjacent ranges. Real PostgreSQL concurrency and guard
+  tests passed (16 scenarios, open-handle detection enabled).
+- Next task: bounded technician reschedule requests, then confirmed-order contact visibility and
+  global realtime message alerts.
 
 ---
 

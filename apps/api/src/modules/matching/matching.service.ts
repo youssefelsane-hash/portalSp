@@ -328,6 +328,7 @@ export class MatchingService {
           engagedStatusesParam: '$11',
           isEmergencyParam: '$12',
           serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+          preciseDurationHoursExpr: '(SELECT o2.duration_hours FROM orders o2 WHERE o2.id = $4::uuid)',
           fullDayThresholdMinutesParam: '$13',
           ignoreActiveOrderConflict,
         })}
