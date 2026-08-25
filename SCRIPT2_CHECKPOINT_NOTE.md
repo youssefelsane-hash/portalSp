@@ -21,8 +21,12 @@
   concurrent approvals execute once, and the admin setting defaults to two requests per order.
   Request/decision in-app notifications commit with the state. Migration `0185` and every previous
   checksum passed; the focused real PostgreSQL suite passed 12/12 with open-handle detection.
-- Next task: wire the reschedule request controls into both Flutter apps, then confirmed-order
-  contact visibility and global realtime message alerts.
+- Completed: both Flutter apps now consume the durable reschedule workflow. The technician selects
+  one of their available future slots and supplies a reason; the current appointment stays visible
+  while awaiting a decision. The customer sees a prominent approve/keep-current card in order
+  details. Focused model tests passed in both apps and changed-file analysis has no errors/warnings
+  (only pre-existing informational deprecations elsewhere in the same large screens).
+- Next task: confirmed-order mutual contact visibility, then global realtime message alerts.
 
 ---
 

@@ -14,6 +14,8 @@ import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
 import '../support/support_contact_screen.dart';
 import '../tracking/tracking_client.dart';
+import '../schedule/models.dart' show ScheduleSlot;
+import '../schedule/schedule_repository.dart';
 import 'models.dart';
 import 'order.dart';
 import 'orders_repository.dart';
@@ -65,6 +67,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   CancellationPolicy? _cancellationPolicy;
   List<OrderMediaItem>? _media;
   List<TeamMember>? _teamMembers;
+  List<OrderRescheduleRequest> _rescheduleRequests = [];
 
   @override
   void initState() {
@@ -80,6 +83,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     _loadMedia();
     _loadTeamMembersIfApplicable();
     _refreshTeamInfoIfApplicable();
+    _loadRescheduleRequests();
   }
 
   // طاقم الطلب — بس لطلبات "اعتماد" (booking_mode='team'). فشل التحميل (مشكلة شبكة عابرة)
@@ -159,8 +163,54 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     try {
       final order = await _repository.getOne(_order.id);
       if (mounted) setState(() => _order = order);
+      await _loadRescheduleRequests();
     } on ApiException {
       // تجاهل — راجع التعليق فوق.
+    }
+  }
+
+  Future<void> _loadRescheduleRequests() async {
+    try {
+      final requests = await _repository.listRescheduleRequests(_order.id);
+      if (mounted) setState(() => _rescheduleRequests = requests);
+    } on ApiException {
+      // سجل التأجيل ثانوي؛ فشله المؤقت لا يعطل تنفيذ الطلب.
+    }
+  }
+
+  Future<void> _requestReschedule() async {
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      final slots = await ScheduleRepository(context.read<AuthRepository>()).list();
+      final available = slots.where((slot) {
+        if (slot.status != 'available') return false;
+        final start = DateTime.tryParse('${slot.slotDate}T${slot.startTime}');
+        return start != null && start.isAfter(DateTime.now());
+      }).toList();
+      if (!mounted) return;
+      if (available.isEmpty) {
+        setState(() => _error = 'ضيف موعدًا متاحًا جديدًا في جدولك الأول، وبعدها ارجع اقترحه للعميل');
+        return;
+      }
+      final proposal = await showDialog<_RescheduleRequestDraft>(
+        context: context,
+        builder: (context) => _RescheduleRequestDialog(slots: available),
+      );
+      if (proposal == null) return;
+      await _repository.requestReschedule(_order.id, newSlotId: proposal.slot.id, reason: proposal.reason);
+      await _loadRescheduleRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اتبعت اقتراح التأجيل للعميل — الموعد الحالي محفوظ لحد ما يرد')),
+        );
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
     }
   }
 
@@ -464,6 +514,11 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
 
   String _formatEgp(int cents) => '${(cents / 100).toStringAsFixed(0)} ج.م.';
 
+  String _formatRescheduleRequestDate(DateTime value) {
+    final local = value.toLocal();
+    return '${local.day}/${local.month}/${local.year} — ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final configuredNextAction = nextTechnicianAction[_order.orderStatus];
@@ -575,6 +630,28 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               icon: const Icon(Icons.chat_bubble_outline),
               label: const Text('الشات مع العميل'),
             ),
+            if (_rescheduleRequests.any((request) => request.isPending)) ...[
+              const SizedBox(height: 12),
+              Card(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                child: ListTile(
+                  leading: const Icon(Icons.hourglass_top_outlined),
+                  title: const Text('طلب التأجيل منتظر رد العميل'),
+                  subtitle: Text(
+                    'الموعد المقترح: ${_formatRescheduleRequestDate(_rescheduleRequests.firstWhere((request) => request.isPending).proposedAt)}\n'
+                    '${_rescheduleRequests.firstWhere((request) => request.isPending).reason}',
+                  ),
+                  isThreeLine: true,
+                ),
+              ),
+            ] else if (_order.orderStatus == 'technician_assigned' || _order.orderStatus == 'accepted') ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _acting ? null : _requestReschedule,
+                icon: const Icon(Icons.event_repeat_outlined),
+                label: const Text('اطلب تأجيل الموعد من العميل'),
+              ),
+            ],
             if (_photoMessage != null) ...[
               const SizedBox(height: 12),
               Text(_photoMessage!, style: const TextStyle(color: Colors.green)),
@@ -706,6 +783,83 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RescheduleRequestDraft {
+  final ScheduleSlot slot;
+  final String reason;
+
+  const _RescheduleRequestDraft({required this.slot, required this.reason});
+}
+
+class _RescheduleRequestDialog extends StatefulWidget {
+  final List<ScheduleSlot> slots;
+
+  const _RescheduleRequestDialog({required this.slots});
+
+  @override
+  State<_RescheduleRequestDialog> createState() => _RescheduleRequestDialogState();
+}
+
+class _RescheduleRequestDialogState extends State<_RescheduleRequestDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _reasonController = TextEditingController();
+  ScheduleSlot? _slot;
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('اقترح موعدًا بديلًا'),
+        content: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('الموعد الحالي لن يتغيّر إلا بعد موافقة العميل.'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<ScheduleSlot>(
+                initialValue: _slot,
+                decoration: const InputDecoration(labelText: 'الموعد المقترح'),
+                items: widget.slots.map((slot) => DropdownMenuItem(
+                  value: slot,
+                  child: Text('${slot.slotDate} — ${slot.startTime.substring(0, 5)}'),
+                )).toList(),
+                onChanged: (value) => setState(() => _slot = value),
+                validator: (value) => value == null ? 'اختار موعدًا' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _reasonController,
+                minLines: 2,
+                maxLines: 4,
+                maxLength: 500,
+                decoration: const InputDecoration(labelText: 'سبب التأجيل للعميل', hintText: 'اكتب سببًا واضحًا ومحترمًا'),
+                validator: (value) => (value?.trim().length ?? 0) < 5 ? 'السبب لازم يكون 5 حروف على الأقل' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+          FilledButton(
+            onPressed: () {
+              if (!_formKey.currentState!.validate()) return;
+              Navigator.of(context).pop(_RescheduleRequestDraft(slot: _slot!, reason: _reasonController.text.trim()));
+            },
+            child: const Text('إرسال للعميل'),
+          ),
+        ],
       ),
     );
   }

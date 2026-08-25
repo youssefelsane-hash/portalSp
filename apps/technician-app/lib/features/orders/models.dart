@@ -252,3 +252,27 @@ const Map<String, String> technicianLevelLabelsAr = {
   'premium': 'مميّز',
   'team_leader': 'قائد فريق',
 };
+
+class OrderRescheduleRequest {
+  final String id;
+  final String proposedSlotId;
+  final DateTime proposedAt;
+  final DateTime proposedEndAt;
+  final String reason;
+  final String status;
+  final DateTime createdAt;
+
+  OrderRescheduleRequest({required this.id, required this.proposedSlotId, required this.proposedAt, required this.proposedEndAt, required this.reason, required this.status, required this.createdAt});
+
+  bool get isPending => status == 'pending';
+
+  factory OrderRescheduleRequest.fromJson(Map<String, dynamic> json) => OrderRescheduleRequest(
+        id: json['id'] as String,
+        proposedSlotId: json['proposed_slot_id'] as String,
+        proposedAt: DateTime.parse(json['proposed_at'] as String),
+        proposedEndAt: DateTime.parse(json['proposed_end_at'] as String),
+        reason: json['reason'] as String,
+        status: json['status'] as String,
+        createdAt: DateTime.parse(json['created_at'] as String),
+      );
+}
