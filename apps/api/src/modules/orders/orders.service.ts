@@ -2297,12 +2297,17 @@ export class OrdersService {
     });
   }
 
-  /** بداية النهاردة بتوقيت مصر (الجدولة باليوم، ADR-0018 §2) — "متأخر" معناها **يوم** عدّى، مش ساعة. */
-  private static startOfTodayCairo(): Date {
-    const cairoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
-    cairoNow.setHours(0, 0, 0, 0);
-    return cairoNow;
-  }
+  /**
+   * مقارنة "يوم الجدولة" بيوم النهاردة **بتوقيت مصر**، في SQL مباشرة (الجدولة باليوم مش بالساعة،
+   * ADR-0018 §2). عمداً مش بحساب حدود اليوم في JS: أول نسخة هنا كانت بتحسب بداية اليوم بـ
+   * `toLocaleString('en-US', {timeZone:'Africa/Cairo'})` + `setHours(0,0,0,0)` — وده بياخد
+   * **تاريخ** القاهرة ويحط عليه منتصف ليل **توقيت السيرفر** (UTC عادة)، يعني بيطلع 03:00 بتوقيت
+   * القاهرة. النتيجة بَقّة حقيقية اتلقطت في الاختبار الحي: في أول 3 ساعات من كل يوم مصري، شغل
+   * النهاردة كان بيتحسب "متأخر" ويختفي من "قدامك". نفس تعبير الـSQL المستخدم في
+   * `technician-eligibility.sql.ts` و`admin-exception-center.service.ts` بالحرف — تعريف واحد.
+   */
+  private static readonly CAIRO_DAY_EXPR = `(o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date`;
+  private static readonly CAIRO_TODAY_EXPR = `(now() AT TIME ZONE 'Africa/Cairo')::date`;
 
   /**
    * "شغل متأخر" (docs/08 §56 بند 4) — شغلانة اتقبلت، يوم تنفيذها عدّى، والفني **لسه ما بدأش
@@ -2311,14 +2316,14 @@ export class OrdersService {
    */
   async findOverdueForTechnician(userId: string): Promise<Order[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.orders.find({
-      where: {
-        technicianId: profile.id,
-        orderStatus: OrderStatus.ACCEPTED,
-        scheduledAt: LessThan(OrdersService.startOfTodayCairo()),
-      },
-      order: { scheduledAt: 'ASC' },
-    });
+    return this.orders
+      .createQueryBuilder('o')
+      .where('o.technician_id = :technicianId', { technicianId: profile.id })
+      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
+      .andWhere('o.scheduled_at IS NOT NULL')
+      .andWhere(`${OrdersService.CAIRO_DAY_EXPR} < ${OrdersService.CAIRO_TODAY_EXPR}`)
+      .orderBy('o.scheduled_at', 'ASC')
+      .getMany();
   }
 
   // "الشغل المؤكّد قدامي" (docs/08 §165) — عكس findActiveForTechnician() بالظبط: الطلبات
@@ -2330,14 +2335,14 @@ export class OrdersService {
     // القايمة أول ما اليوم يبدأ (`scheduled_at` = بداية اليوم بالظبط بعد ADR-0018 §2، فهي أصغر
     // من `now` دايمًا). الفني كان بيصحى يلاقي شغل النهاردة مش موجود في "قدامك". الحد الصح هو
     // **بداية النهاردة** مش اللحظة الحالية.
-    return this.orders.find({
-      where: {
-        technicianId: profile.id,
-        orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
-        scheduledAt: MoreThanOrEqual(OrdersService.startOfTodayCairo()),
-      },
-      order: { scheduledAt: 'ASC' },
-    });
+    return this.orders
+      .createQueryBuilder('o')
+      .where('o.technician_id = :technicianId', { technicianId: profile.id })
+      .andWhere('o.order_status IN (:...statuses)', { statuses: ACTIVE_TECHNICIAN_ORDER_STATUSES })
+      .andWhere('o.scheduled_at IS NOT NULL')
+      .andWhere(`${OrdersService.CAIRO_DAY_EXPR} >= ${OrdersService.CAIRO_TODAY_EXPR}`)
+      .orderBy('o.scheduled_at', 'ASC')
+      .getMany();
   }
 
   /** مصدر واحد لكل انتقالات الفني — بتحترم الـ state machine وبتسجل التاريخ زي أي انتقال تاني. */

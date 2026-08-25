@@ -167,18 +167,59 @@ describe('OrdersService.findActiveForTechnician()/findUpcomingConfirmedForTechni
     expect(upcoming[0].id).toBe(ids.futureOrder);
   });
 
-  it('لو الطلب المجدول وصل موعده (بقى في الماضي)، findActiveForTechnician() بترجّعه كنشط بدل الأقدم تحديثًا', async () => {
+  // **تغيير سلوك مقصود (docs/08 §56 بند 4، طلب مالك صريح 2026-08-25)** — الاختبار ده كان بيثبّت
+  // السلوك القديم: طلب `accepted` وصل موعده يبقى "الشغل الحالي". المالك طلب صراحة إن "الشغل
+  // الحالي" يكون **الشغلانة اللي شغّالة فعلاً** بس (الفني متحرّك ليها)، والباقي يتوزّع على
+  // "قدامك"/"متأخر". شغل النهاردة اللي لسه ما بدأش = "قدامك" (النهاردة)، مش "حالي".
+  it('طلب النهاردة المقبول لسه ما بدأش = "قدامك" مش "الحالي" — والحالي بيفضل فاضي لحد ما الفني يتحرّك', async () => {
     await dataSource.query(`UPDATE orders SET scheduled_at = now() - interval '1 minute' WHERE id = $1`, [
       ids.futureOrder,
     ]);
-    // الطلب الـASAP اتلغى/اتقفل عشان نتأكد إن الطلب المجدول (بعد ما وصل موعده) هو اللي بيترجع لوحده.
     await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [ids.asapOrder]);
+
+    const active = await service.findActiveForTechnician(ids.technicianUser);
+    expect(active).toBeNull();
+
+    // بَقّة حقيقية اتصلحت في نفس الشريحة: الشرط القديم (`MoreThan(now)`) كان بيخفي شغل النهاردة
+    // من "قدامك" تمامًا أول ما اليوم يبدأ — الفني كان بيصحى ملقيش شغل النهاردة في أي قسم.
+    const upcoming = await service.findUpcomingConfirmedForTechnician(ids.technicianUser);
+    expect(upcoming).toHaveLength(1);
+    expect(upcoming[0].id).toBe(ids.futureOrder);
+
+    // ولسه مش "متأخر" — يومه هو النهاردة، ماعداش.
+    const overdue = await service.findOverdueForTechnician(ids.technicianUser);
+    expect(overdue).toHaveLength(0);
+  });
+
+  it('الفني اتحرّك فعلاً (technician_on_way) => بقى "الحالي"، وخرج من "قدامك"', async () => {
+    await dataSource.query(`UPDATE orders SET scheduled_at = now() - interval '1 minute' WHERE id = $1`, [
+      ids.futureOrder,
+    ]);
+    await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [ids.asapOrder]);
+    await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [ids.futureOrder]);
+    // ملحوظة: الاختبارات هنا بتشارك نفس صفوف الـfixture عمدًا، فأي حالة بتعدّل order_status لازم
+    // الحالة اللي بعدها ترجّعها لحالة معروفة صراحة (شوف الـreset في بداية الحالة الجاية).
 
     const active = await service.findActiveForTechnician(ids.technicianUser);
     expect(active).not.toBeNull();
     expect(active!.id).toBe(ids.futureOrder);
+  });
 
-    const upcoming = await service.findUpcomingConfirmedForTechnician(ids.technicianUser);
-    expect(upcoming).toHaveLength(0);
+  // الحالة اللي كانت بتضيع تمامًا قبل الإصلاح: يوم الشغلانة عدّى والفني لسه ما بدأش — مكانتش
+  // في "قدامك" (معادها فات) ولا مضمونة في "الحالي" (findOne بترتيب updatedAt عشوائي فعليًا).
+  it('شغلانة يومها عدّى ولسه accepted => "متأخر"، مش "الحالي" ولا "قدامك"', async () => {
+    // reset صريح: الحالة اللي فاتت سابت futureOrder على technician_on_way.
+    await dataSource.query(`UPDATE orders SET order_status = 'accepted' WHERE id = $1`, [ids.futureOrder]);
+    await dataSource.query(`UPDATE orders SET scheduled_at = now() - interval '2 days' WHERE id = $1`, [
+      ids.futureOrder,
+    ]);
+    await dataSource.query(`UPDATE orders SET order_status = 'completed' WHERE id = $1`, [ids.asapOrder]);
+
+    const overdue = await service.findOverdueForTechnician(ids.technicianUser);
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0].id).toBe(ids.futureOrder);
+
+    expect(await service.findActiveForTechnician(ids.technicianUser)).toBeNull();
+    expect(await service.findUpcomingConfirmedForTechnician(ids.technicianUser)).toHaveLength(0);
   });
 });
