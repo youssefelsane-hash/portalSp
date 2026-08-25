@@ -863,6 +863,23 @@ class _CrewOpportunityCard extends StatelessWidget {
 // ADR-0018 §10 — الشغل المجدول اتأكّد تلقائيًا بلا قرار قبول/رفض من الفني (autoConfirmScheduledOrder
 // في الباك-إند) — بطاقة معلوماتية بس (فتح للتفاصيل)، بلا زراير قبول/رفض. الترتيب بأقرب يوم أولًا
 // جاي من الباك-إند مباشرة (scheduled_at ASC)، فبكرة بتظهر فوق الشهر الجاي تلقائيًا.
+/// شارة "جديد" (docs/08 §56 بند 2) — الفني لسه ما فتحش الطلب ده ولا مرة.
+class _NewBadge extends StatelessWidget {
+  const _NewBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: context.infoColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Text('جديد', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
 /// عنوان قسم موحّد (docs/08 §56 بند 4) — الشاشة كانت خليط أقسام بعضها بعنوان وبعضها بلا،
 /// فالفني مش فارق معاه إيه من إيه. نفس الشكل لكل الأقسام دلوقتي.
 class _SectionHeader extends StatelessWidget {
@@ -936,10 +953,28 @@ class _UpcomingJobCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
-        leading: const Icon(Icons.event_available_outlined),
+        leading: Icon(
+          Icons.event_available_outlined,
+          // docs/08 §56 بند 2 — تمييز لوني بين اللي اتفتح واللي لأ، بدل ما كل حاجة تبان بنفس
+          // البروز أول ما التطبيق يفتح (بلاغ المالك).
+          color: order.isNewForTechnician ? context.infoColor : null,
+        ),
         // docs/08 §56 بند 3 — اسم الخدمة والعميل بقوا في الكارت نفسه: رقم الطلب لوحده ما كانش
         // بيقول للفني هو رايح يعمل إيه ولا لمين، فكان لازم يفتح كل طلب عشان يعرف.
-        title: Text('${order.serviceNameAr ?? 'طلب'} — $dayLabel'),
+        title: Row(
+          children: [
+            if (order.isNewForTechnician) ...[
+              const _NewBadge(),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Text(
+                '${order.serviceNameAr ?? 'طلب'} — $dayLabel',
+                style: order.isNewForTechnician ? const TextStyle(fontWeight: FontWeight.bold) : null,
+              ),
+            ),
+          ],
+        ),
         subtitle: Text(
           [
             if (order.customerName != null) order.customerName!,

@@ -90,6 +90,9 @@ export interface OrderResponseDto {
    * تليفونه خالص — بلاغ مالك مباشر بسكرين شوت. الكولر بيحسب الشرط، مش الدالة دي. */
   customer_name?: string;
   customer_phone?: string;
+  /** "جديد عليك" (docs/08 §56 بند 2) — true لو الفني المعيّن لسه ما فتحش تفاصيل الطلب ولا مرة.
+   * موجود في مسارات الفني بس؛ التطبيق بيستخدمه للتمييز البصري بدل ما يعرض كل حاجة بنفس البروز. */
+  is_new_for_technician?: boolean;
   /** اسم الخدمة المطلوبة بالعربي — الفني كان بيشوف رقم الطلب والمبلغ بس، من غير ما يعرف
    * هو رايح يعمل إيه بالظبط. متاح لكل مسارات الفني بلا شرط حالة (مش بيانات شخصية). */
   service_name_ar?: string;
@@ -115,7 +118,11 @@ export function toOrderResponseDto(
   order: Order,
   address?: Address | null,
   technicianContact?: { name: string; phone: string } | null,
-  viewerExtras?: { customerContact?: { name: string; phone: string } | null; serviceNameAr?: string | null },
+  viewerExtras?: {
+    customerContact?: { name: string; phone: string } | null;
+    serviceNameAr?: string | null;
+    isNewForTechnician?: boolean;
+  },
 ): OrderResponseDto {
   return {
     id: order.id,
@@ -176,6 +183,7 @@ export function toOrderResponseDto(
     customer_name: viewerExtras?.customerContact?.name,
     customer_phone: viewerExtras?.customerContact?.phone,
     service_name_ar: viewerExtras?.serviceNameAr ?? undefined,
+    is_new_for_technician: viewerExtras?.isNewForTechnician,
     customer_cash_confirmed_at: order.customerCashConfirmedAt ? order.customerCashConfirmedAt.toISOString() : null,
     technician_cash_not_received_at: order.technicianCashNotReceivedAt
       ? order.technicianCashNotReceivedAt.toISOString()

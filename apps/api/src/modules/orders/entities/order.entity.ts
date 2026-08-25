@@ -268,6 +268,10 @@ export class Order {
   @Column({ name: 'technician_cash_not_received_at', type: 'timestamptz', nullable: true })
   technicianCashNotReceivedAt: Date | null;
 
+  /** أول مرة الفني المعيّن فتح تفاصيل الطلب (docs/08 §56 بند 2) — NULL = لسه "جديد" عليه. */
+  @Column({ name: 'technician_viewed_at', type: 'timestamptz', nullable: true })
+  technicianViewedAt: Date | null;
+
   @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
   closedAt: Date | null;
 

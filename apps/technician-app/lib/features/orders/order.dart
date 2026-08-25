@@ -89,6 +89,9 @@ class Order {
   final String? customerName;
   final String? customerPhone;
   final String? serviceNameAr;
+  // "جديد عليك" (docs/08 §56 بند 2) — الفني لسه ما فتحش تفاصيل الطلب ولا مرة. بيتحسب في
+  // الباك-إند (orders.technician_viewed_at) مش محليًا، فبيفضل صح بعد إعادة تثبيت أو جهاز تاني.
+  final bool isNewForTechnician;
 
   Order({
     required this.id,
@@ -111,6 +114,7 @@ class Order {
     this.customerName,
     this.customerPhone,
     this.serviceNameAr,
+    this.isNewForTechnician = false,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -137,6 +141,7 @@ class Order {
         customerName: json['customer_name'] as String?,
         customerPhone: json['customer_phone'] as String?,
         serviceNameAr: json['service_name_ar'] as String?,
+        isNewForTechnician: json['is_new_for_technician'] as bool? ?? false,
       );
 }
 
