@@ -535,7 +535,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
     await insertSlot('old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
     const newSlotId = await insertSlot('new', TechnicianScheduleSlotStatus.AVAILABLE, null, '14:00');
 
-    const updated = await ordersService.rescheduleByAdmin(ids.adminUser, orderId, newSlotId, 'العميل اتصل يطلب تأجيل الميعاد');
+    const updated = await ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newSlotId }, 'العميل اتصل يطلب تأجيل الميعاد');
     expect(updated.scheduledAt).not.toBeNull();
 
     const newSlot = await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: newSlotId } });
@@ -564,7 +564,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
   it('يرفض طلب مش موجود', async () => {
     const newSlotId = await insertSlot('notfound-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '15:00');
     await expect(
-      ordersService.rescheduleByAdmin(ids.adminUser, '00000000-0000-0000-0000-000000000000', newSlotId, 'سبب تجريبي'),
+      ordersService.rescheduleByAdmin(ids.adminUser, '00000000-0000-0000-0000-000000000000', { newSlotId }, 'سبب تجريبي'),
     ).rejects.toThrow();
   });
 
@@ -573,7 +573,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
     await insertSlot('toolate-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
     const newSlotId = await insertSlot('toolate-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '16:00');
 
-    await expect(ordersService.rescheduleByAdmin(ids.adminUser, orderId, newSlotId, 'سبب تجريبي')).rejects.toThrow();
+    await expect(ordersService.rescheduleByAdmin(ids.adminUser, orderId, { newSlotId }, 'سبب تجريبي')).rejects.toThrow();
     expect(auditLogRecord).not.toHaveBeenCalled();
   });
 });
