@@ -191,13 +191,11 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           )
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
-      // نجاح واضح — SnackBar + الرجوع لقائمة المشاريع
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تم إنشاء المشروع بنجاح — طلب المعاينة في الطريق'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      // docs/08 §57 بند 1 — بلاغ المالك: "مفروض يبقى ظاهر له إنه بتبعت الطلب ده، الطلب بيتراجع،
+      // وبنتواصل معاك… وتقوله بتلاقي حاجة اسمها مشاريعي عشان تتابع من هناك". SnackBar لوحده
+      // بيختفي في ثانيتين ومش بيشرح الخطوة الجاية ولا مكان المتابعة.
+      await _showSubmittedSheet();
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const MyProjectsScreen()),
       );
@@ -208,6 +206,68 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  /// "وصل طلبك — وإيه اللي هيحصل بعد كده" (docs/08 §57 بند 1).
+  Future<void> _showSubmittedSheet() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.green, size: 28),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'وصلنا طلبك',
+                    style: Theme.of(sheetContext).textTheme.titleLarge,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const _NextStepLine(
+              icon: Icons.fact_check_outlined,
+              text: 'فريقنا بيراجع تفاصيل المشروع دلوقتي.',
+            ),
+            const _NextStepLine(
+              icon: Icons.phone_in_talk_outlined,
+              text: 'هنتواصل معاك لتحديد معاينة على الطبيعة.',
+            ),
+            const _NextStepLine(
+              icon: Icons.request_quote_outlined,
+              text: 'بعد المعاينة هيوصلك عرض سعر مفصّل توافق عليه من التطبيق.',
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(sheetContext).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'تقدر تتابع حالة المشروع في أي وقت من: حسابي ← مشاريعي',
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(sheetContext).pop(),
+                child: const Text('تمام، ودّيني لمشاريعي'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -246,5 +306,27 @@ class ProjectsRepo {
       );
     }
     return response;
+  }
+}
+
+class _NextStepLine extends StatelessWidget {
+  const _NextStepLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text)),
+        ],
+      ),
+    );
   }
 }
