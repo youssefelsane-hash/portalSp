@@ -32,23 +32,6 @@ export class CustomerProfilesService {
     return profile;
   }
 
-  async findContactInfoByProfileIdOrThrow(profileId: string | null | undefined): Promise<{ name: string; phone: string }> {
-    if (!profileId) {
-      throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
-    }
-    const [contact] = await this.dataSource.query<Array<{ name: string; phone: string }>>(
-      `SELECT u.full_name AS name, u.phone_number AS phone
-       FROM customer_profiles cp
-       JOIN users u ON u.id = cp.user_id
-       WHERE cp.id = $1 AND cp.deleted_at IS NULL AND u.deleted_at IS NULL`,
-      [profileId],
-    );
-    if (!contact) {
-      throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
-    }
-    return contact;
-  }
-
   /**
    * بيانات تواصل العميل للفني المعيّن (docs/08 §56 بند 3) — المرآة الحرفية لـ
    * `TechniciansService.findContactInfoOrThrow()` اللي العميل بيشوف بيها الفني. الكولر هو
@@ -57,7 +40,10 @@ export class CustomerProfilesService {
    */
   async findContactInfoOrThrow(profileId: string): Promise<{ name: string; phone: string }> {
     const [row] = await this.dataSource.query<{ full_name: string; phone_number: string }[]>(
-      `SELECT u.full_name, u.phone_number FROM customer_profiles cp JOIN users u ON u.id = cp.user_id WHERE cp.id = $1`,
+      `SELECT u.full_name, u.phone_number
+       FROM customer_profiles cp
+       JOIN users u ON u.id = cp.user_id
+       WHERE cp.id = $1 AND cp.deleted_at IS NULL AND u.deleted_at IS NULL`,
       [profileId],
     );
     if (!row) {

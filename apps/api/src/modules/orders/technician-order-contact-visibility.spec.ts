@@ -3,7 +3,7 @@ import { BookingMode, Order, OrderStatus } from './entities/order.entity';
 
 describe('TechnicianOrderExecutionController customer contact visibility', () => {
   const contact = { name: 'عميل مؤكد', phone: '+201001234567' };
-  const customerProfiles = { findContactInfoByProfileIdOrThrow: jest.fn().mockResolvedValue(contact) };
+  const customerProfiles = { findContactInfoOrThrow: jest.fn().mockResolvedValue(contact) };
 
   function order(status: OrderStatus): Order {
     return Object.assign(new Order(), {
@@ -78,11 +78,12 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
           amountDueToTechnicianCents: 10000,
         }),
       } as never,
+      { findServiceOrThrow: jest.fn().mockResolvedValue({ nameAr: 'خدمة اختبار' }) } as never,
       {} as never,
     );
   }
 
-  beforeEach(() => customerProfiles.findContactInfoByProfileIdOrThrow.mockClear());
+  beforeEach(() => customerProfiles.findContactInfoOrThrow.mockClear());
 
   it('shows the customer phone to the assigned technician after acceptance', async () => {
     const dto = await controller(order(OrderStatus.ACCEPTED)).getOne(
@@ -91,7 +92,7 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
     );
 
     expect(dto).toMatchObject({ customer_name: contact.name, customer_phone: contact.phone });
-    expect(customerProfiles.findContactInfoByProfileIdOrThrow).toHaveBeenCalledTimes(1);
+    expect(customerProfiles.findContactInfoOrThrow).toHaveBeenCalledTimes(1);
   });
 
   it('does not expose the customer phone before the technician accepts', async () => {
@@ -101,6 +102,6 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
     );
 
     expect(dto.customer_phone).toBeUndefined();
-    expect(customerProfiles.findContactInfoByProfileIdOrThrow).not.toHaveBeenCalled();
+    expect(customerProfiles.findContactInfoOrThrow).not.toHaveBeenCalled();
   });
 });

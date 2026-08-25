@@ -33,8 +33,13 @@
 - Completed: customer/technician order chat, admin/customer support replies, and admin/technician
   internal chat now persist the recipient's in-app notification atomically with each message. API
   build and both real PostgreSQL suites passed (8 scenarios) with open-handle detection.
-- Next task: reconcile the newer `main` reschedule/contact implementations, then add the global
-  floating unread entry point and deep-link routing.
+- Integrated: `origin/main` at `c90b793`, including day-based rescheduling and the expanded
+  technician job brief. Duplicate customer contact fields/UI introduced by the parallel phone
+  implementations were removed; one shared visibility policy and one job-summary card remain.
+  Both reschedule models are preserved: direct day/slot changes and customer-approved technician
+  slot proposals use a consistent order-then-slot lock order. API build, 23 merged Jest/PostgreSQL
+  scenarios with open-handle detection, Flutter model test, and focused Dart analysis passed.
+- Next task: add the global floating unread entry point and deep-link routing.
 
 ---
 
