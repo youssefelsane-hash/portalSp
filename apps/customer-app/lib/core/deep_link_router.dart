@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../features/chat/chat_screen.dart';
 import '../features/orders/order_detail_screen.dart';
 
 // docs/08 §19 بند 11 — مسؤول عن الملاحة الفعلية لما العميل يضغط على إشعار push (سواء التطبيق كان
@@ -16,7 +17,16 @@ void handleDeepLink(String? deepLink) {
   if (navigator == null) return;
 
   final match = _orderDeepLinkPattern.firstMatch(deepLink);
-  if (match == null) return;
-  final orderId = match.group(1)!;
-  navigator.push(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
+  if (match != null) {
+    final orderId = match.group(1)!;
+    if (deepLink == '/orders/$orderId/chat') {
+      navigator.push(MaterialPageRoute(builder: (_) => ChatScreen(orderId: orderId)));
+    } else {
+      navigator.push(MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: orderId)));
+    }
+    return;
+  }
+  if (deepLink == '/support-chat') {
+    navigator.push(MaterialPageRoute(builder: (_) => const ChatScreen.support()));
+  }
 }

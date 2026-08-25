@@ -39,7 +39,12 @@
   Both reschedule models are preserved: direct day/slot changes and customer-approved technician
   slot proposals use a consistent order-then-slot lock order. API build, 23 merged Jest/PostgreSQL
   scenarios with open-handle detection, Flutter model test, and focused Dart analysis passed.
-- Next task: add the global floating unread entry point and deep-link routing.
+- Completed: both mobile apps now show a lifecycle-aware floating unread alert on every
+  authenticated screen. Push remains instant; a five-second foreground poll provides a durable
+  fallback. Notification taps now open customer order/support chat, technician order chat, or the
+  exact technician/admin internal thread. Customer Flutter tests passed 13/13, technician tests
+  passed 10/10, and focused Dart analysis reported no issues in either app.
+- Next task: continue the premium customer-home and remaining cross-engine integration review.
 
 ---
 
