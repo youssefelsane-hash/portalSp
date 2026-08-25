@@ -493,6 +493,110 @@ export class ProjectsService {
     return row;
   }
 
+  /**
+   * ربط طلب موجود بمشروع (docs/08 §57 بند 4) — بلاغ المالك: "مش عارف الطلبات دي بتضاف إزاي".
+   * السبب إن `orders.project_id` كان بيتحدد **بس** من `OrdersService.create()` وقت إنشاء الطلب
+   * من العميل (`dto.project_id`) — مفيش أي مسار أدمن يربط طلب قايم بمشروع، فالتبويب كان بيفضل
+   * فاضي عمليًا. الربط مقصور على طلبات **نفس العميل** — طلب عميل تاني في مشروع مش بتاعه تسريب.
+   */
+  async linkOrderToProject(adminUserId: string, projectId: string, orderId: string, meta?: AuditActorMeta) {
+    const project = await this.findOne(projectId);
+    const [order] = await this.dataSource.query<{ id: string; customer_id: string; project_id: string | null }[]>(
+      `SELECT id, customer_id, project_id FROM orders WHERE id = $1 AND deleted_at IS NULL`,
+      [orderId],
+    );
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (order.customer_id !== project.customerId) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الطلب ده مش لنفس عميل المشروع — مينفعش يتربط بيه',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (order.project_id && order.project_id !== projectId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب مربوط بمشروع تاني بالفعل', HttpStatus.CONFLICT);
+    }
+    if (order.project_id === projectId) return { linked: true, already: true };
+
+    await this.dataSource.query(`UPDATE orders SET project_id = $1 WHERE id = $2`, [projectId, orderId]);
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'project.order_linked',
+      entityType: 'project',
+      entityId: projectId,
+      newValues: { order_id: orderId },
+      meta,
+    });
+    return { linked: true, already: false };
+  }
+
+  /**
+   * إصدار ضمان على مستوى المشروع كله (docs/08 §57 بند 5) — بلاغ المالك: "الضمانات… مش عارف
+   * إزاي أضيفها، ولا هي جاهزة أصلاً ولا لأ".
+   *
+   * الحقيقة اللي اتلقطت: خطط الضمان وإدارتها من الأدمن **موجودة وشغّالة**، وصفوف
+   * `customer_warranties` بتتولد **في مكان واحد بس**: `payments.service.ts` عند تسوية **طلب**
+   * فيه خطة ضمان (وبتحمل `project_id` لو الطلب مربوط بمشروع). يعني ضمان **المشروع نفسه** —
+   * اللي بيغطي الشغل ككل مش زيارة واحدة — مكانش ليه أي مسار إصدار خالص. الجدول نفسه بيسمح بيه
+   * من الأساس (`order_id` nullable + الفهرس الفريد مشروط بـ`order_id IS NOT NULL`).
+   */
+  async issueProjectWarranty(
+    adminUserId: string,
+    projectId: string,
+    planId: string,
+    meta?: AuditActorMeta,
+  ): Promise<Record<string, unknown>> {
+    const project = await this.findOne(projectId);
+    const [plan] = await this.dataSource.query<Record<string, unknown>[]>(
+      `SELECT * FROM warranty_plans WHERE id = $1 AND is_active = true`,
+      [planId],
+    );
+    if (!plan) {
+      throw new ApiException(ErrorCode.VAL_001, 'خطة الضمان غير موجودة أو موقوفة', HttpStatus.NOT_FOUND);
+    }
+    const coverageMonths = Number(plan.coverage_months ?? 12);
+    const startsAt = new Date();
+    const expiresAt = new Date(startsAt);
+    expiresAt.setMonth(expiresAt.getMonth() + coverageMonths);
+
+    const [row] = await this.dataSource.query<Record<string, unknown>[]>(
+      `INSERT INTO customer_warranties (
+         plan_id, plan_version, order_id, project_id, customer_id, name_ar, warranty_type,
+         price_paid_cents, coverage_months, max_coverage_cents, max_claims,
+         terms_ar, exclusions_ar, starts_at, expires_at, claims_used
+       ) VALUES ($1,$2,NULL,$3,$4,$5,$6,0,$7,$8,$9,$10,$11,$12,$13,0)
+       RETURNING id, project_id, name_ar, coverage_months, starts_at, expires_at`,
+      [
+        plan.id,
+        Number(plan.version ?? 1),
+        projectId,
+        project.customerId,
+        String(plan.name_ar ?? 'ضمان المشروع'),
+        String(plan.warranty_type ?? 'extended_workmanship'),
+        coverageMonths,
+        plan.max_coverage_cents ?? project.approvedQuoteTotalCents ?? null,
+        Number(plan.max_claims ?? 1),
+        plan.terms_ar ?? null,
+        plan.exclusions_ar ?? null,
+        startsAt,
+        expiresAt,
+      ],
+    );
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'project.warranty_issued',
+      entityType: 'project',
+      entityId: projectId,
+      newValues: { plan_id: planId, warranty_id: row.id, expires_at: expiresAt.toISOString() },
+      meta,
+    });
+    return row;
+  }
+
   async releaseMilestonePayout(milestoneId: string): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const ms = await manager.createQueryBuilder(ProjectMilestone, 'm')

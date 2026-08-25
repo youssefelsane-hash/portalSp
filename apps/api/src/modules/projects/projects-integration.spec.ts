@@ -349,4 +349,73 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       }),
     ).rejects.toThrow(/المرحلة غير موجودة/);
   });
+
+  // ── docs/08 §57 بنود 4-5 — الفجوتين اللي المالك قال "مش عارف بتتضاف إزاي" ──
+
+  it('ربط طلب بمشروع من الأدمن: بيظهر في تبويب الطلبات، وطلب عميل تاني بيترفض', async () => {
+    const [order] = await q<{ id: string }[]>(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+         order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES ($1,$2,$3,$4,$5,'completed','paid',50000,0) RETURNING id`,
+      [`PRJLINK-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+
+    const result = await projectsService.linkOrderToProject(ids.adminUser, ids.project, order.id);
+    expect(result).toEqual({ linked: true, already: false });
+
+    const room = await projectsService.getProjectRoom(ids.project, 'admin');
+    expect((room.orders as Record<string, unknown>[]).some((o) => o.id === order.id)).toBe(true);
+
+    // نداء تاني idempotent — مش بيرمي ولا بيكرر.
+    expect(await projectsService.linkOrderToProject(ids.adminUser, ids.project, order.id)).toEqual({
+      linked: true,
+      already: true,
+    });
+
+    // طلب عميل تاني: تسريب، لازم يترفض.
+    const [foreignOrder] = await q<{ id: string }[]>(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+         order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES ($1,$2,$3,$4,$5,'completed','paid',50000,0) RETURNING id`,
+      [`PRJFRGN-${runId}`.slice(0, 24), ids.otherProfile, ids.service, ids.address, ids.zone],
+    );
+    await expect(
+      projectsService.linkOrderToProject(ids.adminUser, ids.project, foreignOrder.id),
+    ).rejects.toThrow(/مش لنفس عميل المشروع/);
+
+    await q(`UPDATE orders SET project_id = NULL WHERE id = $1`, [order.id]);
+    await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [[order.id, foreignOrder.id]]);
+  });
+
+  it('إصدار ضمان على المشروع كله: بيتخزّن بـproject_id وorder_id فاضي، وبيظهر في تبويب الضمانات', async () => {
+    const [plan] = await q<{ id: string }[]>(
+      `INSERT INTO warranty_plans (slug, name_ar, warranty_type, coverage_months, max_claims, pricing_model, price_value, is_active, version)
+       VALUES ($1,$2,'extended_workmanship',24,2,'fixed',0,true,1) RETURNING id`,
+      [`prj-warranty-${runId}`, `ضمان تشطيب ${runId}`],
+    );
+
+    const warranty = await projectsService.issueProjectWarranty(ids.adminUser, ids.project, plan.id);
+    expect(warranty.project_id).toBe(ids.project);
+    expect(Number(warranty.coverage_months)).toBe(24);
+
+    const [row] = await q<{ order_id: string | null; project_id: string }[]>(
+      `SELECT order_id, project_id FROM customer_warranties WHERE id = $1`,
+      [warranty.id],
+    );
+    // ضمان المشروع مش مربوط بزيارة واحدة — الجدول بيسمح بده من الأساس.
+    expect(row.order_id).toBeNull();
+    expect(row.project_id).toBe(ids.project);
+
+    const room = await projectsService.getProjectRoom(ids.project, 'customer');
+    expect((room.warranties as Record<string, unknown>[]).some((w) => w.id === warranty.id)).toBe(true);
+
+    await q(`DELETE FROM customer_warranties WHERE id = $1`, [warranty.id]);
+    await q(`DELETE FROM warranty_plans WHERE id = $1`, [plan.id]);
+  });
+
+  it('خطة ضمان موقوفة أو مش موجودة بترفض الإصدار', async () => {
+    await expect(
+      projectsService.issueProjectWarranty(ids.adminUser, ids.project, '00000000-0000-0000-0000-000000000000'),
+    ).rejects.toThrow(/غير موجودة أو موقوفة/);
+  });
 });

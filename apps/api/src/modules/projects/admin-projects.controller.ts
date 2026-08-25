@@ -106,4 +106,30 @@ export class AdminProjectsController {
   ) {
     return this.projectsService.addComment({ userId: admin.sub, role: 'admin' }, id, dto, meta);
   }
+
+  // ── سد فجوتَي الطلبات والضمانات (docs/08 §57 بنود 4-5) ──────────────────────
+
+  /** ربط طلب قايم بالمشروع — الطلبات كانت بتتربط بس وقت إنشائها من العميل. */
+  @Post(':id/orders/:orderId/link')
+  @RequirePermission('projects.manage')
+  async linkOrder(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.linkOrderToProject(admin.sub, id, orderId, meta);
+  }
+
+  /** إصدار ضمان على المشروع كله — كان مفيش مسار إصدار غير عبر تسوية طلب. */
+  @Post(':id/warranties')
+  @RequirePermission('projects.manage')
+  async issueWarranty(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { plan_id: string },
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.issueProjectWarranty(admin.sub, id, dto.plan_id, meta);
+  }
 }
