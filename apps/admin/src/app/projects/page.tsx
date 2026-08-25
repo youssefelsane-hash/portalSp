@@ -36,13 +36,38 @@ interface ProjectQuoteDetail {
   sent_at: string | null; approved_at: string | null; expires_at: string | null;
 }
 
+// ADR-0036 — كل مرحلة بتشيل كومنتاتها جوّاها، فالكارت بيتعرض كامل من غير نداء لكل مرحلة.
+interface ProjectCommentRow {
+  id: string;
+  milestone_id: string | null;
+  author_role: string;
+  author_name: string;
+  body: string;
+  is_visible_to_customer: boolean;
+  created_at: string;
+}
+
+interface ProjectMilestoneRow {
+  id: string;
+  sequence_number: number;
+  name_ar: string;
+  amount_cents: number;
+  execution_status: string;
+  approval_status: string;
+  payment_status?: string;
+  expected_date?: string | null;
+  rejection_reason?: string | null;
+  comments?: ProjectCommentRow[];
+}
+
 interface ProjectRoomData {
   project: ProjectRow;
   quotes: ProjectQuoteDetail[];
-  milestones: Array<{ id: string; sequence_number: number; name_ar: string; amount_cents: number; execution_status: string; approval_status: string }>;
+  milestones: ProjectMilestoneRow[];
   orders: Array<{ id: string; order_number: string; status: string; total_amount_cents: number }>;
   warranties: Array<Record<string, unknown>>;
   activity: Array<{ id: string; action: string; actor_name: string; actor_role: string; created_at: string }>;
+  comments?: ProjectCommentRow[];
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -227,13 +252,16 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
 
         {room && room.milestones.length > 0 && (
           <section className="rounded-md border bg-background p-3">
-            <p className="mb-2 font-medium text-sm">مراحل التنفيذ</p>
-            <div className="grid gap-2 md:grid-cols-2">
+            <p className="mb-1 font-medium text-sm">مراحل التنفيذ</p>
+            {/* docs/08 §57 بند 3 — كل مرحلة كارت مستقل بسعرها وأفعالها وكومنتاتها، بدل سطر
+                للقراءة بس. الترتيب مش مفروض: أي مرحلة "لسه ما بدأتش" تقدر تبدأ لوحدها. */}
+            <p className="mb-3 text-xs text-muted-foreground">
+              كل مرحلة بتتسلّم لوحدها. أول ما تسلّم مرحلة، العميل بيتراجعها ويوافق — ولو ماردّش
+              خلال المهلة بتتوافق تلقائيًا.
+            </p>
+            <div className="grid gap-3">
               {room.milestones.map((milestone) => (
-                <div key={milestone.id} className="rounded border p-2 text-sm">
-                  <span className="font-medium">{milestone.sequence_number}. {milestone.name_ar}</span>
-                  <span className="ms-2 text-muted-foreground">{egp(milestone.amount_cents)} · {milestone.execution_status} · {milestone.approval_status}</span>
-                </div>
+                <MilestoneCard key={milestone.id} projectId={currentProject.id} milestone={milestone} onChanged={loadRoom} />
               ))}
             </div>
           </section>
@@ -512,6 +540,148 @@ function MilestoneCreationSection({ projectId, approvedTotal, onCreated }: {
       <Button size="sm" disabled={busy || !matches} onClick={() => void create()}>
         {busy ? '…' : 'إنشاء المراحل'}
       </Button>
+    </div>
+  );
+}
+
+// كارت المرحلة الواحدة (ADR-0036، docs/08 §57 بند 3) — بلاغ المالك: "الأدمن بيسلّم كله مع بعض،
+// وده مش منطقي. مفروض كل مرحلة تكون منفصلة بحدها، مكتوب جنبها سعرها… وكل فيز تسمح إن هي تتسلم
+// على حدة، ويبقى في كل فيز مساحة كومنتات بتظهر للعميل."
+const MILESTONE_EXECUTION_LABELS: Record<string, string> = {
+  pending: 'لسه ما بدأتش', in_progress: 'شغّالة', completed: 'اتسلّمت', rejected: 'مرفوضة',
+};
+const MILESTONE_APPROVAL_LABELS: Record<string, string> = {
+  pending: 'بانتظار موافقة العميل', approved: 'العميل وافق', rejected: 'العميل رفض',
+};
+
+function MilestoneCard({
+  projectId,
+  milestone,
+  onChanged,
+}: {
+  projectId: string;
+  milestone: ProjectMilestoneRow;
+  onChanged: () => void;
+}) {
+  const { authedFetch } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [commentBody, setCommentBody] = useState('');
+  const [internal, setInternal] = useState(false);
+
+  async function act(path: string, body?: Record<string, unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/projects/${projectId}/milestones/${milestone.id}/${path}`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitComment() {
+    if (!commentBody.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/projects/${projectId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          body: commentBody.trim(),
+          milestone_id: milestone.id,
+          is_visible_to_customer: !internal,
+        }),
+      });
+      setCommentBody('');
+      setInternal(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر إضافة الكومنت');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const comments = milestone.comments ?? [];
+
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-sm">
+          {milestone.sequence_number}. {milestone.name_ar}
+        </span>
+        <span className="font-medium text-sm">{egp(milestone.amount_cents)}</span>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Badge variant={milestone.execution_status === 'completed' ? 'default' : 'secondary'}>
+          {MILESTONE_EXECUTION_LABELS[milestone.execution_status] ?? milestone.execution_status}
+        </Badge>
+        {milestone.execution_status === 'completed' && (
+          <Badge variant={milestone.approval_status === 'approved' ? 'default' : 'secondary'}>
+            {MILESTONE_APPROVAL_LABELS[milestone.approval_status] ?? milestone.approval_status}
+          </Badge>
+        )}
+        {milestone.expected_date && (
+          <span className="text-xs text-muted-foreground">الموعد المتوقع: {milestone.expected_date}</span>
+        )}
+      </div>
+
+      {milestone.rejection_reason && (
+        <p className="mt-2 text-xs text-destructive">سبب رفض العميل: {milestone.rejection_reason}</p>
+      )}
+
+      {/* الترتيب مش مفروض: أي مرحلة "لسه ما بدأتش" تقدر تبدأ لوحدها من غير ما تستنى اللي قبلها. */}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {milestone.execution_status === 'pending' && (
+          <Button size="sm" disabled={busy} onClick={() => act('start')}>
+            ابدأ المرحلة دي
+          </Button>
+        )}
+        {milestone.execution_status === 'in_progress' && (
+          <Button size="sm" disabled={busy} onClick={() => act('complete')}>
+            سلّم المرحلة دي
+          </Button>
+        )}
+      </div>
+
+      <div className="mt-3 border-t pt-2">
+        <p className="mb-1 text-xs font-medium">كومنتات المرحلة</p>
+        {comments.length === 0 ? (
+          <p className="text-xs text-muted-foreground">مفيش كومنتات لسه.</p>
+        ) : (
+          <ul className="mb-2 space-y-1">
+            {comments.map((c) => (
+              <li key={c.id} className="text-xs">
+                <span className="font-medium">{c.author_name}:</span> {c.body}
+                {!c.is_visible_to_customer && (
+                  <span className="ms-1 text-muted-foreground">(داخلي — العميل مش شايفه)</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <Input
+          value={commentBody}
+          onChange={(e) => setCommentBody(e.target.value)}
+          placeholder="اكتب تحديث للعميل عن المرحلة دي…"
+        />
+        <label className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} />
+          ملاحظة داخلية (مش هتظهر للعميل)
+        </label>
+        <Button size="sm" variant="outline" className="mt-2" disabled={busy || !commentBody.trim()} onClick={submitComment}>
+          أضف الكومنت
+        </Button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
