@@ -28,7 +28,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
-import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
+import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
@@ -40,6 +40,7 @@ import { PreviewOrderResponseDto } from './dto/preview-order-response.dto';
 import { FailedVisitReason, ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { RescheduleOrderDto } from './dto/reschedule-order.dto';
+import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
 import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-visit.dto';
 import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
@@ -91,6 +92,21 @@ interface OptionalWarrantySelection {
   max_claims: number;
   terms_ar: string | null;
   exclusions_ar: string | null;
+}
+
+export type OrderRescheduleRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface OrderRescheduleRequestResponse {
+  id: string;
+  order_id: string;
+  technician_id: string;
+  proposed_slot_id: string;
+  proposed_at: Date;
+  proposed_end_at: Date;
+  reason: string;
+  status: OrderRescheduleRequestStatus;
+  resolved_at: Date | null;
+  created_at: Date;
 }
 
 @Injectable()
@@ -1301,6 +1317,223 @@ export class OrdersService {
     });
   }
 
+  async requestRescheduleByTechnician(
+    userId: string,
+    orderId: string,
+    dto: CreateTechnicianRescheduleRequestDto,
+  ): Promise<OrderRescheduleRequestResponse> {
+    const technician = await this.techniciansService.findByUserIdOrThrow(userId);
+    const configuredMax = await this.settingsService.getNumber('orders.technician_reschedule_max_requests', 2);
+    const maxRequests = Math.max(1, Math.min(20, Math.floor(configuredMax)));
+
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId AND o.technician_id = :technicianId', { orderId, technicianId: technician.id })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+      }
+      this.assertReschedulable(order);
+
+      const currentSlot = await manager.findOne(TechnicianScheduleSlot, {
+        where: { orderId, status: TechnicianScheduleSlotStatus.BOOKED },
+      });
+      if (!currentSlot) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش مرتبط بموعد محدد أصلاً', HttpStatus.CONFLICT);
+      }
+      if (currentSlot.id === dto.new_slot_id) {
+        throw new ApiException(ErrorCode.VAL_001, 'اختار موعدًا مختلفًا عن الموعد الحالي', HttpStatus.BAD_REQUEST);
+      }
+
+      const proposedSlot = await manager
+        .createQueryBuilder(TechnicianScheduleSlot, 'slot')
+        .setLock('pessimistic_read')
+        .where('slot.id = :slotId', { slotId: dto.new_slot_id })
+        .andWhere('slot.status = :status', { status: TechnicianScheduleSlotStatus.AVAILABLE })
+        .andWhere('slot.deleted_at IS NULL')
+        .getOne();
+      if (!proposedSlot) {
+        throw new ApiException(ErrorCode.VAL_001, 'الموعد المقترح لم يعد متاحًا', HttpStatus.CONFLICT);
+      }
+      if (proposedSlot.technicianId !== technician.id) {
+        throw new ApiException(ErrorCode.VAL_001, 'تقدر تقترح موعدًا من جدولك أنت فقط', HttpStatus.BAD_REQUEST);
+      }
+      const proposedAt = this.slotStart(proposedSlot);
+      if (proposedAt.getTime() <= Date.now()) {
+        throw new ApiException(ErrorCode.VAL_001, 'لا يمكن اقتراح موعد انتهى أو بدأ بالفعل', HttpStatus.BAD_REQUEST);
+      }
+
+      const [{ count }] = await manager.query<{ count: string }[]>(
+        'SELECT COUNT(*)::text AS count FROM order_reschedule_requests WHERE order_id = $1 AND technician_id = $2',
+        [orderId, technician.id],
+      );
+      if (Number(count) >= maxRequests) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          `وصلت للحد الأقصى لطلبات التأجيل (${maxRequests}) — تواصل مع الدعم لو محتاج تغيير إضافي`,
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const pending = await manager.query<{ id: string }[]>(
+        "SELECT id FROM order_reschedule_requests WHERE order_id = $1 AND status = 'pending' LIMIT 1",
+        [orderId],
+      );
+      if (pending.length > 0) {
+        throw new ApiException(ErrorCode.ORDR_003, 'فيه طلب تأجيل منتظر قرار العميل بالفعل', HttpStatus.CONFLICT);
+      }
+
+      const [request] = await manager.query<OrderRescheduleRequestResponse[]>(
+        `INSERT INTO order_reschedule_requests (order_id, technician_id, proposed_slot_id, reason)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, order_id, technician_id, proposed_slot_id,
+                   ($5::date + $6::time) AS proposed_at,
+                   ($5::date + $7::time) AS proposed_end_at,
+                   reason, status, resolved_at, created_at`,
+        [orderId, technician.id, proposedSlot.id, dto.reason.trim(), proposedSlot.slotDate, proposedSlot.startTime, proposedSlot.endTime],
+      );
+
+      const customer = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+      await this.insertDurableInAppNotification(manager, {
+        userId: customer.userId,
+        notificationType: 'order_reschedule_requested',
+        titleAr: 'الفني يقترح تغيير الموعد',
+        bodyAr: `الفني طلب تأجيل طلب رقم ${order.orderNumber}. افتح الطلب للموافقة أو الرفض.`,
+        orderId,
+        deepLink: `/orders/${orderId}`,
+      });
+      return request;
+    });
+  }
+
+  async listRescheduleRequestsForCustomer(userId: string, orderId: string): Promise<OrderRescheduleRequestResponse[]> {
+    await this.findOneOwnedOrThrow(userId, orderId);
+    return this.listRescheduleRequests(orderId);
+  }
+
+  async listRescheduleRequestsForTechnician(userId: string, orderId: string): Promise<OrderRescheduleRequestResponse[]> {
+    await this.findOwnedByTechnicianOrThrow(userId, orderId);
+    return this.listRescheduleRequests(orderId);
+  }
+
+  private listRescheduleRequests(orderId: string): Promise<OrderRescheduleRequestResponse[]> {
+    return this.dataSource.query<OrderRescheduleRequestResponse[]>(
+      `SELECT request.id, request.order_id, request.technician_id, request.proposed_slot_id,
+              (slot.slot_date + slot.start_time) AS proposed_at,
+              (slot.slot_date + slot.end_time) AS proposed_end_at,
+              request.reason, request.status, request.resolved_at, request.created_at
+       FROM order_reschedule_requests request
+       JOIN technician_schedule_slots slot ON slot.id = request.proposed_slot_id
+       WHERE request.order_id = $1
+       ORDER BY request.created_at DESC`,
+      [orderId],
+    );
+  }
+
+  async resolveTechnicianRescheduleRequest(
+    userId: string,
+    orderId: string,
+    requestId: string,
+    decision: 'approved' | 'rejected',
+  ): Promise<{ request: OrderRescheduleRequestResponse; order: Order }> {
+    const customer = await this.customerProfiles.findByUserIdOrThrow(userId);
+
+    const result = await this.dataSource.transaction<{
+      request: OrderRescheduleRequestResponse;
+      order: Order;
+      rescheduled: { previousScheduledAt: Date | null; newScheduledAt: Date } | null;
+    }>(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId AND o.customer_id = :customerId', { orderId, customerId: customer.id })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+
+      const [request] = await manager.query<
+        Array<{ id: string; proposed_slot_id: string; technician_id: string; status: OrderRescheduleRequestStatus }>
+      >(
+        'SELECT id, proposed_slot_id, technician_id, status FROM order_reschedule_requests WHERE id = $1 AND order_id = $2 FOR UPDATE',
+        [requestId, orderId],
+      );
+      if (!request) {
+        throw new ApiException(ErrorCode.VAL_001, 'طلب التأجيل غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (request.status !== 'pending') {
+        throw new ApiException(ErrorCode.ORDR_003, 'تم اتخاذ قرار في طلب التأجيل ده بالفعل', HttpStatus.CONFLICT);
+      }
+
+      const rescheduled =
+        decision === 'approved'
+          ? await this.rescheduleLockedOrder(
+              manager,
+              order,
+              request.proposed_slot_id,
+              {
+                userId,
+                role: 'customer',
+                changeSource: OrderChangeSource.CUSTOMER,
+                reasonSuffix: ' — موافقة على طلب تأجيل الفني',
+              },
+              request.id,
+            )
+          : null;
+
+      await manager.query(
+        `UPDATE order_reschedule_requests
+         SET status = $3, resolved_by_user_id = $4, resolved_at = now(), updated_at = now()
+         WHERE id = $1 AND order_id = $2`,
+        [requestId, orderId, decision, userId],
+      );
+      const [updatedRequest] = await manager.query<OrderRescheduleRequestResponse[]>(
+        `SELECT request.id, request.order_id, request.technician_id, request.proposed_slot_id,
+                (slot.slot_date + slot.start_time) AS proposed_at,
+                (slot.slot_date + slot.end_time) AS proposed_end_at,
+                request.reason, request.status, request.resolved_at, request.created_at
+         FROM order_reschedule_requests request
+         JOIN technician_schedule_slots slot ON slot.id = request.proposed_slot_id
+         WHERE request.id = $1`,
+        [requestId],
+      );
+
+      const technician = await this.techniciansService.findByProfileIdOrThrow(request.technician_id);
+      await this.insertDurableInAppNotification(manager, {
+        userId: technician.userId,
+        notificationType: decision === 'approved' ? 'order_reschedule_approved' : 'order_reschedule_rejected',
+        titleAr: decision === 'approved' ? 'العميل وافق على تأجيل الموعد' : 'العميل رفض تأجيل الموعد',
+        bodyAr:
+          decision === 'approved'
+            ? `تم اعتماد الموعد المقترح لطلب رقم ${order.orderNumber}.`
+            : `العميل فضّل الاحتفاظ بالموعد الحالي لطلب رقم ${order.orderNumber}.`,
+        orderId,
+        deepLink: `/technician/orders/${orderId}`,
+      });
+
+      return { request: updatedRequest, order, rescheduled };
+    });
+
+    if (result.rescheduled && result.order.technicianId) {
+      this.events.emit(
+        ORDER_RESCHEDULED_EVENT,
+        new OrderRescheduledEvent(
+          result.order.id,
+          result.order.orderNumber,
+          result.order.technicianId,
+          result.order.customerId,
+          result.rescheduled.previousScheduledAt,
+          result.rescheduled.newScheduledAt,
+          'technician_request',
+          true,
+        ),
+      );
+    }
+    return { request: result.request, order: result.order };
+  }
+
   /**
    * إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — بعكس reschedule() فوق (مقصور على العميل
    * صاحب الطلب)، ده لأي طلب بغض النظر عن هوية العميل. استخدام تشغيلي حقيقي: العميل يتصل بخدمة
@@ -1339,6 +1572,36 @@ export class OrdersService {
     actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
   ): Promise<Order> {
     const orderId = order.id;
+    this.assertReschedulable(order);
+
+    const moved = await this.dataSource.transaction(async (manager) => {
+      const fresh = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      return this.rescheduleLockedOrder(manager, fresh, newSlotId, actor);
+    });
+    order.scheduledAt = moved.newScheduledAt;
+
+    this.events.emit(
+      ORDER_RESCHEDULED_EVENT,
+      new OrderRescheduledEvent(
+        order.id,
+        order.orderNumber,
+        order.technicianId!,
+        order.customerId,
+        moved.previousScheduledAt,
+        moved.newScheduledAt,
+        actor.role === 'admin' ? 'admin' : 'customer',
+      ),
+    );
+
+    return order;
+  }
+
+  private assertReschedulable(order: Order): void {
     if (!RESCHEDULABLE_STATUSES.has(order.orderStatus)) {
       throw new ApiException(
         ErrorCode.ORDR_003,
@@ -1349,13 +1612,41 @@ export class OrdersService {
     if (!order.technicianId) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مفيهوش فني معيّن لسه', HttpStatus.CONFLICT);
     }
+  }
 
-    const currentSlot = await this.scheduleService.findSlotForOrder(orderId);
+  private slotStart(slot: TechnicianScheduleSlot): Date {
+    return new Date(`${slot.slotDate}T${slot.startTime}Z`);
+  }
+
+  private async rescheduleLockedOrder(
+    manager: EntityManager,
+    order: Order,
+    newSlotId: string,
+    actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
+    approvedRequestId?: string,
+  ): Promise<{ previousScheduledAt: Date | null; newScheduledAt: Date }> {
+    this.assertReschedulable(order);
+
+    const currentSlot = await manager.findOne(TechnicianScheduleSlot, {
+      where: { orderId: order.id, status: TechnicianScheduleSlotStatus.BOOKED },
+    });
     if (!currentSlot) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش مرتبط بموعد محدد أصلاً', HttpStatus.CONFLICT);
     }
+    if (currentSlot.id === newSlotId) {
+      throw new ApiException(ErrorCode.VAL_001, 'اختار موعدًا مختلفًا عن الموعد الحالي', HttpStatus.BAD_REQUEST);
+    }
 
-    const newSlot = await this.scheduleService.findAvailableSlotOrThrow(newSlotId);
+    const newSlot = await manager
+      .createQueryBuilder(TechnicianScheduleSlot, 'slot')
+      .setLock('pessimistic_write')
+      .where('slot.id = :newSlotId', { newSlotId })
+      .andWhere('slot.status = :available', { available: TechnicianScheduleSlotStatus.AVAILABLE })
+      .andWhere('slot.deleted_at IS NULL')
+      .getOne();
+    if (!newSlot) {
+      throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز أو لم يعد متاحًا، اختار سلوت تاني', HttpStatus.CONFLICT);
+    }
     if (newSlot.technicianId !== order.technicianId) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -1365,56 +1656,46 @@ export class OrdersService {
     }
 
     const previousScheduledAt = order.scheduledAt;
-    const newScheduledAt = new Date(`${newSlot.slotDate}T${newSlot.startTime}Z`);
+    const newScheduledAt = this.slotStart(newSlot);
+    const booked = await this.scheduleService.rescheduleSlot(order.id, newSlot.id, manager);
+    if (!booked) {
+      throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
+    }
 
-    await this.dataSource.transaction(async (manager) => {
-      const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
-      if (!booked) {
-        throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
-      }
-
-      // قفل تشاؤمي + إعادة تحقق تحت القفل قبل الكتابة (docs/08 §22 بند 31-32) — بَقّة حقيقية
-      // اتلقطت حية: لو الفني بدأ يتحرّك فعليًا (depart()) في نفس اللحظة، save(order) هنا كان
-      // هيكتب كل أعمدة الـobject القديم اللي في الذاكرة (بما فيهم order_status='accepted' القديمة)
-      // فوق التغيير الحقيقي، يعني يرجّع الطلب "accepted" كذب رغم إن الفني فعليًا في الطريق.
-      // بنجيب نسخة طازة تحت قفل ونكتب scheduled_at عليها هي بس (مش order القديمة).
-      const fresh = await manager
-        .createQueryBuilder(Order, 'o')
-        .setLock('pessimistic_write')
-        .where('o.id = :orderId', { orderId })
-        .getOne();
-      if (!fresh || !RESCHEDULABLE_STATUSES.has(fresh.orderStatus)) {
-        throw new ApiException(
-          ErrorCode.ORDR_003,
-          'حالة الطلب اتغيّرت (الفني بدأ يتحرّك مثلاً) — مينفعش تعيد الجدولة دلوقتي',
-          HttpStatus.CONFLICT,
-        );
-      }
-      fresh.scheduledAt = newScheduledAt;
-      await manager.save(fresh);
-
-      // سجل تاريخ محفوظ (نفس orderStatus قبل وبعد — إعادة الجدولة ماتغيّرش حالة الطلب خالص، بس
-      // لازم يتسجّل كتغيير حقيقي مش يختفي بلا أثر).
-      await manager.save(
-        manager.create(OrderStatusHistory, {
-          orderId: order.id,
-          previousStatus: fresh.orderStatus,
-          newStatus: fresh.orderStatus,
-          changedByUserId: actor.userId,
-          changedByRole: actor.role,
-          changeSource: actor.changeSource,
-          reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}${actor.reasonSuffix ?? ''}`,
-        }),
-      );
-    });
     order.scheduledAt = newScheduledAt;
-
-    this.events.emit(
-      ORDER_RESCHEDULED_EVENT,
-      new OrderRescheduledEvent(order.id, order.orderNumber, order.technicianId, order.customerId, previousScheduledAt, newScheduledAt),
+    await manager.save(order);
+    await manager.save(
+      manager.create(OrderStatusHistory, {
+        orderId: order.id,
+        previousStatus: order.orderStatus,
+        newStatus: order.orderStatus,
+        changedByUserId: actor.userId,
+        changedByRole: actor.role,
+        changeSource: actor.changeSource,
+        reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}${actor.reasonSuffix ?? ''}`,
+      }),
     );
 
-    return order;
+    await manager.query(
+      `UPDATE order_reschedule_requests
+       SET status = 'cancelled', resolved_at = now(), updated_at = now()
+       WHERE order_id = $1 AND status = 'pending' AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+      [order.id, approvedRequestId ?? null],
+    );
+    return { previousScheduledAt, newScheduledAt };
+  }
+
+  private async insertDurableInAppNotification(
+    manager: EntityManager,
+    input: { userId: string; notificationType: string; titleAr: string; bodyAr: string; orderId: string; deepLink: string },
+  ): Promise<void> {
+    await manager.query(
+      `INSERT INTO notifications
+         (user_id, notification_type, channel, title_ar, body_ar, deep_link,
+          reference_type, reference_id, delivery_status, sent_at)
+       VALUES ($1, $2, 'in_app', $3, $4, $5, 'order', $6, 'sent', now())`,
+      [input.userId, input.notificationType, input.titleAr, input.bodyAr, input.deepLink, input.orderId],
+    );
   }
 
   // ── دورة عمل الفني: قبل → في الطريق → وصل → بدأ → خلص ───────────────────

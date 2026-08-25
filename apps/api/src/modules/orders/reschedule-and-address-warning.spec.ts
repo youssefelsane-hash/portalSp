@@ -224,6 +224,14 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     // case while preserving each assertion's state for the duration of that case.
     auditLogRecord.mockClear();
     if (dataSource?.isInitialized) {
+      await dataSource.query(
+        `DELETE FROM order_reschedule_requests WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`,
+        [`TESTRSC-%`],
+      );
+      await dataSource.query(
+        `DELETE FROM notifications WHERE reference_type = 'order' AND reference_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`,
+        [`TESTRSC-%`],
+      );
       await dataSource.query(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
       await dataSource.query(`UPDATE orders SET technician_id = NULL WHERE order_number LIKE $1`, [`TESTRSC-%`]);
     }
@@ -232,6 +240,11 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
   afterAll(async () => {
     try {
       const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+      await q(`DELETE FROM order_reschedule_requests WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRSC-%`]);
+      await q(
+        `DELETE FROM notifications WHERE reference_type = 'order' AND reference_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`,
+        [`TESTRSC-%`],
+      );
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE $1)`, [`TESTRSC-%`]);
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
       await q(`DELETE FROM orders WHERE order_number LIKE $1`, [`TESTRSC-%`]);
@@ -325,6 +338,119 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
     await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [otherTechProfile.id]);
     await q(`DELETE FROM technician_profiles WHERE id = $1`, [otherTechProfile.id]);
     await q(`DELETE FROM users WHERE id = $1`, [otherTechUser.id]);
+  });
+
+  it('الفني يقترح موعدًا ويصل للعميل كإشعار داخلي دائم من نفس المعاملة', async () => {
+    const orderId = await insertOrder(`request-${runId}`, OrderStatus.ACCEPTED);
+    await insertSlot('request-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
+    const proposedSlotId = await insertSlot('request-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '14:00');
+
+    const request = await ordersService.requestRescheduleByTechnician(ids.techUser, orderId, {
+      new_slot_id: proposedSlotId,
+      reason: 'عندي تعارض طارئ في الموعد الحالي',
+    });
+
+    expect(request.status).toBe('pending');
+    expect(request.proposed_slot_id).toBe(proposedSlotId);
+    const listed = await ordersService.listRescheduleRequestsForCustomer(ids.customerUser, orderId);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ id: request.id, status: 'pending' });
+
+    const notifications = await dataSource.query(
+      `SELECT user_id, notification_type, channel, delivery_status
+       FROM notifications WHERE reference_id = $1 AND notification_type = 'order_reschedule_requested'`,
+      [orderId],
+    );
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        user_id: ids.customerUser,
+        notification_type: 'order_reschedule_requested',
+        channel: 'in_app',
+        delivery_status: 'sent',
+      }),
+    ]);
+  });
+
+  it('رفض العميل يحفظ القرار ولا يغيّر الحجز أو الموعد', async () => {
+    const orderId = await insertOrder(`reject-${runId}`, OrderStatus.ACCEPTED);
+    const oldSlotId = await insertSlot('reject-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
+    const proposedSlotId = await insertSlot('reject-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '14:00');
+    const before = await dataSource.getRepository(Order).findOneOrFail({ where: { id: orderId } });
+    const request = await ordersService.requestRescheduleByTechnician(ids.techUser, orderId, {
+      new_slot_id: proposedSlotId,
+      reason: 'أفضل تأجيل الزيارة بسبب ازدحام الجدول',
+    });
+
+    const result = await ordersService.resolveTechnicianRescheduleRequest(
+      ids.customerUser,
+      orderId,
+      request.id,
+      'rejected',
+    );
+
+    expect(result.request.status).toBe('rejected');
+    expect(result.order.scheduledAt?.getTime() ?? null).toBe(before.scheduledAt?.getTime() ?? null);
+    expect((await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: oldSlotId } })).status).toBe(
+      TechnicianScheduleSlotStatus.BOOKED,
+    );
+    expect((await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: proposedSlotId } })).status).toBe(
+      TechnicianScheduleSlotStatus.AVAILABLE,
+    );
+  });
+
+  it('موافقتان متزامنتان على نفس الطلب تغيّران الموعد مرة واحدة فقط', async () => {
+    const orderId = await insertOrder(`approve-race-${runId}`, OrderStatus.ACCEPTED);
+    const oldSlotId = await insertSlot('approve-race-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
+    const proposedSlotId = await insertSlot('approve-race-new', TechnicianScheduleSlotStatus.AVAILABLE, null, '15:00');
+    const request = await ordersService.requestRescheduleByTechnician(ids.techUser, orderId, {
+      new_slot_id: proposedSlotId,
+      reason: 'أحتاج نقل الزيارة للموعد المقترح',
+    });
+
+    const attempts = await Promise.allSettled([
+      ordersService.resolveTechnicianRescheduleRequest(ids.customerUser, orderId, request.id, 'approved'),
+      ordersService.resolveTechnicianRescheduleRequest(ids.customerUser, orderId, request.id, 'approved'),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === 'rejected')).toHaveLength(1);
+    expect((await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: oldSlotId } })).status).toBe(
+      TechnicianScheduleSlotStatus.AVAILABLE,
+    );
+    const booked = await dataSource.getRepository(TechnicianScheduleSlot).findOneOrFail({ where: { id: proposedSlotId } });
+    expect(booked).toMatchObject({ status: TechnicianScheduleSlotStatus.BOOKED, orderId });
+    const [{ count }] = await dataSource.query(
+      `SELECT COUNT(*)::int AS count FROM order_status_history
+       WHERE order_id = $1 AND reason LIKE '%موافقة على طلب تأجيل الفني%'`,
+      [orderId],
+    );
+    expect(count).toBe(1);
+  });
+
+  it('الحد الإداري يحسب الطلبات المحسومة ويمنع تكرار التأجيل بلا نهاية', async () => {
+    const orderId = await insertOrder(`max-${runId}`, OrderStatus.ACCEPTED);
+    await insertSlot('max-old', TechnicianScheduleSlotStatus.BOOKED, orderId, '09:00');
+    const firstSlotId = await insertSlot('max-first', TechnicianScheduleSlotStatus.AVAILABLE, null, '13:00');
+    const secondSlotId = await insertSlot('max-second', TechnicianScheduleSlotStatus.AVAILABLE, null, '14:00');
+    const thirdSlotId = await insertSlot('max-third', TechnicianScheduleSlotStatus.AVAILABLE, null, '15:00');
+
+    const first = await ordersService.requestRescheduleByTechnician(ids.techUser, orderId, {
+      new_slot_id: firstSlotId,
+      reason: 'طلب التأجيل الأول للعميل',
+    });
+    await ordersService.resolveTechnicianRescheduleRequest(ids.customerUser, orderId, first.id, 'rejected');
+    const second = await ordersService.requestRescheduleByTechnician(ids.techUser, orderId, {
+      new_slot_id: secondSlotId,
+      reason: 'طلب التأجيل الثاني والأخير',
+    });
+    await ordersService.resolveTechnicianRescheduleRequest(ids.customerUser, orderId, second.id, 'rejected');
+
+    await expect(
+      ordersService.requestRescheduleByTechnician(ids.techUser, orderId, {
+        new_slot_id: thirdSlotId,
+        reason: 'طلب تأجيل ثالث يجب رفضه',
+      }),
+    ).rejects.toThrow('وصلت للحد الأقصى');
   });
 
   it('AddressesService.hasActiveOrder() — true وقت طلب نشط، false بعد ما يتقفل', async () => {

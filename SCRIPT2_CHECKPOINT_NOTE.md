@@ -16,8 +16,13 @@
 - Completed after the pricing checkpoint: precise-time assignment now rejects overlapping ranges
   under the technician lock while allowing adjacent ranges. Real PostgreSQL concurrency and guard
   tests passed (16 scenarios, open-handle detection enabled).
-- Next task: bounded technician reschedule requests, then confirmed-order contact visibility and
-  global realtime message alerts.
+- Completed: bounded technician reschedule requests are durable and customer-controlled. The
+  current slot remains booked until approval; approval moves the booking atomically, duplicate
+  concurrent approvals execute once, and the admin setting defaults to two requests per order.
+  Request/decision in-app notifications commit with the state. Migration `0185` and every previous
+  checksum passed; the focused real PostgreSQL suite passed 12/12 with open-handle detection.
+- Next task: wire the reschedule request controls into both Flutter apps, then confirmed-order
+  contact visibility and global realtime message alerts.
 
 ---
 

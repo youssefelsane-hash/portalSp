@@ -110,6 +110,31 @@ export class OrdersController {
     return this.enrichedResponse(user.sub, await this.ordersService.reschedule(user.sub, id, dto));
   }
 
+  @Get(':id/reschedule-requests')
+  async listRescheduleRequests(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.listRescheduleRequestsForCustomer(user.sub, id);
+  }
+
+  @Post(':id/reschedule-requests/:requestId/approve')
+  async approveRescheduleRequest(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+  ) {
+    const result = await this.ordersService.resolveTechnicianRescheduleRequest(user.sub, id, requestId, 'approved');
+    return { request: result.request, order: await this.enrichedResponse(user.sub, result.order) };
+  }
+
+  @Post(':id/reschedule-requests/:requestId/reject')
+  async rejectRescheduleRequest(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+  ) {
+    const result = await this.ordersService.resolveTechnicianRescheduleRequest(user.sub, id, requestId, 'rejected');
+    return { request: result.request, order: await this.enrichedResponse(user.sub, result.order) };
+  }
+
   // سياسة إلغاء الفني (docs/10) — العميل بيستخدمها لما طلبه يبقى awaiting_technician_reselection
   // (فني لغى طلب كان العميل مختاره بنفسه) عشان يختار فني بديل بعينه أو يسيب المطابقة التلقائية.
   @Post(':id/request-rematch')

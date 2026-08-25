@@ -13,6 +13,7 @@ import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
+import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
@@ -182,6 +183,20 @@ export class TechnicianOrderExecutionController {
   @Get(':id/cancellation-policy')
   async getCancellationPolicy(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.getTechnicianCancellationPolicy(user.sub, id);
+  }
+
+  @Get(':id/reschedule-requests')
+  async listRescheduleRequests(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.listRescheduleRequestsForTechnician(user.sub, id);
+  }
+
+  @Post(':id/reschedule-requests')
+  async requestReschedule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTechnicianRescheduleRequestDto,
+  ) {
+    return this.ordersService.requestRescheduleByTechnician(user.sub, id, dto);
   }
 
   // كانت فجوة موثّقة صراحة: الفني معندوش أي طريقة يلغي طلب اتقبله بنفسه لو حصل ظرف طارئ —
