@@ -48,6 +48,7 @@ export interface HomepageTipDto {
 
 export interface HomepageContentDto {
   trust_message: string;
+  hero_images: string[];
   tips: HomepageTipDto[];
 }
 

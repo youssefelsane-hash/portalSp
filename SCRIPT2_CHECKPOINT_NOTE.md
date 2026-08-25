@@ -44,7 +44,12 @@
   fallback. Notification taps now open customer order/support chat, technician order chat, or the
   exact technician/admin internal thread. Customer Flutter tests passed 13/13, technician tests
   passed 10/10, and focused Dart analysis reported no issues in either app.
-- Next task: continue the premium customer-home and remaining cross-engine integration review.
+- Completed: admin-managed rotating homepage hero images (`homepage.hero_images`, migration
+  `0186`) now drive customer mobile and web from one public source, with safe URL filtering, a
+  four-image cap, animated indicators, and backward-compatible branding/gradient fallbacks. All
+  migration checksums matched; API test/build, admin and web typechecks, Dart analysis, and customer
+  Flutter tests (13/13) passed.
+- Next task: continue the remaining cross-engine integration review.
 
 ---
 

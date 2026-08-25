@@ -31,17 +31,21 @@ const EMPTY_TIP: HomepageTip = { title: '', body: '', image_url: null };
 export default function HomepageContentPage() {
   const { isLoading, authedFetch, hasPermission } = useAuth();
   const [trustMessage, setTrustMessage] = useState('');
+  const [heroImages, setHeroImages] = useState<string[]>([]);
   const [tips, setTips] = useState<HomepageTip[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSavingMessage, setIsSavingMessage] = useState(false);
+  const [isSavingHeroImages, setIsSavingHeroImages] = useState(false);
   const [isSavingTips, setIsSavingTips] = useState(false);
 
   function load() {
     authedFetch<SettingResponseDto[]>('/admin/settings?group=homepage')
       .then((settings) => {
         const messageSetting = settings.find((s) => s.key === 'homepage.trust_message');
+        const heroImagesSetting = settings.find((s) => s.key === 'homepage.hero_images');
         const tipsSetting = settings.find((s) => s.key === 'homepage.tips');
         if (messageSetting) setTrustMessage(String(messageSetting.value ?? ''));
+        if (heroImagesSetting) setHeroImages((heroImagesSetting.value as string[] | null) ?? []);
         if (tipsSetting) setTips((tipsSetting.value as HomepageTip[] | null) ?? []);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل محتوى الصفحة الرئيسية'));
@@ -83,6 +87,27 @@ export default function HomepageContentPage() {
     }
   }
 
+  async function saveHeroImages() {
+    const normalized = heroImages.map((url) => url.trim()).filter(Boolean);
+    if (normalized.some((url) => !url.startsWith('https://') && !url.startsWith('/uploads/'))) {
+      toast.error('كل صورة لازم تكون رابط HTTPS أو مسار /uploads/');
+      return;
+    }
+    setIsSavingHeroImages(true);
+    try {
+      await authedFetch('/admin/settings/homepage.hero_images', {
+        method: 'PATCH',
+        body: JSON.stringify({ value: normalized.slice(0, 4) }),
+      });
+      setHeroImages(normalized.slice(0, 4));
+      toast.success('اتحفظت صور الواجهة الرئيسية');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'فشل حفظ صور الواجهة');
+    } finally {
+      setIsSavingHeroImages(false);
+    }
+  }
+
   function updateTip(index: number, patch: Partial<HomepageTip>) {
     setTips((current) => current.map((tip, i) => (i === index ? { ...tip, ...patch } : tip)));
   }
@@ -104,7 +129,7 @@ export default function HomepageContentPage() {
     <AppShell>
       <PageHeader
         title="محتوى الصفحة الرئيسية"
-        description="رسالة الثقة/الضمان و«نصايح مفيدة» المعروضين في الصفحة الرئيسية لـcustomer-web وcustomer-app — بيتحدّثوا فورًا من غير أي deployment."
+        description="صور الواجهة المتحركة ورسالة الثقة و«نصايح مفيدة» للويب والموبايل — بيتحدّثوا من مكان واحد من غير deployment."
       />
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
@@ -119,6 +144,43 @@ export default function HomepageContentPage() {
         <CardFooter>
           <Button size="sm" disabled={isSavingMessage} onClick={() => void saveTrustMessage()}>
             {isSavingMessage ? 'جاري الحفظ…' : 'حفظ'}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">صور الواجهة المتحركة</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
+            أضف من صورة إلى 4 صور. هتتبدل تلقائيًا بالترتيب، ولو القائمة فاضية هنستخدم صورة Splash القديمة.
+          </p>
+          {heroImages.map((url, index) => (
+            <div key={index} className="flex items-end gap-2">
+              <div className="flex-1">
+                <Label htmlFor={`hero-image-${index}`}>صورة {index + 1}</Label>
+                <Input
+                  id={`hero-image-${index}`}
+                  dir="ltr"
+                  placeholder="https://..."
+                  value={url}
+                  onChange={(event) => setHeroImages((current) => current.map((item, i) => (i === index ? event.target.value : item)))}
+                  className="mt-1"
+                />
+              </div>
+              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setHeroImages((current) => current.filter((_, i) => i !== index))}>
+                حذف
+              </Button>
+            </div>
+          ))}
+        </CardContent>
+        <CardFooter className="flex gap-2">
+          <Button size="sm" variant="outline" disabled={heroImages.length >= 4} onClick={() => setHeroImages((current) => [...current, ''])}>
+            ضيف صورة
+          </Button>
+          <Button size="sm" disabled={isSavingHeroImages} onClick={() => void saveHeroImages()}>
+            {isSavingHeroImages ? 'جاري الحفظ…' : 'حفظ الصور'}
           </Button>
         </CardFooter>
       </Card>
