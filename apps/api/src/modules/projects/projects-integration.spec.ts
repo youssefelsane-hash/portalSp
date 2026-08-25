@@ -241,4 +241,181 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     const again = await projectsService.releaseMilestonePayout(ms.id);
     expect(again).toBe(false);
   });
+
+  // ── ADR-0036 / docs/08 §57 بند 3 — تسليم مرحلة-مرحلة + كومنتات ──────────────
+  // ملحوظة: الاختبار اللي فوق ده كان مضطر يزوّر `execution_status='completed'` بـSQL خام
+  // **لأن مفيش دالة كانت بتعمل كده أصلاً** — دي بالظبط الفجوة اللي المالك بلّغ عنها.
+
+  it('كل مرحلة بتتسلّم لوحدها: بدء+تسليم المرحلة الأولى مايلمسش الباقي', async () => {
+    const [first, , third] = await projectsService.listProjectMilestones(ids.project);
+
+    await projectsService.startMilestone(ids.adminUser, ids.project, first.id);
+    await projectsService.completeMilestone(ids.adminUser, ids.project, first.id, ['projects/proof-1.jpg']);
+
+    const after = await projectsService.listProjectMilestones(ids.project);
+    const firstAfter = after.find((m) => m.id === first.id)!;
+    expect(firstAfter.executionStatus).toBe('completed');
+    expect(firstAfter.proofAttachments).toHaveLength(1);
+    // المرحلة التالتة لسه ماتلمستش — ده جوهر "كل فيز تتسلّم على حدة".
+    expect(after.find((m) => m.id === third.id)!.executionStatus).toBe('pending');
+  });
+
+  it('الترتيب مش مفروض: مرحلة متأخرة تقدر تبدأ من غير ما اللي قبلها تخلص', async () => {
+    const [, , third] = await projectsService.listProjectMilestones(ids.project);
+    await projectsService.startMilestone(ids.adminUser, ids.project, third.id);
+    const after = await projectsService.listProjectMilestones(ids.project);
+    expect(after.find((m) => m.id === third.id)!.executionStatus).toBe('in_progress');
+  });
+
+  it('الانتقالات الغلط بترفض بوضوح: تسليم قبل البدء، وبدء مرحلة شغّالة', async () => {
+    const [, , third] = await projectsService.listProjectMilestones(ids.project);
+    await expect(projectsService.startMilestone(ids.adminUser, ids.project, third.id)).rejects.toThrow(/مينفعش تبدأ/);
+
+    const fresh = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.executionStatus === 'pending');
+    if (fresh) {
+      await expect(
+        projectsService.completeMilestone(ids.adminUser, ids.project, fresh.id),
+      ).rejects.toThrow(/لازم تبدأها الأول/);
+    }
+  });
+
+  it('رفض العميل بيرجّع المرحلة in_progress بسبب مكتوب، وإعادة التسليم بترجّع الموافقة pending', async () => {
+    const [first] = await projectsService.listProjectMilestones(ids.project);
+
+    await projectsService.rejectMilestone(ids.customerUser, ids.project, first.id, 'الدهان مش متساوي');
+    let current = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.id === first.id)!;
+    expect(current.approvalStatus).toBe('rejected');
+    expect(current.rejectionReason).toBe('الدهان مش متساوي');
+    // رجعت in_progress عشان الأدمن يصلّح — الرفض مش نهاية المرحلة.
+    expect(current.executionStatus).toBe('in_progress');
+
+    await projectsService.completeMilestone(ids.adminUser, ids.project, first.id);
+    current = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.id === first.id)!;
+    expect(current.approvalStatus).toBe('pending');
+    expect(current.rejectionReason).toBeNull();
+
+    await projectsService.approveMilestone(ids.customerUser, ids.project, first.id);
+    current = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.id === first.id)!;
+    expect(current.approvalStatus).toBe('approved');
+    expect(current.approvedByCustomer).toBe(true);
+  });
+
+  it('الرفض من غير سبب بيترفض، وعميل تاني مايقدرش يوافق على مرحلة مش بتاعته', async () => {
+    const [first] = await projectsService.listProjectMilestones(ids.project);
+    await expect(projectsService.rejectMilestone(ids.customerUser, ids.project, first.id, '   ')).rejects.toThrow(/سبب الرفض/);
+    await expect(projectsService.approveMilestone(ids.otherUser, ids.project, first.id)).rejects.toThrow();
+  });
+
+  it('كومنتات: كومنت الأدمن المرئي بيوصل للعميل، والداخلي بيتفلتر في SQL', async () => {
+    const [first] = await projectsService.listProjectMilestones(ids.project);
+
+    await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
+      body: 'خلصنا تأسيس السباكة، بننتقل للكهربا بكرة',
+      milestone_id: first.id,
+    });
+    await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
+      body: 'ملاحظة داخلية: نراجع تكلفة الخامات مع المورّد',
+      milestone_id: first.id,
+      is_visible_to_customer: false,
+    });
+    await projectsService.addComment({ userId: ids.customerUser, role: 'customer' }, ids.project, {
+      body: 'تمام، متابع معاكم',
+    });
+
+    const adminRoom = await projectsService.getProjectRoom(ids.project, 'admin');
+    const customerRoom = await projectsService.getProjectRoom(ids.project, 'customer');
+
+    const adminMilestone = adminRoom.milestones.find((m: Record<string, unknown>) => m.id === first.id)!;
+    const customerMilestone = customerRoom.milestones.find((m: Record<string, unknown>) => m.id === first.id)!;
+
+    // الأدمن بيشوف الاتنين، العميل بيشوف المرئي بس — والفلترة في SQL مش في العرض.
+    expect((adminMilestone.comments as unknown[])).toHaveLength(2);
+    expect((customerMilestone.comments as Record<string, unknown>[])).toHaveLength(1);
+    expect((customerMilestone.comments as Record<string, unknown>[])[0].body).toContain('تأسيس السباكة');
+    expect(JSON.stringify(customerRoom)).not.toContain('ملاحظة داخلية');
+
+    // كومنت العميل العام (بلا مرحلة) بيظهر في قائمة كومنتات المشروع مش جوّه المراحل.
+    expect((customerRoom.comments as Record<string, unknown>[]).some((c) => c.body === 'تمام، متابع معاكم')).toBe(true);
+  });
+
+  it('كومنت فاضي بيترفض، وكومنت على مرحلة مش بتاعة المشروع بيترفض', async () => {
+    await expect(
+      projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, { body: '  ' }),
+    ).rejects.toThrow(/فاضي/);
+    await expect(
+      projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
+        body: 'كومنت',
+        milestone_id: '00000000-0000-0000-0000-000000000000',
+      }),
+    ).rejects.toThrow(/المرحلة غير موجودة/);
+  });
+
+  // ── docs/08 §57 بنود 4-5 — الفجوتين اللي المالك قال "مش عارف بتتضاف إزاي" ──
+
+  it('ربط طلب بمشروع من الأدمن: بيظهر في تبويب الطلبات، وطلب عميل تاني بيترفض', async () => {
+    const [order] = await q<{ id: string }[]>(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+         order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES ($1,$2,$3,$4,$5,'completed','paid',50000,0) RETURNING id`,
+      [`PRJLINK-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+    );
+
+    const result = await projectsService.linkOrderToProject(ids.adminUser, ids.project, order.id);
+    expect(result).toEqual({ linked: true, already: false });
+
+    const room = await projectsService.getProjectRoom(ids.project, 'admin');
+    expect((room.orders as Record<string, unknown>[]).some((o) => o.id === order.id)).toBe(true);
+
+    // نداء تاني idempotent — مش بيرمي ولا بيكرر.
+    expect(await projectsService.linkOrderToProject(ids.adminUser, ids.project, order.id)).toEqual({
+      linked: true,
+      already: true,
+    });
+
+    // طلب عميل تاني: تسريب، لازم يترفض.
+    const [foreignOrder] = await q<{ id: string }[]>(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id,
+         order_status, payment_status, total_amount_cents, technician_earning_cents)
+       VALUES ($1,$2,$3,$4,$5,'completed','paid',50000,0) RETURNING id`,
+      [`PRJFRGN-${runId}`.slice(0, 24), ids.otherProfile, ids.service, ids.address, ids.zone],
+    );
+    await expect(
+      projectsService.linkOrderToProject(ids.adminUser, ids.project, foreignOrder.id),
+    ).rejects.toThrow(/مش لنفس عميل المشروع/);
+
+    await q(`UPDATE orders SET project_id = NULL WHERE id = $1`, [order.id]);
+    await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [[order.id, foreignOrder.id]]);
+  });
+
+  it('إصدار ضمان على المشروع كله: بيتخزّن بـproject_id وorder_id فاضي، وبيظهر في تبويب الضمانات', async () => {
+    const [plan] = await q<{ id: string }[]>(
+      `INSERT INTO warranty_plans (slug, name_ar, warranty_type, coverage_months, max_claims, pricing_model, price_value, is_active, version)
+       VALUES ($1,$2,'extended_workmanship',24,2,'fixed',0,true,1) RETURNING id`,
+      [`prj-warranty-${runId}`, `ضمان تشطيب ${runId}`],
+    );
+
+    const warranty = await projectsService.issueProjectWarranty(ids.adminUser, ids.project, plan.id);
+    expect(warranty.project_id).toBe(ids.project);
+    expect(Number(warranty.coverage_months)).toBe(24);
+
+    const [row] = await q<{ order_id: string | null; project_id: string }[]>(
+      `SELECT order_id, project_id FROM customer_warranties WHERE id = $1`,
+      [warranty.id],
+    );
+    // ضمان المشروع مش مربوط بزيارة واحدة — الجدول بيسمح بده من الأساس.
+    expect(row.order_id).toBeNull();
+    expect(row.project_id).toBe(ids.project);
+
+    const room = await projectsService.getProjectRoom(ids.project, 'customer');
+    expect((room.warranties as Record<string, unknown>[]).some((w) => w.id === warranty.id)).toBe(true);
+
+    await q(`DELETE FROM customer_warranties WHERE id = $1`, [warranty.id]);
+    await q(`DELETE FROM warranty_plans WHERE id = $1`, [plan.id]);
+  });
+
+  it('خطة ضمان موقوفة أو مش موجودة بترفض الإصدار', async () => {
+    await expect(
+      projectsService.issueProjectWarranty(ids.adminUser, ids.project, '00000000-0000-0000-0000-000000000000'),
+    ).rejects.toThrow(/غير موجودة أو موقوفة/);
+  });
 });

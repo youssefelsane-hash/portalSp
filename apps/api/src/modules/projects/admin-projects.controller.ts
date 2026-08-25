@@ -21,7 +21,7 @@ export class AdminProjectsController {
   @Get(':id/room')
   @RequirePermission('projects.view')
   async projectRoom(@Param('id', ParseUUIDPipe) id: string) {
-    return this.projectsService.getProjectRoom(id);
+    return this.projectsService.getProjectRoom(id, 'admin');
   }
 
   @Post(':id/transition')
@@ -66,5 +66,70 @@ export class AdminProjectsController {
     @AuditContext() meta: AuditMeta,
   ) {
     return this.projectsService.createMilestones(admin.sub, id, dto.milestones as never, meta);
+  }
+
+  // ── دورة حياة المرحلة الواحدة (ADR-0036، docs/08 §57 بند 3) ──────────────────
+  // بلاغ المالك: "الأدمن بيسلّم كله مع بعض". الأفعال دي بتشتغل على **مرحلة بعينها**، والترتيب
+  // بينهم مش مفروض (شغل التشطيب بيتوازى). الموافقة التلقائية الموجودة بالفعل بتبدأ بعد complete.
+
+  @Post(':id/milestones/:milestoneId/start')
+  @RequirePermission('projects.manage')
+  async startMilestone(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.startMilestone(admin.sub, id, milestoneId, meta);
+  }
+
+  @Post(':id/milestones/:milestoneId/complete')
+  @RequirePermission('projects.manage')
+  async completeMilestone(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
+    @Body() dto: { proof_storage_keys?: string[] },
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.completeMilestone(admin.sub, id, milestoneId, dto?.proof_storage_keys ?? [], meta);
+  }
+
+  /** كومنت على المشروع أو على مرحلة (milestone_id اختياري). مرئي للعميل افتراضيًا. */
+  @Post(':id/comments')
+  @RequirePermission('projects.manage')
+  async addComment(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { body: string; milestone_id?: string; is_visible_to_customer?: boolean },
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.addComment({ userId: admin.sub, role: 'admin' }, id, dto, meta);
+  }
+
+  // ── سد فجوتَي الطلبات والضمانات (docs/08 §57 بنود 4-5) ──────────────────────
+
+  /** ربط طلب قايم بالمشروع — الطلبات كانت بتتربط بس وقت إنشائها من العميل. */
+  @Post(':id/orders/:orderId/link')
+  @RequirePermission('projects.manage')
+  async linkOrder(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.linkOrderToProject(admin.sub, id, orderId, meta);
+  }
+
+  /** إصدار ضمان على المشروع كله — كان مفيش مسار إصدار غير عبر تسوية طلب. */
+  @Post(':id/warranties')
+  @RequirePermission('projects.manage')
+  async issueWarranty(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { plan_id: string },
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.issueProjectWarranty(admin.sub, id, dto.plan_id, meta);
   }
 }

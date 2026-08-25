@@ -61,7 +61,52 @@ class ProjectsRepository {
       '/me/projects/$projectId/quotes/$quoteId/approve',
     );
   }
+
+  // ADR-0036 / docs/08 §57 بند 3 — موافقة/رفض المرحلة الواحدة. الموافقة التلقائية شغّالة في
+  // الباك-إند بعد مهلة، ودي المسار اليدوي للعميل اللي مش عايز يستنى.
+  Future<void> approveMilestone(String projectId, String milestoneId) async {
+    await auth.authedRequest(
+      'POST',
+      '/me/projects/$projectId/milestones/$milestoneId/approve',
+    );
+  }
+
+  Future<void> rejectMilestone(
+    String projectId,
+    String milestoneId,
+    String reason,
+  ) async {
+    await auth.authedRequest(
+      'POST',
+      '/me/projects/$projectId/milestones/$milestoneId/reject',
+      body: {'reason': reason},
+    );
+  }
 }
+
+// ADR-0036 — حالة تنفيذ المرحلة بالعربي (كانت بتتعرض خام: pending/in_progress).
+const milestoneExecutionLabelsAr = {
+  'pending': 'لسه ما بدأتش',
+  'in_progress': 'شغّالة دلوقتي',
+  'completed': 'اتسلّمت — مستنية مراجعتك',
+  'rejected': 'مرفوضة',
+};
+
+const milestoneApprovalLabelsAr = {
+  'pending': 'مستنية موافقتك',
+  'approved': 'وافقت عليها',
+  'rejected': 'رفضتها',
+};
+
+/// شرح مختصر لكل تبويب (docs/08 §57 بند 2) — بلاغ المالك: "يلاقي في كل حاجة فيه شرح بسيط كده".
+const projectTabHints = {
+  'milestones':
+      'المشروع مقسّم مراحل، كل مرحلة بسعرها. أول ما الإدارة تسلّم مرحلة هتقدر تراجعها وتوافق عليها من هنا.',
+  'quotes': 'عروض الأسعار اللي الإدارة بتبعتهالك. راجع التفاصيل ووافق على العرض المناسب.',
+  'orders': 'زيارات الفنيين المرتبطة بالمشروع ده — بتظهر هنا أول ما الإدارة تجدولها.',
+  'warranties': 'الضمانات الصادرة على شغل المشروع، بمدتها وتاريخ انتهائها.',
+  'activity': 'كل حاجة حصلت في المشروع بالترتيب الزمني — سجل كامل تقدر ترجعله في أي وقت.',
+};
 
 const projectStatusLabelsAr = {
   'draft': 'مسودة',
@@ -95,8 +140,11 @@ class ProjectRoomScreen extends StatefulWidget {
 class _ProjectRoomScreenState extends State<ProjectRoomScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  late final ProjectsRepository _repository = ProjectsRepository(widget.auth);
   ProjectRoom? _room;
   bool _loading = true;
+  // قفل أثناء إرسال قرار المرحلة — يمنع دوسة مزدوجة على "وافق".
+  bool _busy = false;
   String? _error;
 
   @override
@@ -114,8 +162,7 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
 
   Future<void> _load() async {
     try {
-      final repo = ProjectsRepository(widget.auth);
-      final room = await repo.room(widget.projectId);
+      final room = await _repository.room(widget.projectId);
       if (mounted) {
         setState(() {
           _room = room;
@@ -232,30 +279,222 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
     );
   }
 
+  /// شريط شرح فوق كل تبويب (docs/08 §57 بند 2).
+  Widget _tabHint(String key) => Container(
+    width: double.infinity,
+    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.info_outline, size: 16),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            projectTabHints[key] ?? '',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  /// المراحل (docs/08 §57 بند 3) — كانت بتعرض `approval_status` خام جنب المبلغ. بقت كارت كامل
+  /// لكل مرحلة: حالة التنفيذ بالعربي، كومنتات الإدارة، وزراير الموافقة/الرفض لما تكون اتسلّمت.
   Widget _buildMilestones() {
     final ms = _room?.milestones ?? [];
-    if (ms.isEmpty) return const Center(child: Text('مفيش مراحل'));
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: ms.length,
-      itemBuilder: (context, i) {
-        final m = ms[i];
-        final status = m['approval_status']?.toString() ?? 'pending';
-        final amount = ((m['amount_cents'] as num?) ?? 0) / 100;
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: ListTile(
-            leading: CircleAvatar(child: Text('${m['sequence_number']}')),
-            title: Text(m['name_ar']?.toString() ?? ''),
-            subtitle: Text('$amount ج.م · $status'),
-            trailing: Icon(
-              status == 'approved' ? Icons.check_circle : Icons.schedule,
-              color: status == 'approved' ? Colors.green : Colors.grey,
+    if (ms.isEmpty) {
+      return Column(
+        children: [
+          _tabHint('milestones'),
+          const Expanded(
+            child: Center(child: Text('الإدارة لسه ما قسّمتش المشروع لمراحل')),
+          ),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        _tabHint('milestones'),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: ms.length,
+            itemBuilder: (context, i) => _milestoneCard(ms[i]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _milestoneCard(Map<String, dynamic> m) {
+    final execution = m['execution_status']?.toString() ?? 'pending';
+    final approval = m['approval_status']?.toString() ?? 'pending';
+    final amountCents = ((m['amount_cents'] as num?) ?? 0).toInt();
+    final rejection = m['rejection_reason']?.toString();
+    final comments = (m['comments'] as List?) ?? const [];
+    // زراير القرار بتبان بس لما الإدارة تسلّم المرحلة والعميل لسه ماردّش.
+    final awaitingDecision = execution == 'completed' && approval == 'pending';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  child: Text('${m['sequence_number']}'),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    m['name_ar']?.toString() ?? '',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                Text(
+                  _egp(amountCents),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text(
+                    milestoneExecutionLabelsAr[execution] ?? execution,
+                  ),
+                ),
+                if (execution == 'completed')
+                  Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text(
+                      milestoneApprovalLabelsAr[approval] ?? approval,
+                    ),
+                  ),
+              ],
+            ),
+            if (rejection != null && rejection.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'سبب رفضك: $rejection',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            // كومنتات الإدارة المرئية بس — الباك-إند بيفلتر الداخلي في SQL (ADR-0036).
+            if (comments.isNotEmpty) ...[
+              const Divider(height: 20),
+              Text('تحديثات الإدارة', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 4),
+              ...comments.map((raw) {
+                final c = Map<String, dynamic>.from(raw as Map);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Text(
+                    '${c['author_name'] ?? 'الإدارة'}: ${c['body'] ?? ''}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                );
+              }),
+            ],
+            if (awaitingDecision) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _decideMilestone(m['id'].toString(), true),
+                      child: const Text('وافق على المرحلة'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _decideMilestone(m['id'].toString(), false),
+                      child: const Text('في ملاحظات'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _decideMilestone(String milestoneId, bool approve) async {
+    String reason = '';
+    if (!approve) {
+      final controller = TextEditingController();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('إيه الملاحظات على المرحلة دي؟'),
+          content: TextField(
+            controller: controller,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'اكتب المشكلة عشان الإدارة تعالجها',
             ),
           ),
-        );
-      },
-    );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('رجوع'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('إرسال'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      reason = controller.text.trim();
+      if (reason.isEmpty) return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      if (approve) {
+        await _repository.approveMilestone(widget.projectId, milestoneId);
+      } else {
+        await _repository.rejectMilestone(widget.projectId, milestoneId, reason);
+      }
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            approve ? 'تمام، اتسجّلت موافقتك' : 'وصلت ملاحظاتك للإدارة',
+          ),
+        ),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Widget _buildQuotes() {
@@ -408,8 +647,21 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
 
   Widget _buildOrders() {
     final orders = _room?.orders ?? [];
-    if (orders.isEmpty) return const Center(child: Text('مفيش طلبات'));
-    return ListView.builder(
+    if (orders.isEmpty) {
+      return Column(
+        children: [
+          _tabHint('orders'),
+          const Expanded(
+            child: Center(child: Text('لسه مفيش زيارات فنيين مجدولة للمشروع')),
+          ),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        _tabHint('orders'),
+        Expanded(
+          child: ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: orders.length,
       itemBuilder: (context, i) {
@@ -429,16 +681,40 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
             ),
           ),
         );
-      },
+            },
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildWarranties() {
     final warranties = _room?.warranties ?? [];
     if (warranties.isEmpty) {
-      return const Center(child: Text('مفيش ضمانات مرتبطة بالمشروع'));
+      // الضمان بيتصدر بعد اكتمال الشغل — الرسالة القديمة ("مفيش ضمانات") كانت بتسيب العميل
+      // مش فاهم هل ده عطل ولا ترتيب طبيعي (docs/08 §57 بند 5).
+      return Column(
+        children: [
+          _tabHint('warranties'),
+          const Expanded(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'لسه مفيش ضمان صادر. الضمان بيتصدر بعد ما الشغل يكتمل ويتسلّم.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
     }
-    return ListView.builder(
+    return Column(
+      children: [
+        _tabHint('warranties'),
+        Expanded(
+          child: ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: warranties.length,
       itemBuilder: (context, index) {
@@ -452,7 +728,10 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
             ),
           ),
         );
-      },
+            },
+          ),
+        ),
+      ],
     );
   }
 

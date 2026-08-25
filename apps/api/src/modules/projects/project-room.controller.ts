@@ -14,6 +14,7 @@ export class ProjectRoomController {
   @Get(':id/room')
   async projectRoom(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     await this.projectsService.findOneOwned(user.sub, id);
-    return this.projectsService.getProjectRoom(id);
+    // 'customer' بيفلتر الكومنتات الداخلية في SQL نفسه (ADR-0036).
+    return this.projectsService.getProjectRoom(id, 'customer');
   }
 }
