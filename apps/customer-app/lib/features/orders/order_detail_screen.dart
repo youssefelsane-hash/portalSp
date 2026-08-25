@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/media_url.dart';
 import '../catalog/catalog_repository.dart';
 import '../catalog/models.dart' show BookingModeJson;
 import '../chat/chat_screen.dart';
@@ -64,6 +65,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   List<OrderItem> _quoteItems = [];
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
+  List<OrderMedia> _media = [];
   // مفتاح مستقر لكل طريقة دفع (يتولّد مرة واحدة بس، يفضل زي ما هو خلال أي retry لنفس المحاولة) —
   // راجع التعليق الكامل في payments_repository.dart's generateIdempotencyKey().
   String? _walletIdempotencyKey;
@@ -114,8 +116,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         final members = await _repository.fetchTeamMembers(widget.orderId);
         if (mounted) setState(() => _teamMembers = members);
       }
+      await _loadMedia();
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
+    }
+  }
+
+  Future<void> _loadMedia() async {
+    try {
+      final media = await _repository.fetchMedia(widget.orderId);
+      if (mounted) {
+        setState(() => _media = media.where((item) => item.mediaType != 'video').toList());
+      }
+    } on ApiException {
+      // الصور مصدر ثانوي؛ فشلها لا يمنع عرض الطلب أو تنفيذ أفعاله.
     }
   }
 
@@ -804,6 +818,63 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                       ],
                                     ),
                                   ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (_media.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('صور الطلب', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 10),
+                                SizedBox(
+                                  height: 104,
+                                  child: ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: _media.length,
+                                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                                    itemBuilder: (context, index) {
+                                      final item = _media[index];
+                                      return SizedBox(
+                                        width: 104,
+                                        child: Column(
+                                          children: [
+                                            ClipRRect(
+                                              borderRadius: BorderRadius.circular(8),
+                                              child: Image.network(
+                                                resolveMediaUrl(item.fileUrl),
+                                                width: 104,
+                                                height: 76,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, _, _) => Container(
+                                                  width: 104,
+                                                  height: 76,
+                                                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                                  child: const Icon(Icons.broken_image_outlined),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              item.mediaType == 'before_photo'
+                                                  ? 'قبل الشغل'
+                                                  : item.mediaType == 'after_photo'
+                                                      ? 'بعد الشغل'
+                                                      : 'صورة الطلب',
+                                              style: Theme.of(context).textTheme.labelSmall,
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
                               ],
                             ),
                           ),

@@ -239,6 +239,15 @@ recurring/support/complaints/ratings/settings/security) → بث إلى غرف `
 في admin-topics.ts — installments.view / recurring_orders.view / payouts.view / settings.manage /
 security.alerts.view)؛ الإبطال اللحظي عبر pg_notify مفعل تلقائياً من السجل المشترك.
 
-**العميل** (apps/admin): `lib/admin-live.ts` (socket singleton + connection state)، 
-`components/live-indicator.tsx` (مؤشر أخضر/أصفر/أحمر في الشيل)، صفحة الطلبات + التفاصيل +
-recurring + installments + payouts بتستخدم `useAdminLive` لإعادة الجلب الصامت عند الأحداث.
+**العميل الفعلي** (apps/admin): `lib/admin-realtime-context.tsx` يفتح Socket.IO واحدًا بعد تسجيل
+الدخول، يرسل `admin:subscribe`، ويوزع `admin:live` على المشتركين عبر `useAdminLiveRefresh`.
+صفحتا الطلبات وتفاصيل الطلب تعيدان الجلب الصامت عند أحداث الطلب/الدفع، وصفحتا الفنيين والتفاصيل
+تعيدان الجلب عند الاعتماد أو تغيّر الحضور. الاتصال يسمح بـSocket.IO polling fallback لو الـproxy
+لا يمرر WebSocket بدل ما تتوقف الميزة بالكامل. قبل إصلاح 2026-08-25 كان هذا القسم يصف ملفات
+`admin-live.ts`/`live-indicator.tsx` غير موجودة فعليًا؛ البوابة كانت تبث لكن صفر عميل في اللوحة
+كان يتصل بها، لذلك كان الأدمن محتاج Refresh يدويًا رغم وجود كود السيرفر.
+
+حضور الفني: اتصال `/tracking` المستقل في تطبيق الفني يصدّر `technician.presence_changed` فقط عند
+الانتقال الحقيقي صفر→اتصال أو آخر اتصال→صفر؛ اتصالان لنفس الفني لا ينتجان Offline كاذبًا. قائمة
+الفنيين تعرض الحالة وتُحدّث نفسها فورًا. مثبت باختبار PostgreSQL + Socket.IO حقيقي مع اتصالين،
+واختبار مستقل لبوابة الأدمن والاشتراك والبث.

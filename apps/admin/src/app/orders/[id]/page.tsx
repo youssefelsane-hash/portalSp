@@ -17,10 +17,8 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-
-// /uploads/... راجعة من LocalDiskStorageService بره الـ globalPrefix (/api/v1) عمداً — لازم
-// أصل السيرفر بس من غير الـ prefix، مش نفس NEXT_PUBLIC_API_URL المستخدم في apiFetch.
-const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/api\/v1\/?$/, '');
+import { resolveMediaUrl } from '@/lib/media-url';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
 const MEDIA_TYPE_LABELS: Record<string, string> = {
   before_photo: 'قبل الشغل',
@@ -190,6 +188,10 @@ export default function OrderDetailPage() {
       });
   }
 
+  useAdminLiveRefresh(['orders', 'payments'], (event) => {
+    if (event.entity_id === null || event.entity_id === id || event.data?.orderId === id) load();
+  });
+
   async function handleExplainTechnician(e: FormEvent) {
     e.preventDefault();
     if (!explainTechnicianId) return;
@@ -210,7 +212,8 @@ export default function OrderDetailPage() {
 
   useEffect(() => {
     if (isLoading) return;
-    load();
+    const timer = window.setTimeout(load, 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 
@@ -1884,14 +1887,14 @@ export default function OrderDetailPage() {
                 {media.map((item) => (
                   <a
                     key={item.id}
-                    href={`${API_ORIGIN}${item.file_url}`}
+                    href={resolveMediaUrl(item.file_url)}
                     target="_blank"
                     rel="noreferrer"
                     className="flex flex-col gap-1"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element -- ملف من سيرفر الباك-إند نفسه، مش next/image محتاجة config لأصل خارجي */}
                     <img
-                      src={`${API_ORIGIN}${item.file_url}`}
+                      src={resolveMediaUrl(item.file_url)}
                       alt={MEDIA_TYPE_LABELS[item.media_type] ?? item.media_type}
                       className="aspect-square w-full rounded-md border object-cover"
                     />

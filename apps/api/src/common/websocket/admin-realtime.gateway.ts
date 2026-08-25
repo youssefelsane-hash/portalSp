@@ -129,6 +129,10 @@ import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../
 import { TECHNICIAN_VERIFICATION_CHANGED_EVENT, TechnicianVerificationChangedEvent } from '../../common/events/technician-verification-changed.event';
 import { TECHNICIAN_SERVICE_VERIFICATION_CHANGED_EVENT, TechnicianServiceVerificationChangedEvent } from '../../common/events/technician-service-verification-changed.event';
 import { TECHNICIAN_CATEGORY_VERIFICATION_CHANGED_EVENT, TechnicianCategoryVerificationChangedEvent } from '../../common/events/technician-category-verification-changed.event';
+import {
+  TECHNICIAN_PRESENCE_CHANGED_EVENT,
+  TechnicianPresenceChangedEvent,
+} from '../events/technician-presence-changed.event';
 
 interface AuthenticatedSocket extends Socket {
   data: { user?: JwtPayload; authentication?: Promise<JwtPayload>; topics?: Set<AdminTopic> };
@@ -170,6 +174,7 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
         throw new Error('non-admin');
       }
       client.data.user = payload;
+      this.sessions.register(payload.sub, client);
       return payload;
     });
     try {
@@ -326,6 +331,16 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
   @OnEvent(TECHNICIAN_CATEGORY_VERIFICATION_CHANGED_EVENT)
   onCategoryVerificationChanged(): void {
     this.emitTopic('technicians', { entity: 'technician', action: 'category_verification_changed', entity_id: null });
+  }
+
+  @OnEvent(TECHNICIAN_PRESENCE_CHANGED_EVENT)
+  onTechnicianPresenceChanged(event: TechnicianPresenceChangedEvent): void {
+    this.emitTopic('technicians', {
+      entity: 'technician',
+      action: 'presence_changed',
+      entity_id: event.userId,
+      data: { online: event.online },
+    });
   }
 
   @OnEvent(WORK_OPPORTUNITY_OFFERED_EVENT)

@@ -37,6 +37,8 @@ export interface AdminTechnicianResponseDto {
   created_at: string;
   assistant_link_status: 'none' | 'pending_approval' | 'approved';
   assistant_technician_id: string | null;
+  online?: boolean;
+  last_active_at?: string | null;
 }
 
 export interface TechnicianDocumentResponseDto {

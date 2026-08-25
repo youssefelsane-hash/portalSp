@@ -1,5 +1,5 @@
 import { Logger, UsePipes } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   ConnectedSocket,
@@ -13,6 +13,10 @@ import {
 import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { Server, Socket } from 'socket.io';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
+import {
+  TECHNICIAN_PRESENCE_CHANGED_EVENT,
+  TechnicianPresenceChangedEvent,
+} from '../../common/events/technician-presence-changed.event';
 import { websocketCorsOriginHandler } from '../../common/websocket/websocket-cors.util';
 import { RealtimeAccessService } from '../../common/websocket/realtime-access.service';
 import { RealtimeSessionRegistry } from '../../common/websocket/realtime-session-registry.service';
@@ -46,12 +50,20 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
     private readonly techniciansService: TechniciansService,
     private readonly realtimeAccess: RealtimeAccessService,
     private readonly sessions: RealtimeSessionRegistry,
+    private readonly events: EventEmitter2,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket): Promise<void> {
     client.data.authentication = this.realtimeAccess.authenticate(client.handshake.auth?.token).then((payload) => {
       client.data.user = payload;
+      const wasOnline = this.sessions.isUserOnline(payload.sub);
       this.sessions.register(payload.sub, client);
+      if (payload.userType === UserType.TECHNICIAN && !wasOnline) {
+        this.events.emit(
+          TECHNICIAN_PRESENCE_CHANGED_EVENT,
+          new TechnicianPresenceChangedEvent(payload.sub, true),
+        );
+      }
       return payload;
     });
     try {
@@ -66,7 +78,17 @@ export class OrderTrackingGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   handleDisconnect(client: AuthenticatedSocket): void {
-    this.sessions.unregister(client.data.user?.sub, client);
+    const payload = client.data.user;
+    this.sessions.unregister(payload?.sub, client);
+    if (
+      payload?.userType === UserType.TECHNICIAN &&
+      !this.sessions.isUserOnline(payload.sub)
+    ) {
+      this.events.emit(
+        TECHNICIAN_PRESENCE_CHANGED_EVENT,
+        new TechnicianPresenceChangedEvent(payload.sub, false),
+      );
+    }
     this.logger.debug(`disconnected: ${client.id}`);
   }
 

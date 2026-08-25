@@ -22,6 +22,7 @@ import {
   paymentStatusTone,
 } from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
 const PER_PAGE = 20;
 
@@ -50,7 +51,7 @@ export default function OrdersPage() {
   const [originFilter, setOriginFilter] = useState<'all' | 'false' | 'true'>('all');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  function loadOrders() {
     if (isLoading) return;
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (statusFilter !== 'all') params.set('order_status', statusFilter);
@@ -59,8 +60,17 @@ export default function OrdersPage() {
       .then(({ items, meta }) => {
         setOrders(items);
         setTotal(meta.total ?? items.length);
+        setError(null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الطلبات'));
+  }
+
+  useAdminLiveRefresh(['orders', 'payments'], loadOrders);
+
+  useEffect(() => {
+    loadOrders();
+    // loadOrders intentionally reads the current filters; realtime callbacks use the latest render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, page, statusFilter, originFilter, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));

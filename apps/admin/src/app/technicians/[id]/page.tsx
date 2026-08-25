@@ -17,6 +17,7 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { resolveMediaUrl } from '@/lib/media-url';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -41,12 +42,7 @@ import {
 } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 import type { TechnicianCapacityTier } from '@baytak/shared-types';
-
-// بَقّة حقيقية اتلقطت (مستندات/شهادات الفني بترجع 404 عند فتحها من الأدمن، 2026-08-19) — نفس
-// حل orders/[id]/page.tsx بالحرف: file_url راجع من LocalDiskStorageService نسبي عمداً
-// (`/uploads/...`، بره الـglobalPrefix /api/v1) عشان يشتغل مع S3 لاحقًا كمان. من غير الـprefix ده،
-// المتصفح بيحله على أصل صفحة الأدمن نفسها (localhost:3001) بدل الباك-إند (localhost:3000)، فيرجع 404.
-const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/api\/v1\/?$/, '');
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
 // §24 — كانت فجوة موثّقة: GET /admin/technician-productivity/:technicianId موجود ومختبر
 // (technician_productivity.view) من زمان بلا أي واجهة أدمن تعرضه — مش موجودة في @baytak/shared-types
@@ -148,6 +144,11 @@ export default function TechnicianDetailPage() {
       .then(setProfile360)
       .catch((err) => setProfile360Error(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل النظرة التشغيلية'));
   }
+
+  useAdminLiveRefresh(['technicians'], () => {
+    load();
+    load360();
+  });
 
   function loadWallet(userId: string) {
     authedFetch<AdminWalletDetailResponseDto>(`/admin/wallets/${userId}`)
@@ -786,7 +787,7 @@ export default function TechnicianDetailPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <a href={`${API_ORIGIN}${doc.file_url}`} target="_blank" rel="noreferrer" className="underline">
+                        <a href={resolveMediaUrl(doc.file_url)} target="_blank" rel="noreferrer" className="underline">
                           فتح الملف
                         </a>
                       </TableCell>
@@ -865,7 +866,7 @@ export default function TechnicianDetailPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <a href={`${API_ORIGIN}${cert.file_url}`} target="_blank" rel="noreferrer" className="underline">
+                        <a href={resolveMediaUrl(cert.file_url)} target="_blank" rel="noreferrer" className="underline">
                           فتح الملف
                         </a>
                       </TableCell>
@@ -1156,7 +1157,7 @@ export default function TechnicianDetailPage() {
           <CardContent className="flex flex-col gap-3 text-sm">
             {productivityError && <p className="text-destructive">{productivityError}</p>}
             {!productivity && !productivityError && (
-              <p className="text-muted-foreground">تقرير الإنتاجية محسوب (مش مخزّن) من KPI الشهري — اضغط "عرض التقرير".</p>
+              <p className="text-muted-foreground">تقرير الإنتاجية محسوب (مش مخزّن) من KPI الشهري — اضغط «عرض التقرير».</p>
             )}
             {productivity && (
               <>

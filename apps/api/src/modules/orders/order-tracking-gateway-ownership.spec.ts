@@ -1,6 +1,7 @@
 import { createServer, type Server as HttpServer } from 'http';
 import type { AddressInfo } from 'net';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { JwtService } from '@nestjs/jwt';
 import { DataSource } from 'typeorm';
 import { Server as SocketIoServer } from 'socket.io';
@@ -154,9 +155,11 @@ describe('OrderTrackingGateway — room ownership + reconnect (docs/08 §19 بن
       {
         register: jest.fn(),
         unregister: jest.fn(),
+        isUserOnline: jest.fn().mockReturnValue(false),
         disconnectUser: jest.fn(),
         consumeRateLimit: jest.fn().mockReturnValue(true),
       } as never,
+      new EventEmitter2(),
     );
 
     httpServer = createServer();

@@ -11,6 +11,7 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { resolveMediaUrl } from '@/lib/media-url';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -32,8 +33,6 @@ import {
   complaintStatusTone,
   OPEN_COMPLAINT_STATUSES,
 } from '@/lib/support-labels';
-
-const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/api\/v1\/?$/, '');
 
 const RESOLUTION_TYPES: ComplaintResolutionType[] = [
   'refund',
@@ -258,10 +257,10 @@ export default function ComplaintDetailPage() {
             {attachments.length > 0 && (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {attachments.map((att) => (
-                  <a key={att.id} href={`${API_ORIGIN}${att.file_url}`} target="_blank" rel="noreferrer">
+                  <a key={att.id} href={resolveMediaUrl(att.file_url)} target="_blank" rel="noreferrer">
                     {/* eslint-disable-next-line @next/next/no-img-element -- ملف من سيرفر الباك-إند نفسه */}
                     <img
-                      src={`${API_ORIGIN}${att.file_url}`}
+                      src={resolveMediaUrl(att.file_url)}
                       alt="مرفق الشكوى"
                       className="aspect-square w-full rounded-md border object-cover"
                     />

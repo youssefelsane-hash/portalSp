@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
 const PER_PAGE = 20;
 
@@ -40,7 +41,7 @@ export default function TechniciansPage() {
   const [statusFilter, setStatusFilter] = useState<TechnicianVerificationStatus | 'all'>('all');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  function loadTechnicians() {
     if (isLoading) return;
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (statusFilter !== 'all') params.set('verification_status', statusFilter);
@@ -48,8 +49,16 @@ export default function TechniciansPage() {
       .then(({ items, meta }) => {
         setTechnicians(items);
         setTotal(meta.total ?? items.length);
+        setError(null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الفنيين'));
+  }
+
+  useAdminLiveRefresh(['technicians'], loadTechnicians);
+
+  useEffect(() => {
+    loadTechnicians();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, page, statusFilter, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
@@ -75,7 +84,7 @@ export default function TechniciansPage() {
       </div>
 
       {error && <p className="text-destructive">{error}</p>}
-      {!error && !technicians && <TableSkeleton columns={6} />}
+      {!error && !technicians && <TableSkeleton columns={7} />}
       {technicians && technicians.length === 0 && <EmptyState title="مفيش فنيين مطابقين" />}
 
       {technicians && technicians.length > 0 && (
@@ -87,6 +96,7 @@ export default function TechniciansPage() {
                 <TableHead>الاسم</TableHead>
                 <TableHead>المستوى</TableHead>
                 <TableHead>الحالة</TableHead>
+                <TableHead>الاتصال</TableHead>
                 <TableHead>التقييم</TableHead>
                 <TableHead>طلبات مكتملة</TableHead>
               </TableRow>
@@ -108,6 +118,11 @@ export default function TechniciansPage() {
                   <TableCell>
                     <Badge variant={statusBadgeVariant(tech.verification_status)}>
                       {VERIFICATION_STATUS_LABELS[tech.verification_status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={tech.online ? 'secondary' : 'outline'}>
+                      {tech.online ? 'أونلاين' : 'أوفلاين'}
                     </Badge>
                   </TableCell>
                   <TableCell>{tech.average_rating.toFixed(2)} ({tech.total_ratings_count})</TableCell>
