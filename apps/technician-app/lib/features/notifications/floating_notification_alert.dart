@@ -84,10 +84,18 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
         child: Semantics(
         label: '$_unreadCount إشعارات غير مقروءة',
         button: true,
+          // بلاغ مالك (2026-08-25): شاشة حمرا في التطبيقين بعد اللوجن على طول. السبب إن
+          // `tooltip:` بيلف الزرار في `Tooltip`، و`Tooltip` **بيحتاج `Overlay` جدّ** —
+          // والويدجت دي متركّبة في `MaterialApp.builder` جنب `child`، يعني **بره الـNavigator**
+          // فمفيش Overlay فوقها خالص. النتيجة استثناء وقت البناء، وFlutter بيرسم `ErrorWidget`
+          // بتاعه (`RenderErrorBox` = مستطيل أحمر داكن ~94% عتامة) — دي الشاشة الحمرا نفسها.
+          // بتظهر بعد اللوجن بالظبط لأن الويدجت متعلّقة على `auth.isAuthenticated` في main.dart.
+          //
+          // الـ`tooltip` زيادة أصلاً هنا: `Semantics(label: ...)` فوق بيوفّر نفس المعنى لقارئ
+          // الشاشة، وTooltip على الموبايل بيتطلب ضغطة مطوّلة نادرًا حد بيعملها على زرار عايم.
           child: FloatingActionButton.small(
             heroTag: 'global-unread-notifications',
             onPressed: _openNotifications,
-            tooltip: 'رسائل وإشعارات جديدة',
             child: Badge(
               label: Text(_unreadCount > 99 ? '99+' : '$_unreadCount'),
               child: const Icon(Icons.mark_unread_chat_alt_outlined),
