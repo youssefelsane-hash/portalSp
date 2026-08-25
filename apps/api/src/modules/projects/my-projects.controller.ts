@@ -78,4 +78,40 @@ export class MyProjectsController {
   ) {
     return this.projectsService.approveQuote(user.sub, quoteId, projectId, meta);
   }
+
+  // ── موافقة/رفض المرحلة + كومنتات العميل (ADR-0036) ──────────────────────────
+  // الموافقة التلقائية (MilestoneAutoApproveService) موجودة من قبل كده وبتشتغل بعد 72 ساعة —
+  // دي المسار **اليدوي** للعميل اللي مش عايز يستنى المهلة، وكان ناقص تمامًا.
+
+  @Post(':id/milestones/:milestoneId/approve')
+  async approveMilestone(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.approveMilestone(user.sub, id, milestoneId, meta);
+  }
+
+  @Post(':id/milestones/:milestoneId/reject')
+  async rejectMilestone(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
+    @Body() dto: { reason: string },
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.rejectMilestone(user.sub, id, milestoneId, dto?.reason ?? '', meta);
+  }
+
+  /** كومنت من العميل — دايمًا مرئي (مالوش معنى يخفي حاجة عن نفسه). */
+  @Post(':id/comments')
+  async addComment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { body: string; milestone_id?: string },
+    @AuditContext() meta: AuditMeta,
+  ) {
+    return this.projectsService.addComment({ userId: user.sub, role: 'customer' }, id, dto, meta);
+  }
 }

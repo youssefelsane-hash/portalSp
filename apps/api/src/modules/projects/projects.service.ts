@@ -308,6 +308,191 @@ export class ProjectsService {
   }
 
   /** بوابة إطلاق المستحق — لازم: مرحلة مكتملة + عميل موافق + مدفوعة. ذرّية بـSKIP LOCKED. */
+  /**
+   * دورة حياة المرحلة الواحدة (ADR-0036، docs/08 §57 بند 3) — بلاغ المالك: "الأدمن بيسلّم كله مع
+   * بعض، وده مش منطقي… كل فيز تسمح إن هي تتسلم على حدة."
+   *
+   * الاكتشاف الحقيقي وقت التنفيذ: `project_milestones` كانت **مبنية صح من الأساس** (سعر وحالة
+   * تنفيذ وموافقة ودفع واستحقاق لكل مرحلة مستقلين)، و`MilestoneAutoApproveService` شغّالة بالفعل
+   * وبتستنى `execution_status='completed'` — بس **مفيش ولا endpoint في المشروع كله كان بيوصّل
+   * للحالة دي**. الحلقة كانت مقفولة من الطرفين ومفتوحة من النص.
+   *
+   * الترتيب مش مفروض عمدًا: الأدمن يقدر يبدأ أي مرحلة `pending` من غير ما يستنى اللي قبلها —
+   * شغل التشطيب الحقيقي بيتوازى (سباكة وكهربا مع بعض)، وفرض التسلسل قيد مصطنع.
+   */
+  private async transitionMilestone(
+    projectId: string,
+    milestoneId: string,
+    actor: { userId: string; role: 'admin' | 'customer' },
+    apply: (milestone: ProjectMilestone) => { action: string; newValues: Record<string, unknown> },
+    meta?: AuditActorMeta,
+  ): Promise<ProjectMilestone> {
+    const { milestone, action, newValues } = await this.dataSource.transaction(async (manager) => {
+      const found = await manager
+        .createQueryBuilder(ProjectMilestone, 'm')
+        .setLock('pessimistic_write')
+        .where('m.id = :id AND m.project_id = :projectId', { id: milestoneId, projectId })
+        .getOne();
+      if (!found) {
+        throw new ApiException(ErrorCode.VAL_001, 'المرحلة غير موجودة في المشروع ده', HttpStatus.NOT_FOUND);
+      }
+      const result = apply(found);
+      await manager.save(found);
+      return { milestone: found, ...result };
+    });
+
+    await this.auditLog.record({
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action,
+      entityType: 'project_milestone',
+      entityId: milestoneId,
+      newValues: { project_id: projectId, sequence_number: milestone.sequenceNumber, ...newValues },
+      meta,
+    });
+    return milestone;
+  }
+
+  async startMilestone(adminUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
+    return this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
+      if (m.executionStatus !== 'pending') {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `مينفعش تبدأ مرحلة حالتها ${m.executionStatus}`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      m.executionStatus = 'in_progress';
+      return { action: 'project.milestone_started', newValues: { execution_status: 'in_progress' } };
+    }, meta);
+  }
+
+  /** تسليم مرحلة بعينها — بيبدأ عدّاد الموافقة التلقائية الموجود بالفعل (72 ساعة افتراضيًا). */
+  async completeMilestone(
+    adminUserId: string,
+    projectId: string,
+    milestoneId: string,
+    proofStorageKeys: string[] = [],
+    meta?: AuditActorMeta,
+  ) {
+    return this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
+      if (m.executionStatus !== 'in_progress') {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `مينفعش تسلّم مرحلة حالتها ${m.executionStatus} — لازم تبدأها الأول`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      m.executionStatus = 'completed';
+      // إعادة الفتح بعد رفض العميل بترجّع approval_status لـpending — من غير كده المرحلة
+      // المرفوضة تفضل مرفوضة للأبد حتى بعد ما الأدمن يصلّح ويسلّم تاني.
+      m.approvalStatus = 'pending';
+      m.rejectionReason = null;
+      if (proofStorageKeys.length > 0) {
+        const uploadedAt = new Date().toISOString();
+        m.proofAttachments = [
+          ...(m.proofAttachments ?? []),
+          ...proofStorageKeys.map((storage_key) => ({ storage_key, uploaded_at: uploadedAt })),
+        ];
+      }
+      return {
+        action: 'project.milestone_completed',
+        newValues: { execution_status: 'completed', proof_count: m.proofAttachments?.length ?? 0 },
+      };
+    }, meta);
+  }
+
+  /** موافقة العميل اليدوية — الموافقة التلقائية موجودة بالفعل، دي للعميل اللي مش عايز يستنى. */
+  async approveMilestone(customerUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
+    await this.findOneOwned(customerUserId, projectId);
+    return this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
+      if (m.executionStatus !== 'completed') {
+        throw new ApiException(ErrorCode.VAL_001, 'المرحلة لسه ما اتسلّمتش', HttpStatus.CONFLICT);
+      }
+      if (m.approvalStatus !== 'pending') {
+        throw new ApiException(ErrorCode.VAL_001, `المرحلة دي حالتها ${m.approvalStatus} بالفعل`, HttpStatus.CONFLICT);
+      }
+      m.approvalStatus = 'approved';
+      m.approvedByCustomer = true;
+      m.approvedAt = new Date();
+      return { action: 'project.milestone_approved', newValues: { approval_status: 'approved' } };
+    }, meta);
+  }
+
+  async rejectMilestone(
+    customerUserId: string,
+    projectId: string,
+    milestoneId: string,
+    reason: string,
+    meta?: AuditActorMeta,
+  ) {
+    if (!reason?.trim()) {
+      throw new ApiException(ErrorCode.VAL_001, 'سبب الرفض مطلوب', HttpStatus.BAD_REQUEST);
+    }
+    await this.findOneOwned(customerUserId, projectId);
+    return this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
+      if (m.executionStatus !== 'completed') {
+        throw new ApiException(ErrorCode.VAL_001, 'المرحلة لسه ما اتسلّمتش', HttpStatus.CONFLICT);
+      }
+      if (m.approvalStatus !== 'pending') {
+        throw new ApiException(ErrorCode.VAL_001, `المرحلة دي حالتها ${m.approvalStatus} بالفعل`, HttpStatus.CONFLICT);
+      }
+      m.approvalStatus = 'rejected';
+      m.approvedByCustomer = false;
+      m.rejectionReason = reason.trim();
+      // بترجع in_progress عشان الأدمن يقدر يصلّح ويسلّم تاني — الرفض مش نهاية المرحلة.
+      m.executionStatus = 'in_progress';
+      return { action: 'project.milestone_rejected', newValues: { approval_status: 'rejected', reason: reason.trim() } };
+    }, meta);
+  }
+
+  /**
+   * كومنتات المشروع/المرحلة (ADR-0036) — `milestoneId` اختياري: موجود = كومنت على مرحلة،
+   * null = كومنت عام. كومنت العميل بيتفرض مرئي دايمًا (مالوش معنى يخفي حاجة عن نفسه).
+   */
+  async addComment(
+    author: { userId: string; role: 'admin' | 'customer' },
+    projectId: string,
+    dto: { body: string; milestone_id?: string | null; is_visible_to_customer?: boolean },
+    meta?: AuditActorMeta,
+  ): Promise<Record<string, unknown>> {
+    const body = dto.body?.trim();
+    if (!body) {
+      throw new ApiException(ErrorCode.VAL_001, 'الكومنت ماينفعش يكون فاضي', HttpStatus.BAD_REQUEST);
+    }
+    if (author.role === 'customer') {
+      await this.findOneOwned(author.userId, projectId);
+    } else {
+      await this.findOne(projectId);
+    }
+    if (dto.milestone_id) {
+      const [owned] = await this.dataSource.query<{ id: string }[]>(
+        `SELECT id FROM project_milestones WHERE id = $1 AND project_id = $2`,
+        [dto.milestone_id, projectId],
+      );
+      if (!owned) {
+        throw new ApiException(ErrorCode.VAL_001, 'المرحلة غير موجودة في المشروع ده', HttpStatus.NOT_FOUND);
+      }
+    }
+    const visible = author.role === 'customer' ? true : dto.is_visible_to_customer !== false;
+    const [row] = await this.dataSource.query<Record<string, unknown>[]>(
+      `INSERT INTO project_comments (project_id, milestone_id, author_user_id, author_role, body, is_visible_to_customer)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, project_id, milestone_id, author_role, body, is_visible_to_customer, created_at`,
+      [projectId, dto.milestone_id ?? null, author.userId, author.role, body, visible],
+    );
+    await this.auditLog.record({
+      actorUserId: author.userId,
+      actorRole: author.role,
+      action: 'project.comment_added',
+      entityType: 'project',
+      entityId: projectId,
+      newValues: { milestone_id: dto.milestone_id ?? null, is_visible_to_customer: visible },
+      meta,
+    });
+    return row;
+  }
+
   async releaseMilestonePayout(milestoneId: string): Promise<boolean> {
     return this.dataSource.transaction(async (manager) => {
       const ms = await manager.createQueryBuilder(ProjectMilestone, 'm')
@@ -323,7 +508,11 @@ export class ProjectsService {
     });
   }
 
-  async getProjectRoom(projectId: string) {
+  /**
+   * `viewer` (ADR-0036) — `'customer'` بيفلتر الكومنتات المخفية **في SQL نفسه**، مش في طبقة
+   * العرض: الإخفاء لازم يكون على مستوى الاستعلام عشان مايتسربش بالغلط في أي مسار جديد بعد كده.
+   */
+  async getProjectRoom(projectId: string, viewer: 'admin' | 'customer' = 'admin') {
     const [project] = await this.dataSource.query<Record<string, unknown>[]>(
       `SELECT p.*, u.full_name AS customer_full_name, u.phone_number AS customer_phone,
               a.street_name AS address_street
@@ -386,13 +575,32 @@ export class ProjectsService {
       ),
     ]);
 
+    const comments = await this.dataSource.query<Record<string, unknown>[]>(
+      `SELECT c.id, c.milestone_id, c.author_role, c.body, c.is_visible_to_customer, c.created_at,
+              COALESCE(u.full_name, CASE WHEN c.author_role = 'customer' THEN 'العميل' ELSE 'الإدارة' END) AS author_name
+       FROM project_comments c
+       LEFT JOIN users u ON u.id = c.author_user_id
+       WHERE c.project_id = $1 AND c.deleted_at IS NULL
+         AND ($2::boolean IS FALSE OR c.is_visible_to_customer = true)
+       ORDER BY c.created_at ASC`,
+      [projectId, viewer === 'customer'],
+    );
+
+    // كل مرحلة بتشيل كومنتاتها جوّاها — الواجهة بتعرض الكارت كامل من غير نداء تاني لكل مرحلة.
+    const milestonesWithComments = (milestones as Record<string, unknown>[]).map((milestone) => ({
+      ...milestone,
+      comments: comments.filter((c) => c.milestone_id === milestone.id),
+    }));
+
     return {
       project,
       quotes,
-      milestones,
+      milestones: milestonesWithComments,
       orders,
       warranties,
       activity,
+      /** كومنتات عامة على المشروع كله (milestone_id = NULL) — كومنتات المراحل جوّه المراحل نفسها. */
+      comments: comments.filter((c) => c.milestone_id === null),
       summary: {
         total_financed_cents: Number(project.approved_quote_total_cents ?? 0),
         paid_cents: Number(project.paid_cents ?? 0),

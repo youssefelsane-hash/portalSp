@@ -241,4 +241,112 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     const again = await projectsService.releaseMilestonePayout(ms.id);
     expect(again).toBe(false);
   });
+
+  // ── ADR-0036 / docs/08 §57 بند 3 — تسليم مرحلة-مرحلة + كومنتات ──────────────
+  // ملحوظة: الاختبار اللي فوق ده كان مضطر يزوّر `execution_status='completed'` بـSQL خام
+  // **لأن مفيش دالة كانت بتعمل كده أصلاً** — دي بالظبط الفجوة اللي المالك بلّغ عنها.
+
+  it('كل مرحلة بتتسلّم لوحدها: بدء+تسليم المرحلة الأولى مايلمسش الباقي', async () => {
+    const [first, , third] = await projectsService.listProjectMilestones(ids.project);
+
+    await projectsService.startMilestone(ids.adminUser, ids.project, first.id);
+    await projectsService.completeMilestone(ids.adminUser, ids.project, first.id, ['projects/proof-1.jpg']);
+
+    const after = await projectsService.listProjectMilestones(ids.project);
+    const firstAfter = after.find((m) => m.id === first.id)!;
+    expect(firstAfter.executionStatus).toBe('completed');
+    expect(firstAfter.proofAttachments).toHaveLength(1);
+    // المرحلة التالتة لسه ماتلمستش — ده جوهر "كل فيز تتسلّم على حدة".
+    expect(after.find((m) => m.id === third.id)!.executionStatus).toBe('pending');
+  });
+
+  it('الترتيب مش مفروض: مرحلة متأخرة تقدر تبدأ من غير ما اللي قبلها تخلص', async () => {
+    const [, , third] = await projectsService.listProjectMilestones(ids.project);
+    await projectsService.startMilestone(ids.adminUser, ids.project, third.id);
+    const after = await projectsService.listProjectMilestones(ids.project);
+    expect(after.find((m) => m.id === third.id)!.executionStatus).toBe('in_progress');
+  });
+
+  it('الانتقالات الغلط بترفض بوضوح: تسليم قبل البدء، وبدء مرحلة شغّالة', async () => {
+    const [, , third] = await projectsService.listProjectMilestones(ids.project);
+    await expect(projectsService.startMilestone(ids.adminUser, ids.project, third.id)).rejects.toThrow(/مينفعش تبدأ/);
+
+    const fresh = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.executionStatus === 'pending');
+    if (fresh) {
+      await expect(
+        projectsService.completeMilestone(ids.adminUser, ids.project, fresh.id),
+      ).rejects.toThrow(/لازم تبدأها الأول/);
+    }
+  });
+
+  it('رفض العميل بيرجّع المرحلة in_progress بسبب مكتوب، وإعادة التسليم بترجّع الموافقة pending', async () => {
+    const [first] = await projectsService.listProjectMilestones(ids.project);
+
+    await projectsService.rejectMilestone(ids.customerUser, ids.project, first.id, 'الدهان مش متساوي');
+    let current = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.id === first.id)!;
+    expect(current.approvalStatus).toBe('rejected');
+    expect(current.rejectionReason).toBe('الدهان مش متساوي');
+    // رجعت in_progress عشان الأدمن يصلّح — الرفض مش نهاية المرحلة.
+    expect(current.executionStatus).toBe('in_progress');
+
+    await projectsService.completeMilestone(ids.adminUser, ids.project, first.id);
+    current = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.id === first.id)!;
+    expect(current.approvalStatus).toBe('pending');
+    expect(current.rejectionReason).toBeNull();
+
+    await projectsService.approveMilestone(ids.customerUser, ids.project, first.id);
+    current = (await projectsService.listProjectMilestones(ids.project)).find((m) => m.id === first.id)!;
+    expect(current.approvalStatus).toBe('approved');
+    expect(current.approvedByCustomer).toBe(true);
+  });
+
+  it('الرفض من غير سبب بيترفض، وعميل تاني مايقدرش يوافق على مرحلة مش بتاعته', async () => {
+    const [first] = await projectsService.listProjectMilestones(ids.project);
+    await expect(projectsService.rejectMilestone(ids.customerUser, ids.project, first.id, '   ')).rejects.toThrow(/سبب الرفض/);
+    await expect(projectsService.approveMilestone(ids.otherUser, ids.project, first.id)).rejects.toThrow();
+  });
+
+  it('كومنتات: كومنت الأدمن المرئي بيوصل للعميل، والداخلي بيتفلتر في SQL', async () => {
+    const [first] = await projectsService.listProjectMilestones(ids.project);
+
+    await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
+      body: 'خلصنا تأسيس السباكة، بننتقل للكهربا بكرة',
+      milestone_id: first.id,
+    });
+    await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
+      body: 'ملاحظة داخلية: نراجع تكلفة الخامات مع المورّد',
+      milestone_id: first.id,
+      is_visible_to_customer: false,
+    });
+    await projectsService.addComment({ userId: ids.customerUser, role: 'customer' }, ids.project, {
+      body: 'تمام، متابع معاكم',
+    });
+
+    const adminRoom = await projectsService.getProjectRoom(ids.project, 'admin');
+    const customerRoom = await projectsService.getProjectRoom(ids.project, 'customer');
+
+    const adminMilestone = adminRoom.milestones.find((m: Record<string, unknown>) => m.id === first.id)!;
+    const customerMilestone = customerRoom.milestones.find((m: Record<string, unknown>) => m.id === first.id)!;
+
+    // الأدمن بيشوف الاتنين، العميل بيشوف المرئي بس — والفلترة في SQL مش في العرض.
+    expect((adminMilestone.comments as unknown[])).toHaveLength(2);
+    expect((customerMilestone.comments as Record<string, unknown>[])).toHaveLength(1);
+    expect((customerMilestone.comments as Record<string, unknown>[])[0].body).toContain('تأسيس السباكة');
+    expect(JSON.stringify(customerRoom)).not.toContain('ملاحظة داخلية');
+
+    // كومنت العميل العام (بلا مرحلة) بيظهر في قائمة كومنتات المشروع مش جوّه المراحل.
+    expect((customerRoom.comments as Record<string, unknown>[]).some((c) => c.body === 'تمام، متابع معاكم')).toBe(true);
+  });
+
+  it('كومنت فاضي بيترفض، وكومنت على مرحلة مش بتاعة المشروع بيترفض', async () => {
+    await expect(
+      projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, { body: '  ' }),
+    ).rejects.toThrow(/فاضي/);
+    await expect(
+      projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
+        body: 'كومنت',
+        milestone_id: '00000000-0000-0000-0000-000000000000',
+      }),
+    ).rejects.toThrow(/المرحلة غير موجودة/);
+  });
 });
