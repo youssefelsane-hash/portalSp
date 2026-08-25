@@ -277,7 +277,23 @@ export class AdminOrdersController {
     @Body() dto: AdminRescheduleOrderDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(await this.ordersService.rescheduleByAdmin(admin.sub, id, dto.new_slot_id, dto.reason, audit));
+    return toOrderResponseDto(
+      await this.ordersService.rescheduleByAdmin(
+        admin.sub,
+        id,
+        { newSlotId: dto.new_slot_id, newScheduledAt: dto.new_scheduled_at },
+        dto.reason,
+        audit,
+      ),
+    );
+  }
+
+  // ADR-0034 بند 3 — أيام حقيقية متاحة للفني المعيّن، بديل قايمة السلوتات اللي بقت فاضية دايمًا
+  // بعد ما نموذج الإتاحة اتقلب لـopt-out (ADR-0017). نفس صلاحية إعادة الجدولة نفسها.
+  @Get(':id/reschedule-options')
+  @RequirePermission('orders.reschedule')
+  async rescheduleOptions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.listRescheduleOptions(id);
   }
 
   // بَقّة أمنية حقيقية اتلقطت واتصلحت (تدقيق جاهزية الإطلاق النهائي، 2026-08-14): orders.adjust_price

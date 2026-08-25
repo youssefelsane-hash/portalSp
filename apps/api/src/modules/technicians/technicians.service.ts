@@ -762,7 +762,14 @@ export class TechniciansService {
    * `technicianId` اختياري (ADR-0030) — لو موجود، بيقيّد الفحص على فني بعينه بدل "أي فني" — نفس
    * الاستعلام بالحرف، استخدام مختلف بس (`findNextAvailableDateForTechnician()` تحت بتلف حواليه).
    */
-  async hasEligibleTechnicianForDate(serviceId: string, zoneId: string, addressId: string, date: Date, technicianId?: string): Promise<boolean> {
+  async hasEligibleTechnicianForDate(
+    serviceId: string,
+    zoneId: string,
+    addressId: string,
+    date: Date,
+    technicianId?: string,
+    excludeOrderId?: string,
+  ): Promise<boolean> {
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
     const [{ exists }] = await this.technicianProfiles.manager.query<{ exists: boolean }[]>(
       `
@@ -788,7 +795,7 @@ export class TechniciansService {
           ${technicianAvailabilityCondition({
             technicianIdExpr: 'tp.id',
             scheduledAtParam: '$4',
-            excludeOrderIdParam: 'NULL',
+            excludeOrderIdParam: '$10',
             activeStatusesParam: '$5',
             engagedStatusesParam: '$6',
             isEmergencyParam: '$7',
@@ -797,7 +804,18 @@ export class TechniciansService {
           })}
       ) AS exists
       `,
-      [serviceId, zoneId, addressId, date, ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, false, fullDayJobMinutes, technicianId ?? null],
+      [
+        serviceId,
+        zoneId,
+        addressId,
+        date,
+        ACTIVE_TECHNICIAN_ORDER_STATUSES,
+        ENGAGED_TECHNICIAN_ORDER_STATUSES,
+        false,
+        fullDayJobMinutes,
+        technicianId ?? null,
+        excludeOrderId ?? null,
+      ],
     );
     return exists;
   }
