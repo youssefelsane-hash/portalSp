@@ -82,6 +82,13 @@ class Order {
   final CrewStatus? crewStatus;
   // موجود بس لعضو فريق (مش القائد) بيشوف تفاصيل طلب مضاف ليه — "قائد الفريق: <الاسم>".
   final String? teamLeaderName;
+  // بيانات العميل والخدمة (docs/08 §56 بند 3) — بلاغ مالك: الفني كان بيشوف أزرار التنفيذ بس،
+  // من غير ما يعرف رايح لمين ولا يعمل إيه. اسم/تليفون العميل بيرجعوا من الباك-إند بس بعد تأكيد
+  // حجز حقيقي (TECHNICIAN_CONTACT_VISIBLE_STATUSES) — null قبل كده، والواجهة بتخفيهم بدل ما
+  // تعرض قيمة فاضية.
+  final String? customerName;
+  final String? customerPhone;
+  final String? serviceNameAr;
 
   Order({
     required this.id,
@@ -101,6 +108,9 @@ class Order {
     this.scheduledAt,
     this.crewStatus,
     this.teamLeaderName,
+    this.customerName,
+    this.customerPhone,
+    this.serviceNameAr,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
@@ -124,6 +134,9 @@ class Order {
         scheduledAt: json['scheduled_at'] as String?,
         crewStatus: json['crew_status'] != null ? CrewStatus.fromJson(json['crew_status'] as Map<String, dynamic>) : null,
         teamLeaderName: json['team_leader_name'] as String?,
+        customerName: json['customer_name'] as String?,
+        customerPhone: json['customer_phone'] as String?,
+        serviceNameAr: json['service_name_ar'] as String?,
       );
 }
 

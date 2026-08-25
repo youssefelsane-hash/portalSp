@@ -84,6 +84,15 @@ export interface OrderResponseDto {
    * الكولر (orders.controller.ts) هو المسؤول عن حساب الشرط ده وتمرير القيمة، مش الدالة دي. */
   technician_name?: string;
   technician_phone?: string;
+  /** بيانات العميل للفني المعيّن (docs/08 §56 بند 3) — المرآة الحرفية لـtechnician_name/phone فوق:
+   * موجودة بس في مسارات `technician/orders/*` وبس بعد تأكيد حجز حقيقي (نفس
+   * TECHNICIAN_CONTACT_VISIBLE_STATUSES بالظبط). الفني كان بيشوف شاشة تنفيذ بلا اسم العميل ولا
+   * تليفونه خالص — بلاغ مالك مباشر بسكرين شوت. الكولر بيحسب الشرط، مش الدالة دي. */
+  customer_name?: string;
+  customer_phone?: string;
+  /** اسم الخدمة المطلوبة بالعربي — الفني كان بيشوف رقم الطلب والمبلغ بس، من غير ما يعرف
+   * هو رايح يعمل إيه بالظبط. متاح لكل مسارات الفني بلا شرط حالة (مش بيانات شخصية). */
+  service_name_ar?: string;
   /** تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل وحده مايسوّيش الطلب، بس
    * لازم يظهر في الواجهة عشان العميل يعرف إنه أكّد بالفعل (يمنع تكرار الزرار). */
   customer_cash_confirmed_at: string | null;
@@ -106,6 +115,7 @@ export function toOrderResponseDto(
   order: Order,
   address?: Address | null,
   technicianContact?: { name: string; phone: string } | null,
+  viewerExtras?: { customerContact?: { name: string; phone: string } | null; serviceNameAr?: string | null },
 ): OrderResponseDto {
   return {
     id: order.id,
@@ -163,6 +173,9 @@ export function toOrderResponseDto(
       : undefined,
     technician_name: technicianContact?.name,
     technician_phone: technicianContact?.phone,
+    customer_name: viewerExtras?.customerContact?.name,
+    customer_phone: viewerExtras?.customerContact?.phone,
+    service_name_ar: viewerExtras?.serviceNameAr ?? undefined,
     customer_cash_confirmed_at: order.customerCashConfirmedAt ? order.customerCashConfirmedAt.toISOString() : null,
     technician_cash_not_received_at: order.technicianCashNotReceivedAt
       ? order.technicianCashNotReceivedAt.toISOString()

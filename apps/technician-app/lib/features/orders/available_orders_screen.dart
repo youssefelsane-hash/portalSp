@@ -852,10 +852,15 @@ class _UpcomingJobCard extends StatelessWidget {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.event_available_outlined),
-        title: Text('طلب ${order.orderNumber} — $dayLabel'),
+        // docs/08 §56 بند 3 — اسم الخدمة والعميل بقوا في الكارت نفسه: رقم الطلب لوحده ما كانش
+        // بيقول للفني هو رايح يعمل إيه ولا لمين، فكان لازم يفتح كل طلب عشان يعرف.
+        title: Text('${order.serviceNameAr ?? 'طلب'} — $dayLabel'),
         subtitle: Text(
-          '${order.address != null ? order.address!.streetName : ''}'
-          ' — ${_formatEgp(order.totalAmountCents)}',
+          [
+            if (order.customerName != null) order.customerName!,
+            if (order.address != null) order.address!.streetName,
+            _formatEgp(order.totalAmountCents),
+          ].join(' — '),
         ),
         trailing: const Icon(Icons.chevron_left),
         onTap: onTap,

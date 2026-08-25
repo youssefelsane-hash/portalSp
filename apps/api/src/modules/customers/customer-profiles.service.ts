@@ -33,6 +33,23 @@ export class CustomerProfilesService {
   }
 
   /**
+   * بيانات تواصل العميل للفني المعيّن (docs/08 §56 بند 3) — المرآة الحرفية لـ
+   * `TechniciansService.findContactInfoOrThrow()` اللي العميل بيشوف بيها الفني. الكولر هو
+   * المسؤول عن فحص شرط الظهور (`TECHNICIAN_CONTACT_VISIBLE_STATUSES`) قبل ما ينادي، نفس النمط
+   * المتّبع في `orders.controller.ts` بالحرف — مفيش استعلام أصلاً لو الطلب لسه في حالة مش مسموحة.
+   */
+  async findContactInfoOrThrow(profileId: string): Promise<{ name: string; phone: string }> {
+    const [row] = await this.dataSource.query<{ full_name: string; phone_number: string }[]>(
+      `SELECT u.full_name, u.phone_number FROM customer_profiles cp JOIN users u ON u.id = cp.user_id WHERE cp.id = $1`,
+      [profileId],
+    );
+    if (!row) {
+      throw new ApiException(ErrorCode.VAL_001, 'مستخدم العميل غير موجود', HttpStatus.NOT_FOUND);
+    }
+    return { name: row.full_name, phone: row.phone_number };
+  }
+
+  /**
    * فحص "عميل جديد" الحقيقي وقت الاستخدام — عمداً مش `customerProfile.totalOrdersCount`
    * (بَقّة حقيقية اتلقطت في مراجعة شاملة 2026-08-12: العمود ده بيتحدّث async عبر BullMQ job
    * بعد commit إنشاء الطلب، مش لحظيًا — نفس فئة البَقّة الموثّقة بالفعل في referrals/README.md
