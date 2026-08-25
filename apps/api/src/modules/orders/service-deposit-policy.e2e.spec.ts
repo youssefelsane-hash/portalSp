@@ -137,8 +137,8 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     ids.category = category.id;
     // إجمالي 1000ج (100000 قرش)، إيداع 30% = 30000 قرش بالظبط.
     const [serviceDeposit] = await q(
-      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, commission_percentage, warranty_days, deposit_required, deposit_percentage)
-       VALUES ($1,$2,$3,'fixed',100000,20,0,true,30) RETURNING id`,
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, unit_name_ar, commission_percentage, warranty_days, deposit_required, deposit_percentage)
+       VALUES ($1,$2,$3,'per_unit',100000,'قطعة',20,0,true,30) RETURNING id`,
       [ids.category, `خدمة إيداع ${runId}`, `test-service-deposit-${runId}`],
     );
     ids.serviceDeposit = serviceDeposit.id;
@@ -303,14 +303,24 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       ordersService.create(ids.customerUser, {
         service_id: ids.serviceDeposit,
         address_id: ids.address,
+        pricing_quantity: 1,
       } as never),
     ).rejects.toMatchObject({ code: 'VAL_001' });
+  });
+
+  it('خدمة بالوحدة ترفض الحجز والمعاينة من غير كمية صريحة', async () => {
+    const input = { service_id: ids.serviceDeposit, address_id: ids.address };
+    await expect(ordersService.previewPrice(ids.customerUser, input)).rejects.toMatchObject({ code: 'VAL_001' });
+    await expect(ordersService.create(ids.customerUser, { ...input, payment_method: 'card' })).rejects.toMatchObject({
+      code: 'VAL_001',
+    });
   });
 
   it('deposit_required=true + payment_method=card: يتسجّل PENDING_PAYMENT بمبلغ إيداع 30% محسوب صح', async () => {
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
+      pricing_quantity: 1,
       payment_method: 'card',
     } as never);
     expect(order.serviceId).toBe(ids.serviceDeposit);
@@ -324,16 +334,40 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
+      pricing_quantity: 1,
       payment_method: 'fawry_reference',
     });
     expect(order.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
     expect(order.depositAmountCents).toBe(30000);
   });
 
+  it('سعر الوحدة × الكمية ثم الضمان ثم الإيداع: المعاينة والطلب النهائي متطابقان', async () => {
+    const input = {
+      service_id: ids.serviceDeposit,
+      address_id: ids.address,
+      pricing_quantity: 2,
+      warranty_plan_id: ids.warrantyPlan,
+    };
+    const preview = await ordersService.previewPrice(ids.customerUser, input);
+    expect(preview.base_price_cents).toBe(200000);
+    expect(preview.warranty_price_cents).toBe(60000);
+    expect(preview.total_amount_cents).toBe(260000);
+    expect(preview.deposit_amount_cents).toBe(78000);
+    expect(preview.remaining_amount_cents).toBe(182000);
+
+    const order = await ordersService.create(ids.customerUser, { ...input, payment_method: 'card' });
+    expect(order.estimatedPriceCents).toBe(preview.base_price_cents);
+    expect(order.warrantyPriceCents).toBe(preview.warranty_price_cents);
+    expect(order.totalAmountCents).toBe(preview.total_amount_cents);
+    expect(order.depositAmountCents).toBe(preview.deposit_amount_cents);
+    expect(Number(order.pricingQuantity)).toBe(2);
+  });
+
   it('الضمان الاختياري 30% يضاف للإجمالي، يعيد حساب الإيداع، ويصدر من snapshot غير قابل للتغيير', async () => {
     const preview = await ordersService.previewPrice(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
+      pricing_quantity: 1,
       warranty_plan_id: ids.warrantyPlan,
     });
     expect(preview.warranty_price_cents).toBe(30000);
@@ -343,6 +377,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
+      pricing_quantity: 1,
       payment_method: 'card',
       warranty_plan_id: ids.warrantyPlan,
     });
@@ -383,6 +418,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
+      pricing_quantity: 1,
       payment_method: 'card',
     } as never);
 
@@ -438,6 +474,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
     const preview = await ordersService.previewPrice(ids.customerUser, {
       service_id: ids.serviceDeposit,
       address_id: ids.address,
+      pricing_quantity: 1,
     } as never);
     expect(preview.total_amount_cents).toBe(100000);
     expect(preview.deposit_amount_cents).toBe(30000);

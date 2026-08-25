@@ -14,6 +14,7 @@ export interface RecurringTemplateResponseDto {
   // مدخلات التسعير/التوقيت المتكررة (migration 0176) — مدخلات مش سعر، القيمة بتتحسب وقت توليد
   // كل طلب من محرك التسعير الحي.
   field_values: Record<string, string | number | boolean> | null;
+  pricing_quantity: number | null;
   duration_hours: number | null;
   scheduled_end_at: string | null;
   next_run_at: string;
@@ -39,6 +40,7 @@ export function toRecurringTemplateResponseDto(template: RecurringOrderTemplate)
     problem_description: template.problemDescription,
     payment_method: template.paymentMethod,
     field_values: template.fieldValues,
+    pricing_quantity: template.pricingQuantity == null ? null : Number(template.pricingQuantity),
     duration_hours: template.durationHours,
     scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : null,
     next_run_at: template.nextRunAt.toISOString(),

@@ -56,6 +56,13 @@ export class PreviewOrderDto {
   @IsUUID()
   warranty_plan_id?: string;
 
+  // نفس CreateOrderDto.pricing_quantity بالحرف لضمان أن المعاينة والحجز النهائي يستخدمان
+  // نفس مدخلات محرك التسعير لخدمات "بالوحدة".
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  pricing_quantity?: number;
+
   // دقة الوقت (ADR-0031 Slice B/H) — نفس CreateOrderDto.duration_hours بالحرف.
   @IsOptional()
   @IsNumber()

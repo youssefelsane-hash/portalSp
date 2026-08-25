@@ -41,6 +41,9 @@ export class RecurringOrderTemplate {
   @Column({ name: 'field_values', type: 'jsonb', nullable: true })
   fieldValues: Record<string, string | number | boolean> | null;
 
+  @Column({ name: 'pricing_quantity', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  pricingQuantity: string | null;
+
   @Column({ name: 'duration_hours', type: 'integer', nullable: true })
   durationHours: number | null;
 

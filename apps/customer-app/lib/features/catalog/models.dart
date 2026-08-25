@@ -81,6 +81,7 @@ class CatalogService {
   final String pricingModel;
   final int basePriceCents;
   final int inspectionFeeCents;
+  final String? unitNameAr;
   final int warrantyDays;
   final bool allowsScheduling;
   final bool allowsEmergency;
@@ -119,6 +120,7 @@ class CatalogService {
     required this.pricingModel,
     required this.basePriceCents,
     required this.inspectionFeeCents,
+    this.unitNameAr,
     this.warrantyDays = 0,
     required this.allowsScheduling,
     required this.allowsEmergency,
@@ -142,6 +144,7 @@ class CatalogService {
         pricingModel: json['pricing_model'] as String,
         basePriceCents: json['base_price_cents'] as int,
         inspectionFeeCents: json['inspection_fee_cents'] as int,
+        unitNameAr: json['unit_name_ar'] as String?,
         warrantyDays: json['warranty_days'] as int? ?? 0,
         allowsScheduling: json['allows_scheduling'] as bool,
         allowsEmergency: json['allows_emergency'] as bool,

@@ -193,6 +193,11 @@ export class Order {
   @Column({ name: 'requested_units', type: 'numeric', precision: 10, scale: 2, nullable: true })
   requestedUnits: string | null;
 
+  // الكمية التي ضُرب فيها سعر الوحدة وقت الحجز. snapshot مستقلة عن requestedUnits الخاصة
+  // بالإنتاجية، حتى يظل تفسير السعر التاريخي واضحًا بعد تعديل الخدمة أو بياناتها القياسية.
+  @Column({ name: 'pricing_quantity', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  pricingQuantity: string | null;
+
   // Idempotency-Key اختياري (docs/01 §1.4، migration 0139) — نفس مفتاح مرسل مرتين لنفس العميل
   // يرجّع نفس الطلب الأصلي بدل ما ينشئ نسخة جديدة (double-click/retry). NULL للمسارات الداخلية
   // (recurring-orders) اللي عندها حماية idempotency تانية أصلاً.

@@ -107,6 +107,13 @@ export class CreateOrderDto {
   @IsPositive()
   requested_units?: number;
 
+  // كمية التسعير لخدمة pricing_model=per_unit (مثلاً 4 قطع). مستقلة عن requested_units فوق:
+  // requested_units تخص محرك الإنتاجية/الطاقم، أما دي فتدخل سعر الطلب نفسه وتُحفظ snapshot.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  pricing_quantity?: number;
+
   // دفع قبل التوزيع (ADR-0013 §3/§4 — "PAY BEFORE DISPATCH") — اختياري بالكامل، لو مبعتش
   // الطلب بيتوزّع فورًا زي السلوك الحالي (دفع بعد الشغل عبر collect-cash/pay-with-wallet/...).
   // لو "card" أو "instapay" أو "fawry_reference"، الطلب بيتعمل PENDING_PAYMENT بدل

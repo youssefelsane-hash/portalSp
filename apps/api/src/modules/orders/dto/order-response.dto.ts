@@ -76,6 +76,8 @@ export interface OrderResponseDto {
   required_technicians: number | null;
   required_assistants: number | null;
   estimated_duration_days: number | null;
+  /** كمية التسعير لخدمة بالوحدة؛ null لباقي نماذج التسعير. */
+  pricing_quantity: number | null;
   /** موجودة بس في مسارات تفاصيل الطلب الفردي (مش القوائم) — لخرائط التتبع/الملاحة. */
   address?: OrderAddressResponseDto;
   /** رقم تليفون الفني (docs/08 §22 بند 1) — موجود بس بعد تأكيد حجيز حقيقي (TECHNICIAN_CONTACT_VISIBLE_STATUSES)،
@@ -150,6 +152,7 @@ export function toOrderResponseDto(
     required_technicians: order.requiredTechnicians,
     required_assistants: order.requiredAssistants,
     estimated_duration_days: order.estimatedDurationDays,
+    pricing_quantity: order.pricingQuantity == null ? null : Number(order.pricingQuantity),
     address: address
       ? {
           street_name: address.streetName,

@@ -101,6 +101,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // شاشة تدخل بيها القيم اللازمة لحساب سعر خدمات pricing_model=formula، فالعميل مكانش يقدر
   // يحجز الخدمات دي أصلاً من التطبيق (كان المسار الوحيد اختبار مباشر بـ curl). اتقفلت.
   bool get _isFormulaPricing => widget.service.pricingModel == 'formula';
+  bool get _isPerUnitPricing => widget.service.pricingModel == 'per_unit';
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
@@ -125,6 +126,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   List<ServiceStandardDataRow> _standardDataRows = [];
   ServiceStandardDataRow? _selectedStandardData;
   final _requestedUnitsController = TextEditingController();
+  final _pricingQuantityController = TextEditingController();
 
   // دقة الوقت (ADR-0031 Slice B) — service.requiresPreciseSchedule=true محتاجة وقت بداية دقيق
   // (مش يوم بس، ADR-0018) + مدة بالساعات. TimeOfDay منفصل عن _requestedAt (اللي بيحمل اليوم بس
@@ -259,6 +261,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _priceDebounce?.cancel();
     _durationDebounce?.cancel();
     _requestedUnitsController.dispose();
+    _pricingQuantityController.dispose();
     _durationHoursController.dispose();
     super.dispose();
   }
@@ -284,6 +287,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     });
     _durationDebounce?.cancel();
     _durationDebounce = Timer(const Duration(milliseconds: 500), _refreshDurationEstimate);
+  }
+
+  void _onPricingQuantityChanged(String _) {
+    setState(() {
+      _pricePreview = null;
+      _previewError = null;
+    });
+    _priceDebounce?.cancel();
+    _priceDebounce = Timer(const Duration(milliseconds: 400), _refreshPreview);
+  }
+
+  void _onDurationHoursChanged(String _) {
+    setState(() {
+      _pricePreview = null;
+      _previewError = null;
+    });
+    _priceDebounce?.cancel();
+    _priceDebounce = Timer(const Duration(milliseconds: 400), _refreshPreview);
   }
 
   Future<void> _refreshDurationEstimate() async {
@@ -358,6 +379,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<void> _refreshPreview({String? promoCode, String? buildingCode}) async {
     if (_selectedAddress == null) return;
     if (_isFormulaPricing && !_pricingFieldsComplete) return;
+    final pricingQuantity = num.tryParse(_pricingQuantityController.text.trim());
+    if (_isPerUnitPricing && (pricingQuantity == null || pricingQuantity <= 0)) {
+      return;
+    }
+    final durationHours = int.tryParse(_durationHoursController.text.trim());
+    if (widget.service.pricingModel == 'hourly' &&
+        (widget.service.requiresPreciseSchedule || widget.service.requiresHoursOnly) &&
+        durationHours == null) {
+      return;
+    }
     final generation = ++_previewRequestGeneration;
     setState(() => _previewLoading = true);
     try {
@@ -372,6 +403,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         promoCode: promoCode,
         buildingCode: buildingCode,
         warrantyPlanId: _selectedWarrantyPlanId,
+        pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
+        durationHours: widget.service.pricingModel == 'hourly' ? durationHours : null,
       );
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
@@ -526,6 +559,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         addonIds: _selectedAddonIds.toList(),
         promoCode: code,
         warrantyPlanId: _selectedWarrantyPlanId,
+        pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
+        durationHours: widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
       );
       // فشل التحقق بيسيب آخر معاينة صح (من غير خصم) ظاهرة، مش بيمسحها — العميل يشوف
       // "الكود ده مش موجود" جنب حقل الكود، مش رقم فاضي بدل السعر الصحيح.
@@ -576,6 +611,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         addonIds: _selectedAddonIds.toList(),
         buildingCode: code,
         warrantyPlanId: _selectedWarrantyPlanId,
+        pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
+        durationHours: widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
       );
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
@@ -636,6 +673,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         setState(() => _error = 'كمّل كل بيانات السعر المطلوبة الأول');
         return;
       }
+    }
+    final pricingQuantity = num.tryParse(_pricingQuantityController.text.trim());
+    if (_isPerUnitPricing && (pricingQuantity == null || pricingQuantity <= 0)) {
+      setState(() => _error = 'حدد عدد ${widget.service.unitNameAr ?? 'الوحدات'} المطلوبة');
+      return;
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
     // (docs/08 §2، طلب صريح: نفس المدخلات اللي هتتبعت لازم تتعرض قبل التأكيد بالظبط).
@@ -708,6 +750,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
+        pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
         paymentMethod: _selectedPaymentMethod == 'installment' ? null : _selectedPaymentMethod,
         warrantyPlanId: _selectedWarrantyPlanId,
         // "كرّر الحجز ده" (migration 0176) — بيتبعت بس لما الاختيار ظاهر ومختار فعلاً؛ أي حالة
@@ -1007,6 +1050,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 TextField(
                   controller: _durationHoursController,
                   keyboardType: TextInputType.number,
+                  onChanged: _onDurationHoursChanged,
                   decoration: const InputDecoration(labelText: 'عدد الساعات', border: OutlineInputBorder()),
                 ),
               ]
@@ -1065,10 +1109,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   TextField(
                     controller: _durationHoursController,
                     keyboardType: TextInputType.number,
+                    onChanged: _onDurationHoursChanged,
                     decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
                   ),
                 ],
               ],
+            ],
+            if (_isPerUnitPricing) ...[
+              const SizedBox(height: 16),
+              Text('الكمية المطلوبة', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _pricingQuantityController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: _onPricingQuantityChanged,
+                decoration: InputDecoration(
+                  labelText: 'عدد ${widget.service.unitNameAr ?? 'الوحدات'}',
+                  helperText: 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
             ],
             if (_isFormulaPricing) ..._buildPricingFieldsSection() else ..._buildStandardDataSection(),
             if (_addons.isNotEmpty) ...[

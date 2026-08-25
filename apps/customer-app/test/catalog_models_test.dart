@@ -30,7 +30,7 @@ void main() {
       'pricing_model': 'fixed',
       'base_price_cents': 30000,
       'inspection_fee_cents': 0,
-      'unit_name_ar': null,
+      'unit_name_ar': 'قطعة',
       'estimated_duration_minutes': 60,
       'warranty_days': 14,
       'requires_photos': true,
@@ -48,5 +48,6 @@ void main() {
     expect(service.allowsEmergency, false);
     expect(service.allowsIndividual, true);
     expect(service.allowsTeam, false);
+    expect(service.unitNameAr, 'قطعة');
   });
 }

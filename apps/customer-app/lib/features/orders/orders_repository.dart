@@ -110,6 +110,7 @@ class OrdersRepository {
     // بس (CatalogRepository.estimateDuration()) بلا ما القيم دي تتسجّل على الطلب نفسه خالص.
     String? standardDataId,
     num? requestedUnits,
+    num? pricingQuantity,
     // دفع قبل التوزيع (ADR-0013 §3/§4، docs/08 §19 بند 1) — 'card' أو 'instapay' بس، أو null
     // (الافتراضي القديم: دفع بعد الشغل زي زمان). لو اتبعت، الباك-إند بيرجّع الطلب بحالة
     // pending_payment بدل searching_technician — الكولر (CreateOrderScreen) لازم يوجّه العميل
@@ -140,6 +141,7 @@ class OrdersRepository {
       'address_id': addressId,
       if (standardDataId != null) 'standard_data_id': standardDataId,
       if (requestedUnits != null) 'requested_units': requestedUnits,
+      if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
       if (paymentMethod != null) 'payment_method': paymentMethod,
       if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
       // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
@@ -186,6 +188,8 @@ class OrdersRepository {
     String? requestedTechnicianId,
     String? scheduleSlotId,
     String? warrantyPlanId,
+    num? pricingQuantity,
+    int? durationHours,
   }) async {
     final data = await auth.authedRequest('POST', '/orders/preview', body: {
       'service_id': serviceId,
@@ -198,6 +202,8 @@ class OrdersRepository {
       if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
       if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
       if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
+      if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
+      if (durationHours != null) 'duration_hours': durationHours,
     });
     return OrderPricePreview.fromJson(data!);
   }
