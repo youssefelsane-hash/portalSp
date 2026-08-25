@@ -16,8 +16,35 @@
 - Completed after the pricing checkpoint: precise-time assignment now rejects overlapping ranges
   under the technician lock while allowing adjacent ranges. Real PostgreSQL concurrency and guard
   tests passed (16 scenarios, open-handle detection enabled).
-- Next task: bounded technician reschedule requests, then confirmed-order contact visibility and
-  global realtime message alerts.
+- Completed: bounded technician reschedule requests are durable and customer-controlled. The
+  current slot remains booked until approval; approval moves the booking atomically, duplicate
+  concurrent approvals execute once, and the admin setting defaults to two requests per order.
+  Request/decision in-app notifications commit with the state. Migration `0185` and every previous
+  checksum passed; the focused real PostgreSQL suite passed 12/12 with open-handle detection.
+- Completed: both Flutter apps now consume the durable reschedule workflow. The technician selects
+  one of their available future slots and supplies a reason; the current appointment stays visible
+  while awaiting a decision. The customer sees a prominent approve/keep-current card in order
+  details. Focused model tests passed in both apps and changed-file analysis has no errors/warnings
+  (only pre-existing informational deprecations elsewhere in the same large screens).
+- Completed: mutual contact visibility now uses one shared confirmed-order status invariant. The
+  technician receives customer name/phone only after acceptance and only after order ownership or
+  team-membership authorization; offer/pre-acceptance payloads do not query or expose it. API build,
+  focused Jest with open-handle detection, and changed-file Dart analysis passed.
+- Completed: customer/technician order chat, admin/customer support replies, and admin/technician
+  internal chat now persist the recipient's in-app notification atomically with each message. API
+  build and both real PostgreSQL suites passed (8 scenarios) with open-handle detection.
+- Integrated: `origin/main` at `c90b793`, including day-based rescheduling and the expanded
+  technician job brief. Duplicate customer contact fields/UI introduced by the parallel phone
+  implementations were removed; one shared visibility policy and one job-summary card remain.
+  Both reschedule models are preserved: direct day/slot changes and customer-approved technician
+  slot proposals use a consistent order-then-slot lock order. API build, 23 merged Jest/PostgreSQL
+  scenarios with open-handle detection, Flutter model test, and focused Dart analysis passed.
+- Completed: both mobile apps now show a lifecycle-aware floating unread alert on every
+  authenticated screen. Push remains instant; a five-second foreground poll provides a durable
+  fallback. Notification taps now open customer order/support chat, technician order chat, or the
+  exact technician/admin internal thread. Customer Flutter tests passed 13/13, technician tests
+  passed 10/10, and focused Dart analysis reported no issues in either app.
+- Next task: continue the premium customer-home and remaining cross-engine integration review.
 
 ---
 

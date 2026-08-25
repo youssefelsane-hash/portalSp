@@ -92,6 +92,20 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
+  Future<List<OrderRescheduleRequest>> listRescheduleRequests(String orderId) async {
+    final items = await authRepository.authedRequestList('/technician/orders/$orderId/reschedule-requests');
+    return items.map(OrderRescheduleRequest.fromJson).toList();
+  }
+
+  Future<OrderRescheduleRequest> requestReschedule(String orderId, {required String newSlotId, required String reason}) async {
+    final data = await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/reschedule-requests',
+      body: {'new_slot_id': newSlotId, 'reason': reason.trim()},
+    );
+    return OrderRescheduleRequest.fromJson(data!);
+  }
+
   // دورة تنفيذ الطلب بعد القبول — كل فعل بيرجّع نسخة محدّثة من الطلب، الشاشة بتستخدمها
   // تحدد الفعل الجاي (nextTechnicianAction في order.dart) من غير حاجة لـ endpoint تفاصيل منفصل.
   Future<Order> depart(String orderId) async {

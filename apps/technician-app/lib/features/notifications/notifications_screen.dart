@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/deep_link_router.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'models.dart';
@@ -49,6 +50,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       }
     }
+    await handleDeepLink(notification.deepLink);
   }
 
   Future<void> _markAllRead() async {

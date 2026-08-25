@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'auth_repository.dart';
 import '../features/assistant_offers/assistant_offers_screen.dart';
+import '../features/chat/chat_screen.dart';
+import '../features/internal_chat/internal_chat_detail_screen.dart';
+import '../features/internal_chat/internal_chat_repository.dart';
 import '../features/orders/order_execution_screen.dart';
 import '../features/orders/orders_repository.dart';
 
@@ -13,6 +16,7 @@ import '../features/orders/orders_repository.dart';
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final RegExp _orderDeepLinkPattern = RegExp(r'^/technician/orders/([0-9a-fA-F-]+)');
+final RegExp _internalChatDeepLinkPattern = RegExp(r'^/technician/internal-chat/([0-9a-fA-F-]+)$');
 const _assistantOffersDeepLinkPrefix = '/technician/assistant-offers';
 
 Future<void> handleDeepLink(String? deepLink) async {
@@ -26,11 +30,31 @@ Future<void> handleDeepLink(String? deepLink) async {
     return;
   }
 
+  final authRepository = context.read<AuthRepository>();
+  final internalChatMatch = _internalChatDeepLinkPattern.firstMatch(deepLink);
+  if (internalChatMatch != null) {
+    try {
+      final threadId = internalChatMatch.group(1)!;
+      final threads = await InternalChatRepository(authRepository).fetchThreads();
+      for (final thread in threads) {
+        if (thread.id == threadId) {
+          navigator.push(MaterialPageRoute(builder: (_) => InternalChatDetailScreen(thread: thread)));
+          return;
+        }
+      }
+    } catch (_) {
+      return;
+    }
+  }
+
   final match = _orderDeepLinkPattern.firstMatch(deepLink);
   if (match == null) return;
   final orderId = match.group(1)!;
+  if (deepLink == '/technician/orders/$orderId/chat') {
+    navigator.push(MaterialPageRoute(builder: (_) => ChatScreen(orderId: orderId)));
+    return;
+  }
   try {
-    final authRepository = context.read<AuthRepository>();
     final order = await OrdersRepository(authRepository).getOne(orderId);
     navigator.push(MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: order)));
   } catch (_) {

@@ -66,6 +66,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _decidingQuote = false;
   List<TeamMember> _teamMembers = [];
   List<OrderMedia> _media = [];
+  List<OrderRescheduleRequest> _rescheduleRequests = [];
+  bool _decidingRescheduleRequest = false;
   // مفتاح مستقر لكل طريقة دفع (يتولّد مرة واحدة بس، يفضل زي ما هو خلال أي retry لنفس المحاولة) —
   // راجع التعليق الكامل في payments_repository.dart's generateIdempotencyKey().
   String? _walletIdempotencyKey;
@@ -116,10 +118,45 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         final members = await _repository.fetchTeamMembers(widget.orderId);
         if (mounted) setState(() => _teamMembers = members);
       }
+      if (order.technicianId != null) await _loadRescheduleRequests();
       await _loadMedia();
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
+  }
+
+  Future<void> _loadRescheduleRequests() async {
+    try {
+      final requests = await _repository.listRescheduleRequests(widget.orderId);
+      if (mounted) setState(() => _rescheduleRequests = requests);
+    } on ApiException {
+      // الطلب نفسه يظل قابلًا للاستخدام لو تحميل سجل التأجيل فشل مؤقتًا.
+    }
+  }
+
+  Future<void> _decideRescheduleRequest(OrderRescheduleRequest request, bool approve) async {
+    setState(() => _decidingRescheduleRequest = true);
+    try {
+      final result = await _repository.decideRescheduleRequest(widget.orderId, request.id, approve);
+      if (mounted) {
+        setState(() => _order = result.order);
+        await _loadRescheduleRequests();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(approve ? 'تم اعتماد الموعد الجديد وإبلاغ الفني' : 'تم الرفض وسيظل الموعد الحالي كما هو')),
+          );
+        }
+      }
+    } on ApiException catch (err) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+    } finally {
+      if (mounted) setState(() => _decidingRescheduleRequest = false);
+    }
+  }
+
+  String _formatRescheduleDate(DateTime value) {
+    final local = value.toLocal();
+    return '${local.day}/${local.month}/${local.year} — ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   }
 
   Future<void> _loadMedia() async {
@@ -761,6 +798,52 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             ),
                           ),
                         ),
+                      ],
+                      if (_rescheduleRequests.any((request) => request.isPending)) ...[
+                        const SizedBox(height: 16),
+                        Builder(builder: (context) {
+                          final request = _rescheduleRequests.firstWhere((item) => item.isPending);
+                          return Card(
+                            color: Theme.of(context).colorScheme.tertiaryContainer,
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(children: [
+                                    const Icon(Icons.event_repeat_outlined),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text('الفني يقترح تغيير الموعد', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                    ),
+                                  ]),
+                                  const SizedBox(height: 10),
+                                  Text('الموعد المقترح: ${_formatRescheduleDate(request.proposedAt)}'),
+                                  const SizedBox(height: 6),
+                                  Text('السبب: ${request.reason}'),
+                                  const SizedBox(height: 14),
+                                  Row(children: [
+                                    Expanded(
+                                      child: FilledButton.icon(
+                                        onPressed: _decidingRescheduleRequest ? null : () => _decideRescheduleRequest(request, true),
+                                        icon: const Icon(Icons.check),
+                                        label: const Text('موافق'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: _decidingRescheduleRequest ? null : () => _decideRescheduleRequest(request, false),
+                                        icon: const Icon(Icons.close),
+                                        label: const Text('احتفظ بالموعد'),
+                                      ),
+                                    ),
+                                  ]),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
                       ],
                       if (order.technicianId != null &&
                           (order.orderStatus == 'technician_assigned' || order.orderStatus == 'accepted')) ...[
