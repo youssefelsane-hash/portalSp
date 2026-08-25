@@ -29,7 +29,8 @@ import { CrewRole, OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
-import { CUSTOMER_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
+import { CatalogService } from '../catalog/catalog.service';
+import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -47,6 +48,7 @@ export class TechnicianOrderExecutionController {
     private readonly customerProfilesService: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly paymentsService: PaymentsService,
+    private readonly catalogService: CatalogService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -55,15 +57,19 @@ export class TechnicianOrderExecutionController {
   // فالعنوان بتاعه مضمون الوصول ليه. بيتنادى بعد كل فعل تنفيذي عشان زرار "افتح الملاحة" في
   // apps/technician-app يفضل شغال طول دورة التنفيذ، مش بس أول تحميل للشاشة.
   private async toDto(order: Order) {
-    const [address, money, customerContact] = await Promise.all([
+    // بيانات العميل/الخدمة (docs/08 §56 بند 3) — بلاغ مالك: شاشة الفني كانت بتعرض أزرار التنفيذ
+    // بلا اسم العميل ولا تليفونه ولا اسم الخدمة، فالفني مش عارف رايح لمين ولا يعمل إيه. بيانات
+    // التواصل بتظهر بس بعد تأكيد حجز حقيقي — نفس TECHNICIAN_CONTACT_VISIBLE_STATUSES بالظبط
+    // اللي العميل بيشوف بيها الفني، مرآة كاملة. مفيش استعلام أصلاً قبل الحالة دي.
+    const contactVisible = TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
+    const [address, money, customerContact, serviceNameAr] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
       this.paymentsService.getCollectionBreakdownForOrder(order),
-      CUSTOMER_CONTACT_VISIBLE_STATUSES.has(order.orderStatus)
-        ? this.customerProfilesService.findContactInfoByProfileIdOrThrow(order.customerId)
-        : null,
+      contactVisible ? this.customerProfilesService.findContactInfoOrThrow(order.customerId) : Promise.resolve(null),
+      this.catalogService.findServiceOrThrow(order.serviceId).then((service) => service.nameAr),
     ]);
     return {
-      ...toOrderResponseDto(order, address, null, customerContact),
+      ...toOrderResponseDto(order, address, null, { customerContact, serviceNameAr }),
       paid_amount_cents: money.paidAmountCents,
       direct_paid_amount_cents: money.directPaidAmountCents,
       financed_order_amount_cents: money.financedOrderAmountCents,

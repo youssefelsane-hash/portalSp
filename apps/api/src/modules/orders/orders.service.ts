@@ -1310,7 +1310,7 @@ export class OrdersService {
 
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
-    return this.rescheduleCore(order, dto.new_slot_id, {
+    return this.rescheduleCore(order, { newSlotId: dto.new_slot_id, newScheduledAt: dto.new_scheduled_at }, {
       userId,
       role: 'customer',
       changeSource: OrderChangeSource.CUSTOMER,
@@ -1541,13 +1541,19 @@ export class OrdersService {
    * نفس آلية الحجز الذرّي بالحرف (rescheduleCore المشتركة)، الفرق بس هوية المنفّذ + سبب إلزامي
    * للتدقيق (مش مطلوب من العميل نفسه لما بيعيد جدولة طلبه هو).
    */
-  async rescheduleByAdmin(adminUserId: string, orderId: string, newSlotId: string, reason: string, meta?: AuditActorMeta): Promise<Order> {
+  async rescheduleByAdmin(
+    adminUserId: string,
+    orderId: string,
+    target: { newSlotId?: string; newScheduledAt?: string },
+    reason: string,
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
     const order = await this.orders.findOne({ where: { id: orderId } });
     if (!order) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
     }
     const previousScheduledAt = order.scheduledAt;
-    const updated = await this.rescheduleCore(order, newSlotId, {
+    const updated = await this.rescheduleCore(order, target, {
       userId: adminUserId,
       role: 'admin',
       changeSource: OrderChangeSource.ADMIN,
@@ -1566,25 +1572,165 @@ export class OrdersService {
     return updated;
   }
 
+  /** ADR-0034 — نفس منطق حل المنطقة اللي `create()` بتستخدمه بالحرف (point-in-polygon حقيقي). */
+  private async resolveZoneForOrderOrThrow(order: Order): Promise<{ id: string }> {
+    const address = await this.addressesService.findByIdOrThrow(order.addressId);
+    if (!address.cityId) {
+      throw new ApiException(ErrorCode.ORDR_001, 'العنوان مش مربوط بمدينة', HttpStatus.BAD_REQUEST);
+    }
+    const [longitude, latitude] = address.location.coordinates;
+    const zone = await this.geoService.findZoneForPoint(address.cityId, latitude, longitude);
+    if (!zone) {
+      throw new ApiException(ErrorCode.ORDR_001, 'الخدمة غير متاحة في منطقة الطلب ده', HttpStatus.BAD_REQUEST);
+    }
+    return zone;
+  }
+
+  /**
+   * ADR-0034 بند 3 — الأيام الجاية وحالة إتاحة الفني المعيّن في كل يوم. بيحل محل قايمة السلوتات
+   * القديمة في لوحة إعادة الجدولة بالأدمن، اللي كانت بترجع فاضية دايمًا بعد ADR-0017 (النموذج
+   * بقى opt-out: غياب صف = متاح، فمفيش صفوف `available` أصلاً تتعرض).
+   */
+  async listRescheduleOptions(orderId: string, days = 14): Promise<{ date: string; available: boolean }[]> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+    if (!order.technicianId) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مفيهوش فني معيّن لسه', HttpStatus.CONFLICT);
+    }
+    const zone = await this.resolveZoneForOrderOrThrow(order);
+    const technicianId = order.technicianId;
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const options: { date: string; available: boolean }[] = [];
+    for (let offset = 0; offset < days; offset += 1) {
+      const day = new Date(startOfToday.getTime() + offset * 24 * 60 * 60 * 1000);
+      // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: نفس نمط findNextAvailableDateForTechnician() بالحرف، استعلام رخيص محدود بـdays.
+      const available = await this.techniciansService.hasEligibleTechnicianForDate(
+        order.serviceId,
+        zone.id,
+        order.addressId,
+        day,
+        technicianId,
+        orderId,
+      );
+      options.push({ date: day.toISOString().slice(0, 10), available });
+    }
+    return options;
+  }
+
+  /**
+   * ADR-0034 — مسارين لتحديد الموعد الجديد: `newScheduledAt` (يوم، الافتراضي دلوقتي) أو
+   * `newSlotId` (سلوت صريح من جدول الفني، المسار القديم اللي ADR-0017 بند 1 أبقى عليه للعميل
+   * اللي بيختار سلوت بعينه). بالظبط واحد منهم. كل اللي بعد تحديد `newScheduledAt` مشترك بالحرف
+   * بين المسارين (القفل التشاؤمي، سجل التاريخ، الحدث) — مفيش دالة موازية.
+   */
   private async rescheduleCore(
     order: Order,
-    newSlotId: string,
+    target: { newSlotId?: string; newScheduledAt?: string },
     actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
   ): Promise<Order> {
     const orderId = order.id;
+    if ((target.newSlotId == null) === (target.newScheduledAt == null)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'لازم تبعت الموعد الجديد (new_scheduled_at) أو سلوت محدد (new_slot_id) — واحد بس مش الاتنين',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     this.assertReschedulable(order);
 
-    const moved = await this.dataSource.transaction(async (manager) => {
+    let newSlot: TechnicianScheduleSlot | null = null;
+    let newScheduledAt: Date;
+    let zone: { id: string } | null = null;
+
+    if (target.newSlotId != null) {
+      const currentSlot = await this.scheduleService.findSlotForOrder(orderId);
+      if (!currentSlot) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش مرتبط بموعد محدد أصلاً', HttpStatus.CONFLICT);
+      }
+      newSlot = await this.scheduleService.findAvailableSlotOrThrow(target.newSlotId);
+      if (newSlot.technicianId !== order.technicianId) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'السلوت الجديد لازم يكون لنفس الفني المعيّن على الطلب — تغيير الفني نفسه مسار مختلف',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      newScheduledAt = this.slotStart(newSlot);
+    } else {
+      newScheduledAt = new Date(target.newScheduledAt as string);
+      if (Number.isNaN(newScheduledAt.getTime())) {
+        throw new ApiException(ErrorCode.VAL_001, 'الموعد الجديد مش تاريخ صالح', HttpStatus.BAD_REQUEST);
+      }
+      zone = await this.resolveZoneForOrderOrThrow(order);
+    }
+
+    const previousScheduledAt = order.scheduledAt;
+    await this.dataSource.transaction(async (manager) => {
+      // كل مسارات إعادة الجدولة تمسك قفل الطلب أولاً ثم السلوت، لمنع deadlock مع موافقة
+      // العميل على اقتراح الفني التي تستخدم نفس الترتيب.
       const fresh = await manager
         .createQueryBuilder(Order, 'o')
         .setLock('pessimistic_write')
         .where('o.id = :orderId', { orderId })
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-      return this.rescheduleLockedOrder(manager, fresh, newSlotId, actor);
-    });
-    order.scheduledAt = moved.newScheduledAt;
+      this.assertReschedulable(fresh);
 
+      if (newSlot) {
+        const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
+        if (!booked) {
+          throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
+        }
+      } else {
+        const free = await this.techniciansService.hasEligibleTechnicianForDate(
+          fresh.serviceId,
+          zone!.id,
+          fresh.addressId,
+          newScheduledAt,
+          fresh.technicianId!,
+          orderId,
+        );
+        if (!free) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'الفني مش متاح في اليوم ده (إجازة محددة منه، أو عنده شغل تاني بيتعارض) — اختار يوم تاني',
+            HttpStatus.CONFLICT,
+          );
+        }
+        await manager
+          .createQueryBuilder()
+          .update(TechnicianScheduleSlot)
+          .set({ status: TechnicianScheduleSlotStatus.AVAILABLE, orderId: null })
+          .where('order_id = :orderId', { orderId })
+          .execute();
+      }
+
+      fresh.scheduledAt = newScheduledAt;
+      await manager.save(fresh);
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId,
+          previousStatus: fresh.orderStatus,
+          newStatus: fresh.orderStatus,
+          changedByUserId: actor.userId,
+          changedByRole: actor.role,
+          changeSource: actor.changeSource,
+          reason: `إعادة جدولة — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} لـ ${newScheduledAt.toISOString()}${actor.reasonSuffix ?? ''}`,
+        }),
+      );
+      await manager.query(
+        `UPDATE order_reschedule_requests
+         SET status = 'cancelled', resolved_at = now(), updated_at = now()
+         WHERE order_id = $1 AND status = 'pending'`,
+        [orderId],
+      );
+    });
+
+    order.scheduledAt = newScheduledAt;
     this.events.emit(
       ORDER_RESCHEDULED_EVENT,
       new OrderRescheduledEvent(
@@ -1592,12 +1738,11 @@ export class OrdersService {
         order.orderNumber,
         order.technicianId!,
         order.customerId,
-        moved.previousScheduledAt,
-        moved.newScheduledAt,
+        previousScheduledAt,
+        newScheduledAt,
         actor.role === 'admin' ? 'admin' : 'customer',
       ),
     );
-
     return order;
   }
 
@@ -1661,7 +1806,6 @@ export class OrdersService {
     if (!booked) {
       throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
     }
-
     order.scheduledAt = newScheduledAt;
     await manager.save(order);
     await manager.save(

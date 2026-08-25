@@ -44,6 +44,12 @@ interface ScheduleSlot {
   end_time: string;
   is_available: boolean;
 }
+
+// GET /admin/orders/:id/reschedule-options (ADR-0034) — يوم + هل الفني المعيّن متاح فيه فعلاً.
+interface RescheduleOptionDto {
+  date: string;
+  available: boolean;
+}
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -140,8 +146,10 @@ export default function OrderDetailPage() {
   // outcome='reschedule' بتاع resolve-failed-visit)، ده لأي طلب reschedulable بغض النظر عن أي
   // زيارة فاشلة. state منفصل عمدًا عشان الفورمين يفضلوا مستقلين (سياقين مختلفين تمامًا).
   const [showAdminRescheduleForm, setShowAdminRescheduleForm] = useState(false);
-  const [adminRescheduleSlots, setAdminRescheduleSlots] = useState<ScheduleSlot[] | null>(null);
-  const [adminRescheduleSlotId, setAdminRescheduleSlotId] = useState('');
+  // ADR-0034 — أيام حقيقية من محرك التوافر الموحّد، مش صفوف سلوت. القايمة القديمة كانت بترجع
+  // فاضية دايمًا بعد ما النموذج اتقلب لـopt-out (ADR-0017): غياب الصف = متاح، فمفيش صفوف تتعرض.
+  const [adminRescheduleOptions, setAdminRescheduleOptions] = useState<RescheduleOptionDto[] | null>(null);
+  const [adminRescheduleDate, setAdminRescheduleDate] = useState('');
   const [adminRescheduleReason, setAdminRescheduleReason] = useState('');
   // مفتّش المطابقة (docs/08 §36.5) — واجهة فوق MatchingExplainabilityService الموجود بالفعل
   // (§35.7/§35.8)، صفر خوارزمية تشخيصية موازية. funnelError متوقّع/هادئ لطلبات بلا service_zone_id
@@ -585,35 +593,36 @@ export default function OrderDetailPage() {
   // عضو طاقم عادي (اعتماد/فريق) بعكس المساعد (member_type='assistant', مساره منفصل فوق).
   const crewMembers = teamMembers.filter((m) => m.member_type !== 'assistant');
 
-  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42) — نفس endpoint جدول الفني المستخدم في
-  // فورم resolve-failed-visit فوق (GET /technicians/:id/schedule)، بس مسار تنفيذ مختلف كليًا
-  // (POST /admin/orders/:id/reschedule بدل resolve-failed-visit).
+  // إعادة جدولة عامة من الأدمن (Script 4 Part K §42، ADR-0034) — الأيام المتاحة بتتحسب في
+  // الباك-إند بنفس محرك التوافر الموحّد اللي المطابقة بتستخدمه (technicianAvailabilityCondition)،
+  // مش من صفوف سلوت. اليوم غير المتاح بيتعرض معطّل بسببه، مش بيختفي بلا تفسير.
   async function handleOpenAdminRescheduleForm() {
     setShowAdminRescheduleForm((s) => !s);
-    if (adminRescheduleSlots !== null || !order?.technician_id) return;
+    if (adminRescheduleOptions !== null || !order?.technician_id) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const to = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const slots = await authedFetch<ScheduleSlot[]>(`/technicians/${order.technician_id}/schedule?from=${today}&to=${to}`);
-      setAdminRescheduleSlots(slots.filter((s) => s.is_available));
+      const options = await authedFetch<RescheduleOptionDto[]>(`/admin/orders/${id}/reschedule-options`);
+      setAdminRescheduleOptions(options);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل جدول الفني');
+      setError(err instanceof ApiError ? err.message : 'تعذّر تحميل مواعيد الفني المتاحة');
     }
   }
 
   async function handleAdminReschedule(e: FormEvent) {
     e.preventDefault();
-    if (!adminRescheduleSlotId || adminRescheduleReason.trim().length < 5) return;
+    if (!adminRescheduleDate || adminRescheduleReason.trim().length < 5) return;
     setIsSaving(true);
     setError(null);
     try {
       await authedFetch(`/admin/orders/${id}/reschedule`, {
         method: 'POST',
-        body: JSON.stringify({ new_slot_id: adminRescheduleSlotId, reason: adminRescheduleReason }),
+        body: JSON.stringify({
+          new_scheduled_at: new Date(`${adminRescheduleDate}T00:00:00Z`).toISOString(),
+          reason: adminRescheduleReason,
+        }),
       });
       setShowAdminRescheduleForm(false);
-      setAdminRescheduleSlots(null);
-      setAdminRescheduleSlotId('');
+      setAdminRescheduleOptions(null);
+      setAdminRescheduleDate('');
       setAdminRescheduleReason('');
       load();
     } catch (err) {
@@ -1017,27 +1026,34 @@ export default function OrderDetailPage() {
               </Button>
               {showAdminRescheduleForm && (
                 <form onSubmit={handleAdminReschedule} className="flex flex-col gap-2">
-                  <Label htmlFor="admin_reschedule_slot">الموعد الجديد</Label>
-                  {adminRescheduleSlots === null && <p className="text-xs text-muted-foreground">جاري تحميل جدول الفني…</p>}
-                  {adminRescheduleSlots !== null && adminRescheduleSlots.length === 0 && (
-                    <p className="text-xs text-muted-foreground">مفيش مواعيد متاحة للفني ده حاليًا</p>
+                  <Label htmlFor="admin_reschedule_date">اليوم الجديد</Label>
+                  {adminRescheduleOptions === null && (
+                    <p className="text-xs text-muted-foreground">جاري تحميل أيام الفني المتاحة…</p>
                   )}
-                  {adminRescheduleSlots !== null && adminRescheduleSlots.length > 0 && (
-                    <SelectNative
-                      id="admin_reschedule_slot"
-                      value={adminRescheduleSlotId}
-                      onChange={(e) => setAdminRescheduleSlotId(e.target.value)}
-                      required
-                    >
-                      <option value="" disabled>
-                        اختار موعد
-                      </option>
-                      {adminRescheduleSlots.map((slot) => (
-                        <option key={slot.id} value={slot.id}>
-                          {slot.slot_date} — {slot.start_time.slice(0, 5)} إلى {slot.end_time.slice(0, 5)}
+                  {adminRescheduleOptions !== null && (
+                    <>
+                      <SelectNative
+                        id="admin_reschedule_date"
+                        value={adminRescheduleDate}
+                        onChange={(e) => setAdminRescheduleDate(e.target.value)}
+                        required
+                      >
+                        <option value="" disabled>
+                          اختار يوم
                         </option>
-                      ))}
-                    </SelectNative>
+                        {adminRescheduleOptions.map((option) => (
+                          <option key={option.date} value={option.date} disabled={!option.available}>
+                            {option.date}
+                            {option.available ? '' : ' — الفني مشغول/مش متاح'}
+                          </option>
+                        ))}
+                      </SelectNative>
+                      {adminRescheduleOptions.every((option) => !option.available) && (
+                        <p className="text-xs text-muted-foreground">
+                          الفني ده مشغول في كل الأيام الجاية — جرّب استبدال الفني بدل إعادة الجدولة
+                        </p>
+                      )}
+                    </>
                   )}
                   <Label htmlFor="admin_reschedule_reason">سبب إعادة الجدولة</Label>
                   <Input
@@ -1051,7 +1067,7 @@ export default function OrderDetailPage() {
                   <Button
                     type="submit"
                     size="sm"
-                    disabled={isSaving || !adminRescheduleSlotId || adminRescheduleReason.trim().length < 5}
+                    disabled={isSaving || !adminRescheduleDate || adminRescheduleReason.trim().length < 5}
                   >
                     تأكيد إعادة الجدولة
                   </Button>
