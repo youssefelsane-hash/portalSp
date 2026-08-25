@@ -32,7 +32,12 @@ import { MatchingService } from './matching.service';
 // → منطقة → موقع → اعتماد) بجنب فني "fixture" (INSERT خام، بالظبط زي كل specs المشروع التانية)،
 // ومقارنة سلوك المطابقة لثلاث طلبات "تسليك مواسير" نفس اليوم بينهم بالحرف. هدف الاختبار: يثبت/ينفي
 // إن مسار إنشاء الحساب نفسه بيأثر على المطابقة، مش يخمّن من قراءة الكود بس (طلب صريح من المالك).
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
+const settingsServiceStub = {
+  getNumber: async (_key: string, fallback: number) => fallback,
+  getBoolean: async (_key: string, fallback: boolean) => fallback,
+  // ADR-0035 — كادينس موجات الشغل القريب بتتقري كنص، فالـstub لازم يغطّي getString كمان.
+  getString: async (_key: string, fallback: string) => fallback,
+} as unknown as SettingsService;
 
 const config = {
   get: (key: string) => {
@@ -92,6 +97,11 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     return String(call[0]).split('→ ').at(-1)!.trim();
   }
 
+  // ADR-0035 (2026-08-25): الطلبات هنا اتنقلت من 2/4/6 ساعة لـ50/52/54 ساعة (نفس اليوم برضه،
+  // بعد يومين) **عن قصد**. غرض الملف ده هو **تكافؤ** الفني المسجَّل من الموبايل مع الـfixture،
+  // والوسيلة هي تسلسل AUTO ثم فرص شغل إضافي — وده تسلسل الشغل **البعيد**. بعد ADR-0035 أي شغل
+  // خلال 48 ساعة بياخد مسار طلب/قبول بدل AUTO، فلو سبنا 2/4/6 ساعة كان الاختبار هيقيس حاجة
+  // تانية خالص مش التكافؤ. حالة الشغل القريب نفسها مغطّاة في matching.service.spec.ts.
   async function insertOrder(label: string, zoneId: string, hoursFromNow: number, totalAmountCents = 30000) {
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, booking_mode, total_amount_cents, technician_earning_cents, scheduled_at)
@@ -362,13 +372,13 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
   }, 20000);
 
   it('الفني fixture: 3 طلبات نفس اليوم — أول واحد AUTO، والباقي OPT REQ متسقين', async () => {
-    const order1 = await insertOrder('fixture-1', ids.zoneFixture, 2);
+    const order1 = await insertOrder('fixture-1', ids.zoneFixture, 50);
     await matchingService.dispatchOrAutoConfirm(order1);
     const [row1] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [order1]);
     expect(row1.order_status).toBe(OrderStatus.ACCEPTED);
     expect(row1.technician_id).toBe(ids.fixtureProfileId);
 
-    const order2 = await insertOrder('fixture-2', ids.zoneFixture, 4);
+    const order2 = await insertOrder('fixture-2', ids.zoneFixture, 52);
     await matchingService.dispatchOrAutoConfirm(order2);
     const [row2] = await q(`SELECT order_status FROM orders WHERE id = $1`, [order2]);
     expect(row2.order_status).toBe(OrderStatus.SEARCHING_TECHNICIAN);
@@ -378,7 +388,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     );
     expect(opp2).toMatchObject({ status: 'offered', context: 'assignment' });
 
-    const order3 = await insertOrder('fixture-3', ids.zoneFixture, 6);
+    const order3 = await insertOrder('fixture-3', ids.zoneFixture, 54);
     await matchingService.dispatchOrAutoConfirm(order3);
     const [opp3] = await q(
       `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
@@ -394,13 +404,13 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
   });
 
   it('الفني الحقيقي (تسجيل موبايل → تحقق → اعتماد): نفس السلوك بالحرف — أول واحد AUTO، والباقي OPT REQ', async () => {
-    const order1 = await insertOrder('real-1', ids.zoneReal, 2);
+    const order1 = await insertOrder('real-1', ids.zoneReal, 50);
     await matchingService.dispatchOrAutoConfirm(order1);
     const [row1] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [order1]);
     expect(row1.order_status).toBe(OrderStatus.ACCEPTED);
     expect(row1.technician_id).toBe(realTechnicianProfileId);
 
-    const order2 = await insertOrder('real-2', ids.zoneReal, 4);
+    const order2 = await insertOrder('real-2', ids.zoneReal, 52);
     await matchingService.dispatchOrAutoConfirm(order2);
     const [row2] = await q(`SELECT order_status FROM orders WHERE id = $1`, [order2]);
     expect(row2.order_status).toBe(OrderStatus.SEARCHING_TECHNICIAN);
@@ -410,7 +420,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     );
     expect(opp2).toMatchObject({ status: 'offered', context: 'assignment' });
 
-    const order3 = await insertOrder('real-3', ids.zoneReal, 6);
+    const order3 = await insertOrder('real-3', ids.zoneReal, 54);
     await matchingService.dispatchOrAutoConfirm(order3);
     const [opp3] = await q(
       `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
@@ -429,7 +439,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     const decisionLimit = Number(levelConfig?.decision_limit_cents);
     expect(decisionLimit).toBeGreaterThan(1);
 
-    const order1 = await insertOrder('newlevel-1', ids.zoneNew, 2, decisionLimit + 1);
+    const order1 = await insertOrder('newlevel-1', ids.zoneNew, 50, decisionLimit + 1);
     const dispatchResult = await matchingService.dispatchOrAutoConfirm(order1);
     expect(dispatchResult.dispatched).toBe(0);
 
@@ -451,7 +461,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     // الاستبعاد سعري بحت مربوط بقيمة الطلب الفعلية (order.total_amount_cents)، مش استبعاد عام
     // لمستوى NEW من المطابقة كلها. طلب على نفس الخدمة الحقيقية بس بسعر إجمالي مختلف (formula/
     // خصم واقعي)، مش خدمة تانية مصطنعة.
-    const cheapOrderId = await insertOrder('newlevel-cheap', ids.zoneNew, 2, decisionLimit - 1);
+    const cheapOrderId = await insertOrder('newlevel-cheap', ids.zoneNew, 50, decisionLimit - 1);
     await matchingService.dispatchOrAutoConfirm(cheapOrderId);
     const [cheapRow] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [cheapOrderId]);
     expect(cheapRow.order_status).toBe(OrderStatus.ACCEPTED);

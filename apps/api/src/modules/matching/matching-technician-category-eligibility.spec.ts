@@ -46,8 +46,8 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
       dataSource.getRepository(Order),
       dataSource,
       {} as never,
-      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
-      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never,
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never),
+      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never,
       { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
@@ -109,7 +109,12 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
 
     const makeTechnician = async (label: string) => {
       const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
-        `+2015${label}${runId}`.slice(0, 14),
+        // العمود بيسمح بـ15 حرف. الصيغة القديمة (`+2015${label}${runId}`.slice(0,14)) كان
+        // الليبل الطويل فيها (`BYCAT`/`BYSVC`/`NEITHER`) بياكل المساحة فما يفضلش من runId غير
+        // 3-4 حروف hex — ومع صفوف متسربة من تشغيلات فشلت في النص، تصادم users_phone_number_key
+        // بقى بيحصل فعلاً (اتلقط حي 2026-08-25: 118 صف متسرب اتنضّفوا). دلوقتي: حرف واحد بس
+        // للتمييز جوّه التشغيلة + كل الـ12 حرف بتوع runId (الاسم الكامل لسه فيه الليبل للتشخيص).
+        `+201${label[2] ?? label[0]}${runId}`.slice(0, 15),
         `فني اختبار ${label} ${runId}`,
       ]);
       const [profile] = await q(

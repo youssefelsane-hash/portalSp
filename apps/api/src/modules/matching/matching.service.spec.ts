@@ -57,7 +57,12 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
       dataSource,
       {} as never,
       new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
-      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never,
+      {
+        getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+        // ADR-0035 — nearTermRoundTimeoutSeconds() بتقرا قايمة الكادينس كنص، فالـstub لازم
+        // يغطّي getString كمان مش getNumber بس (وإلا بترمي TypeError جوّه الترانزاكشن).
+        getString: jest.fn(async (_key: string, fallback: string) => fallback),
+      } as never,
       { emit: jest.fn() } as never,
       { add: queueAdd } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
@@ -355,6 +360,54 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
     await dataSource.query(`DELETE FROM orders WHERE id = $1`, [scheduledOrder.id]);
   });
 
+  // ADR-0035 (طلب مالك صريح 2026-08-25، docs/08 §56 بند 5) — انقسام 48 ساعة. بيراجع الاختبار
+  // اللي فوق جزئيًا: "مجدول بعد 3 أيام = تأكيد مباشر" **لسه صح** (3 أيام > 48 ساعة)، لكن
+  // "أي طلب مش طوارئ بيتأكّد تلقائيًا مهما كان قرب الموعد" مابقاش صح — شغل خلال 48 ساعة بقى
+  // بياخد دورة طلب/قبول زي الطوارئ، عشان الفني ما يتفاجأش بشغل بكرة اتعيّنله وهو مش عارف.
+  it('dispatchOrAutoConfirm: مجدول خلال 48 ساعة = دورة طلب/قبول (sent)، وبعد 5 أيام = تأكيد تلقائي (ADR-0035)', async () => {
+    const inOneDay = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const [nearOrder] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+       RETURNING id`,
+      [`NEAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, inOneDay],
+    );
+    await matchingService.dispatchOrAutoConfirm(nearOrder.id);
+    const [nearUpdated] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [nearOrder.id]);
+    // لسه بيدوّر — مستني رد الفني، مش اتأكّد تلقائيًا.
+    expect(nearUpdated.order_status).toBe('searching_technician');
+    const nearAssignments = await dataSource.query(
+      `SELECT assignment_status, assignment_round, expires_at, sent_at FROM order_assignments WHERE order_id = $1`,
+      [nearOrder.id],
+    );
+    expect(nearAssignments.length).toBeGreaterThan(0);
+    expect(nearAssignments.every((a: { assignment_status: string }) => a.assignment_status === 'sent')).toBe(true);
+    // كادينس الموجة الأولى = 5 دقايق (matching.near_term_round_timeouts_minutes = "5,15,30")،
+    // مش مهلة الطوارئ القصيرة (20 ثانية) ولا الافتراضي القديم (30 ثانية).
+    const firstRound = nearAssignments[0] as { expires_at: string; sent_at: string };
+    const windowMinutes = (new Date(firstRound.expires_at).getTime() - new Date(firstRound.sent_at).getTime()) / 60000;
+    expect(Math.round(windowMinutes)).toBe(5);
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [nearOrder.id]);
+    await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [nearOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [nearOrder.id]);
+
+    const inFiveDays = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const [farOrder] = await dataSource.query(
+      `INSERT INTO orders
+         (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, placed_at)
+       VALUES ($1, $2, $3, $4, $5, 'searching_technician', 10000, $6, now())
+       RETURNING id`,
+      [`FAR-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone, inFiveDays],
+    );
+    await matchingService.dispatchOrAutoConfirm(farOrder.id);
+    const [farUpdated] = await dataSource.query(`SELECT order_status FROM orders WHERE id = $1`, [farOrder.id]);
+    expect(farUpdated.order_status).toBe('accepted');
+    await dataSource.query(`DELETE FROM order_assignments WHERE order_id = $1`, [farOrder.id]);
+    await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [farOrder.id]);
+    await dataSource.query(`DELETE FROM orders WHERE id = $1`, [farOrder.id]);
+  });
+
   // ADR-0018 §9 (طلب صريح من المالك 2026-08-19) — طلب طوارئ "إضافي" مش شاغل يوم كامل: فني عنده
   // طلب accepted (مقبول بس لسه ما بداش يتحرّك ليه) لازم يفضل مؤهّل لطوارئ جديدة، بس فني منشغل
   // جسديًا فعليًا (technician_on_way/arrived/in_progress) لازم يتستبعد. الاختبار بيثبت الاتنين
@@ -440,6 +493,7 @@ describe('MatchingService — استبعاد طلب soft-deleted من فحص "ا
   it('Fallback: طلب ASAP بيوصل لفني مشغول (ids.blockingOrder نشط) بعد ما يعدّي عتبة التوسيع', async () => {
     const broadenSettingsService = {
       getNumber: jest.fn(async (key: string, fallback: number) => (key === 'matching.broaden_to_busy_after_round' ? 1 : fallback)),
+      getString: jest.fn(async (_key: string, fallback: string) => fallback),
     };
     const broadenQueueAdd = jest.fn().mockResolvedValue(undefined);
     const broadenMatchingService = new MatchingService(

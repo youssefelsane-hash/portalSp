@@ -95,7 +95,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
       {} as never,
       {} as never, // settingsService
     );
-    const assignmentGuard = new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never);
+    const assignmentGuard = new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never);
 
     events = new EventEmitter2();
     events.on(ORDER_OFFER_CREATED_EVENT, () => {
