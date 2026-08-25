@@ -18,7 +18,15 @@ describe('ChatService — حدث رسالة دعم جديدة (docs/08 §24)', (
   let service: ChatService;
   let emitSpy: jest.Mock;
   const runId = Date.now().toString(36);
-  const ids = { customerUser: '', adminUser: '', customerProfile: '', supportThread: '', orderThread: '' };
+  const ids = {
+    customerUser: '',
+    adminUser: '',
+    technicianUser: '',
+    customerProfile: '',
+    technicianProfile: '',
+    supportThread: '',
+    orderThread: '',
+  };
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -39,8 +47,19 @@ describe('ChatService — حدث رسالة دعم جديدة (docs/08 §24)', (
       `أدمن اختبار شات ${runId}`,
     ]);
     ids.adminUser = adminUser.id;
+    const [technicianUser] = await q(
+      `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`,
+      [`+2013${runId}`.slice(0, 15), `فني اختبار شات ${runId}`],
+    );
+    ids.technicianUser = technicianUser.id;
     const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [ids.customerUser]);
     ids.customerProfile = customerProfile.id;
+    const [technicianProfile] = await q(
+      `INSERT INTO technician_profiles (user_id, technician_code, years_of_experience, current_level)
+       VALUES ($1,$2,2,'new') RETURNING id`,
+      [ids.technicianUser, `TCCHAT${runId}`.slice(0, 20)],
+    );
+    ids.technicianProfile = technicianProfile.id;
 
     const [supportThread] = await q(
       `INSERT INTO chat_threads (thread_type, customer_id) VALUES ('support_chat', $1) RETURNING id`,
@@ -48,8 +67,8 @@ describe('ChatService — حدث رسالة دعم جديدة (docs/08 §24)', (
     );
     ids.supportThread = supportThread.id;
     const [orderThread] = await q(
-      `INSERT INTO chat_threads (thread_type, customer_id) VALUES ('order_chat', $1) RETURNING id`,
-      [ids.customerProfile],
+      `INSERT INTO chat_threads (thread_type, customer_id, technician_id) VALUES ('order_chat', $1, $2) RETURNING id`,
+      [ids.customerProfile, ids.technicianProfile],
     );
     ids.orderThread = orderThread.id;
 
@@ -69,10 +88,12 @@ describe('ChatService — حدث رسالة دعم جديدة (docs/08 §24)', (
 
   afterAll(async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM notifications WHERE reference_type = 'chat_thread' AND reference_id IN ($1,$2)`, [ids.supportThread, ids.orderThread]);
     await q(`DELETE FROM chat_messages WHERE thread_id IN ($1,$2)`, [ids.supportThread, ids.orderThread]);
     await q(`DELETE FROM chat_threads WHERE id IN ($1,$2)`, [ids.supportThread, ids.orderThread]);
+    await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technicianProfile]);
     await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
-    await q(`DELETE FROM users WHERE id IN ($1,$2)`, [ids.customerUser, ids.adminUser]);
+    await q(`DELETE FROM users WHERE id IN ($1,$2,$3)`, [ids.customerUser, ids.adminUser, ids.technicianUser]);
     await dataSource.destroy();
   });
 
@@ -87,11 +108,34 @@ describe('ChatService — حدث رسالة دعم جديدة (docs/08 §24)', (
     emitSpy.mockClear();
     await service.sendMessage(ids.adminUser, ids.supportThread, { content: 'أهلاً، اتفضل قوللي المشكلة' });
     expect(emitSpy).not.toHaveBeenCalled();
+    const notifications = await dataSource.query(
+      `SELECT user_id, notification_type FROM notifications
+       WHERE reference_id = $1 AND notification_type = 'support_chat_reply_received'`,
+      [ids.supportThread],
+    );
+    expect(notifications).toContainEqual({ user_id: ids.customerUser, notification_type: 'support_chat_reply_received' });
   });
 
-  it('رسالة العميل في خيط order_chat (مش دعم عام) — الحدث ماينفجرش', async () => {
+  it('رسالة العميل في خيط order_chat تحفظ إشعارًا دائمًا للفني فقط', async () => {
     emitSpy.mockClear();
     await service.sendMessage(ids.customerUser, ids.orderThread, { content: 'إمتى الفني هيوصل؟' });
     expect(emitSpy).not.toHaveBeenCalled();
+    const notifications = await dataSource.query(
+      `SELECT user_id, notification_type FROM notifications
+       WHERE reference_id = $1 AND notification_type = 'order_chat_message_received'`,
+      [ids.orderThread],
+    );
+    expect(notifications).toContainEqual({ user_id: ids.technicianUser, notification_type: 'order_chat_message_received' });
+    expect(notifications).not.toContainEqual(expect.objectContaining({ user_id: ids.customerUser }));
+  });
+
+  it('رد الفني في خيط الطلب يحفظ إشعارًا دائمًا للعميل', async () => {
+    await service.sendMessage(ids.technicianUser, ids.orderThread, { content: 'هوصل خلال عشر دقائق' });
+    const notifications = await dataSource.query(
+      `SELECT user_id, notification_type FROM notifications
+       WHERE reference_id = $1 AND notification_type = 'order_chat_message_received'`,
+      [ids.orderThread],
+    );
+    expect(notifications).toContainEqual({ user_id: ids.customerUser, notification_type: 'order_chat_message_received' });
   });
 });

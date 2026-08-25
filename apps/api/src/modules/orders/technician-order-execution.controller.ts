@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { assertFileSignatureMatches } from '../../common/storage/file-signature-validator';
 import { AddressesService } from '../customers/addresses.service';
+import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { toOrderResponseDto } from './dto/order-response.dto';
@@ -13,6 +14,7 @@ import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
+import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
@@ -27,7 +29,6 @@ import { CrewRole, OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
-import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 
@@ -44,9 +45,9 @@ export class TechnicianOrderExecutionController {
     private readonly orderItemsService: OrderItemsService,
     private readonly orderTeamService: OrderTeamService,
     private readonly addressesService: AddressesService,
+    private readonly customerProfilesService: CustomerProfilesService,
     private readonly techniciansService: TechniciansService,
     private readonly paymentsService: PaymentsService,
-    private readonly customerProfilesService: CustomerProfilesService,
     private readonly catalogService: CatalogService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
@@ -202,6 +203,20 @@ export class TechnicianOrderExecutionController {
   @Get(':id/cancellation-policy')
   async getCancellationPolicy(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.getTechnicianCancellationPolicy(user.sub, id);
+  }
+
+  @Get(':id/reschedule-requests')
+  async listRescheduleRequests(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.listRescheduleRequestsForTechnician(user.sub, id);
+  }
+
+  @Post(':id/reschedule-requests')
+  async requestReschedule(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTechnicianRescheduleRequestDto,
+  ) {
+    return this.ordersService.requestRescheduleByTechnician(user.sub, id, dto);
   }
 
   // كانت فجوة موثّقة صراحة: الفني معندوش أي طريقة يلغي طلب اتقبله بنفسه لو حصل ظرف طارئ —

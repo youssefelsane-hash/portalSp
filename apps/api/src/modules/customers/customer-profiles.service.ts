@@ -40,7 +40,10 @@ export class CustomerProfilesService {
    */
   async findContactInfoOrThrow(profileId: string): Promise<{ name: string; phone: string }> {
     const [row] = await this.dataSource.query<{ full_name: string; phone_number: string }[]>(
-      `SELECT u.full_name, u.phone_number FROM customer_profiles cp JOIN users u ON u.id = cp.user_id WHERE cp.id = $1`,
+      `SELECT u.full_name, u.phone_number
+       FROM customer_profiles cp
+       JOIN users u ON u.id = cp.user_id
+       WHERE cp.id = $1 AND cp.deleted_at IS NULL AND u.deleted_at IS NULL`,
       [profileId],
     );
     if (!row) {

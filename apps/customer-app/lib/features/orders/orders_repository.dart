@@ -228,6 +228,20 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
+  Future<List<OrderRescheduleRequest>> listRescheduleRequests(String orderId) async {
+    final items = await auth.authedRequestList('/orders/$orderId/reschedule-requests');
+    return items.map(OrderRescheduleRequest.fromJson).toList();
+  }
+
+  Future<({OrderRescheduleRequest request, Order order})> decideRescheduleRequest(String orderId, String requestId, bool approve) async {
+    final action = approve ? 'approve' : 'reject';
+    final data = await auth.authedRequest('POST', '/orders/$orderId/reschedule-requests/$requestId/$action');
+    return (
+      request: OrderRescheduleRequest.fromJson(data!['request'] as Map<String, dynamic>),
+      order: Order.fromJson(data['order'] as Map<String, dynamic>),
+    );
+  }
+
   // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده
   // (الفني/الأدمن لسه محتاجين يأكدوا الاستلام الفعلي عبر collectCash/adminConfirmCashReceived).
   Future<Order> confirmCashHandover(String orderId) async {

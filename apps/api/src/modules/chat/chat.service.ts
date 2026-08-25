@@ -4,7 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
 import { safeExtensionForFile } from '../../common/storage/file-signature-validator';
 import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
   SUPPORT_CHAT_MESSAGE_RECEIVED_EVENT,
@@ -250,19 +250,7 @@ export class ChatService {
   async sendMessage(userId: string, threadId: string, dto: SendMessageDto): Promise<ChatMessage> {
     const thread = await this.getThreadForParticipant(userId, threadId);
     this.assertThreadOpen(thread);
-
-    const message = this.messages.create({
-      threadId,
-      senderUserId: userId,
-      messageType: ChatMessageType.TEXT,
-      content: dto.content,
-      isRead: false,
-      isFlagged: containsLikelyContactInfo(dto.content),
-    });
-    await this.messages.save(message);
-
-    thread.lastMessageAt = message.createdAt;
-    await this.threads.save(thread);
+    const message = await this.saveMessageAndNotify(thread, userId, ChatMessageType.TEXT, dto.content, null, dto.content);
 
     await this.emitIfSupportMessageFromCustomer(thread, userId, dto.content);
 
@@ -280,24 +268,97 @@ export class ChatService {
 
     const key = `chat/${threadId}/${randomUUID()}${safeExtensionForFile(file.buffer)}`;
     const message = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
-      const msg = this.messages.create({
-        threadId,
-        senderUserId: userId,
-        messageType: ChatMessageType.IMAGE,
-        content: null,
-        fileUrl,
-        isRead: false,
-        isFlagged: false,
-      });
-      await this.messages.save(msg);
-      return msg;
+      return this.saveMessageAndNotify(thread, userId, ChatMessageType.IMAGE, null, fileUrl, 'صورة جديدة');
     });
-
-    thread.lastMessageAt = message.createdAt;
-    await this.threads.save(thread);
 
     await this.emitIfSupportMessageFromCustomer(thread, userId, '📷 صورة');
 
     return message;
+  }
+
+  private async saveMessageAndNotify(
+    thread: ChatThread,
+    senderUserId: string,
+    messageType: ChatMessageType,
+    content: string | null,
+    fileUrl: string | null,
+    preview: string,
+  ): Promise<ChatMessage> {
+    return this.messages.manager.transaction(async (manager) => {
+      const freshThread = await manager
+        .createQueryBuilder(ChatThread, 'thread')
+        .setLock('pessimistic_write')
+        .where('thread.id = :threadId', { threadId: thread.id })
+        .getOne();
+      if (!freshThread) {
+        throw new ApiException(ErrorCode.VAL_001, 'المحادثة غير موجودة', HttpStatus.NOT_FOUND);
+      }
+      this.assertThreadOpen(freshThread);
+
+      const message = manager.create(ChatMessage, {
+        threadId: thread.id,
+        senderUserId,
+        messageType,
+        content,
+        fileUrl,
+        isRead: false,
+        isFlagged: content ? containsLikelyContactInfo(content) : false,
+      });
+      await manager.save(message);
+      freshThread.lastMessageAt = message.createdAt;
+      await manager.save(freshThread);
+      await this.insertRecipientNotification(manager, freshThread, senderUserId, preview);
+      return message;
+    });
+  }
+
+  private async insertRecipientNotification(
+    manager: EntityManager,
+    thread: ChatThread,
+    senderUserId: string,
+    preview: string,
+  ): Promise<void> {
+    const [participants] = await manager.query<
+      Array<{ customer_user_id: string; technician_user_id: string | null }>
+    >(
+      `SELECT cp.user_id AS customer_user_id, tp.user_id AS technician_user_id
+       FROM chat_threads ct
+       JOIN customer_profiles cp ON cp.id = ct.customer_id
+       LEFT JOIN technician_profiles tp ON tp.id = ct.technician_id
+       WHERE ct.id = $1`,
+      [thread.id],
+    );
+    if (!participants) return;
+
+    let recipientUserId: string | null = null;
+    let deepLink: string | null = null;
+    let titleAr = 'رسالة جديدة';
+    let notificationType = 'chat_message_received';
+    if (thread.threadType === ChatThreadType.ORDER_CHAT) {
+      if (senderUserId === participants.customer_user_id) {
+        recipientUserId = participants.technician_user_id;
+        deepLink = thread.orderId ? `/technician/orders/${thread.orderId}/chat` : null;
+        titleAr = 'رسالة جديدة من العميل';
+      } else if (senderUserId === participants.technician_user_id) {
+        recipientUserId = participants.customer_user_id;
+        deepLink = thread.orderId ? `/orders/${thread.orderId}/chat` : null;
+        titleAr = 'رسالة جديدة من الفني';
+      }
+      notificationType = 'order_chat_message_received';
+    } else if (senderUserId !== participants.customer_user_id) {
+      recipientUserId = participants.customer_user_id;
+      deepLink = '/support-chat';
+      titleAr = 'رد جديد من خدمة العملاء';
+      notificationType = 'support_chat_reply_received';
+    }
+    if (!recipientUserId) return;
+
+    await manager.query(
+      `INSERT INTO notifications
+         (user_id, notification_type, channel, title_ar, body_ar, deep_link,
+          reference_type, reference_id, delivery_status, sent_at)
+       VALUES ($1, $2, 'in_app', $3, $4, $5, 'chat_thread', $6, 'sent', now())`,
+      [recipientUserId, notificationType, titleAr, preview.slice(0, 300), deepLink, thread.id],
+    );
   }
 }

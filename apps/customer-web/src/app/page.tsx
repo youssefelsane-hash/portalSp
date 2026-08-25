@@ -52,6 +52,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeSlide, setActiveSlide] = useState(0);
+  const [heroImages, setHeroImages] = useState<string[]>([]);
   const [heroBackgroundUrl, setHeroBackgroundUrl] = useState<string | null>(null);
   const [trustMessage, setTrustMessage] = useState('');
   const [tips, setTips] = useState<HomepageTipDto[]>([]);
@@ -66,6 +67,8 @@ export default function HomePage() {
     fetchHomepageContent()
       .then((content) => {
         setTrustMessage(content.trust_message);
+        setHeroImages(content.hero_images ?? []);
+        setActiveSlide(0);
         setTips(content.tips);
       })
       .catch(() => {});
@@ -79,14 +82,16 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (heroBackgroundUrl || HERO_SLIDES.length <= 1) return;
+    const slideCount = heroImages.length || (heroBackgroundUrl ? 1 : HERO_SLIDES.length);
+    if (slideCount <= 1) return;
     const timer = setInterval(() => {
-      setActiveSlide((current) => (current + 1) % HERO_SLIDES.length);
+      setActiveSlide((current) => (current + 1) % slideCount);
     }, HERO_SLIDE_DURATION_MS);
     return () => clearInterval(timer);
-  }, [heroBackgroundUrl]);
+  }, [heroBackgroundUrl, heroImages.length]);
 
   const featured = categories?.filter((c) => c.is_featured) ?? [];
+  const effectiveHeroImages = heroImages.length > 0 ? heroImages : heroBackgroundUrl ? [heroBackgroundUrl] : [];
 
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -97,16 +102,22 @@ export default function HomePage() {
     <div>
       <section className="relative isolate overflow-hidden">
         <div aria-hidden className="absolute inset-0">
-          {heroBackgroundUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- رابط ديناميكي من البراندنج (محلي/S3)، مش أصل static معروف وقت البناء
-            <img
-              src={heroBackgroundUrl}
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover"
-              // فشل تحميل الصورة (شبكة، رابط اترفض) بيرجّع للتدرّج الدوّار بدل خلفية فاضية —
-              // نفس فلسفة onError في apps/customer-app's DecorationImage بالحرف.
-              onError={() => setHeroBackgroundUrl(null)}
-            />
+          {effectiveHeroImages.length > 0 ? (
+            effectiveHeroImages.map((url, index) => (
+              // eslint-disable-next-line @next/next/no-img-element -- admin-managed local/S3/CDN URL
+              <img
+                key={url}
+                src={url}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ease-in-out"
+                style={{ opacity: index === activeSlide ? 1 : 0 }}
+                onError={() => {
+                  if (heroImages.length > 0) setHeroImages((current) => current.filter((item) => item !== url));
+                  else setHeroBackgroundUrl(null);
+                  setActiveSlide(0);
+                }}
+              />
+            ))
           ) : (
             HERO_SLIDES.map((slide, i) => (
               <div
@@ -159,6 +170,16 @@ export default function HomePage() {
               </svg>
               {trustMessage}
             </p>
+          )}
+          {effectiveHeroImages.length > 1 && (
+            <div className="mt-5 flex justify-center gap-2" aria-label="صور الواجهة الرئيسية">
+              {effectiveHeroImages.map((url, index) => (
+                <span
+                  key={url}
+                  className={`h-2 rounded-full bg-white transition-all ${index === activeSlide ? 'w-7' : 'w-2 opacity-55'}`}
+                />
+              ))}
+            </div>
           )}
         </div>
       </section>

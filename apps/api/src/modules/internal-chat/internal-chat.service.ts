@@ -169,17 +169,38 @@ export class InternalChatService {
     }
     users.forEach(assertAvailable);
 
-    const message = this.messages.create({
-      threadId,
-      senderUserId: userId,
-      content: dto.content,
-      isRead: false,
+    const sender = users.find((user) => user.id === userId)!;
+    const recipient = users.find((user) => user.id !== userId)!;
+    return this.messages.manager.transaction(async (manager) => {
+      const freshThread = await manager
+        .createQueryBuilder(InternalChatThread, 'thread')
+        .setLock('pessimistic_write')
+        .where('thread.id = :threadId', { threadId })
+        .getOneOrFail();
+      const message = manager.create(InternalMessage, {
+        threadId,
+        senderUserId: userId,
+        content: dto.content,
+        isRead: false,
+      });
+      await manager.save(message);
+      freshThread.lastMessageAt = message.createdAt;
+      await manager.save(freshThread);
+      await manager.query(
+        `INSERT INTO notifications
+           (user_id, notification_type, channel, title_ar, body_ar, deep_link,
+            reference_type, reference_id, delivery_status, sent_at)
+         VALUES ($1, 'internal_chat_message_received', 'in_app', $2, $3, $4,
+                 'internal_chat_thread', $5, 'sent', now())`,
+        [
+          recipient.id,
+          sender.userType === UserType.ADMIN ? 'رسالة جديدة من الإدارة' : 'رسالة جديدة من الفني',
+          dto.content.slice(0, 300),
+          recipient.userType === UserType.TECHNICIAN ? `/technician/internal-chat/${threadId}` : `/internal-chat/${threadId}`,
+          threadId,
+        ],
+      );
+      return message;
     });
-    await this.messages.save(message);
-
-    thread.lastMessageAt = message.createdAt;
-    await this.threads.save(thread);
-
-    return message;
   }
 }

@@ -21,17 +21,22 @@ export class OrderRescheduledNotificationListener {
     try {
       const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianProfileId);
       const newTimeAr = event.newScheduledAt.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+      const technicianRequested = event.source === 'technician_request';
       await this.notificationsService.notifyMultiChannel(
         {
           userId: technician.userId,
           notificationType: 'order_rescheduled',
-          titleAr: 'العميل غيّر ميعاد الطلب',
-          bodyAr: `طلب رقم ${event.orderNumber} اتغيّر ميعاده لـ ${newTimeAr}`,
+          titleAr: technicianRequested ? 'العميل وافق على الموعد المقترح' : 'تم تغيير ميعاد الطلب',
+          bodyAr: technicianRequested
+            ? `العميل وافق على تأجيل طلب رقم ${event.orderNumber} إلى ${newTimeAr}`
+            : `طلب رقم ${event.orderNumber} اتغيّر ميعاده لـ ${newTimeAr}`,
           referenceType: 'order',
           referenceId: event.orderId,
           deepLink: `/technician/orders/${event.orderId}`,
         },
-        [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+        event.durableTechnicianNotificationCreated
+          ? [NotificationChannel.PUSH]
+          : [NotificationChannel.IN_APP, NotificationChannel.PUSH],
       );
     } catch (err) {
       this.logger.error(`فشل إشعار إعادة جدولة الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);

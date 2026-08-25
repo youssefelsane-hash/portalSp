@@ -7,6 +7,7 @@ import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/catalog/home_screen.dart';
+import 'features/notifications/floating_notification_alert.dart';
 
 void main() {
   assertProductionApiConfig();
@@ -27,6 +28,16 @@ class BaytakApp extends StatelessWidget {
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),
+        builder: (context, child) {
+          final auth = context.watch<AuthRepository>();
+          return Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              if (auth.isAuthenticated && !auth.biometricUnlockPending)
+                const PositionedDirectional(end: 16, bottom: 88, child: FloatingNotificationAlert()),
+            ],
+          );
+        },
         home: const _AuthGate(),
       ),
     );

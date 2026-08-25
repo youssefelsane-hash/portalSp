@@ -4,6 +4,7 @@ import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/api_config.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
@@ -69,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ServiceCategory>? _categories;
   String? _error;
   String _trustMessage = '';
+  List<String> _heroImages = [];
   List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
@@ -85,7 +87,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _homepageContentRepository.fetch().then((content) {
       if (mounted) setState(() {
         _trustMessage = content.trustMessage;
+        _heroImages = content.heroImages;
         _tips = content.tips;
+        _activeSlide = 0;
       });
     }).catchError((_) {});
     _supportContactRepository.fetch().then((contact) {
@@ -94,15 +98,18 @@ class _HomeScreenState extends State<HomeScreen> {
     _brandingRepository.fetchPrimaryLogo().then((logo) {
       if (mounted) setState(() => _brandingLogo = logo);
     }).catchError((_) {});
-    // خلفية الـhero (splash) — لو الأدمن رفع صورة حقيقية بتحل محل تدرّجات _heroGradients تمامًا
-    // وبيقف دوران الـslides (مفيش داعي نلف على تدرّجات محلية محدش هيشوفها).
+    // صورة splash القديمة تفضل fallback لو قائمة homepage.hero_images الجديدة فاضية.
     _brandingRepository.fetchHeroBackground().then((asset) {
       if (!mounted || asset == null || asset.isDefault) return;
-      setState(() => _heroBackground = asset);
-      _slideTimer?.cancel();
+      setState(() {
+        _heroBackground = asset;
+        _activeSlide = 0;
+      });
     }).catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (mounted) setState(() => _activeSlide = (_activeSlide + 1) % _heroGradients.length);
+      if (!mounted) return;
+      final count = _heroImages.isNotEmpty ? _heroImages.length : (_heroBackground == null ? _heroGradients.length : 1);
+      if (count > 1) setState(() => _activeSlide = (_activeSlide + 1) % count);
     });
   }
 
@@ -301,7 +308,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // متدرّجة دوّارة فيها التاجلاين + البحث، ورسالة الثقة/الضمان تحتها مباشرة فوق الصورة نفسها
   // (بلا صندوق عمدًا) — مطابق تمامًا لهيكل apps/customer-web's hero.
   Widget _buildHero(BuildContext context) {
-    final heroImageUrl = _heroBackground?.url;
+    final configuredImages = _heroImages.map(_resolveHeroImageUrl).toList();
+    final effectiveImages = configuredImages.isNotEmpty
+        ? configuredImages
+        : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
+    final heroImageUrl = effectiveImages.isEmpty ? null : effectiveImages[_activeSlide % effectiveImages.length];
+    final gradientIndex = _activeSlide % _heroGradients.length;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 900),
       margin: const EdgeInsets.only(bottom: 4),
@@ -312,7 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: _heroGradients[_activeSlide],
+          colors: _heroGradients[gradientIndex],
         ),
         image: heroImageUrl != null
             ? DecorationImage(image: NetworkImage(heroImageUrl), fit: BoxFit.cover, onError: (_, _) {})
@@ -326,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 56),
+              padding: const EdgeInsets.fromLTRB(16, 36, 16, 72),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -375,10 +387,35 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ],
+                  if (effectiveImages.length > 1) ...[
+                    const SizedBox(height: 18),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(
+                        effectiveImages.length,
+                        (index) => AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          width: index == _activeSlide ? 22 : 7,
+                          height: 7,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          decoration: BoxDecoration(
+                            color: index == _activeSlide ? Colors.white : Colors.white54,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
     );
+  }
+
+  String _resolveHeroImageUrl(String value) {
+    if (value.startsWith('http')) return value;
+    final origin = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
+    return '$origin$value';
   }
 
   // عنوان الـAppBar — لوجو البراندنج الحقيقي (لو الأدمن رفع واحد، isDefault=false دايمًا صورة
