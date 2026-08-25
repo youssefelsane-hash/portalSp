@@ -55,7 +55,11 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
 
   function controller(current: Order): TechnicianOrderExecutionController {
     return new TechnicianOrderExecutionController(
-      { findVisibleForTechnician: jest.fn().mockResolvedValue(current) } as never,
+      {
+        findVisibleForTechnician: jest.fn().mockResolvedValue(current),
+        // docs/08 §56 بند 2 — getOne بتعلّم الطلب "اتفتح" بعد ما تبني الرد.
+        markViewedByTechnician: jest.fn().mockResolvedValue(undefined),
+      } as never,
       {} as never,
       {} as never,
       {} as never,

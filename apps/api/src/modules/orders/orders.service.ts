@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, IsNull, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, LessThan, LessThanOrEqual, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -53,7 +53,7 @@ import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderTeamService } from './order-team.service';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
 import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
@@ -1572,6 +1572,39 @@ export class OrdersService {
     return updated;
   }
 
+  /**
+   * "الطلب ده اتفتح" (docs/08 §56 بند 2) — بيتعلّم أول مرة بس (`IS NULL` في الـWHERE، فالنداءات
+   * اللي بعدها مابتعملش كتابة أصلاً ولا بتغيّر التوقيت الأصلي). مقصور على الفني المعيّن نفسه —
+   * عضو فريق بيفتح طلب قائده ماينفعش يعلّمه "مقروء" نيابة عنه.
+   *
+   * بيعلّم كمان `order_assignments` المعلّق كـ`viewed`: القيمة دي موجودة في الـenum من زمان
+   * وبتتقرا في 6 أماكن، بس **محدش كان بيكتبها أبدًا** — دلوقتي بقى ليها معنى حقيقي. آمن تمامًا:
+   * كل المسارات بتعامل SENT وVIEWED بنفس الطريقة بالحرف (عرض حي قابل للقبول).
+   *
+   * أي فشل هنا مايكسرش قراءة الطلب — التعليم راحة استخدام، مش جزء من صحة العملية.
+   */
+  async markViewedByTechnician(order: Order, technicianProfileId: string): Promise<void> {
+    if (order.technicianId !== technicianProfileId || order.technicianViewedAt !== null) return;
+    try {
+      await this.orders
+        .createQueryBuilder()
+        .update(Order)
+        .set({ technicianViewedAt: () => 'now()' })
+        .where('id = :orderId AND technician_id = :technicianId AND technician_viewed_at IS NULL', {
+          orderId: order.id,
+          technicianId: technicianProfileId,
+        })
+        .execute();
+      await this.orders.manager.query(
+        `UPDATE order_assignments SET assignment_status = 'viewed'
+         WHERE order_id = $1 AND technician_id = $2 AND assignment_status = 'sent'`,
+        [order.id, technicianProfileId],
+      );
+    } catch (error) {
+      this.logger.warn(`فشل تعليم الطلب ${order.id} كمقروء للفني — الطلب نفسه اترجع عادي: ${String(error)}`);
+    }
+  }
+
   /** ADR-0034 — نفس منطق حل المنطقة اللي `create()` بتستخدمه بالحرف (point-in-polygon حقيقي). */
   private async resolveZoneForOrderOrThrow(order: Order): Promise<{ id: string }> {
     const address = await this.addressesService.findByIdOrThrow(order.addressId);
@@ -2277,20 +2310,53 @@ export class OrdersService {
   // الغلط (المجدول بدل الشغال فعليًا دلوقتي) لو كان الأحدث تحديثًا، فالتطبيق كان هيفتح شاشة تنفيذ
   // لطلب لسه معادوش وقته. الفلتر الجديد بيستبعد أي طلب مجدول لسه معاداش موعده — "نشط للاسترجاع"
   // معناها فعليًا شغال دلوقتي أو ASAP، مش "مؤكّد ومستني يوم مستقبلي".
+  /**
+   * تضييق تاني (docs/08 §56 بند 4، بلاغ مالك 2026-08-25): "الشغل الحالي" لازم يكون **الشغلانة
+   * اللي شغّالة فعلاً** بس، واحدة. الفلتر القديم (`scheduledAt <= now`) كان بيعتبر أي طلب
+   * `accepted` معاده وصل "نشط" — يعني لو الفني عنده شغل النهاردة مقبول وشغل متأخر من إمبارح،
+   * `findOne` كان بيرجّع واحد منهم بالعشوائي (`updatedAt DESC`) والتاني **بيختفي من الشاشة
+   * تمامًا** (مش في `upcoming` كمان لأنها كانت `MoreThan(now)`). دلوقتي "حالي" = الفني متحرّك
+   * فعليًا (`ENGAGED_TECHNICIAN_ORDER_STATUSES`، نفس تعريف "منشغل جسديًا" اللي محرك الأهلية
+   * بيستخدمه بالحرف) أو طلب ASAP (بالتعريف دلوقتي حالاً). الباقي بيتوزّع على "قدامك"/"متأخر".
+   */
   async findActiveForTechnician(userId: string): Promise<Order | null> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const now = new Date();
     return this.orders.findOne({
       where: [
         { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
-        {
-          technicianId: profile.id,
-          orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
-          scheduledAt: LessThanOrEqual(now),
-        },
+        { technicianId: profile.id, orderStatus: In(ENGAGED_TECHNICIAN_ORDER_STATUSES) },
       ],
       order: { updatedAt: 'DESC' },
     });
+  }
+
+  /**
+   * مقارنة "يوم الجدولة" بيوم النهاردة **بتوقيت مصر**، في SQL مباشرة (الجدولة باليوم مش بالساعة،
+   * ADR-0018 §2). عمداً مش بحساب حدود اليوم في JS: أول نسخة هنا كانت بتحسب بداية اليوم بـ
+   * `toLocaleString('en-US', {timeZone:'Africa/Cairo'})` + `setHours(0,0,0,0)` — وده بياخد
+   * **تاريخ** القاهرة ويحط عليه منتصف ليل **توقيت السيرفر** (UTC عادة)، يعني بيطلع 03:00 بتوقيت
+   * القاهرة. النتيجة بَقّة حقيقية اتلقطت في الاختبار الحي: في أول 3 ساعات من كل يوم مصري، شغل
+   * النهاردة كان بيتحسب "متأخر" ويختفي من "قدامك". نفس تعبير الـSQL المستخدم في
+   * `technician-eligibility.sql.ts` و`admin-exception-center.service.ts` بالحرف — تعريف واحد.
+   */
+  private static readonly CAIRO_DAY_EXPR = `(o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date`;
+  private static readonly CAIRO_TODAY_EXPR = `(now() AT TIME ZONE 'Africa/Cairo')::date`;
+
+  /**
+   * "شغل متأخر" (docs/08 §56 بند 4) — شغلانة اتقبلت، يوم تنفيذها عدّى، والفني **لسه ما بدأش
+   * يتحرّك ليها** (`ACCEPTED` بالظبط، مش أي حالة تنفيذ). دي كانت بتختفي من كل الشاشات: مش
+   * "قدامك" (موعدها فات) ومش "حالي" غير لو الصدفة رجّعتها. لازم تبان بوضوح — وباللون الأحمر.
+   */
+  async findOverdueForTechnician(userId: string): Promise<Order[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.orders
+      .createQueryBuilder('o')
+      .where('o.technician_id = :technicianId', { technicianId: profile.id })
+      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
+      .andWhere('o.scheduled_at IS NOT NULL')
+      .andWhere(`${OrdersService.CAIRO_DAY_EXPR} < ${OrdersService.CAIRO_TODAY_EXPR}`)
+      .orderBy('o.scheduled_at', 'ASC')
+      .getMany();
   }
 
   // "الشغل المؤكّد قدامي" (docs/08 §165) — عكس findActiveForTechnician() بالظبط: الطلبات
@@ -2298,15 +2364,18 @@ export class OrdersService {
   // apps/technician-app يعرضها كقايمة منفصلة ("شغل قادم مؤكّد") مش يخلطها مع "طلبات محتاجة قرارك".
   async findUpcomingConfirmedForTechnician(userId: string): Promise<Order[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const now = new Date();
-    return this.orders.find({
-      where: {
-        technicianId: profile.id,
-        orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
-        scheduledAt: MoreThan(now),
-      },
-      order: { scheduledAt: 'ASC' },
-    });
+    // بَقّة حقيقية (docs/08 §56 بند 4): كانت `MoreThan(now)` — يعني شغل **النهاردة** بيختفي من
+    // القايمة أول ما اليوم يبدأ (`scheduled_at` = بداية اليوم بالظبط بعد ADR-0018 §2، فهي أصغر
+    // من `now` دايمًا). الفني كان بيصحى يلاقي شغل النهاردة مش موجود في "قدامك". الحد الصح هو
+    // **بداية النهاردة** مش اللحظة الحالية.
+    return this.orders
+      .createQueryBuilder('o')
+      .where('o.technician_id = :technicianId', { technicianId: profile.id })
+      .andWhere('o.order_status IN (:...statuses)', { statuses: ACTIVE_TECHNICIAN_ORDER_STATUSES })
+      .andWhere('o.scheduled_at IS NOT NULL')
+      .andWhere(`${OrdersService.CAIRO_DAY_EXPR} >= ${OrdersService.CAIRO_TODAY_EXPR}`)
+      .orderBy('o.scheduled_at', 'ASC')
+      .getMany();
   }
 
   /** مصدر واحد لكل انتقالات الفني — بتحترم الـ state machine وبتسجل التاريخ زي أي انتقال تاني. */

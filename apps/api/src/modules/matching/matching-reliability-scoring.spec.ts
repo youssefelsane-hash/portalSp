@@ -34,7 +34,7 @@ describe('MatchingService.findEligibleTechnicians() — وزن الموثوقي�
 
   function buildMatchingService(settingsOverrides: Record<string, number>): MatchingService {
     const settingsService = {
-      getNumber: jest.fn(async (key: string, fallback: number) => settingsOverrides[key] ?? fallback),
+      getNumber: jest.fn(async (key: string, fallback: number) => settingsOverrides[key] ?? fallback), getString: jest.fn(async (_k: string, fb: string) => fb)
     };
     return new MatchingService(
       dataSource.getRepository(OrderAssignment),

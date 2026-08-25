@@ -69,7 +69,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       {} as never,
     );
     const assignmentGuard = new TechnicianAssignmentGuardService({
-      getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+      getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb)
     } as never);
     workOpportunities = new TechnicianWorkOpportunitiesService(dataSource);
 
@@ -82,6 +82,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       {
         getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
         getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
+        getString: jest.fn(async (_key: string, fallback: string) => fallback),
       } as never,
       { emit: () => true } as never,
       { add: async () => undefined } as never,
@@ -258,10 +259,11 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
         {} as never,
         {} as never,
       ),
-      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never),
       {
         getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
         getBoolean: jest.fn(async (_key: string, fallback: boolean) => fallback),
+        getString: jest.fn(async (_key: string, fallback: string) => fallback),
       } as never,
       { emit } as never,
       { add: async () => undefined } as never,
@@ -360,7 +362,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
         {} as never,
         {} as never,
       ),
-      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never),
+      new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never),
       {
         getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
         getBoolean: jest.fn(async () => false),

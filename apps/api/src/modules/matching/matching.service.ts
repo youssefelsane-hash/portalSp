@@ -59,6 +59,10 @@ const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 // ADR-0017 بند 10 — الجولة اللي بعدها يتوسّع البحث لفنيين "مرتبطين بس مشغولين بطلب نشط دلوقتي"
 // (نفس شرط الخدمة/المنطقة يفضل ساري دايمًا). قيمة كبيرة (أكبر من matching.max_rounds) = تعطيل.
 const BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK = 4;
+// ADR-0035 — عتبة "الشغل القريب" بالساعات (48 = طلب المالك الحرفي)، وكادينس موجاته بالدقايق.
+// 0 في العتبة بيلغي السلوك بالكامل ويرجّع سلوك ADR-0018 بالحرف — القرار مش مقفول في الكود.
+const NEAR_TERM_REQUEST_HOURS_FALLBACK = 48;
+const NEAR_TERM_ROUND_TIMEOUTS_MINUTES_FALLBACK = '5,15,30';
 // ADR-0018 §7 (طلب صريح من المالك 2026-08-19) — بعد ما الفني بقى متاح افتراضيًا (ADR-0017 بند 3)،
 // كل الفنيين المؤهلين بقوا "مرشّحين" دايمًا، فمن غير توازن حِمل هيتكرّر إسناد نفس الفني الأعلى
 // مستوى/الأقرب لكل الطلبات على طول. الوزن ده بيتطرح من order_priority_weight لكل طلب "نشط"
@@ -435,10 +439,45 @@ export class MatchingService {
     if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
       return { dispatched: 0 };
     }
-    if (this.isEmergencyOrder(order)) {
+    if (this.isEmergencyOrder(order) || (await this.isNearTermOrder(order.scheduledAt))) {
       return this.dispatchNextRound(orderId);
     }
     return this.autoConfirmScheduledOrder(orderId);
+  }
+
+  /**
+   * ADR-0035 (طلب مالك صريح 2026-08-25) — بيرجّع مفهوم "قريب/بعيد" اللي ADR-0018 §3-4 شاله،
+   * بس **بساعات صريحة** بدل أيام: شغل خلال 48 ساعة الفني لازم يوافق عليه بنفسه (مش يتفاجأ
+   * بشغل بكرة اتعيّنله وهو مش عارف)، وشغل أبعد من كده بيتأكّد تلقائيًا زي ما هو.
+   *
+   * طلب بلا `scheduled_at` (ASAP) = قريب بالتعريف — أقرب ما يكون فعلاً.
+   */
+  private async isNearTermOrder(scheduledAt: Date | null): Promise<boolean> {
+    const thresholdHours = await this.settingsService.getNumber(
+      'matching.near_term_request_hours',
+      NEAR_TERM_REQUEST_HOURS_FALLBACK,
+    );
+    if (thresholdHours <= 0) return false;
+    if (!scheduledAt) return true;
+    return scheduledAt.getTime() - Date.now() <= thresholdHours * 60 * 60 * 1000;
+  }
+
+  /**
+   * كادينس موجات الشغل القريب (ADR-0035) — قايمة صريحة "5,15,30" بدل صيغة حسابية، عشان تطابق
+   * كلام المالك بالحرف وتفضل قابلة للتعديل من الأدمن بلا كود. أي جولة بعد آخر عنصر بتاخد آخر قيمة.
+   */
+  private async nearTermRoundTimeoutSeconds(round: number): Promise<number> {
+    const raw = await this.settingsService.getString(
+      'matching.near_term_round_timeouts_minutes',
+      NEAR_TERM_ROUND_TIMEOUTS_MINUTES_FALLBACK,
+    );
+    const minutes = raw
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (minutes.length === 0) return RESPONSE_TIMEOUT_SECONDS_FALLBACK;
+    const index = Math.min(Math.max(round, 1), minutes.length) - 1;
+    return minutes[index] * 60;
   }
 
   async dispatchNextRound(orderId: string): Promise<{ dispatched: number }> {
@@ -564,12 +603,14 @@ export class MatchingService {
 
       // مهلة رد أقصر للطوارئ (docs/08 §17.15 — "عمر العرض") — استعجال حقيقي، مستقلة عن مهلة
       // الطلب العادي تمامًا.
+      // ADR-0035 — الشغل القريب (< 48 ساعة) بياخد كادينس موجات متصاعد (5→15→30 دقيقة) بدل مهلة
+      // ثابتة قصيرة: الفني مش قاعد على التطبيق مستني زي حالة الطوارئ، محتاج وقت حقيقي يرد فيه.
       const responseTimeoutSeconds = isEmergency
         ? await this.settingsService.getNumber(
             'matching.emergency_response_timeout_seconds',
             EMERGENCY_RESPONSE_TIMEOUT_SECONDS_FALLBACK,
           )
-        : await this.settingsService.getNumber('matching.response_timeout_seconds', RESPONSE_TIMEOUT_SECONDS_FALLBACK);
+        : await this.nearTermRoundTimeoutSeconds(nextRound);
       const now = new Date();
       const expiresAt = new Date(now.getTime() + responseTimeoutSeconds * 1000);
       const rows = candidates.map((c) =>

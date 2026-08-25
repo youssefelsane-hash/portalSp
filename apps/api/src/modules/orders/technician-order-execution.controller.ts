@@ -69,7 +69,11 @@ export class TechnicianOrderExecutionController {
       this.catalogService.findServiceOrThrow(order.serviceId).then((service) => service.nameAr),
     ]);
     return {
-      ...toOrderResponseDto(order, address, null, { customerContact, serviceNameAr }),
+      ...toOrderResponseDto(order, address, null, {
+        customerContact,
+        serviceNameAr,
+        isNewForTechnician: order.technicianViewedAt === null,
+      }),
       paid_amount_cents: money.paidAmountCents,
       direct_paid_amount_cents: money.directPaidAmountCents,
       financed_order_amount_cents: money.financedOrderAmountCents,
@@ -123,6 +127,14 @@ export class TechnicianOrderExecutionController {
     return Promise.all(orders.map((order) => this.toDto(order)));
   }
 
+  // "شغل متأخر" (docs/08 §56 بند 4) — اتقبل، يومه عدّى، ولسه ما بدأش. كان بيختفي من كل الشاشات.
+  // مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق بالظبط.
+  @Get('overdue')
+  async listOverdue(@CurrentUser() user: JwtPayload) {
+    const orders = await this.ordersService.findOverdueForTechnician(user.sub);
+    return Promise.all(orders.map((order) => this.toDto(order)));
+  }
+
   // "شغلي كعضو فريق" (docs/08 §31) — مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق.
   @Get('team-assigned')
   async listTeamAssigned(@CurrentUser() user: JwtPayload) {
@@ -137,7 +149,11 @@ export class TechnicianOrderExecutionController {
   async getOne(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
     const order = await this.ordersService.findVisibleForTechnician(user.sub, id);
-    return this.toDtoWithTeamInfo(order, profile.id);
+    // الرد بيتبني **قبل** التعليم عمدًا — الفني لازم يشوف "جديد" في نفس الفتحة اللي هو بيقراه
+    // فيها، والفتحات اللي بعدها بس هي اللي تبقى "مقروء" (نفس سلوك أي inbox).
+    const dto = await this.toDtoWithTeamInfo(order, profile.id);
+    await this.ordersService.markViewedByTechnician(order, profile.id);
+    return dto;
   }
 
   /** مرشّحين للتجنيد (docs/08 §31/§35) — القائد بس (listRecruitCandidates بتفحص الملكية داخلها).

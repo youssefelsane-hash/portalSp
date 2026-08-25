@@ -43,6 +43,8 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // UpcomingConfirmedJobsScreen القديمة) والطلب النشط دلوقتي (كان بس auto-redirect وقت فتح
   // التطبيق، مفيش أثر ليه لو الفني رجع للشاشة الرئيسية بعد كده) بقوا جزء من نفس الشاشة الرئيسية.
   List<Order>? _upcomingOrders;
+  // docs/08 §56 بند 4 — شغل معاده عدّى ولسه ما بدأش، قسم أحمر لوحده.
+  List<Order>? _overdueOrders;
   // "شغلي كعضو فريق" (docs/08 §31، طلب مالك صريح 2026-08-20) — طلبات اتضاف ليها الفني كعضو فريق
   // (تجنيد ذاتي من قائد تاني)، مش هو قائدها. كانت بَقّة حقيقية: عضو الفريق معندوش أي طريقة يشوف
   // الطلب ده في تطبيقه خالص قبل كده (findOwnedByTechnicianOrThrow القديمة كانت بترفض 404 ليه).
@@ -187,10 +189,12 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     try {
       final orders = await _repository.fetchAvailable();
       final upcoming = await _repository.fetchUpcomingConfirmed();
+      final overdue = await _repository.fetchOverdue();
       if (mounted) {
         setState(() {
           _orders = orders;
           _upcomingOrders = upcoming;
+          _overdueOrders = overdue;
         });
       }
     } on ApiException catch (err) {
@@ -433,6 +437,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final hasActive = _activeOrder != null;
     final pending = _orders ?? const <AvailableOrder>[];
     final upcoming = _upcomingOrders ?? const <Order>[];
+    final overdue = _overdueOrders ?? const <Order>[];
     final teamAssigned = _teamAssignedOrders ?? const <Order>[];
     final workOpportunities = _workOpportunities ?? const <WorkOpportunity>[];
     final crewOpportunities = _crewOpportunities ?? const <CrewOpportunity>[];
@@ -440,6 +445,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     if (!hasActive &&
         pending.isEmpty &&
         upcoming.isEmpty &&
+        overdue.isEmpty &&
         teamAssigned.isEmpty &&
         workOpportunities.isEmpty &&
         crewOpportunities.isEmpty) {
@@ -459,11 +465,31 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // docs/08 §56 بند 4 — الترتيب مقصود: الشغل الحالي (واحد بس) → المتأخر (أحمر) →
+        // الطوارئ المستنية قرارك → الشغل المؤكّد قدامك → فرص إضافية → فريق.
         if (hasActive) ...[
+          _SectionHeader(icon: Icons.play_circle_outline, label: 'الشغل الحالي'),
+          const SizedBox(height: 8),
           _ActiveOrderCard(order: _activeOrder!, onTap: _openActiveOrder),
           const SizedBox(height: 16),
         ],
+        // شغلانة معادها عدّى ولسه ما بدأتش — أخطر حاجة في الشاشة بعد اللي شغّال دلوقتي.
+        if (overdue.isNotEmpty) ...[
+          _SectionHeader(icon: Icons.warning_amber_rounded, label: 'شغل متأخر — معاده عدّى', color: Colors.red.shade700),
+          const SizedBox(height: 8),
+          for (final order in overdue) ...[
+            _OverdueJobCard(
+              order: order,
+              dayLabel: _formatScheduledDay(order.scheduledAt),
+              onTap: () => _openUpcomingOrder(order),
+            ),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 8),
+        ],
         if (pending.isNotEmpty) ...[
+          _SectionHeader(icon: Icons.emergency_outlined, label: 'طلبات مستنية قرارك'),
+          const SizedBox(height: 8),
           for (final order in pending) ...[
             _EmergencyRequestCard(
               order: order,
@@ -476,10 +502,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           const SizedBox(height: 8),
         ],
         if (upcoming.isNotEmpty) ...[
-          Text(
-            'الشغل المؤكّد قدامك',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-          ),
+          _SectionHeader(icon: Icons.event_available_outlined, label: 'الشغل المؤكّد قدامك'),
           const SizedBox(height: 8),
           for (final order in upcoming) ...[
             _UpcomingJobCard(
@@ -840,6 +863,85 @@ class _CrewOpportunityCard extends StatelessWidget {
 // ADR-0018 §10 — الشغل المجدول اتأكّد تلقائيًا بلا قرار قبول/رفض من الفني (autoConfirmScheduledOrder
 // في الباك-إند) — بطاقة معلوماتية بس (فتح للتفاصيل)، بلا زراير قبول/رفض. الترتيب بأقرب يوم أولًا
 // جاي من الباك-إند مباشرة (scheduled_at ASC)، فبكرة بتظهر فوق الشهر الجاي تلقائيًا.
+/// شارة "جديد" (docs/08 §56 بند 2) — الفني لسه ما فتحش الطلب ده ولا مرة.
+class _NewBadge extends StatelessWidget {
+  const _NewBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: context.infoColor,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Text('جديد', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+/// عنوان قسم موحّد (docs/08 §56 بند 4) — الشاشة كانت خليط أقسام بعضها بعنوان وبعضها بلا،
+/// فالفني مش فارق معاه إيه من إيه. نفس الشكل لكل الأقسام دلوقتي.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.icon, required this.label, this.color});
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: color),
+        ),
+      ],
+    );
+  }
+}
+
+/// شغلانة معادها عدّى ولسه ما بدأتش (docs/08 §56 بند 4) — أحمر صريح، مش نفس شكل الشغل العادي.
+class _OverdueJobCard extends StatelessWidget {
+  const _OverdueJobCard({required this.order, required this.dayLabel, required this.onTap});
+
+  final Order order;
+  final String dayLabel;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final red = Colors.red.shade700;
+    return Card(
+      color: Colors.red.shade50,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: red),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ListTile(
+        leading: Icon(Icons.error_outline, color: red),
+        title: Text(
+          '${order.serviceNameAr ?? 'طلب'} — كان مفروض $dayLabel',
+          style: TextStyle(color: red, fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          [
+            if (order.customerName != null) order.customerName!,
+            if (order.address != null) order.address!.streetName,
+            _formatEgp(order.totalAmountCents),
+          ].join(' — '),
+        ),
+        trailing: Icon(Icons.chevron_left, color: red),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
 class _UpcomingJobCard extends StatelessWidget {
   const _UpcomingJobCard({required this.order, required this.dayLabel, required this.onTap});
 
@@ -851,10 +953,28 @@ class _UpcomingJobCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
-        leading: const Icon(Icons.event_available_outlined),
+        leading: Icon(
+          Icons.event_available_outlined,
+          // docs/08 §56 بند 2 — تمييز لوني بين اللي اتفتح واللي لأ، بدل ما كل حاجة تبان بنفس
+          // البروز أول ما التطبيق يفتح (بلاغ المالك).
+          color: order.isNewForTechnician ? context.infoColor : null,
+        ),
         // docs/08 §56 بند 3 — اسم الخدمة والعميل بقوا في الكارت نفسه: رقم الطلب لوحده ما كانش
         // بيقول للفني هو رايح يعمل إيه ولا لمين، فكان لازم يفتح كل طلب عشان يعرف.
-        title: Text('${order.serviceNameAr ?? 'طلب'} — $dayLabel'),
+        title: Row(
+          children: [
+            if (order.isNewForTechnician) ...[
+              const _NewBadge(),
+              const SizedBox(width: 6),
+            ],
+            Expanded(
+              child: Text(
+                '${order.serviceNameAr ?? 'طلب'} — $dayLabel',
+                style: order.isNewForTechnician ? const TextStyle(fontWeight: FontWeight.bold) : null,
+              ),
+            ),
+          ],
+        ),
         subtitle: Text(
           [
             if (order.customerName != null) order.customerName!,
