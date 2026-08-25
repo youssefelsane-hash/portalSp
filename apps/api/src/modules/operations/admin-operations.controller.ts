@@ -124,6 +124,19 @@ export class AdminOperationsController {
       zoneId: query.zone_id ?? null,
     });
     return {
+      // docs/08 §56 بند 4 — أول عنصر عمدًا: شغلانة معادها عدّى ولسه ما بدأتش هي أعجل حاجة هنا.
+      overdue_orders: {
+        items: result.overdueOrders.items.map((i) => ({
+          order_id: i.orderId,
+          order_number: i.orderNumber,
+          scheduled_at: i.scheduledAt,
+          technician_id: i.technicianId,
+          technician_code: i.technicianCode,
+          full_name: i.fullName,
+          days_late: i.daysLate,
+        })),
+        total: result.overdueOrders.total,
+      },
       crew_shortage: {
         items: result.crewShortage.items.map((i) => ({
           order_id: i.orderId,

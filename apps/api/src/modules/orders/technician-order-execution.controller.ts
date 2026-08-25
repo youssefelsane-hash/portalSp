@@ -122,6 +122,14 @@ export class TechnicianOrderExecutionController {
     return Promise.all(orders.map((order) => this.toDto(order)));
   }
 
+  // "شغل متأخر" (docs/08 §56 بند 4) — اتقبل، يومه عدّى، ولسه ما بدأش. كان بيختفي من كل الشاشات.
+  // مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق بالظبط.
+  @Get('overdue')
+  async listOverdue(@CurrentUser() user: JwtPayload) {
+    const orders = await this.ordersService.findOverdueForTechnician(user.sub);
+    return Promise.all(orders.map((order) => this.toDto(order)));
+  }
+
   // "شغلي كعضو فريق" (docs/08 §31) — مسار حرفي لازم يتسجّل قبل :id لنفس سبب active/upcoming-confirmed فوق.
   @Get('team-assigned')
   async listTeamAssigned(@CurrentUser() user: JwtPayload) {

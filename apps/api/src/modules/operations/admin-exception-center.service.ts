@@ -31,9 +31,35 @@ export interface StaleDispatchExceptionItem {
   expiresAt: string;
 }
 
+// docs/08 §56 بند 4 — "شغلانة اتقبلت، يومها عدّى، ولسه ما بدأتش". النوع ده كان **فجوة موثّقة
+// صراحة** في README الموديول ("طلبات متأخرة ... محتاجة عتبة زمنية واقعية، قرار صريح من المالك
+// قبل الإضافة، مش اختراع عتبة تعسفية"). المالك حدد التعريف بنفسه دلوقتي وهو مش عتبة مخترعة أصلاً:
+// حالة `accepted` بالظبط (الفني ما تحرّكش) + يوم الجدولة عدّى. نفس التعريف بالحرف اللي
+// `OrdersService.findOverdueForTechnician()` بيستخدمه للفني — الجانبين بيشوفوا نفس الحقيقة.
+export interface OverdueOrderExceptionItem {
+  orderId: string;
+  orderNumber: string;
+  scheduledAt: string;
+  technicianId: string | null;
+  technicianCode: string | null;
+  fullName: string | null;
+  daysLate: number;
+}
+
 export interface AdminExceptionCenterResult {
   crewShortage: { items: CrewShortageExceptionItem[]; total: number };
   staleDispatch: { items: StaleDispatchExceptionItem[]; total: number };
+  overdueOrders: { items: OverdueOrderExceptionItem[]; total: number };
+}
+
+interface RawOverdueOrderRow {
+  id: string;
+  order_number: string;
+  scheduled_at: string;
+  technician_id: string | null;
+  technician_code: string | null;
+  full_name: string | null;
+  total_count: string;
 }
 
 interface RawCrewShortageRow {
@@ -160,7 +186,43 @@ export class AdminExceptionCenterService {
       expiresAt: r.expires_at,
     }));
 
+    // نفس شرط findOverdueForTechnician() بالحرف: accepted + يوم الجدولة عدّى (بتوقيت مصر —
+    // الجدولة باليوم مش بالساعة، ADR-0018 §2، فمقارنة بـnow() الخام كانت هتعتبر شغل النهاردة متأخر).
+    const overdueRows = await this.dataSource.query<RawOverdueOrderRow[]>(
+      `
+      SELECT o.id, o.order_number, o.scheduled_at, o.technician_id, tp.technician_code, u.full_name,
+             COUNT(*) OVER() AS total_count
+      FROM orders o
+      JOIN services s ON s.id = o.service_id
+      LEFT JOIN technician_profiles tp ON tp.id = o.technician_id
+      LEFT JOIN users u ON u.id = tp.user_id
+      WHERE o.deleted_at IS NULL
+        AND o.order_status = 'accepted'
+        AND o.scheduled_at IS NOT NULL
+        AND (o.scheduled_at AT TIME ZONE 'Africa/Cairo')::date < (now() AT TIME ZONE 'Africa/Cairo')::date
+        AND ($1::uuid IS NULL OR s.category_id = $1)
+        AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+      ORDER BY o.scheduled_at ASC
+      LIMIT $3
+      `,
+      [categoryId, zoneId, EXCEPTION_LIST_LIMIT],
+    );
+
+    const overdueItems: OverdueOrderExceptionItem[] = overdueRows.map((r) => ({
+      orderId: r.id,
+      orderNumber: r.order_number,
+      scheduledAt: r.scheduled_at,
+      technicianId: r.technician_id,
+      technicianCode: r.technician_code,
+      fullName: r.full_name,
+      daysLate: Math.max(1, Math.floor((now - new Date(r.scheduled_at).getTime()) / (24 * 60 * 60 * 1000))),
+    }));
+
     return {
+      overdueOrders: {
+        items: overdueItems,
+        total: overdueRows.length > 0 ? Number(overdueRows[0].total_count) : 0,
+      },
       crewShortage: {
         items: crewShortageItems,
         total: crewShortageRows.length > 0 ? Number(crewShortageRows[0].total_count) : 0,

@@ -67,6 +67,13 @@ class OrdersRepository {
     return items.map(Order.fromJson).toList();
   }
 
+  // "شغل متأخر" (docs/08 §56 بند 4) — اتقبل، يومه عدّى، ولسه ما بدأش. كان بيختفي من الشاشة
+  // بالكامل (مش "قدامك" لأن معاده فات، ومش "الحالي" غير بالصدفة).
+  Future<List<Order>> fetchOverdue() async {
+    final items = await authRepository.authedRequestList('/technician/orders/overdue');
+    return items.map(Order.fromJson).toList();
+  }
+
   // طلبات شغل إضافي اختيارية (docs/08 §34.1b، ADR-0020) — منفصلة تمامًا عن fetchAvailable()
   // (بث الطوارئ). الفني عنده شغل متوسط/تقيل نفس اليوم لسه بيتعرضله فرصة، بس قبول/رفض صريح
   // بدل تأكيد تلقائي صامت.

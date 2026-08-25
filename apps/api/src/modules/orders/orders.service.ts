@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, IsNull, LessThanOrEqual, MoreThan, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, LessThan, LessThanOrEqual, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { JwtPayload } from '../auth/types/authenticated-request';
@@ -52,7 +52,7 @@ import { OrderMedia, OrderMediaType } from './entities/order-media.entity';
 import { OrderTeamService } from './order-team.service';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, canTransition } from './order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
 import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
@@ -1962,19 +1962,47 @@ export class OrdersService {
   // الغلط (المجدول بدل الشغال فعليًا دلوقتي) لو كان الأحدث تحديثًا، فالتطبيق كان هيفتح شاشة تنفيذ
   // لطلب لسه معادوش وقته. الفلتر الجديد بيستبعد أي طلب مجدول لسه معاداش موعده — "نشط للاسترجاع"
   // معناها فعليًا شغال دلوقتي أو ASAP، مش "مؤكّد ومستني يوم مستقبلي".
+  /**
+   * تضييق تاني (docs/08 §56 بند 4، بلاغ مالك 2026-08-25): "الشغل الحالي" لازم يكون **الشغلانة
+   * اللي شغّالة فعلاً** بس، واحدة. الفلتر القديم (`scheduledAt <= now`) كان بيعتبر أي طلب
+   * `accepted` معاده وصل "نشط" — يعني لو الفني عنده شغل النهاردة مقبول وشغل متأخر من إمبارح،
+   * `findOne` كان بيرجّع واحد منهم بالعشوائي (`updatedAt DESC`) والتاني **بيختفي من الشاشة
+   * تمامًا** (مش في `upcoming` كمان لأنها كانت `MoreThan(now)`). دلوقتي "حالي" = الفني متحرّك
+   * فعليًا (`ENGAGED_TECHNICIAN_ORDER_STATUSES`، نفس تعريف "منشغل جسديًا" اللي محرك الأهلية
+   * بيستخدمه بالحرف) أو طلب ASAP (بالتعريف دلوقتي حالاً). الباقي بيتوزّع على "قدامك"/"متأخر".
+   */
   async findActiveForTechnician(userId: string): Promise<Order | null> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const now = new Date();
     return this.orders.findOne({
       where: [
         { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
-        {
-          technicianId: profile.id,
-          orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
-          scheduledAt: LessThanOrEqual(now),
-        },
+        { technicianId: profile.id, orderStatus: In(ENGAGED_TECHNICIAN_ORDER_STATUSES) },
       ],
       order: { updatedAt: 'DESC' },
+    });
+  }
+
+  /** بداية النهاردة بتوقيت مصر (الجدولة باليوم، ADR-0018 §2) — "متأخر" معناها **يوم** عدّى، مش ساعة. */
+  private static startOfTodayCairo(): Date {
+    const cairoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Africa/Cairo' }));
+    cairoNow.setHours(0, 0, 0, 0);
+    return cairoNow;
+  }
+
+  /**
+   * "شغل متأخر" (docs/08 §56 بند 4) — شغلانة اتقبلت، يوم تنفيذها عدّى، والفني **لسه ما بدأش
+   * يتحرّك ليها** (`ACCEPTED` بالظبط، مش أي حالة تنفيذ). دي كانت بتختفي من كل الشاشات: مش
+   * "قدامك" (موعدها فات) ومش "حالي" غير لو الصدفة رجّعتها. لازم تبان بوضوح — وباللون الأحمر.
+   */
+  async findOverdueForTechnician(userId: string): Promise<Order[]> {
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.orders.find({
+      where: {
+        technicianId: profile.id,
+        orderStatus: OrderStatus.ACCEPTED,
+        scheduledAt: LessThan(OrdersService.startOfTodayCairo()),
+      },
+      order: { scheduledAt: 'ASC' },
     });
   }
 
@@ -1983,12 +2011,15 @@ export class OrdersService {
   // apps/technician-app يعرضها كقايمة منفصلة ("شغل قادم مؤكّد") مش يخلطها مع "طلبات محتاجة قرارك".
   async findUpcomingConfirmedForTechnician(userId: string): Promise<Order[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const now = new Date();
+    // بَقّة حقيقية (docs/08 §56 بند 4): كانت `MoreThan(now)` — يعني شغل **النهاردة** بيختفي من
+    // القايمة أول ما اليوم يبدأ (`scheduled_at` = بداية اليوم بالظبط بعد ADR-0018 §2، فهي أصغر
+    // من `now` دايمًا). الفني كان بيصحى يلاقي شغل النهاردة مش موجود في "قدامك". الحد الصح هو
+    // **بداية النهاردة** مش اللحظة الحالية.
     return this.orders.find({
       where: {
         technicianId: profile.id,
         orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES),
-        scheduledAt: MoreThan(now),
+        scheduledAt: MoreThanOrEqual(OrdersService.startOfTodayCairo()),
       },
       order: { scheduledAt: 'ASC' },
     });
