@@ -23,12 +23,14 @@ class HomepageTip {
 // tips (settings.homepage.tips) — كانت HOME_TIPS ثابتة في الكود، بقت مُدارة من الأدمن (docs/08 §48).
 class HomepageContent {
   final String trustMessage;
+  final List<String> heroImages;
   final List<HomepageTip> tips;
 
-  HomepageContent({required this.trustMessage, required this.tips});
+  HomepageContent({required this.trustMessage, required this.heroImages, required this.tips});
 
   factory HomepageContent.fromJson(Map<String, dynamic> json) => HomepageContent(
         trustMessage: json['trust_message'] as String? ?? '',
+        heroImages: (json['hero_images'] as List<dynamic>? ?? []).whereType<String>().toList(),
         tips: (json['tips'] as List<dynamic>? ?? [])
             .map((t) => HomepageTip.fromJson(t as Map<String, dynamic>))
             .toList(),

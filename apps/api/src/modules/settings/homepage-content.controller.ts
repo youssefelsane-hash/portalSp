@@ -15,6 +15,8 @@ export interface HomepageContentResponseDto {
   /** رسالة الثقة/الضمان المعروضة في hero الصفحة الرئيسية — نص قابل للتعديل من الأدمن، مش ثابت
    * في الكود (طلب مالك صريح 2026-08-22: "الكلام ده بيتغير، مش مستحسن يكون ثابت"). */
   trust_message: string;
+  /** صور الـhero المرتبة من الأدمن. قائمة فارغة تعني الرجوع لصورة branding splash القديمة. */
+  hero_images: string[];
   /** "نصايح مفيدة" — كانت `HOME_TIPS` ثابتة في كود الـfrontend (customer-web/customer-app)،
    * بلا أي مكان يديها الأدمن يعدّلها أو يحط صور حقيقية (بلاغ مالك صريح 2026-08-23: "مش لاقي له
    * مكان أرفع منه الصور"). بقت `homepage.tips` (setting, value_type='json') — نفس نمط
@@ -37,6 +39,12 @@ export class HomepageContentController {
   async getHomepageContent(): Promise<HomepageContentResponseDto> {
     const trustMessage = await this.settingsService.getString('homepage.trust_message', '');
     const tips = await this.settingsService.getJson<HomepageTipDto[]>('homepage.tips', []);
-    return { trust_message: trustMessage, tips };
+    const configuredHeroImages = await this.settingsService.getJson<unknown[]>('homepage.hero_images', []);
+    const heroImages = configuredHeroImages
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter((value) => value.startsWith('https://') || value.startsWith('/uploads/'))
+      .slice(0, 4);
+    return { trust_message: trustMessage, hero_images: heroImages, tips };
   }
 }
