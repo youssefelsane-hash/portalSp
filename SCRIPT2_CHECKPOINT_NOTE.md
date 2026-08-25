@@ -30,7 +30,11 @@
   technician receives customer name/phone only after acceptance and only after order ownership or
   team-membership authorization; offer/pre-acceptance payloads do not query or expose it. API build,
   focused Jest with open-handle detection, and changed-file Dart analysis passed.
-- Next task: global realtime message alerts and floating unread entry point.
+- Completed: customer/technician order chat, admin/customer support replies, and admin/technician
+  internal chat now persist the recipient's in-app notification atomically with each message. API
+  build and both real PostgreSQL suites passed (8 scenarios) with open-handle detection.
+- Next task: reconcile the newer `main` reschedule/contact implementations, then add the global
+  floating unread entry point and deep-link routing.
 
 ---
 

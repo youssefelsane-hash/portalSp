@@ -47,6 +47,10 @@ describe('Internal chat account-state integrity (real PostgreSQL)', () => {
   });
 
   afterAll(async () => {
+    await dataSource.query(
+      `DELETE FROM notifications WHERE reference_type = 'internal_chat_thread' AND reference_id = $1`,
+      [ids.thread],
+    );
     await dataSource.query(`DELETE FROM internal_messages WHERE thread_id = $1`, [ids.thread]);
     await dataSource.query(`DELETE FROM internal_chat_threads WHERE id = $1`, [ids.thread]);
     await dataSource.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [
@@ -66,6 +70,25 @@ describe('Internal chat account-state integrity (real PostgreSQL)', () => {
   it('rejects creating a new thread with blocked or inactive participants', async () => {
     await expect(service.getOrCreateThread(ids.admin, ids.blocked)).rejects.toMatchObject({ code: 'AUTH_001' });
     await expect(service.getOrCreateThread(ids.admin, ids.inactive)).rejects.toMatchObject({ code: 'AUTH_001' });
+  });
+
+  it('persists an in-app notification for the other participant with the message', async () => {
+    await service.sendMessage(ids.admin, ids.thread, { content: 'راجع تفاصيل الطلب الجديد' });
+
+    const notifications = await dataSource.query<
+      Array<{ user_id: string; notification_type: string; deep_link: string }>
+    >(
+      `SELECT user_id, notification_type, deep_link
+       FROM notifications
+       WHERE reference_type = 'internal_chat_thread' AND reference_id = $1`,
+      [ids.thread],
+    );
+    expect(notifications).toContainEqual({
+      user_id: ids.peer,
+      notification_type: 'internal_chat_message_received',
+      deep_link: `/technician/internal-chat/${ids.thread}`,
+    });
+    expect(notifications).not.toContainEqual(expect.objectContaining({ user_id: ids.admin }));
   });
 
   it('preserves historical thread visibility but blocks new delivery after a participant is blocked', async () => {
