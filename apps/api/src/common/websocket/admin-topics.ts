@@ -15,6 +15,8 @@ export const ADMIN_TOPICS = [
   'settings',
   'security',
   'ratings',
+  'projects',
+  'warranty',
 ] as const;
 
 export type AdminTopic = (typeof ADMIN_TOPICS)[number];
@@ -32,6 +34,8 @@ export const TOPIC_PERMISSIONS: Record<AdminTopic, string | null> = {
   recurring: 'recurring_orders.view',
   settings: 'settings.manage',
   security: 'security.alerts.view',
+  projects: 'projects.view',
+  warranty: 'warranty.view',
 };
 
 /** payload موحّد لأي حدث حي — `at` لحظة وقوع الحدث في السيرفر (ISO) للحماية من الكتابة القديمة. */
@@ -50,7 +54,9 @@ export interface AdminLiveEvent {
     | 'recurring_template'
     | 'rating'
     | 'setting'
-   | 'security_event';
+    | 'security_event'
+    | 'project'
+    | 'warranty_claim';
   action: string;
   entity_id: string | null;
   at: string;

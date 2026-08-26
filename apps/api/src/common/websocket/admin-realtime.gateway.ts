@@ -133,6 +133,14 @@ import {
   TECHNICIAN_PRESENCE_CHANGED_EVENT,
   TechnicianPresenceChangedEvent,
 } from '../events/technician-presence-changed.event';
+import {
+  PROJECT_CHANGED_EVENT,
+  ProjectChangedEvent,
+} from '../events/project-changed.event';
+import {
+  WARRANTY_CLAIM_CHANGED_EVENT,
+  WarrantyClaimChangedEvent,
+} from '../events/warranty-claim-changed.event';
 
 interface AuthenticatedSocket extends Socket {
   data: { user?: JwtPayload; authentication?: Promise<JwtPayload>; topics?: Set<AdminTopic> };
@@ -346,6 +354,26 @@ export class AdminRealtimeGateway implements OnGatewayConnection, OnGatewayDisco
   @OnEvent(WORK_OPPORTUNITY_OFFERED_EVENT)
   onWorkOpportunityOffered(event: WorkOpportunityOfferedEvent): void {
     this.emitTopic('orders', { entity: 'order', action: 'work_opportunity_offered', entity_id: event.orderId });
+  }
+
+  // ── projects / warranty ─────────────────────────────────────────────────
+
+  @OnEvent(PROJECT_CHANGED_EVENT)
+  onProjectChanged(event: ProjectChangedEvent): void {
+    this.emitTopic('projects', {
+      entity: 'project',
+      action: event.action,
+      entity_id: event.projectId,
+    });
+  }
+
+  @OnEvent(WARRANTY_CLAIM_CHANGED_EVENT)
+  onWarrantyClaimChanged(event: WarrantyClaimChangedEvent): void {
+    this.emitTopic('warranty', {
+      entity: 'warranty_claim',
+      action: event.action,
+      entity_id: event.claimId,
+    });
   }
 
   // ── payments / payouts / refunds-adjacent ──────────────────────────────

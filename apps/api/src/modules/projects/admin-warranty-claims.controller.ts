@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpStatus, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Optional, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
@@ -9,6 +10,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditLogService } from '../audit/audit-log.service';
+import { WARRANTY_CLAIM_CHANGED_EVENT } from '../../common/events/warranty-claim-changed.event';
 
 const CLAIM_TRANSITIONS: Record<string, readonly string[]> = {
   open: ['under_review', 'rejected'],
@@ -81,6 +83,7 @@ export class AdminWarrantyClaimsController {
     @InjectRepository(WarrantyClaim) private readonly claims: Repository<WarrantyClaim>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditLog: AuditLogService,
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
   @Get()
@@ -147,7 +150,7 @@ export class AdminWarrantyClaimsController {
     if (dto.status === 'rejected' && !dto.rejection_reason?.trim()) {
       throw new ApiException(ErrorCode.VAL_001, 'سبب رفض المطالبة إجباري', HttpStatus.BAD_REQUEST);
     }
-    return this.dataSource.transaction(async (manager) => {
+    const reviewed = await this.dataSource.transaction(async (manager) => {
       const claim = await manager
         .createQueryBuilder(WarrantyClaim, 'claim')
         .setLock('pessimistic_write')
@@ -183,5 +186,7 @@ export class AdminWarrantyClaimsController {
       }, manager);
       return toWarrantyClaimResponse(claim);
     });
+    this.events?.emit(WARRANTY_CLAIM_CHANGED_EVENT, { claimId: id, action: 'reviewed' });
+    return reviewed;
   }
 }

@@ -15,7 +15,9 @@ export type AdminTopic =
   | 'recurring'
   | 'settings'
   | 'security'
-  | 'ratings';
+  | 'ratings'
+  | 'projects'
+  | 'warranty';
 
 export interface AdminLiveEvent {
   topic: AdminTopic;

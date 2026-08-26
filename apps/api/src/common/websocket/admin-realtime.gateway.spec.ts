@@ -55,4 +55,25 @@ describe('AdminRealtimeGateway', () => {
       expect.objectContaining({ topic: 'orders', entity: 'order', action: 'created', entity_id: 'order-id' }),
     );
   });
+
+  it('broadcasts project and warranty changes on their permission-scoped topics', () => {
+    const gateway = new AdminRealtimeGateway(realtimeAccess as never, sessions as never, dataSource as never);
+    const emit = jest.fn();
+    const to = jest.fn().mockReturnValue({ emit });
+    gateway.server = { to } as never;
+
+    gateway.onProjectChanged({ projectId: 'project-id', action: 'created' });
+    gateway.onWarrantyClaimChanged({ claimId: 'claim-id', action: 'opened' });
+
+    expect(to).toHaveBeenCalledWith('admin:topic:projects');
+    expect(to).toHaveBeenCalledWith('admin:topic:warranty');
+    expect(emit).toHaveBeenCalledWith(
+      'admin:live',
+      expect.objectContaining({ topic: 'projects', entity_id: 'project-id', action: 'created' }),
+    );
+    expect(emit).toHaveBeenCalledWith(
+      'admin:live',
+      expect.objectContaining({ topic: 'warranty', entity_id: 'claim-id', action: 'opened' }),
+    );
+  });
 });

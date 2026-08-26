@@ -97,6 +97,12 @@
   instead of an eight-character customer ID and truncated text. The enriched snake_case contract
   is covered by the real PostgreSQL ownership/concurrency/state-machine suite (4/4) with open-handle
   detection; API build and admin typecheck pass.
+- Completed: project and warranty admin pages now have permission-scoped realtime topics. Customer
+  project creation, quote decisions, milestone decisions/comments, and warranty-claim opening emit
+  only after their transaction succeeds; admin project/claim changes do the same. The open admin
+  list and expanded project room refetch their REST source of truth immediately without a manual
+  refresh. Gateway plus real PostgreSQL project/warranty suites pass 25/25 with open-handle
+  detection; API build and admin typecheck pass.
 - Next task: continue the remaining screenshot/new-route review after this project checkpoint,
   prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 
