@@ -116,9 +116,15 @@
   every offer is today. Focused API tests pass 8/8, the real PostgreSQL opportunity suite passes
   10/10 with open-handle detection, Flutter tests pass 7/7, changed-file analysis and the API build
   pass, and a real Nest startup completed without dependency-injection errors.
-- Next task: make the customer homepage search compact and focus-expandable with admin-controlled
-  explanatory copy, then add durable customer/technician notifications for project and admin
-  workflow actions.
+- Completed: customer homepage search copy is now one admin-managed source of truth shared by
+  mobile and web (`homepage.search_content`, migration `0197`). The mobile field is compact and
+  rounded while idle, expands smoothly on focus, and accepts the problem description directly;
+  web mirrors the compact focus treatment. Missing/partial settings retain the prior copy through
+  bounded server and client fallbacks. API tests, customer Flutter tests (4/4), Flutter analysis,
+  API build, admin typecheck, and customer-web typecheck pass. Migration `0197` is applied on TEST,
+  all earlier checksums match, and the new setting/checksum were verified directly.
+- Next task: add durable customer/technician notifications for project and admin workflow actions,
+  then continue the remaining screenshot/new-route review.
 
 ---
 

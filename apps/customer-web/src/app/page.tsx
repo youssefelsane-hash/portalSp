@@ -28,6 +28,12 @@ const HERO_SLIDES = [
 ];
 
 const HERO_SLIDE_DURATION_MS = 6000;
+const DEFAULT_SEARCH_CONTENT = {
+  eyebrow: 'أساعدك إزاي؟',
+  title: 'محتاج مساعدة في إيه؟',
+  description: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+  placeholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
+};
 
 // نمط نقطي خفيف جدًا (data URI، صفر طلب شبكة إضافي) — نفس فلسفة placeholderSvgDataUri في
 // apps/api/src/modules/branding/branding-defaults.ts (أصل مضمّن في الكود، مش ملف خارجي).
@@ -55,6 +61,7 @@ export default function HomePage() {
   const [heroImages, setHeroImages] = useState<string[]>([]);
   const [heroBackgroundUrl, setHeroBackgroundUrl] = useState<string | null>(null);
   const [trustMessage, setTrustMessage] = useState('');
+  const [searchContent, setSearchContent] = useState(DEFAULT_SEARCH_CONTENT);
   const [tips, setTips] = useState<HomepageTipDto[]>([]);
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
 
@@ -68,6 +75,7 @@ export default function HomePage() {
       .then((content) => {
         setTrustMessage(content.trust_message);
         setHeroImages(content.hero_images ?? []);
+        setSearchContent(content.search ?? DEFAULT_SEARCH_CONTENT);
         setActiveSlide(0);
         setTips(content.tips);
       })
@@ -133,20 +141,19 @@ export default function HomePage() {
 
         <div className="relative mx-auto max-w-5xl px-4 py-16 sm:py-24">
           <div className="mx-auto max-w-xl rounded-2xl bg-black/35 p-6 text-center text-white shadow-xl backdrop-blur-sm sm:p-8">
-            <p className="text-sm font-medium text-white/80">أساعدك إزاي؟</p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">محتاج مساعدة في إيه؟</h1>
-            <p className="mt-2 text-sm text-white/80 sm:text-base">قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت</p>
+            <p className="text-sm font-medium text-white/80">{searchContent.eyebrow}</p>
+            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{searchContent.title}</h1>
+            <p className="mt-2 text-sm text-white/80 sm:text-base">{searchContent.description}</p>
 
-            <form onSubmit={submitSearch} className="mt-6">
-              <div className="flex items-center gap-2 rounded-xl bg-surface p-2 shadow-sm">
+            <form onSubmit={submitSearch} className="mx-auto mt-5 max-w-md transition-[max-width] duration-300 ease-out focus-within:max-w-xl">
+              <div className="flex items-center gap-1 rounded-full bg-surface/95 p-1.5 shadow-md transition-all duration-300 focus-within:rounded-2xl focus-within:bg-surface focus-within:shadow-xl">
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder='وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"'
-                  className="flex-1 bg-transparent px-3 py-2 text-foreground outline-none"
-                  autoFocus
+                  placeholder={searchContent.placeholder}
+                  className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-foreground outline-none sm:text-base"
                 />
-                <button type="submit" className="rounded-lg bg-primary px-5 py-2 font-medium text-primary-foreground hover:opacity-90">
+                <button type="submit" className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-transform hover:scale-[1.03] hover:opacity-90">
                   بحث
                 </button>
               </div>

@@ -71,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   String _trustMessage = '';
   List<String> _heroImages = [];
+  HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
   List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
@@ -84,30 +85,43 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
     // رسالة الثقة/الضمان ونصايح مفيدة وبيانات الدعم ولوجو البراندنج — تحميل مستقل عمدًا (فشل أي
     // واحد فيهم ميأثرش على باقي الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
-    _homepageContentRepository.fetch().then((content) {
-      if (mounted) {
-        setState(() {
-          _trustMessage = content.trustMessage;
-          _heroImages = content.heroImages;
-          _tips = content.tips;
-          _activeSlide = 0;
-        });
-      }
-    }).catchError((_) {});
-    _supportContactRepository.fetch().then((contact) {
-      if (mounted) setState(() => _supportContact = contact);
-    }).catchError((_) {});
-    _brandingRepository.fetchPrimaryLogo().then((logo) {
-      if (mounted) setState(() => _brandingLogo = logo);
-    }).catchError((_) {});
+    _homepageContentRepository
+        .fetch()
+        .then((content) {
+          if (mounted) {
+            setState(() {
+              _trustMessage = content.trustMessage;
+              _heroImages = content.heroImages;
+              _searchContent = content.search;
+              _tips = content.tips;
+              _activeSlide = 0;
+            });
+          }
+        })
+        .catchError((_) {});
+    _supportContactRepository
+        .fetch()
+        .then((contact) {
+          if (mounted) setState(() => _supportContact = contact);
+        })
+        .catchError((_) {});
+    _brandingRepository
+        .fetchPrimaryLogo()
+        .then((logo) {
+          if (mounted) setState(() => _brandingLogo = logo);
+        })
+        .catchError((_) {});
     // صورة splash القديمة تفضل fallback لو قائمة homepage.hero_images الجديدة فاضية.
-    _brandingRepository.fetchHeroBackground().then((asset) {
-      if (!mounted || asset == null || asset.isDefault) return;
-      setState(() {
-        _heroBackground = asset;
-        _activeSlide = 0;
-      });
-    }).catchError((_) {});
+    _brandingRepository
+        .fetchHeroBackground()
+        .then((asset) {
+          if (!mounted || asset == null || asset.isDefault) return;
+          setState(() {
+            _heroBackground = asset;
+            _activeSlide = 0;
+          });
+        })
+        .catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
       final count = _heroImages.isNotEmpty ? _heroImages.length : (_heroBackground == null ? _heroGradients.length : 1);
@@ -130,9 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openSearch([String value = '']) => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)),
-      );
+  void _openSearch([String value = '']) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)));
 
   @override
   Widget build(BuildContext context) {
@@ -155,11 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 builder: (context, snapshot) {
                   final unread = snapshot.data ?? 0;
                   return IconButton(
-                    icon: Badge(
-                      isLabelVisible: unread > 0,
-                      label: Text('$unread'),
-                      child: const Icon(Icons.notifications_outlined),
-                    ),
+                    icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.notifications_outlined)),
                     tooltip: 'الإشعارات',
                     onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
                   );
@@ -194,28 +202,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
-                      ));
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>())));
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
-                          Icon(Icons.home_work_outlined, size: 32,
-                              color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          Icon(Icons.home_work_outlined, size: 32, color: Theme.of(context).colorScheme.onPrimaryContainer),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('بتشطب شقتك؟',
-                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                        fontWeight: FontWeight.bold)),
-                                Text('ابدأ مشروعك مع صُنّاع',
-                                    style: TextStyle(
-                                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                        fontSize: 13)),
+                                Text('بتشطب شقتك؟', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                                Text('ابدأ مشروعك مع صُنّاع', style: TextStyle(color: Theme.of(context).colorScheme.onPrimaryContainer, fontSize: 13)),
                               ],
                             ),
                           ),
@@ -244,9 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           separatorBuilder: (_, _) => const SizedBox(width: 16),
                           itemBuilder: (context, index) => _FeaturedCategoryItem(
                             category: featured[index],
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => ServicesScreen(category: featured[index])),
-                            ),
+                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServicesScreen(category: featured[index]))),
                           ),
                         ),
                       ),
@@ -265,32 +263,30 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     if (_error != null)
-                      Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Center(child: Text(_error!)))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: Text(_error!)),
+                      )
                     else if (_categories == null)
                       const LoadingList()
                     else if (_categories!.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي')),
+                        child: Center(
+                          child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي'),
+                        ),
                       )
                     else
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.95,
-                        ),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.95),
                         itemCount: _categories!.length,
                         itemBuilder: (context, index) {
                           final category = _categories![index];
                           return CategoryCard(
                             category: category,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
-                            ),
+                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServicesScreen(category: category))),
                           );
                         },
                       ),
@@ -311,9 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // (بلا صندوق عمدًا) — مطابق تمامًا لهيكل apps/customer-web's hero.
   Widget _buildHero(BuildContext context) {
     final configuredImages = _heroImages.map(_resolveHeroImageUrl).toList();
-    final effectiveImages = configuredImages.isNotEmpty
-        ? configuredImages
-        : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
+    final effectiveImages = configuredImages.isNotEmpty ? configuredImages : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
     final gradientIndex = _activeSlide % _heroGradients.length;
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -326,94 +320,86 @@ class _HomeScreenState extends State<HomeScreen> {
               fallback: AnimatedContainer(
                 duration: const Duration(milliseconds: 1000),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: _heroGradients[gradientIndex],
-                  ),
+                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: _heroGradients[gradientIndex]),
                 ),
               ),
             ),
           ),
           Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(16, 36, 16, 72),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      children: [
-                        Text('أساعدك إزاي؟', style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'محتاج مساعدة في إيه؟',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
-                        ),
-                        const SizedBox(height: 16),
-                        _HeroSearchField(onTap: _openSearch),
-                      ],
-                    ),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent]),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 36, 16, 72),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(20)),
+                  child: Column(
+                    children: [
+                      Text(
+                        _searchContent.eyebrow,
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _searchContent.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _searchContent.description,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
+                      ),
+                      const SizedBox(height: 12),
+                      _HeroSearchField(content: _searchContent, onSearch: _openSearch),
+                    ],
                   ),
-                  if (_trustMessage.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.verified_outlined, color: Colors.white, size: 18),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _trustMessage,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13, shadows: [
-                              Shadow(color: Colors.black45, blurRadius: 4),
-                            ]),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (effectiveImages.length > 1) ...[
-                    const SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        effectiveImages.length,
-                        (index) => AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          width: index == _activeSlide ? 22 : 7,
-                          height: 7,
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          decoration: BoxDecoration(
-                            color: index == _activeSlide ? Colors.white : Colors.white54,
-                            borderRadius: BorderRadius.circular(99),
+                ),
+                if (_trustMessage.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.verified_outlined, color: Colors.white, size: 18),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          _trustMessage,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13,
+                            shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ],
-              ),
+                if (effectiveImages.length > 1) ...[
+                  const SizedBox(height: 18),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      effectiveImages.length,
+                      (index) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        width: index == _activeSlide ? 22 : 7,
+                        height: 7,
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(color: index == _activeSlide ? Colors.white : Colors.white54, borderRadius: BorderRadius.circular(99)),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
+          ),
         ],
       ),
     );
@@ -434,12 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (logo == null || logo.isDefault || logo.url.isEmpty) {
       return const Text('صُنّاع');
     }
-    return Image.network(
-      logo.url,
-      height: 32,
-      fit: BoxFit.contain,
-      errorBuilder: (_, _, _) => const Text('صُنّاع'),
-    );
+    return Image.network(logo.url, height: 32, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Text('صُنّاع'));
   }
 
   // "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (تفاصيل في تعليق _tipFallbackColors فوق). مبتظهرش
@@ -476,8 +457,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             imageUrl,
                             height: 80,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
+                            errorBuilder: (_, _, _) => Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
                           )
                         else
                           Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
@@ -496,12 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Text(tip.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall),
                                 const SizedBox(height: 4),
                                 Flexible(
-                                  child: Text(
-                                    tip.body,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
+                                  child: Text(tip.body, maxLines: 3, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                                 ),
                               ],
                             ),
@@ -562,35 +537,79 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// حقل البحث جوّه لوحة الـhero — نفس تفاعل _SearchEntryField القديمة بالضبط (تاب بيفتح شاشة
-// البحث، مفيش كتابة هنا)، بس بخلفية بيضاء صريحة (مش لون الـTheme المتغيّر) عشان يفضل واضح فوق
-// أي لون من ألوان الـhero الدوّارة، مطابق لـapps/customer-web's `bg-surface` داخل اللوحة الغامقة.
-class _HeroSearchField extends StatelessWidget {
-  final ValueChanged<String> onTap;
+// حقل البحث جوّه لوحة الـhero: مضغوط وهو خامل عشان الصورة تفضل ظاهرة، ويتمدد عند التركيز ويقبل
+// الكتابة مباشرة قبل فتح شاشة النتائج. النص كله جاي من إعداد homepage.search_content.
+class _HeroSearchField extends StatefulWidget {
+  final HomepageSearchContent content;
+  final ValueChanged<String> onSearch;
 
-  const _HeroSearchField({required this.onTap});
+  const _HeroSearchField({required this.content, required this.onSearch});
+
+  @override
+  State<_HeroSearchField> createState() => _HeroSearchFieldState();
+}
+
+class _HeroSearchFieldState extends State<_HeroSearchField> {
+  final _controller = TextEditingController();
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() => setState(() {});
+
+  void _submit() {
+    _focusNode.unfocus();
+    widget.onSearch(_controller.text.trim());
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => onTap(''),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              const Icon(Icons.search, color: Colors.black54),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
-                  style: TextStyle(color: Colors.black54),
-                ),
-              ),
-            ],
+    final expanded = _focusNode.hasFocus || _controller.text.isNotEmpty;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.82, end: expanded ? 1 : 0.82),
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      builder: (context, widthFactor, child) => FractionallySizedBox(widthFactor: widthFactor, child: child),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: expanded ? 1 : 0.94),
+          borderRadius: BorderRadius.circular(expanded ? 18 : 28),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: expanded ? 0.22 : 0.12),
+              blurRadius: expanded ? 18 : 8,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: TextField(
+          controller: _controller,
+          focusNode: _focusNode,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => _submit(),
+          onChanged: (_) => setState(() {}),
+          onTapOutside: (_) => _focusNode.unfocus(),
+          decoration: InputDecoration(
+            hintText: widget.content.placeholder,
+            hintStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+            suffixIcon: expanded ? IconButton(icon: const Icon(Icons.arrow_back_rounded), tooltip: 'بحث', onPressed: _submit) : null,
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: expanded ? 14 : 11),
           ),
         ),
       ),
@@ -638,13 +657,7 @@ class _FeaturedCategoryItem extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 6),
-            Text(
-              category.nameAr,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            Text(category.nameAr, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
