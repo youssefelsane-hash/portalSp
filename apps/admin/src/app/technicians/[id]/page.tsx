@@ -20,6 +20,7 @@ import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
 import { AppShell, useAdminBack } from '@/components/app-shell';
 import { TechnicianEarningsStatement } from '@/components/technician-earnings-statement';
+import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
@@ -637,6 +638,9 @@ export default function TechnicianDetailPage() {
             </CardFooter>
           </form>
         </Card>
+
+        {/* ADR-0041 (docs/08 §63.أ2) — المديونية وتسويتها وسجلها. */}
+        <TechnicianDebtPanel technicianId={id} />
 
         {/* docs/08 §63.أ1 — كشف المستحقات الشهري، بنفس خدمة تطبيق الفني (مصدر رقم واحد). */}
         <TechnicianEarningsStatement technicianId={id} />

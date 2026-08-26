@@ -47,12 +47,16 @@ import { Installment } from '../installments/entities/installment.entity';
 import { InstallmentCollectionService } from './installment-collection.service';
 import { CrewEarningsService } from './crew-earnings.service';
 import { OrderEarningShare } from './entities/order-earning-share.entity';
+import { TechnicianDebtService } from './technician-debt.service';
+import { TechnicianDebtSettlement } from './entities/technician-debt-settlement.entity';
+import { AdminTechnicianDebtController } from './admin-technician-debt.controller';
 
 @Module({
   imports: [
     // كشف مستحقات الفني الشهري (ADR-0038) — موديول مستقل عشان الأدمن يستورده كمان بلا دايرة.
     TechnicianEarningsModule,
     TypeOrmModule.forFeature([
+      TechnicianDebtSettlement,
       OrderEarningShare,
       Wallet,
       WalletTransaction,
@@ -77,6 +81,7 @@ import { OrderEarningShare } from './entities/order-earning-share.entity';
     PromotionsModule,
   ],
   controllers: [
+    AdminTechnicianDebtController,
     WalletController,
     PaymentsController,
     PaymentChannelsController,
@@ -87,6 +92,7 @@ import { OrderEarningShare } from './entities/order-earning-share.entity';
     WebhooksController,
   ],
   providers: [
+    TechnicianDebtService,
     CrewEarningsService,
     WalletsService,
     PaymentsService,
@@ -111,6 +117,7 @@ import { OrderEarningShare } from './entities/order-earning-share.entity';
     PaymentProviderRegistry,
   ],
   exports: [
+    TechnicianDebtService,
     CrewEarningsService,WalletsService, PaymentsService, PayoutsService],
 })
 export class PaymentsModule {}
