@@ -107,6 +107,11 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
     expect(item).toMatchObject({
       warranty_id: warrantyId,
       customer_id: customerId,
+      customer_name: `Warranty test ${runId}`,
+      customer_phone: expect.any(String),
+      warranty_name: 'ضمان اختبار',
+      order_number: null,
+      project_number: null,
       defect_description: expect.any(String),
       created_at: expect.any(String),
     });

@@ -78,6 +78,25 @@
   from professional teams with a premium workspace. Real PostgreSQL matching tests pass 36/36 and
   focused company/admin marketplace regressions pass 8/8 with open-handle detection; API build,
   shared-types build/typecheck, and admin typecheck pass.
+- Integrated: latest verified `origin/main` at `504aa5d`. The running TEST database was missing
+  migrations `0194`-`0196`; this made TypeORM select absent technician trust columns and new
+  earnings/debt tables, producing HTTP 500 responses across admin technicians, companies, academy,
+  matching, and technician payouts. All migrations through `0196` now
+  apply with matching checksums. Focused real PostgreSQL coverage for company/trust presentation,
+  support chat delivery, matching, monthly statements, and debt settlement passes 26/26 with open
+  handle detection.
+- Completed: customer mobile hero images now remain mounted and decoded together, then cross-fade
+  opacity instead of replacing `DecorationImage`; the blue gradient no longer flashes between
+  admin-configured slides and failed images fall back safely. Technician payout UI now identifies a
+  negative wallet as platform debt, disables payout requests until covered, and rejects amounts
+  above the available balance before network submission. Focused Flutter tests pass 10/10 across
+  hero, overflow, payout, and financial breakdown scenarios; changed-file analysis reports no
+  issues in both apps.
+- Completed: the admin warranty-claims queue now returns and displays the customer's name and
+  phone, warranty name, linked order/project references, and the complete defect description
+  instead of an eight-character customer ID and truncated text. The enriched snake_case contract
+  is covered by the real PostgreSQL ownership/concurrency/state-machine suite (4/4) with open-handle
+  detection; API build and admin typecheck pass.
 - Next task: continue the remaining screenshot/new-route review after this project checkpoint,
   prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 

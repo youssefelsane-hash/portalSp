@@ -21,7 +21,28 @@ const CLAIM_TRANSITIONS: Record<string, readonly string[]> = {
   closed: [],
 };
 
-function toWarrantyClaimResponse(claim: WarrantyClaim): Record<string, unknown> {
+interface WarrantyClaimResponse {
+  id: string;
+  warranty_id: string;
+  order_id: string | null;
+  project_id: string | null;
+  customer_id: string;
+  status: string;
+  defect_description: string;
+  defect_discovered_at: string | null;
+  attachments: { storage_key: string; uploaded_at: string }[];
+  resolution_notes: string | null;
+  rejection_reason: string | null;
+  repair_order_id: string | null;
+  original_provider_id: string | null;
+  provider_deadline: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toWarrantyClaimResponse(claim: WarrantyClaim): WarrantyClaimResponse {
   return {
     id: claim.id,
     warranty_id: claim.warrantyId,
@@ -42,6 +63,15 @@ function toWarrantyClaimResponse(claim: WarrantyClaim): Record<string, unknown> 
     created_at: claim.createdAt.toISOString(),
     updated_at: claim.updatedAt.toISOString(),
   };
+}
+
+interface WarrantyClaimAdminDetails {
+  id: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  warranty_name: string | null;
+  order_number: string | null;
+  project_number: string | null;
 }
 
 @Controller('admin/warranty-claims')
@@ -72,7 +102,36 @@ export class AdminWarrantyClaimsController {
       skip: (page - 1) * perPage,
       take: perPage,
     });
-    return { items: items.map(toWarrantyClaimResponse), meta: { page, per_page: perPage, total } };
+    const details = items.length === 0
+      ? []
+      : await this.dataSource.query<WarrantyClaimAdminDetails[]>(
+        `SELECT wc.id,
+                u.full_name AS customer_name,
+                u.phone_number AS customer_phone,
+                cw.name_ar AS warranty_name,
+                o.order_number,
+                p.project_number
+         FROM warranty_claims wc
+         LEFT JOIN customer_profiles cp ON cp.id = wc.customer_id
+         LEFT JOIN users u ON u.id = cp.user_id
+         LEFT JOIN customer_warranties cw ON cw.id = wc.warranty_id
+         LEFT JOIN orders o ON o.id = wc.order_id
+         LEFT JOIN projects p ON p.id = wc.project_id
+         WHERE wc.id = ANY($1::uuid[])`,
+        [items.map((claim) => claim.id)],
+      );
+    const detailsById = new Map(details.map((row) => [row.id, row]));
+    return {
+      items: items.map((claim) => ({
+        ...toWarrantyClaimResponse(claim),
+        customer_name: detailsById.get(claim.id)?.customer_name ?? null,
+        customer_phone: detailsById.get(claim.id)?.customer_phone ?? null,
+        warranty_name: detailsById.get(claim.id)?.warranty_name ?? null,
+        order_number: detailsById.get(claim.id)?.order_number ?? null,
+        project_number: detailsById.get(claim.id)?.project_number ?? null,
+      })),
+      meta: { page, per_page: perPage, total },
+    };
   }
 
   @Patch(':id/review')
