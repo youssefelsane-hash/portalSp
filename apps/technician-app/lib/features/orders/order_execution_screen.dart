@@ -472,6 +472,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             hasOnlinePayment: _order.hasOnlinePayment,
             fullyPaidOnline: _order.fullyPaidOnline,
             totalAmountCents: _order.totalAmountCents,
+            earningPending: _order.earningPending,
+            isCrewShare: _order.isCrewShare,
             paymentStatus: 'paid',
             bookingMode: _order.bookingMode,
             requiredTechnicians: _order.requiredTechnicians,
@@ -601,7 +603,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'نصيبك من الطلب: ${_formatEgp(_order.myEarningCents)}',
+                      technicianEarningLabel(
+                        myEarningCents: _order.myEarningCents,
+                        earningPending: _order.earningPending,
+                        isCrewShare: _order.isCrewShare,
+                        formatEgp: _formatEgp,
+                      ),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                     ),
                   ],

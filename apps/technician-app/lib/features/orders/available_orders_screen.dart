@@ -1019,7 +1019,12 @@ class _OverdueJobCard extends StatelessWidget {
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
             // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
-            'نصيبك ${_formatEgp(order.myEarningCents)}',
+            technicianEarningLabel(
+              myEarningCents: order.myEarningCents,
+              earningPending: order.earningPending,
+              isCrewShare: order.isCrewShare,
+              formatEgp: _formatEgp,
+            ),
           ].join(' — '),
         ),
         trailing: Icon(Icons.chevron_left, color: red),
@@ -1067,7 +1072,12 @@ class _UpcomingJobCard extends StatelessWidget {
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
             // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
-            'نصيبك ${_formatEgp(order.myEarningCents)}',
+            technicianEarningLabel(
+              myEarningCents: order.myEarningCents,
+              earningPending: order.earningPending,
+              isCrewShare: order.isCrewShare,
+              formatEgp: _formatEgp,
+            ),
           ].join(' — '),
         ),
         trailing: const Icon(Icons.chevron_left),
@@ -1092,9 +1102,15 @@ class _TeamAssignedJobCard extends StatelessWidget {
         leading: const Icon(Icons.groups_outlined),
         title: Text('طلب ${order.orderNumber}'),
         subtitle: Text(
-          order.teamLeaderName != null
-              ? 'قائد الفريق: ${order.teamLeaderName} — نصيبك ${_formatEgp(order.myEarningCents)}'
-              : 'نصيبك ${_formatEgp(order.myEarningCents)}',
+          [
+            if (order.teamLeaderName != null) 'قائد الفريق: ${order.teamLeaderName}',
+            technicianEarningLabel(
+              myEarningCents: order.myEarningCents,
+              earningPending: order.earningPending,
+              isCrewShare: order.isCrewShare,
+              formatEgp: _formatEgp,
+            ),
+          ].join(' — '),
         ),
         trailing: const Icon(Icons.chevron_left),
         onTap: onTap,

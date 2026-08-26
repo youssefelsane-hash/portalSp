@@ -75,7 +75,11 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
       const [user] = await q(
         `INSERT INTO users (phone_number, full_name, user_type, referred_by_user_id)
          VALUES ($1,$2,'customer',$3) RETURNING id`,
-        [`+2077${runId}${index}`.slice(0, 15), `عميل referral ${index} ${runId}`, index < 6 ? ids.referrer : null],
+        // بس أول اتنين بياخدوا `referred_by_user_id` (docs/08 §64، نظافة اختبارات): ده المدخل
+        // الوحيد اللي `reconcilePending()` بتكتشف بيه إحالات ضايعة. الباقي بيتسجّلوا صراحة
+        // بـ`createPendingReferral()` في الاختبارات نفسها، فطابور الاسترجاع العام ما يحصلش فيه
+        // ازدحام من صفوف الاختبار ده — وبالتالي أرقام الاسترجاع تفضل حتمية.
+        [`+2077${runId}${index}`.slice(0, 15), `عميل referral ${index} ${runId}`, index < 2 ? ids.referrer : null],
       );
       const [profile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [user.id]);
       const [address] = await q(
@@ -146,7 +150,13 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
   });
 
   it('recovers missed registration/completion events and issues one durable milestone reward', async () => {
-    expect(await service.reconcilePending(2)).toBe(2);
+    // بَقّة نظافة اختبارات حقيقية (docs/08 §64): `reconcilePending(limit)` بتشتغل على **كل**
+    // المرشّحين في القاعدة مش على بتوع الاختبار ده بس. فـ`reconcilePending(2)` كانت بتفترض إن
+    // أول اتنين في الطابور هم بتوعنا — لو أي سويت تانية سابت مرشّح مؤقتًا في نفس اللحظة، الحدّ
+    // بيتاكل بره، وإحالاتنا تفضل pending، فالاختبارات اللي بعده (اللي بتعتمد على العدّ التراكمي)
+    // تفشل بلا أي علاقة بالكود. الحل: دفعة أكبر + التأكيد على حالة **المُرشِّح بتاعنا** نفسه.
+    expect(await service.reconcilePending(200)).toBeGreaterThanOrEqual(2);
+    // بعد ما بقى بتوعنا اتنين بس في مدخل الاكتشاف، الرقم اللي يهمنا هو حالة المُرشِّح نفسه تحت.
     const completed = await dataSource.getRepository(Referral).count({
       where: { referrerUserId: ids.referrer, status: ReferralStatus.COMPLETED },
     });
@@ -202,12 +212,15 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     })).toBe(0);
     expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(2);
 
-    expect(await service.reconcilePending(10)).toBe(1);
+    // العدد المرجَّع بيشمل مرشّحين من سويتات تانية شغالة على نفس القاعدة — اللي بيثبت السلوك
+    // هو **نتيجة المُرشِّح بتاعنا**: مكافأة واحدة بالظبط، ولا واحدة زيادة.
+    await service.reconcilePending(200);
     expect(await dataSource.getRepository(ReferralReward).count({
       where: { referrerUserId: ids.referrer, milestoneCount: 6 },
     })).toBe(1);
     expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
-    expect(await service.reconcilePending(10)).toBe(0);
+    await service.reconcilePending(200);
+    expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
   });
 
   it('treats the same completed referral event twice as an idempotent replay', async () => {
@@ -250,7 +263,7 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     })).toBe(0);
     expect(await dataSource.getRepository(PromoCode).count({ where: { restrictedToUserId: ids.referrer } })).toBe(3);
 
-    expect(await service.reconcilePending(10)).toBe(1);
+    await service.reconcilePending(200);
     const reward = await dataSource.getRepository(ReferralReward).findOneByOrFail({
       referrerUserId: ids.referrer,
       milestoneCount: 8,
@@ -258,7 +271,8 @@ describe('ReferralsService Phase 4 milestone and recovery integrity', () => {
     expect(await dataSource.getRepository(AuditLog).count({
       where: { action: 'promo_code.created', entityId: reward.promoCodeId },
     })).toBe(1);
-    expect(await service.reconcilePending(10)).toBe(0);
+    await service.reconcilePending(200);
+    expect(await dataSource.getRepository(ReferralReward).count({ where: { referrerUserId: ids.referrer } })).toBe(4);
   });
 
   it('returns only the referral code actually persisted during concurrent lazy assignment', async () => {

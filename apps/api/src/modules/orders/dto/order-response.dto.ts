@@ -237,13 +237,24 @@ export interface TechnicianOrderResponseDto
   has_online_payment: boolean;
   /** كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص. */
   fully_paid_online: boolean;
+  /** السعر لسه ما اتحددش فـ`my_earning_cents` بصفر حسابيًا — مش «شغل ببلاش» (docs/08 §64.ب). */
+  earning_pending: boolean;
+  /** الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040). */
+  is_crew_share: boolean;
   /** الإجمالي — موجود بس لما مفيش أي دفع أونلاين (وقتها هو نفسه الكاش المطلوب تحصيله). */
   total_amount_cents?: number;
 }
 
 export function toTechnicianOrderResponseDto(
   base: OrderResponseDto,
-  money: { cashToCollectCents: number; myEarningCents: number; hasOnlinePayment: boolean; fullyPaidOnline: boolean },
+  money: {
+    cashToCollectCents: number;
+    myEarningCents: number;
+    hasOnlinePayment: boolean;
+    fullyPaidOnline: boolean;
+    earningPending?: boolean;
+    isCrewShare?: boolean;
+  },
 ): TechnicianOrderResponseDto {
   const {
     total_amount_cents,
@@ -268,6 +279,9 @@ export function toTechnicianOrderResponseDto(
     ...visible,
     cash_to_collect_cents: money.cashToCollectCents,
     my_earning_cents: money.myEarningCents,
+    // docs/08 §64.ب — «لسه ما اتحددش» غير «صفر». التطبيق بيكتب نص مختلف تمامًا للحالتين.
+    earning_pending: money.earningPending ?? false,
+    is_crew_share: money.isCrewShare ?? false,
     has_online_payment: money.hasOnlinePayment,
     fully_paid_online: money.fullyPaidOnline,
     ...(money.hasOnlinePayment ? {} : { total_amount_cents }),

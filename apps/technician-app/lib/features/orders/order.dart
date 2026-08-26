@@ -77,6 +77,11 @@ class Order {
   final bool fullyPaidOnline;
   /** الإجمالي — بيرجع من الـAPI بس لما مفيش دفع أونلاين (وقتها = الكاش المطلوب تحصيله). */
   final int? totalAmountCents;
+  // docs/08 §64.ب (بلاغ مالك: «نصيبك 0 وده مش منطقي») — السعر لسه ما اتحددش (معاينة/عرض سعر
+  // بيتقرر على الطبيعة)، فالرقم صفر **حسابيًا** مش لأن الشغل ببلاش. الفرق ده لازم يبان في النص.
+  final bool earningPending;
+  // الرقم ده حصّة الفني ده من وعاء الطاقم مش الوعاء كله (ADR-0040).
+  final bool isCrewShare;
   final String paymentStatus;
   final OrderAddress? address;
   // "اعتماد" (docs/06 §1) — بس لما يبقى 'team' في الباك-إند (order.entity.ts's BookingMode) فيه
@@ -112,6 +117,8 @@ class Order {
     required this.hasOnlinePayment,
     required this.fullyPaidOnline,
     this.totalAmountCents,
+    this.earningPending = false,
+    this.isCrewShare = false,
     required this.paymentStatus,
     required this.bookingMode,
     this.requiredTechnicians,
@@ -135,6 +142,8 @@ class Order {
         hasOnlinePayment: json['has_online_payment'] as bool? ?? false,
         fullyPaidOnline: json['fully_paid_online'] as bool? ?? false,
         totalAmountCents: json['total_amount_cents'] as int?,
+        earningPending: json['earning_pending'] as bool? ?? false,
+        isCrewShare: json['is_crew_share'] as bool? ?? false,
         paymentStatus: json['payment_status'] as String,
         bookingMode: json['booking_mode'] as String? ?? 'individual',
         requiredTechnicians: json['required_technicians'] as int?,
@@ -207,3 +216,19 @@ const Map<String, String> technicianActionLabelsAr = {
   'complete': 'الشغل خلص',
   'collect_cash': 'حصّلت الكاش',
 };
+
+/// نص «نصيبك» الموحّد (docs/08 §64.ب).
+///
+/// بلاغ المالك: «بيقولوا إن نصيبك من صفر، وده مش منطقي». الحساب نفسه كان سليم — العرض هو اللي
+/// كان بيكدب: طلب لسه ما اتسعّرش نصيبه بيطلع صفر حسابيًا، و«0 ج.م» معناها للفني «هتشتغل ببلاش».
+/// دلوقتي الحالتين منفصلتين بالنص، والحصّة من طاقم بتتقال إنها حصّة مش الإجمالي.
+String technicianEarningLabel({
+  required int myEarningCents,
+  required bool earningPending,
+  required bool isCrewShare,
+  required String Function(int) formatEgp,
+}) {
+  if (earningPending) return 'نصيبك: هيتحدد بعد تسعير الشغلانة';
+  final amount = formatEgp(myEarningCents);
+  return isCrewShare ? 'نصيبك من الطاقم: $amount' : 'نصيبك: $amount';
+}
