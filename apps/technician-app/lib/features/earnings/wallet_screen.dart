@@ -44,7 +44,7 @@ class _WalletScreenState extends State<WalletScreen> {
 
   Future<void> _requestPayout() async {
     final wallet = _wallet;
-    if (wallet == null) return;
+    if (wallet == null || wallet.balanceCents <= 0) return;
     final created = await Navigator.of(context).push<Payout>(
       MaterialPageRoute(
         builder: (_) => PayoutRequestScreen(repository: _repository, availableBalanceCents: wallet.balanceCents),
@@ -96,8 +96,20 @@ class _WalletScreenState extends State<WalletScreen> {
                                 const SizedBox(height: 8),
                                 Text(
                                   _formatEgp(wallet.balanceCents),
-                                  style: Theme.of(context).textTheme.headlineMedium,
+                                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                    color: wallet.balanceCents < 0
+                                        ? Theme.of(context).colorScheme.error
+                                        : null,
+                                  ),
                                 ),
+                                if (wallet.balanceCents < 0) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'عليك مديونية للمنصة بقيمة ${_formatEgp(-wallet.balanceCents)}. الصرف هيتاح بعد تسويتها أو بعد ما أرباح جديدة تغطيها.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                                  ),
+                                ],
                                 const SizedBox(height: 16),
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -122,8 +134,16 @@ class _WalletScreenState extends State<WalletScreen> {
                         ),
                         const SizedBox(height: 16),
                         FilledButton(
-                          onPressed: wallet.isFrozen ? null : _requestPayout,
-                          child: Text(wallet.isFrozen ? 'المحفظة مجمّدة' : 'اطلب صرف'),
+                          onPressed: wallet.isFrozen || wallet.balanceCents <= 0
+                              ? null
+                              : _requestPayout,
+                          child: Text(
+                            wallet.isFrozen
+                                ? 'المحفظة مجمّدة'
+                                : wallet.balanceCents <= 0
+                                    ? 'لا يوجد رصيد قابل للصرف'
+                                    : 'اطلب صرف',
+                          ),
                         ),
                         const SizedBox(height: 24),
                         Text('آخر الحركات', style: Theme.of(context).textTheme.titleMedium),

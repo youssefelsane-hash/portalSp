@@ -58,7 +58,6 @@ import { TechnicianServiceVerificationNotificationListener } from './listeners/t
 import { TechnicianCategoryVerificationNotificationListener } from './listeners/technician-category-verification-notification.listener';
 import { WorkOpportunityOfferedNotificationListener } from './listeners/work-opportunity-offered-notification.listener';
 import { PreferredCrewNotificationListener } from './listeners/preferred-crew-notification.listener';
-import { ProjectActivityNotificationListener } from './listeners/project-activity-notification.listener';
 import { TechnicianAdminActionNotificationListener } from './listeners/technician-admin-action-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
@@ -68,6 +67,7 @@ import { NotificationWorkflowReminderService } from './notification-workflow-rem
 import { NotificationWorkflowService } from './notification-workflow.service';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
+import { ProjectNotificationOutboxProcessor } from './project-notification-outbox.processor';
 
 @Module({
   imports: [
@@ -109,7 +109,6 @@ import { NotificationsService } from './notifications.service';
     TechnicianServiceVerificationNotificationListener,
     TechnicianCategoryVerificationNotificationListener,
     OrderCrewChangedNotificationListener,
-    ProjectActivityNotificationListener,
     TechnicianAdminActionNotificationListener,
     ComplaintFiledRoutingListener,
     SupportChatMessageRoutingListener,
@@ -140,6 +139,7 @@ import { NotificationsService } from './notifications.service';
     PaymentInstaPayRejectedNotificationListener,
     PaymentInstaPayConfirmedNotificationListener,
     PaymentInstaPayTransferReportedRoutingListener,
+    ProjectNotificationOutboxProcessor,
   ],
   exports: [NotificationsService, NotificationWorkflowService, NotificationRoutingService],
 })

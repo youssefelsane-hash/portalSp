@@ -11,6 +11,7 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
   let controller: MyWarrantyController;
   let adminController: AdminWarrantyClaimsController;
   let auditLog: AuditLogService;
+  let events: { emit: jest.Mock };
   let userId: string;
   let customerId: string;
   let warrantyId: string;
@@ -43,12 +44,14 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
       [customerId],
     );
     warrantyId = warranty.id;
-    controller = new MyWarrantyController(dataSource);
+    events = { emit: jest.fn() };
+    controller = new MyWarrantyController(dataSource, events as never);
     auditLog = { record: jest.fn(async () => undefined) } as unknown as AuditLogService;
     adminController = new AdminWarrantyClaimsController(
       dataSource.getRepository(WarrantyClaim),
       dataSource,
       auditLog,
+      events as never,
     );
   });
 
@@ -76,6 +79,10 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
     );
     expect(state.claims_used).toBe(1);
     expect(state.claim_count).toBe(1);
+    expect(events.emit).toHaveBeenCalledWith(
+      'warranty_claim.changed',
+      expect.objectContaining({ action: 'opened' }),
+    );
   });
 
   it('rolls back a warranty decision when its mandatory audit fails', async () => {
@@ -85,6 +92,7 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
     );
     expect(claim.status).toBe('open');
     const failure = jest.spyOn(auditLog, 'record').mockRejectedValueOnce(new Error('simulated warranty audit failure'));
+    const eventCountBeforeFailure = events.emit.mock.calls.length;
     try {
       await expect(adminController.review(
         { sub: userId } as never,
@@ -99,6 +107,7 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
       [claim.id],
     );
     expect(unchanged.status).toBe('open');
+    expect(events.emit).toHaveBeenCalledTimes(eventCountBeforeFailure);
   });
 
   it('returns the snake_case response contract consumed by the admin claims screen', async () => {
@@ -107,6 +116,11 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
     expect(item).toMatchObject({
       warranty_id: warrantyId,
       customer_id: customerId,
+      customer_name: `Warranty test ${runId}`,
+      customer_phone: expect.any(String),
+      warranty_name: 'ضمان اختبار',
+      order_number: null,
+      project_number: null,
       defect_description: expect.any(String),
       created_at: expect.any(String),
     });

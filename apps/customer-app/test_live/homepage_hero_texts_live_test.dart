@@ -4,19 +4,20 @@
 //
 // docs/08 §64.د — طلب المالك: «الكلام اللي تحت… عايز الأدمين ليه أكسس على الكلام ده». النصوص
 // دي كانت مكتوبة ثابتة في الـDart، فأي تعديل صياغة كان يحتاج release. الاختبار ده بيثبّت إن
-// الـmigration اتطبّقت والـendpoint فعلاً بيرجّعها، وإن الافتراضي مش فاضي أبدًا.
+// إعداد `homepage.search_content` اتطبّق والـendpoint فعلاً بيرجّعه، وإن مفيش حقل بيرجع فاضي.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/features/catalog/homepage_content_repository.dart';
 
 void main() {
-  test('محتوى الصفحة الرئيسية بيرجّع نصوص الـhero من الإعدادات (مش ثابتة في الكود)', () async {
+  test('محتوى الصفحة الرئيسية بيرجّع نصوص البحث من الإعدادات (مش ثابتة في الكود)', () async {
     final content = await HomepageContentRepository().fetch();
+    final search = content.search;
 
     // الأربعة لازم يوصلوا بقيمة حقيقية — الباك-إند بيرجّع الافتراضي لو الأدمن مسح الحقل، فمفيش
     // حالة إن الشاشة الرئيسية تفضل بلا عنوان أو بشريط بحث بلا نص إرشادي.
-    expect(content.heroEyebrow.trim(), isNotEmpty);
-    expect(content.heroTitle.trim(), isNotEmpty);
-    expect(content.heroSubtitle.trim(), isNotEmpty);
-    expect(content.searchPlaceholder.trim(), isNotEmpty);
+    expect(search.eyebrow.trim(), isNotEmpty);
+    expect(search.title.trim(), isNotEmpty);
+    expect(search.description.trim(), isNotEmpty);
+    expect(search.placeholder.trim(), isNotEmpty);
   });
 }

@@ -1,28 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import '../../core/api_config.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/media_url.dart';
 import 'chat_client.dart';
 import 'chat_repository.dart';
 import 'models.dart';
-
-// file_url بيرجع نسبي (`/uploads/...`) وقت التخزين المحلي وقت التطوير (LocalDiskStorageService)،
-// أو رابط S3 كامل جاهز في الإنتاج — نفس نمط `_socketBaseUrl` في chat_client.dart بالظبط.
-String _resolveMediaUrl(String fileUrl) {
-  if (fileUrl.startsWith('http')) return fileUrl;
-  final origin = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
-  return '$origin$fileUrl';
-}
 
 class ChatScreen extends StatefulWidget {
   final String? orderId;
   final String appBarTitle;
 
-  const ChatScreen({super.key, required String orderId})
-      : orderId = orderId,
-        appBarTitle = 'الشات مع الفني';
+  const ChatScreen({super.key, required this.orderId})
+      : appBarTitle = 'الشات مع الفني';
 
   // خيط الدعم العام (support_chat) — مفيش orderId، الـ thread بيتحل بـ get-or-create
   // (ChatRepository.getOrCreateSupportThreadId) بدل ChatRepository.getThreadIdForOrder.
@@ -161,7 +152,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     ? ClipRRect(
                                         borderRadius: BorderRadius.circular(8),
                                         child: Image.network(
-                                          _resolveMediaUrl(message.fileUrl!),
+                                          resolveMediaUrl(message.fileUrl!),
                                           width: 180,
                                           fit: BoxFit.cover,
                                           errorBuilder: (context, error, stack) => const SizedBox(

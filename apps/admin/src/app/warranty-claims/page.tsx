@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
@@ -15,6 +16,9 @@ import { Button } from '@/components/ui/button';
 
 interface ClaimRow {
   id: string; warranty_id: string; customer_id: string | null;
+  order_id: string | null; project_id: string | null;
+  customer_name: string | null; customer_phone: string | null;
+  warranty_name: string | null; order_number: string | null; project_number: string | null;
   status: string; defect_description: string;
   original_provider_id: string | null; repair_order_id: string | null;
   created_at: string;
@@ -79,7 +83,7 @@ export default function AdminWarrantyClaimsPage() {
   }, [isLoading, load]);
   // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
   // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
-  useAdminLiveRefresh(['orders'], load);
+  useAdminLiveRefresh(['warranty'], load);
 
   async function reviewClaim(claimId: string, status: string, rejectionReason?: string) {
     try {
@@ -107,19 +111,32 @@ export default function AdminWarrantyClaimsPage() {
           </button>
         ))}
       </div>
-      {!claims && <TableSkeleton columns={5} />}
+      {!claims && <TableSkeleton columns={6} />}
       {claims && claims.length === 0 && <EmptyState title="مفيش مطالبات" />}
       {claims && claims.length > 0 && (
         <Table>
           <TableHeader><TableRow>
             <TableHead>العميل</TableHead><TableHead>الوصف</TableHead>
-            <TableHead>الحالة</TableHead><TableHead>التاريخ</TableHead><TableHead>إجراءات</TableHead>
+            <TableHead>الضمان والطلب</TableHead><TableHead>الحالة</TableHead>
+            <TableHead>التاريخ</TableHead><TableHead>إجراءات</TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {claims.map((c) => (
               <TableRow key={c.id}>
-                <TableCell className="text-sm">{customerReference(c.customer_id)}</TableCell>
-                <TableCell className="max-w-xs truncate text-sm">{c.defect_description}</TableCell>
+                <TableCell className="text-sm">
+                  <div className="font-medium">{c.customer_name || customerReference(c.customer_id)}</div>
+                  {c.customer_phone && <div className="text-muted-foreground" dir="ltr">{c.customer_phone}</div>}
+                </TableCell>
+                <TableCell className="max-w-md whitespace-pre-wrap break-words text-sm">{c.defect_description}</TableCell>
+                <TableCell className="text-sm">
+                  <div>{c.warranty_name || 'ضمان غير متاح'}</div>
+                  {c.order_id && (
+                    <Link href={`/orders/${c.order_id}`} className="text-primary hover:underline">
+                      {c.order_number || 'فتح الطلب'}
+                    </Link>
+                  )}
+                  {c.project_number && <div className="text-muted-foreground">{c.project_number}</div>}
+                </TableCell>
                 <TableCell><Badge variant={c.status === 'open' ? 'destructive' : 'outline'}>{CLAIM_STATUS_LABELS[c.status] ?? c.status}</Badge></TableCell>
                 <TableCell className="text-sm">{new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')}</TableCell>
                 <TableCell>

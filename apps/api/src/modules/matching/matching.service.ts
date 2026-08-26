@@ -1064,6 +1064,7 @@ export class MatchingService {
             result.technicianId,
             'assignment',
             result.opportunity.capacity_tier_at_offer,
+            result.order.scheduledAt,
           ),
         );
       }

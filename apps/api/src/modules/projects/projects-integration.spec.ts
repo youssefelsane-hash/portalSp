@@ -1,5 +1,3 @@
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PROJECT_ACTIVITY_EVENT, ProjectActivityEvent } from '../../common/events/project-activity.event';
 import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -16,6 +14,8 @@ import { ServiceZone } from '../geo/entities/service-zone.entity';
 import { Order } from '../orders/entities/order.entity';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { Service } from '../catalog/entities/service.entity';
+import { ProjectNotificationOutboxProcessor } from '../notifications/project-notification-outbox.processor';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * نظام المشروعات (docs/01B مهمة A) — تدفق حي كامل:
@@ -25,8 +25,6 @@ describe('ProjectsService — المشروعات والمراحل والعروض
   let dataSource: DataSource;
   let projectsService: ProjectsService;
   let auditLog: AuditLogService;
-  // docs/08 §64.هـ — كل أحداث نشاط المشروع اللي اتصدرت خلال الـsuite كلها، بالترتيب.
-  const activity: ProjectActivityEvent[] = [];
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
   const ids = {
     customerUser: '', customerProfile: '', category: '', service: '',
@@ -83,15 +81,15 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     ids.adminUser = admin.id;
 
     auditLog = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditLogService;
-    const emitter = new EventEmitter2();
-    emitter.on(PROJECT_ACTIVITY_EVENT, (event: ProjectActivityEvent) => activity.push(event));
-    projectsService = new ProjectsService(dataSource.getRepository(Project), dataSource.getRepository(ProjectQuote), dataSource.getRepository(ProjectMilestone), dataSource, auditLog, emitter);
+    projectsService = new ProjectsService(dataSource.getRepository(Project), dataSource.getRepository(ProjectQuote), dataSource.getRepository(ProjectMilestone), dataSource, auditLog);
   });
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
       if (ids.project) {
+        await q(`DELETE FROM notifications WHERE source_outbox_id IN (SELECT id FROM project_notification_outbox WHERE project_id=$1)`, [ids.project]);
+        await q(`DELETE FROM project_notification_outbox WHERE project_id=$1`, [ids.project]);
         await q(`DELETE FROM project_milestones WHERE project_id=$1`, [ids.project]);
         await q(`UPDATE project_quotes SET status='rejected' WHERE project_id=$1 AND status IN ('sent','approved')`, [ids.project]);
         await q(`DELETE FROM project_quotes WHERE project_id=$1`, [ids.project]);
@@ -134,6 +132,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [ids.customerProfile, idempotencyKey],
     );
     expect(Number(projectCount)).toBe(1);
+    const [{ count: createdNotificationCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox WHERE project_id=$1 AND action='project.created'`,
+      [project.id],
+    );
+    expect(Number(createdNotificationCount)).toBe(1);
     await expect(projectsService.findOneOwned(ids.otherUser, project.id)).rejects.toMatchObject({ code: 'VAL_001' });
 
     const page = await projectsService.listAll(1, 1);
@@ -159,6 +162,7 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [ids.customerProfile, idempotencyKey],
     );
     expect(Number(count)).toBe(1);
+    await q(`DELETE FROM project_notification_outbox WHERE project_id=$1`, [first.id]);
     await q(`DELETE FROM projects WHERE id=$1`, [first.id]);
   });
 
@@ -244,6 +248,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     ])).rejects.toThrow('audit unavailable');
     const [{ count }] = await q<{ count: string }[]>(`SELECT COUNT(*)::text AS count FROM project_milestones WHERE project_id=$1`, [ids.project]);
     expect(Number(count)).toBe(0);
+    const [{ count: failedOutboxCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox WHERE project_id=$1 AND action='project.milestones_created'`,
+      [ids.project],
+    );
+    expect(Number(failedOutboxCount)).toBe(0);
 
     const milestones = await projectsService.createMilestones(ids.adminUser, ids.project, [
       { name_ar: 'عربون', amount_cents: 100000 },
@@ -253,6 +262,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     expect(milestones).toHaveLength(3);
     const total = milestones.reduce((s, m) => s + Number(m.amountCents), 0);
     expect(total).toBe(660000);
+    const [{ count: successfulOutboxCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox WHERE project_id=$1 AND action='project.milestones_created'`,
+      [ids.project],
+    );
+    expect(Number(successfulOutboxCount)).toBe(1);
   });
 
   it('مجموع المراحل ≠ العرض: يترفض', async () => {
@@ -358,6 +372,12 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [ids.project, 'تعليق لازم يرجع بالكامل عند فشل التدقيق'],
     );
     expect(Number(rolledBackCommentCount)).toBe(0);
+    const [{ count: rolledBackOutboxCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox
+       WHERE project_id=$1 AND action='project.comment_added' AND details->>'comment_id' IS NOT NULL`,
+      [ids.project],
+    );
+    expect(Number(rolledBackOutboxCount)).toBe(0);
 
     await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
       body: 'خلصنا تأسيس السباكة، بننتقل للكهربا بكرة',
@@ -495,71 +515,55 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     ).rejects.toThrow(/غير موجودة أو موقوفة/);
   });
 
-  /**
-   * docs/08 §64.هـ — بلاغ المالك: «لما بيحصل أي تعديل من الأدمين… ما بيظهرش notification.
-   * المفروض فعليًا أي حاجة أكشن يحصل، المفروض الكاستمر يجيله notification».
-   *
-   * الاختبار ده بيقرا كل الأحداث اللي اتصدرت من الـsuite كلها فوق (دورة حياة مشروع حقيقية
-   * كاملة على Postgres حقيقي) ويتأكد إن كل أكشن أدمن ولّد إشعار فعلاً — الحماية الوحيدة من إن
-   * مسار جديد يتضاف بكرة من غير إشعار زي ما حصل مع الموديول كله.
-   */
-  describe('إشعارات نشاط المشروع (docs/08 §64.هـ)', () => {
-    const kinds = () => activity.map((event) => event.kind);
+  it('إشعار المشروع بيرجع بعد فشل عابر ويتسلم مرة واحدة', async () => {
+    await q(`UPDATE project_notification_outbox SET status='delivered', delivered_at=now() WHERE project_id=$1`, [ids.project]);
+    const [outbox] = await q<{ id: string }[]>(
+      `INSERT INTO project_notification_outbox (project_id, action, actor_user_id, actor_role)
+       VALUES ($1,'project.quote_sent',$2,'admin') RETURNING id`,
+      [ids.project, ids.adminUser],
+    );
+    const notifyMultiChannel = jest.fn()
+      .mockRejectedValueOnce(new Error('temporary push outage'))
+      .mockResolvedValueOnce([]);
+    const processor = new ProjectNotificationOutboxProcessor(
+      dataSource,
+      { notifyMultiChannel } as unknown as NotificationsService,
+    );
 
-    it('كل أكشن أدمن في دورة الحياة ولّد حدث إشعار', () => {
-      // الأكشنات اللي المالك سمّاها بالحرف: «بعت عرض، أو بعت عربون مثلاً، طلب لعربون».
-      expect(kinds()).toEqual(expect.arrayContaining([
-        'quote_sent',
-        'quote_approved',
-        'milestones_created',
-        'milestone_started',
-        'milestone_completed',
-        'milestone_rejected',
-        'comment_added',
-        'order_linked',
-        'warranty_issued',
-      ]));
+    expect(await processor.drain(10, ids.project)).toBe(1);
+    let [state] = await q<{ status: string; attempts: number }[]>(
+      `SELECT status, attempts FROM project_notification_outbox WHERE id=$1`,
+      [outbox.id],
+    );
+    expect(state).toMatchObject({ status: 'pending', attempts: 1 });
+
+    await q(`UPDATE project_notification_outbox SET next_attempt_at=now() WHERE id=$1`, [outbox.id]);
+    expect(await processor.drain(10, ids.project)).toBe(1);
+    [state] = await q<{ status: string; attempts: number }[]>(
+      `SELECT status, attempts FROM project_notification_outbox WHERE id=$1`,
+      [outbox.id],
+    );
+    expect(state).toMatchObject({ status: 'delivered', attempts: 2 });
+    expect(await processor.drain(10, ids.project)).toBe(0);
+    expect(notifyMultiChannel).toHaveBeenCalledTimes(2);
+    expect(notifyMultiChannel.mock.calls[1][0]).toMatchObject({
+      userId: ids.customerUser,
+      sourceOutboxId: outbox.id,
+      deepLink: `/projects/${ids.project}`,
     });
 
-    it('كل حدث بيحمل user id حقيقي (مش profile id) ورقم مشروع ونص عربي', () => {
-      expect(activity.length).toBeGreaterThan(0);
-      for (const event of activity) {
-        expect(event.projectNumber).toMatch(/^PRJ/);
-        expect(event.titleAr.trim().length).toBeGreaterThan(0);
-        expect(event.bodyAr.trim().length).toBeGreaterThan(0);
-        // إما مستقبِل حقيقي، أو `companyRequested` اللي بيخلّي المستمع يوجّهه لفريق العمليات —
-        // ممنوع حدث مالوش مستقبِل ولا مسار احتياطي (ده بالظبط اللي كان بيضيّع الإشعارات).
-        expect(
-          Boolean(event.customerUserId) || Boolean(event.companyOwnerUserId) || event.companyRequested,
-        ).toBe(true);
-        if (event.customerUserId) expect(event.customerUserId).toBe(ids.customerUser);
-      }
-    });
-
-    it('إرسال عرض السعر بيوصل العميل بالمبلغ الحقيقي — مش إشعار عام', () => {
-      const sent = activity.find((event) => event.kind === 'quote_sent');
-      expect(sent?.customerUserId).toBe(ids.customerUser);
-      // العرض المُرسل في الاختبار فوق = 6,600 ج.م — الرقم الحقيقي لازم يكون في نص الإشعار
-      // بأرقام غربية (نفس صيغة باقي إشعارات المنصة)، مش إشعار عام بلا مبلغ.
-      expect(sent?.bodyAr).toContain('6,600 ج.م');
-    });
-
-    it('كومنت الأدمن الداخلي (مش مرئي للعميل) ما بيولّدش إشعار خالص', () => {
-      const comments = activity.filter((event) => event.kind === 'comment_added');
-      // الـsuite فوق ضافت 3 كومنتات ناجحة: أدمن مرئي + أدمن داخلي + كومنت عميل.
-      // المرئي والعميل بس ليهم أحداث — الداخلي مالوش، ونصه ما ينفعش يظهر في أي إشعار.
-      expect(comments).toHaveLength(2);
-      expect(comments.some((event) => event.bodyAr.includes('تأسيس السباكة'))).toBe(true);
-      expect(comments.some((event) => event.bodyAr.includes('ملاحظة داخلية'))).toBe(false);
-      // كومنت العميل بيروح للشركة بس (مالوش لازمة يرجع للعميل نفسه).
-      const fromCustomer = comments.find((event) => event.bodyAr.includes('متابع معاكم'));
-      expect(fromCustomer?.customerUserId).toBeNull();
-    });
-
-    it('رفض العميل لمرحلة بيروح للشركة المنفّذة مش للعميل نفسه', () => {
-      const rejected = activity.find((event) => event.kind === 'milestone_rejected');
-      expect(rejected).toBeDefined();
-      expect(rejected?.customerUserId).toBeNull();
-    });
+    const [exhaustedOutbox] = await q<{ id: string }[]>(
+      `INSERT INTO project_notification_outbox
+         (project_id, action, actor_user_id, actor_role, attempts)
+       VALUES ($1,'project.quote_sent',$2,'admin',4) RETURNING id`,
+      [ids.project, ids.adminUser],
+    );
+    notifyMultiChannel.mockRejectedValueOnce(new Error('persistent delivery outage'));
+    expect(await processor.drain(10, ids.project)).toBe(1);
+    const [exhaustedState] = await q<{ status: string; attempts: number }[]>(
+      `SELECT status, attempts FROM project_notification_outbox WHERE id=$1`,
+      [exhaustedOutbox.id],
+    );
+    expect(exhaustedState).toMatchObject({ status: 'manual_review', attempts: 5 });
   });
 });

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +19,7 @@ import 'categories_screen.dart';
 import 'category_card.dart';
 import 'branding_repository.dart';
 import 'homepage_content_repository.dart';
+import 'hero_image_crossfade.dart';
 import 'models.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
@@ -42,11 +42,6 @@ import '../projects/create_project_screen.dart';
 // من المستخدم بتوقع تلاقيه على واحد من الاتنين مرتين ورا بعض فتحس إن "مفيش تغيير خالص". الحل:
 // سلّم إضاءة واضح (غامق/متوسط/فاتح) بدل تنويع هوية اللون — يفضل داخل عائلة الأزرق نفسها (نفس
 // المبدأ الحاكم في CLAUDE.md، "نفس الشكل في كل حتة")، مطابق تمامًا لـapps/customer-web's HERO_SLIDES.
-// ارتفاع الـhero (docs/08 §64.د) — ثابت صريح عشان مساحة الصورة ما تعتمدش على طول النص. القيمة
-// دي بتدي الصورة مساحة حقيقية (كانت بتطلع شريط رفيع لما النص يقصر) وفي نفس الوقت بتسيب الفئات
-// المميّزة ظاهرة تحتها من غير scroll على شاشات الموبايل العادية.
-const double _heroHeight = 300;
-
 const List<List<Color>> _heroGradients = [
   [Color(0xFF1C3A6E), Color(0xFF2F5AA6), Color(0xFF4D78C4)],
   [Color(0xFF0F1115), Color(0xFF22314F), Color(0xFF2F5AA6)],
@@ -75,13 +70,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ServiceCategory>? _categories;
   String? _error;
   String _trustMessage = '';
-  // نصوص الـhero من الإعدادات (docs/08 §64.د) — الافتراضيات هنا هي نفس النص القديم بالحرف، عشان
-  // الشاشة تبقى صح من أول فريم قبل ما نداء المحتوى يرجع.
-  String _heroEyebrow = 'أساعدك إزاي؟';
-  String _heroTitle = 'محتاج مساعدة في إيه؟';
-  String _heroSubtitle = 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت';
-  String _searchPlaceholder = 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"';
   List<String> _heroImages = [];
+  HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
   List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
@@ -95,32 +85,43 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
     // رسالة الثقة/الضمان ونصايح مفيدة وبيانات الدعم ولوجو البراندنج — تحميل مستقل عمدًا (فشل أي
     // واحد فيهم ميأثرش على باقي الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
-    _homepageContentRepository.fetch().then((content) {
-      if (mounted) setState(() {
-        _trustMessage = content.trustMessage;
-        _heroImages = content.heroImages;
-        _tips = content.tips;
-        _heroEyebrow = content.heroEyebrow;
-        _heroTitle = content.heroTitle;
-        _heroSubtitle = content.heroSubtitle;
-        _searchPlaceholder = content.searchPlaceholder;
-        _activeSlide = 0;
-      });
-    }).catchError((_) {});
-    _supportContactRepository.fetch().then((contact) {
-      if (mounted) setState(() => _supportContact = contact);
-    }).catchError((_) {});
-    _brandingRepository.fetchPrimaryLogo().then((logo) {
-      if (mounted) setState(() => _brandingLogo = logo);
-    }).catchError((_) {});
+    _homepageContentRepository
+        .fetch()
+        .then((content) {
+          if (mounted) {
+            setState(() {
+              _trustMessage = content.trustMessage;
+              _heroImages = content.heroImages;
+              _searchContent = content.search;
+              _tips = content.tips;
+              _activeSlide = 0;
+            });
+          }
+        })
+        .catchError((_) {});
+    _supportContactRepository
+        .fetch()
+        .then((contact) {
+          if (mounted) setState(() => _supportContact = contact);
+        })
+        .catchError((_) {});
+    _brandingRepository
+        .fetchPrimaryLogo()
+        .then((logo) {
+          if (mounted) setState(() => _brandingLogo = logo);
+        })
+        .catchError((_) {});
     // صورة splash القديمة تفضل fallback لو قائمة homepage.hero_images الجديدة فاضية.
-    _brandingRepository.fetchHeroBackground().then((asset) {
-      if (!mounted || asset == null || asset.isDefault) return;
-      setState(() {
-        _heroBackground = asset;
-        _activeSlide = 0;
-      });
-    }).catchError((_) {});
+    _brandingRepository
+        .fetchHeroBackground()
+        .then((asset) {
+          if (!mounted || asset == null || asset.isDefault) return;
+          setState(() {
+            _heroBackground = asset;
+            _activeSlide = 0;
+          });
+        })
+        .catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
       final count = _heroImages.isNotEmpty ? _heroImages.length : (_heroBackground == null ? _heroGradients.length : 1);
@@ -143,9 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openSearch([String value = '']) => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)),
-      );
+  void _openSearch([String value = '']) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)));
 
   @override
   Widget build(BuildContext context) {
@@ -168,11 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 builder: (context, snapshot) {
                   final unread = snapshot.data ?? 0;
                   return IconButton(
-                    icon: Badge(
-                      isLabelVisible: unread > 0,
-                      label: Text('$unread'),
-                      child: const Icon(Icons.notifications_outlined),
-                    ),
+                    icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.notifications_outlined)),
                     tooltip: 'الإشعارات',
                     onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
                   );
@@ -207,28 +202,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>()),
-                      ));
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>())));
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
-                          Icon(Icons.home_work_outlined, size: 32,
-                              color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          Icon(Icons.home_work_outlined, size: 32, color: Theme.of(context).colorScheme.onPrimaryContainer),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('بتشطب شقتك؟',
-                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                        fontWeight: FontWeight.bold)),
-                                Text('ابدأ مشروعك مع صُنّاع',
-                                    style: TextStyle(
-                                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                                        fontSize: 13)),
+                                Text('بتشطب شقتك؟', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                                Text('ابدأ مشروعك مع صُنّاع', style: TextStyle(color: Theme.of(context).colorScheme.onPrimaryContainer, fontSize: 13)),
                               ],
                             ),
                           ),
@@ -257,9 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           separatorBuilder: (_, _) => const SizedBox(width: 16),
                           itemBuilder: (context, index) => _FeaturedCategoryItem(
                             category: featured[index],
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => ServicesScreen(category: featured[index])),
-                            ),
+                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServicesScreen(category: featured[index]))),
                           ),
                         ),
                       ),
@@ -278,32 +263,30 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     if (_error != null)
-                      Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Center(child: Text(_error!)))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: Text(_error!)),
+                      )
                     else if (_categories == null)
                       const LoadingList()
                     else if (_categories!.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي')),
+                        child: Center(
+                          child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي'),
+                        ),
                       )
                     else
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.95,
-                        ),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.95),
                         itemCount: _categories!.length,
                         itemBuilder: (context, index) {
                           final category = _categories![index];
                           return CategoryCard(
                             category: category,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => ServicesScreen(category: category)),
-                            ),
+                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServicesScreen(category: category))),
                           );
                         },
                       ),
@@ -319,121 +302,69 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// hero دوّار (طلب مالك صريح 2026-08-22/23، تصميم مرجعي: Angi.com).
-  ///
-  /// docs/08 §64.د — طلب المالك: «كبرلي مساحة الصورة اللي بتتغير… وتصغرلي محرك البحث…
-  /// محتاج يبقى مدور شوية… professional وأصغر من كده بكتير».
-  ///
-  /// اللي اتغيّر عن النسخة القديمة:
-  ///  1. **ارتفاع صريح للصورة** (`_heroHeight`) بدل ما الارتفاع يطلع من حجم النص + padding —
-  ///     ده كان بيخلّي الصورة شريط رفيع كل ما النص يقصر.
-  ///  2. **اتشال الصندوق الغامق** اللي كان لافّ النص والبحث — كان بيغطّي نص مساحة الصورة.
-  ///     البديل: تدرّج أسود خفيف من تحت + ظل على النص، فالصورة بانت والنص فضل مقروء.
-  ///  3. **الصورة بتتبدّل بـcross-fade حقيقي** (`AnimatedSwitcher` على `Image.network`) بدل
-  ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
-  ///     فالتبديل كان بيحصل قطع مفاجئ.
-  ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
+  // hero دوّار (طلب مالك صريح 2026-08-22/23، تصميم مرجعي: Angi.com) — لوحة شفافة غامقة فوق خلفية
+  // متدرّجة دوّارة فيها التاجلاين + البحث، ورسالة الثقة/الضمان تحتها مباشرة فوق الصورة نفسها
+  // (بلا صندوق عمدًا) — مطابق تمامًا لهيكل apps/customer-web's hero.
   Widget _buildHero(BuildContext context) {
     final configuredImages = _heroImages.map(_resolveHeroImageUrl).toList();
-    final effectiveImages = configuredImages.isNotEmpty
-        ? configuredImages
-        : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
-    final heroImageUrl = effectiveImages.isEmpty ? null : effectiveImages[_activeSlide % effectiveImages.length];
+    final effectiveImages = configuredImages.isNotEmpty ? configuredImages : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
     final gradientIndex = _activeSlide % _heroGradients.length;
-
-    return SizedBox(
-      height: _heroHeight,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
       child: Stack(
-        fit: StackFit.expand,
         children: [
-          // التدرّج فضل تحت الصورة دايمًا كـfallback حقيقي (مش شكلي): لو صورة الأدمن فشلت
-          // تتحمّل، الـerrorBuilder بيرجّع فراغ والتدرّج تحته لسه ظاهر بدل خلفية بيضا.
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 900),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: _heroGradients[gradientIndex],
-              ),
-            ),
-          ),
-          if (heroImageUrl != null)
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 700),
-              // `SizedBox.expand` **ضروري** مش تجميل: الـlayoutBuilder الافتراضي لـAnimatedSwitcher
-              // بيحط ولاده في Stack بمحاذاة center وبيدّيهم قيود **مرنة (loose)** — يعني
-              // `BoxFit.cover` مالوش ارتفاع/عرض يملاه فالصورة بتترسم بمقاسها الطبيعي في النص
-              // والتدرّج بيبان على الجناب. اتلقطت بتشغيل حقيقي (Xvfb) مش بالمراجعة.
-              child: SizedBox.expand(
-                key: ValueKey(heroImageUrl),
-                child: Image.network(
-                  heroImageUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          Positioned.fill(
+            child: HeroImageCrossfade(
+              images: effectiveImages.map<ImageProvider<Object>>(NetworkImage.new).toList(),
+              activeIndex: _activeSlide,
+              fallback: AnimatedContainer(
+                duration: const Duration(milliseconds: 1000),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: _heroGradients[gradientIndex]),
                 ),
               ),
             ),
-          // تدرّج قراءة: غامق تحت وشفاف فوق — أخف من الصندوق القديم بكتير، فالصورة بانت.
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [
-                  Colors.black.withValues(alpha: 0.72),
-                  Colors.black.withValues(alpha: 0.25),
-                  Colors.transparent,
-                ],
-                stops: const [0, 0.55, 1],
-              ),
-            ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent]),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 36, 16, 72),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  _heroEyebrow,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(20)),
+                  child: Column(
+                    children: [
+                      Text(
+                        _searchContent.eyebrow,
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _searchContent.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _searchContent.description,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
+                      ),
+                      const SizedBox(height: 12),
+                      _HeroSearchField(content: _searchContent, onSearch: _openSearch),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _heroTitle,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _heroSubtitle,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 12.5,
-                    shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _HeroSearchField(hintText: _searchPlaceholder, onTap: _openSearch),
                 if (_trustMessage.isNotEmpty) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.verified_outlined, color: Colors.white, size: 16),
+                      const Icon(Icons.verified_outlined, color: Colors.white, size: 18),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
@@ -442,7 +373,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w500,
-                            fontSize: 12,
+                            fontSize: 13,
                             shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
                           ),
                         ),
@@ -451,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
                 if (effectiveImages.length > 1) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 18),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(
@@ -461,10 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         width: index == _activeSlide ? 22 : 7,
                         height: 7,
                         margin: const EdgeInsets.symmetric(horizontal: 3),
-                        decoration: BoxDecoration(
-                          color: index == _activeSlide ? Colors.white : Colors.white54,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
+                        decoration: BoxDecoration(color: index == _activeSlide ? Colors.white : Colors.white54, borderRadius: BorderRadius.circular(99)),
                       ),
                     ),
                   ),
@@ -492,12 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (logo == null || logo.isDefault || logo.url.isEmpty) {
       return const Text('صُنّاع');
     }
-    return Image.network(
-      logo.url,
-      height: 32,
-      fit: BoxFit.contain,
-      errorBuilder: (_, _, _) => const Text('صُنّاع'),
-    );
+    return Image.network(logo.url, height: 32, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Text('صُنّاع'));
   }
 
   // "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (تفاصيل في تعليق _tipFallbackColors فوق). مبتظهرش
@@ -534,8 +457,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             imageUrl,
                             height: 80,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
+                            errorBuilder: (_, _, _) => Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
                           )
                         else
                           Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
@@ -554,12 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Text(tip.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall),
                                 const SizedBox(height: 4),
                                 Flexible(
-                                  child: Text(
-                                    tip.body,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
+                                  child: Text(tip.body, maxLines: 3, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                                 ),
                               ],
                             ),
@@ -620,77 +537,79 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// شريط البحث في الـhero (docs/08 §64.د) — طلب المالك: «محرك البحث… محتاج يبقى مدور شوية…
-/// professional وأصغر من كده بكتير… يبان عليه إنه نشط لما نضغط عليه، والصورة تبان لما ساكت».
-///
-/// التنفيذ: حبّة (pill) نصف شفافة وقت السكون — الصورة بتبان من وراها فعلاً — وبتتحوّل لأبيض
-/// كامل بحلقة ملوّنة وظل أوضح وقت الضغط. مفيش كتابة هنا؛ الضغط بيفتح شاشة البحث زي الأول
-/// بالظبط، فالأنيميشن هو ردّ الفعل الوحيد المتاح ولازم يبان.
+// حقل البحث جوّه لوحة الـhero: مضغوط وهو خامل عشان الصورة تفضل ظاهرة، ويتمدد عند التركيز ويقبل
+// الكتابة مباشرة قبل فتح شاشة النتائج. النص كله جاي من إعداد homepage.search_content.
 class _HeroSearchField extends StatefulWidget {
-  final ValueChanged<String> onTap;
-  final String hintText;
+  final HomepageSearchContent content;
+  final ValueChanged<String> onSearch;
 
-  const _HeroSearchField({required this.onTap, required this.hintText});
+  const _HeroSearchField({required this.content, required this.onSearch});
 
   @override
   State<_HeroSearchField> createState() => _HeroSearchFieldState();
 }
 
 class _HeroSearchFieldState extends State<_HeroSearchField> {
-  bool _pressed = false;
+  final _controller = TextEditingController();
+  final _focusNode = FocusNode();
 
-  void _setPressed(bool value) {
-    if (_pressed != value && mounted) setState(() => _pressed = value);
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChanged);
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChanged);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() => setState(() {});
+
+  void _submit() {
+    _focusNode.unfocus();
+    widget.onSearch(_controller.text.trim());
   }
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
-    return Center(
-      child: GestureDetector(
-        onTapDown: (_) => _setPressed(true),
-        onTapCancel: () => _setPressed(false),
-        onTapUp: (_) => _setPressed(false),
-        onTap: () => widget.onTap(''),
-        child: AnimatedScale(
-          duration: const Duration(milliseconds: 140),
-          scale: _pressed ? 1.03 : 1,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            height: 44,
-            constraints: const BoxConstraints(maxWidth: 420),
-            padding: const EdgeInsetsDirectional.only(start: 14, end: 10),
-            decoration: BoxDecoration(
-              // نصف شفاف وقت السكون = الصورة بتبان من وراه (طلب المالك بالحرف).
-              color: _pressed ? Colors.white : Colors.white.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: _pressed ? accent : Colors.white.withValues(alpha: 0.6),
-                width: _pressed ? 2 : 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: _pressed ? 0.28 : 0.16),
-                  blurRadius: _pressed ? 18 : 10,
-                  offset: Offset(0, _pressed ? 6 : 3),
-                ),
-              ],
+    final expanded = _focusNode.hasFocus || _controller.text.isNotEmpty;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.82, end: expanded ? 1 : 0.82),
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      builder: (context, widthFactor, child) => FractionallySizedBox(widthFactor: widthFactor, child: child),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: expanded ? 1 : 0.94),
+          borderRadius: BorderRadius.circular(expanded ? 18 : 28),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: expanded ? 0.22 : 0.12),
+              blurRadius: expanded ? 18 : 8,
+              offset: const Offset(0, 5),
             ),
-            child: Row(
-              children: [
-                Icon(Icons.search_rounded, size: 20, color: _pressed ? accent : Colors.black54),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    widget.hintText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.black54, fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
+          ],
+        ),
+        child: TextField(
+          controller: _controller,
+          focusNode: _focusNode,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => _submit(),
+          onChanged: (_) => setState(() {}),
+          onTapOutside: (_) => _focusNode.unfocus(),
+          decoration: InputDecoration(
+            hintText: widget.content.placeholder,
+            hintStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
+            suffixIcon: expanded ? IconButton(icon: const Icon(Icons.arrow_back_rounded), tooltip: 'بحث', onPressed: _submit) : null,
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: expanded ? 14 : 11),
           ),
         ),
       ),
@@ -738,13 +657,7 @@ class _FeaturedCategoryItem extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 6),
-            Text(
-              category.nameAr,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            Text(category.nameAr, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),

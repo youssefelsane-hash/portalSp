@@ -10,11 +10,30 @@ class HomepageTip {
 
   HomepageTip({required this.title, required this.body, required this.imageUrl});
 
-  factory HomepageTip.fromJson(Map<String, dynamic> json) => HomepageTip(
-        title: json['title'] as String? ?? '',
-        body: json['body'] as String? ?? '',
-        imageUrl: json['image_url'] as String?,
-      );
+  factory HomepageTip.fromJson(Map<String, dynamic> json) => HomepageTip(title: json['title'] as String? ?? '', body: json['body'] as String? ?? '', imageUrl: json['image_url'] as String?);
+}
+
+class HomepageSearchContent {
+  final String eyebrow;
+  final String title;
+  final String description;
+  final String placeholder;
+
+  const HomepageSearchContent({required this.eyebrow, required this.title, required this.description, required this.placeholder});
+
+  static const defaults = HomepageSearchContent(
+    eyebrow: 'أساعدك إزاي؟',
+    title: 'محتاج مساعدة في إيه؟',
+    description: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+    placeholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
+  );
+
+  factory HomepageSearchContent.fromJson(Map<String, dynamic>? json) => HomepageSearchContent(
+    eyebrow: json?['eyebrow'] as String? ?? defaults.eyebrow,
+    title: json?['title'] as String? ?? defaults.title,
+    description: json?['description'] as String? ?? defaults.description,
+    placeholder: json?['placeholder'] as String? ?? defaults.placeholder,
+  );
 }
 
 // مطابق لـ apps/api/src/modules/settings/homepage-content.controller.ts — رسالة الثقة/الضمان
@@ -24,42 +43,17 @@ class HomepageTip {
 class HomepageContent {
   final String trustMessage;
   final List<String> heroImages;
+  final HomepageSearchContent search;
   final List<HomepageTip> tips;
 
-  // نصوص الـhero (docs/08 §64.د) — كانت ثابتة في الكود، بقت من الإعدادات. الباك-إند بيضمن إنها
-  // مش فاضية أبدًا (بيرجّع الافتراضي لو الأدمن مسح الحقل)، والافتراضي هنا احتياط تاني لو النداء
-  // نفسه فشل قبل ما يوصل.
-  final String heroEyebrow;
-  final String heroTitle;
-  final String heroSubtitle;
-  final String searchPlaceholder;
-
-  HomepageContent({
-    required this.trustMessage,
-    required this.heroImages,
-    required this.tips,
-    required this.heroEyebrow,
-    required this.heroTitle,
-    required this.heroSubtitle,
-    required this.searchPlaceholder,
-  });
-
-  static String _text(Map<String, dynamic> json, String key, String fallback) {
-    final value = json[key] as String?;
-    return (value == null || value.trim().isEmpty) ? fallback : value;
-  }
+  HomepageContent({required this.trustMessage, required this.heroImages, required this.search, required this.tips});
 
   factory HomepageContent.fromJson(Map<String, dynamic> json) => HomepageContent(
-        trustMessage: json['trust_message'] as String? ?? '',
-        heroImages: (json['hero_images'] as List<dynamic>? ?? []).whereType<String>().toList(),
-        tips: (json['tips'] as List<dynamic>? ?? [])
-            .map((t) => HomepageTip.fromJson(t as Map<String, dynamic>))
-            .toList(),
-        heroEyebrow: _text(json, 'hero_eyebrow', 'أساعدك إزاي؟'),
-        heroTitle: _text(json, 'hero_title', 'محتاج مساعدة في إيه؟'),
-        heroSubtitle: _text(json, 'hero_subtitle', 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت'),
-        searchPlaceholder: _text(json, 'search_placeholder', 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"'),
-      );
+    trustMessage: json['trust_message'] as String? ?? '',
+    heroImages: (json['hero_images'] as List<dynamic>? ?? []).whereType<String>().toList(),
+    search: HomepageSearchContent.fromJson(json['search'] as Map<String, dynamic>?),
+    tips: (json['tips'] as List<dynamic>? ?? []).map((t) => HomepageTip.fromJson(t as Map<String, dynamic>)).toList(),
+  );
 }
 
 // GET /settings/homepage-content — @Public()، مفيش داعي لـaccessToken.

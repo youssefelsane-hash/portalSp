@@ -9,6 +9,16 @@ import { NotificationsService } from '../notifications.service';
 // — apps/technician-app بتحتاج orderId فورًا لفتح تفاصيل الطلب من الإشعار مباشرة.
 const workOpportunityDeepLink = (orderId: string): string => `/technician/orders/${orderId}`;
 
+const formatServiceDay = (scheduledAt: Date | null): string => {
+  if (!scheduledAt) return 'في أقرب وقت';
+  return new Intl.DateTimeFormat('ar-EG', {
+    timeZone: 'Africa/Cairo',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(scheduledAt);
+};
+
 /**
  * فرصة عمل اختيارية جديدة (docs/08 §36.1، بَقّة حقيقية اتلقطت 2026-08-20) — كانت فجوة موثّقة
  * صراحة: technician_work_opportunities كان بيتعمله INSERT من غير أي إشعار يوصل للفني خالص، عكس
@@ -39,7 +49,7 @@ export class WorkOpportunityOfferedNotificationListener {
           titleAr: isCrewRecruit ? 'دعوة انضمام لفريق' : 'فرصة شغل إضافي',
           bodyAr: isCrewRecruit
             ? `فريق طلب رقم ${event.orderNumber} محتاجك تنضم — راجع التفاصيل.`
-            : `طلب رقم ${event.orderNumber} متاح ليك كفرصة إضافية النهاردة — راجع التفاصيل.`,
+            : `طلب رقم ${event.orderNumber} متاح ليك كفرصة إضافية يوم ${formatServiceDay(event.scheduledAt)} — راجع التفاصيل.`,
           referenceType: 'technician_work_opportunity',
           referenceId: event.opportunityId,
           deepLink: workOpportunityDeepLink(event.orderId),

@@ -51,6 +51,9 @@ export class Notification {
   @Column({ name: 'workflow_id', type: 'uuid', nullable: true })
   workflowId: string | null;
 
+  @Column({ name: 'source_outbox_id', type: 'uuid', nullable: true })
+  sourceOutboxId: string | null;
+
   @Column({
     name: 'delivery_status',
     type: 'enum',
