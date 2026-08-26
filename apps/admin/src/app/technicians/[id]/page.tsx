@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
 import { AppShell, useAdminBack } from '@/components/app-shell';
+import { TechnicianEarningsStatement } from '@/components/technician-earnings-statement';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
@@ -636,6 +637,9 @@ export default function TechnicianDetailPage() {
             </CardFooter>
           </form>
         </Card>
+
+        {/* docs/08 §63.أ1 — كشف المستحقات الشهري، بنفس خدمة تطبيق الفني (مصدر رقم واحد). */}
+        <TechnicianEarningsStatement technicianId={id} />
 
         <Card className="lg:col-span-2">
           <CardHeader>
