@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import type {
   AdminTechnicianResponseDto,
   OrderDetailResponseDto,
@@ -86,7 +86,6 @@ import { formatEgp } from '@/lib/format';
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
-  const router = useRouter();
   // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
   const goBack = useAdminBack('/orders');
 

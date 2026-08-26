@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { OrderCrewSummaryDto, OrderResponseDto, OrderStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -51,7 +51,17 @@ const SORT_VIEWS: { value: 'newest' | 'soonest'; label: string; hint: string }[]
   { value: 'soonest', label: 'تنفيذها قرّب', hint: 'الأقرب في المواعيد' },
 ];
 
+// useSearchParams() محتاج Suspense boundary وقت الـ static prerendering — بدونها next build
+// بيفشل على /orders (نفس السبب في /login و/security-center).
 export default function OrdersPage() {
+  return (
+    <Suspense>
+      <OrdersListPage />
+    </Suspense>
+  );
+}
+
+function OrdersListPage() {
   const { isLoading, authedFetchPaginated, hasPermission } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();

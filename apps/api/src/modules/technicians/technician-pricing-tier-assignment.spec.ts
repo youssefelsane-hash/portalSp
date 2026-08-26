@@ -44,10 +44,11 @@ describe('AdminTechniciansService.changePricingTier() — منفصل تمامً�
       { findServiceZoneOrThrow: async (id: string) => ({ id }) } as never,
     );
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة فئة فني ${runId}`, `Tier Assign Country ${runId}`, 'T' + runId.slice(0, 1).toUpperCase(), '+002', 'EGP'],
-    );
+    // نفس بَقّة نظافة الاختبارات اللي اتصلحت في matching-work-opportunity.spec.ts (§63 شريحة 5):
+    // إنشاء دولة بـiso_code عشوائي من حرفين مساحته صغيرة جدًا واحتمال تصادمه عالي، وتنظيف
+    // afterAll بيفشل على قيود المفاتيح الأجنبية فبيسيب صف دولة ورا كل تشغيلة فاشلة — فالتصادم
+    // مسألة وقت. بنستعمل دولة موجودة أصلاً بدل ما ننشئ واحدة.
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       ids.country,
@@ -83,7 +84,6 @@ describe('AdminTechniciansService.changePricingTier() — منفصل تمامً�
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.technicianProfile]);
       await q(`DELETE FROM users WHERE id IN ($1,$2)`, [ids.technicianUser, ids.adminUser]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       await dataSource.destroy();
     }

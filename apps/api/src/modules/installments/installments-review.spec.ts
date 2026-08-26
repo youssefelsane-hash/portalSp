@@ -325,12 +325,17 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
       acceptedPolicyVersionIds: [ids.policyVersion],
     });
 
-    const [first, second] = await Promise.all([
-      service.reviewApplication(ids.adminUser, app.id, { approve: true }),
+    // الاختبار كان بيفترض إن النداء الأول هو اللي بيكسب السباق دايمًا (الأول من غير catch)، فلو
+    // النظام جدول التاني الأول كانت السويت كلها بتفشل من غير أي علاقة بالكود (§63 شريحة 7).
+    // السباق حقيقي بطبيعته — المطلوب إثباته إن **واحد بالظبط** بينجح والتاني بياخد 409، مش مين فيهم.
+    const results = await Promise.all([
+      service.reviewApplication(ids.adminUser, app.id, { approve: true }).catch((err) => err),
       service.reviewApplication(ids.adminUser, app.id, { approve: true }).catch((err) => err),
     ]);
-    expect(first.status).toBe('approved');
-    expect(second.status ?? '').toBe(409);
+    const approved = results.filter((r) => r?.status === 'approved');
+    const conflicts = results.filter((r) => r?.status === 409);
+    expect(approved).toHaveLength(1);
+    expect(conflicts).toHaveLength(1);
 
     const rows = await q<{ sequence_number: number; amount_cents: number }[]>(
       `SELECT sequence_number, amount_cents FROM installments WHERE application_id=$1 ORDER BY sequence_number`,

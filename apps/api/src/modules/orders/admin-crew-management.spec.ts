@@ -104,10 +104,11 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     // حقيقي على CI (قاعدة بيانات فاضية، ملفات jest تانية بتنشئ نطاقها وتحذفه في afterAll بتاعها،
     // فـ"أول نطاق موجود" ممكن يبقى نطاق ملف تاني بيتحذف قبل ما نخلص، وDELETE بتاعه يفشل بـFK
     // violation من أوردرات الملف ده اللي لسه موجودة).
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة طاقم ${runId}`, `Crew Country ${runId}`, 'W' + runId.slice(0, 1).toUpperCase(), '+000', 'EGP'],
-    );
+    // بَقّة نظافة اختبارات متكررة (§63 شريحة 7، نفس اللي اتصلحت في matching-work-opportunity.spec.ts):
+    // iso_code عشوائي من حرفين = مساحة صغيرة واحتمال تصادم عالي، وتنظيف afterAll بيفشل على قيود
+    // المفاتيح الأجنبية فبيسيب صف دولة ورا كل تشغيلة فاشلة — فالتصادم مسألة وقت وبيكسر سويتات
+    // ملهاش أي علاقة بالكود المتغيّر. الحل: نستعمل دولة موجودة بدل ما ننشئ واحدة.
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       country.id,
       `مدينة طاقم ${runId}`,
@@ -228,7 +229,6 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }

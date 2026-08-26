@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import type { SecurityEventDto, SecurityEventNoteDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -31,7 +31,6 @@ const STATUS_LABELS: Record<string, string> = {
 export default function SecurityEventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
-  const router = useRouter();
   // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
   const goBack = useAdminBack('/security-center');
 

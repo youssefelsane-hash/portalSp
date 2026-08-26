@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import type {
   AdminServiceResponseDto,
   AdminServiceZoneResponseDto,
@@ -67,7 +67,6 @@ const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
 export default function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
-  const router = useRouter();
   // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
   const goBack = useAdminBack('/catalog');
 
@@ -104,10 +103,30 @@ export default function ServiceDetailPage() {
       .catch(() => setPendingSuggestions([]));
   }
 
+  // بذر حقول الفورم المشتقّة من الخدمة في نفس اللحظة اللي الخدمة بتوصل فيها — قبل كده كان
+  // effect منفصل بيراقب `service` ويعمل setState بعد الرندر (رندر زيادة + كسر
+  // react-hooks/set-state-in-effect).
+  function applyService(next: AdminServiceResponseDto | null) {
+    setService(next);
+    if (!next) return;
+    setPricingModelLive(next.pricing_model);
+    setSchedulingMode(
+      next.requires_precise_schedule
+        ? 'precise'
+        : next.requires_start_time_only
+          ? 'start_only'
+          : next.requires_hours_only
+            ? 'hours_only'
+            : next.requires_start_and_end
+              ? 'start_and_end'
+              : 'none',
+    );
+  }
+
   function loadAll() {
     // مفيش GET /admin/services/:id مفرد — بنلاقيه جوّه القايمة الكاملة بدل endpoint مخصص
     authedFetch<AdminServiceResponseDto[]>('/admin/services')
-      .then((all) => setService(all.find((s) => s.id === id) ?? null))
+      .then((all) => applyService(all.find((s) => s.id === id) ?? null))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الخدمة'));
     authedFetch<AdminServiceZoneResponseDto[]>('/admin/service-zones').then(setZones).catch(() => setZones([]));
     authedFetch<ServiceZonePricingResponseDto[]>(`/admin/services/${id}/zone-pricing`).then(setZonePricing).catch(() => setZonePricing([]));
@@ -132,21 +151,6 @@ export default function ServiceDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 
-  useEffect(() => {
-    if (!service) return;
-    setPricingModelLive(service.pricing_model);
-    setSchedulingMode(
-      service.requires_precise_schedule
-        ? 'precise'
-        : service.requires_start_time_only
-          ? 'start_only'
-          : service.requires_hours_only
-            ? 'hours_only'
-            : service.requires_start_and_end
-              ? 'start_and_end'
-              : 'none',
-    );
-  }, [service]);
 
   function zoneName(zoneId: string): string {
     const zone = zones?.find((z) => z.id === zoneId);
@@ -449,7 +453,7 @@ export default function ServiceDetailPage() {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
-      setService(updated);
+      applyService(updated);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {

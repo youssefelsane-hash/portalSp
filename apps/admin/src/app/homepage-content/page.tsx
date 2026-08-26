@@ -190,7 +190,7 @@ export default function HomepageContentPage() {
           <CardTitle className="text-sm font-medium">نصايح مفيدة</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {tips.length === 0 && <p className="text-sm text-muted-foreground">مفيش نصايح دلوقتي — دوس "ضيف نصيحة" تحت.</p>}
+          {tips.length === 0 && <p className="text-sm text-muted-foreground">مفيش نصايح دلوقتي — دوس &quot;ضيف نصيحة&quot; تحت.</p>}
           {tips.map((tip, index) => (
             <div key={index} className="rounded-lg border border-border p-4">
               <div className="mb-3 flex items-center justify-between">

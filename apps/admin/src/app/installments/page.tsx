@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { AdminRecurringPlanResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
+import { useAdminQuery, useFilteredPage } from '@/lib/use-admin-query';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -30,11 +30,6 @@ interface ApplicationRow {
   regular_installment_cents: number; final_installment_cents: number;
   submitted_at: string; rejection_reason: string | null;
 }
-interface ScheduleRow {
-  application_id: string; order_number: string | null; customer_full_name: string;
-  customer_phone: string; total_financed_cents: number; paid_cents: number;
-  scheduled_count: number; failed_count: number; next_due_at: string | null;
-}
 interface PlanRow {
   id: string; nameAr: string; installmentCount: number; intervalDays: number;
   financingPercentage: string; fixedFeeCents: number; downPaymentPercentage: string;
@@ -47,36 +42,34 @@ export default function InstallmentsPage() {
   const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [tab, setTab] = useState<'applications' | 'plans'>('applications');
   const [statusFilter, setStatusFilter] = useState<'pending_review' | 'all'>('pending_review');
-  const [page, setPage] = useState(1);
-  const [apps, setApps] = useState<ApplicationRow[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [schedules, setSchedules] = useState<ScheduleRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useFilteredPage(`${tab}|${statusFilter}`);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
 
-  const loadApps = useCallback(() => {
-    if (tab !== 'applications') return;
-    setError(null);
-    const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
-    if (statusFilter !== 'all') params.set('status', statusFilter);
-    authedFetchPaginated<ApplicationRow>(`/admin/installments/applications?${params.toString()}`)
-      .then(({ items, meta }) => { setApps(items); setTotal(meta.total ?? items.length); })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'خطأ'));
-  }, [tab, page, statusFilter, authedFetchPaginated]);
+  const appsParams = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
+  if (statusFilter !== 'all') appsParams.set('status', statusFilter);
+  const appsQuery = useAdminQuery(
+    isLoading || tab !== 'applications' ? null : appsParams.toString(),
+    () => authedFetchPaginated<ApplicationRow>(`/admin/installments/applications?${appsParams.toString()}`),
+    'خطأ',
+  );
+  const apps = appsQuery.data?.items ?? null;
+  const total = appsQuery.data?.meta.total ?? apps?.length ?? 0;
+  const error = actionError ?? appsQuery.error;
+  const loadApps = appsQuery.reload;
 
-  useEffect(() => { if (!isLoading) loadApps(); }, [isLoading, tab, page, statusFilter, loadApps]);
   // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
   // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
-  useAdminLiveRefresh(['installments', 'payments'], () => loadApps());
+  useAdminLiveRefresh(['installments', 'payments'], loadApps);
 
   async function act(id: string, decision: 'approve' | 'reject', reason?: string) {
-    setActingId(id); setError(null);
+    setActingId(id); setActionError(null);
     try {
       await authedFetch(`/admin/installments/applications/${id}/${decision}`, {
         method: 'POST', body: JSON.stringify(decision === 'reject' ? { reason } : {}),
       });
       loadApps();
-    } catch (err) { setError(err instanceof ApiError ? err.message : 'حصل خطأ'); }
+    } catch (err) { setActionError(err instanceof ApiError ? err.message : 'حصل خطأ'); }
     finally { setActingId(null); }
   }
 
@@ -98,7 +91,7 @@ export default function InstallmentsPage() {
           <div className="mb-4 flex gap-2">
             {(['pending_review', 'all'] as const).map((value) => (
               <Button key={value} size="sm" variant={statusFilter === value ? 'default' : 'outline'}
-                onClick={() => { setStatusFilter(value); setPage(1); }}>
+                onClick={() => setStatusFilter(value)}>
                 {value === 'pending_review' ? 'في انتظار المراجعة' : 'الكل'}
               </Button>
             ))}
@@ -200,7 +193,7 @@ function PlansTab() {
 
       {error && <p className="text-destructive mb-4">{error}</p>}
 
-      {showCreate && <CreatePlanForm onCreated={() => { setShowCreate(false); loadPlans(); }} services={services?.items ?? []} />}
+      {showCreate && <CreatePlanForm onCreated={() => { setShowCreate(false); loadPlans(); }} />}
 
       {!plans && <TableSkeleton columns={6} />}
       {plans && plans.length === 0 && <EmptyState title="مفيش خطط تقسيط — ابدأ بإنشاء خطة جديدة" />}
@@ -216,7 +209,7 @@ function PlansTab() {
               <PlanRowExpandable key={plan.id} plan={plan} expanded={expandedId === plan.id}
                 onToggle={() => setExpandedId(expandedId === plan.id ? null : plan.id)}
                 onToggleActive={() => void toggleActive(plan)} services={services?.items ?? []}
-                onRefresh={loadPlans} saving={saving} />
+                saving={saving} />
             ))}
           </TableBody>
         </Table>
@@ -226,9 +219,9 @@ function PlansTab() {
 }
 
 // صف خطة قابل للتوسع — يعرض الخدمات المرتبطة + نموذج ربط
-function PlanRowExpandable({ plan, expanded, onToggle, onToggleActive, services, onRefresh, saving }: {
+function PlanRowExpandable({ plan, expanded, onToggle, onToggleActive, services, saving }: {
   plan: PlanRow; expanded: boolean; onToggle: () => void; onToggleActive: () => void;
-  services: { id: string; name_ar: string }[]; onRefresh: () => void; saving: boolean;
+  services: { id: string; name_ar: string }[]; saving: boolean;
 }) {
   const { authedFetch } = useAuth();
   const [linkedServices, setLinkedServices] = useState<{ id: string; name_ar: string }[]>([]);
@@ -242,7 +235,12 @@ function PlanRowExpandable({ plan, expanded, onToggle, onToggleActive, services,
     } catch { /* ignore */ }
   }, [authedFetch, plan.id]);
 
-  useEffect(() => { if (expanded) loadLinked(); }, [expanded, loadLinked]);
+  // بنجيب الخدمات المرتبطة لما الصف يتفتح فعلاً (حدث المستخدم)، مش من effect بيراقب `expanded`
+  // بعد الرندر — نفس النتيجة بنداء شبكة واحد، بلا setState متزامن جوّه effect.
+  function toggle() {
+    if (!expanded) void loadLinked();
+    onToggle();
+  }
 
   async function link(serviceId: string) {
     if (!serviceId) return;
@@ -267,7 +265,7 @@ function PlanRowExpandable({ plan, expanded, onToggle, onToggleActive, services,
     <>
       <TableRow className={expanded ? 'bg-muted/50' : ''}>
         <TableCell>
-          <button onClick={onToggle} className="font-medium underline-offset-2 hover:underline">
+          <button onClick={toggle} className="font-medium underline-offset-2 hover:underline">
             {expanded ? '▾' : '▸'} {plan.nameAr}
           </button>
         </TableCell>
@@ -319,7 +317,7 @@ function PlanRowExpandable({ plan, expanded, onToggle, onToggleActive, services,
 }
 
 // نموذج إنشاء خطة جديدة
-function CreatePlanForm({ onCreated, services }: { onCreated: () => void; services: { id: string; name_ar: string }[] }) {
+function CreatePlanForm({ onCreated }: { onCreated: () => void }) {
   const { authedFetch } = useAuth();
   const [name, setName] = useState('');
   const [count, setCount] = useState(6);

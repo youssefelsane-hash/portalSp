@@ -125,7 +125,7 @@ export default function CancellationReasonsPage() {
                 </SelectNative>
               </div>
               <div>
-                <Label htmlFor="fee_percentage">نسبة الرسوم % (لو "بيحصّل رسوم" مفعّلة)</Label>
+                <Label htmlFor="fee_percentage">نسبة الرسوم % (لو &quot;بيحصّل رسوم&quot; مفعّلة)</Label>
                 <Input id="fee_percentage" name="fee_percentage" type="number" min={0} max={100} dir="ltr" />
               </div>
               <label className="flex items-center gap-2 text-sm">

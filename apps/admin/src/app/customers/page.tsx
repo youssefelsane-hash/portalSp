@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { useFilteredPage } from '@/lib/use-admin-query';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -37,16 +38,14 @@ export default function CustomersPage() {
   const { isLoading, authedFetchPaginated } = useAuth();
   const [customers, setCustomers] = useState<AdminCustomerResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [blockedFilter, setBlockedFilter] = useState<'all' | 'blocked' | 'active'>('all');
   const [phoneSearchInput, setPhoneSearchInput] = useState('');
+  // بحث حي كان بيبعت طلب لكل حرف — دلوقتي بيستنى 400ms قبل ما يبعت. الترقيم بيرجع 1 مع أي تغيير
+  // فلتر أثناء الرندر نفسه (useFilteredPage) بدل effect كان بيعمل setPage(1) بعد الرندر.
   const phoneSearch = useDebouncedValue(phoneSearchInput, 400);
+  const [page, setPage] = useFilteredPage(`${blockedFilter}|${phoneSearch}`);
   const [error, setError] = useState<string | null>(null);
 
-  // بحث حي كان بيبعت طلب لكل حرف — دلوقتي بيستنى الـuseDebouncedValue فوق (400ms) قبل ما يبعت.
-  useEffect(() => {
-    setPage(1);
-  }, [phoneSearch]);
 
   const load = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
@@ -82,7 +81,6 @@ export default function CustomersPage() {
             variant={blockedFilter === filter.value ? 'default' : 'outline'}
             onClick={() => {
               setBlockedFilter(filter.value);
-              setPage(1);
             }}
           >
             {filter.label}
