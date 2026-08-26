@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CreditLoyaltyBody, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -107,6 +108,9 @@ export default function CustomerDetailPage() {
     load360();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, userId]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["orders", "payments"], () => load());
 
   async function handleBlock(e: FormEvent) {
     e.preventDefault();

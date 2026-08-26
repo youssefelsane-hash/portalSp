@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { SupportTicketResponseDto, SupportTicketStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -33,13 +34,20 @@ export default function SupportTicketsPage() {
   const [statusFilter, setStatusFilter] = useState<SupportTicketStatus | 'all'>('all');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     const query = statusFilter === 'all' ? '' : `?ticket_status=${statusFilter}`;
     authedFetch<SupportTicketResponseDto[]>(`/admin/support-tickets${query}`)
       .then(setTickets)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل تذاكر الدعم'));
-  }, [isLoading, authedFetch, statusFilter]);
+  }, [authedFetch, statusFilter]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['support'], load);
 
   return (
     <AppShell>

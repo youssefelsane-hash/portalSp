@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type { KpiDimensionScores, TechnicianKpiSnapshotResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -50,6 +51,9 @@ export default function TechnicianKpiDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, params.id]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["technicians"], () => load());
 
   async function runAction(action: () => Promise<unknown>) {
     setIsSaving(true);

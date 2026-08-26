@@ -10,6 +10,7 @@ import type {
   ComplaintSeverity,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
 import { AppShell, useAdminBack } from '@/components/app-shell';
@@ -86,6 +87,9 @@ export default function ComplaintDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["support"], () => load());
 
   async function handleSendMessage(e: FormEvent) {
     e.preventDefault();

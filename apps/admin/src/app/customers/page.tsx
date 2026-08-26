@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { AdminCustomerResponseDto, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { AppShell } from '@/components/app-shell';
@@ -47,8 +48,7 @@ export default function CustomersPage() {
     setPage(1);
   }, [phoneSearch]);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (blockedFilter !== 'all') params.set('is_blocked', String(blockedFilter === 'blocked'));
     if (phoneSearch.trim()) params.set('phone_number', phoneSearch.trim());
@@ -58,7 +58,15 @@ export default function CustomersPage() {
         setTotal(meta.total ?? items.length);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل العملاء'));
-  }, [isLoading, page, blockedFilter, phoneSearch, authedFetchPaginated]);
+  }, [page, blockedFilter, phoneSearch, authedFetchPaginated]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['orders','payments'], load);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 

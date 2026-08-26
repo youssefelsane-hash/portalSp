@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -60,8 +61,7 @@ export default function AdminWarrantyClaimsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), per_page: '20' });
     if (statusFilter !== 'all') params.set('status', statusFilter);
     authedFetchPaginated<ClaimRow>(`/admin/warranty-claims?${params.toString()}`)
@@ -71,7 +71,15 @@ export default function AdminWarrantyClaimsPage() {
         setError(null);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'خطأ'));
-  }, [isLoading, page, statusFilter, authedFetchPaginated]);
+  }, [page, statusFilter, authedFetchPaginated]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['orders'], load);
 
   async function reviewClaim(claimId: string, status: string, rejectionReason?: string) {
     try {

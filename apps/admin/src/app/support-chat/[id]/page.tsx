@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import type { AdminSupportThreadResponseDto, MessageResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { messagesContentKey, usePinnedScroll } from '@/lib/use-pinned-scroll';
 import { AppShell } from '@/components/app-shell';
@@ -48,6 +49,9 @@ export default function SupportChatThreadDetailPage() {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["support"], () => loadMessages());
 
   // docs/08 §63.ب3 — التمرير لآخر الشات بيحصل بس لو المستخدم أصلاً في الآخر، ومع تغيّر محتوى
   // حقيقي مش مع كل دورة polling. قبل كده كان بيخطف مكان القراءة كل بضع ثوانٍ.

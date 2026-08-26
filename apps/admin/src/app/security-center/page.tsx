@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { SecurityEventDto, SecurityEventSeverity, SecurityEventStatus, SecurityOverviewResponse } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -99,6 +100,9 @@ function SecurityCenterView() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, severityFilter, statusFilter, actorUserId]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["security"], () => load());
 
   const openCounts = new Map((overview?.open_by_severity ?? []).map((r) => [r.severity, r.count]));
 

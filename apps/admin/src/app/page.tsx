@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { DashboardStats } from '@baytak/shared-types';
 import {
@@ -13,6 +13,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -88,12 +89,19 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     authedFetch<DashboardStats>('/admin/dashboard/stats')
       .then(setStats)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الإحصائيات'));
-  }, [isLoading, authedFetch]);
+  }, [authedFetch]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['orders','technicians','payments'], load);
 
   return (
     <AppShell>
