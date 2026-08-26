@@ -1,9 +1,11 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
+import { CatalogModule } from '../catalog/catalog.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { SettingsModule } from '../settings/settings.module';
 import { AdminPricingController } from './admin-pricing.controller';
 import { CommissionBaseService } from './commission-base.service';
+import { LevelPremiumService } from './level-premium.service';
 import { ServicePricingEvaluation } from './entities/service-pricing-evaluation.entity';
 import { ServicePricingField } from './entities/service-pricing-field.entity';
 import { ServicePricingRule } from './entities/service-pricing-rule.entity';
@@ -23,9 +25,11 @@ import { PricingRuleTestsService } from './pricing-rule-tests.service';
     AuditModule,
     // ADR-0037 — سياسة وعاء العمولة بتتقرا من محرك الإعدادات، مش من كود ثابت.
     SettingsModule,
+    // docs/08 §60.3 — LevelPremiumService محتاج CatalogService عشان مضاعف المستوى (مصدر واحد).
+    forwardRef(() => CatalogModule),
   ],
   controllers: [PricingController, AdminPricingController],
-  providers: [PricingFieldsService, PricingRulesService, PricingEngineService, PricingRuleTestsService, CommissionBaseService],
-  exports: [PricingEngineService, PricingFieldsService, PricingRulesService, CommissionBaseService],
+  providers: [PricingFieldsService, PricingRulesService, PricingEngineService, PricingRuleTestsService, CommissionBaseService, LevelPremiumService],
+  exports: [PricingEngineService, PricingFieldsService, PricingRulesService, CommissionBaseService, LevelPremiumService],
 })
 export class PricingModule {}

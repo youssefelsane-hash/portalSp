@@ -19,6 +19,38 @@ interface PaymentChannelStatus {
   unavailable_reason: string | null;
 }
 
+// وعاء العمولة (ADR-0037، docs/08 §60.1/§60.4) — طلب مالك صريح بمكان واحد في الأدمن بيشيل
+// كل تفاصيل الموضوع ده بحيث يفضل flexible.
+//
+// **مش محرك جديد**: المفاتيح دي نفسها اللي في جدول `settings`، وبتتحفظ بنفس الـendpoint بالظبط.
+// الجزء ده تنظيم عرض بس — بيجمّعها في مكان واحد بلغة مفهومة بدل ما تبقى مبعترة وسط عشرات
+// المفاتيح التقنية في قسم pricing العام.
+const COMMISSION_BASE_KEYS = [
+  'commission_base.include_level_premium',
+  'commission_base.include_zone_surge',
+  'commission_base.include_emergency_surcharge',
+  'commission_base.include_inspection_fee',
+  'commission_base.include_addons',
+  'commission_base.include_additional_items',
+  'commission_base.include_warranty',
+  'commission_base.include_installment_interest',
+  'commission_base.discount_reduces_technician_share',
+  'pricing.auto_match_level_premium',
+];
+
+const COMMISSION_BASE_LABELS: Record<string, string> = {
+  'commission_base.include_level_premium': 'مضاعف مستوى الفني',
+  'commission_base.include_zone_surge': 'مضاعف المنطقة / التضخم',
+  'commission_base.include_emergency_surcharge': 'رسوم الطوارئ',
+  'commission_base.include_inspection_fee': 'رسوم المعاينة',
+  'commission_base.include_addons': 'إضافات الكتالوج (وقت الحجز)',
+  'commission_base.include_additional_items': 'بنود إضافية أثناء الشغل',
+  'commission_base.include_warranty': 'الضمان الاختياري',
+  'commission_base.include_installment_interest': 'فوائد / رسوم التقسيط',
+  'commission_base.discount_reduces_technician_share': 'الخصم يتخصم من نصيب الفني',
+  'pricing.auto_match_level_premium': 'فرق الفني المميّز في الاختيار التلقائي',
+};
+
 const PAYMENT_CHANNEL_LABELS: Record<string, string> = {
   cash: 'الدفع بعد الخدمة (كاش)',
   wallet: 'محفظة العميل',
@@ -152,9 +184,12 @@ export default function SettingsPage() {
     }
   }
 
-  const groups = settings
-    ? Array.from(new Set(settings.map((s) => s.group_name))).sort()
-    : [];
+  // المفاتيح دي ليها كارت مخصص تحت — بنستبعدها من العرض العام عشان ما تتكررش.
+  const generalSettings = (settings ?? []).filter((s) => !COMMISSION_BASE_KEYS.includes(s.key));
+  const commissionBaseSettings = COMMISSION_BASE_KEYS.map((key) =>
+    (settings ?? []).find((s) => s.key === key),
+  ).filter((s): s is SettingResponseDto => s !== undefined);
+  const groups = Array.from(new Set(generalSettings.map((s) => s.group_name))).sort();
 
   return (
     <AppShell>
@@ -180,6 +215,52 @@ export default function SettingsPage() {
         </Card>
       )}
 
+      {commissionBaseSettings.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">تقسيم الإيراد: إيه اللي الفني بياخد منه نصيب؟</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-sm text-muted-foreground">
+              نسبة عمولة الشركة بتتطبّق على <strong>وعاء العمولة</strong> بس — مش على إجمالي الطلب.
+              أي مكوّن مطفي هنا بيروح للشركة <strong>100%</strong> والفني مالوش فيه نصيب. سعر الشغل
+              الأساسي دايمًا داخل الوعاء (هو تعريف &quot;الشغل&quot; نفسه) فمفيش مفتاح ليه.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>المكوّن</TableHead>
+                  <TableHead>الشرح</TableHead>
+                  <TableHead>داخل وعاء العمولة؟</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {commissionBaseSettings.map((setting) => (
+                  <TableRow key={setting.key}>
+                    <TableCell className="font-medium">
+                      {COMMISSION_BASE_LABELS[setting.key] ?? setting.key}
+                      <span className="block text-xs text-muted-foreground" dir="ltr">
+                        {setting.key}
+                      </span>
+                    </TableCell>
+                    <TableCell className="max-w-md whitespace-normal text-muted-foreground">
+                      {setting.description ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      <SettingValueEditor
+                        setting={setting}
+                        isSaving={savingKey === setting.key}
+                        onSave={(value) => handleSave(setting.key, value)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       {groups.map((group) => (
         <Card key={group} className="mb-6">
           <CardHeader>
@@ -195,7 +276,7 @@ export default function SettingsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {settings!
+                {generalSettings
                   .filter((s) => s.group_name === group)
                   .map((setting) => (
                     <TableRow key={setting.key}>

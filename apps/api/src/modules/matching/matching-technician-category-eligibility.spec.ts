@@ -7,6 +7,7 @@ import { OrderAssignment } from './entities/order-assignment.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // اختبار حي ضد Postgres حقيقي (ADR-0018 §8، طلب صريح من المالك 2026-08-19) — بيثبت إن فني
 // معتمد بمستوى الفئة كلها (technician_categories، مثلاً "سباكة") بيبقى مؤهّل تلقائيًا لأي خدمة
@@ -51,6 +52,7 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
       { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

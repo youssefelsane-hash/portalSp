@@ -28,6 +28,7 @@ import {
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
+import { LevelPremiumService } from '../pricing/level-premium.service';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -130,6 +131,9 @@ export class MatchingService {
     private readonly events: EventEmitter2,
     @InjectQueue(MATCHING_ROUNDS_QUEUE) private readonly roundsQueue: Queue<RoundExpiredJobData>,
     private readonly workOpportunities: TechnicianWorkOpportunitiesService,
+    // docs/08 §60.3 — آخر بند عمدًا: أقل بلاست-رديوس ممكن على السبيكات الكتير اللي بتبني
+    // MatchingService بـpositional args (append واحد بس في الآخر).
+    private readonly levelPremiumService: LevelPremiumService,
   ) {}
 
   /**
@@ -832,6 +836,23 @@ export class MatchingService {
   // الافتراضي لأي طلب فردي عادي. SQL مباشر عمدًا (مش techniciansService.findByProfileIdOrThrow)
   // — نفس نمط باقي الملف ده (استعلامات دقيقة صغيرة عبر this.dataSource)، وبيتجنّب حقن تبعية
   // جديدة على TechniciansService في مسار مُختبر بـstub خفيف (matching.service.spec.ts).
+  /**
+   * غلاف حوالين [LevelPremiumService.applyOnAutoAssignment] بياخد `technicianId` (الموقع ده
+   * معندوش الـprofile محمّل أصلاً)، وبيبلع أي فشل بتحذير.
+   *
+   * ليه بيبلع: التعيين نفسه أهم من سطر تسعير إضافي. لو حصل خطأ في حساب الفرق (إعداد ناقص،
+   * صف تسعير مش موجود)، الطلب لازم يفضل متعيّن للفني بدل ما التعيين كله يترول باك ويفضل
+   * العميل مستني — نفس فلسفة "أي فشل في طبقة مساعدة ما يكسرش العملية الحقيقية" في CLAUDE.md.
+   */
+  private async applyLevelPremiumSafely(manager: EntityManager, order: Order, technicianId: string): Promise<void> {
+    try {
+      const profile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+      await this.levelPremiumService.applyOnAutoAssignment(manager, order, profile);
+    } catch (error) {
+      this.logger.warn(`فشل حساب فرق الفني المميّز للطلب ${order.orderNumber}: ${String(error)}`);
+    }
+  }
+
   private async resolveAssignedCompanyId(technicianId: string): Promise<string | null> {
     const rows = await this.dataSource.query<{ company_id: string | null }[]>(
       `SELECT company_id FROM technician_profiles WHERE id = $1`,
@@ -868,6 +889,10 @@ export class MatchingService {
     order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
     order.assignedAt = now;
     await manager.save(order);
+
+    // docs/08 §60.3 — الطلب اتسعّر بمضاعف مستوى = 1 (الفني ما كانش معروف وقت الحجز)، فلو الفني
+    // اللي اتعيّن مستواه بيزوّد السعر، الفرق بيتضاف هنا كسطر "فني مميّز" مستقل وواضح.
+    await this.applyLevelPremiumSafely(manager, order, technicianId);
     await manager.save(
       manager.create(OrderStatusHistory, {
         orderId: order.id,
@@ -1224,6 +1249,10 @@ export class MatchingService {
       order.orderStatus = OrderStatus.TECHNICIAN_ASSIGNED;
       order.assignedAt = now;
       await manager.save(order);
+
+      // docs/08 §60.3 — نفس منطق التعيين التلقائي فوق بالحرف (الفني اللي قبل البث كمان ما كانش
+      // معروف وقت التسعير). الدالة بتتخطّى نفسها لو العميل كان اختار الفني بنفسه.
+      await this.levelPremiumService.applyOnAutoAssignment(manager, order, profile);
       await manager.save(
         manager.create(OrderStatusHistory, {
           orderId: order.id,

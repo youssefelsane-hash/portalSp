@@ -3,6 +3,7 @@ import { MatchingExplainabilityService } from './matching-explainability.service
 import { MatchingService } from './matching.service';
 import { SettingsService } from '../settings/settings.service';
 import { Order } from '../orders/entities/order.entity';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // اختبار حي ضد Postgres حقيقي — تفسير مطابقة (docs/08 §35.7، ADR-0021 §4): "ليه الفني ده مش
 // بياخد الطلب ده؟" لازم يعتمد على نفس شروط MatchingService.findEligibleTechnicians() الحقيقية
@@ -90,6 +91,7 @@ describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §3
       {} as never,
       {} as never,
       {} as never,
+      levelPremiumServiceStub(),
     );
     service = new MatchingExplainabilityService(dataSource, settingsServiceStub, matchingServiceForRanking);
 

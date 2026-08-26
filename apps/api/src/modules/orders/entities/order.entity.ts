@@ -244,6 +244,11 @@ export class Order {
   @Column({ name: 'commissionable_base_cents', type: 'integer', nullable: true })
   commissionableBaseCents: number | null;
 
+  /** فرق سعر "الفني المميّز" (docs/08 §60.3، migration 0193) — بيتضاف بعد ما المطابقة التلقائية
+   * تعيّن فني مستواه بيزوّد السعر. 0 لو الفني كان معروف وقت الحجز (الفرق داخل السعر أصلاً). */
+  @Column({ name: 'level_premium_cents', type: 'integer', default: 0 })
+  levelPremiumCents: number;
+
   @Column({ name: 'placed_at', type: 'timestamptz', nullable: true })
   placedAt: Date | null;
 

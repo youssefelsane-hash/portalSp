@@ -27,6 +27,7 @@ import { Order, OrderStatus, BookingMode } from '../orders/entities/order.entity
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // اختبار حي — إعادة إنتاج مسار التسجيل الحقيقي بالكامل (تسجيل → OTP → تصريح فئة → موافقة أدمن
 // → منطقة → موقع → اعتماد) بجنب فني "fixture" (INSERT خام، بالظبط زي كل specs المشروع التانية)،
@@ -283,6 +284,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       { emit: jest.fn() } as never,
       { add: jest.fn() } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
 
     // ── فني حقيقي — نفس المسار بالحرف: تسجيل → OTP → تصريح فئة → موافقة أدمن على الفئة →

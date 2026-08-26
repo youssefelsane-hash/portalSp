@@ -18,6 +18,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // اختبار حي ضد Postgres حقيقي (docs/08 §17.15) — تدرّج دفعات الطوارئ الفعلي: دفعة أولى/تالية
 // منفصلتين، سقف أقصى لإجمالي الفنيين المتواصَل معاهم عبر كل الجولات، تصعيد تلقائي لإشعار الأدمن
@@ -115,6 +116,7 @@ describe('MatchingService.dispatchNextRound() — تدرّج دفعات الطو
       events,
       { add: async () => undefined } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
 
     // إعدادات الاختبار: دفعة أولى=2، تالية=3 (مختلفة عمدًا عشان نثبت إنهم قابلين للتعديل

@@ -31,6 +31,10 @@ export interface OrderResponseDto {
   inspection_fee_cents: number;
   /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
   surge_amount_cents: number;
+  /** فرق سعر "الفني المميّز" (docs/08 §60.3) — 0 لو العميل اختار الفني بنفسه (الفرق داخل السعر
+   * أصلاً) أو لو مستوى الفني مالوش مضاعف. لما يكون > 0 الواجهة بتعرضه كسطر مستقل مكتوب جنبه
+   * "فني مميّز" عشان العميل يفهم الزيادة جاية منين، مش يحس إن السعر اتغيّر عليه فجأة. */
+  level_premium_cents: number;
   discount_amount_cents: number;
   promo_code_id: string | null;
   total_amount_cents: number;
@@ -142,6 +146,7 @@ export function toOrderResponseDto(
     estimated_price_cents: order.estimatedPriceCents,
     inspection_fee_cents: order.inspectionFeeCents,
     surge_amount_cents: order.surgeAmountCents,
+    level_premium_cents: order.levelPremiumCents,
     discount_amount_cents: order.discountAmountCents,
     promo_code_id: order.promoCodeId,
     total_amount_cents: order.totalAmountCents,
@@ -212,6 +217,7 @@ export interface TechnicianOrderResponseDto
     | 'estimated_price_cents'
     | 'inspection_fee_cents'
     | 'surge_amount_cents'
+    | 'level_premium_cents'
     | 'discount_amount_cents'
     | 'warranty_price_cents'
     | 'deposit_amount_cents'
@@ -244,6 +250,7 @@ export function toTechnicianOrderResponseDto(
     estimated_price_cents: _estimated,
     inspection_fee_cents: _inspection,
     surge_amount_cents: _surge,
+    level_premium_cents: _levelPremium,
     discount_amount_cents: _discount,
     warranty_price_cents: _warrantyPrice,
     deposit_amount_cents: _deposit,

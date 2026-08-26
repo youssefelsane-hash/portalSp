@@ -84,7 +84,9 @@ export class CatalogService {
    * وإلا fallback كامل لتسعير المستوى التشغيلي القديم (service_level_pricing)، وإلا 1 لو مفيش أي
    * صف. **صفر كسر لأي مسار موجود** — technicianPricingTier باراميتر جديد اختياري بالكامل.
    */
-  private async resolveLevelPriceMultiplier(
+  /** عام عمدًا (docs/08 §60.3): المطابقة محتاجاه بعد التعيين عشان تحسب فرق سعر الفني المميّز.
+   * مصدر واحد للمضاعف — مفيش نسخة تانية من نفس البحث في موديول تاني. */
+  async resolveLevelPriceMultiplier(
     serviceId: string,
     technicianLevel?: TechnicianLevel,
     technicianPricingTier?: TechnicianPricingTier,
