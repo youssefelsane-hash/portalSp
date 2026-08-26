@@ -18,6 +18,7 @@ import { TechnicianScheduleService } from '../technicians/technician-schedule.se
 import { TechniciansService } from '../technicians/technicians.service';
 import { User } from '../auth/entities/user.entity';
 import { AuditLogService } from '../audit/audit-log.service';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 jest.setTimeout(60_000);
 
@@ -173,6 +174,7 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
       {} as never,
       new EventEmitter2(),
       {} as never,
+      commissionBaseServiceStub(),
     );
   });
 

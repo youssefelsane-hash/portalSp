@@ -54,6 +54,15 @@ import {
   INSTALLMENTS_PLAN_COMPLETED_EVENT,
   InstallmentPaymentResolvedPayload,
 } from '../../common/events/installment.events';
+import { splitOrderRevenue } from '../pricing/commission-base';
+
+/** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
+export interface TechnicianMoneyView {
+  cashToCollectCents: number;
+  myEarningCents: number;
+  hasOnlinePayment: boolean;
+  fullyPaidOnline: boolean;
+}
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
 // طرق دفع مسبق (Card/InstaPay) — لازم تتأكد قبل ما التوزيع يبدأ (ADR-0013 §4، "PAY BEFORE DISPATCH").
@@ -144,9 +153,61 @@ export class PaymentsService {
     commissionRateApplied += bookingModeAdjustment;
     commissionRateApplied = Math.min(100, Math.max(0, commissionRateApplied));
 
-    const platformCommissionCents = Math.round((order.totalAmountCents * commissionRateApplied) / 100);
-    const technicianEarningCents = order.totalAmountCents - platformCommissionCents;
+    // ADR-0037 / docs/08 §60.1 — النسبة بتتطبّق على **وعاء العمولة** مش على الإجمالي.
+    //
+    // قبل كده كانت: `platformCommission = total × rate`، و`total` مجموع مكوّنات مختلفة الطبيعة
+    // (سعر الشغل + مضاعف التضخم + رسوم الطوارئ + الضمان الاختياري). النتيجة إن الفني كان بياخد
+    // 85% من سعر الضمان — والضمان منتج مالي بتتحمّل الشركة وحدها مخاطره. بلاغ مالك صريح.
+    //
+    // `commissionable_base_cents` بيتحسب مرة واحدة وقت إنشاء الطلب (snapshot) حسب سياسة
+    // `commission_base.*`. الطلبات اللي اتعملت قبل الـmigration 0192 عندها null — بنرجع للسلوك
+    // القديم (الوعاء = الإجمالي) عمدًا عشان إعادة تسوية طلب قديم ما تديش نتيجة مختلفة عن
+    // تسويته الأصلية.
+    const commissionableBaseCents = order.commissionableBaseCents ?? order.totalAmountCents;
+    const { platformCommissionCents, technicianEarningCents } = splitOrderRevenue({
+      totalAmountCents: order.totalAmountCents,
+      commissionableBaseCents,
+      commissionRatePercentage: commissionRateApplied,
+    });
     return { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays: service.warrantyDays };
+  }
+
+  /**
+   * نصيب الفني المتوقّع من الطلب **قبل** التسوية (docs/08 §60.2).
+   *
+   * `orders.technician_earning_cents` بيفضل صفر لحد ما الطلب يتقفل، فالفني ما كانش يقدر يعرف
+   * هياخد كام وهو شغّال. الدالة دي بترجّع نفس الرقم اللي التسوية هتوصله بالظبط — نفس
+   * `computeSettlement` بالحرف — عشان الرقم اللي بيشوفه ما يتغيّرش تحت إيده وقت الإقفال.
+   */
+  async previewTechnicianEarningCents(order: Order): Promise<number> {
+    if (order.technicianEarningCents > 0) return order.technicianEarningCents;
+    const { technicianEarningCents } = await this.computeSettlement(order);
+    return technicianEarningCents;
+  }
+
+  /**
+   * الصورة المالية اللي **يجوز** للفني يشوفها (docs/08 §60.2، طلب مالك صريح).
+   *
+   * القاعدة الحاكمة: الفني بيشوف الفلوس اللي بتعدّي من إيده، وبس. أي حاجة اتدفعت أونلاين
+   * بتوصله كـ**واقعة** («مدفوع») من غير رقم — لأن الرقم ده فيه نصيب الشركة والضمان والرسوم،
+   * ودي مش شغله. الفلترة بتتم هنا في الباك-إند مش في الواجهة، عشان الرقم أصلاً **ما يخرجش على
+   * السلك** — إخفاء في التطبيق بس معناه إن أي حد يفتح الـAPI يقراه.
+   */
+  async getTechnicianMoneyView(order: Order, manager?: EntityManager): Promise<TechnicianMoneyView> {
+    const breakdown = await this.getCollectionBreakdownForOrder(order, manager);
+    const paidOnlineCents = breakdown.paidAmountCents + breakdown.financedOrderAmountCents;
+    const myEarningCents = await this.previewTechnicianEarningCents(order);
+
+    return {
+      // اللي هيستلمه كاش من العميل — لازم يبان بالرقم، هو محتاجه عشان يعرف ياخد كام.
+      cashToCollectCents: breakdown.amountDueToTechnicianCents,
+      // نصيبه هو — لازم يبان برضه، بلا أي شرح لتكوينه.
+      myEarningCents,
+      // واقعة بلا رقم.
+      hasOnlinePayment: paidOnlineCents > 0,
+      // كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص.
+      fullyPaidOnline: paidOnlineCents > 0 && breakdown.amountDueToTechnicianCents === 0,
+    };
   }
 
   /** بيتأكد إن الطلب فعلاً بتاع العميل ده وفي حالة قابلة للدفع، وبيرجع صف الطلب. */

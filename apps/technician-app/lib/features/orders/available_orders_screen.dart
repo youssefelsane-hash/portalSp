@@ -932,7 +932,8 @@ class _OverdueJobCard extends StatelessWidget {
           [
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
-            _formatEgp(order.totalAmountCents),
+            // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
+            'نصيبك ${_formatEgp(order.myEarningCents)}',
           ].join(' — '),
         ),
         trailing: Icon(Icons.chevron_left, color: red),
@@ -979,7 +980,8 @@ class _UpcomingJobCard extends StatelessWidget {
           [
             if (order.customerName != null) order.customerName!,
             if (order.address != null) order.address!.streetName,
-            _formatEgp(order.totalAmountCents),
+            // docs/08 §60.2 — نصيبه هو، مش إجمالي الطلب (اللي فيه نصيب الشركة والضمان).
+            'نصيبك ${_formatEgp(order.myEarningCents)}',
           ].join(' — '),
         ),
         trailing: const Icon(Icons.chevron_left),
@@ -1005,8 +1007,8 @@ class _TeamAssignedJobCard extends StatelessWidget {
         title: Text('طلب ${order.orderNumber}'),
         subtitle: Text(
           order.teamLeaderName != null
-              ? 'قائد الفريق: ${order.teamLeaderName} — ${_formatEgp(order.totalAmountCents)}'
-              : _formatEgp(order.totalAmountCents),
+              ? 'قائد الفريق: ${order.teamLeaderName} — نصيبك ${_formatEgp(order.myEarningCents)}'
+              : 'نصيبك ${_formatEgp(order.myEarningCents)}',
         ),
         trailing: const Icon(Icons.chevron_left),
         onTap: onTap,

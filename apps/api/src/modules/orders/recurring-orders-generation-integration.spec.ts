@@ -48,6 +48,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * الدورة الكاملة حي ضد Postgres حقيقي: خطة متكررة → sweep → طلب **عادي** حقيقي عبر
@@ -271,6 +272,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       supportService,
       events,
       {} as never,
+      commissionBaseServiceStub(),
     );
 
     recurringService = new RecurringOrdersService(

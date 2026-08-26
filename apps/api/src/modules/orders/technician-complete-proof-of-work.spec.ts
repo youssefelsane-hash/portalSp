@@ -9,6 +9,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { User } from '../auth/entities/user.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — قرار مالك صريح 2026-08-14 (docs/08 §20 بند 12): صورة after_photo
 // واحدة على الأقل إجبارية قبل إنهاء الشغل (WORK_COMPLETED)، مفروضة على الباك-إند نفسه — مش بس
@@ -142,6 +143,7 @@ describe('OrdersService.complete() — إثبات إنجاز الشغل إجبا
       {} as never, // supportService
       { emit: () => undefined } as never, // events
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى (الاختبار بيمتحن WORK_COMPLETED مش IN_PROGRESS)
+      commissionBaseServiceStub(),
     );
   });
 

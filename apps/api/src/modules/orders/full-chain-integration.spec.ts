@@ -55,6 +55,7 @@ import {
 import { ServicePricingRule, PricingRuleType } from '../pricing/entities/service-pricing-rule.entity';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { Installment } from '../installments/entities/installment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * تكامل السلسلة الكاملة (docs/01B §22) — Price Engine → Booking → Snapshot:
@@ -265,6 +266,7 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       supportService,
       events,
       {} as never,
+      commissionBaseServiceStub(),
     );
   });
 

@@ -1,49 +1,88 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:technician_app/features/orders/order.dart';
 
+// docs/08 §60.2 (طلب مالك صريح) — العقد المالي للفني اتغيّر جوهريًا: الباك-إند بقى بيفلتر
+// الأرقام قبل ما تخرج على السلك، فالتطبيق بيستقبل الصورة المسموحة بس (كاش مطلوب تحصيله،
+// نصيب الفني، وواقعة "مدفوع أونلاين" بلا رقم).
+//
+// الاختبار ده بيقفل على الـparsing: أي رجوع للحقول القديمة (paid_amount_cents وأخواتها) لازم
+// يفضل بلا أثر، والحقول الجديدة لازم تتقري صح.
 void main() {
-  test(
-    'technician order parses deposit totals without showing the full order as collectible',
-    () {
-      final order = Order.fromJson({
-        'id': 'order-1',
-        'order_number': 'ORD-6200',
-        'order_status': 'work_completed',
-        'problem_description': null,
-        'total_amount_cents': 620000,
-        'paid_amount_cents': 93000,
-        'financed_order_amount_cents': 0,
-        'refunded_amount_cents': 0,
-        'installment_outstanding_cents': 0,
-        'amount_due_to_technician_cents': 527000,
-        'payment_status': 'paid',
-        'booking_mode': 'individual',
-      });
+  test('جزء أونلاين + جزء كاش: الكاش بالرقم، الأونلاين واقعة، والإجمالي مش موجود', () {
+    final order = Order.fromJson({
+      'id': 'order-1',
+      'order_number': 'ORD-6200',
+      'order_status': 'work_completed',
+      'problem_description': null,
+      // ملحوظة: مفيش total_amount_cents — الباك-إند بيشيله لما يكون فيه دفع أونلاين.
+      'cash_to_collect_cents': 527000,
+      'my_earning_cents': 450000,
+      'has_online_payment': true,
+      'fully_paid_online': false,
+      'payment_status': 'paid',
+      'booking_mode': 'individual',
+    });
 
-      expect(order.totalAmountCents, 620000);
-      expect(order.paidAmountCents, 93000);
-      expect(order.amountDueToTechnicianCents, 527000);
-    },
-  );
+    expect(order.cashToCollectCents, 527000);
+    expect(order.myEarningCents, 450000);
+    expect(order.hasOnlinePayment, isTrue);
+    expect(order.fullyPaidOnline, isFalse);
+    expect(order.totalAmountCents, isNull);
+  });
 
-  test('approved financing is separate from cash collectible amount', () {
+  test('كله كاش: الإجمالي بيرجع من الـAPI وبيساوي الكاش المطلوب تحصيله', () {
     final order = Order.fromJson({
       'id': 'order-2',
-      'order_number': 'ORD-INSTALLMENT',
+      'order_number': 'ORD-CASH',
       'order_status': 'work_completed',
       'problem_description': null,
       'total_amount_cents': 620000,
-      'paid_amount_cents': 0,
-      'financed_order_amount_cents': 620000,
-      'refunded_amount_cents': 0,
-      'installment_outstanding_cents': 682000,
-      'amount_due_to_technician_cents': 0,
+      'cash_to_collect_cents': 620000,
+      'my_earning_cents': 500000,
+      'has_online_payment': false,
+      'fully_paid_online': false,
       'payment_status': 'unpaid',
       'booking_mode': 'individual',
     });
 
-    expect(order.financedOrderAmountCents, 620000);
-    expect(order.installmentOutstandingCents, 682000);
-    expect(order.amountDueToTechnicianCents, 0);
+    expect(order.totalAmountCents, 620000);
+    expect(order.cashToCollectCents, 620000);
+    expect(order.hasOnlinePayment, isFalse);
+  });
+
+  test('كله أونلاين (تقسيط معتمد مثلاً): مفيش كاش، ونصيبه بس هو اللي بيبان', () {
+    final order = Order.fromJson({
+      'id': 'order-3',
+      'order_number': 'ORD-INSTALLMENT',
+      'order_status': 'work_completed',
+      'problem_description': null,
+      'cash_to_collect_cents': 0,
+      'my_earning_cents': 500000,
+      'has_online_payment': true,
+      'fully_paid_online': true,
+      'payment_status': 'unpaid',
+      'booking_mode': 'individual',
+    });
+
+    expect(order.cashToCollectCents, 0);
+    expect(order.fullyPaidOnline, isTrue);
+    expect(order.myEarningCents, 500000);
+    expect(order.totalAmountCents, isNull);
+  });
+
+  test('رد قديم من سيرفر ما اتحدّثش: القيم بتقع على صفر بأمان بدل ما ترمي', () {
+    final order = Order.fromJson({
+      'id': 'order-4',
+      'order_number': 'ORD-LEGACY',
+      'order_status': 'accepted',
+      'problem_description': null,
+      'payment_status': 'unpaid',
+      'booking_mode': 'individual',
+    });
+
+    expect(order.cashToCollectCents, 0);
+    expect(order.myEarningCents, 0);
+    expect(order.hasOnlinePayment, isFalse);
+    expect(order.totalAmountCents, isNull);
   });
 }

@@ -190,3 +190,79 @@ export function toOrderResponseDto(
       : null,
   };
 }
+
+/**
+ * نسخة الفني من عقد الطلب (docs/08 §60.2، طلب مالك صريح).
+ *
+ * **القاعدة**: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه هو.
+ * أي حاجة اتدفعت أونلاين بتوصله كواقعة («مدفوع») من غير رقم، لأن الرقم فيه نصيب الشركة والضمان
+ * والرسوم ودي مش شغله. ومفيش أي تفصيل لتكوين السعر (سعر تقديري/معاينة/طوارئ/خصم/ضمان/إيداع) —
+ * «هو بيبان عادي جدًا المبلغ … والشركة بتتصرف».
+ *
+ * الإخفاء بيتم هنا في الباك-إند عمدًا: لو سيبنا الأرقام تخرج واعتمدنا على التطبيق إنه ما يعرضهاش،
+ * أي حد يفتح الـAPI بتوكن فني يقراها. الحقول دي **ما بتخرجش على السلك** أصلًا.
+ *
+ * `total_amount_cents` استثناء مشروط: لما مفيش أي دفع أونلاين، الإجمالي = الكاش اللي هيحصّله
+ * بالظبط، فإخفاؤه مالوش معنى («لو كله كاش فالكل بيبان» — نص المالك).
+ */
+export interface TechnicianOrderResponseDto
+  extends Omit<
+    OrderResponseDto,
+    | 'total_amount_cents'
+    | 'estimated_price_cents'
+    | 'inspection_fee_cents'
+    | 'surge_amount_cents'
+    | 'discount_amount_cents'
+    | 'warranty_price_cents'
+    | 'deposit_amount_cents'
+    | 'optional_warranty'
+    | 'paid_amount_cents'
+    | 'direct_paid_amount_cents'
+    | 'financed_order_amount_cents'
+    | 'refunded_amount_cents'
+    | 'installment_outstanding_cents'
+    | 'amount_due_to_technician_cents'
+  > {
+  /** الكاش المطلوب تحصيله من العميل دلوقتي. بيفضل ظاهر دايمًا — الفني محتاجه. */
+  cash_to_collect_cents: number;
+  /** نصيب الفني من الطلب (بعد نسبة الشركة). ظاهر دايمًا، بلا شرح لتكوينه. */
+  my_earning_cents: number;
+  /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
+  has_online_payment: boolean;
+  /** كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص. */
+  fully_paid_online: boolean;
+  /** الإجمالي — موجود بس لما مفيش أي دفع أونلاين (وقتها هو نفسه الكاش المطلوب تحصيله). */
+  total_amount_cents?: number;
+}
+
+export function toTechnicianOrderResponseDto(
+  base: OrderResponseDto,
+  money: { cashToCollectCents: number; myEarningCents: number; hasOnlinePayment: boolean; fullyPaidOnline: boolean },
+): TechnicianOrderResponseDto {
+  const {
+    total_amount_cents,
+    estimated_price_cents: _estimated,
+    inspection_fee_cents: _inspection,
+    surge_amount_cents: _surge,
+    discount_amount_cents: _discount,
+    warranty_price_cents: _warrantyPrice,
+    deposit_amount_cents: _deposit,
+    optional_warranty: _optionalWarranty,
+    paid_amount_cents: _paid,
+    direct_paid_amount_cents: _directPaid,
+    financed_order_amount_cents: _financed,
+    refunded_amount_cents: _refunded,
+    installment_outstanding_cents: _installmentOutstanding,
+    amount_due_to_technician_cents: _amountDue,
+    ...visible
+  } = base;
+
+  return {
+    ...visible,
+    cash_to_collect_cents: money.cashToCollectCents,
+    my_earning_cents: money.myEarningCents,
+    has_online_payment: money.hasOnlinePayment,
+    fully_paid_online: money.fullyPaidOnline,
+    ...(money.hasOnlinePayment ? {} : { total_amount_cents }),
+  };
+}

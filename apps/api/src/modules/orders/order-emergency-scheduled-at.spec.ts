@@ -44,6 +44,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { BookingMode } from './entities/order.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * Script 7 Phase 7 — بَقّة حقيقية اتلقطت: وضع "طوارئ" (docs/06) معناه استجابة فورية بالتعريف
@@ -252,6 +253,7 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      commissionBaseServiceStub(),
     );
   });
 

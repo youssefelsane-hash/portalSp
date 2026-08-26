@@ -73,13 +73,12 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
       customerProfiles as never,
       { findByUserIdOrThrow: jest.fn().mockResolvedValue({ id: current.technicianId }) } as never,
       {
-        getCollectionBreakdownForOrder: jest.fn().mockResolvedValue({
-          paidAmountCents: 0,
-          directPaidAmountCents: 0,
-          financedOrderAmountCents: 0,
-          refundedAmountCents: 0,
-          installmentOutstandingCents: 0,
-          amountDueToTechnicianCents: 10000,
+        // docs/08 §60.2 — الكولر بقى بينادي الصورة المفلترة بدل التفصيل الكامل.
+        getTechnicianMoneyView: jest.fn().mockResolvedValue({
+          cashToCollectCents: 10000,
+          myEarningCents: 9000,
+          hasOnlinePayment: false,
+          fullyPaidOnline: false,
         }),
       } as never,
       { findServiceOrThrow: jest.fn().mockResolvedValue({ nameAr: 'خدمة اختبار' }) } as never,
