@@ -772,51 +772,92 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
   Widget build(BuildContext context) {
     final expanded = _focusNode.hasFocus || _controller.text.isNotEmpty;
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.82, end: expanded ? 1 : 0.82),
+      tween: Tween(begin: 0.86, end: expanded ? 0.98 : 0.86),
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOutCubic,
       builder: (context, widthFactor, child) =>
           FractionallySizedBox(widthFactor: widthFactor, child: child),
       child: AnimatedContainer(
+        height: expanded ? 58 : 52,
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: expanded ? 1 : 0.94),
-          borderRadius: BorderRadius.circular(expanded ? 18 : 28),
+          color: Colors.white.withValues(alpha: expanded ? 1 : 0.96),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: expanded
+                ? AppColors.primary.withValues(alpha: 0.7)
+                : Colors.white.withValues(alpha: 0.72),
+            width: expanded ? 1.5 : 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: expanded ? 0.22 : 0.12),
-              blurRadius: expanded ? 18 : 8,
-              offset: const Offset(0, 5),
+              color: Colors.black.withValues(alpha: expanded ? 0.2 : 0.14),
+              blurRadius: expanded ? 22 : 14,
+              offset: const Offset(0, 7),
             ),
+            if (expanded)
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.14),
+                blurRadius: 0,
+                spreadRadius: 4,
+              ),
           ],
         ),
         child: TextField(
+          key: const ValueKey('homepage-hero-search'),
           controller: _controller,
           focusNode: _focusNode,
+          cursorColor: AppColors.primary,
+          style: const TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
           textInputAction: TextInputAction.search,
           onSubmitted: (_) => _submit(),
           onChanged: (_) => setState(() {}),
           onTapOutside: (_) => _focusNode.unfocus(),
           decoration: InputDecoration(
             hintText: widget.content.placeholder,
-            hintStyle: const TextStyle(color: Colors.black54, fontSize: 13),
-            prefixIcon: const Icon(
-              Icons.search_rounded,
-              color: AppColors.primary,
+            hintStyle: TextStyle(
+              color: Colors.blueGrey.shade500,
+              fontSize: 13,
+              fontWeight: FontWeight.w400,
+            ),
+            prefixIcon: Padding(
+              padding: const EdgeInsets.all(7),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.search_rounded,
+                  color: AppColors.primary,
+                  size: 21,
+                ),
+              ),
             ),
             suffixIcon: expanded
-                ? IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    tooltip: 'بحث',
-                    onPressed: _submit,
+                ? Padding(
+                    padding: const EdgeInsets.all(7),
+                    child: IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                      tooltip: 'بحث',
+                      onPressed: _submit,
+                    ),
                   )
                 : null,
             border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: expanded ? 14 : 11,
-            ),
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10),
           ),
         ),
       ),
