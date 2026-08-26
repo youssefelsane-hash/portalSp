@@ -24,6 +24,12 @@ export class AdminProjectsController {
     return this.projectsService.getProjectRoom(id, 'admin');
   }
 
+  @Get(':id/linkable-orders')
+  @RequirePermission('projects.view')
+  async linkableOrders(@Param('id', ParseUUIDPipe) id: string) {
+    return this.projectsService.listLinkableOrders(id);
+  }
+
   @Post(':id/transition')
   @RequirePermission('projects.manage')
   async transition(

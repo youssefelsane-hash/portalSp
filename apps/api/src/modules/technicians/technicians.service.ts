@@ -57,6 +57,9 @@ export interface TechnicianBookingListItem {
   isCompany: boolean;
   staffCount: number | null;
   branchCount: number | null;
+  companyId: string | null;
+  companyName: string | null;
+  isCommercialCompany: boolean;
   // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — 'available' دايمًا لكل
   // الصفوف الحالية (رجريشن صفري). 'schedule_conflicted' بس لصفوف إضافية جديدة (Service.
   // showUnavailableProviders=true + scheduledAt موجودة) — مؤهّل فعلاً بس مشغول بشغل تاني وقت
@@ -64,6 +67,17 @@ export interface TechnicianBookingListItem {
   availabilityStatus: 'available' | 'schedule_conflicted';
   unavailableReasonAr: string | null;
   availableAgainAt: string | null;
+}
+
+export function dedupeTechnicianBookingItems(
+  items: TechnicianBookingListItem[],
+): TechnicianBookingListItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.technicianId)) return false;
+    seen.add(item.technicianId);
+    return true;
+  });
 }
 
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
@@ -340,6 +354,7 @@ export class TechniciansService {
     // فلترة مستوى الفني (محترف فأعلى، technician_level_config.eligible_for_team_booking). false
     // افتراضيًا (فردي/طوارئ) = صفر تغيير عن السلوك الحالي.
     isTeamBooking = false,
+    includeCompanyEntities = true,
   ): Promise<{ zoneId: string; items: TechnicianBookingListItem[] }> {
     interface AddressRow {
       city_id: string | null;
@@ -378,12 +393,17 @@ export class TechniciansService {
       pricing_tier: TechnicianPricingTier;
       on_time_rate: string | null;
       avg_arrival_minutes: string | null;
+      company_id: string | null;
+      company_name: string | null;
+      commercial_registration_number: string | null;
     }
     const rows = await this.technicianProfiles.manager.query<TechnicianRow[]>(
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
+             company.id AS company_id, company.name AS company_name,
+             company.commercial_registration_number,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
                AS recommendation_score,
              -- Script 6 Part 7 — مؤشرات أداء حقيقية لكروت المقارنة في السوق (مش أرقام مصطنعة).
@@ -413,6 +433,8 @@ export class TechniciansService {
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN services svc ON svc.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      LEFT JOIN technician_companies company ON company.id = tp.company_id
+        AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
@@ -493,6 +515,9 @@ export class TechniciansService {
       isCompany: false,
       staffCount: null,
       branchCount: null,
+      companyId: row.company_id,
+      companyName: row.company_name,
+      isCommercialCompany: Boolean(row.commercial_registration_number?.trim()),
       availabilityStatus: 'available',
       unavailableReasonAr: null,
       availableAgainAt: null,
@@ -521,8 +546,11 @@ export class TechniciansService {
     // الفوري. بلا فلتر مستوى هنا عمداً — الشركة أصلاً موثوقة كوحدة (مالكها/مديرها لازم كان
     // premium+ وقت الإنشاء، technician-companies.service.ts's canLeadTeam check)، وطلب المالك
     // كان "الشركات بتظهر كده كده" بلا أي شرط إضافي.
-    if (!isTeamBooking) {
-      return { zoneId: zone.id, items: [...individualItems, ...conflictedItems] };
+    if (!isTeamBooking || !includeCompanyEntities) {
+      return {
+        zoneId: zone.id,
+        items: dedupeTechnicianBookingItems([...individualItems, ...conflictedItems]),
+      };
     }
 
     interface CompanyRow {
@@ -533,10 +561,11 @@ export class TechniciansService {
       distance_km: string | null;
       staff_count: string;
       branch_count: string;
+      commercial_registration_number: string | null;
     }
     const companyRows = await this.technicianProfiles.manager.query<CompanyRow[]>(
       `
-      SELECT tc.id AS company_id, tc.name,
+      SELECT tc.id AS company_id, tc.name, tc.commercial_registration_number,
              AVG(tp.average_rating) AS avg_rating,
              SUM(tp.total_ratings_count) AS total_ratings,
              MIN(ST_Distance(tp.current_location, a.location) / 1000.0) AS distance_km,
@@ -609,6 +638,9 @@ export class TechniciansService {
       isCompany: true,
       staffCount: Number(row.staff_count),
       branchCount: Number(row.branch_count),
+      companyId: row.company_id,
+      companyName: row.name,
+      isCommercialCompany: Boolean(row.commercial_registration_number?.trim()),
       availabilityStatus: 'available',
       unavailableReasonAr: null,
       availableAgainAt: null,
@@ -625,7 +657,10 @@ export class TechniciansService {
       return da - db;
     });
 
-    return { zoneId: zone.id, items: [...merged, ...conflictedItems] };
+    return {
+      zoneId: zone.id,
+      items: dedupeTechnicianBookingItems([...merged, ...conflictedItems]),
+    };
   }
 
   /**
@@ -655,12 +690,16 @@ export class TechniciansService {
       distance_km: string | null;
       current_level: TechnicianLevel;
       pricing_tier: TechnicianPricingTier;
+      company_id: string | null;
+      company_name: string | null;
+      commercial_registration_number: string | null;
     }
     const rows = await this.technicianProfiles.manager.query<ConflictedRow[]>(
       `
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count,
-             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier
+             ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
+             company.id AS company_id, company.name AS company_name, company.commercial_registration_number
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -668,6 +707,8 @@ export class TechniciansService {
       JOIN technician_zones tz ON tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
       JOIN services svc ON svc.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      LEFT JOIN technician_companies company ON company.id = tp.company_id
+        AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND (
@@ -742,6 +783,9 @@ export class TechniciansService {
           isCompany: false,
           staffCount: null,
           branchCount: null,
+          companyId: row.company_id,
+          companyName: row.company_name,
+          isCommercialCompany: Boolean(row.commercial_registration_number?.trim()),
           availabilityStatus: 'schedule_conflicted',
           unavailableReasonAr: capacity.reasonAr,
           availableAgainAt: nextAvailable,

@@ -846,7 +846,8 @@ export default function OrderDetailPage() {
                       جودة {explanation.rank_info.score_breakdown.priority_component.toFixed(1)} − قدرة{' '}
                       {explanation.rank_info.score_breakdown.workload_penalty.toFixed(1)} − عدالة{' '}
                       {explanation.rank_info.score_breakdown.fairness_penalty.toFixed(1)} + موثوقية{' '}
-                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)}
+                      {explanation.rank_info.score_breakdown.reliability_adjustment.toFixed(2)} + شركة{' '}
+                      {explanation.rank_info.score_breakdown.company_adjustment.toFixed(1)}
                     </p>
                   </>
                 )}

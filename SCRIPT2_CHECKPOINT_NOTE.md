@@ -1,4 +1,4 @@
-# Script 2 Checkpoint — Active (2026-08-25)
+# Script 2 Checkpoint — Active (2026-08-26)
 
 ## Latest verified work
 
@@ -49,7 +49,37 @@
   four-image cap, animated indicators, and backward-compatible branding/gradient fallbacks. All
   migration checksums matched; API test/build, admin and web typechecks, Dart analysis, and customer
   Flutter tests (13/13) passed.
-- Next task: continue the remaining cross-engine integration review.
+- Integrated: latest `origin/main` at `2c2c988` by fast-forward. This includes migrations
+  `0187`-`0189`, near-term dispatch, viewed-order tracking, and the project milestone/comment flow.
+  Migration `0189_project_comments.sql` was missing from the shared local TEST database and caused
+  both admin and customer project-room routes to return 500; all migrations now apply with matching
+  checksums, and the real PostgreSQL project flow passes 17/17.
+- Completed: warranty-claim admin responses now use the documented snake_case contract, short
+  customer claim descriptions show an actionable inline validation message, and warranty revisits
+  no longer incorrectly require the original service's commercial scheduling fields. Eligible
+  technician results are deduplicated at the shared API source before reaching admin/customer UIs.
+  Focused Jest/PostgreSQL tests pass 7/7 with open-handle detection, API build and admin typecheck
+  pass, and the focused Flutter test/analyze pass with no issues.
+- Completed: the project room is now connected end to end. Admins can link same-customer orders,
+  issue an active warranty plan, and post customer-visible or internal updates; customers can read
+  and send general project updates and retry a failed room load. Project creation now sends a stable
+  idempotency key, so a lost response or simultaneous double submit returns the same project rather
+  than creating a duplicate. Migration `0190` adds the scoped uniqueness invariant. Comment, order
+  link, and project-warranty writes are atomic with their audit records. The real PostgreSQL project
+  suite passes 18/18, including concurrency and injected audit failures, with open-handle detection;
+  API build, admin typecheck, four focused Flutter tests, Dart analysis, and migration checksums pass.
+- Completed: registered companies now participate explicitly in large-team auto-matching. Migration
+  `0191` adds admin-controlled crew threshold (4) and modest rank boost (3). The boost requires a
+  TEAM order, a commercial registration, and enough currently eligible company staff; small jobs,
+  independent bookings, informal teams, and understaffed companies receive zero adjustment. One
+  representative per prioritized company enters a dispatch batch. Admin candidate lists now use a
+  real technician profile ID and display its company instead of passing a company UUID to technician
+  explain/reassign routes. The company admin pages now visually distinguish registered companies
+  from professional teams with a premium workspace. Real PostgreSQL matching tests pass 36/36 and
+  focused company/admin marketplace regressions pass 8/8 with open-handle detection; API build,
+  shared-types build/typecheck, and admin typecheck pass.
+- Next task: continue the remaining screenshot/new-route review after this project checkpoint,
+  prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 
 ---
 

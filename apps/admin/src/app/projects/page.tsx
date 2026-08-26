@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -13,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ORDER_STATUS_LABELS } from '@/lib/order-labels';
 
 const egp = (c: number) => `${(c / 100).toLocaleString('ar-EG-u-nu-latn')} ج.م`;
 
@@ -65,9 +67,24 @@ interface ProjectRoomData {
   quotes: ProjectQuoteDetail[];
   milestones: ProjectMilestoneRow[];
   orders: Array<{ id: string; order_number: string; status: string; total_amount_cents: number }>;
-  warranties: Array<Record<string, unknown>>;
+  warranties: Array<{ id: string; name_ar: string; coverage_months: number; expires_at: string; claims_used: number }>;
   activity: Array<{ id: string; action: string; actor_name: string; actor_role: string; created_at: string }>;
   comments?: ProjectCommentRow[];
+}
+
+interface WarrantyPlanOption {
+  id: string;
+  name_ar: string;
+  coverage_months: number;
+  is_active: boolean;
+}
+
+interface LinkableOrder {
+  id: string;
+  order_number: string;
+  status: string;
+  total_amount_cents: number;
+  project_id: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -267,6 +284,22 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
           </section>
         )}
 
+        {room && (
+          <ProjectConnectionsSection
+            projectId={currentProject.id}
+            room={room}
+            onChanged={loadRoom}
+          />
+        )}
+
+        {room && (
+          <GeneralProjectComments
+            projectId={currentProject.id}
+            comments={room.comments ?? []}
+            onChanged={loadRoom}
+          />
+        )}
+
         <div>
           <p className="mb-2 font-medium text-sm">الإجراء التالي</p>
           <div className="flex flex-wrap gap-2">
@@ -300,6 +333,165 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
         )}
       </TableCell>
     </TableRow>
+  );
+}
+
+function ProjectConnectionsSection({ projectId, room, onChanged }: {
+  projectId: string;
+  room: ProjectRoomData;
+  onChanged: () => void;
+}) {
+  const { authedFetch } = useAuth();
+  const [candidateOrders, setCandidateOrders] = useState<LinkableOrder[]>([]);
+  const [plans, setPlans] = useState<WarrantyPlanOption[]>([]);
+  const [orderId, setOrderId] = useState('');
+  const [planId, setPlanId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadOptions = useCallback(() => {
+    Promise.all([
+      authedFetch<LinkableOrder[]>(`/admin/projects/${projectId}/linkable-orders`),
+      authedFetch<WarrantyPlanOption[]>('/admin/warranty-plans'),
+    ])
+      .then(([orders, warrantyPlans]) => {
+        setCandidateOrders(orders.filter((order) => order.project_id !== projectId));
+        setPlans(warrantyPlans.filter((plan) => plan.is_active));
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'تعذّر تحميل خيارات الربط'));
+  }, [authedFetch, projectId]);
+
+  useEffect(() => { void loadOptions(); }, [loadOptions]);
+
+  async function linkOrder() {
+    if (!orderId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/projects/${projectId}/orders/${orderId}/link`, { method: 'POST' });
+      setOrderId('');
+      loadOptions();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر ربط الطلب');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function issueWarranty() {
+    if (!planId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/projects/${projectId}/warranties`, {
+        method: 'POST',
+        body: JSON.stringify({ plan_id: planId }),
+      });
+      setPlanId('');
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر إصدار الضمان');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="grid gap-3 lg:grid-cols-2">
+      <div className="rounded-md border bg-background p-3">
+        <p className="font-medium text-sm">طلبات المشروع</p>
+        <p className="mt-1 text-xs text-muted-foreground">اربط زيارة موجودة لنفس العميل بالمشروع؛ هتظهر للعميل فورًا في تبويب الطلبات.</p>
+        <div className="my-3 space-y-1">
+          {room.orders.length === 0 ? <p className="text-xs text-muted-foreground">مفيش طلبات مرتبطة لسه.</p> : room.orders.map((order) => (
+            <div key={order.id} className="flex items-center justify-between gap-2 text-sm">
+              <Link className="underline" href={`/orders/${order.id}`}>{order.order_number}</Link>
+              <span>{ORDER_STATUS_LABELS[order.status as keyof typeof ORDER_STATUS_LABELS] ?? order.status} · {egp(order.total_amount_cents)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <select className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm" value={orderId} onChange={(event) => setOrderId(event.target.value)}>
+            <option value="">اختار طلبًا لنفس العميل</option>
+            {candidateOrders.map((order) => <option key={order.id} value={order.id}>{order.order_number} · {order.status}</option>)}
+          </select>
+          <Button size="sm" disabled={busy || !orderId} onClick={() => void linkOrder()}>ربط</Button>
+        </div>
+      </div>
+
+      <div className="rounded-md border bg-background p-3">
+        <p className="font-medium text-sm">ضمانات المشروع</p>
+        <p className="mt-1 text-xs text-muted-foreground">أصدر ضمانًا واضح المدة يظهر للعميل داخل المشروع وفي صفحة ضماناتي.</p>
+        <div className="my-3 space-y-1">
+          {room.warranties.length === 0 ? <p className="text-xs text-muted-foreground">لم يصدر ضمان للمشروع لسه.</p> : room.warranties.map((warranty) => (
+            <div key={warranty.id} className="flex items-center justify-between gap-2 text-sm">
+              <span>{warranty.name_ar}</span>
+              <span>{warranty.coverage_months} شهر · حتى {formatDate(warranty.expires_at)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <select className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm" value={planId} onChange={(event) => setPlanId(event.target.value)}>
+            <option value="">اختار خطة ضمان مفعّلة</option>
+            {plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name_ar} · {plan.coverage_months} شهر</option>)}
+          </select>
+          <Button size="sm" disabled={busy || !planId} onClick={() => void issueWarranty()}>إصدار</Button>
+        </div>
+      </div>
+      {error && <p className="text-sm text-destructive lg:col-span-2">{error}</p>}
+    </section>
+  );
+}
+
+function GeneralProjectComments({ projectId, comments, onChanged }: {
+  projectId: string;
+  comments: ProjectCommentRow[];
+  onChanged: () => void;
+}) {
+  const { authedFetch } = useAuth();
+  const [body, setBody] = useState('');
+  const [internal, setInternal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!body.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/projects/${projectId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ body: body.trim(), is_visible_to_customer: !internal }),
+      });
+      setBody('');
+      setInternal(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'تعذّر إرسال التحديث');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-md border bg-background p-3">
+      <p className="font-medium text-sm">تحديثات المشروع العامة</p>
+      <div className="my-3 space-y-2">
+        {comments.length === 0 ? <p className="text-xs text-muted-foreground">مفيش تحديثات عامة لسه.</p> : comments.map((comment) => (
+          <div key={comment.id} className="rounded bg-muted/50 p-2 text-sm">
+            <span className="font-medium">{comment.author_name}:</span> {comment.body}
+            {!comment.is_visible_to_customer && <span className="ms-1 text-xs text-muted-foreground">(داخلي)</span>}
+          </div>
+        ))}
+      </div>
+      <Input value={body} onChange={(event) => setBody(event.target.value)} placeholder="اكتب تحديثًا عامًا يظهر للعميل…" />
+      <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <input type="checkbox" checked={internal} onChange={(event) => setInternal(event.target.checked)} />
+        ملاحظة داخلية
+      </label>
+      <Button className="mt-2" size="sm" variant="outline" disabled={busy || !body.trim()} onClick={() => void submit()}>إرسال التحديث</Button>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </section>
   );
 }
 

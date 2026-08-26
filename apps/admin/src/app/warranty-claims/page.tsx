@@ -13,10 +13,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 interface ClaimRow {
-  id: string; warranty_id: string; customer_id: string;
+  id: string; warranty_id: string; customer_id: string | null;
   status: string; defect_description: string;
   original_provider_id: string | null; repair_order_id: string | null;
   created_at: string;
+}
+
+function customerReference(customerId: string | null): string {
+  return customerId?.slice(0, 8) || 'غير متاح';
 }
 
 const CLAIM_STATUS_LABELS: Record<string, string> = {
@@ -106,7 +110,7 @@ export default function AdminWarrantyClaimsPage() {
           <TableBody>
             {claims.map((c) => (
               <TableRow key={c.id}>
-                <TableCell className="text-sm">{c.customer_id.slice(0,8)}</TableCell>
+                <TableCell className="text-sm">{customerReference(c.customer_id)}</TableCell>
                 <TableCell className="max-w-xs truncate text-sm">{c.defect_description}</TableCell>
                 <TableCell><Badge variant={c.status === 'open' ? 'destructive' : 'outline'}>{CLAIM_STATUS_LABELS[c.status] ?? c.status}</Badge></TableCell>
                 <TableCell className="text-sm">{new Date(c.created_at).toLocaleDateString('ar-EG-u-nu-latn')}</TableCell>

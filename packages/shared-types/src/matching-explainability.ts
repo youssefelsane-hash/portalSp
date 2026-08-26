@@ -20,6 +20,7 @@ export interface TechnicianRankScoreBreakdownDto {
   workload_penalty: number;
   fairness_penalty: number;
   reliability_adjustment: number;
+  company_adjustment: number;
 }
 
 export interface TechnicianRankInfoDto {

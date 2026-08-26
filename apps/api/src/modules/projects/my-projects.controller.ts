@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -47,8 +47,8 @@ export class MyProjectsController {
   async create(@CurrentUser() user: JwtPayload, @Body() dto: {
     project_type: string; name_ar: string; description_ar?: string;
     address_id: string; budget_estimate_cents?: number;
-  }, @AuditContext() meta: AuditMeta) {
-    const project = await this.projectsService.create(user.sub, dto, meta);
+  }, @AuditContext() meta: AuditMeta, @Headers('idempotency-key') idempotencyKey?: string) {
+    const project = await this.projectsService.create(user.sub, dto, meta, idempotencyKey);
     return toProjectResponseDto(project);
   }
 
