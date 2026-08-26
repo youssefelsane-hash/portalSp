@@ -17,6 +17,8 @@ import { OrderRematchListener } from './order-rematch.listener';
 import { TechnicianOrdersController } from './technician-orders.controller';
 import { OrderAssignment } from './entities/order-assignment.entity';
 import { PricingModule } from '../pricing/pricing.module';
+import { CatalogModule } from '../catalog/catalog.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   // كانت الوحدة دي بتستورد OrdersModule بالكامل — بَقّة حقيقية اتلقطت واتصلحت (تفاصيل في
@@ -35,6 +37,8 @@ import { PricingModule } from '../pricing/pricing.module';
     // — عمداً مش OrdersModule زي التحذير فوق. CustomersModule بتاعته controller مختلف تماماً
     // (/addresses) ومفيش أي استيراد لـ OrdersModule جواها، فمفيش نفس فخ ترتيب التسجيل.
     CustomersModule,
+    CatalogModule,
+    PaymentsModule,
     // docs/08 §60.3 — فرق "الفني المميّز" بعد التعيين التلقائي (LevelPremiumService).
     // **بَقّة إقلاع حقيقية اتلقطت لما شغّلت التطبيق فعليًا**: الحقن اتضاف في MatchingService
     // من غير الاستيراد ده، فـ`npx nest build` و`npx jest` عدّوا نضاف (الاتنين مابيبنوش حاوية

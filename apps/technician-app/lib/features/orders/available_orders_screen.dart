@@ -25,6 +25,7 @@ import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order.dart';
+import 'order_date_labels.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
 
@@ -309,10 +310,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       }
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -333,30 +335,17 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     await _load();
   }
 
-  String _formatScheduledDay(String? iso) {
-    if (iso == null) return '';
-    final at = DateTime.parse(iso).toLocal();
-    final now = DateTime.now();
-    final startOfDay = DateTime(at.year, at.month, at.day);
-    final startOfToday = DateTime(now.year, now.month, now.day);
-    final diffDays = startOfDay.difference(startOfToday).inDays;
-    final two = (int n) => n.toString().padLeft(2, '0');
-    final dateLabel = '${two(at.day)}/${two(at.month)}/${at.year}';
-    if (diffDays == 0) return 'النهاردة';
-    if (diffDays == 1) return 'بكرة';
-    return dateLabel;
-  }
-
   Future<void> _reject(AvailableOrder order) async {
     setState(() => _isActing = true);
     try {
       await _repository.reject(order.orderId);
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -480,7 +469,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           for (final order in overdue) ...[
             _OverdueJobCard(
               order: order,
-              dayLabel: _formatScheduledDay(order.scheduledAt),
+              dayLabel: formatScheduledDayAr(order.scheduledAt),
               onTap: () => _openUpcomingOrder(order),
             ),
             const SizedBox(height: 8),
@@ -507,7 +496,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           for (final order in upcoming) ...[
             _UpcomingJobCard(
               order: order,
-              dayLabel: _formatScheduledDay(order.scheduledAt),
+              dayLabel: formatScheduledDayAr(order.scheduledAt),
               onTap: () => _openUpcomingOrder(order),
             ),
             const SizedBox(height: 8),
@@ -754,9 +743,11 @@ class _WorkOpportunityCard extends StatelessWidget {
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
+  String get _serviceDay => formatScheduledDayAr(opportunity.scheduledAt);
+
   String get _tierLabel => switch (opportunity.capacityTierAtOffer) {
-        'HEAVY' => 'عندك شغل تقيل النهاردة — الفرصة دي اختيارية بالكامل',
-        _ => 'عندك شغل تاني النهاردة — لو تقدر تستوعبها، اقبلها',
+        'HEAVY' => 'عندك شغل تقيل في نفس اليوم — الفرصة دي اختيارية بالكامل',
+        _ => 'عندك شغل تاني في نفس اليوم — لو تقدر تستوعبها، اقبلها',
       };
 
   @override
@@ -782,6 +773,14 @@ class _WorkOpportunityCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(opportunity.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.calendar_today_outlined, size: 16),
+                const SizedBox(width: 6),
+                Text('موعد الطلب: $_serviceDay'),
+              ],
+            ),
             const SizedBox(height: 4),
             Text(opportunity.streetName),
             if (opportunity.problemDescription != null) Text(opportunity.problemDescription!),

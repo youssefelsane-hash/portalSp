@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Project, ProjectStatus, canTransitionProject } from './entities/project.entity';
@@ -18,6 +18,20 @@ export class ProjectsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditLog: AuditLogService,
   ) {}
+
+  private async enqueueNotification(
+    manager: EntityManager,
+    projectId: string,
+    action: string,
+    actor: { userId: string | null; role: 'admin' | 'customer' | 'system' },
+    details: Record<string, unknown> = {},
+  ): Promise<void> {
+    await manager.query(
+      `INSERT INTO project_notification_outbox (project_id, action, actor_user_id, actor_role, details)
+       VALUES ($1,$2,$3,$4,$5::jsonb)`,
+      [projectId, action, actor.userId, actor.role, JSON.stringify(details)],
+    );
+  }
 
   async listAll(page = 1, perPage = 20): Promise<{
     items: Record<string, unknown>[];
@@ -94,6 +108,7 @@ export class ProjectsService {
           action: 'project.created', entityType: 'project', entityId: project.id,
           newValues: { name: project.nameAr, type: project.projectType }, meta,
         }, manager);
+        await this.enqueueNotification(manager, project.id, 'project.created', { userId, role: 'customer' });
         return project;
       });
     } catch (error) {
@@ -159,6 +174,7 @@ export class ProjectsService {
         action: `project.${to}`, entityType: 'project', entityId: project.id,
         newValues: { from: previousStatus, to }, meta,
       }, manager);
+      await this.enqueueNotification(manager, project.id, `project.${to}`, { userId: adminUserId, role: 'admin' }, { from: previousStatus, to });
       return project;
     });
   }
@@ -242,6 +258,10 @@ export class ProjectsService {
       await manager.save(project);
       await this.auditLog.record({ actorUserId: adminUserId, actorRole: 'admin', action: 'project.quote_sent',
         entityType: 'project_quote', entityId: quote.id, newValues: { project_id: quote.projectId, expires_at: quote.expiresAt.toISOString() }, meta }, manager);
+      await this.enqueueNotification(manager, project.id, 'project.quote_sent', { userId: adminUserId, role: 'admin' }, {
+        quote_id: quote.id,
+        total_cents: quote.totalCents,
+      });
       return quote;
     });
   }
@@ -289,6 +309,10 @@ export class ProjectsService {
         entityType: 'project_quote', entityId: quote.id,
         newValues: { project_id: project.id, total_cents: quote.totalCents }, meta,
       }, manager);
+      await this.enqueueNotification(manager, project.id, 'project.quote_approved', { userId, role: 'customer' }, {
+        quote_id: quote.id,
+        total_cents: quote.totalCents,
+      });
       return project;
     });
   }
@@ -325,6 +349,10 @@ export class ProjectsService {
         entityType: 'project', entityId: project.id,
         newValues: { count: saved.length, total_cents: total }, meta,
       }, manager);
+      await this.enqueueNotification(manager, project.id, 'project.milestones_created', { userId: adminUserId, role: 'admin' }, {
+        count: saved.length,
+        has_down_payment: saved.some((milestone) => milestone.isDownPayment),
+      });
       return saved;
     });
   }
@@ -349,7 +377,7 @@ export class ProjectsService {
     apply: (milestone: ProjectMilestone) => { action: string; newValues: Record<string, unknown> },
     meta?: AuditActorMeta,
   ): Promise<ProjectMilestone> {
-    const { milestone, action, newValues } = await this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       const found = await manager
         .createQueryBuilder(ProjectMilestone, 'm')
         .setLock('pessimistic_write')
@@ -360,19 +388,22 @@ export class ProjectsService {
       }
       const result = apply(found);
       await manager.save(found);
-      return { milestone: found, ...result };
+      await this.auditLog.record({
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+        action: result.action,
+        entityType: 'project_milestone',
+        entityId: milestoneId,
+        newValues: { project_id: projectId, sequence_number: found.sequenceNumber, ...result.newValues },
+        meta,
+      }, manager);
+      await this.enqueueNotification(manager, projectId, result.action, actor, {
+        milestone_id: milestoneId,
+        milestone_name: found.nameAr,
+        ...result.newValues,
+      });
+      return found;
     });
-
-    await this.auditLog.record({
-      actorUserId: actor.userId,
-      actorRole: actor.role,
-      action,
-      entityType: 'project_milestone',
-      entityId: milestoneId,
-      newValues: { project_id: projectId, sequence_number: milestone.sequenceNumber, ...newValues },
-      meta,
-    });
-    return milestone;
   }
 
   async startMilestone(adminUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
@@ -513,6 +544,11 @@ export class ProjectsService {
         newValues: { milestone_id: dto.milestone_id ?? null, is_visible_to_customer: visible },
         meta,
       }, manager);
+      await this.enqueueNotification(manager, projectId, 'project.comment_added', author, {
+        comment_id: row.id,
+        milestone_id: dto.milestone_id ?? null,
+        visible_to_customer: visible,
+      });
       return row;
     });
   }
@@ -561,6 +597,7 @@ export class ProjectsService {
         newValues: { order_id: orderId },
         meta,
       }, manager);
+      await this.enqueueNotification(manager, projectId, 'project.order_linked', { userId: adminUserId, role: 'admin' }, { order_id: orderId });
       return { linked: true, already: false };
     });
   }
@@ -647,6 +684,10 @@ export class ProjectsService {
         newValues: { plan_id: planId, warranty_id: row.id, expires_at: expiresAt.toISOString() },
         meta,
       }, manager);
+      await this.enqueueNotification(manager, projectId, 'project.warranty_issued', { userId: adminUserId, role: 'admin' }, {
+        warranty_id: row.id,
+        plan_id: planId,
+      });
       return row;
     });
   }

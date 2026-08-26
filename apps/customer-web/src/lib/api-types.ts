@@ -49,6 +49,12 @@ export interface HomepageTipDto {
 export interface HomepageContentDto {
   trust_message: string;
   hero_images: string[];
+  search: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    placeholder: string;
+  };
   tips: HomepageTipDto[];
 }
 

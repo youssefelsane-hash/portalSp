@@ -83,7 +83,7 @@ export default function AdminWarrantyClaimsPage() {
   }, [isLoading, load]);
   // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
   // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
-  useAdminLiveRefresh(['orders'], load);
+  useAdminLiveRefresh(['warranty'], load);
 
   async function reviewClaim(claimId: string, status: string, rejectionReason?: string) {
     try {

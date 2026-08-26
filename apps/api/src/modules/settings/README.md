@@ -25,6 +25,11 @@
     `/uploads/` يديرها الأدمن من نفس صفحة `/homepage-content`. الموبايل والويب يدوران عليها كل
     6 ثوانٍ؛ قائمة فارغة ترجع لصورة branding `splash` القديمة، ثم التدرجات المحلية، لذلك الإضافة
     backward-compatible. الـpublic controller يرشح القيم غير النصية/غير الآمنة ويحد الناتج بأربع صور.
+  - **`homepage.search_content` (migration `0197`)** — العنوان الصغير، العنوان الرئيسي، الشرح،
+    ومثال خانة البحث بقوا مجموعة JSON واحدة يديرها الأدمن من `/homepage-content`. الموبايل والويب
+    يستهلكان نفس النصوص، والـpublic controller يزيل الفراغات ويطبق حدود طول وfallback مطابق للنص
+    القديم لو أي حقل ناقص. حقل الموبايل مضغوط ودائري وهو خامل ويتمدد بسلاسة عند التركيز، فلا يحجب
+    صور الـhero قبل أن يبدأ العميل البحث.
 
 - **`SETTING_UPDATED_EVENT` (`common/events/setting-updated.event.ts`) — بدائي جديد لموديولات محتفظة بقيمة إعداد في الذاكرة (docs/08 §33، طلب مالك صريح 2026-08-20)**: كل الأمثلة فوق (payouts، matching، orders) بتقرا `SettingsService.getX()` **في كل نداء** — كافي تمامًا، مفيش داعي لحدث. بس لو موديول عنده `@Injectable()` singleton بيحتفظ بقيمة الإعداد كـ`readonly`/field محسوب مرة واحدة وقت `bootstrap` (زي `InstaPayProvider.isConfigured` — راجع `../payments/README.md` §33)، `update()` بقى بتطلق `SETTING_UPDATED_EVENT` (`emitAsync`، بعد إبطال الكاش مباشرة) — أي موديول يستمع له بـ`@OnEvent(SETTING_UPDATED_EVENT)` ويتحقق `event.key` قبل ما يعيد تحميل قيمته. **قيد نطاق صريح**: `EventEmitter2` in-process بس — لو النظام يوماً بقى multi-instance، الحدث مش هيوصل لباقي الـinstances، لازم يتحول لـRedis pub/sub. `events: EventEmitter2` بقى param **اختياري** في `SettingsService`'s constructor (24+ ملف اختبار بينشئوها بـ`new` بـ3 args بس، إجباره كان هيكسرهم كلهم).
 

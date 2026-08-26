@@ -6,6 +6,14 @@ describe('HomepageContentController hero images', () => {
     const settings = {
       getString: jest.fn().mockResolvedValue('رسالة ثقة'),
       getJson: jest.fn(async (key: string) => {
+        if (key === 'homepage.search_content') {
+          return {
+            eyebrow: '  اعمل إيه؟  ',
+            title: 'اكتب المشكلة',
+            description: '',
+            placeholder: 'مثال: الحنفية بتسرب',
+          };
+        }
         if (key === 'homepage.hero_images') {
           return [
             ' https://cdn.example.com/one.jpg ',
@@ -30,5 +38,11 @@ describe('HomepageContentController hero images', () => {
       'https://cdn.example.com/three.jpg',
       'https://cdn.example.com/four.jpg',
     ]);
+    expect(response.search).toEqual({
+      eyebrow: 'اعمل إيه؟',
+      title: 'اكتب المشكلة',
+      description: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+      placeholder: 'مثال: الحنفية بتسرب',
+    });
   });
 });

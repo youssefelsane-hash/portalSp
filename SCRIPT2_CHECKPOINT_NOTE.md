@@ -97,8 +97,42 @@
   instead of an eight-character customer ID and truncated text. The enriched snake_case contract
   is covered by the real PostgreSQL ownership/concurrency/state-machine suite (4/4) with open-handle
   detection; API build and admin typecheck pass.
-- Next task: continue the remaining screenshot/new-route review after this project checkpoint,
-  prioritizing visible warranty/project browser flows not already covered by the focused matrix.
+- Completed: project and warranty admin pages now have permission-scoped realtime topics. Customer
+  project creation, quote decisions, milestone decisions/comments, and warranty-claim opening emit
+  only after their transaction succeeds; admin project/claim changes do the same. The open admin
+  list and expanded project room refetch their REST source of truth immediately without a manual
+  refresh. Gateway plus real PostgreSQL project/warranty suites pass 25/25 with open-handle
+  detection; API build and admin typecheck pass.
+- Completed: media URLs stored by an older local API address are now portable. Absolute `/uploads/`
+  links are rebased to the currently configured API origin in admin, customer, and technician apps,
+  while genuine external CDN/S3 URLs remain unchanged. Chat images, complaint attachments,
+  technician onboarding documents, and before/after order photos therefore survive a local IP or
+  deployment-origin change. Focused admin and Flutter URL tests pass 8/8; admin typecheck and
+  changed-file analysis for both mobile apps pass with no issues.
+- Completed: technician order acceptance now returns the same complete financial/customer/service
+  projection as the canonical detail route. The mobile app no longer falls back to a false zero
+  earning immediately after accepting either a normal order or a work opportunity. Opportunity
+  cards and push notifications now show the order's real scheduled day/date instead of claiming
+  every offer is today. Focused API tests pass 8/8, the real PostgreSQL opportunity suite passes
+  10/10 with open-handle detection, Flutter tests pass 7/7, changed-file analysis and the API build
+  pass, and a real Nest startup completed without dependency-injection errors.
+- Completed: customer homepage search copy is now one admin-managed source of truth shared by
+  mobile and web (`homepage.search_content`, migration `0197`). The mobile field is compact and
+  rounded while idle, expands smoothly on focus, and accepts the problem description directly;
+  web mirrors the compact focus treatment. Missing/partial settings retain the prior copy through
+  bounded server and client fallbacks. API tests, customer Flutter tests (4/4), Flutter analysis,
+  API build, admin typecheck, and customer-web typecheck pass. Migration `0197` is applied on TEST,
+  all earlier checksums match, and the new setting/checksum were verified directly.
+- Completed: project workflow notifications now use a transactional PostgreSQL outbox
+  (`0198_project_notification_outbox.sql`). Project state, audit, and notification intent commit
+  atomically; a bounded worker recovers stale claims, retries transient failures, terminates at
+  manual review after five attempts, and deduplicates each user/channel delivery through
+  `source_outbox_id`. Customer/admin/technician recipients and deep links are audience-aware, and
+  hidden admin comments remain hidden. API build and the real PostgreSQL project suite pass 19/19
+  with `--detectOpenHandles`, including rollback fault injection, failed-delivery recovery, exact-once
+  retry behavior, and exhausted-attempt terminal state.
+- Next task: continue the remaining screenshot/new-route review, starting with the failing admin
+  support/technician/company/academy routes and the customer homepage carousel transition.
 
 ---
 
