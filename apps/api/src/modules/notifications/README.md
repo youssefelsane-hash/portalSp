@@ -355,3 +355,29 @@ context=`crew_recruit` من `OrderTeamService.recruitMember()`) — بس صفر 
 كاملة في `../orders/README.md` (قسم "حجز فني (شغالة) مباشر").
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
+
+## القنوات بقت بتتقرا من إعدادات النوع، مش متحطوطة بالإيد (docs/08 §69، 2026-08-26)
+
+`notification_type_configs.default_channels` كان **عمود ميّت**: الأدمن بيعدّله من
+`/admin/notification-types`، والكود كان بيقرا من نفس الصف الأولوية والصوت وactionable **وبس** —
+القناة كانت متحطوطة حرفيًا في كل listener، فـ**6 مسارات من 42** بس كانوا بيطلبوا `push`. النتيجة:
+معظم الإشعارات in_app بس مهما الأدمن ظبّط، وتعديله مالوش أي أثر ظاهر.
+
+دلوقتي:
+
+```ts
+notify(input)                       // القنوات من default_channels للنوع
+notify(input, NotificationChannel.PUSH)  // قناة صريحة — السلوك القديم بالحرف
+notifyMultiChannel(input, [...])    // زي ما هو (بينده notifyOnChannel الداخلية)
+```
+
+- نوع **بلا صف إعدادات** ⇒ `in_app` بس — نفس السلوك القديم بالضبط، صفر مفاجآت لأي مسار قديم.
+- قيمة `notify()` الراجعة لسه صف `in_app` (أو أول صف لو النوع مش فيه in_app) عشان النداءات اللي
+  بتستخدم القيمة الراجعة ما تتكسرش.
+- القيم غير المعروفة في `default_channels` بتتفلتر بدل ما ترمي.
+
+**السبب الجذري التاني اللي كان مانع push خالص** (مش من الموديول ده): التطبيق ماكانش عنده
+`google-services.json` فماكانش بياخد FCM token أصلاً، و`user_devices` كان فاضي — فكل محاولة push
+كانت بتفشل بـ«لا يوجد جهاز مسجّل لهذا المستخدم». تفاصيل كاملة في docs/08 §69.
+
+اختبار: `notification-default-channels.spec.ts` (حي على Postgres).

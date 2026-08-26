@@ -90,8 +90,39 @@ export class NotificationsService {
 
   // ── الإشعارات ────────────────────────────────────────────────────────
 
+  /**
+   * القنوات الافتراضية لنوع إشعار من `notification_type_configs.default_channels` (docs/08 §69).
+   *
+   * الجدول ده كان **معطّل فعليًا**: العمود موجود والأدمن بيعدّله من `/admin/notification-types`،
+   * وكان بيتقرا منه الأولوية والصوت بس — أما القناة فكانت متحطوطة بالإيد في كل listener، فـ36
+   * listener من 42 كانوا in_app بس مهما الأدمن ظبّط. دلوقتي `notify()` من غير قناة صريحة بتقرا
+   * من هنا. نوع بلا صف إعدادات ⇒ `in_app` بس (نفس السلوك القديم بالحرف، صفر مفاجآت).
+   */
+  private async resolveConfiguredChannels(notificationType: string): Promise<NotificationChannel[]> {
+    const config = await this.typeConfigs.findOne({ where: { notificationType } });
+    const configured = (config?.defaultChannels ?? []).filter((value): value is NotificationChannel =>
+      Object.values(NotificationChannel).includes(value as NotificationChannel),
+    );
+    return configured.length > 0 ? Array.from(new Set(configured)) : [NotificationChannel.IN_APP];
+  }
+
+  /**
+   * إشعار على القنوات المضبوطة لنوعه (من غير `channel`)، أو على قناة واحدة محددة (مع `channel`).
+   *
+   * بيرجّع صف `in_app` لو موجود ضمن القنوات، وإلا أول صف اتعمل — عشان النداءات القديمة اللي
+   * بتستخدم القيمة الراجعة تفضل شغالة زي ما هي.
+   */
+  async notify(input: NotifyInput, channel?: NotificationChannel): Promise<Notification> {
+    if (channel === undefined) {
+      const channels = await this.resolveConfiguredChannels(input.notificationType);
+      const results = await this.notifyMultiChannel(input, channels);
+      return results.find((n) => n.channel === NotificationChannel.IN_APP) ?? results[0];
+    }
+    return this.notifyOnChannel(input, channel);
+  }
+
   /** بيسجّل الإشعار في القاعدة دايماً حتى لو فشل الإرسال الفعلي — الفشل بيتسجل في الصف نفسه، مش بيوقف تدفق العملية اللي استدعته. */
-  async notify(input: NotifyInput, channel: NotificationChannel = NotificationChannel.IN_APP): Promise<Notification> {
+  private async notifyOnChannel(input: NotifyInput, channel: NotificationChannel): Promise<Notification> {
     if (input.sourceOutboxId) {
       const existing = await this.notifications.findOne({
         where: { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel },
@@ -165,7 +196,7 @@ export class NotificationsService {
     const uniqueChannels = Array.from(new Set(channels));
     const results: Notification[] = [];
     for (const channel of uniqueChannels) {
-      results.push(await this.notify(input, channel));
+      results.push(await this.notifyOnChannel(input, channel));
     }
     return results;
   }
