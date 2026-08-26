@@ -102,13 +102,18 @@ export function splitEstimatedTotal(components: OrderRevenueComponents): {
 /**
  * بيحسب وعاء العمولة من المكوّنات والسياسة.
  *
- * `totalAmountCents` بيتمرّر عشان القصّ النهائي: خصم كبير ممكن يخلّي الإجمالي أقل من الوعاء،
- * ولو سبنا كده نصيب الفني يبقى أكبر من اللي العميل دفعه أصلاً — يعني الشركة بتدفع من جيبها.
+ * **الوعاء مستقل تمامًا عن الخصم** (ADR-0038، docs/08 §61.2 — طلب مالك صريح): خدمة بـ1000
+ * وكوبون 50% يعني العميل يدفع 500، بس الفني بياخد نصيبه من **1000** والـ500 دي تكلفة تسويق
+ * بتتحملها المنصة بالكامل. «العميل يستفيد من الخصم، المنصة تتحمل تكلفته، والفني ياخد مستحقه
+ * كامل» — نص المالك.
+ *
+ * ده بيصحّح نسخة ADR-0037 اللي كانت بتقصّ الوعاء عند `totalAmountCents`. القصّ ده كان معناه
+ * عمليًا إن **الفني بيموّل حملة تسويق المنصة من جيبه**. لو خصم كبير خلّى نصيب الفني أكبر من
+ * اللي العميل دفعه، `platformCommissionCents` بيطلع سالب — وده صح محاسبيًا: المنصة دفعت الفرق.
  */
 export function computeCommissionableBase(
   components: OrderRevenueComponents,
   policy: CommissionBasePolicy,
-  totalAmountCents: number,
 ): CommissionBaseBreakdown {
   const { workPriceCents, levelPremiumCents, zoneSurgeCents } = splitEstimatedTotal(components);
 
@@ -123,7 +128,7 @@ export function computeCommissionableBase(
   if (policy.discountReducesTechnicianShare) baseCents -= components.discountCents;
 
   return {
-    commissionableBaseCents: Math.min(Math.max(baseCents, 0), Math.max(totalAmountCents, 0)),
+    commissionableBaseCents: Math.max(baseCents, 0),
     workPriceCents,
     levelPremiumCents,
     zoneSurgeCents,
@@ -132,7 +137,8 @@ export function computeCommissionableBase(
 
 /**
  * تقسيم الإيراد النهائي. الثابت المحفوظ عمدًا:
- * `technicianEarningCents + platformCommissionCents === totalAmountCents` **دايمًا** —
+ * `technicianEarningCents + platformCommissionCents === totalAmountCents` **دايمًا** (جبريًا،
+ * حتى لو نصيب المنصة سالب) —
  * كل المحاسبة تحته (حركة المحفظة في `settleAndComplete`، الاسترداد النسبي في `refundOrder`،
  * تجميع `payouts`) بتعتمد عليه، فأي قرش بره الوعاء بيروح للشركة تلقائيًا بلا كود إضافي.
  */
@@ -142,12 +148,15 @@ export function splitOrderRevenue(input: {
   commissionRatePercentage: number;
 }): { platformCommissionCents: number; technicianEarningCents: number } {
   const rate = Math.min(100, Math.max(0, input.commissionRatePercentage));
-  const base = Math.min(Math.max(input.commissionableBaseCents, 0), Math.max(input.totalAmountCents, 0));
+  const base = Math.max(input.commissionableBaseCents, 0);
 
   const commissionOnBaseCents = Math.round((base * rate) / 100);
   const technicianEarningCents = base - commissionOnBaseCents;
   return {
     technicianEarningCents,
+    // ممكن يطلع **سالب** لما خصم كبير يخلّي اللي العميل دفعه أقل من مستحق الفني (ADR-0038).
+    // ده مش خطأ بيانات — ده خسارة المنصة على الطلب، وهي اللي مموّلة الخصم. أي تقرير بيفترض
+    // إن العمود ده موجب دايمًا لازم يتراجع.
     platformCommissionCents: input.totalAmountCents - technicianEarningCents,
   };
 }

@@ -806,8 +806,9 @@ export class OrdersService {
         await manager.save(order);
       }
 
-      // وعاء العمولة (ADR-0037، docs/08 §60.1) — لازم يتحسب **هنا بالظبط**: بعد الخصومات والضمان
-      // (عشان الإجمالي النهائي يبقى معروف للقصّ) وقبل ما الطلب يتحفظ آخر مرة. بيتخزّن كـsnapshot
+      // وعاء العمولة (ADR-0037 + ADR-0038، docs/08 §60.1/§61.2) — بيتحسب بعد الضمان عشان
+      // `warrantyPriceCents` يبقى متسجّل (السياسة ممكن تدخّله). **مش** بيتقصّ عند الإجمالي:
+      // الخصم بتتحمّله المنصة بالكامل والفني بياخد مستحقه من السعر الأصلي (ADR-0038). بيتخزّن كـsnapshot
       // مش بيتعاد حسابه وقت التسوية — تغيير سياسة `commission_base.*` بعد كده بيأثّر على الطلبات
       // الجديدة بس، وطلب اتقفل يفضل زي ما هو للأبد.
       //
@@ -829,7 +830,6 @@ export class OrdersService {
           installmentInterestCents: 0,
         },
         commissionBasePolicy,
-        order.totalAmountCents,
       ).commissionableBaseCents;
       await manager.save(order);
 

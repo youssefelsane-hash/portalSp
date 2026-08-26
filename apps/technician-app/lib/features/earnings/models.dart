@@ -100,3 +100,123 @@ const Map<String, String> payoutMethodLabelsAr = {
   'instapay': 'إنستاباي',
   'cash': 'كاش',
 };
+
+/// سطر شغلانة واحدة في كشف الشهر (docs/08 §61.1، ADR-0038).
+/// مطابق لـ`TechnicianStatementJob` في `apps/api/src/modules/payments/technician-earnings.service.ts`.
+class StatementJob {
+  final String orderId;
+  final String orderNumber;
+  final String? serviceNameAr;
+  final String closedAt;
+  final int originalPriceCents;
+  final int additionalWorkCents;
+  final int levelPremiumCents;
+  final int customerDiscountCents;
+  final int customerPaidCents;
+  final int commissionableBaseCents;
+  final double commissionRatePercentage;
+  final int platformCommissionCents;
+  /// **دايمًا صفر** — بيتعرض صراحةً عشان الفني يشوف بعينه إن الكوبون ما اتخصمش منه.
+  final int discountBorneByTechnicianCents;
+  final int netTechnicianDueCents;
+
+  StatementJob({
+    required this.orderId,
+    required this.orderNumber,
+    required this.serviceNameAr,
+    required this.closedAt,
+    required this.originalPriceCents,
+    required this.additionalWorkCents,
+    required this.levelPremiumCents,
+    required this.customerDiscountCents,
+    required this.customerPaidCents,
+    required this.commissionableBaseCents,
+    required this.commissionRatePercentage,
+    required this.platformCommissionCents,
+    required this.discountBorneByTechnicianCents,
+    required this.netTechnicianDueCents,
+  });
+
+  factory StatementJob.fromJson(Map<String, dynamic> json) => StatementJob(
+        orderId: json['orderId'] as String,
+        orderNumber: json['orderNumber'] as String,
+        serviceNameAr: json['serviceNameAr'] as String?,
+        closedAt: json['closedAt'] as String,
+        originalPriceCents: json['originalPriceCents'] as int? ?? 0,
+        additionalWorkCents: json['additionalWorkCents'] as int? ?? 0,
+        levelPremiumCents: json['levelPremiumCents'] as int? ?? 0,
+        customerDiscountCents: json['customerDiscountCents'] as int? ?? 0,
+        customerPaidCents: json['customerPaidCents'] as int? ?? 0,
+        commissionableBaseCents: json['commissionableBaseCents'] as int? ?? 0,
+        commissionRatePercentage: (json['commissionRatePercentage'] as num?)?.toDouble() ?? 0,
+        platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
+        discountBorneByTechnicianCents: json['discountBorneByTechnicianCents'] as int? ?? 0,
+        netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
+      );
+}
+
+class StatementTotals {
+  final int originalPriceCents;
+  final int additionalWorkCents;
+  final int levelPremiumCents;
+  final int customerDiscountCents;
+  final int customerPaidCents;
+  final int platformCommissionCents;
+  final int discountBorneByTechnicianCents;
+  final int netTechnicianDueCents;
+
+  StatementTotals({
+    required this.originalPriceCents,
+    required this.additionalWorkCents,
+    required this.levelPremiumCents,
+    required this.customerDiscountCents,
+    required this.customerPaidCents,
+    required this.platformCommissionCents,
+    required this.discountBorneByTechnicianCents,
+    required this.netTechnicianDueCents,
+  });
+
+  factory StatementTotals.fromJson(Map<String, dynamic> json) => StatementTotals(
+        originalPriceCents: json['originalPriceCents'] as int? ?? 0,
+        additionalWorkCents: json['additionalWorkCents'] as int? ?? 0,
+        levelPremiumCents: json['levelPremiumCents'] as int? ?? 0,
+        customerDiscountCents: json['customerDiscountCents'] as int? ?? 0,
+        customerPaidCents: json['customerPaidCents'] as int? ?? 0,
+        platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
+        discountBorneByTechnicianCents: json['discountBorneByTechnicianCents'] as int? ?? 0,
+        netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
+      );
+}
+
+/// كشف شهر كامل. `isCurrentMonth` معناه إن الرقم "حتى هذه اللحظة" ولسه ممكن يزيد.
+class MonthlyStatement {
+  final String month;
+  final String monthStart;
+  final String monthEnd;
+  final bool isCurrentMonth;
+  final int jobsCount;
+  final StatementTotals totals;
+  final List<StatementJob> jobs;
+
+  MonthlyStatement({
+    required this.month,
+    required this.monthStart,
+    required this.monthEnd,
+    required this.isCurrentMonth,
+    required this.jobsCount,
+    required this.totals,
+    required this.jobs,
+  });
+
+  factory MonthlyStatement.fromJson(Map<String, dynamic> json) => MonthlyStatement(
+        month: json['month'] as String,
+        monthStart: json['monthStart'] as String,
+        monthEnd: json['monthEnd'] as String,
+        isCurrentMonth: json['isCurrentMonth'] as bool? ?? false,
+        jobsCount: json['jobsCount'] as int? ?? 0,
+        totals: StatementTotals.fromJson(json['totals'] as Map<String, dynamic>? ?? {}),
+        jobs: ((json['jobs'] as List<dynamic>?) ?? [])
+            .map((j) => StatementJob.fromJson(j as Map<String, dynamic>))
+            .toList(),
+      );
+}
