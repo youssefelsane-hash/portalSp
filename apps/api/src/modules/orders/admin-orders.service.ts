@@ -134,6 +134,15 @@ export class AdminOrdersService {
       .skip((page - 1) * perPage)
       .take(perPage);
 
+    // docs/08 §67 — بحث برقم الطلب. `ILIKE` مع `%…%` عشان الأدمن يقدر يلزق جزء من الرقم.
+    // الحروف الخاصة بتاعت LIKE بتتهرّب، وإلا `%` اللي المستخدم يكتبه بيبقى wildcard ويرجّع
+    // القايمة كلها بدل ما يفلتر.
+    const search = query.search?.trim();
+    if (search) {
+      const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      qb.andWhere(`o.order_number ILIKE :search ESCAPE '\\'`, { search: `%${escaped}%` });
+    }
+
     if (query.sort === 'soonest') {
       // "اللي تنفيذه قرّب" — الأقرب موعدًا الأول. الطلبات بلا موعد محدد بتروح الآخر (NULLS LAST)
       // لأن السؤال هنا حرفيًا "إيه اللي هيتنفّذ قريب".

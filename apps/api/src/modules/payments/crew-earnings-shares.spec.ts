@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { CrewEarningsService } from './crew-earnings.service';
+import { CrewEarningsService, DEFAULT_ASSISTANT_SHARE_RATIO } from './crew-earnings.service';
 import { OrderEarningShare } from './entities/order-earning-share.entity';
 import { Order } from '../orders/entities/order.entity';
 
@@ -118,7 +118,10 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
     // الأوزان الافتراضية من migration 0195
     expect(leader.shareWeight).toBeCloseTo(1.6);
     expect(member.shareWeight).toBeCloseTo(1.25);
-    expect(assistant.shareWeight).toBeCloseTo(1.0);
+    // ADR-0043 (docs/08 §66) — المساعد مستواه `new` (وزن 1.00) بس الدور بيضربه في نسبة
+    // `crew.assistant_share_ratio`. الخدمة هنا متركّبة من غير SettingsService فبتستخدم
+    // الافتراضي 0.65، وده مقصود: الافتراضي لازم يبقى نفسه في الكود والـmigration.
+    expect(assistant.shareWeight).toBeCloseTo(1.0 * DEFAULT_ASSISTANT_SHARE_RATIO);
   });
 
   it('**الفجوة اللي اتقفلت**: كل مشارك بياخد حصة فعلية، والمجموع = الوعاء بالظبط', async () => {
@@ -151,7 +154,8 @@ describe('حصص الطاقم من مستحقات الشغلانة — حي (ADR
       .getRepository(OrderEarningShare)
       .findOneByOrFail({ orderId: ids.orderId, technicianId: ids.assistantId });
     expect(row.technicianLevel).toBe('new');
-    expect(Number(row.shareWeight)).toBeCloseTo(1.0);
+    // الـsnapshot بيسجّل الوزن الفعّال (وزن المستوى × معامل الدور) — ده الرقم اللي وزّع الفلوس فعلاً.
+    expect(Number(row.shareWeight)).toBeCloseTo(1.0 * DEFAULT_ASSISTANT_SHARE_RATIO);
   });
 
   it('إعادة تنفيذ التسوية (retry) مابتضاعفش الصفوف', async () => {

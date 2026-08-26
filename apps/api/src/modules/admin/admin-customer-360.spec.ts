@@ -181,6 +181,13 @@ describe('AdminCustomer360Service — بروفايل عميل 360° (docs/08 §3
 
     expect(p.ratingsReceived.totalCount).toBe(1);
     expect(p.ratingsReceived.averageRating).toBe(4);
+    // docs/08 §68 — «كل طلبية على حدة»: التفاصيل نفسها مش المتوسط بس، لأن ده المكان الوحيد
+    // اللي التقييم ده بيتشاف منه أصلاً (العميل ما بيشوفهوش ولا بيوصله إشعار بيه).
+    expect(p.ratingsReceived.recent).toHaveLength(1);
+    expect(p.ratingsReceived.recent[0].ratingId).toBe(ids.rating);
+    expect(p.ratingsReceived.recent[0].orderId).toBe(ids.order);
+    expect(p.ratingsReceived.recent[0].orderNumber).toBe(`TESTC360-${runId}`.slice(0, 24));
+    expect(p.ratingsReceived.recent[0].overallRating).toBe(4);
   });
 
   it('getProfile() — عميل بلا أي بيانات (مستخدم مش موجود) بيرجّع مجموعات فاضية بدل ما يفشل', async () => {
@@ -191,5 +198,6 @@ describe('AdminCustomer360Service — بروفايل عميل 360° (docs/08 §3
     expect(p.complaintsAgainst.totalCount).toBe(0);
     expect(p.ratingsReceived.totalCount).toBe(0);
     expect(p.ratingsReceived.averageRating).toBeNull();
+    expect(p.ratingsReceived.recent).toHaveLength(0);
   });
 });

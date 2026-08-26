@@ -68,21 +68,12 @@ class HomepageContent {
   });
 
   factory HomepageContent.fromJson(Map<String, dynamic> json) {
-    final groupedSearch = json['search'] as Map<String, dynamic>?;
-    final compatibleSearch =
-        groupedSearch ??
-        {
-          'eyebrow': json['hero_eyebrow'],
-          'title': json['hero_title'],
-          'description': json['hero_subtitle'],
-          'placeholder': json['search_placeholder'],
-        };
     return HomepageContent(
       trustMessage: json['trust_message'] as String? ?? '',
       heroImages: (json['hero_images'] as List<dynamic>? ?? [])
           .whereType<String>()
           .toList(),
-      search: HomepageSearchContent.fromJson(compatibleSearch),
+      search: HomepageSearchContent.fromJson(json['search'] as Map<String, dynamic>?),
       tips: (json['tips'] as List<dynamic>? ?? [])
           .map((t) => HomepageTip.fromJson(t as Map<String, dynamic>))
           .toList(),

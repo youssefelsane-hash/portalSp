@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -106,6 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _tips = content.tips;
               _activeSlide = 0;
             });
+            _precacheHeroImages();
           }
         })
         .catchError((_) {});
@@ -130,6 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _heroBackground = asset;
             _activeSlide = 0;
           });
+          _precacheHeroImages();
         })
         .catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
@@ -412,12 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ///     فالتبديل كان بيحصل قطع مفاجئ.
   ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
   Widget _buildHero(BuildContext context) {
-    final configuredImages = _heroImages.map(_resolveHeroImageUrl).toList();
-    final effectiveImages = configuredImages.isNotEmpty
-        ? configuredImages
-        : (_heroBackground == null
-              ? const <String>[]
-              : <String>[_heroBackground!.url]);
+    final effectiveImages = _effectiveHeroImageUrls();
     final gradientIndex = _activeSlide % _heroGradients.length;
     return SizedBox(
       height: _heroHeight,
@@ -430,7 +426,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 .toList(),
             activeIndex: _activeSlide,
             fallback: AnimatedContainer(
-              duration: const Duration(milliseconds: 1000),
+              // التدرّج بيتحرّك بس لما هو نفسه الخلفية المعروضة. لما فيه صور، هو مجرد شبكة أمان
+              // تحتها فمفيش داعي يستهلك فريمات في أنيميشن محدش شايفه.
+              duration: Duration(milliseconds: effectiveImages.isEmpty ? 1000 : 0),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -556,6 +554,30 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+  /// بلاغ المالك (docs/08 §65.3): «لما أعمل scroll لتحت وأطلع فوق تاني الخلفية الزرقة دي بتبان».
+  ///
+  /// `HeroImageCrossfade` بتسيب كل الصور mounted، فالتبديل بين الشرايح بقى نضيف — بس التدرّج
+  /// الأزرق لسه مرسوم **ورا** الصور دايمًا كـfallback. يعني أي لحظة الصورة مش متفكوكة في ذاكرة
+  /// الصور (أول فتح، أو بعد ما الـImageCache يخليها تحت ضغط ذاكرة لما الهيرو يخرج من الشاشة)،
+  /// الأزرق بيبان لفريم أو اتنين لحد ما تتفك تاني.
+  ///
+  /// `precacheImage` بتثبّت الصور في الكاش وتفكّها **قبل** أول رسم، فالتدرّج ما بيبانش أصلاً طول
+  /// ما فيه صور متظبطة. أي فشل بيتبلع بهدوء — التدرّج لسه fallback حقيقي لو الصورة مش متاحة.
+  void _precacheHeroImages() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      for (final url in _effectiveHeroImageUrls()) {
+        precacheImage(NetworkImage(url), context).catchError((_) {});
+      }
+    });
+  }
+
+  List<String> _effectiveHeroImageUrls() {
+    final configured = _heroImages.map(_resolveHeroImageUrl).toList();
+    if (configured.isNotEmpty) return configured;
+    return _heroBackground == null ? const <String>[] : <String>[_heroBackground!.url];
   }
 
   String _resolveHeroImageUrl(String value) {
@@ -773,51 +795,103 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
   Widget build(BuildContext context) {
     final expanded = _focusNode.hasFocus || _controller.text.isNotEmpty;
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.82, end: expanded ? 1 : 0.82),
+      tween: Tween(begin: 0.86, end: expanded ? 0.98 : 0.86),
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOutCubic,
-      builder: (context, widthFactor, child) =>
-          FractionallySizedBox(widthFactor: widthFactor, child: child),
+      // الحد الأقصى مقصود (docs/08 §65.3): `widthFactor` لوحده معناه إن الشريط بيتمدد بعرض
+      // الشاشة كلها — على موبايل ده مظبوط، بس على تابلت/ديسكتوب بيبقى شريط بعرض 1100px وشكله
+      // بعيد تمامًا عن «professional وأصغر» اللي المالك طلبه. 460 بيسيبه بعرضه الطبيعي على
+      // الموبايل ويلجمه على الشاشات الكبيرة.
+      builder: (context, widthFactor, child) => FractionallySizedBox(
+        widthFactor: widthFactor,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: child,
+          ),
+        ),
+      ),
       child: AnimatedContainer(
+        height: expanded ? 58 : 52,
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: expanded ? 1 : 0.94),
-          borderRadius: BorderRadius.circular(expanded ? 18 : 28),
+          color: Colors.white.withValues(alpha: expanded ? 1 : 0.96),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: expanded
+                ? AppColors.primary.withValues(alpha: 0.7)
+                : Colors.white.withValues(alpha: 0.72),
+            width: expanded ? 1.5 : 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: expanded ? 0.22 : 0.12),
-              blurRadius: expanded ? 18 : 8,
-              offset: const Offset(0, 5),
+              color: Colors.black.withValues(alpha: expanded ? 0.2 : 0.14),
+              blurRadius: expanded ? 22 : 14,
+              offset: const Offset(0, 7),
             ),
+            if (expanded)
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.14),
+                blurRadius: 0,
+                spreadRadius: 4,
+              ),
           ],
         ),
         child: TextField(
+          key: const ValueKey('homepage-hero-search'),
           controller: _controller,
           focusNode: _focusNode,
+          cursorColor: AppColors.primary,
+          style: const TextStyle(
+            color: Color(0xFF172033),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
           textInputAction: TextInputAction.search,
           onSubmitted: (_) => _submit(),
           onChanged: (_) => setState(() {}),
           onTapOutside: (_) => _focusNode.unfocus(),
           decoration: InputDecoration(
             hintText: widget.content.placeholder,
-            hintStyle: const TextStyle(color: Colors.black54, fontSize: 13),
-            prefixIcon: const Icon(
-              Icons.search_rounded,
-              color: AppColors.primary,
+            hintStyle: TextStyle(
+              color: Colors.blueGrey.shade500,
+              fontSize: 13,
+              fontWeight: FontWeight.w400,
+            ),
+            prefixIcon: Padding(
+              padding: const EdgeInsets.all(7),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.search_rounded,
+                  color: AppColors.primary,
+                  size: 21,
+                ),
+              ),
             ),
             suffixIcon: expanded
-                ? IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    tooltip: 'بحث',
-                    onPressed: _submit,
+                ? Padding(
+                    padding: const EdgeInsets.all(7),
+                    child: IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                      tooltip: 'بحث',
+                      onPressed: _submit,
+                    ),
                   )
                 : null,
             border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: expanded ? 14 : 11,
-            ),
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10),
           ),
         ),
       ),

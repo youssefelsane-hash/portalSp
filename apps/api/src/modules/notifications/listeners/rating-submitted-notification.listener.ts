@@ -13,8 +13,10 @@ export class RatingSubmittedNotificationListener {
   @OnEvent(RATING_SUBMITTED_EVENT)
   async handleRatingSubmitted(event: RatingSubmittedEvent): Promise<void> {
     try {
-      const isTechnicianRated = event.ratingType === RatingType.CUSTOMER_TO_TECHNICIAN;
-      const deepLink = isTechnicianRated ? `/technician/orders/${event.orderId}` : `/orders/${event.orderId}`;
+      // docs/08 §68 (طلب مالك صريح): تقييم الفني للعميل بيبقى للأدمن بس — «العميل المفروض ما
+      // يعرفش هو بيتقيّم». الإشعار ده كان بيقوله بالحرف «اتقيّمت بـ N من 5 نجوم»، فاتشال.
+      // الأدمن لسه بيشوف التقييم: بث لحظي في AdminRealtimeGateway + بروفايل العميل (360).
+      if (event.ratingType === RatingType.TECHNICIAN_TO_CUSTOMER) return;
 
       await this.notificationsService.notify({
         userId: event.ratedUserId,
@@ -23,7 +25,7 @@ export class RatingSubmittedNotificationListener {
         bodyAr: `اتقيّمت بـ ${event.overallRating} من 5 نجوم على الطلب.`,
         referenceType: 'order',
         referenceId: event.orderId,
-        deepLink,
+        deepLink: `/technician/orders/${event.orderId}`,
       });
     } catch (err) {
       this.logger.error(`فشل إشعار تقييم جديد للتقييم ${event.ratingId}`, err instanceof Error ? err.stack : err);

@@ -465,20 +465,13 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    // docs/08 §65.2 — «سعر الشركة من غير فرق مستوى» كانت تعليمات داخلية بتشرح
+                    // لينا إحنا ليه الشركة مالهاش مضاعف مستوى (§62.2)، مش معلومة تخصّ العميل.
+                    // العميل بيشوف السعر وخلاص.
                     if (c.finalPriceCents != null)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                          ),
-                          Text(
-                            'سعر الشركة — من غير فرق مستوى',
-                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                          ),
-                        ],
+                      Text(
+                        '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                       )
                     else
                       const SizedBox.shrink(),
@@ -546,28 +539,49 @@ class TrustBadge extends StatelessWidget {
   }
 }
 
-/// شارة "فني مميّز" (docs/08 §60.3) — بتظهر جنب سعر أي فني مستواه بيزوّد السعر.
 ///
 /// مقصودة تكون هادية وصغيرة: الهدف تفسير الفرق مش الإعلان. علامة الشيك بتدّي إحساس
 /// "محترف معتمد" اللي المالك طلبه بالحرف.
+/// شارة سعر أعلى من الأساسي (docs/08 §65.1).
+///
+/// طلب المالك: «إحنا مش عايزين علامة صح… نحط كلمة Premium وجنبها أي لوجو خفيف قوي يدل إن
+/// premium دي هي رمز الفلوس… عايزين نشيل علامة الصح، لأن فعليًا علامة الصح المفروض دي توثيق
+/// من الموقع وهي موجودة فعليًا والموقع بيديها لبعض الناس، فمش عايزين نخلي فيه حاجتين علامة صح
+/// في نفس الوقت».
+///
+/// القاعدة الحاكمة دلوقتي: **`Icons.verified` محجوزة حصريًا لعلامة التوثيق اللي الأدمن بيمنحها**
+/// (ADR-0039). أي إشارة تانية — زي السعر الأعلى ده — ممنوع تستخدم علامة صح، عشان العميل ما
+/// يخلطش بين «موثّق من المنصة» و«سعره أعلى».
 class _PremiumBadge extends StatelessWidget {
   const _PremiumBadge();
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.verified, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            'فني مميّز',
-            style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600),
-          ),
-        ],
+      padding: const EdgeInsets.only(top: 3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: scheme.tertiaryContainer,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.diamond_outlined, size: 11, color: scheme.onTertiaryContainer),
+            const SizedBox(width: 3),
+            Text(
+              'Premium',
+              style: TextStyle(
+                fontSize: 11,
+                color: scheme.onTertiaryContainer,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
