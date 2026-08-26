@@ -19,6 +19,9 @@ export class Project {
   @Column({ name: 'customer_id', type: 'uuid' })
   customerId: string;
 
+  @Column({ name: 'idempotency_key', type: 'varchar', length: 128, nullable: true })
+  idempotencyKey: string | null;
+
   @Column({ name: 'address_id', type: 'uuid' })
   addressId: string;
 

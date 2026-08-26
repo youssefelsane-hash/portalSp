@@ -1,4 +1,4 @@
-# Script 2 Checkpoint — Active (2026-08-25)
+# Script 2 Checkpoint — Active (2026-08-26)
 
 ## Latest verified work
 
@@ -60,8 +60,16 @@
   technician results are deduplicated at the shared API source before reaching admin/customer UIs.
   Focused Jest/PostgreSQL tests pass 7/7 with open-handle detection, API build and admin typecheck
   pass, and the focused Flutter test/analyze pass with no issues.
-- Next task: continue the remaining new-route review, prioritizing project/warranty browser flows
-  and any failures reproduced from the supplied screenshots.
+- Completed: the project room is now connected end to end. Admins can link same-customer orders,
+  issue an active warranty plan, and post customer-visible or internal updates; customers can read
+  and send general project updates and retry a failed room load. Project creation now sends a stable
+  idempotency key, so a lost response or simultaneous double submit returns the same project rather
+  than creating a duplicate. Migration `0190` adds the scoped uniqueness invariant. Comment, order
+  link, and project-warranty writes are atomic with their audit records. The real PostgreSQL project
+  suite passes 18/18, including concurrency and injected audit failures, with open-handle detection;
+  API build, admin typecheck, four focused Flutter tests, Dart analysis, and migration checksums pass.
+- Next task: continue the remaining screenshot/new-route review after this project checkpoint,
+  prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 
 ---
 

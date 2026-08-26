@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
@@ -22,6 +23,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   bool _submitting = false;
   String? _error;
   List<Address>? _addresses;
+  String? _idempotencyKey;
 
   static const _typeLabels = {
     'finishing': 'تشطيب شقة',
@@ -179,6 +181,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     });
     try {
       final repo = ProjectsRepo(widget.auth);
+      _idempotencyKey ??= generateProjectIdempotencyKey();
       await repo
           .create(
             projectType: _selectedType,
@@ -188,6 +191,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 : _descriptionController.text.trim(),
             addressId: _selectedAddress!.id,
             budget: _budget,
+            idempotencyKey: _idempotencyKey!,
           )
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
@@ -249,7 +253,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Theme.of(sheetContext).colorScheme.surfaceContainerHighest,
+                color: Theme.of(
+                  sheetContext,
+                ).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Text(
@@ -281,6 +287,7 @@ class ProjectsRepo {
     String? description,
     required String addressId,
     int? budget,
+    required String idempotencyKey,
   }) async {
     final body = <String, dynamic>{
       'project_type': projectType,
@@ -297,6 +304,7 @@ class ProjectsRepo {
       'POST',
       '/me/projects',
       body: body,
+      extraHeaders: {'Idempotency-Key': idempotencyKey},
     );
     if (response == null) {
       throw ApiException(
@@ -307,6 +315,11 @@ class ProjectsRepo {
     }
     return response;
   }
+}
+
+String generateProjectIdempotencyKey() {
+  final random = Random();
+  return '${DateTime.now().microsecondsSinceEpoch}-${random.nextInt(0x7FFFFFFF)}';
 }
 
 class _NextStepLine extends StatelessWidget {

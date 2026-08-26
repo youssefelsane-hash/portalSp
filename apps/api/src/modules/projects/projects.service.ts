@@ -51,7 +51,7 @@ export class ProjectsService {
   async create(userId: string, dto: {
     project_type: string; name_ar: string; description_ar?: string;
     address_id: string; budget_estimate_cents?: number;
-  }, meta?: AuditActorMeta): Promise<Project> {
+  }, meta?: AuditActorMeta, idempotencyKey?: string): Promise<Project> {
     const [profile] = await this.dataSource.query<{ id: string }[]>(
       `SELECT id FROM customer_profiles WHERE user_id = $1`, [userId],
     );
@@ -61,28 +61,50 @@ export class ProjectsService {
     );
     if (!addr) throw new ApiException(ErrorCode.VAL_001, 'العنوان غير موجود', HttpStatus.NOT_FOUND);
 
-    return this.dataSource.transaction(async (manager) => {
-      const [number] = await manager.query<{ next: string }[]>(`SELECT next_human_readable_number('PRJ') AS next`);
-      const project = manager.create(Project, {
-        projectNumber: number.next,
-        customerId: profile.id,
-        addressId: dto.address_id,
-        cityId: addr.city_id,
-        projectType: dto.project_type,
-        nameAr: dto.name_ar,
-        descriptionAr: dto.description_ar ?? null,
-        status: 'survey_requested' as ProjectStatus,
-        budgetEstimateCents: dto.budget_estimate_cents ?? null,
-        surveyRequestedAt: new Date(),
+    const normalizedIdempotencyKey = idempotencyKey?.trim() || null;
+    if (normalizedIdempotencyKey && normalizedIdempotencyKey.length > 128) {
+      throw new ApiException(ErrorCode.VAL_001, 'Idempotency-Key أطول من المسموح', HttpStatus.BAD_REQUEST);
+    }
+    if (normalizedIdempotencyKey) {
+      const existing = await this.projects.findOne({
+        where: { customerId: profile.id, idempotencyKey: normalizedIdempotencyKey },
       });
-      await manager.save(project);
-      await this.auditLog.record({
-        actorUserId: userId, actorRole: 'customer',
-        action: 'project.created', entityType: 'project', entityId: project.id,
-        newValues: { name: project.nameAr, type: project.projectType }, meta,
-      }, manager);
-      return project;
-    });
+      if (existing) return existing;
+    }
+
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const [number] = await manager.query<{ next: string }[]>(`SELECT next_human_readable_number('PRJ') AS next`);
+        const project = manager.create(Project, {
+          projectNumber: number.next,
+          customerId: profile.id,
+          idempotencyKey: normalizedIdempotencyKey,
+          addressId: dto.address_id,
+          cityId: addr.city_id,
+          projectType: dto.project_type,
+          nameAr: dto.name_ar,
+          descriptionAr: dto.description_ar ?? null,
+          status: 'survey_requested' as ProjectStatus,
+          budgetEstimateCents: dto.budget_estimate_cents ?? null,
+          surveyRequestedAt: new Date(),
+        });
+        await manager.save(project);
+        await this.auditLog.record({
+          actorUserId: userId, actorRole: 'customer',
+          action: 'project.created', entityType: 'project', entityId: project.id,
+          newValues: { name: project.nameAr, type: project.projectType }, meta,
+        }, manager);
+        return project;
+      });
+    } catch (error) {
+      if (normalizedIdempotencyKey && (error as { code?: string }).code === '23505') {
+        const existing = await this.projects.findOne({
+          where: { customerId: profile.id, idempotencyKey: normalizedIdempotencyKey },
+        });
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   async listForCustomer(userId: string): Promise<Project[]> {
@@ -475,22 +497,24 @@ export class ProjectsService {
       }
     }
     const visible = author.role === 'customer' ? true : dto.is_visible_to_customer !== false;
-    const [row] = await this.dataSource.query<Record<string, unknown>[]>(
-      `INSERT INTO project_comments (project_id, milestone_id, author_user_id, author_role, body, is_visible_to_customer)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id, project_id, milestone_id, author_role, body, is_visible_to_customer, created_at`,
-      [projectId, dto.milestone_id ?? null, author.userId, author.role, body, visible],
-    );
-    await this.auditLog.record({
-      actorUserId: author.userId,
-      actorRole: author.role,
-      action: 'project.comment_added',
-      entityType: 'project',
-      entityId: projectId,
-      newValues: { milestone_id: dto.milestone_id ?? null, is_visible_to_customer: visible },
-      meta,
+    return this.dataSource.transaction(async (manager) => {
+      const [row] = await manager.query<Record<string, unknown>[]>(
+        `INSERT INTO project_comments (project_id, milestone_id, author_user_id, author_role, body, is_visible_to_customer)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id, project_id, milestone_id, author_role, body, is_visible_to_customer, created_at`,
+        [projectId, dto.milestone_id ?? null, author.userId, author.role, body, visible],
+      );
+      await this.auditLog.record({
+        actorUserId: author.userId,
+        actorRole: author.role,
+        action: 'project.comment_added',
+        entityType: 'project',
+        entityId: projectId,
+        newValues: { milestone_id: dto.milestone_id ?? null, is_visible_to_customer: visible },
+        meta,
+      }, manager);
+      return row;
     });
-    return row;
   }
 
   /**
@@ -500,37 +524,58 @@ export class ProjectsService {
    * فاضي عمليًا. الربط مقصور على طلبات **نفس العميل** — طلب عميل تاني في مشروع مش بتاعه تسريب.
    */
   async linkOrderToProject(adminUserId: string, projectId: string, orderId: string, meta?: AuditActorMeta) {
-    const project = await this.findOne(projectId);
-    const [order] = await this.dataSource.query<{ id: string; customer_id: string; project_id: string | null }[]>(
-      `SELECT id, customer_id, project_id FROM orders WHERE id = $1 AND deleted_at IS NULL`,
-      [orderId],
-    );
-    if (!order) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
-    }
-    if (order.customer_id !== project.customerId) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'الطلب ده مش لنفس عميل المشروع — مينفعش يتربط بيه',
-        HttpStatus.BAD_REQUEST,
+    return this.dataSource.transaction(async (manager) => {
+      const [project] = await manager.query<{ id: string; customer_id: string }[]>(
+        `SELECT id, customer_id FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [projectId],
       );
-    }
-    if (order.project_id && order.project_id !== projectId) {
-      throw new ApiException(ErrorCode.VAL_001, 'الطلب مربوط بمشروع تاني بالفعل', HttpStatus.CONFLICT);
-    }
-    if (order.project_id === projectId) return { linked: true, already: true };
+      if (!project) {
+        throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
+      }
+      const [order] = await manager.query<{ id: string; customer_id: string; project_id: string | null }[]>(
+        `SELECT id, customer_id, project_id FROM orders WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [orderId],
+      );
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+      }
+      if (order.customer_id !== project.customer_id) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'الطلب ده مش لنفس عميل المشروع — مينفعش يتربط بيه',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (order.project_id && order.project_id !== projectId) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب مربوط بمشروع تاني بالفعل', HttpStatus.CONFLICT);
+      }
+      if (order.project_id === projectId) return { linked: true, already: true };
 
-    await this.dataSource.query(`UPDATE orders SET project_id = $1 WHERE id = $2`, [projectId, orderId]);
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'project.order_linked',
-      entityType: 'project',
-      entityId: projectId,
-      newValues: { order_id: orderId },
-      meta,
+      await manager.query(`UPDATE orders SET project_id = $1 WHERE id = $2`, [projectId, orderId]);
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'project.order_linked',
+        entityType: 'project',
+        entityId: projectId,
+        newValues: { order_id: orderId },
+        meta,
+      }, manager);
+      return { linked: true, already: false };
     });
-    return { linked: true, already: false };
+  }
+
+  async listLinkableOrders(projectId: string): Promise<Record<string, unknown>[]> {
+    const project = await this.findOne(projectId);
+    return this.dataSource.query(
+      `SELECT id, order_number, order_status::text AS status, total_amount_cents, project_id
+       FROM orders
+       WHERE customer_id = $1 AND deleted_at IS NULL
+         AND (project_id IS NULL OR project_id = $2)
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [project.customerId, projectId],
+    );
   }
 
   /**
@@ -549,52 +594,61 @@ export class ProjectsService {
     planId: string,
     meta?: AuditActorMeta,
   ): Promise<Record<string, unknown>> {
-    const project = await this.findOne(projectId);
-    const [plan] = await this.dataSource.query<Record<string, unknown>[]>(
-      `SELECT * FROM warranty_plans WHERE id = $1 AND is_active = true`,
-      [planId],
-    );
-    if (!plan) {
-      throw new ApiException(ErrorCode.VAL_001, 'خطة الضمان غير موجودة أو موقوفة', HttpStatus.NOT_FOUND);
-    }
-    const coverageMonths = Number(plan.coverage_months ?? 12);
-    const startsAt = new Date();
-    const expiresAt = new Date(startsAt);
-    expiresAt.setMonth(expiresAt.getMonth() + coverageMonths);
+    return this.dataSource.transaction(async (manager) => {
+      const [project] = await manager.query<{ id: string; customer_id: string; approved_quote_total_cents: number | null }[]>(
+        `SELECT id, customer_id, approved_quote_total_cents
+         FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [projectId],
+      );
+      if (!project) {
+        throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
+      }
+      const [plan] = await manager.query<Record<string, unknown>[]>(
+        `SELECT * FROM warranty_plans WHERE id = $1 AND is_active = true`,
+        [planId],
+      );
+      if (!plan) {
+        throw new ApiException(ErrorCode.VAL_001, 'خطة الضمان غير موجودة أو موقوفة', HttpStatus.NOT_FOUND);
+      }
+      const coverageMonths = Number(plan.coverage_months ?? 12);
+      const startsAt = new Date();
+      const expiresAt = new Date(startsAt);
+      expiresAt.setMonth(expiresAt.getMonth() + coverageMonths);
 
-    const [row] = await this.dataSource.query<Record<string, unknown>[]>(
-      `INSERT INTO customer_warranties (
-         plan_id, plan_version, order_id, project_id, customer_id, name_ar, warranty_type,
-         price_paid_cents, coverage_months, max_coverage_cents, max_claims,
-         terms_ar, exclusions_ar, starts_at, expires_at, claims_used
-       ) VALUES ($1,$2,NULL,$3,$4,$5,$6,0,$7,$8,$9,$10,$11,$12,$13,0)
-       RETURNING id, project_id, name_ar, coverage_months, starts_at, expires_at`,
-      [
-        plan.id,
-        Number(plan.version ?? 1),
-        projectId,
-        project.customerId,
-        String(plan.name_ar ?? 'ضمان المشروع'),
-        String(plan.warranty_type ?? 'extended_workmanship'),
-        coverageMonths,
-        plan.max_coverage_cents ?? project.approvedQuoteTotalCents ?? null,
-        Number(plan.max_claims ?? 1),
-        plan.terms_ar ?? null,
-        plan.exclusions_ar ?? null,
-        startsAt,
-        expiresAt,
-      ],
-    );
-    await this.auditLog.record({
-      actorUserId: adminUserId,
-      actorRole: 'admin',
-      action: 'project.warranty_issued',
-      entityType: 'project',
-      entityId: projectId,
-      newValues: { plan_id: planId, warranty_id: row.id, expires_at: expiresAt.toISOString() },
-      meta,
+      const [row] = await manager.query<Record<string, unknown>[]>(
+        `INSERT INTO customer_warranties (
+           plan_id, plan_version, order_id, project_id, customer_id, name_ar, warranty_type,
+           price_paid_cents, coverage_months, max_coverage_cents, max_claims,
+           terms_ar, exclusions_ar, starts_at, expires_at, claims_used
+         ) VALUES ($1,$2,NULL,$3,$4,$5,$6,0,$7,$8,$9,$10,$11,$12,$13,0)
+         RETURNING id, project_id, name_ar, coverage_months, starts_at, expires_at`,
+        [
+          plan.id,
+          Number(plan.version ?? 1),
+          projectId,
+          project.customer_id,
+          String(plan.name_ar ?? 'ضمان المشروع'),
+          String(plan.warranty_type ?? 'extended_workmanship'),
+          coverageMonths,
+          plan.max_coverage_cents ?? project.approved_quote_total_cents ?? null,
+          Number(plan.max_claims ?? 1),
+          plan.terms_ar ?? null,
+          plan.exclusions_ar ?? null,
+          startsAt,
+          expiresAt,
+        ],
+      );
+      await this.auditLog.record({
+        actorUserId: adminUserId,
+        actorRole: 'admin',
+        action: 'project.warranty_issued',
+        entityType: 'project',
+        entityId: projectId,
+        newValues: { plan_id: planId, warranty_id: row.id, expires_at: expiresAt.toISOString() },
+        meta,
+      }, manager);
+      return row;
     });
-    return row;
   }
 
   async releaseMilestonePayout(milestoneId: string): Promise<boolean> {
