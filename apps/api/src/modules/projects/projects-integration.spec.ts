@@ -1,3 +1,5 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PROJECT_ACTIVITY_EVENT, ProjectActivityEvent } from '../../common/events/project-activity.event';
 import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -23,6 +25,8 @@ describe('ProjectsService — المشروعات والمراحل والعروض
   let dataSource: DataSource;
   let projectsService: ProjectsService;
   let auditLog: AuditLogService;
+  // docs/08 §64.هـ — كل أحداث نشاط المشروع اللي اتصدرت خلال الـsuite كلها، بالترتيب.
+  const activity: ProjectActivityEvent[] = [];
   const runId = randomUUID().replaceAll('-', '').slice(0, 10);
   const ids = {
     customerUser: '', customerProfile: '', category: '', service: '',
@@ -79,7 +83,9 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     ids.adminUser = admin.id;
 
     auditLog = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditLogService;
-    projectsService = new ProjectsService(dataSource.getRepository(Project), dataSource.getRepository(ProjectQuote), dataSource.getRepository(ProjectMilestone), dataSource, auditLog);
+    const emitter = new EventEmitter2();
+    emitter.on(PROJECT_ACTIVITY_EVENT, (event: ProjectActivityEvent) => activity.push(event));
+    projectsService = new ProjectsService(dataSource.getRepository(Project), dataSource.getRepository(ProjectQuote), dataSource.getRepository(ProjectMilestone), dataSource, auditLog, emitter);
   });
 
   afterAll(async () => {
@@ -487,5 +493,73 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     await expect(
       projectsService.issueProjectWarranty(ids.adminUser, ids.project, '00000000-0000-0000-0000-000000000000'),
     ).rejects.toThrow(/غير موجودة أو موقوفة/);
+  });
+
+  /**
+   * docs/08 §64.هـ — بلاغ المالك: «لما بيحصل أي تعديل من الأدمين… ما بيظهرش notification.
+   * المفروض فعليًا أي حاجة أكشن يحصل، المفروض الكاستمر يجيله notification».
+   *
+   * الاختبار ده بيقرا كل الأحداث اللي اتصدرت من الـsuite كلها فوق (دورة حياة مشروع حقيقية
+   * كاملة على Postgres حقيقي) ويتأكد إن كل أكشن أدمن ولّد إشعار فعلاً — الحماية الوحيدة من إن
+   * مسار جديد يتضاف بكرة من غير إشعار زي ما حصل مع الموديول كله.
+   */
+  describe('إشعارات نشاط المشروع (docs/08 §64.هـ)', () => {
+    const kinds = () => activity.map((event) => event.kind);
+
+    it('كل أكشن أدمن في دورة الحياة ولّد حدث إشعار', () => {
+      // الأكشنات اللي المالك سمّاها بالحرف: «بعت عرض، أو بعت عربون مثلاً، طلب لعربون».
+      expect(kinds()).toEqual(expect.arrayContaining([
+        'quote_sent',
+        'quote_approved',
+        'milestones_created',
+        'milestone_started',
+        'milestone_completed',
+        'milestone_rejected',
+        'comment_added',
+        'order_linked',
+        'warranty_issued',
+      ]));
+    });
+
+    it('كل حدث بيحمل user id حقيقي (مش profile id) ورقم مشروع ونص عربي', () => {
+      expect(activity.length).toBeGreaterThan(0);
+      for (const event of activity) {
+        expect(event.projectNumber).toMatch(/^PRJ/);
+        expect(event.titleAr.trim().length).toBeGreaterThan(0);
+        expect(event.bodyAr.trim().length).toBeGreaterThan(0);
+        // إما مستقبِل حقيقي، أو `companyRequested` اللي بيخلّي المستمع يوجّهه لفريق العمليات —
+        // ممنوع حدث مالوش مستقبِل ولا مسار احتياطي (ده بالظبط اللي كان بيضيّع الإشعارات).
+        expect(
+          Boolean(event.customerUserId) || Boolean(event.companyOwnerUserId) || event.companyRequested,
+        ).toBe(true);
+        if (event.customerUserId) expect(event.customerUserId).toBe(ids.customerUser);
+      }
+    });
+
+    it('إرسال عرض السعر بيوصل العميل بالمبلغ الحقيقي — مش إشعار عام', () => {
+      const sent = activity.find((event) => event.kind === 'quote_sent');
+      expect(sent?.customerUserId).toBe(ids.customerUser);
+      // العرض المُرسل في الاختبار فوق = 6,600 ج.م — الرقم الحقيقي لازم يكون في نص الإشعار
+      // بأرقام غربية (نفس صيغة باقي إشعارات المنصة)، مش إشعار عام بلا مبلغ.
+      expect(sent?.bodyAr).toContain('6,600 ج.م');
+    });
+
+    it('كومنت الأدمن الداخلي (مش مرئي للعميل) ما بيولّدش إشعار خالص', () => {
+      const comments = activity.filter((event) => event.kind === 'comment_added');
+      // الـsuite فوق ضافت 3 كومنتات ناجحة: أدمن مرئي + أدمن داخلي + كومنت عميل.
+      // المرئي والعميل بس ليهم أحداث — الداخلي مالوش، ونصه ما ينفعش يظهر في أي إشعار.
+      expect(comments).toHaveLength(2);
+      expect(comments.some((event) => event.bodyAr.includes('تأسيس السباكة'))).toBe(true);
+      expect(comments.some((event) => event.bodyAr.includes('ملاحظة داخلية'))).toBe(false);
+      // كومنت العميل بيروح للشركة بس (مالوش لازمة يرجع للعميل نفسه).
+      const fromCustomer = comments.find((event) => event.bodyAr.includes('متابع معاكم'));
+      expect(fromCustomer?.customerUserId).toBeNull();
+    });
+
+    it('رفض العميل لمرحلة بيروح للشركة المنفّذة مش للعميل نفسه', () => {
+      const rejected = activity.find((event) => event.kind === 'milestone_rejected');
+      expect(rejected).toBeDefined();
+      expect(rejected?.customerUserId).toBeNull();
+    });
   });
 });

@@ -1,6 +1,8 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { PROJECT_ACTIVITY_EVENT, ProjectActivityEvent } from '../../common/events/project-activity.event';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { Project, ProjectStatus, canTransitionProject } from './entities/project.entity';
@@ -8,6 +10,28 @@ import { ProjectQuote } from './entities/project-quote.entity';
 import { ProjectMilestone } from './entities/project-milestone.entity';
 
 const PROJECT_NUMBER_PREFIX = 'PRJ';
+
+// أرقام غربية بفواصل آلاف — نفس ما باقي الإشعارات بتعمل، ومبالغ المشروعات كبيرة فالفاصلة مهمة.
+const EGP = (cents: number) => `${Math.round(cents / 100).toLocaleString('en-US')} ج.م`;
+
+/**
+ * نص الإشعار لكل حالة مشروع (docs/08 §64.هـ). كل الحالات اللي `transition()` بتوصّلها متغطّاة هنا
+ * بالاسم — مفيش fallback بيسرّب كود الحالة الإنجليزي للعميل. (`draft` و`survey_requested`
+ * حالات إنشاء، و`awaiting_customer_approval` ممنوعة في `transition()` أصلاً لأن إرسال العرض هو
+ * طريقها الوحيد.)
+ */
+const PROJECT_STATUS_MESSAGES: Partial<Record<ProjectStatus, { title: string; body: string }>> = {
+  survey_scheduled: { title: 'المعاينة اتحددت', body: 'حدّدنا ميعاد معاينة لمشروعك — تقدر تشوف التفاصيل من صفحة المشروع.' },
+  quote_preparing: { title: 'بنجهّز عرض السعر', body: 'فريقنا بدأ يجهّز عرض سعر لمشروعك، هنبعتهولك أول ما يخلص.' },
+  awaiting_deposit: { title: 'مطلوب عربون لبدء الشغل', body: 'عرض السعر اتعتمد — فاضل تدفع العربون عشان الشغل يبدأ.' },
+  active: { title: 'الشغل بدأ في مشروعك', body: 'مشروعك بقى نشط دلوقتي وبدأنا التنفيذ.' },
+  paused: { title: 'مشروعك متوقف مؤقتًا', body: 'اتوقف التنفيذ مؤقتًا — راجع صفحة المشروع للسبب.' },
+  awaiting_milestone_approval: { title: 'مرحلة تستنى موافقتك', body: 'فيه مرحلة اتسلّمت ومحتاجة مراجعتك وموافقتك.' },
+  handover_pending: { title: 'المشروع جاهز للتسليم', body: 'الشغل خلص وإحنا مستنيين تسليم المشروع ليك.' },
+  completed: { title: 'مشروعك اكتمل 🎉', body: 'تم تسليم المشروع بالكامل — شكرًا لثقتك.' },
+  cancelled: { title: 'مشروعك اتلغى', body: 'اتلغى المشروع — راجع صفحة المشروع للسبب.' },
+  disputed: { title: 'فيه نزاع مفتوح على مشروعك', body: 'اتفتح نزاع على المشروع وفريق الدعم بيراجعه.' },
+};
 
 @Injectable()
 export class ProjectsService {
@@ -17,7 +41,57 @@ export class ProjectsService {
     @InjectRepository(ProjectMilestone) private readonly milestones: Repository<ProjectMilestone>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly auditLog: AuditLogService,
+    private readonly events: EventEmitter2,
   ) {}
+
+  private readonly logger = new Logger(ProjectsService.name);
+
+  /**
+   * docs/08 §64.هـ — بلاغ المالك: «أي حاجة أكشن يحصل، المفروض الكاستمر يجيله notification…
+   * كذلك برضه الـnotifications بتاعت الصنايعي».
+   *
+   * بتتنادى **بعد** ما الترانزاكشن تـcommit، مش جواها: إشعار عن أكشن اترول-باك أسوأ من مفيش
+   * إشعار. وكل حاجة جوّه try — فشل حلّ الـuser ids أو الإصدار ما ينفعش يبوّظ أكشن أدمن اتنفّذ
+   * وخلص (نفس قاعدة "أي فشل infra يتلقّط" في CLAUDE.md).
+   */
+  private async emitProjectActivity(
+    projectId: string,
+    kind: string,
+    titleAr: string,
+    bodyAr: string,
+    audience: { customer?: boolean; company?: boolean } = { customer: true },
+  ): Promise<void> {
+    try {
+      const [row] = await this.dataSource.query<
+        { project_number: string; customer_user_id: string | null; company_owner_user_id: string | null }[]
+      >(
+        `SELECT p.project_number,
+                cp.user_id       AS customer_user_id,
+                tc.owner_user_id AS company_owner_user_id
+         FROM projects p
+         LEFT JOIN customer_profiles cp ON cp.id = p.customer_id
+         LEFT JOIN technician_companies tc ON tc.id = p.assigned_company_id
+         WHERE p.id = $1`,
+        [projectId],
+      );
+      if (!row) return;
+      this.events.emit(
+        PROJECT_ACTIVITY_EVENT,
+        new ProjectActivityEvent(
+          projectId,
+          row.project_number,
+          kind,
+          titleAr,
+          bodyAr,
+          audience.customer === false ? null : row.customer_user_id,
+          audience.company ? row.company_owner_user_id : null,
+          audience.company === true,
+        ),
+      );
+    } catch (err) {
+      this.logger.warn(`فشل إصدار إشعار نشاط المشروع ${projectId} (${kind}): ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   async listAll(page = 1, perPage = 20): Promise<{
     items: Record<string, unknown>[];
@@ -133,7 +207,7 @@ export class ProjectsService {
   }
 
   async transition(adminUserId: string, projectId: string, to: ProjectStatus, reason?: string, meta?: AuditActorMeta): Promise<Project> {
-    return this.dataSource.transaction(async (manager) => {
+    const project = await this.dataSource.transaction(async (manager) => {
       const project = await manager.createQueryBuilder(Project, 'p')
         .setLock('pessimistic_write').where('p.id = :id', { id: projectId }).getOne();
       if (!project) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
@@ -161,6 +235,18 @@ export class ProjectsService {
       }, manager);
       return project;
     });
+
+    const message = PROJECT_STATUS_MESSAGES[to];
+    if (message) {
+      // الشركة المنفّذة بتتبلّغ بس بالحالات اللي بتغيّر شغلها فعليًا (بدء/توقّف/إلغاء/نزاع) —
+      // مش بكل نقلة إدارية.
+      const notifyCompany = ['active', 'paused', 'cancelled', 'disputed', 'handover_pending'].includes(to);
+      await this.emitProjectActivity(project.id, `status_${to}`, message.title, message.body, {
+        customer: true,
+        company: notifyCompany,
+      });
+    }
+    return project;
   }
 
   // ── Quotes ──
@@ -219,7 +305,7 @@ export class ProjectsService {
   }
 
   async sendQuote(adminUserId: string, quoteId: string, expiryDays: number, expectedProjectId?: string, meta?: AuditActorMeta): Promise<ProjectQuote> {
-    return this.dataSource.transaction(async (manager) => {
+    const quote = await this.dataSource.transaction(async (manager) => {
       const quote = await manager.createQueryBuilder(ProjectQuote, 'q')
         .setLock('pessimistic_write').where('q.id = :id', { id: quoteId }).getOne();
       if (!quote || quote.status !== 'draft') {
@@ -244,10 +330,18 @@ export class ProjectsService {
         entityType: 'project_quote', entityId: quote.id, newValues: { project_id: quote.projectId, expires_at: quote.expiresAt.toISOString() }, meta }, manager);
       return quote;
     });
+
+    await this.emitProjectActivity(
+      quote.projectId,
+      'quote_sent',
+      'عرض سعر جديد لمشروعك',
+      `وصلك عرض سعر بإجمالي ${EGP(quote.totalCents)} — راجعه واعتمده قبل ${new Date(quote.expiresAt as Date).toLocaleDateString('en-GB')}.`,
+    );
+    return quote;
   }
 
   async approveQuote(userId: string, quoteId: string, expectedProjectId?: string, meta?: AuditActorMeta): Promise<Project> {
-    return this.dataSource.transaction(async (manager) => {
+    const project = await this.dataSource.transaction(async (manager) => {
       const quote = await manager.createQueryBuilder(ProjectQuote, 'q')
         .setLock('pessimistic_write').where('q.id = :id', { id: quoteId }).getOne();
       if (!quote || quote.status !== 'sent') {
@@ -291,6 +385,17 @@ export class ProjectsService {
       }, manager);
       return project;
     });
+
+    // العميل هو اللي اعتمد — الإشعار للشركة المنفّذة (اللي بقت assigned دلوقتي من العرض نفسه)،
+    // مع إشعار للعميل بمطلوب العربون لأن ده الخطوة اللي عليه دلوقتي.
+    await this.emitProjectActivity(
+      project.id,
+      'quote_approved',
+      'اتعتمد عرض السعر — مطلوب العربون',
+      `عرض السعر (${EGP(project.approvedQuoteTotalCents ?? 0)}) اتعتمد. الخطوة الجاية: دفع العربون عشان الشغل يبدأ.`,
+      { customer: true, company: true },
+    );
+    return project;
   }
 
   // ── Milestones ──
@@ -304,7 +409,7 @@ export class ProjectsService {
     if (milestones.filter((m) => m.is_down_payment).length > 1) {
       throw new ApiException(ErrorCode.VAL_001, 'مسموح بمرحلة عربون واحدة فقط', HttpStatus.BAD_REQUEST);
     }
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const project = await manager.createQueryBuilder(Project, 'p').setLock('pessimistic_write')
         .where('p.id = :id AND p.deleted_at IS NULL', { id: projectId }).getOne();
       if (!project) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
@@ -327,6 +432,15 @@ export class ProjectsService {
       }, manager);
       return saved;
     });
+
+    await this.emitProjectActivity(
+      projectId,
+      'milestones_created',
+      'خطة مراحل مشروعك جاهزة',
+      `اتقسّم المشروع لـ${saved.length} مرحلة — كل مرحلة ليها قيمتها وبتتسلّم لوحدها وتوافق عليها لوحدها.`,
+      { customer: true, company: true },
+    );
+    return saved;
   }
 
   /** بوابة إطلاق المستحق — لازم: مرحلة مكتملة + عميل موافق + مدفوعة. ذرّية بـSKIP LOCKED. */
@@ -376,7 +490,7 @@ export class ProjectsService {
   }
 
   async startMilestone(adminUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
-    return this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
       if (m.executionStatus !== 'pending') {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -387,6 +501,15 @@ export class ProjectsService {
       m.executionStatus = 'in_progress';
       return { action: 'project.milestone_started', newValues: { execution_status: 'in_progress' } };
     }, meta);
+
+    await this.emitProjectActivity(
+      projectId,
+      'milestone_started',
+      'بدأ شغل مرحلة جديدة',
+      `بدأنا التنفيذ في مرحلة «${milestone.nameAr}» من مشروعك.`,
+      { customer: true, company: true },
+    );
+    return milestone;
   }
 
   /** تسليم مرحلة بعينها — بيبدأ عدّاد الموافقة التلقائية الموجود بالفعل (72 ساعة افتراضيًا). */
@@ -397,7 +520,7 @@ export class ProjectsService {
     proofStorageKeys: string[] = [],
     meta?: AuditActorMeta,
   ) {
-    return this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
       if (m.executionStatus !== 'in_progress') {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -422,12 +545,20 @@ export class ProjectsService {
         newValues: { execution_status: 'completed', proof_count: m.proofAttachments?.length ?? 0 },
       };
     }, meta);
+
+    await this.emitProjectActivity(
+      projectId,
+      'milestone_completed',
+      'مرحلة اتسلّمت وتستنى موافقتك',
+      `مرحلة «${milestone.nameAr}» (${EGP(milestone.amountCents)}) اتسلّمت — راجعها ووافق أو ارفض بسبب.`,
+    );
+    return milestone;
   }
 
   /** موافقة العميل اليدوية — الموافقة التلقائية موجودة بالفعل، دي للعميل اللي مش عايز يستنى. */
   async approveMilestone(customerUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
     await this.findOneOwned(customerUserId, projectId);
-    return this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
       if (m.executionStatus !== 'completed') {
         throw new ApiException(ErrorCode.VAL_001, 'المرحلة لسه ما اتسلّمتش', HttpStatus.CONFLICT);
       }
@@ -439,6 +570,16 @@ export class ProjectsService {
       m.approvedAt = new Date();
       return { action: 'project.milestone_approved', newValues: { approval_status: 'approved' } };
     }, meta);
+
+    // الطرف التاني بس — العميل هو اللي عمل الأكشن، مالوش لازمة إشعار بفعله هو.
+    await this.emitProjectActivity(
+      projectId,
+      'milestone_approved',
+      'العميل وافق على تسليم مرحلة',
+      `مرحلة «${milestone.nameAr}» (${EGP(milestone.amountCents)}) اتوافق عليها — المستحق بقى جاهز للإفراج.`,
+      { customer: false, company: true },
+    );
+    return milestone;
   }
 
   async rejectMilestone(
@@ -452,7 +593,7 @@ export class ProjectsService {
       throw new ApiException(ErrorCode.VAL_001, 'سبب الرفض مطلوب', HttpStatus.BAD_REQUEST);
     }
     await this.findOneOwned(customerUserId, projectId);
-    return this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
       if (m.executionStatus !== 'completed') {
         throw new ApiException(ErrorCode.VAL_001, 'المرحلة لسه ما اتسلّمتش', HttpStatus.CONFLICT);
       }
@@ -466,6 +607,15 @@ export class ProjectsService {
       m.executionStatus = 'in_progress';
       return { action: 'project.milestone_rejected', newValues: { approval_status: 'rejected', reason: reason.trim() } };
     }, meta);
+
+    await this.emitProjectActivity(
+      projectId,
+      'milestone_rejected',
+      'العميل رفض تسليم مرحلة',
+      `مرحلة «${milestone.nameAr}» اترفضت والسبب: ${reason.trim()} — المرحلة رجعت "شغل جاري" عشان تتصلّح وتتسلّم تاني.`,
+      { customer: false, company: true },
+    );
+    return milestone;
   }
 
   /**
@@ -497,7 +647,7 @@ export class ProjectsService {
       }
     }
     const visible = author.role === 'customer' ? true : dto.is_visible_to_customer !== false;
-    return this.dataSource.transaction(async (manager) => {
+    const row = await this.dataSource.transaction(async (manager) => {
       const [row] = await manager.query<Record<string, unknown>[]>(
         `INSERT INTO project_comments (project_id, milestone_id, author_user_id, author_role, body, is_visible_to_customer)
          VALUES ($1,$2,$3,$4,$5,$6)
@@ -515,6 +665,25 @@ export class ProjectsService {
       }, manager);
       return row;
     });
+
+    // كومنت داخلي (`is_visible_to_customer=false`) ما يوصلش العميل — لا في الغرفة ولا في إشعار.
+    if (author.role === 'admin' && visible) {
+      await this.emitProjectActivity(
+        projectId,
+        'comment_added',
+        'رسالة جديدة على مشروعك',
+        body.length > 120 ? `${body.slice(0, 117)}…` : body,
+      );
+    } else if (author.role === 'customer') {
+      await this.emitProjectActivity(
+        projectId,
+        'comment_added',
+        'رسالة جديدة من العميل',
+        body.length > 120 ? `${body.slice(0, 117)}…` : body,
+        { customer: false, company: true },
+      );
+    }
+    return row;
   }
 
   /**
@@ -524,7 +693,7 @@ export class ProjectsService {
    * فاضي عمليًا. الربط مقصور على طلبات **نفس العميل** — طلب عميل تاني في مشروع مش بتاعه تسريب.
    */
   async linkOrderToProject(adminUserId: string, projectId: string, orderId: string, meta?: AuditActorMeta) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const [project] = await manager.query<{ id: string; customer_id: string }[]>(
         `SELECT id, customer_id FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
         [projectId],
@@ -563,6 +732,16 @@ export class ProjectsService {
       }, manager);
       return { linked: true, already: false };
     });
+
+    if (!result.already) {
+      await this.emitProjectActivity(
+        projectId,
+        'order_linked',
+        'طلب اتضاف لمشروعك',
+        'اتربط طلب من طلباتك بالمشروع — هتلاقيه في تبويب طلبات المشروع.',
+      );
+    }
+    return result;
   }
 
   async listLinkableOrders(projectId: string): Promise<Record<string, unknown>[]> {
@@ -594,7 +773,7 @@ export class ProjectsService {
     planId: string,
     meta?: AuditActorMeta,
   ): Promise<Record<string, unknown>> {
-    return this.dataSource.transaction(async (manager) => {
+    const row = await this.dataSource.transaction(async (manager) => {
       const [project] = await manager.query<{ id: string; customer_id: string; approved_quote_total_cents: number | null }[]>(
         `SELECT id, customer_id, approved_quote_total_cents
          FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
@@ -649,6 +828,14 @@ export class ProjectsService {
       }, manager);
       return row;
     });
+
+    await this.emitProjectActivity(
+      projectId,
+      'warranty_issued',
+      'ضمان مشروعك اتفعّل 🛡️',
+      `«${String(row.name_ar ?? 'ضمان المشروع')}» ساري لمدة ${Number(row.coverage_months ?? 0)} شهر — تقدر تفتح مطالبة من صفحة الضمان في أي وقت.`,
+    );
+    return row;
   }
 
   async releaseMilestonePayout(milestoneId: string): Promise<boolean> {
