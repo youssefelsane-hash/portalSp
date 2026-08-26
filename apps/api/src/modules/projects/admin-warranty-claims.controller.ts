@@ -21,6 +21,29 @@ const CLAIM_TRANSITIONS: Record<string, readonly string[]> = {
   closed: [],
 };
 
+function toWarrantyClaimResponse(claim: WarrantyClaim): Record<string, unknown> {
+  return {
+    id: claim.id,
+    warranty_id: claim.warrantyId,
+    order_id: claim.orderId,
+    project_id: claim.projectId,
+    customer_id: claim.customerId,
+    status: claim.status,
+    defect_description: claim.defectDescription,
+    defect_discovered_at: claim.defectDiscoveredAt,
+    attachments: claim.attachments,
+    resolution_notes: claim.resolutionNotes,
+    rejection_reason: claim.rejectionReason,
+    repair_order_id: claim.repairOrderId,
+    original_provider_id: claim.originalProviderId,
+    provider_deadline: claim.providerDeadline?.toISOString() ?? null,
+    resolved_at: claim.resolvedAt?.toISOString() ?? null,
+    closed_at: claim.closedAt?.toISOString() ?? null,
+    created_at: claim.createdAt.toISOString(),
+    updated_at: claim.updatedAt.toISOString(),
+  };
+}
+
 @Controller('admin/warranty-claims')
 @Roles(UserType.ADMIN)
 export class AdminWarrantyClaimsController {
@@ -49,7 +72,7 @@ export class AdminWarrantyClaimsController {
       skip: (page - 1) * perPage,
       take: perPage,
     });
-    return { items, meta: { page, per_page: perPage, total } };
+    return { items: items.map(toWarrantyClaimResponse), meta: { page, per_page: perPage, total } };
   }
 
   @Patch(':id/review')
@@ -99,7 +122,7 @@ export class AdminWarrantyClaimsController {
           rejection_reason: claim.rejectionReason,
         },
       }, manager);
-      return claim;
+      return toWarrantyClaimResponse(claim);
     });
   }
 }

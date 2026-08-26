@@ -303,7 +303,8 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
     return row.id;
   }
 
-  it('إعادة زيارة لطلب أصلي عادي (standard) مكتمل تحت الضمان — بتنجح وبتبقى مجانية بالكامل', async () => {
+  it('إعادة زيارة لخدمة وقت بدايتها إجباري لا تطلب موعدًا جديدًا وبتبقى مجانية بالكامل', async () => {
+    await q(`UPDATE services SET requires_start_time_only = true WHERE id = $1`, [ids.service]);
     const originalOrderId = await createCompletedOrder('standard', null);
     const revisit = await ordersService.create(ids.customerUser, {
       service_id: ids.service,

@@ -49,7 +49,19 @@
   four-image cap, animated indicators, and backward-compatible branding/gradient fallbacks. All
   migration checksums matched; API test/build, admin and web typechecks, Dart analysis, and customer
   Flutter tests (13/13) passed.
-- Next task: continue the remaining cross-engine integration review.
+- Integrated: latest `origin/main` at `2c2c988` by fast-forward. This includes migrations
+  `0187`-`0189`, near-term dispatch, viewed-order tracking, and the project milestone/comment flow.
+  Migration `0189_project_comments.sql` was missing from the shared local TEST database and caused
+  both admin and customer project-room routes to return 500; all migrations now apply with matching
+  checksums, and the real PostgreSQL project flow passes 17/17.
+- Completed: warranty-claim admin responses now use the documented snake_case contract, short
+  customer claim descriptions show an actionable inline validation message, and warranty revisits
+  no longer incorrectly require the original service's commercial scheduling fields. Eligible
+  technician results are deduplicated at the shared API source before reaching admin/customer UIs.
+  Focused Jest/PostgreSQL tests pass 7/7 with open-handle detection, API build and admin typecheck
+  pass, and the focused Flutter test/analyze pass with no issues.
+- Next task: continue the remaining new-route review, prioritizing project/warranty browser flows
+  and any failures reproduced from the supplied screenshots.
 
 ---
 
