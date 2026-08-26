@@ -117,6 +117,20 @@ export class TechnicianProfile {
   @Column({ name: 'verification_notes', type: 'text', nullable: true })
   verificationNotes: string | null;
 
+  // ADR-0039 (docs/08 §62.1) — العلامة الزرقاء في واجهة العميل. **مش** مشتقة من verificationStatus:
+  // دي أهلية تشغيلية (استوفى أوراقه ومسموح له يشتغل)، ودي قرار تجاري يدوي من الأدمن.
+  @Column({ name: 'is_trust_verified', type: 'boolean', default: false })
+  isTrustVerified: boolean;
+
+  @Column({ name: 'trust_verified_at', type: 'timestamptz', nullable: true })
+  trustVerifiedAt: Date | null;
+
+  @Column({ name: 'trust_verified_by', type: 'uuid', nullable: true })
+  trustVerifiedBy: string | null;
+
+  @Column({ name: 'trust_verified_note', type: 'varchar', length: 500, nullable: true })
+  trustVerifiedNote: string | null;
+
   @Column({ name: 'approved_at', type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
 

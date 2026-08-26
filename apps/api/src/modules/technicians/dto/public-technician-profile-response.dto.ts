@@ -14,6 +14,8 @@ export interface PublicTechnicianProfileResponseDto {
   bio: string | null;
   years_of_experience: number;
   verification_status: string;
+  /** ADR-0039 — علامة التوثيق الزرقاء: مِنحة إدارية، مستقلة تمامًا عن verification_status. */
+  is_trust_verified: boolean;
   average_rating: number;
   total_ratings_count: number;
   completed_orders_count: number;
@@ -61,6 +63,7 @@ export async function toPublicTechnicianProfileResponseDto(
     bio: profile.bio,
     years_of_experience: profile.yearsOfExperience,
     verification_status: profile.verificationStatus,
+    is_trust_verified: profile.isTrustVerified,
     average_rating: Number(profile.averageRating),
     total_ratings_count: profile.totalRatingsCount,
     completed_orders_count: profile.completedOrdersCount,

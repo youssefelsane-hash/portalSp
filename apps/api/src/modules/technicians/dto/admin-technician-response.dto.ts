@@ -21,6 +21,10 @@ export interface AdminTechnicianResponseDto {
   completed_orders_count: number;
   cancelled_orders_count: number;
   verification_status: string;
+  // ADR-0039 — علامة التوثيق الزرقاء. مِنحة إدارية، **مش** مشتقة من verification_status فوق.
+  is_trust_verified: boolean;
+  trust_verified_at: string | null;
+  trust_verified_note: string | null;
   is_available: boolean;
   is_on_duty: boolean;
   // بَقّة ثقة حقيقية اتلقطت (بلاغ المالك، 2026-08-21): is_available/is_on_duty فوق شكلهم بيوحي
@@ -53,6 +57,9 @@ export function toAdminTechnicianResponseDto(profile: TechnicianProfile, user: U
     completed_orders_count: profile.completedOrdersCount,
     cancelled_orders_count: profile.cancelledOrdersCount,
     verification_status: profile.verificationStatus,
+    is_trust_verified: profile.isTrustVerified,
+    trust_verified_at: profile.trustVerifiedAt?.toISOString() ?? null,
+    trust_verified_note: profile.trustVerifiedNote,
     is_available: profile.isAvailable,
     is_on_duty: profile.isOnDuty,
     has_current_location: profile.currentLocation !== null,

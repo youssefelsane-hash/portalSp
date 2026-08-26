@@ -9,6 +9,7 @@ import '../orders/create_order_screen.dart';
 import 'models.dart';
 import 'portfolio_link_viewer_screen.dart';
 import 'technicians_repository.dart';
+import 'technician_marketplace_screen.dart' show TrustBadge;
 
 const Map<String, IconData> _platformIcons = {
   'tiktok': Icons.music_note,
@@ -224,7 +225,7 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                                     ),
                                     if (profile.isVerified) ...[
                                       const SizedBox(width: 6),
-                                      const Icon(Icons.verified, color: Colors.blue, size: 20),
+                                      const TrustBadge(),
                                     ],
                                   ],
                                 ),

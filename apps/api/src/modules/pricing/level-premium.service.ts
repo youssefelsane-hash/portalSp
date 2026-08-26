@@ -31,6 +31,10 @@ export class LevelPremiumService {
    * بيتخطّى بالكامل (بيرجّع 0) لو:
    * - الفني كان معروف وقت الحجز (`requestedTechnicianId`) — الفرق داخل السعر أصلاً، وإضافته
    *   تاني يبقى تحصيل مزدوج.
+   * - العميل اختار **شركة** (`requestedTechnicianCompanyId`) — docs/08 §62.2. ده كان بَقّة حقيقية:
+   *   حجز الشركة `requestedTechnicianId = null`، فلما المطابقة تعيّن عضو مستواه أعلى كان الفرق
+   *   بيتضاف **بعد** ما العميل أكّد على سعر تاني — نفس "مفاجأة السعر" اللي §60.3 نفسها بتمنعها.
+   *   منطق §60.3 أصلاً عن "العميل ساب المطابقة تختار"، والعميل هنا اختار بإيده.
    * - مستوى الفني مالوش مضاعف (= 1).
    * - السياسة `absorb` — الشركة بتتحمّل الفرق والسعر ما يتغيّرش.
    *
@@ -43,6 +47,7 @@ export class LevelPremiumService {
     technician: Pick<TechnicianProfile, 'currentLevel' | 'pricingTier'>,
   ): Promise<number> {
     if (order.requestedTechnicianId) return 0;
+    if (order.requestedTechnicianCompanyId) return 0;
     if (order.estimatedPriceCents === null || order.estimatedPriceCents <= 0) return 0;
     // حارس ضد التحصيل المزدوج: الطلب ممكن يتعيّن أكتر من مرة (الفني الأول لغى وأعيد التوزيع،
     // أو الأدمن أعاد التعيين). من غير الحارس ده كل تعيين جديد كان هيضيف فرق تاني فوق القديم.

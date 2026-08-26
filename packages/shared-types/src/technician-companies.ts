@@ -4,6 +4,10 @@ export interface CompanyResponseDto {
   name: string;
   commercial_registration_number: string | null;
   is_active: boolean;
+  // ADR-0039 — علامة التوثيق الزرقاء للشركة. مِنحة إدارية، مستقلة عن is_active.
+  is_trust_verified: boolean;
+  trust_verified_at: string | null;
+  trust_verified_note: string | null;
   created_at: string;
 }
 

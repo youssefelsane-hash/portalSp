@@ -77,10 +77,10 @@ class TechnicianBookingListItem {
   final String technicianLevel;
   final int? finalPriceCents;
   final double? levelPriceMultiplier;
-  // Script 6 Part 7 — بيانات مقارنة حقيقية لكروت السوق: كل فني في القايمة دي عدّى المرحلة 1
-  // الصارمة في الباك-إند (verification_status='approved')، فـisVerified دايمًا true فعليًا —
-  // بترجع صريحة من الـAPI بدل ما الشاشة تفترضها ضمنيًا. onTimeRatePercent/avgArrivalMinutes
-  // بيرجعوا null لو مفيش طلبات مجدولة/مكتملة كفاية لحساب متوسط منها (مش صفر مضلّل).
+  // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — **مِنحة إدارية**، مش نتيجة تلقائية لاعتماد
+  // الأوراق. فأغلب الصفوف في القايمة دي هتبقى false، وده الوضع الصحيح مش نقص بيانات.
+  // onTimeRatePercent/avgArrivalMinutes بيرجعوا null لو مفيش طلبات كفاية لحساب متوسط منها
+  // (مش صفر مضلّل).
   final bool isVerified;
   final int? onTimeRatePercent;
   final int? avgArrivalMinutes;
@@ -88,6 +88,8 @@ class TechnicianBookingListItem {
   final bool isCompany;
   final int? staffCount;
   final int? branchCount;
+  // وجود سجل تجاري (docs/08 §62.2) — هو الفرق الحقيقي بين "شركة مسجّلة" و"فريق عمل" في البيانات.
+  final bool isCommercialCompany;
   // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030 Slice B/D) — 'available' دايمًا للسلوك
   // القديم (بلا scheduled_at، أو service.showUnavailableProviders=false). 'schedule_conflicted'
   // معناه الفني مؤهّل فعلاً بس محجوز في الفترة المطلوبة — الباك-إند بيرجّعه صراحة (بدل الإخفاء)
@@ -116,6 +118,7 @@ class TechnicianBookingListItem {
     required this.isCompany,
     required this.staffCount,
     required this.branchCount,
+    required this.isCommercialCompany,
     this.availabilityStatus = 'available',
     this.unavailableReasonAr,
     this.availableAgainAt,
@@ -139,6 +142,7 @@ class TechnicianBookingListItem {
         isCompany: json['is_company'] as bool? ?? false,
         staffCount: json['staff_count'] as int?,
         branchCount: json['branch_count'] as int?,
+        isCommercialCompany: json['is_commercial_company'] as bool? ?? false,
         availabilityStatus: json['availability_status'] as String? ?? 'available',
         unavailableReasonAr: json['unavailable_reason_ar'] as String?,
         availableAgainAt:
@@ -261,6 +265,7 @@ class TechnicianPublicProfile {
     required this.bio,
     required this.yearsOfExperience,
     required this.verificationStatus,
+    required this.isTrustVerified,
     required this.averageRating,
     required this.totalRatingsCount,
     required this.completedOrdersCount,
@@ -275,7 +280,10 @@ class TechnicianPublicProfile {
     required this.certificates,
   });
 
-  bool get isVerified => verificationStatus == 'approved';
+  // ADR-0039 (docs/08 §62.1) — كانت مشتقة من `verificationStatus == 'approved'`، يعني أي فني
+  // معتمد تشغيليًا كان بياخد العلامة الزرقاء تلقائيًا. بقت الحقل اللي الأدمن بيتحكم فيه فعلاً.
+  final bool isTrustVerified;
+  bool get isVerified => isTrustVerified;
 
   factory TechnicianPublicProfile.fromJson(Map<String, dynamic> json) => TechnicianPublicProfile(
         id: json['id'] as String,
@@ -285,6 +293,7 @@ class TechnicianPublicProfile {
         bio: json['bio'] as String?,
         yearsOfExperience: json['years_of_experience'] as int,
         verificationStatus: json['verification_status'] as String,
+        isTrustVerified: json['is_trust_verified'] as bool? ?? false,
         averageRating: (json['average_rating'] as num).toDouble(),
         totalRatingsCount: json['total_ratings_count'] as int,
         completedOrdersCount: json['completed_orders_count'] as int,

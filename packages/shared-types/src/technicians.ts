@@ -31,6 +31,10 @@ export interface AdminTechnicianResponseDto {
   completed_orders_count: number;
   cancelled_orders_count: number;
   verification_status: TechnicianVerificationStatus;
+  // ADR-0039 — علامة التوثيق الزرقاء. مِنحة إدارية، مستقلة عن verification_status فوق.
+  is_trust_verified: boolean;
+  trust_verified_at: string | null;
+  trust_verified_note: string | null;
   is_available: boolean;
   is_on_duty: boolean;
   has_current_location: boolean;

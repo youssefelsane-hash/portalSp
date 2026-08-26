@@ -15,6 +15,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     orderNumber: 'ORD-1',
     serviceId: 'svc-1',
     requestedTechnicianId: null,
+    requestedTechnicianCompanyId: null,
     estimatedPriceCents: 100_000,
     totalAmountCents: 120_000,
     commissionableBaseCents: 100_000,
@@ -64,6 +65,17 @@ describe('فرق الفني المميّز بعد التعيين التلقائ�
   it('العميل اختار الفني بنفسه: مفيش أي إضافة (الفرق داخل السعر أصلاً — تحصيل مزدوج)', async () => {
     const { service, manager } = makeService({ multiplier: 1.5 });
     const order = makeOrder({ requestedTechnicianId: 'tech-1' });
+
+    expect(await service.applyOnAutoAssignment(manager, order, technician)).toBe(0);
+    expect(order.totalAmountCents).toBe(120_000);
+    expect(order.levelPremiumCents).toBe(0);
+  });
+
+  it('العميل اختار شركة: مفيش أي إضافة — السعر اللي شافه هو اللي هيدفعه (docs/08 §62.2)', async () => {
+    // بَقّة حقيقية: حجز الشركة requestedTechnicianId = null، فالحارس القديم مكانش بيمسكه، وأول ما
+    // المطابقة تعيّن عضو مستواه أعلى كان السعر بيزيد **بعد** التأكيد. الشركة بتتسعّر بالأساس دايمًا.
+    const { service, manager } = makeService({ multiplier: 1.5 });
+    const order = makeOrder({ requestedTechnicianCompanyId: 'company-1' });
 
     expect(await service.applyOnAutoAssignment(manager, order, technician)).toBe(0);
     expect(order.totalAmountCents).toBe(120_000);

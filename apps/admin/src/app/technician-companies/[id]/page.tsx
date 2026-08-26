@@ -4,14 +4,16 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Building2, CalendarDays, CheckCircle2, Layers3, MapPin, ShieldCheck, Users } from 'lucide-react';
-import type { CompanyDetailResponseDto, CompanyOrderSummaryResponseDto } from '@baytak/shared-types';
+import type { CompanyDetailResponseDto, CompanyOrderSummaryResponseDto, CompanyResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
 import { ORDER_STATUS_LABELS, BOOKING_MODE_LABELS } from '@/lib/order-labels';
@@ -46,6 +48,27 @@ export default function TechnicianCompanyDetailPage() {
       .catch(() => setOrders([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
+
+  const [trustNote, setTrustNote] = useState('');
+  const [isSavingBadge, setIsSavingBadge] = useState(false);
+
+  // علامة التوثيق الزرقاء للشركة (ADR-0039، docs/08 §62.1) — الكتابة الوحيدة في شاشة الإشراف دي.
+  async function handleSetTrustBadge(granted: boolean) {
+    setIsSavingBadge(true);
+    setError(null);
+    try {
+      const company = await authedFetch<CompanyResponseDto>(`/admin/technician-companies/${id}/trust-badge`, {
+        method: 'PATCH',
+        body: JSON.stringify({ granted, note: trustNote.trim() || undefined }),
+      });
+      setDetail((prev) => (prev ? { ...prev, company } : prev));
+      setTrustNote('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحديث علامة التوثيق');
+    } finally {
+      setIsSavingBadge(false);
+    }
+  }
 
   const activeOrdersCount = orders?.filter((o) => ACTIVE_ORDER_STATUSES.has(o.order_status)).length ?? 0;
   const completedOrdersCount = orders?.filter((o) => o.order_status === 'completed').length ?? 0;
@@ -140,6 +163,50 @@ export default function TechnicianCompanyDetailPage() {
               <div>
                 <span className="text-muted-foreground">تاريخ الإنشاء: </span>
                 {new Date(detail.company.created_at).toLocaleDateString('ar-EG-u-nu-latn')}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">علامة التوثيق</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                {detail.company.is_trust_verified ? (
+                  <Badge className="bg-[#1D9BF0] text-white hover:bg-[#1D9BF0]">موثّقة ✓</Badge>
+                ) : (
+                  <Badge variant="outline">من غير علامة</Badge>
+                )}
+                {detail.company.trust_verified_at && (
+                  <span className="text-muted-foreground">
+                    آخر تغيير: {new Date(detail.company.trust_verified_at).toLocaleString('ar-EG')}
+                  </span>
+                )}
+              </div>
+              {detail.company.trust_verified_note && (
+                <p className="text-muted-foreground">السبب المسجّل: {detail.company.trust_verified_note}</p>
+              )}
+              <p className="text-muted-foreground">
+                دي العلامة الزرقاء اللي العميل بيشوفها على كارت الشركة وقت اختيار مقدّم الخدمة. مالهاش
+                علاقة بتفعيل/إيقاف الشركة — الشركة النشطة بتشتغل عادي من غيرها.
+              </p>
+              <Input
+                value={trustNote}
+                onChange={(e) => setTrustNote(e.target.value)}
+                placeholder="سبب المنح/السحب (اختياري، بيتسجّل في سجل النشاط)"
+                maxLength={500}
+              />
+              <div>
+                {detail.company.is_trust_verified ? (
+                  <Button size="sm" variant="destructive" disabled={isSavingBadge} onClick={() => handleSetTrustBadge(false)}>
+                    اسحب العلامة
+                  </Button>
+                ) : (
+                  <Button size="sm" disabled={isSavingBadge} onClick={() => handleSetTrustBadge(true)}>
+                    امنح العلامة
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

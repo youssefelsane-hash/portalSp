@@ -1,6 +1,11 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
+import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
+import { JwtPayload } from '../auth/types/authenticated-request';
+import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import {
   toBranchResponseDto,
   toCompanyResponseDto,
@@ -9,8 +14,11 @@ import {
 } from './dto/company-response.dto';
 import { TechnicianCompaniesService } from './technician-companies.service';
 
-// إشراف الأدمن على شركات/فرق الفنيين — read-only بالكامل عمداً، الإدارة نفسها ذاتية
-// (owner/manager بتاعت كل شركة) زي أي أدمن يشوف كل حاجة (RolesGuard كفاية، مفيش @RequirePermission).
+// إشراف الأدمن على شركات/فرق الفنيين — القراءة read-only عمداً، الإدارة نفسها ذاتية (owner/manager
+// بتاعت كل شركة) زي أي أدمن يشوف كل حاجة (RolesGuard كفاية، مفيش @RequirePermission).
+//
+// الاستثناء الوحيد: علامة التوثيق (ADR-0039). دي **مش** إدارة ذاتية بطبيعتها — لو الشركة تقدر
+// تمنح نفسها إشارة ثقة تبقى بلا معنى — فهي الكتابة الوحيدة هنا، ومحمية بصلاحية صريحة.
 @Controller('admin/technician-companies')
 @Roles(UserType.ADMIN)
 export class AdminTechnicianCompaniesController {
@@ -34,6 +42,18 @@ export class AdminTechnicianCompaniesController {
       branches: detail.branches.map(toBranchResponseDto),
       staff: detail.staff.map(({ profile, user }) => toStaffMemberResponseDto(profile, user.fullName)),
     };
+  }
+
+  @Patch(':id/trust-badge')
+  @RequirePermission('technicians.approve')
+  async setTrustBadge(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetTrustBadgeDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const company = await this.companiesService.setTrustBadge(admin.sub, id, dto.granted, dto.note ?? null, audit);
+    return toCompanyResponseDto(company);
   }
 
   // مساحة عمل الشركة (ADR-0033) — إشراف read-only، نفس نمط باقي الكونترولر ده.
