@@ -66,6 +66,17 @@ export interface TechnicianBookingListItem {
   availableAgainAt: string | null;
 }
 
+export function dedupeTechnicianBookingItems(
+  items: TechnicianBookingListItem[],
+): TechnicianBookingListItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.technicianId)) return false;
+    seen.add(item.technicianId);
+    return true;
+  });
+}
+
 // تصنيف نوع الفني الأربعة (docs/06 §3.8) — دالة على بيانات موجودة بالفعل، مش مفهوم جديد.
 // "فريق"/"شركة" (technician_companies, migration 0026) الفرق الوحيد بينهم commercial_registration_number
 // (موجود=شركة، فاضي=فريق) — قرار سابق موثّق في technicians/README.md، مش اختراع جديد هنا.
@@ -522,7 +533,10 @@ export class TechniciansService {
     // premium+ وقت الإنشاء، technician-companies.service.ts's canLeadTeam check)، وطلب المالك
     // كان "الشركات بتظهر كده كده" بلا أي شرط إضافي.
     if (!isTeamBooking) {
-      return { zoneId: zone.id, items: [...individualItems, ...conflictedItems] };
+      return {
+        zoneId: zone.id,
+        items: dedupeTechnicianBookingItems([...individualItems, ...conflictedItems]),
+      };
     }
 
     interface CompanyRow {
@@ -625,7 +639,10 @@ export class TechniciansService {
       return da - db;
     });
 
-    return { zoneId: zone.id, items: [...merged, ...conflictedItems] };
+    return {
+      zoneId: zone.id,
+      items: dedupeTechnicianBookingItems([...merged, ...conflictedItems]),
+    };
   }
 
   /**

@@ -101,6 +101,18 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
     expect(unchanged.status).toBe('open');
   });
 
+  it('returns the snake_case response contract consumed by the admin claims screen', async () => {
+    const page = await adminController.list(undefined, '1', '100');
+    const item = page.items.find((claim) => claim.warranty_id === warrantyId);
+    expect(item).toMatchObject({
+      warranty_id: warrantyId,
+      customer_id: customerId,
+      defect_description: expect.any(String),
+      created_at: expect.any(String),
+    });
+    expect(item).not.toHaveProperty('customerId');
+  });
+
   it('enforces the warranty claim state machine', async () => {
     const [claim] = await dataSource.query<{ id: string }[]>(
       `SELECT id FROM warranty_claims WHERE warranty_id=$1`,

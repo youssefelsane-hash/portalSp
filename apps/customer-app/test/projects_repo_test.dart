@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 class _DelayedProjectAuth extends AuthRepository {
   Map<String, dynamic>? capturedBody;
+  Map<String, String>? capturedHeaders;
   bool responseCompleted = false;
 
   @override
@@ -16,6 +17,7 @@ class _DelayedProjectAuth extends AuthRepository {
     expect(method, 'POST');
     expect(path, '/me/projects');
     capturedBody = body;
+    capturedHeaders = extraHeaders;
     await Future<void>.delayed(Duration.zero);
     responseCompleted = true;
     return {'id': 'project-1', 'name_ar': body?['name_ar']};
@@ -31,6 +33,7 @@ void main() {
       description: 'وصف كامل من العميل',
       addressId: 'address-1',
       budget: 50000,
+      idempotencyKey: 'project-attempt-1',
     );
 
     expect(auth.responseCompleted, isTrue);
@@ -40,5 +43,16 @@ void main() {
       containsPair('description_ar', 'وصف كامل من العميل'),
     );
     expect(auth.capturedBody, containsPair('budget_estimate_cents', 5000000));
+    expect(auth.capturedHeaders, {'Idempotency-Key': 'project-attempt-1'});
   });
+
+  test(
+    'project idempotency keys are non-empty and change between attempts',
+    () {
+      final first = generateProjectIdempotencyKey();
+      final second = generateProjectIdempotencyKey();
+      expect(first, isNotEmpty);
+      expect(second, isNot(first));
+    },
+  );
 }

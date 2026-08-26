@@ -105,17 +105,29 @@ describe('ProjectsService — المشروعات والمراحل والعروض
   });
 
   it('إنشاء مشروع: رقم قابل للقراءة + حالة survey_requested', async () => {
+    const idempotencyKey = `project-create-${runId}`;
     const project = await projectsService.create(ids.customerUser, {
       project_type: 'finishing',
       name_ar: `تشطيب شقة ${runId}`,
       description_ar: `وصف العميل الكامل ${runId}`,
       address_id: ids.address,
       budget_estimate_cents: 500_000,
-    });
+    }, undefined, idempotencyKey);
     ids.project = project.id;
     expect(project.projectNumber).toMatch(/^PRJ-/);
     expect(project.status).toBe('survey_requested');
     expect(project.budgetEstimateCents).toBe(500000);
+    const replay = await projectsService.create(ids.customerUser, {
+      project_type: 'finishing',
+      name_ar: 'اسم مختلف لا يجب أن ينشئ مشروعًا ثانيًا',
+      address_id: ids.address,
+    }, undefined, idempotencyKey);
+    expect(replay.id).toBe(project.id);
+    const [{ count: projectCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM projects WHERE customer_id=$1 AND idempotency_key=$2`,
+      [ids.customerProfile, idempotencyKey],
+    );
+    expect(Number(projectCount)).toBe(1);
     await expect(projectsService.findOneOwned(ids.otherUser, project.id)).rejects.toMatchObject({ code: 'VAL_001' });
 
     const page = await projectsService.listAll(1, 1);
@@ -123,6 +135,25 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     expect(page.items[0].id).toBe(project.id);
     expect(page.meta).toMatchObject({ page: 1, per_page: 1 });
     expect(page.meta.total).toBeGreaterThanOrEqual(1);
+  });
+
+  it('ضغطتان متزامنتان بنفس مفتاح الإنشاء تنتجان مشروعًا واحدًا', async () => {
+    const idempotencyKey = `project-concurrent-${runId}`;
+    const createAttempt = () => projectsService.create(ids.customerUser, {
+      project_type: 'renovation',
+      name_ar: `مشروع متزامن ${runId}`,
+      address_id: ids.address,
+    }, undefined, idempotencyKey);
+
+    const [first, second] = await Promise.all([createAttempt(), createAttempt()]);
+    expect(second.id).toBe(first.id);
+
+    const [{ count }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM projects WHERE customer_id=$1 AND idempotency_key=$2`,
+      [ids.customerProfile, idempotencyKey],
+    );
+    expect(Number(count)).toBe(1);
+    await q(`DELETE FROM projects WHERE id=$1`, [first.id]);
   });
 
   it('انتقال صحيح حتى تحضير العرض، وانتظار موافقة العميل لا يبدأ إلا بإرسال عرض', async () => {
@@ -309,6 +340,19 @@ describe('ProjectsService — المشروعات والمراحل والعروض
   it('كومنتات: كومنت الأدمن المرئي بيوصل للعميل، والداخلي بيتفلتر في SQL', async () => {
     const [first] = await projectsService.listProjectMilestones(ids.project);
 
+    const auditRecord = auditLog.record as jest.MockedFunction<AuditLogService['record']>;
+    auditRecord.mockRejectedValueOnce(new Error('simulated comment audit failure'));
+    await expect(projectsService.addComment(
+      { userId: ids.adminUser, role: 'admin' },
+      ids.project,
+      { body: 'تعليق لازم يرجع بالكامل عند فشل التدقيق', milestone_id: first.id },
+    )).rejects.toThrow('simulated comment audit failure');
+    const [{ count: rolledBackCommentCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_comments WHERE project_id = $1 AND body = $2`,
+      [ids.project, 'تعليق لازم يرجع بالكامل عند فشل التدقيق'],
+    );
+    expect(Number(rolledBackCommentCount)).toBe(0);
+
     await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
       body: 'خلصنا تأسيس السباكة، بننتقل للكهربا بكرة',
       milestone_id: first.id,
@@ -359,6 +403,21 @@ describe('ProjectsService — المشروعات والمراحل والعروض
        VALUES ($1,$2,$3,$4,$5,'completed','paid',50000,0) RETURNING id`,
       [`PRJLINK-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
+    const linkable = await projectsService.listLinkableOrders(ids.project);
+    expect(linkable).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: order.id, project_id: null }),
+    ]));
+
+    const auditRecord = auditLog.record as jest.MockedFunction<AuditLogService['record']>;
+    auditRecord.mockRejectedValueOnce(new Error('simulated link audit failure'));
+    await expect(
+      projectsService.linkOrderToProject(ids.adminUser, ids.project, order.id),
+    ).rejects.toThrow('simulated link audit failure');
+    const [notLinked] = await q<{ project_id: string | null }[]>(
+      `SELECT project_id FROM orders WHERE id = $1`,
+      [order.id],
+    );
+    expect(notLinked.project_id).toBeNull();
 
     const result = await projectsService.linkOrderToProject(ids.adminUser, ids.project, order.id);
     expect(result).toEqual({ linked: true, already: false });
@@ -393,6 +452,17 @@ describe('ProjectsService — المشروعات والمراحل والعروض
        VALUES ($1,$2,'extended_workmanship',24,2,'fixed',0,true,1) RETURNING id`,
       [`prj-warranty-${runId}`, `ضمان تشطيب ${runId}`],
     );
+
+    const auditRecord = auditLog.record as jest.MockedFunction<AuditLogService['record']>;
+    auditRecord.mockRejectedValueOnce(new Error('simulated warranty audit failure'));
+    await expect(
+      projectsService.issueProjectWarranty(ids.adminUser, ids.project, plan.id),
+    ).rejects.toThrow('simulated warranty audit failure');
+    const [{ count: warrantyCountAfterFailure }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM customer_warranties WHERE project_id = $1 AND plan_id = $2`,
+      [ids.project, plan.id],
+    );
+    expect(Number(warrantyCountAfterFailure)).toBe(0);
 
     const warranty = await projectsService.issueProjectWarranty(ids.adminUser, ids.project, plan.id);
     expect(warranty.project_id).toBe(ids.project);

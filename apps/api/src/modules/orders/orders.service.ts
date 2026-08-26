@@ -311,7 +311,10 @@ export class OrdersService {
     // chk_services_scheduling_mode_exclusive، على الأكتر وضع واحد فعّال لكل خدمة). هنا بنتحقق
     // من الحقول المطلوبة/الممنوعة حسب الوضع الفعّال للخدمة دي بالظبط. requiresPreciseSchedule
     // (ADR-0031 Slice B) — صفر تغيير سلوك.
-    if (service.requiresPreciseSchedule) {
+    // إعادة زيارة الضمان طلب إصلاح مجاني تابع لطلب مكتمل، وليست حجزًا جديدًا لنفس منتج
+    // الجدولة. التطبيق يرسل original_order_id فقط ويرجعها لنفس الفني؛ لذلك لا نطلب من العميل
+    // إعادة إدخال حقول الوقت التجارية الخاصة بالخدمة الأصلية.
+    if (!dto.original_order_id && service.requiresPreciseSchedule) {
       if (!dto.scheduled_at) {
         throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد الحجز لخدمة بدقة وقت', HttpStatus.BAD_REQUEST);
       }
@@ -321,7 +324,7 @@ export class OrdersService {
       if (dto.scheduled_end_at) {
         throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
       }
-    } else if (service.requiresStartTimeOnly) {
+    } else if (!dto.original_order_id && service.requiresStartTimeOnly) {
       if (!dto.scheduled_at) {
         throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد معاد بداية الخدمة دي', HttpStatus.BAD_REQUEST);
       }
@@ -331,14 +334,14 @@ export class OrdersService {
       if (dto.scheduled_end_at) {
         throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
       }
-    } else if (service.requiresHoursOnly) {
+    } else if (!dto.original_order_id && service.requiresHoursOnly) {
       if (!dto.duration_hours) {
         throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الساعات المطلوبة', HttpStatus.BAD_REQUEST);
       }
       if (dto.scheduled_end_at) {
         throw new ApiException(ErrorCode.VAL_001, 'scheduled_end_at متاحة بس للخدمات اللي محتاجة بداية ونهاية', HttpStatus.BAD_REQUEST);
       }
-    } else if (service.requiresStartAndEnd) {
+    } else if (!dto.original_order_id && service.requiresStartAndEnd) {
       if (!dto.scheduled_at) {
         throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد تاريخ ووقت بداية الخدمة', HttpStatus.BAD_REQUEST);
       }

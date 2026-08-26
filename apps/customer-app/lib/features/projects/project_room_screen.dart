@@ -10,6 +10,7 @@ class ProjectRoom {
   final List<Map<String, dynamic>> orders;
   final List<Map<String, dynamic>> warranties;
   final List<Map<String, dynamic>> activity;
+  final List<Map<String, dynamic>> comments;
   final Map<String, dynamic> summary;
 
   ProjectRoom({
@@ -19,6 +20,7 @@ class ProjectRoom {
     required this.orders,
     required this.warranties,
     required this.activity,
+    required this.comments,
     required this.summary,
   });
 
@@ -33,6 +35,8 @@ class ProjectRoom {
     warranties: (json['warranties'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>(),
     activity: (json['activity'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>(),
+    comments: (json['comments'] as List<dynamic>? ?? [])
         .cast<Map<String, dynamic>>(),
     summary: json['summary'] ?? {},
   );
@@ -82,6 +86,14 @@ class ProjectsRepository {
       body: {'reason': reason},
     );
   }
+
+  Future<void> addComment(String projectId, String body) async {
+    await auth.authedRequest(
+      'POST',
+      '/me/projects/$projectId/comments',
+      body: {'body': body},
+    );
+  }
 }
 
 // ADR-0036 — حالة تنفيذ المرحلة بالعربي (كانت بتتعرض خام: pending/in_progress).
@@ -102,10 +114,13 @@ const milestoneApprovalLabelsAr = {
 const projectTabHints = {
   'milestones':
       'المشروع مقسّم مراحل، كل مرحلة بسعرها. أول ما الإدارة تسلّم مرحلة هتقدر تراجعها وتوافق عليها من هنا.',
-  'quotes': 'عروض الأسعار اللي الإدارة بتبعتهالك. راجع التفاصيل ووافق على العرض المناسب.',
-  'orders': 'زيارات الفنيين المرتبطة بالمشروع ده — بتظهر هنا أول ما الإدارة تجدولها.',
+  'quotes':
+      'عروض الأسعار اللي الإدارة بتبعتهالك. راجع التفاصيل ووافق على العرض المناسب.',
+  'orders':
+      'زيارات الفنيين المرتبطة بالمشروع ده — بتظهر هنا أول ما الإدارة تجدولها.',
   'warranties': 'الضمانات الصادرة على شغل المشروع، بمدتها وتاريخ انتهائها.',
-  'activity': 'كل حاجة حصلت في المشروع بالترتيب الزمني — سجل كامل تقدر ترجعله في أي وقت.',
+  'activity':
+      'كل حاجة حصلت في المشروع بالترتيب الزمني — سجل كامل تقدر ترجعله في أي وقت.',
 };
 
 const projectStatusLabelsAr = {
@@ -145,7 +160,9 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
   bool _loading = true;
   // قفل أثناء إرسال قرار المرحلة — يمنع دوسة مزدوجة على "وافق".
   bool _busy = false;
+  bool _sendingComment = false;
   String? _error;
+  final _commentController = TextEditingController();
 
   @override
   void initState() {
@@ -157,6 +174,7 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _commentController.dispose();
     super.dispose();
   }
 
@@ -196,14 +214,36 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
                 Tab(text: 'العروض'),
                 Tab(text: 'الطلبات'),
                 Tab(text: 'الضمانات'),
-                Tab(text: 'السجل'),
+                Tab(text: 'التحديثات'),
               ],
             ),
           ),
           body: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-              ? Center(child: Text(_error!))
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 12),
+                        FilledButton.tonalIcon(
+                          onPressed: () {
+                            setState(() {
+                              _loading = true;
+                              _error = null;
+                            });
+                            _load();
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('حاول تاني'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
               : Column(
                   children: [
                     _buildProjectOverview(),
@@ -396,7 +436,10 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
             // كومنتات الإدارة المرئية بس — الباك-إند بيفلتر الداخلي في SQL (ADR-0036).
             if (comments.isNotEmpty) ...[
               const Divider(height: 20),
-              Text('تحديثات الإدارة', style: Theme.of(context).textTheme.labelLarge),
+              Text(
+                'تحديثات الإدارة',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
               const SizedBox(height: 4),
               ...comments.map((raw) {
                 final c = Map<String, dynamic>.from(raw as Map);
@@ -476,7 +519,11 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
       if (approve) {
         await _repository.approveMilestone(widget.projectId, milestoneId);
       } else {
-        await _repository.rejectMilestone(widget.projectId, milestoneId, reason);
+        await _repository.rejectMilestone(
+          widget.projectId,
+          milestoneId,
+          reason,
+        );
       }
       await _load();
       if (!mounted) return;
@@ -489,9 +536,9 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(err.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(err.toString())));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -662,25 +709,26 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
         _tabHint('orders'),
         Expanded(
           child: ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: orders.length,
-      itemBuilder: (context, i) {
-        final o = orders[i];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: ListTile(
-            title: Text(o['order_number']?.toString() ?? ''),
-            subtitle: Text(o['status']?.toString() ?? ''),
-            trailing: Text(
-              '${((o['total_amount_cents'] as num?) ?? 0) / 100} ج.م',
-            ),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => OrderDetailScreen(orderId: o['id'].toString()),
-              ),
-            ),
-          ),
-        );
+            padding: const EdgeInsets.all(16),
+            itemCount: orders.length,
+            itemBuilder: (context, i) {
+              final o = orders[i];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(o['order_number']?.toString() ?? ''),
+                  subtitle: Text(o['status']?.toString() ?? ''),
+                  trailing: Text(
+                    '${((o['total_amount_cents'] as num?) ?? 0) / 100} ج.م',
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          OrderDetailScreen(orderId: o['id'].toString()),
+                    ),
+                  ),
+                ),
+              );
             },
           ),
         ),
@@ -715,19 +763,19 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
         _tabHint('warranties'),
         Expanded(
           child: ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: warranties.length,
-      itemBuilder: (context, index) {
-        final warranty = warranties[index];
-        return Card(
-          child: ListTile(
-            leading: const Icon(Icons.verified_user_outlined),
-            title: Text(warranty['name_ar']?.toString() ?? 'ضمان'),
-            subtitle: Text(
-              'ساري حتى ${DateTime.parse(warranty['expires_at'].toString()).toLocal().toString().substring(0, 10)}',
-            ),
-          ),
-        );
+            padding: const EdgeInsets.all(16),
+            itemCount: warranties.length,
+            itemBuilder: (context, index) {
+              final warranty = warranties[index];
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.verified_user_outlined),
+                  title: Text(warranty['name_ar']?.toString() ?? 'ضمان'),
+                  subtitle: Text(
+                    'ساري حتى ${DateTime.parse(warranty['expires_at'].toString()).toLocal().toString().substring(0, 10)}',
+                  ),
+                ),
+              );
             },
           ),
         ),
@@ -737,23 +785,123 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
 
   Widget _buildActivity() {
     final activity = _room?.activity ?? [];
-    if (activity.isEmpty) {
-      return const Center(child: Text('لسه مفيش نشاط مسجل'));
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: activity.length,
-      itemBuilder: (context, index) {
-        final item = activity[index];
-        return ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.history, size: 18)),
-          title: Text(_activityLabel(item['action']?.toString() ?? '')),
-          subtitle: Text(
-            '${item['actor_name'] ?? 'النظام'} · ${_date(item['created_at'])}',
+    final comments = _room?.comments ?? [];
+    return Column(
+      children: [
+        _tabHint('activity'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _commentController,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'اكتب رسالة للإدارة',
+                    hintText: 'استفسار أو تحديث يخص المشروع…',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                onPressed: _sendingComment ? null : _sendComment,
+                tooltip: 'إرسال',
+                icon: _sendingComment
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send),
+              ),
+            ],
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'رسائل المشروع',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 6),
+              if (comments.isEmpty)
+                const Text('مفيش رسائل لسه')
+              else
+                ...comments.map(
+                  (comment) => Card(
+                    child: ListTile(
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.chat_bubble_outline, size: 18),
+                      ),
+                      title: Text(comment['body']?.toString() ?? ''),
+                      subtitle: Text(
+                        '${comment['author_name'] ?? 'الإدارة'} · ${_date(comment['created_at'])}',
+                      ),
+                    ),
+                  ),
+                ),
+              const Divider(height: 28),
+              Text(
+                'سجل التنفيذ',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              if (activity.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text('لسه مفيش نشاط مسجل'),
+                )
+              else
+                ...activity.map(
+                  (item) => ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.history, size: 18),
+                    ),
+                    title: Text(
+                      _activityLabel(item['action']?.toString() ?? ''),
+                    ),
+                    subtitle: Text(
+                      '${item['actor_name'] ?? 'النظام'} · ${_date(item['created_at'])}',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
+  }
+
+  Future<void> _sendComment() async {
+    final body = _commentController.text.trim();
+    if (body.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('اكتب الرسالة الأول')));
+      return;
+    }
+    setState(() => _sendingComment = true);
+    try {
+      await _repository.addComment(widget.projectId, body);
+      _commentController.clear();
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('وصلت رسالتك للإدارة')));
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _sendingComment = false);
+    }
   }
 }
 
