@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
   AdminServiceCategoryResponseDto,
@@ -18,7 +18,7 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
@@ -105,7 +105,8 @@ interface Technician360Response {
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
-  const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/technicians');
 
   const [detail, setDetail] = useState<AdminTechnicianDetailResponseDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -446,7 +447,7 @@ export default function TechnicianDetailPage() {
           </>
         }
         actions={
-          <Button variant="outline" onClick={() => router.push('/technicians')}>
+          <Button variant="outline" onClick={goBack}>
             رجوع للقايمة
           </Button>
         }

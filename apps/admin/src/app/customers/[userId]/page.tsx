@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CreditLoyaltyBody, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Button } from '@/components/ui/button';
@@ -66,6 +66,8 @@ export default function CustomerDetailPage() {
   const { userId } = useParams<{ userId: string }>();
   const { isLoading, authedFetch } = useAuth();
   const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/customers');
 
   const [detail, setDetail] = useState<AdminCustomerResponseDto | null>(null);
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
@@ -190,7 +192,7 @@ export default function CustomerDetailPage() {
 
   return (
     <AppShell>
-      <Button variant="ghost" size="sm" className="mb-4" onClick={() => router.push('/customers')}>
+      <Button variant="ghost" size="sm" className="mb-4" onClick={goBack}>
         رجوع للقايمة
       </Button>
 

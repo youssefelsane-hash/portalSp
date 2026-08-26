@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import type { SecurityEventDto, SecurityEventNoteDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,8 @@ export default function SecurityEventDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
   const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/security-center');
 
   const [event, setEvent] = useState<SecurityEventDto | null>(null);
   const [notes, setNotes] = useState<SecurityEventNoteDto[] | null>(null);
@@ -113,7 +115,7 @@ export default function SecurityEventDetailPage() {
           </>
         }
         actions={
-          <Button variant="outline" onClick={() => router.push('/security-center')}>
+          <Button variant="outline" onClick={goBack}>
             رجوع لمركز الأمان
           </Button>
         }

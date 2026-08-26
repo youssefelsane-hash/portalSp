@@ -25,7 +25,7 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
@@ -68,6 +68,8 @@ export default function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
   const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/catalog');
 
   const [service, setService] = useState<AdminServiceResponseDto | null>(null);
   const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
@@ -468,7 +470,7 @@ export default function ServiceDetailPage() {
       <PageHeader
         title={service.name_ar}
         actions={
-          <Button variant="outline" onClick={() => router.push('/catalog')}>
+          <Button variant="outline" onClick={goBack}>
             رجوع للكتالوج
           </Button>
         }
