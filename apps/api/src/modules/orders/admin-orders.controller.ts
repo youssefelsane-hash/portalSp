@@ -67,6 +67,16 @@ export class AdminOrdersController {
     };
   }
 
+  /**
+   * حصص الطاقم من مستحقات الشغلانة (ADR-0040، docs/08 §63.أ3) — «وينزل في بروفايل كل واحد عند
+   * الأدمن… وعند الأدمن يكون ظهر تفاصيل كتير بحيث يعرف يتراك ويتبع أي شيء».
+   */
+  @Get(':id/earning-shares')
+  async listEarningShares(@Param('id', ParseUUIDPipe) id: string) {
+    const shares = await this.adminOrdersService.listEarningShares(id);
+    return shares;
+  }
+
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent } =

@@ -32,6 +32,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت تصحيح المحفظة اليدوي الجديد (docs/08 §20 بند 5): كانت
 // فجوة حقيقية — AdminWalletController كان قراءة بس، صفر مسار لأدمن/مالية يصحّح رصيد فني (مثلاً
@@ -159,6 +160,7 @@ describe('PaymentsService.adminAdjustWallet() — تصحيح محفظة يدوي
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   });
 

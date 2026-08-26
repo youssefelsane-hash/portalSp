@@ -45,6 +45,7 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { BookingMode } from './entities/order.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * Script 7 Phase 7 — بَقّة حقيقية اتلقطت: وضع "طوارئ" (docs/06) معناه استجابة فورية بالتعريف
@@ -215,6 +216,7 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

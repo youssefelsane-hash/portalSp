@@ -7,6 +7,7 @@ import { Refund, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import type { PaymentProvider, RefundResult } from './gateways/payment-provider.interface';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح بَقّة distributed-transaction حقيقية (docs/08 §19
 // بند 4): كان provider.refund() (نداء خارجي حقيقي للبوابة) بينفّذ جوّه DB transaction واحدة مع
@@ -194,6 +195,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       { getProvider: () => provider } as never, // paymentProviders — الـfake provider بتاعنا
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   }
 

@@ -28,6 +28,7 @@ import { SettingsService } from '../settings/settings.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح البَقّة الحرجة اللي ADR-0015 وثّقها (docs/08 §19
 // بند 2 + اكتشاف عاجل): طلب مدفوع مسبقًا (كارت/InstaPay قبل التوزيع) كان بيفضل عالق في
@@ -209,6 +210,7 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       {} as never, // paymentProviders — مش متنادى (collectCash بس هنا)
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   });
 

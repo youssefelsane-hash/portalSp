@@ -1,5 +1,6 @@
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment.entity';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 describe('PaymentsService — unknown provider-registration outcome', () => {
   const makeService = (options?: { existingPayment?: Payment; createPayment?: () => Promise<never> }) => {
@@ -34,6 +35,7 @@ describe('PaymentsService — unknown provider-registration outcome', () => {
       paymentProviders as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     return { service, paymentRepository, provider, paymentProviders };
   };

@@ -44,6 +44,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * ADR-0026 (docs/08 §42 Phase A.1) — أول قدرة دفع لكل خدمة على محرك الحجز الموحّد: خدمة
@@ -221,6 +222,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

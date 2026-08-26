@@ -44,6 +44,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * Script 7 Phase 5 — بَقّة حقيقية اتلقطت في `OrdersService.create()`: تعليق DTO نفسه
@@ -238,6 +239,7 @@ describe('OrdersService.create() — standard_data_id/requested_units لازم �
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

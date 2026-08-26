@@ -49,6 +49,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * الدورة الكاملة حي ضد Postgres حقيقي: خطة متكررة → sweep → طلب **عادي** حقيقي عبر
@@ -234,6 +235,7 @@ describe('RecurringOrdersService — توليد طلبات عادية عبر Ord
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

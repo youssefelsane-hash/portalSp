@@ -44,6 +44,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * ADR-0028 (docs/08 §42 Phase A.2) — قدرة service.allows_date_range_booking. الاختبار ده بيغطي:
@@ -221,6 +222,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

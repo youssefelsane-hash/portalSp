@@ -45,6 +45,7 @@ import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * ADR-0027 (docs/08 §42 Phase A.3) — سياسة إيداع لكل خدمة. الاختبار ده بيغطي:
@@ -234,6 +235,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

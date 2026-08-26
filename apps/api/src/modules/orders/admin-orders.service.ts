@@ -218,6 +218,33 @@ export class AdminOrdersService {
     return summary;
   }
 
+  /**
+   * حصص الطاقم لطلب واحد مع أسماء الفنيين (ADR-0040). استعلام واحد بـjoin — الشاشة محتاجة الاسم
+   * مش الـid.
+   */
+  async listEarningShares(orderId: string): Promise<
+    {
+      technician_id: string;
+      full_name: string;
+      participant_role: string;
+      technician_level: string;
+      share_weight: string;
+      pool_cents: number;
+      share_cents: number;
+    }[]
+  > {
+    return this.teamMembers.manager.query(
+      `SELECT oes.technician_id, u.full_name, oes.participant_role, oes.technician_level,
+              oes.share_weight, oes.pool_cents, oes.share_cents
+         FROM order_earning_shares oes
+         JOIN technician_profiles tp ON tp.id = oes.technician_id
+         JOIN users u ON u.id = tp.user_id
+        WHERE oes.order_id = $1 AND oes.deleted_at IS NULL
+        ORDER BY oes.share_cents DESC`,
+      [orderId],
+    );
+  }
+
   private async findOrThrow(orderId: string): Promise<Order> {
     const order = await this.orders.findOne({ where: { id: orderId } });
     if (!order) {

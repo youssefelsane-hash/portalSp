@@ -56,6 +56,7 @@ import { ServicePricingRule, PricingRuleType } from '../pricing/entities/service
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { Installment } from '../installments/entities/installment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * تكامل السلسلة الكاملة (docs/01B §22) — Price Engine → Booking → Snapshot:
@@ -228,6 +229,7 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       {} as never,
       {} as never,
       dataSource.getRepository(Installment),
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

@@ -5,6 +5,7 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment
 import { Refund, RefundMethod, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — docs/08 §20 بند 11: PaymentsService.getFinancialSummaryForOrder()
 // جديدة (كانت فجوة عرض حقيقية: platform_commission_cents/technician_earning_cents محسوبين
@@ -121,6 +122,7 @@ describe('PaymentsService.getFinancialSummaryForOrder() — الملخص الم�
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   });
 

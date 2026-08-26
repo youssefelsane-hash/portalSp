@@ -12,6 +12,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بند 6/§20.7 من تدقيق التسوية المالية: عميل بيلغي بنفسه (مش
 // النظام) طلب مدفوع مسبقًا إلكترونيًا (كارت/InstaPay، ADR-0013) قبل ما فني يتعيّن أو بعده قبل
@@ -160,6 +161,7 @@ describe('OrdersService.cancel() — استرداد تلقائي لطلب مدف
       { getProvider: () => makeFakeProvider() } as never, // paymentProviders
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
 
     // OrdersService.cancel() الحقيقية — بس التبعيات اللي فعليًا بتتنادى في المسار ده (طلب بلا

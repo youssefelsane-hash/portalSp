@@ -46,6 +46,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * "كرّر الحجز ده" (migration 0176) — POST /orders مع repeat_frequency لازم ينتج:
@@ -242,6 +243,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

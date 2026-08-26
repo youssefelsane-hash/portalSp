@@ -7,6 +7,7 @@ import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — تكملة InstaPay اليدوي (ADR-0013 §7، docs/08 §163):
 // confirmInstaPayTransferByCustomer() (العميل يقول "أنا حوّلت") + rejectInstaPayPayment()
@@ -168,6 +169,7 @@ describe('PaymentsService — تأكيد العميل ورفض الأدمن لت
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   });
 

@@ -36,6 +36,7 @@ import { City } from '../geo/entities/city.entity';
 import { Area } from '../geo/entities/area.entity';
 import { ServiceZone } from '../geo/entities/service-zone.entity';
 import { Address } from '../customers/entities/address.entity';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 /**
  * Script 7 Phase 35 — Financial Reconciliation Test. الأسئلة الحاكمة من تعليمات الـaudit الأصلية
@@ -249,6 +250,7 @@ describe('التسوية المالية — سلسلة تسوية/استرداد
       fakePaymentProviders,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
 
     payoutsService = new PayoutsService(

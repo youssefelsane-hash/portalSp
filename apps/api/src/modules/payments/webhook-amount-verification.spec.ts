@@ -6,6 +6,7 @@ import { Payment, PaymentGatewayStatus, PaymentMethod } from './entities/payment
 import { Refund } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent, WebhookProcessingStatus } from './entities/webhook-event.entity';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح بَقّة أمنية/مالية حقيقية (مراجعة أمان شاملة
 // 2026-08-13، بند P0-7 في docs/12): finalizeGatewayWebhook() كانت بتثق في succeeded=true من
@@ -63,6 +64,7 @@ describe('PaymentsService.finalizeGatewayWebhook() — تحقق مبلغ الـw
       {} as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

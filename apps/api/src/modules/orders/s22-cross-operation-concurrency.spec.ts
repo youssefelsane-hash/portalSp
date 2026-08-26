@@ -41,6 +41,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — تزامن/أمان عبر العمليات (docs/08 §22 بند 31-32). بيغطي بَقّتين
 // حقيقيتين اتلقطتا وانصلحتا أثناء بناء الاختبار ده نفسه (مش سيناريو نظري): "double admin edit"
@@ -290,6 +291,7 @@ describe('§22 بند 31-32: تزامن عبر العمليات + IDOR للـend
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
 
     const supportService = new SupportService(
