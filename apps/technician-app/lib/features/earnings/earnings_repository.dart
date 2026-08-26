@@ -33,4 +33,17 @@ class EarningsRepository {
     });
     return Payout.fromJson(data!);
   }
+
+  /// كشف مستحقات الشهر (docs/08 §61.1). من غير `month` السيرفر بيرجّع الشهر الحالي.
+  Future<MonthlyStatement> fetchMonthlyStatement({String? month}) async {
+    final path = month == null ? '/technician/earnings/statement' : '/technician/earnings/statement?month=$month';
+    final data = await auth.authedRequest('GET', path);
+    return MonthlyStatement.fromJson(data!);
+  }
+
+  /// الشهور اللي فيها شغل مقفول (الأحدث الأول) — لمنتقي الشهر.
+  Future<List<String>> fetchAvailableMonths() async {
+    final data = await auth.authedRequest('GET', '/technician/earnings/months');
+    return ((data?['months'] as List<dynamic>?) ?? []).map((m) => m as String).toList();
+  }
 }

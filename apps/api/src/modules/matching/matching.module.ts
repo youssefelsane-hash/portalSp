@@ -16,6 +16,7 @@ import { OrderDispatchListener } from './order-dispatch.listener';
 import { OrderRematchListener } from './order-rematch.listener';
 import { TechnicianOrdersController } from './technician-orders.controller';
 import { OrderAssignment } from './entities/order-assignment.entity';
+import { PricingModule } from '../pricing/pricing.module';
 
 @Module({
   // كانت الوحدة دي بتستورد OrdersModule بالكامل — بَقّة حقيقية اتلقطت واتصلحت (تفاصيل في
@@ -34,6 +35,12 @@ import { OrderAssignment } from './entities/order-assignment.entity';
     // — عمداً مش OrdersModule زي التحذير فوق. CustomersModule بتاعته controller مختلف تماماً
     // (/addresses) ومفيش أي استيراد لـ OrdersModule جواها، فمفيش نفس فخ ترتيب التسجيل.
     CustomersModule,
+    // docs/08 §60.3 — فرق "الفني المميّز" بعد التعيين التلقائي (LevelPremiumService).
+    // **بَقّة إقلاع حقيقية اتلقطت لما شغّلت التطبيق فعليًا**: الحقن اتضاف في MatchingService
+    // من غير الاستيراد ده، فـ`npx nest build` و`npx jest` عدّوا نضاف (الاتنين مابيبنوش حاوية
+    // الـDI الحقيقية) والتطبيق كان بيموت وقت الإقلاع بـ"Nest can't resolve dependencies".
+    // الدرس: أي حقن جديد في خدمة لازم يتأكد بإقلاع فعلي، مش بالبناء والاختبارات بس.
+    PricingModule,
     BullModule.registerQueue({ name: MATCHING_ROUNDS_QUEUE }, { name: MATCHING_DISPATCH_QUEUE }),
   ],
   controllers: [TechnicianOrdersController],

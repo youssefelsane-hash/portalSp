@@ -36,6 +36,7 @@ import { TechnicianActivityService } from './technician-activity.service';
 import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
 import { ListCategoryOpsQueryDto } from './dto/list-category-ops-query.dto';
 import { AdminTechnician360Service } from './admin-technician-360.service';
+import { TechnicianEarningsService } from '../payments/technician-earnings.service';
 
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
@@ -52,6 +53,9 @@ export class AdminTechniciansController {
     private readonly technician360Service: AdminTechnician360Service,
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
+    // ADR-0038 — آخر بند عمدًا (نفس فلسفة باقي الإضافات المتأخرة): أقل بلاست-رديوس على
+    // السبيكات اللي بتبني الكولر بـpositional args.
+    private readonly earningsService: TechnicianEarningsService,
   ) {}
 
   @Get()
@@ -226,6 +230,21 @@ export class AdminTechniciansController {
       occupied_from: description.occupiedFrom,
       occupied_to: description.occupiedTo,
     };
+  }
+
+  /**
+   * كشف مستحقات الفني الشهري من جهة الأدمن (docs/08 §61.1، ADR-0038) — **نفس الخدمة بالحرف**
+   * اللي بيشوفها الفني في تطبيقه، عشان الرقمين ما يختلفوش أبدًا. بلا RequirePermission مخصوصة:
+   * عرض بس، نفس مستوى `GET :id/360`.
+   */
+  @Get(':id/earnings/statement')
+  async earningsStatement(@Param('id', ParseUUIDPipe) id: string, @Query('month') month?: string) {
+    return this.earningsService.getMonthlyStatement(id, month ?? TechnicianEarningsService.currentMonthCairo());
+  }
+
+  @Get(':id/earnings/months')
+  async earningsMonths(@Param('id', ParseUUIDPipe) id: string) {
+    return { months: await this.earningsService.listAvailableMonths(id) };
   }
 
   // طابور مراجعة تصريحات المهارات الذاتية (Script 4 §2-7) — راجع فوق تعليق نفس القسم في

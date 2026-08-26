@@ -7,6 +7,7 @@ import '../../core/biometric_auth_service.dart';
 import '../onboarding/models.dart';
 import '../onboarding/onboarding_repository.dart';
 import '../preferred_crew/preferred_crew_screen.dart';
+import '../earnings/monthly_statement_screen.dart';
 
 // بروفايلي — نوع الفني + "معاه مساعد؟" (docs/06 §3.7-§3.8) — كانت فجوة موثّقة صراحة: الباك-إند
 // بيدعم طلب ربط مساعد بكود موظفه من زمان (الإدارة توافق بعد كده)، بس مفيش شاشة في التطبيق كانت
@@ -237,6 +238,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       : const Text('فك الربط'),
                                 ),
                             ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // «مستحقاتي» (docs/08 §61.1، ADR-0038) — حساب الشهر الحالي والشهور
+                      // السابقة، محسوب أوتوماتيك من الباك-إند. متحطّ فوق باقي البنود عمدًا:
+                      // ده أكتر سؤال بيشغل الفني.
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.account_balance_wallet_outlined),
+                          title: const Text('مستحقاتي'),
+                          subtitle: const Text('حساب الشهر الحالي والشهور اللي فاتت، بتفاصيل كل شغلانة'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => MonthlyStatementScreen(auth: context.read<AuthRepository>())),
                           ),
                         ),
                       ),

@@ -24,11 +24,7 @@ const ownerScenario: OrderRevenueComponents = {
 describe('أساس العمولة (ADR-0037)', () => {
   it('بلاغ المالك: الضمان بقى 100% للشركة، والفني بياخد على سعر الشغل بس', () => {
     const totalAmountCents = 120_000;
-    const { commissionableBaseCents } = computeCommissionableBase(
-      ownerScenario,
-      DEFAULT_COMMISSION_BASE_POLICY,
-      totalAmountCents,
-    );
+    const { commissionableBaseCents } = computeCommissionableBase(ownerScenario, DEFAULT_COMMISSION_BASE_POLICY);
     expect(commissionableBaseCents).toBe(100_000);
 
     const split = splitOrderRevenue({ totalAmountCents, commissionableBaseCents, commissionRatePercentage: 15 });
@@ -51,7 +47,7 @@ describe('أساس العمولة (ADR-0037)', () => {
     expect(parts.levelPremiumCents).toBe(20_000);
     expect(parts.zoneSurgeCents).toBe(12_000);
 
-    const { commissionableBaseCents } = computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY, 132_000);
+    const { commissionableBaseCents } = computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY);
     // 1000 (شغل) + 200 (مستوى الفني) = 1200 — الـ120ج بتاعت التضخم بره الوعاء.
     expect(commissionableBaseCents).toBe(120_000);
   });
@@ -70,37 +66,44 @@ describe('أساس العمولة (ADR-0037)', () => {
 
   it('رسوم الطوارئ بره الوعاء افتراضيًا، وبتدخل لو الأدمن غيّر السياسة', () => {
     const components: OrderRevenueComponents = { ...ownerScenario, warrantyPriceCents: 0, emergencySurchargeCents: 30_000 };
-    expect(computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY, 130_000).commissionableBaseCents).toBe(100_000);
+    expect(computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY).commissionableBaseCents).toBe(100_000);
     expect(
-      computeCommissionableBase(
-        components,
-        { ...DEFAULT_COMMISSION_BASE_POLICY, includeEmergencySurcharge: true },
-        130_000,
-      ).commissionableBaseCents,
+      computeCommissionableBase(components, { ...DEFAULT_COMMISSION_BASE_POLICY, includeEmergencySurcharge: true })
+        .commissionableBaseCents,
     ).toBe(130_000);
   });
 
-  it('الخصم بيتحمّله نصيب الشركة افتراضيًا — الفني بياخد على سعر الشغل الكامل', () => {
-    const components: OrderRevenueComponents = { ...ownerScenario, warrantyPriceCents: 0, discountCents: 20_000 };
-    const totalAmountCents = 80_000;
+  it('بلاغ المالك (ADR-0038): كوبون 50% — الفني بياخد مستحقه من السعر الأصلي، مش من اللي العميل دفعه', () => {
+    // خدمة 1000، كوبون 50% → العميل يدفع 500. عمولة 15%.
+    const components: OrderRevenueComponents = { ...ownerScenario, warrantyPriceCents: 0, discountCents: 50_000 };
+    const totalAmountCents = 50_000;
 
-    const { commissionableBaseCents } = computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY, totalAmountCents);
-    // الوعاء اتقصّ على الإجمالي — مينفعش نصيب الفني يزيد عن اللي العميل دفعه.
-    expect(commissionableBaseCents).toBe(80_000);
+    const { commissionableBaseCents } = computeCommissionableBase(components, DEFAULT_COMMISSION_BASE_POLICY);
+    // الوعاء = 1000 كامل، **مش** 500. الخصم تكلفة تسويق على المنصة.
+    expect(commissionableBaseCents).toBe(100_000);
 
-    const withFlag = computeCommissionableBase(
-      components,
-      { ...DEFAULT_COMMISSION_BASE_POLICY, discountReducesTechnicianShare: true },
-      totalAmountCents,
-    );
-    expect(withFlag.commissionableBaseCents).toBe(80_000);
+    const split = splitOrderRevenue({ totalAmountCents, commissionableBaseCents, commissionRatePercentage: 15 });
+    expect(split.technicianEarningCents).toBe(85_000);
+    // نصيب المنصة سالب — دفعت 350ج من جيبها. رقم صحيح ومقصود، مش خطأ بيانات.
+    expect(split.platformCommissionCents).toBe(-35_000);
+    // الثابت الجبري لسه محفوظ، وده اللي بيخلّي حركة المحفظة تشتغل صح بلا أي تعديل.
+    expect(split.technicianEarningCents + split.platformCommissionCents).toBe(totalAmountCents);
+  });
+
+  it('لو الأدمن شغّل discount_reduces_technician_share صراحةً: الخصم بيتخصم من الوعاء', () => {
+    // المفتاح ده موجود للمرونة بس تشغيله بيخالف قرار المالك في ADR-0038 صراحةً.
+    const components: OrderRevenueComponents = { ...ownerScenario, warrantyPriceCents: 0, discountCents: 50_000 };
+    const withFlag = computeCommissionableBase(components, {
+      ...DEFAULT_COMMISSION_BASE_POLICY,
+      discountReducesTechnicianShare: true,
+    });
+    expect(withFlag.commissionableBaseCents).toBe(50_000);
   });
 
   it('الثابت المحاسبي: نصيب الفني + نصيب الشركة = الإجمالي، في كل الحالات', () => {
     const cases = [
       { totalAmountCents: 120_000, commissionableBaseCents: 100_000, commissionRatePercentage: 15 },
       { totalAmountCents: 0, commissionableBaseCents: 0, commissionRatePercentage: 15 },
-      { totalAmountCents: 50_000, commissionableBaseCents: 999_999, commissionRatePercentage: 0 },
       { totalAmountCents: 33_333, commissionableBaseCents: 33_333, commissionRatePercentage: 33 },
       { totalAmountCents: 100_000, commissionableBaseCents: 100_000, commissionRatePercentage: 100 },
     ];
@@ -108,7 +111,6 @@ describe('أساس العمولة (ADR-0037)', () => {
       const { technicianEarningCents, platformCommissionCents } = splitOrderRevenue(input);
       expect(technicianEarningCents + platformCommissionCents).toBe(input.totalAmountCents);
       expect(technicianEarningCents).toBeGreaterThanOrEqual(0);
-      expect(platformCommissionCents).toBeGreaterThanOrEqual(0);
     }
   });
 });

@@ -53,9 +53,13 @@ import { TechnicianCertificate } from './entities/technician-certificate.entity'
 import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechnicianScheduleSlot } from './entities/technician-schedule-slot.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
+import { TechnicianEarningsModule } from '../payments/technician-earnings.module';
 
 @Module({
   imports: [
+    // كشف مستحقات الفني الشهري (ADR-0038) — نفس الخدمة اللي بيستخدمها تطبيق الفني بالحرف،
+    // عشان رقم الأدمن ورقم الفني ما يختلفوش أبدًا.
+    TechnicianEarningsModule,
     TypeOrmModule.forFeature([
       TechnicianProfile,
       TechnicianDocument,

@@ -6,6 +6,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TechniciansModule } from '../technicians/technicians.module';
+import { TechnicianEarningsModule } from './technician-earnings.module';
 import { User } from '../auth/entities/user.entity';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatusHistory } from '../orders/entities/order-status-history.entity';
@@ -47,6 +48,8 @@ import { InstallmentCollectionService } from './installment-collection.service';
 
 @Module({
   imports: [
+    // كشف مستحقات الفني الشهري (ADR-0038) — موديول مستقل عشان الأدمن يستورده كمان بلا دايرة.
+    TechnicianEarningsModule,
     TypeOrmModule.forFeature([
       Wallet,
       WalletTransaction,
