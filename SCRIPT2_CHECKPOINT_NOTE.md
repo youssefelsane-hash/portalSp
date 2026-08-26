@@ -109,8 +109,16 @@
   technician onboarding documents, and before/after order photos therefore survive a local IP or
   deployment-origin change. Focused admin and Flutter URL tests pass 8/8; admin typecheck and
   changed-file analysis for both mobile apps pass with no issues.
-- Next task: continue the remaining screenshot/new-route review after this project checkpoint,
-  prioritizing visible warranty/project browser flows not already covered by the focused matrix.
+- Completed: technician order acceptance now returns the same complete financial/customer/service
+  projection as the canonical detail route. The mobile app no longer falls back to a false zero
+  earning immediately after accepting either a normal order or a work opportunity. Opportunity
+  cards and push notifications now show the order's real scheduled day/date instead of claiming
+  every offer is today. Focused API tests pass 8/8, the real PostgreSQL opportunity suite passes
+  10/10 with open-handle detection, Flutter tests pass 7/7, changed-file analysis and the API build
+  pass, and a real Nest startup completed without dependency-injection errors.
+- Next task: make the customer homepage search compact and focus-expandable with admin-controlled
+  explanatory copy, then add durable customer/technician notifications for project and admin
+  workflow actions.
 
 ---
 
