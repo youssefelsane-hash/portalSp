@@ -70,6 +70,18 @@ export function formatEligibleTechniciansForAdmin(result: {
   };
 }
 
+/** ملخّص طاقم طلب واحد لصفحة القايمة (docs/08 §63.ب5). */
+export interface OrderCrewSummary {
+  leaderTechnicianId: string | null;
+  leaderName: string | null;
+  members: { technicianId: string; fullName: string; memberType: 'team_member' | 'assistant' }[];
+  /** 0 = مش مطلوب طاقم (طلب فردي). */
+  requiredTechnicians: number;
+  requiredAssistants: number;
+  crewComplete: boolean;
+  isTeamBooking: boolean;
+}
+
 @Injectable()
 export class AdminOrdersService {
   constructor(
@@ -107,14 +119,103 @@ export class AdminOrdersService {
       where.placedAt = LessThanOrEqual(new Date(query.to));
     }
 
-    const [items, total] = await this.orders.findAndCount({
-      where,
-      order: { placedAt: 'DESC' },
-      skip: (page - 1) * perPage,
-      take: perPage,
-    });
+    // docs/08 §63.ب5 — بلاغ المالك: «الطلبات بتبقى مترتبة بطريقة شبه عشوائية».
+    //
+    // السبب الحقيقي: الترتيب كان `placedAt: 'DESC'` بس، و`placed_at` عمود **nullable**، وPostgres
+    // بيحط NULL **الأول** في DESC افتراضيًا — فأي طلب من غير `placed_at` كان بيقفز فوق القايمة كلها.
+    // وكمان مكانش فيه tie-break، فالطلبات اللي ليها نفس اللحظة كان ترتيبها غير محدد بين استعلام
+    // والتاني (وده اللي بيدّي إحساس "عشوائي" حتى من غير NULLs).
+    //
+    // الإصلاح: `COALESCE(placed_at, created_at)` — الطلب اللي لسه ما اتسجّلش وقت طلبه بيترتّب بوقت
+    // إنشائه بدل ما يقفز فوق أو يغرق تحت، + `id DESC` كـtie-break حتمي (uuid v7 مرتّب زمنيًا أصلاً).
+    const qb = this.orders
+      .createQueryBuilder('o')
+      .where(where)
+      .skip((page - 1) * perPage)
+      .take(perPage);
+
+    if (query.sort === 'soonest') {
+      // "اللي تنفيذه قرّب" — الأقرب موعدًا الأول. الطلبات بلا موعد محدد بتروح الآخر (NULLS LAST)
+      // لأن السؤال هنا حرفيًا "إيه اللي هيتنفّذ قريب".
+      qb.orderBy('o.scheduled_at', 'ASC', 'NULLS LAST').addOrderBy('o.id', 'DESC');
+    } else {
+      qb.orderBy('COALESCE(o.placed_at, o.created_at)', 'DESC').addOrderBy('o.id', 'DESC');
+    }
+
+    const [items, total] = await qb.getManyAndCount();
 
     return { items, meta: { page, per_page: perPage, total } };
+  }
+
+  /**
+   * ملخّص الطاقم لكل طلب في صفحة القايمة (docs/08 §63.ب5 — طلب مالك صريح: «يظهر إيه معلومات
+   * جنبها هل الفريق كامل، مين اللي أخد الشغلانة دي، ومعاه مين»).
+   *
+   * **استعلام واحد لكل الصفحة**، مش استعلام لكل طلب — القايمة بتعرض 20 صف، وN+1 هنا كان هيبقى
+   * 20 استعلام إضافي على أكتر شاشة بتتفتح في اللوحة.
+   *
+   * القائد بييجي من `orders.technician_id` (مش صف في `order_team_members` — نفس التوصيف الموجود
+   * في `order-team.service.ts`)، والباقي من `order_team_members`. `crewComplete` بيستخدم نفس
+   * `computeCrewComposition()` اللي تطبيق الفني وصفحة التفاصيل بيستخدموها — مصدر حقيقة واحد.
+   */
+  async crewSummaryForOrders(orders: Order[]): Promise<Map<string, OrderCrewSummary>> {
+    const summary = new Map<string, OrderCrewSummary>();
+    if (orders.length === 0) return summary;
+
+    const orderIds = orders.map((o) => o.id);
+    const leaderIds = orders.map((o) => o.technicianId).filter((id): id is string => id !== null);
+
+    interface MemberRow {
+      order_id: string;
+      technician_id: string;
+      member_type: string;
+      full_name: string;
+    }
+    const memberRows = await this.teamMembers.manager.query<MemberRow[]>(
+      `SELECT otm.order_id, otm.technician_id, otm.member_type, u.full_name
+       FROM order_team_members otm
+       JOIN technician_profiles tp ON tp.id = otm.technician_id
+       JOIN users u ON u.id = tp.user_id
+       WHERE otm.order_id = ANY($1::uuid[])
+       ORDER BY otm.created_at ASC`,
+      [orderIds],
+    );
+
+    interface LeaderRow { technician_id: string; full_name: string }
+    const leaderRows = leaderIds.length
+      ? await this.teamMembers.manager.query<LeaderRow[]>(
+          `SELECT tp.id AS technician_id, u.full_name
+           FROM technician_profiles tp JOIN users u ON u.id = tp.user_id
+           WHERE tp.id = ANY($1::uuid[])`,
+          [leaderIds],
+        )
+      : [];
+    const leaderNames = new Map(leaderRows.map((r) => [r.technician_id, r.full_name]));
+
+    for (const order of orders) {
+      const members = memberRows.filter((r) => r.order_id === order.id);
+      const technicians = members.filter((m) => m.member_type === 'team_member').length;
+      const assistants = members.filter((m) => m.member_type === 'assistant').length;
+      const composition = computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, {
+        technicians,
+        assistants,
+      });
+      summary.set(order.id, {
+        leaderTechnicianId: order.technicianId,
+        leaderName: order.technicianId ? (leaderNames.get(order.technicianId) ?? null) : null,
+        members: members.map((m) => ({
+          technicianId: m.technician_id,
+          fullName: m.full_name,
+          memberType: m.member_type === 'assistant' ? 'assistant' : 'team_member',
+        })),
+        requiredTechnicians: order.requiredTechnicians ?? 0,
+        requiredAssistants: order.requiredAssistants ?? 0,
+        // الطلب الفردي مالوش "طاقم" أصلاً — كامل بمجرد ما فيه فني معيّن.
+        crewComplete: order.bookingMode === BookingMode.TEAM ? composition.crewComplete : order.technicianId !== null,
+        isTeamBooking: order.bookingMode === BookingMode.TEAM,
+      });
+    }
+    return summary;
   }
 
   private async findOrThrow(orderId: string): Promise<Order> {

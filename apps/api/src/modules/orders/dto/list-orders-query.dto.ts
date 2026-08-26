@@ -22,6 +22,16 @@ export class ListOrdersQueryDto {
   @IsDateString()
   to?: string;
 
+  /**
+   * ترتيب القايمة (docs/08 §63.ب5). الافتراضي `newest` = الأحدث طلبًا.
+   *
+   * `soonest` = الأقرب تنفيذًا — طلب المالك الصريح: «جزء تاني للطلبات اللي الكستمر طلبها من زمن
+   * ولكن وقت تنفيذها حان خلاص». بيرتّب بـ`scheduled_at` تصاعديًا (الأقرب الأول).
+   */
+  @IsOptional()
+  @IsIn(['newest', 'soonest'])
+  sort?: 'newest' | 'soonest' = 'newest';
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
