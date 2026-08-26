@@ -5,10 +5,18 @@ import '../installments/installments_repository.dart';
 import '../payment_methods/models.dart';
 import '../payment_methods/payment_methods_repository.dart';
 
-/// قسم "ادفع بالتقسيط" على شاشة تفاصيل الطلب — بيظهر بس لو الخدمة عليها خطط متاحة.
+/// قسم "ادفع بالتقسيط" على شاشة تفاصيل الطلب.
 ///
 /// التدفق: العميل يختار خطة → يراجع الشروط → يقدم الطلب → الحالة تبقى "تحت المراجعة"
 /// والأدمن هو اللي بيعتمد أو يرفض (مفيش موافقة ذاتية).
+///
+/// docs/08 §64.ز — بلاغ المالك إن البانر كان «معلق فوق… على الرغم إنك لو اخترت أي خطة بيقولك
+/// التقسيط مش متاح». السبب إن القسم كان بيسأل عن خطط **الخدمة** (`fetchPlans(serviceId)`) في
+/// حين إن الأهلية الحقيقية بتعتمد على **الطلب** (مبلغه، حالته، تقديماته السابقة). دلوقتي بيسأل
+/// `/orders/:id/installment-options` اللي بيطبّق نفس قيود التقديم قبل العرض:
+///  - فيه خطط صالحة  → القسم كامل بخططه (اللي بتنفع بس).
+///  - مفيش وفيه سبب يهم العميل (تقديم تحت المراجعة/متفعّل) → سطر حالة صغير مش بانر تقديم.
+///  - مفيش خالص      → القسم بيختفي تمامًا.
 class InstallmentSection extends StatefulWidget {
   final AuthRepository auth;
   final String orderId;
@@ -26,7 +34,7 @@ class InstallmentSection extends StatefulWidget {
 }
 
 class _InstallmentSectionState extends State<InstallmentSection> {
-  List<InstallmentPlan>? _plans;
+  InstallmentOptions? _options;
   InstallmentPlan? _selectedPlan;
   List<InstallmentPolicy> _policies = [];
   List<SavedPaymentMethod> _paymentMethods = [];
@@ -44,12 +52,17 @@ class _InstallmentSectionState extends State<InstallmentSection> {
   Future<void> _load() async {
     try {
       final repo = InstallmentRepository(widget.auth);
-      final plans = await repo.fetchPlans(widget.serviceId);
+      final options = await repo.fetchOptionsForOrder(widget.orderId);
+      // الشروط ووسائل الدفع مالهاش لازمة لو مفيش خطة صالحة أصلاً — بنوفّر نداءين شبكة.
+      if (options.plans.isEmpty) {
+        if (mounted) setState(() => _options = options);
+        return;
+      }
       final policies = await repo.fetchPolicies(widget.serviceId);
       final methods = await PaymentMethodsRepository(widget.auth).list();
       if (mounted) {
         setState(() {
-          _plans = plans;
+          _options = options;
           _policies = policies;
           _paymentMethods = methods;
           final defaults = methods.where((method) => method.isDefault);
@@ -58,7 +71,8 @@ class _InstallmentSectionState extends State<InstallmentSection> {
         });
       }
     } on ApiException {
-      if (mounted) setState(() => _plans = []);
+      // فشل الفحص = ما نعرضش بانر ممكن يفشل — نفس نتيجة "مش متاح" بالظبط.
+      if (mounted) setState(() => _options = InstallmentOptions.empty);
     }
   }
 
@@ -88,8 +102,24 @@ class _InstallmentSectionState extends State<InstallmentSection> {
 
   @override
   Widget build(BuildContext context) {
-    final plans = _plans;
-    if (plans == null || plans.isEmpty) return const SizedBox.shrink();
+    final options = _options;
+    if (options == null) return const SizedBox.shrink();
+    final plans = options.plans;
+    if (plans.isEmpty) {
+      if (!options.hasCustomerFacingStatus) return const SizedBox.shrink();
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: ListTile(
+          leading: Icon(
+            options.reasonCode == 'application_approved'
+                ? Icons.check_circle_outline
+                : Icons.schedule_outlined,
+          ),
+          title: const Text('التقسيط'),
+          subtitle: Text(options.reasonAr ?? ''),
+        ),
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

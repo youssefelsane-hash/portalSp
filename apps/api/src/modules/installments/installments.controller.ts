@@ -22,6 +22,31 @@ const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
 export class InstallmentsController {
   constructor(private readonly installmentsService: InstallmentsService) {}
 
+  /**
+   * أهلية التقسيط **لطلب بعينه** (docs/08 §64.ز) — بلاغ المالك إن بانر «ادفع بالتقسيط» بيفضل
+   * معلّق فوق تفاصيل الطلب وبعدين أي خطة تختارها بترفض. المسار ده بيرجّع الخطط اللي بتنفع على
+   * الطلب ده **فعلاً** (مبلغه، حالته، تقديماته السابقة)، وسبب واضح لما مفيش.
+   */
+  @Get('orders/:orderId/installment-options')
+  async listOptionsForOrder(
+    @CurrentUser() user: JwtPayload,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+  ) {
+    const result = await this.installmentsService.listOptionsForOrder(user.sub, orderId);
+    const plans = await Promise.all(
+      result.plans.map(async (plan) => {
+        const { requirements } = await this.installmentsService.getPlanWithRequirements(plan.id as string);
+        return {
+          ...plan,
+          document_requirements: requirements
+            .filter((r) => r.isRequired)
+            .map((r) => ({ doc_type: r.docType, label_ar: r.labelAr })),
+        };
+      }),
+    );
+    return { ...result, plans };
+  }
+
   /** الخطط المتاحة لخدمة معينة + متطلبات مستنداتها — للعرض قبل الحجز/الدفع. */
   @Get('installment-plans')
   async listPlansForService(@Query('service_id', ParseUUIDPipe) serviceId: string) {

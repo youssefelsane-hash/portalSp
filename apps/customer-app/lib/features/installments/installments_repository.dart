@@ -71,16 +71,61 @@ class InstallmentPolicy {
       );
 }
 
+/// نتيجة فحص أهلية التقسيط لطلب — مطابقة لرد GET /orders/:id/installment-options
+class InstallmentOptions {
+  final bool eligible;
+
+  /// كود السبب من الباك-إند (`amount_out_of_range` / `application_pending` / …) — الواجهة
+  /// بتقرر بيه، **مش** بمطابقة النص العربي اللي بيتغيّر بالصياغة.
+  final String? reasonCode;
+  final String? reasonAr;
+  final List<InstallmentPlan> plans;
+
+  const InstallmentOptions({
+    required this.eligible,
+    this.reasonCode,
+    this.reasonAr,
+    required this.plans,
+  });
+
+  /// الأسباب اللي تخصّ **حالة العميل على الطلب ده** — دي اللي تستاهل سطر يظهرله. باقي الأسباب
+  /// (مبلغ بره الحدود، سعر لسه ما اتحددش، التقسيط موقوف) معناها ببساطة "مفيش تقسيط هنا"،
+  /// والبانر المفروض يختفي تمامًا (docs/08 §64.ز).
+  bool get hasCustomerFacingStatus =>
+      reasonCode == 'application_pending' || reasonCode == 'application_approved';
+
+  factory InstallmentOptions.fromJson(Map<String, dynamic> json) => InstallmentOptions(
+        eligible: json['eligible'] as bool? ?? false,
+        reasonCode: json['reason_code'] as String?,
+        reasonAr: json['reason_ar'] as String?,
+        plans: (json['plans'] as List<dynamic>?)
+                ?.map((p) => InstallmentPlan.fromJson(p as Map<String, dynamic>))
+                .toList() ??
+            const [],
+      );
+
+  static const empty = InstallmentOptions(eligible: false, plans: []);
+}
+
 /// خدمة التقسيط — استدعاءات API للعميل
 class InstallmentRepository {
   final AuthRepository auth;
   InstallmentRepository(this.auth);
 
-  /// الخطط المتاحة لخدمة معينة
+  /// الخطط المتاحة لخدمة معينة (قبل الحجز — مفيش طلب لسه)
   Future<List<InstallmentPlan>> fetchPlans(String serviceId) async {
     final items = await auth
         .authedRequestList('/installment-plans?service_id=$serviceId');
     return items.map(InstallmentPlan.fromJson).toList();
+  }
+
+  /// أهلية التقسيط **لطلب بعينه** (docs/08 §64.ز).
+  ///
+  /// `fetchPlans` بترد على «الخدمة عليها خطط؟» — سؤال مختلف عن «الطلب ده ينفع يتقسّط؟». استخدام
+  /// الأولى في شاشة تفاصيل الطلب هو اللي كان بيخلّي البانر معلّق فوق وأي خطة تختارها ترفض.
+  Future<InstallmentOptions> fetchOptionsForOrder(String orderId) async {
+    final json = await auth.authedRequest('GET', '/orders/$orderId/installment-options');
+    return InstallmentOptions.fromJson(json ?? const {});
   }
 
   Future<List<InstallmentPolicy>> fetchPolicies(String serviceId) async {

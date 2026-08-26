@@ -378,4 +378,77 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
     expect(resubmitted.id).not.toBe(first.id);
     expect(resubmitted.status).toBe('pending_review');
   });
+
+  /**
+   * docs/08 §64.ز — بلاغ المالك: «التقسيط… بيكون معلق فوق في تفاصيل الطلب على الرغم إنك لو اخترت
+   * أي خطة بيقولك التقسيط مش متاح».
+   *
+   * السبب إن العرض كان بيسأل «الخدمة عليها خطط؟» والتقديم بيسأل «الطلب ده ينفع؟» — سؤالين
+   * مختلفين. `listOptionsForOrder()` بتوحّدهم. الاختبارات دي بتثبّت إن **كل** قيد في
+   * `submitApplication()` بقى مرئي قبل العرض، مش مفاجأة بعد الاختيار.
+   */
+  describe('أهلية التقسيط على مستوى الطلب (docs/08 §64.ز)', () => {
+    it('طلب مبلغه داخل الحدود: متاح، وبيرجّع الخطة', async () => {
+      const orderId = await seedOrder(500_000);
+      const result = await service.listOptionsForOrder(ids.customerUser, orderId);
+      expect(result.eligible).toBe(true);
+      expect(result.reason_code).toBeNull();
+      expect(result.plans.map((plan) => plan.id)).toContain(ids.plan);
+    });
+
+    it('مبلغ تحت الحد الأدنى للخطة: مش متاح بسبب مكتوب — البانر ما يظهرش أصلاً', async () => {
+      // الخطة min = 100,000 قرش. الطلب 50,000 — التقديم كان هيترفض بعد ما العميل يختار ويوافق.
+      const orderId = await seedOrder(50_000);
+      const result = await service.listOptionsForOrder(ids.customerUser, orderId);
+      expect(result.eligible).toBe(false);
+      expect(result.plans).toHaveLength(0);
+      expect(result.reason_code).toBe('amount_out_of_range');
+      expect(result.reason_ar).toContain('حدود');
+    });
+
+    it('طلب لسه ما اتسعّرش: «لسه ما اتحددش» مش «مش متاح» (نفس تفرقة §64.ب)', async () => {
+      const orderId = await seedOrder(0);
+      const result = await service.listOptionsForOrder(ids.customerUser, orderId);
+      expect(result.eligible).toBe(false);
+      expect(result.reason_code).toBe('price_undetermined');
+      expect(result.reason_ar).toContain('لسه ما اتحددش');
+    });
+
+    it('طلب متلغي: مش متاح', async () => {
+      const orderId = await seedOrder(500_000);
+      await q(`UPDATE orders SET order_status='cancelled_by_customer' WHERE id=$1`, [orderId]);
+      const result = await service.listOptionsForOrder(ids.customerUser, orderId);
+      expect(result.eligible).toBe(false);
+      expect(result.reason_code).toBe('order_cancelled');
+    });
+
+    it('طلب عليه تقديم تحت المراجعة: مش متاح، والسبب بيقول للعميل حالته', async () => {
+      const orderId = await seedOrder(500_000);
+      await service.submitApplication({
+        userId: ids.customerUser,
+        orderId,
+        planId: ids.plan,
+        acceptedPolicyVersionIds: [ids.policyVersion],
+      });
+      const result = await service.listOptionsForOrder(ids.customerUser, orderId);
+      expect(result.eligible).toBe(false);
+      expect(result.reason_code).toBe('application_pending');
+      expect(result.reason_ar).toContain('تحت المراجعة');
+    });
+
+    it('طلب عميل تاني: 404 مش تسريب حالة', async () => {
+      const [otherUser] = await q<{ id: string }[]>(
+        `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,
+        [`+2099${runId}`.slice(0, 15), `عميل تاني ${runId}`],
+      );
+      const [otherProfile] = await q<{ id: string }[]>(
+        `INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`,
+        [otherUser.id],
+      );
+      const orderId = await seedOrder(500_000);
+      await expect(service.listOptionsForOrder(otherUser.id, orderId)).rejects.toThrow(/الطلب غير موجود/);
+      await q(`DELETE FROM customer_profiles WHERE id=$1`, [otherProfile.id]);
+      await q(`DELETE FROM users WHERE id=$1`, [otherUser.id]);
+    });
+  });
 });
