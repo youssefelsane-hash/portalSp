@@ -38,6 +38,8 @@ export interface TechnicianRankScoreBreakdown {
   fairnessPenalty: number;
   /** موثوقية (docs/08 §36.20-21، ADR-0023) — تعديل مبني على تقييم الفني، صفر لو تقييماته أقل من الحد الأدنى. */
   reliabilityAdjustment: number;
+  /** أفضلية شركة مسجلة وقادرة على تغطية طاقم طلب كبير؛ صفر لكل الحالات الأخرى. */
+  companyAdjustment: number;
 }
 
 export interface TechnicianRankInfo {
@@ -244,6 +246,7 @@ export class MatchingExplainabilityService {
             workloadPenalty: Number(row.workload_penalty),
             fairnessPenalty: Number(row.fairness_penalty),
             reliabilityAdjustment: Number(row.reliability_adjustment),
+            companyAdjustment: Number(row.company_adjustment),
           },
         };
       }

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { Building2, CalendarDays, CheckCircle2, Layers3, MapPin, ShieldCheck, Users } from 'lucide-react';
 import type { CompanyDetailResponseDto, CompanyOrderSummaryResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
@@ -47,6 +49,7 @@ export default function TechnicianCompanyDetailPage() {
 
   const activeOrdersCount = orders?.filter((o) => ACTIVE_ORDER_STATUSES.has(o.order_status)).length ?? 0;
   const completedOrdersCount = orders?.filter((o) => o.order_status === 'completed').length ?? 0;
+  const isCommercial = Boolean(detail?.company.commercial_registration_number);
 
   return (
     <AppShell>
@@ -57,6 +60,7 @@ export default function TechnicianCompanyDetailPage() {
         <div className="space-y-6">
           <PageHeader
             title={detail.company.name}
+            description={isCommercial ? 'ملف شركة تنفيذ مسجلة ومساحة عملها التشغيلية.' : 'ملف فريق مهني ومساحة عمله التشغيلية.'}
             actions={
               <Badge variant={detail.company.is_active ? 'secondary' : 'outline'}>
                 {detail.company.is_active ? 'نشطة' : 'غير نشطة'}
@@ -64,27 +68,58 @@ export default function TechnicianCompanyDetailPage() {
             }
           />
 
+          <section className={`relative overflow-hidden rounded-3xl border p-6 md:p-8 ${
+            isCommercial
+              ? 'border-amber-200 bg-[radial-gradient(circle_at_top_left,rgba(251,191,36,0.2),transparent_35%),linear-gradient(135deg,#172033,#28364d)] text-white shadow-xl shadow-slate-950/10'
+              : 'border-slate-200 bg-gradient-to-l from-slate-50 to-white'
+          }`}>
+            <div className="relative flex flex-col justify-between gap-6 md:flex-row md:items-end">
+              <div className="flex items-start gap-4">
+                <div className={`grid h-16 w-16 shrink-0 place-items-center rounded-2xl ${isCommercial ? 'bg-amber-300 text-slate-950 shadow-lg shadow-amber-500/20' : 'bg-slate-200 text-slate-700'}`}>
+                  {isCommercial ? <Building2 className="h-8 w-8" /> : <Layers3 className="h-8 w-8" />}
+                </div>
+                <div>
+                  <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${isCommercial ? 'border border-amber-300/30 bg-amber-300/10 text-amber-100' : 'bg-slate-200 text-slate-700'}`}>
+                    <ShieldCheck className="h-4 w-4" />
+                    {isCommercial ? 'شركة مسجلة في شبكة التنفيذ' : 'فريق مهني معتمد'}
+                  </div>
+                  <h2 className="mt-3 text-2xl font-semibold md:text-3xl">{detail.company.name}</h2>
+                  <p className={`mt-2 text-sm ${isCommercial ? 'text-slate-300' : 'text-muted-foreground'}`}>
+                    {isCommercial
+                      ? `السجل التجاري ${detail.company.commercial_registration_number}`
+                      : 'فريق تنفيذي مرن بدون سجل تجاري مستقل'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-2 ${isCommercial ? 'bg-white/10 text-slate-200' : 'bg-slate-100'}`}><Users className="h-4 w-4" />{detail.staff.length} عضو</span>
+                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-2 ${isCommercial ? 'bg-white/10 text-slate-200' : 'bg-slate-100'}`}><MapPin className="h-4 w-4" />{detail.branches.length} فرع</span>
+                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-2 ${isCommercial ? 'bg-white/10 text-slate-200' : 'bg-slate-100'}`}><CalendarDays className="h-4 w-4" />منذ {new Date(detail.company.created_at).toLocaleDateString('ar-EG-u-nu-latn')}</span>
+              </div>
+            </div>
+          </section>
+
           {orders && (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Card>
+              <Card className="border-slate-200 bg-gradient-to-br from-white to-slate-50">
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">إجمالي الطلبات</p>
                   <p className="text-2xl font-bold">{orders.length}</p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="border-sky-200 bg-gradient-to-br from-white to-sky-50">
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">جارية دلوقتي</p>
                   <p className="text-2xl font-bold">{activeOrdersCount}</p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="border-emerald-200 bg-gradient-to-br from-white to-emerald-50">
                 <CardContent className="pt-6">
-                  <p className="text-sm text-muted-foreground">مكتملة</p>
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4 text-emerald-600" />مكتملة</p>
                   <p className="text-2xl font-bold">{completedOrdersCount}</p>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="border-amber-200 bg-gradient-to-br from-white to-amber-50">
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">إجمالي القيمة</p>
                   <p className="text-2xl font-bold">{formatEgp(orders.reduce((sum, o) => sum + o.total_amount_cents, 0))}</p>
@@ -205,7 +240,7 @@ export default function TechnicianCompanyDetailPage() {
                     {orders.map((order) => (
                       <TableRow key={order.id}>
                         <TableCell dir="ltr" className="text-start">
-                          {order.order_number}
+                          <Link href={`/orders/${order.id}`} className="font-medium underline-offset-4 hover:underline">{order.order_number}</Link>
                         </TableCell>
                         <TableCell>{order.service_name_ar}</TableCell>
                         <TableCell>

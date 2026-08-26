@@ -83,6 +83,10 @@ const TIE_BREAK_THRESHOLD_FALLBACK = 0;
 const RELIABILITY_WEIGHT_FALLBACK = 0;
 const RELIABILITY_BASELINE_RATING_FALLBACK = 4.0;
 const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
+// أفضلية شركة صغيرة ومقيدة للشغل الكبير فقط. 3 نقاط أقل بوضوح من فرق مستويات الفنيين المعتاد
+// (10 نقاط)، فالشركة لا تتخطى الجودة/الحمل؛ تكسر التقارب المنطقي لما طاقمها قادر ينفذ الطلب.
+const COMPANY_LARGE_JOB_MIN_CREW_FALLBACK = 4;
+const COMPANY_LARGE_JOB_BOOST_FALLBACK = 3;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
@@ -93,6 +97,11 @@ export interface EligibleTechnicianRow {
   workload_penalty: string;
   fairness_penalty: string;
   reliability_adjustment: string;
+  company_adjustment: string;
+  company_id: string | null;
+  company_name: string | null;
+  is_commercial_company: boolean;
+  company_available_staff_count: string;
 }
 
 export interface AvailableOrderRow {
@@ -219,6 +228,18 @@ export class MatchingService {
       'matching.reliability_min_ratings_count',
       RELIABILITY_MIN_RATINGS_COUNT_FALLBACK,
     );
+    const companyLargeJobMinCrew = await this.settingsService.getNumber(
+      'matching.company_large_job_min_crew',
+      COMPANY_LARGE_JOB_MIN_CREW_FALLBACK,
+    );
+    const companyLargeJobBoost = await this.settingsService.getNumber(
+      'matching.company_large_job_boost',
+      COMPANY_LARGE_JOB_BOOST_FALLBACK,
+    );
+    const requiredCrew = Math.max(1, order.requiredTechnicians ?? 1) + Math.max(0, order.requiredAssistants ?? 0);
+    // نافذة أكبر قبل تمثيل كل شركة مرة واحدة؛ شركة كبيرة لا يجوز أن تملأ LIMIT بأعضائها ثم
+    // يترك dedupe دفعة ناقصة. السقف يحافظ على زمن الاستعلام، ونداء التفسير الكبير يحتفظ بحجمه.
+    const candidateWindowSize = Math.max(batchSize, Math.min(batchSize * 20, 500));
     const candidates = await this.dataSource.query<EligibleTechnicianRow[]>(
       `
       SELECT tp.id AS technician_id,
@@ -233,6 +254,16 @@ export class MatchingService {
                    ELSE 0
                  END
                )
+               + (
+                 CASE WHEN $19::boolean IS TRUE
+                           AND $23::int >= $24::int
+                           AND company.id IS NOT NULL
+                           AND NULLIF(BTRIM(company.commercial_registration_number), '') IS NOT NULL
+                           AND COALESCE(company_capacity.available_staff_count, 0) >= $23::int
+                   THEN $25::numeric
+                   ELSE 0
+                 END
+               )
              ) AS rank_score,
              COALESCE(tlc.order_priority_weight, 0) AS priority_component,
              COALESCE(workload.active_count, 0) * $14::int AS workload_penalty,
@@ -242,7 +273,22 @@ export class MatchingService {
                  THEN (tp.average_rating - $21::numeric) * $20::numeric
                  ELSE 0
                END
-             ) AS reliability_adjustment
+             ) AS reliability_adjustment,
+             (
+               CASE WHEN $19::boolean IS TRUE
+                         AND $23::int >= $24::int
+                         AND company.id IS NOT NULL
+                         AND NULLIF(BTRIM(company.commercial_registration_number), '') IS NOT NULL
+                         AND COALESCE(company_capacity.available_staff_count, 0) >= $23::int
+                 THEN $25::numeric
+                 ELSE 0
+               END
+             ) AS company_adjustment,
+             company.id AS company_id,
+             company.name AS company_name,
+             (company.id IS NOT NULL AND NULLIF(BTRIM(company.commercial_registration_number), '') IS NOT NULL)
+               AS is_commercial_company,
+             COALESCE(company_capacity.available_staff_count, 0) AS company_available_staff_count
       FROM technician_profiles tp
       -- ADR-0018 §8 — LEFT JOIN بدل INNER: أهلية الفني بقت "خدمة معتمدة مباشرة (ts) OR فئة
       -- الخدمة معتمدة (technician_categories، شرط الـEXISTS تحت في WHERE)" — فني معتمد بمستوى
@@ -254,6 +300,47 @@ export class MatchingService {
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       LEFT JOIN technician_level_config tlc ON tlc.level = tp.current_level
+      LEFT JOIN technician_companies company ON company.id = tp.company_id
+        AND company.is_active = true AND company.deleted_at IS NULL
+      LEFT JOIN LATERAL (
+        SELECT COUNT(DISTINCT member.id) AS available_staff_count
+        FROM technician_profiles member
+        LEFT JOIN technician_services member_service
+          ON member_service.technician_id = member.id AND member_service.service_id = $1
+          AND member_service.is_active = true AND member_service.verification_status = 'approved'
+        JOIN technician_zones member_zone
+          ON member_zone.technician_id = member.id AND member_zone.service_zone_id = $2
+          AND member_zone.is_active = true
+        WHERE $19::boolean IS TRUE
+          AND $23::int >= $24::int
+          AND $25::numeric <> 0
+          AND member.company_id = company.id
+          AND member.verification_status = 'approved'
+          AND member.deleted_at IS NULL
+          AND member.current_location IS NOT NULL
+          AND (
+            member_service.id IS NOT NULL
+            OR EXISTS (
+              SELECT 1 FROM technician_categories member_category
+              WHERE member_category.technician_id = member.id
+                AND member_category.category_id = s.category_id
+                AND member_category.is_active = true
+                AND member_category.verification_status = 'approved'
+            )
+          )
+          ${technicianAvailabilityCondition({
+            technicianIdExpr: 'member.id',
+            scheduledAtParam: '$10',
+            excludeOrderIdParam: '$4',
+            activeStatusesParam: '$6',
+            engagedStatusesParam: '$11',
+            isEmergencyParam: '$12',
+            serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+            preciseDurationHoursExpr: '(SELECT o2.duration_hours FROM orders o2 WHERE o2.id = $4::uuid)',
+            fullDayThresholdMinutesParam: '$13',
+            ignoreActiveOrderConflict,
+          })}
+      ) company_capacity ON company.id IS NOT NULL
       -- ADR-0018 §7 — حِمل الفني الحالي (عدد الطلبات النشطة عليه دلوقتي) لغرض موازنة التوزيع
       -- في الـORDER BY تحت. LATERAL بدل subquery عادي في SELECT عشان يتحسب مرة واحدة لكل فني
       -- مرشّح بس (بعد كل شروط WHERE)، مش لكل صف technician_profiles في الجدول كله.
@@ -345,7 +432,7 @@ export class MatchingService {
         order.serviceZoneId,
         order.addressId,
         order.id,
-        batchSize,
+        candidateWindowSize,
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         requestedTechnicianId ?? null,
         ignoreAvailabilityFilter,
@@ -363,10 +450,26 @@ export class MatchingService {
         reliabilityWeight,
         reliabilityBaselineRating,
         reliabilityMinRatingsCount,
+        requiredCrew,
+        companyLargeJobMinCrew,
+        companyLargeJobBoost,
       ],
     );
     const tieBreakThreshold = await this.settingsService.getNumber('matching.tie_break_threshold', TIE_BREAK_THRESHOLD_FALLBACK);
-    return this.applyTieBreak(candidates, tieBreakThreshold);
+    // في الشغل الكبير الشركة كيان واحد، مش أربع فرص متكررة لنفس الشركة داخل نفس الدفعة.
+    // نحتفظ بأعلى ممثل لها فقط عندما الزيادة فعالة؛ أعضاء الفرق/الشركات بلا زيادة يفضلوا أفرادًا
+    // طبيعيين بلا تغيير في السلوك القديم.
+    const prioritizedCompanies = new Set(
+      candidates.filter((candidate) => Number(candidate.company_adjustment) > 0 && candidate.company_id).map((candidate) => candidate.company_id!),
+    );
+    const representedCompanies = new Set<string>();
+    const companyDedupedCandidates = candidates.filter((candidate) => {
+      if (!candidate.company_id || !prioritizedCompanies.has(candidate.company_id)) return true;
+      if (representedCompanies.has(candidate.company_id)) return false;
+      representedCompanies.add(candidate.company_id);
+      return true;
+    });
+    return this.applyTieBreak(companyDedupedCandidates, tieBreakThreshold).slice(0, batchSize);
   }
 
   /**

@@ -6,7 +6,7 @@ import { OrderAssignment } from './entities/order-assignment.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
-import { MatchingService } from './matching.service';
+import { EligibleTechnicianRow, MatchingService } from './matching.service';
 
 // اختبار حي ضد Postgres حقيقي (docs/08 §38، طلب مالك صريح 2026-08-21) — findEligibleTechnicians()
 // (التوزيع التلقائي الفعلي) كانت زيرو فلترة بمستوى الفني لطلبات "اعتماد" — فني مستواه new كان
@@ -28,6 +28,10 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
     address: '',
     newTechProfile: '',
     proTechProfile: '',
+    independentProProfile: '',
+    company: '',
+    companyMemberProfiles: [] as string[],
+    technicianUsers: [] as string[],
   };
 
   beforeAll(async () => {
@@ -111,24 +115,44 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
         ids.service,
       ]);
       await q(`INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`, [profile.id, ids.zone]);
+      ids.technicianUsers.push(user.id);
       return profile.id as string;
     };
 
     ids.newTechProfile = await makeTechnician('NEW', 'new');
     ids.proTechProfile = await makeTechnician('PRO', 'professional');
+    ids.independentProProfile = await makeTechnician('IND', 'professional');
+
+    const [companyOwner] = (await q(
+      `SELECT user_id FROM technician_profiles WHERE id = $1`,
+      [ids.proTechProfile],
+    )) as { user_id: string }[];
+    const [company] = (await q(
+      `INSERT INTO technician_companies (owner_user_id, name, commercial_registration_number, is_active)
+       VALUES ($1,$2,$3,true) RETURNING id`,
+      [companyOwner.user_id, `شركة اعتماد ${runId}`, `CR-${runId}`],
+    )) as { id: string }[];
+    ids.company = company.id;
+    await q(`UPDATE technician_profiles SET company_id=$1, team_role='owner' WHERE id=$2`, [ids.company, ids.proTechProfile]);
+    for (const label of ['CO1', 'CO2', 'CO3']) {
+      const profileId = await makeTechnician(label, 'professional');
+      ids.companyMemberProfiles.push(profileId);
+      await q(`UPDATE technician_profiles SET company_id=$1, team_role='worker' WHERE id=$2`, [ids.company, profileId]);
+    }
   });
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
-    const technicianIds = [ids.newTechProfile, ids.proTechProfile];
+    const technicianIds = [ids.newTechProfile, ids.proTechProfile, ids.independentProProfile, ...ids.companyMemberProfiles];
     try {
       await q(`DELETE FROM technician_services WHERE technician_id = ANY($1::uuid[])`, [technicianIds]);
       await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1::uuid[])`, [technicianIds]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [technicianIds]);
-      await q(`DELETE FROM users WHERE id IN (SELECT user_id FROM technician_profiles WHERE id = ANY($1::uuid[]))`, [technicianIds]);
+      await q(`DELETE FROM technician_companies WHERE id = $1`, [ids.company]);
+      await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [ids.technicianUsers]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
@@ -139,7 +163,7 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
     }
   });
 
-  const findCandidates = (bookingMode: BookingMode) => {
+  const findCandidates = (bookingMode: BookingMode, requiredTechnicians = 1, requiredAssistants = 0) => {
     const order = {
       id: randomUUID(),
       serviceId: ids.service,
@@ -148,9 +172,11 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
       scheduledAt: null,
       totalAmountCents: 10000,
       bookingMode,
+      requiredTechnicians,
+      requiredAssistants,
     } as Order;
     return (
-      matchingService as unknown as { findEligibleTechnicians: (...args: unknown[]) => Promise<{ technician_id: string }[]> }
+      matchingService as unknown as { findEligibleTechnicians: (...args: unknown[]) => Promise<EligibleTechnicianRow[]> }
     ).findEligibleTechnicians(order, 50, null, false, null);
   };
 
@@ -164,5 +190,31 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
     const candidates = await findCandidates(BookingMode.INDIVIDUAL);
     expect(candidates.some((c) => c.technician_id === ids.newTechProfile)).toBe(true);
     expect(candidates.some((c) => c.technician_id === ids.proTechProfile)).toBe(true);
+  });
+
+  it('شغل فريق كبير: الشركة المسجلة ذات 4 مؤهلين تسبق المحترف المستقل بزيادة معتدلة واحدة', async () => {
+    const candidates = await findCandidates(BookingMode.TEAM, 4);
+    const companyCandidates = candidates.filter((candidate) => candidate.company_id === ids.company);
+    const independent = candidates.find((candidate) => candidate.technician_id === ids.independentProProfile);
+
+    expect(companyCandidates).toHaveLength(1);
+    expect(companyCandidates[0]).toMatchObject({
+      company_name: `شركة اعتماد ${runId}`,
+      is_commercial_company: true,
+      company_adjustment: '3',
+      company_available_staff_count: '4',
+    });
+    expect(independent).toBeDefined();
+    expect(Number(companyCandidates[0].rank_score)).toBe(Number(independent!.rank_score) + 3);
+    expect(candidates.indexOf(companyCandidates[0])).toBeLessThan(candidates.indexOf(independent!));
+  });
+
+  it('شغل فريق صغير: عضوية الشركة لا تمنح أي زيادة تلقائية', async () => {
+    const candidates = await findCandidates(BookingMode.TEAM, 2);
+    const companyCandidate = candidates.find((candidate) => candidate.technician_id === ids.proTechProfile);
+    const independent = candidates.find((candidate) => candidate.technician_id === ids.independentProProfile);
+
+    expect(companyCandidate?.company_adjustment).toBe('0');
+    expect(Number(companyCandidate!.rank_score)).toBe(Number(independent!.rank_score));
   });
 });
