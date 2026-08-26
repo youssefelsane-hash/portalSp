@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +19,7 @@ import 'categories_screen.dart';
 import 'category_card.dart';
 import 'branding_repository.dart';
 import 'homepage_content_repository.dart';
+import 'hero_image_crossfade.dart';
 import 'models.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
@@ -85,12 +85,14 @@ class _HomeScreenState extends State<HomeScreen> {
     // رسالة الثقة/الضمان ونصايح مفيدة وبيانات الدعم ولوجو البراندنج — تحميل مستقل عمدًا (فشل أي
     // واحد فيهم ميأثرش على باقي الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
     _homepageContentRepository.fetch().then((content) {
-      if (mounted) setState(() {
-        _trustMessage = content.trustMessage;
-        _heroImages = content.heroImages;
-        _tips = content.tips;
-        _activeSlide = 0;
-      });
+      if (mounted) {
+        setState(() {
+          _trustMessage = content.trustMessage;
+          _heroImages = content.heroImages;
+          _tips = content.tips;
+          _activeSlide = 0;
+        });
+      }
     }).catchError((_) {});
     _supportContactRepository.fetch().then((contact) {
       if (mounted) setState(() => _supportContact = contact);
@@ -312,25 +314,28 @@ class _HomeScreenState extends State<HomeScreen> {
     final effectiveImages = configuredImages.isNotEmpty
         ? configuredImages
         : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
-    final heroImageUrl = effectiveImages.isEmpty ? null : effectiveImages[_activeSlide % effectiveImages.length];
     final gradientIndex = _activeSlide % _heroGradients.length;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 900),
+    return Container(
       margin: const EdgeInsets.only(bottom: 4),
-      decoration: BoxDecoration(
-        // التدرّج فضل مرسوم دايمًا كـfallback حقيقي (مش بس شكلي) — لو صورة الأدمن فشلت تتحمّل
-        // (شبكة، رابط اترفض)، onError بيمنع أي استثناء، والتدرّج تحته لسه ظاهر بدل خلفية فاضية
-        // تمامًا. لو الصورة اتحمّلت صح، بتغطّي التدرّج بالكامل (BoxFit.cover).
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: _heroGradients[gradientIndex],
-        ),
-        image: heroImageUrl != null
-            ? DecorationImage(image: NetworkImage(heroImageUrl), fit: BoxFit.cover, onError: (_, _) {})
-            : null,
-      ),
-      child: Container(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: HeroImageCrossfade(
+              images: effectiveImages.map<ImageProvider<Object>>(NetworkImage.new).toList(),
+              activeIndex: _activeSlide,
+              fallback: AnimatedContainer(
+                duration: const Duration(milliseconds: 1000),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: _heroGradients[gradientIndex],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
@@ -409,6 +414,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+        ],
+      ),
     );
   }
 
