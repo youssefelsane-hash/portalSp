@@ -23,6 +23,12 @@ interface HomepageTip {
 }
 
 const EMPTY_TIP: HomepageTip = { title: '', body: '', image_url: null };
+const DEFAULT_SEARCH_CONTENT = {
+  eyebrow: 'أساعدك إزاي؟',
+  title: 'محتاج مساعدة في إيه؟',
+  description: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+  placeholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
+};
 
 // إدارة محتوى الصفحة الرئيسية (customer-web/customer-app) — رسالة الثقة/الضمان + "نصايح مفيدة"
 // (docs/08 §48). صفر endpoint جديد — الاتنين settings عاديين (`homepage.trust_message` من
@@ -31,15 +37,13 @@ const EMPTY_TIP: HomepageTip = { title: '', body: '', image_url: null };
 export default function HomepageContentPage() {
   const { isLoading, authedFetch, hasPermission } = useAuth();
   const [trustMessage, setTrustMessage] = useState('');
-  // نصوص الـhero (docs/08 §64.د) — كانت مكتوبة ثابتة في كود التطبيقين، فأي تعديل صياغة كان
-  // يحتاج release. بقت 4 إعدادات عادية زي trust_message بالحرف.
-  const [heroTexts, setHeroTexts] = useState({ eyebrow: '', title: '', subtitle: '', searchPlaceholder: '' });
-  const [isSavingHeroTexts, setIsSavingHeroTexts] = useState(false);
   const [heroImages, setHeroImages] = useState<string[]>([]);
+  const [searchContent, setSearchContent] = useState(DEFAULT_SEARCH_CONTENT);
   const [tips, setTips] = useState<HomepageTip[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSavingMessage, setIsSavingMessage] = useState(false);
   const [isSavingHeroImages, setIsSavingHeroImages] = useState(false);
+  const [isSavingSearchContent, setIsSavingSearchContent] = useState(false);
   const [isSavingTips, setIsSavingTips] = useState(false);
 
   function load() {
@@ -47,17 +51,14 @@ export default function HomepageContentPage() {
       .then((settings) => {
         const messageSetting = settings.find((s) => s.key === 'homepage.trust_message');
         const heroImagesSetting = settings.find((s) => s.key === 'homepage.hero_images');
+        const searchContentSetting = settings.find((s) => s.key === 'homepage.search_content');
         const tipsSetting = settings.find((s) => s.key === 'homepage.tips');
         if (messageSetting) setTrustMessage(String(messageSetting.value ?? ''));
         if (heroImagesSetting) setHeroImages((heroImagesSetting.value as string[] | null) ?? []);
+        if (searchContentSetting) {
+          setSearchContent({ ...DEFAULT_SEARCH_CONTENT, ...(searchContentSetting.value as Partial<typeof DEFAULT_SEARCH_CONTENT>) });
+        }
         if (tipsSetting) setTips((tipsSetting.value as HomepageTip[] | null) ?? []);
-        const text = (key: string) => String(settings.find((s) => s.key === key)?.value ?? '');
-        setHeroTexts({
-          eyebrow: text('homepage.hero_eyebrow'),
-          title: text('homepage.hero_title'),
-          subtitle: text('homepage.hero_subtitle'),
-          searchPlaceholder: text('homepage.search_placeholder'),
-        });
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل محتوى الصفحة الرئيسية'));
   }
@@ -83,31 +84,6 @@ export default function HomepageContentPage() {
     }
   }
 
-  async function saveHeroTexts() {
-    setIsSavingHeroTexts(true);
-    try {
-      // أربع نداءات منفصلة عمدًا: `/admin/settings/:key` هو المسار الموجود بالفعل، ومفيش داعي
-      // لـendpoint دفعة واحدة عشان أربع حقول بيتحفظوا مرة كل كام أسبوع.
-      const entries: [string, string][] = [
-        ['homepage.hero_eyebrow', heroTexts.eyebrow],
-        ['homepage.hero_title', heroTexts.title],
-        ['homepage.hero_subtitle', heroTexts.subtitle],
-        ['homepage.search_placeholder', heroTexts.searchPlaceholder],
-      ];
-      for (const [key, value] of entries) {
-        await authedFetch(`/admin/settings/${key}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ value }),
-        });
-      }
-      toast.success('اتحفظت نصوص الواجهة');
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'فشل حفظ نصوص الواجهة');
-    } finally {
-      setIsSavingHeroTexts(false);
-    }
-  }
-
   async function saveTips() {
     setIsSavingTips(true);
     try {
@@ -120,6 +96,29 @@ export default function HomepageContentPage() {
       toast.error(err instanceof ApiError ? err.message : 'فشل حفظ النصايح');
     } finally {
       setIsSavingTips(false);
+    }
+  }
+
+  async function saveSearchContent() {
+    const normalized = Object.fromEntries(
+      Object.entries(searchContent).map(([key, value]) => [key, value.trim()]),
+    ) as typeof DEFAULT_SEARCH_CONTENT;
+    if (Object.values(normalized).some((value) => !value)) {
+      toast.error('كل نصوص البحث مطلوبة عشان الواجهة تفضل واضحة');
+      return;
+    }
+    setIsSavingSearchContent(true);
+    try {
+      await authedFetch('/admin/settings/homepage.search_content', {
+        method: 'PATCH',
+        body: JSON.stringify({ value: normalized }),
+      });
+      setSearchContent(normalized);
+      toast.success('اتحفظت نصوص محرك البحث');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'فشل حفظ نصوص محرك البحث');
+    } finally {
+      setIsSavingSearchContent(false);
     }
   }
 
@@ -186,56 +185,54 @@ export default function HomepageContentPage() {
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle className="text-sm font-medium">نصوص واجهة البحث</CardTitle>
+          <CardTitle className="text-sm font-medium">نصوص محرك البحث</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">
-            الكلام اللي بيظهر فوق شريط البحث في الشاشة الرئيسية (التطبيق والويب). سيبه فاضي عشان يرجع للنص الافتراضي.
-          </p>
+        <CardContent className="grid gap-4 md:grid-cols-2">
           <div>
-            <Label htmlFor="hero_eyebrow">السطر الصغير فوق العنوان</Label>
+            <Label htmlFor="search_eyebrow">النص الصغير</Label>
             <Input
-              id="hero_eyebrow"
-              value={heroTexts.eyebrow}
-              placeholder="أساعدك إزاي؟"
-              onChange={(e) => setHeroTexts((c) => ({ ...c, eyebrow: e.target.value }))}
+              id="search_eyebrow"
+              value={searchContent.eyebrow}
+              maxLength={80}
+              onChange={(event) => setSearchContent((current) => ({ ...current, eyebrow: event.target.value }))}
               className="mt-1"
             />
           </div>
           <div>
-            <Label htmlFor="hero_title">العنوان الرئيسي</Label>
+            <Label htmlFor="search_title">العنوان الرئيسي</Label>
             <Input
-              id="hero_title"
-              value={heroTexts.title}
-              placeholder="محتاج مساعدة في إيه؟"
-              onChange={(e) => setHeroTexts((c) => ({ ...c, title: e.target.value }))}
+              id="search_title"
+              value={searchContent.title}
+              maxLength={120}
+              onChange={(event) => setSearchContent((current) => ({ ...current, title: event.target.value }))}
               className="mt-1"
             />
           </div>
-          <div>
-            <Label htmlFor="hero_subtitle">السطر التوضيحي تحت العنوان</Label>
-            <Input
-              id="hero_subtitle"
-              value={heroTexts.subtitle}
-              placeholder="قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت"
-              onChange={(e) => setHeroTexts((c) => ({ ...c, subtitle: e.target.value }))}
+          <div className="md:col-span-2">
+            <Label htmlFor="search_description">الشرح فوق البحث</Label>
+            <Textarea
+              id="search_description"
+              value={searchContent.description}
+              maxLength={240}
+              rows={2}
+              onChange={(event) => setSearchContent((current) => ({ ...current, description: event.target.value }))}
               className="mt-1"
             />
           </div>
-          <div>
-            <Label htmlFor="search_placeholder">النص الرمادي جوّه شريط البحث</Label>
+          <div className="md:col-span-2">
+            <Label htmlFor="search_placeholder">المثال داخل خانة البحث</Label>
             <Input
               id="search_placeholder"
-              value={heroTexts.searchPlaceholder}
-              placeholder={'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"'}
-              onChange={(e) => setHeroTexts((c) => ({ ...c, searchPlaceholder: e.target.value }))}
+              value={searchContent.placeholder}
+              maxLength={180}
+              onChange={(event) => setSearchContent((current) => ({ ...current, placeholder: event.target.value }))}
               className="mt-1"
             />
           </div>
         </CardContent>
         <CardFooter>
-          <Button size="sm" disabled={isSavingHeroTexts} onClick={() => void saveHeroTexts()}>
-            {isSavingHeroTexts ? 'جاري الحفظ…' : 'حفظ النصوص'}
+          <Button size="sm" disabled={isSavingSearchContent} onClick={() => void saveSearchContent()}>
+            {isSavingSearchContent ? 'جاري الحفظ…' : 'حفظ نصوص البحث'}
           </Button>
         </CardFooter>
       </Card>

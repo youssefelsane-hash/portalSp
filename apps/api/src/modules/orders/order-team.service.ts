@@ -428,7 +428,15 @@ export class OrderTeamService {
     if (opportunity.created) {
       this.events.emit(
         WORK_OPPORTUNITY_OFFERED_EVENT,
-        new WorkOpportunityOfferedEvent(opportunity.id, orderId, order.orderNumber, technicianId, 'crew_recruit', tier),
+        new WorkOpportunityOfferedEvent(
+          opportunity.id,
+          orderId,
+          order.orderNumber,
+          technicianId,
+          'crew_recruit',
+          tier,
+          order.scheduledAt,
+        ),
       );
     }
     return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };

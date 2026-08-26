@@ -22,6 +22,7 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
   String? _error;
 
   Future<void> _submit() async {
+    if (widget.availableBalanceCents <= 0) return;
     if (!_formKey.currentState!.validate()) return;
     final amountEgp = double.parse(_amountController.text.trim());
     setState(() {
@@ -45,6 +46,7 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
   @override
   Widget build(BuildContext context) {
     final availableEgp = (widget.availableBalanceCents / 100).toStringAsFixed(0);
+    final canRequestPayout = widget.availableBalanceCents > 0;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -55,6 +57,15 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
             padding: const EdgeInsets.all(16),
             children: [
               Text('الرصيد المتاح: $availableEgp ج.م.', style: Theme.of(context).textTheme.titleMedium),
+              if (!canRequestPayout) ...[
+                const SizedBox(height: 8),
+                Text(
+                  widget.availableBalanceCents < 0
+                      ? 'عليك مديونية بقيمة ${(widget.availableBalanceCents.abs() / 100).toStringAsFixed(0)} ج.م.، ومش هتقدر تطلب صرف قبل تغطيتها.'
+                      : 'لا يوجد رصيد متاح للصرف حاليًا.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
               const SizedBox(height: 16),
               if (_error != null)
                 Padding(
@@ -68,6 +79,9 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
                 validator: (value) {
                   final parsed = double.tryParse(value ?? '');
                   if (parsed == null || parsed <= 0) return 'مبلغ غير صحيح';
+                  if ((parsed * 100).round() > widget.availableBalanceCents) {
+                    return 'المبلغ أكبر من الرصيد المتاح';
+                  }
                   return null;
                 },
               ),
@@ -87,7 +101,7 @@ class _PayoutRequestScreenState extends State<PayoutRequestScreen> {
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _submitting ? null : _submit,
+                onPressed: _submitting || !canRequestPayout ? null : _submit,
                 child: _submitting
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Text('تأكيد طلب الصرف'),

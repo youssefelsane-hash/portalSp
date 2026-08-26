@@ -6,6 +6,8 @@ import { JwtPayload } from '../auth/types/authenticated-request';
 import { UserType } from '../auth/entities/user.entity';
 import { ProjectsService } from './projects.service';
 import { Project } from './entities/project.entity';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PROJECT_CHANGED_EVENT } from '../../common/events/project-changed.event';
 
 
 function toProjectResponseDto(p: Project): Record<string, unknown> {
@@ -41,7 +43,14 @@ function toProjectResponseDto(p: Project): Record<string, unknown> {
 @Controller('me/projects')
 @Roles(UserType.CUSTOMER)
 export class MyProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly events: EventEmitter2,
+  ) {}
+
+  private publish(projectId: string, action: string): void {
+    this.events.emit(PROJECT_CHANGED_EVENT, { projectId, action });
+  }
 
   @Post()
   async create(@CurrentUser() user: JwtPayload, @Body() dto: {
@@ -49,6 +58,7 @@ export class MyProjectsController {
     address_id: string; budget_estimate_cents?: number;
   }, @AuditContext() meta: AuditMeta, @Headers('idempotency-key') idempotencyKey?: string) {
     const project = await this.projectsService.create(user.sub, dto, meta, idempotencyKey);
+    this.publish(project.id, 'created');
     return toProjectResponseDto(project);
   }
 
@@ -76,7 +86,9 @@ export class MyProjectsController {
     @Param('quoteId', ParseUUIDPipe) quoteId: string,
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.approveQuote(user.sub, quoteId, projectId, meta);
+    const project = await this.projectsService.approveQuote(user.sub, quoteId, projectId, meta);
+    this.publish(projectId, 'quote_approved');
+    return project;
   }
 
   // ── موافقة/رفض المرحلة + كومنتات العميل (ADR-0036) ──────────────────────────
@@ -90,7 +102,9 @@ export class MyProjectsController {
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.approveMilestone(user.sub, id, milestoneId, meta);
+    const milestone = await this.projectsService.approveMilestone(user.sub, id, milestoneId, meta);
+    this.publish(id, 'milestone_approved');
+    return milestone;
   }
 
   @Post(':id/milestones/:milestoneId/reject')
@@ -101,7 +115,9 @@ export class MyProjectsController {
     @Body() dto: { reason: string },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.rejectMilestone(user.sub, id, milestoneId, dto?.reason ?? '', meta);
+    const milestone = await this.projectsService.rejectMilestone(user.sub, id, milestoneId, dto?.reason ?? '', meta);
+    this.publish(id, 'milestone_rejected');
+    return milestone;
   }
 
   /** كومنت من العميل — دايمًا مرئي (مالوش معنى يخفي حاجة عن نفسه). */
@@ -112,6 +128,8 @@ export class MyProjectsController {
     @Body() dto: { body: string; milestone_id?: string },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.addComment({ userId: user.sub, role: 'customer' }, id, dto, meta);
+    const comment = await this.projectsService.addComment({ userId: user.sub, role: 'customer' }, id, dto, meta);
+    this.publish(id, 'comment_added');
+    return comment;
   }
 }

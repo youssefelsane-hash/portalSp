@@ -13,15 +13,11 @@ import { EmptyState } from '@/components/empty-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { resolveMediaUrl } from '@/lib/media-url';
 
 // مفيش WebSocket جوّه لوحة الأدمن (البنية التحتية للسوكيت في chat.gateway.ts مبنية للعميل/الفني
 // بس) — بولينج بسيط كل 4 ثواني بدل بناء عميل Socket.IO كامل داخل Next.js لسكرين واحد.
 const POLL_INTERVAL_MS = 4000;
-
-// نفس بَقّة orders/[id]/page.tsx وtechnicians/[id]/page.tsx (2026-08-19): file_url راجع من
-// LocalDiskStorageService نسبي عمداً (`/uploads/...`) — لازم أصل الباك-إند صراحة وإلا المتصفح
-// بيحله على أصل صفحة الأدمن نفسها (404).
-const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1').replace(/\/api\/v1\/?$/, '');
 
 export default function SupportChatThreadDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -110,7 +106,7 @@ export default function SupportChatThreadDetailPage() {
                       {m.message_type === 'image' && m.file_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={m.file_url.startsWith('http') ? m.file_url : `${API_ORIGIN}${m.file_url}`}
+                          src={resolveMediaUrl(m.file_url)}
                           alt="صورة مرفقة"
                           className="max-w-full rounded"
                         />

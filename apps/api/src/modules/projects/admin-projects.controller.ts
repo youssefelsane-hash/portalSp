@@ -6,11 +6,20 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { UserType } from '../auth/entities/user.entity';
 import { ProjectsService } from './projects.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PROJECT_CHANGED_EVENT } from '../../common/events/project-changed.event';
 
 @Controller('admin/projects')
 @Roles(UserType.ADMIN)
 export class AdminProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly events: EventEmitter2,
+  ) {}
+
+  private publish(projectId: string, action: string): void {
+    this.events.emit(PROJECT_CHANGED_EVENT, { projectId, action });
+  }
 
   @Get()
   @RequirePermission('projects.view')
@@ -38,7 +47,9 @@ export class AdminProjectsController {
     @Body() dto: { to: string; reason?: string },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.transition(admin.sub, id, dto.to as never, dto.reason, meta);
+    const project = await this.projectsService.transition(admin.sub, id, dto.to as never, dto.reason, meta);
+    this.publish(id, 'status_changed');
+    return project;
   }
 
   @Post(':id/quotes')
@@ -49,7 +60,9 @@ export class AdminProjectsController {
     @Body() dto: Record<string, unknown>,
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.createQuote(admin.sub, id, dto as never, meta);
+    const quote = await this.projectsService.createQuote(admin.sub, id, dto as never, meta);
+    this.publish(id, 'quote_created');
+    return quote;
   }
 
   @Post(':id/quotes/:quoteId/send')
@@ -60,7 +73,9 @@ export class AdminProjectsController {
     @Param('quoteId', ParseUUIDPipe) quoteId: string,
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.sendQuote(admin.sub, quoteId, 14, projectId, meta);
+    const quote = await this.projectsService.sendQuote(admin.sub, quoteId, 14, projectId, meta);
+    this.publish(projectId, 'quote_sent');
+    return quote;
   }
 
   @Post(':id/milestones')
@@ -71,7 +86,9 @@ export class AdminProjectsController {
     @Body() dto: { milestones: unknown[] },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.createMilestones(admin.sub, id, dto.milestones as never, meta);
+    const milestones = await this.projectsService.createMilestones(admin.sub, id, dto.milestones as never, meta);
+    this.publish(id, 'milestones_created');
+    return milestones;
   }
 
   // ── دورة حياة المرحلة الواحدة (ADR-0036، docs/08 §57 بند 3) ──────────────────
@@ -86,7 +103,9 @@ export class AdminProjectsController {
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.startMilestone(admin.sub, id, milestoneId, meta);
+    const milestone = await this.projectsService.startMilestone(admin.sub, id, milestoneId, meta);
+    this.publish(id, 'milestone_started');
+    return milestone;
   }
 
   @Post(':id/milestones/:milestoneId/complete')
@@ -98,7 +117,15 @@ export class AdminProjectsController {
     @Body() dto: { proof_storage_keys?: string[] },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.completeMilestone(admin.sub, id, milestoneId, dto?.proof_storage_keys ?? [], meta);
+    const milestone = await this.projectsService.completeMilestone(
+      admin.sub,
+      id,
+      milestoneId,
+      dto?.proof_storage_keys ?? [],
+      meta,
+    );
+    this.publish(id, 'milestone_completed');
+    return milestone;
   }
 
   /** كومنت على المشروع أو على مرحلة (milestone_id اختياري). مرئي للعميل افتراضيًا. */
@@ -110,7 +137,9 @@ export class AdminProjectsController {
     @Body() dto: { body: string; milestone_id?: string; is_visible_to_customer?: boolean },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.addComment({ userId: admin.sub, role: 'admin' }, id, dto, meta);
+    const comment = await this.projectsService.addComment({ userId: admin.sub, role: 'admin' }, id, dto, meta);
+    this.publish(id, 'comment_added');
+    return comment;
   }
 
   // ── سد فجوتَي الطلبات والضمانات (docs/08 §57 بنود 4-5) ──────────────────────
@@ -124,7 +153,9 @@ export class AdminProjectsController {
     @Param('orderId', ParseUUIDPipe) orderId: string,
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.linkOrderToProject(admin.sub, id, orderId, meta);
+    const order = await this.projectsService.linkOrderToProject(admin.sub, id, orderId, meta);
+    this.publish(id, 'order_linked');
+    return order;
   }
 
   /** إصدار ضمان على المشروع كله — كان مفيش مسار إصدار غير عبر تسوية طلب. */
@@ -136,6 +167,8 @@ export class AdminProjectsController {
     @Body() dto: { plan_id: string },
     @AuditContext() meta: AuditMeta,
   ) {
-    return this.projectsService.issueProjectWarranty(admin.sub, id, dto.plan_id, meta);
+    const warranty = await this.projectsService.issueProjectWarranty(admin.sub, id, dto.plan_id, meta);
+    this.publish(id, 'warranty_issued');
+    return warranty;
   }
 }

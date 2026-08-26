@@ -16,5 +16,6 @@ export class WorkOpportunityOfferedEvent {
     public readonly technicianId: string,
     public readonly context: 'assignment' | 'crew_recruit',
     public readonly capacityTier: 'LIGHT' | 'MEANINGFUL' | 'HEAVY' | 'BLOCKED',
+    public readonly scheduledAt: Date | null = null,
   ) {}
 }

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Optional, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -6,12 +7,16 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { UserType } from '../auth/entities/user.entity';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { WARRANTY_CLAIM_CHANGED_EVENT } from '../../common/events/warranty-claim-changed.event';
 
 /** مسارات الضمان للعميل — فتح Claim ومتابعة مطالباته وضماناته. */
 @Controller('me/warranties')
 @Roles(UserType.CUSTOMER)
 export class MyWarrantyController {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @Optional() private readonly events?: EventEmitter2,
+  ) {}
 
   @Get()
   async myWarranties(@CurrentUser() user: JwtPayload) {
@@ -50,7 +55,7 @@ export class MyWarrantyController {
     );
     if (!profile) throw new ApiException(ErrorCode.VAL_001, 'بروفايل العميل غير موجود', HttpStatus.NOT_FOUND);
 
-    return this.dataSource.transaction(async (manager) => {
+    const opened = await this.dataSource.transaction(async (manager) => {
       const [warranty] = await manager.query<{ id: string; expires_at: string; claims_used: number; max_claims: number; order_id: string | null; project_id: string | null }[]>(
         `SELECT id, expires_at, claims_used, max_claims, order_id, project_id
          FROM customer_warranties WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
@@ -85,6 +90,8 @@ export class MyWarrantyController {
       if (!updated[0]) throw new ApiException(ErrorCode.VAL_001, 'تم استهلاك المطالبات المسموحة', HttpStatus.CONFLICT);
       return { id: claim.id, status: 'open' };
     });
+    this.events?.emit(WARRANTY_CLAIM_CHANGED_EVENT, { claimId: opened.id, action: 'opened' });
+    return opened;
   }
 
   @Get('claims')

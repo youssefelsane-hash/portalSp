@@ -49,6 +49,12 @@ export interface HomepageTipDto {
 export interface HomepageContentDto {
   trust_message: string;
   hero_images: string[];
+  search: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    placeholder: string;
+  };
   tips: HomepageTipDto[];
   // نصوص الـhero (docs/08 §64.د) — كانت ثابتة في الكود، بقت مُدارة من الأدمن. الباك-إند بيضمن
   // إنها مش فاضية أبدًا (بيرجّع الافتراضي لو الأدمن مسح الحقل).

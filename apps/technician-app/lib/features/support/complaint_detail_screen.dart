@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../core/media_url.dart';
 import 'models.dart';
 import 'support_repository.dart';
 
@@ -155,7 +156,7 @@ class _ComplaintDetailScreenState extends State<ComplaintDetailScreen> {
                                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                                   itemBuilder: (context, i) => ClipRRect(
                                     borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(_attachments[i].fileUrl, width: 80, height: 80, fit: BoxFit.cover),
+                                    child: Image.network(resolveMediaUrl(_attachments[i].fileUrl), width: 80, height: 80, fit: BoxFit.cover),
                                   ),
                                 ),
                               ),

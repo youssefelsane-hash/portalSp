@@ -7938,7 +7938,7 @@ soft-delete تلقائيًا). يعني أي طلب قائم **اتوقفت خد
 `technicianLevel = undefined` عمدًا (§62.2 — الشركة مش فني واحد وأعضاؤها مش معروفين لسه)، فالمضاعف
 = 1 **دايمًا**. يعني مفيش أي وسيلة تسعّر شركة أعلى من الأساسي مهما كانت.
 
-**التنفيذ** (ADR-0042 + migration 0197):
+**التنفيذ** (ADR-0042 + migration 0199):
 
 | البند | القرار |
 |---|---|
@@ -8115,7 +8115,7 @@ $ grep -n  "emit\|EventEmitter"            src/modules/projects/projects.service
 
 **ج. النصوص للأدمن** — أربع نصوص كانت **مكتوبة ثابتة في كود التطبيقين** (Dart وTSX): السطر
 الصغير، العنوان، السطر التوضيحي، ونص شريط البحث. أي تعديل صياغة كان يحتاج release للتطبيقين.
-بقت إعدادات عادية (`migration 0198`، نفس نمط `homepage.trust_message`): `homepage.hero_eyebrow`،
+بقت إعدادات توافق عادية (`migration 0200`، نفس نمط `homepage.trust_message`): `homepage.hero_eyebrow`،
 `homepage.hero_title`، `homepage.hero_subtitle`، `homepage.search_placeholder` — بكارت جديد
 «نصوص واجهة البحث» في `/homepage-content` في لوحة الأدمن.
 

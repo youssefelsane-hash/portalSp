@@ -11,12 +11,28 @@ export interface HomepageTipDto {
   image_url: string | null;
 }
 
+export interface HomepageSearchContentDto {
+  eyebrow: string;
+  title: string;
+  description: string;
+  placeholder: string;
+}
+
+const DEFAULT_SEARCH_CONTENT: HomepageSearchContentDto = {
+  eyebrow: 'أساعدك إزاي؟',
+  title: 'محتاج مساعدة في إيه؟',
+  description: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+  placeholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
+};
+
 export interface HomepageContentResponseDto {
   /** رسالة الثقة/الضمان المعروضة في hero الصفحة الرئيسية — نص قابل للتعديل من الأدمن، مش ثابت
    * في الكود (طلب مالك صريح 2026-08-22: "الكلام ده بيتغير، مش مستحسن يكون ثابت"). */
   trust_message: string;
   /** صور الـhero المرتبة من الأدمن. قائمة فارغة تعني الرجوع لصورة branding splash القديمة. */
   hero_images: string[];
+  /** نصوص مدخل البحث الرئيسية، كلها قابلة للتعديل من لوحة الإدارة كمجموعة واحدة. */
+  search: HomepageSearchContentDto;
   /** "نصايح مفيدة" — كانت `HOME_TIPS` ثابتة في كود الـfrontend (customer-web/customer-app)،
    * بلا أي مكان يديها الأدمن يعدّلها أو يحط صور حقيقية (بلاغ مالك صريح 2026-08-23: "مش لاقي له
    * مكان أرفع منه الصور"). بقت `homepage.tips` (setting, value_type='json') — نفس نمط
@@ -34,14 +50,6 @@ export interface HomepageContentResponseDto {
   search_placeholder: string;
 }
 
-// النصوص الافتراضية = اللي كان مكتوب حرفيًا في التطبيقين قبل ما يبقى قابل للتعديل.
-const HERO_TEXT_DEFAULTS = {
-  eyebrow: 'أساعدك إزاي؟',
-  title: 'محتاج مساعدة في إيه؟',
-  subtitle: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
-  searchPlaceholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
-} as const;
-
 /**
  * محتوى الصفحة الرئيسية لـ customer-web/customer-app (طلب مالك صريح 2026-08-22/23) — @Public()
  * عمداً، نفس فلسفة SupportContactController بالحرف (نفس الملف/الموديول). التعديل عبر
@@ -57,29 +65,38 @@ export class HomepageContentController {
   async getHomepageContent(): Promise<HomepageContentResponseDto> {
     const trustMessage = await this.settingsService.getString('homepage.trust_message', '');
     const tips = await this.settingsService.getJson<HomepageTipDto[]>('homepage.tips', []);
+    const configuredSearch = await this.settingsService.getJson<unknown>('homepage.search_content', {});
     const configuredHeroImages = await this.settingsService.getJson<unknown[]>('homepage.hero_images', []);
     const heroImages = configuredHeroImages
       .filter((value): value is string => typeof value === 'string')
       .map((value) => value.trim())
       .filter((value) => value.startsWith('https://') || value.startsWith('/uploads/'))
       .slice(0, 4);
-    // نص فاضي في الإعداد = "رجّع الافتراضي"، مش "اعرض فراغ" — الأدمن ممكن يمسح الحقل بالغلط
-    // ومينفعش الشاشة الرئيسية تفضل بلا عنوان.
-    const textOrDefault = async (key: string, fallback: string): Promise<string> => {
-      const value = await this.settingsService.getString(key, '');
-      return value.trim() === '' ? fallback : value;
+    const searchRecord = configuredSearch && typeof configuredSearch === 'object' && !Array.isArray(configuredSearch)
+      ? configuredSearch as Record<string, unknown>
+      : {};
+    const readSearchText = (key: keyof HomepageSearchContentDto, maxLength: number): string => {
+      const value = searchRecord[key];
+      return typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLength) : DEFAULT_SEARCH_CONTENT[key];
+    };
+    const search: HomepageSearchContentDto = {
+      eyebrow: readSearchText('eyebrow', 80),
+      title: readSearchText('title', 120),
+      description: readSearchText('description', 240),
+      placeholder: readSearchText('placeholder', 180),
     };
     return {
       trust_message: trustMessage,
       hero_images: heroImages,
+      search,
       tips,
-      hero_eyebrow: await textOrDefault('homepage.hero_eyebrow', HERO_TEXT_DEFAULTS.eyebrow),
-      hero_title: await textOrDefault('homepage.hero_title', HERO_TEXT_DEFAULTS.title),
-      hero_subtitle: await textOrDefault('homepage.hero_subtitle', HERO_TEXT_DEFAULTS.subtitle),
-      search_placeholder: await textOrDefault(
-        'homepage.search_placeholder',
-        HERO_TEXT_DEFAULTS.searchPlaceholder,
-      ),
+      // Compatibility aliases for the first Script 2 clients. New clients use `search`, but
+      // retaining these fields makes the merge non-breaking for an app released from the
+      // Claude branch before all clients update together.
+      hero_eyebrow: search.eyebrow,
+      hero_title: search.title,
+      hero_subtitle: search.description,
+      search_placeholder: search.placeholder,
     };
   }
 }

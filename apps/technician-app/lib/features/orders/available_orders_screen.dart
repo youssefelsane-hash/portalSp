@@ -25,38 +25,9 @@ import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
 import 'order.dart';
+import 'order_date_labels.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
-
-
-// docs/08 §64.ج — بلاغ المالك: الطلبات الإضافية كانت **كلها** مكتوب عليها «النهاردة» حتى لو
-// ميعادها الأسبوع الجاي، لأن نص الكارت كان ثابت في الكود ومحدش بيقرا `scheduled_at` أصلاً
-// (الحقل موجود في الـAPI وفي الموديل من زمان). دالة واحدة لتسمية اليوم بيستعملها كل الكروت
-// عشان ما يحصلش اختلاف بينهم تاني.
-const _weekdayNamesAr = ['الاتنين', 'التلات', 'الأربع', 'الخميس', 'الجمعة', 'السبت', 'الحد'];
-
-String formatJobDayLabel(String? iso) {
-  if (iso == null) return 'الميعاد لسه ما اتحددش';
-  final at = DateTime.parse(iso).toLocal();
-  final now = DateTime.now();
-  final startOfDay = DateTime(at.year, at.month, at.day);
-  final startOfToday = DateTime(now.year, now.month, now.day);
-  final diffDays = startOfDay.difference(startOfToday).inDays;
-  String two(int n) => n.toString().padLeft(2, '0');
-  final dateLabel = '${two(at.day)}/${two(at.month)}/${at.year}';
-  if (diffDays == 0) return 'النهاردة';
-  if (diffDays == 1) return 'بكرة';
-  // بعد بكرة بيوم أو أكتر: اليوم + التاريخ الكامل، مش تاريخ أعمى.
-  return '${_weekdayNamesAr[at.weekday - 1]} $dateLabel';
-}
-
-/// هل الميعاد ده نفس يوم النهاردة فعلاً؟ (النص «عندك شغل تاني النهاردة» ما ينفعش يتقال غير كده)
-bool isSameDayAsToday(String? iso) {
-  if (iso == null) return false;
-  final at = DateTime.parse(iso).toLocal();
-  final now = DateTime.now();
-  return at.year == now.year && at.month == now.month && at.day == now.day;
-}
 
 class AvailableOrdersScreen extends StatefulWidget {
   const AvailableOrdersScreen({super.key});
@@ -121,7 +92,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   // أي إزعاج للفني. لو الثلاثة فشلوا (رفض إذن فعلي، أو GPS مقفول من الجهاز)، الشريط تحت بيفضل
   // ظاهر لحد ما يدوس "فعّل الموقع الآن" بنفسه.
   Future<void> _captureInitialLocationWithRetries() async {
-    for (final delay in const [Duration.zero, Duration(seconds: 3), Duration(seconds: 8)]) {
+    for (final delay in const [
+      Duration.zero,
+      Duration(seconds: 3),
+      Duration(seconds: 8),
+    ]) {
       if (delay > Duration.zero) await Future.delayed(delay);
       if (!mounted || _locationCaptured) return;
       final ok = await _captureLocationOnce();
@@ -134,26 +109,41 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Future<bool> _captureLocationOnce({bool showFeedback = false}) async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        if (showFeedback) _showLocationSnack('لازم تفعّل GPS/خدمة الموقع من إعدادات الجهاز الأول');
+        if (showFeedback)
+          _showLocationSnack(
+            'لازم تفعّل GPS/خدمة الموقع من إعدادات الجهاز الأول',
+          );
         return false;
       }
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-        if (showFeedback) _showLocationSnack('محتاجين إذن الموقع عشان الطلبات توصلك — فعّله من إعدادات التطبيق');
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (showFeedback)
+          _showLocationSnack(
+            'محتاجين إذن الموقع عشان الطلبات توصلك — فعّله من إعدادات التطبيق',
+          );
         return false;
       }
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
       );
-      await _onboardingRepository.updateLocation(position.latitude, position.longitude);
+      await _onboardingRepository.updateLocation(
+        position.latitude,
+        position.longitude,
+      );
       if (mounted) setState(() => _locationCaptured = true);
       if (showFeedback) _showLocationSnack('تم تحديث موقعك بنجاح ✓');
       return true;
     } catch (_) {
-      if (showFeedback) _showLocationSnack('فشلت المحاولة — تأكد إن الجي بي إس مفعّل وحاول تاني');
+      if (showFeedback)
+        _showLocationSnack(
+          'فشلت المحاولة — تأكد إن الجي بي إس مفعّل وحاول تاني',
+        );
       return false;
     }
   }
@@ -167,7 +157,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
   void _showLocationSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // كانت فجوة موثّقة: لو التطبيق اتقفل في نص دورة تنفيذ طلب، الشاشة الرئيسية كانت بترجع
@@ -207,7 +199,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final order = _activeOrder;
     if (order == null) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: order)),
+      MaterialPageRoute(
+        builder: (_) => OrderExecutionScreen(initialOrder: order),
+      ),
     );
     await _refreshActiveOrder();
     await _load();
@@ -281,17 +275,24 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
   Future<void> _acceptWorkOpportunity(WorkOpportunity opportunity) async {
     setState(() => _isActing = true);
     try {
-      final acceptedOrder = await _repository.acceptWorkOpportunity(opportunity.id);
+      final acceptedOrder = await _repository.acceptWorkOpportunity(
+        opportunity.id,
+      );
       if (mounted) {
         setState(() => _activeOrder = acceptedOrder);
         await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder)),
+          MaterialPageRoute(
+            builder: (_) => OrderExecutionScreen(initialOrder: acceptedOrder),
+          ),
         );
         await _refreshActiveOrder();
       }
       await _load();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
       // الفرصة ممكن تكون اتقفلت من مكان تاني (فني تاني قبلها/الطلب اتغطى) — نحدّث القايمة عشان
       // تختفي فورًا بدل ما تفضل ظاهرة وهي بقت مش صالحة.
       await _loadWorkOpportunities();
@@ -306,7 +307,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.declineWorkOpportunity(opportunity.id);
       await _loadWorkOpportunities();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -327,7 +331,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.acceptCrewOpportunity(invite.id);
       await _load();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
       // ممكن تكون اتقفلت من مكان تاني (العدد المطلوب اكتمل قبل ما توصل) — نحدّث القايمة عشان تختفي.
       await _loadCrewOpportunities();
     } finally {
@@ -341,7 +348,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.declineCrewOpportunity(invite.id);
       await _loadCrewOpportunities();
     } on ApiException catch (err) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(err.message)));
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -362,10 +372,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       }
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -373,7 +384,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
   Future<void> _openUpcomingOrder(Order order) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: order)),
+      MaterialPageRoute(
+        builder: (_) => OrderExecutionScreen(initialOrder: order),
+      ),
     );
     await _refreshActiveOrder();
     await _load();
@@ -381,12 +394,12 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
   Future<void> _openTeamAssignedOrder(Order order) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => OrderExecutionScreen(initialOrder: order)),
+      MaterialPageRoute(
+        builder: (_) => OrderExecutionScreen(initialOrder: order),
+      ),
     );
     await _load();
   }
-
-  String _formatScheduledDay(String? iso) => formatJobDayLabel(iso);
 
   Future<void> _reject(AvailableOrder order) async {
     setState(() => _isActing = true);
@@ -394,10 +407,11 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
       await _repository.reject(order.orderId);
       await _load();
     } on ApiException catch (err) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(err.message)));
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -455,18 +469,31 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               Container(
                 width: double.infinity,
                 color: Theme.of(context).colorScheme.errorContainer,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, size: 18, color: Theme.of(context).colorScheme.onErrorContainer),
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'جزء من الشاشة ما اتحمّلش: ${_error!}',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer, fontSize: 13),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
-                    TextButton(onPressed: _load, child: const Text('إعادة المحاولة')),
+                    TextButton(
+                      onPressed: _load,
+                      child: const Text('إعادة المحاولة'),
+                    ),
                   ],
                 ),
               ),
@@ -528,19 +555,26 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         // docs/08 §56 بند 4 — الترتيب مقصود: الشغل الحالي (واحد بس) → المتأخر (أحمر) →
         // الطوارئ المستنية قرارك → الشغل المؤكّد قدامك → فرص إضافية → فريق.
         if (hasActive) ...[
-          _SectionHeader(icon: Icons.play_circle_outline, label: 'الشغل الحالي'),
+          _SectionHeader(
+            icon: Icons.play_circle_outline,
+            label: 'الشغل الحالي',
+          ),
           const SizedBox(height: 8),
           _ActiveOrderCard(order: _activeOrder!, onTap: _openActiveOrder),
           const SizedBox(height: 16),
         ],
         // شغلانة معادها عدّى ولسه ما بدأتش — أخطر حاجة في الشاشة بعد اللي شغّال دلوقتي.
         if (overdue.isNotEmpty) ...[
-          _SectionHeader(icon: Icons.warning_amber_rounded, label: 'شغل متأخر — معاده عدّى', color: Colors.red.shade700),
+          _SectionHeader(
+            icon: Icons.warning_amber_rounded,
+            label: 'شغل متأخر — معاده عدّى',
+            color: Colors.red.shade700,
+          ),
           const SizedBox(height: 8),
           for (final order in overdue) ...[
             _OverdueJobCard(
               order: order,
-              dayLabel: _formatScheduledDay(order.scheduledAt),
+              dayLabel: formatScheduledDayAr(order.scheduledAt),
               onTap: () => _openUpcomingOrder(order),
             ),
             const SizedBox(height: 8),
@@ -548,7 +582,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           const SizedBox(height: 8),
         ],
         if (pending.isNotEmpty) ...[
-          _SectionHeader(icon: Icons.emergency_outlined, label: 'طلبات مستنية قرارك'),
+          _SectionHeader(
+            icon: Icons.emergency_outlined,
+            label: 'طلبات مستنية قرارك',
+          ),
           const SizedBox(height: 8),
           for (final order in pending) ...[
             _EmergencyRequestCard(
@@ -562,12 +599,15 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           const SizedBox(height: 8),
         ],
         if (upcoming.isNotEmpty) ...[
-          _SectionHeader(icon: Icons.event_available_outlined, label: 'الشغل المؤكّد قدامك'),
+          _SectionHeader(
+            icon: Icons.event_available_outlined,
+            label: 'الشغل المؤكّد قدامك',
+          ),
           const SizedBox(height: 8),
           for (final order in upcoming) ...[
             _UpcomingJobCard(
               order: order,
-              dayLabel: _formatScheduledDay(order.scheduledAt),
+              dayLabel: formatScheduledDayAr(order.scheduledAt),
               onTap: () => _openUpcomingOrder(order),
             ),
             const SizedBox(height: 8),
@@ -582,7 +622,9 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
               const SizedBox(width: 6),
               Text(
                 'فرص شغل إضافي',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -603,11 +645,17 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         if (crewOpportunities.isNotEmpty) ...[
           Row(
             children: [
-              const Icon(Icons.group_add_outlined, size: 18, color: Colors.deepPurple),
+              const Icon(
+                Icons.group_add_outlined,
+                size: 18,
+                color: Colors.deepPurple,
+              ),
               const SizedBox(width: 6),
               Text(
                 'دعوات انضمام لفريق',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -628,11 +676,16 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           const SizedBox(height: 8),
           Text(
             'شغلي كعضو فريق',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           for (final order in teamAssigned) ...[
-            _TeamAssignedJobCard(order: order, onTap: () => _openTeamAssignedOrder(order)),
+            _TeamAssignedJobCard(
+              order: order,
+              onTap: () => _openTeamAssignedOrder(order),
+            ),
             const SizedBox(height: 8),
           ],
         ],
@@ -645,7 +698,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 // _captureInitialLocationWithRetries فوق للسياق الكامل. تنبيه واضح + زرار فعل واحد، مش رسالة
 // عابرة بتختفي — الفني من غير موقع مسجّل معندوش أي فرصة يتوصّله طلب خالص (matching.service.ts).
 class _LocationCaptureBanner extends StatelessWidget {
-  const _LocationCaptureBanner({required this.isCapturing, required this.onRetry});
+  const _LocationCaptureBanner({
+    required this.isCapturing,
+    required this.onRetry,
+  });
 
   final bool isCapturing;
   final VoidCallback onRetry;
@@ -664,7 +720,11 @@ class _LocationCaptureBanner extends StatelessWidget {
             Expanded(
               child: Text(
                 'موقعك لسه مسجّلش — الطلبات مش هتوصلك من غيره',
-                style: TextStyle(color: scheme.onErrorContainer, fontWeight: FontWeight.w600, fontSize: 13),
+                style: TextStyle(
+                  color: scheme.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -672,11 +732,17 @@ class _LocationCaptureBanner extends StatelessWidget {
                 ? SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onErrorContainer),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: scheme.onErrorContainer,
+                    ),
                   )
                 : TextButton(
                     onPressed: onRetry,
-                    child: Text('فعّل الموقع الآن', style: TextStyle(color: scheme.onErrorContainer)),
+                    child: Text(
+                      'فعّل الموقع الآن',
+                      style: TextStyle(color: scheme.onErrorContainer),
+                    ),
                   ),
           ],
         ),
@@ -714,11 +780,21 @@ class _ActiveOrderCard extends StatelessWidget {
                   children: [
                     Text(
                       'الشغل الجاري دلوقتي',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: scheme.primary),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: scheme.primary,
+                      ),
                     ),
                     const SizedBox(height: 4),
-                    Text('طلب ${order.orderNumber}', style: Theme.of(context).textTheme.titleMedium),
-                    Text(technicianOrderStatusLabelsAr[order.orderStatus] ?? order.orderStatus),
+                    Text(
+                      'طلب ${order.orderNumber}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      technicianOrderStatusLabelsAr[order.orderStatus] ??
+                          order.orderStatus,
+                    ),
                   ],
                 ),
               ),
@@ -758,7 +834,11 @@ class _EmergencyRequestCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.bolt, size: 16, color: Theme.of(context).colorScheme.error),
+                Icon(
+                  Icons.bolt,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.error,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   'طلب طوارئ — محتاج قرارك دلوقتي',
@@ -771,11 +851,17 @@ class _EmergencyRequestCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            Text(order.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              order.serviceNameAr,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
-            Text('${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}'),
+            Text(
+              '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
+            ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
-            if (order.problemDescription != null) Text(order.problemDescription!),
+            if (order.problemDescription != null)
+              Text(order.problemDescription!),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -817,8 +903,9 @@ class _WorkOpportunityCard extends StatelessWidget {
   // docs/08 §64.ج — النص كان ثابت «النهاردة» مهما كان ميعاد الشغلانة. دلوقتي بيتقال بس لما
   // الفرصة فعلاً في نفس اليوم؛ غير كده بيوضّح إنها شغل إضافي في يوم تاني.
   String get _tierLabel {
-    final sameDay = isSameDayAsToday(opportunity.scheduledAt);
-    if (!sameDay) return 'شغل إضافي — ${formatJobDayLabel(opportunity.scheduledAt)}';
+    if (!isScheduledToday(opportunity.scheduledAt)) {
+      return 'شغل إضافي — ${formatScheduledDayAr(opportunity.scheduledAt)}';
+    }
     return switch (opportunity.capacityTierAtOffer) {
       'HEAVY' => 'عندك شغل تقيل النهاردة — الفرصة دي اختيارية بالكامل',
       _ => 'عندك شغل تاني النهاردة — لو تقدر تستوعبها، اقبلها',
@@ -836,37 +923,57 @@ class _WorkOpportunityCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.add_task_outlined, size: 16, color: context.infoColor),
+                Icon(
+                  Icons.add_task_outlined,
+                  size: 16,
+                  color: context.infoColor,
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     _tierLabel,
-                    style: TextStyle(fontSize: 12, color: context.infoColor, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.infoColor,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(opportunity.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              opportunity.serviceNameAr,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
             // الميعاد بالاسم دايمًا — الفني ما يقدرش يقرر يقبل ولا لأ من غير ما يعرف الشغل ده إمتى.
             Row(
               children: [
-                const Icon(Icons.event_outlined, size: 14),
-                const SizedBox(width: 4),
-                Text('الميعاد: ${formatJobDayLabel(opportunity.scheduledAt)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                const Icon(Icons.calendar_today_outlined, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'موعد الطلب: ${formatScheduledDayAr(opportunity.scheduledAt)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
               ],
             ),
             const SizedBox(height: 4),
             Text(opportunity.streetName),
-            if (opportunity.problemDescription != null) Text(opportunity.problemDescription!),
+            if (opportunity.problemDescription != null)
+              Text(opportunity.problemDescription!),
             const SizedBox(height: 8),
             Row(
               children: [
-                FilledButton(onPressed: busy ? null : onAccept, child: const Text('قبول')),
+                FilledButton(
+                  onPressed: busy ? null : onAccept,
+                  child: const Text('قبول'),
+                ),
                 const SizedBox(width: 8),
-                OutlinedButton(onPressed: busy ? null : onDecline, child: const Text('رفض')),
+                OutlinedButton(
+                  onPressed: busy ? null : onDecline,
+                  child: const Text('رفض'),
+                ),
               ],
             ),
           ],
@@ -904,39 +1011,59 @@ class _CrewOpportunityCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.group_add_outlined, size: 16, color: Colors.deepPurple),
+                const Icon(
+                  Icons.group_add_outlined,
+                  size: 16,
+                  color: Colors.deepPurple,
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     invite.teamLeaderName != null
                         ? 'قائد الفريق ${invite.teamLeaderName} بيدعوك تنضم كـ$roleLabel'
                         : 'دعوة انضمام كـ$roleLabel',
-                    style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.deepPurple,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(invite.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              invite.serviceNameAr,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
             // نفس سبب §64.ج بالظبط — دعوة انضمام من غير ميعاد مش قرار كامل.
             Row(
               children: [
                 const Icon(Icons.event_outlined, size: 14),
                 const SizedBox(width: 4),
-                Text('الميعاد: ${formatJobDayLabel(invite.scheduledAt)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  'الميعاد: ${formatScheduledDayAr(invite.scheduledAt)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
               ],
             ),
             const SizedBox(height: 4),
             Text(invite.streetName),
-            if (invite.problemDescription != null) Text(invite.problemDescription!),
+            if (invite.problemDescription != null)
+              Text(invite.problemDescription!),
             const SizedBox(height: 8),
             Row(
               children: [
-                FilledButton(onPressed: busy ? null : onAccept, child: const Text('انضم')),
+                FilledButton(
+                  onPressed: busy ? null : onAccept,
+                  child: const Text('انضم'),
+                ),
                 const SizedBox(width: 8),
-                OutlinedButton(onPressed: busy ? null : onDecline, child: const Text('رفض')),
+                OutlinedButton(
+                  onPressed: busy ? null : onDecline,
+                  child: const Text('رفض'),
+                ),
               ],
             ),
           ],
@@ -961,7 +1088,14 @@ class _NewBadge extends StatelessWidget {
         color: context.infoColor,
         borderRadius: BorderRadius.circular(4),
       ),
-      child: const Text('جديد', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      child: const Text(
+        'جديد',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
@@ -984,7 +1118,10 @@ class _SectionHeader extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           label,
-          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold, color: color),
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
         ),
       ],
     );
@@ -993,7 +1130,11 @@ class _SectionHeader extends StatelessWidget {
 
 /// شغلانة معادها عدّى ولسه ما بدأتش (docs/08 §56 بند 4) — أحمر صريح، مش نفس شكل الشغل العادي.
 class _OverdueJobCard extends StatelessWidget {
-  const _OverdueJobCard({required this.order, required this.dayLabel, required this.onTap});
+  const _OverdueJobCard({
+    required this.order,
+    required this.dayLabel,
+    required this.onTap,
+  });
 
   final Order order;
   final String dayLabel;
@@ -1035,7 +1176,11 @@ class _OverdueJobCard extends StatelessWidget {
 }
 
 class _UpcomingJobCard extends StatelessWidget {
-  const _UpcomingJobCard({required this.order, required this.dayLabel, required this.onTap});
+  const _UpcomingJobCard({
+    required this.order,
+    required this.dayLabel,
+    required this.onTap,
+  });
 
   final Order order;
   final String dayLabel;
@@ -1062,7 +1207,9 @@ class _UpcomingJobCard extends StatelessWidget {
             Expanded(
               child: Text(
                 '${order.serviceNameAr ?? 'طلب'} — $dayLabel',
-                style: order.isNewForTechnician ? const TextStyle(fontWeight: FontWeight.bold) : null,
+                style: order.isNewForTechnician
+                    ? const TextStyle(fontWeight: FontWeight.bold)
+                    : null,
               ),
             ),
           ],
@@ -1103,7 +1250,8 @@ class _TeamAssignedJobCard extends StatelessWidget {
         title: Text('طلب ${order.orderNumber}'),
         subtitle: Text(
           [
-            if (order.teamLeaderName != null) 'قائد الفريق: ${order.teamLeaderName}',
+            if (order.teamLeaderName != null)
+              'قائد الفريق: ${order.teamLeaderName}',
             technicianEarningLabel(
               myEarningCents: order.myEarningCents,
               earningPending: order.earningPending,

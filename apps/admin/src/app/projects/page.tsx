@@ -15,6 +15,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ORDER_STATUS_LABELS } from '@/lib/order-labels';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
 const egp = (c: number) => `${(c / 100).toLocaleString('ar-EG-u-nu-latn')} ج.م`;
 
@@ -132,15 +133,9 @@ export default function AdminProjectsPage() {
   }, [isLoading, page, authedFetchPaginated]);
 
   useEffect(() => {
-    if (isLoading) return;
-    void authedFetchPaginated<ProjectRow>(`/admin/projects?page=${page}&per_page=20`)
-      .then(({ items, meta }) => {
-        setProjects(items);
-        setTotal(meta.total ?? items.length);
-        setError(null);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'خطأ'));
-  }, [isLoading, page, authedFetchPaginated]);
+    load();
+  }, [load]);
+  useAdminLiveRefresh(['projects'], load);
 
   return (
     <AppShell>
@@ -221,6 +216,9 @@ function ProjectDetailPanel({ project, onRefresh }: { project: ProjectRow; onRef
   }, [authedFetch, project.id]);
 
   useEffect(() => { void loadRoom(); }, [loadRoom]);
+  useAdminLiveRefresh(['projects'], (event) => {
+    if (event.entity_id === project.id) void loadRoom();
+  });
 
   const currentProject = room?.project ?? project;
   const transitions = TRANSITIONS[currentProject.status] ?? [];
