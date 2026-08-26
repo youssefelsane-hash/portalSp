@@ -228,6 +228,17 @@ describe('PaymentsService.settleAlreadyPaidOrder() — تسوية الطلب ا�
       );
       await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [ids.customerProfile]);
+      // بَقّة نظافة (docs/08 §64): إقفال الطلب بينشئ محادثة (chat_threads) — التنظيف ما كانش
+      // بيحذفها، فحذف الطلبات كان بيفشل على قيد المفتاح الأجنبي ويسيب صفوف ورا، والتشغيلة اللي
+      // بعدها بتقع على بيانات قديمة. نفس فئة التسريبات اللي اتصلحت في §63 شريحة 7.
+      await q(
+        `DELETE FROM chat_messages WHERE thread_id IN (
+           SELECT id FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1))`,
+        [ids.customerProfile],
+      );
+      await q(`DELETE FROM chat_threads WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, [
+        ids.customerProfile,
+      ]);
       await q(`DELETE FROM orders WHERE customer_id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM wallets WHERE owner_user_id IN ($1, $2)`, [ids.techUser, ids.customerUser]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);

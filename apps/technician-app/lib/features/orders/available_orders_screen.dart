@@ -28,6 +28,36 @@ import 'order.dart';
 import 'order_execution_screen.dart';
 import 'orders_repository.dart';
 
+
+// docs/08 §64.ج — بلاغ المالك: الطلبات الإضافية كانت **كلها** مكتوب عليها «النهاردة» حتى لو
+// ميعادها الأسبوع الجاي، لأن نص الكارت كان ثابت في الكود ومحدش بيقرا `scheduled_at` أصلاً
+// (الحقل موجود في الـAPI وفي الموديل من زمان). دالة واحدة لتسمية اليوم بيستعملها كل الكروت
+// عشان ما يحصلش اختلاف بينهم تاني.
+const _weekdayNamesAr = ['الاتنين', 'التلات', 'الأربع', 'الخميس', 'الجمعة', 'السبت', 'الحد'];
+
+String formatJobDayLabel(String? iso) {
+  if (iso == null) return 'الميعاد لسه ما اتحددش';
+  final at = DateTime.parse(iso).toLocal();
+  final now = DateTime.now();
+  final startOfDay = DateTime(at.year, at.month, at.day);
+  final startOfToday = DateTime(now.year, now.month, now.day);
+  final diffDays = startOfDay.difference(startOfToday).inDays;
+  String two(int n) => n.toString().padLeft(2, '0');
+  final dateLabel = '${two(at.day)}/${two(at.month)}/${at.year}';
+  if (diffDays == 0) return 'النهاردة';
+  if (diffDays == 1) return 'بكرة';
+  // بعد بكرة بيوم أو أكتر: اليوم + التاريخ الكامل، مش تاريخ أعمى.
+  return '${_weekdayNamesAr[at.weekday - 1]} $dateLabel';
+}
+
+/// هل الميعاد ده نفس يوم النهاردة فعلاً؟ (النص «عندك شغل تاني النهاردة» ما ينفعش يتقال غير كده)
+bool isSameDayAsToday(String? iso) {
+  if (iso == null) return false;
+  final at = DateTime.parse(iso).toLocal();
+  final now = DateTime.now();
+  return at.year == now.year && at.month == now.month && at.day == now.day;
+}
+
 class AvailableOrdersScreen extends StatefulWidget {
   const AvailableOrdersScreen({super.key});
 
@@ -185,20 +215,43 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
 
   // ADR-0018 §10-11 — الشغل المؤكّد المجدول (بلا قرار قبول/رفض، فقط auto-confirm من الباك-إند)
   // بقى جزء من نفس تحميل الشاشة الرئيسية، مش endpoint منفصل شاشته منفصلة.
+  // كل قايمة بتتحمّل لوحدها (docs/08 §64.أ). قبل كده كانوا في `try` واحد: أول نداء يفشل كان
+  // بيمنع اللي بعده **ويحط رسالة الخطأ مكان الشاشة كلها** — الفني بيلاقي شاشة فاضية مكتوب فيها
+  // «الخدمة غير موجودة» وخلاص، ومفيش ولا طلب باين حتى لو طلباته التانية كلها تمام. وكمان
+  // `_error` ما كانش بيترجّع null أبدًا، فأول خطأ عابر كان بيكسر الشاشة لحد ما التطبيق يتقفل.
   Future<void> _load() async {
+    String? firstError;
+    List<AvailableOrder>? orders;
+    List<Order>? upcoming;
+    List<Order>? overdue;
+
     try {
-      final orders = await _repository.fetchAvailable();
-      final upcoming = await _repository.fetchUpcomingConfirmed();
-      final overdue = await _repository.fetchOverdue();
-      if (mounted) {
-        setState(() {
-          _orders = orders;
-          _upcomingOrders = upcoming;
-          _overdueOrders = overdue;
-        });
-      }
+      orders = await _repository.fetchAvailable();
     } on ApiException catch (err) {
-      if (mounted) setState(() => _error = err.message);
+      firstError ??= err.message;
+    }
+    try {
+      upcoming = await _repository.fetchUpcomingConfirmed();
+    } on ApiException catch (err) {
+      firstError ??= err.message;
+    }
+    try {
+      overdue = await _repository.fetchOverdue();
+    } on ApiException catch (err) {
+      firstError ??= err.message;
+    }
+
+    if (mounted) {
+      setState(() {
+        // القوايم اللي نجحت بتتحدّث؛ اللي فشلت بتفضل بآخر قيمة ناجحة (أو فاضية) بدل ما تفضّي الشاشة.
+        if (orders != null) _orders = orders;
+        if (upcoming != null) _upcomingOrders = upcoming;
+        if (overdue != null) _overdueOrders = overdue;
+        _orders ??= const [];
+        _upcomingOrders ??= const [];
+        _overdueOrders ??= const [];
+        _error = firstError;
+      });
     }
     await _loadTeamAssigned();
     await _loadWorkOpportunities();
@@ -333,19 +386,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     await _load();
   }
 
-  String _formatScheduledDay(String? iso) {
-    if (iso == null) return '';
-    final at = DateTime.parse(iso).toLocal();
-    final now = DateTime.now();
-    final startOfDay = DateTime(at.year, at.month, at.day);
-    final startOfToday = DateTime(now.year, now.month, now.day);
-    final diffDays = startOfDay.difference(startOfToday).inDays;
-    final two = (int n) => n.toString().padLeft(2, '0');
-    final dateLabel = '${two(at.day)}/${two(at.month)}/${at.year}';
-    if (diffDays == 0) return 'النهاردة';
-    if (diffDays == 1) return 'بكرة';
-    return dateLabel;
-  }
+  String _formatScheduledDay(String? iso) => formatJobDayLabel(iso);
 
   Future<void> _reject(AvailableOrder order) async {
     setState(() => _isActing = true);
@@ -410,12 +451,31 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                 isCapturing: _locationCapturing,
                 onRetry: _retryLocationManually,
               ),
+            if (_error != null)
+              Container(
+                width: double.infinity,
+                color: Theme.of(context).colorScheme.errorContainer,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 18, color: Theme.of(context).colorScheme.onErrorContainer),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'جزء من الشاشة ما اتحمّلش: ${_error!}',
+                        style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer, fontSize: 13),
+                      ),
+                    ),
+                    TextButton(onPressed: _load, child: const Text('إعادة المحاولة')),
+                  ],
+                ),
+              ),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _load,
-                child: _error != null
-                    ? Center(child: Text(_error!))
-                    : (_orders == null || _upcomingOrders == null)
+                // الخطأ بقى **شريط فوق** مش بديل للشاشة (docs/08 §64.أ) — الشغل اللي حمّل بنجاح
+                // لازم يفضل باين وقابل للتنفيذ حتى لو قايمة واحدة فشلت.
+                child: (_orders == null || _upcomingOrders == null)
                     ? const Padding(
                         padding: EdgeInsets.all(16),
                         child: LoadingList(),
@@ -754,10 +814,16 @@ class _WorkOpportunityCard extends StatelessWidget {
   final VoidCallback onAccept;
   final VoidCallback onDecline;
 
-  String get _tierLabel => switch (opportunity.capacityTierAtOffer) {
-        'HEAVY' => 'عندك شغل تقيل النهاردة — الفرصة دي اختيارية بالكامل',
-        _ => 'عندك شغل تاني النهاردة — لو تقدر تستوعبها، اقبلها',
-      };
+  // docs/08 §64.ج — النص كان ثابت «النهاردة» مهما كان ميعاد الشغلانة. دلوقتي بيتقال بس لما
+  // الفرصة فعلاً في نفس اليوم؛ غير كده بيوضّح إنها شغل إضافي في يوم تاني.
+  String get _tierLabel {
+    final sameDay = isSameDayAsToday(opportunity.scheduledAt);
+    if (!sameDay) return 'شغل إضافي — ${formatJobDayLabel(opportunity.scheduledAt)}';
+    return switch (opportunity.capacityTierAtOffer) {
+      'HEAVY' => 'عندك شغل تقيل النهاردة — الفرصة دي اختيارية بالكامل',
+      _ => 'عندك شغل تاني النهاردة — لو تقدر تستوعبها، اقبلها',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -782,6 +848,16 @@ class _WorkOpportunityCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(opportunity.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            // الميعاد بالاسم دايمًا — الفني ما يقدرش يقرر يقبل ولا لأ من غير ما يعرف الشغل ده إمتى.
+            Row(
+              children: [
+                const Icon(Icons.event_outlined, size: 14),
+                const SizedBox(width: 4),
+                Text('الميعاد: ${formatJobDayLabel(opportunity.scheduledAt)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
             const SizedBox(height: 4),
             Text(opportunity.streetName),
             if (opportunity.problemDescription != null) Text(opportunity.problemDescription!),
@@ -842,6 +918,16 @@ class _CrewOpportunityCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(invite.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            // نفس سبب §64.ج بالظبط — دعوة انضمام من غير ميعاد مش قرار كامل.
+            Row(
+              children: [
+                const Icon(Icons.event_outlined, size: 14),
+                const SizedBox(width: 4),
+                Text('الميعاد: ${formatJobDayLabel(invite.scheduledAt)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
             const SizedBox(height: 4),
             Text(invite.streetName),
             if (invite.problemDescription != null) Text(invite.problemDescription!),

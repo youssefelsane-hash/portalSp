@@ -69,7 +69,9 @@ export class TechnicianOrderExecutionController {
       // مهما كانت الواجهة بتخفيها.
       this.paymentsService.getTechnicianMoneyView(order),
       contactVisible ? this.customerProfilesService.findContactInfoOrThrow(order.customerId) : Promise.resolve(null),
-      this.catalogService.findServiceOrThrow(order.serviceId).then((service) => service.nameAr),
+      // بَقّة حقيقية (docs/08 §64.أ): كانت findServiceOrThrow() اللي بتفلتر is_active=true —
+      // فأي طلب خدمته اتوقفت بعد إنشائه كان بيرمي 404 يفضّي شاشة الفني بالكامل ويمنع تنفيذ الشغل.
+      this.catalogService.findServiceForDisplay(order.serviceId).then((service) => service?.nameAr ?? null),
     ]);
     return toTechnicianOrderResponseDto(
       toOrderResponseDto(order, address, null, {

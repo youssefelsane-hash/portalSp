@@ -136,7 +136,15 @@ export class PaymentsService {
   private async computeSettlement(
     order: Order,
   ): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number; warrantyDays: number }> {
-    const service = await this.catalogService.findServiceOrThrow(order.serviceId);
+    // نفس بَقّة §64.أ بالظبط بس في مسار الفلوس: لو الخدمة اتوقفت (is_active=false) أو اتحذفت
+    // بعد ما الطلب اتعمل، findServiceOrThrow() كانت هترمي 404 فالتسوية نفسها تفشل — يعني الفني
+    // ما ياخدش فلوسه والطلب ما يقفلش، بسبب تغيير في الكتالوج ملوش أي علاقة بالطلب ده. نسبة
+    // العمولة بيانات تاريخية على صف الخدمة، بتتقرا حتى لو الخدمة موقوفة. الرمي بيفضل بس لو
+    // الصف نفسه مش موجود خالص (خلل بيانات حقيقي، مش قرار كتالوج).
+    const service = await this.catalogService.findServiceForDisplay(order.serviceId);
+    if (!service) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة غير موجودة', HttpStatus.NOT_FOUND);
+    }
     let commissionRateApplied = Number(service.commissionPercentage);
 
     if (order.technicianId) {

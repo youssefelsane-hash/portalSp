@@ -81,7 +81,7 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
           fullyPaidOnline: false,
         }),
       } as never,
-      { findServiceOrThrow: jest.fn().mockResolvedValue({ nameAr: 'خدمة اختبار' }) } as never,
+      { findServiceForDisplay: jest.fn().mockResolvedValue({ nameAr: 'خدمة اختبار' }) } as never,
       {} as never,
     );
   }
