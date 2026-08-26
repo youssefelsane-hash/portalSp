@@ -1,6 +1,11 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
+import {
+  TECHNICIAN_ADMIN_ACTION_EVENT,
+  TechnicianAdminActionEvent,
+} from '../../common/events/technician-admin-action.event';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
@@ -35,7 +40,16 @@ export class TechnicianCompaniesService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly auditLog: AuditLogService,
     private readonly technicianLevelsService: TechnicianLevelsService,
+    private readonly events: EventEmitter2,
   ) {}
+
+  /** docs/08 §64.هـ — أكشن أدمن على الشركة لازم يوصل صاحبها، مش يتسجّل في audit_log وبس. */
+  private emitOwnerNotice(company: TechnicianCompany, kind: string, titleAr: string, bodyAr: string): void {
+    this.events.emit(
+      TECHNICIAN_ADMIN_ACTION_EVENT,
+      new TechnicianAdminActionEvent(company.ownerUserId, kind, titleAr, bodyAr, 'technician_company', company.id),
+    );
+  }
 
   private async findProfileOrThrow(userId: string): Promise<TechnicianProfile> {
     const profile = await this.technicianProfiles.findOne({ where: { userId } });
@@ -252,6 +266,64 @@ export class TechnicianCompaniesService {
       newValues: { is_trust_verified: granted, note },
       meta,
     });
+
+    this.emitOwnerNotice(
+      company,
+      granted ? 'company_trust_badge_granted' : 'company_trust_badge_revoked',
+      granted ? 'شركتك خدت علامة التوثيق ✅' : 'اتسحبت علامة توثيق شركتك',
+      granted
+        ? `«${company.name}» بقت موثّقة — العلامة بتظهر للعملاء في نتايج البحث.`
+        : `اتسحبت علامة التوثيق من «${company.name}»${note ? ` — السبب: ${note}` : ''}.`,
+    );
+
+    return company;
+  }
+
+  /**
+   * تغيير معامل سعر الشركة (ADR-0042).
+   *
+   * قرار أدمن بحت: ده سعر بيدفعه العميل، فالشركة **ما تقدرش** تغيّره لنفسها — نفس مبدأ علامة
+   * التوثيق فوق بالحرف. كل تغيير بيتسجّل بقيمته القديمة والجديدة عشان يبقى فيه إجابة مكتوبة
+   * لما حد يسأل بعدين "ليه سعر الشركة دي أعلى؟".
+   */
+  async setPriceMultiplier(
+    adminUserId: string,
+    companyId: string,
+    multiplier: number,
+    note: string | null,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianCompany> {
+    const company = await this.companies.findOne({ where: { id: companyId } });
+    if (!company) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة مش موجودة', HttpStatus.NOT_FOUND);
+    }
+    const previous = Number(company.priceMultiplier);
+    if (previous === multiplier) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة أصلاً على نفس المعامل ده', HttpStatus.CONFLICT);
+    }
+
+    company.priceMultiplier = multiplier.toFixed(2);
+    await this.companies.save(company);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_company.price_multiplier_changed',
+      entityType: 'technician_company',
+      entityId: company.id,
+      oldValues: { price_multiplier: previous },
+      newValues: { price_multiplier: multiplier, note },
+      meta,
+    });
+
+    // ADR-0042 — المعامل ده بيغيّر السعر اللي العميل بيدفعه لشغل الشركة، فصاحبها لازم يعرف
+    // فورًا مش يكتشفه من أول فاتورة.
+    this.emitOwnerNotice(
+      company,
+      'company_price_multiplier_changed',
+      'اتغيّر معامل سعر شركتك',
+      `المعامل بقى ×${multiplier} بدل ×${previous}${note ? ` — ${note}` : ''}. الأسعار الجديدة بتسري على الحجوزات الجاية بس.`,
+    );
 
     return company;
   }

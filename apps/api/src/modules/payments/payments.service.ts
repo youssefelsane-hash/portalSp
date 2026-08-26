@@ -56,6 +56,7 @@ import {
 } from '../../common/events/installment.events';
 import { CrewEarningsService } from './crew-earnings.service';
 import { splitOrderRevenue } from '../pricing/commission-base';
+import { splitCrewEarnings } from './crew-earning-split';
 
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
 export interface TechnicianMoneyView {
@@ -63,6 +64,14 @@ export interface TechnicianMoneyView {
   myEarningCents: number;
   hasOnlinePayment: boolean;
   fullyPaidOnline: boolean;
+  /**
+   * السعر لسه ما اتحددش (docs/08 §64.ب) — طلب معاينة/عرض سعر لسه ما اتسعّرش، فـ
+   * `myEarningCents` بيطلع 0 حسابيًا. صفر **حقيقي** (شغل ببلاش) حاجة تانية خالص، فالتطبيق
+   * محتاج يفرّق: مع العلم ده بيكتب «هيتحدد بعد التسعير» بدل «نصيبك 0 ج.م».
+   */
+  earningPending: boolean;
+  /** حصّة الفني ده هو من وعاء الطاقم (ADR-0040) — بتساوي الوعاء كله لو مفيش طاقم. */
+  isCrewShare: boolean;
 }
 
 const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.AWAITING_PAYMENT]);
@@ -136,7 +145,15 @@ export class PaymentsService {
   private async computeSettlement(
     order: Order,
   ): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number; warrantyDays: number }> {
-    const service = await this.catalogService.findServiceOrThrow(order.serviceId);
+    // نفس بَقّة §64.أ بالظبط بس في مسار الفلوس: لو الخدمة اتوقفت (is_active=false) أو اتحذفت
+    // بعد ما الطلب اتعمل، findServiceOrThrow() كانت هترمي 404 فالتسوية نفسها تفشل — يعني الفني
+    // ما ياخدش فلوسه والطلب ما يقفلش، بسبب تغيير في الكتالوج ملوش أي علاقة بالطلب ده. نسبة
+    // العمولة بيانات تاريخية على صف الخدمة، بتتقرا حتى لو الخدمة موقوفة. الرمي بيفضل بس لو
+    // الصف نفسه مش موجود خالص (خلل بيانات حقيقي، مش قرار كتالوج).
+    const service = await this.catalogService.findServiceForDisplay(order.serviceId);
+    if (!service) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة غير موجودة', HttpStatus.NOT_FOUND);
+    }
     let commissionRateApplied = Number(service.commissionPercentage);
 
     if (order.technicianId) {
@@ -195,10 +212,43 @@ export class PaymentsService {
    * ودي مش شغله. الفلترة بتتم هنا في الباك-إند مش في الواجهة، عشان الرقم أصلاً **ما يخرجش على
    * السلك** — إخفاء في التطبيق بس معناه إن أي حد يفتح الـAPI يقراه.
    */
-  async getTechnicianMoneyView(order: Order, manager?: EntityManager): Promise<TechnicianMoneyView> {
+  async getTechnicianMoneyView(
+    order: Order,
+    manager?: EntityManager,
+    // آخر باراميتر عمدًا (نفس نمط الملف): الكولرز القدام ما يتكسروش. `null`/غياب = القائد.
+    viewerTechnicianProfileId?: string | null,
+  ): Promise<TechnicianMoneyView> {
     const breakdown = await this.getCollectionBreakdownForOrder(order, manager);
     const paidOnlineCents = breakdown.paidAmountCents + breakdown.financedOrderAmountCents;
-    const myEarningCents = await this.previewTechnicianEarningCents(order);
+    const poolCents = await this.previewTechnicianEarningCents(order);
+
+    // بلاغ المالك (docs/08 §64.ب): «نصيبك 0 وده مش منطقي». مصدرها إن نصيب الفني بيتحسب من
+    // `commissionable_base_cents ?? total_amount_cents`، والاتنين بصفر في طلب لسه ما اتسعّرش
+    // (معاينة/عرض سعر بيتحدد على الطبيعة). الحساب سليم — العرض هو اللي كان بيكدب: «0 ج.م»
+    // معناها «هتشتغل ببلاش»، والحقيقة «لسه ما اتحددش». العلم ده بيخلي التطبيق يقول الحقيقة.
+    const earningPending = poolCents <= 0 && order.totalAmountCents <= 0;
+
+    let myEarningCents = poolCents;
+    let isCrewShare = false;
+    // ADR-0040 — عضو الطاقم كان بيشوف **وعاء القائد كله** كأنه نصيبه هو. الحصص بتتحسب بنفس
+    // الدالة النقية بتاعت التسوية بالظبط (splitCrewEarnings)، فالرقم اللي بيشوفه دلوقتي هو
+    // نفس اللي هينزل محفظته وقت الإقفال.
+    // بلا viewer صريح = القائد نفسه (كل مسارات "طلباتي" في تطبيق الفني بتخص صاحب الطلب).
+    // مهم: القائد كمان بياخد **حصّته هو** وقت التسوية مش الوعاء كله (settleAndComplete)، فلازم
+    // يشوف نفس الرقم اللي هينزل محفظته.
+    const viewerId = viewerTechnicianProfileId ?? order.technicianId;
+    if (viewerId && order.technicianId && poolCents > 0) {
+      const em = manager ?? this.dataSource.manager;
+      const participants = await this.crewEarningsService.resolveParticipants(em, order);
+      if (participants.length > 1) {
+        const shares = splitCrewEarnings(poolCents, participants);
+        const mine = shares.find((share) => share.technicianId === viewerId);
+        if (mine) {
+          myEarningCents = mine.shareCents;
+          isCrewShare = true;
+        }
+      }
+    }
 
     return {
       // اللي هيستلمه كاش من العميل — لازم يبان بالرقم، هو محتاجه عشان يعرف ياخد كام.
@@ -209,6 +259,8 @@ export class PaymentsService {
       hasOnlinePayment: paidOnlineCents > 0,
       // كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص.
       fullyPaidOnline: paidOnlineCents > 0 && breakdown.amountDueToTechnicianCents === 0,
+      earningPending,
+      isCrewShare,
     };
   }
 

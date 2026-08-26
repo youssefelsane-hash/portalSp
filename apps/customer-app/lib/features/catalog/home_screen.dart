@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:characters/characters.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -42,6 +43,11 @@ import '../projects/create_project_screen.dart';
 // من المستخدم بتوقع تلاقيه على واحد من الاتنين مرتين ورا بعض فتحس إن "مفيش تغيير خالص". الحل:
 // سلّم إضاءة واضح (غامق/متوسط/فاتح) بدل تنويع هوية اللون — يفضل داخل عائلة الأزرق نفسها (نفس
 // المبدأ الحاكم في CLAUDE.md، "نفس الشكل في كل حتة")، مطابق تمامًا لـapps/customer-web's HERO_SLIDES.
+// ارتفاع الـhero (docs/08 §64.د) — ثابت صريح عشان مساحة الصورة ما تعتمدش على طول النص. القيمة
+// دي بتدي الصورة مساحة حقيقية (كانت بتطلع شريط رفيع لما النص يقصر) وفي نفس الوقت بتسيب الفئات
+// المميّزة ظاهرة تحتها من غير scroll على شاشات الموبايل العادية.
+const double _heroHeight = 300;
+
 const List<List<Color>> _heroGradients = [
   [Color(0xFF1C3A6E), Color(0xFF2F5AA6), Color(0xFF4D78C4)],
   [Color(0xFF0F1115), Color(0xFF22314F), Color(0xFF2F5AA6)],
@@ -53,7 +59,11 @@ const List<List<Color>> _heroGradients = [
 // HomepageContentRepository تحت، نفس apps/customer-web بالحرف. لو الأدمن ما حطش imageUrl، بيرجع
 // لنفس التدرّجات اللونية دي كـfallback (مُتسلسلة حسب index، نفس apps/customer-web's
 // TIP_FALLBACK_BACKGROUNDS بالحرف).
-const List<Color> _tipFallbackColors = [AppColors.primary, AppColors.success, AppColors.warning];
+const List<Color> _tipFallbackColors = [
+  AppColors.primary,
+  AppColors.success,
+  AppColors.warning,
+];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -124,7 +134,9 @@ class _HomeScreenState extends State<HomeScreen> {
         .catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
-      final count = _heroImages.isNotEmpty ? _heroImages.length : (_heroBackground == null ? _heroGradients.length : 1);
+      final count = _heroImages.isNotEmpty
+          ? _heroImages.length
+          : (_heroBackground == null ? _heroGradients.length : 1);
       if (count > 1) setState(() => _activeSlide = (_activeSlide + 1) % count);
     });
   }
@@ -144,11 +156,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openSearch([String value = '']) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)));
+  void _openSearch([String value = '']) => Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => SearchResultsScreen(initialQuery: value)),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final featured = _categories?.where((c) => c.isFeatured).toList() ?? const <ServiceCategory>[];
+    final featured =
+        _categories?.where((c) => c.isFeatured).toList() ??
+        const <ServiceCategory>[];
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -159,17 +175,29 @@ class _HomeScreenState extends State<HomeScreen> {
             IconButton(
               icon: const Icon(Icons.receipt_long),
               tooltip: 'طلباتي',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OrdersScreen())),
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const OrdersScreen())),
             ),
             Builder(
               builder: (context) => FutureBuilder<int>(
-                future: NotificationsRepository(context.read<AuthRepository>()).unreadCount(),
+                future: NotificationsRepository(
+                  context.read<AuthRepository>(),
+                ).unreadCount(),
                 builder: (context, snapshot) {
                   final unread = snapshot.data ?? 0;
                   return IconButton(
-                    icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.notifications_outlined)),
+                    icon: Badge(
+                      isLabelVisible: unread > 0,
+                      label: Text('$unread'),
+                      child: const Icon(Icons.notifications_outlined),
+                    ),
                     tooltip: 'الإشعارات',
-                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
+                    ),
                   );
                 },
               ),
@@ -177,12 +205,16 @@ class _HomeScreenState extends State<HomeScreen> {
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupportContactScreen())),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.person_outline),
               tooltip: 'حسابي',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AccountScreen())),
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const AccountScreen())),
             ),
           ],
         ),
@@ -195,31 +227,63 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 12),
               // Banner المشروعات (docs/01B مهمة A §2)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 child: Card(
                   color: Theme.of(context).colorScheme.primaryContainer,
                   margin: EdgeInsets.zero,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () {
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => CreateProjectScreen(auth: context.read<AuthRepository>())));
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CreateProjectScreen(
+                            auth: context.read<AuthRepository>(),
+                          ),
+                        ),
+                      );
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
-                          Icon(Icons.home_work_outlined, size: 32, color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          Icon(
+                            Icons.home_work_outlined,
+                            size: 32,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('بتشطب شقتك؟', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                                Text('ابدأ مشروعك مع صُنّاع', style: TextStyle(color: Theme.of(context).colorScheme.onPrimaryContainer, fontSize: 13)),
+                                Text(
+                                  'بتشطب شقتك؟',
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  'ابدأ مشروعك مع صُنّاع',
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onPrimaryContainer,
+                                    fontSize: 13,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
-                          Icon(Icons.chevron_left, color: Theme.of(context).colorScheme.onPrimaryContainer),
+                          Icon(
+                            Icons.chevron_left,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
+                          ),
                         ],
                       ),
                     ),
@@ -234,7 +298,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     if (featured.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text('الأكثر طلبًا', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'الأكثر طلبًا',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 12),
                       SizedBox(
                         height: 84,
@@ -242,10 +309,17 @@ class _HomeScreenState extends State<HomeScreen> {
                           scrollDirection: Axis.horizontal,
                           itemCount: featured.length,
                           separatorBuilder: (_, _) => const SizedBox(width: 16),
-                          itemBuilder: (context, index) => _FeaturedCategoryItem(
-                            category: featured[index],
-                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServicesScreen(category: featured[index]))),
-                          ),
+                          itemBuilder: (context, index) =>
+                              _FeaturedCategoryItem(
+                                category: featured[index],
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ServicesScreen(
+                                      category: featured[index],
+                                    ),
+                                  ),
+                                ),
+                              ),
                         ),
                       ),
                       const SizedBox(height: 24),
@@ -254,9 +328,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('كل الفئات', style: Theme.of(context).textTheme.titleMedium),
+                        Text(
+                          'كل الفئات',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                         TextButton(
-                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CategoriesScreen())),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const CategoriesScreen(),
+                            ),
+                          ),
                           child: const Text('عرض الكل'),
                         ),
                       ],
@@ -273,20 +354,34 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
                         child: Center(
-                          child: EmptyState(icon: Icons.category_outlined, title: 'مفيش فئات خدمات متاحة دلوقتي'),
+                          child: EmptyState(
+                            icon: Icons.category_outlined,
+                            title: 'مفيش فئات خدمات متاحة دلوقتي',
+                          ),
                         ),
                       )
                     else
                       GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 0.95),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.95,
+                            ),
                         itemCount: _categories!.length,
                         itemBuilder: (context, index) {
                           final category = _categories![index];
                           return CategoryCard(
                             category: category,
-                            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServicesScreen(category: category))),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    ServicesScreen(category: category),
+                              ),
+                            ),
                           );
                         },
                       ),
@@ -302,69 +397,120 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // hero دوّار (طلب مالك صريح 2026-08-22/23، تصميم مرجعي: Angi.com) — لوحة شفافة غامقة فوق خلفية
-  // متدرّجة دوّارة فيها التاجلاين + البحث، ورسالة الثقة/الضمان تحتها مباشرة فوق الصورة نفسها
-  // (بلا صندوق عمدًا) — مطابق تمامًا لهيكل apps/customer-web's hero.
+  /// hero دوّار (طلب مالك صريح 2026-08-22/23، تصميم مرجعي: Angi.com).
+  ///
+  /// docs/08 §64.د — طلب المالك: «كبرلي مساحة الصورة اللي بتتغير… وتصغرلي محرك البحث…
+  /// محتاج يبقى مدور شوية… professional وأصغر من كده بكتير».
+  ///
+  /// اللي اتغيّر عن النسخة القديمة:
+  ///  1. **ارتفاع صريح للصورة** (`_heroHeight`) بدل ما الارتفاع يطلع من حجم النص + padding —
+  ///     ده كان بيخلّي الصورة شريط رفيع كل ما النص يقصر.
+  ///  2. **اتشال الصندوق الغامق** اللي كان لافّ النص والبحث — كان بيغطّي نص مساحة الصورة.
+  ///     البديل: تدرّج أسود خفيف من تحت + ظل على النص، فالصورة بانت والنص فضل مقروء.
+  ///  3. **الصورة بتتبدّل بـcross-fade حقيقي** (`AnimatedSwitcher` على `Image.network`) بدل
+  ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
+  ///     فالتبديل كان بيحصل قطع مفاجئ.
+  ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
   Widget _buildHero(BuildContext context) {
     final configuredImages = _heroImages.map(_resolveHeroImageUrl).toList();
-    final effectiveImages = configuredImages.isNotEmpty ? configuredImages : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
+    final effectiveImages = configuredImages.isNotEmpty
+        ? configuredImages
+        : (_heroBackground == null
+              ? const <String>[]
+              : <String>[_heroBackground!.url]);
     final gradientIndex = _activeSlide % _heroGradients.length;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 4),
+    return SizedBox(
+      height: _heroHeight,
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          Positioned.fill(
-            child: HeroImageCrossfade(
-              images: effectiveImages.map<ImageProvider<Object>>(NetworkImage.new).toList(),
-              activeIndex: _activeSlide,
-              fallback: AnimatedContainer(
-                duration: const Duration(milliseconds: 1000),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: _heroGradients[gradientIndex]),
+          HeroImageCrossfade(
+            images: effectiveImages
+                .map<ImageProvider<Object>>(NetworkImage.new)
+                .toList(),
+            activeIndex: _activeSlide,
+            fallback: AnimatedContainer(
+              duration: const Duration(milliseconds: 1000),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: _heroGradients[gradientIndex],
                 ),
               ),
             ),
           ),
-          Container(
+          // تدرّج قراءة: غامق تحت وشفاف فوق — أخف من الصندوق القديم بكتير، فالصورة بانت.
+          DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent]),
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.72),
+                  Colors.black.withValues(alpha: 0.25),
+                  Colors.transparent,
+                ],
+                stops: const [0, 0.55, 1],
+              ),
             ),
-            padding: const EdgeInsets.fromLTRB(16, 36, 16, 72),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(20)),
-                  child: Column(
-                    children: [
-                      Text(
-                        _searchContent.eyebrow,
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w500),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _searchContent.title,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _searchContent.description,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
-                      ),
-                      const SizedBox(height: 12),
-                      _HeroSearchField(content: _searchContent, onSearch: _openSearch),
+                Text(
+                  _searchContent.eyebrow,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    shadows: const [
+                      Shadow(color: Colors.black54, blurRadius: 6),
                     ],
                   ),
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  _searchContent.title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _searchContent.description,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 12.5,
+                    shadows: const [
+                      Shadow(color: Colors.black54, blurRadius: 6),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _HeroSearchField(
+                  content: _searchContent,
+                  onSearch: _openSearch,
+                ),
                 if (_trustMessage.isNotEmpty) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.verified_outlined, color: Colors.white, size: 18),
+                      const Icon(
+                        Icons.verified_outlined,
+                        color: Colors.white,
+                        size: 18,
+                      ),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
@@ -374,7 +520,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             color: Colors.white,
                             fontWeight: FontWeight.w500,
                             fontSize: 13,
-                            shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
+                            shadows: [
+                              Shadow(color: Colors.black45, blurRadius: 4),
+                            ],
                           ),
                         ),
                       ),
@@ -382,7 +530,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
                 if (effectiveImages.length > 1) ...[
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(
@@ -392,7 +540,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         width: index == _activeSlide ? 22 : 7,
                         height: 7,
                         margin: const EdgeInsets.symmetric(horizontal: 3),
-                        decoration: BoxDecoration(color: index == _activeSlide ? Colors.white : Colors.white54, borderRadius: BorderRadius.circular(99)),
+                        decoration: BoxDecoration(
+                          color: index == _activeSlide
+                              ? Colors.white
+                              : Colors.white54,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
                       ),
                     ),
                   ),
@@ -420,7 +573,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (logo == null || logo.isDefault || logo.url.isEmpty) {
       return const Text('صُنّاع');
     }
-    return Image.network(logo.url, height: 32, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Text('صُنّاع'));
+    return Image.network(
+      logo.url,
+      height: 32,
+      fit: BoxFit.contain,
+      errorBuilder: (_, _, _) => const Text('صُنّاع'),
+    );
   }
 
   // "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (تفاصيل في تعليق _tipFallbackColors فوق). مبتظهرش
@@ -434,7 +592,10 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Text('نصايح مفيدة', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 2),
-          Text('حاجات كويس تعرفها قبل ما تحجز أي شغلانة', style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            'حاجات كويس تعرفها قبل ما تحجز أي شغلانة',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 12),
           SizedBox(
             height: 190,
@@ -457,10 +618,20 @@ class _HomeScreenState extends State<HomeScreen> {
                             imageUrl,
                             height: 80,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
+                            errorBuilder: (_, _, _) => Container(
+                              height: 80,
+                              color:
+                                  _tipFallbackColors[index %
+                                      _tipFallbackColors.length],
+                            ),
                           )
                         else
-                          Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
+                          Container(
+                            height: 80,
+                            color:
+                                _tipFallbackColors[index %
+                                    _tipFallbackColors.length],
+                          ),
                         // Expanded + Flexible مش تزيين: الكارت جوّه `SizedBox(height: 190)` ثابت،
                         // والصورة بتاخد 80 منهم. من غيرهم أي نصيحة عنوانها بيلف سطرين ونصّها 3
                         // سطور كانت بتطلع أطول من الفاضل وترمي `RenderFlex overflowed by N pixels
@@ -473,10 +644,22 @@ class _HomeScreenState extends State<HomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(tip.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall),
+                                Text(
+                                  tip.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
                                 const SizedBox(height: 4),
                                 Flexible(
-                                  child: Text(tip.body, maxLines: 3, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+                                  child: Text(
+                                    tip.body,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
                                 ),
                               ],
                             ),
@@ -499,7 +682,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // apps/customer-web's homepage. مبيظهرش خالص لو enabled=false أو مفيش رقم حقيقي.
   Widget _buildSupportSection(BuildContext context) {
     final contact = _supportContact;
-    if (contact == null || !contact.enabled || (contact.phoneNumber == null && contact.whatsappUrl == null)) {
+    if (contact == null ||
+        !contact.enabled ||
+        (contact.phoneNumber == null && contact.whatsappUrl == null)) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -510,7 +695,10 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 16),
           Text('الدعم', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
-          Text('محتاج مساعدة؟ إحنا هنا', style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            'محتاج مساعدة؟ إحنا هنا',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 12,
@@ -519,13 +707,20 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               if (contact.phoneNumber != null)
                 OutlinedButton.icon(
-                  onPressed: () => launchUrl(Uri(scheme: 'tel', path: contact.phoneNumber!)),
+                  onPressed: () =>
+                      launchUrl(Uri(scheme: 'tel', path: contact.phoneNumber!)),
                   icon: const Icon(Icons.call_outlined),
-                  label: Text(contact.phoneNumber!, textDirection: TextDirection.ltr),
+                  label: Text(
+                    contact.phoneNumber!,
+                    textDirection: TextDirection.ltr,
+                  ),
                 ),
               if (contact.whatsappUrl != null)
                 OutlinedButton.icon(
-                  onPressed: () => launchUrl(Uri.parse(contact.whatsappUrl!), mode: LaunchMode.externalApplication),
+                  onPressed: () => launchUrl(
+                    Uri.parse(contact.whatsappUrl!),
+                    mode: LaunchMode.externalApplication,
+                  ),
                   icon: const Icon(Icons.chat_outlined),
                   label: const Text('واتساب'),
                 ),
@@ -581,7 +776,8 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
       tween: Tween(begin: 0.82, end: expanded ? 1 : 0.82),
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOutCubic,
-      builder: (context, widthFactor, child) => FractionallySizedBox(widthFactor: widthFactor, child: child),
+      builder: (context, widthFactor, child) =>
+          FractionallySizedBox(widthFactor: widthFactor, child: child),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
@@ -606,10 +802,22 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
           decoration: InputDecoration(
             hintText: widget.content.placeholder,
             hintStyle: const TextStyle(color: Colors.black54, fontSize: 13),
-            prefixIcon: const Icon(Icons.search_rounded, color: AppColors.primary),
-            suffixIcon: expanded ? IconButton(icon: const Icon(Icons.arrow_back_rounded), tooltip: 'بحث', onPressed: _submit) : null,
+            prefixIcon: const Icon(
+              Icons.search_rounded,
+              color: AppColors.primary,
+            ),
+            suffixIcon: expanded
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    tooltip: 'بحث',
+                    onPressed: _submit,
+                  )
+                : null,
             border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: expanded ? 14 : 11),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: expanded ? 14 : 11,
+            ),
           ),
         ),
       ),
@@ -647,17 +855,29 @@ class _FeaturedCategoryItem extends StatelessWidget {
                         fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) => Text(
                           category.nameAr.characters.first,
-                          style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     )
                   : Text(
                       category.nameAr.characters.first,
-                      style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
             ),
             const SizedBox(height: 6),
-            Text(category.nameAr, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              category.nameAr,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
       ),

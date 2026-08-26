@@ -29,6 +29,26 @@ import { InstallmentApplication } from './entities/installment-application.entit
 import { InstallmentApplicationStatus } from './entities/installment-status.enum';
 import { SettingsService } from '../settings/settings.service';
 
+/**
+ * سبب عدم أهلية التقسيط لطلب (docs/08 §64.ز) — **كود** مش نص، عشان الواجهة تقرر تعرض إيه من غير
+ * ما تطابق نصوص عربية (مطابقة نصية بتتكسر في صمت أول ما حد يعدّل صياغة رسالة).
+ */
+export type InstallmentIneligibilityReason =
+  | 'disabled'
+  | 'order_cancelled'
+  | 'application_pending'
+  | 'application_approved'
+  | 'price_undetermined'
+  | 'amount_out_of_range'
+  | 'no_plans';
+
+export interface InstallmentOrderOptions {
+  eligible: boolean;
+  reason_code: InstallmentIneligibilityReason | null;
+  reason_ar: string | null;
+  plans: Record<string, unknown>[];
+}
+
 export interface IncomingFile {
   buffer: Buffer;
   mimetype: string;
@@ -232,6 +252,82 @@ export class InstallmentsService {
        WHERE sp.service_id = $1 AND p.is_active = true AND p.deleted_at IS NULL`,
       [serviceId],
     );
+  }
+
+  /**
+   * أهلية التقسيط **لطلب بعينه** (docs/08 §64.ز).
+   *
+   * بلاغ المالك: «التقسيط… بيكون معلق فوق في تفاصيل الطلب على الرغم إنك لو اخترت أي خطة بيقولك
+   * التقسيط مش متاح».
+   *
+   * السبب: `listPlansForService()` بترد على سؤال «الخدمة دي عليها خطط؟» — سؤال مختلف تمامًا عن
+   * «الطلب ده ينفع يتقسّط؟». كل قيود الأهلية الحقيقية (مبلغ الطلب داخل حدود الخطة، الطلب مش
+   * متلغي، السعر اتحدد أصلاً، مفيش تقديم نشط) كانت بتتفحص **بس** وقت التقديم — فالبانر بيفضل
+   * معلق والرفض بييجي بعد ما العميل يختار ويوافق على الشروط.
+   *
+   * الميثود دي بتنقل **نفس** قيود `submitApplication()` بالحرف لقبل العرض. أي قيد جديد هناك
+   * لازم ينزل هنا كمان، وإلا البَقّة بترجع.
+   */
+  async listOptionsForOrder(
+    userId: string,
+    orderId: string,
+  ): Promise<InstallmentOrderOptions> {
+    const enabled = (await this.settingsService?.getBoolean('payments.installments_enabled', true)) ?? true;
+    if (!enabled) {
+      return { eligible: false, reason_code: 'disabled', reason_ar: 'التقسيط متوقف مؤقتًا', plans: [] };
+    }
+
+    const profile = await this.customerProfiles.findByUserIdOrThrow(userId);
+    const order = await this.dataSource.getRepository(Order).findOne({
+      where: { id: orderId, customerId: profile.id },
+    });
+    if (!order) {
+      throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
+    }
+
+    if (['cancelled_by_customer', 'cancelled_by_system', 'cancelled_by_technician'].includes(order.orderStatus)) {
+      return { eligible: false, reason_code: 'order_cancelled', reason_ar: 'الطلب ده متلغي', plans: [] };
+    }
+
+    const [existingActive] = await this.dataSource.query<{ status: string }[]>(
+      `SELECT status FROM installment_applications
+       WHERE order_id = $1 AND status IN ('pending_review','approved') AND deleted_at IS NULL LIMIT 1`,
+      [orderId],
+    );
+    if (existingActive) {
+      const approved = existingActive.status === 'approved';
+      return {
+        eligible: false,
+        reason_code: approved ? 'application_approved' : 'application_pending',
+        reason_ar: approved ? 'التقسيط متفعّل على الطلب ده بالفعل' : 'طلب التقسيط بتاعك تحت المراجعة',
+        plans: [],
+      };
+    }
+
+    const priceCents = order.totalAmountCents - order.discountAmountCents;
+    if (priceCents <= 0) {
+      // نفس تفرقة §64.ب: «لسه ما اتحددش» مش «صفر».
+      return { eligible: false, reason_code: 'price_undetermined', reason_ar: 'سعر الطلب لسه ما اتحددش', plans: [] };
+    }
+
+    const all = await this.listPlansForService(order.serviceId);
+    const eligiblePlans = all.filter((plan) =>
+      isAmountWithinPlanLimits(priceCents, {
+        minOrderAmountCents: (plan.min_order_amount_cents as number | null) ?? null,
+        maxOrderAmountCents: (plan.max_order_amount_cents as number | null) ?? null,
+      }),
+    );
+    if (eligiblePlans.length === 0) {
+      return all.length === 0
+        ? { eligible: false, reason_code: 'no_plans', reason_ar: null, plans: [] }
+        : {
+            eligible: false,
+            reason_code: 'amount_out_of_range',
+            reason_ar: 'مبلغ الطلب مش في حدود أي خطة تقسيط متاحة',
+            plans: [],
+          };
+    }
+    return { eligible: true, reason_code: null, reason_ar: null, plans: eligiblePlans };
   }
 
   /** الخطة + متطلبات المستندات — للعميل قبل التقديم ولواجهة الأدمن. */

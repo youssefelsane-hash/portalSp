@@ -103,7 +103,35 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
   // والوسيلة هي تسلسل AUTO ثم فرص شغل إضافي — وده تسلسل الشغل **البعيد**. بعد ADR-0035 أي شغل
   // خلال 48 ساعة بياخد مسار طلب/قبول بدل AUTO، فلو سبنا 2/4/6 ساعة كان الاختبار هيقيس حاجة
   // تانية خالص مش التكافؤ. حالة الشغل القريب نفسها مغطّاة في matching.service.spec.ts.
-  async function insertOrder(label: string, zoneId: string, hoursFromNow: number, totalAmountCents = 30000) {
+  /**
+   * ميعاد ثابت **بتوقيت القاهرة** لليوم بعد بكرة (docs/08 §64، بَقّة نظافة اختبارات حقيقية).
+   *
+   * الاختبارات تحت بتقول «3 طلبات نفس اليوم»، وكانت بتحسب الميعاد بـ`now + 50/52/54 ساعة`.
+   * (اليوم +3 عمدًا: لازم يفضل **بعد نافذة الـ48 ساعة** بتاعت ADR-0035 عشان المسار يفضل
+   * auto-confirm زي ما الاختبار بيفترض، مش قبول/رفض قريب المدى.)
+   *
+   * تصنيف قدرة الفني بيقسّم اليوم بـ`AT TIME ZONE 'Africa/Cairo'::date` — يعني لما السويت تتشغّل
+   * بالليل، الطلب التالت (+54 ساعة) بيقع في **يوم قاهري تاني**، فالفني بيرجع LIGHT وياخد الطلب
+   * تلقائيًا بدل ما يتعرضله كفرصة، والاختبار بيفشل. يعني الاختبار كان بينجح الصبح ويفشل بالليل
+   * بلا أي تغيير في الكود. الميعاد بقى محسوب من الداتابيز نفسها بتوقيت القاهرة عشان التلاتة
+   * يقعوا في نفس اليوم دايمًا مهما كان وقت التشغيل.
+   */
+  async function cairoSameDayAt(hourOfDay: number): Promise<Date> {
+    const [row] = (await q(
+      `SELECT (((now() AT TIME ZONE 'Africa/Cairo')::date + 3)::timestamp + ($1::int || ' hours')::interval)
+                AT TIME ZONE 'Africa/Cairo' AS at`,
+      [hourOfDay],
+    )) as { at: Date }[];
+    return row.at;
+  }
+
+  async function insertOrder(
+    label: string,
+    zoneId: string,
+    hoursFromNow: number,
+    totalAmountCents = 30000,
+    scheduledAt?: Date,
+  ) {
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, payment_status, booking_mode, total_amount_cents, technician_earning_cents, scheduled_at)
        VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,0,$9) RETURNING id`,
@@ -116,7 +144,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
         OrderStatus.SEARCHING_TECHNICIAN,
         BookingMode.INDIVIDUAL,
         totalAmountCents,
-        new Date(Date.now() + hoursFromNow * 60 * 60 * 1000),
+        scheduledAt ?? new Date(Date.now() + hoursFromNow * 60 * 60 * 1000),
       ],
     );
     return order.id as string;
@@ -374,13 +402,13 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
   }, 20000);
 
   it('الفني fixture: 3 طلبات نفس اليوم — أول واحد AUTO، والباقي OPT REQ متسقين', async () => {
-    const order1 = await insertOrder('fixture-1', ids.zoneFixture, 50);
+    const order1 = await insertOrder('fixture-1', ids.zoneFixture, 0, 30000, await cairoSameDayAt(9));
     await matchingService.dispatchOrAutoConfirm(order1);
     const [row1] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [order1]);
     expect(row1.order_status).toBe(OrderStatus.ACCEPTED);
     expect(row1.technician_id).toBe(ids.fixtureProfileId);
 
-    const order2 = await insertOrder('fixture-2', ids.zoneFixture, 52);
+    const order2 = await insertOrder('fixture-2', ids.zoneFixture, 0, 30000, await cairoSameDayAt(11));
     await matchingService.dispatchOrAutoConfirm(order2);
     const [row2] = await q(`SELECT order_status FROM orders WHERE id = $1`, [order2]);
     expect(row2.order_status).toBe(OrderStatus.SEARCHING_TECHNICIAN);
@@ -390,7 +418,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     );
     expect(opp2).toMatchObject({ status: 'offered', context: 'assignment' });
 
-    const order3 = await insertOrder('fixture-3', ids.zoneFixture, 54);
+    const order3 = await insertOrder('fixture-3', ids.zoneFixture, 0, 30000, await cairoSameDayAt(13));
     await matchingService.dispatchOrAutoConfirm(order3);
     const [opp3] = await q(
       `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
@@ -406,13 +434,13 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
   });
 
   it('الفني الحقيقي (تسجيل موبايل → تحقق → اعتماد): نفس السلوك بالحرف — أول واحد AUTO، والباقي OPT REQ', async () => {
-    const order1 = await insertOrder('real-1', ids.zoneReal, 50);
+    const order1 = await insertOrder('real-1', ids.zoneReal, 0, 30000, await cairoSameDayAt(9));
     await matchingService.dispatchOrAutoConfirm(order1);
     const [row1] = await q(`SELECT order_status, technician_id FROM orders WHERE id = $1`, [order1]);
     expect(row1.order_status).toBe(OrderStatus.ACCEPTED);
     expect(row1.technician_id).toBe(realTechnicianProfileId);
 
-    const order2 = await insertOrder('real-2', ids.zoneReal, 52);
+    const order2 = await insertOrder('real-2', ids.zoneReal, 0, 30000, await cairoSameDayAt(11));
     await matchingService.dispatchOrAutoConfirm(order2);
     const [row2] = await q(`SELECT order_status FROM orders WHERE id = $1`, [order2]);
     expect(row2.order_status).toBe(OrderStatus.SEARCHING_TECHNICIAN);
@@ -422,7 +450,7 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     );
     expect(opp2).toMatchObject({ status: 'offered', context: 'assignment' });
 
-    const order3 = await insertOrder('real-3', ids.zoneReal, 54);
+    const order3 = await insertOrder('real-3', ids.zoneReal, 0, 30000, await cairoSameDayAt(13));
     await matchingService.dispatchOrAutoConfirm(order3);
     const [opp3] = await q(
       `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,

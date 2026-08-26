@@ -78,6 +78,10 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     category: '',
     serviceFormula: '',
     address: '',
+    // ADR-0042 / docs/08 §64.ح — شركة بمعامل سعر حقيقي، عشان نثبت إن المعامل بيعدّي على
+    // **نفس** مسار محرك التسعير (فرع الـformula) في المعاينة والإنشاء بالحرف.
+    companyOwnerUser: '',
+    company: '',
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,7 +260,18 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       catalogService,
       geoService,
       techniciansService,
-      {} as never,
+      // بيقرا `price_multiplier` الحقيقي من القاعدة — اللي تحت الاختبار هو سريان المعامل في
+      // التسعير، مش البحث عن الشركة (مغطّى في technician-companies specs).
+      {
+        findActiveCompanyOrThrow: async (companyId: string) => {
+          const [row] = await dataSource.query<{ id: string; price_multiplier: string }[]>(
+            `SELECT id, price_multiplier FROM technician_companies WHERE id = $1 AND is_active = true`,
+            [companyId],
+          );
+          if (!row) throw new Error('الشركة غير موجودة أو غير نشطة');
+          return { id: row.id, priceMultiplier: Number(row.price_multiplier) };
+        },
+      } as never,
       scheduleService,
       pricingEngine,
       {} as never, // promoCodesService — الاختبارات دي من غير كوبونات
@@ -288,7 +303,9 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
       await q(`DELETE FROM service_categories WHERE id=$1`, [ids.category]);
       await q(`DELETE FROM addresses WHERE id=$1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id=$1`, [ids.customerProfile]);
+      if (ids.company) await q(`DELETE FROM technician_companies WHERE id=$1`, [ids.company]);
       await q(`DELETE FROM users WHERE id=$1`, [ids.customerUser]);
+      if (ids.companyOwnerUser) await q(`DELETE FROM users WHERE id=$1`, [ids.companyOwnerUser]);
     } finally {
       await cache?.onModuleDestroy();
       await dataSource.destroy();
@@ -397,5 +414,52 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     } as never);
     expect(created.totalAmountCents).toBe(previewed.total_amount_cents);
     expect(created.totalAmountCents).toBe(125000); // 250×500
+  });
+
+  /**
+   * docs/08 §64.ح — طلب المالك: «اتأكد إن كل حاجة بترفليكت في الحاجة المرتبطة بيها، سواء الـ
+   * booking engine، price engine، schedule، auto matching».
+   *
+   * ده أقوى إثبات لـADR-0042: نفس الخدمة، نفس المدخلات، مرة بلا شركة ومرة بشركة معاملها 1.20 —
+   * والاتنين عبر **فرع محرك التسعير الديناميكي** (formula) مش الفرع الثابت. لازم:
+   *  1. المعاينة والإنشاء يديّوا نفس الرقم بالحرف (مفيش مفاجأة سعر بين الشاشة والتحصيل).
+   *  2. الرقم = سعر المعادلة × 1.20 بالظبط.
+   */
+  it('ADR-0042: معامل الشركة بيسري في محرك التسعير، والمعاينة = الإنشاء بالحرف', async () => {
+    const [owner] = await q<{ id: string }[]>(
+      `INSERT INTO users (phone_number, full_name, user_type, phone_verified_at)
+       VALUES ($1,$2,'technician',now()) RETURNING id`,
+      [`+2055${Date.now().toString().slice(-9)}`.slice(0, 15), 'مالك شركة معامل'],
+    );
+    ids.companyOwnerUser = owner.id;
+    const [company] = await q<{ id: string }[]>(
+      `INSERT INTO technician_companies (owner_user_id, name, is_active, price_multiplier)
+       VALUES ($1,'شركة معامل 1.20',true,1.20) RETURNING id`,
+      [owner.id],
+    );
+    ids.company = company.id;
+    // الخدمة في الـsuite دي متعمَلة بالافتراضيات — وضع "اعتماد" لازم يتفعّل عليها الأول.
+    await q(`UPDATE services SET allows_team = true WHERE id = $1`, [ids.serviceFormula]);
+
+    const input = { service_id: ids.serviceFormula, address_id: ids.address, field_values: { area: 250 } };
+    const baseline = await ordersService.previewPrice(ids.customerUser, input as never);
+
+    // اختيار شركة متاح بس في وضع "اعتماد" (team) — قاعدة موجودة من §62، مش من ADR-0042.
+    // وضع الحجز بيأثّر على **العمولة** مش على سعر العميل، فالمقارنة مع الأساس فضلت صالحة.
+    const companyInput = {
+      ...input,
+      booking_mode: 'team',
+      requested_technician_company_id: company.id,
+    };
+    const previewed = await ordersService.previewPrice(ids.customerUser, companyInput as never);
+    const created = await ordersService.create(ids.customerUser, companyInput as never);
+
+    // 1) مفيش فرق بين اللي العميل شافه واللي اتحسب عليه.
+    expect(created.totalAmountCents).toBe(previewed.total_amount_cents);
+    // 2) المعامل سرى فعلاً: 125,000 × 1.20 = 150,000.
+    expect(baseline.total_amount_cents).toBe(125000);
+    expect(created.totalAmountCents).toBe(150000);
+    // 3) الطلب محتفظ بالشركة المطلوبة — الـmatching بيقرا منها (matching.service.ts).
+    expect(created.requestedTechnicianCompanyId).toBe(company.id);
   });
 });

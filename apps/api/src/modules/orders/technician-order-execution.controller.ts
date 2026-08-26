@@ -56,7 +56,7 @@ export class TechnicianOrderExecutionController {
   // (findOwnedByTechnicianOrThrow/findActiveForTechnician/depart/arrive/... كلهم بيضمنوا كده)،
   // فالعنوان بتاعه مضمون الوصول ليه. بيتنادى بعد كل فعل تنفيذي عشان زرار "افتح الملاحة" في
   // apps/technician-app يفضل شغال طول دورة التنفيذ، مش بس أول تحميل للشاشة.
-  private async toDto(order: Order) {
+  private async toDto(order: Order, viewerProfileId?: string | null) {
     // بيانات العميل/الخدمة (docs/08 §56 بند 3) — بلاغ مالك: شاشة الفني كانت بتعرض أزرار التنفيذ
     // بلا اسم العميل ولا تليفونه ولا اسم الخدمة، فالفني مش عارف رايح لمين ولا يعمل إيه. بيانات
     // التواصل بتظهر بس بعد تأكيد حجز حقيقي — نفس TECHNICIAN_CONTACT_VISIBLE_STATUSES بالظبط
@@ -67,9 +67,12 @@ export class TechnicianOrderExecutionController {
       // docs/08 §60.2 (طلب مالك صريح) — الصورة المالية المفلترة بدل التفصيل الكامل. الفلترة في
       // الباك-إند مش في التطبيق: لو الأرقام خرجت على السلك، أي حد بتوكن فني يقراها من الـAPI
       // مهما كانت الواجهة بتخفيها.
-      this.paymentsService.getTechnicianMoneyView(order),
+      // ADR-0040 (docs/08 §64.ب): عضو الطاقم كان بيشوف وعاء القائد كله كأنه نصيبه هو.
+      this.paymentsService.getTechnicianMoneyView(order, undefined, viewerProfileId),
       contactVisible ? this.customerProfilesService.findContactInfoOrThrow(order.customerId) : Promise.resolve(null),
-      this.catalogService.findServiceOrThrow(order.serviceId).then((service) => service.nameAr),
+      // بَقّة حقيقية (docs/08 §64.أ): كانت findServiceOrThrow() اللي بتفلتر is_active=true —
+      // فأي طلب خدمته اتوقفت بعد إنشائه كان بيرمي 404 يفضّي شاشة الفني بالكامل ويمنع تنفيذ الشغل.
+      this.catalogService.findServiceForDisplay(order.serviceId).then((service) => service?.nameAr ?? null),
     ]);
     return toTechnicianOrderResponseDto(
       toOrderResponseDto(order, address, null, {
@@ -87,7 +90,7 @@ export class TechnicianOrderExecutionController {
    * الحقول دي، صفر استعلام إضافي غير ضروري في المسار الساخن ده).
    */
   private async toDtoWithTeamInfo(order: Order, viewerProfileId: string) {
-    const base = await this.toDto(order);
+    const base = await this.toDto(order, viewerProfileId);
     if (order.bookingMode !== BookingMode.TEAM) {
       return base;
     }

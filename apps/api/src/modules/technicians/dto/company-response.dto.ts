@@ -10,6 +10,8 @@ export interface CompanyResponseDto {
   is_active: boolean;
   // ADR-0039 — علامة التوثيق الزرقاء، مِنحة إدارية مستقلة عن is_active/الأهلية.
   is_trust_verified: boolean;
+  /** ADR-0042 — مضاعف سعر الشغل لحجوزات الشركة دي (1 = السعر الأساسي). */
+  price_multiplier: number;
   trust_verified_at: string | null;
   trust_verified_note: string | null;
   created_at: string;
@@ -23,6 +25,8 @@ export function toCompanyResponseDto(company: TechnicianCompany): CompanyRespons
     commercial_registration_number: company.commercialRegistrationNumber,
     is_active: company.isActive,
     is_trust_verified: company.isTrustVerified,
+    // ADR-0042 — الأدمن لازم يشوف المعامل الحالي عشان يقرر يغيّره.
+    price_multiplier: Number(company.priceMultiplier),
     trust_verified_at: company.trustVerifiedAt?.toISOString() ?? null,
     trust_verified_note: company.trustVerifiedNote,
     created_at: company.createdAt.toISOString(),

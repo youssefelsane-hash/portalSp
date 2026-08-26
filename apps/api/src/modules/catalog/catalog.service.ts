@@ -201,6 +201,22 @@ export class CatalogService {
     return service;
   }
 
+  /**
+   * قراءة خدمة **للعرض على طلب قائم** — بتتجاهل `is_active` و`deleted_at` عمدًا، وبترجّع `null`
+   * بدل ما ترمي.
+   *
+   * ليه موجودة (بَقّة حقيقية، docs/08 §64.أ): `findServiceOrThrow()` فوق بتفلتر `isActive: true`
+   * (وTypeORM بتستبعد المحذوف soft-delete تلقائيًا). المسار ده صح تمامًا **قبل** إنشاء طلب — ما
+   * ينفعش عميل يحجز خدمة متوقفة. لكنه كان مستخدم كمان في تحويل الطلب لـDTO عند الفني، فأي طلب
+   * خدمته اتوقفت/اتحذفت بعد إنشائه كان بيرمي 404 «الخدمة غير موجودة» — والنتيجة إن **شاشة الفني
+   * الرئيسية كلها بتبقى فاضية إلا من رسالة الخطأ**، وكل أفعال التنفيذ (رايح/وصلت/بدأت/خلصت)
+   * بترجع 404 كمان. طلب قائم لازم يفضل معروض ومنفَّذ مهما اتغيّر الكتالوج بعده — اسم الخدمة
+   * بيانات تاريخية، مش بوابة صلاحية.
+   */
+  async findServiceForDisplay(id: string): Promise<Service | null> {
+    return this.services.findOne({ where: { id }, withDeleted: true });
+  }
+
   // ملحوظة: `technicianLevel` اختياري ومُستخدم بس لمعاينة السعر (`POST /services/:id/estimate`) —
   // مسار إنشاء الطلب الفعلي (`orders.service.ts`) بيستدعي الدالة دي من غير المعامل ده لأن الفني
   // مش معروف لسه وقت الإنشاء (لسه في searching_technician). تطبيق المضاعف تلقائياً على السعر
@@ -225,6 +241,10 @@ export class CatalogService {
     // خدمات "بالوحدة" لازم تضرب سعر الوحدة في الكمية اللي العميل أكدها. append-only عشان أي
     // caller قديم يفضل بنفس سلوك الوحدة الواحدة، بينما OrdersService يفرض وجودها للحجز الحقيقي.
     pricingQuantity?: number,
+    // ADR-0042 / docs/08 §64.و — معامل سعر الشركة. **بديل** عن مضاعف المستوى/الفئة مش فوقه:
+    // حجز الشركة مالوش مستوى فني أصلاً (§62.2)، فالخانة دي فاضية والمعامل بياخدها. تركيب
+    // الاتنين كان هيبقى تحصيل مزدوج على نفس المعنى. append-only زي كل الباراميترات فوق.
+    companyPriceMultiplier?: number,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
     const quantityMultiplier =
@@ -247,7 +267,8 @@ export class CatalogService {
     // حسابها — مش جزء من المعادلة نفسها (الفني مش من مدخلات الفورم اللي العميل بيملاها).
     if (service.pricingModel === PricingModel.FORMULA) {
       const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
-      const formulaLevelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
+      const formulaLevelMultiplier =
+        companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
       // docs/01B — حدود min/max_price_cents بتتفرض على السعر النهائي بعد مضاعف المستوى وقبل
       // رسوم الطوارئ (سياسة عمل على سعر الخدمة نفسه). كانت بتترجع للعرض بس بدون تطبيق.
       let clampedTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
@@ -281,7 +302,8 @@ export class CatalogService {
       };
     }
 
-    const levelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
+    const levelMultiplier =
+      companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
 
     // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد
     // من migration 0007 الأولى، بيتفعّل هنا. منفصلة عن commission.emergency_adjustment_percentage

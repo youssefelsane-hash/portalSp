@@ -6,6 +6,8 @@ export interface CompanyResponseDto {
   is_active: boolean;
   // ADR-0039 — علامة التوثيق الزرقاء للشركة. مِنحة إدارية، مستقلة عن is_active.
   is_trust_verified: boolean;
+  /** ADR-0042 (docs/08 §64.و) — مضاعف سعر الشغل لحجوزات الشركة دي (1 = السعر الأساسي). */
+  price_multiplier: number;
   trust_verified_at: string | null;
   trust_verified_note: string | null;
   created_at: string;

@@ -38,6 +38,16 @@ export interface HomepageContentResponseDto {
    * مكان أرفع منه الصور"). بقت `homepage.tips` (setting, value_type='json') — نفس نمط
    * `homepage.trust_message` بالحرف، إدارة كاملة من `/homepage-content` في apps/admin. */
   tips: HomepageTipDto[];
+  /**
+   * نصوص واجهة الـhero (docs/08 §64.د) — طلب المالك: «الكلام اللي تحت… عايز الأدمين ليه أكسس
+   * على الكلام ده». كانت مكتوبة **ثابتة في كود التطبيقين** (customer-app وcustomer-web)، فأي
+   * تعديل صغير في الصياغة كان يحتاج release كامل. القيم الافتراضية هنا هي بالظبط النص القديم،
+   * فمفيش أي تغيير شكلي لو الأدمن ما لمسش حاجة.
+   */
+  hero_eyebrow: string;
+  hero_title: string;
+  hero_subtitle: string;
+  search_placeholder: string;
 }
 
 /**
@@ -75,6 +85,18 @@ export class HomepageContentController {
       description: readSearchText('description', 240),
       placeholder: readSearchText('placeholder', 180),
     };
-    return { trust_message: trustMessage, hero_images: heroImages, search, tips };
+    return {
+      trust_message: trustMessage,
+      hero_images: heroImages,
+      search,
+      tips,
+      // Compatibility aliases for the first Script 2 clients. New clients use `search`, but
+      // retaining these fields makes the merge non-breaking for an app released from the
+      // Claude branch before all clients update together.
+      hero_eyebrow: search.eyebrow,
+      hero_title: search.title,
+      hero_subtitle: search.description,
+      search_placeholder: search.placeholder,
+    };
   }
 }

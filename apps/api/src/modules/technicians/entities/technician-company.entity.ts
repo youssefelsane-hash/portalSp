@@ -15,6 +15,13 @@ export class TechnicianCompany {
   @Column({ name: 'commercial_registration_number', type: 'varchar', length: 60, nullable: true })
   commercialRegistrationNumber: string | null;
 
+  /**
+   * ADR-0042 (docs/08 §64.و) — مضاعف سعر الشغل لحجوزات الشركة دي. بيحل **محل** مضاعف مستوى/فئة
+   * الفني (مش فوقه). 1.00 = السعر الأساسي زي ما كان، وده الافتراضي لكل الشركات الموجودة.
+   */
+  @Column({ name: 'price_multiplier', type: 'numeric', precision: 4, scale: 2, default: 1 })
+  priceMultiplier: string;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

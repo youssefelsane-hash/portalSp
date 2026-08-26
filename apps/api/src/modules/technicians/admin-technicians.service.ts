@@ -4,6 +4,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FindOptionsWhere, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import {
+  TECHNICIAN_ADMIN_ACTION_EVENT,
+  TechnicianAdminActionEvent,
+} from '../../common/events/technician-admin-action.event';
+import {
   TECHNICIAN_VERIFICATION_CHANGED_EVENT,
   TechnicianVerificationChangedEvent,
 } from '../../common/events/technician-verification-changed.event';
@@ -289,6 +293,20 @@ export class AdminTechniciansService {
       meta,
     });
 
+    const reviewedProfile = await this.technicianProfiles.findOne({ where: { id: technicianProfileId } });
+    if (reviewedProfile) {
+      const approved = document.reviewStatus === DocumentReviewStatus.APPROVED;
+      this.emitAdminAction(
+        reviewedProfile.userId,
+        approved ? 'document_approved' : 'document_rejected',
+        approved ? 'مستندك اتقبل ✅' : 'مستندك محتاج تعديل',
+        approved
+          ? 'راجعنا المستند اللي رفعته واتقبل.'
+          : `المستند اترفض${document.rejectionReason ? ` — السبب: ${document.rejectionReason}` : ''}. ارفع نسخة صحيحة عشان نكمّل.`,
+        reviewedProfile.id,
+      );
+    }
+
     return document;
   }
 
@@ -338,6 +356,16 @@ export class AdminTechniciansService {
       meta,
     });
 
+    // المستوى بيغيّر عمولة الفني ووزن نصيبه في الطاقم (ADR-0040) — أكتر أكشن أدمن بيمس فلوسه،
+    // وكان بيتم في صمت تام.
+    this.emitAdminAction(
+      profile.userId,
+      changeType === TechnicianLevelChangeType.PROMOTION ? 'level_promoted' : 'level_demoted',
+      changeType === TechnicianLevelChangeType.PROMOTION ? 'اترقّيت لمستوى أعلى 🎉' : 'اتغيّر مستواك',
+      `مستواك بقى «${dto.level}» بدل «${previousLevel}»${dto.reason ? ` — ${dto.reason}` : ''}.`,
+      profile.id,
+    );
+
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
   }
@@ -369,6 +397,14 @@ export class AdminTechniciansService {
       newValues: { pricing_tier: profile.pricingTier, reason: dto.reason ?? null },
       meta,
     });
+
+    this.emitAdminAction(
+      profile.userId,
+      'pricing_tier_changed',
+      'اتغيّرت فئة تسعيرك',
+      `فئة التسعير بتاعتك بقت «${profile.pricingTier}» بدل «${previousTier}»${dto.reason ? ` — ${dto.reason}` : ''}.`,
+      profile.id,
+    );
 
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
@@ -413,9 +449,37 @@ export class AdminTechniciansService {
       meta,
     });
 
+    this.emitAdminAction(
+      profile.userId,
+      dto.granted ? 'trust_badge_granted' : 'trust_badge_revoked',
+      dto.granted ? 'مبروك! خدت علامة التوثيق ✅' : 'اتسحبت علامة التوثيق',
+      dto.granted
+        ? 'العلامة الزرقا ظهرت على بروفايلك — العملاء دلوقتي بيشوفوك موثّق.'
+        : `اتسحبت علامة التوثيق من بروفايلك${dto.note ? ` — السبب: ${dto.note}` : ''}. ده مش بيمنعك من الشغل.`,
+      profile.id,
+    );
+
     const [withUser] = await this.attachUsers([profile]);
     return withUser;
   }
+
+  /**
+   * docs/08 §64.هـ — أي أكشن أدمن على الفني لازم يوصله. الحدث بيتصدر **بعد** ما الصف يتحفظ،
+   * وفشل الإشعار نفسه بيتلقّط جوّه المستمع فمبيأثّرش على الأكشن.
+   */
+  private emitAdminAction(
+    userId: string,
+    kind: string,
+    titleAr: string,
+    bodyAr: string,
+    referenceId: string,
+  ): void {
+    this.events.emit(
+      TECHNICIAN_ADMIN_ACTION_EVENT,
+      new TechnicianAdminActionEvent(userId, kind, titleAr, bodyAr, 'technician_profile', referenceId),
+    );
+  }
+
 
   // ── مناطق العمل ──────────────────────────────────────────────────────
   // كانت فجوة موثّقة صراحة: technician_zones (اللي matching.service.ts's findEligibleTechnicians

@@ -8,9 +8,17 @@ class HomepageTip {
   final String body;
   final String? imageUrl;
 
-  HomepageTip({required this.title, required this.body, required this.imageUrl});
+  HomepageTip({
+    required this.title,
+    required this.body,
+    required this.imageUrl,
+  });
 
-  factory HomepageTip.fromJson(Map<String, dynamic> json) => HomepageTip(title: json['title'] as String? ?? '', body: json['body'] as String? ?? '', imageUrl: json['image_url'] as String?);
+  factory HomepageTip.fromJson(Map<String, dynamic> json) => HomepageTip(
+    title: json['title'] as String? ?? '',
+    body: json['body'] as String? ?? '',
+    imageUrl: json['image_url'] as String?,
+  );
 }
 
 class HomepageSearchContent {
@@ -19,7 +27,12 @@ class HomepageSearchContent {
   final String description;
   final String placeholder;
 
-  const HomepageSearchContent({required this.eyebrow, required this.title, required this.description, required this.placeholder});
+  const HomepageSearchContent({
+    required this.eyebrow,
+    required this.title,
+    required this.description,
+    required this.placeholder,
+  });
 
   static const defaults = HomepageSearchContent(
     eyebrow: 'أساعدك إزاي؟',
@@ -28,12 +41,13 @@ class HomepageSearchContent {
     placeholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
   );
 
-  factory HomepageSearchContent.fromJson(Map<String, dynamic>? json) => HomepageSearchContent(
-    eyebrow: json?['eyebrow'] as String? ?? defaults.eyebrow,
-    title: json?['title'] as String? ?? defaults.title,
-    description: json?['description'] as String? ?? defaults.description,
-    placeholder: json?['placeholder'] as String? ?? defaults.placeholder,
-  );
+  factory HomepageSearchContent.fromJson(Map<String, dynamic>? json) =>
+      HomepageSearchContent(
+        eyebrow: json?['eyebrow'] as String? ?? defaults.eyebrow,
+        title: json?['title'] as String? ?? defaults.title,
+        description: json?['description'] as String? ?? defaults.description,
+        placeholder: json?['placeholder'] as String? ?? defaults.placeholder,
+      );
 }
 
 // مطابق لـ apps/api/src/modules/settings/homepage-content.controller.ts — رسالة الثقة/الضمان
@@ -46,14 +60,34 @@ class HomepageContent {
   final HomepageSearchContent search;
   final List<HomepageTip> tips;
 
-  HomepageContent({required this.trustMessage, required this.heroImages, required this.search, required this.tips});
+  HomepageContent({
+    required this.trustMessage,
+    required this.heroImages,
+    required this.search,
+    required this.tips,
+  });
 
-  factory HomepageContent.fromJson(Map<String, dynamic> json) => HomepageContent(
-    trustMessage: json['trust_message'] as String? ?? '',
-    heroImages: (json['hero_images'] as List<dynamic>? ?? []).whereType<String>().toList(),
-    search: HomepageSearchContent.fromJson(json['search'] as Map<String, dynamic>?),
-    tips: (json['tips'] as List<dynamic>? ?? []).map((t) => HomepageTip.fromJson(t as Map<String, dynamic>)).toList(),
-  );
+  factory HomepageContent.fromJson(Map<String, dynamic> json) {
+    final groupedSearch = json['search'] as Map<String, dynamic>?;
+    final compatibleSearch =
+        groupedSearch ??
+        {
+          'eyebrow': json['hero_eyebrow'],
+          'title': json['hero_title'],
+          'description': json['hero_subtitle'],
+          'placeholder': json['search_placeholder'],
+        };
+    return HomepageContent(
+      trustMessage: json['trust_message'] as String? ?? '',
+      heroImages: (json['hero_images'] as List<dynamic>? ?? [])
+          .whereType<String>()
+          .toList(),
+      search: HomepageSearchContent.fromJson(compatibleSearch),
+      tips: (json['tips'] as List<dynamic>? ?? [])
+          .map((t) => HomepageTip.fromJson(t as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 }
 
 // GET /settings/homepage-content — @Public()، مفيش داعي لـaccessToken.

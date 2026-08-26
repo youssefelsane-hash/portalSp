@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { TechnicianCompaniesService } from './technician-companies.service';
@@ -58,6 +59,7 @@ describe('TechnicianCompaniesService — صورة الشركة = أفتار ال
       dataSource.getRepository(User),
       { record: async () => undefined } as never,
       {} as never,
+      new EventEmitter2(),
     );
   });
 

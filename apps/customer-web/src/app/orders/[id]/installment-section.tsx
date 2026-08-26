@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ApplicablePaymentPolicyDto, InstallmentPlanPublicDto } from '@baytak/shared-types';
-import { submitInstallmentApplication, type InstallmentApplicationDto } from '@/lib/installments';
+import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
+import {
+  submitInstallmentApplication,
+  type InstallmentApplicationDto,
+  type InstallmentOrderOptionsDto,
+} from '@/lib/installments';
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
 
@@ -19,9 +23,13 @@ function egp(cents: number): string {
 }
 
 /**
- * قسم التقسيط في صفحة الطلب (migration 0177) — بيظهر بس لو الخدمة عليها خطط متاحة.
+ * قسم التقسيط في صفحة الطلب (migration 0177).
  * التدفق: اختار خطة → شوف الـbreakdown الدقيق (محسوب من الباك-إند وقت التقديم) → وافق على
  * الشروط → قدّم → الحالة "تحت المراجعة" لحد قرار الأدمن. مفيش أي موافقة ذاتية.
+ *
+ * docs/08 §64.ز — القسم كان بيسأل عن خطط **الخدمة** فيظهر حتى لما الطلب نفسه مش مؤهّل (مبلغه
+ * بره حدود الخطط، سعره لسه ما اتحددش، عليه تقديم نشط)، والرفض بييجي بعد ما العميل يختار ويوافق.
+ * دلوقتي بيسأل `/orders/:id/installment-options` اللي بيطبّق نفس قيود التقديم قبل العرض.
  */
 export function InstallmentSection({
   authedFetch,
@@ -34,7 +42,7 @@ export function InstallmentSection({
   serviceId: string;
   onApplied: () => void;
 }) {
-  const [plans, setPlans] = useState<InstallmentPlanPublicDto[] | null>(null);
+  const [options, setOptions] = useState<InstallmentOrderOptionsDto | null>(null);
   const [policies, setPolicies] = useState<ApplicablePaymentPolicyDto[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<SavedPaymentMethod[]>([]);
   const [selectedPaymentMethodId, setSelectedPaymentMethodId] = useState<string | null>(null);
@@ -46,22 +54,23 @@ export function InstallmentSection({
 
   useEffect(() => {
     import('@/lib/installments')
-      .then(({ fetchInstallmentPlans, fetchApplicablePolicies }) =>
+      .then(({ fetchInstallmentOptionsForOrder, fetchApplicablePolicies }) =>
         Promise.all([
-          fetchInstallmentPlans(serviceId),
+          fetchInstallmentOptionsForOrder(authedFetch, orderId),
           fetchApplicablePolicies(serviceId, 'installment'),
           authedFetch<SavedPaymentMethod[]>('/payment-methods'),
         ]),
       )
-      .then(([planList, policyList, methods]) => {
-        setPlans(planList);
+      .then(([orderOptions, policyList, methods]) => {
+        setOptions(orderOptions);
         setPolicies(policyList);
         setPaymentMethods(methods);
         setSelectedPaymentMethodId(methods.find((method) => method.is_default)?.id ?? methods[0]?.id ?? null);
       })
-      .catch(() => setPlans([]));
+      // فشل الفحص = ما نعرضش قسم ممكن يفشل — نفس نتيجة "مش متاح".
+      .catch(() => setOptions({ eligible: false, reason_code: null, reason_ar: null, plans: [] }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceId]);
+  }, [orderId, serviceId]);
 
   async function handleSubmit(): Promise<void> {
     if (!selectedPlanId) return;
@@ -83,7 +92,19 @@ export function InstallmentSection({
     }
   }
 
-  if (plans !== null && plans.length === 0) return null;
+  const plans = options?.plans ?? null;
+  if (options !== null && options.plans.length === 0 && !application) {
+    // تقديم نشط على الطلب ده يستاهل سطر حالة؛ باقي الأسباب معناها ببساطة "مفيش تقسيط هنا".
+    if (options.reason_code !== 'application_pending' && options.reason_code !== 'application_approved') {
+      return null;
+    }
+    return (
+      <section className="mt-4 rounded-xl border border-border bg-surface p-4">
+        <h2 className="font-semibold">التقسيط</h2>
+        <p className="mt-1 text-sm text-muted">{options.reason_ar}</p>
+      </section>
+    );
+  }
 
   if (application) {
     return (

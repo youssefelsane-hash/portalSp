@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchList } from './api-client';
+import { apiFetchList } from './api-client';
 import type { ApplicablePaymentPolicyDto, InstallmentPlanPublicDto } from '@baytak/shared-types';
 
 type AuthedFetch = <T>(path: string, options?: RequestInit) => Promise<T>;
@@ -15,6 +15,34 @@ export const fetchApplicablePolicies = (
 
 export const fetchInstallmentPlans = (serviceId: string): Promise<InstallmentPlanPublicDto[]> =>
   apiFetchList<InstallmentPlanPublicDto>(`/installment-plans?service_id=${encodeURIComponent(serviceId)}`);
+
+/** أسباب عدم أهلية التقسيط لطلب — أكواد من الباك-إند، مش نصوص (docs/08 §64.ز). */
+export type InstallmentIneligibilityReason =
+  | 'disabled'
+  | 'order_cancelled'
+  | 'application_pending'
+  | 'application_approved'
+  | 'price_undetermined'
+  | 'amount_out_of_range'
+  | 'no_plans';
+
+export interface InstallmentOrderOptionsDto {
+  eligible: boolean;
+  reason_code: InstallmentIneligibilityReason | null;
+  reason_ar: string | null;
+  plans: InstallmentPlanPublicDto[];
+}
+
+/**
+ * أهلية التقسيط **لطلب بعينه** (docs/08 §64.ز) — `fetchInstallmentPlans` بترد على «الخدمة عليها
+ * خطط؟» وهو سؤال مختلف عن «الطلب ده ينفع يتقسّط؟». استخدام الأولى في صفحة الطلب هو اللي كان
+ * بيخلّي القسم يظهر وأي خطة تختارها ترفض.
+ */
+export const fetchInstallmentOptionsForOrder = (
+  authedFetch: AuthedFetch,
+  orderId: string,
+): Promise<InstallmentOrderOptionsDto> =>
+  authedFetch<InstallmentOrderOptionsDto>(`/orders/${orderId}/installment-options`);
 
 /** تقديم طلب تقسيط على طلب قائم — الباك-إند بيحسب كل المبالغ authoritative وبيرجع الـbreakdown. */
 export const submitInstallmentApplication = (
