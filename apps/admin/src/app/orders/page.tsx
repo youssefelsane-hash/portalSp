@@ -12,6 +12,7 @@ import { StatusChip } from '@/components/status-chip';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
@@ -72,6 +73,8 @@ function OrdersListPage() {
   const statusFilter = (searchParams.get('status') ?? 'all') as OrderStatus | 'all';
   const originFilter = (searchParams.get('origin') ?? 'all') as 'all' | 'false' | 'true';
   const sortView = (searchParams.get('sort') === 'soonest' ? 'soonest' : 'newest') as 'newest' | 'soonest';
+  // docs/08 §67 — البحث في الـURL زي باقي حالة القايمة، عشان الرجوع من تفاصيل الطلب يحافظ عليه.
+  const searchTerm = searchParams.get('search') ?? '';
 
   const setParams = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams.toString());
@@ -92,6 +95,7 @@ function OrdersListPage() {
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE), sort: sortView });
     if (statusFilter !== 'all') params.set('order_status', statusFilter);
     if (originFilter !== 'all') params.set('recurring', originFilter);
+    if (searchTerm.trim()) params.set('search', searchTerm.trim());
     authedFetchPaginated<OrderResponseDto>(`/admin/orders?${params.toString()}`)
       .then(({ items, meta }) => {
         setOrders(items);
@@ -107,7 +111,7 @@ function OrdersListPage() {
     loadOrders();
     // loadOrders intentionally reads the current filters; realtime callbacks use the latest render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, page, statusFilter, originFilter, sortView, authedFetchPaginated]);
+  }, [isLoading, page, statusFilter, originFilter, sortView, searchTerm, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
@@ -124,6 +128,46 @@ function OrdersListPage() {
           ) : undefined
         }
       />
+
+      {/* docs/08 §67 — بلاغ المالك: «لما أحب أدور على أي طلب قديم أدور عليه وألاقيه… يبقى معايا
+          رقم الطلب وأدور في السيرش ألاقيه بسهولة». البحث بيتبعت للباك-إند (مش فلترة الصفحة
+          الحالية) عشان يلاقي طلب من أي صفحة مهما كانت قديمة. */}
+      <form
+        className="mb-4 flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const value = new FormData(event.currentTarget).get('search');
+          setParams({ search: typeof value === 'string' ? value.trim() : null, page: '1' });
+        }}
+      >
+        <Input
+          name="search"
+          defaultValue={searchTerm}
+          key={searchTerm}
+          placeholder="ابحث برقم الطلب…"
+          className="max-w-xs"
+          aria-label="بحث برقم الطلب"
+        />
+        <Button type="submit" size="sm" variant="outline">
+          بحث
+        </Button>
+        {searchTerm && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => setParams({ search: null, page: '1' })}
+          >
+            مسح البحث
+          </Button>
+        )}
+      </form>
+
+      {searchTerm && (
+        <p className="mb-3 text-sm text-muted-foreground">
+          نتايج البحث عن «{searchTerm}» — {total} طلب.
+        </p>
+      )}
 
       {/* قسمين واضحين بدل قايمة واحدة (docs/08 §63.ب5) */}
       <div className="mb-4 flex flex-wrap gap-2">

@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
+import { SettingsService } from '../settings/settings.service';
 import { CrewParticipant, CrewShare, splitCrewEarnings } from './crew-earning-split';
 import { OrderEarningShare } from './entities/order-earning-share.entity';
 
@@ -10,9 +11,32 @@ import { OrderEarningShare } from './entities/order-earning-share.entity';
  * الخدمة دي **بتحسب وبتسجّل الحصص بس** — حركة الفلوس نفسها بتفضل في `settleAndComplete()`
  * عشان كل حركة محفظة في التسوية تفضل في مكان واحد مقروء.
  */
+/**
+ * نسبة حصة المساعد لو الإعداد مش متاح (الخدمة متركّبة بإيد في اختبارات قديمة، أو الإعداد اتمسح).
+ * نفس قيمة migration 0200 بالحرف — مصدرين للرقم ده ممنوع يختلفوا.
+ */
+export const DEFAULT_ASSISTANT_SHARE_RATIO = 0.65;
+
 @Injectable()
 export class CrewEarningsService {
   private readonly logger = new Logger(CrewEarningsService.name);
+
+  constructor(@Optional() private readonly settingsService?: SettingsService) {}
+
+  /**
+   * ADR-0043 / docs/08 §66 — المساعد بياخد نسبة من اللي الفني بياخده في **نفس المستوى**.
+   *
+   * الإعداد قابل للتعديل من الأدمن، وبيتلجم في مدى معقول هنا كمان مش في الـmigration بس: إعداد
+   * غلط (سالب، أو أكبر من 1) معناه المساعد بياخد أكتر من الفني — انعكاس كامل للمعنى، ومينفعش
+   * يعدّي لمجرد إن حد كتب رقم غلط في لوحة الإعدادات.
+   */
+  private async assistantShareRatio(): Promise<number> {
+    const raw =
+      (await this.settingsService?.getNumber('crew.assistant_share_ratio', DEFAULT_ASSISTANT_SHARE_RATIO)) ??
+      DEFAULT_ASSISTANT_SHARE_RATIO;
+    if (!Number.isFinite(raw)) return DEFAULT_ASSISTANT_SHARE_RATIO;
+    return Math.min(1, Math.max(0.1, raw));
+  }
 
   /**
    * بيجمع المشاركين (القائد + `order_team_members`) بأوزان مستوياتهم **وقت التنفيذ**.
@@ -43,13 +67,22 @@ export class CrewEarningsService {
       [order.technicianId, order.id],
     );
 
-    return rows.map((r) => ({
-      technicianId: r.technician_id,
-      participantRole: r.participant_role,
-      technicianLevel: r.technician_level,
+    const assistantRatio = await this.assistantShareRatio();
+    return rows.map((r) => {
       // مستوى بلا صف إعدادات (بيانات ناقصة) بياخد وزن محايد بدل ما يتشال من التوزيع خالص.
-      shareWeight: r.share_weight !== null ? Number(r.share_weight) : 1,
-    }));
+      const levelWeight = r.share_weight !== null ? Number(r.share_weight) : 1;
+      // ADR-0043 — الوزن الفعّال = وزن المستوى × معامل الدور. المساعد أقل من الفني في **نفس**
+      // المستوى، والمستوى لسه بيفرق بين مساعد ومساعد. الوزن الفعّال هو اللي بيتسجّل في
+      // `order_earning_shares.share_weight` لأنه هو اللي حرّك القسمة فعلاً — السجل لازم يفسّر
+      // الرقم اللي نزل المحفظة.
+      const roleMultiplier = r.participant_role === 'assistant' ? assistantRatio : 1;
+      return {
+        technicianId: r.technician_id,
+        participantRole: r.participant_role,
+        technicianLevel: r.technician_level,
+        shareWeight: levelWeight * roleMultiplier,
+      };
+    });
   }
 
   /**
