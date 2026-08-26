@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { AdminCustomerResponseDto, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { useDebouncedValue } from '@/lib/use-debounced-value';
+import { useFilteredPage } from '@/lib/use-admin-query';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -36,19 +38,16 @@ export default function CustomersPage() {
   const { isLoading, authedFetchPaginated } = useAuth();
   const [customers, setCustomers] = useState<AdminCustomerResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [blockedFilter, setBlockedFilter] = useState<'all' | 'blocked' | 'active'>('all');
   const [phoneSearchInput, setPhoneSearchInput] = useState('');
+  // بحث حي كان بيبعت طلب لكل حرف — دلوقتي بيستنى 400ms قبل ما يبعت. الترقيم بيرجع 1 مع أي تغيير
+  // فلتر أثناء الرندر نفسه (useFilteredPage) بدل effect كان بيعمل setPage(1) بعد الرندر.
   const phoneSearch = useDebouncedValue(phoneSearchInput, 400);
+  const [page, setPage] = useFilteredPage(`${blockedFilter}|${phoneSearch}`);
   const [error, setError] = useState<string | null>(null);
 
-  // بحث حي كان بيبعت طلب لكل حرف — دلوقتي بيستنى الـuseDebouncedValue فوق (400ms) قبل ما يبعت.
-  useEffect(() => {
-    setPage(1);
-  }, [phoneSearch]);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (blockedFilter !== 'all') params.set('is_blocked', String(blockedFilter === 'blocked'));
     if (phoneSearch.trim()) params.set('phone_number', phoneSearch.trim());
@@ -58,7 +57,15 @@ export default function CustomersPage() {
         setTotal(meta.total ?? items.length);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل العملاء'));
-  }, [isLoading, page, blockedFilter, phoneSearch, authedFetchPaginated]);
+  }, [page, blockedFilter, phoneSearch, authedFetchPaginated]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['orders','payments'], load);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
@@ -74,7 +81,6 @@ export default function CustomersPage() {
             variant={blockedFilter === filter.value ? 'default' : 'outline'}
             onClick={() => {
               setBlockedFilter(filter.value);
-              setPage(1);
             }}
           >
             {filter.label}

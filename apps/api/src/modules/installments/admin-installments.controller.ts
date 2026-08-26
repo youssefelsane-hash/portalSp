@@ -32,7 +32,12 @@ export class AdminInstallmentsController {
   ) {
     const p = Math.max(1, Number(page) || 1);
     const pp = Math.min(100, Math.max(1, Number(perPage) || 20));
-    return this.installmentsService.adminListApplications(status ?? undefined, p, pp);
+    const { items, total } = await this.installmentsService.adminListApplications(status ?? undefined, p, pp);
+    // بَقّة حقيقية اتلقطت في مسح §63.ب7: الميثود كانت بترجّع { items, total } — الـResponseInterceptor
+    // بيتعرّف على { items, meta } بس، فالـenvelope كان بيطلع data={items,total} وmeta=null. نتيجة كده
+    // إن جدول "طلبات التقسيط" في الأدمن كان بيستقبل object مكان array فما كانش بيرسم **أي** صف ولا
+    // حتى رسالة "مفيش طلبات" — صفحة فاضية تمامًا. الشكل القياسي هنا زي كل قايمة تانية في المشروع.
+    return { items, meta: { page: p, per_page: pp, total } };
   }
 
   @Get('applications/:id')
@@ -81,7 +86,10 @@ export class AdminInstallmentsController {
     const f = (allowed as readonly string[]).includes(filter) ? (filter as (typeof allowed)[number]) : 'active';
     const p = Math.max(1, Number(page) || 1);
     const pp = Math.min(100, Math.max(1, Number(perPage) || 20));
-    return this.installmentsService.adminScheduleOverview(f, p, pp);
+    // نفس شكل الـenvelope القياسي زي applications فوق (مسح §63.ب7) — الـendpoint ده لسه ملهوش
+    // مستهلك في الأدمن، فبنظبطه دلوقتي قبل ما أول مستهلك يقع في نفس الفخ.
+    const { items, total } = await this.installmentsService.adminScheduleOverview(f, p, pp);
+    return { items, meta: { page: p, per_page: pp, total } };
   }
 
   /** رابط مؤقت لمستند KYC — بصلاحية review + audit لكل فتح (مين فتح إيه وإمتى). */

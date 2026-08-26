@@ -20,6 +20,11 @@ export class TechnicianLevelConfig {
   @Column({ name: 'order_priority_weight', type: 'smallint', default: 0 })
   orderPriorityWeight: number;
 
+  // ADR-0040 — وزن حصة المستوى في توزيع مستحقات الشغلانة على الطاقم. مختلف عمدًا عن مضاعف سعر
+  // العميل (resolveLevelPriceMultiplier): ده توزيع داخلي بين ناس اشتغلوا مع بعض، مش تسعير للعميل.
+  @Column({ name: 'crew_share_weight', type: 'numeric', precision: 5, scale: 2, default: 1 })
+  crewShareWeight: string;
+
   @Column({ name: 'decision_limit_cents', type: 'integer', nullable: true })
   decisionLimitCents: number | null;
 

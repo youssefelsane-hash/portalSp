@@ -19,6 +19,7 @@ import {
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
+import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ApproveTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
@@ -366,6 +367,49 @@ export class AdminTechniciansService {
       entityId: profile.id,
       oldValues: { pricing_tier: previousTier },
       newValues: { pricing_tier: profile.pricingTier, reason: dto.reason ?? null },
+      meta,
+    });
+
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
+  /**
+   * منح/سحب علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1).
+   *
+   * مقصود إنها **مستقلة تمامًا** عن `verificationStatus`: فني معتمد تشغيليًا ممكن ما ياخدش
+   * العلامة، وسحب العلامة **مبيمنعوش** من الشغل. أي ربط بين الاتنين هنا بيرجّعنا للمشكلة اللي
+   * الـADR اتكتبت عشانها (العلامة بتتوزّع تلقائيًا على أي حد يخلّص أوراقه).
+   */
+  async setTrustBadge(
+    adminUserId: string,
+    technicianProfileId: string,
+    dto: SetTrustBadgeDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianWithUser> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (profile.isTrustVerified === dto.granted) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        dto.granted ? 'الفني أصلاً معاه علامة التوثيق' : 'الفني أصلاً من غير علامة التوثيق',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    profile.isTrustVerified = dto.granted;
+    profile.trustVerifiedAt = new Date();
+    profile.trustVerifiedBy = adminUserId;
+    profile.trustVerifiedNote = dto.note ?? null;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: dto.granted ? 'technician.trust_badge_granted' : 'technician.trust_badge_revoked',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { is_trust_verified: !dto.granted },
+      newValues: { is_trust_verified: dto.granted, note: dto.note ?? null },
       meta,
     });
 

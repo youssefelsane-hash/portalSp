@@ -33,6 +33,7 @@ import { SettingsService } from '../settings/settings.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح فجوة محاسبية جوهرية (docs/08 §20 بند 2/3/4، تدقيق
 // تسوية مالية شامل قبل الإطلاق): settleAndComplete() كانت دايمًا بتحوّل technicianEarningCents
@@ -255,6 +256,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       { getProvider: () => ({ supportsRefund: false, refund: async () => ({ succeeded: false }) }) } as never,
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   });
 

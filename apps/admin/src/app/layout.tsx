@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { AdminRealtimeProvider } from "@/lib/admin-realtime-context";
+import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -28,9 +29,13 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       dir="rtl"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="h-full">
         <AuthProvider>
-          <AdminRealtimeProvider>{children}</AdminRealtimeProvider>
+          {/* docs/08 §63.ب4 — الشِل هنا عشان يتركّب **مرة واحدة** ويعيش عبر كل التنقّلات.
+              الصفحات اللي لسه بتلفّ محتواها بـ<AppShell> بتعدّي pass-through (شوف app-shell.tsx). */}
+          <AdminRealtimeProvider>
+            <AppShell>{children}</AppShell>
+          </AdminRealtimeProvider>
         </AuthProvider>
         <Toaster />
       </body>

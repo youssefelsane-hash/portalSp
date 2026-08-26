@@ -7,6 +7,7 @@ import { Refund, RefundStatus, RefundType } from './entities/refund.entity';
 import { User } from '../auth/entities/user.entity';
 import { WebhookEvent } from './entities/webhook-event.entity';
 import type { PaymentProvider, RefundResult } from './gateways/payment-provider.interface';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح بَقّة distributed-transaction حقيقية (docs/08 §19
 // بند 4): كان provider.refund() (نداء خارجي حقيقي للبوابة) بينفّذ جوّه DB transaction واحدة مع
@@ -113,10 +114,11 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة اختبار ${runId}`, `Test Country ${runId}`, 'R' + runId.slice(0, 1).toUpperCase(), '+000', 'EGP'],
-    );
+    // بَقّة نظافة اختبارات متكررة (§63 شريحة 7، نفس اللي اتصلحت في matching-work-opportunity.spec.ts):
+    // iso_code عشوائي من حرفين = مساحة صغيرة واحتمال تصادم عالي، وتنظيف afterAll بيفشل على قيود
+    // المفاتيح الأجنبية فبيسيب صف دولة ورا كل تشغيلة فاشلة — فالتصادم مسألة وقت وبيكسر سويتات
+    // ملهاش أي علاقة بالكود المتغيّر. الحل: نستعمل دولة موجودة بدل ما ننشئ واحدة.
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     ids.country = country.id;
     const [city] = await q(
       `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
@@ -169,7 +171,6 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
     await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
     await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
     await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-    await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     await dataSource.destroy();
   });
 
@@ -194,6 +195,7 @@ describe('PaymentsService.refundOrder() — أمان الـtransaction المو�
       { getProvider: () => provider } as never, // paymentProviders — الـfake provider بتاعنا
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   }
 

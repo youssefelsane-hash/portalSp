@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import type {
   AdminTechnicianResponseDto,
   OrderDetailResponseDto,
@@ -50,7 +50,7 @@ interface RescheduleOptionDto {
   date: string;
   available: boolean;
 }
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
@@ -86,7 +86,8 @@ import { formatEgp } from '@/lib/format';
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
-  const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/orders');
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
   const [financialSummary, setFinancialSummary] = useState<OrderFinancialSummaryResponseDto | null>(null);
@@ -675,7 +676,7 @@ export default function OrderDetailPage() {
           </>
         }
         actions={
-          <Button variant="outline" onClick={() => router.push('/orders')}>
+          <Button variant="outline" onClick={goBack}>
             رجوع للقايمة
           </Button>
         }

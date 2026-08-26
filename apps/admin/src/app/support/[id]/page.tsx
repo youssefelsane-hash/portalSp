@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import type {
   ComplaintAttachmentResponseDto,
   ComplaintMessageResponseDto,
@@ -10,9 +10,10 @@ import type {
   ComplaintSeverity,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { StatusChip } from '@/components/status-chip';
@@ -48,7 +49,8 @@ const SEVERITY_LEVELS: ComplaintSeverity[] = ['low', 'medium', 'high', 'critical
 export default function ComplaintDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
-  const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/support');
 
   const [complaint, setComplaint] = useState<ComplaintResponseDto | null>(null);
   const [messages, setMessages] = useState<ComplaintMessageResponseDto[]>([]);
@@ -84,6 +86,9 @@ export default function ComplaintDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["support"], () => load());
 
   async function handleSendMessage(e: FormEvent) {
     e.preventDefault();
@@ -196,7 +201,7 @@ export default function ComplaintDetailPage() {
 
   return (
     <AppShell>
-      <Button variant="ghost" size="sm" className="mb-4" onClick={() => router.push('/support')}>
+      <Button variant="ghost" size="sm" className="mb-4" onClick={goBack}>
         رجوع للقايمة
       </Button>
 

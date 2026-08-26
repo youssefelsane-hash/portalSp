@@ -128,7 +128,7 @@ export default function PricingEnginePage() {
           <CardHeader>
             <CardTitle>باقي الخدمات ({otherServices.length})</CardTitle>
             <CardDescription>
-              لسه بتسعير تقليدي (ثابت/بالساعة/بالوحدة/كشف ثم عرض سعر) — دوس "فعّل المعادلة" عشان
+              لسه بتسعير تقليدي (ثابت/بالساعة/بالوحدة/كشف ثم عرض سعر) — دوس &quot;فعّل المعادلة&quot; عشان
               تنقلها لمحرك التسعير الديناميكي وتبدأ تبني حقولها وقواعدها.
             </CardDescription>
           </CardHeader>

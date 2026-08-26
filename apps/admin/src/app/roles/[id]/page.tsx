@@ -22,7 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
+import { Table, TableBody, TableRow, TableCell } from '@/components/ui/table';
 
 const AUDIT_ACTION_LABELS_AR: Record<string, string> = {
   'role.created': 'إنشاء الدور',

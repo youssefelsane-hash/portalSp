@@ -54,6 +54,7 @@ import {
   INSTALLMENTS_PLAN_COMPLETED_EVENT,
   InstallmentPaymentResolvedPayload,
 } from '../../common/events/installment.events';
+import { CrewEarningsService } from './crew-earnings.service';
 import { splitOrderRevenue } from '../pricing/commission-base';
 
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
@@ -115,6 +116,7 @@ export class PaymentsService {
     // docs/08 §56 — آخر بند عمدًا (نفس فلسفة orderTeamService فوق): الاختبارات القديمة اللي
     // بتبني PaymentsService بـpositional args ما تتكسرش.
     @InjectRepository(Installment) private readonly installments: Repository<Installment>,
+    private readonly crewEarningsService: CrewEarningsService,
   ) {}
 
   /** نفس isIdempotencyKeyViolation في orders.service — 23505 raw → استرجاع بدل 500. */
@@ -572,7 +574,21 @@ export class PaymentsService {
         })
         .getRawOne<{ cash_collected_cents: string }>();
       const cashHeldByTechnicianCents = Number(cashSumRow?.cash_collected_cents ?? 0);
-      const netMovementCents = technicianEarningCents - cashHeldByTechnicianCents;
+
+      // ADR-0040 (docs/08 §63.أ3) — توزيع الوعاء على الطاقم بوزن المستوى.
+      //
+      // قبل كده: `technicianEarningCents` كان بيتحوّل **بالكامل** للقائد، وأعضاء
+      // `order_team_members` بياخدوا صفر — فجوة مالية موثّقة صراحةً في technicians/README.md.
+      //
+      // اللي **ما اتغيّرش**: العمولة، وإجمالي اللي بيخرج من محفظة المنصة
+      // (`technicianEarning − cashHeld`). اللي اتغيّر: التوزيع الداخلي بس.
+      //
+      // الكاش بيمسكه القائد (هو اللي بيستلم من العميل)، فالمقاصّة مع الكاش بتفضل **على حصته هو
+      // بس**؛ الأعضاء بياخدوا تحويل مباشر من المنصة لأنهم مش ماسكين حاجة.
+      const crewShares = await this.crewEarningsService.recordShares(manager, order, technicianEarningCents);
+      const leaderShareCents =
+        crewShares.find((s) => s.participantRole === 'leader')?.shareCents ?? technicianEarningCents;
+      const netMovementCents = leaderShareCents - cashHeldByTechnicianCents;
 
       if (netMovementCents > 0) {
         await this.walletsService.doubleEntry(
@@ -599,6 +615,30 @@ export class PaymentsService {
             referenceId: order.id,
             descriptionAr: `عمولة كاش طلب ${order.orderNumber} — الفني ماسك المبلغ كامل يدًا بيد`,
             allowNegativeBalance: true, // دَين مشروع على الفني (هيتسوّى في الصرف الجاي)، مش سحب فوق رصيد حقيقي
+          },
+          manager,
+        );
+      }
+
+      // ADR-0040 — حصص باقي الطاقم: تحويل مباشر من محفظة المنصة لكل عضو. مبيمسكوش كاش فمفيش
+      // مقاصّة عليهم. حركة لكل عضو جوّه **نفس** ترانزاكشن التسوية — يا كله يا ولا حاجة.
+      for (const share of crewShares) {
+        if (share.participantRole === 'leader' || share.shareCents <= 0) continue;
+        const memberProfile = await this.techniciansService.findByProfileIdOrThrow(share.technicianId);
+        const memberWallet = await this.walletsService.getOrCreateWallet(
+          memberProfile.userId,
+          WalletOwnerType.TECHNICIAN,
+        );
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: platformWallet.id,
+            toWalletId: memberWallet.id,
+            amountCents: share.shareCents,
+            transactionType: WalletTxType.ORDER_EARNING,
+            referenceType: 'order',
+            referenceId: order.id,
+            descriptionAr: `نصيبك من طلب ${order.orderNumber} (${share.participantRole === 'assistant' ? 'مساعد' : 'عضو فريق'})`,
+            allowNegativeBalance: true, // محفظة المنصة تمثيل محاسبي، مش رصيد حقيقي محدود
           },
           manager,
         );

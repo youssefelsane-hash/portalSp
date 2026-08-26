@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { AdminRecurringPlanResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -29,8 +30,7 @@ export default function RecurringOrdersPage() {
   const [activeFilter, setActiveFilter] = useState<'all' | 'true' | 'false'>('all');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (activeFilter !== 'all') params.set('is_active', activeFilter);
     authedFetchPaginated<AdminRecurringPlanResponseDto>(`/admin/recurring-orders?${params.toString()}`)
@@ -39,7 +39,15 @@ export default function RecurringOrdersPage() {
         setTotal(meta.total ?? items.length);
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل خطط الحجز المتكرر'));
-  }, [isLoading, page, activeFilter, authedFetchPaginated]);
+  }, [page, activeFilter, authedFetchPaginated]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['recurring','orders'], load);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 

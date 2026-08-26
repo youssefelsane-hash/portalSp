@@ -109,10 +109,11 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
     dataSource = new DataSource({ type: 'postgres', url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak' });
     await dataSource.initialize();
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة استثناء ${runId}`, `Exception Country ${runId}`, 'E' + runId.slice(0, 1).toUpperCase(), '+006', 'EGP'],
-    );
+    // بَقّة نظافة اختبارات متكررة (§63 شريحة 7، نفس اللي اتصلحت في matching-work-opportunity.spec.ts):
+    // iso_code عشوائي من حرفين = مساحة صغيرة واحتمال تصادم عالي، وتنظيف afterAll بيفشل على قيود
+    // المفاتيح الأجنبية فبيسيب صف دولة ورا كل تشغيلة فاشلة — فالتصادم مسألة وقت وبيكسر سويتات
+    // ملهاش أي علاقة بالكود المتغيّر. الحل: نستعمل دولة موجودة بدل ما ننشئ واحدة.
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     ids.country = country.id;
     const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
       ids.country,
@@ -186,7 +187,6 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
       await q(`DELETE FROM service_categories WHERE id = ANY($1)`, [[ids.categoryA, ids.categoryB]]);
       await q(`DELETE FROM service_zones WHERE id = ANY($1)`, [[ids.zoneA, ids.zoneB]]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       if (dataSource?.isInitialized) await dataSource.destroy();
     }

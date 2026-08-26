@@ -138,17 +138,21 @@ export class CatalogController {
         ? items.map((item) => ({ item, estimate: null }))
         : await Promise.all(
             items.map(async (item) => {
-              // الشركات (docs/08 §38) مالهاش فني محدد بعد — أي سعر نهائي هنا هيبقى تخمين على فني
-              // عشوائي من الشركة، يتعارض مع مبدأ "مفيش مفاجأة سعر" الأساسي في المشروع. null صريح
-              // زي estimate:null الموجود بالفعل لخدمات formula من غير field_values.
-              if (item.isCompany) return { item, estimate: null };
+              // الشركات (docs/08 §62.2) — السعر بيتحسب زي أي مرشّح تاني، بس **بمضاعف مستوى = 1**.
+              // ده مش تقريب ولا تخمين: `OrdersService.create()` لما بيتبعتله requested_technician_
+              // company_id بيسيب knownTechnicianLevel = undefined (مفيش فني محدد بعد)، يعني بيسعّر
+              // بالأساس بالظبط. فالرقم اللي بيتعرض هنا هو حرفيًا اللي هيتحصّل.
+              //
+              // كان راجع null قبل كده بحجة "مفيش فني محدد" — والنتيجة إن العميل يشوف شركة من غير
+              // أي سعر ويعدّيها. حارس فرق المستوى في LevelPremiumService بيستثني حجوزات الشركات
+              // عشان الوعد ده يفضل صحيح بعد التوزيع كمان.
               const estimate = await this.catalogService.estimate(
                 id,
                 zoneId,
-                item.currentLevel,
+                item.isCompany ? undefined : item.currentLevel,
                 isEmergency,
                 query.field_values,
-                item.pricingTier,
+                item.isCompany ? undefined : item.pricingTier,
                 query.duration_hours,
               );
               return { item, estimate };

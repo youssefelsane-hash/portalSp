@@ -224,12 +224,15 @@ describe('TechniciansService.listForServiceBooking — ترتيب التوصية
     expect(highVolume.totalRatingsCount).toBe(200);
   });
 
-  it('isVerified صريح true للاتنين، وon_time_rate/avg_arrival_minutes بيتحسبوا من طلب حقيقي (Script 6 Part 7)', async () => {
+  it('isVerified=false للاتنين (مفيش مِنحة أدمن)، وon_time_rate/avg_arrival_minutes بيتحسبوا من طلب حقيقي', async () => {
     const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId);
     const lowVolume = items.find((item) => item.technicianId === ids.lowVolumeTechId)!;
     const highVolume = items.find((item) => item.technicianId === ids.highVolumeTechId)!;
-    expect(lowVolume.isVerified).toBe(true);
-    expect(highVolume.isVerified).toBe(true);
+    // ADR-0039 (docs/08 §62.1) — الاختبار ده كان بيتوقّع `true` لأن الحقل كان ثابت `true` في الكود
+    // لكل صف. بقى مربوط بـ`is_trust_verified` اللي الأدمن بيمنحه، والفنيين دول مأخدوش أي مِنحة —
+    // فـ`false` هي الإجابة الصحيحة دلوقتي. اعتمادهم التشغيلي (`approved`) لسه زي ما هو، وبيظهروا عادي.
+    expect(lowVolume.isVerified).toBe(false);
+    expect(highVolume.isVerified).toBe(false);
     // الفني منخفض الحجم عنده الطلب المزروع: وصل بعد الموعد بـ5 دقايق (جوّه عتبة الـ15) = 100%
     // التزام، ورحلة استغرقت 20 دقيقة (departed→arrived).
     expect(lowVolume.onTimeRatePercent).toBe(100);

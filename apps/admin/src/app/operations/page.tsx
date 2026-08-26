@@ -1,7 +1,8 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type {
   AdminCategoryOpsRowDto,
   AdminCityResponseDto,
@@ -18,7 +19,10 @@ import type {
 } from '@baytak/shared-types';
 import { AlertTriangle, Bell, ChevronDown, ChevronLeft, ClipboardList, Compass, Radio, Send, Users } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
+import { useAdminQuery, useFilteredPage } from '@/lib/use-admin-query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -27,6 +31,7 @@ import { SelectNative } from '@/components/ui/select-native';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { EmptyState } from '@/components/empty-state';
@@ -206,25 +211,14 @@ function ExceptionCenterSection({
   authedFetch: ReturnType<typeof useAuth>['authedFetch'];
   hasPermission: ReturnType<typeof useAuth>['hasPermission'];
 }) {
-  const [data, setData] = useState<ExceptionCenterResponseDto | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function refresh() {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    if (categoryId) params.set('category_id', categoryId);
-    authedFetch<ExceptionCenterResponseDto>(`/admin/operations/exceptions?${params.toString()}`)
-      .then(setData)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مركز الاستثناءات'))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authedFetch, categoryId]);
+  const query = categoryId ? `?category_id=${categoryId}` : '';
+  const { data, loading, error, reload: refresh } = useAdminQuery(
+    query,
+    () => authedFetch<ExceptionCenterResponseDto>(`/admin/operations/exceptions${query}`),
+    'حصل خطأ في تحميل مركز الاستثناءات',
+  );
+  // docs/08 §63.ب1 — مركز الاستثناءات لازم يكون حي بطبيعته: كل بند فيه طلب محتاج تدخّل دلوقتي.
+  useAdminLiveRefresh(['orders', 'technicians'], refresh);
 
   const crewCount = data?.crew_shortage.total ?? 0;
   const staleCount = data?.stale_dispatch.total ?? 0;
@@ -328,67 +322,42 @@ function WorkforceMatrixSection({
 }) {
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [cityId, setCityId] = useState<string>('');
-  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zoneId, setZoneId] = useState<string>('');
   // بحث/فلترة شاملة (docs/08 §36.12) — الاتنين قابلين للجمع مع فلاتر المدينة/النطاق/الفئة فوق،
   // مش بديل ليهم. q مُعاد استخدامها من ILIKE بسيط مضاف حديثًا في AdminTechnicianCategoryOpsService
   // (اسم/كود الفني)، صفر محرك بحث جديد.
   const [qInput, setQInput] = useState('');
-  const [q, setQ] = useState('');
+  const q = useDebouncedValue(qInput, 400);
   const [verificationStatus, setVerificationStatus] = useState<TechnicianVerificationStatus | ''>('');
   const [level, setLevel] = useState<TechnicianLevel | ''>('');
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState<AdminCategoryOpsRowDto[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useFilteredPage(`${categoryId}|${zoneId}|${q}|${verificationStatus}|${level}`);
 
   useEffect(() => {
     authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
   }, [authedFetch]);
 
-  useEffect(() => {
-    setZoneId('');
-    if (!cityId) {
-      setZones(null);
-      return;
-    }
-    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
-      .then(setZones)
-      .catch(() => undefined);
-  }, [authedFetch, cityId]);
+  const zonesQuery = useAdminQuery(
+    cityId || null,
+    () => authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`),
+    'حصل خطأ في تحميل النطاقات',
+  );
+  const zones = zonesQuery.data;
 
-  // ديبونس بسيط لمربّع البحث — نداء واحد بعد ما الأدمن يوقف الكتابة، مش نداء لكل حرف.
-  useEffect(() => {
-    const timer = setTimeout(() => setQ(qInput.trim()), 400);
-    return () => clearTimeout(timer);
-  }, [qInput]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [categoryId, zoneId, q, verificationStatus, level]);
-
-  useEffect(() => {
-    if (!categoryId) {
-      setItems(null);
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(MATRIX_PER_PAGE) });
-    if (zoneId) params.set('zone_id', zoneId);
-    if (q) params.set('q', q);
-    if (verificationStatus) params.set('verification_status', verificationStatus);
-    if (level) params.set('level', level);
-    authedFetchPaginated<AdminCategoryOpsRowDto>(`/admin/technicians/by-category?${params.toString()}`)
-      .then(({ items: rows, meta }) => {
-        setItems(rows);
-        setTotal(meta.total ?? rows.length);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مصفوفة القوى العاملة'))
-      .finally(() => setLoading(false));
-  }, [authedFetchPaginated, categoryId, zoneId, q, verificationStatus, level, page]);
+  const matrixParams = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(MATRIX_PER_PAGE) });
+  if (zoneId) matrixParams.set('zone_id', zoneId);
+  if (q.trim()) matrixParams.set('q', q.trim());
+  if (verificationStatus) matrixParams.set('verification_status', verificationStatus);
+  if (level) matrixParams.set('level', level);
+  const matrixKey = categoryId ? matrixParams.toString() : null;
+  const matrixQuery = useAdminQuery(
+    matrixKey,
+    () => authedFetchPaginated<AdminCategoryOpsRowDto>(`/admin/technicians/by-category?${matrixParams.toString()}`),
+    'حصل خطأ في تحميل مصفوفة القوى العاملة',
+  );
+  const items = matrixQuery.data?.items ?? null;
+  const total = matrixQuery.data?.meta.total ?? items?.length ?? 0;
+  const loading = matrixQuery.loading;
+  const error = matrixQuery.error;
 
   const totalPages = Math.max(1, Math.ceil(total / MATRIX_PER_PAGE));
 
@@ -401,7 +370,15 @@ function WorkforceMatrixSection({
           <Label htmlFor="matrix_city" className="text-sm text-muted-foreground">
             المدينة
           </Label>
-          <SelectNative id="matrix_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+          <SelectNative
+            id="matrix_city"
+            value={cityId}
+            onChange={(e) => {
+              setCityId(e.target.value);
+              setZoneId('');
+            }}
+            className="max-w-xs"
+          >
             <option value="">كل المدن</option>
             {cities?.map((c) => (
               <option key={c.id} value={c.id}>
@@ -571,51 +548,30 @@ function NearFutureWorkloadSection({
 }) {
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [cityId, setCityId] = useState<string>('');
-  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zoneId, setZoneId] = useState<string>('');
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState<WorkloadForecastRowDto[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useFilteredPage(`${categoryId}|${zoneId}`);
 
   useEffect(() => {
     authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
   }, [authedFetch]);
 
-  useEffect(() => {
-    setZoneId('');
-    if (!cityId) {
-      setZones(null);
-      return;
-    }
-    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
-      .then(setZones)
-      .catch(() => undefined);
-  }, [authedFetch, cityId]);
+  const zones = useAdminQuery(
+    cityId || null,
+    () => authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`),
+    'حصل خطأ في تحميل النطاقات',
+  ).data;
 
-  useEffect(() => {
-    setPage(1);
-  }, [categoryId, zoneId]);
-
-  useEffect(() => {
-    if (!categoryId) {
-      setItems(null);
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(WORKLOAD_PER_PAGE) });
-    if (zoneId) params.set('zone_id', zoneId);
-    authedFetchPaginated<WorkloadForecastRowDto>(`/admin/operations/workload-forecast?${params.toString()}`)
-      .then(({ items: rows, meta }) => {
-        setItems(rows);
-        setTotal(meta.total ?? rows.length);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل عرض الحمل القريب'))
-      .finally(() => setLoading(false));
-  }, [authedFetchPaginated, categoryId, zoneId, page]);
+  const params = new URLSearchParams({ category_id: categoryId, page: String(page), per_page: String(WORKLOAD_PER_PAGE) });
+  if (zoneId) params.set('zone_id', zoneId);
+  const workload = useAdminQuery(
+    categoryId ? params.toString() : null,
+    () => authedFetchPaginated<WorkloadForecastRowDto>(`/admin/operations/workload-forecast?${params.toString()}`),
+    'حصل خطأ في تحميل عرض الحمل القريب',
+  );
+  const items = workload.data?.items ?? null;
+  const total = workload.data?.meta.total ?? items?.length ?? 0;
+  const loading = workload.loading;
+  const error = workload.error;
 
   const totalPages = Math.max(1, Math.ceil(total / WORKLOAD_PER_PAGE));
 
@@ -628,7 +584,15 @@ function NearFutureWorkloadSection({
           <Label htmlFor="workload_city" className="text-sm text-muted-foreground">
             المدينة
           </Label>
-          <SelectNative id="workload_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+          <SelectNative
+            id="workload_city"
+            value={cityId}
+            onChange={(e) => {
+              setCityId(e.target.value);
+              setZoneId('');
+            }}
+            className="max-w-xs"
+          >
             <option value="">كل المدن</option>
             {cities?.map((c) => (
               <option key={c.id} value={c.id}>
@@ -755,44 +719,31 @@ function DispatchDeliverySection({
 }) {
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [cityId, setCityId] = useState<string>('');
-  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zoneId, setZoneId] = useState<string>('');
   const [hours, setHours] = useState<number>(24);
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<DispatchDeliveryResponseDto | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useFilteredPage(`${categoryId}|${zoneId}|${hours}`);
 
   useEffect(() => {
     authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
   }, [authedFetch]);
 
-  useEffect(() => {
-    setZoneId('');
-    if (!cityId) {
-      setZones(null);
-      return;
-    }
-    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
-      .then(setZones)
-      .catch(() => undefined);
-  }, [authedFetch, cityId]);
+  const zones = useAdminQuery(
+    cityId || null,
+    () => authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`),
+    'حصل خطأ في تحميل النطاقات',
+  ).data;
 
-  useEffect(() => {
-    setPage(1);
-  }, [categoryId, zoneId, hours]);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ hours: String(hours), page: String(page), per_page: String(DELIVERY_PER_PAGE) });
-    if (categoryId) params.set('category_id', categoryId);
-    if (zoneId) params.set('zone_id', zoneId);
-    authedFetch<DispatchDeliveryResponseDto>(`/admin/operations/dispatch-delivery?${params.toString()}`)
-      .then(setData)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل مراقبة تسليم الطلبات'))
-      .finally(() => setLoading(false));
-  }, [authedFetch, categoryId, zoneId, hours, page]);
+  const params = new URLSearchParams({ hours: String(hours), page: String(page), per_page: String(DELIVERY_PER_PAGE) });
+  if (categoryId) params.set('category_id', categoryId);
+  if (zoneId) params.set('zone_id', zoneId);
+  const delivery = useAdminQuery(
+    params.toString(),
+    () => authedFetch<DispatchDeliveryResponseDto>(`/admin/operations/dispatch-delivery?${params.toString()}`),
+    'حصل خطأ في تحميل مراقبة تسليم الطلبات',
+  );
+  const data = delivery.data;
+  const loading = delivery.loading;
+  const error = delivery.error;
 
   const totalPages = Math.max(1, Math.ceil((data?.feed.meta.total ?? 0) / DELIVERY_PER_PAGE));
 
@@ -808,7 +759,15 @@ function DispatchDeliverySection({
           <Label htmlFor="delivery_city" className="text-sm text-muted-foreground">
             المدينة
           </Label>
-          <SelectNative id="delivery_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+          <SelectNative
+            id="delivery_city"
+            value={cityId}
+            onChange={(e) => {
+              setCityId(e.target.value);
+              setZoneId('');
+            }}
+            className="max-w-xs"
+          >
             <option value="">كل المدن</option>
             {cities?.map((c) => (
               <option key={c.id} value={c.id}>
@@ -1000,49 +959,33 @@ function CoverageIntelligenceSection({
 }) {
   const [cities, setCities] = useState<AdminCityResponseDto[] | null>(null);
   const [cityId, setCityId] = useState<string>('');
-  const [zones, setZones] = useState<AdminServiceZoneResponseDto[] | null>(null);
   const [zoneId, setZoneId] = useState<string>('');
-  const [page, setPage] = useState(1);
-  const [items, setItems] = useState<CoverageRowDto[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useFilteredPage(`${categoryId}|${zoneId}`);
   // درج قابل للتوسيع (docs/08 §36.12) — صف واحد مفتوح في نفس اللحظة، بمفتاح "zone_id-category_id".
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     authedFetch<AdminCityResponseDto[]>('/admin/cities').then(setCities).catch(() => undefined);
   }, [authedFetch]);
 
-  useEffect(() => {
-    setZoneId('');
-    if (!cityId) {
-      setZones(null);
-      return;
-    }
-    authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`)
-      .then(setZones)
-      .catch(() => undefined);
-  }, [authedFetch, cityId]);
+  const zones = useAdminQuery(
+    cityId || null,
+    () => authedFetch<AdminServiceZoneResponseDto[]>(`/admin/service-zones?city_id=${cityId}`),
+    'حصل خطأ في تحميل النطاقات',
+  ).data;
 
-  useEffect(() => {
-    setPage(1);
-  }, [categoryId, zoneId]);
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams({ page: String(page), per_page: String(COVERAGE_PER_PAGE) });
-    if (categoryId) params.set('category_id', categoryId);
-    if (zoneId) params.set('zone_id', zoneId);
-    authedFetchPaginated<CoverageRowDto>(`/admin/operations/coverage?${params.toString()}`)
-      .then(({ items: rows, meta }) => {
-        setItems(rows);
-        setTotal(meta.total ?? rows.length);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل ذكاء تغطية القوى العاملة'))
-      .finally(() => setLoading(false));
-  }, [authedFetchPaginated, categoryId, zoneId, page]);
+  const params = new URLSearchParams({ page: String(page), per_page: String(COVERAGE_PER_PAGE) });
+  if (categoryId) params.set('category_id', categoryId);
+  if (zoneId) params.set('zone_id', zoneId);
+  const coverage = useAdminQuery(
+    params.toString(),
+    () => authedFetchPaginated<CoverageRowDto>(`/admin/operations/coverage?${params.toString()}`),
+    'حصل خطأ في تحميل ذكاء تغطية القوى العاملة',
+  );
+  const items = coverage.data?.items ?? null;
+  const total = coverage.data?.meta.total ?? items?.length ?? 0;
+  const loading = coverage.loading;
+  const error = coverage.error;
 
   const totalPages = Math.max(1, Math.ceil(total / COVERAGE_PER_PAGE));
 
@@ -1058,7 +1001,15 @@ function CoverageIntelligenceSection({
           <Label htmlFor="coverage_city" className="text-sm text-muted-foreground">
             المدينة
           </Label>
-          <SelectNative id="coverage_city" value={cityId} onChange={(e) => setCityId(e.target.value)} className="max-w-xs">
+          <SelectNative
+            id="coverage_city"
+            value={cityId}
+            onChange={(e) => {
+              setCityId(e.target.value);
+              setZoneId('');
+            }}
+            className="max-w-xs"
+          >
             <option value="">كل المدن</option>
             {cities?.map((c) => (
               <option key={c.id} value={c.id}>
@@ -1162,27 +1113,67 @@ function CoverageIntelligenceSection({
   );
 }
 
-export default function OperationsOverviewPage() {
+// أقسام مركز العمليات كتبويبات (docs/08 §63.ب2) — قبل كده كانت خمس أقسام تقيلة مرصوصة تحت بعض
+// في صفحة واحدة: كلها بتجيب بيانات مع بعض عند الفتح، والأدمن بيلف بالسكرول عشان يوصل لأي حاجة.
+// دلوقتي المؤشرات اللحظية فوق دايمًا (نظرة أول ثانية)، والتفاصيل في تبويب واحد فاتح في المرة —
+// فبيجيب بيانات التبويب المفتوح بس، والتبويب متخزّن في الـURL فالرجوع/التحديث بيرجّعك مكانك.
+const OPERATIONS_TABS = [
+  { value: 'exceptions', label: 'الاستثناءات', hint: 'طلبات محتاجة تدخّل دلوقتي' },
+  { value: 'workforce', label: 'القوى العاملة', hint: 'مين متاح ومستواه وقدرته النهاردة' },
+  { value: 'workload', label: 'الحمل القريب', hint: 'ضغط الشغل على 7 أيام' },
+  { value: 'delivery', label: 'تسليم الطلبات', hint: 'وصلت لمين وردّ ولا لأ' },
+  { value: 'coverage', label: 'التغطية', hint: 'فجوات منطقة × فئة' },
+] as const;
+
+type OperationsTab = (typeof OPERATIONS_TABS)[number]['value'];
+
+// useSearchParams() محتاج Suspense boundary وقت الـ static prerendering — بدونها next build
+// بيفشل على /operations (نفس السبب في /login و/security-center).
+export default function OperationsPage() {
+  return (
+    <Suspense>
+      <OperationsOverviewPage />
+    </Suspense>
+  );
+}
+
+function OperationsOverviewPage() {
   const { isLoading, authedFetch, authedFetchPaginated, hasPermission } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
-  const [categoryId, setCategoryId] = useState<string>('');
-  const [overview, setOverview] = useState<OperationsOverview | null>(null);
-  const [error, setError] = useState<string | null>(null);
+
+  // الفئة والتبويب في الـURL (نفس مبدأ /orders في §63.ب6) — الرجوع من صفحة طلب/فني بيرجّع
+  // الأدمن لنفس التبويب ونفس الفلتر، مش لأول الصفحة من جديد.
+  const categoryId = searchParams.get('category_id') ?? '';
+  const tabParam = searchParams.get('tab');
+  const activeTab: OperationsTab = OPERATIONS_TABS.some((t) => t.value === tabParam)
+    ? (tabParam as OperationsTab)
+    : 'exceptions';
+
+  const setParams = (patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === '') next.delete(k);
+      else next.set(k, v);
+    }
+    const qs = next.toString();
+    router.replace(qs ? `/operations?${qs}` : '/operations', { scroll: false });
+  };
 
   useEffect(() => {
     if (isLoading) return;
     authedFetch<AdminServiceCategoryResponseDto[]>('/admin/service-categories').then(setCategories).catch(() => undefined);
   }, [isLoading, authedFetch]);
 
-  useEffect(() => {
-    if (isLoading) return;
-    setOverview(null);
-    setError(null);
-    const query = categoryId ? `?category_id=${categoryId}` : '';
-    authedFetch<OperationsOverview>(`/admin/operations/overview${query}`)
-      .then(setOverview)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل نظرة العمليات'));
-  }, [isLoading, authedFetch, categoryId]);
+  const overviewQuery = useAdminQuery(
+    isLoading ? null : categoryId,
+    () => authedFetch<OperationsOverview>(`/admin/operations/overview${categoryId ? `?category_id=${categoryId}` : ''}`),
+    'حصل خطأ في تحميل نظرة العمليات',
+  );
+  useAdminLiveRefresh(['orders', 'technicians'], overviewQuery.reload);
+  const overview = overviewQuery.data;
+  const error = overviewQuery.error;
 
   return (
     <AppShell>
@@ -1195,7 +1186,12 @@ export default function OperationsOverviewPage() {
         <Label htmlFor="ops_category" className="text-sm text-muted-foreground">
           فلترة بالفئة
         </Label>
-        <SelectNative id="ops_category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="max-w-xs">
+        <SelectNative
+          id="ops_category"
+          value={categoryId}
+          onChange={(e) => setParams({ category_id: e.target.value || null })}
+          className="max-w-xs"
+        >
           <option value="">كل الفئات</option>
           {categories?.map((c) => (
             <option key={c.id} value={c.id}>
@@ -1256,15 +1252,33 @@ export default function OperationsOverviewPage() {
             </div>
           </section>
 
-          <ExceptionCenterSection categoryId={categoryId} authedFetch={authedFetch} hasPermission={hasPermission} />
+          <Tabs value={activeTab} onValueChange={(value) => setParams({ tab: value })}>
+            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+              {OPERATIONS_TABS.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value} title={tab.hint} className="flex-none px-3 py-1.5">
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-          <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+            <p className="mt-2 text-xs text-muted-foreground">{OPERATIONS_TABS.find((t) => t.value === activeTab)?.hint}</p>
 
-          <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
-
-          <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
-
-          <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+            <TabsContent value="exceptions" className="mt-4">
+              <ExceptionCenterSection categoryId={categoryId} authedFetch={authedFetch} hasPermission={hasPermission} />
+            </TabsContent>
+            <TabsContent value="workforce" className="mt-4">
+              <WorkforceMatrixSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+            </TabsContent>
+            <TabsContent value="workload" className="mt-4">
+              <NearFutureWorkloadSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+            </TabsContent>
+            <TabsContent value="delivery" className="mt-4">
+              <DispatchDeliverySection categoryId={categoryId} authedFetch={authedFetch} />
+            </TabsContent>
+            <TabsContent value="coverage" className="mt-4">
+              <CoverageIntelligenceSection categoryId={categoryId} authedFetch={authedFetch} authedFetchPaginated={authedFetchPaginated} />
+            </TabsContent>
+          </Tabs>
         </div>
       )}
     </AppShell>

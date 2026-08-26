@@ -382,7 +382,7 @@ export default function GeoPage() {
                 </Table>
               )}
               <p className="mt-2 text-xs text-muted-foreground">
-                "مُطلَقة" (`is_launched`) بيحدد ظهور المنطقة في `GET /cities/:id/areas` العام —
+                &quot;مُطلَقة&quot; (`is_launched`) بيحدد ظهور المنطقة في `GET /cities/:id/areas` العام —
                 منطقة اتعملت بس لسه معطّلة الإطلاق مش هتظهر للعميل وقت اختيار العنوان.
               </p>
             </CardContent>
@@ -451,7 +451,7 @@ export default function GeoPage() {
                 </Table>
               )}
               <p className="mt-2 text-xs text-muted-foreground">
-                دوس "رسم مضلّع" لأي نطاق عشان تفتح خريطة تفاعلية (OpenStreetMap، مجانية بالكامل
+                دوس &quot;رسم مضلّع&quot; لأي نطاق عشان تفتح خريطة تفاعلية (OpenStreetMap، مجانية بالكامل
                 من غير API key) وترسم/تعدّل حدود تغطيته بالنقر مباشرة.
               </p>
             </CardContent>

@@ -124,7 +124,7 @@ export default function TechnicianLevelsPage() {
                       />
                     </div>
                     <div>
-                      <Label htmlFor={`limit_${config.level}`}>حد قرار الفني بالجنيه (لو مفيش حد، فعّل "بلا حد")</Label>
+                      <Label htmlFor={`limit_${config.level}`}>حد قرار الفني بالجنيه (لو مفيش حد، فعّل &quot;بلا حد&quot;)</Label>
                       <Input
                         id={`limit_${config.level}`}
                         name="decision_limit_egp"
@@ -150,7 +150,7 @@ export default function TechnicianLevelsPage() {
                         name="eligible_for_team_booking"
                         defaultChecked={config.eligible_for_team_booking}
                       />
-                      يظهر ويترشّح كقائد مهمة في حجوزات "اعتماد"
+                      يظهر ويترشّح كقائد مهمة في حجوزات &quot;اعتماد&quot;
                     </label>
                     <div className="flex gap-2 sm:col-span-2">
                       <Button type="submit" size="sm" disabled={isSaving}>
@@ -180,7 +180,7 @@ export default function TechnicianLevelsPage() {
                       <dd>{config.can_lead_team ? 'مسموح' : 'غير مسموح'}</dd>
                     </div>
                     <div>
-                      <dt className="text-muted-foreground">قائد مهمة "اعتماد"</dt>
+                      <dt className="text-muted-foreground">قائد مهمة &quot;اعتماد&quot;</dt>
                       <dd>{config.eligible_for_team_booking ? 'مؤهّل' : 'غير مؤهّل'}</dd>
                     </div>
                   </dl>

@@ -136,10 +136,11 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة اختبار ${runId}`, `Test Country ${runId}`, Math.random().toString(36).slice(2, 4).toUpperCase(), '+000', 'EGP'],
-    );
+    // بَقّة نظافة اختبارات متكررة (§63 شريحة 7، نفس اللي اتصلحت في matching-work-opportunity.spec.ts):
+    // iso_code عشوائي من حرفين = مساحة صغيرة واحتمال تصادم عالي، وتنظيف afterAll بيفشل على قيود
+    // المفاتيح الأجنبية فبيسيب صف دولة ورا كل تشغيلة فاشلة — فالتصادم مسألة وقت وبيكسر سويتات
+    // ملهاش أي علاقة بالكود المتغيّر. الحل: نستعمل دولة موجودة بدل ما ننشئ واحدة.
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     ids.country = country.id;
 
     const [city] = await q(
@@ -256,7 +257,6 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       await dataSource.destroy();
     }

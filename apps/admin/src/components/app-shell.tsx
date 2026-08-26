@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import {
   Avatar,
   AvatarFallback,
@@ -145,15 +146,118 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// docs/08 §63.ب4 — الشريط الجانبي كان بيرجع لفوق مع كل تنقّل ويوّه الأدمن.
+//
+// السبب: `AppShell` (وجوّاه `<nav>`) كان متكرر جوّه 57 صفحة بدل ما يكون في `layout`، فكل تنقّل
+// بيعمل unmount/remount للشريط و`scrollTop` بيرجع صفر. الحل: الشِل الحقيقي بقى في الـlayout
+// (بيتركّب مرة واحدة ويعيش عبر كل التنقّلات)، والنسخ المتداخلة جوّه الصفحات بقت **pass-through**.
+//
+// اخترنا الـcontext بدل تعديل 57 صفحة دفعة واحدة: صفر مخاطرة على أي صفحة، ونفس النتيجة بالظبط.
+// الصفحات ممكن تسيب `<AppShell>` بتاعتها أو تشيلها بعدين — الاتنين شغالين.
+const AppShellMountedContext = createContext(false);
+
+/** المسارات اللي بتترسم من غير شِل (شاشة الدخول — مفيش قايمة جانبية قبل تسجيل الدخول). */
+const BARE_ROUTES = new Set(['/login']);
+
+/**
+ * حفظ/استرجاع مكان الـscroll لكل مسار (docs/08 §63.ب6).
+ *
+ * `<main>` بقى هو حاوية الـscroll (مش المستند)، عشان الشريط الجانبي يفضل ثابت. النتيجة إن
+ * استرجاع الـscroll التلقائي بتاع المتصفح مبقاش بيشتغل عليه، فبنعمله بنفسنا: بنفتكر آخر مكان
+ * لكل مسار، فلما الأدمن يرجع للقايمة يلاقي نفسه في نفس الصف اللي كان فيه مش في أول الصفحة.
+ */
+function useMainScrollMemory(pathname: string) {
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+
+    let saved = 0;
+    try {
+      saved = Number(sessionStorage.getItem(`admin:scroll:${pathname}`) ?? 0);
+    } catch {
+      // sessionStorage ممكن يرمي في وضع خاص/حظر بيانات الموقع — تجاهل واعتبرها بداية الصفحة.
+    }
+    el.scrollTop = Number.isFinite(saved) ? saved : 0;
+
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        try {
+          sessionStorage.setItem(`admin:scroll:${pathname}`, String(el.scrollTop));
+        } catch {
+          // نفس السبب فوق — الحفظ رفاهية، مش شرط لعمل الصفحة.
+        }
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [pathname]);
+
+  return mainRef;
+}
+
+/**
+ * ملاحة الرجوع (docs/08 §63.ب6).
+ *
+ * الشكوى: «أرجع لورا يوديني حتة تانية خالص». السبب إن زراير "رجوع للقايمة" كانت بتعمل
+ * `router.push('/list')` — **دفع** مش رجوع: بيضيف سجل جديد للتاريخ، فحالة القايمة (الصفحة،
+ * الفلاتر، مكان الـscroll) بتضيع، وزرار الرجوع الحقيقي للمتصفح بيبقى في مكان غير متوقع.
+ *
+ * الشِل بقى دايم (بيتركّب مرة واحدة)، فهو الوحيد اللي بيشوف **كل** تغييرات المسار — فبيمسك
+ * عدّاد للتنقّلات اللي حصلت جوّه التطبيق. `back()` بترجع فعليًا بس لو فيه صفحة سابقة جوّه
+ * التطبيق؛ غير كده (فتح مباشر للرابط، أو refresh) بتروح للمسار البديل.
+ */
+const AdminBackContext = createContext<((fallbackHref: string) => void) | null>(null);
+
+export function useAdminBack(fallbackHref: string): () => void {
+  const back = useContext(AdminBackContext);
+  const router = useRouter();
+  return () => {
+    if (back) back(fallbackHref);
+    else router.push(fallbackHref);
+  };
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   return (parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '');
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const alreadyMounted = useContext(AppShellMountedContext);
   const { user, logout, hasPermission } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const mainRef = useMainScrollMemory(pathname);
+
+  // عمق التنقّل جوّه التطبيق — بيزيد مع كل مسار جديد يشوفه الشِل الدائم.
+  const inAppDepth = useRef(0);
+  const previousPathname = useRef<string | null>(null);
+  useEffect(() => {
+    if (previousPathname.current !== null && previousPathname.current !== pathname) {
+      inAppDepth.current += 1;
+    }
+    previousPathname.current = pathname;
+  }, [pathname]);
+
+  const goBack = useCallback(
+    (fallbackHref: string) => {
+      if (inAppDepth.current > 0) {
+        inAppDepth.current -= 1;
+        router.back();
+        return;
+      }
+      router.push(fallbackHref);
+    },
+    [router],
+  );
 
   async function handleLogout() {
     await logout();
@@ -168,8 +272,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     items: group.items.filter((item) => !item.permission || hasPermission(item.permission)),
   })).filter((group) => group.items.length > 0);
 
+  // نسخة متداخلة (صفحة لسه بتلفّ محتواها بـ<AppShell>) — الشِل الحقيقي متركّب في الـlayout فوق،
+  // فبنعدّي المحتوى زي ما هو بدل ما نرسم شريط جانبي تاني.
+  if (alreadyMounted) return <>{children}</>;
+  // شاشة الدخول من غير شِل — مفيش قايمة جانبية قبل تسجيل الدخول.
+  if (BARE_ROUTES.has(pathname)) return <>{children}</>;
+
   return (
-    <div className="flex min-h-screen">
+    <AppShellMountedContext.Provider value={true}>
+    <AdminBackContext.Provider value={goBack}>
+    <div className="flex h-screen overflow-hidden">
       <aside className="flex w-64 shrink-0 flex-col border-s bg-muted/30">
         <div className="flex items-center gap-2 px-4 py-4">
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
@@ -230,8 +342,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
           </div>
         </header>
-        <main className="flex-1 p-6">{children}</main>
+        {/* حاوية الـscroll الحقيقية — لازم تكون هنا مش على المستند، وإلا الشريط الجانبي
+            بيتحرّك مع المحتوى وبيضيع مكانه (نفس الشكوى في §63.ب4). */}
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
+    </AdminBackContext.Provider>
+    </AppShellMountedContext.Provider>
   );
 }

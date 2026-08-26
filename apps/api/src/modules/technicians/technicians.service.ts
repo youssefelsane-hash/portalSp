@@ -44,16 +44,15 @@ export interface TechnicianBookingListItem {
   // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — مستقلة عن currentLevel، بتتبعت لـestimate()
   // عشان final_price_cents هنا يطابق تمامًا اللي هيتحسب فعليًا وقت الحجز الفعلي.
   pricingTier: TechnicianPricingTier;
-  // Script 6 Part 7 — بيانات مقارنة حقيقية للسوق (مفيش بيانات مصطنعة). isVerified دايمًا true
-  // هنا فعليًا (المرحلة 1 الصارمة فوق بتفلتر verification_status='approved' بس) — بيترجع
-  // كحقل صريح بدل ما apps/customer-app تفترض ده ضمنيًا من مجرد ظهور الفني في القايمة.
+  // العلامة الزرقاء في واجهة العميل (ADR-0039، docs/08 §62.1). **مِنحة إدارية يدوية** من
+  // `technician_profiles.is_trust_verified` (أو `technician_companies` للشركات) — مش مشتقة من
+  // `verification_status`. كانت `true` ثابتة هنا لكل صف، يعني أي حد يخلّص أوراقه ياخد العلامة.
   isVerified: boolean;
   onTimeRatePercent: number | null;
   avgArrivalMinutes: number | null;
   // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — false دايمًا لصفوف الفنيين الأفراد.
-  // للشركات: technicianId = technician_companies.id، currentLevel مالوش معنى حقيقي (بيتحط
-  // TEAM_LEADER كتمثيل بس، مش مخزّن ولا بيتفحص)، isVerified=true دايمًا (الشركة أصلاً معتمدة
-  // بوجود مالك/مدير مستواه premium+ وقت الإنشاء — technician-companies.service.ts).
+  // للشركات: technicianId = technician_companies.id، وcurrentLevel مالوش معنى حقيقي (بيتحط
+  // TEAM_LEADER كتمثيل بس، مش مخزّن ولا بيتفحص).
   isCompany: boolean;
   staffCount: number | null;
   branchCount: number | null;
@@ -391,6 +390,7 @@ export class TechniciansService {
       distance_km: string | null;
       current_level: TechnicianLevel;
       pricing_tier: TechnicianPricingTier;
+      is_trust_verified: boolean;
       on_time_rate: string | null;
       avg_arrival_minutes: string | null;
       company_id: string | null;
@@ -402,6 +402,7 @@ export class TechniciansService {
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count, COALESCE(ts.completed_count, 0) AS service_completed_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
+             tp.is_trust_verified,
              company.id AS company_id, company.name AS company_name,
              company.commercial_registration_number,
              (tp.total_ratings_count * tp.average_rating + $5::int * $6::numeric) / NULLIF(tp.total_ratings_count + $5::int, 0)
@@ -507,9 +508,9 @@ export class TechniciansService {
       distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
       currentLevel: row.current_level,
       pricingTier: row.pricing_tier,
-      // المرحلة 1 الصارمة فوق فلترت verification_status='approved' بالفعل — أي صف راجع هنا
-      // فني موثّق فعلاً، مفيش سبب يبقى false أبداً هنا لكن الحقل بيترجع صريح مش ضمني.
-      isVerified: true,
+      // ADR-0039 — مِنحة إدارية، مش مشتقة من verification_status. الفلتر فوق بيضمن إن الفني
+      // مؤهّل تشغيليًا (وده شرط ظهوره أصلاً)، والعمود ده بيقول إن الأدمن اختاره يستاهل العلامة.
+      isVerified: row.is_trust_verified,
       onTimeRatePercent: row.on_time_rate !== null ? Number(row.on_time_rate) : null,
       avgArrivalMinutes: row.avg_arrival_minutes !== null ? Number(row.avg_arrival_minutes) : null,
       isCompany: false,
@@ -561,13 +562,18 @@ export class TechniciansService {
       distance_km: string | null;
       staff_count: string;
       branch_count: string;
+      completed_count: string | null;
+      is_trust_verified: boolean;
       commercial_registration_number: string | null;
     }
     const companyRows = await this.technicianProfiles.manager.query<CompanyRow[]>(
       `
-      SELECT tc.id AS company_id, tc.name, tc.commercial_registration_number,
+      SELECT tc.id AS company_id, tc.name, tc.commercial_registration_number, tc.is_trust_verified,
              AVG(tp.average_rating) AS avg_rating,
              SUM(tp.total_ratings_count) AS total_ratings,
+             -- docs/08 §62.2 — كان 0 ثابت في طبقة العرض (رقم كاذب معروض للعميل). الـLEFT JOIN
+             -- على ts صف واحد بالكتير لكل عضو، فالمجموع هنا = طلبات الشركة المكتملة في الخدمة دي.
+             SUM(COALESCE(ts.completed_count, 0)) AS completed_count,
              MIN(ST_Distance(tp.current_location, a.location) / 1000.0) AS distance_km,
              (SELECT COUNT(*) FROM technician_profiles WHERE company_id = tc.id) AS staff_count,
              (SELECT COUNT(*) FROM technician_company_branches WHERE company_id = tc.id) AS branch_count
@@ -625,14 +631,15 @@ export class TechniciansService {
       bio: null,
       averageRating: row.avg_rating !== null ? Number(row.avg_rating) : 0,
       totalRatingsCount: row.total_ratings !== null ? Number(row.total_ratings) : 0,
-      serviceCompletedCount: 0,
+      serviceCompletedCount: Number(row.completed_count ?? 0),
       distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
       // تمثيلي بس (مفيش فني محدد بعد) — أعلى مستوى عشان مايتفسّرش غلط كـ"تحت محترف".
       currentLevel: TechnicianLevel.TEAM_LEADER,
       // تمثيلي بس زي currentLevel فوق — estimate() أصلاً مبيتحسبش للشركات (isCompany:true بترجع
       // estimate:null في catalog.controller.ts)، فالقيمة دي مالهاش أي أثر على السعر المعروض.
       pricingTier: TechnicianPricingTier.STANDARD,
-      isVerified: true,
+      // ADR-0039 — نفس المِنحة الإدارية بالظبط، بس من technician_companies.
+      isVerified: row.is_trust_verified,
       onTimeRatePercent: null,
       avgArrivalMinutes: null,
       isCompany: true,
@@ -690,6 +697,7 @@ export class TechniciansService {
       distance_km: string | null;
       current_level: TechnicianLevel;
       pricing_tier: TechnicianPricingTier;
+      is_trust_verified: boolean;
       company_id: string | null;
       company_name: string | null;
       commercial_registration_number: string | null;
@@ -699,6 +707,7 @@ export class TechniciansService {
       SELECT tp.id AS technician_id, u.full_name, u.avatar_url, u.avatar_storage_key, tp.bio,
              tp.average_rating, tp.total_ratings_count,
              ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km, tp.current_level, tp.pricing_tier,
+             tp.is_trust_verified,
              company.id AS company_id, company.name AS company_name, company.commercial_registration_number
       FROM technician_profiles tp
       JOIN users u ON u.id = tp.user_id
@@ -777,7 +786,7 @@ export class TechniciansService {
           distanceKm: row.distance_km !== null ? Number(row.distance_km) : null,
           currentLevel: row.current_level,
           pricingTier: row.pricing_tier,
-          isVerified: true,
+          isVerified: row.is_trust_verified,
           onTimeRatePercent: null,
           avgArrivalMinutes: null,
           isCompany: false,

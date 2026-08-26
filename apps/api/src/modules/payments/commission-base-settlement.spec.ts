@@ -28,6 +28,7 @@ import { SettingsService } from '../settings/settings.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
+import { crewEarningsServiceStub } from './crew-earnings.testing';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت أساس العمولة الجديد (ADR-0037، docs/08 §60.1).
 //
@@ -124,10 +125,11 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة اختبار ${runId}`, `Test Country ${runId}`, runId.slice(-2).toUpperCase(), '+008', 'EGP'],
-    );
+    // بَقّة نظافة اختبارات متكررة (§63 شريحة 7، نفس اللي اتصلحت في matching-work-opportunity.spec.ts):
+    // iso_code عشوائي من حرفين = مساحة صغيرة واحتمال تصادم عالي، وتنظيف afterAll بيفشل على قيود
+    // المفاتيح الأجنبية فبيسيب صف دولة ورا كل تشغيلة فاشلة — فالتصادم مسألة وقت وبيكسر سويتات
+    // ملهاش أي علاقة بالكود المتغيّر. الحل: نستعمل دولة موجودة بدل ما ننشئ واحدة.
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     ids.country = country.id;
     const [city] = await q(
       `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
@@ -243,6 +245,7 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
       {} as never, // paymentProviders — مش متنادى (collectCash بس هنا)
       {} as never, // savedPaymentMethods (docs/08 §21) — مش متنادى في الاختبار ده
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
   });
 
@@ -272,7 +275,6 @@ describe('أساس العمولة في التسوية الحقيقية (ADR-0037
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
     } finally {
       await cache?.onModuleDestroy();
       await dataSource.destroy();

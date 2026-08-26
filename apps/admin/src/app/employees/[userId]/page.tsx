@@ -15,7 +15,7 @@ import type {
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -38,6 +38,8 @@ export default function EmployeeDetailPage() {
   const { userId } = useParams<{ userId: string }>();
   const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/employees');
 
   const [detail, setDetail] = useState<EmployeeDetail | null>(null);
   const [allRoles, setAllRoles] = useState<RoleResponseDto[] | null>(null);
@@ -230,7 +232,7 @@ export default function EmployeeDetailPage() {
           </>
         }
         actions={
-          <Button variant="outline" onClick={() => router.push('/employees')}>
+          <Button variant="outline" onClick={goBack}>
             رجوع للقايمة
           </Button>
         }

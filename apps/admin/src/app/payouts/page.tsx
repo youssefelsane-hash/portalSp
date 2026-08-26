@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import type { AdminPayoutResponseDto, PayoutOrderItemResponseDto, PayoutStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -45,6 +46,9 @@ export default function PayoutsPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, statusFilter]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["payouts", "payments"], () => load());
 
   async function runAction(action: () => Promise<unknown>) {
     setIsSaving(true);

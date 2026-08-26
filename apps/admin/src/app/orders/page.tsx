@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { OrderResponseDto, OrderStatus } from '@baytak/shared-types';
+import type { OrderCrewSummaryDto, OrderResponseDto, OrderStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -23,6 +23,7 @@ import {
 } from '@/lib/order-labels';
 import { formatEgp } from '@/lib/format';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const PER_PAGE = 20;
 
@@ -42,18 +43,53 @@ const ORIGIN_FILTERS: { value: 'all' | 'false' | 'true'; label: string }[] = [
   { value: 'true', label: 'متكررة' },
 ];
 
+// docs/08 §63.ب5 (طلب مالك صريح) — «المفروض يكون فيه جزء للطلبات اللي لسه مطلوبة، اللي هو جزء
+// الطلبات الأحدث، وكمان جزء للطلبات اللي معاد تنفيذها أحدث… الكستمر طلبها ممكن من زمن ولكن وقت
+// تنفيذها حان خلاص». الترتيبين بيتحسبوا في الباك-إند (admin-orders.service.ts) مش هنا.
+const SORT_VIEWS: { value: 'newest' | 'soonest'; label: string; hint: string }[] = [
+  { value: 'newest', label: 'الأحدث طلبًا', hint: 'آخر اللي العملاء طلبوه' },
+  { value: 'soonest', label: 'تنفيذها قرّب', hint: 'الأقرب في المواعيد' },
+];
+
+// useSearchParams() محتاج Suspense boundary وقت الـ static prerendering — بدونها next build
+// بيفشل على /orders (نفس السبب في /login و/security-center).
 export default function OrdersPage() {
+  return (
+    <Suspense>
+      <OrdersListPage />
+    </Suspense>
+  );
+}
+
+function OrdersListPage() {
   const { isLoading, authedFetchPaginated, hasPermission } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // docs/08 §63.ب6 — حالة القايمة في الـURL مش في state المكوّن. من غير كده، الرجوع من تفاصيل
+  // طلب كان بيرجّعك للقايمة **من أول الأول** (صفحة 1، بلا فلاتر) — نص شكوى "بيوّهني".
+  const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
+  const statusFilter = (searchParams.get('status') ?? 'all') as OrderStatus | 'all';
+  const originFilter = (searchParams.get('origin') ?? 'all') as 'all' | 'false' | 'true';
+  const sortView = (searchParams.get('sort') === 'soonest' ? 'soonest' : 'newest') as 'newest' | 'soonest';
+
+  const setParams = (patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === '' || v === 'all' || (k === 'page' && v === '1')) next.delete(k);
+      else next.set(k, v);
+    }
+    const qs = next.toString();
+    router.replace(qs ? `/orders?${qs}` : '/orders', { scroll: false });
+  };
+
   const [orders, setOrders] = useState<OrderResponseDto[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
-  const [originFilter, setOriginFilter] = useState<'all' | 'false' | 'true'>('all');
   const [error, setError] = useState<string | null>(null);
 
   function loadOrders() {
     if (isLoading) return;
-    const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
+    const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE), sort: sortView });
     if (statusFilter !== 'all') params.set('order_status', statusFilter);
     if (originFilter !== 'all') params.set('recurring', originFilter);
     authedFetchPaginated<OrderResponseDto>(`/admin/orders?${params.toString()}`)
@@ -71,7 +107,7 @@ export default function OrdersPage() {
     loadOrders();
     // loadOrders intentionally reads the current filters; realtime callbacks use the latest render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, page, statusFilter, originFilter, authedFetchPaginated]);
+  }, [isLoading, page, statusFilter, originFilter, sortView, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
@@ -89,16 +125,31 @@ export default function OrdersPage() {
         }
       />
 
+      {/* قسمين واضحين بدل قايمة واحدة (docs/08 §63.ب5) */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {SORT_VIEWS.map((view) => (
+          <Button
+            key={view.value}
+            size="sm"
+            variant={sortView === view.value ? 'default' : 'outline'}
+            onClick={() => setParams({ sort: view.value === 'newest' ? null : view.value, page: '1' })}
+            title={view.hint}
+          >
+            {view.label}
+          </Button>
+        ))}
+        <span className="self-center text-xs text-muted-foreground">
+          {SORT_VIEWS.find((v) => v.value === sortView)?.hint}
+        </span>
+      </div>
+
       <div className="mb-4 flex gap-2">
         {QUICK_FILTERS.map((filter) => (
           <Button
             key={filter.value}
             size="sm"
             variant={statusFilter === filter.value ? 'default' : 'outline'}
-            onClick={() => {
-              setStatusFilter(filter.value);
-              setPage(1);
-            }}
+            onClick={() => setParams({ status: filter.value, page: '1' })}
           >
             {filter.label}
           </Button>
@@ -112,10 +163,7 @@ export default function OrdersPage() {
             key={filter.value}
             size="sm"
             variant={originFilter === filter.value ? 'default' : 'outline'}
-            onClick={() => {
-              setOriginFilter(filter.value);
-              setPage(1);
-            }}
+            onClick={() => setParams({ origin: filter.value, page: '1' })}
           >
             {filter.label}
           </Button>
@@ -136,6 +184,8 @@ export default function OrdersPage() {
                 <TableHead>الحالة</TableHead>
                 <TableHead>الإجمالي</TableHead>
                 <TableHead>حالة الدفع</TableHead>
+                <TableHead>الطاقم</TableHead>
+                <TableHead>موعد التنفيذ</TableHead>
                 <TableHead>تاريخ الطلب</TableHead>
               </TableRow>
             </TableHeader>
@@ -163,6 +213,13 @@ export default function OrdersPage() {
                       {PAYMENT_STATUS_LABELS[order.payment_status] ?? order.payment_status}
                     </StatusChip>
                   </TableCell>
+                  {/* docs/08 §63.ب5 — «مين اللي أخد الشغلانة دي، ومعاه مين، والفريق كامل ولا لأ» */}
+                  <TableCell><CrewCell crew={order.crew ?? null} /></TableCell>
+                  <TableCell>
+                    {order.scheduled_at
+                      ? new Date(order.scheduled_at).toLocaleString('ar-EG-u-nu-latn')
+                      : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
                   <TableCell>
                     {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
                   </TableCell>
@@ -171,9 +228,39 @@ export default function OrdersPage() {
             </TableBody>
           </Table>
 
-          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="طلب" onPageChange={setPage} />
+          <Pagination page={page} totalPages={totalPages} total={total} itemLabel="طلب" onPageChange={(p) => setParams({ page: String(p) })} />
         </>
       )}
     </AppShell>
+  );
+}
+
+/** خلية الطاقم في قايمة الطلبات (docs/08 §63.ب5). */
+function CrewCell({ crew }: { crew: OrderCrewSummaryDto | null }) {
+  if (!crew) return <span className="text-muted-foreground">—</span>;
+  if (!crew.leaderTechnicianId) {
+    return <Badge variant="outline">لسه محدش أخدها</Badge>;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="font-medium">{crew.leaderName ?? 'فني'}</span>
+        {crew.isTeamBooking && (
+          <Badge variant={crew.crewComplete ? 'secondary' : 'destructive'}>
+            {crew.crewComplete ? 'الطاقم كامل' : 'الطاقم ناقص'}
+          </Badge>
+        )}
+      </div>
+      {crew.members.length > 0 && (
+        <span className="text-xs text-muted-foreground">
+          معاه: {crew.members.map((m) => m.fullName).join('، ')}
+        </span>
+      )}
+      {crew.isTeamBooking && (
+        <span className="text-xs text-muted-foreground">
+          {1 + crew.members.length} من {crew.requiredTechnicians + crew.requiredAssistants || 1}
+        </span>
+      )}
+    </div>
   );
 }

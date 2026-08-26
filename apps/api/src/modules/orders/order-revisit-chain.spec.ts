@@ -44,6 +44,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * Script 7 Phase 23 — بَقّة حقيقية اتلقطت: إعادة الزيارة تحت الضمان (order_type=revisit) بتاخد
@@ -213,6 +214,7 @@ describe('OrdersService.create() — إعادة الزيارة تحت الضما
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

@@ -243,8 +243,8 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                           ),
                           if (t.isVerified)
                             const Padding(
-                              padding: EdgeInsets.only(left: 4),
-                              child: Tooltip(message: 'فني موثّق', child: Icon(Icons.verified, size: 18, color: Colors.blue)),
+                              padding: EdgeInsetsDirectional.only(start: 4),
+                              child: TrustBadge(),
                             ),
                           Chip(
                             label: Text(technicianLevelLabelsAr[t.technicianLevel] ?? t.technicianLevel),
@@ -383,75 +383,165 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
   }
 
   // اندماج الشركات في نفس قايمة "اعتماد" (docs/08 §38) — كارت مستقل عمداً بدل تعقيد _buildCard
-  // بشروط كتير: مفيش مستوى/بروفايل فردي/سعر نهائي محدد للشركة ككل (الفني الفعلي بيتحدد وقت
-  // التوزيع)، وبدل كده بتعرض عدد الفنيين/الفروع.
+  // بشروط كتير: مفيش مستوى ولا بروفايل فردي للشركة ككل.
+  //
+  // docs/08 §62.2 (طلب مالك صريح) — الشكل هنا مقصود إنه **يتقري كشركة من نظرة**، مش نسخة باهتة
+  // من كارت الفرد: شريط علوي ملوّن باسم الشركة، إطار بلون الـprimary، وأرقام الشركة (عدد الفنيين/
+  // الفروع/الشغل المكتمل) كشارات إحصائية بدل سطر نص واحد صغير. والسعر بقى بيظهر فعلاً — الشركة
+  // بتتسعّر بالأساس (مضاعف مستوى = 1) وده حرفيًا اللي هيتحصّل، راجع catalog.controller.ts.
   Widget _buildCompanyCard(TechnicianBookingListItem c) {
+    final scheme = Theme.of(context).colorScheme;
+    final registered = c.isCommercialCompany;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.35),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-              child: const Icon(Icons.apartment_outlined),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(c.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ),
-                      const Chip(
-                        label: Text('شركة/فريق'),
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text('${c.staffCount ?? 0} فني · ${c.branchCount ?? 0} فرع'),
-                  if (c.totalRatingsCount > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.star, size: 14, color: Colors.amber),
-                          Text(' ${c.averageRating.toStringAsFixed(1)} (${c.totalRatingsCount})'),
-                        ],
-                      ),
-                    ),
-                  if (c.distanceKm != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.place_outlined, size: 14, color: Colors.grey),
-                          Text('${c.distanceKm!.toStringAsFixed(1)} كم'),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    child: FilledButton(
-                      onPressed: () => _select(c.id, true),
-                      child: const Text('اختار'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      clipBehavior: Clip.antiAlias,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scheme.primary.withValues(alpha: 0.45), width: 1.5),
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // الشريط العلوي — ده اللي بيخلي الشركة "تتشاف" وسط كروت الأفراد.
+          Container(
+            color: scheme.primaryContainer,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.apartment, size: 20, color: scheme.onPrimaryContainer),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    c.fullName,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+                if (c.isVerified) const TrustBadge(),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _CompanyTag(
+                      icon: registered ? Icons.business_center_outlined : Icons.groups_outlined,
+                      // الفرق الحقيقي بين "شركة" و"فريق" في البيانات هو وجود سجل تجاري من عدمه
+                      // (technician_companies.commercial_registration_number) — مش تسمية تجميلية.
+                      label: registered ? 'شركة مسجّلة' : 'فريق عمل',
+                      emphasized: true,
+                    ),
+                    _CompanyTag(icon: Icons.engineering_outlined, label: '${c.staffCount ?? 0} فني'),
+                    if ((c.branchCount ?? 0) > 0)
+                      _CompanyTag(icon: Icons.store_outlined, label: '${c.branchCount} فرع'),
+                    if (c.completedOrdersCount > 0)
+                      _CompanyTag(icon: Icons.task_alt, label: '${c.completedOrdersCount} طلب مكتمل'),
+                    if (c.totalRatingsCount > 0)
+                      _CompanyTag(
+                        icon: Icons.star,
+                        label: '${c.averageRating.toStringAsFixed(1)} (${c.totalRatingsCount})',
+                      ),
+                    if (c.distanceKm != null)
+                      _CompanyTag(icon: Icons.place_outlined, label: '${c.distanceKm!.toStringAsFixed(1)} كم'),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'فريق كامل بيقدر يغطّي الشغل الكبير، ومسؤولية الشغل على الشركة نفسها.',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (c.finalPriceCents != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                          ),
+                          Text(
+                            'سعر الشركة — من غير فرق مستوى',
+                            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                          ),
+                        ],
+                      )
+                    else
+                      const SizedBox.shrink(),
+                    FilledButton(
+                      onPressed: () => _select(c.id, true),
+                      child: const Text('اختار الشركة'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// شارة إحصائية صغيرة داخل كارت الشركة (docs/08 §62.2).
+class _CompanyTag extends StatelessWidget {
+  const _CompanyTag({required this.icon, required this.label, this.emphasized = false});
+
+  final IconData icon;
+  final String label;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = emphasized ? scheme.onPrimary : scheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: emphasized ? scheme.primary : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: fg, fontWeight: emphasized ? FontWeight.w600 : FontWeight.normal),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1).
+///
+/// بتظهر بس لما الأدمن يمنحها صراحة — **مش** مشتقة من اعتماد أوراق الفني. لو ظهرت لكل حد
+/// بتفقد معناها، وده بالظبط اللي المالك طلب إصلاحه.
+class TrustBadge extends StatelessWidget {
+  const TrustBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Tooltip(
+      message: 'موثّق من المنصة',
+      child: Icon(Icons.verified, size: 18, color: Color(0xFF1D9BF0)),
     );
   }
 }

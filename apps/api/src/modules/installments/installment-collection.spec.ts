@@ -20,6 +20,7 @@ import { Order } from '../orders/entities/order.entity';
 import { Installment } from './entities/installment.entity';
 import { InstallmentApplication } from './entities/installment-application.entity';
 import { InstallmentPlan } from './entities/installment-plan.entity';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * محرك تحصيل الأقساط (migration 0177) — أدلة التعريف الحرجة:
@@ -156,6 +157,7 @@ describe('InstallmentCollectionService + webhook resolution (PostgreSQL)', () =>
       {} as never, // providers registry — المسار هنا بينتهي قبل نداء البوابة (مفيش كارت محفوظ)
       { findDefaultForCustomer: async () => null } as never, // مفيش بطاقة محفوظة = فشل مبكر آمن
       dataSource.getRepository(Installment),
+      crewEarningsServiceStub(),
     );
     collectionService = new InstallmentCollectionService(
       dataSource.getRepository(Installment),

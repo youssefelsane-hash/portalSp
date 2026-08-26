@@ -47,6 +47,7 @@ import { ComplaintAttachment } from '../support/entities/complaint-attachment.en
 import { RatingsService } from '../ratings/ratings.service';
 import { Rating, RatingType } from '../ratings/entities/rating.entity';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
+import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
 
 /**
  * Script 7 Phase 34 — Full Golden-Path Live Test. رحلة العميل الكاملة أولوية #1 (docs/08 المقدمة
@@ -240,6 +241,7 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
       {} as never,
       {} as never,
       {} as never, // installments repo (migration 0177)
+      crewEarningsServiceStub(),
     );
     const supportService = new SupportService(
       dataSource.getRepository(Complaint),

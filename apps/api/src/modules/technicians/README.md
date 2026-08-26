@@ -927,3 +927,44 @@ block على نطاق تواريخ بينشئ صف `blocked` كامل اليوم
   حقيقية موجودة من قبل (قائد الطلب بياخد كل الفلوس، أعضاء الفريق صفر)، قرار مالي مستقل، مش بيتحل
   هنا. حجز الشغالة المباشر (ADR-0031 Phase A.4) برضه خارج النطاق — مسار بيتخطى `MatchingService`
   بالكامل، مفهوم "شركة" مش منطبق عليه.
+
+---
+
+## علامة التوثيق (Trust Badge) — ADR-0039 / docs/08 §62.1
+
+**بلاغ المالك**: «العلامة الزرقاء … أي حد بيسجل جديد بياخدها عادي من غير حاجة. لأ، المفروض الأدمن
+يتحكم مين اللي ياخد العلامة دي».
+
+**السبب في الكود** (متأكَّد منه، مش استنتاج): `listForServiceBooking()` كانت بتحط `isVerified: true`
+**حرفيًا** في التلات مسارات (الأفراد، الشركات، والمتعارضين جدوليًا)، بتبرير إن فلتر
+`verification_status = 'approved'` فوق بيضمن إن الصف "موثّق". التبرير ده تقنيًا صح وتجاريًا غلط:
+`approved` = "استوفى أوراقه ومسموح له يشتغل"، مش "المنصة بتضمنه".
+
+**الشكل الحالي**:
+
+- `technician_profiles.is_trust_verified` و`technician_companies.is_trust_verified` (migration 0194)
+  + `trust_verified_at/by/note` للتدقيق. الافتراضي `false` للكل، **بلا backfill** (مقصود — راجع ADR).
+- `verification_status` وكل بوابات الأهلية/المطابقة **ما اتلمسوش خالص**. سحب العلامة مبيمنعش الفني
+  من الشغل، ومنحها مش شرط للظهور في القوايم.
+- `PATCH /admin/technicians/:id/trust-badge` و`PATCH /admin/technician-companies/:id/trust-badge`،
+  الاتنين تحت `@RequirePermission('technicians.approve')` ومسجّلين في `audit_log`
+  (`technician.trust_badge_granted/revoked` ونظائرهم للشركة).
+- **الكونترولر `admin-technician-companies.controller.ts` كان read-only بالكامل** — العلامة هي
+  الكتابة الوحيدة فيه، لأن الإدارة الذاتية للشركة مينفعش تشمل منح إشارة ثقة لنفسها.
+
+## عرض الشركة في قايمة اختيار مقدّم الخدمة — docs/08 §62.2
+
+- **السعر بقى بيظهر.** `catalog.controller.ts` كانت بترجّع `estimate: null` لأي صف شركة بحجة
+  "مفيش فني محدد بعد فأي سعر تخمين". التبرير كان غلط: `OrdersService.create()` بيسعّر حجز الشركة
+  بـ`knownTechnicianLevel = undefined` (مضاعف = 1) — يعني السعر الأساسي هو **بالظبط** اللي هيتحصّل.
+- **بَقّة حقيقية اتصلحت معاها**: `LevelPremiumService.applyOnAutoAssignment()` كانت بتتخطّى بس لو
+  `requestedTechnicianId` موجود. حجز الشركة بيسيبه `null`، فأول ما المطابقة تعيّن عضو مستواه أعلى
+  كان فرق "فني مميّز" بيتضاف **بعد** تأكيد العميل. الحارس بقى بيشمل `requestedTechnicianCompanyId`.
+- `serviceCompletedCount` للشركة كان `0` ثابت (رقم كاذب معروض للعميل) — بقى
+  `SUM(technician_services.completed_count)` لأعضاء الشركة المؤهلين للخدمة.
+
+### فجوة موثّقة (مفتوحة عن قصد)
+
+`apps/customer-web` مبيعرضش كروت الشركات ولا علامة التوثيق أصلاً (بيقرأ `final_price_cents` بس من
+نفس الـendpoint). الحقول راجعة له في الرد وبيتجاهلها — مفيش كسر، بس التجربة الجديدة موجودة في
+`apps/customer-app` بس دلوقتي.

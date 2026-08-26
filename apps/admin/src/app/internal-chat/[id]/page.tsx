@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import type { InternalMessageResponseDto, InternalThreadResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { messagesContentKey, usePinnedScroll } from '@/lib/use-pinned-scroll';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -22,7 +23,8 @@ export default function InternalChatThreadDetailPage() {
   const [messages, setMessages] = useState<InternalMessageResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // حاوية الرسايل نفسها (مش عنصر في آخرها) — التمرير التلقائي بقى مشروط بمكان المستخدم.
+  const listRef = useRef<HTMLDivElement>(null);
 
   function loadMessages() {
     authedFetch<InternalMessageResponseDto[]>(`/internal-chat/threads/${id}/messages`)
@@ -41,9 +43,9 @@ export default function InternalChatThreadDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, id]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  // docs/08 §63.ب3 — التمرير لآخر الشات بيحصل بس لو المستخدم أصلاً في الآخر، ومع تغيّر محتوى
+  // حقيقي مش مع كل دورة polling. قبل كده كان بيخطف مكان القراءة كل بضع ثوانٍ.
+  usePinnedScroll(listRef, messagesContentKey(messages));
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -85,7 +87,7 @@ export default function InternalChatThreadDetailPage() {
           {messages && messages.length === 0 && <EmptyState title="مفيش رسائل لسه" />}
 
           {messages && messages.length > 0 && (
-            <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pe-1">
+            <div ref={listRef} className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pe-1">
               {messages.map((m) => {
                 const fromMe = m.sender_user_id === user?.id;
                 return (
@@ -103,7 +105,6 @@ export default function InternalChatThreadDetailPage() {
                   </div>
                 );
               })}
-              <div ref={bottomRef} />
             </div>
           )}
 

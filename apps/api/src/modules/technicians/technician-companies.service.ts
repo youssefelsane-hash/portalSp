@@ -211,6 +211,51 @@ export class TechnicianCompaniesService {
     return this.getDetail(profile.companyId!);
   }
 
+  /**
+   * منح/سحب علامة التوثيق الزرقاء للشركة (ADR-0039، docs/08 §62.1).
+   *
+   * نفس منطق `AdminTechniciansService.setTrustBadge()` للفرد بالحرف — الشركة بتظهر في **نفس**
+   * قايمة اختيار مقدّم الخدمة، فلازم تخضع لنفس البوابة الإدارية بدل ما تاخد العلامة ضمنيًا.
+   */
+  async setTrustBadge(
+    adminUserId: string,
+    companyId: string,
+    granted: boolean,
+    note: string | null,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianCompany> {
+    const company = await this.companies.findOne({ where: { id: companyId } });
+    if (!company) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة مش موجودة', HttpStatus.NOT_FOUND);
+    }
+    if (company.isTrustVerified === granted) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        granted ? 'الشركة أصلاً معاها علامة التوثيق' : 'الشركة أصلاً من غير علامة التوثيق',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    company.isTrustVerified = granted;
+    company.trustVerifiedAt = new Date();
+    company.trustVerifiedBy = adminUserId;
+    company.trustVerifiedNote = note;
+    await this.companies.save(company);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: granted ? 'technician_company.trust_badge_granted' : 'technician_company.trust_badge_revoked',
+      entityType: 'technician_company',
+      entityId: company.id,
+      oldValues: { is_trust_verified: !granted },
+      newValues: { is_trust_verified: granted, note },
+      meta,
+    });
+
+    return company;
+  }
+
   async listForAdmin(): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
     const companies = await this.companies.find({ order: { createdAt: 'DESC' } });
     return this.countBranchesAndStaff(companies);

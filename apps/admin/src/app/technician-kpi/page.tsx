@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { TechnicianKpiSnapshotResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -46,6 +47,9 @@ export default function TechnicianKpiPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, year, month, statusFilter]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
+  // الصفحة دي كانت بتفوّتها فكانت محتاجة refresh يدوي.
+  useAdminLiveRefresh(["technicians"], () => load());
 
   async function handleCalculate() {
     setIsCalculating(true);

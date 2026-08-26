@@ -57,6 +57,8 @@ export interface OrderResponseDto {
   optional_warranty: { name_ar: string; coverage_months: number } | null;
   payment_status: string;
   placed_at: string | null;
+  /** ملخّص الطاقم — بيرجع من `/admin/orders` بس (docs/08 §63.ب5). */
+  crew?: OrderCrewSummaryDto | null;
   cancelled_at: string | null;
   cancellation_reason_id: string | null;
   cancellation_fee_cents: number;
@@ -339,4 +341,19 @@ export interface OrderItemResponseDto {
   approved_at: string | null;
   declined_at: string | null;
   created_at: string;
+}
+
+/**
+ * ملخّص طاقم الطلب في قايمة الأدمن (docs/08 §63.ب5).
+ *
+ * `null` مش متوقّع من `/admin/orders` بس الحقل اختياري عشان أي مستهلك قديم ما يكسرش.
+ */
+export interface OrderCrewSummaryDto {
+  leaderTechnicianId: string | null;
+  leaderName: string | null;
+  members: { technicianId: string; fullName: string; memberType: 'team_member' | 'assistant' }[];
+  requiredTechnicians: number;
+  requiredAssistants: number;
+  crewComplete: boolean;
+  isTeamBooking: boolean;
 }

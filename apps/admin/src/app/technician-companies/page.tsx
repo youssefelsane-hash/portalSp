@@ -81,6 +81,9 @@ export default function TechnicianCompaniesPage() {
                     {isCommercial ? <Building2 className="h-6 w-6" /> : <Layers3 className="h-6 w-6" />}
                   </div>
                   <div className="flex items-center gap-2">
+                    {company.is_trust_verified && (
+                      <Badge className="bg-[#1D9BF0] text-white hover:bg-[#1D9BF0]">موثّقة ✓</Badge>
+                    )}
                     <Badge variant={company.is_active ? 'secondary' : 'outline'}>{company.is_active ? 'نشطة' : 'متوقفة'}</Badge>
                     <ArrowUpLeft className="h-4 w-4 text-muted-foreground transition group-hover:-translate-x-1 group-hover:-translate-y-1" />
                   </div>

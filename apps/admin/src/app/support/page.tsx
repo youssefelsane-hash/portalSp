@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { ComplaintResponseDto, ComplaintStatus } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
+import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
@@ -35,12 +36,19 @@ export default function SupportPage() {
   const [statusFilter, setStatusFilter] = useState<ComplaintStatus | 'all' | 'open'>('open');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isLoading) return;
+  const load = useCallback(() => {
     authedFetch<ComplaintResponseDto[]>('/admin/complaints')
       .then(setComplaints)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الشكاوى'));
-  }, [isLoading, authedFetch]);
+  }, [authedFetch]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    load();
+  }, [isLoading, load]);
+  // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً، الصفحة كانت بتفوّتها
+  // فكانت محتاجة refresh يدوي. الجلب اتحوّل لـuseCallback عشان يتنادى من المكانين.
+  useAdminLiveRefresh(['support'], load);
 
   // مفيش فلترة server-side لهذا المسار (listAllForAdmin بيرجّع الكل) — عدد الشكاوى المتوقع
   // صغير بما يكفي لفلترة client-side، نفس السبب اللي خلّى قايمة الفلاجز من غير صفحات.

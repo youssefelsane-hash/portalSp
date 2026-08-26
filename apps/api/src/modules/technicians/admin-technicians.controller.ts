@@ -14,6 +14,7 @@ import { toAdminTechnicianDetailResponseDto, toAdminTechnicianResponseDto } from
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
+import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
@@ -512,6 +513,20 @@ export class AdminTechniciansController {
     @AuditContext() audit: AuditMeta,
   ) {
     const { profile, user } = await this.adminTechniciansService.changePricingTier(admin.sub, id, dto, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
+  // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — نفس صلاحية تغيير المستوى/فئة التسعير عمداً،
+  // مش صلاحية جديدة: نفس فئة القرار الإداري على مقدّم الخدمة، ومصفوفة الصلاحيات مش محتاجة تتضخّم.
+  @Patch(':id/trust-badge')
+  @RequirePermission('technicians.approve')
+  async setTrustBadge(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetTrustBadgeDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.setTrustBadge(admin.sub, id, dto, audit);
     return toAdminTechnicianResponseDto(profile, user);
   }
 

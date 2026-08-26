@@ -18,6 +18,19 @@ export class TechnicianCompany {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  // ADR-0039 (docs/08 §62.1) — العلامة الزرقاء للشركة: نفس مِنحة الفني بالظبط، بنفس المسار الإداري.
+  @Column({ name: 'is_trust_verified', type: 'boolean', default: false })
+  isTrustVerified: boolean;
+
+  @Column({ name: 'trust_verified_at', type: 'timestamptz', nullable: true })
+  trustVerifiedAt: Date | null;
+
+  @Column({ name: 'trust_verified_by', type: 'uuid', nullable: true })
+  trustVerifiedBy: string | null;
+
+  @Column({ name: 'trust_verified_note', type: 'varchar', length: 500, nullable: true })
+  trustVerifiedNote: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

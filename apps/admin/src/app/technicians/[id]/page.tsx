@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type {
   AdminServiceCategoryResponseDto,
@@ -18,7 +18,9 @@ import type {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
-import { AppShell } from '@/components/app-shell';
+import { AppShell, useAdminBack } from '@/components/app-shell';
+import { TechnicianEarningsStatement } from '@/components/technician-earnings-statement';
+import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
@@ -105,7 +107,8 @@ interface Technician360Response {
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch } = useAuth();
-  const router = useRouter();
+  // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
+  const goBack = useAdminBack('/technicians');
 
   const [detail, setDetail] = useState<AdminTechnicianDetailResponseDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +132,7 @@ export default function TechnicianDetailPage() {
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
 
+  const [trustBadgeNote, setTrustBadgeNote] = useState('');
   const [wallet, setWallet] = useState<AdminWalletDetailResponseDto | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
 
@@ -270,6 +274,18 @@ export default function TechnicianDetailPage() {
         body: JSON.stringify({ pricing_tier: selectedPricingTier }),
       }),
     );
+  }
+
+  // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — مِنحة إدارية، **مش** نتيجة اعتماد الأوراق.
+  // سحبها مبيمنعش الفني من الشغل، وبالعكس: اعتماد أوراقه مبياخدش العلامة تلقائيًا.
+  async function handleSetTrustBadge(granted: boolean) {
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/trust-badge`, {
+        method: 'PATCH',
+        body: JSON.stringify({ granted, note: trustBadgeNote.trim() || undefined }),
+      }),
+    );
+    setTrustBadgeNote('');
   }
 
   async function handleReviewDocument(documentId: string, reviewStatus: 'approved' | 'rejected', rejection_reason?: string) {
@@ -433,7 +449,7 @@ export default function TechnicianDetailPage() {
           </>
         }
         actions={
-          <Button variant="outline" onClick={() => router.push('/technicians')}>
+          <Button variant="outline" onClick={goBack}>
             رجوع للقايمة
           </Button>
         }
@@ -552,6 +568,50 @@ export default function TechnicianDetailPage() {
         </Card>
 
         <Card>
+          <CardHeader>
+            <CardTitle className="text-base">علامة التوثيق</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            <div className="flex items-center gap-2">
+              {detail.is_trust_verified ? (
+                <Badge className="bg-[#1D9BF0] text-white hover:bg-[#1D9BF0]">موثّق ✓</Badge>
+              ) : (
+                <Badge variant="outline">من غير علامة</Badge>
+              )}
+              {detail.trust_verified_at && (
+                <span className="text-muted-foreground">
+                  آخر تغيير: {new Date(detail.trust_verified_at).toLocaleString('ar-EG')}
+                </span>
+              )}
+            </div>
+            {detail.trust_verified_note && (
+              <p className="text-muted-foreground">السبب المسجّل: {detail.trust_verified_note}</p>
+            )}
+            <p className="text-muted-foreground">
+              دي العلامة الزرقاء اللي العميل بيشوفها جنب اسم الفني. مالهاش أي علاقة باعتماد الأوراق —
+              الفني المعتمد بيشتغل عادي من غيرها، وسحبها مبيوقفوش عن الشغل.
+            </p>
+            <Input
+              value={trustBadgeNote}
+              onChange={(e) => setTrustBadgeNote(e.target.value)}
+              placeholder="سبب المنح/السحب (اختياري، بيتسجّل في سجل النشاط)"
+              maxLength={500}
+            />
+          </CardContent>
+          <CardFooter>
+            {detail.is_trust_verified ? (
+              <Button size="sm" variant="destructive" disabled={isSaving} onClick={() => handleSetTrustBadge(false)}>
+                اسحب العلامة
+              </Button>
+            ) : (
+              <Button size="sm" disabled={isSaving} onClick={() => handleSetTrustBadge(true)}>
+                امنح العلامة
+              </Button>
+            )}
+          </CardFooter>
+        </Card>
+
+        <Card>
           <form onSubmit={handleChangePricingTier}>
             <CardHeader>
               <CardTitle className="text-base">فئة التسعير</CardTitle>
@@ -578,6 +638,12 @@ export default function TechnicianDetailPage() {
             </CardFooter>
           </form>
         </Card>
+
+        {/* ADR-0041 (docs/08 §63.أ2) — المديونية وتسويتها وسجلها. */}
+        <TechnicianDebtPanel technicianId={id} />
+
+        {/* docs/08 §63.أ1 — كشف المستحقات الشهري، بنفس خدمة تطبيق الفني (مصدر رقم واحد). */}
+        <TechnicianEarningsStatement technicianId={id} />
 
         <Card className="lg:col-span-2">
           <CardHeader>

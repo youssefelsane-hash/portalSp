@@ -8,6 +8,10 @@ export interface CompanyResponseDto {
   name: string;
   commercial_registration_number: string | null;
   is_active: boolean;
+  // ADR-0039 — علامة التوثيق الزرقاء، مِنحة إدارية مستقلة عن is_active/الأهلية.
+  is_trust_verified: boolean;
+  trust_verified_at: string | null;
+  trust_verified_note: string | null;
   created_at: string;
 }
 
@@ -18,6 +22,9 @@ export function toCompanyResponseDto(company: TechnicianCompany): CompanyRespons
     name: company.name,
     commercial_registration_number: company.commercialRegistrationNumber,
     is_active: company.isActive,
+    is_trust_verified: company.isTrustVerified,
+    trust_verified_at: company.trustVerifiedAt?.toISOString() ?? null,
+    trust_verified_note: company.trustVerifiedNote,
     created_at: company.createdAt.toISOString(),
   };
 }

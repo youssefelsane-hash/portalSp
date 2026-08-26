@@ -37,13 +37,19 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     address: '',
   };
   const orderIds: string[] = [];
+  let orderSeq = 0;
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
   async function insertOrder(label: string): Promise<string> {
     const [order] = await q(
       `INSERT INTO orders (order_number, customer_id, service_id, address_id, service_zone_id, order_status, total_amount_cents)
        VALUES ($1,$2,$3,$4,$5,'searching_technician',10000) RETURNING id`,
-      [`WO-${label}-${runId}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
+      // رقم الطلب لازم يبقى فريد **بعد** القصّ على 24 حرف. الصيغة القديمة
+      // (`WO-${label}-${runId}`.slice(0,24)) كانت بتقصّ معرّف التشغيلة نفسه مع الـlabels الطويلة،
+      // فبيحصل تصادم بين تشغيلتين — وكمان بين labels في نفس التشغيلة لو أول 12 حرف متشابهين
+      // ("heavy-baseline" و"heavy-baseline-off"). العدّاد هو مصدر التفرّد الحقيقي دلوقتي،
+      // والـlabel للقراءة بس.
+      [`WO-${runId}-${++orderSeq}-${label}`.slice(0, 24), ids.customerProfile, ids.service, ids.address, ids.zone],
     );
     orderIds.push(order.id as string);
     return order.id as string;
@@ -91,10 +97,13 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       levelPremiumServiceStub(),
     );
 
-    const [country] = await q(
-      `INSERT INTO countries (name_ar, name_en, iso_code, phone_prefix, currency_code) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [`دولة فرص ${runId}`, `Opp Country ${runId}`, Math.random().toString(36).slice(2, 4).toUpperCase(), '+000', 'EGP'],
-    );
+    // بيستخدم دولة موجودة بدل ما يعمل واحدة جديدة (نفس نمط باقي الاختبارات الحية).
+    //
+    // ليه اتغيّر: `countries.iso_code` مفتاح فريد من حرفين، والاختبار كان بيولّده عشوائي — يعني
+    // مساحة صغيرة جدًا واحتمال تصادم عالي. وأسوأ: تنظيف `afterAll` كان بيفشل على قيود المفاتيح
+    // الأجنبية فبيسيب صف دولة ورا كل تشغيلة، فالتصادم بيبقى مسألة وقت. النتيجة كانت فشل عابر
+    // في السويت كلها من غير أي علاقة بالكود اللي بيتغيّر (docs/08 §63 شريحة 5).
+    const [country] = await q(`SELECT id FROM countries ORDER BY created_at ASC LIMIT 1`);
     ids.country = country.id;
     const [city] = await q(
       `INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
@@ -175,7 +184,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
       await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
       await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
-      await q(`DELETE FROM countries WHERE id = $1`, [ids.country]);
+      // الدولة مش بتتمسح — مش بتاعة الاختبار ده أصلاً (موجودة قبله).
     } finally {
       await dataSource.destroy();
     }
