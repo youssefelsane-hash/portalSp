@@ -22,7 +22,25 @@ export interface HomepageContentResponseDto {
    * مكان أرفع منه الصور"). بقت `homepage.tips` (setting, value_type='json') — نفس نمط
    * `homepage.trust_message` بالحرف، إدارة كاملة من `/homepage-content` في apps/admin. */
   tips: HomepageTipDto[];
+  /**
+   * نصوص واجهة الـhero (docs/08 §64.د) — طلب المالك: «الكلام اللي تحت… عايز الأدمين ليه أكسس
+   * على الكلام ده». كانت مكتوبة **ثابتة في كود التطبيقين** (customer-app وcustomer-web)، فأي
+   * تعديل صغير في الصياغة كان يحتاج release كامل. القيم الافتراضية هنا هي بالظبط النص القديم،
+   * فمفيش أي تغيير شكلي لو الأدمن ما لمسش حاجة.
+   */
+  hero_eyebrow: string;
+  hero_title: string;
+  hero_subtitle: string;
+  search_placeholder: string;
 }
+
+// النصوص الافتراضية = اللي كان مكتوب حرفيًا في التطبيقين قبل ما يبقى قابل للتعديل.
+const HERO_TEXT_DEFAULTS = {
+  eyebrow: 'أساعدك إزاي؟',
+  title: 'محتاج مساعدة في إيه؟',
+  subtitle: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+  searchPlaceholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
+} as const;
 
 /**
  * محتوى الصفحة الرئيسية لـ customer-web/customer-app (طلب مالك صريح 2026-08-22/23) — @Public()
@@ -45,6 +63,23 @@ export class HomepageContentController {
       .map((value) => value.trim())
       .filter((value) => value.startsWith('https://') || value.startsWith('/uploads/'))
       .slice(0, 4);
-    return { trust_message: trustMessage, hero_images: heroImages, tips };
+    // نص فاضي في الإعداد = "رجّع الافتراضي"، مش "اعرض فراغ" — الأدمن ممكن يمسح الحقل بالغلط
+    // ومينفعش الشاشة الرئيسية تفضل بلا عنوان.
+    const textOrDefault = async (key: string, fallback: string): Promise<string> => {
+      const value = await this.settingsService.getString(key, '');
+      return value.trim() === '' ? fallback : value;
+    };
+    return {
+      trust_message: trustMessage,
+      hero_images: heroImages,
+      tips,
+      hero_eyebrow: await textOrDefault('homepage.hero_eyebrow', HERO_TEXT_DEFAULTS.eyebrow),
+      hero_title: await textOrDefault('homepage.hero_title', HERO_TEXT_DEFAULTS.title),
+      hero_subtitle: await textOrDefault('homepage.hero_subtitle', HERO_TEXT_DEFAULTS.subtitle),
+      search_placeholder: await textOrDefault(
+        'homepage.search_placeholder',
+        HERO_TEXT_DEFAULTS.searchPlaceholder,
+      ),
+    };
   }
 }

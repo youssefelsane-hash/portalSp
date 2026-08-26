@@ -55,6 +55,14 @@ export default function HomePage() {
   const [heroImages, setHeroImages] = useState<string[]>([]);
   const [heroBackgroundUrl, setHeroBackgroundUrl] = useState<string | null>(null);
   const [trustMessage, setTrustMessage] = useState('');
+  // النصوص الافتراضية = النص القديم بالحرف، عشان الصفحة تكون صح قبل ما نداء المحتوى يرجع
+  // (docs/08 §64.د).
+  const [heroTexts, setHeroTexts] = useState({
+    eyebrow: 'أساعدك إزاي؟',
+    title: 'محتاج مساعدة في إيه؟',
+    subtitle: 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
+    searchPlaceholder: 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
+  });
   const [tips, setTips] = useState<HomepageTipDto[]>([]);
   const [supportContact, setSupportContact] = useState<SupportContactDto | null>(null);
 
@@ -70,6 +78,12 @@ export default function HomePage() {
         setHeroImages(content.hero_images ?? []);
         setActiveSlide(0);
         setTips(content.tips);
+        setHeroTexts((current) => ({
+          eyebrow: content.hero_eyebrow?.trim() || current.eyebrow,
+          title: content.hero_title?.trim() || current.title,
+          subtitle: content.hero_subtitle?.trim() || current.subtitle,
+          searchPlaceholder: content.search_placeholder?.trim() || current.searchPlaceholder,
+        }));
       })
       .catch(() => {});
     fetchSupportContact()
@@ -133,16 +147,16 @@ export default function HomePage() {
 
         <div className="relative mx-auto max-w-5xl px-4 py-16 sm:py-24">
           <div className="mx-auto max-w-xl rounded-2xl bg-black/35 p-6 text-center text-white shadow-xl backdrop-blur-sm sm:p-8">
-            <p className="text-sm font-medium text-white/80">أساعدك إزاي؟</p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">محتاج مساعدة في إيه؟</h1>
-            <p className="mt-2 text-sm text-white/80 sm:text-base">قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت</p>
+            <p className="text-sm font-medium text-white/80">{heroTexts.eyebrow}</p>
+            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">{heroTexts.title}</h1>
+            <p className="mt-2 text-sm text-white/80 sm:text-base">{heroTexts.subtitle}</p>
 
             <form onSubmit={submitSearch} className="mt-6">
               <div className="flex items-center gap-2 rounded-xl bg-surface p-2 shadow-sm">
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder='وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"'
+                  placeholder={heroTexts.searchPlaceholder}
                   className="flex-1 bg-transparent px-3 py-2 text-foreground outline-none"
                   autoFocus
                 />

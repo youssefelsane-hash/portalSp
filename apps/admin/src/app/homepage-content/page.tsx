@@ -31,6 +31,10 @@ const EMPTY_TIP: HomepageTip = { title: '', body: '', image_url: null };
 export default function HomepageContentPage() {
   const { isLoading, authedFetch, hasPermission } = useAuth();
   const [trustMessage, setTrustMessage] = useState('');
+  // نصوص الـhero (docs/08 §64.د) — كانت مكتوبة ثابتة في كود التطبيقين، فأي تعديل صياغة كان
+  // يحتاج release. بقت 4 إعدادات عادية زي trust_message بالحرف.
+  const [heroTexts, setHeroTexts] = useState({ eyebrow: '', title: '', subtitle: '', searchPlaceholder: '' });
+  const [isSavingHeroTexts, setIsSavingHeroTexts] = useState(false);
   const [heroImages, setHeroImages] = useState<string[]>([]);
   const [tips, setTips] = useState<HomepageTip[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +51,13 @@ export default function HomepageContentPage() {
         if (messageSetting) setTrustMessage(String(messageSetting.value ?? ''));
         if (heroImagesSetting) setHeroImages((heroImagesSetting.value as string[] | null) ?? []);
         if (tipsSetting) setTips((tipsSetting.value as HomepageTip[] | null) ?? []);
+        const text = (key: string) => String(settings.find((s) => s.key === key)?.value ?? '');
+        setHeroTexts({
+          eyebrow: text('homepage.hero_eyebrow'),
+          title: text('homepage.hero_title'),
+          subtitle: text('homepage.hero_subtitle'),
+          searchPlaceholder: text('homepage.search_placeholder'),
+        });
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل محتوى الصفحة الرئيسية'));
   }
@@ -69,6 +80,31 @@ export default function HomepageContentPage() {
       toast.error(err instanceof ApiError ? err.message : 'فشل حفظ رسالة الثقة');
     } finally {
       setIsSavingMessage(false);
+    }
+  }
+
+  async function saveHeroTexts() {
+    setIsSavingHeroTexts(true);
+    try {
+      // أربع نداءات منفصلة عمدًا: `/admin/settings/:key` هو المسار الموجود بالفعل، ومفيش داعي
+      // لـendpoint دفعة واحدة عشان أربع حقول بيتحفظوا مرة كل كام أسبوع.
+      const entries: [string, string][] = [
+        ['homepage.hero_eyebrow', heroTexts.eyebrow],
+        ['homepage.hero_title', heroTexts.title],
+        ['homepage.hero_subtitle', heroTexts.subtitle],
+        ['homepage.search_placeholder', heroTexts.searchPlaceholder],
+      ];
+      for (const [key, value] of entries) {
+        await authedFetch(`/admin/settings/${key}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ value }),
+        });
+      }
+      toast.success('اتحفظت نصوص الواجهة');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'فشل حفظ نصوص الواجهة');
+    } finally {
+      setIsSavingHeroTexts(false);
     }
   }
 
@@ -144,6 +180,62 @@ export default function HomepageContentPage() {
         <CardFooter>
           <Button size="sm" disabled={isSavingMessage} onClick={() => void saveTrustMessage()}>
             {isSavingMessage ? 'جاري الحفظ…' : 'حفظ'}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">نصوص واجهة البحث</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
+            الكلام اللي بيظهر فوق شريط البحث في الشاشة الرئيسية (التطبيق والويب). سيبه فاضي عشان يرجع للنص الافتراضي.
+          </p>
+          <div>
+            <Label htmlFor="hero_eyebrow">السطر الصغير فوق العنوان</Label>
+            <Input
+              id="hero_eyebrow"
+              value={heroTexts.eyebrow}
+              placeholder="أساعدك إزاي؟"
+              onChange={(e) => setHeroTexts((c) => ({ ...c, eyebrow: e.target.value }))}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="hero_title">العنوان الرئيسي</Label>
+            <Input
+              id="hero_title"
+              value={heroTexts.title}
+              placeholder="محتاج مساعدة في إيه؟"
+              onChange={(e) => setHeroTexts((c) => ({ ...c, title: e.target.value }))}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="hero_subtitle">السطر التوضيحي تحت العنوان</Label>
+            <Input
+              id="hero_subtitle"
+              value={heroTexts.subtitle}
+              placeholder="قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت"
+              onChange={(e) => setHeroTexts((c) => ({ ...c, subtitle: e.target.value }))}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label htmlFor="search_placeholder">النص الرمادي جوّه شريط البحث</Label>
+            <Input
+              id="search_placeholder"
+              value={heroTexts.searchPlaceholder}
+              placeholder={'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"'}
+              onChange={(e) => setHeroTexts((c) => ({ ...c, searchPlaceholder: e.target.value }))}
+              className="mt-1"
+            />
+          </div>
+        </CardContent>
+        <CardFooter>
+          <Button size="sm" disabled={isSavingHeroTexts} onClick={() => void saveHeroTexts()}>
+            {isSavingHeroTexts ? 'جاري الحفظ…' : 'حفظ النصوص'}
           </Button>
         </CardFooter>
       </Card>

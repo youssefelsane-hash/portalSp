@@ -42,6 +42,11 @@ import '../projects/create_project_screen.dart';
 // من المستخدم بتوقع تلاقيه على واحد من الاتنين مرتين ورا بعض فتحس إن "مفيش تغيير خالص". الحل:
 // سلّم إضاءة واضح (غامق/متوسط/فاتح) بدل تنويع هوية اللون — يفضل داخل عائلة الأزرق نفسها (نفس
 // المبدأ الحاكم في CLAUDE.md، "نفس الشكل في كل حتة")، مطابق تمامًا لـapps/customer-web's HERO_SLIDES.
+// ارتفاع الـhero (docs/08 §64.د) — ثابت صريح عشان مساحة الصورة ما تعتمدش على طول النص. القيمة
+// دي بتدي الصورة مساحة حقيقية (كانت بتطلع شريط رفيع لما النص يقصر) وفي نفس الوقت بتسيب الفئات
+// المميّزة ظاهرة تحتها من غير scroll على شاشات الموبايل العادية.
+const double _heroHeight = 300;
+
 const List<List<Color>> _heroGradients = [
   [Color(0xFF1C3A6E), Color(0xFF2F5AA6), Color(0xFF4D78C4)],
   [Color(0xFF0F1115), Color(0xFF22314F), Color(0xFF2F5AA6)],
@@ -70,6 +75,12 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ServiceCategory>? _categories;
   String? _error;
   String _trustMessage = '';
+  // نصوص الـhero من الإعدادات (docs/08 §64.د) — الافتراضيات هنا هي نفس النص القديم بالحرف، عشان
+  // الشاشة تبقى صح من أول فريم قبل ما نداء المحتوى يرجع.
+  String _heroEyebrow = 'أساعدك إزاي؟';
+  String _heroTitle = 'محتاج مساعدة في إيه؟';
+  String _heroSubtitle = 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت';
+  String _searchPlaceholder = 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"';
   List<String> _heroImages = [];
   List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
@@ -89,6 +100,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _trustMessage = content.trustMessage;
         _heroImages = content.heroImages;
         _tips = content.tips;
+        _heroEyebrow = content.heroEyebrow;
+        _heroTitle = content.heroTitle;
+        _heroSubtitle = content.heroSubtitle;
+        _searchPlaceholder = content.searchPlaceholder;
         _activeSlide = 0;
       });
     }).catchError((_) {});
@@ -304,9 +319,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // hero دوّار (طلب مالك صريح 2026-08-22/23، تصميم مرجعي: Angi.com) — لوحة شفافة غامقة فوق خلفية
-  // متدرّجة دوّارة فيها التاجلاين + البحث، ورسالة الثقة/الضمان تحتها مباشرة فوق الصورة نفسها
-  // (بلا صندوق عمدًا) — مطابق تمامًا لهيكل apps/customer-web's hero.
+  /// hero دوّار (طلب مالك صريح 2026-08-22/23، تصميم مرجعي: Angi.com).
+  ///
+  /// docs/08 §64.د — طلب المالك: «كبرلي مساحة الصورة اللي بتتغير… وتصغرلي محرك البحث…
+  /// محتاج يبقى مدور شوية… professional وأصغر من كده بكتير».
+  ///
+  /// اللي اتغيّر عن النسخة القديمة:
+  ///  1. **ارتفاع صريح للصورة** (`_heroHeight`) بدل ما الارتفاع يطلع من حجم النص + padding —
+  ///     ده كان بيخلّي الصورة شريط رفيع كل ما النص يقصر.
+  ///  2. **اتشال الصندوق الغامق** اللي كان لافّ النص والبحث — كان بيغطّي نص مساحة الصورة.
+  ///     البديل: تدرّج أسود خفيف من تحت + ظل على النص، فالصورة بانت والنص فضل مقروء.
+  ///  3. **الصورة بتتبدّل بـcross-fade حقيقي** (`AnimatedSwitcher` على `Image.network`) بدل
+  ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
+  ///     فالتبديل كان بيحصل قطع مفاجئ.
+  ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
   Widget _buildHero(BuildContext context) {
     final configuredImages = _heroImages.map(_resolveHeroImageUrl).toList();
     final effectiveImages = configuredImages.isNotEmpty
@@ -314,101 +340,140 @@ class _HomeScreenState extends State<HomeScreen> {
         : (_heroBackground == null ? const <String>[] : <String>[_heroBackground!.url]);
     final heroImageUrl = effectiveImages.isEmpty ? null : effectiveImages[_activeSlide % effectiveImages.length];
     final gradientIndex = _activeSlide % _heroGradients.length;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 900),
-      margin: const EdgeInsets.only(bottom: 4),
-      decoration: BoxDecoration(
-        // التدرّج فضل مرسوم دايمًا كـfallback حقيقي (مش بس شكلي) — لو صورة الأدمن فشلت تتحمّل
-        // (شبكة، رابط اترفض)، onError بيمنع أي استثناء، والتدرّج تحته لسه ظاهر بدل خلفية فاضية
-        // تمامًا. لو الصورة اتحمّلت صح، بتغطّي التدرّج بالكامل (BoxFit.cover).
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: _heroGradients[gradientIndex],
-        ),
-        image: heroImageUrl != null
-            ? DecorationImage(image: NetworkImage(heroImageUrl), fit: BoxFit.cover, onError: (_, _) {})
-            : null,
-      ),
-      child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Colors.black.withValues(alpha: 0.55), Colors.transparent],
+
+    return SizedBox(
+      height: _heroHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // التدرّج فضل تحت الصورة دايمًا كـfallback حقيقي (مش شكلي): لو صورة الأدمن فشلت
+          // تتحمّل، الـerrorBuilder بيرجّع فراغ والتدرّج تحته لسه ظاهر بدل خلفية بيضا.
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 900),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: _heroGradients[gradientIndex],
+              ),
+            ),
+          ),
+          if (heroImageUrl != null)
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 700),
+              // `SizedBox.expand` **ضروري** مش تجميل: الـlayoutBuilder الافتراضي لـAnimatedSwitcher
+              // بيحط ولاده في Stack بمحاذاة center وبيدّيهم قيود **مرنة (loose)** — يعني
+              // `BoxFit.cover` مالوش ارتفاع/عرض يملاه فالصورة بتترسم بمقاسها الطبيعي في النص
+              // والتدرّج بيبان على الجناب. اتلقطت بتشغيل حقيقي (Xvfb) مش بالمراجعة.
+              child: SizedBox.expand(
+                key: ValueKey(heroImageUrl),
+                child: Image.network(
+                  heroImageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 36, 16, 72),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      children: [
-                        Text('أساعدك إزاي؟', style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'محتاج مساعدة في إيه؟',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12),
-                        ),
-                        const SizedBox(height: 16),
-                        _HeroSearchField(onTap: _openSearch),
-                      ],
-                    ),
+            ),
+          // تدرّج قراءة: غامق تحت وشفاف فوق — أخف من الصندوق القديم بكتير، فالصورة بانت.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.72),
+                  Colors.black.withValues(alpha: 0.25),
+                  Colors.transparent,
+                ],
+                stops: const [0, 0.55, 1],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  _heroEyebrow,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
                   ),
-                  if (_trustMessage.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.verified_outlined, color: Colors.white, size: 18),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _trustMessage,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13, shadows: [
-                              Shadow(color: Colors.black45, blurRadius: 4),
-                            ]),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (effectiveImages.length > 1) ...[
-                    const SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        effectiveImages.length,
-                        (index) => AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          width: index == _activeSlide ? 22 : 7,
-                          height: 7,
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          decoration: BoxDecoration(
-                            color: index == _activeSlide ? Colors.white : Colors.white54,
-                            borderRadius: BorderRadius.circular(99),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _heroTitle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _heroSubtitle,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 12.5,
+                    shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _HeroSearchField(hintText: _searchPlaceholder, onTap: _openSearch),
+                if (_trustMessage.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.verified_outlined, color: Colors.white, size: 16),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          _trustMessage,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 12,
+                            shadows: [Shadow(color: Colors.black45, blurRadius: 4)],
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ],
-              ),
+                if (effectiveImages.length > 1) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      effectiveImages.length,
+                      (index) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        width: index == _activeSlide ? 22 : 7,
+                        height: 7,
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(
+                          color: index == _activeSlide ? Colors.white : Colors.white54,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -555,35 +620,77 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// حقل البحث جوّه لوحة الـhero — نفس تفاعل _SearchEntryField القديمة بالضبط (تاب بيفتح شاشة
-// البحث، مفيش كتابة هنا)، بس بخلفية بيضاء صريحة (مش لون الـTheme المتغيّر) عشان يفضل واضح فوق
-// أي لون من ألوان الـhero الدوّارة، مطابق لـapps/customer-web's `bg-surface` داخل اللوحة الغامقة.
-class _HeroSearchField extends StatelessWidget {
+/// شريط البحث في الـhero (docs/08 §64.د) — طلب المالك: «محرك البحث… محتاج يبقى مدور شوية…
+/// professional وأصغر من كده بكتير… يبان عليه إنه نشط لما نضغط عليه، والصورة تبان لما ساكت».
+///
+/// التنفيذ: حبّة (pill) نصف شفافة وقت السكون — الصورة بتبان من وراها فعلاً — وبتتحوّل لأبيض
+/// كامل بحلقة ملوّنة وظل أوضح وقت الضغط. مفيش كتابة هنا؛ الضغط بيفتح شاشة البحث زي الأول
+/// بالظبط، فالأنيميشن هو ردّ الفعل الوحيد المتاح ولازم يبان.
+class _HeroSearchField extends StatefulWidget {
   final ValueChanged<String> onTap;
+  final String hintText;
 
-  const _HeroSearchField({required this.onTap});
+  const _HeroSearchField({required this.onTap, required this.hintText});
+
+  @override
+  State<_HeroSearchField> createState() => _HeroSearchFieldState();
+}
+
+class _HeroSearchFieldState extends State<_HeroSearchField> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed != value && mounted) setState(() => _pressed = value);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => onTap(''),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              const Icon(Icons.search, color: Colors.black54),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"',
-                  style: TextStyle(color: Colors.black54),
-                ),
+    final accent = Theme.of(context).colorScheme.primary;
+    return Center(
+      child: GestureDetector(
+        onTapDown: (_) => _setPressed(true),
+        onTapCancel: () => _setPressed(false),
+        onTapUp: (_) => _setPressed(false),
+        onTap: () => widget.onTap(''),
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 140),
+          scale: _pressed ? 1.03 : 1,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            height: 44,
+            constraints: const BoxConstraints(maxWidth: 420),
+            padding: const EdgeInsetsDirectional.only(start: 14, end: 10),
+            decoration: BoxDecoration(
+              // نصف شفاف وقت السكون = الصورة بتبان من وراه (طلب المالك بالحرف).
+              color: _pressed ? Colors.white : Colors.white.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: _pressed ? accent : Colors.white.withValues(alpha: 0.6),
+                width: _pressed ? 2 : 1,
               ),
-            ],
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: _pressed ? 0.28 : 0.16),
+                  blurRadius: _pressed ? 18 : 10,
+                  offset: Offset(0, _pressed ? 6 : 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.search_rounded, size: 20, color: _pressed ? accent : Colors.black54),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.hintText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.black54, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

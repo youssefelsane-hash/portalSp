@@ -50,6 +50,12 @@ export interface HomepageContentDto {
   trust_message: string;
   hero_images: string[];
   tips: HomepageTipDto[];
+  // نصوص الـhero (docs/08 §64.د) — كانت ثابتة في الكود، بقت مُدارة من الأدمن. الباك-إند بيضمن
+  // إنها مش فاضية أبدًا (بيرجّع الافتراضي لو الأدمن مسح الحقل).
+  hero_eyebrow: string;
+  hero_title: string;
+  hero_subtitle: string;
+  search_placeholder: string;
 }
 
 // مطابق لـ apps/api/src/modules/settings/support-contact.controller.ts — نفس البيانات

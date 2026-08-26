@@ -26,7 +26,28 @@ class HomepageContent {
   final List<String> heroImages;
   final List<HomepageTip> tips;
 
-  HomepageContent({required this.trustMessage, required this.heroImages, required this.tips});
+  // نصوص الـhero (docs/08 §64.د) — كانت ثابتة في الكود، بقت من الإعدادات. الباك-إند بيضمن إنها
+  // مش فاضية أبدًا (بيرجّع الافتراضي لو الأدمن مسح الحقل)، والافتراضي هنا احتياط تاني لو النداء
+  // نفسه فشل قبل ما يوصل.
+  final String heroEyebrow;
+  final String heroTitle;
+  final String heroSubtitle;
+  final String searchPlaceholder;
+
+  HomepageContent({
+    required this.trustMessage,
+    required this.heroImages,
+    required this.tips,
+    required this.heroEyebrow,
+    required this.heroTitle,
+    required this.heroSubtitle,
+    required this.searchPlaceholder,
+  });
+
+  static String _text(Map<String, dynamic> json, String key, String fallback) {
+    final value = json[key] as String?;
+    return (value == null || value.trim().isEmpty) ? fallback : value;
+  }
 
   factory HomepageContent.fromJson(Map<String, dynamic> json) => HomepageContent(
         trustMessage: json['trust_message'] as String? ?? '',
@@ -34,6 +55,10 @@ class HomepageContent {
         tips: (json['tips'] as List<dynamic>? ?? [])
             .map((t) => HomepageTip.fromJson(t as Map<String, dynamic>))
             .toList(),
+        heroEyebrow: _text(json, 'hero_eyebrow', 'أساعدك إزاي؟'),
+        heroTitle: _text(json, 'hero_title', 'محتاج مساعدة في إيه؟'),
+        heroSubtitle: _text(json, 'hero_subtitle', 'قول لينا مشكلتك بكلامك العادي، أو تصفّح الفئات تحت'),
+        searchPlaceholder: _text(json, 'search_placeholder', 'وصّف مشكلتك... زي "المياه بتنزل من تحت الحوض"'),
       );
 }
 
