@@ -7,6 +7,7 @@ import { OrderAssignment } from './entities/order-assignment.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // نموذج العدالة بالتاريخ الحديث + كسر التعادل (docs/08 §34.2، ADR-0020 §6) — اختبار حي ضد
 // Postgres حقيقي. الافتراضي (fairness_weight=0, tie_break_threshold=0) بيرجّع للسلوك القديم
@@ -47,6 +48,7 @@ describe('MatchingService.findEligibleTechnicians() — نموذج العدال�
       { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
   }
 

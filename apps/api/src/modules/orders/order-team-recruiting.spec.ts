@@ -15,6 +15,7 @@ import { TechnicianWorkOpportunitiesService } from '../technicians/technician-wo
 import { SettingsService } from '../settings/settings.service';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — تجنيد فريق ميداني ذاتي من الفني القائد (docs/08 §31/§35، طلب
 // صريح من المالك 2026-08-20). مختلف عمدًا عن admin-crew-management.spec.ts: هنا القائد نفسه هو
@@ -258,6 +259,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
       {} as never, // supportService
       new EventEmitter2(), // events
       orderTeamService,
+      commissionBaseServiceStub(),
     );
   });
 

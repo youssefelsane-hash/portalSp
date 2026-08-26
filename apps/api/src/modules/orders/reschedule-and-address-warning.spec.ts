@@ -26,6 +26,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — إعادة جدولة + تحذير تغيير العنوان (docs/08 §22 بند 9-12).
 describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/08 §22 بند 9-12)', () => {
@@ -216,6 +217,7 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35)
+      commissionBaseServiceStub(),
     );
   });
 
@@ -627,6 +629,7 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
       {} as never,
       events,
       {} as never, // orderTeamService (docs/08 §35)
+      commissionBaseServiceStub(),
     );
   });
 

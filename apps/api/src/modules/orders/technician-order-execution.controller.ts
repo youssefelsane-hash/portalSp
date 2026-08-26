@@ -9,7 +9,7 @@ import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
-import { toOrderResponseDto } from './dto/order-response.dto';
+import { toOrderResponseDto, toTechnicianOrderResponseDto } from './dto/order-response.dto';
 import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
@@ -64,23 +64,21 @@ export class TechnicianOrderExecutionController {
     const contactVisible = TECHNICIAN_CONTACT_VISIBLE_STATUSES.has(order.orderStatus);
     const [address, money, customerContact, serviceNameAr] = await Promise.all([
       this.addressesService.findByIdOrThrow(order.addressId),
-      this.paymentsService.getCollectionBreakdownForOrder(order),
+      // docs/08 §60.2 (طلب مالك صريح) — الصورة المالية المفلترة بدل التفصيل الكامل. الفلترة في
+      // الباك-إند مش في التطبيق: لو الأرقام خرجت على السلك، أي حد بتوكن فني يقراها من الـAPI
+      // مهما كانت الواجهة بتخفيها.
+      this.paymentsService.getTechnicianMoneyView(order),
       contactVisible ? this.customerProfilesService.findContactInfoOrThrow(order.customerId) : Promise.resolve(null),
       this.catalogService.findServiceOrThrow(order.serviceId).then((service) => service.nameAr),
     ]);
-    return {
-      ...toOrderResponseDto(order, address, null, {
+    return toTechnicianOrderResponseDto(
+      toOrderResponseDto(order, address, null, {
         customerContact,
         serviceNameAr,
         isNewForTechnician: order.technicianViewedAt === null,
       }),
-      paid_amount_cents: money.paidAmountCents,
-      direct_paid_amount_cents: money.directPaidAmountCents,
-      financed_order_amount_cents: money.financedOrderAmountCents,
-      refunded_amount_cents: money.refundedAmountCents,
-      installment_outstanding_cents: money.installmentOutstandingCents,
-      amount_due_to_technician_cents: money.amountDueToTechnicianCents,
-    };
+      money,
+    );
   }
 
   /**

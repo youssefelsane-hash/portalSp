@@ -44,6 +44,7 @@ import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
 import { OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * ADR-0027 (docs/08 §42 Phase A.3) — سياسة إيداع لكل خدمة. الاختبار ده بيغطي:
@@ -271,6 +272,7 @@ describe('OrdersService/PaymentsService — سياسة إيداع الخدمة (
       supportService,
       events,
       {} as never,
+      commissionBaseServiceStub(),
     );
   });
 

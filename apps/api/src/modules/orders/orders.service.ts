@@ -30,6 +30,8 @@ import { TechnicianCompaniesService } from '../technicians/technician-companies.
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { CommissionBaseService } from '../pricing/commission-base.service';
+import { computeCommissionableBase } from '../pricing/commission-base';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
@@ -139,6 +141,9 @@ export class OrdersService {
     // docs/08 §35، ADR-0021 §1 — آخر بند عمدًا (بعد events) عشان ياخد أقل بلاست-رديوس ممكن على
     // الاختبارات القديمة الكتير اللي بتبني OrdersService بـpositional args (append واحد بس).
     private readonly orderTeamService: OrderTeamService,
+    // ADR-0037 — آخر بند عمدًا، نفس سبب orderTeamService فوقه بالحرف: أقل بلاست-رديوس ممكن على
+    // الاختبارات الكتير اللي بتبني OrdersService بـpositional args (append واحد بس في الآخر).
+    private readonly commissionBaseService: CommissionBaseService,
   ) {}
 
   private async resolveOptionalWarranty(
@@ -800,6 +805,33 @@ export class OrdersService {
         order.totalAmountCents += order.warrantyPriceCents;
         await manager.save(order);
       }
+
+      // وعاء العمولة (ADR-0037، docs/08 §60.1) — لازم يتحسب **هنا بالظبط**: بعد الخصومات والضمان
+      // (عشان الإجمالي النهائي يبقى معروف للقصّ) وقبل ما الطلب يتحفظ آخر مرة. بيتخزّن كـsnapshot
+      // مش بيتعاد حسابه وقت التسوية — تغيير سياسة `commission_base.*` بعد كده بيأثّر على الطلبات
+      // الجديدة بس، وطلب اتقفل يفضل زي ما هو للأبد.
+      //
+      // إعادة الزيارة تحت الضمان مجانية بالكامل (كل المكوّنات صفر) فالوعاء بيطلع صفر طبيعي.
+      const commissionBasePolicy = await this.commissionBaseService.getPolicy();
+      order.commissionableBaseCents = computeCommissionableBase(
+        {
+          basePriceCents: originalOrder ? 0 : estimate.base_price_cents,
+          levelPriceMultiplier: originalOrder ? 1 : estimate.level_price_multiplier,
+          estimatedTotalCents: originalOrder ? 0 : estimate.estimated_total_cents,
+          inspectionFeeCents: order.inspectionFeeCents,
+          emergencySurchargeCents: order.surgeAmountCents,
+          addonsTotalCents: originalOrder ? 0 : addonsTotalCents,
+          discountCents: order.discountAmountCents,
+          warrantyPriceCents: order.warrantyPriceCents,
+          // فوايد/رسوم التقسيط مش بتتحمّل على الطلب وقت الإنشاء (خطة التقسيط بتتعمل بعد كده،
+          // ورسومها بتتحصّل في مسار الأقساط نفسه) — فبتفضل صفر هنا. لو اتغيّر ده يومًا، المكوّن
+          // موجود في العقد جاهز والسياسة بتاعته موجودة كمان.
+          installmentInterestCents: 0,
+        },
+        commissionBasePolicy,
+        order.totalAmountCents,
+      ).commissionableBaseCents;
+      await manager.save(order);
 
       // سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — snapshot مبلغ الإيداع بعد كل الخصومات
       // (نفس سبب ترتيب requiresPrepay تحت بالحرف: النسبة بتتحسب على الإجمالي النهائي مش الخام).

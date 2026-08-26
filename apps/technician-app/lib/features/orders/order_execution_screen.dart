@@ -466,12 +466,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             orderNumber: _order.orderNumber,
             orderStatus: 'completed',
             problemDescription: _order.problemDescription,
+            // اتحصّل الكاش خلاص — مفيش باقي، ونصيبه ما اتغيّرش (docs/08 §60.2).
+            cashToCollectCents: 0,
+            myEarningCents: _order.myEarningCents,
+            hasOnlinePayment: _order.hasOnlinePayment,
+            fullyPaidOnline: _order.fullyPaidOnline,
             totalAmountCents: _order.totalAmountCents,
-            paidAmountCents: _order.totalAmountCents,
-            financedOrderAmountCents: _order.financedOrderAmountCents,
-            refundedAmountCents: _order.refundedAmountCents,
-            installmentOutstandingCents: _order.installmentOutstandingCents,
-            amountDueToTechnicianCents: 0,
             paymentStatus: 'paid',
             bookingMode: _order.bookingMode,
             requiredTechnicians: _order.requiredTechnicians,
@@ -522,7 +522,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   @override
   Widget build(BuildContext context) {
     final configuredNextAction = nextTechnicianAction[_order.orderStatus];
-    final nextAction = configuredNextAction == 'collect_cash' && _order.amountDueToTechnicianCents <= 0
+    final nextAction = configuredNextAction == 'collect_cash' && _order.cashToCollectCents <= 0
         ? null
         : configuredNextAction;
     final isDone = _order.orderStatus == 'completed';
@@ -571,24 +571,39 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    Text('إجمالي الطلب: ${_formatEgp(_order.totalAmountCents)}'),
-                    if (_order.paidAmountCents > 0)
-                      Text('المدفوع بالفعل: ${_formatEgp(_order.paidAmountCents)}'),
-                    if (_order.financedOrderAmountCents > 0)
-                      Text('مغطى بالتقسيط: ${_formatEgp(_order.financedOrderAmountCents)}'),
+                    // docs/08 §60.2 (طلب مالك صريح) — الفني بيشوف الفلوس اللي بتعدّي من إيده
+                    // وبس: الكاش اللي هيحصّله، ونصيبه هو. أي حاجة اتدفعت أونلاين بتبان كواقعة
+                    // من غير رقم، ومفيش تفصيل لتكوين السعر ولا نصيب الشركة — دي مش شغله.
+                    // الأرقام دي **مش بترجع من الـAPI أصلاً** (الفلترة في الباك-إند).
+                    if (_order.totalAmountCents != null)
+                      // مفيش دفع أونلاين خالص، فالإجمالي = اللي هيحصّله بالظبط.
+                      Text('إجمالي الطلب: ${_formatEgp(_order.totalAmountCents!)}'),
+                    if (_order.hasOnlinePayment)
+                      Row(
+                        children: [
+                          Icon(Icons.verified_outlined, size: 18, color: Colors.green.shade700),
+                          const SizedBox(width: 6),
+                          Text(
+                            _order.fullyPaidOnline ? 'مدفوع أونلاين بالكامل' : 'فيه جزء مدفوع أونلاين',
+                            style: TextStyle(color: Colors.green.shade700),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 4),
                     Text(
-                      'المطلوب تحصيله من العميل: ${_formatEgp(_order.amountDueToTechnicianCents)}',
+                      _order.cashToCollectCents > 0
+                          ? 'المطلوب تحصيله كاش: ${_formatEgp(_order.cashToCollectCents)}'
+                          : 'مش هتحصّل كاش من العميل',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: _order.amountDueToTechnicianCents > 0 ? Colors.orange.shade800 : Colors.green,
+                            color: _order.cashToCollectCents > 0 ? Colors.orange.shade800 : Colors.green,
                             fontWeight: FontWeight.bold,
                           ),
                     ),
-                    if (_order.installmentOutstandingCents > 0)
-                      Text(
-                        'باقي التقسيط تحصّله المنصة، مش الفني: ${_formatEgp(_order.installmentOutstandingCents)}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'نصيبك من الطلب: ${_formatEgp(_order.myEarningCents)}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    ),
                   ],
                 ),
               ),
@@ -743,7 +758,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — لو المفروض العميل يدفع كاش
             // ("محتاج تحصيل") ومستلمتش الفلوس فعلاً، بلّغ بدل ما تقفل الطلب "حصّلت الكاش" كذب.
             if ((_order.orderStatus == 'work_completed' || _order.orderStatus == 'awaiting_payment') &&
-                _order.amountDueToTechnicianCents > 0) ...[
+                _order.cashToCollectCents > 0) ...[
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: _acting ? null : _reportCashNotReceived,
@@ -766,7 +781,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                     label: const Text('قيّم العميل'),
                   ),
                 ),
-            ] else if (configuredNextAction == 'collect_cash' && _order.amountDueToTechnicianCents <= 0) ...[
+            ] else if (configuredNextAction == 'collect_cash' && _order.cashToCollectCents <= 0) ...[
               const Center(
                 child: Text(
                   'لا تحصّل أي كاش من العميل — المبلغ مغطى بالفعل، وجارٍ إقفال التسوية تلقائيًا.',

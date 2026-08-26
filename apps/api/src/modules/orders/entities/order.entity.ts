@@ -235,6 +235,20 @@ export class Order {
   @Column({ name: 'commission_rate_applied', type: 'numeric', precision: 5, scale: 2, nullable: true })
   commissionRateApplied: string | null;
 
+  /** وعاء العمولة (ADR-0037، migration 0192) — الجزء من `total_amount_cents` اللي نسبة العمولة
+   * بتتطبّق عليه فعلاً: سعر الشغل + اللي سياسة `commission_base.*` بتسمح بيه. أي قرش بره الوعاء
+   * (ضمان، فوائد تقسيط، مضاعف تضخم، رسوم طوارئ) بيروح للشركة 100%.
+   *
+   * `null` = طلب اتعمل قبل الـADR؛ `PaymentsService` بيرجع للسلوك القديم (الوعاء = الإجمالي)
+   * للصفوف دي عمدًا عشان إعادة تسوية طلب قديم ما تديش نتيجة مختلفة عن تسويته الأصلية. */
+  @Column({ name: 'commissionable_base_cents', type: 'integer', nullable: true })
+  commissionableBaseCents: number | null;
+
+  /** فرق سعر "الفني المميّز" (docs/08 §60.3، migration 0193) — بيتضاف بعد ما المطابقة التلقائية
+   * تعيّن فني مستواه بيزوّد السعر. 0 لو الفني كان معروف وقت الحجز (الفرق داخل السعر أصلاً). */
+  @Column({ name: 'level_premium_cents', type: 'integer', default: 0 })
+  levelPremiumCents: number;
+
   @Column({ name: 'placed_at', type: 'timestamptz', nullable: true })
   placedAt: Date | null;
 

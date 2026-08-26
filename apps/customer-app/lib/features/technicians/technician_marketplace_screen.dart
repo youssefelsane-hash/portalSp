@@ -318,9 +318,20 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 if (t.finalPriceCents != null)
-                  Text(
-                    '${(t.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  // docs/08 §60.3 (طلب مالك صريح) — الفني اللي مستواه بيزوّد السعر لازم يبان
+                  // جنبه إنه "مميّز"، عشان العميل يفهم الزيادة جاية منين بدل ما يحس إن السعر
+                  // مرمي عشوائي. الشارة بتتحسب من level_price_multiplier اللي الباك-إند بيرجّعه
+                  // أصلاً — مفيش أي حساب سعر في التطبيق (مصدر الحقيقة واحد).
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${(t.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      if ((t.levelPriceMultiplier ?? 1) > 1) const _PremiumBadge(),
+                    ],
                   )
                 else
                   const SizedBox.shrink(),
@@ -440,6 +451,33 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// شارة "فني مميّز" (docs/08 §60.3) — بتظهر جنب سعر أي فني مستواه بيزوّد السعر.
+///
+/// مقصودة تكون هادية وصغيرة: الهدف تفسير الفرق مش الإعلان. علامة الشيك بتدّي إحساس
+/// "محترف معتمد" اللي المالك طلبه بالحرف.
+class _PremiumBadge extends StatelessWidget {
+  const _PremiumBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.verified, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            'فني مميّز',
+            style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }

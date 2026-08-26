@@ -29,6 +29,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint, ComplaintCategory } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — زيارة فاشلة/عدم حضور (docs/08 §22 بند 3-6). بيغطي الدورة الكاملة:
 // الفني بيبلّغ (no-show أو required_work_rejected) → الطلب DISPUTED + شكوى مسجّلة بالتصنيف الصح →
@@ -313,6 +314,7 @@ describe('OrdersService.reportFailedVisit()/resolveFailedVisit() — زيارة 
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      commissionBaseServiceStub(),
     );
   });
 

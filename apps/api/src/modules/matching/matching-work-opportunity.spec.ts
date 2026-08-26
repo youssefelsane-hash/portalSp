@@ -9,6 +9,7 @@ import { classifyTechnicianCapacity } from '../technicians/technician-eligibilit
 import { WORK_OPPORTUNITY_OFFERED_EVENT } from '../../common/events/work-opportunity-offered.event';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // طلبات شغل إضافي اختيارية (docs/08 §34.1/§34.1b، ADR-0020) — اختبار حي شامل ضد Postgres حقيقي:
 // فني LIGHT (فاضي) يتأكد تلقائيًا زي ما هو بالحرف (بلا فرصة)، فني MEANINGFUL (عنده شغل قصير نفس
@@ -87,6 +88,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       { emit: () => true } as never,
       { add: async () => undefined } as never,
       workOpportunities,
+      levelPremiumServiceStub(),
     );
 
     const [country] = await q(
@@ -268,6 +270,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       { emit } as never,
       { add: async () => undefined } as never,
       workOpportunities,
+      levelPremiumServiceStub(),
     );
 
     const orderId = await insertOrder('event-meaningful');
@@ -370,6 +373,7 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
       { emit: () => true } as never,
       { add: async () => undefined } as never,
       workOpportunities,
+      levelPremiumServiceStub(),
     );
 
     const result = await noOfferService.autoConfirmScheduledOrder(orderId);

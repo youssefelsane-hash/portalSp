@@ -7,6 +7,7 @@ import { OrderAssignment } from './entities/order-assignment.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // وزن الموثوقية في محرك المطابقة (docs/08 §36.20-21، ADR-0023) — اختبار حي ضد Postgres حقيقي.
 // نفس نمط matching-fairness-scoring.spec.ts بالحرف (fixture/buildMatchingService/findCandidates).
@@ -46,6 +47,7 @@ describe('MatchingService.findEligibleTechnicians() — وزن الموثوقي�
       { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
   }
 

@@ -43,6 +43,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * Script 7 Phase 5 — بَقّة حقيقية اتلقطت في `OrdersService.create()`: تعليق DTO نفسه
@@ -275,6 +276,7 @@ describe('OrdersService.create() — standard_data_id/requested_units لازم �
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      commissionBaseServiceStub(),
     );
   });
 

@@ -106,3 +106,31 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
     );
   }
 }
+
+/// بيركّب [FloatingNotificationAlert] جوّه `Overlay` خاص بيها.
+///
+/// **ليه ده موجود** (بلاغ مالك 2026-08-25، docs/08 §58 و§59): الويدجت دي بتتركّب من
+/// `MaterialApp.builder` جنب `child`، يعني **بره الـNavigator** بتاع التطبيق — فمفيش `Overlay`
+/// فوقها في الشجرة خالص. أي حاجة جوّاها بتحتاج Overlay (`Tooltip`، `SnackBar`، `DropdownMenu`،
+/// أي `Overlay.of(context)`) بترمي استثناء وقت البناء، وFlutter بيرسم `ErrorWidget` مكانها —
+/// مستطيل أحمر داكن (~94% عتامة) بيغطي الشاشة. ده كان بالظبط اللي حصل مع `tooltip:` على الزرار.
+///
+/// شيل الـ`tooltip` حلّ الحالة دي **وحدها**. الغلاف ده بيقفل **الفئة كلها**: أي ويدجت تتضاف هنا
+/// بعدين وتحتاج Overlay هتلاقي واحد جاهز بدل ما ترجّع الشاشة الحمرا تاني.
+///
+/// `alwaysSizeToContent: true` عشان الـOverlay ياخد مقاس الزرار نفسه بدل ما يطلب قيود محدودة
+/// (إحنا جوّه `PositionedDirectional` بإزاحتين بس، يعني القيود غير محدودة) — كده الشكل والمكان
+/// ما بيتغيروش ولا بكسل. و`Clip.none` عشان الـovershoot بتاع أنيميشن الدخول (easeOutBack)
+/// يفضل بيترسم زي ما هو من غير قص.
+class FloatingNotificationAlertHost extends StatelessWidget {
+  const FloatingNotificationAlertHost({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Overlay.wrap(
+      alwaysSizeToContent: true,
+      clipBehavior: Clip.none,
+      child: const FloatingNotificationAlert(),
+    );
+  }
+}

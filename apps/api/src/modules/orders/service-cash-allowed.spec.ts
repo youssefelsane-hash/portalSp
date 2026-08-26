@@ -43,6 +43,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * ADR-0026 (docs/08 §42 Phase A.1) — أول قدرة دفع لكل خدمة على محرك الحجز الموحّد: خدمة
@@ -258,6 +259,7 @@ describe('OrdersService.create() — قدرة service.cash_allowed (ADR-0026)', 
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      commissionBaseServiceStub(),
     );
   });
 

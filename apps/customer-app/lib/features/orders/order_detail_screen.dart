@@ -711,6 +711,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text('السعر الإجمالي: ${_formatEgp(order.totalAmountCents)}'),
+                              // docs/08 §60.3 (طلب مالك صريح) — لما السعر يزيد عشان الفني اللي
+                              // اتعيّن مستواه أعلى، الزيادة لازم تبان بسببها مكتوب، مش رقم
+                              // بيتغيّر من غير تفسير. والسطر التاني تحتها مطمئن ومقصود يكون
+                              // خفيف: العميل يعرف إن له اختيار تاني من غير ما نحسسه إن حد
+                              // زوّد عليه.
+                              if (order.levelPremiumCents > 0) ...[
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(Icons.verified,
+                                        size: 15, color: Theme.of(context).colorScheme.primary),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'منها ${_formatEgp(order.levelPremiumCents)} — فني مميّز',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  'اتعيّن لك فني تقييمه ومستواه أعلى. لو تحب تختار بنفسك المرة الجاية، تقدر من "اختار الفني".',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: Theme.of(context).hintColor,
+                                      ),
+                                ),
+                              ],
                               const SizedBox(height: 4),
                               // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، مُعدَّلة §32.3) — التاريخ بقى
                               // إجباري لكل الأوضاع غير الطوارئ، فـnull هنا معناها طلب طوارئ (أو

@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { OrdersService } from './orders.service';
 import { Order, OrderStatus } from './entities/order.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت (docs/08 §165، بعد ADR-0017):
 // findActiveForTechnician() (GET /technician/orders/active، استرجاع شاشة التنفيذ بعد إعادة فتح
@@ -136,6 +137,7 @@ describe('OrdersService.findActiveForTechnician()/findUpcomingConfirmedForTechni
       {} as never,
       {} as never,
       {} as never, // orderTeamService (docs/08 §35)
+      commissionBaseServiceStub(),
     );
   });
 

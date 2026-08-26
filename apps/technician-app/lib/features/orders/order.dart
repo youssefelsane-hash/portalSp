@@ -62,12 +62,21 @@ class Order {
   final String orderNumber;
   final String orderStatus;
   final String? problemDescription;
-  final int totalAmountCents;
-  final int paidAmountCents;
-  final int financedOrderAmountCents;
-  final int refundedAmountCents;
-  final int installmentOutstandingCents;
-  final int amountDueToTechnicianCents;
+  // الصورة المالية المسموحة للفني (docs/08 §60.2، طلب مالك صريح). الباك-إند بيفلتر قبل الإرسال —
+  // الحقول القديمة (paid_amount_cents، financed_order_amount_cents، installment_outstanding_cents،
+  // total_amount_cents وقت وجود دفع أونلاين) **مش بترجع من الـAPI أصلاً**، مش مجرد مخفية هنا.
+  //
+  // القاعدة: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه هو.
+  /** الكاش المطلوب تحصيله من العميل دلوقتي. */
+  final int cashToCollectCents;
+  /** نصيب الفني من الطلب (بعد نسبة الشركة) — بلا أي شرح لتكوينه. */
+  final int myEarningCents;
+  /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
+  final bool hasOnlinePayment;
+  /** كله اتدفع أونلاين ومفيش كاش هيتحصّل. */
+  final bool fullyPaidOnline;
+  /** الإجمالي — بيرجع من الـAPI بس لما مفيش دفع أونلاين (وقتها = الكاش المطلوب تحصيله). */
+  final int? totalAmountCents;
   final String paymentStatus;
   final OrderAddress? address;
   // "اعتماد" (docs/06 §1) — بس لما يبقى 'team' في الباك-إند (order.entity.ts's BookingMode) فيه
@@ -98,12 +107,11 @@ class Order {
     required this.orderNumber,
     required this.orderStatus,
     required this.problemDescription,
-    required this.totalAmountCents,
-    required this.paidAmountCents,
-    required this.financedOrderAmountCents,
-    required this.refundedAmountCents,
-    required this.installmentOutstandingCents,
-    required this.amountDueToTechnicianCents,
+    required this.cashToCollectCents,
+    required this.myEarningCents,
+    required this.hasOnlinePayment,
+    required this.fullyPaidOnline,
+    this.totalAmountCents,
     required this.paymentStatus,
     required this.bookingMode,
     this.requiredTechnicians,
@@ -122,13 +130,11 @@ class Order {
         orderNumber: json['order_number'] as String,
         orderStatus: json['order_status'] as String,
         problemDescription: json['problem_description'] as String?,
-        totalAmountCents: json['total_amount_cents'] as int,
-        paidAmountCents: json['paid_amount_cents'] as int? ?? 0,
-        financedOrderAmountCents: json['financed_order_amount_cents'] as int? ?? 0,
-        refundedAmountCents: json['refunded_amount_cents'] as int? ?? 0,
-        installmentOutstandingCents: json['installment_outstanding_cents'] as int? ?? 0,
-        amountDueToTechnicianCents:
-            (json['amount_due_to_technician_cents'] as int?) ?? (json['total_amount_cents'] as int),
+        cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
+        myEarningCents: json['my_earning_cents'] as int? ?? 0,
+        hasOnlinePayment: json['has_online_payment'] as bool? ?? false,
+        fullyPaidOnline: json['fully_paid_online'] as bool? ?? false,
+        totalAmountCents: json['total_amount_cents'] as int?,
         paymentStatus: json['payment_status'] as String,
         bookingMode: json['booking_mode'] as String? ?? 'individual',
         requiredTechnicians: json['required_technicians'] as int?,

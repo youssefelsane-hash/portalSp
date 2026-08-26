@@ -14,6 +14,7 @@ import { TechnicianCompany } from '../technicians/entities/technician-company.en
 import { TechnicianScheduleSlot } from '../technicians/entities/technician-schedule-slot.entity';
 import { User } from '../auth/entities/user.entity';
 import { AuditLogService } from '../audit/audit-log.service';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 jest.setTimeout(60_000);
 
@@ -74,6 +75,7 @@ describe('OrdersService.markViewedByTechnician() (docs/08 §56 بند 2)', () =>
       {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
       {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
       new EventEmitter2(), {} as never,
+      commissionBaseServiceStub(),
     );
   });
 

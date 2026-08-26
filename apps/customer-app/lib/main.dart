@@ -34,7 +34,10 @@ class BaytakApp extends StatelessWidget {
             children: [
               child ?? const SizedBox.shrink(),
               if (auth.isAuthenticated && !auth.biometricUnlockPending)
-                const PositionedDirectional(end: 16, bottom: 88, child: FloatingNotificationAlert()),
+                // الغلاف Host مش تفصيلة — هو اللي بيوفّر `Overlay` للويدجت دي، لأن مكانها هنا
+                // (جنب `child` جوّه `MaterialApp.builder`) **بره الـNavigator** فمفيش Overlay
+                // فوقها. راجع FloatingNotificationAlertHost وdocs/08 §59.
+                const PositionedDirectional(end: 16, bottom: 88, child: FloatingNotificationAlertHost()),
             ],
           );
         },

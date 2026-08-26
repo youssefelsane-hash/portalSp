@@ -10,6 +10,7 @@ import { CancellationReasonsService } from './cancellation-reasons.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { SettingsService } from '../settings/settings.service';
 import { AuditLogService } from '../audit/audit-log.service';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — بَقّة حقيقية اتلقطت من اختبار المالك الفعلي لتطبيق الفني
 // (docs/08 §بند إصلاح إلغاء قائد طلب "اعتماد"، 2026-08-21): canSelfCancelTeamOrder() كانت
@@ -176,6 +177,7 @@ describe('OrdersService — إلغاء قائد طلب فريق بنفسه رغ�
       {} as never, // supportService
       eventsStub,
       {} as never, // orderTeamService
+      commissionBaseServiceStub(),
     );
   });
 

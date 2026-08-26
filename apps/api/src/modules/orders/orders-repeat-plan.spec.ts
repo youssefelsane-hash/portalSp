@@ -45,6 +45,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * "كرّر الحجز ده" (migration 0176) — POST /orders مع repeat_frequency لازم ينتج:
@@ -279,6 +280,7 @@ describe('OrdersService.create() — repeat_frequency ينشئ طلب عادي +
       supportService,
       events,
       {} as never,
+      commissionBaseServiceStub(),
     );
   });
 

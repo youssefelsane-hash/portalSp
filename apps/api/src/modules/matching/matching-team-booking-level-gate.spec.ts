@@ -7,6 +7,7 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { EligibleTechnicianRow, MatchingService } from './matching.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // اختبار حي ضد Postgres حقيقي (docs/08 §38، طلب مالك صريح 2026-08-21) — findEligibleTechnicians()
 // (التوزيع التلقائي الفعلي) كانت زيرو فلترة بمستوى الفني لطلبات "اعتماد" — فني مستواه new كان
@@ -52,6 +53,7 @@ describe('MatchingService.findEligibleTechnicians() — بوابة مستوى "�
       { emit: jest.fn() } as never,
       { add: jest.fn().mockResolvedValue(undefined) } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

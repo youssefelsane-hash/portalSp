@@ -43,6 +43,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 /**
  * ADR-0028 (docs/08 §42 Phase A.2) — قدرة service.allows_date_range_booking. الاختبار ده بيغطي:
@@ -258,6 +259,7 @@ describe('OrdersService.create() — قدرة service.allows_date_range_booking 
       supportService,
       events,
       {} as never,
+      commissionBaseServiceStub(),
     );
   });
 

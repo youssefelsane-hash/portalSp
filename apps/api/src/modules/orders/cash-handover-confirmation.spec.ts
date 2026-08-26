@@ -36,6 +36,7 @@ import { SupportService } from '../support/support.service';
 import { Complaint, ComplaintCategory } from '../support/entities/complaint.entity';
 import { ComplaintMessage } from '../support/entities/complaint-message.entity';
 import { ComplaintAttachment } from '../support/entities/complaint-attachment.entity';
+import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 
 // اختبار حي ضد Postgres حقيقي — تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14). بيغطي: تأكيد
 // العميل وحده مايسوّيش الطلب؛ "لم أستلم" الفني يوديه DISPUTED + شكوى؛ التعارض (عميل أكّد + فني
@@ -256,6 +257,7 @@ describe('Cash handover — تأكيد الطرفين (docs/08 §22 بند 13-14
       supportService,
       events,
       {} as never, // orderTeamService (docs/08 §35) — مش متنادى في المسار ده
+      commissionBaseServiceStub(),
     );
   });
 

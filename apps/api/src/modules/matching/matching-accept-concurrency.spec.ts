@@ -10,6 +10,7 @@ import { TechnicianProfile } from '../technicians/entities/technician-profile.en
 import { TechniciansService } from '../technicians/technicians.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MatchingService } from './matching.service';
+import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 
 // اختبار تزامن حقيقي ضد Postgres حقيقي (docs/08 §17.16) — بيثبت إن قفل pessimistic_write على
 // صف الطلب في MatchingService.accept() فعليًا بيمنع قبول مزدوج لنفس الطلب، مش بس افتراض من قراءة
@@ -115,6 +116,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       { emit: () => true } as never,
       { add: async () => undefined } as never,
       new TechnicianWorkOpportunitiesService(dataSource),
+      levelPremiumServiceStub(),
     );
 
     adminOrdersService = new AdminOrdersService(

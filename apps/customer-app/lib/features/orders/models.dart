@@ -35,6 +35,10 @@ class Order {
   final int? estimatedPriceCents;
   final int totalAmountCents;
   final int warrantyPriceCents;
+  /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
+  /// مستواه بيزوّد السعر. 0 لو العميل اختار الفني بنفسه (الفرق داخل السعر أصلاً).
+  /// الواجهة بتعرضه كسطر مستقل مكتوب جنبه "فني مميّز" عشان العميل يفهم الزيادة جاية منين.
+  final int levelPremiumCents;
   final String? optionalWarrantyNameAr;
   final int? optionalWarrantyCoverageMonths;
   final String paymentStatus;
@@ -107,6 +111,7 @@ class Order {
     this.scheduledAt,
     this.recurringTemplateId,
     this.recurringOccurrenceAt,
+    this.levelPremiumCents = 0,
   });
 
   bool get isUnderWarranty =>
@@ -125,6 +130,7 @@ class Order {
         estimatedPriceCents: json['estimated_price_cents'] as int?,
         totalAmountCents: json['total_amount_cents'] as int,
         warrantyPriceCents: json['warranty_price_cents'] as int? ?? 0,
+        levelPremiumCents: json['level_premium_cents'] as int? ?? 0,
         optionalWarrantyNameAr: (json['optional_warranty'] as Map<String, dynamic>?)?['name_ar'] as String?,
         optionalWarrantyCoverageMonths:
             (json['optional_warranty'] as Map<String, dynamic>?)?['coverage_months'] as int?,
