@@ -68,6 +68,16 @@
   link, and project-warranty writes are atomic with their audit records. The real PostgreSQL project
   suite passes 18/18, including concurrency and injected audit failures, with open-handle detection;
   API build, admin typecheck, four focused Flutter tests, Dart analysis, and migration checksums pass.
+- Completed: registered companies now participate explicitly in large-team auto-matching. Migration
+  `0191` adds admin-controlled crew threshold (4) and modest rank boost (3). The boost requires a
+  TEAM order, a commercial registration, and enough currently eligible company staff; small jobs,
+  independent bookings, informal teams, and understaffed companies receive zero adjustment. One
+  representative per prioritized company enters a dispatch batch. Admin candidate lists now use a
+  real technician profile ID and display its company instead of passing a company UUID to technician
+  explain/reassign routes. The company admin pages now visually distinguish registered companies
+  from professional teams with a premium workspace. Real PostgreSQL matching tests pass 36/36 and
+  focused company/admin marketplace regressions pass 8/8 with open-handle detection; API build,
+  shared-types build/typecheck, and admin typecheck pass.
 - Next task: continue the remaining screenshot/new-route review after this project checkpoint,
   prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 

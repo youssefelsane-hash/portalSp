@@ -16,7 +16,7 @@ import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
-import { TechniciansService } from '../technicians/technicians.service';
+import { TechnicianBookingListItem, TechniciansService } from '../technicians/technicians.service';
 import { TechnicianCapacityTier, classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
 import { SettingsService } from '../settings/settings.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
@@ -52,6 +52,23 @@ const REASSIGNABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
   OrderStatus.SEARCHING_TECHNICIAN,
   OrderStatus.TECHNICIAN_ASSIGNED,
 ]);
+
+export function formatEligibleTechniciansForAdmin(result: {
+  zoneId: string;
+  items: TechnicianBookingListItem[];
+}) {
+  return {
+    ...result,
+    // كيان الشركة نفسه يحمل company_id، وليس technician_profile_id، لذلك لا يدخل أي dropdown
+    // ينادي reassign/explain. يظهر بدلًا منه ممثلوها الحقيقيون مع اسم الشركة واضحًا.
+    items: result.items
+      .filter((item) => !item.isCompany)
+      .map((item) => ({
+        ...item,
+        fullName: item.companyName ? `${item.fullName} — ${item.companyName}` : item.fullName,
+      })),
+  };
+}
 
 @Injectable()
 export class AdminOrdersService {
@@ -330,13 +347,15 @@ export class AdminOrdersService {
     const order = await this.findOrThrow(orderId);
     // docs/08 §38 — طلب اعتماد لازم قايمة إعادة التعيين تفضل مقيّدة بنفس فلترة المستوى (محترف
     // فأعلى) اللي assertCoreEligibility() هيرفض غيرها وقت التنفيذ فعليًا — نفس فلسفة التعليق فوق.
-    return this.techniciansService.listForServiceBooking(
+    const result = await this.techniciansService.listForServiceBooking(
       order.serviceId,
       order.addressId,
       order.technicianId ?? undefined,
       order.scheduledAt,
       order.bookingMode === BookingMode.TEAM,
+      false,
     );
+    return formatEligibleTechniciansForAdmin(result);
   }
 
   async reassign(
