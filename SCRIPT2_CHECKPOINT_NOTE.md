@@ -123,8 +123,16 @@
   bounded server and client fallbacks. API tests, customer Flutter tests (4/4), Flutter analysis,
   API build, admin typecheck, and customer-web typecheck pass. Migration `0197` is applied on TEST,
   all earlier checksums match, and the new setting/checksum were verified directly.
-- Next task: add durable customer/technician notifications for project and admin workflow actions,
-  then continue the remaining screenshot/new-route review.
+- Completed: project workflow notifications now use a transactional PostgreSQL outbox
+  (`0198_project_notification_outbox.sql`). Project state, audit, and notification intent commit
+  atomically; a bounded worker recovers stale claims, retries transient failures, terminates at
+  manual review after five attempts, and deduplicates each user/channel delivery through
+  `source_outbox_id`. Customer/admin/technician recipients and deep links are audience-aware, and
+  hidden admin comments remain hidden. API build and the real PostgreSQL project suite pass 19/19
+  with `--detectOpenHandles`, including rollback fault injection, failed-delivery recovery, exact-once
+  retry behavior, and exhausted-attempt terminal state.
+- Next task: continue the remaining screenshot/new-route review, starting with the failing admin
+  support/technician/company/academy routes and the customer homepage carousel transition.
 
 ---
 

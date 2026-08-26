@@ -30,6 +30,8 @@ export interface NotifyInput {
   deepLink?: string;
   /** بيربط صف التسليم بالـNotificationWorkflow اللي ولّده (ADR-0012) — اختياري، مفيش أثر على الإرسال العادي. */
   workflowId?: string;
+  /** Durable-event source. One row per user/channel makes retries idempotent. */
+  sourceOutboxId?: string;
 }
 
 export interface ListNotificationsParams {
@@ -90,6 +92,12 @@ export class NotificationsService {
 
   /** بيسجّل الإشعار في القاعدة دايماً حتى لو فشل الإرسال الفعلي — الفشل بيتسجل في الصف نفسه، مش بيوقف تدفق العملية اللي استدعته. */
   async notify(input: NotifyInput, channel: NotificationChannel = NotificationChannel.IN_APP): Promise<Notification> {
+    if (input.sourceOutboxId) {
+      const existing = await this.notifications.findOne({
+        where: { sourceOutboxId: input.sourceOutboxId, userId: input.userId, channel },
+      });
+      if (existing) return existing;
+    }
     const notification = this.notifications.create({
       userId: input.userId,
       notificationType: input.notificationType,
@@ -100,6 +108,7 @@ export class NotificationsService {
       referenceType: input.referenceType ?? null,
       referenceId: input.referenceId ?? null,
       workflowId: input.workflowId ?? null,
+      sourceOutboxId: input.sourceOutboxId ?? null,
       deliveryStatus: NotificationDeliveryStatus.QUEUED,
     });
     await this.notifications.save(notification);

@@ -14,6 +14,8 @@ import { ServiceZone } from '../geo/entities/service-zone.entity';
 import { Order } from '../orders/entities/order.entity';
 import { ServiceCategory } from '../catalog/entities/service-category.entity';
 import { Service } from '../catalog/entities/service.entity';
+import { ProjectNotificationOutboxProcessor } from '../notifications/project-notification-outbox.processor';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /**
  * نظام المشروعات (docs/01B مهمة A) — تدفق حي كامل:
@@ -86,6 +88,8 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     if (!dataSource?.isInitialized) return;
     try {
       if (ids.project) {
+        await q(`DELETE FROM notifications WHERE source_outbox_id IN (SELECT id FROM project_notification_outbox WHERE project_id=$1)`, [ids.project]);
+        await q(`DELETE FROM project_notification_outbox WHERE project_id=$1`, [ids.project]);
         await q(`DELETE FROM project_milestones WHERE project_id=$1`, [ids.project]);
         await q(`UPDATE project_quotes SET status='rejected' WHERE project_id=$1 AND status IN ('sent','approved')`, [ids.project]);
         await q(`DELETE FROM project_quotes WHERE project_id=$1`, [ids.project]);
@@ -128,6 +132,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [ids.customerProfile, idempotencyKey],
     );
     expect(Number(projectCount)).toBe(1);
+    const [{ count: createdNotificationCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox WHERE project_id=$1 AND action='project.created'`,
+      [project.id],
+    );
+    expect(Number(createdNotificationCount)).toBe(1);
     await expect(projectsService.findOneOwned(ids.otherUser, project.id)).rejects.toMatchObject({ code: 'VAL_001' });
 
     const page = await projectsService.listAll(1, 1);
@@ -153,6 +162,7 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [ids.customerProfile, idempotencyKey],
     );
     expect(Number(count)).toBe(1);
+    await q(`DELETE FROM project_notification_outbox WHERE project_id=$1`, [first.id]);
     await q(`DELETE FROM projects WHERE id=$1`, [first.id]);
   });
 
@@ -238,6 +248,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     ])).rejects.toThrow('audit unavailable');
     const [{ count }] = await q<{ count: string }[]>(`SELECT COUNT(*)::text AS count FROM project_milestones WHERE project_id=$1`, [ids.project]);
     expect(Number(count)).toBe(0);
+    const [{ count: failedOutboxCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox WHERE project_id=$1 AND action='project.milestones_created'`,
+      [ids.project],
+    );
+    expect(Number(failedOutboxCount)).toBe(0);
 
     const milestones = await projectsService.createMilestones(ids.adminUser, ids.project, [
       { name_ar: 'عربون', amount_cents: 100000 },
@@ -247,6 +262,11 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     expect(milestones).toHaveLength(3);
     const total = milestones.reduce((s, m) => s + Number(m.amountCents), 0);
     expect(total).toBe(660000);
+    const [{ count: successfulOutboxCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox WHERE project_id=$1 AND action='project.milestones_created'`,
+      [ids.project],
+    );
+    expect(Number(successfulOutboxCount)).toBe(1);
   });
 
   it('مجموع المراحل ≠ العرض: يترفض', async () => {
@@ -352,6 +372,12 @@ describe('ProjectsService — المشروعات والمراحل والعروض
       [ids.project, 'تعليق لازم يرجع بالكامل عند فشل التدقيق'],
     );
     expect(Number(rolledBackCommentCount)).toBe(0);
+    const [{ count: rolledBackOutboxCount }] = await q<{ count: string }[]>(
+      `SELECT COUNT(*)::text AS count FROM project_notification_outbox
+       WHERE project_id=$1 AND action='project.comment_added' AND details->>'comment_id' IS NOT NULL`,
+      [ids.project],
+    );
+    expect(Number(rolledBackOutboxCount)).toBe(0);
 
     await projectsService.addComment({ userId: ids.adminUser, role: 'admin' }, ids.project, {
       body: 'خلصنا تأسيس السباكة، بننتقل للكهربا بكرة',
@@ -487,5 +513,57 @@ describe('ProjectsService — المشروعات والمراحل والعروض
     await expect(
       projectsService.issueProjectWarranty(ids.adminUser, ids.project, '00000000-0000-0000-0000-000000000000'),
     ).rejects.toThrow(/غير موجودة أو موقوفة/);
+  });
+
+  it('إشعار المشروع بيرجع بعد فشل عابر ويتسلم مرة واحدة', async () => {
+    await q(`UPDATE project_notification_outbox SET status='delivered', delivered_at=now() WHERE project_id=$1`, [ids.project]);
+    const [outbox] = await q<{ id: string }[]>(
+      `INSERT INTO project_notification_outbox (project_id, action, actor_user_id, actor_role)
+       VALUES ($1,'project.quote_sent',$2,'admin') RETURNING id`,
+      [ids.project, ids.adminUser],
+    );
+    const notifyMultiChannel = jest.fn()
+      .mockRejectedValueOnce(new Error('temporary push outage'))
+      .mockResolvedValueOnce([]);
+    const processor = new ProjectNotificationOutboxProcessor(
+      dataSource,
+      { notifyMultiChannel } as unknown as NotificationsService,
+    );
+
+    expect(await processor.drain(10, ids.project)).toBe(1);
+    let [state] = await q<{ status: string; attempts: number }[]>(
+      `SELECT status, attempts FROM project_notification_outbox WHERE id=$1`,
+      [outbox.id],
+    );
+    expect(state).toMatchObject({ status: 'pending', attempts: 1 });
+
+    await q(`UPDATE project_notification_outbox SET next_attempt_at=now() WHERE id=$1`, [outbox.id]);
+    expect(await processor.drain(10, ids.project)).toBe(1);
+    [state] = await q<{ status: string; attempts: number }[]>(
+      `SELECT status, attempts FROM project_notification_outbox WHERE id=$1`,
+      [outbox.id],
+    );
+    expect(state).toMatchObject({ status: 'delivered', attempts: 2 });
+    expect(await processor.drain(10, ids.project)).toBe(0);
+    expect(notifyMultiChannel).toHaveBeenCalledTimes(2);
+    expect(notifyMultiChannel.mock.calls[1][0]).toMatchObject({
+      userId: ids.customerUser,
+      sourceOutboxId: outbox.id,
+      deepLink: `/projects/${ids.project}`,
+    });
+
+    const [exhaustedOutbox] = await q<{ id: string }[]>(
+      `INSERT INTO project_notification_outbox
+         (project_id, action, actor_user_id, actor_role, attempts)
+       VALUES ($1,'project.quote_sent',$2,'admin',4) RETURNING id`,
+      [ids.project, ids.adminUser],
+    );
+    notifyMultiChannel.mockRejectedValueOnce(new Error('persistent delivery outage'));
+    expect(await processor.drain(10, ids.project)).toBe(1);
+    const [exhaustedState] = await q<{ status: string; attempts: number }[]>(
+      `SELECT status, attempts FROM project_notification_outbox WHERE id=$1`,
+      [exhaustedOutbox.id],
+    );
+    expect(exhaustedState).toMatchObject({ status: 'manual_review', attempts: 5 });
   });
 });
