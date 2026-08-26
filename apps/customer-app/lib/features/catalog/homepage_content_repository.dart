@@ -67,6 +67,13 @@ class HomepageContent {
     required this.tips,
   });
 
+  // Keep the original flat contract available for live tests and older callers
+  // while the grouped search object remains the single source of truth.
+  String get heroEyebrow => search.eyebrow;
+  String get heroTitle => search.title;
+  String get heroSubtitle => search.description;
+  String get searchPlaceholder => search.placeholder;
+
   factory HomepageContent.fromJson(Map<String, dynamic> json) {
     final groupedSearch = json['search'] as Map<String, dynamic>?;
     final compatibleSearch =
