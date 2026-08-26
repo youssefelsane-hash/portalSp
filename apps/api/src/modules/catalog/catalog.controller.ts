@@ -154,6 +154,9 @@ export class CatalogController {
                 query.field_values,
                 item.isCompany ? undefined : item.pricingTier,
                 query.duration_hours,
+                undefined,
+                // ADR-0042 — الشركة بتتسعّر بمعاملها هي بدل مضاعف المستوى (اللي مالوش معنى هنا).
+                item.isCompany ? item.companyPriceMultiplier : undefined,
               );
               return { item, estimate };
             }),

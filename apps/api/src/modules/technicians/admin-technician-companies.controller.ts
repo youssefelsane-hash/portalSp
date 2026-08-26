@@ -6,6 +6,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
+import { SetCompanyPriceMultiplierDto } from './dto/set-company-price-multiplier.dto';
 import {
   toBranchResponseDto,
   toCompanyResponseDto,
@@ -53,6 +54,29 @@ export class AdminTechnicianCompaniesController {
     @AuditContext() audit: AuditMeta,
   ) {
     const company = await this.companiesService.setTrustBadge(admin.sub, id, dto.granted, dto.note ?? null, audit);
+    return toCompanyResponseDto(company);
+  }
+
+  /**
+   * معامل سعر الشركة (ADR-0042، docs/08 §64.و) — الكتابة التانية الوحيدة هنا، ولنفس السبب:
+   * السعر اللي العميل بيدفعه مش إدارة ذاتية. `orders.adjust_price` مش `technicians.approve`
+   * عمدًا — ده قرار **تسعير** مش قرار اعتماد، ومحمي بنفس صلاحية أي تغيير سعر تاني في المنصة.
+   */
+  @Patch(':id/price-multiplier')
+  @RequirePermission('orders.adjust_price')
+  async setPriceMultiplier(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCompanyPriceMultiplierDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const company = await this.companiesService.setPriceMultiplier(
+      admin.sub,
+      id,
+      dto.price_multiplier,
+      dto.note ?? null,
+      audit,
+    );
     return toCompanyResponseDto(company);
   }
 

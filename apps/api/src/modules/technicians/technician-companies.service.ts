@@ -256,6 +256,46 @@ export class TechnicianCompaniesService {
     return company;
   }
 
+  /**
+   * تغيير معامل سعر الشركة (ADR-0042).
+   *
+   * قرار أدمن بحت: ده سعر بيدفعه العميل، فالشركة **ما تقدرش** تغيّره لنفسها — نفس مبدأ علامة
+   * التوثيق فوق بالحرف. كل تغيير بيتسجّل بقيمته القديمة والجديدة عشان يبقى فيه إجابة مكتوبة
+   * لما حد يسأل بعدين "ليه سعر الشركة دي أعلى؟".
+   */
+  async setPriceMultiplier(
+    adminUserId: string,
+    companyId: string,
+    multiplier: number,
+    note: string | null,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianCompany> {
+    const company = await this.companies.findOne({ where: { id: companyId } });
+    if (!company) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة مش موجودة', HttpStatus.NOT_FOUND);
+    }
+    const previous = Number(company.priceMultiplier);
+    if (previous === multiplier) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشركة أصلاً على نفس المعامل ده', HttpStatus.CONFLICT);
+    }
+
+    company.priceMultiplier = multiplier.toFixed(2);
+    await this.companies.save(company);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician_company.price_multiplier_changed',
+      entityType: 'technician_company',
+      entityId: company.id,
+      oldValues: { price_multiplier: previous },
+      newValues: { price_multiplier: multiplier, note },
+      meta,
+    });
+
+    return company;
+  }
+
   async listForAdmin(): Promise<{ company: TechnicianCompany; branchCount: number; staffCount: number }[]> {
     const companies = await this.companies.find({ order: { createdAt: 'DESC' } });
     return this.countBranchesAndStaff(companies);

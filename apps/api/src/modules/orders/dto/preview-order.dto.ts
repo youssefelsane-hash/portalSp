@@ -46,6 +46,13 @@ export class PreviewOrderDto {
   @IsUUID()
   requested_technician_id?: string;
 
+  // ADR-0042 (docs/08 §64.و) — لو العميل اختار **شركة**، سعرها بيتحسب بمعامل الشركة بدل مضاعف
+  // المستوى. من غير الحقل ده كانت المعاينة بترجّع السعر الأساسي والحجز يتحصّل بسعر أعلى — نفس
+  // "مفاجأة السعر" اللي كل مسار التسعير هنا متبني عشان يمنعها.
+  @IsOptional()
+  @IsUUID()
+  requested_technician_company_id?: string;
+
   // نفس السبب بالظبط، لكن لسلوت جدولة محدد (GET /technicians/:id/schedule) — بيغلب
   // requested_technician_id لو الاتنين اتبعتوا مع بعض، نفس أولوية create() بالحرف.
   @IsOptional()

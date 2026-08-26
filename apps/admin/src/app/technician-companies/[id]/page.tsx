@@ -51,6 +51,10 @@ export default function TechnicianCompanyDetailPage() {
 
   const [trustNote, setTrustNote] = useState('');
   const [isSavingBadge, setIsSavingBadge] = useState(false);
+  // ADR-0042 (docs/08 §64.و) — معامل سعر الشركة. الحقل بيتعبّى من الرد نفسه أول ما يوصل.
+  const [multiplierInput, setMultiplierInput] = useState('');
+  const [multiplierNote, setMultiplierNote] = useState('');
+  const [isSavingMultiplier, setIsSavingMultiplier] = useState(false);
 
   // علامة التوثيق الزرقاء للشركة (ADR-0039، docs/08 §62.1) — الكتابة الوحيدة في شاشة الإشراف دي.
   async function handleSetTrustBadge(granted: boolean) {
@@ -67,6 +71,29 @@ export default function TechnicianCompanyDetailPage() {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحديث علامة التوثيق');
     } finally {
       setIsSavingBadge(false);
+    }
+  }
+
+  // ADR-0042 — تغيير معامل السعر. محمي بصلاحية orders.adjust_price في الباك-إند.
+  async function handleSaveMultiplier() {
+    const parsed = Number(multiplierInput);
+    if (!Number.isFinite(parsed) || parsed < 1 || parsed > 3) {
+      setError('المعامل لازم يكون رقم بين 1.00 و3.00');
+      return;
+    }
+    setIsSavingMultiplier(true);
+    setError(null);
+    try {
+      const company = await authedFetch<CompanyResponseDto>(`/admin/technician-companies/${id}/price-multiplier`, {
+        method: 'PATCH',
+        body: JSON.stringify({ price_multiplier: parsed, note: multiplierNote.trim() || undefined }),
+      });
+      setDetail((prev) => (prev ? { ...prev, company } : prev));
+      setMultiplierNote('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحديث معامل السعر');
+    } finally {
+      setIsSavingMultiplier(false);
     }
   }
 
@@ -207,6 +234,53 @@ export default function TechnicianCompanyDetailPage() {
                     امنح العلامة
                   </Button>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ADR-0042 / docs/08 §64.و — معامل سعر الشركة. طلب مالك صريح: «جوا كل شركة يكون فيه
+              معامل زيادة خاص بيها»، بدل ما كل الشركات تتسعّر بالسعر الأساسي المشترك. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">معامل سعر الشركة</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={detail.company.price_multiplier > 1 ? 'secondary' : 'outline'}>
+                  المعامل الحالي: ×{detail.company.price_multiplier.toFixed(2)}
+                </Badge>
+                {detail.company.price_multiplier > 1 && (
+                  <span className="text-muted-foreground">
+                    يعني +{Math.round((detail.company.price_multiplier - 1) * 100)}% فوق السعر الأساسي
+                  </span>
+                )}
+              </div>
+              <p className="text-muted-foreground">
+                بيتطبّق على سعر الشغل في أي حجز للشركة دي، وبيحل محل مضاعف مستوى الفني (حجز الشركة
+                مالوش مستوى فني محدد). العميل بيشوف السعر النهائي بالمعامل ده قبل ما يأكّد، وتوزيع
+                نصيب الفنيين جوّه الطاقم بيفضل بنفس القاعدة زي ما هو.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  type="number"
+                  step="0.05"
+                  min="1"
+                  max="3"
+                  className="max-w-[140px]"
+                  value={multiplierInput}
+                  onChange={(e) => setMultiplierInput(e.target.value)}
+                  placeholder={detail.company.price_multiplier.toFixed(2)}
+                />
+                <Input
+                  value={multiplierNote}
+                  onChange={(e) => setMultiplierNote(e.target.value)}
+                  placeholder="سبب التغيير (اختياري، بيتسجّل في سجل النشاط)"
+                  maxLength={500}
+                  className="max-w-md"
+                />
+                <Button size="sm" disabled={isSavingMultiplier || !multiplierInput} onClick={handleSaveMultiplier}>
+                  حفظ المعامل
+                </Button>
               </div>
             </CardContent>
           </Card>

@@ -54,6 +54,8 @@ export interface TechnicianBookingListItem {
   // للشركات: technicianId = technician_companies.id، وcurrentLevel مالوش معنى حقيقي (بيتحط
   // TEAM_LEADER كتمثيل بس، مش مخزّن ولا بيتفحص).
   isCompany: boolean;
+  /** ADR-0042 — معامل سعر الشركة (1 للأفراد). */
+  companyPriceMultiplier?: number;
   staffCount: number | null;
   branchCount: number | null;
   companyId: string | null;
@@ -565,10 +567,14 @@ export class TechniciansService {
       completed_count: string | null;
       is_trust_verified: boolean;
       commercial_registration_number: string | null;
+      price_multiplier: string;
     }
     const companyRows = await this.technicianProfiles.manager.query<CompanyRow[]>(
       `
       SELECT tc.id AS company_id, tc.name, tc.commercial_registration_number, tc.is_trust_verified,
+             -- ADR-0042 — معامل سعر الشركة بيتحمّل مع القايمة عشان السعر المعروض في المقارنة
+             -- يبقى السعر الحقيقي بتاعها، مش السعر الأساسي المشترك.
+             tc.price_multiplier,
              AVG(tp.average_rating) AS avg_rating,
              SUM(tp.total_ratings_count) AS total_ratings,
              -- docs/08 §62.2 — كان 0 ثابت في طبقة العرض (رقم كاذب معروض للعميل). الـLEFT JOIN
@@ -643,6 +649,8 @@ export class TechniciansService {
       onTimeRatePercent: null,
       avgArrivalMinutes: null,
       isCompany: true,
+      // ADR-0042 — بيتبعت لـestimate() بدل مضاعف المستوى.
+      companyPriceMultiplier: Number(row.price_multiplier ?? 1),
       staffCount: Number(row.staff_count),
       branchCount: Number(row.branch_count),
       companyId: row.company_id,

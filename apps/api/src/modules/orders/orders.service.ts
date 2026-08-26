@@ -27,6 +27,7 @@ import { SupportService } from '../support/support.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompaniesService } from '../technicians/technician-companies.service';
+import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
@@ -290,6 +291,8 @@ export class OrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'طلبات الطوارئ استجابة فورية — مينفعش تتحدد بموعد مستقبلي', HttpStatus.BAD_REQUEST);
     }
 
+    // ADR-0042 (docs/08 §64.و) — معامل سعر الشركة بيتحمّل هنا مرة واحدة عشان يدخل التسعير تحت.
+    let requestedCompany: TechnicianCompany | null = null;
     if (dto.requested_technician_company_id) {
       if (bookingMode !== BookingMode.TEAM) {
         throw new ApiException(
@@ -298,7 +301,7 @@ export class OrdersService {
           HttpStatus.BAD_REQUEST,
         );
       }
-      await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id);
+      requestedCompany = await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id);
     }
 
     if (!address.cityId) {
@@ -473,6 +476,9 @@ export class OrdersService {
       knownTechnicianPricingTier,
       dto.duration_hours,
       dto.pricing_quantity,
+      // ADR-0042 — حجز شركة بيتسعّر بمعاملها هي بدل مضاعف المستوى (اللي بيبقى غير معروف أصلاً
+      // في حجز الشركة). نفس القيمة اللي العميل شافها في المقارنة قبل ما يختار.
+      requestedCompany ? Number(requestedCompany.priceMultiplier) : undefined,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -1079,6 +1085,10 @@ export class OrdersService {
       : null;
     const previewTechnicianLevel = scheduleSlotTechnicianProfile?.currentLevel ?? requestedTechnicianProfile?.currentLevel;
     const previewTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
+    // ADR-0042 — نفس معامل الشركة اللي create() بيستعمله بالحرف، عشان المعاينة تطابق التحصيل.
+    const previewCompany = dto.requested_technician_company_id
+      ? await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id)
+      : null;
 
     const estimate = await this.catalogService.estimate(
       service.id,
@@ -1089,6 +1099,7 @@ export class OrdersService {
       previewTechnicianPricingTier,
       dto.duration_hours,
       dto.pricing_quantity,
+      previewCompany ? Number(previewCompany.priceMultiplier) : undefined,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);

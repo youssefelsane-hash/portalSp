@@ -241,6 +241,10 @@ export class CatalogService {
     // خدمات "بالوحدة" لازم تضرب سعر الوحدة في الكمية اللي العميل أكدها. append-only عشان أي
     // caller قديم يفضل بنفس سلوك الوحدة الواحدة، بينما OrdersService يفرض وجودها للحجز الحقيقي.
     pricingQuantity?: number,
+    // ADR-0042 / docs/08 §64.و — معامل سعر الشركة. **بديل** عن مضاعف المستوى/الفئة مش فوقه:
+    // حجز الشركة مالوش مستوى فني أصلاً (§62.2)، فالخانة دي فاضية والمعامل بياخدها. تركيب
+    // الاتنين كان هيبقى تحصيل مزدوج على نفس المعنى. append-only زي كل الباراميترات فوق.
+    companyPriceMultiplier?: number,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
     const quantityMultiplier =
@@ -263,7 +267,8 @@ export class CatalogService {
     // حسابها — مش جزء من المعادلة نفسها (الفني مش من مدخلات الفورم اللي العميل بيملاها).
     if (service.pricingModel === PricingModel.FORMULA) {
       const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
-      const formulaLevelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
+      const formulaLevelMultiplier =
+        companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
       // docs/01B — حدود min/max_price_cents بتتفرض على السعر النهائي بعد مضاعف المستوى وقبل
       // رسوم الطوارئ (سياسة عمل على سعر الخدمة نفسه). كانت بتترجع للعرض بس بدون تطبيق.
       let clampedTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
@@ -297,7 +302,8 @@ export class CatalogService {
       };
     }
 
-    const levelMultiplier = await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier);
+    const levelMultiplier =
+      companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
 
     // رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — orders.surge_amount_cents كان عمود راكد
     // من migration 0007 الأولى، بيتفعّل هنا. منفصلة عن commission.emergency_adjustment_percentage
