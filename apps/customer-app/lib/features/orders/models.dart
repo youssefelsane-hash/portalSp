@@ -37,7 +37,7 @@ class Order {
   final int warrantyPriceCents;
   /// فرق سعر "الفني المميّز" (docs/08 §60.3) — بيتضاف لما المطابقة التلقائية تعيّن فني
   /// مستواه بيزوّد السعر. 0 لو العميل اختار الفني بنفسه (الفرق داخل السعر أصلاً).
-  /// الواجهة بتعرضه كسطر مستقل مكتوب جنبه "فني مميّز" عشان العميل يفهم الزيادة جاية منين.
+  /// الواجهة بتعرضه كسطر مستقل مكتوب جنبه "فني Premium" عشان العميل يفهم الزيادة جاية منين.
   final int levelPremiumCents;
   final String? optionalWarrantyNameAr;
   final int? optionalWarrantyCoverageMonths;
