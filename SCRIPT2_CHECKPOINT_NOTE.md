@@ -103,6 +103,12 @@
   list and expanded project room refetch their REST source of truth immediately without a manual
   refresh. Gateway plus real PostgreSQL project/warranty suites pass 25/25 with open-handle
   detection; API build and admin typecheck pass.
+- Completed: media URLs stored by an older local API address are now portable. Absolute `/uploads/`
+  links are rebased to the currently configured API origin in admin, customer, and technician apps,
+  while genuine external CDN/S3 URLs remain unchanged. Chat images, complaint attachments,
+  technician onboarding documents, and before/after order photos therefore survive a local IP or
+  deployment-origin change. Focused admin and Flutter URL tests pass 8/8; admin typecheck and
+  changed-file analysis for both mobile apps pass with no issues.
 - Next task: continue the remaining screenshot/new-route review after this project checkpoint,
   prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 
