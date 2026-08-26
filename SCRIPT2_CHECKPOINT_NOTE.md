@@ -92,6 +92,11 @@
   above the available balance before network submission. Focused Flutter tests pass 10/10 across
   hero, overflow, payout, and financial breakdown scenarios; changed-file analysis reports no
   issues in both apps.
+- Completed: the admin warranty-claims queue now returns and displays the customer's name and
+  phone, warranty name, linked order/project references, and the complete defect description
+  instead of an eight-character customer ID and truncated text. The enriched snake_case contract
+  is covered by the real PostgreSQL ownership/concurrency/state-machine suite (4/4) with open-handle
+  detection; API build and admin typecheck pass.
 - Next task: continue the remaining screenshot/new-route review after this project checkpoint,
   prioritizing visible warranty/project browser flows not already covered by the focused matrix.
 
