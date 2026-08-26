@@ -474,20 +474,30 @@ class _HomeScreenState extends State<HomeScreen> {
                           )
                         else
                           Container(height: 80, color: _tipFallbackColors[index % _tipFallbackColors.length]),
-                        Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(tip.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall),
-                              const SizedBox(height: 4),
-                              Text(
-                                tip.body,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
+                        // Expanded + Flexible مش تزيين: الكارت جوّه `SizedBox(height: 190)` ثابت،
+                        // والصورة بتاخد 80 منهم. من غيرهم أي نصيحة عنوانها بيلف سطرين ونصّها 3
+                        // سطور كانت بتطلع أطول من الفاضل وترمي `RenderFlex overflowed by N pixels
+                        // on the bottom` كل frame (اتلقطت في كونسول المالك، docs/08 §59). كده
+                        // النص بياخد الفاضل بالظبط ويتقص بأدب مهما كان مقياس الخط عند المستخدم.
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(tip.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall),
+                                const SizedBox(height: 4),
+                                Flexible(
+                                  child: Text(
+                                    tip.body,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ],
