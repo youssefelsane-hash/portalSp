@@ -148,7 +148,7 @@ export class ProjectsService {
   }
 
   async transition(adminUserId: string, projectId: string, to: ProjectStatus, reason?: string, meta?: AuditActorMeta): Promise<Project> {
-    return this.dataSource.transaction(async (manager) => {
+    const project = await this.dataSource.transaction(async (manager) => {
       const project = await manager.createQueryBuilder(Project, 'p')
         .setLock('pessimistic_write').where('p.id = :id', { id: projectId }).getOne();
       if (!project) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
@@ -177,6 +177,8 @@ export class ProjectsService {
       await this.enqueueNotification(manager, project.id, `project.${to}`, { userId: adminUserId, role: 'admin' }, { from: previousStatus, to });
       return project;
     });
+
+    return project;
   }
 
   // ── Quotes ──
@@ -235,7 +237,7 @@ export class ProjectsService {
   }
 
   async sendQuote(adminUserId: string, quoteId: string, expiryDays: number, expectedProjectId?: string, meta?: AuditActorMeta): Promise<ProjectQuote> {
-    return this.dataSource.transaction(async (manager) => {
+    const quote = await this.dataSource.transaction(async (manager) => {
       const quote = await manager.createQueryBuilder(ProjectQuote, 'q')
         .setLock('pessimistic_write').where('q.id = :id', { id: quoteId }).getOne();
       if (!quote || quote.status !== 'draft') {
@@ -261,13 +263,15 @@ export class ProjectsService {
       await this.enqueueNotification(manager, project.id, 'project.quote_sent', { userId: adminUserId, role: 'admin' }, {
         quote_id: quote.id,
         total_cents: quote.totalCents,
+        expires_at: quote.expiresAt.toISOString(),
       });
       return quote;
     });
+    return quote;
   }
 
   async approveQuote(userId: string, quoteId: string, expectedProjectId?: string, meta?: AuditActorMeta): Promise<Project> {
-    return this.dataSource.transaction(async (manager) => {
+    const project = await this.dataSource.transaction(async (manager) => {
       const quote = await manager.createQueryBuilder(ProjectQuote, 'q')
         .setLock('pessimistic_write').where('q.id = :id', { id: quoteId }).getOne();
       if (!quote || quote.status !== 'sent') {
@@ -315,6 +319,8 @@ export class ProjectsService {
       });
       return project;
     });
+
+    return project;
   }
 
   // ── Milestones ──
@@ -328,7 +334,7 @@ export class ProjectsService {
     if (milestones.filter((m) => m.is_down_payment).length > 1) {
       throw new ApiException(ErrorCode.VAL_001, 'مسموح بمرحلة عربون واحدة فقط', HttpStatus.BAD_REQUEST);
     }
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const project = await manager.createQueryBuilder(Project, 'p').setLock('pessimistic_write')
         .where('p.id = :id AND p.deleted_at IS NULL', { id: projectId }).getOne();
       if (!project) throw new ApiException(ErrorCode.VAL_001, 'المشروع غير موجود', HttpStatus.NOT_FOUND);
@@ -355,6 +361,8 @@ export class ProjectsService {
       });
       return saved;
     });
+
+    return saved;
   }
 
   /** بوابة إطلاق المستحق — لازم: مرحلة مكتملة + عميل موافق + مدفوعة. ذرّية بـSKIP LOCKED. */
@@ -400,6 +408,7 @@ export class ProjectsService {
       await this.enqueueNotification(manager, projectId, result.action, actor, {
         milestone_id: milestoneId,
         milestone_name: found.nameAr,
+        milestone_amount_cents: found.amountCents,
         ...result.newValues,
       });
       return found;
@@ -407,7 +416,7 @@ export class ProjectsService {
   }
 
   async startMilestone(adminUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
-    return this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
       if (m.executionStatus !== 'pending') {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -418,6 +427,8 @@ export class ProjectsService {
       m.executionStatus = 'in_progress';
       return { action: 'project.milestone_started', newValues: { execution_status: 'in_progress' } };
     }, meta);
+
+    return milestone;
   }
 
   /** تسليم مرحلة بعينها — بيبدأ عدّاد الموافقة التلقائية الموجود بالفعل (72 ساعة افتراضيًا). */
@@ -428,7 +439,7 @@ export class ProjectsService {
     proofStorageKeys: string[] = [],
     meta?: AuditActorMeta,
   ) {
-    return this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: adminUserId, role: 'admin' }, (m) => {
       if (m.executionStatus !== 'in_progress') {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -453,12 +464,14 @@ export class ProjectsService {
         newValues: { execution_status: 'completed', proof_count: m.proofAttachments?.length ?? 0 },
       };
     }, meta);
+
+    return milestone;
   }
 
   /** موافقة العميل اليدوية — الموافقة التلقائية موجودة بالفعل، دي للعميل اللي مش عايز يستنى. */
   async approveMilestone(customerUserId: string, projectId: string, milestoneId: string, meta?: AuditActorMeta) {
     await this.findOneOwned(customerUserId, projectId);
-    return this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
       if (m.executionStatus !== 'completed') {
         throw new ApiException(ErrorCode.VAL_001, 'المرحلة لسه ما اتسلّمتش', HttpStatus.CONFLICT);
       }
@@ -470,6 +483,8 @@ export class ProjectsService {
       m.approvedAt = new Date();
       return { action: 'project.milestone_approved', newValues: { approval_status: 'approved' } };
     }, meta);
+
+    return milestone;
   }
 
   async rejectMilestone(
@@ -483,7 +498,7 @@ export class ProjectsService {
       throw new ApiException(ErrorCode.VAL_001, 'سبب الرفض مطلوب', HttpStatus.BAD_REQUEST);
     }
     await this.findOneOwned(customerUserId, projectId);
-    return this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
+    const milestone = await this.transitionMilestone(projectId, milestoneId, { userId: customerUserId, role: 'customer' }, (m) => {
       if (m.executionStatus !== 'completed') {
         throw new ApiException(ErrorCode.VAL_001, 'المرحلة لسه ما اتسلّمتش', HttpStatus.CONFLICT);
       }
@@ -497,6 +512,8 @@ export class ProjectsService {
       m.executionStatus = 'in_progress';
       return { action: 'project.milestone_rejected', newValues: { approval_status: 'rejected', reason: reason.trim() } };
     }, meta);
+
+    return milestone;
   }
 
   /**
@@ -528,7 +545,7 @@ export class ProjectsService {
       }
     }
     const visible = author.role === 'customer' ? true : dto.is_visible_to_customer !== false;
-    return this.dataSource.transaction(async (manager) => {
+    const row = await this.dataSource.transaction(async (manager) => {
       const [row] = await manager.query<Record<string, unknown>[]>(
         `INSERT INTO project_comments (project_id, milestone_id, author_user_id, author_role, body, is_visible_to_customer)
          VALUES ($1,$2,$3,$4,$5,$6)
@@ -548,9 +565,11 @@ export class ProjectsService {
         comment_id: row.id,
         milestone_id: dto.milestone_id ?? null,
         visible_to_customer: visible,
+        comment_preview: body.length > 120 ? `${body.slice(0, 117)}…` : body,
       });
       return row;
     });
+    return row;
   }
 
   /**
@@ -560,7 +579,7 @@ export class ProjectsService {
    * فاضي عمليًا. الربط مقصور على طلبات **نفس العميل** — طلب عميل تاني في مشروع مش بتاعه تسريب.
    */
   async linkOrderToProject(adminUserId: string, projectId: string, orderId: string, meta?: AuditActorMeta) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const [project] = await manager.query<{ id: string; customer_id: string }[]>(
         `SELECT id, customer_id FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
         [projectId],
@@ -600,6 +619,8 @@ export class ProjectsService {
       await this.enqueueNotification(manager, projectId, 'project.order_linked', { userId: adminUserId, role: 'admin' }, { order_id: orderId });
       return { linked: true, already: false };
     });
+
+    return result;
   }
 
   async listLinkableOrders(projectId: string): Promise<Record<string, unknown>[]> {
@@ -631,7 +652,7 @@ export class ProjectsService {
     planId: string,
     meta?: AuditActorMeta,
   ): Promise<Record<string, unknown>> {
-    return this.dataSource.transaction(async (manager) => {
+    const row = await this.dataSource.transaction(async (manager) => {
       const [project] = await manager.query<{ id: string; customer_id: string; approved_quote_total_cents: number | null }[]>(
         `SELECT id, customer_id, approved_quote_total_cents
          FROM projects WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
@@ -687,9 +708,12 @@ export class ProjectsService {
       await this.enqueueNotification(manager, projectId, 'project.warranty_issued', { userId: adminUserId, role: 'admin' }, {
         warranty_id: row.id,
         plan_id: planId,
+        warranty_name: String(row.name_ar ?? 'ضمان المشروع'),
+        coverage_months: Number(row.coverage_months ?? 0),
       });
       return row;
     });
+    return row;
   }
 
   async releaseMilestonePayout(milestoneId: string): Promise<boolean> {

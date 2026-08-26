@@ -75,6 +75,11 @@ export class HomepageContentController {
       description: readSearchText('description', 240),
       placeholder: readSearchText('placeholder', 180),
     };
-    return { trust_message: trustMessage, hero_images: heroImages, search, tips };
+    return {
+      trust_message: trustMessage,
+      hero_images: heroImages,
+      search,
+      tips,
+    };
   }
 }

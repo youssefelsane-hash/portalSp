@@ -10,8 +10,7 @@ import 'package:customer_app/features/catalog/homepage_content_repository.dart';
 
 void main() {
   test('محتوى الصفحة الرئيسية بيرجّع نصوص البحث من الإعدادات (مش ثابتة في الكود)', () async {
-    final content = await HomepageContentRepository().fetch();
-    final search = content.search;
+    final search = (await HomepageContentRepository().fetch()).search;
 
     // الأربعة لازم يوصلوا بقيمة حقيقية — الباك-إند بيرجّع الافتراضي لو الأدمن مسح الحقل، فمفيش
     // حالة إن الشاشة الرئيسية تفضل بلا عنوان أو بشريط بحث بلا نص إرشادي.
