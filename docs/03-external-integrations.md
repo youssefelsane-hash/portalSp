@@ -275,6 +275,14 @@ FIREBASE_SERVICE_ACCOUNT_JSON=<محتوى الملف كامل كسطر واحد>
 - الملفين الاتنين (`android/app/google-services.json`, `ios/Runner/GoogleService-Info.plist`)
   مُضافين لـ `.gitignore` في التطبيقين — نفس منطق `.env`: قيم بيئة حقيقية متتحطش في git.
 
+> **تحديث 2026-08-26 (docs/08 §69)**: مشروع Firebase الحقيقي بقى موجود (`sonaa3-66360`)،
+> و**`apps/customer-app/android/app/google-services.json` اتحط فعلاً** — يعني تطبيق العميل على
+> أندرويد جاهز يسجّل توكن ويستقبل push بمجرد ما يتبني ويتسجّل فيه دخول. الباقي:
+> `technician-app` محتاج تطبيق Android تاني في نفس المشروع بحزمة `com.baytak.technician_app`
+> وملفه الخاص، وiOS (التطبيقين) محتاج `GoogleService-Info.plist` + **مفتاح APNs مرفوع** في
+> Project Settings → Cloud Messaging (مؤجّل بطلب المالك). الملفات دي في `.gitignore` فكل بيئة
+> بناء لازم تحط نسختها.
+
 **الخطوات المتبقية عليك (محتاجة مشروع Firebase حقيقي)**: اعمل مشروع على
 [console.firebase.google.com](https://console.firebase.google.com) (لو لسه معملتوش في §الأول)،
 ضيف تطبيق Android بـ `applicationId` من `android/app/build.gradle.kts` (`com.baytak.customer_app`
