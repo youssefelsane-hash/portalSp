@@ -9644,6 +9644,39 @@ PostgreSQL مافيهوش `ALTER TYPE … DROP VALUE`، فالـmigration بتع
   صح؛ عميل حجز فعلاً بعد كده → بيتشال؛ عميل محظور → بيتشال؛ عميل رافض التسويق → **بيفضل ظاهر**
   (الفرق المتعمّد عن محرك الحملات، الاختبار الحرج اللي بيتأكد من "ما تفوّتش عميل واحد حتى").
 
+# §80 — بَقّة حقيقية: تبويب "عملاء متروكين" كان بيقع فورًا (بلاغ مالك بلقطة شاشة، 2026-08-27)
+
+المالك بعت لقطة شاشة حقيقية لصفحة `/campaigns` واقعة بـ`Runtime TypeError: Cannot read
+properties of undefined (reading 'length')` عند `leads.length` — فورًا بعد ما تبويب "عملاء
+متروكين" (§79 فوق) اتعمل وانضم لـ`main`.
+
+## السبب الجذري
+
+`loadLeads()` في `apps/admin/src/app/campaigns/page.tsx` استخدم `authedFetch()` العادي لجلب
+`GET /admin/campaigns/abandoned-leads`، واللي بيرجّع `{items, meta}` على المستوى الأول (نفس
+شكل أي endpoint مُقسّم صفحات في الباك-إند). `ResponseInterceptor` العام
+(`apps/api/src/common/interceptors/response.interceptor.ts`) بيكتشف الشكل ده تلقائيًا (`items`
++`meta` سوا) وبيفكّه — `envelope.data` بيبقى `items` عارية (المصفوفة نفسها)، و`meta` بتطلع
+لمستوى الـenvelope الخارجي. `authedFetch()` بيرجّع `envelope.data` كما هو، يعني بيرجّع مصفوفة،
+مش `{items, meta}`. الكود بعدين بيحاول `res.items` من المصفوفة دي → `undefined` → `.length`
+على `undefined` → الانهيار اللي المالك شافه فورًا.
+
+`authedFetchPaginated()` هي الدالة المصمّمة بالظبط لإعادة تركيب `{items, meta}` من نفس
+الـenvelope (نفس النمط المستخدم بالفعل في `/admin/customers/:userId/orders` وصفحات تانية) —
+كان المفروض تُستخدم هي مش `authedFetch()` العادي.
+
+## الإصلاح
+
+استبدال `authedFetch<AbandonedLeadsListResponseDto>(...)` بـ`authedFetchPaginated<AbandonedLeadResponseDto>(...)`
+في `loadLeads()`. صفر تغيير في الباك-إند (الـendpoint كان سليم من الأول — المشكلة كانت في
+اختيار دالة الجلب الغلط في الفرونت-إند بس). فحصت باقي صفحات الأدمن اللي أضفتها في نفس الجلسة
+(`/admin/customers/:userId/orders` في customers page) — كانت مستخدمة `authedFetchPaginated`
+صح من الأول، الغلطة كانت في التبويب الجديد ده بس.
+
+**درس للمستقبل**: أي endpoint جديد بيرجّع `{items, meta}` (نمط تقسيم صفحات) لازم يتستهلك بـ
+`authedFetchPaginated()` مش `authedFetch()` — الفرق مش واضح من نوع TypeScript وحده (الاتنين
+بياخدوا generic type)، لازم انتباه يدوي وقت الكتابة.
+
 # §81 — بَقّة حقيقية: فيديو تيك توك في معرض أعمال الفني بيفشل يشتغل (بلاغ مالك، 2026-08-27)
 
 بلاغ المالك: فني ضاف لينك تيك توك لمعرض أعماله، الصورة المصغّرة (thumbnail) ظاهرة صح في بروفايله

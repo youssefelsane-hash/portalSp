@@ -106,6 +106,17 @@
 الاستبعاد بعد حجز فعلي/حظر/حذف، **ظهور عميل رافض التسويق عمدًا** (الاختبار الحرج)، نافذة
 الأيام، و`reminder_processed`.
 
+**بَقّة حقيقية اتلقطت واتصلحت فورًا (docs/08 §80، بلاغ مالك بلقطة شاشة فعلية للصفحة واقعة)**:
+تبويب "عملاء متروكين" كان بيقع بـ`Cannot read properties of undefined (reading 'length')` —
+الصفحة كانت بتستخدم `authedFetch()` العادي بدل `authedFetchPaginated()` لجلب
+`GET /admin/campaigns/abandoned-leads`. الـendpoint ده بيرجّع `{items, meta}` على المستوى
+الأول، وده الشكل اللي `ResponseInterceptor` (`apps/api/src/common/interceptors/response.interceptor.ts`)
+بيكتشفه ويفكّه تلقائيًا (`data` بيبقى `items` عارية، `meta` بتطلع لمستوى الـenvelope الخارجي) —
+فـ`authedFetch()` كان بيرجّع مصفوفة عارية، والكود بيحاول يقرا `res.items` منها فيرجع `undefined`.
+`authedFetchPaginated()` هي المصمّمة بالظبط لإعادة تركيب `{items, meta}` من نفس الـenvelope ده —
+نفس النمط المستخدم بالفعل في `/admin/customers/:userId/orders` وغيره. اتصلحت باستبدال
+الاستدعاء، صفر تغيير في الباك-إند.
+
 ## اللي **ما اتعملش** (بصراحة)
 
 - **مفيش تتبّع للتحويل**: بنعرف كام إشعار اتبعت، بس مش بنعرف كام واحد فيهم أدّى لطلب فعلي.
