@@ -178,6 +178,33 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     }
   }
 
+  Future<void> _showRescheduleSupport() async {
+    final openSupport = await showDialog<bool>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('جدولة الموعد عبر الإدارة'),
+          content: const Text(
+            'مفيش موعد صريح متاح للاقتراح من جدولك حاليًا. تواصل مع الإدارة أو ابعت رسالة، '
+            'والإدارة هتنسّق الموعد الجديد وتبلّغ العميل.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('لاحقًا')),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop(true),
+              icon: const Icon(Icons.support_agent_outlined),
+              label: const Text('تواصل مع الإدارة'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (openSupport == true && mounted) {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupportContactScreen()));
+    }
+  }
+
   Future<void> _requestReschedule() async {
     setState(() {
       _acting = true;
@@ -192,7 +219,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       }).toList();
       if (!mounted) return;
       if (available.isEmpty) {
-        setState(() => _error = 'ضيف موعدًا متاحًا جديدًا في جدولك الأول، وبعدها ارجع اقترحه للعميل');
+        await _showRescheduleSupport();
         return;
       }
       final proposal = await showDialog<_RescheduleRequestDraft>(
@@ -680,7 +707,13 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
               OutlinedButton.icon(
                 onPressed: _acting ? null : _requestReschedule,
                 icon: const Icon(Icons.event_repeat_outlined),
-                label: const Text('اطلب تأجيل الموعد من العميل'),
+                label: const Text('اطلب تغيير الموعد من العميل'),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'الموعد لا يتغيّر إلا بعد موافقة العميل. لو لم يظهر موعد مناسب، تواصل مع الإدارة.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
             if (_photoMessage != null) ...[

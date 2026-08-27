@@ -260,6 +260,18 @@ export interface TeamMemberResponseDto {
   created_at: string;
 }
 
+// GET /admin/orders/:id/earning-shares — توزيع مستحقات الطاقم للأدمن فقط.
+export interface OrderEarningShareResponseDto {
+  technician_id: string;
+  full_name: string;
+  participant_role: 'leader' | 'team_member' | 'assistant';
+  technician_level: string;
+  /** الوزن الفعلي وقت التوزيع بعد تطبيق معامل الدور. */
+  share_weight: string;
+  pool_cents: number;
+  share_cents: number;
+}
+
 // مطابق لـ apps/api/src/modules/orders/dto/assign-assistant.dto.ts (ADR-0008)
 export interface AssignAssistantBody {
   technician_id: string;

@@ -412,3 +412,15 @@ class OrderRescheduleRequest {
         createdAt: DateTime.parse(json['created_at'] as String),
       );
 }
+
+class RescheduleDateOption {
+  final String date;
+  final bool available;
+
+  const RescheduleDateOption({required this.date, required this.available});
+
+  factory RescheduleDateOption.fromJson(Map<String, dynamic> json) => RescheduleDateOption(
+        date: json['date'] as String,
+        available: json['available'] as bool? ?? false,
+      );
+}

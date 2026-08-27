@@ -17,4 +17,13 @@ void main() {
     expect(request.proposedSlotId, 'slot-2');
     expect(request.proposedEndAt.difference(request.proposedAt), const Duration(hours: 2));
   });
+
+  test('parses opt-out reschedule date availability', () {
+    final available = RescheduleDateOption.fromJson({'date': '2026-09-03', 'available': true});
+    final blocked = RescheduleDateOption.fromJson({'date': '2026-09-04', 'available': false});
+
+    expect(available.date, '2026-09-03');
+    expect(available.available, isTrue);
+    expect(blocked.available, isFalse);
+  });
 }

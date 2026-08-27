@@ -222,9 +222,19 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
-  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك، لسلوت تاني لنفس الفني.
-  Future<Order> reschedule(String orderId, String newSlotId) async {
-    final data = await auth.authedRequest('POST', '/orders/$orderId/reschedule', body: {'new_slot_id': newSlotId});
+  Future<List<RescheduleDateOption>> listRescheduleOptions(String orderId) async {
+    final items = await auth.authedRequestList('/orders/$orderId/reschedule-options');
+    return items.map(RescheduleDateOption.fromJson).toList();
+  }
+
+  // نموذج الإتاحة opt-out: عدم وجود صف في جدول الفني يعني أن اليوم متاح. لذلك إعادة الجدولة
+  // باليوم هي المسار الافتراضي، بدل الاعتماد على slots صريحة قد تكون القائمة فيها فارغة.
+  Future<Order> reschedule(String orderId, String newDate) async {
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/reschedule',
+      body: {'new_scheduled_at': '${newDate}T00:00:00.000Z'},
+    );
     return Order.fromJson(data!);
   }
 

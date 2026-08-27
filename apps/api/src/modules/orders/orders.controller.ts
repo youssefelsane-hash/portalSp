@@ -113,6 +113,11 @@ export class OrdersController {
     return this.enrichedResponse(user.sub, await this.ordersService.reschedule(user.sub, id, dto));
   }
 
+  @Get(':id/reschedule-options')
+  async rescheduleOptions(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    return this.ordersService.listRescheduleOptionsForCustomer(user.sub, id);
+  }
+
   @Get(':id/reschedule-requests')
   async listRescheduleRequests(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.listRescheduleRequestsForCustomer(user.sub, id);
