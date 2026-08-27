@@ -6,6 +6,7 @@ import { AddressesService } from '../customers/addresses.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { ApproveQuoteItemsDto } from './dto/approve-quote-items.dto';
+import { ApproveInitialQuoteDto } from './dto/approve-initial-quote.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewOrderDto } from './dto/preview-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
@@ -18,6 +19,7 @@ import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { TECHNICIAN_CONTACT_VISIBLE_STATUSES } from './order-state-machine';
 import { Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
+import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
@@ -29,6 +31,7 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly orderItemsService: OrderItemsService,
+    private readonly inspectionQuoteService: InspectionQuoteService,
     private readonly orderTeamService: OrderTeamService,
     private readonly orderMediaService: OrderMediaService,
     private readonly addressesService: AddressesService,
@@ -166,6 +169,19 @@ export class OrdersController {
   @Post(':id/quote-items/decline')
   async declineQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const { order } = await this.orderItemsService.decline(user.sub, id);
+    return this.enrichedResponse(user.sub, order);
+  }
+
+  // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — العميل بيوافق على السعر اللي الفني حدده بعد
+  // المعاينة. الرفض مفيهوش endpoint منفصل عمداً — العميل يستخدم POST :id/cancel العادي (الحالة
+  // مضافة لـCUSTOMER_CANCELLABLE_STATUSES، صفر رسوم إلغاء إضافية لأن رسم المعاينة اتحصّل بالفعل).
+  @Post(':id/approve-initial-quote')
+  async approveInitialQuote(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveInitialQuoteDto,
+  ) {
+    const order = await this.inspectionQuoteService.approveInitialQuote(user.sub, id, dto.payment_choice ?? 'electronic');
     return this.enrichedResponse(user.sub, order);
   }
 
