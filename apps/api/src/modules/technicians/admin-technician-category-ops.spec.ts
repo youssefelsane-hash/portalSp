@@ -180,10 +180,11 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     );
     ids.orderCrewShortage = crewOrder.id;
 
-    // techBlocked عنده طلب نشط دلوقتي (working_now=true).
+    // techBlocked عنده طلب **مشتغل فيه فعلًا دلوقتي** (working_now=true) — docs/08 §72: الحالة
+    // لازم تكون من ENGAGED_TECHNICIAN_ORDER_STATUSES (في الطريق/وصل/شغال)، مش مجرد `accepted`.
     const [workingOrder] = await q(
       `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode)
-       VALUES ($1,$2,$3,$4,$5,$6,'accepted','pending',30000,0,'individual') RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,'technician_on_way','pending',30000,0,'individual') RETURNING id`,
       [`TESTOPS-WORK-${runId}`.slice(0, 24), ids.customerProfile, ids.techBlocked, ids.service, ids.address, ids.zone],
     );
     ids.orderWorking = workingOrder.id;
@@ -237,6 +238,9 @@ describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (do
     expect(online.hasZoneIssue).toBe(false);
     expect(online.openRequestsCount).toBe(1);
     expect(online.crewLeaderShortageCount).toBe(1);
+    // docs/08 §72 — طلبه في حالة `accepted` (مقبول بس لسه ما تحركش)، فـ"شغال دلوقتي" لازم تفضل
+    // false. ده كان بيرجع true قبل الإصلاح فالأدمن كان بيشوف فني قاعد في بيته "شغال".
+    expect(online.workingNow).toBe(false);
 
     const noZone = items.find((r) => r.id === ids.techNoZone)!;
     expect(noZone.hasZoneIssue).toBe(true);

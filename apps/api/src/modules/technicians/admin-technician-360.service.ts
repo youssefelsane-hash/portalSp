@@ -236,7 +236,8 @@ export class AdminTechnician360Service {
       ),
       this.dataSource.query<{ count: string }[]>(
         `SELECT COUNT(*) AS count FROM (
-           SELECT 1 FROM order_assignments WHERE technician_id = $1 AND assignment_status = 'sent'
+           -- 'viewed' برضه عرض مفتوح لسه مستني رد (docs/08 §72) — مش رد ولا انتهت مهلته.
+           SELECT 1 FROM order_assignments WHERE technician_id = $1 AND assignment_status IN ('sent', 'viewed')
            UNION ALL
            SELECT 1 FROM technician_work_opportunities WHERE technician_id = $1 AND status = 'offered' AND deleted_at IS NULL
          ) t`,

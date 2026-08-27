@@ -47,6 +47,11 @@ export interface DispatchDeliveryRow {
   respondedAt: string | null;
   expiresAt: string | null;
   isStale: boolean;
+  /** رقم الطلب الإنساني — الأدمن كان بيشوف "عرض الطلب" بس بلا أي هوية للطلب. */
+  orderNumber: string;
+  /** كام فني **مختلف** الطلب ده اتبعتله فعلًا (كل الجولات + فرص الشغل، بلا حدود النافذة الزمنية
+   *  للتبويب) — بلاغ المالك: «الطلب لما يتبعت لكذا حد ما بيبانليش اتبعت لكام». */
+  orderTechnicianCount: number;
 }
 
 interface RawRow {
@@ -62,6 +67,8 @@ interface RawRow {
   responded_at: string | null;
   expires_at: string | null;
   is_stale: boolean;
+  order_number: string;
+  order_technician_count: string;
   total_count: string;
 }
 
@@ -135,7 +142,8 @@ export class AdminDispatchDeliveryService {
         COUNT(*) FILTER (WHERE assignment_status = 'rejected') AS a_rejected,
         COUNT(*) FILTER (WHERE assignment_status = 'timeout') AS a_timeout,
         COUNT(*) FILTER (WHERE assignment_status = 'cancelled') AS a_cancelled,
-        COUNT(*) FILTER (WHERE assignment_status = 'sent' AND expires_at < now()) AS a_stale_sent,
+        -- 'viewed' برضه متأخر لو فات معاده بلا رد (docs/08 §72).
+        COUNT(*) FILTER (WHERE assignment_status IN ('sent', 'viewed') AND expires_at < now()) AS a_stale_sent,
         (SELECT COUNT(*) FILTER (WHERE status = 'offered') FROM wo_filtered) AS wo_offered,
         (SELECT COUNT(*) FILTER (WHERE status = 'accepted') FROM wo_filtered) AS wo_accepted,
         (SELECT COUNT(*) FILTER (WHERE status = 'declined') FROM wo_filtered) AS wo_declined,
@@ -150,7 +158,7 @@ export class AdminDispatchDeliveryService {
       WITH assignments_filtered AS (
         SELECT oa.id, oa.order_id, oa.technician_id, oa.assignment_status::text AS status,
                oa.sent_at, oa.responded_at, oa.expires_at,
-               (oa.assignment_status = 'sent' AND oa.expires_at < now()) AS is_stale
+               (oa.assignment_status IN ('sent', 'viewed') AND oa.expires_at < now()) AS is_stale
         FROM order_assignments oa
         JOIN orders o ON o.id = oa.order_id
         JOIN services s ON s.id = o.service_id
@@ -179,10 +187,23 @@ export class AdminDispatchDeliveryService {
       )
       SELECT f.id, f.kind, f.order_id, f.technician_id, tp.technician_code, u.full_name,
              f.status, f.context, f.sent_at, f.responded_at, f.expires_at, f.is_stale,
+             ord.order_number,
+             -- "اتبعت لكام فني" على مستوى الطلب: فنيين **مختلفين** عبر كل الجولات وكل فرص الشغل،
+             -- **بلا** قيد النافذة الزمنية للتبويب — السؤال إجماليّ عن الطلب نفسه، مش عن آخر N
+             -- ساعة. subquery محدودة بصفحة العرض (≤ perPage صف)، مش مسح كامل.
+             (
+               SELECT COUNT(*) FROM (
+                 SELECT technician_id FROM order_assignments WHERE order_id = f.order_id
+                 UNION
+                 SELECT technician_id FROM technician_work_opportunities
+                  WHERE order_id = f.order_id AND deleted_at IS NULL
+               ) d
+             ) AS order_technician_count,
              COUNT(*) OVER() AS total_count
       FROM feed f
       JOIN technician_profiles tp ON tp.id = f.technician_id
       JOIN users u ON u.id = tp.user_id
+      JOIN orders ord ON ord.id = f.order_id
       ORDER BY f.sent_at DESC
       LIMIT $4 OFFSET $5
       `,
@@ -203,6 +224,8 @@ export class AdminDispatchDeliveryService {
       respondedAt: r.responded_at,
       expiresAt: r.expires_at,
       isStale: r.is_stale,
+      orderNumber: r.order_number,
+      orderTechnicianCount: Number(r.order_technician_count),
     }));
 
     const summary: DispatchDeliverySummary = summaryRow

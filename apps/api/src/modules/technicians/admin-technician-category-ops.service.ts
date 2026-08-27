@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import {
   classifyTechnicianCapacity,
@@ -141,9 +141,14 @@ export class AdminTechnicianCategoryOpsService {
 
     const [activitySnapshot, workingRows, zoneCategoryRows, requestRows, crewLeaderRows, crewOfferRows] = await Promise.all([
       this.activityService.getActivitySnapshot(userIds),
+      // docs/08 §72 (بلاغ مالك) — "شغال دلوقتي" كانت بتتحسب من ACTIVE_TECHNICIAN_ORDER_STATUSES
+      // اللي بتشمل `accepted`: طلب اتقبل/اتأكّد بس الفني **لسه ما تحركش ليه ولا فتحه أصلاً**.
+      // فالأدمن كان بيشوف "شغال دلوقتي" لفني قاعد في بيته. ENGAGED_TECHNICIAN_ORDER_STATUSES
+      // (موجودة أصلاً، ADR-0018 §9) هي التعريف الحقيقي: في الطريق/واصل/بينفّذ. حجم الشغل
+      // النهاردة لسه ظاهر في عمود "القدرة النهاردة" المنفصل، فمفيش معلومة اتفقدت.
       this.dataSource.query<{ technician_id: string }[]>(
         `SELECT DISTINCT technician_id FROM orders WHERE technician_id = ANY($1::uuid[]) AND order_status = ANY($2::order_status[]) AND deleted_at IS NULL`,
-        [profileIds, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+        [profileIds, ENGAGED_TECHNICIAN_ORDER_STATUSES],
       ),
       this.dataSource.query<{ technician_id: string; zone_count: string; category_count: string }[]>(
         `SELECT tp.id AS technician_id,
@@ -154,7 +159,8 @@ export class AdminTechnicianCategoryOpsService {
       ),
       this.dataSource.query<{ technician_id: string; open_requests_count: string }[]>(
         `SELECT technician_id, COUNT(*) AS open_requests_count FROM (
-           SELECT technician_id FROM order_assignments WHERE technician_id = ANY($1::uuid[]) AND assignment_status = 'sent'
+           -- 'viewed' برضه عرض مفتوح لسه مستني رد (docs/08 §72).
+           SELECT technician_id FROM order_assignments WHERE technician_id = ANY($1::uuid[]) AND assignment_status IN ('sent', 'viewed')
            UNION ALL
            SELECT technician_id FROM technician_work_opportunities WHERE technician_id = ANY($1::uuid[]) AND status = 'offered' AND deleted_at IS NULL
          ) t GROUP BY technician_id`,

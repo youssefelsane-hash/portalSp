@@ -475,4 +475,32 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
     await dataSource.query(`UPDATE orders SET order_status = 'in_progress' WHERE id = $1`, [quoteOrder]);
     await dataSource.query(`UPDATE orders SET order_status = 'awaiting_quote_approval' WHERE id = $1`, [quoteOrder]);
   });
+  // docs/08 §72 — العرض بقى بيتعلّم `viewed` بمجرد ما جهاز الفني يسحبه. الاختبار ده بيثبّت
+  // الحتة الخطيرة في التغيير ده: العرض **لازم يفضل في القايمة** بعد ما يتعلّم، وإلا الفني بيشوف
+  // شغله مرة واحدة وبعدين القايمة تفضى.
+  it('سحب قايمة الطلبات المتاحة بيعلّم العرض viewed ومع ذلك بيفضل ظاهر في السحب اللي بعده', async () => {
+    const orderId = await insertOrder('viewed-mark');
+    const assignmentId = await insertAssignment(orderId, ids.technicianAProfile);
+
+    const first = await matchingService.listAvailableForTechnician(ids.technicianAUser);
+    expect(first.some((row) => row.order_id === orderId)).toBe(true);
+
+    const [afterFirst] = await dataSource.query(`SELECT assignment_status FROM order_assignments WHERE id = $1`, [
+      assignmentId,
+    ]);
+    expect(afterFirst.assignment_status).toBe(AssignmentStatus.VIEWED);
+
+    const second = await matchingService.listAvailableForTechnician(ids.technicianAUser);
+    expect(second.some((row) => row.order_id === orderId)).toBe(true);
+
+    // والقبول لسه شغال من حالة viewed — مش بس العرض ظاهر، هو لسه قابل للتنفيذ.
+    await dataSource.query(
+      `UPDATE orders SET order_status = 'completed'
+       WHERE technician_id = $1
+         AND order_status IN ('accepted','technician_on_way','technician_arrived','in_progress','awaiting_quote_approval')`,
+      [ids.technicianAProfile],
+    );
+    const accepted = await matchingService.accept(ids.technicianAUser, orderId);
+    expect(accepted.orderStatus).toBe(OrderStatus.ACCEPTED);
+  });
 });

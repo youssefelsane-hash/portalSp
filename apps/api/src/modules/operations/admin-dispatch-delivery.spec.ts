@@ -217,6 +217,26 @@ describe('AdminDispatchDeliveryService.getDeliveryObservability() (docs/08 §36.
     expect(row.isStale).toBe(true);
   });
 
+  // docs/08 §72 (بلاغ مالك: «الطلب لما يتبعت لكذا حد ما بيبانليش اتبعت لكام»).
+  it('كل صف بيحمل رقم الطلب وعدد الفنيين المختلفين اللي الطلب اتبعتلهم إجماليًا', async () => {
+    const techA = await insertTechnician('fanout-a');
+    const techB = await insertTechnician('fanout-b');
+    const techC = await insertTechnician('fanout-c');
+    const order = await insertOrder(ids.categoryB, ids.serviceB, ids.zoneB);
+    const [{ order_number: orderNumber }] = await q(`SELECT order_number FROM orders WHERE id = $1`, [order]);
+
+    const assignmentId = await insertAssignment({ orderId: order, technicianId: techA, status: 'sent', sentAgoMinutes: 3, expiresInMinutes: 10 });
+    await insertAssignment({ orderId: order, technicianId: techB, status: 'rejected', sentAgoMinutes: 4, expiresInMinutes: 10 });
+    // نفس الفني في جولة تانية ما يتعدّش مرتين، وفرصة شغل لفني تالت تتعدّ.
+    await insertWorkOpportunity({ orderId: order, technicianId: techB, status: 'declined', offeredAgoMinutes: 2 });
+    await insertWorkOpportunity({ orderId: order, technicianId: techC, status: 'offered', offeredAgoMinutes: 1 });
+
+    const { feed } = await service().getDeliveryObservability({ categoryId: ids.categoryB, hours: 24, page: 1, perPage: 50 });
+    const row = feed.items.find((i) => i.id === assignmentId)!;
+    expect(row.orderNumber).toBe(orderNumber);
+    expect(row.orderTechnicianCount).toBe(3);
+  });
+
   it('assignment لسه sent وقدام معاده — مش stale', async () => {
     const tech = await insertTechnician('fresh');
     const order = await insertOrder(ids.categoryA, ids.serviceA, ids.zoneA);

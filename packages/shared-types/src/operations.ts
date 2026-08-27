@@ -72,6 +72,9 @@ export interface DispatchDeliveryItemDto {
   // بس لـkind='assignment' (order_assignments عنده expires_at حقيقي) — دايمًا null لـwork_opportunity.
   expires_at: string | null;
   is_stale: boolean;
+  order_number: string;
+  // كام فني مختلف الطلب اتبعتله إجماليًا (كل الجولات + فرص الشغل، بلا قيد نافذة التبويب الزمنية).
+  order_technician_count: number;
 }
 
 // ملحوظة تسمية مقصودة: items/meta متعشّشين تحت feed مش على المستوى الأول جنب summary — لو كانوا

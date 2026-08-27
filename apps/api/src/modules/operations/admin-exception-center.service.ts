@@ -167,7 +167,8 @@ export class AdminExceptionCenterService {
       JOIN services s ON s.id = o.service_id
       JOIN technician_profiles tp ON tp.id = oa.technician_id
       JOIN users u ON u.id = tp.user_id
-      WHERE oa.assignment_status = 'sent' AND oa.expires_at < now()
+      -- 'viewed' = وصل واتعرض بس ما اترد عليهوش (docs/08 §72) — استثناء زيّه بالظبط.
+      WHERE oa.assignment_status IN ('sent', 'viewed') AND oa.expires_at < now()
         AND ($1::uuid IS NULL OR s.category_id = $1)
         AND ($2::uuid IS NULL OR o.service_zone_id = $2)
       ORDER BY oa.expires_at ASC
