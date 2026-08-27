@@ -6,7 +6,7 @@ import 'core/deep_link_router.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
-import 'features/catalog/home_screen.dart';
+import 'features/shell/customer_shell.dart';
 import 'features/notifications/floating_notification_alert.dart';
 
 void main() {
@@ -61,6 +61,7 @@ class _AuthGate extends StatelessWidget {
     if (auth.biometricUnlockPending) {
       return const BiometricUnlockScreen();
     }
-    return auth.isAuthenticated ? const HomeScreen() : const LoginScreen();
+    // القشرة بالشريط السفلي هي نقطة الدخول دلوقتي مش HomeScreen مباشرة (docs/08 §75-أ).
+    return auth.isAuthenticated ? const CustomerShell() : const LoginScreen();
   }
 }

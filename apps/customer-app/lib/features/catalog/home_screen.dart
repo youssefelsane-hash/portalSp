@@ -8,15 +8,15 @@ import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
-import '../account/account_screen.dart';
 import '../notifications/notifications_repository.dart';
 import '../notifications/notifications_screen.dart';
-import '../orders/orders_screen.dart';
 import '../support/support_contact_repository.dart';
 import '../support/support_contact_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
-import 'category_card.dart';
+import 'category_tile.dart';
+import 'home_header.dart';
+import 'trust_strip.dart';
 import 'branding_repository.dart';
 import 'homepage_content_repository.dart';
 import 'hero_image_crossfade.dart';
@@ -45,7 +45,11 @@ import '../projects/create_project_screen.dart';
 // ارتفاع الـhero (docs/08 §64.د) — ثابت صريح عشان مساحة الصورة ما تعتمدش على طول النص. القيمة
 // دي بتدي الصورة مساحة حقيقية (كانت بتطلع شريط رفيع لما النص يقصر) وفي نفس الوقت بتسيب الفئات
 // المميّزة ظاهرة تحتها من غير scroll على شاشات الموبايل العادية.
-const double _heroHeight = 300;
+// docs/08 §75-ب (بلاغ مالك 2026-08-27: «نسيب الصورة الموجودة ولكن نصغرها شوية، بس برضه الـsearch
+// يبقى واضح»). 300 كانت بتاكل الشاشة كلها فوق الطية — الفئات مكانتش بتبان غير بعد scroll، وده
+// اللي بيخلي الشاشة تحس إنها "صفحة إعلان" مش أداة. 200 بتسيب البحث + أول صف فئات ظاهرين مع
+// بعض على شاشة موبايل عادية، والصورة لسه ليها حضور حقيقي.
+const double _heroHeight = 200;
 
 const List<List<Color>> _heroGradients = [
   [Color(0xFF1C3A6E), Color(0xFF2F5AA6), Color(0xFF4D78C4)],
@@ -79,6 +83,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<ServiceCategory>? _categories;
   String? _error;
   String _trustMessage = '';
+  // معلومات الضمان الحقيقية من السيرفر (docs/08 §75-ج) — `null` لحد ما توصل، والشريط
+  // بيخفي بند الضمان بدل ما يعرض رقم مخترع.
+  TrustInfo? _trustInfo;
   List<String> _heroImages = [];
   List<ImageProvider<Object>> _heroImageProviders = const [];
   HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
@@ -139,6 +146,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {
       if (mounted) setState(() => _error = 'تعذّر تحميل الفئات — اسحب لتحديث');
     }
+    // معلومات الثقة مستقلة عن الفئات: فشلها ما يمنعش عرض الكتالوج، ونجاحها ما يستناش الفئات.
+    final trust = await fetchTrustInfo();
+    if (mounted && trust != null) setState(() => _trustInfo = trust);
   }
 
   void _applyHomepageContent(HomepageContent content) {
@@ -194,15 +204,26 @@ class _HomeScreenState extends State<HomeScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: _buildAppBarTitle(),
+          // docs/08 §75-ب — العنوان بقى هو عنوان الشاشة نفسه («فوق خالص يبقى العنوان إن
+          // الـcustomer بينتمي لي»). طلباتي/حسابي اتنقلوا للشريط السفلي، فالرأس فضي من
+          // الأربع أيقونات المزحومة وفضل فيه اللي بيتفتح عند حدث بس: الإشعارات والدعم.
+          titleSpacing: 8,
+          // شعار الأدمن المرفوع بيفضل ظاهر — بس صغير على الجنب، مش عنوان الشاشة. لو الأدمن
+          // ما رفعش شعار (`isDefault`)، مفيش leading خالص والعنوان بياخد العرض كله: الشكل
+          // المرجعي اللي المالك بعته مفيهوش شعار في الرأس أصلاً.
+          leading: _brandingLogo != null && !_brandingLogo!.isDefault && _brandingLogo!.url.isNotEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  child: Image.network(
+                    _resolveHeroImageUrl(_brandingLogo!.url),
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                )
+              : null,
+          title: HomeLocationHeader(onAddressChanged: (_) => _load()),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.receipt_long),
-              tooltip: 'طلباتي',
-              onPressed: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const OrdersScreen())),
-            ),
             Builder(
               builder: (context) => FutureBuilder<int>(
                 future: NotificationsRepository(
@@ -233,13 +254,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 MaterialPageRoute(builder: (_) => const SupportContactScreen()),
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.person_outline),
-              tooltip: 'حسابي',
-              onPressed: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const AccountScreen())),
-            ),
           ],
         ),
         body: RefreshIndicator(
@@ -249,72 +263,6 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               _buildHero(context),
               const SizedBox(height: 12),
-              // Banner المشروعات (docs/01B مهمة A §2)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
-                ),
-                child: Card(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  margin: EdgeInsets.zero,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => CreateProjectScreen(
-                            auth: context.read<AuthRepository>(),
-                          ),
-                        ),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.home_work_outlined,
-                            size: 32,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onPrimaryContainer,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'بتشطب شقتك؟',
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                                Text(
-                                  'ابدأ مشروعك مع صُنّاع',
-                                  style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onPrimaryContainer,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.chevron_left,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onPrimaryContainer,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -385,30 +333,61 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       )
                     else
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 12,
-                              crossAxisSpacing: 12,
-                              childAspectRatio: 0.95,
+                      // docs/08 §75-ب — تلات أعمدة بخانات مدمجة بدل عمودين بكروت كاملة.
+                      // عمودين معناه كارت عرضه نص الشاشة لفئة واحدة: تسع فئات = ثلاث شاشات
+                      // scroll، والعميل مش شايف اللي متاح. تلاتة بتخلّي تسع فئات في شاشة
+                      // واحدة تقريبًا — وده الفرق الحقيقي بين "قائمة" و"واجهة اختيار".
+                      // `childAspectRatio` محسوب: صورة 1:1 + 8 مسافة + سطرين اسم ≈ العرض + 44.
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          const columns = 3;
+                          const spacing = 12.0;
+                          final tileWidth =
+                              (constraints.maxWidth - spacing * (columns - 1)) / columns;
+                          // الارتفاع المحجوز للاسم بيتحسب من مقياس خط المستخدم الفعلي —
+                          // رقم ثابت هنا كان بيعمل overflow مع تكبير الخط (اتلقط بالاختبار).
+                          final labelHeight = categoryTileLabelHeight(context);
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              mainAxisSpacing: 16,
+                              crossAxisSpacing: spacing,
+                              childAspectRatio: tileWidth / (tileWidth + labelHeight),
                             ),
-                        itemCount: _categories!.length,
-                        itemBuilder: (context, index) {
-                          final category = _categories![index];
-                          return CategoryCard(
-                            category: category,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    ServicesScreen(category: category),
-                              ),
-                            ),
+                            itemCount: _categories!.length,
+                            itemBuilder: (context, index) {
+                              final category = _categories![index];
+                              return CategoryTile(
+                                category: category,
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        ServicesScreen(category: category),
+                                  ),
+                                ),
+                              );
+                            },
                           );
                         },
                       ),
+                    // ترتيب المالك الصريح: «كارت التشطيب يفضل موجود، لكن **بعد الخدمات
+                    // مباشرة**». منطقيًا برضه — العميل اللي دوّر في الفئات وما لقاش اللي
+                    // بيدور عليه، ده بالظبط اللي محتاج يعرف إن فيه مسار مشروع كامل.
+                    const SizedBox(height: 24),
+                    _ProjectCta(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CreateProjectScreen(
+                            auth: context.read<AuthRepository>(),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    TrustStrip(warranty: _trustInfo),
                     _buildTipsSection(context),
                     _buildSupportSection(context),
                   ],
@@ -605,18 +584,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // raster حقيقية) بدل النص الثابت "صُنّاع" (بلاغ مالك صريح 2026-08-23: "الصور مش بتظهر على
   // الأبليكيشن" — التطبيق أصلاً مكانش بيستهلك /branding خالص). errorBuilder يرجع للنص لو تحميل
   // الصورة فشل لأي سبب (شبكة، رابط اترفض)، مش بيوقف التطبيق أبدًا.
-  Widget _buildAppBarTitle() {
-    final logo = _brandingLogo;
-    if (logo == null || logo.isDefault || logo.url.isEmpty) {
-      return const Text('صُنّاع');
-    }
-    return Image.network(
-      logo.url,
-      height: 32,
-      fit: BoxFit.contain,
-      errorBuilder: (_, _, _) => const Text('صُنّاع'),
-    );
-  }
 
   // "نصايح مفيدة" — مُدارة من الأدمن دلوقتي (تفاصيل في تعليق _tipFallbackColors فوق). مبتظهرش
   // خالص لو الأدمن مسحها كلها (نفس فلسفة رسالة الثقة/بيانات الدعم — بيختفي بهدوء بدل قسم فاضي).
@@ -968,6 +935,72 @@ class _FeaturedCategoryItem extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// كارت «بتجهز أو بتشطب بيتك؟» — بعد الخدمات مباشرة (docs/08 §75-ج).
+///
+/// النص حرفيًا زي ما المالك كتبه. والمكان مقصود: العميل اللي عدّى على كل الفئات وما لقاش
+/// اللي بيدور عليه هو بالظبط اللي محتاج يعرف إن فيه مسار مشروع كامل — عرضه فوق قبل الخدمات
+/// كان بيزاحم أول حاجة العميل جاي عشانها.
+class _ProjectCta extends StatelessWidget {
+  const _ProjectCta({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.primaryContainer,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'بتجهز أو بتشطب بيتك؟ 🏠',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'من المعاينة لحد التسليم، خلّي مشروعك كله في مكان واحد.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'ابدأ مشروع',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.arrow_back_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
