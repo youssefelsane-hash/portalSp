@@ -1453,10 +1453,27 @@ o.order_number ILIKE :search ESCAPE '\'
 جديدة للبحث الموسّع)، `admin-customer-360.spec.ts` (اختبارين جداد لـ`listOrderHistory`)،
 `order-internal-notes.spec.ts` (اختبارين).
 
-**مؤجّل من نفس البند** (نطاق أكبر، هيتعمل في دفعة لاحقة): شكاوى/ضمان مرتبطين بالطلب inline (الفلتر
-`order_id` مش موجود في `admin-support.controller.ts`/`admin-warranty-claims.controller.ts` رغم إن
-العمود موجود)، شات الطلب inline (`admin-chat.controller.ts` مبني للـsupport_chat بس)، وعرض
-`GET /admin/orders/:id/earning-shares` (endpoint موجود من زمان، صفر UI مستهلك له).
+**مؤجّل من نفس البند** (نطاق أكبر، هيتعمل في دفعة لاحقة): شات الطلب inline (`admin-chat.controller.ts`
+مبني للـsupport_chat بس)، وعرض `GET /admin/orders/:id/earning-shares` (endpoint موجود من زمان،
+صفر UI مستهلك له).
+
+### تحديث — شكاوى وضمان مرتبطين بالطلب inline (docs/08 §73 بند 3 المؤجّل، اتفعّل)
+
+الفلتر `order_id` كان فعلاً غايب من `AdminSupportController.listAll()`/`SupportService.listAllForAdmin()`
+و`AdminWarrantyClaimsController.list()` رغم إن العمود موجود في الجدولين. اتضاف كـquery param
+اختياري (`?order_id=`) للاتنين — نفس نمط `status` الموجود بالفعل في مسار الضمان. شاشة تفاصيل
+الطلب في الأدمن (`apps/admin/src/app/orders/[id]/page.tsx`) بقى فيها كارت "شكاوى وضمان مرتبطين
+بالطلب" (بيظهر بس لو فيه عناصر فعلاً) بيجيب من المسارين المتوسّعين ويعرض رابط مباشر لكل شكوى
+(`/support/:id`، الشاشة العامة الموجودة بالفعل). مطالبات الضمان مالهاش صفحة تفصيل مستقلة حاليًا،
+فالرابط بيودّي لقايمة `/warranty-claims` العامة (عرض بس، مفيش endpoint جديد للتفصيل — نفس فلسفة
+"Do NOT overbuild").
+
+اتأكد حي على Postgres حقيقي: `complaint-customer-notifications.spec.ts` (اختبار جديد لـ
+`listAllForAdmin(orderId)`)، `warranty-claim-concurrency.spec.ts` (اختبار جديد لفلتر `order_id`
+في `AdminWarrantyClaimsController.list()`). **بَقّة حقيقية اتلقطت أثناء التعديل**: إضافة باراميتر
+`order_id` في نص توقيع `list()` (بين `status` والـpagination) كسرت استدعاء positional-args قديم
+في نفس السبيك (`adminController.list(undefined, '1', '100')` بقى بيبعت `'1'` كـ`order_id` مش
+`page`) — اتصلحت (`list(undefined, undefined, '1', '100')`). `apps/admin` تايبسكريبت نظيف.
 
 ## معاينة-ثم-سعر كوضع حجز (ADR-0044، docs/08 §73 بند 1)
 

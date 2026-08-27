@@ -170,8 +170,10 @@ export class SupportService {
       .getMany();
   }
 
-  async listAllForAdmin(): Promise<Complaint[]> {
-    return this.complaints.find({ order: { createdAt: 'DESC' } });
+  // orderId اختياري (docs/08 §73 بند 3 المؤجّل، تفعيل لاحقًا) — الأدمن بيشوف الشكاوى المرتبطة
+  // بطلب معيّن من شاشة تفاصيله، بدل ما يدوّر في شاشة الشكاوى العامة بالراحة.
+  async listAllForAdmin(orderId?: string): Promise<Complaint[]> {
+    return this.complaints.find({ where: orderId ? { orderId } : {}, order: { createdAt: 'DESC' } });
   }
 
   async addMessage(user: JwtPayload, complaintId: string, dto: AddComplaintMessageDto): Promise<ComplaintMessage> {

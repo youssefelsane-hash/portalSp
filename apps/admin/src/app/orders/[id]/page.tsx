@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import type {
   AdminTechnicianResponseDto,
+  ComplaintResponseDto,
   OrderDetailResponseDto,
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
@@ -60,6 +61,14 @@ interface OrderInternalNoteResponseDto {
   note: string;
   created_at: string;
 }
+
+// شكاوى/ضمان مرتبطين بالطلب (docs/08 §73 بند 3 المؤجّل — الجزء ده اتفعّل) — GET /admin/warranty-claims?order_id=.
+interface OrderWarrantyClaimSummaryDto {
+  id: string;
+  status: string;
+  defect_description: string;
+  created_at: string;
+}
 import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -90,6 +99,7 @@ import {
   REFUND_METHOD_LABELS,
   REFUND_STATUS_LABELS,
 } from '@/lib/payments-labels';
+import { COMPLAINT_STATUS_LABELS, complaintStatusTone } from '@/lib/support-labels';
 import { CAPACITY_TIER_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 
@@ -176,6 +186,10 @@ export default function OrderDetailPage() {
   // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — مش شات/رسالة عادية، العميل/الفني
   // مالهومش أي وصول لها خالص.
   const [internalNotes, setInternalNotes] = useState<OrderInternalNoteResponseDto[]>([]);
+  // شكاوى/ضمان مرتبطين بالطلب (docs/08 §73 بند 3 المؤجّل) — عرض بس، الإجراءات نفسها في شاشة
+  // الشكاوى/الضمان العامة (/support، /warranty-claims) — رابط مباشر لكل عنصر من هنا.
+  const [linkedComplaints, setLinkedComplaints] = useState<ComplaintResponseDto[]>([]);
+  const [linkedWarrantyClaims, setLinkedWarrantyClaims] = useState<OrderWarrantyClaimSummaryDto[]>([]);
   const [newInternalNote, setNewInternalNote] = useState('');
   const [isSavingNote, setIsSavingNote] = useState(false);
 
@@ -216,6 +230,13 @@ export default function OrderDetailPage() {
     authedFetch<OrderInternalNoteResponseDto[]>(`/admin/orders/${id}/notes`)
       .then(setInternalNotes)
       .catch(() => setInternalNotes([]));
+    // شكاوى/ضمان مرتبطين بالطلب (docs/08 §73 بند 3 المؤجّل) — مسارين منفصلين عمداً زي باقي المصادر الثانوية فوق.
+    authedFetch<ComplaintResponseDto[]>(`/admin/complaints?order_id=${id}`)
+      .then(setLinkedComplaints)
+      .catch(() => setLinkedComplaints([]));
+    authedFetchPaginated<OrderWarrantyClaimSummaryDto>(`/admin/warranty-claims?order_id=${id}&per_page=50`)
+      .then(({ items }) => setLinkedWarrantyClaims(items))
+      .catch(() => setLinkedWarrantyClaims([]));
   }
 
   async function handleAddInternalNote(e: FormEvent) {
@@ -2028,6 +2049,43 @@ export default function OrderDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* شكاوى/ضمان مرتبطين بالطلب (docs/08 §73 بند 3 المؤجّل — الجزء ده اتفعّل) — عرض بس،
+            مركز الاتصال يشوف بسرعة هل الطلب ده وراه شكوى/مطالبة ضمان مفتوحة قبل ما يتصرف فيه،
+            بدل ما يدوّر في شاشتين منفصلتين. الإجراءات نفسها (رد/حل/مراجعة) في الشاشات العامة. */}
+        {(linkedComplaints.length > 0 || linkedWarrantyClaims.length > 0) && (
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle className="text-base">
+                شكاوى وضمان مرتبطين بالطلب ({linkedComplaints.length + linkedWarrantyClaims.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              {linkedComplaints.map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/support/${c.id}`}
+                  className="flex items-center justify-between rounded-md border p-2 text-sm hover:bg-muted/50"
+                >
+                  <span>شكوى: {c.title}</span>
+                  <StatusChip tone={complaintStatusTone(c.complaint_status)}>
+                    {COMPLAINT_STATUS_LABELS[c.complaint_status]}
+                  </StatusChip>
+                </Link>
+              ))}
+              {linkedWarrantyClaims.map((w) => (
+                <Link
+                  key={w.id}
+                  href="/warranty-claims"
+                  className="flex items-center justify-between rounded-md border p-2 text-sm hover:bg-muted/50"
+                >
+                  <span>مطالبة ضمان: {w.defect_description}</span>
+                  <Badge variant="outline">{w.status}</Badge>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3، بلاغ مالك صريح: "ملاحظات داخلية
             للكول سنتر لا يراها العميل أو الفني") — نفس نمط is_internal_note في الشكاوى، بس هنا
