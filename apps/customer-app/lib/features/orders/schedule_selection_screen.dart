@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api_client.dart';
+
 // "امتى تحب تنفّذ الشغل؟" (docs/08 §154، ADR-0018 §2) — العميل بيختار يوم بس، مش ساعة محددة.
 // **تصحيح (ADR-0018 §2)**: النسخة الأولى من الشاشة دي كانت بتاخد ساعة محددة كمان ("النهاردة
 // الساعة كام؟") — ده يخالف قصد المالك الصريح: "العميل بيختار اليوم، مش بيوعد الفني بساعة معينة
@@ -27,11 +29,40 @@ DateTime _startOfDay(DateTime date) => DateTime(date.year, date.month, date.day)
 // (استعلام أهلية يومي متكرر بحد أقصى، مش نطاق مفتوح).
 const int _maxFlexibleRangeDays = 14;
 
-class ScheduleSelectionScreen extends StatelessWidget {
+class ScheduleSelectionScreen extends StatefulWidget {
   // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — لو false، كارت "مرن" بيتخفي
   // بدل ما العميل يختاره ويترفض من الباك-إند بعدين (orders.service.ts).
   final bool allowsDateRangeBooking;
   const ScheduleSelectionScreen({super.key, required this.allowsDateRangeBooking});
+
+  @override
+  State<ScheduleSelectionScreen> createState() => _ScheduleSelectionScreenState();
+}
+
+class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
+  // عتبة "الشغل القريب" بالساعات (docs/08 §61.3) — null لحد ما تتحمّل، و0 معناه الأدمن عطّل
+  // النظام ده فمفيش تنبيه يتعرض. فشل التحميل بيسيبها null بهدوء: التنبيه معلومة مساعدة،
+  // مايصحّش يمنع العميل من اختيار موعد.
+  int? _nearTermHours;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBookingPolicy();
+  }
+
+  // `/booking-policy` عام (`@Public()`) — فالشاشة دي بتقراه بنفسها بدل ما تستنى الشاشة اللي
+  // فتحتها تمرّرهولها. ده مهم لأن ليها مدخلين مختلفين (`create_order_screen` و
+  // `catalog_navigation`)، وواحد منهم مكانش بيعرف الرقم ده أصلاً.
+  Future<void> _loadBookingPolicy() async {
+    try {
+      final data = await apiRequest('GET', '/booking-policy');
+      if (!mounted) return;
+      setState(() => _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt());
+    } catch (error) {
+      debugPrint('فشل تحميل سياسة المواعيد: $error');
+    }
+  }
 
   Future<void> _pickSpecificDate(BuildContext context) async {
     final now = DateTime.now();
@@ -84,7 +115,7 @@ class ScheduleSelectionScreen extends StatelessWidget {
                 highlighted: true,
                 onTap: () => _pickSpecificDate(context),
               ),
-              if (allowsDateRangeBooking) ...[
+              if (widget.allowsDateRangeBooking) ...[
                 const SizedBox(height: 12),
                 _ScheduleOptionCard(
                   icon: Icons.event_repeat_outlined,
@@ -92,6 +123,15 @@ class ScheduleSelectionScreen extends StatelessWidget {
                   subtitle: 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
                   onTap: () => _pickFlexibleRange(context),
                 ),
+              ],
+              // مكان التنبيه ده هنا مش في شاشة تأكيد الطلب (نقل مقصود، docs/08 §76-و، بلاغ
+              // مالك صريح): «الكاستمر بيختار المواعيد من برا، فيه صفحة خاصة بالمواعيد أصلاً…
+              // هنشيل دي من هنا ونحطها مع بتاعت اختار معادك». والمنطق يوافق: نصيحة عن
+              // استعجال الموعد قيمتها الوحيدة **وقت اختيار الموعد**؛ بعد ما العميل يختار
+              // ويوصل للدفع بتبقى مجرد نص بيزحم الشاشة.
+              if (_nearTermHours != null && _nearTermHours! > 0) ...[
+                const SizedBox(height: 20),
+                _BookingTimingNotice(nearTermHours: _nearTermHours!),
               ],
             ],
           ),
@@ -144,6 +184,48 @@ class _ScheduleOptionCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// تنبيه سياسة المواعيد (docs/08 §61.3). نصّه مقصود يكون **مساعد مش تحذيري**: بيقول للعميل
+/// إيه أسرع طريق لو مستعجل، وبيطمّنه إن المواعيد الأبعد مش محتاجة انتظار — من غير ما يحسّسه
+/// إن الحجز العادي فيه مشكلة.
+class _BookingTimingNotice extends StatelessWidget {
+  const _BookingTimingNotice({required this.nearTermHours});
+
+  final int nearTermHours;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.bolt_outlined, size: 20, color: scheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('محتاج الخدمة بسرعة؟', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  'لو الموعد عاجل، اختار خدمة طوارئ. المواعيد العادية خلال الـ$nearTermHours ساعة الجاية '
+                  'بتحتاج تأكيد الفني الأول، أما المواعيد بعد كده فمش محتاجة انتظار موافقة إضافية.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

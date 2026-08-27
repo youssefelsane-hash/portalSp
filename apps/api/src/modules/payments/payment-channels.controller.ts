@@ -1,11 +1,26 @@
 import { Controller, Get } from '@nestjs/common';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { JwtPayload } from '../auth/types/authenticated-request';
 import { UserType } from '../auth/entities/user.entity';
 import { SettingsService } from '../settings/settings.service';
 import { PaymentChannelResponseDto } from './dto/payments-response.dto';
 import { PaymentMethod } from './entities/payment.entity';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymobProvider } from './gateways/paymob-provider.service';
+
+/**
+ * سبب عدم إتاحة طريقة دفع **بلغة العميل** (docs/08 §76-ز).
+ *
+ * بلاغ مالك صريح: «مش عايزين أي comment تدل إن الأدمن هو المفروض يشوفها». الأسباب القديمة
+ * كانت مكتوبة لمشغّل النظام مش للعميل («الطريقة مقفولة من إعدادات الأدمن»، «بيانات تشغيل
+ * الطريقة غير مكتملة»)، وواحد منها كان بيطبع أسماء متغيّرات إعداد Paymob الناقصة حرفيًا في
+ * شاشة العميل — تسريب بنية تحتية مش بس صياغة وحشة.
+ *
+ * العميل مش محتاج يعرف **ليه** الطريقة مش شغّالة — ده مالوش أي أثر على قراره. محتاج يعرف
+ * إنها مش متاحة وإن قدّامه بدائل. التشخيص كله بيروح لـ`admin_note` اللي بيتبعت للأدمن بس.
+ */
+const CUSTOMER_UNAVAILABLE_REASON = 'الطريقة دي مش متاحة دلوقتي — اختار طريقة تانية';
 
 // Script 2 Part I (findings #46/#47/#48) — كان مفيش endpoint خالص يعرض للعميل أي طرق دفع مُفعّلة
 // فعليًا في الباك-إند. الكلاينت (apps/customer-app) كان بيثبّت قايمة طرق دفع ثابتة في الكود، فلو
@@ -21,7 +36,8 @@ export class PaymentChannelsController {
   ) {}
 
   @Get()
-  async list(): Promise<PaymentChannelResponseDto[]> {
+  async list(@CurrentUser() user: JwtPayload): Promise<PaymentChannelResponseDto[]> {
+    const isAdmin = user?.userType === UserType.ADMIN;
     // الكاش استثناء عمدًا: `CashProvider.isConfigured` ثابتة `true` دايمًا (مفيش بوابة خارجية
     // تتفحص)، لكن لازم تفضل قابلة للتعطيل من الأدمن برضه (`payments.cash_enabled`، بَقّة
     // تسليم كاش على طلب بلا فني، docs/08) — عكس باقي البوابات اللي isConfigured بتعكس وجود
@@ -45,32 +61,37 @@ export class PaymentChannelsController {
     const channels: PaymentChannelResponseDto[] = this.registry.listAll().map((entry) => {
       const isEnabled = enabledByMethod.get(entry.method) ?? false;
       const isAvailable = isEnabled && entry.isConfigured;
-      let unavailableReason: string | null = null;
-      if (!isEnabled) unavailableReason = 'الطريقة مقفولة من إعدادات الأدمن';
+      let adminNote: string | null = null;
+      if (!isEnabled) adminNote = 'الطريقة مقفولة من إعدادات الأدمن';
       else if (!entry.isConfigured && entry.method === PaymentMethod.CARD) {
         const missing = this.paymobProvider.getConfigurationStatus().missingFields;
-        unavailableReason = `إعداد Paymob غير مكتمل${missing.length ? `: ${missing.join(', ')}` : ''}`;
-      } else if (!entry.isConfigured) unavailableReason = 'بيانات تشغيل الطريقة غير مكتملة';
+        adminNote = `إعداد Paymob غير مكتمل${missing.length ? `: ${missing.join(', ')}` : ''}`;
+      } else if (!entry.isConfigured) adminNote = 'بيانات تشغيل الطريقة غير مكتملة';
       return {
         method: entry.method,
         is_enabled: isEnabled,
         is_configured: entry.isConfigured,
         is_available: isAvailable,
-        unavailable_reason: unavailableReason,
+        unavailable_reason: isAvailable ? null : CUSTOMER_UNAVAILABLE_REASON,
+        // الحقل ده بيتحذف تمامًا من رد العميل (مش بيترجع null) — أقل سطح تسريب ممكن.
+        ...(isAdmin && adminNote ? { admin_note: adminNote } : {}),
       };
     });
 
     const paymobStatus = this.paymobProvider.getConfigurationStatus();
+    const installmentAvailable = installmentsEnabled && paymobStatus.configured;
+    const installmentAdminNote = !installmentsEnabled
+      ? 'التقسيط مقفول من إعدادات الأدمن'
+      : !paymobStatus.configured
+        ? `التقسيط يحتاج Paymob مكتمل${paymobStatus.missingFields.length ? `: ${paymobStatus.missingFields.join(', ')}` : ''}`
+        : null;
     channels.push({
       method: 'installment',
       is_enabled: installmentsEnabled,
       is_configured: paymobStatus.configured,
-      is_available: installmentsEnabled && paymobStatus.configured,
-      unavailable_reason: !installmentsEnabled
-        ? 'التقسيط مقفول من إعدادات الأدمن'
-        : !paymobStatus.configured
-          ? `التقسيط يحتاج Paymob مكتمل${paymobStatus.missingFields.length ? `: ${paymobStatus.missingFields.join(', ')}` : ''}`
-          : null,
+      is_available: installmentAvailable,
+      unavailable_reason: installmentAvailable ? null : CUSTOMER_UNAVAILABLE_REASON,
+      ...(isAdmin && installmentAdminNote ? { admin_note: installmentAdminNote } : {}),
     });
     return channels;
   }
