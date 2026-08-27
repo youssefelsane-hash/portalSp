@@ -171,6 +171,33 @@ interview_scheduled→test_passed→approved` موثّق بالتفصيل في `
 - **اتعمله اختبار حي كامل**: لينك يوتيوب حقيقي اتضاف — `platform` اتكشف صح، `thumbnail_url` رجع `null` بأمان (البروكسي في بيئة التطوير دي بيمنع الوصول لـ`youtube.com` — نفس القيد الموثّق لباقي التكاملات الخارجية، مش بَقّة في الكود؛ اتأكد السلوك السليم من اللوج: تحذير واضح + `200` نجاح مش `500`)، لينك انستجرام من غير مفتاح Graph API اتحفظ عادي بـ`thumbnail_url=null`، لينك من دومين مش مدعوم اترفض `400`، القايمة والحذف اشتغلوا صح، واللينكات ظهرت في البروفايل العام للعميل.
 - **بَقّة حقيقية اتلقطت واتصلحت وقت الاختبار الحي (مش في الباك-إند — في `apps/technician-app`)**: `core/api_client.dart`'s `_send()` مكانتش بتدعم `DELETE` method خالص (بس `GET`/`POST`/`PATCH`) — أول استخدام لـ`DELETE` في التطبيق ده كان `PortfolioRepository.remove()`، فالبَقّة اتكشفت أول ما اتعمل. اتصلحت بإضافة `case 'DELETE': return http.delete(...)`. `apps/customer-app`'s نسخة كانت أصلاً بتدعم `DELETE` (مستخدمة لحذف العناوين من زمان).
 
+### بَقّة حقيقية اتلقطت واتصلحت — فيديو تيك توك بيفشل يشتغل رغم إن الـthumbnail ظاهر (docs/08 §81)
+
+بلاغ مالك بلينك تيك توك حقيقي: الفني ضاف لينك، الـthumbnail ظهر صح في بروفايله للعميل، بس
+لما العميل يدوس يشغّل الفيديو بترجع "الرابط مش بصيغة معروفة".
+
+**السبب**: الباك-إند بيجيب المعاينة بنداء HTTP حقيقي (`fetchOembedPreview()`) بيتبع أي
+short link (redirect) تلقائيًا — فبترجع thumbnail صح حتى لو اللينك المخزّن short link
+(`vm.tiktok.com/...`). لكن `apps/customer-app`'s `portfolio_embed_url.dart` كان بيحاول يفكّ
+**نفس اللينك الخام** بـregex محلي (`RegExp(r'/video/(\d+)')`) بلا أي نداء شبكة — بيفشل مع
+short links لأنها مفيهاش `/video/<رقم>` صريح.
+
+**الحل**: عمود جديد `technician_portfolio_links.embed_video_id` (migration `0212`، nullable) —
+بيتملى وقت الإضافة من `embed_product_id` (حقل رسمي في رد oEmbed تيك توك الرسمي، مش استنتاج)
+لو `platform=tiktok` والـoEmbed نجح. معروض في `PortfolioLinkResponseDto`. الكلاينت بقى بيفضّله
+على تفكيك اللينك الخام، ولو null (لينكات قديمة قبل الإصلاح، أو oEmbed فشل وقتها) بيرجع لنفس
+الـregex كـfallback — صفر كسر لأي لينك شغال بالفعل. **النطاق تيك توك بس** (ده اللي المالك بلّغ
+عنه بلينك حقيقي فشل) — يوتيوب/انستجرام/فيسبوك ليهم فجوات مشابهة أصغر، مؤجّلة عمدًا لحد ما
+يتبلّغ عنهم فعليًا.
+
+اتأكد حي على Postgres حقيقي (`portfolio-link-embed-video-id.spec.ts`، 3 اختبار، `fetch` مموّه
+بـرد oEmbed تيك توك حقيقي الشكل): حفظ `embed_video_id` صح، فشل الشبكة بيسيب اللينك يتحفظ
+بـ`embed_video_id=null`، يوتيوب مش بيتأثر (خارج النطاق عمدًا). **تعديل Flutter
+(`portfolio_embed_url.dart`, `models.dart`, `portfolio_link_viewer_screen.dart` في
+`apps/customer-app`) اتعمل يدويًا بعناية — مفيش Flutter SDK في بيئة السيشن دي لتشغيل
+`flutter analyze`/`flutter test` آليًا. اختبار وحدة جديد (`test/portfolio_embed_url_test.dart`،
+4 حالة) اتكتب بس **ما اتشغّلش فعليًا** — محتاج تأكيد من سيشن عندها Flutter SDK.**
+
 ## `GET /technician-companies` — تصفّح "اعتماد" للعميل (صُنّاع، `docs/06` §1.5، `docs/07` الجزء أ)
 
 `PublicTechnicianCompaniesController` (جديد، `@Roles(CUSTOMER)`) — العميل يقدر يشوف الشركات/الفرق **النشطة بس** عشان يختار واحدة يحجزها كاملة لطلب "اعتماد" (بدل ما يسيب المطابقة تختار له). `TechnicianCompaniesService.listActiveCompanies()` (جديدة) بتفلتر `is_active=true` — مختلفة عمداً عن `listForAdmin()` الموجودة (بترجع الكل، نشطة أو لأ، للإشراف). `toPublicCompanyResponseDto()` (جديدة) بترجّع `id`/`name`/`branch_count`/`staff_count` بس — **من غير** `owner_user_id`/`commercial_registration_number` اللي بترجعهم `toCompanyResponseDto()` العادية (بيانات إدارية داخلية مالهاش داعي تتعرض للعميل).

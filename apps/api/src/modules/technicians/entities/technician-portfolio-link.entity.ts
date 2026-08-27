@@ -27,6 +27,12 @@ export class TechnicianPortfolioLink {
   @Column({ name: 'thumbnail_url', type: 'text', nullable: true })
   thumbnailUrl: string | null;
 
+  /** بَقّة حقيقية اتلقطت (docs/08 §81) — الـID الفعلي اللي oEmbed استخرجه (تيك توك بس حاليًا).
+   * الكلاينت بيفضّله على تفكيك اللينك الخام بـregex محلي (بيفشل مع short links). null = لينك
+   * قديم قبل الإصلاح، أو oEmbed فشل وقت الإضافة — الكلاينت يرجع لمحاولة الـregex كـfallback. */
+  @Column({ name: 'embed_video_id', type: 'text', nullable: true })
+  embedVideoId: string | null;
+
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
   displayOrder: number;
 

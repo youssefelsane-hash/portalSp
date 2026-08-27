@@ -180,8 +180,19 @@ class PortfolioLink {
   final String url;
   final String? title;
   final String? thumbnailUrl;
+  // بَقّة حقيقية اتلقطت (docs/08 §81) — الـID الفعلي اللي الباك-إند استخرجه من oEmbed وقت
+  // الإضافة (تيك توك بس حاليًا). بيتفضّل على تفكيك url الخام بـregex محلي في buildPortfolioEmbedUrl
+  // (بيفشل مع short links زي vm.tiktok.com). null = لينك قبل الإصلاح، أو oEmbed فشل وقتها.
+  final String? embedVideoId;
 
-  PortfolioLink({required this.id, required this.platform, required this.url, required this.title, required this.thumbnailUrl});
+  PortfolioLink({
+    required this.id,
+    required this.platform,
+    required this.url,
+    required this.title,
+    required this.thumbnailUrl,
+    required this.embedVideoId,
+  });
 
   factory PortfolioLink.fromJson(Map<String, dynamic> json) => PortfolioLink(
         id: json['id'] as String,
@@ -189,6 +200,7 @@ class PortfolioLink {
         url: json['url'] as String,
         title: json['title'] as String?,
         thumbnailUrl: json['thumbnail_url'] as String?,
+        embedVideoId: json['embed_video_id'] as String?,
       );
 }
 
