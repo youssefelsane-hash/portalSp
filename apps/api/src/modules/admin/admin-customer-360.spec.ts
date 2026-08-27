@@ -200,4 +200,22 @@ describe('AdminCustomer360Service — بروفايل عميل 360° (docs/08 §3
     expect(p.ratingsReceived.averageRating).toBeNull();
     expect(p.ratingsReceived.recent).toHaveLength(0);
   });
+
+  // docs/08 §73 بند 3 — سجل الطلبات الكامل + الفلوس، بعكس currentAndUpcomingOrders (ملخّص
+  // مصغّر، حالية/قادمة بس). نفس فيكستشر الطلب الموجود فوق (accepted، total_amount_cents=30000).
+  it('listOrderHistory() — بيرجّع الطلب مع الفلوس، بعكس الملخص المصغّر اللي بيفلتر بالحالة', async () => {
+    const { items, total } = await service.listOrderHistory(ids.customerUser, 1, 20);
+    expect(total).toBe(1);
+    expect(items).toHaveLength(1);
+    expect(items[0].orderId).toBe(ids.order);
+    expect(items[0].totalAmountCents).toBe(30000);
+    expect(items[0].paymentStatus).toBe('pending');
+    expect(items[0].serviceNameAr).toBe(`خدمة ك360 ${runId}`);
+  });
+
+  it('listOrderHistory() — عميل بلا طلبات بيرجّع صفحة فاضية بدل ما يفشل', async () => {
+    const { items, total } = await service.listOrderHistory('00000000-0000-0000-0000-000000000000', 1, 20);
+    expect(items).toHaveLength(0);
+    expect(total).toBe(0);
+  });
 });

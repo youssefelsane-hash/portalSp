@@ -7,6 +7,8 @@ import { safeExtensionForFile } from '../../common/storage/file-signature-valida
 import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { COMPLAINT_FILED_EVENT, ComplaintFiledEvent } from '../../common/events/complaint-filed.event';
+import { COMPLAINT_MESSAGE_ADDED_EVENT, ComplaintMessageAddedEvent } from '../../common/events/complaint-message-added.event';
+import { COMPLAINT_STATUS_CHANGED_EVENT, ComplaintStatusChangedEvent } from '../../common/events/complaint-status-changed.event';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
@@ -192,6 +194,16 @@ export class SupportService {
       await this.complaints.save(complaint);
     }
 
+    // بلاغ مالك صريح (docs/08 §73 بند 2): رد الأدمن كان بيوصل كرسالة بس من غير أي إشعار لصاحب
+    // الشكوى. ملاحظة داخلية (isInternalNote) مبتتصدّرش عمداً — العميل/الفني مش المفروض يعرفوا
+    // بوجودها أصلاً. "لا تبلّغ نفسك" دفاعي — أدمن عمره ما يبقى هو صاحب الشكوى فعليًا.
+    if (user.userType === UserType.ADMIN && !isInternalNote && complaint.filedByUserId !== user.sub) {
+      this.events.emit(
+        COMPLAINT_MESSAGE_ADDED_EVENT,
+        new ComplaintMessageAddedEvent(complaint.id, complaint.complaintNumber, complaint.filedByUserId),
+      );
+    }
+
     return message;
   }
 
@@ -285,6 +297,11 @@ export class SupportService {
       );
       return { complaint, previousStatus };
     });
+    // بره الـtransaction عمداً (نفس فلسفة fileComplaint()) — docs/08 §73 بند 2
+    this.events.emit(
+      COMPLAINT_STATUS_CHANGED_EVENT,
+      new ComplaintStatusChangedEvent(result.complaint.id, result.complaint.complaintNumber, result.complaint.filedByUserId, 'اتحلّت'),
+    );
     return result.complaint;
   }
 
@@ -334,11 +351,15 @@ export class SupportService {
       );
       return { complaint, previousStatus };
     });
+    this.events.emit(
+      COMPLAINT_STATUS_CHANGED_EVENT,
+      new ComplaintStatusChangedEvent(result.complaint.id, result.complaint.complaintNumber, result.complaint.filedByUserId, 'اترفضت'),
+    );
     return result.complaint;
   }
 
   async close(adminUserId: string, complaintId: string, meta?: AuditActorMeta): Promise<Complaint> {
-    return this.dataSource.transaction(async (manager) => {
+    const complaint = await this.dataSource.transaction(async (manager) => {
       const complaint = await manager
         .createQueryBuilder(Complaint, 'complaint')
         .setLock('pessimistic_write')
@@ -372,6 +393,11 @@ export class SupportService {
       );
       return complaint;
     });
+    this.events.emit(
+      COMPLAINT_STATUS_CHANGED_EVENT,
+      new ComplaintStatusChangedEvent(complaint.id, complaint.complaintNumber, complaint.filedByUserId, 'اتقفلت'),
+    );
+    return complaint;
   }
 
   /**

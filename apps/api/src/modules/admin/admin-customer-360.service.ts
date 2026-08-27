@@ -51,6 +51,21 @@ export interface AdminCustomer360RatingsReceived {
   recent: AdminCustomer360RatingRow[];
 }
 
+// docs/08 §73 بند 3 — طلب مالك صريح: "لو كتبت رقم تليفون، يظهرلي كل الطلبات اللي هو طلبها كلها،
+// وكل طلب كان بقد إيه والفلوس دخلت إزاي". كانت فجوة موثّقة صراحة (§67): كارت currentAndUpcomingOrders
+// فوق مقصود يبقى ملخّص مصغّر (حالية/قادمة بس، LIMIT 10)، مش سجل كامل — endpoint منفصل بدل ما
+// نكبّر الكارت المصغّر لحاجة تانية تمامًا (كل الطلبات + الفلوس)، وأصلح لصفحة كاملة قابلة للـpagination.
+export interface AdminCustomerOrderHistoryRow {
+  orderId: string;
+  orderNumber: string;
+  orderStatus: string;
+  serviceNameAr: string;
+  placedAt: Date | null;
+  totalAmountCents: number;
+  paymentStatus: string;
+  paymentMethod: string | null;
+}
+
 export interface AdminCustomer360Profile {
   addresses: AddressResponseDto[];
   currentAndUpcomingOrders: AdminCustomer360Order[];
@@ -186,6 +201,58 @@ export class AdminCustomer360Service {
           createdAt: r.created_at,
         })),
       },
+    };
+  }
+
+  /** سجل الطلبات الكامل + الفلوس (docs/08 §73 بند 3) — أي حالة، أي تاريخ، بعكس currentAndUpcomingOrders فوق. */
+  async listOrderHistory(
+    userId: string,
+    page: number,
+    perPage: number,
+  ): Promise<{ items: AdminCustomerOrderHistoryRow[]; total: number }> {
+    const offset = (page - 1) * perPage;
+    const [rows, countRows] = await Promise.all([
+      this.dataSource.query<
+        {
+          order_id: string;
+          order_number: string;
+          order_status: string;
+          service_name_ar: string;
+          placed_at: Date | null;
+          total_amount_cents: number;
+          payment_status: string;
+          payment_method: string | null;
+        }[]
+      >(
+        `SELECT o.id AS order_id, o.order_number, o.order_status, s.name_ar AS service_name_ar, o.placed_at,
+                o.total_amount_cents, o.payment_status, o.payment_method
+         FROM orders o
+         JOIN customer_profiles cp ON cp.id = o.customer_id
+         JOIN services s ON s.id = o.service_id
+         WHERE cp.user_id = $1 AND o.deleted_at IS NULL
+         ORDER BY COALESCE(o.placed_at, o.created_at) DESC, o.id DESC
+         LIMIT $2 OFFSET $3`,
+        [userId, perPage, offset],
+      ),
+      this.dataSource.query<{ total: string }[]>(
+        `SELECT COUNT(*) AS total FROM orders o JOIN customer_profiles cp ON cp.id = o.customer_id
+         WHERE cp.user_id = $1 AND o.deleted_at IS NULL`,
+        [userId],
+      ),
+    ]);
+
+    return {
+      items: rows.map((r) => ({
+        orderId: r.order_id,
+        orderNumber: r.order_number,
+        orderStatus: r.order_status,
+        serviceNameAr: r.service_name_ar,
+        placedAt: r.placed_at,
+        totalAmountCents: r.total_amount_cents,
+        paymentStatus: r.payment_status,
+        paymentMethod: r.payment_method,
+      })),
+      total: Number(countRows[0]?.total ?? 0),
     };
   }
 }

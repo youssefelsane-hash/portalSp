@@ -8819,3 +8819,30 @@ service على أندرويد، `NSLocationAlwaysAndWhenInUseUsageDescription` �
 بند 3 (صفحة الطلبات، إضافي بالكامل صفر خطر معماري) → بند 1 (معاينة-ثم-سعر، الأكبر، محتاج ADR-0044 +
 migration + state machine جديدة). كل بند: تنفيذ → اختبار حي (Postgres/Redis حقيقيين) → `tsc`/`nest
 build`/`jest` → commit + push + PR منفصل → merge بعد CI أخضر → التالي.
+
+### حالة التنفيذ (2026-08-27)
+
+**بند 2 — ✅ خلص.** حدثين جداد (`ComplaintMessageAddedEvent`/`ComplaintStatusChangedEvent`) +
+مستمعين + نوعين إشعار جداد (`complaint_reply`/`complaint_resolved`، migration 0202) + فرع
+`/complaints/:id` في `deep_link_router.dart` (عميل وفني). اتأكد حي بالكامل (شكوى حقيقية → رد أدمن →
+صف `notifications` حقيقي بالـdeep_link الصح). تفاصيل: `apps/api/src/modules/notifications/README.md`.
+
+**بند 4 — ✅ خلص.** `location_capture.dart` جديد (نسخة صامتة من منطق `AvailableOrdersScreen`
+الموجود) بينده من `main.dart`'s `_AuthGate` عند الدخول وعند رجوع التطبيق من الخلفية — مش مربوط
+بشاشة واحدة بس. صفر تغيير في شرط المطابقة نفسه (كان بيعمل الصح أصلاً، صفر staleness check). تفاصيل:
+`apps/technician-app/README.md`.
+
+**بند 3 — 🔄 الأهم خلص، الباقي مؤجّل لدفعة لاحقة.** بيانات العميل + اسم الخدمة على تفاصيل الطلب
+للأدمن (كانوا غايبين تمامًا)، بحث موسّع (اسم/تليفون عميل وفني + Payment ID، مش رقم الطلب بس)، سجل
+طلبات العميل الكامل بالفلوس (`GET /admin/customers/:userId/orders` جديد)، ملاحظات داخلية على الطلب
+(جدول `order_internal_notes` جديد، migration 0203). اتأكد حي بالكامل عبر Playwright (بحث بالتليفون،
+بيانات العميل ظاهرة، ملاحظة داخلية اتضافت وظهرت). **مؤجّل**: شكاوى/ضمان مرتبطين بالطلب inline، شات
+الطلب inline، عرض `earning-shares` الموجود بلا UI. تفاصيل كاملة: `apps/api/src/modules/orders/README.md`.
+
+**بند 1 — لسه ما بدأش.** الأكبر والأكثر خطورة معماريًا (ADR-0044 + enum جديد + حالة state machine
+جديدة + endpoint فني جديد) — هيتعمل في الدفعة الجاية.
+
+`npx tsc --noEmit` → `npx nest build` → full jest suite (194 suite، 1094 اختبار): 3 فشل غير مرتبطين
+إطلاقًا بالتعديلات دي (اتنين معروفين مسبقًا كفجوة بيانات محلية من إعادة استخدام نفس الـDB عبر جلسات
+اختبار حي متعددة، والتالت flake توقيت في `workforce-activity.spec.ts` مالوش أي علاقة بالملفات
+المعدّلة). `apps/admin` تايبسكريبت نظيف. مفيش Flutter SDK — فحص توازن أقواس آلي على الملفين المعدّلين.

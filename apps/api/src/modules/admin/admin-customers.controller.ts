@@ -10,6 +10,7 @@ import { toAddressResponseDto } from '../customers/dto/address-response.dto';
 import { AdminCustomer360Service } from './admin-customer-360.service';
 import { AdminCustomersService } from './admin-customers.service';
 import { BlockCustomerDto } from './dto/block-customer.dto';
+import { CustomerOrderHistoryQueryDto } from './dto/customer-order-history-query.dto';
 import { ListCustomersQueryDto } from './dto/list-customers-query.dto';
 
 // إدارة العملاء (عرض بروفايلات/إحصائيات + حظر/فك حظر) — محتاجة customers.manage للحظر،
@@ -84,6 +85,29 @@ export class AdminCustomersController {
           created_at: r.createdAt.toISOString(),
         })),
       },
+    };
+  }
+
+  // سجل الطلبات الكامل + الفلوس (docs/08 §73 بند 3، بلاغ مالك صريح: "لو كتبت رقم تليفون، يظهرلي
+  // كل الطلبات اللي هو طلبها كلها، وكل طلب كان بقد إيه والفلوس دخلت إزاي") — بعكس
+  // current_and_upcoming_orders فوق (ملخّص مصغّر، حالية/قادمة بس): ده أي حالة، paginated كامل.
+  @Get(':userId/orders')
+  async listOrderHistory(@Param('userId', ParseUUIDPipe) userId: string, @Query() query: CustomerOrderHistoryQueryDto) {
+    const page = query.page ?? 1;
+    const perPage = query.per_page ?? 20;
+    const { items, total } = await this.customer360Service.listOrderHistory(userId, page, perPage);
+    return {
+      items: items.map((o) => ({
+        order_id: o.orderId,
+        order_number: o.orderNumber,
+        order_status: o.orderStatus,
+        service_name_ar: o.serviceNameAr,
+        placed_at: o.placedAt ? o.placedAt.toISOString() : null,
+        total_amount_cents: o.totalAmountCents,
+        payment_status: o.paymentStatus,
+        payment_method: o.paymentMethod,
+      })),
+      meta: { page, per_page: perPage, total },
     };
   }
 

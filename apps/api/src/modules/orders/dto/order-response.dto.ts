@@ -22,6 +22,9 @@ export interface OrderResponseDto {
   requested_technician_id: string | null;
   requested_technician_company_id: string | null;
   order_status: string;
+  /** id العميل صاحب الطلب — كان غايب تمامًا من عقد الأدمن (docs/08 §73 بند 3: "صفحة الطلبات
+   * تبقى أداة شاملة لمركز الاتصال")، فمكانش في وجود رابط لبروفايل العميل من تفاصيل الطلب. */
+  customer_id: string;
   problem_description: string | null;
   customer_notes: string | null;
   /**
@@ -144,6 +147,7 @@ export function toOrderResponseDto(
     requested_technician_id: order.requestedTechnicianId,
     requested_technician_company_id: order.requestedTechnicianCompanyId,
     order_status: order.orderStatus,
+    customer_id: order.customerId,
     problem_description: order.problemDescription,
     customer_notes: order.customerNotes,
     customer_inputs: order.customerInputs ?? null,

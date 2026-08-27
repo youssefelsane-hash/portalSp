@@ -135,13 +135,28 @@ export class AdminOrdersService {
       .skip((page - 1) * perPage)
       .take(perPage);
 
-    // docs/08 §67 — بحث برقم الطلب. `ILIKE` مع `%…%` عشان الأدمن يقدر يلزق جزء من الرقم.
-    // الحروف الخاصة بتاعت LIKE بتتهرّب، وإلا `%` اللي المستخدم يكتبه بيبقى wildcard ويرجّع
-    // القايمة كلها بدل ما يفلتر.
+    // docs/08 §67 — بحث برقم الطلب. §73 بند 3 وسّعه لاسم/تليفون العميل والفني وPayment ID —
+    // بلاغ مالك صريح: "مركز الاتصال محتاج يدوّر برقم تليفون العميل مش رقم الطلب بس". `ILIKE` مع
+    // `%…%` عشان الأدمن يقدر يلزق جزء بس. الحروف الخاصة بتاعت LIKE بتتهرّب، وإلا `%` اللي
+    // المستخدم يكتبه بيبقى wildcard ويرجّع القايمة كلها بدل ما يفلتر. الـJOINs بتتضاف بس لو فيه
+    // بحث فعلي — صفر تكلفة إضافية على القايمة العادية بلا بحث. قرار خصوصية موثّق (docs/08 §73):
+    // كل الأدمن يقدروا يدوروا بالتليفون — نفس صلاحية عرض الصفحة كلها، مفيش تعقيد إضافي هنا.
     const search = query.search?.trim();
     if (search) {
       const escaped = search.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-      qb.andWhere(`o.order_number ILIKE :search ESCAPE '\\'`, { search: `%${escaped}%` });
+      qb.leftJoin('customer_profiles', 'cp', 'cp.id = o.customer_id')
+        .leftJoin('users', 'cu', 'cu.id = cp.user_id')
+        .leftJoin('technician_profiles', 'tp', 'tp.id = o.technician_id')
+        .leftJoin('users', 'tu', 'tu.id = tp.user_id')
+        .andWhere(
+          `(o.order_number ILIKE :search ESCAPE '\\'
+            OR cu.full_name ILIKE :search ESCAPE '\\'
+            OR cu.phone_number ILIKE :search ESCAPE '\\'
+            OR tu.full_name ILIKE :search ESCAPE '\\'
+            OR tu.phone_number ILIKE :search ESCAPE '\\'
+            OR EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id AND p.gateway_reference ILIKE :search ESCAPE '\\'))`,
+          { search: `%${escaped}%` },
+        );
     }
 
     if (query.sort === 'soonest') {
@@ -149,7 +164,14 @@ export class AdminOrdersService {
       // لأن السؤال هنا حرفيًا "إيه اللي هيتنفّذ قريب".
       qb.orderBy('o.scheduled_at', 'ASC', 'NULLS LAST').addOrderBy('o.id', 'DESC');
     } else {
-      qb.orderBy('COALESCE(o.placed_at, o.created_at)', 'DESC').addOrderBy('o.id', 'DESC');
+      // بَقّة حقيقية اتلقطت وقت تطوير §73 بند 3 (بحث موسّع فوق): TypeORM بيرمي "COALESCE(o alias
+      // was not found" لما orderBy عبارة عن تعبير SQL خام (مش alias.column بسيط) *مع* وجود
+      // LEFT JOINs في نفس الاستعلام — بيحاول يحلل التعبير كـ"alias.column" بطريقة نصّية بسيطة
+      // وبيتلخبط. الحل: alias صريح عبر addSelect بدل تمرير التعبير الخام مباشرة لـorderBy —
+      // نفس النتيجة بالظبط، بس TypeORM بيتعامل معاه كعمود عادي.
+      qb.addSelect('COALESCE(o.placed_at, o.created_at)', 'effective_placed_at')
+        .orderBy('effective_placed_at', 'DESC')
+        .addOrderBy('o.id', 'DESC');
     }
 
     const [items, total] = await qb.getManyAndCount();

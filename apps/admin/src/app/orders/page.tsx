@@ -144,9 +144,9 @@ function OrdersListPage() {
           name="search"
           defaultValue={searchTerm}
           key={searchTerm}
-          placeholder="ابحث برقم الطلب…"
-          className="max-w-xs"
-          aria-label="بحث برقم الطلب"
+          placeholder="رقم الطلب، اسم/تليفون العميل أو الفني، أو Payment ID…"
+          className="max-w-md"
+          aria-label="بحث برقم الطلب، اسم/تليفون العميل أو الفني، أو Payment ID"
         />
         <Button type="submit" size="sm" variant="outline">
           بحث

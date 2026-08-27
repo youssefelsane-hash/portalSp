@@ -35,6 +35,8 @@ export interface OrderResponseDto {
   /** سياسة إلغاء الفني (docs/10) — لو awaiting_technician_reselection، بيشاور على الفني اللي لغى. */
   requested_technician_id: string | null;
   order_status: OrderStatus;
+  /** id العميل صاحب الطلب — رابط مباشر لبروفايل العميل (docs/08 §73 بند 3). */
+  customer_id: string;
   problem_description: string | null;
   customer_notes: string | null;
   /** إجابات العميل على الفورم الديناميكي وقت الحجز (docs/08 §71) — تسميات محلولة، للعرض. */
@@ -90,6 +92,13 @@ export interface OrderResponseDto {
    * دايمًا طالما فيه فني معيّن (order-response.dto.ts). undefined لو مفيش فني أو الشرط مش متحقق. */
   technician_name?: string;
   technician_phone?: string;
+  /** بيانات العميل + اسم الخدمة + العنوان — كانت غايبة تمامًا عن `/admin/orders/:id` (docs/08
+   * §73 بند 3)، دلوقتي بتترجع دايمًا في مسار تفاصيل الطلب الفردي للأدمن (صفر شرط ظهور، الأدمن
+   * عنده صلاحية RBAC كاملة على الطلب أصلاً). */
+  customer_name?: string;
+  customer_phone?: string;
+  service_name_ar?: string;
+  address?: { street_name: string; landmark: string | null; latitude: number; longitude: number };
 }
 
 // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). نفس CreateOrderDto اللي apps/customer-web
