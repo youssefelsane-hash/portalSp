@@ -254,6 +254,9 @@ describe('OrdersService.reschedule() + AddressesService.hasActiveOrder() (docs/0
       await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      // إعادة الجدولة بقت بتبعت إشعار للعميل، والإشعارات بتمسك users بمفتاح أجنبي — من غير
+      // المسح ده الـafterAll بيفشل بالكامل رغم إن كل الاختبارات نجحت.
+      await q(`DELETE FROM notifications WHERE user_id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.adminUser]);
       await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.adminUser]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
@@ -650,6 +653,9 @@ describe('OrdersService.rescheduleByAdmin() (Script 4 Part K §42)', () => {
       await q(`DELETE FROM addresses WHERE user_id = $1`, [ids.customerUser]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
+      // إعادة الجدولة بقت بتبعت إشعار للعميل، والإشعارات بتمسك users بمفتاح أجنبي — من غير
+      // المسح ده الـafterAll بيفشل بالكامل رغم إن كل الاختبارات نجحت.
+      await q(`DELETE FROM notifications WHERE user_id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.adminUser]);
       await q(`DELETE FROM users WHERE id IN ($1, $2, $3)`, [ids.customerUser, ids.techUser, ids.adminUser]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

@@ -74,6 +74,9 @@ export interface AdminServiceResponseDto {
   commission_percentage: number;
   display_order: number;
   is_active: boolean;
+  // ADR-0046 — الأدمن سامح للمنصة تعمل إعلان تلقائي عن الخدمة دي؟ افتراضي false: مفيش خدمة
+  // بتتعلن لحد ما الأدمن يعلّمها بإيده.
+  is_promotable: boolean;
   launch_phase: number;
   search_keywords: string[];
   created_at: string;
@@ -119,6 +122,7 @@ export interface CreateServiceBody {
 
 export interface UpdateServiceBody extends Partial<CreateServiceBody> {
   is_active?: boolean;
+  is_promotable?: boolean;
 }
 
 // docs/08 §36.22-23، ADR-0024 — override (رقم مطلق، السلوك القديم) أو percentage (نسبة مئوية فوق

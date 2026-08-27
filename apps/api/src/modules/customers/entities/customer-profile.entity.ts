@@ -39,6 +39,11 @@ export class CustomerProfile {
   @Column({ name: 'average_rating_given', type: 'numeric', precision: 3, scale: 2, nullable: true })
   averageRatingGiven: string | null;
 
+  // ADR-0046 — إلغاء اشتراك تسويقي مستقل تمامًا عن تفضيلات قنوات إشعارات الطلبات: العميل يقفل
+  // الإعلانات من غير ما يفقد "الفني في الطريق".
+  @Column({ name: 'marketing_opt_out', type: 'boolean', default: false })
+  marketingOptOut: boolean;
+
   @Column({ name: 'is_high_risk', type: 'boolean', default: false })
   isHighRisk: boolean;
 

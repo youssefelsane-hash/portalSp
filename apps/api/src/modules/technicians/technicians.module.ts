@@ -7,6 +7,9 @@ import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { GeoModule } from '../geo/geo.module';
 import { SettingsModule } from '../settings/settings.module';
+// ADR-0045 — TechnicianIdentityService بيسجّل محاولة استخدام رقم قومي محجوز كحدث أمني.
+// **مش** RealtimeSecurityModule تحت (ده حاجة تانية خالص: حراسة اتصالات الـwebsocket).
+import { SecurityModule } from '../security/security.module';
 // Script 4 §2-7 — تصريح مهارات ذاتي: نفس نمط استيراد Order/OrderTeamMember جوّه CatalogModule
 // (كيان من موديول تاني بلا استيراد دائري). CatalogModule بيستورد TechniciansModule أصلاً، فمينفعش
 // العكس — الحل: تسجيل الكيانين هنا مباشرة بدل استيراد CatalogModule كامل.
@@ -40,6 +43,7 @@ import { TechnicianWorkOpportunitiesService } from './technician-work-opportunit
 import { TechnicianActivityService } from './technician-activity.service';
 import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
 import { AdminTechnician360Service } from './admin-technician-360.service';
+import { TechnicianIdentityService } from './technician-identity.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
 import { PreferredCrewService } from './preferred-crew.service';
 import { TechnicianPreferredCrewMember } from './entities/technician-preferred-crew-member.entity';
@@ -82,6 +86,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     GeoModule,
     SettingsModule,
     RealtimeSecurityModule,
+    SecurityModule,
     BullModule.registerQueue({ name: TECHNICIAN_STATS_QUEUE }),
   ],
   controllers: [
@@ -112,6 +117,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     TechnicianActivityService,
     AdminTechnicianCategoryOpsService,
     AdminTechnician360Service,
+    TechnicianIdentityService,
     ScheduleSlotReleaseListener,
     PreferredCrewService,
     storageServiceProvider,
@@ -127,6 +133,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     TechnicianWorkOpportunitiesService,
     TechnicianActivityService,
     PreferredCrewService,
+    TechnicianIdentityService,
   ],
 })
 export class TechniciansModule {}

@@ -45,6 +45,8 @@ describe('AdminTechniciansService.removeZone() — إلغاء تفعيل حقي�
       { emit: jest.fn() } as never,
       { record: jest.fn(async () => undefined) } as never,
       { findServiceZoneOrThrow: async (id: string) => ({ id }) } as never,
+      // ADR-0045 §5 — الاعتماد بيسأل عن `technicians.require_national_id_for_approval`.
+      { getBoolean: async (_k: string, fallback: boolean) => fallback } as never,
     );
 
     // بَقّة نظافة اختبارات متكررة (§63 شريحة 7، نفس اللي اتصلحت في matching-work-opportunity.spec.ts):

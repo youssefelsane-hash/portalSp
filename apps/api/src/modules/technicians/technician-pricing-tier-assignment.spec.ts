@@ -42,6 +42,8 @@ describe('AdminTechniciansService.changePricingTier() — منفصل تمامً�
       { emit: jest.fn() } as never,
       { record: jest.fn(async () => undefined) } as never,
       { findServiceZoneOrThrow: async (id: string) => ({ id }) } as never,
+      // ADR-0045 §5 — الاعتماد بيسأل عن `technicians.require_national_id_for_approval`.
+      { getBoolean: async (_k: string, fallback: boolean) => fallback } as never,
     );
 
     // نفس بَقّة نظافة الاختبارات اللي اتصلحت في matching-work-opportunity.spec.ts (§63 شريحة 5):

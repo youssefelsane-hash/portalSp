@@ -97,6 +97,12 @@ export class CreateServiceDto {
   @IsBoolean()
   allows_emergency?: boolean;
 
+  // ADR-0046 — الإعلان التلقائي. الافتراضي في القاعدة `false`، فحتى لو الحقل ده اتساب فاضي
+  // الخدمة ما بتتعلنش — الأدمن لازم يفعّلها صراحةً.
+  @IsOptional()
+  @IsBoolean()
+  is_promotable?: boolean;
+
   // هيكل الحجز الجديد (docs/06 §1) — أي أوضاع حجز ("أفراد"/"اعتماد") مسموحة لهذه الخدمة.
   @IsOptional()
   @IsBoolean()

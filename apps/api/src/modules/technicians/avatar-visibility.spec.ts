@@ -86,6 +86,8 @@ describe('ADR-0031 — ظهور صورة البروفايل (معاينة ذات
       { emit: jest.fn() } as never,
       { record: jest.fn(async () => undefined) } as never,
       {} as never,
+      // ADR-0045 §5 — الاعتماد بيسأل عن `technicians.require_national_id_for_approval`.
+      { getBoolean: async (_k: string, fallback: boolean) => fallback } as never,
     );
   });
 
