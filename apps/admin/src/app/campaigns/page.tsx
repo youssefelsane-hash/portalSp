@@ -3,7 +3,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
   AbandonedLeadResponseDto,
-  AbandonedLeadsListResponseDto,
   CampaignResponseDto,
   CampaignType,
   CampaignsListResponseDto,
@@ -40,7 +39,7 @@ const INTENT_STAGE_LABELS: Record<AbandonedLeadResponseDto['intent_stage'], stri
 };
 
 export default function CampaignsPage() {
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const [tab, setTab] = useState<'campaigns' | 'leads'>('campaigns');
   const [campaigns, setCampaigns] = useState<CampaignResponseDto[] | null>(null);
   const [variables, setVariables] = useState<string[]>([]);
@@ -66,7 +65,10 @@ export default function CampaignsPage() {
   }
 
   function loadLeads() {
-    authedFetch<AbandonedLeadsListResponseDto>(`/admin/campaigns/abandoned-leads?days=${leadsDays}&per_page=100`)
+    // بَقّة حقيقية اتلقطت (docs/08 §81) — الـendpoint بيرجّع {items, meta} على المستوى الأول،
+    // وده الشكل اللي ResponseInterceptor في apps/api بيفكّه تلقائيًا (بيرجّع items عاريين في
+    // data). لازم authedFetchPaginated مش authedFetch العادي، وإلا res.items = undefined.
+    authedFetchPaginated<AbandonedLeadResponseDto>(`/admin/campaigns/abandoned-leads?days=${leadsDays}&per_page=100`)
       .then((res) => setLeads(res.items))
       .catch((err) => setLeadsError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل العملاء المتروكين'));
   }
