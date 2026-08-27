@@ -14,6 +14,14 @@ export interface TechnicianProfileResponseDto {
   verification_status: string;
   is_available: boolean;
   is_on_duty: boolean;
+  /**
+   * هل الفني سجّل رقمه القومي؟ (ADR-0045، docs/08 §77-E1)
+   *
+   * **boolean بس — الرقم نفسه ما بيترجعش أبدًا للفني**: هو كتبه فبيعرفه، وإرجاعه بيوسّع سطح
+   * التسريب بلا أي فايدة. التطبيق محتاج يعرف يعرض الحقل ولا رسالة «اتسجّل» — والـboolean ده
+   * كافي للاتنين.
+   */
+  national_id_set: boolean;
 }
 
 export function toTechnicianProfileResponseDto(profile: TechnicianProfile): TechnicianProfileResponseDto {
@@ -35,5 +43,6 @@ export function toTechnicianProfileResponseDto(profile: TechnicianProfile): Tech
     // التلاتة بيشترطوا is_available AND is_on_duty معًا، بس الحقل ده كان ناقص من DTO بروفايل
     // الفني نفسه (موجود بالفعل في admin-technician-response.dto.ts للأدمن بس).
     is_on_duty: profile.isOnDuty,
+    national_id_set: profile.nationalIdHash !== null,
   };
 }

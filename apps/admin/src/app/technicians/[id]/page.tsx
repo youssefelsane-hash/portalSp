@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { resolveMediaUrl } from '@/lib/media-url';
 import { AppShell, useAdminBack } from '@/components/app-shell';
+import { NationalIdCard } from '@/components/technician-national-id-card';
 import { TechnicianEarningsStatement } from '@/components/technician-earnings-statement';
 import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
 import { PageHeader } from '@/components/page-header';
@@ -106,7 +107,7 @@ interface Technician360Response {
 
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, hasPermission } = useAuth();
   // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
   const goBack = useAdminBack('/technicians');
 
@@ -456,6 +457,17 @@ export default function TechnicianDetailPage() {
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      {/* الهوية الدائمة (ADR-0045، docs/08 §77-E1) — فوق كل حاجة عمدًا: ده الحقل اللي بيمنع
+          فني متوقف يرجع بحساب جديد برقم موبايل تاني، والاعتماد نفسه ممنوع من غيره. */}
+      <div className="mb-6">
+        <NationalIdCard
+          technicianId={id}
+          nationalId={detail.national_id}
+          canManage={hasPermission('technicians.manage')}
+          onChanged={load}
+        />
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>

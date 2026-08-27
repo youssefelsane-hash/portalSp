@@ -14,6 +14,7 @@ import {
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
+import { blindIndex, isValidEgyptianNationalId, normalizeNationalId } from '../../common/crypto/pii-crypto.util';
 import { SettingsService } from '../settings/settings.service';
 import { Service } from '../catalog/entities/service.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from '../catalog/entities/technician-service.entity';
@@ -75,16 +76,49 @@ export class AdminTechniciansService {
   ): Promise<{ items: TechnicianWithUser[]; meta: { page: number; per_page: number; total: number } }> {
     const page = query.page ?? 1;
     const perPage = query.per_page ?? 20;
-    const where: FindOptionsWhere<TechnicianProfile> = {};
-    if (query.verification_status) where.verificationStatus = query.verification_status;
-    if (query.level) where.currentLevel = query.level;
 
-    const [profiles, total] = await this.technicianProfiles.findAndCount({
-      where,
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * perPage,
-      take: perPage,
-    });
+    const qb = this.technicianProfiles
+      .createQueryBuilder('tp')
+      // JOIN على المستخدم لازم للبحث بالاسم/التليفون — الاتنين على `users` مش على البروفايل.
+      .innerJoin(User, 'u', 'u.id = tp.user_id')
+      .where('1 = 1');
+
+    if (query.verification_status) {
+      qb.andWhere('tp.verification_status = :status', { status: query.verification_status });
+    }
+    if (query.level) qb.andWhere('tp.current_level = :level', { level: query.level });
+
+    const search = query.search?.trim();
+    if (search) {
+      // **الرقم القومي مش زي باقي الحقول (ADR-0045, docs/08 §77-C1)**: القيمة متخزّنة مشفّرة
+      // بـAES-GCM بـIV عشوائي — يعني نفس الرقم بيدّي نص مختلف كل مرة، فـ`LIKE` أو `=` عليها
+      // مستحيلة رياضيًا. الوسيلة الوحيدة هي عمود الـblind index (HMAC حتمي) اللي اتعمل
+      // للغرض ده بالظبط.
+      //
+      // بنحسب الـhash **بس لما المدخل يبقى شكله رقم قومي فعلاً** (بعد تطبيع الأرقام العربية):
+      // حساب HMAC لكل بحث بالاسم شغل ضايع، والأهم إنه بيخلط نية البحث.
+      const normalized = normalizeNationalId(search);
+      const nationalIdHash = isValidEgyptianNationalId(normalized) ? blindIndex(normalized) : null;
+
+      qb.andWhere(
+        `(
+           u.full_name ILIKE :like
+           OR u.phone_number ILIKE :like
+           OR tp.technician_code ILIKE :like
+           OR (:nid::char(64) IS NOT NULL AND tp.national_id_hash = :nid)
+         )`,
+        { like: `%${search}%`, nid: nationalIdHash },
+      );
+    }
+
+    const [profiles, total] = await qb
+      // `createdAt` (اسم الخاصية) مش `created_at` (اسم العمود): مع `skip/take` + JOIN،
+      // TypeORM بيعيد بناء الـORDER BY من الميتاداتا فبيحتاج مسار الخاصية — الاسم الخام
+      // بيرمي `Cannot read properties of undefined (reading 'databaseName')`.
+      .orderBy('tp.createdAt', 'DESC')
+      .skip((page - 1) * perPage)
+      .take(perPage)
+      .getManyAndCount();
 
     return { items: await this.attachUsers(profiles), meta: { page, per_page: perPage, total } };
   }
