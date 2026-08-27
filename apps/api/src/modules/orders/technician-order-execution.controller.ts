@@ -107,6 +107,21 @@ export class TechnicianOrderExecutionController {
     return base;
   }
 
+  /**
+   * رد أي فعل تنفيذي (docs/08 §70، بلاغ مالك) — بَقّة حقيقية: كل الأفعال (accept/depart/arrive/
+   * start/complete/...) كانت بترجّع `toDto()` **من غير `crew_status`**، وتطبيق الفني بيحط الرد ده
+   * مكان الطلب الحالي — فكارت "الطاقم ناقص" وأزرار ضم فني/مساعد كانوا **بيختفوا بعد أول فعل**
+   * ويرجعوا بس لما الشاشة تعيد التحميل من `getOne()`. ده اللي المالك وصفه بـ«بيظهر أول ما الطلب
+   * ييجي وبعدين بيختفي». الاستعلام الزيادة بيتعمل **بس لطلبات الفريق** (نفس تحفّظ الأداء الأصلي).
+   */
+  private async toDtoAfterAction(order: Order, userId: string) {
+    if (order.bookingMode !== BookingMode.TEAM) {
+      return this.toDto(order);
+    }
+    const profile = await this.techniciansService.findByUserIdOrThrow(userId);
+    return this.toDtoWithTeamInfo(order, profile.id);
+  }
+
   // مسار حرفي (`active`) لازم يتسجّل قبل `:id` — وإلا NestJS هيحاول يفسّرها كـ UUID ويرفضها
   // (ParseUUIDPipe) قبل ما توصل هنا خالص. كانت فجوة موثّقة صراحة في apps/technician-app/README.md:
   // مفيش endpoint يرجّع "الطلب النشط الحالي" من غير ما التطبيق يعرف الـ id مقدماً — يعني لو
@@ -114,7 +129,7 @@ export class TechnicianOrderExecutionController {
   @Get('active')
   async getActive(@CurrentUser() user: JwtPayload) {
     const order = await this.ordersService.findActiveForTechnician(user.sub);
-    return order ? this.toDto(order) : null;
+    return order ? this.toDtoAfterAction(order, user.sub) : null;
   }
 
   // "الشغل المؤكّد قدامي" (docs/08 §165) — كانت فجوة حقيقية: طلبات مجدولة (ADR-0018: أي طلب غير
@@ -237,27 +252,27 @@ export class TechnicianOrderExecutionController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CancelOrderAsTechnicianDto,
   ) {
-    return this.toDto(await this.ordersService.technicianCancel(user.sub, id, dto));
+    return this.toDtoAfterAction(await this.ordersService.technicianCancel(user.sub, id, dto), user.sub);
   }
 
   @Post(':id/depart')
   async depart(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return this.toDto(await this.ordersService.depart(user.sub, id));
+    return this.toDtoAfterAction(await this.ordersService.depart(user.sub, id), user.sub);
   }
 
   @Post(':id/arrive')
   async arrive(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return this.toDto(await this.ordersService.arrive(user.sub, id));
+    return this.toDtoAfterAction(await this.ordersService.arrive(user.sub, id), user.sub);
   }
 
   @Post(':id/start')
   async start(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return this.toDto(await this.ordersService.start(user.sub, id));
+    return this.toDtoAfterAction(await this.ordersService.start(user.sub, id), user.sub);
   }
 
   @Post(':id/complete')
   async complete(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    return this.toDto(await this.ordersService.complete(user.sub, id));
+    return this.toDtoAfterAction(await this.ordersService.complete(user.sub, id), user.sub);
   }
 
   // زيارة فاشلة/عدم حضور (docs/08 §22 بند 3+6) — الفني بيوقف بدل ما يكمّل شغل غير مصرّح أو يقفل
@@ -268,7 +283,7 @@ export class TechnicianOrderExecutionController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReportFailedVisitDto,
   ) {
-    return this.toDto(await this.ordersService.reportFailedVisit(user, id, dto));
+    return this.toDtoAfterAction(await this.ordersService.reportFailedVisit(user, id, dto), user.sub);
   }
 
   // "لم أستلم" الكاش (docs/08 §22 بند 13-14) — مسار الفني للتنازع، مش قرار نهائي فوري (بيودّي
@@ -279,7 +294,7 @@ export class TechnicianOrderExecutionController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ReportCashNotReceivedDto,
   ) {
-    return this.toDto(await this.ordersService.reportCashNotReceived(user, id, dto));
+    return this.toDtoAfterAction(await this.ordersService.reportCashNotReceived(user, id, dto), user.sub);
   }
 
   @Post(':id/media')
@@ -319,7 +334,7 @@ export class TechnicianOrderExecutionController {
     @Body() dto: ProposeQuoteItemsDto,
   ) {
     const { order, items } = await this.orderItemsService.propose(user.sub, id, dto.items);
-    return { order: await this.toDto(order), items: items.map(toOrderItemResponseDto) };
+    return { order: await this.toDtoAfterAction(order, user.sub), items: items.map(toOrderItemResponseDto) };
   }
 
   @Get(':id/quote-items')

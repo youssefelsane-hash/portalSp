@@ -135,6 +135,8 @@ export default function OrderDetailPage() {
   const [showAddCrewForm, setShowAddCrewForm] = useState(false);
   const [crewTechnicianId, setCrewTechnicianId] = useState('');
   const [crewRoleLabel, setCrewRoleLabel] = useState('');
+  // docs/08 §70 — نوع العضو (فني/مساعد) هو اللي بتتحسب منه حالة "الطاقم ناقص"، مش نص الدور.
+  const [crewMemberType, setCrewMemberType] = useState<'team_member' | 'assistant'>('team_member');
   const [removingCrewMemberId, setRemovingCrewMemberId] = useState<string | null>(null);
   const [removeCrewReason, setRemoveCrewReason] = useState('');
   const [replacingCrewMemberId, setReplacingCrewMemberId] = useState<string | null>(null);
@@ -531,11 +533,12 @@ export default function OrderDetailPage() {
     try {
       await authedFetch(`/admin/orders/${id}/team-members`, {
         method: 'POST',
-        body: JSON.stringify({ technician_id: crewTechnicianId, role_label: crewRoleLabel }),
+        body: JSON.stringify({ technician_id: crewTechnicianId, role_label: crewRoleLabel, member_type: crewMemberType }),
       });
       setShowAddCrewForm(false);
       setCrewTechnicianId('');
       setCrewRoleLabel('');
+      setCrewMemberType('team_member');
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
@@ -592,7 +595,12 @@ export default function OrderDetailPage() {
   }
 
   // عضو طاقم عادي (اعتماد/فريق) بعكس المساعد (member_type='assistant', مساره منفصل فوق).
-  const crewMembers = teamMembers.filter((m) => m.member_type !== 'assistant');
+  // docs/08 §70 — الفرز بالنوع الحقيقي (`member_type`) مش بالنص الحر في `role_label`: كارت
+  // "المساعدين" كان بيعرض **كل** الأعضاء، فأي حد الأدمن يضيفه كان بيبان مساعد مهما كان دوره.
+  // وكارت "طاقم الطلب" (اللي فيه الإزالة/الاستبدال) بيعرض الكل دلوقتي — مساعد مضاف إداريًا كان
+  // مالوش أي مكان يتشال أو يتستبدل منه.
+  const assistantMembers = teamMembers.filter((m) => m.member_type === 'assistant');
+  const crewMembers = teamMembers;
 
   // إعادة جدولة عامة من الأدمن (Script 4 Part K §42، ADR-0034) — الأيام المتاحة بتتحسب في
   // الباك-إند بنفس محرك التوافر الموحّد اللي المطابقة بتستخدمه (technicianAvailabilityCondition)،
@@ -1457,10 +1465,10 @@ export default function OrderDetailPage() {
         {!!order.required_assistants && order.required_assistants > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">المساعدين ({teamMembers.length}/{order.required_assistants})</CardTitle>
+              <CardTitle className="text-base">المساعدين ({assistantMembers.length}/{order.required_assistants})</CardTitle>
             </CardHeader>
             <CardContent>
-              {teamMembers.length === 0 ? (
+              {assistantMembers.length === 0 ? (
                 <EmptyState title="مفيش مساعد معيّن لسه" />
               ) : (
                 <Table>
@@ -1472,7 +1480,7 @@ export default function OrderDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {teamMembers.map((member) => (
+                    {assistantMembers.map((member) => (
                       <TableRow key={member.id}>
                         <TableCell>{member.full_name}</TableCell>
                         <TableCell>{member.role_label}</TableCell>
@@ -1483,7 +1491,7 @@ export default function OrderDetailPage() {
                 </Table>
               )}
             </CardContent>
-            {teamMembers.length < order.required_assistants && (
+            {assistantMembers.length < order.required_assistants && (
               <CardFooter className="flex-col items-stretch gap-3">
                 <Button
                   type="button"
@@ -1549,6 +1557,7 @@ export default function OrderDetailPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>الاسم</TableHead>
+                      <TableHead>النوع</TableHead>
                       <TableHead>الدور</TableHead>
                       <TableHead>اتضاف إمتى</TableHead>
                       {hasPermission('orders.manage_crew') && <TableHead>إجراءات</TableHead>}
@@ -1559,6 +1568,11 @@ export default function OrderDetailPage() {
                       <Fragment key={member.id}>
                         <TableRow>
                           <TableCell>{member.full_name}</TableCell>
+                          <TableCell>
+                            <Badge variant={member.member_type === 'assistant' ? 'secondary' : 'outline'}>
+                              {member.member_type === 'assistant' ? 'مساعد' : 'فني'}
+                            </Badge>
+                          </TableCell>
                           <TableCell>{member.role_label}</TableCell>
                           <TableCell>{new Date(member.created_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
                           {hasPermission('orders.manage_crew') && (
@@ -1597,7 +1611,7 @@ export default function OrderDetailPage() {
                         </TableRow>
                         {removingCrewMemberId === member.id && (
                           <TableRow>
-                            <TableCell colSpan={4}>
+                            <TableCell colSpan={5}>
                               <form onSubmit={(e) => handleRemoveCrewMember(e, member.id)} className="flex flex-col gap-2">
                                 <Label htmlFor={`remove_reason_${member.id}`}>سبب الإزالة</Label>
                                 <Input
@@ -1630,7 +1644,7 @@ export default function OrderDetailPage() {
                         )}
                         {replacingCrewMemberId === member.id && (
                           <TableRow>
-                            <TableCell colSpan={4}>
+                            <TableCell colSpan={5}>
                               <form onSubmit={(e) => handleReplaceCrewMember(e, member.id)} className="flex flex-col gap-2">
                                 <Label htmlFor={`replace_tech_${member.id}`}>الفني الجديد</Label>
                                 {!approvedTechnicians ? (
@@ -1728,6 +1742,18 @@ export default function OrderDetailPage() {
                         ))}
                       </SelectNative>
                     )}
+                    <Label htmlFor="crew_member_type">نوع العضو</Label>
+                    <SelectNative
+                      id="crew_member_type"
+                      value={crewMemberType}
+                      onChange={(e) => setCrewMemberType(e.target.value === 'assistant' ? 'assistant' : 'team_member')}
+                    >
+                      <option value="team_member">فني</option>
+                      <option value="assistant">مساعد</option>
+                    </SelectNative>
+                    <p className="text-xs text-muted-foreground">
+                      النوع ده هو اللي بيسدّ النقص في &quot;حالة الطاقم&quot; — الدور تحت وصف للعرض بس.
+                    </p>
                     <Label htmlFor="crew_role_label">الدور</Label>
                     <Input id="crew_role_label" value={crewRoleLabel} onChange={(e) => setCrewRoleLabel(e.target.value)} required minLength={2} maxLength={100} />
                     <Button type="submit" size="sm" disabled={isSaving || !crewTechnicianId || !crewRoleLabel}>
