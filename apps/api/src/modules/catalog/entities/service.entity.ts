@@ -155,6 +155,11 @@ export class Service {
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
   displayOrder: number;
 
+  // ADR-0046 — الأدمن سامح للمنصة تعمل إعلان تلقائي عن الخدمة دي؟ **افتراضي false**: مفيش
+  // خدمة بتتعلن لحد ما الأدمن يعلّمها بإيده (رد مباشر على «ممكن تبقى خدمة إحنا ما نظفناهاش»).
+  @Column({ name: 'is_promotable', type: 'boolean', default: false })
+  isPromotable: boolean;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

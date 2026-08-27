@@ -31,6 +31,7 @@ import {
   LogOut,
   Map,
   Megaphone,
+  Send,
   MessageSquare,
   MessagesSquare,
   Package,
@@ -121,6 +122,8 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/payouts', label: 'طلبات الصرف', icon: Banknote },
       { href: '/instapay-confirmations', label: 'تأكيدات InstaPay', icon: Landmark, permission: 'payments.confirm_manual' },
       { href: '/promotions', label: 'أكواد الخصم', icon: Tag },
+      // ADR-0046 — الحملات التسويقية: إشعارات تلقائية بتفكّر العميل بالخدمات.
+      { href: '/campaigns', label: 'الحملات التسويقية', icon: Send, permission: 'campaigns.manage' },
     ],
   },
   {

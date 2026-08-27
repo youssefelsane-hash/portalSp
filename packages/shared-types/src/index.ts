@@ -34,3 +34,4 @@ export * from './security';
 export * from './operations';
 export * from './matching-explainability';
 export * from './installments';
+export * from './campaigns';

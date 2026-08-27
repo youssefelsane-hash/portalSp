@@ -7,6 +7,9 @@ import { AuditModule } from '../audit/audit.module';
 import { User } from '../auth/entities/user.entity';
 import { GeoModule } from '../geo/geo.module';
 import { SettingsModule } from '../settings/settings.module';
+// ADR-0045 — TechnicianIdentityService بيسجّل محاولة استخدام رقم قومي محجوز كحدث أمني.
+// **مش** RealtimeSecurityModule تحت (ده حاجة تانية خالص: حراسة اتصالات الـwebsocket).
+import { SecurityModule } from '../security/security.module';
 // Script 4 §2-7 — تصريح مهارات ذاتي: نفس نمط استيراد Order/OrderTeamMember جوّه CatalogModule
 // (كيان من موديول تاني بلا استيراد دائري). CatalogModule بيستورد TechniciansModule أصلاً، فمينفعش
 // العكس — الحل: تسجيل الكيانين هنا مباشرة بدل استيراد CatalogModule كامل.
@@ -83,6 +86,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     GeoModule,
     SettingsModule,
     RealtimeSecurityModule,
+    SecurityModule,
     BullModule.registerQueue({ name: TECHNICIAN_STATS_QUEUE }),
   ],
   controllers: [

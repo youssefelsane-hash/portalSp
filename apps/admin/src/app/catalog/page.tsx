@@ -197,6 +197,24 @@ export default function CatalogPage() {
     }
   }
 
+  /** بوابة الإعلان التلقائي (ADR-0046) — منفصلة تمامًا عن التفعيل: خدمة نشطة للحجز مش
+   *  بالضرورة جاهزة إن المنصة تعلن عنها لوحدها. */
+  async function toggleServicePromotable(service: AdminServiceResponseDto) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/services/${service.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_promotable: !service.is_promotable }),
+      });
+      loadServices();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function toggleServiceActive(service: AdminServiceResponseDto) {
     setIsSaving(true);
     setError(null);
@@ -535,6 +553,18 @@ export default function CatalogPage() {
                             {service.is_active ? 'نشطة' : 'معطّلة'}
                           </Badge>
                         </button>
+                        {/* ADR-0046 — الخدمة ما بتتعلنش تلقائيًا إلا لو الأدمن علّمها هنا. */}
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => toggleServicePromotable(service)}
+                          className="mr-2 cursor-pointer"
+                          title="السماح للمنصة تبعت إشعارات إعلانية عن الخدمة دي"
+                        >
+                          <Badge variant={service.is_promotable ? 'secondary' : 'outline'}>
+                            {service.is_promotable ? 'قابلة للإعلان' : 'مش بتتعلن'}
+                          </Badge>
+                        </button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -546,7 +576,8 @@ export default function CatalogPage() {
       </div>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        دوس على شارة الحالة عشان تفعّل/تعطّل. دوس على اسم الخدمة عشان تعدّل كل حقول الخدمة
+        دوس على شارة الحالة عشان تفعّل/تعطّل، وعلى شارة «قابلة للإعلان» عشان تسمح للمنصة تبعت
+        إشعارات إعلانية عن الخدمة دي (الحملات التسويقية). دوس على اسم الخدمة عشان تعدّل كل حقول الخدمة
         التفصيلية (السعر الأساسي، الحد الأدنى/الأقصى، الضمان، أقل مستوى فني، ...) وتدير تسعير
         المناطق، فئات تسعير الفني، تسعير المستويات، والإضافات الاختيارية.
       </p>

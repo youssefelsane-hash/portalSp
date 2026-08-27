@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/auth_repository.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
 import '../orders/schedule_selection_screen.dart';
@@ -16,6 +20,10 @@ import 'models.dart';
 Future<void> navigateToServiceBooking(BuildContext context, CatalogService service) async {
   final availableModes = service.availableBookingModes;
   if (availableModes.isEmpty) return; // مفيش وضع حجز مسموح للخدمة دي أصلاً — حالة بيانات غير متوقعة، تجاهل بأمان
+
+  // ADR-0046 — إشارة "العميل بدأ حجز الخدمة دي". لو ما كمّلش، الاسترجاع بيفكّره بعد ساعة.
+  // النقطة دي بالذات لأنها مكان التقاء **كل** مسارات اكتشاف الخدمة (فئات/بحث/الرئيسية).
+  _recordServiceIntent(context, service.id);
 
   final BookingMode bookingMode;
   if (availableModes.length == 1) {
@@ -74,5 +82,22 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
                   requestedAtRangeEnd: scheduledAtRangeEnd,
                 ),
     ),
+  );
+}
+
+/// تسجيل اهتمام العميل بخدمة (ADR-0046) — **fire-and-forget بالكامل**.
+///
+/// إشارة تسويقية بحتة: أي فشل فيها (مفيش شبكة، العميل مش مسجّل دخول، الـendpoint واقع) لازم
+/// يتبلع تمامًا. تعطيل حجز حقيقي عشان إعلان ما اتسجّلش هيبقى مقايضة غبية.
+void _recordServiceIntent(BuildContext context, String serviceId) {
+  final auth = context.read<AuthRepository>();
+  if (!auth.isAuthenticated) return; // زائر مش مسجّل — مفيش حساب نبعتله إشعار أصلاً
+  unawaited(
+    auth
+        .authedRequest('POST', '/customer/service-intents', body: {
+          'service_id': serviceId,
+          'intent_stage': 'started_booking',
+        })
+        .catchError((_) => null),
   );
 }

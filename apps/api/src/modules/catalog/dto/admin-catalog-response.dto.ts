@@ -63,6 +63,8 @@ export interface AdminServiceResponseDto {
   requires_photos: boolean;
   allows_scheduling: boolean;
   allows_emergency: boolean;
+  // ADR-0046 — بوابة الإعلان التلقائي عن الخدمة (افتراضي false).
+  is_promotable: boolean;
   allows_individual: boolean;
   allows_team: boolean;
   cash_allowed: boolean;
@@ -105,6 +107,7 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     requires_photos: service.requiresPhotos,
     allows_scheduling: service.allowsScheduling,
     allows_emergency: service.allowsEmergency,
+    is_promotable: service.isPromotable,
     allows_individual: service.allowsIndividual,
     allows_team: service.allowsTeam,
     cash_allowed: service.cashAllowed,

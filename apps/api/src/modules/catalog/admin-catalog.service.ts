@@ -234,6 +234,7 @@ export class AdminCatalogService {
       requiresPhotos: dto.requires_photos ?? false,
       allowsScheduling: dto.allows_scheduling ?? true,
       allowsEmergency: dto.allows_emergency ?? false,
+      isPromotable: dto.is_promotable ?? false,
       allowsIndividual: dto.allows_individual ?? true,
       allowsTeam: dto.allows_team ?? false,
       cashAllowed: dto.cash_allowed ?? true,
@@ -291,6 +292,7 @@ export class AdminCatalogService {
     if (dto.requires_photos !== undefined) service.requiresPhotos = dto.requires_photos;
     if (dto.allows_scheduling !== undefined) service.allowsScheduling = dto.allows_scheduling;
     if (dto.allows_emergency !== undefined) service.allowsEmergency = dto.allows_emergency;
+    if (dto.is_promotable !== undefined) service.isPromotable = dto.is_promotable;
     if (dto.allows_individual !== undefined) service.allowsIndividual = dto.allows_individual;
     if (dto.allows_team !== undefined) service.allowsTeam = dto.allows_team;
     if (dto.cash_allowed !== undefined) service.cashAllowed = dto.cash_allowed;

@@ -33,6 +33,7 @@ import { AdminRealtimeModule } from './common/websocket/admin-realtime.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
 import { SupportModule } from './modules/support/support.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
@@ -116,6 +117,7 @@ import { SecurityModule } from './modules/security/security.module';
     SupportModule,
     NotificationsModule,
     PromotionsModule,
+    CampaignsModule,
     ReferralsModule,
     FavoritesModule,
     TechnicianReferralsModule,
