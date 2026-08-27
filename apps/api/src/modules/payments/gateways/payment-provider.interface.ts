@@ -30,7 +30,15 @@ export interface CreatePaymentInput {
 // كذب معماري (راجع "البدائل اللي اتقيّمت" في ADR-0013).
 export type CreatePaymentResult =
   | { kind: 'redirect'; checkoutUrl: string; providerReference: string }
-  | { kind: 'reference'; referenceCode: string; instructionsAr: string; providerReference: string; expiresAt: Date | null }
+  | {
+      kind: 'reference';
+      referenceCode: string;
+      instructionsAr: string;
+      providerReference: string;
+      expiresAt: Date | null;
+      /** صورة QR اختيارية بتسهّل التحويل (InstaPay بس دلوقتي، docs/08 §78-د) — `null` = مفيش. */
+      qrImageUrl?: string | null;
+    }
   | { kind: 'immediate'; succeeded: boolean };
 
 export interface WebhookVerificationResult {

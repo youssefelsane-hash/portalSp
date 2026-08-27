@@ -7,6 +7,7 @@ import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../../common/even
 import { Setting } from '../../settings/entities/setting.entity';
 import { SettingsService } from '../../settings/settings.service';
 import { InstaPayProvider } from './instapay-provider.service';
+import { InstaPayQrService } from './instapay-qr.service';
 
 // اختبار حي ضد Postgres/Redis حقيقيين — §31 (طلب مالك صريح 2026-08-20): عنوان IPA/اسم المستلم
 // بقوا يتعدّلوا من /admin/settings مش env vars، ولازم يبانوا لحظيًا في InstaPayProvider من غير
@@ -52,7 +53,14 @@ describe('InstaPayProvider — إعدادات أدمن ديناميكية بدل
     await settingsService.update(adminUserId, ipaKey, '');
     await settingsService.update(adminUserId, nameKey, '');
 
-    provider = new InstaPayProvider(settingsService);
+    // خدمة الـQR حقيقية بنفس الـsettingsService (docs/08 §78-د) — التخزين stub لأن الاختبار ده
+    // عن الإعدادات الديناميكية مش عن رفع الملفات (ده مغطّى في instapay-qr.spec.ts).
+    const qrService = new InstaPayQrService(settingsService, {
+      save: jest.fn(),
+      getUrl: jest.fn(async (key: string) => `https://cdn.test/${key}`),
+      delete: jest.fn(),
+    });
+    provider = new InstaPayProvider(settingsService, qrService);
     // في التطبيق الحقيقي، NestJS's EventEmitterModule بيربط @OnEvent() تلقائيًا وقت الـbootstrap
     // (DI حقيقي). هنا بننشئ الكلاسات يدويًا بـnew (نفس نمط كل الاختبارات الحية في المشروع ده)،
     // فلازم نربط الحدث يدويًا — نفس الأثر بالظبط، مفيش أي فرق في المنطق المُختبر.

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import type { InstaPayPendingPaymentResponseDto } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
@@ -12,6 +13,8 @@ import { StatusChip } from '@/components/status-chip';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
 import Link from 'next/link';
@@ -20,7 +23,7 @@ import Link from 'next/link';
 // جوّه apps/orders/[id]/page.tsx بس مفيش شاشة تجمّع الدفعات المعلّقة في مكان واحد — موظف Finance
 // كان لازم يدوّر طلب-طلب. نفس أسلوب /payouts بالحرف (طابور + موافقة/رفض).
 export default function InstaPayConfirmationsPage() {
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, hasPermission } = useAuth();
   const [payments, setPayments] = useState<InstaPayPendingPaymentResponseDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -71,6 +74,12 @@ export default function InstaPayConfirmationsPage() {
           'تحويل InstaPay — قارنه مباشرة بملاحظة التحويل الفعلية في كشف الحساب قبل ما تأكّد.'
         }
       />
+
+      {/* ضبط الـQR جوّه نفس الصفحة عمدًا (docs/08 §78-د): ده المكان اللي موظف الـFinance
+          بيراجع فيه تحويلات InstaPay فعليًا، فبيانات استقبالها المفروض تبقى قدّامه هنا مش
+          مدفونة في /settings. الكارت بيختفي لمن مالوش `settings.manage` — القراءة نفسها محمية
+          في الباك-إند برضه، مش بالإخفاء ده بس. */}
+      {hasPermission('settings.manage') && <InstaPayQrCard authedFetch={authedFetch} />}
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
       {!error && !payments && <TableSkeleton columns={6} />}
@@ -139,5 +148,142 @@ export default function InstaPayConfirmationsPage() {
         </Table>
       )}
     </AppShell>
+  );
+}
+
+interface InstaPayQrView {
+  url: string | null;
+  source: 'uploaded' | 'link' | null;
+}
+
+/**
+ * ضبط QR استقبال تحويلات InstaPay (docs/08 §78-د، migration 0211).
+ *
+ * **طريقتين لنفس الإعداد الواحد**: رفع ملف صورة، أو لصق رابط https — والاتنين بيكتبوا في
+ * `payments.instapay.qr_image`، فالأحدث هو اللي بيكسب دايمًا بلا أي التباس. الشيل بيرجّع الحالة
+ * لـ«مفيش QR» وشاشة العميل بتعرض التعليمات النصية بس، زي ما كانت قبل الميزة دي بالظبط.
+ *
+ * الكتابة كلها محمية بـStep-Up في الباك-إند (نفس مستوى الاسترداد) — بيتعامل معاه `authedFetch`
+ * تلقائيًا، فالمكوّن ده مش عارف عنه حاجة.
+ */
+function InstaPayQrCard({ authedFetch }: { authedFetch: <T>(path: string, options?: RequestInit) => Promise<T> }) {
+  const [view, setView] = useState<InstaPayQrView | null>(null);
+  const [link, setLink] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    authedFetch<InstaPayQrView>('/admin/payments/instapay-qr')
+      .then(setView)
+      .catch(() => setView({ url: null, source: null }));
+  }, [authedFetch]);
+
+  async function run(action: () => Promise<InstaPayQrView>, successMessage: string) {
+    setIsBusy(true);
+    try {
+      setView(await action());
+      toast.success(successMessage);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  return (
+    <Card className="mb-6">
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">كود QR لاستقبال تحويلات InstaPay</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        {/* خلفية بيضا دايمًا — قارئات QR بتتوقّع مربّعات غامقة على فاتح، ومعاينة على سطح غامق
+            بتخفي مشكلة حقيقية بتظهر بعدين على تليفون العميل. */}
+        <div className="flex h-40 w-40 shrink-0 items-center justify-center rounded-md border bg-white">
+          {view?.url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- رابط ديناميكي (presigned أو خارجي)، مش أصل static
+            <img src={view.url} alt="QR كود InstaPay" className="max-h-36 max-w-36 object-contain" />
+          ) : (
+            <span className="px-2 text-center text-xs text-muted-foreground">
+              مفيش QR — العميل بيشوف تعليمات التحويل النصية بس
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-1 flex-col gap-3">
+          <p className="text-xs text-muted-foreground">
+            الصورة دي بتظهر للعميل في شاشة الدفع بـInstaPay جنب رقم الطلب وتعليمات التحويل. PNG/JPEG/WEBP بس، حتى 5MB.
+            {view?.source === 'link' && ' (الحالي: رابط خارجي)'}
+            {view?.source === 'uploaded' && ' (الحالي: ملف مرفوع)'}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const formData = new FormData();
+                  formData.append('file', file);
+                  void run(
+                    () => authedFetch<InstaPayQrView>('/admin/payments/instapay-qr', { method: 'POST', body: formData }),
+                    'اترفع الـQR',
+                  );
+                }
+                e.target.value = '';
+              }}
+            />
+            <Button size="sm" variant="outline" disabled={isBusy} onClick={() => fileInputRef.current?.click()}>
+              {isBusy ? 'شغّال…' : 'ارفع صورة'}
+            </Button>
+            {view?.url && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive"
+                disabled={isBusy}
+                onClick={() =>
+                  void run(
+                    () => authedFetch<InstaPayQrView>('/admin/payments/instapay-qr', { method: 'DELETE' }),
+                    'اتشال الـQR',
+                  )
+                }
+              >
+                شيل الـQR
+              </Button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              dir="ltr"
+              placeholder="https://…/instapay-qr.png"
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              className="max-w-md flex-1"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isBusy || link.trim().length === 0}
+              onClick={() =>
+                void run(async () => {
+                  const next = await authedFetch<InstaPayQrView>('/admin/payments/instapay-qr', {
+                    method: 'PUT',
+                    body: JSON.stringify({ url: link.trim() }),
+                  });
+                  setLink('');
+                  return next;
+                }, 'اتحفظ الرابط')
+              }
+            >
+              استخدم رابط
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

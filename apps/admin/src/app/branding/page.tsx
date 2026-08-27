@@ -109,7 +109,6 @@ function BrandingAssetCard({
   onRemove: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const isDark = assetType === 'logo_dark' || assetType === 'primary_logo' || assetType === 'login_logo' || assetType === 'splash';
 
   return (
     <Card>
@@ -121,13 +120,20 @@ function BrandingAssetCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className={`flex h-24 items-center justify-center rounded-md border ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
-          {asset ? (
-            // eslint-disable-next-line @next/next/no-img-element -- روابط ديناميكية (presigned/data URI)، مش أصل static معروف وقت البناء
-            <img src={asset.url} alt={BRANDING_ASSET_LABELS_AR[assetType]} className="max-h-20 max-w-full object-contain" />
-          ) : (
-            <span className="text-xs text-muted-foreground">جاري التحميل…</span>
-          )}
+        {/* معاينة على الخلفيتين مع بعض (docs/08 §78-ج): التطبيق بيدعم الوضع الفاتح والداكن،
+            فاللوجو بيتعرض فوق الاتنين فعلاً. معاينة على خلفية واحدة كانت بتخفي المشكلة الشائعة
+            (لوجو أبيض على خلفية بيضا = مختفي) لحد ما تظهر على جهاز مستخدم حقيقي. */}
+        <div className="grid h-24 grid-cols-2 overflow-hidden rounded-md border">
+          {(['bg-white', 'bg-slate-900'] as const).map((bg) => (
+            <div key={bg} className={`flex items-center justify-center ${bg}`}>
+              {asset ? (
+                // eslint-disable-next-line @next/next/no-img-element -- روابط ديناميكية (presigned/data URI)، مش أصل static معروف وقت البناء
+                <img src={asset.url} alt={BRANDING_ASSET_LABELS_AR[assetType]} className="max-h-20 max-w-full object-contain" />
+              ) : (
+                <span className="text-xs text-muted-foreground">جاري التحميل…</span>
+              )}
+            </div>
+          ))}
         </div>
         {asset && asset.is_default === false && (
           <p className="mt-2 text-xs text-muted-foreground" dir="ltr">

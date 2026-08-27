@@ -1151,12 +1151,17 @@ export class PaymentsService {
     userId: string,
     orderId: string,
     idempotencyKey: string,
-  ): Promise<{ payment: Payment; referenceCode: string; instructionsAr: string }> {
+  ): Promise<{ payment: Payment; referenceCode: string; instructionsAr: string; qrImageUrl: string | null }> {
     const { payment, result } = await this.payWithProvider(userId, orderId, idempotencyKey, PaymentMethod.INSTAPAY);
     if (result.kind !== 'reference') {
       throw new Error('InstaPay provider لازم يرجّع reference دايماً — نتيجة غير متوقعة');
     }
-    return { payment, referenceCode: result.referenceCode, instructionsAr: result.instructionsAr };
+    return {
+      payment,
+      referenceCode: result.referenceCode,
+      instructionsAr: result.instructionsAr,
+      qrImageUrl: result.qrImageUrl ?? null,
+    };
   }
 
   /**

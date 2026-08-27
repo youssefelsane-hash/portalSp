@@ -31,6 +31,8 @@ import { FawryGatewayService } from './gateways/fawry-gateway.service';
 import { CashProvider } from './gateways/cash-provider.service';
 import { FawryProvider } from './gateways/fawry-provider.service';
 import { InstaPayProvider } from './gateways/instapay-provider.service';
+import { InstaPayQrService } from './gateways/instapay-qr.service';
+import { storageServiceProvider } from '../../common/storage/storage.provider';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymobProvider } from './gateways/paymob-provider.service';
 import { WalletProvider } from './gateways/wallet-provider.service';
@@ -113,6 +115,10 @@ import { AdminTechnicianDebtController } from './admin-technician-debt.controlle
     CashProvider,
     WalletProvider,
     InstaPayProvider,
+    InstaPayQrService,
+    // QR كود InstaPay بيترفع لنفس التخزين المشترك (docs/08 §78-د) — نفس الـprovider اللي
+    // branding/catalog/chat بيستخدموه، مش نسخة تانية.
+    storageServiceProvider,
     FawryProvider,
     PaymentProviderRegistry,
   ],

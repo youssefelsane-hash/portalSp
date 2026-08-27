@@ -26,3 +26,14 @@ void assertProductionApiConfig({bool isRelease = kReleaseMode, String url = apiB
     );
   }
 }
+
+/// بيحوّل مسار أصل نسبي جاي من السيرفر (زي `/uploads/branding/xxx.png`) لرابط مطلق.
+///
+/// كان مكرر كدالة خاصة في `home_screen.dart` — اتنقل هنا لما شاشة الدخول احتاجت نفس المنطق
+/// (docs/08 §78-ج، اللوجو بقى مستهلك في مكانين). التخزين المحلي (`local-disk-storage`) بيرجّع
+/// مسار نسبي، وS3 بيرجّع رابط مطلق موقّع — الاتنين لازم يشتغلوا بلا فرع في كل شاشة.
+String resolveApiAssetUrl(String value) {
+  if (value.startsWith('http')) return value;
+  final origin = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
+  return '$origin$value';
+}

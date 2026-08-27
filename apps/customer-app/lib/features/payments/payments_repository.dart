@@ -98,11 +98,16 @@ class InstaPayReference {
   final String referenceCode;
   final String instructionsAr;
 
-  InstaPayReference({required this.referenceCode, required this.instructionsAr});
+  /// صورة QR لاستقبال التحويل (docs/08 §78-د) — بيرفعها/بيربطها الأدمن من لوحة التحكم.
+  /// `null` يعني مفيش واحدة مضبوطة، والشاشة بتعرض التعليمات النصية بس زي ما كانت.
+  final String? qrImageUrl;
+
+  InstaPayReference({required this.referenceCode, required this.instructionsAr, this.qrImageUrl});
 
   factory InstaPayReference.fromJson(Map<String, dynamic> json) => InstaPayReference(
         referenceCode: json['reference_code'] as String,
         instructionsAr: json['instructions_ar'] as String,
+        qrImageUrl: json['qr_image_url'] as String?,
       );
 }
 

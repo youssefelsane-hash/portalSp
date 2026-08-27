@@ -210,9 +210,19 @@ class _HomeScreenState extends State<HomeScreen> {
           // شعار الأدمن المرفوع بيفضل ظاهر — بس صغير على الجنب، مش عنوان الشاشة. لو الأدمن
           // ما رفعش شعار (`isDefault`)، مفيش leading خالص والعنوان بياخد العرض كله: الشكل
           // المرجعي اللي المالك بعته مفيهوش شعار في الرأس أصلاً.
+          //
+          // **بلاغ مالك (docs/08 §78-ب)**: «اللوجو صغير قوي لدرجة إنه ما بيتقراش… نكبره شوية،
+          // ما يبقاش ضخم». السبب الحقيقي مش الحشو: `AppBar.leading` عرضه مقفول على
+          // `kToolbarHeight` (56) افتراضيًا، والحشو 12 على الجنبين كان بيسيب **32 بكسل بس**
+          // للوجو. ولوجو كلمة (wordmark زي «صُنّاع») محتاج **عرض** مش ارتفاع — فتكبير الارتفاع
+          // لوحده مكانش هيحل حاجة، لازم `leadingWidth` نفسه يكبر.
+          //
+          // 96 مقصودة كسقف مش أكتر: على شاشة 360dp بيفضل ~170dp للعنوان بعد أيقونتين الأكشن —
+          // العنوان (اللي هو أهم عنصر في الرأس بقرار §75-ب) بيفضل مقروء بدل ما يتقصّ.
+          leadingWidth: 96,
           leading: _brandingLogo != null && !_brandingLogo!.isDefault && _brandingLogo!.url.isNotEmpty
               ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   child: Image.network(
                     _resolveHeroImageUrl(_brandingLogo!.url),
                     fit: BoxFit.contain,
@@ -437,11 +447,9 @@ class _HomeScreenState extends State<HomeScreen> {
   ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
   ///     فالتبديل كان بيحصل قطع مفاجئ.
   ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
-  String _resolveHeroImageUrl(String value) {
-    if (value.startsWith('http')) return value;
-    final origin = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
-    return '$origin$value';
-  }
+  // نفس المنطق بقى في `core/api_config.dart` (محتاجه شاشة الدخول كمان) — الاسم المحلي باقٍ
+  // عشان مواقع النداء ما تتغيّرش.
+  String _resolveHeroImageUrl(String value) => resolveApiAssetUrl(value);
 
   // عنوان الـAppBar — لوجو البراندنج الحقيقي (لو الأدمن رفع واحد، isDefault=false دايمًا صورة
   // raster حقيقية) بدل النص الثابت "صُنّاع" (بلاغ مالك صريح 2026-08-23: "الصور مش بتظهر على

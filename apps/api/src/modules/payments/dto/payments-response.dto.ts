@@ -136,6 +136,8 @@ export interface InstaPayReferenceResponseDto {
   payment: PaymentResponseDto;
   reference_code: string;
   instructions_ar: string;
+  /** صورة QR لاستقبال التحويل (docs/08 §78-د) — `null` لو الأدمن ما رفعش/ما ربطش واحدة. */
+  qr_image_url: string | null;
 }
 
 export interface PayoutResponseDto {

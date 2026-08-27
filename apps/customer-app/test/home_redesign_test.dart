@@ -221,6 +221,45 @@ void main() {
       await tester.pumpAndSettle();
       expect(searched, 'حنفية');
     });
+
+    // **بَقّة مالك حقيقية (docs/08 §78-أ، بلقطة شاشة من جهازه)**: «الشريط الأسود اللي جوه محرك
+    // البحث… لما الموبايل يبقى على الوضع الداكن مود».
+    //
+    // الاختبار ده بيقيس الـ`InputDecoration` **المحسوبة فعليًا بعد تطبيق الثيم** (اللي
+    // `TextField` بيمرّرها لـ`InputDecorator`)، مش الـdecoration المكتوبة في الكود — وده بيت
+    // القصيد: الكود مكانش بيقول `filled: true` في أي مكان، القيمة كانت جايّة من
+    // `AppTheme._base().inputDecorationTheme`. اختبار بيتفرّج على `TextField.decoration` كان
+    // هيعدّي على النسخة المكسورة.
+    //
+    // بيتشغّل على **الثيمين**: الوضع الفاتح كان بيخفي البَقّة بالصدفة (fillColor أبيض على
+    // كبسولة بيضا)، والتثبيت عليه هو اللي بيمنع الرجوع.
+    for (final entry in {'الداكن': AppTheme.dark(), 'الفاتح': AppTheme.light()}.entries) {
+      testWidgets('الوضع ${entry.key}: مفيش تعبئة موروثة جوّه كبسولة البحث', (tester) async {
+        await tester.pumpWidget(MaterialApp(
+          theme: entry.value,
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Scaffold(
+              body: HomeHero(
+                images: const [],
+                activeIndex: 0,
+                content: HomepageSearchContent.defaults,
+                trustMessage: '',
+                onSearch: (_) {},
+              ),
+            ),
+          ),
+        ));
+        await tester.pumpAndSettle();
+
+        final decorator = tester.widget<InputDecorator>(find.byType(InputDecorator));
+        expect(
+          decorator.decoration.filled,
+          isFalse,
+          reason: 'التعبئة الموروثة من الثيم بترسم مستطيل غامق جوّه الكبسولة البيضا',
+        );
+      });
+    }
   });
 
   // docs/08 §76-د — «اللوجو اللي جوّاه الأكثر طلبًا حواليه إطار رمادي… أنا عايز اللوجو بس
@@ -351,5 +390,33 @@ void main() {
     ));
     await tester.pumpAndSettle();
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('home_redesign_preview.png'));
+  });
+
+  // لقطة الـhero في **الوضع الداكن** (docs/08 §78-أ) — الدليل البصري على إن الشريط الأسود جوّه
+  // الكبسولة مبقاش موجود. اختياري زي اللي فوق:
+  //   FLUTTER_TEST_HOME_PNG=1 flutter test test/home_redesign_test.dart --update-goldens
+  testWidgets('طباعة لقطة للـhero في الوضع الداكن (اختياري)', (tester) async {
+    if (Platform.environment['FLUTTER_TEST_HOME_PNG'] != '1') return;
+    tester.view.physicalSize = const Size(390 * 3, 260 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark(),
+      home: Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          body: HomeHero(
+            images: const [],
+            activeIndex: 0,
+            content: HomepageSearchContent.defaults,
+            trustMessage: 'ضمان على كل شغلانة — لو في أي عيب بعد التسليم بنرجع نصلحه',
+            onSearch: (_) {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await expectLater(find.byType(MaterialApp), matchesGoldenFile('hero_dark_mode.png'));
   });
 }
