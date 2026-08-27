@@ -35,6 +35,7 @@ import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
 import { CancellationReasonsService } from './cancellation-reasons.service';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { ContinueWorkAnotherDayDto } from './dto/continue-work-another-day.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { RequestRematchDto } from './dto/request-rematch.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -2172,6 +2173,138 @@ export class OrdersService {
    * `CANCELLED_BY_TECHNICIAN` (الحالة النهائية القديمة) بقت غير قابلة للوصول من هنا — لسه موجودة
    * في الـstate machine لأسباب توافقية بس (بيانات تاريخية قديمة قبل الميزة دي).
    */
+  /**
+   * استكمال الشغل يوم تاني (ADR-0047، docs/08 §77-D1).
+   *
+   * **طلب مالك بنصّه**: «الصنايعي راح شغلانة وكان عامل حسابه يقعد فيها ست ساعات، اكتشف إن فيه
+   * قطعة غيار محتاجها ونادرة… يكون فيه خيار استكمال الشغل يوم آخر، ويكون ليه الحرية إن هو
+   * يجدوله ليوم تاني، واليوم ده يظهر في الطلبات اللي برا إن الشغل ده مجدول».
+   *
+   * **مش إعادة جدولة**: `order_reschedule_requests` بتنقل زيارة **لسه ما حصلتش** بموافقة
+   * العميل. هنا الشغل بدأ فعلاً، والفني مش بيطلب — هو بيبلّغ. العميل بيتخطر بالسبب والتاريخ.
+   *
+   * **حالة الطلب بتفضل `in_progress`** والفني مربوط بيه — الشغل شغّال، مجرد إنه متقسّم على
+   * أيام. الـADR بيوضّح ليه إضافة حالة جديدة اترفضت.
+   */
+  async continueWorkAnotherDay(
+    userId: string,
+    orderId: string,
+    dto: ContinueWorkAnotherDayDto,
+  ): Promise<{ order: Order; sessionsUsed: number; maxSessions: number }> {
+    const technician = await this.techniciansService.findByUserIdOrThrow(userId);
+    const configuredMax = await this.settingsService.getNumber('orders.max_work_sessions_per_order', 3);
+    const maxSessions = Math.max(1, Math.min(10, Math.floor(configuredMax)));
+
+    // اليوم الجديد لازم يكون بعد النهارده — تجديل لنفس اليوم أو يوم فات مالوش معنى.
+    const nextDay = new Date(`${dto.next_session_date}T00:00:00Z`);
+    if (Number.isNaN(nextDay.getTime())) {
+      throw new ApiException(ErrorCode.VAL_001, 'تاريخ غير صالح', HttpStatus.BAD_REQUEST);
+    }
+    // اليوم بتوقيت القاهرة — منطقة العمل الوحيدة للمشروع. `toLocaleDateString('en-CA')`
+    // بيدّي `YYYY-MM-DD` مباشرة، وهو نفس شكل عمود `DATE` في الجدول.
+    const todayCairo = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+    if (dto.next_session_date <= todayCairo) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'اختار يوم بعد النهارده — الاستكمال معناه إنك هترجع في يوم تاني',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId AND o.technician_id = :technicianId', { orderId, technicianId: technician.id })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
+      }
+      // بس أثناء التنفيذ الفعلي — قبل ما يبدأ ده «إعادة جدولة» مش «استكمال»، وبعد ما يخلص
+      // الطلب اتقفل أصلاً.
+      if (order.orderStatus !== OrderStatus.IN_PROGRESS) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الاستكمال متاح بس والشغل شغّال — ابدأ الشغل الأول',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      // القفل فوق (`pessimistic_write` على الطلب) هو اللي بيمنع سباق العدّ ده: نداءين
+      // متزامنين مش هيقدروا يعدّوا نفس الرقم ويعدّوا الحد الأقصى مع بعض.
+      const [{ count }] = await manager.query<{ count: string }[]>(
+        `SELECT COUNT(*)::int AS count FROM order_work_sessions WHERE order_id = $1`,
+        [orderId],
+      );
+      const sessionsUsed = Number(count);
+      if (sessionsUsed >= maxSessions) {
+        throw new ApiException(
+          ErrorCode.ORDR_006,
+          `وصلت للحد الأقصى (${maxSessions}) لتأجيل الشغل في الطلب ده — كلّم الدعم`,
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      // الزيارة اللي وقفت النهارده + الزيارة الجاية. الفهرس الفريد الجزئي
+      // (`uq_order_work_sessions_one_scheduled`) بيضمن إن مفيش أكتر من زيارة مجدولة مفتوحة.
+      await manager.query(
+        `INSERT INTO order_work_sessions (order_id, technician_id, session_date, status, pause_reason)
+         VALUES ($1, $2, $3, 'completed_partial', $4)`,
+        [orderId, technician.id, todayCairo, dto.pause_reason.trim()],
+      );
+      await manager.query(
+        `INSERT INTO order_work_sessions (order_id, technician_id, session_date, status)
+         VALUES ($1, $2, $3, 'scheduled')`,
+        [orderId, technician.id, dto.next_session_date],
+      );
+
+      // `scheduled_at` بيتحدّث لليوم الجديد — وده **بيحقق تلات حاجات مع بعض**، مش واحدة:
+      //  1. الطلب يبان «مجدول» في القوايم برّه زي ما المالك طلب.
+      //  2. تقارير «متأخر» (اللي بتقارن بـ`scheduled_at`) تبطل تعتبره متأخر ظلمًا.
+      //  3. **حجز طاقة الفني في اليوم الجديد يشتغل لوحده** (ADR-0047، القرار الفرعي 2):
+      //     منطق تعارض الأهلية (`technician-eligibility.sql.ts`) بيقارن أيام الطلبات النشطة
+      //     بـ`scheduled_at`، و`in_progress` موجودة في `ACTIVE_TECHNICIAN_ORDER_STATUSES`
+      //     و`ENGAGED_TECHNICIAN_ORDER_STATUSES` الاتنين. يعني بمجرد تحديث اليوم، الفني بقى
+      //     محجوز فيه بالآلية القائمة — **من غير أي منطق موازي**، وده مقصود مش صدفة: أي فحص
+      //     تاني كان هيبقى مصدر حقيقة تاني لازم يفضل متزامن مع الأول للأبد.
+      const previousScheduledAt = order.scheduledAt;
+      await manager.update(Order, { id: orderId }, { scheduledAt: nextDay });
+      order.scheduledAt = nextDay;
+
+      await manager.save(
+        manager.create(OrderStatusHistory, {
+          orderId,
+          previousStatus: order.orderStatus,
+          newStatus: order.orderStatus,
+          changedByUserId: userId,
+          changedByRole: 'technician',
+          changeSource: OrderChangeSource.TECHNICIAN,
+          reason:
+            `استكمال الشغل يوم تاني — من ${previousScheduledAt?.toISOString() ?? 'بلا موعد'} ` +
+            `لـ ${nextDay.toISOString()}. السبب: ${dto.pause_reason.trim()}`,
+        }),
+      );
+
+      // العميل بيتخطر بالسبب الحقيقي حرفيًا — مش رسالة عامة. ADR-0047 (القرار الفرعي 3):
+      // الشفافية هي الحل، مش طلب موافقة على حاجة العميل مش شايفها أصلاً.
+      const customer = await this.customerProfiles.findByProfileIdOrThrow(order.customerId);
+      if (customer) {
+        await this.insertDurableInAppNotification(manager, {
+          userId: customer.userId,
+          notificationType: 'order_rescheduled',
+          titleAr: 'الفني هيكمّل شغل طلبك يوم تاني',
+          bodyAr:
+            `طلب رقم ${order.orderNumber}: الفني وقف الشغل مؤقتًا — ${dto.pause_reason.trim()}. ` +
+            `هيرجع يكمّل يوم ${dto.next_session_date}.`,
+          orderId,
+          deepLink: `/orders/${orderId}`,
+        });
+      }
+
+      return { order, sessionsUsed: sessionsUsed + 2, maxSessions };
+    });
+  }
+
   async technicianCancel(userId: string, orderId: string, dto: CancelOrderAsTechnicianDto): Promise<Order> {
     const order = await this.findOwnedByTechnicianOrThrow(userId, orderId);
 

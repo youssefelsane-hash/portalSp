@@ -135,6 +135,63 @@ export class CatalogService {
     return this.categories.find({ where: { isActive: true }, order: { displayOrder: 'ASC' } });
   }
 
+  /**
+   * «الأكثر طلبًا» — **من عدد الطلبات الحقيقي** (docs/08 §77-E2).
+   *
+   * **الفجوة اللي بتتقفل هنا**: القسم ده كان بيعرض الفئات اللي الأدمن علّم عليها `is_featured`
+   * يدويًا. يعني العنوان بيقول «الأكثر طلبًا» والمصدر «اللي الأدمن اختاره» — وعد بيتقال
+   * للعميل والنظام مش بينفّذه. نفس فئة البَقّة اللي اتصلحت في §75/§76 أكتر من مرة: الاسم
+   * بيقول حاجة والقياس بيقول حاجة تانية.
+   *
+   * **الفترة المتحركة (`windowDays`) مقصودة**: «الأكثر طلبًا» على مدى تاريخ المنصة كله بيتجمّد
+   * بعد شهور — الفئات القديمة بتفضل في الصدارة للأبد ومحدش يقدر يوصل لفئة جديدة رايجة. النافذة
+   * بتخلّي القسم يعكس الطلب **دلوقتي**.
+   *
+   * **الرجوع لـ`is_featured` مقصود كمان**: منصة جديدة عندها صفر طلبات مكتملة. عرض قسم فاضي
+   * أسوأ بكتير من عرض اختيار الأدمن كبذرة أولية لحد ما بيانات حقيقية تتكوّن.
+   */
+  async findMostRequestedCategories(limit = 8): Promise<ServiceCategory[]> {
+    const windowDays = await this.settingsService.getNumber('catalog.most_requested_window_days', 90);
+    const safeWindow = Math.max(7, Math.min(365, Math.floor(windowDays)));
+
+    // `categories.manager` مش `@InjectDataSource()` عمدًا: نفس الاتصال بالظبط، **وبصفر تغيير
+    // في الـconstructor**. التعليق على آخر بند في الـconstructor فوق بيحذّر من ده حرفيًا —
+    // إضافة بند جديد بتكسر 19 spec بتبني الخدمة بـpositional args. القاعدة العامة: لو محتاج
+    // استعلام خام في خدمة عندها repository أصلاً، استخدم `manager` بتاعه.
+    const rows = await this.categories.manager.query<{ category_id: string }[]>(
+      `SELECT s.category_id, COUNT(*) AS orders_count
+         FROM orders o
+         JOIN services s ON s.id = o.service_id
+         JOIN service_categories sc ON sc.id = s.category_id
+        WHERE o.created_at >= now() - ($1 || ' days')::interval
+          AND o.deleted_at IS NULL
+          -- الطلبات الملغاة مستبعدة عمدًا: طلب اتلغى مش دليل طلب على الخدمة، وأحيانًا بيبقى
+          -- دليل العكس (السعر مش مناسب، مفيش فني). عدّه كان هيرفع فئات فاشلة للصدارة.
+          AND o.order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician',
+                                     'cancelled_by_system', 'expired', 'draft')
+          AND sc.is_active = true AND sc.deleted_at IS NULL
+        GROUP BY s.category_id
+        ORDER BY COUNT(*) DESC
+        LIMIT $2`,
+      [safeWindow, limit],
+    );
+
+    if (rows.length === 0) {
+      // صفر طلبات في النافذة — بذرة الأدمن هي كل اللي عندنا.
+      return this.categories.find({
+        where: { isActive: true, isFeatured: true },
+        order: { displayOrder: 'ASC' },
+        take: limit,
+      });
+    }
+
+    const ids = rows.map((r) => r.category_id);
+    const categories = await this.categories.find({ where: { id: In(ids), isActive: true } });
+    // ترتيب النتيجة بترتيب العدّ — `find` بـ`In` مبيحافظش على ترتيب المصفوفة.
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    return ids.map((id) => byId.get(id)).filter((c): c is ServiceCategory => c !== undefined);
+  }
+
   findServices(categoryId?: string, bookingMode?: BookingModeFilter): Promise<Service[]> {
     const bookingModeFilter =
       bookingMode === 'individual'

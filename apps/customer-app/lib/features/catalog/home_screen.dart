@@ -72,6 +72,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _supportContactRepository = SupportContactRepository();
   final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
+  /// «الأكثر طلبًا» من السيرفر (docs/08 §77-E2) — مستقل عن `_categories` لأن ترتيبه بالعدّ
+  /// مش بـ`display_order`، والسيرفر هو اللي بيحسبه.
+  List<ServiceCategory>? _mostRequested;
   String? _error;
   String _trustMessage = '';
   // معلومات الضمان الحقيقية من السيرفر (docs/08 §75-ج) — `null` لحد ما توصل، والشريط
@@ -136,6 +139,14 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {
       if (mounted) setState(() => _error = 'تعذّر تحميل الفئات — اسحب لتحديث');
     }
+    // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
+    // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
+    try {
+      final mostRequested = await _repository.fetchMostRequestedCategories();
+      if (mounted) setState(() => _mostRequested = mostRequested);
+    } catch (_) {
+      // بهدوء — القسم تسويقي، مش وظيفي.
+    }
   }
 
   void _applyHomepageContent(HomepageContent content) {
@@ -183,9 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final featured =
-        _categories?.where((c) => c.isFeatured).toList() ??
-        const <ServiceCategory>[];
+    // «الأكثر طلبًا» بقى بيجي من السيرفر محسوبًا من عدد الطلبات الحقيقي (docs/08 §77-E2)
+    // بدل فلترة محلية بـ`isFeatured`. الفرق مش تقني: العنوان كان بيقول «الأكثر طلبًا»
+    // والمصدر «اللي الأدمن اختاره» — نفس فئة البَقّة اللي اتصلحت أكتر من مرة في §75/§76.
+    final featured = _mostRequested ?? const <ServiceCategory>[];
 
     return Directionality(
       textDirection: TextDirection.rtl,
