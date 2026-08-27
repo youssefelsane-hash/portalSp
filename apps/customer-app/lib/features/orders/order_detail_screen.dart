@@ -16,10 +16,8 @@ import '../ratings/rating_dialog.dart';
 import '../ratings/ratings_repository.dart';
 import '../support/file_complaint_screen.dart';
 import '../support/support_contact_screen.dart';
-import '../technicians/models.dart' show ScheduleSlot;
 import '../technicians/technician_profile_screen.dart';
 import '../technicians/technician_selection_screen.dart';
-import '../technicians/technicians_repository.dart';
 import '../tracking/tracking_client.dart';
 import '../tracking/tracking_screen.dart';
 import 'models.dart';
@@ -188,26 +186,58 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  // إعادة جدولة (docs/08 §22 بند 9-12) — بس قبل ما الفني يبدأ يتحرّك، لسلوت تاني لنفس الفني.
+  String _formatRescheduleOptionDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return value;
+    const weekdays = ['الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
+    return '${weekdays[date.weekday - 1]} ${date.day}/${date.month}/${date.year}';
+  }
+
+  Future<void> _showRescheduleSupport(String message) async {
+    final openSupport = await showDialog<bool>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('جدولة الموعد عبر الإدارة'),
+          content: Text('$message\n\nيمكنك الاتصال بالإدارة أو إرسال رسالة وسيتم ترتيب الموعد مع الطرفين.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('لاحقًا')),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).pop(true),
+              icon: const Icon(Icons.support_agent_outlined),
+              label: const Text('تواصل مع الإدارة'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (openSupport == true && mounted) {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SupportContactScreen()));
+    }
+  }
+
+  // نفس مصدر الأيام المتاحة الذي تستخدمه لوحة الإدارة. غياب slot صريح لا يعني أن الفني مشغول؛
+  // نموذج الجدول الحالي opt-out، لذلك الاختيار يتم باليوم ويُفحص مركزيًا في الـAPI.
   Future<void> _rescheduleOrder() async {
     final order = _order;
     if (order == null || order.technicianId == null) return;
 
-    List<ScheduleSlot> slots;
+    List<RescheduleDateOption> options;
     try {
-      final all = await TechniciansRepository(context.read<AuthRepository>()).fetchSchedule(order.technicianId!);
-      slots = all.where((s) => s.isAvailable).toList();
+      final all = await _repository.listRescheduleOptions(order.id);
+      options = all.where((option) => option.available).toList();
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
       return;
     }
     if (!mounted) return;
-    if (slots.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مفيش مواعيد تانية متاحة للفني ده دلوقتي')));
+    if (options.isEmpty) {
+      await _showRescheduleSupport('لا توجد أيام متاحة للفني خلال الفترة القادمة.');
       return;
     }
 
-    final chosen = await showDialog<ScheduleSlot>(
+    final chosen = await showDialog<RescheduleDateOption>(
       context: context,
       builder: (context) => Directionality(
         textDirection: TextDirection.rtl,
@@ -217,12 +247,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             width: 400,
             height: 300,
             child: ListView.builder(
-              itemCount: slots.length,
+              itemCount: options.length,
               itemBuilder: (context, i) {
-                final s = slots[i];
+                final option = options[i];
                 return ListTile(
-                  title: Text('${s.slotDate} — ${s.startTime.substring(0, 5)}'),
-                  onTap: () => Navigator.of(context).pop(s),
+                  leading: const Icon(Icons.calendar_today_outlined),
+                  title: Text(_formatRescheduleOptionDate(option.date)),
+                  subtitle: const Text('الفني متاح في هذا اليوم'),
+                  onTap: () => Navigator.of(context).pop(option),
                 );
               },
             ),
@@ -234,7 +266,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     if (chosen == null) return;
 
     try {
-      final updated = await _repository.reschedule(order.id, chosen.id);
+      final updated = await _repository.reschedule(order.id, chosen.date);
       if (mounted) {
         setState(() => _order = updated);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتغيّر الميعاد — الفني اتبلّغ')));

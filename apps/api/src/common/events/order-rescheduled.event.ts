@@ -15,5 +15,6 @@ export class OrderRescheduledEvent {
     public readonly newScheduledAt: Date,
     public readonly source: OrderRescheduleSource = 'customer',
     public readonly durableTechnicianNotificationCreated = false,
+    public readonly durableCustomerNotificationCreated = false,
   ) {}
 }

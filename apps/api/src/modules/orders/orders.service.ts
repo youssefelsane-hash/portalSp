@@ -1427,6 +1427,14 @@ export class OrdersService {
     });
   }
 
+  async listRescheduleOptionsForCustomer(
+    userId: string,
+    orderId: string,
+  ): Promise<{ date: string; available: boolean }[]> {
+    await this.findOneOwnedOrThrow(userId, orderId);
+    return this.listRescheduleOptions(orderId);
+  }
+
   async requestRescheduleByTechnician(
     userId: string,
     orderId: string,
@@ -1812,6 +1820,7 @@ export class OrdersService {
     }
 
     const previousScheduledAt = order.scheduledAt;
+    const customer = actor.role === 'admin' ? await this.customerProfiles.findByProfileIdOrThrow(order.customerId) : null;
     await this.dataSource.transaction(async (manager) => {
       // كل مسارات إعادة الجدولة تمسك قفل الطلب أولاً ثم السلوت، لمنع deadlock مع موافقة
       // العميل على اقتراح الفني التي تستخدم نفس الترتيب.
@@ -1871,6 +1880,17 @@ export class OrdersService {
          WHERE order_id = $1 AND status = 'pending'`,
         [orderId],
       );
+
+      if (customer) {
+        await this.insertDurableInAppNotification(manager, {
+          userId: customer.userId,
+          notificationType: 'order_rescheduled',
+          titleAr: 'تم تغيير موعد طلبك',
+          bodyAr: `الإدارة غيّرت موعد طلب رقم ${fresh.orderNumber}. افتح الطلب لمراجعة الموعد الجديد.`,
+          orderId,
+          deepLink: `/orders/${orderId}`,
+        });
+      }
     });
 
     order.scheduledAt = newScheduledAt;
@@ -1884,6 +1904,8 @@ export class OrdersService {
         previousScheduledAt,
         newScheduledAt,
         actor.role === 'admin' ? 'admin' : 'customer',
+        false,
+        customer !== null,
       ),
     );
     return order;

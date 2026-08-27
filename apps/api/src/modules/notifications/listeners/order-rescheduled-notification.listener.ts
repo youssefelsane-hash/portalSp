@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_RESCHEDULED_EVENT, OrderRescheduledEvent } from '../../../common/events/order-rescheduled.event';
+import { CustomerProfilesService } from '../../customers/customer-profiles.service';
 import { TechniciansService } from '../../technicians/technicians.service';
 import { NotificationChannel } from '../entities/notification.entity';
 import { NotificationsService } from '../notifications.service';
@@ -13,33 +14,62 @@ export class OrderRescheduledNotificationListener {
 
   constructor(
     private readonly techniciansService: TechniciansService,
+    private readonly customerProfilesService: CustomerProfilesService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   @OnEvent(ORDER_RESCHEDULED_EVENT)
   async handle(event: OrderRescheduledEvent): Promise<void> {
-    try {
-      const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianProfileId);
-      const newTimeAr = event.newScheduledAt.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
-      const technicianRequested = event.source === 'technician_request';
-      await this.notificationsService.notifyMultiChannel(
-        {
-          userId: technician.userId,
-          notificationType: 'order_rescheduled',
-          titleAr: technicianRequested ? 'العميل وافق على الموعد المقترح' : 'تم تغيير ميعاد الطلب',
-          bodyAr: technicianRequested
-            ? `العميل وافق على تأجيل طلب رقم ${event.orderNumber} إلى ${newTimeAr}`
-            : `طلب رقم ${event.orderNumber} اتغيّر ميعاده لـ ${newTimeAr}`,
-          referenceType: 'order',
-          referenceId: event.orderId,
-          deepLink: `/technician/orders/${event.orderId}`,
-        },
-        event.durableTechnicianNotificationCreated
-          ? [NotificationChannel.PUSH]
-          : [NotificationChannel.IN_APP, NotificationChannel.PUSH],
-      );
-    } catch (err) {
-      this.logger.error(`فشل إشعار إعادة جدولة الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
+    const deliveries = [this.notifyTechnician(event)];
+    if (event.source === 'admin') deliveries.push(this.notifyCustomer(event));
+
+    const results = await Promise.allSettled(deliveries);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        const err = result.reason;
+        this.logger.error(`فشل إشعار إعادة جدولة الطلب ${event.orderId}`, err instanceof Error ? err.stack : err);
+      }
     }
+  }
+
+  private async notifyTechnician(event: OrderRescheduledEvent): Promise<void> {
+    const technician = await this.techniciansService.findByProfileIdOrThrow(event.technicianProfileId);
+    const newTimeAr = event.newScheduledAt.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+    const technicianRequested = event.source === 'technician_request';
+    await this.notificationsService.notifyMultiChannel(
+      {
+        userId: technician.userId,
+        notificationType: 'order_rescheduled',
+        titleAr: technicianRequested ? 'العميل وافق على الموعد المقترح' : 'تم تغيير ميعاد الطلب',
+        bodyAr: technicianRequested
+          ? `العميل وافق على تأجيل طلب رقم ${event.orderNumber} إلى ${newTimeAr}`
+          : `طلب رقم ${event.orderNumber} اتغيّر ميعاده لـ ${newTimeAr}`,
+        referenceType: 'order',
+        referenceId: event.orderId,
+        deepLink: `/technician/orders/${event.orderId}`,
+      },
+      event.durableTechnicianNotificationCreated
+        ? [NotificationChannel.PUSH]
+        : [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+    );
+  }
+
+  private async notifyCustomer(event: OrderRescheduledEvent): Promise<void> {
+    const customer = await this.customerProfilesService.findByProfileIdOrThrow(event.customerProfileId);
+    const newTimeAr = event.newScheduledAt.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' });
+    await this.notificationsService.notifyMultiChannel(
+      {
+        userId: customer.userId,
+        notificationType: 'order_rescheduled',
+        titleAr: 'تم تغيير موعد طلبك',
+        bodyAr: `الإدارة غيّرت موعد طلب رقم ${event.orderNumber} إلى ${newTimeAr}`,
+        referenceType: 'order',
+        referenceId: event.orderId,
+        deepLink: `/orders/${event.orderId}`,
+      },
+      event.durableCustomerNotificationCreated
+        ? [NotificationChannel.PUSH]
+        : [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+    );
   }
 }

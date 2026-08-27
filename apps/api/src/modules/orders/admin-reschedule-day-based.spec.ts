@@ -179,6 +179,7 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
   });
 
   afterEach(async () => {
+    await q(`DELETE FROM notifications WHERE reference_type = 'order' AND reference_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
     await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
     await q(`DELETE FROM orders WHERE order_number LIKE 'TESTRSDB-%'`);
     await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
@@ -186,6 +187,7 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
 
   afterAll(async () => {
     try {
+      await q(`DELETE FROM notifications WHERE reference_type = 'order' AND reference_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
       await q(`DELETE FROM order_status_history WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'TESTRSDB-%')`);
       await q(`DELETE FROM orders WHERE order_number LIKE 'TESTRSDB-%'`);
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.techProfile]);
@@ -221,6 +223,20 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
     const [history] = await q(`SELECT change_source, reason FROM order_status_history WHERE order_id = $1`, [orderId]);
     expect(history.change_source).toBe('admin');
     expect(history.reason).toContain('إعادة جدولة');
+    const notifications = await q(
+      `SELECT user_id, notification_type, channel, deep_link
+       FROM notifications
+       WHERE reference_type = 'order' AND reference_id = $1 AND notification_type = 'order_rescheduled'`,
+      [orderId],
+    );
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        user_id: ids.customerUser,
+        notification_type: 'order_rescheduled',
+        channel: 'in_app',
+        deep_link: `/orders/${orderId}`,
+      }),
+    ]);
   });
 
   it('يوم فيه استثناء blocked صريح من الفني بيترفض — نفس محرك التوافر الموحّد، بلا فحص منفصل', async () => {
@@ -272,6 +288,16 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
     expect(options).toHaveLength(7);
     expect(options.find((o) => o.date === blockedDay)?.available).toBe(false);
     expect(options.filter((o) => o.available).length).toBeGreaterThan(0);
+  });
+
+  it('العميل صاحب الطلب يشوف نفس أيام الإتاحة الافتراضية، وأي مستخدم تاني يترفض', async () => {
+    const orderId = await insertOrder(`custopts-${runId}`, dayFromNow(2));
+
+    const options = await ordersService.listRescheduleOptionsForCustomer(ids.customerUser, orderId);
+
+    expect(options).toHaveLength(14);
+    expect(options.some((option) => option.available)).toBe(true);
+    await expect(ordersService.listRescheduleOptionsForCustomer(ids.adminUser, orderId)).rejects.toThrow();
   });
 
   it('بعت الاتنين مع بعض أو ولا واحد فيهم = رفض واضح', async () => {
