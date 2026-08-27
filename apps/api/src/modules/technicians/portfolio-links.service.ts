@@ -11,6 +11,10 @@ const MAX_LINKS_PER_TECHNICIAN = 12;
 interface OembedPreview {
   thumbnailUrl: string | null;
   title: string | null;
+  /** بَقّة حقيقية اتلقطت (docs/08 §81) — `embed_product_id` حقل رسمي في رد oEmbed تيك توك، هو
+   * الـID الفعلي اللي الكلاينت محتاجه يبني رابط تشغيل صحيح، بدل ما يحاول يفكّ اللينك الخام
+   * بـregex محلي (بيفشل مع short links زي vm.tiktok.com اللي مفيهاش /video/<رقم> خالص). */
+  embedVideoId: string | null;
 }
 
 /**
@@ -50,18 +54,23 @@ export class PortfolioLinksService {
   private async fetchOembedPreview(platform: PortfolioLinkPlatform, url: string): Promise<OembedPreview> {
     try {
       const oembedUrl = await this.buildOembedUrl(platform, url);
-      if (!oembedUrl) return { thumbnailUrl: null, title: null };
+      if (!oembedUrl) return { thumbnailUrl: null, title: null, embedVideoId: null };
 
       const res = await fetch(oembedUrl);
       if (!res.ok) {
         this.logger.warn(`oEmbed رجّع ${res.status} لـ ${platform}: ${url}`);
-        return { thumbnailUrl: null, title: null };
+        return { thumbnailUrl: null, title: null, embedVideoId: null };
       }
-      const data = (await res.json()) as { thumbnail_url?: string; title?: string };
-      return { thumbnailUrl: data.thumbnail_url ?? null, title: data.title ?? null };
+      const data = (await res.json()) as { thumbnail_url?: string; title?: string; embed_product_id?: string };
+      return {
+        thumbnailUrl: data.thumbnail_url ?? null,
+        title: data.title ?? null,
+        // embed_product_id بس (تيك توك) حاليًا — يوتيوب/انستجرام/فيسبوك مش من نطاق البَقّة المبلّغة.
+        embedVideoId: platform === PortfolioLinkPlatform.TIKTOK ? (data.embed_product_id ?? null) : null,
+      };
     } catch (err) {
       this.logger.warn(`فشل جلب oEmbed لـ ${platform} (${url}): ${err instanceof Error ? err.message : err}`);
-      return { thumbnailUrl: null, title: null };
+      return { thumbnailUrl: null, title: null, embedVideoId: null };
     }
   }
 
@@ -104,6 +113,7 @@ export class PortfolioLinksService {
       url: dto.url,
       title: dto.title ?? preview.title,
       thumbnailUrl: preview.thumbnailUrl,
+      embedVideoId: preview.embedVideoId,
       displayOrder: existingCount,
     });
     return this.links.save(link);

@@ -12,7 +12,7 @@ class PortfolioLinkViewerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final embedUrl = buildPortfolioEmbedUrl(link.platform, link.url);
+    final embedUrl = buildPortfolioEmbedUrl(link.platform, link.url, embedVideoId: link.embedVideoId);
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
