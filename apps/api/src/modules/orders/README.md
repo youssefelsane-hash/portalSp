@@ -1457,3 +1457,41 @@ o.order_number ILIKE :search ESCAPE '\'
 `order_id` مش موجود في `admin-support.controller.ts`/`admin-warranty-claims.controller.ts` رغم إن
 العمود موجود)، شات الطلب inline (`admin-chat.controller.ts` مبني للـsupport_chat بس)، وعرض
 `GET /admin/orders/:id/earning-shares` (endpoint موجود من زمان، صفر UI مستهلك له).
+
+## معاينة-ثم-سعر كوضع حجز (ADR-0044، docs/08 §73 بند 1)
+
+طلب مالك صريح: بعض الخدمات سعرها مش معروف مقدمًا — الفني لازم يعاين المكان الأول عشان يقدر يحدد
+سعر حقيقي. `service.pricing_model = 'inspection_then_quote'` كان **enum value ميت تمامًا** —
+`CatalogService.estimate()` مفيهوش أي فرع ليه، فبيقع في مسار `fixed`: سعر تقديري كامل بيتحصّل
+وقت الحجز، ورسم المعاينة بيتضاف **فوقه**. المالك رفض صراحة استخدام مسار "الشغل الإضافي"
+(`order_items`/`AWAITING_QUOTE_APPROVAL`، §21) لتأسيس السعر الأول — دلالته "إضافة على سعر موجود
+بالفعل أثناء شغل شغال"، مش "تأسيس أول سعر لطلب لسه بلا سعر"، واستخدامه هنا وصفه بـ"مش professional".
+تفاصيل القرار الكاملة والبدائل المرفوضة: `docs/adr/0044-inspection-then-quote-booking-mode.md`.
+
+**التنفيذ**:
+1. **الحجز** — `CatalogService.estimate()` فرع جديد لـ`inspection_then_quote`: `base_price_cents=0`،
+   `estimated_total_cents=0`، `inspection_fee_cents` زي أي خدمة تانية. `OrdersService.createOrder()`
+   صفر تعديل — الصيغة الموجودة بالفعل بترجع رسم المعاينة بس تلقائيًا.
+2. **التنفيذ لحد المعاينة** — صفر تغيير (الفني يقبل/يتحرك/يوصل زي أي طلب عادي).
+3. **حالة جديدة `awaiting_initial_quote_approval`** (migration 0204) — مختلفة عمدًا عن
+   `awaiting_quote_approval` الموجودة (دلالة مختلفة جوهريًا، راجع الفقرة فوق). بعد
+   `TECHNICIAN_ARRIVED`، الفني بينادي `POST /technician/orders/:id/submit-initial-quote`
+   (`InspectionQuoteService.submitInitialQuote()`) — بيتأكد إن الخدمة فعلاً
+   `inspection_then_quote` وإن الطلب `technician_arrived` قبل ما يحدد السعر ويحول الحالة.
+4. **الموافقة** — `POST /orders/:id/approve-initial-quote`
+   (`InspectionQuoteService.approveInitialQuote()`)، نفس نمط `OrderItemsService.approve()` بالحرف
+   (قفل pessimistic، `OrderStatusHistory`، تحصيل فوري عبر `PaymentsService.attemptAdditionalWorkCharge()`
+   الموجودة لو الطلب مدفوع إلكترونيًا). فرق جوهري واحد: `commissionableBaseCents` بيتزاد من غير
+   شرط سياسة `includeAdditionalItems` — السعر ده هو `workPriceCents` نفسه (الشغل الأساسي)، مش بند
+   إضافي فوقه، و`workPriceCents` دايمًا داخل الوعاء بلا شرط بتعريفه في `computeCommissionableBase()`.
+   الرفض بلا endpoint منفصل — العميل يستخدم `POST /orders/:id/cancel` العادي (الحالة مضافة
+   لـ`CUSTOMER_CANCELLABLE_STATUSES`، صفر رسوم إلغاء إضافية لأن رسم المعاينة اتحصّل بالفعل).
+
+**اتأكد حي بالكامل على Postgres حقيقي** — `inspection-then-quote.spec.ts` (7 اختبار): فرع
+`estimate()`، الفني يحدد سعر (نجاح + رفض خدمة غلط + رفض حالة طلب غلطة)، العميل يوافق (تحديث
+`total_amount_cents`/`commissionable_base_cents` صح، تحصيل إلكتروني/كاش)، مسار الرفض
+(state machine). `tsc`/`nest build`/full jest suite (195 suite، 1101 اختبار) عدّوا.
+
+**مؤجّل صراحة**: شاشتين Flutter جديدتين (الفني يدخل سعر بعد المعاينة، العميل يوافق/يرفض) — مفيش
+Flutter SDK متاح فعليًا في بيئة السيشن دي لبناء/اختبار شاشات جديدة حيًا. الـAPI كامل ومختبر —
+الحالة الجديدة معروضة في `OrderResponseDto.order_status` بالفعل (نفس العقد العام).

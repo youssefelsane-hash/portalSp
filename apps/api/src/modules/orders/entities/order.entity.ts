@@ -11,6 +11,10 @@ export enum OrderStatus {
   TECHNICIAN_ARRIVED = 'technician_arrived',
   IN_PROGRESS = 'in_progress',
   AWAITING_QUOTE_APPROVAL = 'awaiting_quote_approval',
+  // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — مختلفة عن AWAITING_QUOTE_APPROVAL فوق عمدًا:
+  // دي بتؤسس أول سعر لطلب لسه بلا سعر (pricing_model=inspection_then_quote)، مش بتضيف على سعر
+  // موجود بالفعل. بتوصل من TECHNICIAN_ARRIVED بس (الفني عاين وحدد سعر).
+  AWAITING_INITIAL_QUOTE_APPROVAL = 'awaiting_initial_quote_approval',
   WORK_COMPLETED = 'work_completed',
   AWAITING_PAYMENT = 'awaiting_payment',
   COMPLETED = 'completed',
