@@ -11,6 +11,7 @@ import {
   OrderAssistantAssignedManuallyEvent,
 } from '../../common/events/order-assistant-assigned-manually.event';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
+import { CrewMemberType } from './dto/admin-crew-member.dto';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-evaluation.entity';
@@ -792,7 +793,19 @@ export class AdminOrdersService {
   }
 
   /** إضافة عضو طاقم (Ops حل نقص طاقم، مش شغل "مساعد" بالضرورة — راجع assignAssistant فوق للمساعد تحديدًا). */
-  async addCrewMember(adminUserId: string, orderId: string, technicianId: string, roleLabel: string, meta?: AuditActorMeta): Promise<Order> {
+  /**
+   * docs/08 §70 (بلاغ مالك) — `memberType` بقى صريح. قبل كده الصف كان بينزل بالافتراضي
+   * `team_member` مهما كان الدور المكتوب، فالأدمن ماكانش يقدر يسدّ نقص المساعدين خالص:
+   * `crew_status.assignedAssistants` تفضل صفر و"الطاقم ناقص" تفضل مزمّرة للأبد.
+   */
+  async addCrewMember(
+    adminUserId: string,
+    orderId: string,
+    technicianId: string,
+    roleLabel: string,
+    memberType: CrewMemberType = 'team_member',
+    meta?: AuditActorMeta,
+  ): Promise<Order> {
     const order = await this.findOrThrow(orderId);
     const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId);
 
@@ -807,7 +820,7 @@ export class AdminOrdersService {
     // هنا بس بنحوّل خطأ الداتابيز الخام لنفس رسالة 409 الواضحة اللي الفحص العادي بيرجّعها.
     try {
       await this.teamMembers.save(
-        this.teamMembers.create({ orderId, technicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+        this.teamMembers.create({ orderId, technicianId, roleLabel, memberType, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
       );
     } catch (err) {
       if (this.isUniqueViolation(err)) {
@@ -823,7 +836,7 @@ export class AdminOrdersService {
       action: 'order.crew_member_added',
       entityType: 'order',
       entityId: orderId,
-      newValues: { technician_id: technicianId, role_label: roleLabel, capacity_tier: capacityTier },
+      newValues: { technician_id: technicianId, role_label: roleLabel, member_type: memberType, capacity_tier: capacityTier },
       meta,
     });
     return order;
@@ -896,12 +909,15 @@ export class AdminOrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود (اتشال قبل كده)', HttpStatus.NOT_FOUND);
       }
       const roleLabel = roleLabelOverride ?? existing.roleLabel;
+      // docs/08 §70 — نوع العضو بيتوارث من اللي اتشال: استبدال مساعد بيدّي مساعد، مش فني.
+      // من غير ده كان الاستبدال بيرجع للافتراضي (`team_member`) ويقلب حسبة نقص المساعدين.
+      const memberType = existing.memberType;
       await repo.remove(existing);
       // نفس حماية addCrewMember فوق — سباق ممكن: الفني الجديد بقى عضو بالفعل (إضافة متزامنة)
       // بين التحقق فوق (validateCrewCandidateOrThrow) وهنا.
       try {
         await repo.save(
-          repo.create({ orderId, technicianId: newTechnicianId, roleLabel, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+          repo.create({ orderId, technicianId: newTechnicianId, roleLabel, memberType, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
         );
       } catch (err) {
         if (this.isUniqueViolation(err)) {

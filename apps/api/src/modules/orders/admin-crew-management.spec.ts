@@ -65,11 +65,24 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
     return profile.id as string;
   }
 
-  async function insertOrder(label: string, opts: { bookingMode: BookingMode; technicianId: string; requiredTechnicians: number | null }) {
+  async function insertOrder(
+    label: string,
+    opts: { bookingMode: BookingMode; technicianId: string; requiredTechnicians: number | null; requiredAssistants?: number | null },
+  ) {
     const [order] = await q(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians)
-       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8) RETURNING id`,
-      [`TESTCRW-${label}`.slice(0, 24), ids.customerProfile, opts.technicianId, ids.service, ids.address, ids.zone, opts.bookingMode, opts.requiredTechnicians],
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, payment_status, total_amount_cents, technician_earning_cents, booking_mode, required_technicians, required_assistants)
+       VALUES ($1,$2,$3,$4,$5,$6,'technician_assigned','pending',30000,0,$7,$8,$9) RETURNING id`,
+      [
+        `TESTCRW-${label}`.slice(0, 24),
+        ids.customerProfile,
+        opts.technicianId,
+        ids.service,
+        ids.address,
+        ids.zone,
+        opts.bookingMode,
+        opts.requiredTechnicians,
+        opts.requiredAssistants ?? null,
+      ],
     );
     return order.id as string;
   }
@@ -390,5 +403,86 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0][0]).toMatchObject({ orderId, changeType: 'added', addedTechnicianProfileId: ids.memberAProfile });
+  });
+
+  // docs/08 §70 (بلاغ مالك): «الأدمن بيحط الدور سواء فني أو مساعد، في الحالتين بتنزل في خانة
+  // المساعدين… فبيفضل الاحتياج دايمًا موجود حتى لو الأدمن عايز يسده». السبب: addCrewMember
+  // ماكانتش بتكتب member_type خالص، فالصف بينزل بالافتراضي `team_member` مهما كان الدور المكتوب.
+  describe('نوع العضو (فني/مساعد) — الأدمن بقى يقدر يسدّ النقص فعلاً (docs/08 §70)', () => {
+    it('addCrewMember بـmember_type=assistant بينزل مساعد فعلاً، والنقص بيتسدّ', async () => {
+      const orderId = await insertOrder(`type-asst-${runId}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 1,
+        requiredAssistants: 1,
+      });
+
+      const before = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 1, requiredAssistants: 1 });
+      expect(before.missingAssistants).toBe(1);
+      expect(before.crewComplete).toBe(false);
+
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'مساعد سباك', 'assistant');
+
+      const [row] = await q(`SELECT member_type FROM order_team_members WHERE order_id = $1`, [orderId]);
+      expect(row.member_type).toBe('assistant');
+
+      const after = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 1, requiredAssistants: 1 });
+      expect(after.assignedAssistants).toBe(1);
+      expect(after.missingAssistants).toBe(0);
+      expect(after.crewComplete).toBe(true);
+    });
+
+    it('**الفجوة اللي اتقفلت**: من غير النوع كان المساعد بينزل فني والنقص يفضل مفتوح للأبد', async () => {
+      const orderId = await insertOrder(`type-default-${runId}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 1,
+        requiredAssistants: 1,
+      });
+      // نفس النداء القديم بالحرف (بلا نوع) — بيفضل `team_member` عشان صفر انحدار.
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'مساعد');
+
+      const [row] = await q(`SELECT member_type FROM order_team_members WHERE order_id = $1`, [orderId]);
+      expect(row.member_type).toBe('team_member');
+      const composition = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 1, requiredAssistants: 1 });
+      // ده السلوك اللي المالك اشتكى منه: الدور مكتوب "مساعد" بس العدّاد لسه ناقص مساعد.
+      expect(composition.missingAssistants).toBe(1);
+      expect(composition.crewComplete).toBe(false);
+    });
+
+    it('فني ومساعد مع بعض على نفس الطلب بيكمّلوا الطاقم', async () => {
+      const orderId = await insertOrder(`type-both-${runId}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 2,
+        requiredAssistants: 1,
+      });
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'فني تاني', 'team_member');
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberBProfile, 'مساعد', 'assistant');
+
+      const composition = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 2, requiredAssistants: 1 });
+      expect(composition.assignedTechnicians).toBe(2); // القائد + فني مضاف
+      expect(composition.assignedAssistants).toBe(1);
+      expect(composition.crewComplete).toBe(true);
+    });
+
+    it('replaceCrewMember بيورّث نوع العضو — استبدال مساعد بيدّي مساعد مش فني', async () => {
+      const orderId = await insertOrder(`type-replace-${runId}`, {
+        bookingMode: BookingMode.TEAM,
+        technicianId: ids.leaderProfile,
+        requiredTechnicians: 1,
+        requiredAssistants: 1,
+      });
+      await adminOrdersService.addCrewMember(ids.adminUserId, orderId, ids.memberAProfile, 'مساعد', 'assistant');
+      const [existing] = await q(`SELECT id FROM order_team_members WHERE order_id = $1`, [orderId]);
+
+      await adminOrdersService.replaceCrewMember(ids.adminUserId, orderId, existing.id, ids.memberBProfile, 'المساعد اعتذر', undefined);
+
+      const [row] = await q(`SELECT technician_id, member_type FROM order_team_members WHERE order_id = $1`, [orderId]);
+      expect(row.technician_id).toBe(ids.memberBProfile);
+      expect(row.member_type).toBe('assistant');
+      const composition = await orderTeamService.getCrewComposition(orderId, { requiredTechnicians: 1, requiredAssistants: 1 });
+      expect(composition.crewComplete).toBe(true);
+    });
   });
 });
