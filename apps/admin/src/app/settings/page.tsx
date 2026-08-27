@@ -17,6 +17,9 @@ interface PaymentChannelStatus {
   is_configured: boolean;
   is_available: boolean;
   unavailable_reason: string | null;
+  // تشخيص تشغيلي بيوصل للأدمن بس (docs/08 §76-ز) — العميل بياخد جملة عامة في
+  // `unavailable_reason` بدل أسماء إعدادات ناقصة.
+  admin_note?: string;
 }
 
 // وعاء العمولة (ADR-0037، docs/08 §60.1/§60.4) — طلب مالك صريح بمكان واحد في الأدمن بيشيل
@@ -207,7 +210,7 @@ export default function SettingsPage() {
               <div key={channel.method} className="rounded-md border p-3">
                 <p className="font-medium">{PAYMENT_CHANNEL_LABELS[channel.method] ?? channel.method}</p>
                 <p className={channel.is_available ? 'text-sm text-green-700' : 'text-sm text-destructive'}>
-                  {channel.is_available ? 'جاهزة وتظهر للعميل' : channel.unavailable_reason ?? 'غير جاهزة'}
+                  {channel.is_available ? 'جاهزة وتظهر للعميل' : channel.admin_note ?? channel.unavailable_reason ?? 'غير جاهزة'}
                 </p>
               </div>
             ))}

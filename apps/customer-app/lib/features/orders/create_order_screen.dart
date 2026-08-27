@@ -68,10 +68,6 @@ class CreateOrderScreen extends StatefulWidget {
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   late final OrdersRepository _repository;
-  // عتبة "الشغل القريب" بالساعات (docs/08 §61.3) — null لحد ما تتحمّل، و0 معناه الأدمن عطّل
-  // النظام ده فمفيش تنبيه يتعرض. فشل التحميل بيسيبها null بهدوء: التنبيه معلومة مساعدة،
-  // مايصحّش يمنع العميل من الحجز.
-  int? _nearTermHours;
   late final PaymentsRepository _paymentsRepository;
   // دفع قبل التوزيع (ADR-0013، docs/08 §19 بند 1) — null = الافتراضي القديم (دفع بعد الشغل).
   // card/instapay/fawry_reference دفع مسبق. installment اختيار تجهيز طلب التقسيط بعد إنشاء الطلب.
@@ -169,7 +165,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   @override
   void initState() {
     super.initState();
-    _loadBookingPolicy();
     _repository = OrdersRepository(context.read<AuthRepository>());
     _paymentsRepository = PaymentsRepository(context.read<AuthRepository>());
     _orderIdempotencyKey = _paymentsRepository.generateIdempotencyKey();
@@ -1012,17 +1007,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Widget _buildPricingFieldWidget(PricingField field) =>
       buildPricingFieldWidget(context, field, _fieldValues, _onFieldValueChanged);
 
-  Future<void> _loadBookingPolicy() async {
-    try {
-      final data = await context.read<AuthRepository>().authedRequest('GET', '/booking-policy');
-      if (!mounted) return;
-      setState(() => _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt());
-    } catch (error) {
-      // بهدوء — التنبيه مايمنعش الحجز.
-      debugPrint('فشل تحميل سياسة المواعيد: $error');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -1107,14 +1091,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     onTap: _pickSchedule,
                   ),
                 ),
-                // تنبيه سياسة المواعيد (docs/08 §61.3، طلب مالك صريح) — بيبني توقّع صح قبل
-                // الحجز بدل ما العميل يستغرب إن حجزه مستني تأكيد فني. العتبة بتيجي من
-                // /booking-policy (نفس الإعداد اللي المطابقة بتقرا منه، ADR-0035) — **مش**
-                // مكتوبة "48" ثابتة، وإلا أول ما الأدمن يغيّرها يبقى النص كذب.
-                if (_nearTermHours != null && _nearTermHours! > 0) ...[
-                  const SizedBox(height: 8),
-                  _BookingTimingNotice(nearTermHours: _nearTermHours!),
-                ],
                 // دقة الوقت (ADR-0031 Slice B) + وضع "بداية بس" (ADR-0032) — الاتنين محتاجين
                 // وقت بداية دقيق فوق اليوم المختار، بس دقة الوقت وحدها محتاجة مدة كمان تحت.
                 if (widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly) ...[
@@ -1435,12 +1411,12 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         : ((_paymentChannels['cash']?.available ?? false) ||
                                 (_paymentChannels['wallet']?.available ?? false))
                             ? 'تدفع بعد ما الفني يخلّص الشغل'
-                            : 'الكاش والمحفظة مقفولان من إعدادات الأدمن'),
+                            : 'مش متاح للخدمة دي دلوقتي'),
                   ),
                   _paymentOption(
                     method: 'card',
-                    title: 'الدفع بالبطاقة عبر Paymob',
-                    subtitle: 'يفتح بوابة Paymob الآمنة ويبدأ التنفيذ بعد تأكيد الدفع',
+                    title: 'بطاقة بنكية — فيزا أو ماستركارد',
+                    subtitle: 'تحويل آمن لصفحة الدفع، والتنفيذ بيبدأ بعد تأكيد العملية',
                     icon: Icons.credit_card_outlined,
                   ),
                   _paymentOption(
@@ -1452,7 +1428,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     extraUnavailableReason: _requiresElectronicPayment
                         ? 'التقسيط الحالي يحتاج مراجعة إدارة ولا يغطي الإيداع الفوري لهذه الخدمة'
                         : _paymentChannels['installment']?.available == true && !_hasInstallmentPlans
-                            ? 'لا توجد خطة تقسيط مرتبطة بهذه الخدمة — اربطها من لوحة الأدمن'
+                            ? 'مفيش خطة تقسيط متاحة للخدمة دي'
                             : null,
                   ),
                   _paymentOption(
@@ -1471,10 +1447,21 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
             ),
             const SizedBox(height: 16),
+            // النص القديم كان «وصف المشكلة (اختياري)» — بلاغ مالك صريح (docs/08 §76-هـ):
+            // العميل مش عارف الكلام ده رايح لمين، فبيسيبه فاضي. التسمية دلوقتي بتقول الوجهة
+            // بالاسم («الفني») بدل ما توصف المحتوى، وده اللي بيخلّي الحقل يتملي فعلاً.
+            Text('رسالة للفني', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'اللي هتكتبه هنا بيوصل للفني قبل ما ييجي — تفاصيل المشكلة، مكان العطل، أو أي حاجة تحب ياخد باله منها.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: _descriptionController,
               decoration: const InputDecoration(
-                labelText: 'وصف المشكلة (اختياري)',
+                hintText: 'مثلاً: الحنفية بتنقّط من تحت الحوض في المطبخ',
+                helperText: 'اختياري',
                 border: OutlineInputBorder(),
               ),
               maxLines: 3,
@@ -1492,48 +1479,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// تنبيه سياسة المواعيد (docs/08 §61.3). نصّه مقصود يكون **مساعد مش تحذيري**: بيقول للعميل
-/// إيه أسرع طريق لو مستعجل، وبيطمّنه إن المواعيد الأبعد مش محتاجة انتظار — من غير ما يحسّسه
-/// إن الحجز العادي فيه مشكلة.
-class _BookingTimingNotice extends StatelessWidget {
-  const _BookingTimingNotice({required this.nearTermHours});
-
-  final int nearTermHours;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.bolt_outlined, size: 20, color: scheme.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('محتاج الخدمة بسرعة؟', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                Text(
-                  'لو الموعد عاجل، اختار خدمة طوارئ. المواعيد العادية خلال الـ$nearTermHours ساعة الجاية '
-                  'بتحتاج تأكيد الفني الأول، أما المواعيد بعد كده فمش محتاجة انتظار موافقة إضافية.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -45,6 +45,15 @@ class HomepageSearchContent {
     placeholder: 'اوصف لنا مشكلتك أو الشيء اللي فيه المشكلة',
   );
 
+  /// نسخة بعنوان مختلف — بتستخدمها الاختبارات عشان تتأكد إن لوحة الـhero بتكبر لعنوان
+  /// طويل بدل ما تقصّه (بَقّة الـoverflow، docs/08 §76-ب).
+  HomepageSearchContent copyWithTitle(String? newTitle) => HomepageSearchContent(
+        eyebrow: eyebrow,
+        title: newTitle ?? title,
+        description: description,
+        placeholder: placeholder,
+      );
+
   factory HomepageSearchContent.fromJson(Map<String, dynamic>? json) =>
       HomepageSearchContent(
         eyebrow: json?['eyebrow'] as String? ?? defaults.eyebrow,

@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/design/app_theme.dart';
 import 'package:customer_app/features/catalog/category_tile.dart';
+import 'package:customer_app/features/catalog/featured_category_item.dart';
+import 'package:customer_app/features/catalog/home_hero.dart';
+import 'package:customer_app/features/catalog/homepage_content_repository.dart';
 import 'package:customer_app/features/catalog/models.dart';
-import 'package:customer_app/features/catalog/trust_strip.dart';
 import 'package:customer_app/features/shell/customer_shell.dart';
 
-// docs/08 §75 — إعادة تصميم واجهة العميل. الاختبارات دي بتقيس **البنية الفعلية بعد الرندر**
+// docs/08 §75/§76 — إعادة تصميم واجهة العميل. الاختبارات دي بتقيس **البنية الفعلية بعد الرندر**
 // (مواضع وأحجام حقيقية)، مش وجود ودجت بالاسم — الدرس من §72: `flutter analyze` بيمسك الأنواع،
 // مش الـlayout، وكارت 568px لمحتوى 350px عدّى منه.
 ServiceCategory _category(String name, {String? image}) => ServiceCategory.fromJson({
@@ -107,25 +109,183 @@ void main() {
     });
   });
 
-  group('TrustStrip — شريط الضمان', () {
-    testWidgets('من غير بيانات ضمان: البند بيختفي بدل ما يتعرض رقم مخترع', (tester) async {
-      await tester.pumpWidget(wrap(const TrustStrip(warranty: null)));
-      // الوعدين التانيين حقيقيين دايمًا، فبيفضلوا.
-      expect(find.textContaining('السعر واضح'), findsOneWidget);
-      expect(find.textContaining('متحقّق'), findsOneWidget);
-      // بس مفيش أي كلام عن ضمان.
-      expect(find.textContaining('ضمان'), findsNothing);
+  // docs/08 §76-ب — **بَقّة حقيقية بلّغ عنها المالك بلقطة من الجهاز**:
+  // `BOTTOM OVERFLOWED BY 43 PIXELS` جنب شريط البحث. السبب: ارتفاع الـhero كان مقفول
+  // (`SizedBox(height: 200)`) ومحتواه محتاج ~242. المجموعة دي بترسم اللوحة بمحتوى حقيقي في
+  // ظروف قاسية عمدًا وتتأكد إن مفيش استثناء رندر.
+  //
+  // **`pumpAndSettle` مش رفاهية هنا — من غيرها الاختبار بيعدّي على النسخة المكسورة**: اللوحة
+  // بتدخل بأنيميشن `Opacity` من 0، و`RenderOpacity` بتتخطى رسم أولادها بالكامل لما الشفافية
+  // صفر. وخطأ الـoverflow بيتبلّغ **وقت الرسم**. يعني فريم واحد بعد `pumpWidget` = صفر رسم =
+  // صفر خطأ، حتى والارتفاع مقفول والمحتوى فايض فعلاً (اتجرّب: الاختبار عدّى أخضر على النسخة
+  // المكسورة قبل ما نضيف السطر ده).
+  group('HomeHero — مفيش overflow مهما كان المحتوى', () {
+    /// بترسم اللوحة وتستنى أنيميشن الدخول يخلص، وترجّع أي استثناء رندر حصل.
+    Future<Object?> renderAndCatch(WidgetTester tester, Widget app) async {
+      await tester.pumpWidget(app);
+      await tester.pumpAndSettle();
+      return tester.takeException();
+    }
+
+    Widget hero({
+      double textScale = 1,
+      String? title,
+      String trust = 'ضمان على كل شغلانة — لو في أي عيب بعد التسليم بنرجع نصلحه',
+      int imageCount = 0,
+      double width = 390,
+    }) =>
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+            child: Directionality(
+              textDirection: TextDirection.rtl,
+              child: Scaffold(
+                body: SingleChildScrollView(
+                  child: SizedBox(
+                    width: width,
+                    child: HomeHero(
+                      // مفيش صور شبكة في الاختبار: `HeroImageCrossfade` بياخد قايمة فاضية
+                      // فيرسم التدرّج الاحتياطي. النقط بتظهر بعدد الصور، فبنعدّيها كتكرار
+                      // لنفس الـprovider لما نحتاج نختبرها.
+                      images: List.generate(
+                        imageCount,
+                        (_) => const AssetImage('assets/nonexistent.png'),
+                      ),
+                      activeIndex: 0,
+                      content: HomepageSearchContent.defaults.copyWithTitle(title),
+                      trustMessage: trust,
+                      onSearch: (_) {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    testWidgets('الحالة الافتراضية: مفيش استثناء رندر', (tester) async {
+      expect(await renderAndCatch(tester, hero()), isNull);
     });
 
-    testWidgets('النص بييجي من السيرفر زي ما هو — مش مبني في التطبيق', (tester) async {
-      await tester.pumpWidget(wrap(
-        const TrustStrip(
-          warranty: TrustInfo(warrantyDays: 365, warrantyLabelAr: 'ضمان سنة كاملة'),
+    testWidgets('تكبير خط النظام 1.6× (إتاحة): لسه مفيش overflow', (tester) async {
+      expect(await renderAndCatch(tester, hero(textScale: 1.6)), isNull);
+    });
+
+    testWidgets('عنوان طويل جدًا من لوحة الأدمن: اللوحة بتكبر مش بتتقص', (tester) async {
+      expect(
+        await renderAndCatch(tester, hero(
+          title: 'محتاج مساعدة في إيه النهارده في بيتك أو شقتك أو مكتبك؟ إحنا معاك',
+        )),
+        isNull,
+      );
+    });
+
+    testWidgets('شاشة ضيقة (320px) + نقط شرائح: مفيش overflow', (tester) async {
+      expect(await renderAndCatch(tester, hero(width: 320, imageCount: 3)), isNull);
+    });
+
+    // الحد الأدنى هو الوعد للمالك («سيب للصورة مساحة») — لو حد شاله بالغلط الشكل بيرجع
+    // شريط رفيع زي ما كان.
+    testWidgets('الارتفاع مش أقل من الحد الأدنى', (tester) async {
+      await tester.pumpWidget(hero());
+      expect(tester.getSize(find.byType(HomeHero)).height,
+          greaterThanOrEqualTo(kHeroMinHeight));
+    });
+
+    // زرار البحث كان بيظهر بس بعد ما العميل يكتب — يعني أول نظرة مفيش مخرج واضح للبحث.
+    testWidgets('زرار البحث ظاهر من غير ما العميل يكتب حاجة', (tester) async {
+      await tester.pumpWidget(hero());
+      expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+    });
+
+    testWidgets('الكتابة + Enter بتبعت النص للبحث', (tester) async {
+      String? searched;
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light(),
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: HomeHero(
+              images: const [],
+              activeIndex: 0,
+              content: HomepageSearchContent.defaults,
+              trustMessage: '',
+              onSearch: (value) => searched = value,
+            ),
+          ),
         ),
       ));
-      // لو الإدارة رفعت الضمان لسنة، النص بيتغيّر لوحده بلا نشر جديد للتطبيق.
-      expect(find.text('ضمان سنة كاملة'), findsOneWidget);
-      expect(find.textContaining('14'), findsNothing);
+      await tester.enterText(find.byType(TextField), ' حنفية ');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(searched, 'حنفية');
+    });
+  });
+
+  // docs/08 §76-د — «اللوجو اللي جوّاه الأكثر طلبًا حواليه إطار رمادي… أنا عايز اللوجو بس
+  // وفي الصفحة طاير». الصف بيتحط في `SizedBox` بارتفاع محسوب، فهو نفس فئة بَقّة الـoverflow
+  // اللي في اللوحة فوق — لازم يتقاس بنفس الطريقة.
+  group('FeaturedCategoryItem — الأكثر طلبًا', () {
+    Widget row(BuildContext Function()? capture, {double textScale = 1, String name = 'سباكة'}) =>
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+            child: Directionality(
+              textDirection: TextDirection.rtl,
+              child: Scaffold(
+                body: Builder(
+                  builder: (context) => SizedBox(
+                    height: featuredRowHeight(context),
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        FeaturedCategoryItem(category: _category(name), onTap: () {}),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    testWidgets('مفيش دايرة/إطار ورا الأيقونة لما فيه icon_url', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light(),
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: FeaturedCategoryItem(
+              category: _category('سباكة', image: 'https://example.test/i.png'),
+              onTap: () {},
+            ),
+          ),
+        ),
+      ));
+      // `CircleAvatar` كان بيرسم `surfaceContainerHighest` كخلفية دايرية — ده بالظبط
+      // "الإطار الرمادي" اللي المالك شافه.
+      expect(find.byType(CircleAvatar), findsNothing);
+    });
+
+    testWidgets('من غير أيقونة: حرف أول الاسم بيفضل ليه دايرة عشان يبان إنه زرار', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light(),
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: FeaturedCategoryItem(category: _category('نجارة'), onTap: () {}),
+          ),
+        ),
+      ));
+      expect(find.text('ن'), findsOneWidget);
+    });
+
+    testWidgets('الارتفاع المحجوز بيكبر مع خط النظام — مفيش overflow', (tester) async {
+      await tester.pumpWidget(row(null, textScale: 1.6, name: 'خدمات منزلية'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -141,7 +301,7 @@ void main() {
   });
 
   // لقطة PNG حقيقية للأجزاء الجديدة — للفحص بالعين مش بالوصف (نفس منهجية §72).
-  testWidgets('طباعة لقطة للشبكة وشريط الضمان (اختياري)', (tester) async {
+  testWidgets('طباعة لقطة للشبكة (اختياري)', (tester) async {
     if (Platform.environment['FLUTTER_TEST_HOME_PNG'] != '1') return;
     tester.view.physicalSize = const Size(390 * 3, 844 * 3);
     tester.view.devicePixelRatio = 3;
@@ -182,10 +342,6 @@ void main() {
                       itemBuilder: (context, i) => CategoryTile(category: categories[i], onTap: () {}),
                     );
                   },
-                ),
-                const SizedBox(height: 24),
-                const TrustStrip(
-                  warranty: TrustInfo(warrantyDays: 14, warrantyLabelAr: 'ضمان 14 يوم'),
                 ),
               ],
             ),

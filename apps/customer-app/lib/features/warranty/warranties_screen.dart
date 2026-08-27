@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../catalog/trust_info.dart';
 
 class WarrantyRepository {
   final AuthRepository auth;
@@ -37,11 +38,20 @@ class WarrantiesScreen extends StatefulWidget {
 class _WarrantiesScreenState extends State<WarrantiesScreen> {
   List<Map<String, dynamic>>? _items;
   String? _error;
+  // مدة الضمان النافذة فعليًا دلوقتي — بتيجي من السيرفر (`/trust-info`) مش مكتوبة في التطبيق،
+  // فأول ما الإدارة تغيّرها النص هنا بيتغيّر لوحده (docs/08 §76-أ).
+  TrustInfo? _trustInfo;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadTrustInfo();
+  }
+
+  Future<void> _loadTrustInfo() async {
+    final trust = await fetchTrustInfo();
+    if (mounted && trust != null) setState(() => _trustInfo = trust);
   }
 
   Future<void> _load() async {
@@ -130,7 +140,18 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(title: const Text('ضماناتي')),
-        body: RefreshIndicator(
+        body: Column(
+          children: [
+            if (_trustInfo != null) _WarrantyPromiseBanner(trust: _trustInfo!),
+            Expanded(child: _buildList()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    return RefreshIndicator(
           onRefresh: _load,
           child: _error != null
               ? ListView(
@@ -207,7 +228,57 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
                     );
                   },
                 ),
-        ),
+    );
+  }
+}
+
+/// لافتة وعد الضمان أعلى شاشة «ضماناتي» (docs/08 §76-أ).
+///
+/// **ليه هنا بالذات؟** الوعد ده كان في شريط تحت الخدمات في الشاشة الرئيسية واتشال منها (طلب
+/// مالك صريح — الشاشة الرئيسية كانت بتقول نفس الكلام مرتين). المكان الطبيعي ليه هو الشاشة
+/// اللي العميل بيفتحها **وهو بيفكر في الضمان**، مش الشاشة اللي بيدوّر فيها على خدمة.
+class _WarrantyPromiseBanner extends StatelessWidget {
+  const _WarrantyPromiseBanner({required this.trust});
+
+  final TrustInfo trust;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.verified_user_outlined, color: scheme.onPrimaryContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  trust.warrantyLabelAr,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: scheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'لو ظهر أي عيب في الشغل جوّه مدة الضمان، افتح مطالبة من هنا وإحنا بنرجع نصلّحه.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onPrimaryContainer,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

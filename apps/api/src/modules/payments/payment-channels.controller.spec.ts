@@ -7,6 +7,11 @@ import { PaymentChannelsController } from './payment-channels.controller';
 import { PaymentProviderRegistry } from './gateways/payment-provider.registry';
 import { PaymentMethod } from './entities/payment.entity';
 import { PaymobProvider } from './gateways/paymob-provider.service';
+import { UserType } from '../auth/entities/user.entity';
+import { JwtPayload } from '../auth/types/authenticated-request';
+
+const CUSTOMER: JwtPayload = { sub: 'customer-1', userType: UserType.CUSTOMER, amr: ['otp'] };
+const ADMIN: JwtPayload = { sub: 'admin-1', userType: UserType.ADMIN, amr: ['otp'] };
 
 // اختبار حي ضد Postgres/Redis حقيقيين — بَقّة حقيقية اتلقطت من صاحب المشروع (2026-08-21): الكاش
 // كان الوسيلة الوحيدة اللي `isConfigured` بتاعتها ثابتة `true` دايمًا (بلا بوابة خارجية تتفحص)،
@@ -52,10 +57,30 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
   });
 
   it('payments.cash_enabled=true (الافتراضي) — الكاش متاح زي isConfigured بتاعته بالظبط', async () => {
-    const items = await controller.list();
+    const items = await controller.list(CUSTOMER);
     expect(items.find((i) => i.method === PaymentMethod.CASH)?.is_available).toBe(true);
     expect(items.find((i) => i.method === PaymentMethod.CARD)?.is_available).toBe(false);
     expect(items.find((i) => i.method === PaymentMethod.WALLET)?.is_available).toBe(true);
+  });
+
+  // docs/08 §76-ز — بلاغ مالك: نصوص موجّهة للأدمن كانت بتظهر للعميل. الأخطر إن سبب الكارت
+  // كان بيطبع أسماء متغيّرات إعداد Paymob الناقصة حرفيًا في شاشة العميل.
+  it('العميل ما يشوفش أي تشخيص تشغيلي ولا أسماء إعدادات', async () => {
+    const items = await controller.list(CUSTOMER);
+    for (const item of items) {
+      expect(item.admin_note).toBeUndefined();
+      if (item.unavailable_reason) {
+        expect(item.unavailable_reason).not.toMatch(/أدمن|Paymob|API Key|إعداد/);
+      }
+    }
+    expect(items.find((i) => i.method === PaymentMethod.CARD)?.unavailable_reason)
+      .toBe('الطريقة دي مش متاحة دلوقتي — اختار طريقة تانية');
+  });
+
+  it('الأدمن لسه بياخد التشخيص الكامل — التشخيص ما اتشالش، اتنقل لمكانه الصح', async () => {
+    const items = await controller.list(ADMIN);
+    expect(items.find((i) => i.method === PaymentMethod.CARD)?.admin_note).toContain('API Key');
+    expect(items.find((i) => i.method === PaymentMethod.CASH)?.admin_note).toBeUndefined();
   });
 
   it('payments.cash_enabled=false — الكاش بس بيتحجب، باقي الوسائل زي isConfigured بتاعتها من غير تغيير', async () => {
@@ -64,7 +89,7 @@ describe('PaymentChannelsController — إعداد payments.cash_enabled (docs/0
     );
     await cache.del('settings:payments.cash_enabled');
     try {
-      const items = await controller.list();
+      const items = await controller.list(CUSTOMER);
       expect(items.find((i) => i.method === PaymentMethod.CASH)?.is_available).toBe(false);
       expect(items.find((i) => i.method === PaymentMethod.WALLET)?.is_available).toBe(true);
     } finally {
