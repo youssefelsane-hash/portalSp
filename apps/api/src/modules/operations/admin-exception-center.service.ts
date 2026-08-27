@@ -24,6 +24,12 @@ export interface CrewShortageExceptionItem {
 export interface StaleDispatchExceptionItem {
   assignmentId: string;
   orderId: string;
+  /**
+   * رقم الطلب المقروء (docs/08 §77-A3، بلاغ مالك). الصف كان بيعرض لينك عام «عرض الطلب» + اسم
+   * الفني + الميعاد وبس — موظف العمليات كان مضطر يفتح كل صف عشان يعرف هو بيبص على إيه.
+   * الرقم ده هو الحاجة الوحيدة اللي بيتكلم بيها مع العميل والفني، فغيابه هنا بيبطّل القايمة.
+   */
+  orderNumber: string;
   technicianId: string;
   technicianCode: string;
   fullName: string;
@@ -76,6 +82,7 @@ interface RawCrewShortageRow {
 
 interface RawStaleDispatchRow {
   id: string;
+  order_number: string;
   order_id: string;
   technician_id: string;
   technician_code: string;
@@ -160,7 +167,7 @@ export class AdminExceptionCenterService {
     });
     const staleDispatchRows = await this.dataSource.query<RawStaleDispatchRow[]>(
       `
-      SELECT oa.id, oa.order_id, oa.technician_id, tp.technician_code, u.full_name,
+      SELECT oa.id, oa.order_id, o.order_number, oa.technician_id, tp.technician_code, u.full_name,
              oa.sent_at, oa.expires_at, COUNT(*) OVER() AS total_count
       FROM order_assignments oa
       JOIN orders o ON o.id = oa.order_id
@@ -180,6 +187,7 @@ export class AdminExceptionCenterService {
     const staleDispatchItems: StaleDispatchExceptionItem[] = staleDispatchRows.map((r) => ({
       assignmentId: r.id,
       orderId: r.order_id,
+      orderNumber: r.order_number,
       technicianId: r.technician_id,
       technicianCode: r.technician_code,
       fullName: r.full_name,

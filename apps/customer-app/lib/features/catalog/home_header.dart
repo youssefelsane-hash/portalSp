@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../addresses/addresses_repository.dart';
 import '../addresses/addresses_screen.dart';
@@ -37,6 +38,12 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
   }
 
   Future<void> _load() async {
+    // زائر مش مسجّل (docs/08 §77-B1): `/me/addresses` محمي، فالنداء هيرجع 401 دايمًا. بنعرض
+    // دعوة بدل ما نستهلك شبكة ونسجّل خطأ متوقع.
+    if (!context.read<AuthRepository>().isAuthenticated) {
+      if (mounted) setState(() => _loaded = true);
+      return;
+    }
     try {
       final addresses = await _repository.list();
       if (!mounted) return;
@@ -54,6 +61,17 @@ class _HomeLocationHeaderState extends State<HomeLocationHeader> {
   }
 
   Future<void> _pickAddress() async {
+    // العنوان بيتحفظ على الحساب — فمفيش معنى لاختياره بلا حساب. البوابة بتشرح السبب،
+    // وبعد التسجيل بنكمّل لنفس الشاشة اللي العميل كان رايحها.
+    if (!await ensureSignedIn(
+      context,
+      reason: 'العنوان بيتحفظ على حسابك عشان تلاقيه جاهز في كل حجز.',
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
     final picked = await Navigator.of(context).push<Address>(
       MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
     );

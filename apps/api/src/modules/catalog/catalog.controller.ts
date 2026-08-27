@@ -28,6 +28,21 @@ export class CatalogController {
     return categories.map(toServiceCategoryResponseDto);
   }
 
+  /**
+   * «الأكثر طلبًا» — من عدد الطلبات الحقيقي (docs/08 §77-E2).
+   *
+   * كان القسم ده في التطبيق بيتفلتر محليًا بـ`is_featured` — يعني العنوان يقول «الأكثر طلبًا»
+   * والمصدر «اللي الأدمن اختاره». المسار ده بيخلّي الاسم يطابق القياس.
+   *
+   * `@Public()` زي باقي الكتالوج — معلومة عامة بحتة بلا أي بيانات شخصية.
+   */
+  @Public()
+  @Get('service-categories/most-requested')
+  async listMostRequestedCategories() {
+    const categories = await this.catalogService.findMostRequestedCategories();
+    return categories.map(toServiceCategoryResponseDto);
+  }
+
   @Public()
   @Get('services')
   async listServices(@Query() query: ListServicesDto) {

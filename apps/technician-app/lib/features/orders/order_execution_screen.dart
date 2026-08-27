@@ -20,6 +20,7 @@ import 'models.dart';
 import 'order.dart';
 import 'orders_repository.dart';
 import 'recruit_team_screen.dart';
+import '../../design/order_number_title.dart';
 
 // قبل/بعد الشغل — عتبة بسيطة على الحالة بدل قايمة صور فعلية (مفيش GET /technician/orders/:id
 // لاسترجاع صور اترفعت قبل كده لو التطبيق اتقفل وفتح تاني، نفس فجوة الاستمرارية الموثّقة فوق).
@@ -232,6 +233,42 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('اتبعت اقتراح التأجيل للعميل — الموعد الحالي محفوظ لحد ما يرد')),
+        );
+      }
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  /// استكمال الشغل يوم تاني (ADR-0047، docs/08 §77-D1).
+  ///
+  /// **مش تأجيل الموعد** (`_requestReschedule` فوق): دي بتنقل زيارة لسه ما حصلتش ومحتاجة
+  /// موافقة العميل. هنا الشغل بدأ فعلاً — الفني بيبلّغ إنه هيرجع، والعميل بيتخطر بالسبب
+  /// والتاريخ فورًا.
+  Future<void> _continueAnotherDay() async {
+    final draft = await showDialog<_ContinueAnotherDayDraft>(
+      context: context,
+      builder: (context) => const _ContinueAnotherDayDialog(),
+    );
+    if (draft == null) return;
+    setState(() {
+      _acting = true;
+      _error = null;
+    });
+    try {
+      await _repository.continueAnotherDay(
+        _order.id,
+        pauseReason: draft.reason,
+        nextSessionDate: draft.date,
+      );
+      // إعادة تحميل الطلب: `scheduled_at` اتغيّر لليوم الجديد، فالشاشة لازم تعكسه.
+      final refreshed = await _repository.getOne(_order.id);
+      if (mounted) {
+        setState(() => _order = refreshed);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('اتسجّل إنك هتكمّل يوم ${draft.date} — العميل اتبلّغ')),
         );
       }
     } on ApiException catch (err) {
@@ -569,7 +606,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('طلب ${_order.orderNumber}'),
+          title: OrderNumberTitle(orderNumber: _order.orderNumber),
           actions: [
             // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
             IconButton(
@@ -763,6 +800,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 onPressed: _acting ? null : _proposeQuoteItems,
                 icon: const Icon(Icons.receipt_long_outlined),
                 label: const Text('اقترح عرض سعر (قطع غيار/أجرة إضافية)'),
+              ),
+              // استكمال الشغل يوم تاني (ADR-0047) — متاح بس والشغل شغّال فعلاً، وده بالظبط
+              // الموقف اللي المالك وصفه: الفني اكتشف وسط الشغل إنه محتاج قطعة غيار نادرة.
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _acting ? null : _continueAnotherDay,
+                icon: const Icon(Icons.event_repeat_outlined),
+                label: const Text('هكمّل الشغل يوم تاني'),
               ),
             ],
             // سياسة إلغاء الفني (docs/10) — الزرار يظهر بس لو can_cancel:true فعلاً من الباك-إند
@@ -1670,6 +1715,114 @@ class _CashNotReceivedDialogState extends State<_CashNotReceivedDialog> {
                 FilledButton(onPressed: _goToConfirm, child: const Text('التالي')),
               ],
       ),
+    );
+  }
+}
+
+/// مدخلات «هكمّل الشغل يوم تاني» (ADR-0047).
+class _ContinueAnotherDayDraft {
+  const _ContinueAnotherDayDraft(this.reason, this.date);
+
+  final String reason;
+
+  /// `YYYY-MM-DD` — الجدولة في المشروع كله باليوم مش بالساعة (ADR-0018 §2).
+  final String date;
+}
+
+/// حوار «هكمّل الشغل يوم تاني».
+///
+/// **السبب إجباري ومش قصير** — هو اللي بيوصل للعميل حرفيًا. سبب فاضي أو من كلمة واحدة بيخلّي
+/// الميزة تبان للعميل كتهرّب مش كشفافية، وده عكس الغرض منها بالظبط.
+class _ContinueAnotherDayDialog extends StatefulWidget {
+  const _ContinueAnotherDayDialog();
+
+  @override
+  State<_ContinueAnotherDayDialog> createState() => _ContinueAnotherDayDialogState();
+}
+
+class _ContinueAnotherDayDialogState extends State<_ContinueAnotherDayDialog> {
+  final _reasonController = TextEditingController();
+  DateTime? _date;
+  String? _error;
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      // أقرب اختيار هو بعد بكرة — الاستكمال معناه ترجع في **يوم تاني**، والباك-إند بيرفض
+      // النهارده صراحةً. تقييد المُنتقي هنا بيمنع رفض متأخر بعد ما الفني يملا كل حاجة.
+      initialDate: now.add(const Duration(days: 1)),
+      firstDate: now.add(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 60)),
+      helpText: 'هترجع تكمّل امتى؟',
+    );
+    if (picked != null && mounted) setState(() => _date = picked);
+  }
+
+  void _submit() {
+    final reason = _reasonController.text.trim();
+    if (reason.length < 3) {
+      setState(() => _error = 'اكتب السبب — العميل هيقراه زي ما هو');
+      return;
+    }
+    if (_date == null) {
+      setState(() => _error = 'اختار اليوم اللي هترجع فيه');
+      return;
+    }
+    Navigator.of(context).pop(
+      _ContinueAnotherDayDraft(reason, _date!.toLocal().toIso8601String().split('T').first),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('هكمّل الشغل يوم تاني'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'الطلب هيفضل مفتوح باسمك، والعميل هيوصله إن الشغل هيكمّل — بالسبب واليوم.',
+            style: TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _reasonController,
+            maxLines: 2,
+            maxLength: 500,
+            decoration: const InputDecoration(
+              labelText: 'ليه وقفت النهارده؟',
+              hintText: 'مثلاً: محتاج قطعة غيار مش متوفرة، هجيبها وأرجع',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _pickDate,
+            icon: const Icon(Icons.event_outlined),
+            label: Text(
+              _date == null
+                  ? 'اختار يوم الرجوع'
+                  : 'هرجع يوم ${_date!.toLocal().toIso8601String().split('T').first}',
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
+        FilledButton(onPressed: _submit, child: const Text('تأكيد')),
+      ],
     );
   }
 }

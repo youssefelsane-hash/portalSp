@@ -23,6 +23,7 @@ import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
 import '../installments/installment_section.dart';
+import '../../design/order_number_title.dart';
 
 // نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط.
 // pending_payment (docs/08 §19 بند 1) — دفع قبل التوزيع (ADR-0013): لو محاولة الدفع الأولى وقت
@@ -704,7 +705,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(order != null ? 'طلب ${order.orderNumber}' : 'تفاصيل الطلب'),
+          title: OrderNumberTitle(orderNumber: order?.orderNumber),
           actions: [
             // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
             IconButton(
@@ -731,6 +732,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         serviceId: order.serviceId,
                       ),
                       const SizedBox(height: 8),
+                      // طمأنة أثناء الانتظار (docs/08 §77-B3، طلب مالك صريح) — فوق كل حاجة
+                      // عشان دي أول سؤال في دماغ العميل وهو مستني.
+                      if (_kAwaitingTechnicianStatuses.contains(order.orderStatus)) ...[
+                        const _AwaitingTechnicianCard(),
+                        const SizedBox(height: 8),
+                      ],
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),
@@ -1253,4 +1260,97 @@ class _CancelChoice {
   final String freeText;
 
   _CancelChoice({required this.reasonId, required this.freeText});
+}
+
+/// الحالات اللي العميل فيها **مستني قرار فني** (docs/08 §77-B3).
+///
+/// `searching_technician` = الطلب اتبعت لفنيين ولسه محدش قبل.
+/// `technician_assigned` = فني بعينه استلمه ولسه ما ردّش (شغل قريب/طوارئ، ADR-0035).
+///
+/// الاتنين من وجهة نظر العميل نفس الإحساس: «عملت الطلب ومحصلش حاجة» — وده بالظبط اللي
+/// الكارت تحت بيعالجه.
+const _kAwaitingTechnicianStatuses = {'searching_technician', 'technician_assigned'};
+
+/// كارت الطمأنة أثناء انتظار قبول الفني (docs/08 §77-B3).
+///
+/// **نص المالك**: «عايز يضيف رسالة بسيطة تشرح للـcustomer إن الفني هيقبل الطلب أو مستنيين فني
+/// يقبل، وفي خلال الساعات القادمة هنتواصل معاك… تبقى جملة واحدة بتقول الحاجتين مع بعض، إن
+/// الطلب ممكن يكون مستعجل فبيحتاج إن الصنايعي يوافق عليه بنفسه، أو إن مفيش دلوقتي صنايعية
+/// فاضية فإحنا مستنيين الإتاحة».
+///
+/// **السببان دول مش صياغة تسويقية — هما الحقيقة الحرفية**: ADR-0035 بيحدد إن الشغل القريب
+/// والطوارئ محتاجين قبول صريح من الفني (مش تعيين تلقائي)، والحالة التانية هي عدم توفر فني
+/// متاح في اليوم المطلوب. مفيش سبب تالت يخلّي طلب يستنى. فالكارت بيشرح النظام زي ما هو.
+///
+/// **ليه أيقونتَي التليفون والرسالة؟** طلب المالك: «تطمنه إنه ما يقلقش خالص إن خلاص طلبه بقى
+/// معانا وهيتعمل». معرفة إن فيه قناتين للتواصل بتشيل قلق «هل حد أصلاً شايف طلبي؟».
+class _AwaitingTechnicianCard extends StatelessWidget {
+  const _AwaitingTechnicianCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      color: theme.colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: theme.colorScheme.onSecondaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'طلبك معانا وبندوّرلك على فني',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'الطلب ده محتاج الفني يوافق عليه بنفسه — يا إما لأنه قريب/مستعجل، يا إما لأن '
+              'الفنيين المتاحين مشغولين دلوقتي وإحنا مستنيين أول واحد يفضى. أول ما حد يقبل '
+              'هيوصلك إشعار فورًا، وفي كل الأحوال هنتواصل معاك خلال الساعات الجاية.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+                height: 1.55,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.phone_in_talk_outlined,
+                    size: 18, color: theme.colorScheme.onSecondaryContainer),
+                const SizedBox(width: 6),
+                Icon(Icons.chat_bubble_outline_rounded,
+                    size: 18, color: theme.colorScheme.onSecondaryContainer),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'هنكلّمك أو نبعتلك رسالة — مش محتاج تعمل أي حاجة دلوقتي.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

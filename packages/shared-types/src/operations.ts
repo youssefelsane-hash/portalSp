@@ -102,6 +102,8 @@ export interface CrewShortageExceptionItemDto {
 export interface StaleDispatchExceptionItemDto {
   assignment_id: string;
   order_id: string;
+  /** رقم الطلب المقروء (docs/08 §77-A3) — الصف كان بيعرض الفني والميعاد بلا هوية الطلب. */
+  order_number: string;
   technician_id: string;
   technician_code: string;
   full_name: string;

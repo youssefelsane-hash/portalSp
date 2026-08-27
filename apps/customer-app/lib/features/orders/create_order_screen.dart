@@ -75,8 +75,32 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   String? _selectedPaymentMethod;
   final _catalogRepository = CatalogRepository();
   final _descriptionController = TextEditingController();
-  final _promoController = TextEditingController();
-  final _buildingController = TextEditingController();
+  /// **حقل كود واحد بدل اتنين (docs/08 §77-B4، طلب مالك صريح)**: «موجود مكانين تدخل فيهم
+  /// أكواد… ملهاش لازمة خالص يبقوا اتنين، هو واحد كفاية وندمج فيه الاتنين».
+  ///
+  /// والدمج ده مش تبسيط بصري بس — هو **التمثيل الصح للسلوك الحقيقي**: الباك-إند بيرفض إرسال
+  /// `promo_code` و`building_code` مع بعض أصلاً، والكود القديم كان بيمسح واحد لما التاني
+  /// يتفعّل. يعني هما حصريان متبادلان بالتصميم، وعرضهم كحقلين كان بيكشف تعقيد داخلي للعميل
+  /// بلا أي فايدة له — هو أصلاً بيمسك ورقة عليها كود واحد، ومش عارف ولا مهتم بنوعه.
+  final _codeController = TextEditingController();
+
+  /// **مفاتيح الأقسام للتمرير التلقائي (docs/08 §77-B5)**.
+  ///
+  /// طلب المالك: «دايمًا بجي تحت عشان أبتدي أحسب الحساب، يقولي الساعة ناقصة… يعني مثلًا يحصل
+  /// scrolling أوتوماتيك على الحاجة الناقصة». والملاحظة دقيقة: الشاشة طويلة، ورسالة الخطأ
+  /// بتظهر **جنب زرار التأكيد تحت** — يعني بتقول للعميل إن فيه حاجة ناقصة فوق من غير ما توديه
+  /// لها. هو مضطر يفضل يقلّب يدوي.
+  ///
+  /// الحل بسيط بالقدر اللي المالك اشترطه («لو تنفع تتعامل ببساطة»): مفتاح لكل قسم قابل
+  /// للنقص، و`Scrollable.ensureVisible` بيوصّله. صفر مكتبات، صفر أثر على الأداء.
+  final _addressSectionKey = GlobalKey();
+  final _pricingFieldsSectionKey = GlobalKey();
+  final _unitsSectionKey = GlobalKey();
+  final _scheduleSectionKey = GlobalKey();
+
+  /// نوع الكود اللي اتحقق منه بنجاح — `null` يعني لسه ما اتحققش أو الكود اتغيّر بعد التحقق.
+  /// بيتحدد **من رد السيرفر** مش من شكل الكود: بنجرّب كود خصم، ولو مش موجود بنجرّب كود عمارة.
+  String? _resolvedCodeKind; // 'promo' | 'building'
   Address? _selectedAddress;
   // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — قابلة للتغيير هنا برضه (نفس _selectedAddress)،
   // مش مقفولة على اختيار الشاشة السابقة.
@@ -89,10 +113,14 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // مفتاح جديد جوّه _submit() نفسها كان هيلغي الحماية لأي retry). أي محاولة تانية من نفس الشاشة
   // (double-tap، إعادة إرسال بعد timeout شبكة) بتستخدم نفس المفتاح.
   late final String _orderIdempotencyKey;
-  bool _validatingPromo = false;
-  String? _promoError;
-  bool _validatingBuilding = false;
-  String? _buildingError;
+  bool _validatingCode = false;
+  String? _codeError;
+
+  /// الكود اللي هيتبعت كـ`promo_code` — فاضي إلا لو التحقق أثبت إنه كود خصم.
+  String get _promoCodeToSend => _resolvedCodeKind == 'promo' ? _codeController.text.trim() : '';
+
+  /// الكود اللي هيتبعت كـ`building_code` — نفس المنطق بالظبط.
+  String get _buildingCodeToSend => _resolvedCodeKind == 'building' ? _codeController.text.trim() : '';
   String? _error;
   List<ServiceAddon> _addons = [];
   final Set<String> _selectedAddonIds = {};
@@ -374,7 +402,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   // معاينة السعر الكامل — مصدر واحد (POST /orders/preview) لكل نماذج التسعير، بدل ما كل نموذج
   // يحسب/يعرض بمنطقه الخاص. مفيش سعر حقيقي من غير عنوان (المنطقة عامل أساسي في السعر).
-  // promoCode بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validatePromo) — مش أوتوماتيك مع كل
+  // الكود بيتبعت بس لما العميل يضغط "تحقق" صراحة (_validateCode) — مش أوتوماتيك مع كل
   // تعديل، عشان كود غلط وسط الكتابة ميغطّيش السعر الأساسي الصحيح.
   Future<void> _refreshPreview({String? promoCode, String? buildingCode}) async {
     if (_selectedAddress == null) return;
@@ -439,8 +467,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         _selectedAddress = address;
         // العنوان اتغيّر — أي معاينة سعر/خصم قديمة بقت مش موثوقة (النطاق ممكن يختلف).
         _pricePreview = null;
-        _promoError = null;
-        _buildingError = null;
+        _codeError = null;
       });
       _refreshPreview();
     }
@@ -530,100 +557,74 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     return '${two(at.day)}/${two(at.month)}/${at.year}';
   }
 
-  Future<void> _validatePromo() async {
-    final code = _promoController.text.trim();
+  /// تحقق من الكود — **محاولة واحدة للعميل، محاولتان للنظام** (docs/08 §77-B4).
+  ///
+  /// العميل بيكتب كود واحد ومش عارف نوعه (خصم ولا عمارة) — ومفيش سبب يعرف. الدالة بتجرّب
+  /// كود الخصم الأول، ولو السيرفر قال «مش موجود» بتجرّبه كود عمارة. أول واحد ينجح بيتسجّل
+  /// نوعه في `_resolvedCodeKind` عشان الإرسال النهائي يبعته في الحقل الصح.
+  ///
+  /// **ليه بالترتيب ده؟** أكواد الخصم أكتر بكتير وأشيع، فالمحاولة الأولى بتنجح في الأغلبية
+  /// الساحقة ومفيش نداء تاني أصلاً. ولو الاتنين فشلوا، العميل بيشوف رسالة واحدة — مش
+  /// رسالتين بتقولوا نفس الحاجة بصيغتين.
+  Future<void> _validateCode() async {
+    final code = _codeController.text.trim();
     if (code.isEmpty) return;
     if (_selectedAddress == null) {
-      setState(() => _promoError = 'اختار عنوان الأول');
+      setState(() => _codeError = 'اختار عنوان الأول');
       return;
     }
     if (_isFormulaPricing && !_pricingFieldsComplete) {
-      setState(() => _promoError = 'كمّل بيانات السعر الأول');
+      setState(() => _codeError = 'كمّل بيانات السعر الأول');
       return;
     }
     setState(() {
-      _validatingPromo = true;
-      _promoError = null;
-      _buildingController.clear();
-      _buildingError = null;
+      _validatingCode = true;
+      _codeError = null;
+      _resolvedCodeKind = null;
     });
     final generation = ++_previewRequestGeneration;
+
+    Future<OrderPricePreview> attempt({required bool asBuilding}) => _repository.previewPrice(
+          serviceId: widget.service.id,
+          addressId: _selectedAddress!.id,
+          bookingMode: widget.bookingMode,
+          requestedTechnicianId: widget.requestedTechnicianId,
+          scheduleSlotId: widget.scheduleSlotId,
+          fieldValues: _isFormulaPricing ? _fieldValues : null,
+          addonIds: _selectedAddonIds.toList(),
+          promoCode: asBuilding ? null : code,
+          buildingCode: asBuilding ? code : null,
+          warrantyPlanId: _selectedWarrantyPlanId,
+          pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
+          durationHours:
+              widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
+        );
+
     try {
-      final result = await _repository.previewPrice(
-        serviceId: widget.service.id,
-        addressId: _selectedAddress!.id,
-        bookingMode: widget.bookingMode,
-        requestedTechnicianId: widget.requestedTechnicianId,
-        scheduleSlotId: widget.scheduleSlotId,
-        fieldValues: _isFormulaPricing ? _fieldValues : null,
-        addonIds: _selectedAddonIds.toList(),
-        promoCode: code,
-        warrantyPlanId: _selectedWarrantyPlanId,
-        pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
-        durationHours: widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
-      );
+      OrderPricePreview result;
+      String kind;
+      try {
+        result = await attempt(asBuilding: false);
+        kind = 'promo';
+      } on ApiException {
+        // الكود مش كود خصم صالح — يبقى يمكن كود عمارة. لو ده كمان فشل، الاستثناء بيطلع
+        // للـcatch اللي تحت ويتعرض كرسالة واحدة.
+        result = await attempt(asBuilding: true);
+        kind = 'building';
+      }
       // فشل التحقق بيسيب آخر معاينة صح (من غير خصم) ظاهرة، مش بيمسحها — العميل يشوف
       // "الكود ده مش موجود" جنب حقل الكود، مش رقم فاضي بدل السعر الصحيح.
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
           _pricePreview = result;
+          _resolvedCodeKind = kind;
           _reconcilePaymentMethodSelection();
         });
       }
     } on ApiException catch (err) {
-      if (mounted) setState(() => _promoError = err.message);
+      if (mounted) setState(() => _codeError = err.message);
     } finally {
-      if (mounted) setState(() => _validatingPromo = false);
-    }
-  }
-
-  // نظام العمائر (docs/08 §13, ADR-0003) — كانت فجوة موثّقة صراحة: الباك-إند بيدعم building_code
-  // بديل لـpromo_code في POST /orders و/orders/preview بالظبط من زمان (خصم تلقائي حسب اشتراك
-  // العمارة)، بس مفيش حقل في الشاشة كان بيستخدمه خالص. نفس منطق _validatePromo بالحرف — الاتنين
-  // مش مسموح يتبعتوا مع بعض (الباك-إند بيرفض)، فمسح الكود التاني عند تفعيل واحد بدل ما نسيب
-  // العميل يكتشف الرفض بعد التأكيد.
-  Future<void> _validateBuilding() async {
-    final code = _buildingController.text.trim();
-    if (code.isEmpty) return;
-    if (_selectedAddress == null) {
-      setState(() => _buildingError = 'اختار عنوان الأول');
-      return;
-    }
-    if (_isFormulaPricing && !_pricingFieldsComplete) {
-      setState(() => _buildingError = 'كمّل بيانات السعر الأول');
-      return;
-    }
-    setState(() {
-      _validatingBuilding = true;
-      _buildingError = null;
-      _promoController.clear();
-      _promoError = null;
-    });
-    final generation = ++_previewRequestGeneration;
-    try {
-      final result = await _repository.previewPrice(
-        serviceId: widget.service.id,
-        addressId: _selectedAddress!.id,
-        bookingMode: widget.bookingMode,
-        requestedTechnicianId: widget.requestedTechnicianId,
-        scheduleSlotId: widget.scheduleSlotId,
-        fieldValues: _isFormulaPricing ? _fieldValues : null,
-        addonIds: _selectedAddonIds.toList(),
-        buildingCode: code,
-        warrantyPlanId: _selectedWarrantyPlanId,
-        pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
-        durationHours: widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
-      );
-      if (mounted && generation == _previewRequestGeneration) {
-        setState(() {
-          _pricePreview = result;
-          _reconcilePaymentMethodSelection();
-        });
-      }
-    } on ApiException catch (err) {
-      if (mounted) setState(() => _buildingError = err.message);
-    } finally {
-      if (mounted) setState(() => _validatingBuilding = false);
+      if (mounted) setState(() => _validatingCode = false);
     }
   }
 
@@ -659,9 +660,26 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     }
   }
 
+  /// بتودّي العميل للقسم الناقص وتعرض سبب المنع (docs/08 §77-B5).
+  ///
+  /// الترتيب مقصود: `setState` الأول عشان الرسالة تتكتب، وبعدين التمرير — عشان لو القسم
+  /// الناقص هو نفسه اللي فيه الرسالة، يوصله والرسالة ظاهرة مش وهو لسه بيتبني.
+  void _failValidation(String message, GlobalKey? section) {
+    setState(() => _error = message);
+    final target = section?.currentContext;
+    if (target == null) return;
+    Scrollable.ensureVisible(
+      target,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOutCubic,
+      // 0.1 مش 0 عمدًا: بيسيب مسافة صغيرة فوق القسم فالعميل يشوف عنوانه مش أول بكسل منه.
+      alignment: 0.1,
+    );
+  }
+
   Future<void> _submit() async {
     if (_selectedAddress == null) {
-      setState(() => _error = 'اختار عنوان الأول');
+      _failValidation('اختار عنوان الأول', _addressSectionKey);
       return;
     }
     if (_isFormulaPricing) {
@@ -670,13 +688,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         return;
       }
       if (!_pricingFieldsComplete) {
-        setState(() => _error = 'كمّل كل بيانات السعر المطلوبة الأول');
+        _failValidation('كمّل كل بيانات السعر المطلوبة الأول', _pricingFieldsSectionKey);
         return;
       }
     }
     final pricingQuantity = num.tryParse(_pricingQuantityController.text.trim());
     if (_isPerUnitPricing && (pricingQuantity == null || pricingQuantity <= 0)) {
-      setState(() => _error = 'حدد عدد ${widget.service.unitNameAr ?? 'الوحدات'} المطلوبة');
+      _failValidation('حدد عدد ${widget.service.unitNameAr ?? 'الوحدات'} المطلوبة', _unitsSectionKey);
       return;
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
@@ -689,22 +707,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     // الخام، نفس فلسفة تحقق العنوان/بيانات السعر فوق.
     if (widget.scheduleSlotId == null && widget.service.requiresStartAndEnd) {
       if (_startAndEndStart == null || _startAndEndEnd == null) {
-        setState(() => _error = 'حدد تاريخ ووقت البداية والنهاية');
+        _failValidation('حدد تاريخ ووقت البداية والنهاية', _scheduleSectionKey);
         return;
       }
       if (!_startAndEndEnd!.isAfter(_startAndEndStart!)) {
-        setState(() => _error = 'وقت النهاية لازم يكون بعد وقت البداية');
+        _failValidation('وقت النهاية لازم يكون بعد وقت البداية', _scheduleSectionKey);
         return;
       }
     }
     if (widget.scheduleSlotId == null &&
         widget.service.requiresHoursOnly &&
         int.tryParse(_durationHoursController.text.trim()) == null) {
-      setState(() => _error = 'حدد عدد الساعات المطلوبة');
+      _failValidation('حدد عدد الساعات المطلوبة', _scheduleSectionKey);
       return;
     }
     if (widget.scheduleSlotId == null && widget.service.requiresStartTimeOnly && _combinedPreciseScheduledAt() == null) {
-      setState(() => _error = 'حدد تاريخ ووقت بداية الخدمة');
+      _failValidation('حدد تاريخ ووقت بداية الخدمة', _scheduleSectionKey);
       return;
     }
     setState(() {
@@ -743,8 +761,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true.
         scheduledEndAt: widget.service.requiresStartAndEnd ? _startAndEndEnd?.toUtc().toIso8601String() : null,
         problemDescription: _descriptionController.text.trim(),
-        promoCode: _promoController.text.trim(),
-        buildingCode: _buildingController.text.trim(),
+        promoCode: _promoCodeToSend,
+        buildingCode: _buildingCodeToSend,
         addonIds: _selectedAddonIds.toList(),
         requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
         fieldValues: _isFormulaPricing ? _fieldValues : null,
@@ -995,6 +1013,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
+            key: _pricingFieldsSectionKey,
             children: sortedFields.map(_buildPricingFieldWidget).toList(),
           ),
         ),
@@ -1020,7 +1039,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               child: ListTile(title: Text(widget.service.nameAr)),
             ),
             const SizedBox(height: 16),
-            Text('عنوان الطلب', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'عنوان الطلب',
+              key: _addressSectionKey,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             Card(
               child: ListTile(
@@ -1045,7 +1068,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               // وضع "عدد ساعات بس" (ADR-0032) — ASAP، من غير وقت بداية محدد خالص، فصف اختيار
               // اليوم بيتخفي تمامًا.
               if (widget.service.requiresHoursOnly) ...[
-                Text('عدد الساعات المطلوبة', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'عدد الساعات المطلوبة',
+                  key: _scheduleSectionKey,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _durationHoursController,
@@ -1057,7 +1084,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               // وضع "بداية+نهاية" (ADR-0032) — تاريخ ووقت كاملين مستقلين للاتنين، مالوش علاقة
               // بصف اختيار اليوم العادي (_pickSchedule) خالص.
               else if (widget.service.requiresStartAndEnd) ...[
-                Text('مدة الخدمة', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'مدة الخدمة',
+                  key: _scheduleSectionKey,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
                 Card(
                   child: ListTile(
@@ -1117,7 +1148,11 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ],
             if (_isPerUnitPricing) ...[
               const SizedBox(height: 16),
-              Text('الكمية المطلوبة', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'الكمية المطلوبة',
+                key: _unitsSectionKey,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _pricingQuantityController,
@@ -1161,15 +1196,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               ),
             ],
             const SizedBox(height: 16),
+            // حقل كود واحد (docs/08 §77-B4) — شوف تعليق `_codeController` للسبب الكامل.
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: TextField(
-                    controller: _promoController,
-                    decoration: const InputDecoration(
-                      labelText: 'كود خصم (اختياري)',
-                      border: OutlineInputBorder(),
+                    key: const ValueKey('order-discount-code'),
+                    controller: _codeController,
+                    decoration: InputDecoration(
+                      labelText: 'كود خاص (خصم أو عمارة) — اختياري',
+                      border: const OutlineInputBorder(),
+                      // تأكيد إيجابي بعد نجاح التحقق: العميل يعرف إن الكود اتقبل فعلاً
+                      // من غير ما يدوّر على الفرق في السعر.
+                      suffixIcon: _resolvedCodeKind == null
+                          ? null
+                          : Icon(Icons.check_circle, color: Colors.green.shade600),
+                      helperText: _resolvedCodeKind == 'building'
+                          ? 'اتقبل ككود عمارة'
+                          : _resolvedCodeKind == 'promo'
+                              ? 'اتقبل ككود خصم'
+                              : null,
                     ),
                     textCapitalization: TextCapitalization.characters,
                     // بَقّة حقيقية اتلقطت (مراجعة booking flow الشاملة 2026-08-12): لو العميل
@@ -1178,7 +1225,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     // عشان السعر المعروض دايمًا يطابق الكود اللي فعلاً هيتبعت وقت التأكيد.
                     onChanged: (_) {
                       setState(() {
-                        _promoError = null;
+                        _codeError = null;
+                        _resolvedCodeKind = null;
                         _pricePreview = null;
                       });
                       _refreshPreview();
@@ -1187,50 +1235,16 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton(
-                  onPressed: _validatingPromo ? null : _validatePromo,
-                  child: _validatingPromo
+                  onPressed: _validatingCode ? null : _validateCode,
+                  child: _validatingCode
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Text('تحقق'),
                 ),
               ],
             ),
-            if (_promoError != null) ...[
+            if (_codeError != null) ...[
               const SizedBox(height: 4),
-              Text(_promoError!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _buildingController,
-                    decoration: const InputDecoration(
-                      labelText: 'كود عمارة (اختياري — خصم بدل كود الخصم)',
-                      border: OutlineInputBorder(),
-                    ),
-                    textCapitalization: TextCapitalization.characters,
-                    onChanged: (_) {
-                      setState(() {
-                        _buildingError = null;
-                        _pricePreview = null;
-                      });
-                      _refreshPreview();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _validatingBuilding ? null : _validateBuilding,
-                  child: _validatingBuilding
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('تحقق'),
-                ),
-              ],
-            ),
-            if (_buildingError != null) ...[
-              const SizedBox(height: 4),
-              Text(_buildingError!, style: const TextStyle(color: Colors.red)),
+              Text(_codeError!, style: const TextStyle(color: Colors.red)),
             ],
             // "كرّر الحجز ده" (migration 0176) — مرة واحدة (الافتراضي) / أسبوعي / شهري.
             // الطلب الحالي بيتعمل دلوقتي زي العادة بالظبط، والمواعيد الجاية بيتولّد منها طلبات
@@ -1296,8 +1310,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                           if (value != null) _repeatFrequency = null;
                         });
                         _refreshPreview(
-                          promoCode: _promoController.text.trim().isEmpty ? null : _promoController.text.trim(),
-                          buildingCode: _buildingController.text.trim().isEmpty ? null : _buildingController.text.trim(),
+                          promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
+                          buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
                         );
                       },
                       title: const Text('بدون ضمان إضافي'),
@@ -1314,8 +1328,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                               if (value != null) _repeatFrequency = null;
                             });
                             _refreshPreview(
-                              promoCode: _promoController.text.trim().isEmpty ? null : _promoController.text.trim(),
-                              buildingCode: _buildingController.text.trim().isEmpty ? null : _buildingController.text.trim(),
+                              promoCode: _promoCodeToSend.isEmpty ? null : _promoCodeToSend,
+                              buildingCode: _buildingCodeToSend.isEmpty ? null : _buildingCodeToSend,
                             );
                           },
                           title: Text('${plan.nameAr} — ${plan.coverageMonths} شهر'),

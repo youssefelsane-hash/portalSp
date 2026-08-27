@@ -8,6 +8,16 @@ class CatalogRepository {
     return items.map(ServiceCategory.fromJson).toList();
   }
 
+  /// «الأكثر طلبًا» — **من عدد الطلبات الحقيقي** (docs/08 §77-E2).
+  ///
+  /// كان التطبيق بيفلتر الفئات محليًا بـ`isFeatured` — يعني العنوان يقول «الأكثر طلبًا»
+  /// والمصدر «اللي الأدمن اختاره». المسار ده بيخلّي الاسم يطابق القياس: السيرفر بيعدّ الطلبات
+  /// الحقيقية في نافذة متحركة، وبيرجع لاختيار الأدمن بس لو مفيش أي طلبات لسه.
+  Future<List<ServiceCategory>> fetchMostRequestedCategories() async {
+    final items = await apiRequestList('/service-categories/most-requested');
+    return items.map(ServiceCategory.fromJson).toList();
+  }
+
   Future<List<CatalogService>> fetchServices({String? categoryId, BookingMode? bookingMode}) async {
     final params = <String, String>{
       if (categoryId != null) 'category_id': categoryId,

@@ -102,6 +102,17 @@ export interface OrderResponseDto {
    * تليفونه خالص — بلاغ مالك مباشر بسكرين شوت. الكولر بيحسب الشرط، مش الدالة دي. */
   customer_name?: string;
   customer_phone?: string;
+  /**
+   * **مُعرّف المستخدم** للعميل — مش `customer_id` (docs/08 §77-A1، بلاغ مالك).
+   *
+   * `customer_id` فوق هو `customer_profiles.id` (كده الـFK في `orders` من migration 0007).
+   * أي واجهة عايزة تودّي لصفحة العميل محتاجة `users.id`، ولوحة الأدمن كانت بتستخدم
+   * `customer_id` مكانه فالصفحة كانت بترجّع 404 **دايمًا**. الحقل ده بيقفل التخمين ده من
+   * المصدر: السيرفر بيقول الرقمين، والواجهة ما تحوّلش بينهم.
+   *
+   * موجود في مسارات تفاصيل الطلب للأدمن بس (نفس شرط `customer_name`/`customer_phone`).
+   */
+  customer_user_id?: string;
   /** "جديد عليك" (docs/08 §56 بند 2) — true لو الفني المعيّن لسه ما فتحش تفاصيل الطلب ولا مرة.
    * موجود في مسارات الفني بس؛ التطبيق بيستخدمه للتمييز البصري بدل ما يعرض كل حاجة بنفس البروز. */
   is_new_for_technician?: boolean;
@@ -131,7 +142,7 @@ export function toOrderResponseDto(
   address?: Address | null,
   technicianContact?: { name: string; phone: string } | null,
   viewerExtras?: {
-    customerContact?: { name: string; phone: string } | null;
+    customerContact?: { name: string; phone: string; userId?: string } | null;
     serviceNameAr?: string | null;
     isNewForTechnician?: boolean;
   },
@@ -197,6 +208,7 @@ export function toOrderResponseDto(
     technician_phone: technicianContact?.phone,
     customer_name: viewerExtras?.customerContact?.name,
     customer_phone: viewerExtras?.customerContact?.phone,
+    customer_user_id: viewerExtras?.customerContact?.userId,
     service_name_ar: viewerExtras?.serviceNameAr ?? undefined,
     is_new_for_technician: viewerExtras?.isNewForTechnician,
     customer_cash_confirmed_at: order.customerCashConfirmedAt ? order.customerCashConfirmedAt.toISOString() : null,

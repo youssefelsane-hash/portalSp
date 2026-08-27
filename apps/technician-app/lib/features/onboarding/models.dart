@@ -17,6 +17,9 @@ class TechnicianMe {
   final String technicianType;
   final String assistantLinkStatus;
   final String? assistantTechnicianId;
+  /// هل الفني سجّل رقمه القومي؟ (ADR-0045، docs/08 §77-E1) — الرقم نفسه ما بيرجعش من
+  /// السيرفر أبدًا للفني، بس الـboolean ده كافي عشان التطبيق يعرف يعرض الحقل ولا التأكيد.
+  final bool nationalIdSet;
 
   TechnicianMe({
     required this.technicianCode,
@@ -27,6 +30,7 @@ class TechnicianMe {
     required this.technicianType,
     required this.assistantLinkStatus,
     required this.assistantTechnicianId,
+    required this.nationalIdSet,
   });
 
   factory TechnicianMe.fromJson(Map<String, dynamic> json) => TechnicianMe(
@@ -38,6 +42,7 @@ class TechnicianMe {
     technicianType: json['technician_type'] as String,
     assistantLinkStatus: json['assistant_link_status'] as String,
     assistantTechnicianId: json['assistant_technician_id'] as String?,
+    nationalIdSet: json['national_id_set'] as bool? ?? false,
   );
 }
 

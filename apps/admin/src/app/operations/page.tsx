@@ -281,8 +281,11 @@ function ExceptionCenterSection({
                 {data.stale_dispatch.items.map((item) => (
                   <li key={item.assignment_id} className="flex flex-col gap-1 border-b pb-2 text-sm last:border-b-0 last:pb-0">
                     <div className="flex flex-wrap items-center gap-2">
+                      {/* رقم الطلب بدل «عرض الطلب» العام (docs/08 §77-A3، بلاغ مالك): الصف
+                          كان بيقول إن فيه توزيع متأخر لفني معيّن من غير ما يقول **لأي طلب** —
+                          فالموظف مضطر يفتح كل صف عشان يعرف. */}
                       <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
-                        عرض الطلب
+                        {item.order_number}
                       </Link>
                       <Link href={`/technicians/${item.technician_id}`} className="hover:underline">
                         {item.full_name}

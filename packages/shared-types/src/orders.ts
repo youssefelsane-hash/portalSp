@@ -97,6 +97,11 @@ export interface OrderResponseDto {
    * عنده صلاحية RBAC كاملة على الطلب أصلاً). */
   customer_name?: string;
   customer_phone?: string;
+  /**
+   * **مُعرّف المستخدم** للعميل — مش `customer_id` (docs/08 §77-A1).
+   * `customer_id` هو `customer_profiles.id`؛ الروابط لصفحة العميل بتاخد `users.id`.
+   */
+  customer_user_id?: string;
   service_name_ar?: string;
   address?: { street_name: string; landmark: string | null; latitude: number; longitude: number };
 }

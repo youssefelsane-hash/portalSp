@@ -14,6 +14,7 @@ import { toOrderMediaResponseDto } from './dto/order-media-response.dto';
 import { toOrderItemResponseDto } from './dto/order-item-response.dto';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
+import { ContinueWorkAnotherDayDto } from './dto/continue-work-another-day.dto';
 import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
 import { SubmitInitialQuoteDto } from './dto/submit-initial-quote.dto';
@@ -235,6 +236,32 @@ export class TechnicianOrderExecutionController {
   @Get(':id/reschedule-requests')
   async listRescheduleRequests(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.listRescheduleRequestsForTechnician(user.sub, id);
+  }
+
+  /**
+   * استكمال الشغل يوم تاني (ADR-0047، docs/08 §77-D1).
+   *
+   * **مش `reschedule-requests` تحت**: دي بتنقل زيارة **لسه ما حصلتش** ومحتاجة موافقة العميل.
+   * هنا الشغل بدأ فعلاً والفني بيبلّغ إنه هيرجع يكمّل — العميل بيتخطر بالسبب والتاريخ، مش
+   * بيتطلب منه موافقة على حاجة مش شايفها.
+   */
+  @Post(':id/continue-another-day')
+  async continueAnotherDay(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ContinueWorkAnotherDayDto,
+  ) {
+    const { order, sessionsUsed, maxSessions } = await this.ordersService.continueWorkAnotherDay(
+      user.sub,
+      id,
+      dto,
+    );
+    return {
+      order_id: order.id,
+      next_session_date: dto.next_session_date,
+      sessions_used: sessionsUsed,
+      max_sessions: maxSessions,
+    };
   }
 
   @Post(':id/reschedule-requests')

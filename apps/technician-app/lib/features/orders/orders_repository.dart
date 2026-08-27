@@ -113,6 +113,22 @@ class OrdersRepository {
     return OrderRescheduleRequest.fromJson(data!);
   }
 
+  /// استكمال الشغل يوم تاني (ADR-0047، docs/08 §77-D1).
+  ///
+  /// **مش `requestReschedule` فوق**: دي بتنقل زيارة **لسه ما حصلتش** ومحتاجة موافقة العميل.
+  /// هنا الشغل بدأ فعلاً والفني بيبلّغ إنه هيرجع — العميل بيتخطر مش بيوافق.
+  Future<void> continueAnotherDay(
+    String orderId, {
+    required String pauseReason,
+    required String nextSessionDate,
+  }) async {
+    await authRepository.authedRequest(
+      'POST',
+      '/technician/orders/$orderId/continue-another-day',
+      body: {'pause_reason': pauseReason.trim(), 'next_session_date': nextSessionDate},
+    );
+  }
+
   // دورة تنفيذ الطلب بعد القبول — كل فعل بيرجّع نسخة محدّثة من الطلب، الشاشة بتستخدمها
   // تحدد الفعل الجاي (nextTechnicianAction في order.dart) من غير حاجة لـ endpoint تفاصيل منفصل.
   Future<Order> depart(String orderId) async {

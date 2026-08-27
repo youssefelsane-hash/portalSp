@@ -46,6 +46,13 @@ class OnboardingRepository {
     await auth.authedRequest('POST', '/technician/location', body: {'latitude': latitude, 'longitude': longitude});
   }
 
+  /// تسجيل الرقم القومي (ADR-0045) — **قبل الاعتماد بس**؛ بعده التعديل للأدمن وحده، وده
+  /// مقصود: لو الفني قدر يغيّره بعد الاعتماد، الحماية كلها بتتلف (اتحظر ⇒ غيّر رقمه ⇒ سجّل
+  /// من تاني كأنه شخص جديد). الباك-إند هو اللي بيفرض القيد ده، مش الواجهة.
+  Future<void> setNationalId(String nationalId) async {
+    await auth.authedRequest('PATCH', '/technician/national-id', body: {'national_id': nationalId});
+  }
+
   Future<List<TechnicianDocument>> listDocuments() async {
     final items = await auth.authedRequestList('/technician/documents');
     return items.map(TechnicianDocument.fromJson).toList();

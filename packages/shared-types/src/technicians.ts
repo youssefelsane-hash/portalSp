@@ -73,6 +73,24 @@ export interface CertificateResponseDto {
 export interface AdminTechnicianDetailResponseDto extends AdminTechnicianResponseDto {
   documents: TechnicianDocumentResponseDto[];
   certificates: CertificateResponseDto[];
+  online: boolean;
+  last_active_at: string | null;
+  /**
+   * الهوية الدائمة للفني (ADR-0045). الرقم **مقنّع** هنا (آخر 4 أرقام بس) — الرقم الكامل له
+   * endpoint منفصل بصلاحية صريحة، فكل كشف كامل بيبقى فعل مقصود مش أثر جانبي لفتح الصفحة.
+   */
+  national_id: {
+    has_value: boolean;
+    masked: string | null;
+    set_at: string | null;
+    /** أكواد حسابات فنيين تانية بنفس الرقم (بما فيها المتشالة) — «الشخص ده كان عندنا قبل كده». */
+    linked_account_codes: string[];
+  };
+}
+
+/** جسم `PATCH /admin/technicians/:id/national-id`. */
+export interface SetTechnicianNationalIdBody {
+  national_id: string;
 }
 
 // مطابق لـ apps/api/src/modules/technicians/dto/technician-zone-response.dto.ts

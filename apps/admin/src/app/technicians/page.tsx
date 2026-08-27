@@ -11,6 +11,9 @@ import { EmptyState } from '@/components/empty-state';
 import { TableSkeleton } from '@/components/table-skeleton';
 import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
@@ -39,12 +42,17 @@ export default function TechniciansPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<TechnicianVerificationStatus | 'all'>('all');
+  // بحث الفنيين (docs/08 §77-C1، طلب مالك) — الصفحة كانت فيها فلتر حالة **بس**، يعني الوصول
+  // لفني بعينه كان تقليب صفحة صفحة. الـdebounce عشان ما نضربش نداء مع كل حرف.
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 400);
   const [error, setError] = useState<string | null>(null);
 
   function loadTechnicians() {
     if (isLoading) return;
     const params = new URLSearchParams({ page: String(page), per_page: String(PER_PAGE) });
     if (statusFilter !== 'all') params.set('verification_status', statusFilter);
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim());
     authedFetchPaginated<AdminTechnicianResponseDto>(`/admin/technicians?${params.toString()}`)
       .then(({ items, meta }) => {
         setTechnicians(items);
@@ -59,13 +67,35 @@ export default function TechniciansPage() {
   useEffect(() => {
     loadTechnicians();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, page, statusFilter, authedFetchPaginated]);
+  }, [isLoading, page, statusFilter, debouncedSearch, authedFetchPaginated]);
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
 
   return (
     <AppShell>
       <PageHeader title="الفنيين" />
+
+      <div className="mb-4 max-w-md">
+        <Label htmlFor="technician_search" className="text-sm text-muted-foreground">
+          بحث
+        </Label>
+        <Input
+          id="technician_search"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          placeholder="اسم، رقم موبايل، كود فني، أو رقم قومي"
+          className="mt-1"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          {/* الرقم القومي بيتبحث عنه **بمطابقة كاملة بس** — مش جزئية. السبب مش اختيار واجهة:
+              القيمة متخزّنة مشفّرة، والبحث بيمر على blind index (HMAC) اللي بطبيعته بيطابق
+              القيمة كاملة أو لأ. توضيح ده هنا بيمنع الموظف يفتكر إن البحث بايظ. */}
+          الرقم القومي لازم يتكتب كامل (14 رقم) عشان يطابق؛ باقي الحقول بتقبل جزء من النص.
+        </p>
+      </div>
 
       <div className="mb-4 flex gap-2">
         {STATUS_FILTERS.map((filter) => (

@@ -38,9 +38,13 @@ export class CustomerProfilesService {
    * المسؤول عن فحص شرط الظهور (`TECHNICIAN_CONTACT_VISIBLE_STATUSES`) قبل ما ينادي، نفس النمط
    * المتّبع في `orders.controller.ts` بالحرف — مفيش استعلام أصلاً لو الطلب لسه في حالة مش مسموحة.
    */
-  async findContactInfoOrThrow(profileId: string): Promise<{ name: string; phone: string }> {
-    const [row] = await this.dataSource.query<{ full_name: string; phone_number: string }[]>(
-      `SELECT u.full_name, u.phone_number
+  async findContactInfoOrThrow(
+    profileId: string,
+  ): Promise<{ name: string; phone: string; userId: string }> {
+    const [row] = await this.dataSource.query<
+      { id: string; full_name: string; phone_number: string }[]
+    >(
+      `SELECT u.id, u.full_name, u.phone_number
        FROM customer_profiles cp
        JOIN users u ON u.id = cp.user_id
        WHERE cp.id = $1 AND cp.deleted_at IS NULL AND u.deleted_at IS NULL`,
@@ -49,7 +53,11 @@ export class CustomerProfilesService {
     if (!row) {
       throw new ApiException(ErrorCode.VAL_001, 'مستخدم العميل غير موجود', HttpStatus.NOT_FOUND);
     }
-    return { name: row.full_name, phone: row.phone_number };
+    // `userId` مضاف هنا لسبب واحد محدد (docs/08 §77-A1، بلاغ مالك): `orders.customer_id` هو
+    // **مُعرّف البروفايل** (`customer_profiles.id`)، مش `users.id`. أي واجهة عايزة تودّي
+    // لصفحة العميل محتاجة الـuser id، والاستعلام ده أصلاً بيعمل JOIN على `users` — فالقيمة
+    // كانت متاحة ومترمية. من غيرها الواجهة بتضطر تخمّن العلاقة، وده اللي كسر اللينك أصلاً.
+    return { name: row.full_name, phone: row.phone_number, userId: row.id };
   }
 
   /**

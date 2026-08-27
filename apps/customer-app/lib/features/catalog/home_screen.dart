@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_config.dart';
+import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
@@ -71,6 +72,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final _supportContactRepository = SupportContactRepository();
   final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
+  /// «الأكثر طلبًا» من السيرفر (docs/08 §77-E2) — مستقل عن `_categories` لأن ترتيبه بالعدّ
+  /// مش بـ`display_order`، والسيرفر هو اللي بيحسبه.
+  List<ServiceCategory>? _mostRequested;
   String? _error;
   String _trustMessage = '';
   // معلومات الضمان الحقيقية من السيرفر (docs/08 §75-ج) — `null` لحد ما توصل، والشريط
@@ -135,6 +139,14 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {
       if (mounted) setState(() => _error = 'تعذّر تحميل الفئات — اسحب لتحديث');
     }
+    // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
+    // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
+    try {
+      final mostRequested = await _repository.fetchMostRequestedCategories();
+      if (mounted) setState(() => _mostRequested = mostRequested);
+    } catch (_) {
+      // بهدوء — القسم تسويقي، مش وظيفي.
+    }
   }
 
   void _applyHomepageContent(HomepageContent content) {
@@ -182,9 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final featured =
-        _categories?.where((c) => c.isFeatured).toList() ??
-        const <ServiceCategory>[];
+    // «الأكثر طلبًا» بقى بيجي من السيرفر محسوبًا من عدد الطلبات الحقيقي (docs/08 §77-E2)
+    // بدل فلترة محلية بـ`isFeatured`. الفرق مش تقني: العنوان كان بيقول «الأكثر طلبًا»
+    // والمصدر «اللي الأدمن اختاره» — نفس فئة البَقّة اللي اتصلحت أكتر من مرة في §75/§76.
+    final featured = _mostRequested ?? const <ServiceCategory>[];
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -210,6 +223,9 @@ class _HomeScreenState extends State<HomeScreen> {
               : null,
           title: HomeLocationHeader(onAddressChanged: (_) => _load()),
           actions: [
+            // الجرس بيتخفي للزائر (docs/08 §77-B1): `unreadCount()` بينادي endpoint محمي،
+            // ومفيش حساب أصلاً يبقى ليه إشعارات. عرضه بصفر دايمًا كان هيبقى كذب صغير.
+            if (context.watch<AuthRepository>().isAuthenticated)
             Builder(
               builder: (context) => FutureBuilder<int>(
                 future: NotificationsRepository(
@@ -298,13 +314,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 16),
                     ],
                     _ProjectCta(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => CreateProjectScreen(
-                            auth: context.read<AuthRepository>(),
+                      // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
+                      // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
+                      onTap: () async {
+                        if (!await ensureSignedIn(
+                          context,
+                          reason: 'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
+                          headline: 'ابدأ مشروعك',
+                        )) {
+                          return;
+                        }
+                        if (!context.mounted) return;
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CreateProjectScreen(
+                              auth: context.read<AuthRepository>(),
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 20),
                     Row(
