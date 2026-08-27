@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -7,7 +7,7 @@ import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
 import { AdminCampaignsService } from './admin-campaigns.service';
 import { CampaignsService } from './campaigns.service';
-import { CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
+import { AbandonedLeadsQueryDto, CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
 import { toCampaignResponseDto } from './dto/campaign-response.dto';
 
 /**
@@ -69,5 +69,32 @@ export class AdminCampaignsController {
   @RequirePermission('campaigns.manage')
   async runSweep() {
     return { sent: await this.campaigns.sweep() };
+  }
+
+  // "عملاء متروكين" لمركز الاتصال (docs/08 §79، طلب مالك صريح) — عملاء بصوا على خدمة أو بدأوا
+  // حجز ومكملوش. نفس صلاحية campaigns.manage الموجودة — الموديول كله وراها صلاحية واحدة بالفعل.
+  @Get('abandoned-leads')
+  @RequirePermission('campaigns.manage')
+  async abandonedLeads(@Query() query: AbandonedLeadsQueryDto) {
+    const { items, total } = await this.adminCampaigns.listAbandonedLeads(
+      query.days ?? 14,
+      query.page ?? 1,
+      query.per_page ?? 20,
+    );
+    return {
+      items: items.map((lead) => ({
+        intent_id: lead.intentId,
+        user_id: lead.userId,
+        customer_name: lead.customerName,
+        customer_phone: lead.customerPhone,
+        service_id: lead.serviceId,
+        service_name: lead.serviceName,
+        category_name: lead.categoryName,
+        intent_stage: lead.intentStage,
+        occurred_at: lead.occurredAt,
+        reminder_processed: lead.reminderProcessed,
+      })),
+      meta: { page: query.page ?? 1, per_page: query.per_page ?? 20, total },
+    };
   }
 }

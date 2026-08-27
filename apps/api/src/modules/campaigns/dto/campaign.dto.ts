@@ -97,6 +97,30 @@ export class UpdateCampaignDto {
   trigger_delay_minutes?: number;
 }
 
+// قايمة "عملاء متروكين" لمركز الاتصال (docs/08 §79) — نافذة زمنية اختيارية (سقفها 30 يوم،
+// نفس مدة الاحتفاظ الفعلية بـcustomer_service_intents في campaigns.service.ts's purgeOldIntents()).
+export class AbandonedLeadsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  days?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  per_page?: number;
+}
+
 export class RecordServiceIntentDto {
   @IsUUID()
   service_id: string;

@@ -7,6 +7,21 @@ import { NotificationCampaign } from './entities/notification-campaign.entity';
 import { CreateCampaignDto, UpdateCampaignDto } from './dto/campaign.dto';
 import { KNOWN_TEMPLATE_VARIABLES, renderCampaignTemplate, unknownTemplateVariables } from './campaign-template.util';
 
+export interface AbandonedLead {
+  intentId: string;
+  userId: string;
+  customerName: string;
+  customerPhone: string;
+  serviceId: string;
+  serviceName: string;
+  categoryName: string;
+  intentStage: string;
+  occurredAt: Date;
+  /** محرك الحملات عالج الاهتمام ده بالفعل (بعت تذكير تلقائي أو منعه حاجز) — مش ضمان إن رسالة
+   * فعلاً وصلت، بس بيفرّق للكول سنتر بين "المحرك لسه ما وصلّوش" و"المحرك خلاص شاف الاهتمام ده". */
+  reminderProcessed: boolean;
+}
+
 export interface CampaignWithStats {
   campaign: NotificationCampaign;
   /** إرسالات آخر 30 يوم — الرقم اللي بيقول للأدمن الحملة دي شغالة فعلاً ولا نايمة. */
@@ -154,6 +169,84 @@ export class AdminCampaignsService {
       oldValues: { name: campaign.name },
       meta,
     });
+  }
+
+  /**
+   * "عملاء متروكين" لمركز الاتصال (docs/08 §79، طلب مالك صريح: "ما تفوّتش عميل واحد حتى") —
+   * قراءة إضافية بس على `customer_service_intents`، صفر لمس لمنطق محرك الحملات نفسه.
+   *
+   * **مختلف عمدًا عن `sweepAbandonedIntents()`**: مش بيستبعد `marketing_opt_out=true` (مكالمة
+   * كول سنتر "محتاج مساعدة؟" مش إعلان تسويقي، رفض العميل للتسويق مش رفض للمساعدة البشرية)،
+   * ومش بيتقيّد بمهلة تأخير حملة معيّنة ولا `is_promotable`/ساعات هدوء (دول حواجز سبام تسويقية،
+   * مش قيود على إيه اللي الكول سنتر يقدر يشوفه). بيستبعد بس حسابات محظورة/محذوفة، ولو العميل
+   * حجز فعلاً الخدمة دي بعدين (نفس استبعاد محرك الحملات — خلص فعلاً، مفيش داعي مكالمة).
+   */
+  async listAbandonedLeads(days: number, page: number, perPage: number): Promise<{ items: AbandonedLead[]; total: number }> {
+    const offset = (page - 1) * perPage;
+    const [rows, [{ count }]] = await Promise.all([
+      this.dataSource.query<
+        {
+          intent_id: string;
+          user_id: string;
+          full_name: string;
+          phone_number: string;
+          service_id: string;
+          service_name: string;
+          category_name: string;
+          intent_stage: string;
+          occurred_at: Date;
+          processed_at: Date | null;
+        }[]
+      >(
+        `SELECT i.id AS intent_id, i.user_id, u.full_name, u.phone_number,
+                s.id AS service_id, s.name_ar AS service_name, sc.name_ar AS category_name,
+                i.intent_stage, i.occurred_at, i.processed_at
+           FROM customer_service_intents i
+           JOIN users u ON u.id = i.user_id
+           JOIN customer_profiles cp ON cp.user_id = u.id
+           JOIN services s ON s.id = i.service_id
+           JOIN service_categories sc ON sc.id = s.category_id
+          WHERE i.occurred_at >= now() - make_interval(days => $1::int)
+            AND u.is_blocked = false AND u.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM orders o
+               WHERE o.customer_id = cp.id AND o.service_id = i.service_id
+                 AND o.created_at >= i.occurred_at AND o.deleted_at IS NULL
+            )
+          ORDER BY i.occurred_at DESC
+          LIMIT $2 OFFSET $3`,
+        [days, perPage, offset],
+      ),
+      this.dataSource.query<{ count: string }[]>(
+        `SELECT count(*) FROM customer_service_intents i
+           JOIN users u ON u.id = i.user_id
+           JOIN customer_profiles cp ON cp.user_id = u.id
+          WHERE i.occurred_at >= now() - make_interval(days => $1::int)
+            AND u.is_blocked = false AND u.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM orders o
+               WHERE o.customer_id = cp.id AND o.service_id = i.service_id
+                 AND o.created_at >= i.occurred_at AND o.deleted_at IS NULL
+            )`,
+        [days],
+      ),
+    ]);
+
+    return {
+      items: rows.map((r) => ({
+        intentId: r.intent_id,
+        userId: r.user_id,
+        customerName: r.full_name,
+        customerPhone: r.phone_number,
+        serviceId: r.service_id,
+        serviceName: r.service_name,
+        categoryName: r.category_name,
+        intentStage: r.intent_stage,
+        occurredAt: r.occurred_at,
+        reminderProcessed: r.processed_at !== null,
+      })),
+      total: Number(count),
+    };
   }
 
   private async findOrThrow(id: string): Promise<NotificationCampaign> {
