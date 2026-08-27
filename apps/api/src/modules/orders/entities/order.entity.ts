@@ -62,6 +62,14 @@ export enum OrderSourceChannel {
   WHATSAPP = 'whatsapp',
 }
 
+/** بند واحد من إجابات العميل على الفورم الديناميكي — محلول للعرض (docs/08 §71). */
+export interface OrderCustomerInput {
+  key: string;
+  label: string;
+  value: string;
+  unit: string | null;
+}
+
 @Entity('orders')
 export class Order {
   @PrimaryColumn('uuid', { default: () => 'uuid_generate_v7()' })
@@ -116,6 +124,14 @@ export class Order {
 
   @Column({ name: 'customer_notes', type: 'text', nullable: true })
   customerNotes: string | null;
+
+  /**
+   * إجابات العميل على الحقول الديناميكية وقت الحجز (docs/08 §71، migration 0201) — snapshot
+   * بتسميات عربية محلولة، للعرض بس (الأدمن/الفني/العميل). التسعير مصدره
+   * `service_pricing_evaluations` زي ما هو، مفيش أي حساب بيقرا من هنا.
+   */
+  @Column({ name: 'customer_inputs', type: 'jsonb', nullable: true })
+  customerInputs: OrderCustomerInput[] | null;
 
   @Column({ name: 'scheduled_at', type: 'timestamptz', nullable: true })
   scheduledAt: Date | null;

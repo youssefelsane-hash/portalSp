@@ -305,6 +305,21 @@ function ExceptionCenterSection({
   );
 }
 
+/**
+ * "آخر ظهور" بدل كلمة "أوفلاين" المطلقة (docs/08 §72، بلاغ مالك) — الفني ممكن يكون فاتح التطبيق
+ * فعلاً وهو "أوفلاين" هنا، لأن الاتصال اللحظي (socket) بيتفتح في شاشة تنفيذ الطلب بس. عرض آخر
+ * نشاط حقيقي أنفع للأدمن من كلمة بتوصف حاجة تانية.
+ */
+function lastSeenLabel(lastActiveAt: string | null): string {
+  if (!lastActiveAt) return 'مفيش نشاط مسجّل';
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(lastActiveAt).getTime()) / 60000));
+  if (minutes < 1) return 'آخر ظهور: دلوقتي';
+  if (minutes < 60) return `آخر ظهور: من ${minutes} دقيقة`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `آخر ظهور: من ${hours} ساعة`;
+  return `آخر ظهور: من ${Math.round(hours / 24)} يوم`;
+}
+
 const MATRIX_PER_PAGE = 20;
 
 // مصفوفة القوى العاملة (docs/08 §36.3) — مدينة→نطاق→فئة→فني. صفر منطق تصنيف/أهلية جديد هنا:
@@ -477,7 +492,7 @@ function WorkforceMatrixSection({
                 <TableHead>الاعتماد</TableHead>
                 <TableHead>المستوى</TableHead>
                 <TableHead>القدرة النهاردة</TableHead>
-                <TableHead>حالة الاتصال</TableHead>
+                <TableHead>آخر ظهور</TableHead>
                 <TableHead>نطاقات/فئات</TableHead>
                 <TableHead>طلبات مفتوحة</TableHead>
               </TableRow>
@@ -501,10 +516,21 @@ function WorkforceMatrixSection({
                     <Badge variant="outline" className={capacityTierBadgeClass(row.capacity_tier_today)}>
                       {CAPACITY_TIER_LABELS[row.capacity_tier_today]}
                     </Badge>
+                    {/* docs/08 §72 — "شغال دلوقتي" بقت من الحالات التنفيذية بس (في الطريق/واصل/بينفّذ)،
+                        مش من مجرد وجود طلب مقبول. شغل النهاردة نفسه ظاهر في الشارة اللي جنبها. */}
                     {row.working_now && <span className="ms-1 text-xs text-muted-foreground">(شغال دلوقتي)</span>}
                   </TableCell>
-                  <TableCell>
-                    <span className={row.online ? 'text-success' : 'text-muted-foreground'}>{row.online ? 'أونلاين' : 'أوفلاين'}</span>
+                  <TableCell className="text-sm">
+                    {/* docs/08 §72 (بلاغ مالك: "دايمًا أوفلاين") — "أونلاين" هنا معناها **اتصال
+                        لحظي مفتوح** (socket تتبّع/شات)، وتطبيق الفني بيفتح الاتصال ده جوّه شاشة
+                        تنفيذ الطلب بس. يعني فني فاتح التطبيق وقاعد على الشاشة الرئيسية = مفيش
+                        اتصال = "أوفلاين" — صح تقنيًا ومضلّل إداريًا. بدل الكلمة المطلقة بنعرض
+                        الحقيقة: متصل لحظيًا، وإلا آخر ظهور فعلي (من الجلسات). */}
+                    {row.online ? (
+                      <span className="text-success">متصل لحظيًا</span>
+                    ) : (
+                      <span className="text-muted-foreground">{lastSeenLabel(row.last_active_at)}</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm">
                     <span className={row.has_zone_issue ? 'text-danger' : undefined}>{row.zone_count} نطاق</span>
@@ -694,6 +720,19 @@ const DELIVERY_STATUS_LABELS: Record<string, string> = {
   closed: 'مُغلق',
 };
 
+/** تاريخ/وقت في سطرين ثابتين — بدل سطر واحد طويل بيتلف ويخرّب محاذاة الجدول (docs/08 §72). */
+function DeliveryTimestamp({ value }: { value: string }) {
+  const date = new Date(value);
+  return (
+    <>
+      <div>{date.toLocaleDateString('ar-EG-u-nu-latn')}</div>
+      <div className="text-[10px] text-muted-foreground">
+        {date.toLocaleTimeString('ar-EG-u-nu-latn', { hour: '2-digit', minute: '2-digit' })}
+      </div>
+    </>
+  );
+}
+
 function deliveryKindLabel(item: DispatchDeliveryItemDto): string {
   if (item.kind === 'assignment') return DELIVERY_KIND_LABELS.assignment;
   return item.context === 'crew_recruit' ? DELIVERY_KIND_LABELS.work_opportunity_crew_recruit : DELIVERY_KIND_LABELS.work_opportunity_assignment;
@@ -859,9 +898,13 @@ function DispatchDeliverySection({
                         <div className="text-xs text-muted-foreground">{item.technician_code}</div>
                       </TableCell>
                       <TableCell>
-                        <Link href={`/orders/${item.order_id}`} className="hover:underline">
-                          عرض الطلب
+                        {/* docs/08 §72 — كان "عرض الطلب" بلا أي هوية للطلب ولا عدد اللي اتبعتلهم. */}
+                        <Link href={`/orders/${item.order_id}`} className="font-medium hover:underline">
+                          {item.order_number}
                         </Link>
+                        <div className="text-xs text-muted-foreground">
+                          اتبعت لـ{item.order_technician_count} فني
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={deliveryStatusBadgeClass(item.status)}>
@@ -869,9 +912,13 @@ function DispatchDeliverySection({
                         </Badge>
                         {item.is_stale && <div className="mt-1 text-[10px] text-danger">متأخر عن معاده</div>}
                       </TableCell>
-                      <TableCell className="text-xs">{new Date(item.sent_at).toLocaleString('ar-EG-u-nu-latn')}</TableCell>
-                      <TableCell className="text-xs">
-                        {item.responded_at ? new Date(item.responded_at).toLocaleString('ar-EG-u-nu-latn') : '—'}
+                      {/* docs/08 §72 — التاريخ والوقت كانوا سطر واحد طويل بيتلف جوّه الخلية فالجدول
+                          يبان مش متظبط. سطرين ثابتين (تاريخ فوق، وقت باهت تحت) وبلا لف. */}
+                      <TableCell className="whitespace-nowrap text-xs">
+                        <DeliveryTimestamp value={item.sent_at} />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-xs">
+                        {item.responded_at ? <DeliveryTimestamp value={item.responded_at} /> : '—'}
                       </TableCell>
                     </TableRow>
                   ))}

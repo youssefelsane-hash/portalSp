@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
-import '../../design/network_image_box.dart';
 import 'catalog_navigation.dart';
 import 'catalog_repository.dart';
+import 'service_card.dart';
 import 'models.dart';
 
 // Script 3 §6/§7 — نتيجة "قول لينا محتاج مساعدة في إيه؟" من HomeScreen. وصف طبيعي ("المياه
@@ -108,26 +108,14 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                             separatorBuilder: (_, _) => const SizedBox(height: 8),
                             itemBuilder: (context, index) {
                               final service = _results![index];
-                              return Card(
-                                child: ListTile(
-                                  leading: SizedBox(
-                                    width: 56,
-                                    height: 56,
-                                    child: NetworkImageBox(
-                                      imageUrl: service.iconUrl,
-                                      placeholderIcon: Icons.build_outlined,
-                                      aspectRatio: 1,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                  title: Text(service.nameAr),
-                                  subtitle: service.shortDescriptionAr != null ? Text(service.shortDescriptionAr!) : null,
-                                  trailing: Text(
-                                    service.pricingModel == 'formula' ? 'يُحسب حسب التفاصيل' : _formatEgp(service.basePriceCents),
-                                    style: Theme.of(context).textTheme.titleMedium,
-                                  ),
-                                  onTap: () => navigateToServiceBooking(context, service),
-                                ),
+                              // نفس كارت قايمة الفئة بالحرف (docs/08 §72) — شكل واحد للخدمة في كل
+                              // مكان بيتعرض فيه، مش شكلين مختلفين حسب الشاشة.
+                              return ServiceCard(
+                                service: service,
+                                priceLabel: service.pricingModel == 'formula'
+                                    ? 'يُحسب حسب التفاصيل'
+                                    : _formatEgp(service.basePriceCents),
+                                onTap: () => navigateToServiceBooking(context, service),
                               );
                             },
                           ),

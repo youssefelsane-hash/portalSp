@@ -918,6 +918,15 @@ export default function OrderDetailPage() {
               )}
             </p>
             {order.problem_description && <p>وصف المشكلة: {order.problem_description}</p>}
+            {/* docs/08 §71 — اللي العميل اختاره في الفورم الديناميكي وقت الحجز، سطر واحد. */}
+            {order.customer_inputs && order.customer_inputs.length > 0 && (
+              <p className="whitespace-normal">
+                اختيارات العميل:{' '}
+                {order.customer_inputs
+                  .map((input) => `${input.label}: ${input.value}${input.unit ? ` ${input.unit}` : ''}`)
+                  .join(' · ')}
+              </p>
+            )}
             {order.customer_notes && <p>ملاحظات العميل: {order.customer_notes}</p>}
             <p>
               اتحجز في: {order.placed_at ? new Date(order.placed_at).toLocaleString('ar-EG-u-nu-latn') : '—'}

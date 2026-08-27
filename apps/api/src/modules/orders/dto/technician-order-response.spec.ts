@@ -19,6 +19,7 @@ const fullOrder: OrderResponseDto = {
   order_status: 'in_progress',
   problem_description: 'حنفية بتنقّط',
   customer_notes: null,
+  customer_inputs: null,
   scheduled_at: null,
   scheduled_end_at: null,
   estimated_price_cents: 100_000,

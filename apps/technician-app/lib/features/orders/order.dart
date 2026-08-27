@@ -57,11 +57,31 @@ class CrewStatus {
 // مطابق لـ apps/api/src/modules/orders/dto/order-response.dto.ts — نسخة الفني (منفصلة عن
 // AvailableOrder اللي بيرجعها /technician/orders/available، ده الشكل الكامل اللي كل فعل
 // (accept/depart/arrive/start/complete) بيرجّعه بعد تنفيذه).
+/// docs/08 §71 — سطر واحد من إجابات العميل: "المساحة: 25 م² · الدور: 3". التسميات محلولة من
+/// الباك-إند وقت الحجز (snapshot)، فمفيش أي منطق تسمية هنا — بس تجميع للعرض.
+String _formatCustomerInputs(dynamic raw) {
+  if (raw is! List) return '';
+  return raw
+      .whereType<Map<String, dynamic>>()
+      .map((item) {
+        final label = item['label'] as String? ?? '';
+        final value = item['value'] as String? ?? '';
+        final unit = item['unit'] as String?;
+        if (label.isEmpty || value.isEmpty) return '';
+        return unit != null && unit.isNotEmpty ? '$label: $value $unit' : '$label: $value';
+      })
+      .where((part) => part.isNotEmpty)
+      .join(' · ');
+}
+
 class Order {
   final String id;
   final String orderNumber;
   final String orderStatus;
   final String? problemDescription;
+  /// اللي العميل اختاره في الفورم الديناميكي وقت الحجز (docs/08 §71) — نص جاهز للعرض في سطر
+  /// واحد، متبني في الباك-إند بتسميات عربية محلولة. فاضي = الخدمة مالهاش حقول ديناميكية.
+  final String customerInputsLine;
   // الصورة المالية المسموحة للفني (docs/08 §60.2، طلب مالك صريح). الباك-إند بيفلتر قبل الإرسال —
   // الحقول القديمة (paid_amount_cents، financed_order_amount_cents، installment_outstanding_cents،
   // total_amount_cents وقت وجود دفع أونلاين) **مش بترجع من الـAPI أصلاً**، مش مجرد مخفية هنا.
@@ -112,6 +132,7 @@ class Order {
     required this.orderNumber,
     required this.orderStatus,
     required this.problemDescription,
+    this.customerInputsLine = '',
     required this.cashToCollectCents,
     required this.myEarningCents,
     required this.hasOnlinePayment,
@@ -137,6 +158,7 @@ class Order {
         orderNumber: json['order_number'] as String,
         orderStatus: json['order_status'] as String,
         problemDescription: json['problem_description'] as String?,
+        customerInputsLine: _formatCustomerInputs(json['customer_inputs']),
         cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
         myEarningCents: json['my_earning_cents'] as int? ?? 0,
         hasOnlinePayment: json['has_online_payment'] as bool? ?? false,

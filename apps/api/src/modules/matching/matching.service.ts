@@ -1169,7 +1169,7 @@ export class MatchingService {
    */
   async listAvailableForTechnician(userId: string): Promise<AvailableOrderRow[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.dataSource.query<AvailableOrderRow[]>(
+    const rows = await this.dataSource.query<AvailableOrderRow[]>(
       `
       SELECT oa.id AS assignment_id, o.id AS order_id, o.order_number, s.name_ar AS service_name_ar,
              o.problem_description, a.street_name, a.landmark, oa.distance_km, oa.expires_at
@@ -1177,11 +1177,32 @@ export class MatchingService {
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id
       JOIN addresses a ON a.id = o.address_id
-      WHERE oa.technician_id = $1 AND oa.assignment_status = 'sent'
+      -- 'viewed' لازم تفضل في القايمة: العرض بيتعلّم viewed تحت بمجرد ما الجهاز يسحبه (docs/08
+      -- §72)، فلو الفلتر 'sent' بس القايمة كانت هتفضى من أول سحب والفني ما يشوفش شغله خالص.
+      WHERE oa.technician_id = $1 AND oa.assignment_status IN ('sent', 'viewed')
       ORDER BY oa.sent_at DESC
       `,
       [profile.id],
     );
+
+    // docs/08 §72 (بلاغ مالك: «تمت المشاهدة دايمًا صفر») — كانت بَقّة حقيقية: الانتقال
+    // sent→viewed كان في `markViewedByTechnician()` بس، واللي شرطها `orders.technician_id` =
+    // الفني نفسه — يعني **بعد** ما ياخد الطلب. وقتها العرض بيكون بقى `accepted` أصلاً مش `sent`،
+    // فالشرط ما كانش بيتحقق أبدًا عمليًا والعدّاد يفضل صفر للأبد. العرض بيتعلّم "وصل واتعرض"
+    // هنا: دي اللحظة اللي جهاز الفني فعليًا سحب فيها العرض وعرضه في قايمة "الطلبات المتاحة".
+    if (rows.length > 0) {
+      try {
+        await this.dataSource.query(
+          `UPDATE order_assignments SET assignment_status = 'viewed'
+            WHERE id = ANY($1::uuid[]) AND assignment_status = 'sent'`,
+          [rows.map((r) => r.assignment_id)],
+        );
+      } catch (err) {
+        // تعليم "اتشاف" إحصائي بحت — ما ينفعش يمنع الفني يشوف شغله المتاح.
+        this.logger.warn(`فشل تعليم عروض الفني ${profile.id} كـviewed — القايمة اترجعت عادي: ${String(err)}`);
+      }
+    }
+    return rows;
   }
 
   /**

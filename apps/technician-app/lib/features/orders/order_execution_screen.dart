@@ -466,6 +466,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             orderNumber: _order.orderNumber,
             orderStatus: 'completed',
             problemDescription: _order.problemDescription,
+            customerInputsLine: _order.customerInputsLine,
             // اتحصّل الكاش خلاص — مفيش باقي، ونصيبه ما اتغيّرش (docs/08 §60.2).
             cashToCollectCents: 0,
             myEarningCents: _order.myEarningCents,
@@ -940,6 +941,14 @@ class _JobBriefCard extends StatelessWidget {
               Text('المطلوب', style: theme.textTheme.labelLarge),
               const SizedBox(height: 2),
               Text(order.problemDescription!),
+            ],
+            // docs/08 §71 — اللي العميل اختاره وقت الحجز (مساحة/دور/نوع…) في سطر واحد، عشان
+            // الفني يعرف حجم الشغل قبل ما يتحرك بدل ما يسأل العميل على التليفون.
+            if (order.customerInputsLine.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text('اختيارات العميل', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 2),
+              Text(order.customerInputsLine, style: theme.textTheme.bodyMedium),
             ],
             // بيانات التواصل بترجع من الباك-إند بس بعد تأكيد الحجز — قبل كده بتبقى null والقسم
             // ده بيختفي بالكامل بدل ما يعرض سطر فاضي.

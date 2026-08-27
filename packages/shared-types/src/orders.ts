@@ -37,6 +37,8 @@ export interface OrderResponseDto {
   order_status: OrderStatus;
   problem_description: string | null;
   customer_notes: string | null;
+  /** إجابات العميل على الفورم الديناميكي وقت الحجز (docs/08 §71) — تسميات محلولة، للعرض. */
+  customer_inputs: { key: string; label: string; value: string; unit: string | null }[] | null;
   scheduled_at: string | null;
   estimated_price_cents: number | null;
   inspection_fee_cents: number;
