@@ -91,6 +91,8 @@ describe('تصريح مهارات ذاتي للفني + موافقة أدمن (S
       new EventEmitter2(),
       auditLog,
       {} as never, // geoService
+      // ADR-0045 §5 — الاعتماد بيسأل عن `technicians.require_national_id_for_approval`.
+      { getBoolean: async (_k: string, fallback: boolean) => fallback } as never,
     );
   });
 

@@ -36,6 +36,8 @@ import { SettingsService } from '../settings/settings.service';
 import { TechnicianActivityService } from './technician-activity.service';
 import { AdminTechnicianCategoryOpsService } from './admin-technician-category-ops.service';
 import { ListCategoryOpsQueryDto } from './dto/list-category-ops-query.dto';
+import { TechnicianIdentityService } from './technician-identity.service';
+import { SetNationalIdDto } from './dto/set-national-id.dto';
 import { AdminTechnician360Service } from './admin-technician-360.service';
 import { TechnicianEarningsService } from '../payments/technician-earnings.service';
 
@@ -52,6 +54,7 @@ export class AdminTechniciansController {
     private readonly technicianActivityService: TechnicianActivityService,
     private readonly categoryOpsService: AdminTechnicianCategoryOpsService,
     private readonly technician360Service: AdminTechnician360Service,
+    private readonly identityService: TechnicianIdentityService,
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
     // ADR-0038 — آخر بند عمدًا (نفس فلسفة باقي الإضافات المتأخرة): أقل بلاست-رديوس على
@@ -396,7 +399,41 @@ export class AdminTechniciansController {
     // docs/08 §35.10 — observability بحت (online/last_active_at)، منفصل تمامًا عن is_available/
     // is_on_duty. راجع TechnicianActivityService.
     const activity = await this.technicianActivityService.getActivityForUser(profile.userId);
-    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates, this.storage, activity);
+    const nationalId = await this.identityService.summaryFor(profile);
+    return toAdminTechnicianDetailResponseDto(profile, user, documents, certificates, this.storage, activity, nationalId);
+  }
+
+  /**
+   * الرقم القومي من الأدمن (ADR-0045 §4) — المسار المعتمد وقت مراجعة الأوراق: المراجع بيقرا
+   * الرقم من صورة البطاقة المرفوعة ويكتبه. مسموح في أي وقت (بعكس الفني اللي بيقدر قبل الاعتماد
+   * بس)، لأن تصحيح غلطة إدخال لازم يفضل ممكن.
+   */
+  @Patch(':id/national-id')
+  @RequirePermission('technicians.manage')
+  async setNationalId(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetNationalIdDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const profile = await this.identityService.setNationalId({
+      technicianProfileId: id,
+      rawNationalId: dto.national_id,
+      actorUserId: admin.sub,
+      source: 'admin',
+      meta: audit,
+    });
+    return this.identityService.summaryFor(profile);
+  }
+
+  /**
+   * الرقم كامل — صلاحية منفصلة عن العرض العادي عمدًا. الملخّص المقنّع بيرجع مع تفاصيل الفني
+   * لأي حد بيشوف الصفحة؛ الرقم الصريح بيتطلب صراحةً، فكل كشف بيبقى فعل مقصود.
+   */
+  @Get(':id/national-id')
+  @RequirePermission('technicians.manage')
+  async revealNationalId(@Param('id', ParseUUIDPipe) id: string) {
+    return { national_id: await this.identityService.revealNationalId(id) };
   }
 
   @Post(':id/approve')

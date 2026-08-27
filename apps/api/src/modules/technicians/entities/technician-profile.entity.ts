@@ -61,8 +61,21 @@ export class TechnicianProfile {
   @Column({ name: 'technician_code', type: 'varchar', length: 20, unique: true })
   technicianCode: string;
 
+  // ADR-0045 — الهوية الدائمة للفني. `select: false` مقصود: PII ما بيتحملش مع أي استعلام عادي،
+  // اللي محتاجه بيطلبه صراحة (`addSelect`) وده بيخلي كل قراءة للرقم مقصودة وقابلة للتتبّع.
   @Column({ name: 'national_id_encrypted', type: 'text', select: false, nullable: true })
   nationalIdEncrypted: string | null;
+
+  // الفهرس الأعمى — عليه UNIQUE جزئي (الحسابات غير المحذوفة بس). مش `select: false` لأنه
+  // one-way ومش PII بذاته، والاستعلامات محتاجة تقارن بيه.
+  @Column({ name: 'national_id_hash', type: 'char', length: 64, nullable: true })
+  nationalIdHash: string | null;
+
+  @Column({ name: 'national_id_set_at', type: 'timestamptz', nullable: true })
+  nationalIdSetAt: Date | null;
+
+  @Column({ name: 'national_id_set_by_user_id', type: 'uuid', nullable: true })
+  nationalIdSetByUserId: string | null;
 
   @Column({ name: 'years_of_experience', type: 'smallint', default: 0 })
   yearsOfExperience: number;

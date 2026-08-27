@@ -43,6 +43,8 @@ import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { RequestAssistantDto } from './dto/request-assistant.dto';
 import { SelfDeclareServiceDto } from './dto/self-declare-service.dto';
 import { SelfDeclareCategoryDto } from './dto/self-declare-category.dto';
+import { SetNationalIdDto } from './dto/set-national-id.dto';
+import { TechnicianIdentityService } from './technician-identity.service';
 import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
 import { toTechnicianCategoryResponseDto } from './dto/technician-category-response.dto';
 import { TechnicianCategoriesService } from './technician-categories.service';
@@ -67,6 +69,7 @@ export class TechniciansController {
     private readonly certificatesService: TechnicianCertificatesService,
     private readonly technicianCategoriesService: TechnicianCategoriesService,
     private readonly preferredCrewService: PreferredCrewService,
+    private readonly identityService: TechnicianIdentityService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -175,6 +178,24 @@ export class TechniciansController {
   @Patch('profile')
   async updateProfile(@CurrentUser() user: JwtPayload, @Body() dto: UpdateTechnicianProfileDto) {
     return toTechnicianProfileResponseDto(await this.techniciansService.updateProfile(user.sub, dto));
+  }
+
+  /**
+   * تسجيل الرقم القومي (ADR-0045) — **قبل الاعتماد بس**. بعد ما الأدمن يعتمد الحساب، التعديل
+   * بقى للأدمن وحده: لو الفني قدر يغيّره بعد الاعتماد، الحماية كلها بتتلف (اتحظر ⇒ غيّر رقمه
+   * ⇒ سجّل من تاني كأنه شخص جديد).
+   */
+  @Patch('national-id')
+  async setNationalId(@CurrentUser() user: JwtPayload, @Body() dto: SetNationalIdDto) {
+    const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
+    const updated = await this.identityService.setNationalId({
+      technicianProfileId: profile.id,
+      rawNationalId: dto.national_id,
+      actorUserId: user.sub,
+      source: 'technician',
+    });
+    // الرقم **ما بيترجعش** للفني — هو كتبه فبيعرفه، والرد بيأكّد الاستلام بس.
+    return { national_id_set: true, set_at: updated.nationalIdSetAt };
   }
 
   // تصريح مهارات ذاتي (Script 4 §2-7) — كانت فجوة موثّقة صراحة: technician_services كان 100%

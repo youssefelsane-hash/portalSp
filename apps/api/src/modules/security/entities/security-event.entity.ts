@@ -12,6 +12,9 @@ export enum SecurityEventType {
   SESSION_REUSE_AFTER_REVOKE = 'session_reuse_after_revoke',
   BLOCKED_ACCOUNT_ACCESS_ATTEMPT = 'blocked_account_access_attempt',
   SECURITY_SETTING_CHANGE = 'security_setting_change',
+  // محاولة تسجيل برقم قومي محجوز لحساب فني تاني (ADR-0045 §3) — الرد على المحاوِل عام بلا
+  // تفاصيل، والتفاصيل الكاملة بتعيش هنا للأدمن.
+  DUPLICATE_IDENTITY_ATTEMPT = 'duplicate_identity_attempt',
 }
 
 export enum SecurityEventSeverity {

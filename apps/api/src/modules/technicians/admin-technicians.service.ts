@@ -14,6 +14,7 @@ import {
 import { AuditActorMeta, AuditLogService } from '../audit/audit-log.service';
 import { User } from '../auth/entities/user.entity';
 import { GeoService } from '../geo/geo.service';
+import { SettingsService } from '../settings/settings.service';
 import { Service } from '../catalog/entities/service.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from '../catalog/entities/technician-service.entity';
 import {
@@ -51,6 +52,8 @@ export class AdminTechniciansService {
     private readonly events: EventEmitter2,
     private readonly auditLog: AuditLogService,
     private readonly geoService: GeoService,
+    // ADR-0045 §5 — قيد "ممنوع الاعتماد بلا رقم قومي" مفتاح إعداد مش hardcode.
+    private readonly settingsService: SettingsService,
   ) {}
 
   private async attachUsers(profiles: TechnicianProfile[]): Promise<TechnicianWithUser[]> {
@@ -120,6 +123,20 @@ export class AdminTechniciansService {
         `مينفعش تنقل حالة اعتماد الفني من ${profile.verificationStatus} لـ ${to}`,
         HttpStatus.CONFLICT,
       );
+    }
+
+    // ADR-0045 §5 — الاعتماد ممنوع بلا هوية دائمة. لو اتاعتمد بلا رقم قومي، كل الحماية ضد
+    // "الفني المحظور بيرجع بتليفون تاني" بتبقى بلا معنى: مفيش حاجة تربط الحساب الجديد بالقديم.
+    // مفتاح إعداد مش hardcode عشان الاستثناء يتاخد بقرار واعٍ مسجّل.
+    if (to === TechnicianVerificationStatus.APPROVED && !profile.nationalIdHash) {
+      const required = await this.settingsService.getBoolean('technicians.require_national_id_for_approval', true);
+      if (required) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          'مينفعش تعتمد الفني قبل ما يتسجّل رقمه القومي — ده الهوية الوحيدة اللي بتفضل ثابتة لو غيّر تليفونه',
+          HttpStatus.CONFLICT,
+        );
+      }
     }
 
     const previousStatus = profile.verificationStatus;

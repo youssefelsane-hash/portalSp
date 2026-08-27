@@ -80,6 +80,16 @@ export interface AdminTechnicianDetailResponseDto extends AdminTechnicianRespons
   // (MAX(refresh_tokens.last_seen_at)) — راجع TechnicianActivityService للتفاصيل الكاملة.
   online: boolean;
   last_active_at: string | null;
+  // ADR-0045 — الهوية الدائمة. الرقم **مقنّع** هنا (آخر 4 أرقام بس)؛ الرقم كامل له endpoint
+  // منفصل بصلاحية صريحة، فكل كشف كامل بيبقى فعل مقصود مش أثر جانبي لفتح الصفحة.
+  national_id: {
+    has_value: boolean;
+    masked: string | null;
+    set_at: string | null;
+    // أكواد حسابات فنيين تانية بنفس الرقم القومي (بما فيها المتشالة) — إشارة "الشخص ده كان
+    // عندنا قبل كده". فاضية في الحالة الطبيعية.
+    linked_account_codes: string[];
+  };
 }
 
 // docs/08 §19 بند 9 — الأدمن (بس مش الفني) هو الطرف الوحيد اللي بيقرا roots المستندات دي كتلة
@@ -91,6 +101,7 @@ export async function toAdminTechnicianDetailResponseDto(
   certificates: TechnicianCertificate[],
   storage: StorageService,
   activity: { online: boolean; lastActiveAt: Date | null },
+  nationalId: { hasNationalId: boolean; maskedNationalId: string | null; setAt: Date | null; linkedAccountCodes: string[] },
 ): Promise<AdminTechnicianDetailResponseDto> {
   return {
     ...toAdminTechnicianResponseDto(profile, user),
@@ -98,5 +109,11 @@ export async function toAdminTechnicianDetailResponseDto(
     certificates: await Promise.all(certificates.map((c) => toCertificateResponseDto(c, storage))),
     online: activity.online,
     last_active_at: activity.lastActiveAt ? activity.lastActiveAt.toISOString() : null,
+    national_id: {
+      has_value: nationalId.hasNationalId,
+      masked: nationalId.maskedNationalId,
+      set_at: nationalId.setAt ? nationalId.setAt.toISOString() : null,
+      linked_account_codes: nationalId.linkedAccountCodes,
+    },
   };
 }

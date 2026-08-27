@@ -301,6 +301,8 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
       { emit: jest.fn() } as never,
       { record: jest.fn(async () => undefined) } as never,
       geoServiceStub,
+      // ADR-0045 §5 — الاعتماد بيسأل عن `technicians.require_national_id_for_approval`.
+      { getBoolean: async (_k: string, fallback: boolean) => fallback } as never,
     );
     matchingService = new MatchingService(
       dataSource.getRepository(OrderAssignment),
@@ -335,6 +337,12 @@ describe('مسار التسجيل الحقيقي مقابل fixture — تكاف
     await categoriesService.approveCategoryDeclaration(ids.adminUser, declaration.id);
     await adminTechniciansService.assignZone(ids.adminUser, realProfile.id, { service_zone_id: ids.zoneReal, is_primary: false });
     await techniciansService.updateLocation(realUser.id, { latitude: 30.06, longitude: 31.26 });
+    // ADR-0045 §5 — الاعتماد ممنوع بلا رقم قومي. الفني الحقيقي بيعدّي بنفس الشرط اللي بيعدّي بيه
+    // في الإنتاج، فبنحطه هنا كجزء من الـfixture بدل ما نعطّل القيد.
+    await dataSource.query(`UPDATE technician_profiles SET national_id_hash = $1 WHERE id = $2`, [
+      `real${runId}`.padEnd(64, '0').slice(0, 64),
+      realProfile.id,
+    ]);
     await adminTechniciansService.approve(ids.adminUser, realProfile.id);
     // نفس مستوى فني fixture بالحرف (VERIFIED) — طلب المالك الصريح: "identical: category, zone,
     // level, verification, location, availability". ترقية حقيقية عبر AdminTechniciansService.

@@ -39,6 +39,14 @@ export const envValidationSchema = Joi.object({
     .optional()
     .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-settings-encryption-key').required() }),
 
+  // مفتاح تشفير بيانات الهوية (ADR-0045). مش مطلوب صراحةً في الإنتاج لأن الكود بيرجع لـ
+  // SETTINGS_ENCRYPTION_KEY المطلوب فوق — بس لو اتحدد لازم يكون قوي، والقيمة الافتراضية مرفوضة.
+  PII_ENCRYPTION_KEY: Joi.string()
+    .min(32)
+    .allow('')
+    .optional()
+    .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().min(32).invalid('change-me-pii-encryption-key-32ch') }),
+
   // قائمة أصول (origins) مسموح لها بنداء الـAPI من متصفح، مفصولة بفاصلة — راجع الشرح الكامل في
   // main.ts. فاضي/غير موجود = مفتوح للكل (`*`)، مقبول في التطوير بس مرفوض صراحة في staging/production.
   CORS_ORIGIN: Joi.string()
