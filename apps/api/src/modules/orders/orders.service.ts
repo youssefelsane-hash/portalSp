@@ -48,7 +48,16 @@ import { FailedVisitOutcome, ResolveFailedVisitDto } from './dto/resolve-failed-
 import { CashDisputeOutcome, ResolveCashDisputeDto } from './dto/resolve-cash-dispute.dto';
 import { TechnicianCancellationPolicyResponseDto } from './dto/technician-cancellation-policy-response.dto';
 import { CancellationAppliesTo, CancellationReason } from './entities/cancellation-reason.entity';
-import { BookingMode, Order, OrderPaymentStatus, OrderSourceChannel, OrderStatus, OrderType } from './entities/order.entity';
+import {
+  BookingMode,
+  Order,
+  OrderCustomerInput,
+  OrderPaymentStatus,
+  OrderSourceChannel,
+  OrderStatus,
+  OrderType,
+} from './entities/order.entity';
+import { PricingFieldOption } from '../pricing/entities/service-pricing-field.entity';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
@@ -215,6 +224,57 @@ export class OrdersService {
       );
     }
     return fresh;
+  }
+
+  /**
+   * snapshot لإجابات العميل على الفورم الديناميكي (docs/08 §71، طلب مالك صريح).
+   *
+   * التسميات بتتحل **هنا وقت الحجز** مش وقت العرض: الأدمن ممكن يعيد تسمية الحقل أو يمسحه بعدين،
+   * والطلب لازم يفضل يقول اللي العميل شافه واختاره وقتها بالظبط — نفس فلسفة الـsnapshot المتبعة
+   * في المشروع كله. وكمان بيخلي العرض في 3 واجهات بصفر استعلامات إضافية.
+   *
+   * أي فشل هنا **ما ينفعش يكسر إنشاء طلب حقيقي** — بنرجّع null ونكمّل (الطلب أهم من سطر عرض).
+   */
+  private async buildCustomerInputsSnapshot(
+    manager: EntityManager,
+    serviceId: string,
+    fieldValues: Record<string, string | number | boolean> | undefined,
+  ): Promise<OrderCustomerInput[] | null> {
+    const entries = Object.entries(fieldValues ?? {});
+    if (entries.length === 0) return null;
+    try {
+      const fields = await manager.query<
+        { field_key: string; label_ar: string; unit_ar: string | null; options: PricingFieldOption[] | null; display_order: number }[]
+      >(
+        `SELECT field_key, label_ar, unit_ar, options, display_order
+           FROM service_pricing_fields
+          WHERE service_id = $1 AND deleted_at IS NULL`,
+        [serviceId],
+      );
+      const byKey = new Map(fields.map((f) => [f.field_key, f]));
+      const inputs = entries
+        .map(([key, rawValue]) => {
+          const field = byKey.get(key);
+          // قيمة dropdown/multi_select بتيجي كـkey مش نص — بنحلّها للتسمية العربية اللي العميل
+          // شافها فعلًا، وإلا الأدمن هيقرا كود زي `type_b` ومش هيفهم منه حاجة.
+          const option = field?.options?.find((o) => o.value === String(rawValue));
+          const value = option ? option.label_ar : typeof rawValue === 'boolean' ? (rawValue ? 'نعم' : 'لأ') : String(rawValue);
+          return {
+            key,
+            // حقل اتمسح من الخدمة بعد كده (أو مفيش صف ليه أصلاً) بيتعرض بمفتاحه بدل ما يختفي.
+            label: field?.label_ar ?? key,
+            value,
+            unit: field?.unit_ar ?? null,
+            displayOrder: field?.display_order ?? 999,
+          };
+        })
+        .sort((a, b) => a.displayOrder - b.displayOrder)
+        .map(({ key, label, value, unit }) => ({ key, label, value, unit }));
+      return inputs.length > 0 ? inputs : null;
+    } catch (err) {
+      this.logger.warn(`فشل تسجيل مدخلات العميل للطلب (خدمة ${serviceId}) — الطلب بيكمل عادي: ${String(err)}`);
+      return null;
+    }
   }
 
   async create(
@@ -684,6 +744,10 @@ export class OrdersService {
         durationHours: service.requiresPreciseSchedule || service.requiresHoursOnly ? (dto.duration_hours ?? null) : null,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
+        // docs/08 §71 (طلب مالك) — إجابات الفورم الديناميكي كانت بتتخزن في
+        // service_pricing_evaluations لخدمات formula بس، فأي خدمة تانية إجابات العميل كانت
+        // بتتبخّر بعد حساب السعر. بتتسجّل هنا كـsnapshot بتسميات عربية محلولة للعرض في كل واجهة.
+        customerInputs: await this.buildCustomerInputsSnapshot(manager, service.id, dto.field_values),
         // سلوت الجدولة (لو اتحجز) بيحدد الموعد المطلوب فعليًا — أدق من resolvedScheduledAtIso
         // (تاريخ/وقت السلوت نفسه اللي الفني أعلن عنه، UTC مباشرة زي باقي أوقات المشروع).
         // resolvedScheduledAtIso = dto.scheduled_at الحر، أو أقرب يوم متاح فعليًا داخل النطاق

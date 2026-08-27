@@ -24,6 +24,11 @@ export interface OrderResponseDto {
   order_status: string;
   problem_description: string | null;
   customer_notes: string | null;
+  /**
+   * إجابات العميل على الفورم الديناميكي وقت الحجز (docs/08 §71) — تسميات عربية محلولة، جاهزة
+   * للعرض كسطر واحد. `null` = الخدمة مالهاش حقول ديناميكية أو الطلب اتعمل قبل migration 0201.
+   */
+  customer_inputs: { key: string; label: string; value: string; unit: string | null }[] | null;
   scheduled_at: string | null;
   // وضع "بداية+نهاية" (ADR-0032) — null دايمًا لأي خدمة تانية غير requiresStartAndEnd.
   scheduled_end_at: string | null;
@@ -141,6 +146,7 @@ export function toOrderResponseDto(
     order_status: order.orderStatus,
     problem_description: order.problemDescription,
     customer_notes: order.customerNotes,
+    customer_inputs: order.customerInputs ?? null,
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     scheduled_end_at: order.scheduledEndAt ? order.scheduledEndAt.toISOString() : null,
     estimated_price_cents: order.estimatedPriceCents,
