@@ -86,17 +86,23 @@ export class AdminWarrantyClaimsController {
     @Optional() private readonly events?: EventEmitter2,
   ) {}
 
+  // order_id اختياري (docs/08 §73 بند 3 المؤجّل) — نفس نمط order_id في AdminSupportController.listAll()،
+  // شاشة تفاصيل الطلب بتستخدمه لعرض مطالبات الضمان المرتبطة بالطلب ده مباشرة.
   @Get()
   @RequirePermission('warranty.view')
   async list(
     @Query('status') status?: string,
+    @Query('order_id') orderId?: string,
     @Query('page') pageValue?: string,
     @Query('per_page') perPageValue?: string,
   ) {
     if (status && status !== 'all' && !(status in CLAIM_TRANSITIONS)) {
       throw new ApiException(ErrorCode.VAL_001, 'حالة المطالبة غير صحيحة', HttpStatus.BAD_REQUEST);
     }
-    const where = status && status !== 'all' ? { status } : {};
+    const where = {
+      ...(status && status !== 'all' ? { status } : {}),
+      ...(orderId ? { orderId } : {}),
+    };
     const page = Math.max(1, Number.parseInt(pageValue ?? '1', 10) || 1);
     const perPage = Math.min(100, Math.max(1, Number.parseInt(perPageValue ?? '20', 10) || 20));
     const [items, total] = await this.claims.findAndCount({

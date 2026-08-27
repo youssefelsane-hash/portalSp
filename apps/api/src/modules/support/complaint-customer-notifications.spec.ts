@@ -149,4 +149,36 @@ describe('SupportService — إشعارات صاحب الشكوى (رد الأد
 
     expect(emitted.filter((e) => e.event === COMPLAINT_MESSAGE_ADDED_EVENT)).toHaveLength(0);
   });
+
+  // docs/08 §73 بند 3 المؤجّل (اتفعّل) — شاشة تفاصيل الطلب في الأدمن بتحتاج تعرض شكاوى الطلب ده بس.
+  it('listAllForAdmin(orderId) — بيرجّع شكاوى الطلب المحدد بس، مش كل الشكاوى', async () => {
+    const linkedComplaintId = await createComplaint('order-linked');
+    const otherComplaintId = await createComplaint('order-unrelated');
+
+    const [service_] = await dataSource.query(`SELECT id FROM services LIMIT 1`);
+    const [address] = await dataSource.query(
+      `INSERT INTO addresses (user_id, street_name, location) VALUES ($1,$2, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
+      [ids.customerUser, `شارع اختبار شكاوى ${runId}`],
+    );
+    const [order] = await dataSource.query(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
+       VALUES ($1,$2,$3,$4,'completed','paid',10000) RETURNING id`,
+      [`TESTCPF-${runId}`.slice(0, 24), ids.customerProfile, service_.id, address.id],
+    );
+    await dataSource.query(`UPDATE complaints SET order_id = $1 WHERE id = $2`, [order.id, linkedComplaintId]);
+
+    try {
+      const filtered = await service.listAllForAdmin(order.id);
+      expect(filtered.map((c) => c.id)).toEqual([linkedComplaintId]);
+
+      const all = await service.listAllForAdmin();
+      const allIds = all.map((c) => c.id);
+      expect(allIds).toEqual(expect.arrayContaining([linkedComplaintId, otherComplaintId]));
+    } finally {
+      await dataSource.query(`UPDATE complaints SET order_id = NULL WHERE id = $1`, [linkedComplaintId]);
+      await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM orders WHERE id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM addresses WHERE id = $1`, [address.id]);
+    }
+  });
 });

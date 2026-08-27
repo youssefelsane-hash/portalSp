@@ -111,7 +111,7 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
   });
 
   it('returns the snake_case response contract consumed by the admin claims screen', async () => {
-    const page = await adminController.list(undefined, '1', '100');
+    const page = await adminController.list(undefined, undefined, '1', '100');
     const item = page.items.find((claim) => claim.warranty_id === warrantyId);
     expect(item).toMatchObject({
       warranty_id: warrantyId,
@@ -143,5 +143,34 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
       { status: 'under_review' },
     );
     expect(reviewed.status).toBe('under_review');
+  });
+
+  // docs/08 §73 بند 3 المؤجّل (اتفعّل) — شاشة تفاصيل الطلب في الأدمن بتحتاج تعرض مطالبات الضمان
+  // المرتبطة بالطلب ده بس، مش كل المطالبات.
+  it('filters claims by order_id when provided', async () => {
+    const [service] = await dataSource.query(`SELECT id FROM services LIMIT 1`);
+    const [address] = await dataSource.query(
+      `INSERT INTO addresses (user_id, street_name, location) VALUES ($1,$2, ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography) RETURNING id`,
+      [userId, `شارع اختبار ${runId}`],
+    );
+    const [order] = await dataSource.query(
+      `INSERT INTO orders (order_number, customer_id, service_id, address_id, order_status, payment_status, total_amount_cents)
+       VALUES ($1,$2,$3,$4,'completed','paid',10000) RETURNING id`,
+      [`TESTWCF-${runId}`.slice(0, 24), customerId, service.id, address.id],
+    );
+    await dataSource.query(`UPDATE warranty_claims SET order_id = $1 WHERE warranty_id = $2`, [order.id, warrantyId]);
+    try {
+      const filtered = await adminController.list(undefined, order.id, '1', '100');
+      expect(filtered.items).toHaveLength(1);
+      expect(filtered.items[0].order_id).toBe(order.id);
+
+      const unrelated = await adminController.list(undefined, randomUUID(), '1', '100');
+      expect(unrelated.items).toHaveLength(0);
+    } finally {
+      await dataSource.query(`UPDATE warranty_claims SET order_id = NULL WHERE warranty_id = $1`, [warrantyId]);
+      await dataSource.query(`DELETE FROM order_status_history WHERE order_id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM orders WHERE id = $1`, [order.id]);
+      await dataSource.query(`DELETE FROM addresses WHERE id = $1`, [address.id]);
+    }
   });
 });

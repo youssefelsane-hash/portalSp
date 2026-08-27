@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuditContext, AuditMeta } from '../../common/decorators/audit-meta.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -16,9 +16,11 @@ import { SupportService } from './support.service';
 export class AdminSupportController {
   constructor(private readonly supportService: SupportService) {}
 
+  // order_id اختياري (docs/08 §73 بند 3 المؤجّل) — شاشة تفاصيل الطلب في الأدمن بتستخدمه عشان تعرض
+  // الشكاوى المرتبطة بالطلب ده مباشرة، بدل ما مركز الاتصال يدوّر في شاشة الشكاوى العامة.
   @Get()
-  async listAll() {
-    const complaints = await this.supportService.listAllForAdmin();
+  async listAll(@Query('order_id') orderId?: string) {
+    const complaints = await this.supportService.listAllForAdmin(orderId);
     return complaints.map(toComplaintResponseDto);
   }
 
