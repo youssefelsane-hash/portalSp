@@ -20,6 +20,7 @@ import 'models.dart';
 import 'order.dart';
 import 'orders_repository.dart';
 import 'recruit_team_screen.dart';
+import '../../design/order_number_title.dart';
 
 // قبل/بعد الشغل — عتبة بسيطة على الحالة بدل قايمة صور فعلية (مفيش GET /technician/orders/:id
 // لاسترجاع صور اترفعت قبل كده لو التطبيق اتقفل وفتح تاني، نفس فجوة الاستمرارية الموثّقة فوق).
@@ -569,7 +570,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('طلب ${_order.orderNumber}'),
+          title: OrderNumberTitle(orderNumber: _order.orderNumber),
           actions: [
             // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
             IconButton(

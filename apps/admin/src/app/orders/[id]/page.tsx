@@ -1404,9 +1404,21 @@ export default function OrderDetailPage() {
           <CardContent className="flex flex-col gap-2 text-sm">
             <p>
               الاسم:{' '}
-              <Link href={`/customers/${order.customer_id}`} className="underline" title={order.customer_id}>
-                {order.customer_name ?? 'عرض البروفايل'}
-              </Link>
+              {/* `customer_user_id` مش `customer_id` (docs/08 §77-A1): التاني هو مُعرّف
+                  البروفايل (`customer_profiles.id`)، وصفحة العميل بتاخد `users.id` — فاللينك
+                  كان بيرجّع 404 دايمًا. */}
+              {order.customer_user_id ? (
+                <Link
+                  href={`/customers/${order.customer_user_id}`}
+                  className="underline"
+                  title={order.customer_user_id}
+                >
+                  {order.customer_name ?? 'عرض البروفايل'}
+                </Link>
+              ) : (
+                // لو السيرفر ما رجّعش الـuser id لأي سبب، بنعرض الاسم كنص بدل لينك مكسور.
+                <span>{order.customer_name ?? '—'}</span>
+              )}
             </p>
             {order.customer_phone && (
               <p dir="ltr" className="text-start">

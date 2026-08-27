@@ -153,6 +153,7 @@ export class AdminOperationsController {
         items: result.staleDispatch.items.map((i) => ({
           assignment_id: i.assignmentId,
           order_id: i.orderId,
+          order_number: i.orderNumber,
           technician_id: i.technicianId,
           technician_code: i.technicianCode,
           full_name: i.fullName,

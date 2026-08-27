@@ -23,6 +23,7 @@ import '../tracking/tracking_screen.dart';
 import 'models.dart';
 import 'orders_repository.dart';
 import '../installments/installment_section.dart';
+import '../../design/order_number_title.dart';
 
 // نفس PAYABLE_ORDER_STATUSES في payments.service.ts بالظبط.
 // pending_payment (docs/08 §19 بند 1) — دفع قبل التوزيع (ADR-0013): لو محاولة الدفع الأولى وقت
@@ -704,7 +705,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(order != null ? 'طلب ${order.orderNumber}' : 'تفاصيل الطلب'),
+          title: OrderNumberTitle(orderNumber: order?.orderNumber),
           actions: [
             // إتاحة الدعم أثناء طلب نشط بشكل واضح (docs/08 §22 بند 18) — مش مدفون في قوائم فرعية.
             IconButton(

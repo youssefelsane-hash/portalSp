@@ -81,3 +81,27 @@
 + أيقونة تحذير صغيرة في القايمة نفسها قبل حتى ما العميل يفتح التعديل.
 
 مرجع كامل: `../../../../docs/02-data-dictionary.md` و `../../../../docs/01-master-plan.md` §2.4.
+
+## `findContactInfoOrThrow()` بترجّع `userId` — وليه ده مش تفصيلة (docs/08 §77-A1)
+
+**فخ حقيقي في الـschema وقع فيه الكود مرة، وهيوقع تاني لو محدش قرا ده**:
+
+```sql
+-- infra/migrations/0007_orders.sql
+customer_id UUID NOT NULL REFERENCES customer_profiles(id)   -- مش users(id)!
+```
+
+`orders.customer_id` هو **مُعرّف البروفايل**. أي حتة عايزة توصل لصفحة المستخدم أو تنادي
+endpoint بياخد user id (`/admin/customers/:userId`، `/admin/wallets/:userId`) محتاجة
+`users.id`، وهو **مش** الرقم ده.
+
+بلاغ مالك حقيقي (2026-08-27): لوحة الأدمن كانت بتبني `/customers/${order.customer_id}` —
+فالصفحة كانت بترجّع «غير موجودة» **دايمًا**، من يوم ما اللينك اتكتب.
+
+**القاعدة**: أي DTO فيه معلومات عميل مستخرجة من طلب لازم يقول **الرقمين صراحةً** لو الواجهة
+محتاجة تربط. `findContactInfoOrThrow()` بترجّع `userId` دلوقتي — والاستعلام أصلاً كان بيعمل
+`JOIN users` فالقيمة كانت متاحة ومترمية. **ما تحوّلش بين الرقمين في الواجهة** — الواجهة ما
+تعرفش العلاقة دي، والتخمين هو اللي كسر اللينك.
+
+الحارس: `customer-contact-user-id.spec.ts` — أهم اختبار فيه مش «الحقل موجود» بل
+`expect(contact.userId).not.toBe(profileId)`.
