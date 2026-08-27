@@ -7,6 +7,7 @@ import type {
   AdminTechnicianResponseDto,
   ComplaintResponseDto,
   OrderDetailResponseDto,
+  OrderEarningShareResponseDto,
   OrderFinancialSummaryResponseDto,
   OrderItemResponseDto,
   OrderMatchingFunnelDto,
@@ -35,6 +36,12 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   addon: 'إضافة',
   spare_part: 'قطعة غيار',
   extra_labor: 'أجرة إضافية',
+};
+
+const EARNING_SHARE_ROLE_LABELS: Record<OrderEarningShareResponseDto['participant_role'], string> = {
+  leader: 'قائد الطاقم',
+  team_member: 'فني ضمن الطاقم',
+  assistant: 'مساعد',
 };
 
 // GET /technicians/:id/schedule (نسخة العميل — is_available بس، docs/08 §25.2 فتحها للأدمن كمان)
@@ -100,7 +107,7 @@ import {
   REFUND_STATUS_LABELS,
 } from '@/lib/payments-labels';
 import { COMPLAINT_STATUS_LABELS, complaintStatusTone } from '@/lib/support-labels';
-import { CAPACITY_TIER_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
+import { CAPACITY_TIER_LABELS, LEVEL_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
@@ -111,6 +118,8 @@ export default function OrderDetailPage() {
 
   const [order, setOrder] = useState<OrderDetailResponseDto | null>(null);
   const [financialSummary, setFinancialSummary] = useState<OrderFinancialSummaryResponseDto | null>(null);
+  const [earningShares, setEarningShares] = useState<OrderEarningShareResponseDto[] | null>(null);
+  const [earningSharesError, setEarningSharesError] = useState(false);
   const [media, setMedia] = useState<OrderMediaResponseDto[]>([]);
   const [quoteItems, setQuoteItems] = useState<OrderItemResponseDto[]>([]);
   const [timeline, setTimeline] = useState<OrderTimelineEventResponseDto[]>([]);
@@ -208,6 +217,14 @@ export default function OrderDetailPage() {
     authedFetch<OrderFinancialSummaryResponseDto>(`/admin/orders/${id}/financial-summary`)
       .then(setFinancialSummary)
       .catch(() => setFinancialSummary(null));
+    // توزيع أرباح الطاقم إداري فقط. فشل المسار لا يمنع عرض الملخص المالي أو باقي الطلب.
+    setEarningSharesError(false);
+    authedFetch<OrderEarningShareResponseDto[]>(`/admin/orders/${id}/earning-shares`)
+      .then(setEarningShares)
+      .catch(() => {
+        setEarningShares([]);
+        setEarningSharesError(true);
+      });
     // تعيين مساعد يدوي بعد التصعيد (ADR-0008) — محتاجين نعرف كام مساعد اتعيّن فعلاً عشان
     // نعرف نعرض فورم التعيين ولا لأ (لو الأماكن اكتملت بالفعل، مفيش داعي نعرضه).
     authedFetch<TeamMemberResponseDto[]>(`/admin/orders/${id}/team-members`)
@@ -1440,6 +1457,68 @@ export default function OrderDetailPage() {
                     <p className="text-destructive">
                       رسوم إلغاء: {formatEgp(financialSummary.cancellation_fee_cents)}
                     </p>
+                  )}
+                </div>
+
+                <div className="rounded-md border">
+                  <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2">
+                    <div>
+                      <p className="font-medium">توزيع مستحقات أفراد الطاقم</p>
+                      <p className="text-xs text-muted-foreground">بيانات داخلية للأدمن فقط</p>
+                    </div>
+                    {!!earningShares?.length && (
+                      <div className="text-end">
+                        <p className="font-semibold">
+                          موزع: {formatEgp(earningShares.reduce((total, share) => total + share.share_cents, 0))}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          الوعاء: {formatEgp(earningShares[0].pool_cents)} ·{' '}
+                          {earningShares.reduce((total, share) => total + share.share_cents, 0) === earningShares[0].pool_cents
+                            ? 'متطابق'
+                            : 'يحتاج مراجعة'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  {earningShares === null && (
+                    <p className="p-3 text-muted-foreground">جاري تحميل توزيع المستحقات…</p>
+                  )}
+                  {earningSharesError && (
+                    <p className="p-3 text-destructive">تعذّر تحميل توزيع المستحقات. حاول تحديث الصفحة.</p>
+                  )}
+                  {!earningSharesError && earningShares?.length === 0 && (
+                    <p className="p-3 text-muted-foreground">
+                      لم يتم إنشاء توزيع للطاقم حتى الآن. يظهر التوزيع بعد اعتماد مستحقات الشغل.
+                    </p>
+                  )}
+                  {!!earningShares?.length && (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>الفرد</TableHead>
+                          <TableHead>الدور</TableHead>
+                          <TableHead>المستوى / الوزن</TableHead>
+                          <TableHead>المستحق</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {earningShares.map((share) => (
+                          <TableRow key={share.technician_id}>
+                            <TableCell>
+                              <Link href={`/technicians/${share.technician_id}`} className="font-medium underline">
+                                {share.full_name}
+                              </Link>
+                            </TableCell>
+                            <TableCell>{EARNING_SHARE_ROLE_LABELS[share.participant_role]}</TableCell>
+                            <TableCell>
+                              {(LEVEL_LABELS as Record<string, string>)[share.technician_level] ?? share.technician_level} ·{' '}
+                              {Number(share.share_weight).toLocaleString('ar-EG')}
+                            </TableCell>
+                            <TableCell className="font-semibold">{formatEgp(share.share_cents)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   )}
                 </div>
 
