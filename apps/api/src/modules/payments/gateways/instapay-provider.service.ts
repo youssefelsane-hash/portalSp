@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { SETTING_UPDATED_EVENT, SettingUpdatedEvent } from '../../../common/events/setting-updated.event';
 import { SettingsService } from '../../settings/settings.service';
+import { InstaPayQrService } from './instapay-qr.service';
 import {
   CaptureResult,
   CardSaveWebhookResult,
@@ -51,7 +52,10 @@ export class InstaPayProvider implements PaymentProvider, OnModuleInit {
   private ipaAddress: string | undefined;
   private recipientName: string | undefined;
 
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(
+    private readonly settingsService: SettingsService,
+    private readonly qrService: InstaPayQrService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.reload();
@@ -97,6 +101,10 @@ export class InstaPayProvider implements PaymentProvider, OnModuleInit {
         `هيتم تأكيد الدفع خلال وقت قصير من فريق الدعم.`,
       providerReference: input.paymentId,
       expiresAt,
+      // QR مُدار من الأدمن (migration 0211) — بيتقرا **وقت كل عملية دفع** مش وقت الإقلاع، لأن
+      // رابط S3 موقّع وبينتهي. `null` لو الأدمن ما حطش حاجة أو التخزين وقع: التعليمات النصية
+      // فوق فيها كل اللي العميل محتاجه فعليًا، فالـQR راحة إضافية مش شرط للدفع.
+      qrImageUrl: await this.qrService.getCustomerUrl(),
     };
   }
 

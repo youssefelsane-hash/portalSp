@@ -320,20 +320,18 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
                   textInputAction: TextInputAction.search,
                   onSubmitted: (_) => _submit(),
                   onTapOutside: (_) => _focusNode.unfocus(),
-                  decoration: InputDecoration(
+                  // `kSelfPaintedFieldDecoration` (design/app_theme.dart) بيلغي `filled` الموروثة
+                  // من الثيم — من غيره الوضع الداكن بيرسم مستطيل غامق جوّه الكبسولة البيضا
+                  // (بَقّة مالك حقيقية، docs/08 §78-أ). وبيحطّ `isDense` + حشو صفر كمان:
+                  // الارتفاع بيطلع من الخط نفسه، فمفيش فرصة إن `InputDecorator` يتحشر في
+                  // مساحة أصغر من اللي محتاجها.
+                  decoration: kSelfPaintedFieldDecoration.copyWith(
                     hintText: widget.content.placeholder,
                     hintStyle: TextStyle(
                       color: Colors.blueGrey.shade400,
                       fontSize: 13,
                       fontWeight: FontWeight.w400,
                     ),
-                    // `isDense` + حشو صفر: الارتفاع بيطلع من الخط نفسه، فمفيش أي فرصة
-                    // إن `InputDecorator` يتحشر في مساحة أصغر من اللي محتاجها.
-                    isDense: true,
-                    contentPadding: EdgeInsets.zero,
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
                   ),
                 ),
               ),

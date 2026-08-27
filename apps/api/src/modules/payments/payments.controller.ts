@@ -83,12 +83,17 @@ export class PaymentsController {
       throw new BadRequestException('Idempotency-Key header مطلوب');
     }
 
-    const { payment, referenceCode, instructionsAr } = await this.paymentsService.payWithInstaPay(
+    const { payment, referenceCode, instructionsAr, qrImageUrl } = await this.paymentsService.payWithInstaPay(
       user.sub,
       id,
       idempotencyKey.trim(),
     );
-    return { payment: toPaymentResponseDto(payment), reference_code: referenceCode, instructions_ar: instructionsAr };
+    return {
+      payment: toPaymentResponseDto(payment),
+      reference_code: referenceCode,
+      instructions_ar: instructionsAr,
+      qr_image_url: qrImageUrl,
+    };
   }
 
   /**

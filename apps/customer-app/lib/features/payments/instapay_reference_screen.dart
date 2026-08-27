@@ -70,67 +70,97 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // البطاقة دي هي أهم حاجة في الشاشة (تنظيم واضح، طلب صريح من صاحب المشروع
-              // 2026-08-21) — الكود ده لازم يتكتب في ملاحظة التحويل فعليًا (نفس القيمة بالحرف في
-              // instructionsAr تحت)، فهي أول حاجة العميل يشوفها، بلون مميّز، مش كارت عادي وسط
-              // كارت تاني. قبل كده كان الكود المعروض مختلف عن الكود المطلوب فعليًا في التعليمات
-              // (بَقّة حقيقية اتصلحت في الباك-إند — راجع instapay-provider.service.ts).
-              Card(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              // **المحتوى قابل للتمرير والزرار مثبّت تحت** — قبل إضافة كارت الـQR (§78-د) كان
+              // العمود كله ثابت بـ`Spacer()`، يعني أي محتوى إضافي (صورة QR، أو التعليمات بخط
+              // نظام مكبّر) بيعمل RenderFlex overflow. نفس فئة البَقّة اللي المالك شافها في
+              // الـhero (§76-ب) بالظبط، فاتصلحت هنا استباقيًا مش بعد بلاغ.
+              Expanded(
+                child: SingleChildScrollView(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.tag, size: 18, color: Theme.of(context).colorScheme.onPrimaryContainer),
-                          const SizedBox(width: 6),
-                          Text(
-                            'اكتب الكود ده في ملاحظة التحويل',
-                            style: TextStyle(color: Theme.of(context).colorScheme.onPrimaryContainer, fontWeight: FontWeight.w600),
+                      // البطاقة دي هي أهم حاجة في الشاشة (تنظيم واضح، طلب صريح من صاحب المشروع
+                      // 2026-08-21) — الكود ده لازم يتكتب في ملاحظة التحويل فعليًا (نفس القيمة بالحرف في
+                      // instructionsAr تحت)، فهي أول حاجة العميل يشوفها، بلون مميّز، مش كارت عادي وسط
+                      // كارت تاني. قبل كده كان الكود المعروض مختلف عن الكود المطلوب فعليًا في التعليمات
+                      // (بَقّة حقيقية اتصلحت في الباك-إند — راجع instapay-provider.service.ts).
+                      Card(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                          child: Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.tag, size: 18, color: Theme.of(context).colorScheme.onPrimaryContainer),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'اكتب الكود ده في ملاحظة التحويل',
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              SelectableText(
+                                widget.reference.referenceCode,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 2,
+                                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              FilledButton.tonalIcon(
+                                icon: const Icon(Icons.copy, size: 18),
+                                label: const Text('نسخ الكود'),
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: widget.reference.referenceCode));
+                                  ScaffoldMessenger.of(
+                                    context,
+                                  ).showSnackBar(const SnackBar(content: Text('اتنسخ الكود')));
+                                },
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      SelectableText(
-                        widget.reference.referenceCode,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      FilledButton.tonalIcon(
-                        icon: const Icon(Icons.copy, size: 18),
-                        label: const Text('نسخ الكود'),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: widget.reference.referenceCode));
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتنسخ الكود')));
-                        },
+                      const SizedBox(height: 16),
+                      // QR مُدار من الأدمن (docs/08 §78-د) — بيوفّر على العميل كتابة عنوان الـIPA
+                      // بإيده، وده أكتر مكان بيحصل فيه غلط في التحويل اليدوي. بيختفي بالكامل لو الأدمن
+                      // ما ضبطش واحد: كارت فاضي أو صورة مكسورة أسوأ بكتير من غيابه.
+                      if (widget.reference.qrImageUrl != null) ...[
+                        _InstaPayQrCard(imageUrl: widget.reference.qrImageUrl!),
+                        const SizedBox(height: 16),
+                      ],
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.info_outline, size: 20, color: Theme.of(context).colorScheme.secondary),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  widget.reference.instructionsAr,
+                                  style: const TextStyle(fontSize: 15, height: 1.6),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.info_outline, size: 20, color: Theme.of(context).colorScheme.secondary),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(widget.reference.instructionsAr, style: const TextStyle(fontSize: 15, height: 1.6))),
-                    ],
-                  ),
-                ),
-              ),
-              const Spacer(),
               if (_checkState == _CheckState.stillPending)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -153,6 +183,52 @@ class _InstaPayReferenceScreenState extends State<InstaPayReferenceScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// كارت الـQR — صورة مربّعة على خلفية بيضا دايمًا.
+///
+/// **الخلفية البيضا مقصودة ومش نسيان للوضع الداكن**: قارئات QR بتتوقّع مربّعات غامقة على خلفية
+/// فاتحة، وعرض الصورة على سطح غامق بيكسر القراءة على أجهزة كتير. ده الاستثناء الوحيد المبرَّر
+/// لتثبيت لون هنا — عكس بَقّة §78-أ اللي كانت تثبيت لون بلا سبب.
+class _InstaPayQrCard extends StatelessWidget {
+  const _InstaPayQrCard({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        child: Column(
+          children: [
+            Text(
+              'أو امسح الكود ده من تطبيق البنك',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 14),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220, maxHeight: 220),
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    // فشل تحميل الصورة ما يكسرش الشاشة: التعليمات النصية تحت فيها كل اللي
+                    // العميل محتاجه، فبنخفي الكارت بهدوء بدل أيقونة صورة مكسورة.
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

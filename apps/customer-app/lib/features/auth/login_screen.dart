@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../core/api_config.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
+import '../catalog/branding_repository.dart';
 
 /// شاشة الدخول/التسجيل.
 ///
@@ -322,34 +324,53 @@ class _LoginScreenState extends State<LoginScreen> {
 /// أو Lottie معناها انتظار تحميل/فك ترميز في اللحظة اللي المستخدم فيها أقل صبرًا، وحزمة أكبر
 /// بلا مقابل. الشكل ده بيترسم في نفس الإطار، بيتكيّف مع الثيم الفاتح/الغامق لوحده، وبصفر بايت
 /// أصول.
-class _BrandMark extends StatelessWidget {
+/// علامة العلامة التجارية فوق شاشة الدخول.
+///
+/// **بيعرض `primary_logo` المرفوع من الأدمن لو موجود (docs/08 §78-ج)** — قبل كده كان في
+/// `asset_type` منفصل اسمه `login_logo` مالوش **أي** مستهلك في أي تطبيق: خانة رفع في لوحة
+/// الأدمن بترفع ملف حقيقي وما يظهرش في أي مكان. اتشال في migration 0210، والشاشة دي بقت
+/// تستهلك اللوجو الأساسي — لوجو واحد للمنصة كلها بدل خانتين لازم الأدمن يزامنهم بإيده.
+///
+/// الدايرة المتدرّجة المرسومة بالكود بتفضل الاحتياطي: قبل ما الطلب يرجع، ولو الأدمن ما رفعش
+/// حاجة (`is_default`)، ولو تحميل الصورة فشل. الشاشة أبدًا ما بتفضل بلا هوية.
+class _BrandMark extends StatefulWidget {
   const _BrandMark();
+
+  @override
+  State<_BrandMark> createState() => _BrandMarkState();
+}
+
+class _BrandMarkState extends State<_BrandMark> {
+  String? _logoUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    BrandingRepository()
+        .fetchPrimaryLogo()
+        .then((logo) {
+          if (!mounted || logo == null || logo.isDefault || logo.url.isEmpty) return;
+          setState(() => _logoUrl = resolveApiAssetUrl(logo.url));
+        })
+        .catchError((_) {});
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final logoUrl = _logoUrl;
     return Column(
       children: [
-        Container(
-          width: 92,
-          height: 92,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [AppColors.primary, Color(0xFF7FA6E0)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.28),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.handyman_rounded, size: 44, color: Colors.white),
-        ),
+        if (logoUrl != null)
+          Image.network(
+            logoUrl,
+            height: 92,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => const _GradientBrandCircle(),
+          )
+        else
+          const _GradientBrandCircle(),
         const SizedBox(height: 14),
         Text(
           'صُنّاع',
@@ -366,6 +387,35 @@ class _BrandMark extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// الاحتياطي المرسوم بالكود — صفر أصول مطلوبة، فبيشتغل حتى لو الباك-إند مش شغّال خالص.
+class _GradientBrandCircle extends StatelessWidget {
+  const _GradientBrandCircle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 92,
+      height: 92,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primary, Color(0xFF7FA6E0)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.28),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: const Icon(Icons.handyman_rounded, size: 44, color: Colors.white),
     );
   }
 }

@@ -19,9 +19,5 @@ export interface DefaultBrandingAsset {
 
 export const DEFAULT_BRANDING_ASSETS: Record<BrandingAssetType, DefaultBrandingAsset> = {
   [BrandingAssetType.PRIMARY_LOGO]: { url: placeholderSvgDataUri('baytak', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
-  [BrandingAssetType.LOGO_MARK]: { url: placeholderSvgDataUri('ب', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
-  [BrandingAssetType.LOGO_LIGHT]: { url: placeholderSvgDataUri('baytak', '#FFFFFF', '#0F172A'), width_px: 240, height_px: 80 },
-  [BrandingAssetType.LOGO_DARK]: { url: placeholderSvgDataUri('baytak', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
-  [BrandingAssetType.LOGIN_LOGO]: { url: placeholderSvgDataUri('baytak', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
   [BrandingAssetType.SPLASH]: { url: placeholderSvgDataUri('baytak', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
 };

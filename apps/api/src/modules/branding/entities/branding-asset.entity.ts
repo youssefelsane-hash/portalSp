@@ -1,12 +1,13 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
+/**
+ * **نوعين بس عمدًا (migration 0210، docs/08 §78-ج)** — كان فيه ستة، والأربعة المتشالة
+ * (`logo_mark`/`logo_light`/`logo_dark`/`login_logo`) مكانش ليهم **ولا مستهلك واحد** في أي
+ * تطبيق: خانات رفع بترفع ملف لتخزين حقيقي وما تظهرش في أي مكان. أي نوع جديد هنا لازم يتضاف
+ * **مع** الكود اللي بيعرضه في نفس الـPR، مش قبله.
+ */
 export enum BrandingAssetType {
   PRIMARY_LOGO = 'primary_logo',
-  // اختصار اللوجو / رمز التفضيل (ملاحظة المالك: حرف الـ"جاكوش" — زي حرف T بتاع طلبات، U بتاع أوبر).
-  LOGO_MARK = 'logo_mark',
-  LOGO_LIGHT = 'logo_light',
-  LOGO_DARK = 'logo_dark',
-  LOGIN_LOGO = 'login_logo',
   SPLASH = 'splash',
 }
 

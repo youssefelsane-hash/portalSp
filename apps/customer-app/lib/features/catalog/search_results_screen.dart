@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
+import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import 'catalog_navigation.dart';
@@ -79,9 +80,11 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
             controller: _controller,
             autofocus: widget.initialQuery.isEmpty,
             textInputAction: TextInputAction.search,
-            decoration: const InputDecoration(
+            // نفس بَقّة الوضع الداكن اللي اتصلحت في الـhero (docs/08 §78-أ) بالظبط: الحقل ده
+            // بيرسم جوّه سطح الـAppBar، و`InputBorder.none` بتشيل الإطار بس — التعبئة الموروثة
+            // من الثيم كانت بترسم مستطيل غامق جوّه شريط الرأس. اتلقطت هنا بالمسح مش ببلاغ.
+            decoration: kSelfPaintedFieldDecoration.copyWith(
               hintText: 'قول لينا محتاج مساعدة في إيه...',
-              border: InputBorder.none,
             ),
             onChanged: _onChanged,
             onSubmitted: _search,

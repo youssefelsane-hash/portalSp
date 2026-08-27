@@ -88,3 +88,24 @@ extension SemanticColors on BuildContext {
   Color get infoColor => Theme.of(this).brightness == Brightness.light ? AppColors.info : AppColors.infoDark;
   Color get dangerColor => Theme.of(this).colorScheme.error;
 }
+
+/// حقل نص جوّه **سطح بيرسم نفسه** (شريط بحث الـhero فوق الصورة، حقل البحث جوّه AppBar).
+///
+/// **بَقّة حقيقية من المالك (docs/08 §78-أ، لقطة وضع داكن)**: «الشريط الأسود اللي جوه محرك
+/// البحث… لما الموبايل يبقى على الوضع الداكن». السبب مش في شريط البحث نفسه: `AppTheme._base`
+/// بيحطّ `inputDecorationTheme(filled: true)` بـ`fillColor` غامق في الوضع الداكن، و`TextField`
+/// بيورّث ده تلقائيًا حتى لو الحدود متشالة (`InputBorder.none` بتشيل الإطار **مش** التعبئة).
+/// فالنتيجة مستطيل غامق مرسوم جوّه الكبسولة البيضا — غير مرئي في الوضع الفاتح لأن الـfillColor
+/// هناك أبيض بالصدفة، وده اللي خلّاه يعدّي.
+///
+/// الحل من الجذر مش لون تاني: أي حقل بيرسم خلفيته بنفسه لازم **يلغي** التعبئة الموروثة صراحةً.
+/// ثابت واحد مشترك بدل ما كل موقع يفتكر لوحده — والاختبار في `home_redesign_test.dart` بيقيس
+/// الـdecoration المحسوبة فعلاً بعد تطبيق الثيم، مش النية.
+const InputDecoration kSelfPaintedFieldDecoration = InputDecoration(
+  filled: false,
+  isDense: true,
+  contentPadding: EdgeInsets.zero,
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+);
