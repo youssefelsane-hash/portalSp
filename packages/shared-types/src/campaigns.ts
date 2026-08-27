@@ -45,3 +45,23 @@ export interface CreateCampaignBody {
 }
 
 export type UpdateCampaignBody = Partial<Omit<CreateCampaignBody, 'campaign_type' | 'category_id'>>;
+
+// "عملاء متروكين" لمركز الاتصال (docs/08 §79) — عملاء بصوا على خدمة/بدأوا حجز ومكملوش.
+export interface AbandonedLeadResponseDto {
+  intent_id: string;
+  user_id: string;
+  customer_name: string;
+  customer_phone: string;
+  service_id: string;
+  service_name: string;
+  category_name: string;
+  intent_stage: 'viewed_service' | 'started_booking';
+  occurred_at: string;
+  /** محرك الحملات عالج الاهتمام ده بالفعل (بعت تذكير أو منعه حاجز) — مش ضمان إن رسالة وصلت فعلاً. */
+  reminder_processed: boolean;
+}
+
+export interface AbandonedLeadsListResponseDto {
+  items: AbandonedLeadResponseDto[];
+  meta: { page: number; per_page: number; total: number };
+}

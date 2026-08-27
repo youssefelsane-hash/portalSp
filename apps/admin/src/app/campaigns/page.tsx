@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import type { CampaignResponseDto, CampaignType, CampaignsListResponseDto, CreateCampaignBody } from '@baytak/shared-types';
+import type {
+  AbandonedLeadResponseDto,
+  AbandonedLeadsListResponseDto,
+  CampaignResponseDto,
+  CampaignType,
+  CampaignsListResponseDto,
+  CreateCampaignBody,
+} from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -27,8 +34,14 @@ const CAMPAIGN_TYPE_HINTS: Record<CampaignType, string> = {
   abandoned_intent: 'بيتبعت للعميل اللي بصّ على خدمة وما حجزهاش — بعد المهلة اللي تحتها.',
 };
 
+const INTENT_STAGE_LABELS: Record<AbandonedLeadResponseDto['intent_stage'], string> = {
+  viewed_service: 'بصّ على الخدمة',
+  started_booking: 'بدأ يحجز',
+};
+
 export default function CampaignsPage() {
   const { isLoading, authedFetch } = useAuth();
+  const [tab, setTab] = useState<'campaigns' | 'leads'>('campaigns');
   const [campaigns, setCampaigns] = useState<CampaignResponseDto[] | null>(null);
   const [variables, setVariables] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +49,12 @@ export default function CampaignsPage() {
   const [showNew, setShowNew] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [newType, setNewType] = useState<CampaignType>('periodic_promo');
+
+  // "عملاء متروكين" لمركز الاتصال (docs/08 §79) — تبويب منفصل عمداً، بيانات مختلفة تمامًا
+  // (عملاء حقيقيين بأرقام تليفوناتهم) عن قايمة الحملات نفسها.
+  const [leads, setLeads] = useState<AbandonedLeadResponseDto[] | null>(null);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [leadsDays, setLeadsDays] = useState(14);
 
   function load() {
     authedFetch<CampaignsListResponseDto>('/admin/campaigns')
@@ -46,11 +65,23 @@ export default function CampaignsPage() {
       .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل الحملات'));
   }
 
+  function loadLeads() {
+    authedFetch<AbandonedLeadsListResponseDto>(`/admin/campaigns/abandoned-leads?days=${leadsDays}&per_page=100`)
+      .then((res) => setLeads(res.items))
+      .catch((err) => setLeadsError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل العملاء المتروكين'));
+  }
+
   useEffect(() => {
     if (isLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
+
+  useEffect(() => {
+    if (isLoading || tab !== 'leads') return;
+    loadLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, tab, leadsDays]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -126,15 +157,102 @@ export default function CampaignsPage() {
         title="الحملات التسويقية"
         description="إشعارات تلقائية بتفكّر العميل بالخدمات. النص قالب فيه متغيّرات، والمنصة بتملاه بأسماء خدمات حقيقية."
         actions={
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={runSweep}>
-              تشغيل دورة دلوقتي
-            </Button>
-            <Button onClick={() => setShowNew((v) => !v)}>{showNew ? 'إلغاء' : 'حملة جديدة'}</Button>
-          </div>
+          tab === 'campaigns' ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={runSweep}>
+                تشغيل دورة دلوقتي
+              </Button>
+              <Button onClick={() => setShowNew((v) => !v)}>{showNew ? 'إلغاء' : 'حملة جديدة'}</Button>
+            </div>
+          ) : undefined
         }
       />
 
+      <div className="mb-4 flex gap-2">
+        <Button variant={tab === 'campaigns' ? 'default' : 'outline'} size="sm" onClick={() => setTab('campaigns')}>
+          الحملات
+        </Button>
+        <Button variant={tab === 'leads' ? 'default' : 'outline'} size="sm" onClick={() => setTab('leads')}>
+          عملاء متروكين
+        </Button>
+      </div>
+
+      {tab === 'leads' && (
+        <>
+          {leadsError && <div className="mb-4 rounded-md bg-danger/10 p-3 text-sm text-danger">{leadsError}</div>}
+
+          <Card className="mb-4">
+            <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+              <p>
+                عملاء بصوا على خدمة أو بدأوا يحجزوا ومكملوش — لمركز الاتصال يتصل بيهم يشوف محتاجين
+                مساعدة. رقم التليفون مضمون لكل صف (مسجّل وقت التصفح من عميل مسجّل دخول بالفعل).
+              </p>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="leads_days" className="text-foreground">
+                  آخر
+                </Label>
+                <Input
+                  id="leads_days"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={leadsDays}
+                  onChange={(e) => setLeadsDays(Math.min(30, Math.max(1, Number(e.target.value) || 14)))}
+                  className="w-20"
+                />
+                <span className="text-foreground">يوم</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {leads === null && <TableSkeleton columns={5} />}
+          {leads !== null && leads.length === 0 && (
+            <EmptyState title="مفيش عملاء متروكين في الفترة دي" description="كل العملاء اللي بصوا على خدمة أكملوا حجزهم." />
+          )}
+          {leads !== null && leads.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>العميل</TableHead>
+                  <TableHead>رقم التليفون</TableHead>
+                  <TableHead>كان بيحاول يطلب</TableHead>
+                  <TableHead>إمتى</TableHead>
+                  <TableHead>تذكير تلقائي</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {leads.map((lead) => (
+                  <TableRow key={lead.intent_id}>
+                    <TableCell>{lead.customer_name}</TableCell>
+                    <TableCell>
+                      <a href={`tel:${lead.customer_phone}`} className="font-medium text-primary underline underline-offset-2" dir="ltr">
+                        {lead.customer_phone}
+                      </a>
+                    </TableCell>
+                    <TableCell>
+                      <div>{lead.service_name}</div>
+                      <Badge variant="outline" className="mt-1">
+                        {INTENT_STAGE_LABELS[lead.intent_stage]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {new Date(lead.occurred_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={lead.reminder_processed ? 'default' : 'outline'}>
+                        {lead.reminder_processed ? 'اتبعتله' : 'لسه'}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </>
+      )}
+
+      {tab === 'campaigns' && (
+        <>
       {error && <div className="mb-4 rounded-md bg-danger/10 p-3 text-sm text-danger">{error}</div>}
       {notice && <div className="mb-4 rounded-md bg-muted p-3 text-sm text-muted-foreground">{notice}</div>}
 
@@ -300,7 +418,8 @@ export default function CampaignsPage() {
           </TableBody>
         </Table>
       )}
-
+        </>
+      )}
     </AppShell>
   );
 }
