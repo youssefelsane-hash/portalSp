@@ -26,6 +26,7 @@ import { OrdersService } from './orders.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { OrderItemsService } from './order-items.service';
+import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
@@ -83,6 +84,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     OrderAutoCancelService,
     CrewShortageEscalationService,
     OrderItemsService,
+    InspectionQuoteService,
     OrderInternalNotesService,
     OrderMediaService,
     OrderTeamService,

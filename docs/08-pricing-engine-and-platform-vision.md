@@ -8841,10 +8841,29 @@ build`/`jest` → commit + push + PR منفصل → merge بعد CI أخضر →
 مؤجّل**: شات الطلب inline، عرض `earning-shares` الموجود بلا UI. تفاصيل كاملة:
 `apps/api/src/modules/orders/README.md`.
 
-**بند 1 — لسه ما بدأش.** الأكبر والأكثر خطورة معماريًا (ADR-0044 + enum جديد + حالة state machine
-جديدة + endpoint فني جديد) — هيتعمل في الدفعة الجاية.
+**بند 1 — ✅ خلص (الباك-إند بالكامل).** `docs/adr/0044-inspection-then-quote-booking-mode.md`
+مكتوب ومعتمد قبل أي كود (زي ما القاعدة الحاكمة بتفرض). التنفيذ بالحرف زي ما القرار بيقول:
+migration 0204 (`awaiting_initial_quote_approval` enum value جديد) + `order-state-machine.ts`
+(4 إضافات لمجموعات موجودة + انتقالين جداد: `technician_arrived → awaiting_initial_quote_approval`
+و`awaiting_initial_quote_approval → [in_progress, cancelled_by_customer]`) + `CatalogService.estimate()`
+فرع جديد لـ`pricing_model=inspection_then_quote` (رسم معاينة بس، `base_price_cents=0`) +
+`InspectionQuoteService` جديدة (`submitInitialQuote()`/`approveInitialQuote()`، نفس نمط
+`OrderItemsService.propose()`/`approve()` بالحرف — قفل pessimistic، `OrderStatusHistory`،
+إعادة استخدام كاملة لـ`PaymentsService.attemptAdditionalWorkCharge()`) + 2 endpoint جديد
+(`POST /technician/orders/:id/submit-initial-quote`، `POST /orders/:id/approve-initial-quote`).
+الرفض بلا endpoint جديد — العميل يستخدم `POST /orders/:id/cancel` العادي (الحالة مضافة
+لـ`CUSTOMER_CANCELLABLE_STATUSES`، صفر رسوم إلغاء إضافية).
 
-`npx tsc --noEmit` → `npx nest build` → full jest suite (194 suite، 1094 اختبار): 3 فشل غير مرتبطين
-إطلاقًا بالتعديلات دي (اتنين معروفين مسبقًا كفجوة بيانات محلية من إعادة استخدام نفس الـDB عبر جلسات
-اختبار حي متعددة، والتالت flake توقيت في `workforce-activity.spec.ts` مالوش أي علاقة بالملفات
-المعدّلة). `apps/admin` تايبسكريبت نظيف. مفيش Flutter SDK — فحص توازن أقواس آلي على الملفين المعدّلين.
+اتأكد حيًا بالكامل على Postgres حقيقي: `inspection-then-quote.spec.ts` (7 اختبار) — فرع
+`estimate()` (رسم معاينة بس، صفر سعر أساسي)، الفني يحدد سعر بعد المعاينة (نجاح + رفض خدمة غلط
++ رفض حالة طلب غلطة)، العميل يوافق (تحديث `total_amount_cents`/`commissionable_base_cents` صح،
+تحصيل فوري إلكتروني عبر وسيلة دفع محفوظة، أو كاش من غير أي محاولة تحصيل)، مسار الرفض
+(`canTransition`/`CUSTOMER_CANCELLABLE_STATUSES`). `npx tsc --noEmit` → `npx nest build` → full
+jest suite (195 suite، 1101 اختبار): فشل واحد بس، معروف مسبقًا وغير مرتبط إطلاقًا بالتعديلات دي
+(`matching-accept-concurrency.spec.ts` — تصادم `order_number` من إعادة استخدام نفس الـDB عبر
+جلسات اختبار حي متعددة في نفس الـsandbox).
+
+**مؤجّل صراحة لدفعة لاحقة**: شاشتين Flutter جداد (الفني يدخل سعر بعد المعاينة، العميل
+يوافق/يرفض) — مفيش Flutter SDK متاح فعليًا هنا لبناء/اختبار شاشات جديدة حيًا. الحالة الجديدة
+معروضة في `OrderResponseDto.order_status` بالفعل (نفس العقد العام)، فأي واجهة تتبنى بعدين هتلاقي
+الـAPI جاهز بالكامل ومختبر. تفاصيل كاملة: `apps/api/src/modules/orders/README.md`.

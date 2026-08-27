@@ -63,6 +63,7 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       {
         findByIdOrThrow: jest.fn().mockResolvedValue({
           streetName: 'شارع الاختبار',

@@ -16,6 +16,7 @@ import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { CancelOrderAsTechnicianDto } from './dto/cancel-order-as-technician.dto';
 import { CreateTechnicianRescheduleRequestDto } from './dto/create-technician-reschedule-request.dto';
 import { ProposeQuoteItemsDto } from './dto/propose-quote-items.dto';
+import { SubmitInitialQuoteDto } from './dto/submit-initial-quote.dto';
 import { ReportFailedVisitDto } from './dto/report-failed-visit.dto';
 import { ReportCashNotReceivedDto } from './dto/report-cash-not-received.dto';
 import { UploadMediaDto } from './dto/upload-media.dto';
@@ -24,6 +25,7 @@ import { RecruitTeamMemberDto } from './dto/recruit-team-member.dto';
 import { toRecruitCandidateResponseDto } from './dto/recruit-candidate-response.dto';
 import { BookingMode, Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
+import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderMediaService } from './order-media.service';
 import { CrewRole, OrderTeamService } from './order-team.service';
 import { OrdersService } from './orders.service';
@@ -43,6 +45,7 @@ export class TechnicianOrderExecutionController {
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
+    private readonly inspectionQuoteService: InspectionQuoteService,
     private readonly orderTeamService: OrderTeamService,
     private readonly addressesService: AddressesService,
     private readonly customerProfilesService: CustomerProfilesService,
@@ -341,6 +344,19 @@ export class TechnicianOrderExecutionController {
   async listQuoteItems(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
     const items = await this.orderItemsService.listForTechnician(user.sub, id);
     return items.map(toOrderItemResponseDto);
+  }
+
+  // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — الفني بيحدد السعر بعد ما وصل وعاين المكان
+  // فعليًا لخدمة pricing_model=inspection_then_quote. مختلفة عمداً عن quote-items فوق (راجع
+  // inspection-quote.service.ts).
+  @Post(':id/submit-initial-quote')
+  async submitInitialQuote(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SubmitInitialQuoteDto,
+  ) {
+    const order = await this.inspectionQuoteService.submitInitialQuote(user.sub, id, dto.quoted_amount_cents, dto.note);
+    return this.toDtoAfterAction(order, user.sub);
   }
 
   // توزيع أدوار الفريق داخل الطلب الواحد (docs/08 §5) — فقط لقائد الطلب (orders.technician_id)

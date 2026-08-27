@@ -302,6 +302,25 @@ export class CatalogService {
       };
     }
 
+    // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — كان enum value ميت تمامًا (بيقع في مسار
+    // fixed تحت: سعر تقديري كامل + رسم معاينة فوقه). الحجز الحقيقي هنا رسم المعاينة بس —
+    // الفني يحدد السعر الفعلي بعد المعاينة (InspectionQuoteService.submitInitialQuote()).
+    if (service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE) {
+      return {
+        base_price_cents: 0,
+        inspection_fee_cents: service.inspectionFeeCents,
+        surge_multiplier: 1,
+        level_price_multiplier: 1,
+        estimated_total_cents: 0,
+        emergency_surcharge_cents: 0,
+        emergency_sla_minutes: null,
+        min_price_cents: null,
+        max_price_cents: null,
+        pricing_evaluation_id: null,
+        estimated_duration_days: null,
+      };
+    }
+
     const levelMultiplier =
       companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
 
