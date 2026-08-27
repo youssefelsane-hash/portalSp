@@ -5,7 +5,6 @@ import 'core/auth_repository.dart';
 import 'core/deep_link_router.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
-import 'features/auth/login_screen.dart';
 import 'features/shell/customer_shell.dart';
 import 'features/notifications/floating_notification_alert.dart';
 
@@ -61,7 +60,15 @@ class _AuthGate extends StatelessWidget {
     if (auth.biometricUnlockPending) {
       return const BiometricUnlockScreen();
     }
-    // القشرة بالشريط السفلي هي نقطة الدخول دلوقتي مش HomeScreen مباشرة (docs/08 §75-أ).
-    return auth.isAuthenticated ? const CustomerShell() : const LoginScreen();
+    // **الزائر بيدخل عادي (docs/08 §77-B1، طلب مالك صريح)**: «مش لازم يعمل لوج إن أول ما يخش.
+    // عادي الكاستمر بيخش يتفرج ويدوس على الكاتيجوريز».
+    //
+    // القشرة هي نقطة الدخول للاتنين — مسجّل وزائر. التسجيل بقى **مشروط بالفعل** (أول خطوة
+    // حجز) مش بفتح التطبيق، عبر `ensureSignedIn()` في `core/auth_gate.dart`. وده اللي كل
+    // تطبيقات الخدمات المعروفة بتعمله: الكتالوج قيمة بتتعرض قبل ما تطلب مقابل.
+    //
+    // **الباك-إند كان جاهز لده أصلاً** — كل مسارات الكتالوج `@Public()` من زمان، فالتغيير ده
+    // صفر تغيير في الصلاحيات.
+    return const CustomerShell();
   }
 }

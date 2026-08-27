@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api_config.dart';
+import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
@@ -210,6 +211,9 @@ class _HomeScreenState extends State<HomeScreen> {
               : null,
           title: HomeLocationHeader(onAddressChanged: (_) => _load()),
           actions: [
+            // الجرس بيتخفي للزائر (docs/08 §77-B1): `unreadCount()` بينادي endpoint محمي،
+            // ومفيش حساب أصلاً يبقى ليه إشعارات. عرضه بصفر دايمًا كان هيبقى كذب صغير.
+            if (context.watch<AuthRepository>().isAuthenticated)
             Builder(
               builder: (context) => FutureBuilder<int>(
                 future: NotificationsRepository(
@@ -298,13 +302,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 16),
                     ],
                     _ProjectCta(
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => CreateProjectScreen(
-                            auth: context.read<AuthRepository>(),
+                      // مشروع تشطيب = بيانات على الحساب زيه زي أي حجز (docs/08 §77-B1).
+                      // نفس البوابة بالظبط، ونفس السلوك: بعد التسجيل بيكمّل لنفس الشاشة.
+                      onTap: () async {
+                        if (!await ensureSignedIn(
+                          context,
+                          reason: 'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
+                          headline: 'ابدأ مشروعك',
+                        )) {
+                          return;
+                        }
+                        if (!context.mounted) return;
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => CreateProjectScreen(
+                              auth: context.read<AuthRepository>(),
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 20),
                     Row(

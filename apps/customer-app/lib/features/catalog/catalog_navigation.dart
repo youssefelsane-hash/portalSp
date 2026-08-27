@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/auth_gate.dart';
 import '../../core/auth_repository.dart';
 import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
@@ -20,6 +21,25 @@ import 'models.dart';
 Future<void> navigateToServiceBooking(BuildContext context, CatalogService service) async {
   final availableModes = service.availableBookingModes;
   if (availableModes.isEmpty) return; // مفيش وضع حجز مسموح للخدمة دي أصلاً — حالة بيانات غير متوقعة، تجاهل بأمان
+
+  // **بوابة الزائر (docs/08 §77-B1، طلب مالك صريح)** — هنا بالظبط، ومكان تاني غلط.
+  //
+  // الدالة دي هي نقطة الالتقاء الوحيدة لكل مسارات اكتشاف الخدمة (فئات، بحث، الرئيسية، وأي
+  // مسار يتضاف بعدين — ده مبدأ مثبّت في التعليق فوق من Script 3). حط البوابة هنا معناه إن
+  // **مستحيل** يفضل مسار حجز بلا تسجيل، بلا ما نفتكر نحط فحص في كل شاشة.
+  //
+  // والتوقيت مطابق لطلب المالك بالحرف: «قبل ما يطلع له أي سعر أو أول ما يدوس على خدمة محددة».
+  // الخطوة اللي بعد السطر ده مباشرةً هي اختيار وضع الحجز ← الموعد ← السعر.
+  //
+  // `ensureSignedIn` بترجّع `false` لو العميل اختار يفضل يتفرّج — بنخرج بهدوء، والعميل
+  // بيفضل في نفس الشاشة اللي كان فيها. ولو سجّل، الرحلة بتكمّل من السطر اللي بعده بنفس
+  // الخدمة — «تروح جاي الصفحة أوتوماتيك مرجعة اللي هو كان بيعمله على طول».
+  final signedIn = await ensureSignedIn(
+    context,
+    reason: 'عشان نحجزلك «${service.nameAr}» محتاجين نعرف عنوانك ونقدر نتواصل معاك.',
+    headline: 'كمّل حجز «${service.nameAr}»',
+  );
+  if (!signedIn || !context.mounted) return;
 
   // ADR-0046 — إشارة "العميل بدأ حجز الخدمة دي". لو ما كمّلش، الاسترجاع بيفكّره بعد ساعة.
   // النقطة دي بالذات لأنها مكان التقاء **كل** مسارات اكتشاف الخدمة (فئات/بحث/الرئيسية).

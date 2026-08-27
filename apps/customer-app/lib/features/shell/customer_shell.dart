@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/auth_gate.dart';
+import '../../core/auth_repository.dart';
 import '../account/account_screen.dart';
 import '../catalog/home_screen.dart';
 import '../orders/orders_screen.dart';
@@ -14,16 +17,29 @@ import '../warranty/warranties_screen.dart';
 /// أربعة هو السقف العملي: خمسة بتبدأ تضغط النصوص العربية وتخليها تتقص على شاشات الموبايل
 /// الضيقة (اتقاس فعليًا، مش تقدير).
 enum CustomerTab {
-  home('الرئيسية', Icons.home_outlined, Icons.home_rounded),
+  home('الرئيسية', Icons.home_outlined, Icons.home_rounded, requiresAccount: false),
   orders('طلباتي', Icons.receipt_long_outlined, Icons.receipt_long_rounded),
   warranties('ضماناتي', Icons.verified_user_outlined, Icons.verified_user_rounded),
   account('حسابي', Icons.person_outline_rounded, Icons.person_rounded);
 
-  const CustomerTab(this.label, this.icon, this.selectedIcon);
+  const CustomerTab(
+    this.label,
+    this.icon,
+    this.selectedIcon, {
+    this.requiresAccount = true,
+  });
 
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+
+  /// التبويب ده محتاج حساب؟ (docs/08 §77-B1)
+  ///
+  /// الرئيسية بس هي اللي بتشتغل للزائر — الكتالوج `@Public()` في الباك-إند. الباقي **بيانات
+  /// شخصية بحتة** (طلباتي، ضماناتي، حسابي): بلا حساب مفيش حاجة تتعرض أصلاً. من غير العلم ده،
+  /// التبويبات دي كانت هتنادي endpoints محمية وتفشل بـ401 وتعرض «حصل خطأ» — رسالة غلط تمامًا
+  /// لموقف مفهوم تمامًا.
+  final bool requiresAccount;
 }
 
 /// القشرة الرئيسية لتطبيق العميل — الشريط السفلي الدائم.
@@ -70,6 +86,10 @@ class _CustomerShellState extends State<CustomerShell> {
 
   Widget _tabChild(CustomerTab tab) {
     if (!_visited.contains(tab)) return const SizedBox.shrink();
+    // زائر فتح تبويب محتاج حساب — دعوة مفهومة بدل شاشة بتفشل بـ401.
+    if (tab.requiresAccount && !context.watch<AuthRepository>().isAuthenticated) {
+      return _GuestTabInvitation(tab: tab);
+    }
     switch (tab) {
       case CustomerTab.home:
         return const HomeScreen();
@@ -107,6 +127,87 @@ class _CustomerShellState extends State<CustomerShell> {
                 tooltip: tab.label,
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// اللي الزائر بيشوفه في تبويب محتاج حساب (docs/08 §77-B1).
+///
+/// **ليه دعوة مخصّصة لكل تبويب مش رسالة واحدة عامة؟** لأن السبب مختلف فعلاً: «طلباتي» فاضية
+/// لأن مفيش طلبات، و«ضماناتي» فاضية لأن مفيش شغل اتعمل. رسالة واحدة عامة («سجّل دخول») بتقول
+/// للعميل إنه ممنوع، والرسالة دي بتقوله إن مفيش حاجة تتعرض **لسه**.
+class _GuestTabInvitation extends StatelessWidget {
+  const _GuestTabInvitation({required this.tab});
+
+  final CustomerTab tab;
+
+  ({IconData icon, String title, String body}) get _content => switch (tab) {
+        CustomerTab.orders => (
+            icon: Icons.receipt_long_outlined,
+            title: 'طلباتك هتظهر هنا',
+            body: 'أول ما تحجز أول شغلانة، هتلاقي هنا حالتها والفني والسعر — كل حاجة في مكان واحد.',
+          ),
+        CustomerTab.warranties => (
+            icon: Icons.verified_user_outlined,
+            title: 'ضمانات شغلك هتظهر هنا',
+            body: 'كل شغلانة بتخلص بيتسجّل ليها ضمان. لو ظهر أي عيب جوّه المدة، بتفتح مطالبة من هنا.',
+          ),
+        _ => (
+            icon: Icons.person_outline_rounded,
+            title: 'حسابك',
+            body: 'عناوينك، محفظتك، ونقاطك — كلها بتتحفظ هنا أول ما تعمل حساب.',
+          ),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final content = _content;
+    return Scaffold(
+      appBar: AppBar(title: Text(tab.label)),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 88,
+                height: 88,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: theme.colorScheme.primaryContainer,
+                ),
+                child: Icon(content.icon, size: 40, color: theme.colorScheme.onPrimaryContainer),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                content.title,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                content.body,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () => ensureSignedIn(
+                  context,
+                  reason: 'اعمل حسابك في ثانية عشان نحفظلك طلباتك وضماناتك.',
+                ),
+                style: FilledButton.styleFrom(minimumSize: const Size(220, 48)),
+                child: const Text('اعمل حساب أو سجّل دخول'),
+              ),
+            ],
+          ),
         ),
       ),
     );
