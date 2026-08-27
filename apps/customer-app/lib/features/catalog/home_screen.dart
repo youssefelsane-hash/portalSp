@@ -80,11 +80,13 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   String _trustMessage = '';
   List<String> _heroImages = [];
+  List<ImageProvider<Object>> _heroImageProviders = const [];
   HomepageSearchContent _searchContent = HomepageSearchContent.defaults;
   List<HomepageTip> _tips = [];
   SupportContact? _supportContact;
   BrandingLogo? _brandingLogo;
   BrandingLogo? _heroBackground;
+  ImageProvider<Object>? _legacyHeroImageProvider;
   int _activeSlide = 0;
   Timer? _slideTimer;
 
@@ -96,18 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // واحد فيهم ميأثرش على باقي الشاشة، الأقسام المعتمدة عليهم بتختفي بهدوء).
     _homepageContentRepository
         .fetch()
-        .then((content) {
-          if (mounted) {
-            setState(() {
-              _trustMessage = content.trustMessage;
-              _heroImages = content.heroImages;
-              _searchContent = content.search;
-              _tips = content.tips;
-              _activeSlide = 0;
-            });
-            _precacheHeroImages();
-          }
-        })
+        .then(_applyHomepageContent)
         .catchError((_) {});
     _supportContactRepository
         .fetch()
@@ -124,14 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // صورة splash القديمة تفضل fallback لو قائمة homepage.hero_images الجديدة فاضية.
     _brandingRepository
         .fetchHeroBackground()
-        .then((asset) {
-          if (!mounted || asset == null || asset.isDefault) return;
-          setState(() {
-            _heroBackground = asset;
-            _activeSlide = 0;
-          });
-          _precacheHeroImages();
-        })
+        .then(_applyLegacyHeroBackground)
         .catchError((_) {});
     _slideTimer = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
@@ -154,6 +138,45 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _categories = categories);
     } catch (_) {
       if (mounted) setState(() => _error = 'تعذّر تحميل الفئات — اسحب لتحديث');
+    }
+  }
+
+  void _applyHomepageContent(HomepageContent content) {
+    if (!mounted) return;
+    final providers = content.heroImages
+        .map(_resolveHeroImageUrl)
+        .map<ImageProvider<Object>>(NetworkImage.new)
+        .toList(growable: false);
+    setState(() {
+      _trustMessage = content.trustMessage;
+      _heroImages = content.heroImages;
+      _heroImageProviders = providers;
+      _searchContent = content.search;
+      _tips = content.tips;
+      _activeSlide = 0;
+    });
+    for (final provider in providers) {
+      unawaited(_precacheHeroImage(provider));
+    }
+  }
+
+  void _applyLegacyHeroBackground(BrandingLogo? asset) {
+    if (!mounted || asset == null || asset.isDefault) return;
+    final provider = NetworkImage(asset.url);
+    setState(() {
+      _heroBackground = asset;
+      _legacyHeroImageProvider = provider;
+      _activeSlide = 0;
+    });
+    unawaited(_precacheHeroImage(provider));
+  }
+
+  Future<void> _precacheHeroImage(ImageProvider<Object> provider) async {
+    if (!mounted) return;
+    try {
+      await precacheImage(provider, context);
+    } catch (_) {
+      // The visual fallback remains available when an admin URL is unreachable.
     }
   }
 
@@ -408,12 +431,16 @@ class _HomeScreenState extends State<HomeScreen> {
   ///     ده كان بيخلّي الصورة شريط رفيع كل ما النص يقصر.
   ///  2. **اتشال الصندوق الغامق** اللي كان لافّ النص والبحث — كان بيغطّي نص مساحة الصورة.
   ///     البديل: تدرّج أسود خفيف من تحت + ظل على النص، فالصورة بانت والنص فضل مقروء.
-  ///  3. **الصورة بتتبدّل بـcross-fade حقيقي** (`AnimatedSwitcher` على `Image.network`) بدل
+  ///  3. **الصورة بتتبدّل بـcross-fade حقيقي** (طبقات صور محمّلة مسبقًا) بدل
   ///     `DecorationImage` جوّه `AnimatedContainer` — الأخيرة مبتعملش fade بين صورتين أصلاً،
   ///     فالتبديل كان بيحصل قطع مفاجئ.
   ///  4. شريط البحث بقى **حبّة (pill)** أقصر بكتير — `_HeroSearchField` تحت.
   Widget _buildHero(BuildContext context) {
-    final effectiveImages = _effectiveHeroImageUrls();
+    final effectiveImages = _heroImageProviders.isNotEmpty
+        ? _heroImageProviders
+        : (_legacyHeroImageProvider == null
+              ? const <ImageProvider<Object>>[]
+              : <ImageProvider<Object>>[_legacyHeroImageProvider!]);
     final gradientIndex = _activeSlide % _heroGradients.length;
     return SizedBox(
       height: _heroHeight,
@@ -421,14 +448,14 @@ class _HomeScreenState extends State<HomeScreen> {
         fit: StackFit.expand,
         children: [
           HeroImageCrossfade(
-            images: effectiveImages
-                .map<ImageProvider<Object>>(NetworkImage.new)
-                .toList(),
+            images: effectiveImages,
             activeIndex: _activeSlide,
             fallback: AnimatedContainer(
               // التدرّج بيتحرّك بس لما هو نفسه الخلفية المعروضة. لما فيه صور، هو مجرد شبكة أمان
               // تحتها فمفيش داعي يستهلك فريمات في أنيميشن محدش شايفه.
-              duration: Duration(milliseconds: effectiveImages.isEmpty ? 1000 : 0),
+              duration: Duration(
+                milliseconds: effectiveImages.isEmpty ? 1000 : 0,
+              ),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -455,129 +482,117 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  _searchContent.eyebrow,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    shadows: const [
-                      Shadow(color: Colors.black54, blurRadius: 6),
-                    ],
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 700),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) => Opacity(
+                opacity: value,
+                child: Transform.translate(
+                  offset: Offset(0, 16 * (1 - value)),
+                  child: child,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _searchContent.eyebrow,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      shadows: const [
+                        Shadow(color: Colors.black54, blurRadius: 6),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _searchContent.title,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                  const SizedBox(height: 4),
+                  Text(
+                    _searchContent.title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _searchContent.description,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 12.5,
-                    shadows: const [
-                      Shadow(color: Colors.black54, blurRadius: 6),
-                    ],
+                  const SizedBox(height: 6),
+                  Text(
+                    _searchContent.description,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 12.5,
+                      shadows: const [
+                        Shadow(color: Colors.black54, blurRadius: 6),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                _HeroSearchField(
-                  content: _searchContent,
-                  onSearch: _openSearch,
-                ),
-                if (_trustMessage.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.verified_outlined,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          _trustMessage,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13,
-                            shadows: [
-                              Shadow(color: Colors.black45, blurRadius: 4),
-                            ],
+                  const SizedBox(height: 14),
+                  _HeroSearchField(
+                    content: _searchContent,
+                    onSearch: _openSearch,
+                  ),
+                  if (_trustMessage.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.verified_outlined,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _trustMessage,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 13,
+                              shadows: [
+                                Shadow(color: Colors.black45, blurRadius: 4),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (effectiveImages.length > 1) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(
+                        effectiveImages.length,
+                        (index) => AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          width: index == _activeSlide ? 22 : 7,
+                          height: 7,
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          decoration: BoxDecoration(
+                            color: index == _activeSlide
+                                ? Colors.white
+                                : Colors.white54,
+                            borderRadius: BorderRadius.circular(99),
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                ],
-                if (effectiveImages.length > 1) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      effectiveImages.length,
-                      (index) => AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        width: index == _activeSlide ? 22 : 7,
-                        height: 7,
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        decoration: BoxDecoration(
-                          color: index == _activeSlide
-                              ? Colors.white
-                              : Colors.white54,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  /// بلاغ المالك (docs/08 §65.3): «لما أعمل scroll لتحت وأطلع فوق تاني الخلفية الزرقة دي بتبان».
-  ///
-  /// `HeroImageCrossfade` بتسيب كل الصور mounted، فالتبديل بين الشرايح بقى نضيف — بس التدرّج
-  /// الأزرق لسه مرسوم **ورا** الصور دايمًا كـfallback. يعني أي لحظة الصورة مش متفكوكة في ذاكرة
-  /// الصور (أول فتح، أو بعد ما الـImageCache يخليها تحت ضغط ذاكرة لما الهيرو يخرج من الشاشة)،
-  /// الأزرق بيبان لفريم أو اتنين لحد ما تتفك تاني.
-  ///
-  /// `precacheImage` بتثبّت الصور في الكاش وتفكّها **قبل** أول رسم، فالتدرّج ما بيبانش أصلاً طول
-  /// ما فيه صور متظبطة. أي فشل بيتبلع بهدوء — التدرّج لسه fallback حقيقي لو الصورة مش متاحة.
-  void _precacheHeroImages() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      for (final url in _effectiveHeroImageUrls()) {
-        precacheImage(NetworkImage(url), context).catchError((_) {});
-      }
-    });
-  }
-
-  List<String> _effectiveHeroImageUrls() {
-    final configured = _heroImages.map(_resolveHeroImageUrl).toList();
-    if (configured.isNotEmpty) return configured;
-    return _heroBackground == null ? const <String>[] : <String>[_heroBackground!.url];
   }
 
   String _resolveHeroImageUrl(String value) {

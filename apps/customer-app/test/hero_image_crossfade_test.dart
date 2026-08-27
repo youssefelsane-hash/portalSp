@@ -29,7 +29,10 @@ void main() {
     'كل الصور تفضل mounted والصورتان تعملان cross-fade بلا frame أزرق',
     (tester) async {
       await tester.pumpWidget(_subject(activeIndex: 0));
-      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pumpAndSettle();
 
       expect(find.byType(Image), findsNWidgets(2));
       expect(
@@ -41,6 +44,14 @@ void main() {
       expect(
         tester
             .widget<AnimatedOpacity>(find.byKey(const ValueKey('hero-image-1')))
+            .opacity,
+        0,
+      );
+      expect(
+        tester
+            .widget<AnimatedOpacity>(
+              find.byKey(const ValueKey('hero-fallback')),
+            )
             .opacity,
         0,
       );
@@ -82,6 +93,55 @@ void main() {
         (widget) => widget is ColoredBox && widget.color == Colors.blue,
       ),
       findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('الرجوع السريع للـ hero بعد scroll لا يعيد الخلفية الزرقاء', (
+    tester,
+  ) async {
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            controller: controller,
+            children: [
+              SizedBox(
+                height: 180,
+                child: HeroImageCrossfade(
+                  images: [MemoryImage(_pixel), MemoryImage(_pixel)],
+                  activeIndex: 0,
+                  fallback: const ColoredBox(color: Colors.blue),
+                ),
+              ),
+              const SizedBox(height: 2000),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    controller.jumpTo(controller.position.maxScrollExtent);
+    await tester.pump();
+    controller.jumpTo(0);
+    await tester.pump();
+
+    expect(
+      tester
+          .widget<AnimatedOpacity>(find.byKey(const ValueKey('hero-fallback')))
+          .opacity,
+      0,
+    );
+    expect(
+      tester
+          .widget<AnimatedOpacity>(find.byKey(const ValueKey('hero-image-0')))
+          .opacity,
+      1,
     );
     expect(tester.takeException(), isNull);
   });
