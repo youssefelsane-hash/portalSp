@@ -534,3 +534,36 @@ null` (شرط أنضف من تكرار أسماء الحالات — بيعبّ�
 جديد) — الكود المعروض اتأكد حيًا بإعداد InstaPay مؤقت + إعادة تشغيل السيرفر: `reference_code` في
 رد الـAPI طابق `order_number` المكتوب في `instructions_ar` بالظبط. 126/126 suite، 703/703 اختبار،
 صفر ريجريشن. تفاصيل التحقيق والتحقق الكاملة: `docs/08-pricing-engine-and-platform-vision.md` §37.
+
+## حصص الطاقم: الدور بقى بيفرق، مش المستوى بس (ADR-0043، docs/08 §66، 2026-08-26)
+
+`CrewEarningsService.resolveParticipants()` كانت بتحدد وزن كل مشارك من **مستواه** بس
+(`technician_level_config.crew_share_weight`, ADR-0040). `participant_role` كان محمول في الصف
+ومتسجّل في `order_earning_shares` لكنه **مش داخل الحسبة** — مستخدم بس في تحديد مين ياخد باقي
+قروش التقريب. يعني مساعد مستواه `new` كان بياخد بالظبط زي فني مستواه `new`.
+
+دلوقتي:
+
+```
+effectiveWeight = crew_share_weight(level) × (role === 'assistant' ? assistantRatio : 1)
+```
+
+`assistantRatio` = `settings['crew.assistant_share_ratio']` (افتراضي `0.65` — من مثال المالك:
+فني 700 ⇒ مساعد ~450). الأدمن بيعدّله من مجموعة `payments` في شاشة الإعدادات، من غير أي UI جديد.
+النسبة **ملجومة في الكود** في `[0.10, 1.00]` كمان — إعداد فوق 1 معناه المساعد بياخد أكتر من
+الفني، انعكاس كامل للمعنى.
+
+**نقطة الدخول مقصودة**: المعامل بيتطبّق على **الوزن قبل الجمع**، مش على الحصة بعد القسمة، عشان
+`splitCrewEarnings()` تفضل دالة صافية بشرطها `Σ shareCents === poolCents` — لو اتطبّق بعد القسمة
+كان هيقلّل المجموع وتظهر فلوس بلا صاحب. `crew-earning-split.ts` **ما اتلمسش**.
+
+`order_earning_shares.share_weight` بيسجّل الوزن **الفعّال** (بعد الضرب) لأنه هو اللي حرّك القسمة
+فعلاً — السجل لازم يفسّر الرقم اللي نزل المحفظة. `technician_level` و`participant_role` في نفس
+الصف، فالمكوّنان قابلان للاستخراج.
+
+`SettingsService` محقون بـ`@Optional()` لأن الخدمة متركّبة بإيد (`new CrewEarningsService()`) في
+اختبارات ADR-0040 القديمة؛ غيابه = رجوع لـ`DEFAULT_ASSISTANT_SHARE_RATIO`، **نفس قيمة**
+migration `0200` بالحرف (مصدرين للرقم ممنوع يختلفوا).
+
+اختبار حي: `crew-assistant-share.spec.ts` — الطاقم كله في نفس المستوى عمدًا عشان الدور يبقى
+التفسير الوحيد لأي فرق.

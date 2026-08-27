@@ -400,7 +400,7 @@ export class AdminOrdersController {
     @AuditContext() audit: AuditMeta,
   ) {
     return toOrderResponseDto(
-      await this.adminOrdersService.addCrewMember(admin.sub, id, dto.technician_id, dto.role_label, audit),
+      await this.adminOrdersService.addCrewMember(admin.sub, id, dto.technician_id, dto.role_label, dto.member_type, audit),
     );
   }
 

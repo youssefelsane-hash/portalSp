@@ -74,6 +74,15 @@ export class AdminCustomersController {
       ratings_received: {
         average_rating: p.ratingsReceived.averageRating,
         total_count: p.ratingsReceived.totalCount,
+        // للأدمن بس (docs/08 §68) — مفيش أي endpoint تاني بيرجّع تقييمات الفنيين للعميل.
+        recent: p.ratingsReceived.recent.map((r) => ({
+          rating_id: r.ratingId,
+          order_id: r.orderId,
+          order_number: r.orderNumber,
+          overall_rating: r.overallRating,
+          comment: r.comment,
+          created_at: r.createdAt.toISOString(),
+        })),
       },
     };
   }

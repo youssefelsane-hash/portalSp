@@ -58,7 +58,6 @@ import { TechnicianServiceVerificationNotificationListener } from './listeners/t
 import { TechnicianCategoryVerificationNotificationListener } from './listeners/technician-category-verification-notification.listener';
 import { WorkOpportunityOfferedNotificationListener } from './listeners/work-opportunity-offered-notification.listener';
 import { PreferredCrewNotificationListener } from './listeners/preferred-crew-notification.listener';
-import { ProjectActivityNotificationListener } from './listeners/project-activity-notification.listener';
 import { TechnicianAdminActionNotificationListener } from './listeners/technician-admin-action-notification.listener';
 import { TechnicianVerificationNotificationListener } from './listeners/technician-verification-notification.listener';
 import { WelcomeNotificationListener } from './listeners/welcome-notification.listener';
@@ -110,7 +109,6 @@ import { ProjectNotificationOutboxProcessor } from './project-notification-outbo
     TechnicianServiceVerificationNotificationListener,
     TechnicianCategoryVerificationNotificationListener,
     OrderCrewChangedNotificationListener,
-    ProjectActivityNotificationListener,
     TechnicianAdminActionNotificationListener,
     ComplaintFiledRoutingListener,
     SupportChatMessageRoutingListener,

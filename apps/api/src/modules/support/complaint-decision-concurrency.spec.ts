@@ -30,7 +30,9 @@ describe('SupportService complaint terminal decision concurrency', () => {
       `INSERT INTO complaints
          (complaint_number, filed_by_user_id, category, severity, title, description, complaint_status, sla_due_at)
        VALUES ($1,$2,'other','medium',$3,$4,'open',now() + interval '24 hours') RETURNING id`,
-      [`CMP-P4-${label}-${runId}`.slice(0, 24), ids.customerUser, `شكوى ${label}`, `وصف شكوى ${label}`],
+      // runId قبل الـlabel: العمود محدود بـ24 حرف، ولو الـrunId في الآخر بيتقص فيبقى الرقم ثابت
+      // بين التشغيلات ⇒ تصادم unique مع صفوف تشغيلة سابقة ما اتنضفتش (حصل فعلًا).
+      [`CMP${runId}-${label}`.slice(0, 24), ids.customerUser, `شكوى ${label}`, `وصف شكوى ${label}`],
     );
     ids.complaints.push(complaint.id);
     return complaint.id;

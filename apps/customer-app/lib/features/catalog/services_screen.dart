@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import '../../core/api_exception.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
-import '../../design/network_image_box.dart';
 import '../support/support_contact_screen.dart';
 import 'catalog_navigation.dart';
 import 'catalog_repository.dart';
+import 'service_card.dart';
 import 'models.dart';
 
 // Script 3 §32/§35 — كانت الشاشة دي تفلتر بـbookingMode مُختار مسبقًا (قبل ما العميل يشوف
@@ -89,34 +89,18 @@ class _ServicesScreenState extends State<ServicesScreen> {
                               separatorBuilder: (_, _) => const SizedBox(height: 8),
                               itemBuilder: (context, index) {
                                 final service = _services![index];
-                                return Card(
-                                  child: ListTile(
-                                    leading: SizedBox(
-                                      width: 56,
-                                      height: 56,
-                                      child: NetworkImageBox(
-                                        imageUrl: service.iconUrl,
-                                        placeholderIcon: Icons.build_outlined,
-                                        aspectRatio: 1,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                    title: Text(service.nameAr),
-                                    subtitle: service.shortDescriptionAr != null
-                                        ? Text(service.shortDescriptionAr!)
-                                        : null,
-                                    // بَقّة حقيقية اتلقطت: خدمات pricing_model=formula بيتعرض ليها
-                                    // basePriceCents (غالبًا صفر أو رقم داخلي مش مستخدم فعليًا —
-                                    // السعر الحقيقي بيتحسب بالكامل من محرك التسعير الديناميكي بعد
-                                    // ما العميل يملى تفاصيل الشغل) بدل ما توضّح إن السعر مش ثابت.
-                                    trailing: Text(
-                                      service.pricingModel == 'formula'
-                                          ? 'يُحسب حسب التفاصيل'
-                                          : _formatEgp(service.basePriceCents),
-                                      style: Theme.of(context).textTheme.titleMedium,
-                                    ),
-                                    onTap: () => navigateToServiceBooking(context, service),
-                                  ),
+                                // docs/08 §72 — الكارت بقى صورة عريضة فوق والكلام تحتها بعرض
+                                // الكارت كله (كان ListTile بصورة جانبية بتضغط العنوان والوصف).
+                                return ServiceCard(
+                                  service: service,
+                                  // بَقّة حقيقية اتلقطت: خدمات pricing_model=formula بيتعرض ليها
+                                  // basePriceCents (غالبًا صفر أو رقم داخلي مش مستخدم فعليًا —
+                                  // السعر الحقيقي بيتحسب بالكامل من محرك التسعير الديناميكي بعد
+                                  // ما العميل يملى تفاصيل الشغل) بدل ما توضّح إن السعر مش ثابت.
+                                  priceLabel: service.pricingModel == 'formula'
+                                      ? 'يُحسب حسب التفاصيل'
+                                      : _formatEgp(service.basePriceCents),
+                                  onTap: () => navigateToServiceBooking(context, service),
                                 );
                               },
                             ),

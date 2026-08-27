@@ -466,6 +466,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             orderNumber: _order.orderNumber,
             orderStatus: 'completed',
             problemDescription: _order.problemDescription,
+            customerInputsLine: _order.customerInputsLine,
             // اتحصّل الكاش خلاص — مفيش باقي، ونصيبه ما اتغيّرش (docs/08 §60.2).
             cashToCollectCents: 0,
             myEarningCents: _order.myEarningCents,
@@ -481,6 +482,14 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           );
       }
       if (mounted) setState(() {});
+      // docs/08 §70 (بلاغ مالك: كارت "الطاقم ناقص" بيختفي بعد ما تشتغل على الطلب) — ردود الأفعال
+      // التنفيذية بتحطّ نسخة جديدة من الطلب مكان القديمة، وحالة collect_cash بتتبني محليًا أصلاً،
+      // فأي حقل مش موجود في الرد (زي crew_status) كان بيضيع. تحديث واحد من السيرفر بعد أي فعل على
+      // طلب فريق بيخلّي الكارت وقايمة الطاقم يعكسوا الحقيقة دايمًا، مهما كان شكل رد الفعل.
+      if (_order.bookingMode == 'team') {
+        await _refreshFromServer();
+        await _loadTeamMembersIfApplicable();
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     } finally {
@@ -932,6 +941,14 @@ class _JobBriefCard extends StatelessWidget {
               Text('المطلوب', style: theme.textTheme.labelLarge),
               const SizedBox(height: 2),
               Text(order.problemDescription!),
+            ],
+            // docs/08 §71 — اللي العميل اختاره وقت الحجز (مساحة/دور/نوع…) في سطر واحد، عشان
+            // الفني يعرف حجم الشغل قبل ما يتحرك بدل ما يسأل العميل على التليفون.
+            if (order.customerInputsLine.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text('اختيارات العميل', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 2),
+              Text(order.customerInputsLine, style: theme.textTheme.bodyMedium),
             ],
             // بيانات التواصل بترجع من الباك-إند بس بعد تأكيد الحجز — قبل كده بتبقى null والقسم
             // ده بيختفي بالكامل بدل ما يعرض سطر فاضي.

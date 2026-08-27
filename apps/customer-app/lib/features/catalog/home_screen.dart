@@ -451,7 +451,11 @@ class _HomeScreenState extends State<HomeScreen> {
             images: effectiveImages,
             activeIndex: _activeSlide,
             fallback: AnimatedContainer(
-              duration: const Duration(milliseconds: 1000),
+              // التدرّج بيتحرّك بس لما هو نفسه الخلفية المعروضة. لما فيه صور، هو مجرد شبكة أمان
+              // تحتها فمفيش داعي يستهلك فريمات في أنيميشن محدش شايفه.
+              duration: Duration(
+                milliseconds: effectiveImages.isEmpty ? 1000 : 0,
+              ),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -809,8 +813,19 @@ class _HeroSearchFieldState extends State<_HeroSearchField> {
       tween: Tween(begin: 0.86, end: expanded ? 0.98 : 0.86),
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOutCubic,
-      builder: (context, widthFactor, child) =>
-          FractionallySizedBox(widthFactor: widthFactor, child: child),
+      // الحد الأقصى مقصود (docs/08 §65.3): `widthFactor` لوحده معناه إن الشريط بيتمدد بعرض
+      // الشاشة كلها — على موبايل ده مظبوط، بس على تابلت/ديسكتوب بيبقى شريط بعرض 1100px وشكله
+      // بعيد تمامًا عن «professional وأصغر» اللي المالك طلبه. 460 بيسيبه بعرضه الطبيعي على
+      // الموبايل ويلجمه على الشاشات الكبيرة.
+      builder: (context, widthFactor, child) => FractionallySizedBox(
+        widthFactor: widthFactor,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: child,
+          ),
+        ),
+      ),
       child: AnimatedContainer(
         height: expanded ? 58 : 52,
         duration: const Duration(milliseconds: 240),

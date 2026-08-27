@@ -49,7 +49,9 @@ describe('Technician referral Phase 4 financial integrity', () => {
          (order_number, customer_id, technician_id, service_id, address_id, service_zone_id,
           order_status, total_amount_cents, technician_earning_cents)
        VALUES ($1,$2,$3,$4,$5,$6,'completed',30000,24000) RETURNING id`,
-      [`TRFI-${label}-${runId}`.slice(0, 24), customer.profile, ids.techProfile, ids.service, customer.address, ids.zone],
+      // runId قبل الـlabel: `order_number` محدود بـ24 حرف، ولو الـrunId في الآخر بيتقص فيبقى
+      // الرقم ثابت بين التشغيلات ⇒ تصادم unique مع صفوف تشغيلة سابقة ما اتنضفتش (حصل فعلًا).
+      [`TR${runId}-${label}`.slice(0, 24), customer.profile, ids.techProfile, ids.service, customer.address, ids.zone],
     );
     ids.orders.push(order.id);
     return order.id;
@@ -216,9 +218,17 @@ describe('Technician referral Phase 4 financial integrity', () => {
     await dataSource.query(`UPDATE wallets SET is_frozen = true, frozen_reason = 'failure injection' WHERE id = $1`, [
       technicianWallet.id,
     ]);
-    await expect(service.evaluateOrderForBonus(orderId, 'completed')).rejects.toThrow('محفظة الطرف التاني مجمّدة');
-    expect(await dataSource.getRepository(TechnicianReferralBonus).findOne({ where: { orderId } })).toBeNull();
-    await dataSource.query(`UPDATE wallets SET is_frozen = false, frozen_reason = NULL WHERE id = $1`, [technicianWallet.id]);
+    // فكّ التجميد في finally: لو الاختبار وقع في النص، المحفظة كانت بتفضل مجمّدة في قاعدة البيانات
+    // المشتركة، وأي تشغيلة بعدها بتفشل عند reconcilePendingBonuses لأنها بتمسح كل المكافآت
+    // المعلّقة — مش بتاعة الفني ده بس (حصل فعلًا).
+    try {
+      await expect(service.evaluateOrderForBonus(orderId, 'completed')).rejects.toThrow('محفظة الطرف التاني مجمّدة');
+      expect(await dataSource.getRepository(TechnicianReferralBonus).findOne({ where: { orderId } })).toBeNull();
+    } finally {
+      await dataSource.query(`UPDATE wallets SET is_frozen = false, frozen_reason = NULL WHERE id = $1`, [
+        technicianWallet.id,
+      ]);
+    }
   });
 
   it('rolls back reward money when audit persistence fails and retries with one audit', async () => {

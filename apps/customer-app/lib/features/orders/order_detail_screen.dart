@@ -718,15 +718,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               // زوّد عليه.
                               if (order.levelPremiumCents > 0) ...[
                                 const SizedBox(height: 4),
+                                // docs/08 §65.1 — كانت Icons.verified هنا كمان. علامة الصح
+                                // محجوزة حصريًا لتوثيق الأدمن (ADR-0039)، فاستخدامها لفرق
+                                // السعر كان بيدّي العميل علامتين صح بمعنيين مختلفين.
                                 Row(
                                   children: [
-                                    Icon(Icons.verified,
-                                        size: 15, color: Theme.of(context).colorScheme.primary),
+                                    Icon(Icons.diamond_outlined,
+                                        size: 14, color: Theme.of(context).colorScheme.tertiary),
                                     const SizedBox(width: 4),
                                     Text(
-                                      'منها ${_formatEgp(order.levelPremiumCents)} — فني مميّز',
+                                      'منها ${_formatEgp(order.levelPremiumCents)} — فني Premium',
                                       style: TextStyle(
-                                        color: Theme.of(context).colorScheme.primary,
+                                        color: Theme.of(context).colorScheme.tertiary,
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),

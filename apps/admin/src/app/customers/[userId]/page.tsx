@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { AdminCustomerResponseDto, AdminWalletDetailResponseDto, CreditLoyaltyBody, CustomerTier } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
@@ -60,7 +61,18 @@ interface Customer360Response {
   current_and_upcoming_orders: Customer360Order[];
   complaints_filed: Customer360Complaints;
   complaints_against: Customer360Complaints;
-  ratings_received: { average_rating: number | null; total_count: number };
+  ratings_received: {
+    average_rating: number | null;
+    total_count: number;
+    recent: {
+      rating_id: string;
+      order_id: string;
+      order_number: string;
+      overall_rating: number;
+      comment: string | null;
+      created_at: string;
+    }[];
+  };
 }
 
 export default function CustomerDetailPage() {
@@ -373,6 +385,34 @@ export default function CustomerDetailPage() {
                     التقييم اللي بياخده: {profile360.ratings_received.average_rating ?? '—'} (
                     {profile360.ratings_received.total_count})
                   </Badge>
+                </div>
+
+                {/* docs/08 §68 — رأي الفنيين في العميل: للأدمن بس، العميل ما بيتبلّغش بيه خالص. */}
+                <div>
+                  <p className="mb-1 font-medium">تقييم الفنيين للعميل (طلب بطلب)</p>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    داخلي — العميل ما بيشوفش التقييم ده ولا بيوصله إشعار بيه.
+                  </p>
+                  {profile360.ratings_received.recent.length === 0 ? (
+                    <p className="text-muted-foreground">لسه محدش قيّم العميل ده</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1">
+                      {profile360.ratings_received.recent.map((r) => (
+                        <li key={r.rating_id} className="border-b pb-1 text-xs last:border-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Link href={`/orders/${r.order_id}`} className="font-medium underline-offset-2 hover:underline">
+                              {r.order_number}
+                            </Link>
+                            <Badge variant="secondary">{r.overall_rating} / 5</Badge>
+                            <span className="text-muted-foreground">
+                              {new Date(r.created_at).toLocaleDateString('ar-EG')}
+                            </span>
+                          </div>
+                          {r.comment && <p className="mt-0.5 whitespace-normal text-muted-foreground">{r.comment}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div>

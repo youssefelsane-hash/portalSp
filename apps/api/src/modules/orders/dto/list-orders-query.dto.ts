@@ -1,11 +1,24 @@
-import { Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { OrderStatus } from '../entities/order.entity';
 
 export class ListOrdersQueryDto {
   @IsOptional()
   @IsEnum(OrderStatus)
   order_status?: OrderStatus;
+
+  /**
+   * بحث برقم الطلب (docs/08 §67) — طلب المالك: «لما أحب أدور على أي طلب قديم أدور عليه وألاقيه…
+   * يبقى معايا رقم الطلب وأدور في السيرش ألاقيه بسهولة».
+   *
+   * بحث جزئي غير حسّاس لحالة الأحرف على `order_number` — الأدمن غالبًا بينسخ جزء من الرقم أو
+   * بيكتبه من ورقة، فمطابقة تامة بس كانت هتخلّي الخانة عديمة الفايدة عمليًا.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  search?: string;
 
   // فلتر أصل الطلب (migration 0124/0176) — 'true' = طلبات متولّدة تلقائيًا من خطط متكررة بس
   // (recurring_template_id مش null)، 'false' = الطلبات العادية (حجز يدوي/كول سنتر/إعادة زيارة/

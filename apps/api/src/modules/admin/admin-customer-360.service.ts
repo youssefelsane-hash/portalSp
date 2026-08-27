@@ -34,9 +34,21 @@ export interface AdminCustomer360Complaints {
   recent: AdminCustomer360ComplaintRow[];
 }
 
+/** تقييم فني للعميل على طلب واحد — للأدمن بس (docs/08 §68). */
+export interface AdminCustomer360RatingRow {
+  ratingId: string;
+  orderId: string;
+  orderNumber: string;
+  overallRating: number;
+  comment: string | null;
+  createdAt: Date;
+}
+
 export interface AdminCustomer360RatingsReceived {
   averageRating: number | null;
   totalCount: number;
+  /** آخر 10 تقييمات بالتفصيل — «كل طلبية على حدة» (طلب مالك صريح، docs/08 §68). */
+  recent: AdminCustomer360RatingRow[];
 }
 
 export interface AdminCustomer360Profile {
@@ -74,6 +86,7 @@ export class AdminCustomer360Service {
       againstRows,
       againstCounts,
       ratingRows,
+      ratingDetailRows,
     ] = await Promise.all([
       this.addressesService.findAllForUser(userId),
       this.dataSource.query<
@@ -115,6 +128,19 @@ export class AdminCustomer360Service {
          FROM ratings WHERE rated_user_id = $1 AND rating_type = 'technician_to_customer'`,
         [userId],
       ),
+      // «كل طلبية على حدة» — التقييم ده مالوش أي مسار عرض تاني: العميل مش المفروض يشوفه خالص
+      // (docs/08 §68)، فالكارت ده هو المكان الوحيد اللي الأدمن يقرا منه رأي الفنيين في العميل.
+      this.dataSource.query<
+        { rating_id: string; order_id: string; order_number: string; overall_rating: number; comment: string | null; created_at: Date }[]
+      >(
+        `SELECT r.id AS rating_id, r.order_id, o.order_number, r.overall_rating, r.comment, r.created_at
+         FROM ratings r
+         JOIN orders o ON o.id = r.order_id
+         WHERE r.rated_user_id = $1 AND r.rating_type = 'technician_to_customer'
+         ORDER BY r.created_at DESC
+         LIMIT 10`,
+        [userId],
+      ),
     ]);
 
     return {
@@ -151,6 +177,14 @@ export class AdminCustomer360Service {
       ratingsReceived: {
         averageRating: ratingRows[0]?.average_rating != null ? Number(ratingRows[0].average_rating) : null,
         totalCount: Number(ratingRows[0]?.total_count ?? 0),
+        recent: ratingDetailRows.map((r) => ({
+          ratingId: r.rating_id,
+          orderId: r.order_id,
+          orderNumber: r.order_number,
+          overallRating: Number(r.overall_rating),
+          comment: r.comment,
+          createdAt: r.created_at,
+        })),
       },
     };
   }
