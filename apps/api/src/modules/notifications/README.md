@@ -381,3 +381,20 @@ notifyMultiChannel(input, [...])    // زي ما هو (بينده notifyOnChanne
 كانت بتفشل بـ«لا يوجد جهاز مسجّل لهذا المستخدم». تفاصيل كاملة في docs/08 §69.
 
 اختبار: `notification-default-channels.spec.ts` (حي على Postgres).
+
+## الشكوى — رد الأدمن/تغيير الحالة بقى بيبلّغ صاحبها (docs/08 §73 بند 2)
+
+بلاغ مالك صريح: "الأدمن يرد على شكوى، الرسالة توصل، بس صاحب الشكوى مبيوصلهوش أي notification".
+`SupportService.addMessage()`/`resolve()`/`reject()`/`close()` (support module) كانوا بيغيروا حالة/
+يضيفوا رسالة بلا أي emit خالص — `EventEmitter2` متحقن أصلاً في `SupportService` بس مستخدم في
+`fileComplaint()` بس. اتضاف حدثين جداد (`ComplaintMessageAddedEvent`/`ComplaintStatusChangedEvent`،
+`common/events/`) + مستمعين جداد هنا (`ComplaintRepliedNotificationListener`/
+`ComplaintStatusChangedNotificationListener`) بنفس نمط `RatingSubmittedNotificationListener` بالحرف.
+نوعين جداد اتسجّلوا (`complaint_reply`, `complaint_resolved`، migration 0202، `["push","in_app"]`
+افتراضيًا). `addMessage()` بيتصدّر بس لو المُرسل أدمن والرسالة مش `is_internal_note` (ملاحظات داخلية
+للشكوى — مش لازم تبان للعميل)، ومفيش "بلّغ نفسك" (لو صاحب الشكوى نفسه هو الأدمن، مستحيل عمليًا بس
+اتحقق دفاعيًا). `deep_link_router.dart` في `customer-app`/`technician-app` الاتنين اتضاف لهم فرع
+`/complaints/:id` (كان بيسقط بصمت — `handleDeepLink` بترجع من غير أي ملاحة). **اتأكد حي**: شكوى
+حقيقية اتعملت، أدمن رد عليها، `notifications` table عرضت صفين (`in_app`=sent، `push`=failed لعدم
+وجود جهاز مسجّل — متوقع في بيئة تطوير)، الـ`deep_link` صح. اختبار: `complaint-customer-notifications.spec.ts`
+(4 اختبارات حية — رد عادي بيصدّر، ملاحظة داخلية لأ، رسالة العميل نفسه لأ، الثلاث انتقالات الحالة).

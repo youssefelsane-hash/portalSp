@@ -1421,3 +1421,39 @@ o.order_number ILIKE :search ESCAPE '\'
 
 بيترجع في `OrderResponseDto.customer_inputs` (نفس العقد للأدمن/الفني/العميل). طلبات قبل الـmigration
 = `null` والسطر بيختفي بالكامل. اختبار: `order-customer-inputs.spec.ts`.
+
+## صفحة الطلبات بقت أداة شاملة لمركز الاتصال (docs/08 §73 بند 3)
+
+طلب مالك صريح: مركز الاتصال يقدر يدوّر بتليفون العميل/الفني مش رقم الطلب بس، ويشوف بيانات العميل
+وسجل طلباته كاملة من نفس شاشة تفاصيل الطلب، وملاحظات داخلية عليه.
+
+- **تفاصيل الطلب للأدمن كانت بلا أي بيانات عميل/اسم خدمة خالص** — `toOrderResponseDto(order,
+  undefined, technicianContact)` كانت بتتنادى بـ`address`/`viewerExtras` فاضيين رغم إنهم متوفرين
+  أصلاً لمسارات العميل/الفني بنفس الشكل. `AdminOrdersController.getDetail()` بقى بيجيب العنوان
+  + بيانات العميل (`CustomerProfilesService.findContactInfoOrThrow`، صفر شرط ظهور — الأدمن عنده
+  RBAC كاملة أصلاً بخلاف حماية IDOR للعميل/الفني) + اسم الخدمة، نفس نمط
+  `TechnicianOrderExecutionController.toDto()` بالحرف. `customer_id` اتضاف لـ`OrderResponseDto`
+  (كان غايب تمامًا) — رابط مباشر لبروفايل العميل.
+- **البحث كان `order_number` بس** (§67) — اتوسّع لاسم/تليفون العميل والفني (JOIN على
+  `customer_profiles`/`technician_profiles`/`users`) وPayment ID (`EXISTS` على `payments.gateway_reference`).
+  قرار خصوصية موثّق: كل الأدمن يقدروا يدوروا بالتليفون (نفس صلاحية عرض الصفحة). **بَقّة TypeORM
+  حقيقية اتلقطت أثناء ده**: `orderBy('COALESCE(...)')` مع `LEFT JOIN`s بيرمي "alias was not found" —
+  الحل `addSelect` بـalias صريح بدل تمرير تعبير SQL خام لـ`orderBy` مباشرة.
+- **سجل طلبات العميل الكامل بالفلوس** — `AdminCustomer360Service.listOrderHistory()` جديدة
+  (endpoint منفصل `GET /admin/customers/:userId/orders`, paginated) بعكس
+  `currentAndUpcomingOrders` في بروفايل الـ360 (ملخّص مصغّر، حالية/قادمة بس، `LIMIT 10`، بلا فلوس
+  عمدًا) — ده أي حالة، أي تاريخ، مع `total_amount_cents`/`payment_status`/`payment_method`.
+- **ملاحظات داخلية على الطلب** — جدول جديد `order_internal_notes` (migration 0203) + خدمة
+  `OrderInternalNotesService`، نفس نمط `complaint_messages.is_internal_note` بالمبدأ بس جدول مستقل
+  بالكامل (كل الصفوف داخلية بتعريفها، مفيش أي endpoint للعميل/الفني يوصل له خالص).
+
+**اتأكد حي بالكامل** (Postgres حقيقي، Playwright): عميل تجريبي + طلب حقيقي، بحث بجزء من رقم
+التليفون رجّع الطلب صح، تفاصيل الطلب عرضت "بيانات العميل" (اسم قابل للنقر + تليفون + عنوان) واسم
+الخدمة، إضافة ملاحظة داخلية نجحت وظهرت فورًا. اختبارات: `admin-orders-search.spec.ts` (5 اختبارات
+جديدة للبحث الموسّع)، `admin-customer-360.spec.ts` (اختبارين جداد لـ`listOrderHistory`)،
+`order-internal-notes.spec.ts` (اختبارين).
+
+**مؤجّل من نفس البند** (نطاق أكبر، هيتعمل في دفعة لاحقة): شكاوى/ضمان مرتبطين بالطلب inline (الفلتر
+`order_id` مش موجود في `admin-support.controller.ts`/`admin-warranty-claims.controller.ts` رغم إن
+العمود موجود)، شات الطلب inline (`admin-chat.controller.ts` مبني للـsupport_chat بس)، وعرض
+`GET /admin/orders/:id/earning-shares` (endpoint موجود من زمان، صفر UI مستهلك له).

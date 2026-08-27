@@ -25,6 +25,8 @@ import { toOrderStatusHistoryResponseDto } from './dto/order-status-history-resp
 import { toOrderTimelineEventResponseDto } from './dto/order-timeline-event-response.dto';
 import { toTeamMemberResponseDto } from './dto/team-member-response.dto';
 import { OrderItemsService } from './order-items.service';
+import { AddOrderInternalNoteDto } from './dto/add-order-internal-note.dto';
+import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { ReassignOrderDto } from './dto/reassign-order.dto';
@@ -35,6 +37,9 @@ import { PaymentsService } from '../payments/payments.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { MatchingExplainabilityService } from '../matching/matching-explainability.service';
+import { AddressesService } from '../customers/addresses.service';
+import { CustomerProfilesService } from '../customers/customer-profiles.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 @Controller('admin/orders')
 @Roles(UserType.ADMIN)
@@ -44,11 +49,15 @@ export class AdminOrdersController {
     private readonly ordersService: OrdersService,
     private readonly orderMediaService: OrderMediaService,
     private readonly orderItemsService: OrderItemsService,
+    private readonly orderInternalNotesService: OrderInternalNotesService,
     private readonly orderTeamService: OrderTeamService,
     private readonly paymentsService: PaymentsService,
     private readonly techniciansService: TechniciansService,
     private readonly workOpportunities: TechnicianWorkOpportunitiesService,
     private readonly matchingExplainabilityService: MatchingExplainabilityService,
+    private readonly addressesService: AddressesService,
+    private readonly customerProfilesService: CustomerProfilesService,
+    private readonly catalogService: CatalogService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
@@ -77,6 +86,31 @@ export class AdminOrdersController {
     return shares;
   }
 
+  // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — العميل/الفني مالهومش أي وصول، جدول مستقل
+  // تمامًا عن الشات/الوصف. صفر صلاحية إضافية (نفس مستوى addMessage على الشكاوى — أي أدمن).
+  @Get(':id/notes')
+  async listInternalNotes(@Param('id', ParseUUIDPipe) id: string) {
+    const notes = await this.orderInternalNotesService.list(id);
+    return notes.map((n) => ({
+      id: n.id,
+      order_id: n.orderId,
+      author_user_id: n.authorUserId,
+      author_full_name: n.authorFullName,
+      note: n.note,
+      created_at: n.createdAt.toISOString(),
+    }));
+  }
+
+  @Post(':id/notes')
+  async addInternalNote(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddOrderInternalNoteDto,
+  ) {
+    const note = await this.orderInternalNotesService.add(id, admin.sub, dto.note);
+    return { id: note.id, order_id: note.orderId, author_user_id: note.authorUserId, note: note.note, created_at: note.createdAt.toISOString() };
+  }
+
   @Get(':id')
   async getDetail(@Param('id', ParseUUIDPipe) id: string) {
     const { order, history, pricingEvaluation, technicianCancellations, crewStatus, crewShortageUrgent } =
@@ -89,8 +123,18 @@ export class AdminOrdersController {
     const technicianContact = order.technicianId
       ? await this.techniciansService.findContactInfoOrThrow(order.technicianId)
       : null;
+    // بيانات العميل + العنوان + اسم الخدمة (docs/08 §73 بند 3) — كانت غايبة تمامًا عن تفاصيل
+    // الطلب للأدمن (toOrderResponseDto كانت بتتنادى بـaddress=undefined, viewerExtras=undefined)،
+    // رغم إنها متوفرة أصلاً لمسارات العميل/الفني بنفس الشكل بالظبط. الأدمن عنده صلاحية RBAC
+    // كاملة على الطلب أصلاً — صفر شرط ظهور هنا (بخلاف TECHNICIAN_CONTACT_VISIBLE_STATUSES
+    // المستخدم في مسارات العميل/الفني للحماية من IDOR قبل تأكيد حجز حقيقي).
+    const [address, customerContact, serviceNameAr] = await Promise.all([
+      this.addressesService.findByIdOrThrow(order.addressId),
+      this.customerProfilesService.findContactInfoOrThrow(order.customerId),
+      this.catalogService.findServiceForDisplay(order.serviceId).then((service) => service?.nameAr ?? null),
+    ]);
     return {
-      ...toOrderResponseDto(order, undefined, technicianContact),
+      ...toOrderResponseDto(order, address, technicianContact, { customerContact, serviceNameAr }),
       status_history: history.map(toOrderStatusHistoryResponseDto),
       // للتشغيل بس (docs/08 §35) — null لو الخدمة مش pricing_model=formula، راجع
       // PricingEngineService.findEvaluationForOrder().

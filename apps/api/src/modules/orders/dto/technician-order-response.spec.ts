@@ -17,6 +17,7 @@ const fullOrder: OrderResponseDto = {
   requested_technician_id: null,
   requested_technician_company_id: null,
   order_status: 'in_progress',
+  customer_id: 'c1',
   problem_description: 'حنفية بتنقّط',
   customer_notes: null,
   customer_inputs: null,

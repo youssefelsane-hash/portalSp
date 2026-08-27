@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
 import { formatEgp } from '@/lib/format';
+import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/order-labels';
 
 const TIER_LABELS: Record<CustomerTier, string> = {
   standard: 'عادي',
@@ -75,9 +76,21 @@ interface Customer360Response {
   };
 }
 
+// سجل الطلبات الكامل + الفلوس (docs/08 §73 بند 3): GET /admin/customers/:userId/orders (paginated).
+interface CustomerOrderHistoryRow {
+  order_id: string;
+  order_number: string;
+  order_status: string;
+  service_name_ar: string;
+  placed_at: string | null;
+  total_amount_cents: number;
+  payment_status: string;
+  payment_method: string | null;
+}
+
 export default function CustomerDetailPage() {
   const { userId } = useParams<{ userId: string }>();
-  const { isLoading, authedFetch } = useAuth();
+  const { isLoading, authedFetch, authedFetchPaginated } = useAuth();
   const router = useRouter();
   // رجوع حقيقي بيحافظ على حالة القايمة (docs/08 §63.ب6) بدل router.push اللي كان بيضيّعها.
   const goBack = useAdminBack('/customers');
@@ -94,6 +107,13 @@ export default function CustomerDetailPage() {
   const [showLoyaltyForm, setShowLoyaltyForm] = useState(false);
   const [loyaltyPoints, setLoyaltyPoints] = useState('');
   const [isSavingLoyalty, setIsSavingLoyalty] = useState(false);
+  // سجل الطلبات الكامل + الفلوس (docs/08 §73 بند 3) — بعكس current_and_upcoming_orders فوق
+  // (ملخّص مصغّر، حالية/قادمة بس)، ده أي حالة، paginated.
+  const [orderHistory, setOrderHistory] = useState<CustomerOrderHistoryRow[] | null>(null);
+  const [orderHistoryTotal, setOrderHistoryTotal] = useState(0);
+  const [orderHistoryPage, setOrderHistoryPage] = useState(1);
+  const [orderHistoryError, setOrderHistoryError] = useState<string | null>(null);
+  const orderHistoryPerPage = 20;
 
   function load() {
     authedFetch<AdminCustomerResponseDto>(`/admin/customers/${userId}`)
@@ -113,11 +133,22 @@ export default function CustomerDetailPage() {
       .catch((err) => setProfile360Error(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل النظرة التشغيلية'));
   }
 
+  function loadOrderHistory(page: number) {
+    authedFetchPaginated<CustomerOrderHistoryRow>(`/admin/customers/${userId}/orders?page=${page}&per_page=${orderHistoryPerPage}`)
+      .then(({ items, meta }) => {
+        setOrderHistory(items);
+        setOrderHistoryTotal(meta.total ?? 0);
+        setOrderHistoryPage(page);
+      })
+      .catch((err) => setOrderHistoryError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل سجل الطلبات'));
+  }
+
   useEffect(() => {
     if (isLoading) return;
     load();
     loadWallet();
     load360();
+    loadOrderHistory(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, userId]);
   // docs/08 §63.ب1 — تحديث حي: الباك-إند بيبثّ الأحداث دي أصلاً عبر AdminRealtimeGateway،
@@ -494,6 +525,67 @@ export default function CustomerDetailPage() {
                   )}
                 </div>
               </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* سجل الطلبات الكامل + الفلوس (docs/08 §73 بند 3، بلاغ مالك صريح: "لو كتبت رقم تليفون،
+            يظهرلي كل الطلبات اللي هو طلبها كلها، وكل طلب كان بقد إيه والفلوس دخلت إزاي") —
+            بعكس "نظرة تشغيلية 360°" فوق (ملخّص مصغّر، حالية/قادمة بس)، ده أي حالة، paginated. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">كل الطلبات ({orderHistoryTotal})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {orderHistoryError && <p className="text-destructive">{orderHistoryError}</p>}
+            {!orderHistory && !orderHistoryError && <p className="text-muted-foreground">جاري التحميل…</p>}
+            {orderHistory && orderHistory.length === 0 && <p className="text-muted-foreground">مفيش طلبات لسه</p>}
+            {orderHistory && orderHistory.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {orderHistory.map((o) => (
+                  <Link
+                    key={o.order_id}
+                    href={`/orders/${o.order_id}`}
+                    className="flex flex-col gap-1 rounded-md border p-2 text-sm hover:border-primary sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <span className="font-medium">{o.order_number}</span>
+                      <span className="text-muted-foreground"> — {o.service_name_ar}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>{o.placed_at ? new Date(o.placed_at).toLocaleDateString('ar-EG-u-nu-latn') : '—'}</span>
+                      <span>
+                        {ORDER_STATUS_LABELS[o.order_status as keyof typeof ORDER_STATUS_LABELS] ?? o.order_status}
+                      </span>
+                      <span>{PAYMENT_STATUS_LABELS[o.payment_status] ?? o.payment_status}</span>
+                      <span className="font-medium text-foreground">{formatEgp(o.total_amount_cents)}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+            {orderHistoryTotal > orderHistoryPerPage && (
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={orderHistoryPage <= 1}
+                  onClick={() => loadOrderHistory(orderHistoryPage - 1)}
+                >
+                  السابق
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  صفحة {orderHistoryPage} من {Math.ceil(orderHistoryTotal / orderHistoryPerPage)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={orderHistoryPage >= Math.ceil(orderHistoryTotal / orderHistoryPerPage)}
+                  onClick={() => loadOrderHistory(orderHistoryPage + 1)}
+                >
+                  التالي
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>

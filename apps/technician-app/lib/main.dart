@@ -9,6 +9,7 @@ import 'core/device_security.dart';
 import 'design/app_theme.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
+import 'features/onboarding/location_capture.dart';
 import 'features/onboarding/onboarding_repository.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/notifications/floating_notification_alert.dart';
@@ -96,6 +97,7 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   final _presence = TechnicianTrackingClient();
   bool _presenceConnected = false;
+  bool _capturingLocation = false;
   AuthRepository? _auth;
 
   @override
@@ -134,6 +136,16 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
     } else if (!auth.isAuthenticated) {
       _disconnectPresence();
     }
+    // بَقّة حقيقية (docs/08 §73 بند 4): current_location كان بيتسجّل مرة واحدة بس (لما
+    // AvailableOrdersScreen تفتح) — لو فشلت وقتها، الفني يفضل غير مؤهّل للتوزيع للأبد. نفس لحظة
+    // إعادة اتصال presence بالظبط (دخول + رجوع من الخلفية) طبقة موثوقية إضافية، صامتة تمامًا.
+    if (auth.isAuthenticated) _attemptLocationCapture(auth);
+  }
+
+  void _attemptLocationCapture(AuthRepository auth) {
+    if (_capturingLocation) return;
+    _capturingLocation = true;
+    captureLocationSilently(OnboardingRepository(auth)).whenComplete(() => _capturingLocation = false);
   }
 
   void _disconnectPresence() {

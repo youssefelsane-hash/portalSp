@@ -50,6 +50,16 @@ interface RescheduleOptionDto {
   date: string;
   available: boolean;
 }
+
+// ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3): GET/POST /admin/orders/:id/notes.
+interface OrderInternalNoteResponseDto {
+  id: string;
+  order_id: string;
+  author_user_id: string;
+  author_full_name?: string;
+  note: string;
+  created_at: string;
+}
 import { AppShell, useAdminBack } from '@/components/app-shell';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
@@ -163,6 +173,11 @@ export default function OrderDetailPage() {
   const [explanation, setExplanation] = useState<TechnicianEligibilityExplanationDto | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
   const [explainError, setExplainError] = useState<string | null>(null);
+  // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — مش شات/رسالة عادية، العميل/الفني
+  // مالهومش أي وصول لها خالص.
+  const [internalNotes, setInternalNotes] = useState<OrderInternalNoteResponseDto[]>([]);
+  const [newInternalNote, setNewInternalNote] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
 
   function load() {
     authedFetch<OrderDetailResponseDto>(`/admin/orders/${id}`)
@@ -197,6 +212,27 @@ export default function OrderDetailPage() {
         setMatchingFunnel(null);
         setFunnelError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل فانل المطابقة');
       });
+    // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3) — مسار منفصل عمداً زي باقي المصادر الثانوية فوق.
+    authedFetch<OrderInternalNoteResponseDto[]>(`/admin/orders/${id}/notes`)
+      .then(setInternalNotes)
+      .catch(() => setInternalNotes([]));
+  }
+
+  async function handleAddInternalNote(e: FormEvent) {
+    e.preventDefault();
+    if (!newInternalNote.trim()) return;
+    setIsSavingNote(true);
+    try {
+      await authedFetch(`/admin/orders/${id}/notes`, { method: 'POST', body: JSON.stringify({ note: newInternalNote.trim() }) });
+      setNewInternalNote('');
+      authedFetch<OrderInternalNoteResponseDto[]>(`/admin/orders/${id}/notes`)
+        .then(setInternalNotes)
+        .catch(() => undefined);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'فشل حفظ الملاحظة');
+    } finally {
+      setIsSavingNote(false);
+    }
   }
 
   useAdminLiveRefresh(['orders', 'payments'], (event) => {
@@ -883,6 +919,9 @@ export default function OrderDetailPage() {
             <CardTitle className="text-base">البيانات</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
+            {/* اسم الخدمة — كان غايب تمامًا (docs/08 §73 بند 3)، موظف مركز الاتصال محتاج يعرف
+                الطلب ده على إيه بالظبط من أول نظرة، مش يستنتج من السعر/الوصف بس. */}
+            {order.service_name_ar && <p>الخدمة: {order.service_name_ar}</p>}
             <p>نوع الطلب: {ORDER_TYPE_LABELS[order.order_type] ?? order.order_type}</p>
             <p>وضع الحجز: {BOOKING_MODE_LABELS[order.booking_mode] ?? order.booking_mode}</p>
             <p>الإجمالي: {formatEgp(order.total_amount_cents)}</p>
@@ -1315,6 +1354,34 @@ export default function OrderDetailPage() {
               )}
             </CardFooter>
           )}
+        </Card>
+
+        {/* بيانات العميل — كانت غايبة تمامًا عن تفاصيل الطلب للأدمن (docs/08 §73 بند 3، بلاغ
+            مالك: "مركز الاتصال محتاج يعرف مين العميل ده وعنوانه من غير ما يدوّر مكان تاني").
+            الاسم قابل للنقر — بيودّي لبروفايل العميل 360°. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">بيانات العميل</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            <p>
+              الاسم:{' '}
+              <Link href={`/customers/${order.customer_id}`} className="underline" title={order.customer_id}>
+                {order.customer_name ?? 'عرض البروفايل'}
+              </Link>
+            </p>
+            {order.customer_phone && (
+              <p dir="ltr" className="text-start">
+                {order.customer_phone}
+              </p>
+            )}
+            {order.address && (
+              <p>
+                العنوان: {order.address.street_name}
+                {order.address.landmark ? ` — ${order.address.landmark}` : ''}
+              </p>
+            )}
+          </CardContent>
         </Card>
 
         {/* الملخص المالي لكل طلب (docs/08 §20 بند 11) — كارت واحد واضح يجمع كل حاجة متبعثرة قبل
@@ -1958,6 +2025,42 @@ export default function OrderDetailPage() {
                   </a>
                 ))}
               </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3، بلاغ مالك صريح: "ملاحظات داخلية
+            للكول سنتر لا يراها العميل أو الفني") — نفس نمط is_internal_note في الشكاوى، بس هنا
+            جدول مستقل تمامًا (العميل/الفني مالهومش أي endpoint يوصل له خالص). */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">ملاحظات داخلية ({internalNotes.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleAddInternalNote} className="mb-4 flex flex-col gap-2 sm:flex-row">
+              <Input
+                value={newInternalNote}
+                onChange={(e) => setNewInternalNote(e.target.value)}
+                placeholder="اكتب ملاحظة داخلية عن الطلب ده — مش هتظهر للعميل ولا الفني"
+                className="flex-1"
+              />
+              <Button type="submit" size="sm" disabled={isSavingNote || !newInternalNote.trim()}>
+                {isSavingNote ? 'جاري الحفظ…' : 'إضافة ملاحظة'}
+              </Button>
+            </form>
+            {internalNotes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">مفيش ملاحظات داخلية لسه</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {internalNotes.map((n) => (
+                  <li key={n.id} className="rounded-md border p-2 text-sm">
+                    <p>{n.note}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {n.author_full_name ?? 'موظف'} — {new Date(n.created_at).toLocaleString('ar-EG-u-nu-latn')}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             )}
           </CardContent>
         </Card>

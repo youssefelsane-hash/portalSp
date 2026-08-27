@@ -26,6 +26,7 @@ import { OrdersService } from './orders.service';
 import { OrderAutoCancelService } from './order-auto-cancel.service';
 import { CrewShortageEscalationService } from './crew-shortage-escalation.service';
 import { OrderItemsService } from './order-items.service';
+import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
 import { OrderTeamService } from './order-team.service';
 import { OrderTrackingGateway } from './order-tracking.gateway';
@@ -35,6 +36,7 @@ import { Order } from './entities/order.entity';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderInternalNote } from './entities/order-internal-note.entity';
 import { OrderMedia } from './entities/order-media.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
@@ -47,6 +49,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
       OrderStatusHistory,
       OrderMedia,
       OrderItem,
+      OrderInternalNote,
       OrderTeamMember,
       RecurringOrderTemplate,
       CancellationReason,
@@ -80,6 +83,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     OrderAutoCancelService,
     CrewShortageEscalationService,
     OrderItemsService,
+    OrderInternalNotesService,
     OrderMediaService,
     OrderTeamService,
     OrderTrackingGateway,
