@@ -12,7 +12,7 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
   let service: TechnicianEarningsService;
 
   const runId = Date.now().toString(36);
-  const ids = { country: '', city: '', zone: '', category: '', service: '', customerUser: '', customerProfile: '', address: '', techUser: '', techProfile: '' };
+  const ids = { country: '', city: '', zone: '', category: '', service: '', customerUser: '', customerProfile: '', address: '', techUser: '', techProfile: '', techUser2: '', techProfile2: '' };
   const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
   /** بيدخل طلب **مقفول** بتاريخ إقفال محدد، بأرقام تسوية زي ما التسوية الحقيقية بتسيبها. */
@@ -77,12 +77,21 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
     ids.techUser = tu.id;
     const [tp] = await q(`INSERT INTO technician_profiles (user_id, technician_code, years_of_experience, current_level) VALUES ($1,$2,3,'new') RETURNING id`, [ids.techUser, `TCSTMT${runId}`.slice(0, 20)]);
     ids.techProfile = tp.id;
+    const [tu2] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [`+2062${runId}`.slice(0, 15), `فني كشف2 ${runId}`]);
+    ids.techUser2 = tu2.id;
+    const [tp2] = await q(`INSERT INTO technician_profiles (user_id, technician_code, years_of_experience, current_level) VALUES ($1,$2,3,'new') RETURNING id`, [ids.techUser2, `TCSTMT2${runId}`.slice(0, 20)]);
+    ids.techProfile2 = tp2.id;
   });
 
   afterAll(async () => {
     if (!dataSource?.isInitialized) return;
     try {
+      await q(`DELETE FROM refunds WHERE payment_id IN (SELECT id FROM payments WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1))`, [ids.techProfile]);
+      await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1)`, [ids.techProfile]);
+      await q(`DELETE FROM order_earning_shares WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1)`, [ids.techProfile]);
       await q(`DELETE FROM orders WHERE technician_id = $1`, [ids.techProfile]);
+      await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile2]);
+      await q(`DELETE FROM users WHERE id = $1`, [ids.techUser2]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.techUser]);
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
@@ -172,5 +181,92 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
     await expect(service.getMonthlyStatement(ids.techProfile, "2026-13")).rejects.toThrow();
     await expect(service.getMonthlyStatement(ids.techProfile, "2026-8")).rejects.toThrow();
     await expect(service.getMonthlyStatement(ids.techProfile, "'; DROP TABLE orders; --")).rejects.toThrow();
+  });
+
+  // §90.1 (طلب مالك مباشر 2026-08-28) — "مستحقاتي" لازم يطابق "محفظتي" فعليًا. قبل الإصلاح ده،
+  // الاستعلام كان بيفلتر على orders.technician_id بس: عضو الطاقم (مش القائد) ما كانش بيشوف
+  // شغلانات اشتغل فيها خالص رغم إنه أخد فلوس فعلية في محفظته، والقائد كان بيشوف وعاء الطاقم كله
+  // كأنه نصيبه هو. التستات دي بتتأكد إن كل واحد بيشوف بالظبط اللي نزل محفظته.
+  describe('§90.1 — تطابق مع المحفظة: طاقم + استرداد', () => {
+    async function insertCrewShares(orderId: string, poolCents: number, memberShareCents: number) {
+      const leaderShareCents = poolCents - memberShareCents;
+      await q(
+        `INSERT INTO order_earning_shares (order_id, technician_id, participant_role, technician_level, share_weight, pool_cents, share_cents)
+         VALUES ($1,$2,'leader','new',1.00,$3,$4), ($1,$5,'team_member','new',1.00,$3,$6)`,
+        [orderId, ids.techProfile, poolCents, leaderShareCents, ids.techProfile2, memberShareCents],
+      );
+    }
+
+    it('عضو الطاقم بيشوف نصيبه هو بس — مش صفر ومش وعاء القائد', async () => {
+      const orderId = await insertClosedOrder({
+        label: 'crew1', closedAt: '2026-12-05T09:00:00Z',
+        totalAmountCents: 100_000, discountCents: 0, commissionableBaseCents: 100_000, technicianEarningCents: 85_000,
+      });
+      await insertCrewShares(orderId, 85_000, 20_000); // القائد 65,000 + العضو 20,000
+
+      const leaderStatement = await service.getMonthlyStatement(ids.techProfile, '2026-12');
+      const memberStatement = await service.getMonthlyStatement(ids.techProfile2, '2026-12');
+
+      expect(leaderStatement.jobsCount).toBe(1);
+      expect(leaderStatement.jobs[0].participantRole).toBe('leader');
+      expect(leaderStatement.jobs[0].netTechnicianDueCents).toBe(65_000); // مش الـ85,000 كاملة
+
+      expect(memberStatement.jobsCount).toBe(1); // قبل الإصلاح كان صفر
+      expect(memberStatement.jobs[0].participantRole).toBe('team_member');
+      expect(memberStatement.jobs[0].netTechnicianDueCents).toBe(20_000); // مش صفر
+    });
+
+    async function insertRefundedPayment(orderId: string, totalAmountCents: number, refundAmountCents: number) {
+      // uuid_generate_v7() بيحط الطابع الزمني في أول بايتات الـUUID — طلبات اتعملت في نفس
+      // الميلي ثانية ممكن يتشابه أولها، فبناخد آخر الحروف (الجزء العشوائي) بدل الأول عشان التفرّد.
+      const shortOrderId = orderId.replace(/-/g, '').slice(-10);
+      const [payment] = await q(
+        `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
+         VALUES ($1,$2,$3,$4,'card','succeeded',$5,now()) RETURNING id`,
+        [`P${runId}${shortOrderId}`.slice(0, 24), orderId, ids.customerProfile, totalAmountCents, `idem-stmt-${runId}-${orderId}`.slice(0, 80)],
+      );
+      await q(
+        `INSERT INTO refunds (refund_number, payment_id, order_id, amount_cents, refund_type, refund_method, refund_status, requested_by_user_id, requested_at, completed_at)
+         VALUES ($1,$2,$3,$4,$5,'wallet_credit','completed',$6,now(),now())`,
+        [
+          `R${runId}${shortOrderId}`.slice(0, 24), payment.id, orderId, refundAmountCents,
+          refundAmountCents === totalAmountCents ? 'full' : 'partial', ids.customerUser,
+        ],
+      );
+    }
+
+    it('استرداد جزئي بيتعكس من مستحق الفني بنفس نسبة refundOrder() بالظبط', async () => {
+      // طلب 1000، الفني 850. استرداد 400 (40% من الإجمالي) → عكس = round(850 * 400/1000) = 340.
+      const orderId = await insertClosedOrder({
+        label: 'refund1', closedAt: '2026-12-06T09:00:00Z',
+        totalAmountCents: 100_000, discountCents: 0, commissionableBaseCents: 100_000, technicianEarningCents: 85_000,
+      });
+      await insertRefundedPayment(orderId, 100_000, 40_000);
+
+      const statement = await service.getMonthlyStatement(ids.techProfile, '2026-12');
+      const job = statement.jobs.find((j) => j.orderId === orderId)!;
+      expect(job.refundReversalCents).toBe(34_000);
+      expect(job.netTechnicianDueCents).toBe(85_000 - 34_000);
+    });
+
+    it('استرداد على طلب طاقم بيتعكس من القائد بس — عضو الطاقم مستحقه ما بيتأثرش (نفس سلوك المحفظة الفعلي)', async () => {
+      const orderId = await insertClosedOrder({
+        label: 'crewref', closedAt: '2026-12-07T09:00:00Z',
+        totalAmountCents: 100_000, discountCents: 0, commissionableBaseCents: 100_000, technicianEarningCents: 85_000,
+      });
+      await insertCrewShares(orderId, 85_000, 20_000);
+      await insertRefundedPayment(orderId, 100_000, 50_000); // 50% استرداد → عكس القائد = round(850*500/1000)=425
+
+      const leaderStatement = await service.getMonthlyStatement(ids.techProfile, '2026-12');
+      const memberStatement = await service.getMonthlyStatement(ids.techProfile2, '2026-12');
+      const leaderJob = leaderStatement.jobs.find((j) => j.orderId === orderId)!;
+      const memberJob = memberStatement.jobs.find((j) => j.orderId === orderId)!;
+
+      expect(leaderJob.refundReversalCents).toBe(42_500);
+      expect(leaderJob.netTechnicianDueCents).toBe(65_000 - 42_500);
+      // العضو محفظته ما اتلمستش وقت الاسترداد فعليًا (payments.service.ts refundOrder)، فمستحقه هنا ثابت.
+      expect(memberJob.refundReversalCents).toBe(0);
+      expect(memberJob.netTechnicianDueCents).toBe(20_000);
+    });
   });
 });
