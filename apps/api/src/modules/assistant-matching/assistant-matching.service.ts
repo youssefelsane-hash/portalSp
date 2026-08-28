@@ -249,7 +249,7 @@ export class AssistantMatchingService {
       if (offerId) {
         this.events.emit(
           ASSISTANT_OPPORTUNITY_OFFERED_EVENT,
-          new AssistantOpportunityOfferedEvent(offerId, order.id, c.technician_id),
+          new AssistantOpportunityOfferedEvent(offerId, order.id, c.technician_id, order.orderNumber),
         );
       }
     }
