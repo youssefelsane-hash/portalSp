@@ -115,6 +115,16 @@ export interface AvailableOrderRow {
   landmark: string | null;
   distance_km: string;
   expires_at: Date;
+  /**
+   * **ADR-0048 §4 — الحقلين دول هما إصلاح البلاغ نفسه، مش تحسين عرض.**
+   *
+   * بعد ADR-0035 بقى في نوعين مختلفين تمامًا بيوصلوا لنفس القايمة: طوارئ (نفس اليوم، استجابة
+   * فورية، مفيش معاد) وشغل قريب عادي (بكرة، ليه معاد لازم الفني يشوفه قبل ما يوافق). من غير
+   * الحقلين دول **مستحيل** تطبيق الفني يفرّق بينهم — وده اللي خلّى شغل بكرة يبان "طلب طوارئ
+   * محتاج قرارك دلوقتي" بلا أي تاريخ (بلاغ مالك، docs/08 §85).
+   */
+  booking_mode: string;
+  scheduled_at: Date | null;
 }
 
 @Injectable()
@@ -1172,7 +1182,8 @@ export class MatchingService {
     const rows = await this.dataSource.query<AvailableOrderRow[]>(
       `
       SELECT oa.id AS assignment_id, o.id AS order_id, o.order_number, s.name_ar AS service_name_ar,
-             o.problem_description, a.street_name, a.landmark, oa.distance_km, oa.expires_at
+             o.problem_description, a.street_name, a.landmark, oa.distance_km, oa.expires_at,
+             o.booking_mode, o.scheduled_at
       FROM order_assignments oa
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id

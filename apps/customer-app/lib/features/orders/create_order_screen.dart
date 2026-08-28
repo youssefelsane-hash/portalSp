@@ -444,6 +444,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         warrantyPlanId: _selectedWarrantyPlanId,
         pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
         durationHours: widget.service.pricingModel == 'hourly' ? durationHours : null,
+        scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
       );
       if (mounted && generation == _previewRequestGeneration) {
         setState(() {
@@ -493,6 +494,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           allowsDateRangeBooking: widget.service.allowsDateRangeBooking,
           requiresPreciseTime: widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly,
           requiresDurationHours: widget.service.requiresPreciseSchedule,
+          // **مدخل تاني لنفس الشاشة** (العميل بيغيّر الميعاد من شاشة تأكيد الطلب) — لازم ياخد
+          // نفس البوابة بالظبط (ADR-0048)، وإلا كان فيه مسار يوصل لنفس اليوم من غير ما يشوف
+          // تنبيه رسوم الاستعجال.
+          allowsSameDay: widget.service.allowsEmergency,
         ),
       ),
     );
@@ -615,6 +620,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           pricingQuantity: _isPerUnitPricing ? num.tryParse(_pricingQuantityController.text.trim()) : null,
           durationHours:
               widget.service.pricingModel == 'hourly' ? int.tryParse(_durationHoursController.text.trim()) : null,
+          scheduledAt: _combinedPreciseScheduledAt() ?? _requestedAt,
         );
 
     try {

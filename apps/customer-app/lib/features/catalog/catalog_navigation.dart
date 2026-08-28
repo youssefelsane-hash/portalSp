@@ -8,7 +8,6 @@ import '../orders/create_order_screen.dart';
 import '../orders/job_details_screen.dart';
 import '../orders/schedule_selection_screen.dart';
 import '../technicians/technician_selection_screen.dart';
-import 'booking_mode_selector.dart';
 import 'models.dart';
 
 // Script 3 §6/§59 — نقطة تنقّل واحدة لكل مسارات اكتشاف الخدمة (فئات، بحث، لاحقًا: صوت/صورة) —
@@ -16,11 +15,13 @@ import 'models.dart';
 // كانت الشجرة دي مكررة داخل ServicesScreen بس؛ اتفصلت هنا عشان HomeScreen/SearchResultsScreen
 // يستخدموها بنفس السلوك بالظبط بلا تكرار.
 //
-// وضع الحجز بقى بيتقرر هنا (بعد اختيار الخدمة)، مش قبلها — لو الخدمة بتدعم وضع واحد بس
-// (الحالة الشائعة، allowsIndividual افتراضيًا) بيتخطى سؤال "إزاي حابب تحجز؟" تمامًا.
+// **وضع الحجز مابقاش بيتسأل خالص (ADR-0048)** — بيتشتق في الباك-إند من اليوم المختار وعدد
+// العمال المطلوب. الخطوة الوحيدة اللي العميل بيشوفها بعد اختيار الخدمة هي **الميعاد**.
 Future<void> navigateToServiceBooking(BuildContext context, CatalogService service) async {
   final availableModes = service.availableBookingModes;
   if (availableModes.isEmpty) return; // مفيش وضع حجز مسموح للخدمة دي أصلاً — حالة بيانات غير متوقعة، تجاهل بأمان
+  // ملاحظة: `availableBookingModes` بقت تُستخدم هنا كفحص "الخدمة قابلة للحجز أصلاً" بس — مش
+  // كقايمة اختيارات تتعرض للعميل (ADR-0048).
 
   // **بوابة الزائر (docs/08 §77-B1، طلب مالك صريح)** — هنا بالظبط، ومكان تاني غلط.
   //
@@ -45,41 +46,35 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   // النقطة دي بالذات لأنها مكان التقاء **كل** مسارات اكتشاف الخدمة (فئات/بحث/الرئيسية).
   _recordServiceIntent(context, service.id);
 
-  final BookingMode bookingMode;
-  if (availableModes.length == 1) {
-    bookingMode = availableModes.first;
-  } else {
-    final chosen = await showBookingModeSelector(context, availableModes);
-    if (chosen == null || !context.mounted) return; // العميل قفل الـsheet من غير اختيار
-    bookingMode = chosen;
-  }
-
-  if (!context.mounted) return;
-
-  // "امتى تحب تنفّذ الشغل؟" (docs/08 §154) — خطوة إجبارية بعد وضع الحجز مباشرة، قبل أي تفاصيل
-  // تانية (نفس ترتيب المالك: وضع الحجز → تفاصيل الشغل → الموعد المطلوب → العنوان → ...).
-  // الطوارئ مستثناة عمدًا — استجابة فورية بالتعريف (orders.service.ts بيرفض scheduled_at مع
-  // بوكينج طوارئ بوضوح)، فسؤال "امتى؟" هنا مضلّل مش مفيد.
-  DateTime? scheduledAt;
-  DateTime? scheduledAtRangeEnd;
-  TimeOfDay? preciseTime;
-  int? durationHours;
-  if (bookingMode != BookingMode.emergency) {
-    final choice = await Navigator.of(context).push<ScheduleChoice>(
-      MaterialPageRoute(
-        builder: (_) => ScheduleSelectionScreen(
-          allowsDateRangeBooking: service.allowsDateRangeBooking,
-          requiresPreciseTime: service.requiresPreciseSchedule || service.requiresStartTimeOnly,
-          requiresDurationHours: service.requiresPreciseSchedule,
-        ),
+  // **سؤال «إزاي حابب تحجز الخدمة دي؟» اتشال نهائيًا (ADR-0048، طلب مالك صريح، docs/08 §85)**:
+  // «بدل ما أسأل الكاستمر عايز شغلنا طوارئ ولا فوري ولا فردي، نشيل دول خالص ونحط قواعد على
+  // السيستم، والسيستم هو اللي بيحدد بناءً على التاريخ».
+  //
+  // فالخطوة الأولى بقت **الميعاد دايمًا**، لكل الخدمات بلا استثناء. الوضع (طوارئ/فريق/فردي)
+  // بيتحسب في الباك-إند من اليوم المختار وعدد العمال المطلوب، والعميل مابيشوفش المصطلحات دي
+  // خالص — بيشوف تنبيه أحمر واضح لو اختار النهارده إن فيه رسوم استعجال، وبس.
+  final choice = await Navigator.of(context).push<ScheduleChoice>(
+    MaterialPageRoute(
+      builder: (_) => ScheduleSelectionScreen(
+        allowsDateRangeBooking: service.allowsDateRangeBooking,
+        requiresPreciseTime: service.requiresPreciseSchedule || service.requiresStartTimeOnly,
+        requiresDurationHours: service.requiresPreciseSchedule,
+        allowsSameDay: service.allowsEmergency,
       ),
-    );
-    if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
-    scheduledAt = choice.scheduledAt;
-    scheduledAtRangeEnd = choice.rangeEnd;
-    preciseTime = choice.preciseTime;
-    durationHours = choice.durationHours;
-  }
+    ),
+  );
+  if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
+  final DateTime? scheduledAt = choice.scheduledAt;
+  final DateTime? scheduledAtRangeEnd = choice.rangeEnd;
+  final TimeOfDay? preciseTime = choice.preciseTime;
+  final int? durationHours = choice.durationHours;
+
+  // الوضع المحلي ده **للتنقّل بس** — الباك-إند بيعيد اشتقاقه من جديد بتوقيت القاهرة وهو المرجع
+  // الوحيد (ADR-0048 §1). اليوم المختار هو النهارده ⇒ خدمة مستعجلة ⇒ مفيش خطوة اختيار فني
+  // (أول فني يقبل هو اللي بيروح)، بالظبط زي ما الطوارئ كانت بتشتغل قبل كده.
+  final BookingMode bookingMode = _isSameDayLocal(scheduledAt)
+      ? BookingMode.emergency
+      : (availableModes.contains(BookingMode.individual) ? BookingMode.individual : availableModes.first);
 
   if (!context.mounted) return;
   Navigator.of(context).push(
@@ -117,6 +112,17 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
                 ),
     ),
   );
+}
+
+/// هل اليوم المختار هو النهارده؟ (ADR-0048)
+///
+/// **بتوقيت الجهاز عمدًا، والباك-إند بيعيد الحساب بتوقيت القاهرة وهو المرجع.** لو ساعة الجهاز
+/// غلط، أسوأ نتيجة إن العميل ياخد شاشة اختيار فني وهو مش محتاجها (أو العكس) — السعر والتوزيع
+/// بيفضلوا صح لأنهم بيتحسبوا في السيرفر.
+bool _isSameDayLocal(DateTime? scheduledAt) {
+  if (scheduledAt == null) return true; // بلا تاريخ = دلوقتي
+  final now = DateTime.now();
+  return scheduledAt.year == now.year && scheduledAt.month == now.month && scheduledAt.day == now.day;
 }
 
 /// تسجيل اهتمام العميل بخدمة (ADR-0046) — **fire-and-forget بالكامل**.

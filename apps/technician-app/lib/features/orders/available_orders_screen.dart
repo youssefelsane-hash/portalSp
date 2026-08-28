@@ -528,6 +528,10 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final teamAssigned = _teamAssignedOrders ?? const <Order>[];
     final workOpportunities = _workOpportunities ?? const <WorkOpportunity>[];
     final crewOpportunities = _crewOpportunities ?? const <CrewOpportunity>[];
+    // ADR-0048 §4 — نفس المصدر (`order_assignments`)، نوعين مختلفين. التقسيم هنا مش في الباك-إند
+    // عمدًا: الاتنين بيتقبلوا/يترفضوا بنفس الـendpoint بالظبط، الفرق عرضي بحت.
+    final emergencyPending = pending.where((order) => order.isEmergency).toList(growable: false);
+    final scheduledPending = pending.where((order) => !order.isEmergency).toList(growable: false);
 
     if (!hasActive &&
         pending.isEmpty &&
@@ -581,14 +585,36 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
           ],
           const SizedBox(height: 8),
         ],
-        if (pending.isNotEmpty) ...[
+        // **بلاغ مالك حقيقي (docs/08 §85، ADR-0048 §4)**: القسم ده كان واحد، وكل اللي فيه بيترسم
+        // بكارت «طلب طوارئ — محتاج قرارك دلوقتي» بلا تاريخ. بعد ADR-0035 بقى بيوصله نوعين
+        // مختلفين تمامًا — طوارئ (النهارده، الفني بيتحرك حالًا) وشغل قريب عادي (بكرة، ليه معاد).
+        // اتفصلوا لقسمين بعناوين وألوان مختلفة، والتاريخ بيظهر على القريب العادي.
+        if (emergencyPending.isNotEmpty) ...[
           _SectionHeader(
             icon: Icons.emergency_outlined,
-            label: 'طلبات مستنية قرارك',
+            label: 'طلبات طوارئ — محتاجة قرارك دلوقتي',
+            color: Theme.of(context).colorScheme.error,
           ),
           const SizedBox(height: 8),
-          for (final order in pending) ...[
+          for (final order in emergencyPending) ...[
             _EmergencyRequestCard(
+              order: order,
+              busy: _isActing,
+              onAccept: () => _accept(order),
+              onReject: () => _reject(order),
+            ),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 8),
+        ],
+        if (scheduledPending.isNotEmpty) ...[
+          _SectionHeader(
+            icon: Icons.event_note_outlined,
+            label: 'طلبات قريبة مستنية قرارك',
+          ),
+          const SizedBox(height: 8),
+          for (final order in scheduledPending) ...[
+            _NearTermRequestCard(
               order: order,
               busy: _isActing,
               onAccept: () => _accept(order),
@@ -807,10 +833,16 @@ class _ActiveOrderCard extends StatelessWidget {
   }
 }
 
-// ADR-0018 §3-4-5 — العروض اللي بتوصل هنا كلها طوارئ بالتعريف بعد التصحيح (المجدول العادي بيتأكد
-// تلقائيًا بلا قرار قبول/رفض، راجع _UpcomingJobCard تحت). "طلب قريب" القديمة كانت مضلّلة — مكانتش
-// عن القرب الزمني، كانت فعليًا عن الاستعجال (طوارئ). العرض يفضل قابل للقبول طالما ظاهر في القايمة
-// دي (§5) — مفيش عدّاد وقت مرئي هنا عمدًا عشان مانوهمش الفني إن العرض بيختفي بعد فترة معيّنة.
+// كارت **الطوارئ بس** (ADR-0048 §4).
+//
+// **التعليق اللي كان هنا بقى غلط واتصلح**: كان مكتوب إن "العروض اللي بتوصل هنا كلها طوارئ
+// بالتعريف" — وده كان صح تحت ADR-0018 §3-4، لكن **ADR-0035 كسره** لما خلّى أي طلب خلال 48 ساعة
+// يعدّي على نفس مسار الطلب/القبول. الفرضية فضلت مكتوبة في تعليق واتغيّرت في ADR تاني، والكود فضل
+// عليها — فشغل بكرة بقى بيبان "طوارئ محتاج قرارك دلوقتي" بلا تاريخ (بلاغ مالك، docs/08 §85).
+// الشغل القريب العادي ليه كارت مستقل دلوقتي (`_NearTermRequestCard` تحت).
+//
+// مفيش تاريخ هنا **عمدًا وده صح**: الطوارئ استجابة فورية بالتعريف، والفني بيتحرك أول ما يقبل.
+// ومفيش عدّاد وقت مرئي (ADR-0018 §5) عشان مانوهمش الفني إن العرض بيختفي بعد فترة معيّنة.
 class _EmergencyRequestCard extends StatelessWidget {
   const _EmergencyRequestCard({
     required this.order,
@@ -1460,6 +1492,77 @@ class _DrawerItem extends StatelessWidget {
         Navigator.of(context).pop();
         Navigator.of(context).push(MaterialPageRoute(builder: builder));
       },
+    );
+  }
+}
+
+/// كارت **شغل قريب عادي** مستنّي قرار الفني (ADR-0048 §4، docs/08 §85).
+///
+/// نفس مسار القبول/الرفض بتاع الطوارئ بالظبط في الباك-إند — الفرق كله عرضي، وهو المقصود:
+///  - **التاريخ ظاهر**. ده جوهر البلاغ: الفني كان بيقبل شغل من غير ما يعرف هو امتى.
+///  - لون معلوماتي مش أحمر. الشغلانة دي مش عاجلة؛ الأحمر بيفقد معناه لو كل حاجة حمرا.
+///  - النص بيقول للفني **ليه** بيتسأل أصلاً بدل ما يتعيّنله تلقائي (شغل قريب، ADR-0035).
+class _NearTermRequestCard extends StatelessWidget {
+  const _NearTermRequestCard({
+    required this.order,
+    required this.busy,
+    required this.onAccept,
+    required this.onReject,
+  });
+
+  final AvailableOrder order;
+  final bool busy;
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheduledAt = order.scheduledAt;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.event_note_outlined, size: 16, color: context.infoColor),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    // الموعد جوّه العنوان نفسه مش سطر تحت — أول حاجة الفني يقراها قبل ما يقرر.
+                    scheduledAt != null
+                        ? 'شغل ${formatScheduledDayAr(scheduledAt)} — محتاج موافقتك'
+                        : 'شغل قريب — محتاج موافقتك',
+                    style: TextStyle(fontSize: 12, color: context.infoColor, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(order.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text('${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}'),
+            Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
+            if (order.problemDescription != null) Text(order.problemDescription!),
+            const SizedBox(height: 6),
+            Text(
+              'بنسألك بدل ما نعيّنه عليك تلقائي لأن معاده قريب — لازم تكون عارف وموافق.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                FilledButton(onPressed: busy ? null : onAccept, child: const Text('قبول')),
+                const SizedBox(width: 8),
+                OutlinedButton(onPressed: busy ? null : onReject, child: const Text('رفض')),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -49,11 +49,18 @@ class ScheduleSelectionScreen extends StatefulWidget {
   // requiresPreciseTime (مينفعش تبقى true من غيرها).
   final bool requiresDurationHours;
 
+  /// هل الخدمة بتتعمل في نفس اليوم؟ (`allows_emergency`، ADR-0048 §3).
+  ///
+  /// لو `false`، التقويم بيبدأ من **بكرة** — العميل مايختارش يوم الباك-إند هيرفضه بعدين. نفس
+  /// فلسفة `allowsDateRangeBooking` فوق بالحرف.
+  final bool allowsSameDay;
+
   const ScheduleSelectionScreen({
     super.key,
     required this.allowsDateRangeBooking,
     this.requiresPreciseTime = false,
     this.requiresDurationHours = false,
+    this.allowsSameDay = true,
   });
 
   @override
@@ -65,6 +72,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // النظام ده فمفيش تنبيه يتعرض. فشل التحميل بيسيبها null بهدوء: التنبيه معلومة مساعدة،
   // مايصحّش يمنع العميل من اختيار موعد.
   int? _nearTermHours;
+
+  /// نسبة رسوم الاستعجال (ADR-0048) — بتيجي من نفس الإعداد اللي التسعير بيقرا منه، عشان الرقم
+  /// اللي العميل بيشوفه في التنبيه يبقى هو الرقم اللي هيتحاسب بيه فعلاً.
+  int? _emergencySurchargePercentage;
 
   // حالة محلية بس للخدمات اللي محتاجة وقت دقيق (docs/08 §84 جزء ج) — الحجوزات العادية لسه بتاخد
   // اليوم وتقفل الشاشة فورًا زي ما كانت دايمًا، صفر state إضافية ليها.
@@ -92,21 +103,91 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     try {
       final data = await apiRequest('GET', '/booking-policy');
       if (!mounted) return;
-      setState(() => _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt());
+      setState(() {
+        _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt();
+        _emergencySurchargePercentage = (data?['emergency_surcharge_percentage'] as num?)?.toInt();
+      });
     } catch (error) {
       debugPrint('فشل تحميل سياسة المواعيد: $error');
     }
   }
 
-  Future<void> _pickSpecificDate(BuildContext context) async {
+  /// هل اليوم ده هو النهارده؟ — نفس تعريف الباك-إند (`isSameDayUrgent`) بس بتوقيت الجهاز.
+  ///
+  /// **الجهاز مش مصدر الحقيقة هنا عمدًا**: الباك-إند بيعيد الاشتقاق من جديد بتوقيت القاهرة وهو
+  /// اللي بيقرر فعليًا (ADR-0048 §1). الفحص المحلي ده غرضه **التنبيه قبل الاختيار** بس — لو
+  /// ساعة الجهاز غلط، أسوأ حاجة هتحصل إن التنبيه يظهر أو ما يظهرش، والسعر يفضل صح.
+  bool _isToday(DateTime date) {
     final now = DateTime.now();
+    return date.year == now.year && date.month == now.month && date.day == now.day;
+  }
+
+  /// أول يوم مسموح في التقويم — بكرة لو الخدمة مابتتعملش في نفس اليوم (ADR-0048 §3).
+  DateTime get _firstSelectableDate {
+    final now = DateTime.now();
+    return widget.allowsSameDay ? now : now.add(const Duration(days: 1));
+  }
+
+  /// **التنبيه الأحمر (طلب مالك صريح، docs/08 §85)**: «لو اختار الموعد ده النهاردة، أوتوماتيك
+  /// السيستم بيبعت له رسالة بالأحمر إن طالما اخترت النهاردة فمعناها كأنك طوارئ عشان يجيلك
+  /// الشخص بسرعة، وفي الحالة دي بتتحسب عليه رسوم الطوارئ».
+  ///
+  /// **ده إخطار مش سؤال عن وضع الحجز.** العميل مابيختارش "طوارئ ولا عادي" — هو بيختار يوم،
+  /// والنتيجة بتتشرح له بصراحة مع فرصة يرجع يغيّر اليوم لو الرسوم مش مناسبة له.
+  Future<bool> _confirmSameDayUrgency(BuildContext context) async {
+    final percentage = _emergencySurchargePercentage;
+    final scheme = Theme.of(context).colorScheme;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          icon: Icon(Icons.bolt, color: scheme.error, size: 32),
+          title: Text(
+            'طلب النهارده = خدمة مستعجلة',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.error, fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            percentage != null && percentage > 0
+                ? 'طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — '
+                    'وبيتحسب عليه رسوم استعجال $percentage% فوق سعر الخدمة.\n\n'
+                    'لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر يفضل عادي.'
+                : 'طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — '
+                    'وبيتحسب عليه رسوم استعجال فوق سعر الخدمة.\n\n'
+                    'لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر يفضل عادي.',
+            textAlign: TextAlign.center,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('أختار يوم تاني'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: scheme.error),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('تمام، كمّل'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return accepted == true;
+  }
+
+  Future<void> _pickSpecificDate(BuildContext context) async {
+    final firstDate = _firstSelectableDate;
     final date = await showDatePicker(
       context: context,
-      initialDate: now.add(const Duration(days: 2)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 90)),
+      // الافتراضي بعد يومين — بعيد عن نافذة الاستعجال عمدًا، فالعميل اللي بيدوس "تمام" بسرعة
+      // مايتفاجئش برسوم. `firstDate` بتحكم الحد الأدنى الحقيقي.
+      initialDate: firstDate.add(const Duration(days: 2)),
+      firstDate: firstDate,
+      lastDate: DateTime.now().add(const Duration(days: 90)),
     );
     if (date == null || !context.mounted) return;
+    if (_isToday(date) && !await _confirmSameDayUrgency(context)) return;
+    if (!context.mounted) return;
     if (!widget.requiresPreciseTime) {
       Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
       return;
@@ -122,11 +203,15 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     final range = await showDateRangePicker(
       context: context,
       initialDateRange: DateTimeRange(start: now.add(const Duration(days: 1)), end: now.add(const Duration(days: 4))),
-      firstDate: now,
+      firstDate: _firstSelectableDate,
       lastDate: now.add(const Duration(days: 90)),
       helpText: 'اختار نطاق الأيام اللي تناسبك',
     );
     if (range == null || !context.mounted) return;
+    // النطاق المرن بيبدأ من النهارده = نفس القاعدة بالظبط (الباك-إند بيحل النطاق لأقرب يوم متاح،
+    // وممكن يطلع النهارده فعلاً) — فالتنبيه لازم يظهر هنا كمان، مش في مسار اليوم المحدد بس.
+    if (_isToday(range.start) && !await _confirmSameDayUrgency(context)) return;
+    if (!context.mounted) return;
     final start = _startOfDay(range.start);
     var end = _startOfDay(range.end);
     // العميل يقدر يختار نطاق أوسع من الحد المسموح بيه — بنقصّه للحد الأقصى بدل ما نرفض الاختيار

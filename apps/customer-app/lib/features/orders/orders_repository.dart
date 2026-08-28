@@ -190,11 +190,18 @@ class OrdersRepository {
     String? warrantyPlanId,
     num? pricingQuantity,
     int? durationHours,
+    DateTime? scheduledAt,
   }) async {
     final data = await auth.authedRequest('POST', '/orders/preview', body: {
       'service_id': serviceId,
       'address_id': addressId,
+      // **متجاهَل في السيرفر (ADR-0048)** — الوضع بقى مشتق. لسه بيتبعت عشان نسخ سيرفر أقدم
+      // ما تتكسرش، ومش بيأثر على السعر خالص.
       'booking_mode': bookingMode.apiValue,
+      // **ضروري للسعر الصح (ADR-0048)**: اليوم هو اللي بيحدد رسوم الاستعجال. من غيره السيرفر
+      // بيقرا "مفيش تاريخ" = دلوقتي = مستعجل، فحجز الأسبوع الجاي كان هيتعرض عليه رسوم طوارئ
+      // في المعاينة وهو مش مستعجل أصلاً.
+      if (scheduledAt != null) 'scheduled_at': scheduledAt.toUtc().toIso8601String(),
       if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
       if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
       if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,

@@ -5,7 +5,7 @@ import 'models.dart';
 // Script 6 Part 1-2 — كارت فئة موحّد (كانت مكررة نص مركزي بلا صورة في home_screen.dart
 // وcategories_screen.dart، نفس الكود بالحرف). دلوقتي صورة حقيقية (cover_image_url ثم icon_url
 // ثم placeholder — NetworkImageBox) فوق، اسم الفئة تحت — استلهام هيكلي من كروت Angi/Thumbtack
-// (صورة + عنوان، بلا نسخ شعار/نص/تصميم فعلي)، بهوية صُنّاع (ألوان الـTheme الحالي).
+// (صورة + عنوان، بلا نسخ شعار/نص/تصميم فعلي)، بهوية أسطى (ألوان الـTheme الحالي).
 class CategoryCard extends StatelessWidget {
   final ServiceCategory category;
   final VoidCallback onTap;
