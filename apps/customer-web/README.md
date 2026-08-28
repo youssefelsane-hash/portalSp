@@ -121,3 +121,25 @@ slide 1 وslide 3 كانوا شبه متطابقين بصريًا (نفس عائ
 `asset_type` نفسه فضل `splash`). **اتأكد حي**: صورة JPG حقيقية (800×400) اترفعت من `/branding`
 عبر Playwright + virtual WebAuthn authenticator، وظهرت فورًا كخلفية hero كاملة في `customer-web`
 (سكرين شوت قبل/بعد). نفس المنطق اتطبّق على `apps/customer-app` (docs/08 §48.2).
+
+## توازي الميزات مع customer-app — إعادة الجدولة + بروفايل الفني (2026-08-28، طلب مالك، docs/08 §82)
+
+المالك طلب صراحة: "اللي يطلب من التطبيق زي اللي يطلب من الويب ميبقاش فيه أي فرق" وظيفيًا. الفحص
+كشف 16 قدرة موجودة في `apps/customer-app`'s شاشة تفاصيل الطلب وغايبة بالكامل من الويب — القايمة
+الكاملة موثّقة في `docs/08-pricing-engine-and-platform-vision.md` §82. الدفعة دي قفلت الاتنين
+اللي المالك سمّاهم صراحة (الشات كان موجود بالفعل):
+
+- **إعادة جدولة الزيارة** — `lib/orders.ts`'s `fetchRescheduleOptions`/`rescheduleOrder` +
+  `orders/[id]/reschedule-section.tsx` جديد (نفس `GET/POST /orders/:id/reschedule[-options]`
+  الموجودين بالفعل من الباك-إند، مستخدمين في `apps/customer-app` من زمان).
+- **بروفايل الفني** — `lib/technicians.ts`'s `fetchTechnicianProfile` + صفحة جديدة
+  `app/technicians/[id]/page.tsx` (`GET /technicians/:id/profile`، نفس المحتوى: اسم/صورة/توثيق/
+  نبذة/إحصائيات/مناطق/خدمات/آخر تقييمات — معرض الأعمال والشهادات مؤجّلين لدفعة لاحقة عمدًا، محتاجين
+  تصميم embed منفصل للويب).
+
+**قيد مهم اتلقط أثناء التنفيذ نفسه**: زرار "بروفايل الفني" في `orders/[id]/page.tsx` لازم يظهر
+بمجرد وجود `technician_id` (من `technician_assigned`)، **مش** بشرط ظهور اسم/تليفون الفني (اللي
+بيبدأ بس من `accepted` — `TECHNICIAN_CONTACT_VISIBLE_STATUSES`). أول نسخة حطّت الرابط غلط جوه شرط
+اسم الفني، فاختفى الرابط على طلب معيّن له فني لسه مقبلش. اتصلح بفصل الشرط، مطابقة
+`order_detail_screen.dart`'s `technicianId != null` بالحرف. اتأكد حي عبر Playwright (سيرفرين
+حقيقيين + بيانات seed حقيقية) — الرابطين ظاهرين صح من `technician_assigned`.

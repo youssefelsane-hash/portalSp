@@ -436,6 +436,28 @@ describe('InstallmentsService — تقديم/مراجعة/جدولة (PostgreSQL
       expect(result.reason_ar).toContain('تحت المراجعة');
     });
 
+    // بَقّة حقيقية اتلقطت (docs/08 §82، بلاغ مالك بلقطة شاشة): طلب مقبول ومعيّن له فني بالفعل
+    // كان بيسمح بالتقسيط ما دام order_status مش cancelled — حتى لو الطلب اتحصّل بالفعل. القيد
+    // الناقص كان payment_status، مش order_status.
+    it('طلب اتحصّل بالفعل (paid): مش متاح للتقسيط رغم إن order_status مش متلغي', async () => {
+      const orderId = await seedOrder(500_000);
+      await q(`UPDATE orders SET payment_status='paid' WHERE id=$1`, [orderId]);
+      const result = await service.listOptionsForOrder(ids.customerUser, orderId);
+      expect(result.eligible).toBe(false);
+      expect(result.plans).toHaveLength(0);
+      expect(result.reason_code).toBe('already_paid');
+
+      // نفس القيد لازم يفضل مطبّق في submitApplication() نفسها كمان — مش بس في العرض.
+      await expect(
+        service.submitApplication({
+          userId: ids.customerUser,
+          orderId,
+          planId: ids.plan,
+          acceptedPolicyVersionIds: [ids.policyVersion],
+        }),
+      ).rejects.toMatchObject({ code: 'VAL_001' });
+    });
+
     it('طلب عميل تاني: 404 مش تسريب حالة', async () => {
       const [otherUser] = await q<{ id: string }[]>(
         `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`,

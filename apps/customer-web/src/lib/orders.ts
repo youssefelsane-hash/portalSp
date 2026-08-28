@@ -175,3 +175,23 @@ export const approveQuoteItems = (authedFetch: AuthedFetch, orderId: string, pay
 
 export const declineQuoteItems = (authedFetch: AuthedFetch, orderId: string) =>
   authedFetch<OrderItemDto[]>(`/orders/${orderId}/quote-items/decline`, { method: 'POST' });
+
+// إعادة جدولة الزيارة (docs/08 §82 — توازي الميزات مع apps/customer-app). متاحة بس والطلب
+// technician_assigned/accepted (قبل ما الفني يتحرّك فعليًا) — نفس RESCHEDULABLE_STATUSES في
+// orders.service.ts. الباك-إند بيرفض غير كده بوضوح، مفيش داعي نكرر الشرط هنا في الواجهة.
+export const RESCHEDULABLE_ORDER_STATUSES = new Set(['technician_assigned', 'accepted']);
+
+export interface RescheduleDateOptionDto {
+  date: string;
+  available: boolean;
+}
+
+export const fetchRescheduleOptions = (authedFetch: AuthedFetch, orderId: string) =>
+  authedFetch<RescheduleDateOptionDto[]>(`/orders/${orderId}/reschedule-options`);
+
+// new_scheduled_at يوم بس (مسار ADR-0034 الافتراضي) — نفس الصيغة اللي customer-app بيبعتها بالحرف.
+export const rescheduleOrder = (authedFetch: AuthedFetch, orderId: string, date: string) =>
+  authedFetch<OrderResponseDto>(`/orders/${orderId}/reschedule`, {
+    method: 'POST',
+    body: JSON.stringify({ new_scheduled_at: `${date}T00:00:00.000Z` }),
+  });
