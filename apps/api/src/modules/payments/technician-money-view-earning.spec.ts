@@ -32,7 +32,10 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     });
   }
 
-  function service(participants: CrewParticipant[]): PaymentsService {
+  function service(
+    participants: CrewParticipant[],
+    collection: { totalAmountCents?: number; onlinePaidAmountCents?: number; amountDueToTechnicianCents?: number } = {},
+  ): PaymentsService {
     const svc = Object.create(PaymentsService.prototype) as PaymentsService;
     Object.assign(svc, {
       crewEarningsService: {
@@ -46,9 +49,14 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
       technicianLevelsService: { getOrThrow: async () => ({ commissionAdjustmentPercentage: 0 }) },
       settingsService: { getNumber: async (_k: string, fallback: number) => fallback },
       getCollectionBreakdownForOrder: async () => ({
-        amountDueToTechnicianCents: 100000,
+        totalAmountCents: collection.totalAmountCents ?? 100000,
+        amountDueToTechnicianCents: collection.amountDueToTechnicianCents ?? 100000,
         paidAmountCents: 0,
+        directPaidAmountCents: 0,
+        onlinePaidAmountCents: collection.onlinePaidAmountCents ?? 0,
+        refundedAmountCents: 0,
         financedOrderAmountCents: 0,
+        installmentOutstandingCents: 0,
       }),
     });
     return svc;
@@ -109,5 +117,28 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     );
     // الثابت الحاكم لـADR-0040: مجموع الحصص = الوعاء بالظبط، مفيش قرش ضايع ولا مضاعف.
     expect(leaderView.myEarningCents + memberView.myEarningCents).toBe(80000);
+  });
+
+  it('إيداع أونلاين + باقي كاش: بعد تحصيل الكاش يظل الطلب مختلطًا ولا يتحول إلى "أونلاين بالكامل"', async () => {
+    const view = await service([], {
+      totalAmountCents: 100000,
+      onlinePaidAmountCents: 15000,
+      amountDueToTechnicianCents: 0,
+    }).getTechnicianMoneyView(order());
+
+    expect(view.hasOnlinePayment).toBe(true);
+    expect(view.fullyPaidOnline).toBe(false);
+    expect(view.cashToCollectCents).toBe(0);
+  });
+
+  it('طلب مدفوع إلكترونيًا بالكامل وحده يحمل علامة "أونلاين بالكامل"', async () => {
+    const view = await service([], {
+      totalAmountCents: 100000,
+      onlinePaidAmountCents: 100000,
+      amountDueToTechnicianCents: 0,
+    }).getTechnicianMoneyView(order());
+
+    expect(view.hasOnlinePayment).toBe(true);
+    expect(view.fullyPaidOnline).toBe(true);
   });
 });

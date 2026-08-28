@@ -29,6 +29,8 @@ interface StatementJob {
   commissionRatePercentage: number;
   platformCommissionCents: number;
   discountBorneByTechnicianCents: number;
+  grossTechnicianEarningCents: number;
+  cashCollectedCents: number;
   netTechnicianDueCents: number;
 }
 
@@ -46,6 +48,8 @@ interface MonthlyStatement {
     customerPaidCents: number;
     platformCommissionCents: number;
     discountBorneByTechnicianCents: number;
+    grossTechnicianEarningCents: number;
+    cashCollectedCents: number;
     netTechnicianDueCents: number;
   };
   jobs: StatementJob[];
@@ -129,12 +133,14 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
             <div className="rounded-lg border bg-muted/40 p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="font-medium">
-                  {statement.isCurrentMonth
-                    ? 'إجمالي مستحقات الفني للشهر الحالي حتى هذه اللحظة'
-                    : 'إجمالي مستحقات الفني عن الشهر'}
+                  {statement.totals.netTechnicianDueCents < 0
+                    ? 'مديونية الفني للمنصة من شغل الشهر'
+                    : statement.isCurrentMonth
+                      ? 'صافي حركة محفظة الفني من شغل الشهر حتى هذه اللحظة'
+                      : 'صافي حركة محفظة الفني عن الشهر'}
                 </span>
-                <span className="text-2xl font-bold tabular-nums">
-                  {formatEgp(statement.totals.netTechnicianDueCents)}
+                <span className={`text-2xl font-bold tabular-nums ${statement.totals.netTechnicianDueCents < 0 ? 'text-destructive' : ''}`}>
+                  {formatEgp(Math.abs(statement.totals.netTechnicianDueCents))}
                 </span>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
@@ -144,6 +150,8 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
                   خصم محمّل على الفني: {formatEgp(statement.totals.discountBorneByTechnicianCents)}
                 </span>{' '}
                 (المنصة بتتحمّل الخصومات بالكامل — ADR-0038).
+                {' '}نصيب الفني {formatEgp(statement.totals.grossTechnicianEarningCents)} · كاش استلمه{' '}
+                {formatEgp(statement.totals.cashCollectedCents)}.
               </p>
             </div>
 
@@ -162,7 +170,9 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
                       <TableHead>خصم العميل</TableHead>
                       <TableHead>دفع العميل</TableHead>
                       <TableHead>العمولة</TableHead>
-                      <TableHead>صافي المستحق</TableHead>
+                      <TableHead>نصيب الفني</TableHead>
+                      <TableHead>كاش استلمه</TableHead>
+                      <TableHead>صافي حركة المحفظة</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -187,8 +197,10 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
                         <TableCell className="tabular-nums text-muted-foreground">
                           {formatEgp(j.platformCommissionCents)} ({j.commissionRatePercentage}%)
                         </TableCell>
-                        <TableCell className="font-medium tabular-nums">
-                          {formatEgp(j.netTechnicianDueCents)}
+                        <TableCell className="tabular-nums">{formatEgp(j.grossTechnicianEarningCents)}</TableCell>
+                        <TableCell className="tabular-nums">{formatEgp(j.cashCollectedCents)}</TableCell>
+                        <TableCell className={`font-medium tabular-nums ${j.netTechnicianDueCents < 0 ? 'text-destructive' : ''}`}>
+                          {j.netTechnicianDueCents < 0 ? 'مديونية ' : ''}{formatEgp(Math.abs(j.netTechnicianDueCents))}
                         </TableCell>
                       </TableRow>
                     ))}

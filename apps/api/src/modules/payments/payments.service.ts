@@ -99,6 +99,8 @@ export type OrderCollectionBreakdown = {
   totalAmountCents: number;
   paidAmountCents: number;
   directPaidAmountCents: number;
+  /** صافي الدفعات المباشرة غير الكاش — لا يشمل أقساط الخطة التي تغطيها المنصة. */
+  onlinePaidAmountCents: number;
   refundedAmountCents: number;
   financedOrderAmountCents: number;
   installmentOutstandingCents: number;
@@ -225,7 +227,7 @@ export class PaymentsService {
     viewerTechnicianProfileId?: string | null,
   ): Promise<TechnicianMoneyView> {
     const breakdown = await this.getCollectionBreakdownForOrder(order, manager);
-    const paidOnlineCents = breakdown.paidAmountCents + breakdown.financedOrderAmountCents;
+    const paidOnlineCents = breakdown.onlinePaidAmountCents + breakdown.financedOrderAmountCents;
     const poolCents = await this.previewTechnicianEarningCents(order);
 
     // بلاغ المالك (docs/08 §64.ب): «نصيبك 0 وده مش منطقي». مصدرها إن نصيب الفني بيتحسب من
@@ -264,7 +266,9 @@ export class PaymentsService {
       // واقعة بلا رقم.
       hasOnlinePayment: paidOnlineCents > 0,
       // كله اتدفع أونلاين ومفيش كاش هيتحصّل خالص.
-      fullyPaidOnline: paidOnlineCents > 0 && breakdown.amountDueToTechnicianCents === 0,
+      // لا نستخدم "المتبقي = صفر" هنا: بعد تحصيل باقي طلب مختلط كاش يصبح المتبقي صفرًا، لكنه
+      // لم يتحول بأثر رجعي إلى طلب مدفوع أونلاين بالكامل.
+      fullyPaidOnline: paidOnlineCents > 0 && paidOnlineCents >= breakdown.totalAmountCents,
       earningPending,
       isCrewShare,
     };
@@ -359,8 +363,10 @@ export class PaymentsService {
     const [money] = await runner.query<
       {
         direct_paid_cents: string;
+        online_paid_cents: string;
         installment_paid_cents: string;
         direct_refunded_cents: string;
+        online_refunded_cents: string;
         installment_refunded_cents: string;
       }[]
     >(
@@ -370,6 +376,11 @@ export class PaymentsService {
              AND p.payment_status IN ('succeeded','partially_refunded','refunded')
          ), 0)::text AS direct_paid_cents,
          COALESCE(SUM(p.amount_cents) FILTER (
+           WHERE p.installment_id IS NULL
+             AND p.payment_method <> 'cash'
+             AND p.payment_status IN ('succeeded','partially_refunded','refunded')
+         ), 0)::text AS online_paid_cents,
+         COALESCE(SUM(p.amount_cents) FILTER (
            WHERE p.installment_id IS NOT NULL
              AND p.payment_status IN ('succeeded','partially_refunded','refunded')
          ), 0)::text AS installment_paid_cents,
@@ -378,6 +389,12 @@ export class PaymentsService {
            JOIN payments rp ON rp.id = r.payment_id
            WHERE r.order_id = $1 AND r.refund_status = 'completed' AND rp.installment_id IS NULL
          ), 0)::text AS direct_refunded_cents,
+         COALESCE((
+           SELECT SUM(r.amount_cents) FROM refunds r
+           JOIN payments rp ON rp.id = r.payment_id
+           WHERE r.order_id = $1 AND r.refund_status = 'completed'
+             AND rp.installment_id IS NULL AND rp.payment_method <> 'cash'
+         ), 0)::text AS online_refunded_cents,
          COALESCE((
            SELECT SUM(r.amount_cents) FROM refunds r
            JOIN payments rp ON rp.id = r.payment_id
@@ -402,8 +419,10 @@ export class PaymentsService {
     );
 
     const directRefundedCents = Number(money?.direct_refunded_cents ?? 0);
+    const onlineRefundedCents = Number(money?.online_refunded_cents ?? 0);
     const installmentRefundedCents = Number(money?.installment_refunded_cents ?? 0);
     const directPaidAmountCents = Math.max(0, Number(money?.direct_paid_cents ?? 0) - directRefundedCents);
+    const onlinePaidAmountCents = Math.max(0, Number(money?.online_paid_cents ?? 0) - onlineRefundedCents);
     const installmentPaidAmountCents = Math.max(
       0,
       Number(money?.installment_paid_cents ?? financing?.paid_cents ?? 0) - installmentRefundedCents,
@@ -417,6 +436,7 @@ export class PaymentsService {
       totalAmountCents: order.totalAmountCents,
       paidAmountCents: directPaidAmountCents + installmentPaidAmountCents,
       directPaidAmountCents,
+      onlinePaidAmountCents,
       refundedAmountCents: directRefundedCents + installmentRefundedCents,
       financedOrderAmountCents,
       installmentOutstandingCents: financing

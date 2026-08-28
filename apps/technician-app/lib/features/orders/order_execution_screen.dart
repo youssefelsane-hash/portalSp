@@ -126,7 +126,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   // "Show Cancel Order only when backend policy permits it" — استشاري بس، الفرض الحقيقي جوّه
   // الباك-إند وقت الإلغاء الفعلي (نفس مصدر الحقيقة، لو الاتنين اختلفوا الباك-إند بيكسب دايمًا).
   Future<void> _loadCancellationPolicyIfApplicable() async {
-    if (!_cancellableOrderStatuses.contains(_order.orderStatus)) return;
+    if (!_cancellableOrderStatuses.contains(_order.orderStatus)) {
+      if (mounted && _cancellationPolicy != null) {
+        setState(() => _cancellationPolicy = null);
+      }
+      return;
+    }
     try {
       final policy = await _repository.fetchCancellationPolicy(_order.id);
       if (mounted) setState(() => _cancellationPolicy = policy);
@@ -164,6 +169,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
     try {
       final order = await _repository.getOne(_order.id);
       if (mounted) setState(() => _order = order);
+      await _loadCancellationPolicyIfApplicable();
       await _loadRescheduleRequests();
     } on ApiException {
       // تجاهل — راجع التعليق فوق.
@@ -523,27 +529,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
           _order = await _repository.complete(_order.id);
         case 'collect_cash':
           await _repository.collectCash(_order.id);
-          // مفيش GET /technician/orders/:id — الطلب بعد collect-cash بيبقى completed دايماً
-          // (نفس المسار الوحيد المتاح، مفيش دفع تاني في التطبيق لسه)، فبنعكسها محلياً.
-          _order = Order(
-            id: _order.id,
-            orderNumber: _order.orderNumber,
-            orderStatus: 'completed',
-            problemDescription: _order.problemDescription,
-            customerInputsLine: _order.customerInputsLine,
-            // اتحصّل الكاش خلاص — مفيش باقي، ونصيبه ما اتغيّرش (docs/08 §60.2).
-            cashToCollectCents: 0,
-            myEarningCents: _order.myEarningCents,
-            hasOnlinePayment: _order.hasOnlinePayment,
-            fullyPaidOnline: _order.fullyPaidOnline,
-            totalAmountCents: _order.totalAmountCents,
-            earningPending: _order.earningPending,
-            isCrewShare: _order.isCrewShare,
-            paymentStatus: 'paid',
-            bookingMode: _order.bookingMode,
-            requiredTechnicians: _order.requiredTechnicians,
-            address: _order.address,
-          );
+          // التحصيل غيّر الدفع والحالة وسياسة الإلغاء في نفس اللحظة. نعيد القراءة من المصدر بدل
+          // تركيب Order ناقص محليًا، حتى تظل حقيقة الدفع المختلط محفوظة ويختفي الإلغاء فورًا.
+          await _refreshFromServer();
       }
       if (mounted) setState(() {});
       // docs/08 §70 (بلاغ مالك: كارت "الطاقم ناقص" بيختفي بعد ما تشتغل على الطلب) — ردود الأفعال
@@ -812,7 +800,8 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
             ],
             // سياسة إلغاء الفني (docs/10) — الزرار يظهر بس لو can_cancel:true فعلاً من الباك-إند
             // (مش مجرد "الحالة مسموحة" — النافذة الزمنية وصلاحيات الفريق ممكن يمنعوه كمان).
-            if (_cancellationPolicy?.canCancel == true) ...[
+            if (_cancellableOrderStatuses.contains(_order.orderStatus) &&
+                _cancellationPolicy?.canCancel == true) ...[
               const SizedBox(height: 16),
               OutlinedButton.icon(
                 onPressed: _acting ? null : _cancelOrder,

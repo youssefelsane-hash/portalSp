@@ -34,6 +34,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from './crew-earnings.testing';
+import { TechnicianEarningsService } from './technician-earnings.service';
 
 // اختبار حي ضد Postgres حقيقي — بيثبت إصلاح فجوة محاسبية جوهرية (docs/08 §20 بند 2/3/4، تدقيق
 // تسوية مالية شامل قبل الإطلاق): settleAndComplete() كانت دايمًا بتحوّل technicianEarningCents
@@ -44,6 +45,7 @@ import { crewEarningsServiceStub } from './crew-earnings.testing';
 describe('PaymentsService.settleAndComplete() — اتجاه التسوية الصحيح حسب مين ماسك الفلوس (docs/08 §20)', () => {
   let dataSource: DataSource;
   let service: PaymentsService;
+  let technicianEarningsService: TechnicianEarningsService;
   let walletsService: WalletsService;
   let cache: RedisCacheService;
   let failStatusEventForOrderId: string | null = null;
@@ -122,6 +124,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
       ],
     });
     await dataSource.initialize();
+    technicianEarningsService = new TechnicianEarningsService(dataSource);
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
@@ -326,9 +329,24 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     expect(order?.platformCommissionCents).toBe(20000);
     expect(order?.technicianEarningCents).toBe(80000);
 
+    const moneyView = await service.getTechnicianMoneyView(order!);
+    expect(moneyView.hasOnlinePayment).toBe(false);
+    expect(moneyView.fullyPaidOnline).toBe(false);
+    expect(moneyView.cashToCollectCents).toBe(0);
+
     // الفني ماسك الـ1000ج كاملة، فمفروض رصيده ينزل بـ200ج (العمولة) — مش يزيد بـ800ج
     const after = await techWalletBalance();
     expect(after - before).toBe(-20000);
+
+    // اختبار الربط المباشر بين المصدرين الظاهرين للفني: أثر الطلب في كشف "مستحقاتي" لازم
+    // يساوي بالقرش حركة المحفظة التي نفذتها التسوية، لا مجرد معادلة مشابهة في اختبار منفصل.
+    const [closedMonth] = await dataSource.query<{ month: string }[]>(
+      `SELECT to_char((closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') AS month FROM orders WHERE id = $1`,
+      [orderId],
+    );
+    const statement = await technicianEarningsService.getMonthlyStatement(ids.techProfile, closedMonth.month);
+    const statementJob = statement.jobs.find((job) => job.orderId === orderId);
+    expect(statementJob?.netTechnicianDueCents).toBe(after - before);
 
     // قيد COMMISSION_DEDUCTION فني→منصة، مش ORDER_EARNING منصة→فني
     const txs = await dataSource
@@ -363,6 +381,10 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
 
     const order = await dataSource.getRepository(Order).findOne({ where: { id: orderId } });
     expect(order?.technicianEarningCents).toBe(80000);
+
+    const moneyView = await service.getTechnicianMoneyView(order!);
+    expect(moneyView.hasOnlinePayment).toBe(true);
+    expect(moneyView.fullyPaidOnline).toBe(true);
 
     // المنصة ماسكة الفلوس (دفعت المحفظة الداخلية) — رصيد الفني لازم يزيد بـ800ج كاملة
     const after = await techWalletBalance();
@@ -580,6 +602,13 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     expect(order?.orderStatus).toBe(OrderStatus.COMPLETED);
     expect(order?.technicianEarningCents).toBe(96000); // 80% من 120000
     expect(order?.platformCommissionCents).toBe(24000);
+
+    // بعد تحصيل الدلتا الكاش، يفضل وصف الطلب مختلطًا: الكارت لم يتحول إلى كامل، والكاش لم
+    // يتحول بأثر رجعي إلى أونلاين لمجرد أن المتبقي أصبح صفرًا.
+    const moneyView = await service.getTechnicianMoneyView(order!);
+    expect(moneyView.hasOnlinePayment).toBe(true);
+    expect(moneyView.fullyPaidOnline).toBe(false);
+    expect(moneyView.cashToCollectCents).toBe(0);
 
     // المنصة ماسكة 100000 (كارت)، الفني ماسك 20000 (كاش دلتا). نصيب الفني العادل 96000 —
     // المنصة تدفعله الفرق بس (96000-20000=76000)، مش الـ96000 كاملة (كان ده هيبقى فلوس مضاعفة).

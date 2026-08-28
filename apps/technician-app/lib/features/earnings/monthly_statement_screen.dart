@@ -8,8 +8,18 @@ String _egp(int cents) => '${(cents / 100).toStringAsFixed(2)} ج.م';
 /// شهر `YYYY-MM` بالعربي — «أغسطس 2026».
 String _monthLabel(String month) {
   const names = [
-    'يناير', 'فبراير', 'مارس', 'إبريل', 'مايو', 'يونيو',
-    'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+    'يناير',
+    'فبراير',
+    'مارس',
+    'إبريل',
+    'مايو',
+    'يونيو',
+    'يوليو',
+    'أغسطس',
+    'سبتمبر',
+    'أكتوبر',
+    'نوفمبر',
+    'ديسمبر',
   ];
   final parts = month.split('-');
   if (parts.length != 2) return month;
@@ -51,8 +61,12 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
       _error = null;
     });
     try {
-      final months = _months.isEmpty ? await _repository.fetchAvailableMonths() : _months;
-      final statement = await _repository.fetchMonthlyStatement(month: month ?? _selectedMonth);
+      final months = _months.isEmpty
+          ? await _repository.fetchAvailableMonths()
+          : _months;
+      final statement = await _repository.fetchMonthlyStatement(
+        month: month ?? _selectedMonth,
+      );
       if (!mounted) return;
       setState(() {
         _months = months;
@@ -79,8 +93,15 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
-                ? ListView(children: [Padding(padding: const EdgeInsets.all(32), child: Center(child: Text(_error!)))])
-                : _buildBody(context),
+            ? ListView(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Center(child: Text(_error!)),
+                  ),
+                ],
+              )
+            : _buildBody(context),
       ),
     );
   }
@@ -94,7 +115,10 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
         const SizedBox(height: 12),
         _summaryCard(context, statement),
         const SizedBox(height: 16),
-        Text('الشغلانات (${statement.jobsCount})', style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          'الشغلانات (${statement.jobsCount})',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
         if (statement.jobs.isEmpty)
           const Padding(
@@ -110,8 +134,13 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
   Widget _monthPicker() {
     return DropdownButtonFormField<String>(
       initialValue: _selectedMonth,
-      decoration: const InputDecoration(labelText: 'الشهر', border: OutlineInputBorder()),
-      items: _months.map((m) => DropdownMenuItem(value: m, child: Text(_monthLabel(m)))).toList(),
+      decoration: const InputDecoration(
+        labelText: 'الشهر',
+        border: OutlineInputBorder(),
+      ),
+      items: _months
+          .map((m) => DropdownMenuItem(value: m, child: Text(_monthLabel(m))))
+          .toList(),
       onChanged: (value) {
         if (value != null) _load(month: value);
       },
@@ -120,8 +149,12 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
 
   Widget _summaryCard(BuildContext context, MonthlyStatement statement) {
     final scheme = Theme.of(context).colorScheme;
+    final isDebt = statement.totals.netTechnicianDueCents < 0;
+    final foreground = isDebt
+        ? scheme.onErrorContainer
+        : scheme.onPrimaryContainer;
     return Card(
-      color: scheme.primaryContainer,
+      color: isDebt ? scheme.errorContainer : scheme.primaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -129,35 +162,45 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
           children: [
             Text(
               // «حتى هذه اللحظة» للشهر الجاري بس — الشهر المقفول رقمه نهائي.
-              statement.isCurrentMonth
-                  ? 'إجمالي مستحقاتك لحد دلوقتي'
-                  : 'إجمالي مستحقاتك عن ${_monthLabel(statement.month)}',
-              style: TextStyle(color: scheme.onPrimaryContainer),
+              isDebt
+                  ? 'مطلوب منك للمنصة عن شغل ${statement.isCurrentMonth ? 'الشهر لحد دلوقتي' : _monthLabel(statement.month)}'
+                  : statement.isCurrentMonth
+                  ? 'صافي حركة محفظتك من شغل الشهر لحد دلوقتي'
+                  : 'صافي حركة محفظتك عن ${_monthLabel(statement.month)}',
+              style: TextStyle(color: foreground),
             ),
             const SizedBox(height: 6),
             Text(
-              _egp(statement.totals.netTechnicianDueCents),
+              _egp(statement.totals.netTechnicianDueCents.abs()),
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: scheme.onPrimaryContainer,
-                    fontWeight: FontWeight.bold,
-                  ),
+                color: foreground,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'نصيبك ${_egp(statement.totals.grossTechnicianEarningCents)} · كاش استلمته ${_egp(statement.totals.cashCollectedCents)}',
+              style: TextStyle(fontSize: 12, color: foreground),
             ),
             const SizedBox(height: 8),
             Text(
               'من ${statement.monthStart} لـ ${statement.monthEnd}',
-              style: TextStyle(fontSize: 12, color: scheme.onPrimaryContainer.withValues(alpha: 0.75)),
+              style: TextStyle(
+                fontSize: 12,
+                color: foreground.withValues(alpha: 0.75),
+              ),
             ),
             if (statement.totals.customerDiscountCents > 0) ...[
               const SizedBox(height: 10),
               // طلب مالك صريح: الفني لازم يشوف بعينه إن الكوبونات ما اتخصمتش منه.
               Row(
                 children: [
-                  Icon(Icons.info_outline, size: 16, color: scheme.onPrimaryContainer),
+                  Icon(Icons.info_outline, size: 16, color: foreground),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       'فيه خصومات على العملاء بقيمة ${_egp(statement.totals.customerDiscountCents)} — الشركة تحمّلتها بالكامل، ومستحقاتك مش متأثرة بيها.',
-                      style: TextStyle(fontSize: 12, color: scheme.onPrimaryContainer),
+                      style: TextStyle(fontSize: 12, color: foreground),
                     ),
                   ),
                 ],
@@ -190,13 +233,19 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
           // شغلانة طاقم: السطور الجاية (السعر الأصلي، العمولة...) بتوصف الطلب كله مش نصيبك بس —
           // ده السياق اللي بيوضّح تكوين نصيبك، مش رقم مفروض يتجمع عليه (§90.1).
           _row('السعر الأصلي للخدمة', _egp(job.originalPriceCents)),
-          if (job.additionalWorkCents > 0) _row('زيادات أثناء الشغل', _egp(job.additionalWorkCents)),
-          if (job.levelPremiumCents > 0) _row('فرق مستواك (فني مميّز)', _egp(job.levelPremiumCents)),
+          if (job.additionalWorkCents > 0)
+            _row('زيادات أثناء الشغل', _egp(job.additionalWorkCents)),
+          if (job.levelPremiumCents > 0)
+            _row('فرق مستواك (فني مميّز)', _egp(job.levelPremiumCents)),
           if (job.customerDiscountCents > 0) ...[
             _row('خصم العميل', '− ${_egp(job.customerDiscountCents)}'),
             _row('اللي العميل دفعه', _egp(job.customerPaidCents)),
             // السطر ده مقصود يفضل ظاهر حتى وهو صفر — هو الإجابة على السؤال "الكوبون خصم مني؟".
-            _row('خصم محمّل عليك', _egp(job.discountBorneByTechnicianCents), highlight: true),
+            _row(
+              'خصم محمّل عليك',
+              _egp(job.discountBorneByTechnicianCents),
+              highlight: true,
+            ),
           ],
           const Divider(),
           // كان بيتحسب بطرح صافي مستحقك من الوعاء — غلط لشغلانات الطاقم (نصيبك مش الوعاء كله)
@@ -209,25 +258,60 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
                 : '+ ${_egp(job.platformCommissionCents.abs())} (الشركة تحمّلت الفرق)',
           ),
           if (job.refundReversalCents > 0)
-            _row('اتخصم بسبب استرداد للعميل', '− ${_egp(job.refundReversalCents)}', highlight: true),
-          _row('صافي مستحقك', _egp(job.netTechnicianDueCents), bold: true),
+            _row(
+              'اتخصم بسبب استرداد للعميل',
+              '− ${_egp(job.refundReversalCents)}',
+              highlight: true,
+            ),
+          _row('نصيبك من الشغل', _egp(job.grossTechnicianEarningCents)),
+          if (job.cashCollectedCents > 0)
+            _row(
+              'كاش استلمته من العميل',
+              '− ${_egp(job.cashCollectedCents)}',
+              highlight: true,
+            ),
+          _row(
+            job.netTechnicianDueCents < 0
+                ? 'مطلوب منك للمنصة بسبب الطلب'
+                : 'صافي أثر الطلب على محفظتك',
+            _egp(job.netTechnicianDueCents.abs()),
+            bold: true,
+            error: job.netTechnicianDueCents < 0,
+          ),
         ],
       ),
     );
   }
 
-  Widget _row(String label, String value, {bool bold = false, bool highlight = false}) {
+  Widget _row(
+    String label,
+    String value, {
+    bool bold = false,
+    bool highlight = false,
+    bool error = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
+          Text(
+            label,
+            style: TextStyle(
+              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
           Text(
             value,
             style: TextStyle(
-              fontWeight: bold || highlight ? FontWeight.bold : FontWeight.normal,
-              color: highlight ? Colors.green.shade700 : null,
+              fontWeight: bold || highlight
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+              color: error
+                  ? Theme.of(context).colorScheme.error
+                  : highlight
+                  ? Colors.green.shade700
+                  : null,
             ),
           ),
         ],
