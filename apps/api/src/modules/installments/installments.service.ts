@@ -14,7 +14,7 @@ import {
   InstallmentApplicationReviewedEvent,
   InstallmentApplicationSubmittedEvent,
 } from '../../common/events/installment.events';
-import { Order } from '../orders/entities/order.entity';
+import { Order, OrderPaymentStatus } from '../orders/entities/order.entity';
 import { SavedPaymentMethod } from '../payments/entities/saved-payment-method.entity';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { PaymentPoliciesService } from '../payment-policies/payment-policies.service';
@@ -40,7 +40,9 @@ export type InstallmentIneligibilityReason =
   | 'application_approved'
   | 'price_undetermined'
   | 'amount_out_of_range'
-  | 'no_plans';
+  | 'no_plans'
+  // بَقّة حقيقية اتلقطت (docs/08 §82) — الطلب اتحصّل بالفعل (كاش أو إلكتروني)، مفيش معنى يتقسّط.
+  | 'already_paid';
 
 export interface InstallmentOrderOptions {
   eligible: boolean;
@@ -289,6 +291,19 @@ export class InstallmentsService {
       return { eligible: false, reason_code: 'order_cancelled', reason_ar: 'الطلب ده متلغي', plans: [] };
     }
 
+    // بَقّة حقيقية اتلقطت (docs/08 §82، بلاغ مالك بلقطة شاشة لطلب مقبول ومعيّن له فني بالفعل):
+    // القيد الوحيد فوق كان حالة الطلب (order_status)، وده مش كافي — طلب مقبول ومعيّن له فني بالفعل
+    // ولسه من غير أي تحصيل (paymentStatus=unpaid) لازم يفضل مؤهّل (التقسيط مش مربوط بمرحلة معيّنة
+    // من دورة الطلب، installments/README.md §"الجدولة دورة حياة منفصلة"). لكن طلب **اتحصّل بالفعل**
+    // (كاش أو إلكتروني) مفيش أي معنى يعرضله يقسّط مبلغ اتحصّل خلاص.
+    if (
+      [OrderPaymentStatus.PAID, OrderPaymentStatus.PARTIALLY_REFUNDED, OrderPaymentStatus.REFUNDED].includes(
+        order.paymentStatus,
+      )
+    ) {
+      return { eligible: false, reason_code: 'already_paid', reason_ar: 'الطلب ده اتحصّل بالفعل', plans: [] };
+    }
+
     const [existingActive] = await this.dataSource.query<{ status: string }[]>(
       `SELECT status FROM installment_applications
        WHERE order_id = $1 AND status IN ('pending_review','approved') AND deleted_at IS NULL LIMIT 1`,
@@ -378,6 +393,15 @@ export class InstallmentsService {
       if (!order) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       if (['cancelled_by_customer', 'cancelled_by_system', 'cancelled_by_technician'].includes(order.orderStatus)) {
         throw new ApiException(ErrorCode.VAL_001, 'مينفعش تقسيط طلب متلغي', HttpStatus.BAD_REQUEST);
+      }
+      // نفس قيد listOptionsForOrder() فوق بالحرف (docs/08 §82) — لازم ينزل هنا كمان (الدالة دي
+      // مصدر الحقيقة الفعلي، listOptionsForOrder() بس بتعكسه قبل العرض).
+      if (
+        [OrderPaymentStatus.PAID, OrderPaymentStatus.PARTIALLY_REFUNDED, OrderPaymentStatus.REFUNDED].includes(
+          order.paymentStatus,
+        )
+      ) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده اتحصّل بالفعل — مينفعش يتقسّط', HttpStatus.BAD_REQUEST);
       }
       const priceCents = order.totalAmountCents - order.discountAmountCents;
       if (priceCents <= 0) {

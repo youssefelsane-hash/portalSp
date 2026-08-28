@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import Link from 'next/link';
 import {
   getMyOrder,
   cancelOrder,
@@ -12,6 +13,7 @@ import {
   declineQuoteItems,
   orderStatusLabelsAr,
   customerCancellableStatuses,
+  RESCHEDULABLE_ORDER_STATUSES,
   formatEgp,
   fetchCustomerCancellationReasons,
   OrderResponseDto,
@@ -22,6 +24,7 @@ import { getThreadForOrder, listMessages, sendMessage, MessageDto } from '@/lib/
 import { ChatSocketClient } from '@/lib/chat-socket';
 import { ApiError } from '@/lib/api-client';
 import { InstallmentSection } from './installment-section';
+import { RescheduleSection } from './reschedule-section';
 
 // ترتيب رحلة الطلب الطبيعية للعرض كخط زمني — الحالات الاستثنائية (إلغاء/نزاع) بتتعرض لوحدها.
 const TIMELINE_STATUSES = [
@@ -126,6 +129,19 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </a>
           )}
         </section>
+      )}
+
+      {/* بروفايل الفني وإعادة الجدولة (docs/08 §82 — توازي مع apps/customer-app) — مربوطين بس
+          بـtechnician_id، مش بظهور بيانات التواصل (اسم/تليفون الفني بيظهروا بس من accepted،
+          نفس order_detail_screen.dart's شرط: technicianId != null بس، صفر ربط بحالة الطلب). */}
+      {order.technician_id && (
+        <Link href={`/technicians/${order.technician_id}`} className="mt-4 block text-sm text-primary hover:underline">
+          بروفايل الفني
+        </Link>
+      )}
+
+      {order.technician_id && RESCHEDULABLE_ORDER_STATUSES.has(order.order_status) && (
+        <RescheduleSection authedFetch={authedFetch} orderId={order.id} onRescheduled={setOrder} />
       )}
 
       {order.order_status === 'awaiting_quote_approval' && (
