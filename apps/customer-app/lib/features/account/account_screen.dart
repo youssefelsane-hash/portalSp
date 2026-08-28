@@ -179,7 +179,7 @@ class _AccountScreenState extends State<AccountScreen> {
               SwitchListTile(
                 secondary: const Icon(Icons.fingerprint),
                 title: const Text('الدخول بالبصمة'),
-                subtitle: const Text('افتح صُنّاع ببصمتك بدل ما تستنى كود التحقق كل مرة'),
+                subtitle: const Text('افتح أسطى ببصمتك بدل ما تستنى كود التحقق كل مرة'),
                 value: _biometricEnabled,
                 onChanged: _toggleBiometric,
               ),

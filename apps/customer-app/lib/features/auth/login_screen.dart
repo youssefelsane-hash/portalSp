@@ -167,7 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (!widget.isModal) const SizedBox(height: 20),
                     Text(
                       widget.headline ??
-                          (_isRegisterMode ? 'اعمل حساب جديد' : 'أهلًا بيك في صُنّاع'),
+                          (_isRegisterMode ? 'اعمل حساب جديد' : 'أهلًا بيك في أسطى'),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
                     ),
@@ -373,7 +373,7 @@ class _BrandMarkState extends State<_BrandMark> {
           const _GradientBrandCircle(),
         const SizedBox(height: 14),
         Text(
-          'صُنّاع',
+          'أسطى',
           style: theme.textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w800,
             letterSpacing: 1,

@@ -10,7 +10,7 @@
     <!-- الدخول بالبصمة (docs/08 §17.22) — local_auth محتاجها عشان يفتح BiometricPrompt. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <application
-        android:label="technician_app"
+        android:label="أسطى فنيين"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

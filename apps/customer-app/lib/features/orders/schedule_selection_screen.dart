@@ -14,11 +14,21 @@ import '../../core/api_client.dart';
 // technician-eligibility.sql.ts). التاريخ بقى إجباري دايمًا — تقويم يفتح على طول، بلا خطوة اختيار
 // وسيطة، بالظبط زي مسار "اختار تاريخ تاني" القديم بلا أي تغيير فيه. أُضيف خيار "مرن" (نطاق أيام)
 // بجانبه — الباك-إند بيختار أقرب يوم فعليًا متاح جوّه النطاق (orders.service.ts، أقصى 14 يوم).
+//
+// **تصحيح تالت (docs/08 §84 جزء ج، طلب مالك صريح 2026-08-28)**: للخدمات اللي محتاجة وقت بداية
+// دقيق (requiresPreciseSchedule/requiresStartTimeOnly، ADR-0031 Slice B)، الساعة (+عدد الساعات
+// لـrequiresPreciseSchedule بس) بقت تُسأل هنا كمان — في نفس الخطوة، فوراً بعد اليوم — بدل ما
+// تتأجّل لحد CreateOrderScreen بعيد. طلب المالك حرفيًا: "خلي حاجات الوقت كلها تظهر مع بعض عادي
+// جدًا". **صفر تغيير على الحجوزات العادية (يوم بس)** — التوسيع ده مقصور تمامًا على الخدمات اللي
+// أصلاً بتحتاج وقت دقيق، عشان منرجعش لبَقّة ADR-0018 §2 (مطابقة بدقة الدقيقة لحجوزات عادية).
 class ScheduleChoice {
   final DateTime scheduledAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس (مفيش نطاق).
   final DateTime? rangeEnd;
-  const ScheduleChoice(this.scheduledAt, {this.rangeEnd});
+  // دقة الوقت (docs/08 §84 جزء ج) — مليانين بس لو requiresPreciseTime، وإلا null دايمًا.
+  final TimeOfDay? preciseTime;
+  final int? durationHours;
+  const ScheduleChoice(this.scheduledAt, {this.rangeEnd, this.preciseTime, this.durationHours});
 }
 
 // بداية اليوم المحلي (Africa/Cairo، نفس منطقة العمل الوحيدة للمشروع) — نفس التاريخ اللي هيتعرض
@@ -33,7 +43,18 @@ class ScheduleSelectionScreen extends StatefulWidget {
   // قدرة "نطاق أيام مرن" لكل خدمة (ADR-0028، docs/08 §42 Phase A.2) — لو false، كارت "مرن" بيتخفي
   // بدل ما العميل يختاره ويترفض من الباك-إند بعدين (orders.service.ts).
   final bool allowsDateRangeBooking;
-  const ScheduleSelectionScreen({super.key, required this.allowsDateRangeBooking});
+  // محتاجة وقت بداية دقيق (docs/08 §84 جزء ج) — لو true، كارت "الساعة" بيظهر بعد اختيار اليوم.
+  final bool requiresPreciseTime;
+  // محتاجة عدد الساعات كمان (requiresPreciseSchedule بس، مش requiresStartTimeOnly) — فرعية من
+  // requiresPreciseTime (مينفعش تبقى true من غيرها).
+  final bool requiresDurationHours;
+
+  const ScheduleSelectionScreen({
+    super.key,
+    required this.allowsDateRangeBooking,
+    this.requiresPreciseTime = false,
+    this.requiresDurationHours = false,
+  });
 
   @override
   State<ScheduleSelectionScreen> createState() => _ScheduleSelectionScreenState();
@@ -45,10 +66,23 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // مايصحّش يمنع العميل من اختيار موعد.
   int? _nearTermHours;
 
+  // حالة محلية بس للخدمات اللي محتاجة وقت دقيق (docs/08 §84 جزء ج) — الحجوزات العادية لسه بتاخد
+  // اليوم وتقفل الشاشة فورًا زي ما كانت دايمًا، صفر state إضافية ليها.
+  DateTime? _selectedDate;
+  DateTime? _selectedRangeEnd;
+  TimeOfDay? _selectedTime;
+  final _durationController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _loadBookingPolicy();
+  }
+
+  @override
+  void dispose() {
+    _durationController.dispose();
+    super.dispose();
   }
 
   // `/booking-policy` عام (`@Public()`) — فالشاشة دي بتقراه بنفسها بدل ما تستنى الشاشة اللي
@@ -73,7 +107,14 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
       lastDate: now.add(const Duration(days: 90)),
     );
     if (date == null || !context.mounted) return;
-    Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
+    if (!widget.requiresPreciseTime) {
+      Navigator.of(context).pop(ScheduleChoice(_startOfDay(date)));
+      return;
+    }
+    setState(() {
+      _selectedDate = _startOfDay(date);
+      _selectedRangeEnd = null;
+    });
   }
 
   Future<void> _pickFlexibleRange(BuildContext context) async {
@@ -93,7 +134,43 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     // أول 14 يوم من اختياره).
     final maxEnd = start.add(const Duration(days: _maxFlexibleRangeDays));
     if (end.isAfter(maxEnd)) end = maxEnd;
-    Navigator.of(context).pop(ScheduleChoice(start, rangeEnd: end));
+    if (!widget.requiresPreciseTime) {
+      Navigator.of(context).pop(ScheduleChoice(start, rangeEnd: end));
+      return;
+    }
+    setState(() {
+      _selectedDate = start;
+      _selectedRangeEnd = end;
+    });
+  }
+
+  Future<void> _pickTime(BuildContext context) async {
+    final picked = await showTimePicker(context: context, initialTime: _selectedTime ?? const TimeOfDay(hour: 10, minute: 0));
+    if (picked != null && mounted) setState(() => _selectedTime = picked);
+  }
+
+  String _formatDate(DateTime date) {
+    final two = (int n) => n.toString().padLeft(2, '0');
+    return '${two(date.day)}/${two(date.month)}/${date.year}';
+  }
+
+  bool get _canConfirm {
+    if (_selectedDate == null || _selectedTime == null) return false;
+    if (!widget.requiresDurationHours) return true;
+    final hours = int.tryParse(_durationController.text.trim());
+    return hours != null && hours > 0;
+  }
+
+  void _confirm() {
+    if (!_canConfirm) return;
+    Navigator.of(context).pop(
+      ScheduleChoice(
+        _selectedDate!,
+        rangeEnd: _selectedRangeEnd,
+        preciseTime: _selectedTime,
+        durationHours: widget.requiresDurationHours ? int.parse(_durationController.text.trim()) : null,
+      ),
+    );
   }
 
   @override
@@ -111,8 +188,11 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
               _ScheduleOptionCard(
                 icon: Icons.calendar_month_outlined,
                 title: 'اختار يوم محدد',
-                subtitle: 'حدد اليوم اللي يناسبك من الكالندر',
+                subtitle: _selectedDate != null && _selectedRangeEnd == null
+                    ? _formatDate(_selectedDate!)
+                    : 'حدد اليوم اللي يناسبك من الكالندر',
                 highlighted: true,
+                selected: _selectedDate != null && _selectedRangeEnd == null,
                 onTap: () => _pickSpecificDate(context),
               ),
               if (widget.allowsDateRangeBooking) ...[
@@ -120,8 +200,37 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
                 _ScheduleOptionCard(
                   icon: Icons.event_repeat_outlined,
                   title: 'مرن — اختار نطاق أيام',
-                  subtitle: 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
+                  subtitle: _selectedRangeEnd != null
+                      ? '${_formatDate(_selectedDate!)} — ${_formatDate(_selectedRangeEnd!)}'
+                      : 'هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره',
+                  selected: _selectedRangeEnd != null,
                   onTap: () => _pickFlexibleRange(context),
+                ),
+              ],
+              // خطوة الساعة (+عدد الساعات) — بتظهر بمجرد ما يختار العميل يوم، في نفس الشاشة دي
+              // مباشرة (docs/08 §84 جزء ج، طلب مالك صريح: "خلي حاجات الوقت كلها تظهر مع بعض").
+              if (widget.requiresPreciseTime && _selectedDate != null) ...[
+                const SizedBox(height: 12),
+                _ScheduleOptionCard(
+                  icon: Icons.schedule_outlined,
+                  title: 'الساعة',
+                  subtitle: _selectedTime != null ? _selectedTime!.format(context) : 'حدد وقت البداية',
+                  selected: _selectedTime != null,
+                  onTap: () => _pickTime(context),
+                ),
+                if (widget.requiresDurationHours) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _durationController,
+                    keyboardType: TextInputType.number,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(labelText: 'عدد الساعات المطلوبة', border: OutlineInputBorder()),
+                  ),
+                ],
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: _canConfirm ? _confirm : null,
+                  child: const Text('تأكيد الميعاد'),
                 ),
               ],
               // مكان التنبيه ده هنا مش في شاشة تأكيد الطلب (نقل مقصود، docs/08 §76-و، بلاغ
@@ -147,6 +256,7 @@ class _ScheduleOptionCard extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
   final bool highlighted;
+  final bool selected;
 
   const _ScheduleOptionCard({
     required this.icon,
@@ -154,13 +264,14 @@ class _ScheduleOptionCard extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.highlighted = false,
+    this.selected = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
-      color: highlighted ? scheme.primaryContainer : null,
+      color: selected ? scheme.primaryContainer : (highlighted ? scheme.primaryContainer : null),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
@@ -168,7 +279,7 @@ class _ScheduleOptionCard extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              Icon(icon, size: 32, color: highlighted ? scheme.onPrimaryContainer : scheme.primary),
+              Icon(icon, size: 32, color: selected || highlighted ? scheme.onPrimaryContainer : scheme.primary),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(

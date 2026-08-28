@@ -35,7 +35,7 @@ export default () => ({
   // (apps/admin شغال على 3001). لازم تتظبط صح في الإنتاج (rpID = دومين الأدمن الحقيقي بدون
   // بروتوكول، origin = الرابط الكامل بالـhttps) وإلا كل ceremony هيترفض من المتصفح نفسه.
   webauthn: {
-    rpName: process.env.WEBAUTHN_RP_NAME ?? 'صُنّاع — لوحة التحكم',
+    rpName: process.env.WEBAUTHN_RP_NAME ?? 'أسطى — لوحة التحكم',
     rpId: process.env.WEBAUTHN_RP_ID ?? 'localhost',
     origin: process.env.WEBAUTHN_ORIGIN ?? 'http://localhost:3001',
   },

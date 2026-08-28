@@ -18,6 +18,6 @@ export interface DefaultBrandingAsset {
 }
 
 export const DEFAULT_BRANDING_ASSETS: Record<BrandingAssetType, DefaultBrandingAsset> = {
-  [BrandingAssetType.PRIMARY_LOGO]: { url: placeholderSvgDataUri('baytak', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
-  [BrandingAssetType.SPLASH]: { url: placeholderSvgDataUri('baytak', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
+  [BrandingAssetType.PRIMARY_LOGO]: { url: placeholderSvgDataUri('OSTA', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
+  [BrandingAssetType.SPLASH]: { url: placeholderSvgDataUri('OSTA', '#0F172A', '#FFFFFF'), width_px: 240, height_px: 80 },
 };

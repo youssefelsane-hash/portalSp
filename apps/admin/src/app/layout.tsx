@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "لوحة إدارة baytak",
-  description: "لوحة تحكم عمليات baytak — العملاء، الفنيين، الطلبات، الأرباح، الشكاوى، الإحصائيات",
+  title: "لوحة إدارة OSTA",
+  description: "لوحة تحكم عمليات OSTA — العملاء، الفنيين، الطلبات، الأرباح، الشكاوى، الإحصائيات",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

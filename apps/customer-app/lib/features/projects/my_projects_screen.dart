@@ -183,7 +183,7 @@ class _MyProjectsScreenState extends State<MyProjectsScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'صوّر المكان واحكي لنا اللي محتاجه،\nوصُنّاع ترتب لك المعاينة والعرض والمراحل.',
+                'صوّر المكان واحكي لنا اللي محتاجه،\nوأسطى ترتب لك المعاينة والعرض والمراحل.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.grey),
               ),

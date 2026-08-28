@@ -137,7 +137,7 @@ class AuthRepository extends ChangeNotifier {
   /// حقيقي من `AuthService.refresh()` مش افتراض محلي) — الكولر (شاشة القفل) بيوجّه المستخدم
   /// لمسار OTP العادي في الحالتين.
   Future<bool> unlockWithBiometrics() async {
-    final authenticated = await BiometricAuthService.authenticate(reason: 'افتح صُنّاع ببصمتك');
+    final authenticated = await BiometricAuthService.authenticate(reason: 'افتح أسطى ببصمتك');
     if (!authenticated) return false;
 
     _biometricUnlockPending = false;

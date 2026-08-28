@@ -290,7 +290,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
             ص
           </div>
-          <span className="font-semibold">صُنّاع — إدارة</span>
+          <span className="font-semibold">أسطى — إدارة</span>
         </div>
         <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 pb-4">
           {visibleGroups.map((group) => (

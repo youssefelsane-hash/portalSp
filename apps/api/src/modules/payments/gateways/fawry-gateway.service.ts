@@ -114,7 +114,7 @@ export class FawryGatewayService implements FawryGateway {
           customerName: input.customerName,
           amount: Number(amountStr),
           currencyCode: 'EGP',
-          description: `طلب baytak ${input.orderNumber}`,
+          description: `طلب أسطى ${input.orderNumber}`,
           paymentMethod: 'PAYATFAWRY',
           chargeItems: [{ itemId: '1', description: `طلب ${input.orderNumber}`, price: Number(amountStr), quantity: 1 }],
           chargeExpiry: this.referenceExpiryHours * 60,
