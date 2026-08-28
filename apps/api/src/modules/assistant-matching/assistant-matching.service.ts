@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
 import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { technicianServiceQualificationCondition } from '../technicians/technician-eligibility.sql';
 import {
   ASSISTANT_MATCHING_ESCALATED_EVENT,
   AssistantMatchingEscalatedEvent,
@@ -175,14 +176,12 @@ export class AssistantMatchingService {
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       WHERE tp.verification_status = 'approved'
-        AND (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tc
-            WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
-              AND tc.is_active = true AND tc.verification_status = 'approved'
-          )
-        )
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 's.id',
+          categoryIdExpr: 's.category_id',
+          directServiceAlias: 'ts',
+        })}
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id != ALL($6::uuid[])

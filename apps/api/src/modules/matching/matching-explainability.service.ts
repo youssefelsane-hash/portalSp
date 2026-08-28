@@ -13,6 +13,7 @@ import {
   classifyTechnicianCapacity,
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
+  technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { MatchingService } from './matching.service';
 
@@ -119,14 +120,12 @@ export class MatchingExplainabilityService {
       `
       SELECT
         (tp.verification_status = 'approved') AS verified,
-        (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tc
-            WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
-              AND tc.is_active = true AND tc.verification_status = 'approved'
-          )
-        ) AS category_eligible,
+        (${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 's.id',
+          categoryIdExpr: 's.category_id',
+          directServiceAlias: 'ts',
+        })}) AS category_eligible,
         EXISTS (
           SELECT 1 FROM technician_zones tz WHERE tz.technician_id = tp.id AND tz.service_zone_id = $2 AND tz.is_active = true
         ) AS zone_eligible,
@@ -302,14 +301,12 @@ export class MatchingExplainabilityService {
           AND ts.verification_status = 'approved'
         JOIN services s ON s.id = $1
         WHERE tp.deleted_at IS NULL AND tp.verification_status = 'approved'
-          AND (
-            ts.id IS NOT NULL
-            OR EXISTS (
-              SELECT 1 FROM technician_categories tc
-              WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
-                AND tc.is_active = true AND tc.verification_status = 'approved'
-            )
-          )
+          AND ${technicianServiceQualificationCondition({
+            technicianIdExpr: 'tp.id',
+            serviceIdExpr: 's.id',
+            categoryIdExpr: 's.category_id',
+            directServiceAlias: 'ts',
+          })}
       ),
       zone_pool AS (
         SELECT p.id FROM pool p

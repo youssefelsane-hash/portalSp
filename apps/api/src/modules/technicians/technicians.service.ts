@@ -24,7 +24,12 @@ import { PortfolioLinksService } from './portfolio-links.service';
 import { TechnicianCertificate } from './entities/technician-certificate.entity';
 import { TechnicianCertificatesService } from './technician-certificates.service';
 import { SettingsService } from '../settings/settings.service';
-import { describeTechnicianCapacity, technicianAvailabilityCondition, technicianScheduleConflictCondition } from './technician-eligibility.sql';
+import {
+  describeTechnicianCapacity,
+  technicianAvailabilityCondition,
+  technicianScheduleConflictCondition,
+  technicianServiceQualificationCondition,
+} from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TechnicianBookingListItem {
@@ -444,14 +449,12 @@ export class TechniciansService {
         -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
         -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
         -- الثلاثة بيطبّقوها.
-        AND (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tc
-            WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
-              AND tc.is_active = true AND tc.verification_status = 'approved'
-          )
-        )
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          directServiceAlias: 'ts',
+        })}
         -- بَقّة حقيقية اتلقطت (بلاغ المالك، 2026-08-19، سيناريو "يوسف") — القايمة دي كانت بترشّح
         -- فني للعرض/الاختيار اليدوي حتى لو معندوش current_location خالص (لسه مفتحش تطبيق الفني
         -- أبدًا)، بينما findEligibleTechnicians() في matching.service.ts (اللي فعليًا بتوزّع
@@ -596,14 +599,12 @@ export class TechniciansService {
       JOIN services svc ON svc.id = $1
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tc.is_active = true
-        AND (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories catg
-            WHERE catg.technician_id = tp.id AND catg.category_id = svc.category_id
-              AND catg.is_active = true AND catg.verification_status = 'approved'
-          )
-        )
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          directServiceAlias: 'ts',
+        })}
         ${technicianAvailabilityCondition({
           technicianIdExpr: 'tp.id',
           scheduledAtParam: '$4',
@@ -728,14 +729,12 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        AND (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tc
-            WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
-              AND tc.is_active = true AND tc.verification_status = 'approved'
-          )
-        )
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          directServiceAlias: 'ts',
+        })}
         AND tp.current_location IS NOT NULL
         AND NOT (tp.id = ANY($9::uuid[]))
         AND ($10::boolean IS NOT TRUE OR tlc.eligible_for_team_booking = true)
@@ -843,14 +842,12 @@ export class TechniciansService {
         JOIN services svc ON svc.id = $1
         CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
         WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-          AND (
-            ts.id IS NOT NULL
-            OR EXISTS (
-              SELECT 1 FROM technician_categories tc
-              WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
-                AND tc.is_active = true AND tc.verification_status = 'approved'
-            )
-          )
+          AND ${technicianServiceQualificationCondition({
+            technicianIdExpr: 'tp.id',
+            serviceIdExpr: 'svc.id',
+            categoryIdExpr: 'svc.category_id',
+            directServiceAlias: 'ts',
+          })}
           AND tp.current_location IS NOT NULL
           AND ($9::uuid IS NULL OR tp.id = $9)
           ${technicianAvailabilityCondition({

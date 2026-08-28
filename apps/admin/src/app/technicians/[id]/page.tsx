@@ -105,6 +105,24 @@ interface Technician360Response {
   preferred_crew_as_member: { id: string; technician_id: string; technician_code: string; full_name: string; status: string }[];
 }
 
+/**
+ * صف واحد في «الشغلانات المسموح بيها» (ADR-0049، docs/08 §86).
+ *
+ * مطابق لـ`TechnicianServicePermissionRow` في
+ * `apps/api/src/modules/technicians/technician-service-exclusions.service.ts`. محلي عمدًا —
+ * الشكل ده ليه مستهلك واحد بس (الصفحة دي)، فتصديره في `@baytak/shared-types` كان هيضيف خطوة
+ * بناء يدوية بلا أي مكسب.
+ */
+interface TechnicianServicePermissionRow {
+  service_id: string;
+  service_name_ar: string;
+  category_id: string;
+  category_name_ar: string;
+  is_excluded: boolean;
+  exclusion_reason: string | null;
+  excluded_at: string | null;
+}
+
 export default function TechnicianDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { isLoading, authedFetch, hasPermission } = useAuth();
@@ -128,6 +146,9 @@ export default function TechnicianDetailPage() {
   // مباشرة من هنا، أو يراجع طلب تصريح ذاتي قائم من الفني لنفس الفئة. أي خدمة جديدة تتضاف تحت فئة
   // معتمدة للفني تبقى متاحة له تلقائيًا (matching.service.ts's category_id join).
   const [categories, setCategories] = useState<TechnicianCategoryResponseDto[] | null>(null);
+  // ADR-0049 / docs/08 §86 — الشغلانات المسموح بيها للفني (قائمة حجب: الديفولت الكل مسموح).
+  const [servicePermissions, setServicePermissions] = useState<TechnicianServicePermissionRow[] | null>(null);
+  const [savingPermission, setSavingPermission] = useState<string | null>(null);
   const [allCategories, setAllCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
   const [newCategoryId, setNewCategoryId] = useState('');
   const [categoryError, setCategoryError] = useState<string | null>(null);
@@ -178,6 +199,10 @@ export default function TechnicianDetailPage() {
 
   function loadCategories() {
     authedFetch<TechnicianCategoryResponseDto[]>(`/admin/technicians/${id}/categories`).then(setCategories);
+    authedFetch<TechnicianServicePermissionRow[]>(`/admin/technicians/${id}/service-permissions`)
+      .then(setServicePermissions)
+      // القسم ده تحسين تشغيلي — فشل تحميله مايكسرش صفحة الفني كلها.
+      .catch(() => setServicePermissions([]));
   }
 
   useEffect(() => {
@@ -387,6 +412,31 @@ export default function TechnicianDetailPage() {
       setCategoryError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
     } finally {
       setSavingCategory(false);
+    }
+  }
+
+  // حجب/سماح خدمة (ADR-0049). الاتنين بيرجّعوا القايمة المحدّثة من السيرفر بدل ما نعدّل الحالة
+  // محليًا — مصدر واحد للحقيقة، وأي تعارض (خدمة اتشالت من الكتالوج مثلاً) بيبان فورًا.
+  async function handleToggleServicePermission(row: TechnicianServicePermissionRow, reason?: string) {
+    setSavingPermission(row.service_id);
+    try {
+      const updated = row.is_excluded
+        ? await authedFetch<TechnicianServicePermissionRow[]>(
+            `/admin/technicians/${id}/service-permissions/${row.service_id}`,
+            { method: 'DELETE' },
+          )
+        : await authedFetch<TechnicianServicePermissionRow[]>(`/admin/technicians/${id}/service-permissions/exclude`, {
+            method: 'POST',
+            body: JSON.stringify({ service_id: row.service_id, reason }),
+          });
+      setServicePermissions(updated);
+      setError(null);
+    } catch (err) {
+      // نفس أسلوب باقي الصفحة (`setError`) مش toast — الصفحة دي كلها بتعرض أخطاءها في مكان
+      // واحد فوق، وخلط الأسلوبين بيخلّي المستخدم يدوّر على الرسالة في مكانين.
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setSavingPermission(null);
     }
   }
 
@@ -1163,6 +1213,80 @@ export default function TechnicianDetailPage() {
                             إزالة
                           </Button>
                         ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* الشغلانات المسموح بيها (ADR-0049، docs/08 §86) — جنب كارت التخصصات مباشرة عمدًا:
+            ده نفس القرار بدقة أعلى («الراجل ده سبّاك، بس مش هدّيله تسليك مجاري»)، وفصله في تبويب
+            بعيد كان هيخلّي الأدمن يظبط التخصص وينسى إن فيه طبقة تانية أصلاً. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>الشغلانات المسموح بيها</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-sm text-muted-foreground">
+              الفني بياخد <strong>كل</strong> شغلانات تخصصاته المعتمدة افتراضيًا. لو فيه شغلانة
+              معيّنة مش عايزها توصله، احجبها من هنا — وهو مش هيتخطر بيه، بس الطلبات دي مش هتوصله
+              ومش هيظهر للعملاء عليها.
+            </p>
+            {!servicePermissions ? (
+              <p className="text-sm text-muted-foreground">جاري التحميل…</p>
+            ) : servicePermissions.length === 0 ? (
+              <EmptyState title="مفيش شغلانات — اعتمد تخصص للفني الأول" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>الشغلانة</TableHead>
+                    <TableHead>التخصص</TableHead>
+                    <TableHead>الحالة</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {servicePermissions.map((row) => (
+                    <TableRow key={row.service_id}>
+                      <TableCell>{row.service_name_ar}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{row.category_name_ar}</TableCell>
+                      <TableCell>
+                        <Badge variant={row.is_excluded ? 'destructive' : 'secondary'}>
+                          {row.is_excluded ? 'محجوبة' : 'مسموحة'}
+                        </Badge>
+                        {row.is_excluded && row.exclusion_reason && (
+                          <p className="mt-1 text-xs text-muted-foreground">{row.exclusion_reason}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-end">
+                        {row.is_excluded ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={savingPermission === row.service_id}
+                            onClick={() => handleToggleServicePermission(row)}
+                          >
+                            ارفع الحجب
+                          </Button>
+                        ) : (
+                          <PromptDialog
+                            trigger={
+                              <Button size="sm" variant="ghost" className="text-destructive" disabled={savingPermission === row.service_id}>
+                                احجبها
+                              </Button>
+                            }
+                            title={`حجب "${row.service_name_ar}" عن الفني`}
+                            label="سبب الحجب (للإدارة بس)"
+                            minLength={0}
+                            confirmLabel="احجب"
+                            destructive
+                            onConfirm={(reason) => handleToggleServicePermission(row, reason)}
+                          />
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

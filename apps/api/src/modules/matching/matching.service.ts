@@ -24,6 +24,7 @@ import {
   classifyTechnicianCapacity,
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
+  technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
@@ -332,16 +333,12 @@ export class MatchingService {
           AND member.verification_status = 'approved'
           AND member.deleted_at IS NULL
           AND member.current_location IS NOT NULL
-          AND (
-            member_service.id IS NOT NULL
-            OR EXISTS (
-              SELECT 1 FROM technician_categories member_category
-              WHERE member_category.technician_id = member.id
-                AND member_category.category_id = s.category_id
-                AND member_category.is_active = true
-                AND member_category.verification_status = 'approved'
-            )
-          )
+          AND ${technicianServiceQualificationCondition({
+            technicianIdExpr: 'member.id',
+            serviceIdExpr: 's.id',
+            categoryIdExpr: 's.category_id',
+            directServiceAlias: 'member_service',
+          })}
           ${technicianAvailabilityCondition({
             technicianIdExpr: 'member.id',
             scheduledAtParam: '$10',
@@ -383,14 +380,12 @@ export class MatchingService {
       WHERE tp.verification_status = 'approved'
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
         -- بمستوى الفئة كلها (technician_categories).
-        AND (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tc
-            WHERE tc.technician_id = tp.id AND tc.category_id = s.category_id
-              AND tc.is_active = true AND tc.verification_status = 'approved'
-          )
-        )
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 's.id',
+          categoryIdExpr: 's.category_id',
+          directServiceAlias: 'ts',
+        })}
         -- ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل (الفني متاح
         -- افتراضيًا Opt-out، مش محتاج يدوس زرار كل يوم). $8 (ignoreAvailabilityFilter) بقى
         -- no-op فعليًا، متسيّب في التوقيع بس (استخدامه القديم كان مقصور على ده بالظبط) — الشرط
