@@ -55,7 +55,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showNewAddressForm, setShowNewAddressForm] = useState(false);
 
-  // اختيار الفني قبل الحجز (Script 3 §32-35) — "خلي صُنّاع يختار" افتراضي/أساسي، "اختار بنفسك"
+  // اختيار الفني قبل الحجز (Script 3 §32-35) — "خلي أسطى يختار" افتراضي/أساسي، "اختار بنفسك"
   // ثانوي، وبيظهر بس لو الخدمة فعلاً بتسمح بأكتر من فني (نفس منطق showBookingModeSelector في
   // apps/customer-app's catalog_navigation.dart — مفيش داعي نعرض اختيار لخدمة مفيهاش بدائل).
   const [technicianChoiceMode, setTechnicianChoiceMode] = useState<'auto' | 'manual'>('auto');
@@ -471,7 +471,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 technicianChoiceMode === 'auto' ? 'border-primary bg-primary/5' : 'border-border'
               }`}
             >
-              <p className="font-medium text-primary">خلي صُنّاع يختار</p>
+              <p className="font-medium text-primary">خلي أسطى يختار</p>
               <p className="text-sm text-muted">أسرع فني متاح بالمنطقة، بأفضل تقييم</p>
             </button>
             <button

@@ -21,7 +21,7 @@ class BaytakApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AuthRepository()..init(),
       child: MaterialApp(
-        title: 'صُنّاع',
+        title: 'أسطى',
         debugShowCheckedModeBanner: false,
         navigatorKey: rootNavigatorKey,
         theme: AppTheme.light(),

@@ -44,7 +44,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
   Future<void> _share(String token) async {
     await SharePlus.instance.share(
       ShareParams(
-        text: 'استخدم كود الترشيح بتاعي "$token" عشان تحجز أول خدمة معايا على تطبيق baytak! 🛠️',
+        text: 'استخدم كود الترشيح بتاعي "$token" عشان تحجز أول خدمة معايا على تطبيق أسطى! 🛠️',
       ),
     );
   }

@@ -119,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('صُنّاع', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
+                  Text('أسطى', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
                   const SizedBox(height: 8),
                   Text(
                     _otpSent

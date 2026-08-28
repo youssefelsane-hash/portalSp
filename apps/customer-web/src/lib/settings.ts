@@ -12,3 +12,11 @@ export const fetchHeroBackground = async (): Promise<BrandingAssetDto> => {
   const payload = await apiFetch<Record<string, BrandingAssetDto>>('/branding', null);
   return payload.splash;
 };
+
+// بَقّة حقيقية اتلقطت (بلاغ مالك بلقطة شاشة، docs/08 §84 جزء أ) — customer-web كان التطبيق
+// الوحيد اللي مبيعرضش لوجو حقيقي خالص (site-header.tsx كان نص "صُنّاع" مباشرة، صفر استدعاء
+// لـGET /branding) بعكس customer-app اللي بيجيب ويعرض primary_logo فعليًا (branding_repository.dart).
+export const fetchLogo = async (): Promise<BrandingAssetDto> => {
+  const payload = await apiFetch<Record<string, BrandingAssetDto>>('/branding', null);
+  return payload.primary_logo;
+};

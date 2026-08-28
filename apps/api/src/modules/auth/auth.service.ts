@@ -135,7 +135,7 @@ export class AuthService {
     const result = await this.smsDispatcher.send({
       userId: '', // مش موجود بعد (OTP ممكن يكون لتسجيل جديد) — TwilioSmsDispatcher.send() مبيقراش الحقل ده أصلاً
       channel: NotificationChannel.SMS,
-      titleAr: 'كود التحقق — baytak',
+      titleAr: 'كود التحقق — OSTA',
       bodyAr: `كودك: ${code} — صالح لمدة ${expiryMinutes} دقيقة. متشاركوش الكود ده مع حد.`,
       deepLink: null,
       targets: [dto.phone_number],

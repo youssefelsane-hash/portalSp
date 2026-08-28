@@ -429,7 +429,7 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
         // "المهمة الحالية" (قايمة الطلبات المتاحة) زي ما الطلب الأصلي نص عليه بالحرف.
         drawer: const _TechnicianDrawer(),
         appBar: AppBar(
-          title: const Text('صُنّاع — الفني'),
+          title: const Text('أسطى — الفني'),
           actions: [
             // صندوق إشعارات داخل التطبيق (docs/08) — كانت فجوة موثّقة صراحة: الـendpoints
             // كانت شغالة ومختبرة من زمان بس مفيش شاشة كانت بتستخدمها خالص.
@@ -1307,7 +1307,7 @@ class _TechnicianDrawer extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     Text(
-                      'صُنّاع — الفني',
+                      'أسطى — الفني',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],

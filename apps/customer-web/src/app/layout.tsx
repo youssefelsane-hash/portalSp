@@ -15,7 +15,7 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: 'صُنّاع — خدمات منزلية موثوقة',
+  title: 'أسطى — خدمات منزلية موثوقة',
   description: 'احجز صنايعي معتمد لأي شغلانة في البيت — سعر واضح، تتبّع لحظي، دفع آمن.',
   manifest: '/manifest.webmanifest',
 };

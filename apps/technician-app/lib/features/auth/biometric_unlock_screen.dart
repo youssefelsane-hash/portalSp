@@ -43,7 +43,7 @@ class _BiometricUnlockScreenState extends State<BiometricUnlockScreen> {
             children: [
               const Icon(Icons.fingerprint, size: 96),
               const SizedBox(height: 24),
-              const Text('افتح صُنّاع ببصمتك', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const Text('افتح أسطى ببصمتك', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               const Text('عشان نحافظ على أمان حسابك حتى لو حد تاني ماسك موبايلك', textAlign: TextAlign.center),
               const SizedBox(height: 32),

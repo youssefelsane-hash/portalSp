@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Customer App</string>
+	<string>أسطى</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -29,7 +29,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>محتاجين موقعك عشان نحدد عنوانك بدقة على الخريطة.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>استخدم Face ID عشان تفتح صُنّاع بسرعة وأمان بدل ما تستنى كود التحقق كل مرة.</string>
+	<string>استخدم Face ID عشان تفتح أسطى بسرعة وأمان بدل ما تستنى كود التحقق كل مرة.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -66,7 +66,7 @@ export const envValidationSchema = Joi.object({
   // اتسيب فاضي تمامًا (مش متسجّل خالص، مش بس ='localhost' صراحة) في الإنتاج، السيرفر كان بيقلع
   // "healthy" بـWebAuthn شغال بقيم localhost حقيقية — نفس فئة البَقّة اللي بند 16 بيعالجها
   // لـSTORAGE_PROVIDER/Twilio. `.required()` في الـthen بيغلق الفجوة.
-  WEBAUTHN_RP_NAME: Joi.string().default('صُنّاع — لوحة التحكم'),
+  WEBAUTHN_RP_NAME: Joi.string().default('أسطى — لوحة التحكم'),
   WEBAUTHN_RP_ID: Joi.string()
     .default('localhost')
     .when('NODE_ENV', { is: PRODUCTION_LIKE_ENV, then: Joi.string().invalid('localhost').required() }),

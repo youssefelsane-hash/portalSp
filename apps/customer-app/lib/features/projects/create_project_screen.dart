@@ -54,7 +54,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('ابدأ مشروعك مع صُنّاع')),
+        appBar: AppBar(title: const Text('ابدأ مشروعك مع أسطى')),
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(

@@ -15,7 +15,7 @@ export class WelcomeNotificationListener {
       await this.notificationsService.notify({
         userId: event.userId,
         notificationType: 'welcome',
-        titleAr: `أهلاً بيك في BAYTAK يا ${event.fullName}`,
+        titleAr: `أهلاً بيك في OSTA يا ${event.fullName}`,
         bodyAr: 'حسابك اتعمل بنجاح. جاهز تطلب أول خدمة؟',
       });
     } catch (err) {

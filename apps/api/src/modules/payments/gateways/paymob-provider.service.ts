@@ -237,7 +237,7 @@ export class PaymobProvider implements PaymentProvider, OnModuleInit {
             Number(this.integrationIdCard),
             ...(this.integrationIdMobileWallet ? [Number(this.integrationIdMobileWallet)] : []),
           ],
-          items: [{ name: `طلب ${input.orderNumber}`, amount: input.amountCents, description: `baytak — ${input.orderNumber}`, quantity: 1 }],
+          items: [{ name: `طلب ${input.orderNumber}`, amount: input.amountCents, description: `أسطى — ${input.orderNumber}`, quantity: 1 }],
           billing_data: {
             first_name: input.customerFirstName || 'NA',
             last_name: input.customerLastName || 'NA',
