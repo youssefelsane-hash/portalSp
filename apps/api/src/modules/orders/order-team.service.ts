@@ -8,7 +8,11 @@ import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../
 import { TechnicianLevel } from '../technicians/entities/technician-profile.entity';
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
-import { TechnicianCapacityTier, classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
+import {
+  TechnicianCapacityTier,
+  classifyTechnicianCapacity,
+  technicianServiceQualificationCondition,
+} from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { SettingsService } from '../settings/settings.service';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
@@ -313,14 +317,12 @@ export class OrderTeamService {
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND tp.current_location IS NOT NULL
         AND tp.id != $2
-        AND (
-          ts.id IS NOT NULL
-          OR EXISTS (
-            SELECT 1 FROM technician_categories tc
-            WHERE tc.technician_id = tp.id AND tc.category_id = svc.category_id
-              AND tc.is_active = true AND tc.verification_status = 'approved'
-          )
-        )
+        AND ${technicianServiceQualificationCondition({
+          technicianIdExpr: 'tp.id',
+          serviceIdExpr: 'svc.id',
+          categoryIdExpr: 'svc.category_id',
+          directServiceAlias: 'ts',
+        })}
         AND NOT EXISTS (SELECT 1 FROM order_team_members otm WHERE otm.order_id = $1 AND otm.technician_id = tp.id)
         AND CASE tp.current_level
               WHEN 'new' THEN 0 WHEN 'verified' THEN 1 WHEN 'professional' THEN 2

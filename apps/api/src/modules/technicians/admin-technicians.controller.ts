@@ -20,6 +20,8 @@ import { RejectTechnicianDto } from './dto/reject-technician.dto';
 import { ApproveTechnicianServiceDto, RejectTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { toTechnicianServiceResponseDto } from './dto/technician-service-response.dto';
 import { RejectTechnicianCategoryDto } from './dto/review-technician-category.dto';
+import { ExcludeTechnicianServiceDto } from './dto/exclude-technician-service.dto';
+import { TechnicianServiceExclusionsService } from './technician-service-exclusions.service';
 import { SelfDeclareCategoryDto } from './dto/self-declare-category.dto';
 import { toTechnicianCategoryResponseDto } from './dto/technician-category-response.dto';
 import { TechnicianCategoriesService } from './technician-categories.service';
@@ -60,6 +62,9 @@ export class AdminTechniciansController {
     // ADR-0038 — آخر بند عمدًا (نفس فلسفة باقي الإضافات المتأخرة): أقل بلاست-رديوس على
     // السبيكات اللي بتبني الكولر بـpositional args.
     private readonly earningsService: TechnicianEarningsService,
+    // ADR-0049 — نفس القاعدة اللي فوق بالظبط: الإضافة الجديدة بتتحط آخر واحدة، عشان أي spec
+    // بيبني الكولر بـpositional args ما يتكسرش.
+    private readonly serviceExclusionsService: TechnicianServiceExclusionsService,
   ) {}
 
   @Get()
@@ -390,6 +395,43 @@ export class AdminTechniciansController {
   ) {
     await this.technicianCategoriesService.adminRemoveCategory(admin.sub, id, categoryId, audit);
     return { category_id: categoryId, removed: true };
+  }
+
+  /**
+   * الشغلانات المسموح بيها للفني (ADR-0049، docs/08 §86).
+   *
+   * بترجّع **كل** خدمات فئاته المعتمدة ومعاها علامة محجوب — الديفولت إن الكل مسموح، والأدمن
+   * بيحجب اللي يختاره. `technicians.approve` نفس صلاحية إدارة فئاته بالظبط: ده نفس نوع القرار
+   * (إيه اللي الراجل ده مسموح يشتغله)، بس بدقة أعلى.
+   */
+  @Get(':id/service-permissions')
+  @RequirePermission('technicians.approve')
+  async listServicePermissions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.serviceExclusionsService.listForTechnician(id);
+  }
+
+  @Post(':id/service-permissions/exclude')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async excludeService(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ExcludeTechnicianServiceDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.serviceExclusionsService.exclude(admin.sub, id, dto.service_id, dto.reason?.trim() || null, audit);
+  }
+
+  @Delete(':id/service-permissions/:serviceId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('technicians.approve')
+  async allowService(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('serviceId', ParseUUIDPipe) serviceId: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    return this.serviceExclusionsService.allow(admin.sub, id, serviceId, audit);
   }
 
   @Get(':id')

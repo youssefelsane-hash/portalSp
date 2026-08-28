@@ -5,7 +5,11 @@ import { BookingMode, Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
-import { classifyTechnicianCapacity, technicianAvailabilityCondition } from './technician-eligibility.sql';
+import {
+  classifyTechnicianCapacity,
+  technicianAvailabilityCondition,
+  technicianServiceQualificationCondition,
+} from './technician-eligibility.sql';
 
 // نفس fallback matching.service.ts وtechnicians.service.ts — راجع ADR-0018 §2/§9.
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -136,19 +140,11 @@ export class TechnicianAssignmentGuardService {
          -- ADR-0018 §8 — خدمة معتمدة مباشرة أو فئة الخدمة معتمدة كلها (technician_categories) —
          -- نفس القاعدة المطبّقة في matching.service.ts وtechnicians.service.ts's
          -- listForServiceBooking() وassistant-matching.service.ts.
-         (
-           EXISTS (
-             SELECT 1 FROM technician_services
-             WHERE technician_id = $1 AND service_id = $2 AND is_active = true
-               AND verification_status = 'approved'
-           )
-           OR EXISTS (
-             SELECT 1 FROM technician_categories tc
-             JOIN services s ON s.id = $2
-             WHERE tc.technician_id = $1 AND tc.category_id = s.category_id
-               AND tc.is_active = true AND tc.verification_status = 'approved'
-           )
-         ) AS has_service,
+         (${technicianServiceQualificationCondition({
+           technicianIdExpr: '$1',
+           serviceIdExpr: '$2',
+           categoryIdExpr: '(SELECT category_id FROM services WHERE id = $2)',
+         })}) AS has_service,
          EXISTS (
            SELECT 1 FROM technician_zones
            WHERE technician_id = $1 AND service_zone_id = $3 AND is_active = true

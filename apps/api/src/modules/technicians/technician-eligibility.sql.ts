@@ -410,3 +410,61 @@ export async function describeTechnicianCapacity(
     occupiedTo: fromDate,
   };
 }
+
+/**
+ * شرط SQL موحّد **لتأهيل الفني للخدمة** (ADR-0018 §8 + ADR-0049) — نفس فلسفة
+ * `technicianAvailabilityCondition()` فوق بالظبط: مصدر واحد بدل نسخ ولصق.
+ *
+ * **ليه الدالة دي اتعملت أصلاً**: الشرط ده (`technician_services` مباشر **أو**
+ * `technician_categories` للفئة) كان مكتوب حرفيًا في **تسع** استعلامات مختلفة — التوزيع الفعلي،
+ * قوايم اختيار العميل (تلاتة)، تعيين الأدمن القسري، إضافة عضو فريق، مطابقة المساعدين، وشاشتين
+ * تشخيص. وتعليق في `technicians.service.ts` كان بيعترف بالتكرار ده صراحةً.
+ *
+ * التكرار ده كان مقبول طول ما القاعدة قاعدة واحدة بسيطة. أول ما اتضاف ليها **الحجب** (ADR-0049)
+ * بقى خطر حقيقي: تطبيقه على تمنية من تسعة معناه إن الفني المحجوب يفضل بيوصله الشغل من المسار
+ * المنسي، **والأدمن شايف في الواجهة إنه محجوب** — تسريب صامت أسوأ من عدم بناء الميزة أصلاً.
+ *
+ * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض:
+ *  1. **مؤهّل**: صف خدمة مباشر معتمد، أو اعتماد الفئة كلها.
+ *  2. **مش محجوب**: مفيش صف في `technician_excluded_services` للفني/الخدمة دول.
+ */
+export function technicianServiceQualificationCondition(opts: {
+  /** تعبير SQL لمعرّف الفني، مثلاً `tp.id` أو `member.id` أو `$1`. */
+  technicianIdExpr: string;
+  /** تعبير SQL لمعرّف الخدمة المطلوبة، مثلاً `$1` أو `svc.id` أو `s.id`. */
+  serviceIdExpr: string;
+  /** تعبير SQL لمعرّف فئة الخدمة، مثلاً `s.category_id` أو `svc.category_id`. */
+  categoryIdExpr: string;
+  /**
+   * alias لـ`LEFT JOIN technician_services` لو الاستعلام عامله بالفعل (مثلاً `ts`) — بنستخدم
+   * `<alias>.id IS NOT NULL` زي ما كان بالظبط. لو مش موجود، الدالة بتبني `EXISTS` بنفسها.
+   */
+  directServiceAlias?: string;
+}): string {
+  const directlyApproved = opts.directServiceAlias
+    ? `${opts.directServiceAlias}.id IS NOT NULL`
+    : `EXISTS (
+             SELECT 1 FROM technician_services direct_svc
+             WHERE direct_svc.technician_id = ${opts.technicianIdExpr}
+               AND direct_svc.service_id = ${opts.serviceIdExpr}
+               AND direct_svc.is_active = true
+               AND direct_svc.verification_status = 'approved'
+           )`;
+
+  return `(
+          ${directlyApproved}
+          OR EXISTS (
+            SELECT 1 FROM technician_categories tec_cat
+            WHERE tec_cat.technician_id = ${opts.technicianIdExpr}
+              AND tec_cat.category_id = ${opts.categoryIdExpr}
+              AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
+          )
+        )
+        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. قائمة حجب: غياب الصف = مسموح، فالشرط
+        -- ده مالوش أي أثر لحد ما الأدمن يحجب فعلاً.
+        AND NOT EXISTS (
+          SELECT 1 FROM technician_excluded_services tes
+          WHERE tes.technician_id = ${opts.technicianIdExpr}
+            AND tes.service_id = ${opts.serviceIdExpr}
+        )`;
+}

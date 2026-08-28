@@ -45,6 +45,7 @@ import { AdminTechnicianCategoryOpsService } from './admin-technician-category-o
 import { AdminTechnician360Service } from './admin-technician-360.service';
 import { TechnicianIdentityService } from './technician-identity.service';
 import { ScheduleSlotReleaseListener } from './schedule-slot-release.listener';
+import { TechnicianServiceExclusionsService } from './technician-service-exclusions.service';
 import { PreferredCrewService } from './preferred-crew.service';
 import { TechnicianPreferredCrewMember } from './entities/technician-preferred-crew-member.entity';
 import { TechnicianCompanyBranch } from './entities/technician-company-branch.entity';
@@ -120,6 +121,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     TechnicianIdentityService,
     ScheduleSlotReleaseListener,
     PreferredCrewService,
+    TechnicianServiceExclusionsService,
     storageServiceProvider,
   ],
   exports: [
@@ -133,6 +135,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     TechnicianWorkOpportunitiesService,
     TechnicianActivityService,
     PreferredCrewService,
+    TechnicianServiceExclusionsService,
     TechnicianIdentityService,
   ],
 })
