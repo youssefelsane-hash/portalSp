@@ -73,10 +73,6 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // مايصحّش يمنع العميل من اختيار موعد.
   int? _nearTermHours;
 
-  /// نسبة رسوم الاستعجال (ADR-0048) — بتيجي من نفس الإعداد اللي التسعير بيقرا منه، عشان الرقم
-  /// اللي العميل بيشوفه في التنبيه يبقى هو الرقم اللي هيتحاسب بيه فعلاً.
-  int? _emergencySurchargePercentage;
-
   // حالة محلية بس للخدمات اللي محتاجة وقت دقيق (docs/08 §84 جزء ج) — الحجوزات العادية لسه بتاخد
   // اليوم وتقفل الشاشة فورًا زي ما كانت دايمًا، صفر state إضافية ليها.
   DateTime? _selectedDate;
@@ -103,10 +99,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     try {
       final data = await apiRequest('GET', '/booking-policy');
       if (!mounted) return;
-      setState(() {
-        _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt();
-        _emergencySurchargePercentage = (data?['emergency_surcharge_percentage'] as num?)?.toInt();
-      });
+      setState(() => _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt());
     } catch (error) {
       debugPrint('فشل تحميل سياسة المواعيد: $error');
     }
@@ -128,35 +121,37 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     return widget.allowsSameDay ? now : now.add(const Duration(days: 1));
   }
 
-  /// **التنبيه الأحمر (طلب مالك صريح، docs/08 §85)**: «لو اختار الموعد ده النهاردة، أوتوماتيك
-  /// السيستم بيبعت له رسالة بالأحمر إن طالما اخترت النهاردة فمعناها كأنك طوارئ عشان يجيلك
-  /// الشخص بسرعة، وفي الحالة دي بتتحسب عليه رسوم الطوارئ».
+  /// **تبسيط التنبيه (طلب مالك صريح، docs/08 §87)**: النسخة الأولى (docs/08 §85) كانت بألوان
+  /// حمرا/تحذيرية (أيقونة+عنوان بلون `error`، زرار تأكيد أحمر) وبتذكر نسبة الرسوم بالرقم صراحة
+  /// ("رسوم استعجال 20% فوق سعر الخدمة"). المالك اعتبرها "تخض" و"مش تحذير فعلي" — هي بس معلومة
+  /// عادية إن الطلب مستعجل. التصميم بقى محايد (بلا لون error خالص)، والنص مختصر لسطرين بسّ،
+  /// وسطر "الرسوم زيادة" بخط أصغر وباهت عمدًا بدل ما يكون جزء من النص الرئيسي أو فيه رقم.
   ///
   /// **ده إخطار مش سؤال عن وضع الحجز.** العميل مابيختارش "طوارئ ولا عادي" — هو بيختار يوم،
-  /// والنتيجة بتتشرح له بصراحة مع فرصة يرجع يغيّر اليوم لو الرسوم مش مناسبة له.
+  /// والنتيجة بتتشرح له بصراحة مع فرصة يرجع يغيّر اليوم لو مش مستعجل.
   Future<bool> _confirmSameDayUrgency(BuildContext context) async {
-    final percentage = _emergencySurchargePercentage;
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
-          icon: Icon(Icons.bolt, color: scheme.error, size: 32),
-          title: Text(
-            'طلب النهارده = خدمة مستعجلة',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: scheme.error, fontWeight: FontWeight.bold),
-          ),
-          content: Text(
-            percentage != null && percentage > 0
-                ? 'طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — '
-                    'وبيتحسب عليه رسوم استعجال $percentage% فوق سعر الخدمة.\n\n'
-                    'لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر يفضل عادي.'
-                : 'طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — '
-                    'وبيتحسب عليه رسوم استعجال فوق سعر الخدمة.\n\n'
-                    'لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر يفضل عادي.',
-            textAlign: TextAlign.center,
+          icon: Icon(Icons.bolt_outlined, color: scheme.primary, size: 28),
+          title: const Text('طلب النهارده', textAlign: TextAlign.center),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('هيوصلك الفني بسرعة النهارده.', textAlign: TextAlign.center, style: textTheme.bodyMedium),
+              const SizedBox(height: 6),
+              Text(
+                'هتتحسب رسوم بسيطة زيادة على السعر.',
+                textAlign: TextAlign.center,
+                style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 6),
+              Text('لو مش مستعجل، اختار يوم تاني والسعر يفضل عادي.', textAlign: TextAlign.center, style: textTheme.bodyMedium),
+            ],
           ),
           actions: [
             TextButton(
@@ -164,7 +159,6 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
               child: const Text('أختار يوم تاني'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: scheme.error),
               onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('تمام، كمّل'),
             ),
@@ -385,9 +379,9 @@ class _ScheduleOptionCard extends StatelessWidget {
   }
 }
 
-/// تنبيه سياسة المواعيد (docs/08 §61.3). نصّه مقصود يكون **مساعد مش تحذيري**: بيقول للعميل
-/// إيه أسرع طريق لو مستعجل، وبيطمّنه إن المواعيد الأبعد مش محتاجة انتظار — من غير ما يحسّسه
-/// إن الحجز العادي فيه مشكلة.
+/// تنبيه سياسة المواعيد (docs/08 §61.3، مختصر docs/08 §87 طلب مالك صريح) — كان فقرة كاملة
+/// ("محتاج الخدمة بسرعة؟ لو الموعد عاجل اختار خدمة طوارئ...")، المالك عايزها سطر واحد بسيط
+/// بالمعلومة الأساسية بس، بلا مقدمة/شرح إضافي.
 class _BookingTimingNotice extends StatelessWidget {
   const _BookingTimingNotice({required this.nearTermHours});
 
@@ -403,22 +397,13 @@ class _BookingTimingNotice extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(Icons.bolt_outlined, size: 20, color: scheme.primary),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('محتاج الخدمة بسرعة؟', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                Text(
-                  'لو الموعد عاجل، اختار خدمة طوارئ. المواعيد العادية خلال الـ$nearTermHours ساعة الجاية '
-                  'بتحتاج تأكيد الفني الأول، أما المواعيد بعد كده فمش محتاجة انتظار موافقة إضافية.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
+            child: Text(
+              'الطلبات خلال الـ$nearTermHours ساعة الجاية بتحتاج تأكيد الفني الأول.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ],
