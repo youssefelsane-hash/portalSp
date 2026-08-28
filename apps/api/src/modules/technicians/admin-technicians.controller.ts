@@ -252,6 +252,17 @@ export class AdminTechniciansController {
     return this.earningsService.getMonthlyStatement(id, month ?? TechnicianEarningsService.currentMonthCairo());
   }
 
+  /**
+   * مطابقة رصيد المحفظة مع كشف الشهر (docs/08 §95، طلب مالك مباشر).
+   *
+   * بيرد على السؤال "ليه المديونية الحالية مش زي مديونية شغل الشهر؟" برقم مفكّك من دفتر
+   * الحسابات نفسه، بدل ما الفرق يفضل لغز يبان كأنه خطأ حسابي.
+   */
+  @Get(':id/earnings/reconciliation')
+  async earningsReconciliation(@Param('id', ParseUUIDPipe) id: string, @Query('month') month?: string) {
+    return this.earningsService.getBalanceReconciliation(id, month ?? TechnicianEarningsService.currentMonthCairo());
+  }
+
   @Get(':id/earnings/months')
   async earningsMonths(@Param('id', ParseUUIDPipe) id: string) {
     return { months: await this.earningsService.listAvailableMonths(id) };

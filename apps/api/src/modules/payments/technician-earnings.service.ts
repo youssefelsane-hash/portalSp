@@ -77,6 +77,53 @@ export interface TechnicianMonthlyStatement {
 }
 
 /**
+ * مطابقة رصيد المحفظة مع كشف الشهر (docs/08 §95، طلب مالك مباشر).
+ *
+ * **المشكلة اللي بيحلها**: الأدمن بيشوف رقمين أحمر جنب بعض في صفحة الفني —
+ * "المديونية الحالية" و"مديونية الفني للمنصة من شغل الشهر" — وبيفترض إنهم لازم يتطابقوا، وهما
+ * أصلاً **بيقيسوا حاجتين مختلفتين**:
+ *
+ * - **المديونية الحالية** = `wallets.balance_cents` — رصيد دفتر الحسابات **كل الزمن**: كل الشهور،
+ *   والسدادات، والصرف (payouts)، والتسويات اليدوية، والمكافآت... إلخ.
+ * - **مديونية شغل الشهر** = صافي شغل الشهر المحدد **بس** (طلبات اتقفلت في الشهر ده).
+ *
+ * فاختلافهم **طبيعي ومتوقع** في أي وقت فيه أي حركة برّه شغل الشهر ده. المشكلة الحقيقية كانت إن
+ * الواجهة مكانتش بتقول ده، فالفرق كان بيبان كأنه خطأ حسابي.
+ *
+ * الدالة دي بتقفل الموضوع نهائيًا: بتفكّك الفرق لمصادره الحقيقية من دفتر الحسابات نفسه، فأي فرق
+ * بيبقى **مفسَّر بالكامل** مش لغز. ولو الفرق ما اتفسرش (`monthMatchesLedger === false`) يبقى ده
+ * خلل حقيقي محتاج مراجعة — وبيبان صراحةً بدل ما يفضل مستخبي.
+ */
+export interface TechnicianBalanceReconciliation {
+  month: string;
+  /** صافي شغل الشهر حسب الكشف. */
+  monthNetCents: number;
+  /** اللي اتحرك فعلاً في المحفظة بسبب طلبات الشهر ده. */
+  monthLedgerCents: number;
+  /** رصيد المحفظة الحالي (كل الزمن) — سالب = مديونية على الفني. */
+  currentBalanceCents: number;
+  /** الفرق الجاي من برّه شغل الشهر ده. */
+  outsideMonthCents: number;
+  outsideMonthBreakdown: { transactionType: string; labelAr: string; amountCents: number }[];
+  /** لو false: الكشف والدفتر مش متطابقين لنفس الشهر — خلل حقيقي محتاج مراجعة. */
+  monthMatchesLedger: boolean;
+}
+
+/** أسماء عربية لأنواع حركة المحفظة — عشان الأدمن يفهم مصدر الفرق من غير ما يفتح الداتابيز. */
+const WALLET_TX_LABELS_AR: Record<string, string> = {
+  order_earning: 'أرباح طلبات (من شهور تانية)',
+  commission_deduction: 'عمولة كاش (من شهور تانية)',
+  adjustment: 'تسويات وسدادات مديونية',
+  topup: 'شحن رصيد',
+  withdrawal: 'سحب رصيد',
+  refund: 'استرداد',
+  penalty: 'غرامات',
+  bonus: 'مكافآت',
+  referral_reward: 'مكافآت دعوة',
+  installment_collection: 'تحصيل أقساط',
+};
+
+/**
  * كشف مستحقات الفني الشهري (ADR-0038، docs/08 §61.1).
  *
  * **read model خالص** — صفر جداول جديدة، صفر كتابة، صفر مهمة شهرية. كل البيانات موجودة أصلاً
@@ -279,6 +326,97 @@ export class TechnicianEarningsService {
         netTechnicianDueCents: sum((j) => j.netTechnicianDueCents),
       },
       jobs: mapped,
+    };
+  }
+
+  /**
+   * بتفكّك الفرق بين رصيد المحفظة (كل الزمن) وصافي شغل شهر معيّن (docs/08 §95).
+   *
+   * كله بيتقرا من **دفتر الحسابات نفسه** (`wallet_transactions`، دفتر غير قابل للتعديل بقيد
+   * مزدوج) — مفيش أي رقم بيتحسب من مكان تاني، فالمطابقة دايمًا صادقة.
+   */
+  async getBalanceReconciliation(technicianProfileId: string, month: string): Promise<TechnicianBalanceReconciliation> {
+    this.parseMonth(month);
+    const statement = await this.getMonthlyStatement(technicianProfileId, month);
+
+    const [totals] = await this.dataSource.query<
+      { current_balance_cents: string | null; month_ledger_cents: string | null }[]
+    >(
+      `WITH tech AS (
+         SELECT tp.id AS technician_id, tp.user_id FROM technician_profiles tp WHERE tp.id = $1
+       ),
+       w AS (
+         SELECT wl.id, wl.balance_cents FROM wallets wl
+         JOIN tech ON tech.user_id = wl.owner_user_id
+         WHERE wl.owner_type = 'technician'
+       ),
+       month_orders AS (
+         SELECT o.id FROM orders o
+         LEFT JOIN order_earning_shares oes
+           ON oes.order_id = o.id AND oes.technician_id = (SELECT technician_id FROM tech) AND oes.deleted_at IS NULL
+         WHERE (oes.technician_id IS NOT NULL OR (oes.id IS NULL AND o.technician_id = (SELECT technician_id FROM tech)))
+           AND o.closed_at IS NOT NULL AND o.deleted_at IS NULL
+           AND to_char((o.closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') = $2
+       )
+       SELECT
+         (SELECT balance_cents FROM w)::text AS current_balance_cents,
+         COALESCE((
+           SELECT SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END)
+           FROM wallet_transactions wt
+           WHERE wt.wallet_id = (SELECT id FROM w)
+             AND wt.reference_type = 'order'
+             AND wt.reference_id IN (SELECT id FROM month_orders)
+         ), 0)::text AS month_ledger_cents`,
+      [technicianProfileId, month],
+    );
+
+    const breakdownRows = await this.dataSource.query<{ transaction_type: string; amount_cents: string }[]>(
+      `WITH tech AS (
+         SELECT tp.id AS technician_id, tp.user_id FROM technician_profiles tp WHERE tp.id = $1
+       ),
+       w AS (
+         SELECT wl.id FROM wallets wl JOIN tech ON tech.user_id = wl.owner_user_id
+         WHERE wl.owner_type = 'technician'
+       ),
+       month_orders AS (
+         SELECT o.id FROM orders o
+         LEFT JOIN order_earning_shares oes
+           ON oes.order_id = o.id AND oes.technician_id = (SELECT technician_id FROM tech) AND oes.deleted_at IS NULL
+         WHERE (oes.technician_id IS NOT NULL OR (oes.id IS NULL AND o.technician_id = (SELECT technician_id FROM tech)))
+           AND o.closed_at IS NOT NULL AND o.deleted_at IS NULL
+           AND to_char((o.closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') = $2
+       )
+       SELECT wt.transaction_type,
+              SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END)::text AS amount_cents
+       FROM wallet_transactions wt
+       WHERE wt.wallet_id = (SELECT id FROM w)
+         -- IS NOT TRUE مش NOT (...): أغلب الحركات اللي بندوّر عليها هنا (تسوية، سداد مديونية،
+         -- مكافأة) عمود reference_type بتاعها NULL، و NOT (NULL = 'order' AND ...) بيتقيّم لـNULL
+         -- في SQL فالصف بيتشال من النتيجة بصمت. البَقّة دي اتلقطت باختبار حي.
+         AND (wt.reference_type = 'order' AND wt.reference_id IN (SELECT id FROM month_orders)) IS NOT TRUE
+       GROUP BY wt.transaction_type
+       HAVING SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END) <> 0
+       ORDER BY 2 DESC`,
+      [technicianProfileId, month],
+    );
+
+    const currentBalanceCents = Number(totals?.current_balance_cents ?? 0);
+    const monthLedgerCents = Number(totals?.month_ledger_cents ?? 0);
+
+    return {
+      month,
+      monthNetCents: statement.totals.netTechnicianDueCents,
+      monthLedgerCents,
+      currentBalanceCents,
+      outsideMonthCents: currentBalanceCents - monthLedgerCents,
+      outsideMonthBreakdown: breakdownRows.map((row) => ({
+        transactionType: row.transaction_type,
+        labelAr: WALLET_TX_LABELS_AR[row.transaction_type] ?? row.transaction_type,
+        amountCents: Number(row.amount_cents),
+      })),
+      // الكشف بيحسب صافي الشهر من snapshot الطلبات، والدفتر بيحسبه من حركات المحفظة الفعلية.
+      // لو الاتنين مختلفين يبقى فيه خلل حقيقي (تسوية ناقصة أو حركة يدوية على طلب) — بيتعرض صراحةً.
+      monthMatchesLedger: statement.totals.netTechnicianDueCents === monthLedgerCents,
     };
   }
 
