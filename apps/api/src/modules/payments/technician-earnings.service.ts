@@ -23,6 +23,15 @@ export interface TechnicianStatementJob {
   additionalWorkCents: number;
   /** فرق مستوى الفني (§60.3) — بيزوّد مستحقه هو. */
   levelPremiumCents: number;
+  /** دور الفني في الشغلانة دي (§90.1) — قائد أو عضو فريق أو مساعد. طلب فردي = قائد دايمًا. */
+  participantRole: 'leader' | 'team_member' | 'assistant';
+  /**
+   * لو الطلب اتسترد (كليًا أو جزئيًا)، الجزء اللي اتخصم فعليًا من محفظة الفني رجوعًا للمنصة
+   * (نفس معادلة `refundOrder()` بالحرف — `payments.service.ts`) — بيبان صراحةً هنا عشان الكشف
+   * يطابق المحفظة تمامًا، مش يفاجئ الفني برقم مختلف. **بيتطبّق على القائد بس** لأن الاسترداد
+   * الفعلي بيتعكس من محفظة القائد وحده (نفس سلوك المحفظة الحقيقي، مش قرار جديد هنا).
+   */
+  refundReversalCents: number;
   /** خصم العميل (كوبون/عمارة/حملة). */
   customerDiscountCents: number;
   /** اللي العميل دفعه فعلاً بعد الخصم. */
@@ -53,7 +62,9 @@ export interface TechnicianMonthlyStatement {
     customerPaidCents: number;
     platformCommissionCents: number;
     discountBorneByTechnicianCents: number;
-    /** **إجمالي مستحقات الفني للشهر**. */
+    /** إجمالي اللي اتعكس من محفظة الفني بسبب استردادات مكتملة (§90.1). */
+    refundReversalCents: number;
+    /** **إجمالي مستحقات الفني للشهر** — نفس اللي بينزل محفظته بالظبط (بعد عكس الاسترداد). */
     netTechnicianDueCents: number;
   };
   jobs: TechnicianStatementJob[];
@@ -124,6 +135,14 @@ export class TechnicianEarningsService {
     // ملحوظة على الحدود: بنقارن على `to_char(...)` بدل BETWEEN بتاريخين عشان نتجنّب أخطاء
     // الحدود عند آخر يوم في الشهر ووقت تغيير التوقيت الصيفي. الفهرس على technician_id بيقلّل
     // الصفوف المفحوصة لطلبات الفني ده بس، فالتحويل النصي مش على الجدول كله.
+    //
+    // §90.1 (طلب مالك — تطابق "مستحقاتي" مع "محفظتي"): قبل كده الاستعلام كان بيفلتر على
+    // `o.technician_id = $1` بس، يعني عضو الطاقم (مش القائد) ما كانش بيشوف شغلانات اشتغل فيها
+    // خالص، والقائد كان بيشوف وعاء الطاقم كله كأنه نصيبه هو — بينما اللي بينزل محفظة كل واحد فعلاً
+    // هو حصته من `order_earning_shares` (نفس الجدول اللي `settleAndComplete()` بيكتب منه حركات
+    // المحفظة، `payments.service.ts:640-697`). `LEFT JOIN` بدل `INNER` عمدًا: طلبات اتقفلت قبل
+    // ADR-0040 (أو تستات بتدخل صف `orders` مباشرة بلا `order_earning_shares`) معندهاش صف حصة
+    // خالص — بيترجعوا لافتراض "قائد فردي" زي السلوك القديم (`o.technician_id = $1`).
     const jobs = await this.dataSource.query<
       {
         order_id: string;
@@ -137,6 +156,9 @@ export class TechnicianEarningsService {
         commission_rate_applied: string | null;
         platform_commission_cents: number;
         technician_earning_cents: number;
+        participant_role: 'leader' | 'team_member' | 'assistant';
+        my_share_cents: number;
+        total_refunded_cents: string;
         additional_work_cents: string;
       }[]
     >(
@@ -144,6 +166,12 @@ export class TechnicianEarningsService {
               o.total_amount_cents, o.discount_amount_cents, o.level_premium_cents,
               o.commissionable_base_cents, o.commission_rate_applied,
               o.platform_commission_cents, o.technician_earning_cents,
+              COALESCE(oes.participant_role, 'leader') AS participant_role,
+              COALESCE(oes.share_cents, CASE WHEN o.technician_id = $1 THEN o.technician_earning_cents ELSE 0 END) AS my_share_cents,
+              COALESCE((
+                SELECT SUM(r.amount_cents) FROM refunds r
+                WHERE r.order_id = o.id AND r.refund_status = 'completed'
+              ), 0)::text AS total_refunded_cents,
               COALESCE((
                 SELECT SUM(oi.total_price_cents) FROM order_items oi
                 WHERE oi.order_id = o.id
@@ -151,8 +179,10 @@ export class TechnicianEarningsService {
                   AND oi.is_customer_approved = true
               ), 0)::text AS additional_work_cents
        FROM orders o
+       LEFT JOIN order_earning_shares oes
+         ON oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
        LEFT JOIN services s ON s.id = o.service_id
-       WHERE o.technician_id = $1
+       WHERE (oes.technician_id = $1 OR (oes.id IS NULL AND o.technician_id = $1))
          AND o.closed_at IS NOT NULL
          AND o.deleted_at IS NULL
          AND to_char((o.closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') = $2
@@ -165,6 +195,16 @@ export class TechnicianEarningsService {
       const customerDiscountCents = Number(row.discount_amount_cents);
       const additionalWorkCents = Number(row.additional_work_cents);
       const levelPremiumCents = Number(row.level_premium_cents);
+      const myShareCents = Number(row.my_share_cents);
+      const totalRefundedCents = Number(row.total_refunded_cents);
+      const totalAmountCents = Number(row.total_amount_cents);
+      const technicianEarningCents = Number(row.technician_earning_cents);
+      // نفس معادلة `refundOrder()` بالحرف (`payments.service.ts:2578-2580`) — بتتطبّق بس لو
+      // القائد، لأن ده اللي فعليًا بيتعكس من محفظته وقت الاسترداد. عضو الطاقم محفظته ما بتتلمسش.
+      const refundReversalCents =
+        row.participant_role === 'leader' && totalRefundedCents > 0 && totalAmountCents > 0
+          ? Math.round((technicianEarningCents * totalRefundedCents) / totalAmountCents)
+          : 0;
       return {
         orderId: row.order_id,
         orderNumber: row.order_number,
@@ -174,6 +214,8 @@ export class TechnicianEarningsService {
         originalPriceCents: customerPaidCents + customerDiscountCents,
         additionalWorkCents,
         levelPremiumCents,
+        participantRole: row.participant_role,
+        refundReversalCents,
         customerDiscountCents,
         customerPaidCents,
         commissionableBaseCents: Number(row.commissionable_base_cents ?? customerPaidCents),
@@ -182,7 +224,7 @@ export class TechnicianEarningsService {
         // ADR-0038 — دايمًا صفر. بيتعرض صراحةً مش بيتشال، عشان الفني يشوف بعينه إن الكوبون
         // ما اتخصمش منه.
         discountBorneByTechnicianCents: 0,
-        netTechnicianDueCents: Number(row.technician_earning_cents),
+        netTechnicianDueCents: myShareCents - refundReversalCents,
       };
     });
 
@@ -202,6 +244,7 @@ export class TechnicianEarningsService {
         customerPaidCents: sum((j) => j.customerPaidCents),
         platformCommissionCents: sum((j) => j.platformCommissionCents),
         discountBorneByTechnicianCents: 0,
+        refundReversalCents: sum((j) => j.refundReversalCents),
         netTechnicianDueCents: sum((j) => j.netTechnicianDueCents),
       },
       jobs: mapped,

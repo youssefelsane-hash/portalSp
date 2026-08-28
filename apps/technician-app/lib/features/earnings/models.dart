@@ -118,6 +118,12 @@ class StatementJob {
   final int platformCommissionCents;
   /// **دايمًا صفر** — بيتعرض صراحةً عشان الفني يشوف بعينه إن الكوبون ما اتخصمش منه.
   final int discountBorneByTechnicianCents;
+  /// دورك في الشغلانة دي — 'leader' لطلب فردي أو لو إنت قائد الفريق، أو 'team_member'/'assistant'
+  /// لو كنت عضو مساند بس (§90.1).
+  final String participantRole;
+  /// لو الطلب اتسترد، الجزء اللي اتخصم فعليًا من محفظتك رجوعًا للمنصة (§90.1) — صفر يعني مفيش
+  /// استرداد أو إنك مش قائد الشغلانة (الاسترداد بيتعكس من محفظة القائد بس).
+  final int refundReversalCents;
   final int netTechnicianDueCents;
 
   StatementJob({
@@ -134,6 +140,8 @@ class StatementJob {
     required this.commissionRatePercentage,
     required this.platformCommissionCents,
     required this.discountBorneByTechnicianCents,
+    required this.participantRole,
+    required this.refundReversalCents,
     required this.netTechnicianDueCents,
   });
 
@@ -151,6 +159,8 @@ class StatementJob {
         commissionRatePercentage: (json['commissionRatePercentage'] as num?)?.toDouble() ?? 0,
         platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
         discountBorneByTechnicianCents: json['discountBorneByTechnicianCents'] as int? ?? 0,
+        participantRole: json['participantRole'] as String? ?? 'leader',
+        refundReversalCents: json['refundReversalCents'] as int? ?? 0,
         netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
       );
 }
@@ -163,6 +173,7 @@ class StatementTotals {
   final int customerPaidCents;
   final int platformCommissionCents;
   final int discountBorneByTechnicianCents;
+  final int refundReversalCents;
   final int netTechnicianDueCents;
 
   StatementTotals({
@@ -173,6 +184,7 @@ class StatementTotals {
     required this.customerPaidCents,
     required this.platformCommissionCents,
     required this.discountBorneByTechnicianCents,
+    required this.refundReversalCents,
     required this.netTechnicianDueCents,
   });
 
@@ -184,6 +196,7 @@ class StatementTotals {
         customerPaidCents: json['customerPaidCents'] as int? ?? 0,
         platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
         discountBorneByTechnicianCents: json['discountBorneByTechnicianCents'] as int? ?? 0,
+        refundReversalCents: json['refundReversalCents'] as int? ?? 0,
         netTechnicianDueCents: json['netTechnicianDueCents'] as int? ?? 0,
       );
 }

@@ -169,17 +169,26 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
     );
   }
 
+  static const _roleLabels = {'team_member': 'عضو فريق', 'assistant': 'مساعد'};
+
   Widget _jobCard(BuildContext context, StatementJob job) {
+    final roleLabel = _roleLabels[job.participantRole];
     return Card(
       child: ExpansionTile(
         title: Text(job.serviceNameAr ?? 'طلب ${job.orderNumber}'),
-        subtitle: Text('${job.orderNumber} — ${job.closedAt.split('T').first}'),
+        subtitle: Text(
+          roleLabel == null
+              ? '${job.orderNumber} — ${job.closedAt.split('T').first}'
+              : '${job.orderNumber} — ${job.closedAt.split('T').first} — شاركت كـ$roleLabel',
+        ),
         trailing: Text(
           _egp(job.netTechnicianDueCents),
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         children: [
+          // شغلانة طاقم: السطور الجاية (السعر الأصلي، العمولة...) بتوصف الطلب كله مش نصيبك بس —
+          // ده السياق اللي بيوضّح تكوين نصيبك، مش رقم مفروض يتجمع عليه (§90.1).
           _row('السعر الأصلي للخدمة', _egp(job.originalPriceCents)),
           if (job.additionalWorkCents > 0) _row('زيادات أثناء الشغل', _egp(job.additionalWorkCents)),
           if (job.levelPremiumCents > 0) _row('فرق مستواك (فني مميّز)', _egp(job.levelPremiumCents)),
@@ -190,8 +199,17 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
             _row('خصم محمّل عليك', _egp(job.discountBorneByTechnicianCents), highlight: true),
           ],
           const Divider(),
-          _row('عمولة الشركة (${job.commissionRatePercentage.toStringAsFixed(0)}%)',
-              '− ${_egp((job.commissionableBaseCents - job.netTechnicianDueCents).abs())}'),
+          // كان بيتحسب بطرح صافي مستحقك من الوعاء — غلط لشغلانات الطاقم (نصيبك مش الوعاء كله)
+          // ولكوبونات المنصة المموّلة بالكامل (تظهر عمولة موجبة رغم إن المنصة فعليًا دافعة فرق،
+          // platformCommissionCents سالبة في الحالة دي) — استخدام الحقل الجاهز من الباك-إند أدق.
+          _row(
+            'عمولة الشركة (${job.commissionRatePercentage.toStringAsFixed(0)}%)',
+            job.platformCommissionCents >= 0
+                ? '− ${_egp(job.platformCommissionCents)}'
+                : '+ ${_egp(job.platformCommissionCents.abs())} (الشركة تحمّلت الفرق)',
+          ),
+          if (job.refundReversalCents > 0)
+            _row('اتخصم بسبب استرداد للعميل', '− ${_egp(job.refundReversalCents)}', highlight: true),
           _row('صافي مستحقك', _egp(job.netTechnicianDueCents), bold: true),
         ],
       ),
