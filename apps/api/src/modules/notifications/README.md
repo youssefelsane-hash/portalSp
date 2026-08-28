@@ -398,3 +398,27 @@ notifyMultiChannel(input, [...])    // زي ما هو (بينده notifyOnChanne
 حقيقية اتعملت، أدمن رد عليها، `notifications` table عرضت صفين (`in_app`=sent، `push`=failed لعدم
 وجود جهاز مسجّل — متوقع في بيئة تطوير)، الـ`deep_link` صح. اختبار: `complaint-customer-notifications.spec.ts`
 (4 اختبارات حية — رد عادي بيصدّر، ملاحظة داخلية لأ، رسالة العميل نفسه لأ، الثلاث انتقالات الحالة).
+
+## بَقّة حقيقية — كل إشعار كان بيوصل مرتين (docs/08 §92، طلب مالك مباشر 2026-08-28)
+
+المالك بلّغ إن تقريبًا كل إشعار عميل (طلبك اتسجّل، الفني في الطريق، الفني وصل، الشغل بدأ) بيوصل
+**مرتين بالظبط** — إلا تأكيدات الدفع اللي بتوصل مرة واحدة صح. السبب: `notification_type_configs.
+default_channels` كان افتراضيًا `'["push","in_app"]'` (`infra/migrations/0087_notification_engine.sql`)،
+و`notifyMultiChannel()` بتعمل صف `Notification` **مستقل لكل قناة**. أي listener بينادي `notify()`
+من غير قناة صريحة (الأغلبية الساحقة — `order-created-notification.listener.ts`،
+`order-status-notification.listener.ts`، إلخ) كان بيعمل صفين متطابقين في النص. تأكيدات الدفع
+(`payment_instapay_confirmed`) كانت الاستثناء **بالصدفة** — مالهاش صف إعداد في الجدول أصلاً، فبترجع
+لـfallback مختلف (`in_app` بس، `resolveConfiguredChannels()` في `notifications.service.ts:106`).
+
+القناة `push` بيتسجّل صفها في `notifications` بغض النظر عن نجاح الإرسال الفعلي عبر FCM (الـINSERT
+منفصل تمامًا عن `CompositeNotificationDispatcher.dispatch()`) — يعني هي وحدها كافية لظهور الإشعار
+في قايمة "الإشعارات" **وبرضه** محاولة push حقيقية. صف `in_app` منفصل زيادة عليها كان مجرد تكرار
+بحت مالوش قيمة إضافية لأي نوع من الأنواع دي.
+
+**الإصلاح**: migration `0215_notification_default_channels_single_row.sql` — القيمة الافتراضية
+بقت `["push"]` بس (`ALTER COLUMN ... SET DEFAULT`)، وتحديث كل الصفوف اللي **لسه على القيمة
+الافتراضية القديمة تحديدًا** (مفيش لمس لأي نوع أدمن ظبطه يدويًا لحاجة تانية — مثلاً `order_offer_lost`
+فضل `["in_app"]` زي ما هو). القدرة على multi-channel نفسها **ما اتشالتش** — `notifyMultiChannel()`
+لسه شغالة زي ما هي (اختبار `notification-default-channels.spec.ts` بيتحقق منها لوحدها بصف إعداد
+مستقل، ما اتأثرش بالـmigration). أي نوع محتاج فعليًا أكتر من قناة (SMS لتنبيه حرج مثلاً) الأدمن لسه
+يقدر يظبطه من `/admin/notification-types` — التحديث ده بيصلح الـ"افتراضي" بس.
