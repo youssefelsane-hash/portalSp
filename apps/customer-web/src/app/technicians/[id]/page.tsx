@@ -74,13 +74,6 @@ export default function TechnicianProfilePage({ params }: { params: Promise<{ id
         <StatCard label="معدل الإلغاء" value={profile.cancellation_rate !== null ? `${profile.cancellation_rate}%` : '—'} />
       </div>
 
-      {(profile.avg_arrival_minutes !== null || profile.avg_completion_minutes !== null) && (
-        <div className="mt-3 flex flex-wrap justify-around gap-2 text-xs text-muted">
-          {profile.avg_arrival_minutes !== null && <span>بيوصل خلال ~{profile.avg_arrival_minutes} دقيقة</span>}
-          {profile.avg_completion_minutes !== null && <span>بينفّذ الشغل في ~{profile.avg_completion_minutes} دقيقة</span>}
-        </div>
-      )}
-
       {profile.zones.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">مناطق العمل</h2>
@@ -102,6 +95,24 @@ export default function TechnicianProfilePage({ params }: { params: Promise<{ id
               <li key={service.id} className="flex justify-between rounded-lg border border-border px-3 py-2">
                 <span>{service.name_ar}</span>
                 <span className="font-medium">{formatEgp(service.base_price_cents)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {profile.certificates.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 font-semibold">الشهادات</h2>
+          <ul className="space-y-1 text-sm">
+            {profile.certificates.map((cert) => (
+              <li key={cert.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+                <span aria-hidden>🏅</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{cert.title}</p>
+                  {cert.issuer_name && <p className="text-xs text-muted">{cert.issuer_name}</p>}
+                </div>
+                {cert.issued_at && <span className="shrink-0 text-xs text-muted">{cert.issued_at}</span>}
               </li>
             ))}
           </ul>

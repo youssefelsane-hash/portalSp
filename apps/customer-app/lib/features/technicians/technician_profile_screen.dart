@@ -274,24 +274,6 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                           ),
                         ),
                       ),
-                      if (profile.avgArrivalMinutes != null || profile.avgCompletionMinutes != null) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            if (profile.avgArrivalMinutes != null)
-                              Text(
-                                'بيوصل خلال ~${profile.avgArrivalMinutes} دقيقة',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            if (profile.avgCompletionMinutes != null)
-                              Text(
-                                'بينفّذ الشغل في ~${profile.avgCompletionMinutes} دقيقة',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                          ],
-                        ),
-                      ],
                       if (profile.zones.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         Text('مناطق العمل', style: Theme.of(context).textTheme.titleMedium),

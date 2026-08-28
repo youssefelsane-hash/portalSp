@@ -918,8 +918,6 @@ export class TechniciansService {
     services: { id: string; nameAr: string; basePriceCents: number }[];
     recentReviews: { overallRating: number; comment: string | null; createdAt: Date }[];
     onTimeRate: number | null;
-    avgArrivalMinutes: number | null;
-    avgCompletionMinutes: number | null;
     portfolioLinks: TechnicianPortfolioLink[];
     certificates: TechnicianCertificate[];
   }> {
@@ -987,29 +985,6 @@ export class TechniciansService {
     const onTimeTotal = Number(onTimeRow.total);
     const onTimeRate = onTimeTotal > 0 ? Math.round((Number(onTimeRow.on_time) / onTimeTotal) * 100) : null;
 
-    // متوسط وقت الوصول = من لحظة ما الفني "طالع للعميل" (technician_departed_at) لحد ما يوصل
-    // فعليًا (technician_arrived_at) — مش من وقت القبول، عشان القبول ممكن يبقى قبل الوصول
-    // بساعات/أيام في الحجز المسبق، ووقت الرحلة نفسه هو اللي بيعبّر عن "سرعة الوصول" فعلاً.
-    interface AvgDurationRow {
-      avg_minutes: string | null;
-    }
-    const [arrivalRow] = await this.technicianProfiles.manager.query<AvgDurationRow[]>(
-      `SELECT AVG(EXTRACT(EPOCH FROM (technician_arrived_at - technician_departed_at)) / 60) AS avg_minutes
-       FROM orders
-       WHERE technician_id = $1 AND technician_departed_at IS NOT NULL AND technician_arrived_at IS NOT NULL AND deleted_at IS NULL`,
-      [technicianProfileId],
-    );
-    const avgArrivalMinutes = arrivalRow.avg_minutes !== null ? Math.round(Number(arrivalRow.avg_minutes)) : null;
-
-    // متوسط مدة إنهاء الخدمة = من بدء التنفيذ الفعلي (work_started_at) لحد الانتهاء (work_completed_at).
-    const [completionRow] = await this.technicianProfiles.manager.query<AvgDurationRow[]>(
-      `SELECT AVG(EXTRACT(EPOCH FROM (work_completed_at - work_started_at)) / 60) AS avg_minutes
-       FROM orders
-       WHERE technician_id = $1 AND work_started_at IS NOT NULL AND work_completed_at IS NOT NULL AND deleted_at IS NULL`,
-      [technicianProfileId],
-    );
-    const avgCompletionMinutes = completionRow.avg_minutes !== null ? Math.round(Number(completionRow.avg_minutes)) : null;
-
     const portfolioLinks = await this.portfolioLinksService.listForTechnician(technicianProfileId);
     const certificates = await this.certificatesService.listApprovedForTechnician(technicianProfileId);
 
@@ -1027,8 +1002,6 @@ export class TechniciansService {
         createdAt: r.created_at,
       })),
       onTimeRate,
-      avgArrivalMinutes,
-      avgCompletionMinutes,
       certificates,
     };
   }

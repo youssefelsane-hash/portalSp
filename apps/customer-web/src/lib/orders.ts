@@ -13,6 +13,12 @@ export interface CreateOrderBody {
   problem_description?: string;
   customer_notes?: string;
   scheduled_at?: string;
+  // "مرن — نطاق أيام" (docs/08 §83 جزء ب) — لو اتبعت مع scheduled_at، الباك-إند بيدوّر على أقرب
+  // يوم بينهم فيه فني مؤهّل. مطابق لـFlutter's ScheduleChoice.rangeEnd بالحرف.
+  scheduled_at_range_end?: string;
+  // دقة الوقت (ADR-0031 Slice B) — service.requires_precise_schedule=true بس، مطابق لـ
+  // create_order_screen.dart's _onDurationHoursChanged بالحرف.
+  duration_hours?: number;
   promo_code?: string;
   field_values?: Record<string, string | number | boolean>;
   payment_method?: 'card' | 'instapay';

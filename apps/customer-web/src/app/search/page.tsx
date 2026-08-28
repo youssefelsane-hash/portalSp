@@ -60,13 +60,21 @@ function SearchResults() {
               <Link
                 key={s.id}
                 href={`/services/${s.id}`}
-                className="flex items-center justify-between rounded-xl border border-border bg-surface p-4 hover:border-primary"
+                className="flex items-center justify-between gap-4 rounded-xl border border-border bg-surface p-4 hover:border-primary"
               >
-                <div>
-                  <p className="font-medium">{s.name_ar}</p>
-                  {s.short_description_ar && <p className="text-sm text-muted">{s.short_description_ar}</p>}
+                <div className="flex items-center gap-4">
+                  {s.icon_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
+                    <img src={s.icon_url} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <div className="h-14 w-14 shrink-0 rounded-lg bg-surface-variant" />
+                  )}
+                  <div>
+                    <p className="font-medium">{s.name_ar}</p>
+                    {s.short_description_ar && <p className="text-sm text-muted">{s.short_description_ar}</p>}
+                  </div>
                 </div>
-                <span className="font-semibold text-primary">
+                <span className="shrink-0 font-semibold text-primary">
                   {s.pricing_model === 'formula' ? 'يُحسب حسب التفاصيل' : formatEgp(s.base_price_cents)}
                 </span>
               </Link>

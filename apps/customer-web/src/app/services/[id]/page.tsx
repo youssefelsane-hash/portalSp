@@ -11,7 +11,7 @@ import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel 
 import { createOrder, formatEgp } from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
-import { fetchTechniciansForService, TechnicianBookingListItemDto } from '@/lib/technicians';
+import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
 import { ApiError } from '@/lib/api-client';
 import { MapPicker } from '@/components/map-picker';
 
@@ -62,8 +62,17 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [technicians, setTechnicians] = useState<TechnicianBookingListItemDto[] | null>(null);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string | null>(null);
 
-  const [scheduleType, setScheduleType] = useState<'asap' | 'later'>('asap');
-  const [scheduledAt, setScheduledAt] = useState('');
+  // إعادة ترتيب اختيار الميعاد (docs/08 §83 جزء ب، طلب مالك) — يوم (محدد/مرن) قبل تفاصيل السعر
+  // مباشرة، مطابق apps/customer-app's ScheduleSelectionScreen بالحرف. خيار "أقرب وقت ممكن" اتشال
+  // نهائيًا هنا زي ما اتشال من الموبايل قبل كده (ADR-0018 §2، بَقّة تعارض وهمي حقيقية) — التاريخ
+  // بقى إجباري دايمًا لأي خدمة بتسمح بالجدولة.
+  const [scheduleDayMode, setScheduleDayMode] = useState<'specific' | 'flexible'>('specific');
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduledDateRangeEnd, setScheduledDateRangeEnd] = useState('');
+  // دقة الوقت (ADR-0031 Slice B) — service.requires_precise_schedule/requires_start_time_only بس،
+  // ومربوطة بنفس خطوة اليوم مباشرة (مش سؤال منفصل لاحقًا زي ما كان الحال في الموبايل قبل كده).
+  const [preciseTime, setPreciseTime] = useState('');
+  const [durationHours, setDurationHours] = useState('');
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
@@ -172,6 +181,17 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     service?.base_price_cents ||
     null;
 
+  // مطابق لـ RescheduleSection's fetchRescheduleOptions/rescheduleOrder بالحرف (نفس اتفاقية
+  // "T00:00:00.000Z" لليوم المجرّد) — الوقت الدقيق (precise/start-time-only بس) بيتضاف فوق نفس
+  // اليوم بنفس الاتفاقية، مطابق create_order_screen.dart's _combinedPreciseScheduledAt.
+  function computeScheduledAt(dateStr: string): string | undefined {
+    if (!dateStr) return undefined;
+    if ((service?.requires_precise_schedule || service?.requires_start_time_only) && preciseTime) {
+      return `${dateStr}T${preciseTime}:00.000Z`;
+    }
+    return `${dateStr}T00:00:00.000Z`;
+  }
+
   async function handleSubmit() {
     if (!service || !selectedAddressId) return;
     if (technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
@@ -186,7 +206,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           booking_mode: bookingMode,
           requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
           problem_description: problemDescription || undefined,
-          scheduled_at: scheduleType === 'later' && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+          scheduled_at: bookingMode !== 'emergency' ? computeScheduledAt(scheduledDate) : undefined,
+          scheduled_at_range_end:
+            bookingMode !== 'emergency' && scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
+          duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
           repeat_frequency: repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: promoCode || undefined,
@@ -236,9 +259,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const modes = availableBookingModes(service);
   const allRequiredAccepted =
     postpaidPolicies.filter((p) => p.isRequired).every((p) => acceptedPolicyVersions.has(p.currentVersionId));
+  // خيار "أقرب وقت ممكن" اتشال (ADR-0018 §2) — التاريخ إجباري دايمًا لأي خدمة بتسمح بالجدولة
+  // ومش طوارئ (الطوارئ مستثناة تمامًا من سؤال الميعاد، نفس catalog_navigation.dart).
+  const needsSchedule = service.allows_scheduling && bookingMode !== 'emergency';
+  const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
   const canSubmit =
     !!selectedAddressId &&
-    (scheduleType === 'asap' || !!scheduledAt) &&
+    (!needsSchedule ||
+      (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd)) &&
+    (!needsPreciseTime || !!preciseTime) &&
+    (!needsPreciseTime || !service.requires_precise_schedule || !!durationHours) &&
     (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
     allRequiredAccepted &&
     !submitting &&
@@ -246,6 +276,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
+      {service.icon_url && (
+        // eslint-disable-next-line @next/next/no-img-element -- صور خدمات خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
+        <img src={service.icon_url} alt="" className="mb-4 aspect-[3/1] w-full rounded-xl object-cover" />
+      )}
       <h1 className="text-2xl font-bold">{service.name_ar}</h1>
       {service.short_description_ar && <p className="mt-1 text-muted">{service.short_description_ar}</p>}
       {service.warranty_days > 0 && (
@@ -268,6 +302,80 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               </button>
             ))}
           </div>
+        </section>
+      )}
+
+      {needsSchedule && (
+        <section className="mt-6">
+          <h2 className="mb-3 font-semibold">الموعد</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setScheduleDayMode('specific')}
+              className={`rounded-lg border px-4 py-2 text-sm ${scheduleDayMode === 'specific' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+            >
+              اختار يوم محدد
+            </button>
+            {service.allows_date_range_booking && (
+              <button
+                onClick={() => setScheduleDayMode('flexible')}
+                className={`rounded-lg border px-4 py-2 text-sm ${scheduleDayMode === 'flexible' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+              >
+                مرن — نطاق أيام
+              </button>
+            )}
+          </div>
+
+          {scheduleDayMode === 'specific' ? (
+            <input
+              type="date"
+              value={scheduledDate}
+              onChange={(e) => setScheduledDate(e.target.value)}
+              className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
+            />
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                className="rounded-lg border border-border bg-surface px-4 py-2"
+              />
+              <span className="text-sm text-muted">لحد</span>
+              <input
+                type="date"
+                value={scheduledDateRangeEnd}
+                onChange={(e) => setScheduledDateRangeEnd(e.target.value)}
+                className="rounded-lg border border-border bg-surface px-4 py-2"
+              />
+              <p className="mt-1 w-full text-xs text-muted">هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره</p>
+            </div>
+          )}
+
+          {needsPreciseTime && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <span>الساعة</span>
+                <input
+                  type="time"
+                  value={preciseTime}
+                  onChange={(e) => setPreciseTime(e.target.value)}
+                  className="rounded-lg border border-border bg-surface px-3 py-2"
+                />
+              </label>
+              {service.requires_precise_schedule && (
+                <label className="flex items-center gap-2 text-sm">
+                  <span>عدد الساعات المطلوبة</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={durationHours}
+                    onChange={(e) => setDurationHours(e.target.value)}
+                    className="w-24 rounded-lg border border-border bg-surface px-3 py-2"
+                  />
+                </label>
+              )}
+            </div>
+          )}
         </section>
       )}
 
@@ -384,68 +492,32 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               ) : technicians.length === 0 ? (
                 <p className="text-sm text-muted">مفيش فنيين متاحين في منطقتك دلوقتي للخدمة دي</p>
               ) : (
-                technicians.map((t) => (
-                  <label
-                    key={t.id}
-                    className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 ${
-                      selectedTechnicianId === t.id ? 'border-primary bg-primary/5' : 'border-border'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="technician"
-                        checked={selectedTechnicianId === t.id}
-                        onChange={() => setSelectedTechnicianId(t.id)}
-                      />
-                      <div>
-                        <p className="font-medium">{t.full_name}</p>
-                        <p className="text-sm text-muted">
-                          {t.average_rating > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}
-                          {t.distance_km !== null ? ` · ${t.distance_km} كم` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    {t.final_price_cents !== null && <span className="font-semibold text-primary">{formatEgp(t.final_price_cents)}</span>}
-                  </label>
-                ))
+                technicians.map((t) =>
+                  t.is_company ? (
+                    <CompanyCard
+                      key={t.id}
+                      t={t}
+                      selected={selectedTechnicianId === t.id}
+                      onSelect={() => setSelectedTechnicianId(t.id)}
+                    />
+                  ) : (
+                    <IndividualCard
+                      key={t.id}
+                      t={t}
+                      selected={selectedTechnicianId === t.id}
+                      onSelect={() => setSelectedTechnicianId(t.id)}
+                    />
+                  ),
+                )
               )}
             </div>
           )}
         </section>
       )}
 
-      {service.allows_scheduling && (
-        <section className="mt-6">
-          <h2 className="mb-3 font-semibold">الموعد</h2>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setScheduleType('asap')}
-              className={`rounded-lg border px-4 py-2 text-sm ${scheduleType === 'asap' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
-            >
-              أقرب وقت ممكن
-            </button>
-            <button
-              onClick={() => setScheduleType('later')}
-              className={`rounded-lg border px-4 py-2 text-sm ${scheduleType === 'later' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
-            >
-              حدد موعد
-            </button>
-          </div>
-          {scheduleType === 'later' && (
-            <input
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(e) => setScheduledAt(e.target.value)}
-              className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
-            />
-          )}
-        </section>
-      )}
-
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
-      {service.allows_recurring_booking && bookingMode !== 'emergency' && scheduleType === 'later' && scheduledAt && (
+      {service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
@@ -757,5 +829,119 @@ function NewAddressForm({
         {busy ? 'جاري الحفظ...' : 'حفظ العنوان'}
       </button>
     </form>
+  );
+}
+
+// بادج توثيق صغيرة (docs/08 §83 جزء ج) — مطابقة TrustBadge في apps/customer-app بصريًا.
+function TrustBadge() {
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary" title="فني موثّق">
+      ✓
+    </span>
+  );
+}
+
+// شارة إحصائية صغيرة داخل كارت الشركة — مطابقة _CompanyTag في technician_marketplace_screen.dart.
+function CompanyTag({ label, emphasized }: { label: string; emphasized?: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-1 text-xs ${
+        emphasized ? 'bg-primary font-semibold text-primary-foreground' : 'bg-surface-variant text-muted'
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// كارت فني فردي في "اختار بنفسك" (docs/08 §83 جزء ج) — توازي مع _buildCard في
+// technician_marketplace_screen.dart: صورة/fallback، بادج توثيق، شارة مستوى، تحذير تعارض جدولة.
+function IndividualCard({
+  t,
+  selected,
+  onSelect,
+}: {
+  t: TechnicianBookingListItemDto;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const conflicted = t.availability_status === 'schedule_conflicted';
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${
+        selected ? 'border-primary bg-primary/5' : 'border-border'
+      } ${conflicted ? 'opacity-70' : ''}`}
+    >
+      <input type="radio" name="technician" checked={selected} onChange={onSelect} className="mt-1.5" />
+      {t.avatar_url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- صور فنيين خارجية من التخزين، مش أصول ثابتة معروفة وقت الـbuild
+        <img src={t.avatar_url} alt="" className="h-12 w-12 shrink-0 rounded-full object-cover" />
+      ) : (
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant text-lg">👤</div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="font-medium">{t.full_name}</p>
+          {t.is_verified && <TrustBadge />}
+          <span className="rounded-full bg-surface-variant px-2 py-0.5 text-xs">
+            {TECHNICIAN_LEVEL_LABELS_AR[t.technician_level] ?? t.technician_level}
+          </span>
+        </div>
+        {conflicted && (
+          <p className="mt-1 text-xs text-danger">
+            مش متاح للفترة دي{t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
+          </p>
+        )}
+        <p className="mt-1 text-sm text-muted">
+          {t.total_ratings_count > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}
+          {t.distance_km !== null ? ` · ${t.distance_km} كم` : ''}
+        </p>
+        {t.on_time_rate !== null && <p className="text-xs text-muted">الالتزام بالمواعيد: {t.on_time_rate}%</p>}
+      </div>
+      {t.final_price_cents !== null && (
+        <span className="shrink-0 font-semibold text-primary">{formatEgp(t.final_price_cents)}</span>
+      )}
+    </label>
+  );
+}
+
+// كارت شركة/فريق (docs/08 §83 جزء ج، ADR-0031) — توازي مع _buildCompanyCard: شريط علوي ملوّن،
+// بادجات إحصائية، "يتقرا كشركة من نظرة" (طلب مالك أصلي، docs/08 §62.2) — مش نسخة باهتة من الفردي.
+function CompanyCard({
+  t,
+  selected,
+  onSelect,
+}: {
+  t: TechnicianBookingListItemDto;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <label
+      className={`block cursor-pointer overflow-hidden rounded-xl border-2 ${
+        selected ? 'border-primary' : 'border-primary/40'
+      }`}
+    >
+      <input type="radio" name="technician" checked={selected} onChange={onSelect} className="sr-only" />
+      <div className="flex items-center gap-2 bg-primary/10 px-3 py-2">
+        <span aria-hidden>🏢</span>
+        <span className="flex-1 font-bold">{t.full_name}</span>
+        {t.is_verified && <TrustBadge />}
+      </div>
+      <div className="p-3">
+        <div className="flex flex-wrap gap-1.5">
+          <CompanyTag label={t.is_commercial_company ? 'شركة مسجّلة' : 'فريق عمل'} emphasized />
+          <CompanyTag label={`${t.staff_count ?? 0} فني`} />
+          {(t.branch_count ?? 0) > 0 && <CompanyTag label={`${t.branch_count} فرع`} />}
+          {t.completed_orders_count > 0 && <CompanyTag label={`${t.completed_orders_count} طلب مكتمل`} />}
+          {t.total_ratings_count > 0 && <CompanyTag label={`⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})`} />}
+          {t.distance_km !== null && <CompanyTag label={`${t.distance_km} كم`} />}
+        </div>
+        <p className="mt-2 text-xs text-muted">فريق كامل بيقدر يغطّي الشغل الكبير، ومسؤولية الشغل على الشركة نفسها.</p>
+        {t.final_price_cents !== null && (
+          <p className="mt-2 text-lg font-bold text-primary">{formatEgp(t.final_price_cents)}</p>
+        )}
+      </div>
+    </label>
   );
 }

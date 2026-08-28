@@ -259,10 +259,6 @@ class TechnicianPublicProfile {
   final int completedOrdersCount;
   final int? cancellationRate;
   final int? onTimeRate;
-  // كانت فجوة موثّقة صراحة (docs/08 §4) — الباك-إند بيحسبهم ويرجّعهم في GET /technicians/:id/profile
-  // من زمان، بس مفيش شاشة كانت بتقراهم أو تعرضهم للعميل خالص.
-  final int? avgArrivalMinutes;
-  final int? avgCompletionMinutes;
   final List<TechnicianZoneInfo> zones;
   final List<TechnicianServiceInfo> services;
   final List<TechnicianReview> recentReviews;
@@ -283,8 +279,6 @@ class TechnicianPublicProfile {
     required this.completedOrdersCount,
     required this.cancellationRate,
     required this.onTimeRate,
-    required this.avgArrivalMinutes,
-    required this.avgCompletionMinutes,
     required this.zones,
     required this.services,
     required this.recentReviews,
@@ -311,8 +305,6 @@ class TechnicianPublicProfile {
         completedOrdersCount: json['completed_orders_count'] as int,
         cancellationRate: json['cancellation_rate'] as int?,
         onTimeRate: json['on_time_rate'] as int?,
-        avgArrivalMinutes: json['avg_arrival_minutes'] as int?,
-        avgCompletionMinutes: json['avg_completion_minutes'] as int?,
         zones: (json['zones'] as List).map((z) => TechnicianZoneInfo.fromJson(z as Map<String, dynamic>)).toList(),
         services: (json['services'] as List)
             .map((s) => TechnicianServiceInfo.fromJson(s as Map<String, dynamic>))
