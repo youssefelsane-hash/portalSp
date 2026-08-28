@@ -62,8 +62,17 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [technicians, setTechnicians] = useState<TechnicianBookingListItemDto[] | null>(null);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<string | null>(null);
 
-  const [scheduleType, setScheduleType] = useState<'asap' | 'later'>('asap');
-  const [scheduledAt, setScheduledAt] = useState('');
+  // إعادة ترتيب اختيار الميعاد (docs/08 §83 جزء ب، طلب مالك) — يوم (محدد/مرن) قبل تفاصيل السعر
+  // مباشرة، مطابق apps/customer-app's ScheduleSelectionScreen بالحرف. خيار "أقرب وقت ممكن" اتشال
+  // نهائيًا هنا زي ما اتشال من الموبايل قبل كده (ADR-0018 §2، بَقّة تعارض وهمي حقيقية) — التاريخ
+  // بقى إجباري دايمًا لأي خدمة بتسمح بالجدولة.
+  const [scheduleDayMode, setScheduleDayMode] = useState<'specific' | 'flexible'>('specific');
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [scheduledDateRangeEnd, setScheduledDateRangeEnd] = useState('');
+  // دقة الوقت (ADR-0031 Slice B) — service.requires_precise_schedule/requires_start_time_only بس،
+  // ومربوطة بنفس خطوة اليوم مباشرة (مش سؤال منفصل لاحقًا زي ما كان الحال في الموبايل قبل كده).
+  const [preciseTime, setPreciseTime] = useState('');
+  const [durationHours, setDurationHours] = useState('');
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
@@ -172,6 +181,17 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     service?.base_price_cents ||
     null;
 
+  // مطابق لـ RescheduleSection's fetchRescheduleOptions/rescheduleOrder بالحرف (نفس اتفاقية
+  // "T00:00:00.000Z" لليوم المجرّد) — الوقت الدقيق (precise/start-time-only بس) بيتضاف فوق نفس
+  // اليوم بنفس الاتفاقية، مطابق create_order_screen.dart's _combinedPreciseScheduledAt.
+  function computeScheduledAt(dateStr: string): string | undefined {
+    if (!dateStr) return undefined;
+    if ((service?.requires_precise_schedule || service?.requires_start_time_only) && preciseTime) {
+      return `${dateStr}T${preciseTime}:00.000Z`;
+    }
+    return `${dateStr}T00:00:00.000Z`;
+  }
+
   async function handleSubmit() {
     if (!service || !selectedAddressId) return;
     if (technicianChoiceMode === 'manual' && !selectedTechnicianId) return;
@@ -186,7 +206,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           booking_mode: bookingMode,
           requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
           problem_description: problemDescription || undefined,
-          scheduled_at: scheduleType === 'later' && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+          scheduled_at: bookingMode !== 'emergency' ? computeScheduledAt(scheduledDate) : undefined,
+          scheduled_at_range_end:
+            bookingMode !== 'emergency' && scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
+          duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
           repeat_frequency: repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: promoCode || undefined,
@@ -236,9 +259,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const modes = availableBookingModes(service);
   const allRequiredAccepted =
     postpaidPolicies.filter((p) => p.isRequired).every((p) => acceptedPolicyVersions.has(p.currentVersionId));
+  // خيار "أقرب وقت ممكن" اتشال (ADR-0018 §2) — التاريخ إجباري دايمًا لأي خدمة بتسمح بالجدولة
+  // ومش طوارئ (الطوارئ مستثناة تمامًا من سؤال الميعاد، نفس catalog_navigation.dart).
+  const needsSchedule = service.allows_scheduling && bookingMode !== 'emergency';
+  const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
   const canSubmit =
     !!selectedAddressId &&
-    (scheduleType === 'asap' || !!scheduledAt) &&
+    (!needsSchedule ||
+      (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd)) &&
+    (!needsPreciseTime || !!preciseTime) &&
+    (!needsPreciseTime || !service.requires_precise_schedule || !!durationHours) &&
     (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
     allRequiredAccepted &&
     !submitting &&
@@ -272,6 +302,80 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               </button>
             ))}
           </div>
+        </section>
+      )}
+
+      {needsSchedule && (
+        <section className="mt-6">
+          <h2 className="mb-3 font-semibold">الموعد</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setScheduleDayMode('specific')}
+              className={`rounded-lg border px-4 py-2 text-sm ${scheduleDayMode === 'specific' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+            >
+              اختار يوم محدد
+            </button>
+            {service.allows_date_range_booking && (
+              <button
+                onClick={() => setScheduleDayMode('flexible')}
+                className={`rounded-lg border px-4 py-2 text-sm ${scheduleDayMode === 'flexible' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
+              >
+                مرن — نطاق أيام
+              </button>
+            )}
+          </div>
+
+          {scheduleDayMode === 'specific' ? (
+            <input
+              type="date"
+              value={scheduledDate}
+              onChange={(e) => setScheduledDate(e.target.value)}
+              className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
+            />
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                className="rounded-lg border border-border bg-surface px-4 py-2"
+              />
+              <span className="text-sm text-muted">لحد</span>
+              <input
+                type="date"
+                value={scheduledDateRangeEnd}
+                onChange={(e) => setScheduledDateRangeEnd(e.target.value)}
+                className="rounded-lg border border-border bg-surface px-4 py-2"
+              />
+              <p className="mt-1 w-full text-xs text-muted">هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره</p>
+            </div>
+          )}
+
+          {needsPreciseTime && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <span>الساعة</span>
+                <input
+                  type="time"
+                  value={preciseTime}
+                  onChange={(e) => setPreciseTime(e.target.value)}
+                  className="rounded-lg border border-border bg-surface px-3 py-2"
+                />
+              </label>
+              {service.requires_precise_schedule && (
+                <label className="flex items-center gap-2 text-sm">
+                  <span>عدد الساعات المطلوبة</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={durationHours}
+                    onChange={(e) => setDurationHours(e.target.value)}
+                    className="w-24 rounded-lg border border-border bg-surface px-3 py-2"
+                  />
+                </label>
+              )}
+            </div>
+          )}
         </section>
       )}
 
@@ -411,37 +515,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {service.allows_scheduling && (
-        <section className="mt-6">
-          <h2 className="mb-3 font-semibold">الموعد</h2>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setScheduleType('asap')}
-              className={`rounded-lg border px-4 py-2 text-sm ${scheduleType === 'asap' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
-            >
-              أقرب وقت ممكن
-            </button>
-            <button
-              onClick={() => setScheduleType('later')}
-              className={`rounded-lg border px-4 py-2 text-sm ${scheduleType === 'later' ? 'border-primary bg-primary/10 text-primary' : 'border-border'}`}
-            >
-              حدد موعد
-            </button>
-          </div>
-          {scheduleType === 'later' && (
-            <input
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(e) => setScheduledAt(e.target.value)}
-              className="mt-3 rounded-lg border border-border bg-surface px-4 py-2"
-            />
-          )}
-        </section>
-      )}
-
       {/* "كرّر الحجز ده" (migration 0176) — الطلب الحالي بيتعمل زي العادة، والمواعيد الجاية بيتولّد
           منها طلبات عادية كاملة بسعر الخدمة وقتها. بيظهر بس للخدمات المفعّل فيها التكرار ومع موعد محدد. */}
-      {service.allows_recurring_booking && bookingMode !== 'emergency' && scheduleType === 'later' && scheduledAt && (
+      {service.allows_recurring_booking && needsSchedule && scheduleDayMode === 'specific' && scheduledDate && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">تكرار الحجز</h2>
           <div className="flex gap-2">
