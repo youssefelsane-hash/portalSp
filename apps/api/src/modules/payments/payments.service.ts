@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, MoreThan, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { CASH_COLLECTED_EVENT, CashCollectedEvent } from '../../common/events/cash-collected.event';
 import {
@@ -79,6 +79,12 @@ const PAYABLE_ORDER_STATUSES = new Set([OrderStatus.WORK_COMPLETED, OrderStatus.
 const PREPAY_METHODS = new Set([PaymentMethod.CARD, PaymentMethod.INSTAPAY]);
 const WEBHOOK_RECOVERY_MAX_ATTEMPTS_FALLBACK = 5;
 const WEBHOOK_RECOVERY_BASE_DELAY_SECONDS_FALLBACK = 30;
+/**
+ * نافذة منع فتح شحنة دفع بوابة مستقلة تانية لنفس الطلب (§90.2) — راجع التعليق الكامل في
+ * `payWithProvider()`. قصيرة كفاية إنها متمنعش عميل بدّل رأيه فعلاً من المحاولة بطريقة تانية،
+ * طويلة كفاية تغطي إدخال بيانات كارت طبيعي + إعادة فتح تطبيق بعد قفل مفاجئ.
+ */
+const RECENT_ACTIVE_PAYMENT_WINDOW_MS = 5 * 60 * 1000;
 
 type PaymentConfirmedEffects = {
   dispatchStarted: boolean;
@@ -863,7 +869,23 @@ export class PaymentsService {
       }
       return existing; // نفس الطلب بنفس المفتاح — عملية مكررة، رجّع نفس النتيجة من غير ما نعمل حاجة تانية
     }
+    try {
+      return await this.payWithWalletUnchecked(userId, orderId, idempotencyKey);
+    } catch (err) {
+      // §90.2 (طلب مالك مباشر — دفع مزدوج بضغطتين متزامنتين): الفحص فوق check-then-act خارج أي
+      // قفل، فضغطتين حقيقيتين متزامنتين (أو retry شبكة بينما المحاولة الأولى لسه واصلة) ممكن
+      // يعدّوا الفحص الاتنين ويوصلوا هنا بنفس المفتاح بالظبط. القيد الفريد على idempotency_key
+      // في الداتابيز بيمنع صف مكرر فعليًا، لكن من غيره كان بيرجّع 500 خام للخاسر بدل ما يرجّعله
+      // نفس نتيجة اللي كسب — فرق واضح بين "الدفع فشل" و"الدفع نجح من محاولة تانية بنفس اللحظة".
+      if (this.isUniqueViolation(err)) {
+        const winner = await this.payments.findOne({ where: { idempotencyKey } });
+        if (winner) return winner;
+      }
+      throw err;
+    }
+  }
 
+  private async payWithWalletUnchecked(userId: string, orderId: string, idempotencyKey: string): Promise<Payment> {
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     this.assertPayable(order);
 
@@ -992,6 +1014,32 @@ export class PaymentsService {
       throw new ApiException(ErrorCode.PAY_001, `الدفع بـ${method} مش متاح دلوقتي — جرّب طريقة تانية`, HttpStatus.SERVICE_UNAVAILABLE);
     }
 
+    // §90.2 (طلب مالك مباشر — دفع مزدوج عند البوابة لو العميل قفل التطبيق فجأة وسط عملية دفع):
+    // idempotencyKey بيتولّد ويتخزّن في ذاكرة الشاشة بس، مش تخزين دائم — لو التطبيق اتقفل فجأة
+    // (أو الموبايل نفسه) والعميل رجع فتحه تاني وجرّب يدفع، هيتولّد مفتاح **جديد تمامًا**، فمفتاح
+    // idempotency القديم ما بيحميش من حاجة هنا. من غير الفحص ده، كان ممكن يتفتح شحنة مستقلة
+    // تانية عند البوابة الحقيقية (Paymob/Fawry) بينما الأولى لسه معلّقة — لو العميل كمّل الاتنين،
+    // تحصيل حقيقي مزدوج عند البوابة نفسها (الطلب في نظامنا محمي من settleAndComplete المزدوج
+    // بقفل الصف + assertPayable() في finalizeGatewayWebhook، لكن فلوس العميل عند البوابة مش
+    // بترجع تلقائي في الحالة دي). نافذة 5 دقايق بس — قصيرة كفاية إنها متمنعش عميل بدّل رأيه
+    // فعلاً (لغى الدفع وعايز طريقة تانية) من المحاولة تاني، طويلة كفاية تغطي إدخال بيانات كارت
+    // طبيعي + إعادة فتح تطبيق بعد قفل مفاجئ.
+    const recentActivePayment = await this.payments.findOne({
+      where: {
+        orderId,
+        paymentStatus: In([PaymentGatewayStatus.PENDING, PaymentGatewayStatus.PROCESSING]),
+        initiatedAt: MoreThan(new Date(Date.now() - RECENT_ACTIVE_PAYMENT_WINDOW_MS)),
+      },
+      order: { initiatedAt: 'DESC' },
+    });
+    if (recentActivePayment) {
+      throw new ApiException(
+        ErrorCode.PAY_003,
+        'فيه محاولة دفع سابقة لسه معلّقة لنفس الطلب من دقايق قليلة — استنى نتيجتها أو جرّب تاني بعد شوية',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const order = await this.loadPayableOrderForCustomer(userId, orderId);
     this.assertPayable(order);
     // المبلغ المستحق دلوقتي (ADR-0015) — راجع تعليق collectCash فوق لنفس المنطق بالحرف. صف
@@ -1012,7 +1060,24 @@ export class PaymentsService {
       paymentStatus: PaymentGatewayStatus.PENDING,
       idempotencyKey,
     });
-    await this.payments.save(payment);
+    try {
+      await this.payments.save(payment);
+    } catch (err) {
+      // نفس سباق payWithWallet: ضغطتين متزامنتين حقيقيتين ممكن يعدّوا فحص idempotencyKey فوق
+      // الاتنين بنفس اللحظة. القيد الفريد في الداتابيز بيمنع صف مكرر؛ بدل 500 خام للخاسر، نرجّع
+      // نتيجة اللي كسب.
+      if (this.isUniqueViolation(err)) {
+        const winner = await this.payments.findOne({ where: { idempotencyKey } });
+        if (winner) {
+          const cachedResult = (winner.gatewayResponse as { cached_result?: unknown } | null)?.cached_result;
+          if (cachedResult) {
+            return { payment: winner, result: cachedResult as import('./gateways/payment-provider.interface').CreatePaymentResult };
+          }
+          return { payment: winner, result: await this.initiateProviderCharge(winner, method) };
+        }
+      }
+      throw err;
+    }
 
     return { payment, result: await this.initiateProviderCharge(payment, method) };
   }
