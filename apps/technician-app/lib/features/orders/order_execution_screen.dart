@@ -1784,10 +1784,14 @@ class _ContinueAnotherDayDialogState extends State<_ContinueAnotherDayDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('هكمّل الشغل يوم تاني'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      // بَقّة حقيقية اتلقطت بلقطة شاشة مالك — لما الكيبورد بيفتح (العميل بيكتب السبب)، المساحة
+      // المتاحة للحوار بتقل والمحتوى الثابت الطول ده كان بيعمل RenderFlex overflow ("BOTTOM
+      // OVERFLOWED BY 26 PIXELS"). SingleChildScrollView بيخلي المحتوى يتمرّر بدل ما يفيض.
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
           const Text(
             'الطلب هيفضل مفتوح باسمك، والعميل هيوصله إن الشغل هيكمّل — بالسبب واليوم.',
             style: TextStyle(fontSize: 13),
@@ -1817,7 +1821,8 @@ class _ContinueAnotherDayDialogState extends State<_ContinueAnotherDayDialog> {
             const SizedBox(height: 8),
             Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
           ],
-        ],
+          ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
