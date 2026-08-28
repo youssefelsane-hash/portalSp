@@ -43,6 +43,25 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
     return order.id as string;
   }
 
+  async function insertSucceededPayment(orderId: string, amountCents: number, method: 'cash' | 'card') {
+    const suffix = orderId.replace(/-/g, '').slice(-10);
+    const [payment] = await q(
+      `INSERT INTO payments
+         (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status,
+          idempotency_key, completed_at)
+       VALUES ($1,$2,$3,$4,$5,'succeeded',$6,now()) RETURNING id`,
+      [
+        `PM${runId}${suffix}${method}`.slice(0, 24),
+        orderId,
+        ids.customerProfile,
+        amountCents,
+        method,
+        `statement-${runId}-${orderId}-${method}`.slice(0, 80),
+      ],
+    );
+    return payment.id as string;
+  }
+
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
@@ -156,6 +175,64 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
     expect(statement.totals.levelPremiumCents).toBe(20_000);
   });
 
+  it('طلب كاش كامل: الكشف يطابق المحفظة ويعرض عمولة مستحقة للمنصة بدل مستحق وهمي للفني', async () => {
+    const orderId = await insertClosedOrder({
+      label: 'cashnet', closedAt: '2027-01-05T09:00:00Z',
+      totalAmountCents: 100_000, discountCents: 0,
+      commissionableBaseCents: 100_000, technicianEarningCents: 85_000,
+    });
+    await insertSucceededPayment(orderId, 100_000, 'cash');
+
+    const statement = await service.getMonthlyStatement(ids.techProfile, '2027-01');
+    const job = statement.jobs.find((item) => item.orderId === orderId)!;
+
+    expect(job.grossTechnicianEarningCents).toBe(85_000);
+    expect(job.cashCollectedCents).toBe(100_000);
+    expect(job.netTechnicianDueCents).toBe(-15_000);
+    expect(statement.totals.netTechnicianDueCents).toBe(-15_000);
+  });
+
+  it('إيداع أونلاين + باقي كاش: المقاصة الشهرية تستخدم الكاش فقط ويصبح صافي الحركة صفرًا', async () => {
+    const orderId = await insertClosedOrder({
+      label: 'mixednet', closedAt: '2027-02-05T09:00:00Z',
+      totalAmountCents: 100_000, discountCents: 0,
+      commissionableBaseCents: 100_000, technicianEarningCents: 85_000,
+    });
+    await insertSucceededPayment(orderId, 15_000, 'card');
+    await insertSucceededPayment(orderId, 85_000, 'cash');
+
+    const statement = await service.getMonthlyStatement(ids.techProfile, '2027-02');
+    const job = statement.jobs.find((item) => item.orderId === orderId)!;
+
+    expect(job.grossTechnicianEarningCents).toBe(85_000);
+    expect(job.cashCollectedCents).toBe(85_000);
+    expect(job.netTechnicianDueCents).toBe(0);
+  });
+
+  it('استرداد جزئي لطلب كاش لا يمحو تاريخ استلام الكاش ويظل مطابقًا لصافي المحفظة', async () => {
+    const orderId = await insertClosedOrder({
+      label: 'cashrefund', closedAt: '2027-03-05T09:00:00Z',
+      totalAmountCents: 100_000, discountCents: 0,
+      commissionableBaseCents: 100_000, technicianEarningCents: 85_000,
+    });
+    const paymentId = await insertSucceededPayment(orderId, 100_000, 'cash');
+    await q(`UPDATE payments SET payment_status = 'partially_refunded' WHERE id = $1`, [paymentId]);
+    await q(
+      `INSERT INTO refunds
+         (refund_number, payment_id, order_id, amount_cents, refund_type, refund_method,
+          refund_status, requested_by_user_id, requested_at, completed_at)
+       VALUES ($1,$2,$3,40000,'partial','wallet_credit','completed',$4,now(),now())`,
+      [`RF${runId}${orderId.replace(/-/g, '').slice(-8)}`.slice(0, 24), paymentId, orderId, ids.customerUser],
+    );
+
+    const statement = await service.getMonthlyStatement(ids.techProfile, '2027-03');
+    const job = statement.jobs.find((item) => item.orderId === orderId)!;
+
+    expect(job.cashCollectedCents).toBe(100_000);
+    expect(job.refundReversalCents).toBe(34_000);
+    expect(job.netTechnicianDueCents).toBe(-49_000); // -15,000 عمولة كاش - 34,000 عكس استرداد
+  });
+
   it('شهر بلا شغل بيرجّع كشف صفر صحيح، مش خطأ', async () => {
     const statement = await service.getMonthlyStatement(ids.techProfile, '2020-01');
     expect(statement.jobsCount).toBe(0);
@@ -214,6 +291,7 @@ describe('كشف مستحقات الفني الشهري (ADR-0038)', () => {
       expect(memberStatement.jobsCount).toBe(1); // قبل الإصلاح كان صفر
       expect(memberStatement.jobs[0].participantRole).toBe('team_member');
       expect(memberStatement.jobs[0].netTechnicianDueCents).toBe(20_000); // مش صفر
+      expect(await service.listAvailableMonths(ids.techProfile2)).toContain('2026-12');
     });
 
     async function insertRefundedPayment(orderId: string, totalAmountCents: number, refundAmountCents: number) {

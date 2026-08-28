@@ -32,6 +32,10 @@ export interface TechnicianStatementJob {
    * الفعلي بيتعكس من محفظة القائد وحده (نفس سلوك المحفظة الحقيقي، مش قرار جديد هنا).
    */
   refundReversalCents: number;
+  /** نصيب الفني قبل مقاصة الكاش والاستردادات. */
+  grossTechnicianEarningCents: number;
+  /** الكاش الموجود فعليًا مع قائد الطلب؛ أعضاء الطاقم لا يستلمونه نيابة عنه. */
+  cashCollectedCents: number;
   /** خصم العميل (كوبون/عمارة/حملة). */
   customerDiscountCents: number;
   /** اللي العميل دفعه فعلاً بعد الخصم. */
@@ -64,6 +68,8 @@ export interface TechnicianMonthlyStatement {
     discountBorneByTechnicianCents: number;
     /** إجمالي اللي اتعكس من محفظة الفني بسبب استردادات مكتملة (§90.1). */
     refundReversalCents: number;
+    grossTechnicianEarningCents: number;
+    cashCollectedCents: number;
     /** **إجمالي مستحقات الفني للشهر** — نفس اللي بينزل محفظته بالظبط (بعد عكس الاسترداد). */
     netTechnicianDueCents: number;
   };
@@ -118,7 +124,19 @@ export class TechnicianEarningsService {
     const rows = await this.dataSource.query<{ month: string }[]>(
       `SELECT DISTINCT to_char((o.closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') AS month
        FROM orders o
-       WHERE o.technician_id = $1 AND o.closed_at IS NOT NULL AND o.deleted_at IS NULL
+       WHERE (
+           EXISTS (
+             SELECT 1 FROM order_earning_shares oes
+             WHERE oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
+           )
+           OR (
+             o.technician_id = $1 AND NOT EXISTS (
+               SELECT 1 FROM order_earning_shares any_share
+               WHERE any_share.order_id = o.id AND any_share.deleted_at IS NULL
+             )
+           )
+         )
+         AND o.closed_at IS NOT NULL AND o.deleted_at IS NULL
        ORDER BY month DESC
        LIMIT $2`,
       [technicianProfileId, MAX_HISTORY_MONTHS],
@@ -159,6 +177,7 @@ export class TechnicianEarningsService {
         participant_role: 'leader' | 'team_member' | 'assistant';
         my_share_cents: number;
         total_refunded_cents: string;
+        cash_collected_cents: string;
         additional_work_cents: string;
       }[]
     >(
@@ -172,6 +191,11 @@ export class TechnicianEarningsService {
                 SELECT SUM(r.amount_cents) FROM refunds r
                 WHERE r.order_id = o.id AND r.refund_status = 'completed'
               ), 0)::text AS total_refunded_cents,
+              CASE WHEN COALESCE(oes.participant_role, 'leader') = 'leader' THEN COALESCE((
+                SELECT SUM(p.amount_cents) FROM payments p
+                WHERE p.order_id = o.id AND p.payment_method = 'cash'
+                  AND p.payment_status IN ('succeeded','partially_refunded','refunded')
+              ), 0) ELSE 0 END::text AS cash_collected_cents,
               COALESCE((
                 SELECT SUM(oi.total_price_cents) FROM order_items oi
                 WHERE oi.order_id = o.id
@@ -197,6 +221,7 @@ export class TechnicianEarningsService {
       const levelPremiumCents = Number(row.level_premium_cents);
       const myShareCents = Number(row.my_share_cents);
       const totalRefundedCents = Number(row.total_refunded_cents);
+      const cashCollectedCents = Number(row.cash_collected_cents);
       const totalAmountCents = Number(row.total_amount_cents);
       const technicianEarningCents = Number(row.technician_earning_cents);
       // نفس معادلة `refundOrder()` بالحرف (`payments.service.ts:2578-2580`) — بتتطبّق بس لو
@@ -216,6 +241,8 @@ export class TechnicianEarningsService {
         levelPremiumCents,
         participantRole: row.participant_role,
         refundReversalCents,
+        grossTechnicianEarningCents: myShareCents,
+        cashCollectedCents,
         customerDiscountCents,
         customerPaidCents,
         commissionableBaseCents: Number(row.commissionable_base_cents ?? customerPaidCents),
@@ -224,7 +251,9 @@ export class TechnicianEarningsService {
         // ADR-0038 — دايمًا صفر. بيتعرض صراحةً مش بيتشال، عشان الفني يشوف بعينه إن الكوبون
         // ما اتخصمش منه.
         discountBorneByTechnicianCents: 0,
-        netTechnicianDueCents: myShareCents - refundReversalCents,
+        // نفس المقاصة في settleAndComplete(): نصيب القائد ناقص الكاش الموجود في يده. بذلك
+        // يكون الرقم هو أثر الطلب على المحفظة فعلًا (وقد يكون سالبًا = مديونية للمنصة).
+        netTechnicianDueCents: myShareCents - cashCollectedCents - refundReversalCents,
       };
     });
 
@@ -245,6 +274,8 @@ export class TechnicianEarningsService {
         platformCommissionCents: sum((j) => j.platformCommissionCents),
         discountBorneByTechnicianCents: 0,
         refundReversalCents: sum((j) => j.refundReversalCents),
+        grossTechnicianEarningCents: sum((j) => j.grossTechnicianEarningCents),
+        cashCollectedCents: sum((j) => j.cashCollectedCents),
         netTechnicianDueCents: sum((j) => j.netTechnicianDueCents),
       },
       jobs: mapped,
