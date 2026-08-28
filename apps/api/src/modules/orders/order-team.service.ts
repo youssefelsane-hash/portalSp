@@ -11,11 +11,13 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import {
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
+  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { SettingsService } from '../settings/settings.service';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
+import { resolveEffectiveMemberType } from './crew-member-type';
 import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
@@ -172,6 +174,10 @@ export class OrderTeamService {
       technicianId: dto.technician_id,
       roleLabel: dto.role_label,
       addedByTechnicianId: leaderProfileId,
+      // ADR-0050 — المسار القديم ده مكانش بيحدد memberType خالص (كان بيعتمد على default الجدول
+      // 'team_member')، يعني مساعد مضاف من هنا كان بياخد نصيب عضو فريق كامل. الفرض هنا بيقفل
+      // الثغرة دي من غير ما يغيّر سلوك الفنيين العاديين.
+      memberType: resolveEffectiveMemberType('team_member', memberProfile.technicianKind),
     });
     await this.teamMembers.save(member);
   }
@@ -317,6 +323,11 @@ export class OrderTeamService {
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
         AND tp.current_location IS NOT NULL
         AND tp.id != $2
+        -- ADR-0050 — **النقطة المحورية للفصل**: قبل كده الاستعلام ده كان بيرجّع نفس الناس بالحرف
+        -- سواء القائد بيضم "فني" أو "مساعد" (المعامل role كان بيأثر بس على فحص "الخانة اتملت؟").
+        -- دلوقتي القايمة بتختلف فعليًا حسب الدور المطلوب — طلب مالك صريح: "أدوس إضافة فني، أقلي
+        -- الفنيين... أدخل أضيف مساعدين، أقلي المساعدين بس اللي هم محطوط لهم إن هم مساعدين".
+        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: role })}
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
@@ -405,8 +416,10 @@ export class OrderTeamService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتجنّد', HttpStatus.CONFLICT);
     }
 
-    const memberType = role === 'assistant' ? 'assistant' : 'team_member';
-    const label = roleLabel && roleLabel.trim().length > 0 ? roleLabel.trim() : role === 'assistant' ? 'مساعد' : 'عضو فريق';
+    // ADR-0050 — الدور المطلوب بيتفلتر من خلال دور الشخص نفسه: مساعد بالبروفايل بياخد نسبة
+    // المساعد دايمًا مهما كان اللي القائد طلبه.
+    const memberType = resolveEffectiveMemberType(role === 'assistant' ? 'assistant' : 'team_member', candidateProfile.technicianKind);
+    const label = roleLabel && roleLabel.trim().length > 0 ? roleLabel.trim() : memberType === 'assistant' ? 'مساعد' : 'عضو فريق';
 
     if (tier === 'LIGHT') {
       const member = this.teamMembers.create({ orderId, technicianId, roleLabel: label, addedByTechnicianId: leaderProfileId, memberType });
@@ -501,11 +514,12 @@ export class OrderTeamService {
           throw new CrewOpportunityDeclinedError(new ApiException(ErrorCode.VAL_001, 'أنت مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT));
         }
 
-        const memberType = role === 'assistant' ? 'assistant' : 'team_member';
+        // ADR-0050 — نفس قاعدة الفرض في recruitMember بالحرف.
+        const memberType = resolveEffectiveMemberType(role === 'assistant' ? 'assistant' : 'team_member', profile.technicianKind);
         const member = manager.create(OrderTeamMember, {
           orderId: order.id,
           technicianId: profile.id,
-          roleLabel: role === 'assistant' ? 'مساعد' : 'عضو فريق',
+          roleLabel: memberType === 'assistant' ? 'مساعد' : 'عضو فريق',
           addedByTechnicianId: order.technicianId,
           memberType,
         });

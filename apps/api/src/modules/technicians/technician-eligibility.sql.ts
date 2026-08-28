@@ -468,3 +468,22 @@ export function technicianServiceQualificationCondition(opts: {
             AND tes.service_id = ${opts.serviceIdExpr}
         )`;
 }
+
+/**
+ * فلترة على **دور الشخص** — فني كامل ولا مساعد (ADR-0050، docs/08 §94، طلب مالك مباشر).
+ *
+ * **ليه helper منفصل مش شرط جوّه `technicianServiceQualificationCondition`؟** الدالة دي مشتركة
+ * بين مسارات الفني **والمساعد** الاتنين (بث مجمع المساعدين بيستخدمها بالحرف) — حقن شرط "مش مساعد"
+ * جواها كان هيمنع المساعدين من إنهم يبقوا مساعدين، يعني يكسر الميزة نفسها. الفصل ده مقصود، ونفس
+ * شكل `technicianAvailabilityCondition` المُعامَل بالفعل فوق.
+ *
+ * - `'technician'` → مسارات القيادة/التوزيع/اختيار العميل: **المساعدين مستبعدين**.
+ * - `'assistant'` → مجمع المساعدين وضم مساعد لطاقم: **الفنيين مستبعدين** (الاتجاه العكسي).
+ */
+export function technicianKindCondition(opts: {
+  /** تعبير SQL لمعرّف صف الفني، مثلاً `tp` أو `member` (الـalias مش الـid — بنقرا العمود منه). */
+  technicianAlias: string;
+  kind: 'technician' | 'assistant';
+}): string {
+  return `${opts.technicianAlias}.technician_kind = '${opts.kind}'`;
+}
