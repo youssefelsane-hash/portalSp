@@ -74,13 +74,6 @@ export default function TechnicianProfilePage({ params }: { params: Promise<{ id
         <StatCard label="معدل الإلغاء" value={profile.cancellation_rate !== null ? `${profile.cancellation_rate}%` : '—'} />
       </div>
 
-      {(profile.avg_arrival_minutes !== null || profile.avg_completion_minutes !== null) && (
-        <div className="mt-3 flex flex-wrap justify-around gap-2 text-xs text-muted">
-          {profile.avg_arrival_minutes !== null && <span>بيوصل خلال ~{profile.avg_arrival_minutes} دقيقة</span>}
-          {profile.avg_completion_minutes !== null && <span>بينفّذ الشغل في ~{profile.avg_completion_minutes} دقيقة</span>}
-        </div>
-      )}
-
       {profile.zones.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">مناطق العمل</h2>

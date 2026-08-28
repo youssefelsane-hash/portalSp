@@ -67,8 +67,6 @@ export interface TechnicianProfileDto {
   completed_orders_count: number;
   cancellation_rate: number | null;
   on_time_rate: number | null;
-  avg_arrival_minutes: number | null;
-  avg_completion_minutes: number | null;
   zones: TechnicianProfileZoneDto[];
   services: TechnicianProfileServiceDto[];
   recent_reviews: TechnicianProfileReviewDto[];
