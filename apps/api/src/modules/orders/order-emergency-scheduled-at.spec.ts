@@ -55,7 +55,7 @@ import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
  * بموعد مستقبلي، وبعدين `computeDispatchDeferredUntil()` بيؤجّل بث المطابقة فعليًا لساعات —
  * عميل دافع رسوم طوارئ إضافية بينتظر بلا استجابة "فورية" فعلية، عكس تعريف الوضع تمامًا.
  */
-describe('OrdersService.create() — الطوارئ مينفعش تتحدد بموعد مستقبلي (Script 7 Phase 7)', () => {
+describe('OrdersService.create() — اشتقاق الاستعجال من التاريخ (ADR-0048، كان Script 7 Phase 7)', () => {
   let dataSource: DataSource;
   let cache: RedisCacheService;
   let ordersService: OrdersService;
@@ -279,26 +279,64 @@ describe('OrdersService.create() — الطوارئ مينفعش تتحدد بم
     }
   });
 
-  it('booking_mode=emergency + scheduled_at مستقبلي: يترفض بوضوح — مش يتسجّل طلب طوارئ مؤجّل بصمت', async () => {
-    const futureDate = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
-    await expect(
-      ordersService.create(ids.customerUser, {
-        service_id: ids.service,
-        address_id: ids.address,
-        booking_mode: BookingMode.EMERGENCY,
-        scheduled_at: futureDate,
-      } as never),
-    ).rejects.toMatchObject({ code: 'VAL_001' });
+  // **الاختبارات هنا اتقلبت مع ADR-0048 (docs/08 §85).**
+  //
+  // الاختبار القديم كان بيثبّت قاعدة اتشالت: «طوارئ + موعد مستقبلي = يترفض». القاعدة دي كانت
+  // منطقية لما الطوارئ كانت **اختيار** ممكن يتناقض مع التاريخ. دلوقتي الطوارئ **نتيجة** إن
+  // التاريخ هو النهارده، فالتناقض ده بقى مستحيل بالبناء نفسه — والاختبار الصح بقى إن الاشتقاق
+  // بيطلع صح ورسوم الاستعجال بتتحصّل في الحالة الصح بس.
+  const cairoDay = (offsetDays: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    // منتصف النهار عشان مانلعبش على حدود اليوم — الاختبار عن القاعدة مش عن المناطق الزمنية
+    // (ده مغطّى في `booking-mode-resolver.spec.ts` بحالات 00:30 و22:30 صراحةً).
+    return new Date(`${d.toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' })}T12:00:00Z`).toISOString();
+  };
+
+  it('حجز النهارده: بيتسجّل طوارئ أوتوماتيك وبرسوم استعجال — من غير ما العميل يختار', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.service,
+      address_id: ids.address,
+      scheduled_at: cairoDay(0),
+    } as never);
+    expect(order.bookingMode).toBe(BookingMode.EMERGENCY);
+    expect(order.orderType).toBe('emergency');
+    expect(order.surgeAmountCents).toBeGreaterThan(0);
   });
 
-  it('booking_mode=emergency من غير scheduled_at (المسار السليم): بيتسجّل عادي بلا تأجيل', async () => {
+  // **ده بالظبط طلب المالك بالحرف**: «حتى لو الشخص مختار فريق ومختار الشغل النهارده، الشغل
+  // بيتطبّق إنه بيدخل خانة الطوارئ». الـdto بيقول "فريق"، والتاريخ بيقول "النهارده" — التاريخ
+  // بيكسب، لأن الـdto مابقاش له أي وزن أصلاً.
+  it('العميل باعت booking_mode=team بس اختار النهارده: التاريخ بيكسب والوضع بيطلع طوارئ', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.service,
+      address_id: ids.address,
+      booking_mode: BookingMode.TEAM,
+      scheduled_at: cairoDay(0),
+    } as never);
+    expect(order.bookingMode).toBe(BookingMode.EMERGENCY);
+  });
+
+  it('حجز بكرة: عادي بلا أي رسوم استعجال — حتى لو الـdto قال طوارئ', async () => {
     const order = await ordersService.create(ids.customerUser, {
       service_id: ids.service,
       address_id: ids.address,
       booking_mode: BookingMode.EMERGENCY,
+      scheduled_at: cairoDay(1),
     } as never);
-    expect(order.bookingMode).toBe(BookingMode.EMERGENCY);
-    expect(order.orderType).toBe('emergency');
+    expect(order.bookingMode).toBe(BookingMode.INDIVIDUAL);
+    expect(order.surgeAmountCents).toBe(0);
+  });
+
+  // التصحيح اللي اتاخد أثناء التنفيذ (ADR-0048، الشرح الكامل في `isSameDayUrgent`): طلب من قناة
+  // مابتبعتش تاريخ محدش وراه شاف تنبيه الرسوم، فمينفعش يتحاسب عليها.
+  it('طلب بلا تاريخ خالص: مش طوارئ ومفيش رسوم — محدش اتخطر بيها', async () => {
+    const order = await ordersService.create(ids.customerUser, {
+      service_id: ids.service,
+      address_id: ids.address,
+    } as never);
+    expect(order.bookingMode).not.toBe(BookingMode.EMERGENCY);
+    expect(order.surgeAmountCents).toBe(0);
     expect(order.scheduledAt).toBeNull();
   });
 });

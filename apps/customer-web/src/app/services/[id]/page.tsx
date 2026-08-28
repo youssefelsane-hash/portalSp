@@ -16,12 +16,6 @@ import { ApiError } from '@/lib/api-client';
 import { MapPicker } from '@/components/map-picker';
 
 type BookingMode = 'individual' | 'team' | 'emergency';
-const BOOKING_MODE_LABELS: Record<BookingMode, string> = {
-  individual: 'فني واحد',
-  team: 'فريق',
-  emergency: 'طوارئ',
-};
-
 function availableBookingModes(service: ServiceDto): BookingMode[] {
   return [
     ...(service.allows_individual ? (['individual'] as const) : []),
@@ -47,7 +41,6 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [service, setService] = useState<ServiceDto | null>(null);
   const [pricingFields, setPricingFields] = useState<PricingFieldDto[] | null>(null);
   const [fieldValues, setFieldValues] = useState<Record<string, string | number | boolean>>({});
-  const [bookingMode, setBookingMode] = useState<BookingMode>('individual');
   const [estimate, setEstimate] = useState<PriceEstimateDto | null>(null);
   const [estimating, setEstimating] = useState(false);
 
@@ -69,6 +62,17 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const [scheduleDayMode, setScheduleDayMode] = useState<'specific' | 'flexible'>('specific');
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledDateRangeEnd, setScheduledDateRangeEnd] = useState('');
+
+  // **وضع الحجز قيمة مشتقة، مش state (ADR-0048، docs/08 §85)** — العميل مابيسألش عنه خالص.
+  //
+  // مقصود إنها `const` محسوبة مش `useState` + `useEffect`: الوضع **دالة** في التاريخ، ومفيش أي
+  // حالة يقدر يبقى فيها مختلف عنه. تخزينه في state كان هيخلق لحظة يكون فيها التاريخ اتغيّر
+  // والوضع لسه القديم (وده بالظبط اللي `react-hooks/set-state-in-effect` بيحذّر منه).
+  //
+  // مقارنة نصية على `YYYY-MM-DD` زي ما `<input type="date">` بيرجّعه — نفس أسلوب `platformDayOf`
+  // في الباك-إند بالحرف، بلا أي حساب حدود يوم (البَقّة الموثّقة في `CAIRO_DAY_EXPR`).
+  const isSameDayBooking = scheduledDate !== '' && scheduledDate <= new Date().toLocaleDateString('en-CA');
+  const bookingMode: BookingMode = isSameDayBooking ? 'emergency' : 'individual';
   // دقة الوقت (ADR-0031 Slice B) — service.requires_precise_schedule/requires_start_time_only بس،
   // ومربوطة بنفس خطوة اليوم مباشرة (مش سؤال منفصل لاحقًا زي ما كان الحال في الموبايل قبل كده).
   const [preciseTime, setPreciseTime] = useState('');
@@ -105,8 +109,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     fetchService(id)
       .then((s) => {
         setService(s);
-        const modes = availableBookingModes(s);
-        if (modes.length > 0) setBookingMode(modes[0]);
+        // مابنضبطش الوضع من قايمة الخدمة بعد ADR-0048 — بيتحسب من التاريخ في الـeffect تحت.
       })
       .catch(() => setService(null));
   }, [id]);
@@ -206,9 +209,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           booking_mode: bookingMode,
           requested_technician_id: technicianChoiceMode === 'manual' ? (selectedTechnicianId ?? undefined) : undefined,
           problem_description: problemDescription || undefined,
-          scheduled_at: bookingMode !== 'emergency' ? computeScheduledAt(scheduledDate) : undefined,
+          // التاريخ بيتبعت دايمًا دلوقتي (ADR-0048) — هو مدخل الاشتقاق نفسه في الباك-إند.
+          scheduled_at: computeScheduledAt(scheduledDate),
           scheduled_at_range_end:
-            bookingMode !== 'emergency' && scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
+            scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
           duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
           repeat_frequency: repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
@@ -257,11 +261,16 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }
 
   const modes = availableBookingModes(service);
+  // الخدمة لازم تكون بتدعم وضع واحد على الأقل عشان تتحجز أصلاً — مش قايمة اختيارات للعميل بعد
+  // ADR-0048، مجرد فحص "قابلة للحجز".
+  void modes;
   const allRequiredAccepted =
     postpaidPolicies.filter((p) => p.isRequired).every((p) => acceptedPolicyVersions.has(p.currentVersionId));
   // خيار "أقرب وقت ممكن" اتشال (ADR-0018 §2) — التاريخ إجباري دايمًا لأي خدمة بتسمح بالجدولة
   // ومش طوارئ (الطوارئ مستثناة تمامًا من سؤال الميعاد، نفس catalog_navigation.dart).
-  const needsSchedule = service.allows_scheduling && bookingMode !== 'emergency';
+  // **الميعاد بقى الخطوة الأولى دايمًا (ADR-0048)** — قبل كده كان بيتخطى لو العميل اختار
+  // "طوارئ"؛ الاختيار ده اتشال، والاستعجال نفسه بقى **نتيجة** اختيار النهارده.
+  const needsSchedule = service.allows_scheduling;
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
   const canSubmit =
     !!selectedAddressId &&
@@ -286,24 +295,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         <p className="mt-2 text-sm text-success">ضمان {service.warranty_days} يوم على الشغل ده</p>
       )}
 
-      {modes.length > 1 && (
-        <section className="mt-6">
-          <h2 className="mb-2 font-semibold">نوع الحجز</h2>
-          <div className="flex gap-2">
-            {modes.map((m) => (
-              <button
-                key={m}
-                onClick={() => setBookingMode(m)}
-                className={`rounded-lg border px-4 py-2 text-sm ${
-                  bookingMode === m ? 'border-primary bg-primary/10 text-primary' : 'border-border'
-                }`}
-              >
-                {BOOKING_MODE_LABELS[m]}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* قسم "نوع الحجز" اتشال بالكامل (ADR-0048) — «نشيل دول خالص ونحط قواعد على السيستم،
+          والسيستم هو اللي بيحدد بناءً على التاريخ». اللي محلّه: التنبيه الأحمر تحت لما العميل
+          يختار النهارده. */}
 
       {needsSchedule && (
         <section className="mt-6">
@@ -349,6 +343,17 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
               />
               <p className="mt-1 w-full text-xs text-muted">هنجيبلك أقرب يوم فيه فني متاح جوّه النطاق اللي تختاره</p>
             </div>
+          )}
+
+          {/* **التنبيه الأحمر (ADR-0048، طلب مالك صريح)**: «لو اختار الموعد ده النهاردة، السيستم
+              يبعتله رسالة بالأحمر إن طالما اخترت النهاردة فمعناها كأنك طوارئ عشان يجيلك الشخص
+              بسرعة، وبتتحسب عليه رسوم الطوارئ». إخطار مش سؤال — العميل مابيختارش وضع حجز. */}
+          {isSameDayBooking && (
+            <p className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-danger">
+              طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — وبيتحسب
+              عليه رسوم استعجال فوق سعر الخدمة. لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر
+              يفضل عادي.
+            </p>
           )}
 
           {needsPreciseTime && (

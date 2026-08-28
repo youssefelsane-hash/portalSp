@@ -52,6 +52,20 @@ class AvailableOrder {
   final double distanceKm;
   final DateTime expiresAt;
 
+  /// **الحقلين دول هما إصلاح بلاغ المالك نفسه (ADR-0048 §4، docs/08 §85)** — مش تحسين عرض.
+  ///
+  /// بعد ADR-0035 بقى في نوعين مختلفين تمامًا بيوصلوا لنفس القايمة: طوارئ (نفس اليوم، الفني
+  /// بيتحرك حالًا، مفيش معاد) وشغل قريب عادي (بكرة، ليه معاد لازم الفني يشوفه قبل ما يوافق).
+  /// من غيرهم التطبيق كان بيرسم الاتنين بكارت أحمر واحد اسمه «طلب طوارئ — محتاج قرارك دلوقتي»
+  /// بلا أي تاريخ، فالفني بيقبل شغل بكرة وهو فاكره طوارئ النهارده.
+  final String bookingMode;
+  /// ISO string مش `DateTime` — نفس شكل `Order.scheduledAt` في التطبيق ده بالظبط، عشان
+  /// `formatScheduledDayAr()` (اللي كل الكروت التانية بتستخدمها) تشتغل عليه بلا تحويل.
+  final String? scheduledAt;
+
+  /// طوارئ = استجابة فورية. أي حاجة تانية = شغل ليه معاد، والمعاد لازم يبان.
+  bool get isEmergency => bookingMode == 'emergency';
+
   AvailableOrder({
     required this.assignmentId,
     required this.orderId,
@@ -62,6 +76,8 @@ class AvailableOrder {
     required this.landmark,
     required this.distanceKm,
     required this.expiresAt,
+    required this.bookingMode,
+    required this.scheduledAt,
   });
 
   factory AvailableOrder.fromJson(Map<String, dynamic> json) => AvailableOrder(
@@ -74,6 +90,10 @@ class AvailableOrder {
         landmark: json['landmark'] as String?,
         distanceKm: double.parse(json['distance_km'].toString()),
         expiresAt: DateTime.parse(json['expires_at'] as String),
+        // نسخة سيرفر قديمة (قبل ADR-0048) مابترجّعش الحقلين — بنرجع للسلوك القديم بأمان
+        // (طوارئ بلا تاريخ) بدل ما التطبيق يقع بـcast error على شاشة الشغل الرئيسية.
+        bookingMode: json['booking_mode'] as String? ?? 'emergency',
+        scheduledAt: json['scheduled_at'] as String?,
       );
 }
 

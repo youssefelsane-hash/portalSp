@@ -1,13 +1,30 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsEnum, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
+  IsDateString,
+  IsEnum,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsPositive,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { BookingMode } from '../entities/order.entity';
 
 // معاينة السعر الحقيقي قبل تأكيد الحجز (docs/08 §1، طلب صريح: "عرض السعر قبل التأكيد لازم
 // يطابق بالظبط اللي هيتحصّل"). نفس الحقول المؤثرة في السعر بتاعة CreateOrderDto — بما فيهم
 // requested_technician_id وschedule_slot_id (بَقّة حقيقية اتلقطت: كان مضاعف سعر مستوى الفني
 // بيتحسب صح في create() بس مش في المعاينة لو العميل اختار سلوت جدولة تحديدًا، فرق السعر بين
-// المعاينة والطلب الفعلي كان ممكن يحصل). عمدًا من غير حقول تنفيذ تانية زي scheduled_at اللي
-// فعلاً مش بتأثر على السعر — duration_hours استثناء (ADR-0031 Slice B/H): بيأثر فعليًا على
-// السعر لخدمات pricing_model=hourly، فلازم يتبعت هنا زي create().
+// المعاينة والطلب الفعلي كان ممكن يحصل). duration_hours موجود (ADR-0031 Slice B/H): بيأثر فعليًا
+// على السعر لخدمات pricing_model=hourly.
+//
+// **`scheduled_at` اتضاف هنا مع ADR-0048** — التعليق القديم كان بيقول إنه مستبعد عمدًا لأنه
+// "مش بيأثر على السعر"، وده **بقى غلط**: اليوم المختار هو اللي بيحدد الاستعجال، والاستعجال
+// بيضيف رسوم الطوارئ. من غيره المعاينة كانت هتقول سعر والتحصيل ياخد سعر أعلى — بالظبط البَقّة
+// اللي التعليق ده اتكتب أصلاً عشان يمنعها.
 export class PreviewOrderDto {
   @IsUUID()
   service_id: string;
@@ -15,9 +32,18 @@ export class PreviewOrderDto {
   @IsUUID()
   address_id: string;
 
+  /**
+   * **متجاهَل تمامًا (ADR-0048)** — الوضع بقى مشتق من `scheduled_at` وعدد العمال، مش مختار.
+   * الحقل باقي عشان النسخ القديمة من التطبيقات اللي لسه بتبعته ما تتكسرش بـ400.
+   */
   @IsOptional()
   @IsEnum(BookingMode)
   booking_mode?: BookingMode;
+
+  /** اليوم المطلوب — بيحدد الاستعجال ومنه رسوم الطوارئ (ADR-0048). غيابه = "دلوقتي" = مستعجل. */
+  @IsOptional()
+  @IsDateString()
+  scheduled_at?: string;
 
   @IsOptional()
   @IsObject()

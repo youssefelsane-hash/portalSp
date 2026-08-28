@@ -68,6 +68,7 @@ import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-h
 import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
 import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
+import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
@@ -307,19 +308,12 @@ export class OrdersService {
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
-    // هيكل الحجز الجديد (docs/06 §1) — التلات أزرار (فرد/اعتماد/طوارئ) بتترجم مباشرة لتحقق
-    // إن الخدمة المطلوبة أصلاً بتدعم الوضع ده (allows_individual/allows_team/allows_emergency
-    // على service.entity.ts، مضبوطة من الأدمن عبر /admin/services).
-    const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
-    const bookingModeAllowed =
-      bookingMode === BookingMode.INDIVIDUAL
-        ? service.allowsIndividual
-        : bookingMode === BookingMode.TEAM
-          ? service.allowsTeam
-          : service.allowsEmergency;
-    if (!bookingModeAllowed) {
-      throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
-    }
+    // **وضع الحجز بقى مشتق مش مختار (ADR-0048، docs/08 §85)** — `dto.booking_mode` متجاهَل تمامًا
+    // هنا. الاشتقاق نفسه محتاج حاجتين لسه مش جاهزين في النقطة دي: اليوم النهائي (بعد حل النطاق
+    // المرن/السلوت) وعدد العمال المطلوب (ناتج التسعير) — فبيتم على مرحلتين تحت:
+    //   1. `urgent` بعد ما اليوم يتحدد نهائيًا (قبل التسعير — الاستعجال بيدخّل رسوم الطوارئ).
+    //   2. `bookingMode` بعد التسعير (الحجم بيتحدد من `required_technicians`، ومابيأثرش على السعر).
+    // تفاصيل ليه محورين مستقلين: ADR-0048 §2.
 
     // قدرة دفع لكل خدمة (ADR-0026، docs/08 §42 Phase A.1) — cash_allowed=false يعني الخدمة دي
     // مينفعش تتقفل بكاش خالص (لازم كارت/InstaPay مقدّم). غياب dto.payment_method يعني كاش ضمنيًا
@@ -342,26 +336,21 @@ export class OrdersService {
       );
     }
 
-    // Script 7 Phase 7 — بَقّة حقيقية اتلقطت: الطوارئ (docs/06) معناها استجابة فورية بالتعريف
-    // (نفس التعليق موثّق تحت لـ`schedule_slot_id`)، لكن الفحص القديم كان بيمنع `schedule_slot_id`
-    // بس مع الطوارئ — `dto.scheduled_at` الحر (بلا سلوت محدد) كان بيعدّي عادي، فيتسجّل طلب
-    // `orderType=EMERGENCY` بـ`scheduledAt` في المستقبل، وبعدين `computeDispatchDeferredUntil()`
-    // بيؤجّل بث المطابقة فعليًا ساعات — عميل دافع رسوم طوارئ إضافية (`emergency_surcharge_cents`)
-    // بينتظر بلا أي استجابة "فورية" فعلية، عكس تعريف الوضع ده تمامًا.
-    if (bookingMode === BookingMode.EMERGENCY && dto.scheduled_at) {
-      throw new ApiException(ErrorCode.VAL_001, 'طلبات الطوارئ استجابة فورية — مينفعش تتحدد بموعد مستقبلي', HttpStatus.BAD_REQUEST);
-    }
+    // Script 7 Phase 7 كان بيرفض هنا أي `scheduled_at` مع وضع طوارئ، عشان طلب طوارئ بموعد
+    // مستقبلي كان بيتأجّل بثه (`computeDispatchDeferredUntil()`) والعميل دافع رسوم استعجال
+    // بينتظر بلا استجابة فورية. **الفحص ده بقى بلا معنى بعد ADR-0048**: الطوارئ مابقاش اختيار
+    // ممكن يتناقض مع التاريخ — هي **نتيجة** إن التاريخ هو النهارده. "طوارئ بموعد مستقبلي" بقت
+    // حالة مستحيلة بالبناء نفسه، مش حالة بترفض. الحماية الفعلية اللي حلّت محله: البث الفوري
+    // المفروض على كل طلب مستعجل تحت (`dispatchDeferredUntil = undefined`).
 
     // ADR-0042 (docs/08 §64.و) — معامل سعر الشركة بيتحمّل هنا مرة واحدة عشان يدخل التسعير تحت.
+    //
+    // **قيد "لازم وضع اعتماد" اتشال (ADR-0048 §5)**: كان معقول لما العميل هو اللي بيختار الوضع.
+    // دلوقتي الوضع محسوب من عدد العمال، فربط تفضيل العميل بيه معناه إن العميل يختار شركة
+    // والنظام يرفض اختياره لأن التقدير طلع "فرد واحد". التفضيل بقى مسموح دايمًا — لسه تفضيل مش
+    // ضمان، بالظبط زي `requested_technician_id`.
     let requestedCompany: TechnicianCompany | null = null;
     if (dto.requested_technician_company_id) {
-      if (bookingMode !== BookingMode.TEAM) {
-        throw new ApiException(
-          ErrorCode.VAL_001,
-          'اختيار شركة/فريق محدد متاح بس لوضع "اعتماد"',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
       requestedCompany = await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id);
     }
 
@@ -456,9 +445,10 @@ export class OrdersService {
     // queue جديد بالكامل مش موجود حتى للحقل القديم، فمش هنخترعه بس هنا).
     let scheduleSlot: TechnicianScheduleSlot | null = null;
     if (dto.schedule_slot_id) {
-      if (bookingMode === BookingMode.EMERGENCY) {
-        throw new ApiException(ErrorCode.VAL_001, 'حجز سلوت وقت محدد مش متاح لطلبات الطوارئ', HttpStatus.BAD_REQUEST);
-      }
+      // الفحص القديم ("سلوت مش متاح لطلبات الطوارئ") اتشال مع ADR-0048 — الطوارئ مابقتش اختيار
+      // يتناقض مع السلوت. **العلاقة اتقلبت**: السلوت هو اللي بيلغي الاستعجال (تحت،
+      // `urgent = !scheduleSlot && ...`)، لأن سلوت محجوز معناه فني بعينه التزم بوقت محدد —
+      // وده عكس بث الطوارئ تمامًا، حتى لو السلوت نفسه في نفس اليوم.
       if (dto.original_order_id) {
         throw new ApiException(
           ErrorCode.VAL_001,
@@ -516,6 +506,24 @@ export class OrdersService {
       }
     }
 
+    // ══ الاشتقاق، المرحلة 1: الاستعجال (ADR-0048 §1/§2) ══
+    //
+    // اليوم النهائي بقى معروف دلوقتي (بعد حل النطاق المرن فوق)، والاستعجال بيتحدد منه **بس**.
+    // لازم يتحسب هنا بالذات — قبل التسعير مباشرة — لأنه مدخل لرسوم الطوارئ.
+    //
+    // **السلوت المحجوز بيلغي الاستعجال** حتى لو في نفس اليوم: فني بعينه التزم بوقت محدد، وده
+    // تعيين مؤكّد مش بث طوارئ. تحويله لطوارئ كان هيلغي التزامه ويبثّه لناس تانية.
+    const urgent = !scheduleSlot && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+    if (urgent && !canAcceptSameDay(service)) {
+      // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل
+      // الطلب عادي: العميل اختار النهارده وهو متوقّع حد يجي النهارده (ADR-0048 §3).
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي مش متاحة لنفس اليوم — اختار يوم تاني',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // مضاعف سعر مستوى الفني (docs/08 — "قرار عمل: السعر النهائي معروف قبل التأكيد") — بيتطبّق
     // بس لو الفني معروف صراحة وقت الحجز (اختيار مباشر أو سلوت جدولة)، مش لو العميل سايب المطابقة
     // تختار (technicianLevel=undefined يبقى مضاعف=1 داخل estimate()، زي ما كان بالظبط). سلوت
@@ -532,7 +540,9 @@ export class OrdersService {
       service.id,
       zone.id,
       knownTechnicianLevel,
-      bookingMode === BookingMode.EMERGENCY,
+      // رسوم الطوارئ بقت بتتطبّق على **كل** طلب نفس اليوم لكل الفئات (ADR-0048، طلب مالك صريح:
+      // «أي طلب بيتعامل في نفس اليوم بيتسجل طوارئ… ولكن بزيادة الطوارئ طبعًا»).
+      urgent,
       dto.field_values,
       knownTechnicianPricingTier,
       dto.duration_hours,
@@ -573,13 +583,25 @@ export class OrdersService {
       !durationEstimate && estimate.required_assistants != null ? estimate.required_assistants : null;
     const formulaDurationDays =
       !durationEstimate && estimate.estimated_duration_days != null ? estimate.estimated_duration_days : null;
-    if (bookingMode === BookingMode.EMERGENCY && estimate.suitable_for_emergency === false) {
+    if (urgent && estimate.suitable_for_emergency === false) {
       throw new ApiException(
         ErrorCode.VAL_001,
         'الخدمة دي مش مناسبة لطلب طوارئ بالمواصفات دي حسب سياسة التسعير — احجزها بموعد عادي',
         HttpStatus.BAD_REQUEST,
       );
     }
+
+    // ══ الاشتقاق، المرحلة 2: الوضع النهائي (ADR-0048 §1) ══
+    //
+    // عدد العمال بقى معروف دلوقتي (من محرك الإنتاجية القياسي لو العميل استخدمه، وإلا من مخرجات
+    // معادلة التسعير). الحجم **مابيأثرش على السعر** — رسوم الطوارئ هي الفرق السعري الوحيد بين
+    // الأوضاع — فحسابه بعد التسعير مش بيخلق أي دورة.
+    const bookingMode = resolveBookingMode({
+      urgent,
+      requiredTechnicians: durationEstimate?.assigned_technicians ?? formulaCrewTechnicians,
+      requiredAssistants: durationEstimate?.assigned_assistants ?? formulaCrewAssistants,
+      service,
+    });
 
     // إعادة زيارة تحت الضمان (docs/08 §7) — لازم: بتاعة نفس العميل، مكتملة فعلاً، لنفس الخدمة
     // ونفس العنوان بالظبط (نفس المشكلة المفروض)، وتحت warranty_expires_at الفعلي لسه. تفضيل
@@ -1066,11 +1088,17 @@ export class OrdersService {
     // الطلب مش دليل كافي على وجود سلوت صريح (بيتحط من إعادة الزيارة والتفضيل العادي كمان). سلوت
     // الجدولة الصريح (scheduleSlot) مستثنى دايمًا — الفني نفسه أعلن توافره في الوقت ده صراحة.
     const leadHours = await this.settingsService.getNumber('matching.deferred_dispatch_lead_hours', 4);
-    const dispatchDeferredUntil = computeDispatchDeferredUntil({
-      scheduleSlotBooked: !!scheduleSlot,
-      scheduledAt: createdOrder.scheduledAt,
-      leadHours,
-    });
+    // طلب مستعجل (نفس اليوم) بيتبثّ **فورًا** مهما كانت الحسابات (ADR-0048): العميل دافع رسوم
+    // استعجال، فتأجيل البث لحظة واحدة يناقض اللي دفع عشانه. عمليًا `computeDispatchDeferredUntil`
+    // بترجّع `undefined` أصلاً لموعد النهارده (بداية اليوم عدّت)، بس التصريح هنا حزام أمان: أي
+    // تغيير مستقبلي في `leadHours` أو في شكل `scheduled_at` مايقدرش يأجّل طلب مدفوع كطوارئ.
+    const dispatchDeferredUntil = urgent
+      ? undefined
+      : computeDispatchDeferredUntil({
+          scheduleSlotBooked: !!scheduleSlot,
+          scheduledAt: createdOrder.scheduledAt,
+          leadHours,
+        });
 
     // بره الـ transaction عمداً — matching لازم يشتغل على بيانات مؤكّدة (committed) بس. لازم
     // emitAsync (مش emit) هنا تحديدًا: بَقّة حقيقية اتلقطت واتصلحت — emit() عادي بيستدعي
@@ -1118,15 +1146,11 @@ export class OrdersService {
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
-    const bookingMode = dto.booking_mode ?? BookingMode.INDIVIDUAL;
-    const bookingModeAllowed =
-      bookingMode === BookingMode.INDIVIDUAL
-        ? service.allowsIndividual
-        : bookingMode === BookingMode.TEAM
-          ? service.allowsTeam
-          : service.allowsEmergency;
-    if (!bookingModeAllowed) {
-      throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
+    // نفس اشتقاق `create()` بالحرف (ADR-0048) — لازم يفضلوا متطابقين، وإلا المعاينة بتقول سعر
+    // والتحصيل ياخد سعر تاني. السلوت بيلغي الاستعجال هنا كمان، بنفس السبب المشروح في `create()`.
+    const urgent = !dto.schedule_slot_id && isSameDayUrgent({ scheduledAt: dto.scheduled_at ? new Date(dto.scheduled_at) : null });
+    if (urgent && !canAcceptSameDay(service)) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مش متاحة لنفس اليوم — اختار يوم تاني', HttpStatus.BAD_REQUEST);
     }
 
     if (!address.cityId) {
@@ -1159,7 +1183,7 @@ export class OrdersService {
       service.id,
       zone.id,
       previewTechnicianLevel,
-      bookingMode === BookingMode.EMERGENCY,
+      urgent,
       dto.field_values,
       previewTechnicianPricingTier,
       dto.duration_hours,

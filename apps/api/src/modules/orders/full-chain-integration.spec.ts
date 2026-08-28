@@ -163,8 +163,11 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
 
     // ===== خدمة formula بمعادلة بتنتج crew/duration/min/max =====
     const [svc] = await q(
-      `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,min_price_cents,max_price_cents)
-       VALUES ($1,$2,$3,'formula',0,20000,900000) RETURNING id`,
+      // `allows_emergency=true` لازمة بعد ADR-0048: بوابة نفس اليوم (`canAcceptSameDay`) بتترمي
+      // **قبل** التسعير، فلو الخدمة قافلة نفس اليوم كان الاختبار تحت هيعدّي على البوابة الغلط
+      // ويبطل يختبر `suitable_for_emergency` أصلاً.
+      `INSERT INTO services (category_id,name_ar,slug,pricing_model,base_price_cents,min_price_cents,max_price_cents,allows_emergency)
+       VALUES ($1,$2,$3,'formula',0,20000,900000,true) RETURNING id`,
       [ids.category, `خدمة سلسلة ${runId}`, `chain-svc-${runId}`],
     );
     ids.serviceFormula = svc.id;
@@ -367,12 +370,16 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     expect(order.requiredTechnicians).toBe(1); // ceil(10/40)=1
   });
 
-  it('بوابة الطوارئ: المعادلة suitable_for_emergency=0 → حجز طوارئ يترفض بوضوح', async () => {
+  // بعد ADR-0048 الاستعجال بيتشتق من **التاريخ** مش من `booking_mode` — فالاختبار بقى بيبعت
+  // حجز النهارده (اللي هو تعريف الاستعجال الجديد) بدل ما يبعت وضع طوارئ مختار. البوابة نفسها
+  // (`suitable_for_emergency` من المعادلة) زي ما هي بالحرف — دي اللي بنختبرها.
+  it('بوابة الطوارئ: المعادلة suitable_for_emergency=0 → حجز نفس اليوم يترفض بوضوح', async () => {
+    const todayCairo = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
     await expect(
       ordersService.create(ids.customerUser, {
         service_id: ids.serviceFormula,
         address_id: ids.address,
-        booking_mode: 'emergency',
+        scheduled_at: `${todayCairo}T12:00:00Z`,
         field_values: { area: 100 },
       } as never),
     ).rejects.toMatchObject({ code: 'VAL_001' });
