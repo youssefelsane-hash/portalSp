@@ -41,7 +41,7 @@ void main() {
     await tester.pumpWidget(const BaytakTechnicianApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('صُنّاع'), findsWidgets);
+    expect(find.text('أسطى'), findsWidgets);
     expect(find.text('ابعت كود التحقق'), findsOneWidget);
   });
 }
