@@ -14,6 +14,7 @@ import { toAdminTechnicianDetailResponseDto, toAdminTechnicianResponseDto } from
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
+import { SetTechnicianKindDto } from './dto/set-technician-kind.dto';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { RejectTechnicianDto } from './dto/reject-technician.dto';
@@ -597,6 +598,24 @@ export class AdminTechniciansController {
 
   // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — نفس صلاحية تغيير المستوى/فئة التسعير عمداً،
   // مش صلاحية جديدة: نفس فئة القرار الإداري على مقدّم الخدمة، ومصفوفة الصلاحيات مش محتاجة تتضخّم.
+  /**
+   * دور الشخص — فني كامل ولا مساعد (ADR-0050، docs/08 §94، طلب مالك مباشر).
+   *
+   * نفس صلاحية `technicians.approve` زي باقي قرارات تصنيف الفني (المستوى/فئة التسعير/التوثيق) —
+   * مش صلاحية جديدة، عشان مانفتتش مصفوفة الصلاحيات لكل إعداد على حدة (نفس تبرير ADR-0049).
+   */
+  @Patch(':id/kind')
+  @RequirePermission('technicians.approve')
+  async setTechnicianKind(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetTechnicianKindDto,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const { profile, user } = await this.adminTechniciansService.setTechnicianKind(admin.sub, id, dto, audit);
+    return toAdminTechnicianResponseDto(profile, user);
+  }
+
   @Patch(':id/trust-badge')
   @RequirePermission('technicians.approve')
   async setTrustBadge(

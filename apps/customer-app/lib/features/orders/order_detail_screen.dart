@@ -926,6 +926,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       ],
                       if (order.technicianId != null) ...[
                         const SizedBox(height: 16),
+                        // طلب مالك صريح (docs/08 §93): العميل مش عارف إن الشات مفيد قبل الزيارة —
+                        // سطر بسيط بيوضّح إنه يقدر يشرح المشكلة ويبعت صور، عشان الفني يجهّز
+                        // العدة الصح ويجي جاهز بدل ما يكتشف على الطبيعة إنه ناقصه حاجة.
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.lightbulb_outline, size: 18, color: Theme.of(context).colorScheme.primary),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'اشرح مشكلتك للفني وابعتله صور قبل الزيارة — كده هيعرف يجيب العدة المناسبة معاه.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: () => Navigator.of(context).push(
                             MaterialPageRoute(builder: (_) => ChatScreen(orderId: order.id)),

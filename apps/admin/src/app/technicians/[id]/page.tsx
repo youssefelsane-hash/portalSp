@@ -302,6 +302,18 @@ export default function TechnicianDetailPage() {
     );
   }
 
+  // دور الشخص — فني كامل ولا مساعد (ADR-0050، docs/08 §94، طلب مالك مباشر). المساعد ما يظهرش
+  // في أي قايمة فنيين (توزيع/اختيار عميل/ضم فني لطاقم)، وما ياخدش طلب لوحده، وبياخد نسبة المساعد
+  // دايمًا في توزيع حصص الطاقم. قابل للتغيير في الاتجاهين — الترقية بتأثر على الشغل الجديد بس.
+  async function handleSetTechnicianKind(kind: 'technician' | 'assistant') {
+    await runAction(() =>
+      authedFetch(`/admin/technicians/${id}/kind`, {
+        method: 'PATCH',
+        body: JSON.stringify({ kind }),
+      }),
+    );
+  }
+
   // علامة التوثيق الزرقاء (ADR-0039، docs/08 §62.1) — مِنحة إدارية، **مش** نتيجة اعتماد الأوراق.
   // سحبها مبيمنعش الفني من الشغل، وبالعكس: اعتماد أوراقه مبياخدش العلامة تلقائيًا.
   async function handleSetTrustBadge(granted: boolean) {
@@ -627,6 +639,48 @@ export default function TechnicianDetailPage() {
               </Button>
             </CardFooter>
           </form>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">نوع الحساب — فني ولا مساعد</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            <div className="flex items-center gap-2">
+              {/* الدور + المستوى مع بعض — "مساعد محترف" / "فني كامل — مميّز" (طلب مالك: المساعد
+                  بياخد نفس مسار الترقية، فالمستوى لازم يبان جنب الدور مش بديل عنه). */}
+              {detail.technician_kind === 'assistant' ? (
+                <Badge variant="outline">مساعد {LEVEL_LABELS[detail.current_level]}</Badge>
+              ) : (
+                <Badge>فني كامل — {LEVEL_LABELS[detail.current_level]}</Badge>
+              )}
+            </div>
+            <p className="text-muted-foreground">
+              <strong>فني كامل</strong>: بياخد طلبات لوحده، بيظهر للعملاء في قايمة اختيار الفني، وبيتوزّعله
+              شغل تلقائي.
+              <br />
+              <strong>مساعد</strong>: بينضم لطاقم شغلانة مع فني بس. ما بيظهرش في أي قايمة فنيين، وما
+              بياخدش طلب لوحده، وبياخد نسبة المساعد في توزيع مستحقات الطاقم.
+            </p>
+            <p className="text-muted-foreground">
+              التغيير بيأثر على <strong>الشغل الجديد بس</strong> — حصص الشغلانات القديمة متسجّلة زي ما
+              اتحسبت وقتها ومش بتتغيّر بأثر رجعي.
+              <br />
+              <strong>المستوى مستقل عن الدور</strong>: المساعد بيترقّى (جديد → موثّق → محترف → مميّز) بنفس
+              معايير التقييم بالظبط زي الفني، والترقية بتزوّد نصيبه فعليًا وهو لسه مساعد.
+            </p>
+          </CardContent>
+          <CardFooter>
+            {detail.technician_kind === 'assistant' ? (
+              <Button size="sm" disabled={isSaving} onClick={() => handleSetTechnicianKind('technician')}>
+                رقّيه لفني كامل
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" disabled={isSaving} onClick={() => handleSetTechnicianKind('assistant')}>
+                خليه مساعد
+              </Button>
+            )}
+          </CardFooter>
         </Card>
 
         <Card>

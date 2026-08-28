@@ -5,7 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
 import { DataSource, In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
-import { technicianServiceQualificationCondition } from '../technicians/technician-eligibility.sql';
+import { technicianKindCondition, technicianServiceQualificationCondition } from '../technicians/technician-eligibility.sql';
 import {
   ASSISTANT_MATCHING_ESCALATED_EVENT,
   AssistantMatchingEscalatedEvent,
@@ -78,6 +78,8 @@ export class AssistantMatchingService {
       SELECT (
         tp.verification_status = 'approved'
         AND tp.deleted_at IS NULL
+        -- ADR-0050 — الاتجاه العكسي: المسار ده بيدوّر على **مساعد**، فالفنيين مستبعدين منه.
+        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
         AND tp.id NOT IN (
           SELECT technician_id FROM orders
           WHERE technician_id IS NOT NULL AND order_status = ANY($2::order_status[]) AND deleted_at IS NULL
@@ -176,6 +178,9 @@ export class AssistantMatchingService {
       JOIN addresses a ON a.id = $3
       JOIN services s ON s.id = $1
       WHERE tp.verification_status = 'approved'
+        -- ADR-0050 — الاتجاه العكسي: مجمع المساعدين بيضم المساعدين بس. قبل كده كان بيبث لأي فني
+        -- مؤهّل، فالفنيين الكاملين كانوا بياخدوا عروض مساعدة بنسبة أقل من نصيبهم العادي.
+        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 's.id',

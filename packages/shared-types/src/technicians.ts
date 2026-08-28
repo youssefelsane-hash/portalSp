@@ -3,6 +3,12 @@ export type TechnicianLevel = 'new' | 'verified' | 'professional' | 'premium' | 
 
 // فئة التسعير التجارية (docs/08 §36.24، ADR-0025) — منفصلة تمامًا عن TechnicianLevel التشغيلي فوق.
 export type TechnicianPricingTier = 'standard' | 'expert' | 'senior' | 'premium';
+/**
+ * دور الشخص نفسه (ADR-0050) — مستقل تمامًا عن `TechnicianLevel` (جودة/أقدمية) و
+ * `TechnicianPricingTier` (مضاعف سعر تجاري). `assistant` = ما يظهرش في أي قايمة فنيين، وما ياخدش
+ * طلب لوحده، وبياخد نسبة المساعد دايمًا في توزيع حصص الطاقم.
+ */
+export type TechnicianKind = 'technician' | 'assistant';
 
 export type TechnicianVerificationStatus =
   | 'pending'
@@ -25,6 +31,7 @@ export interface AdminTechnicianResponseDto {
   years_of_experience: number;
   current_level: TechnicianLevel;
   pricing_tier: TechnicianPricingTier;
+  technician_kind: TechnicianKind;
   quality_score: number;
   average_rating: number;
   total_ratings_count: number;

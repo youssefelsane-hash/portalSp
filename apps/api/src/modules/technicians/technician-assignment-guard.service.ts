@@ -4,7 +4,7 @@ import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { BookingMode, Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
-import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { TechnicianKind, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import {
   classifyTechnicianCapacity,
   technicianAvailabilityCondition,
@@ -118,6 +118,17 @@ export class TechnicianAssignmentGuardService {
   private async assertCoreEligibility(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
     if (technician.verificationStatus !== TechnicianVerificationStatus.APPROVED) {
       throw new ApiException(ErrorCode.TECH_001, 'الفني ده لسه مش معتمد', HttpStatus.BAD_REQUEST);
+    }
+    // ADR-0050 — **آخر خط دفاع** على القاعدة الجوهرية: المساعد ما يقودش طلب أبدًا. استعلامات
+    // المرشّحين بتستبعده أصلاً، بس الحارس ده بيتنادى كمان من مسارات التعيين الإداري القسري وقبول
+    // الفرص — يعني حتى لو حد وصل لـid مساعد بأي طريقة تانية، التعيين بيترفض هنا. القاعدة دي
+    // مالية كمان مش تشغيلية بس: القائد بياخد باقي قروش القسمة وبتتم عليه مقاصّة الكاش.
+    if (technician.technicianKind === TechnicianKind.ASSISTANT) {
+      throw new ApiException(
+        ErrorCode.TECH_001,
+        'ده مساعد مش فني — المساعد بينضم لطاقم شغلانة بس، ما ياخدش طلب لوحده',
+        HttpStatus.BAD_REQUEST,
+      );
     }
     // ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل. الفني متاح افتراضيًا
     // (Opt-out) — مش محتاج يكون "أونلاين دلوقتي" عشان الأدمن يقدر يعيّنه لطلب مجدول (أو حتى فوري،

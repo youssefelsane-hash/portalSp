@@ -25,13 +25,19 @@ import {
 import { AssignTechnicianZoneDto } from './dto/assign-technician-zone.dto';
 import { ChangeTechnicianLevelDto } from './dto/change-technician-level.dto';
 import { ChangeTechnicianPricingTierDto } from './dto/change-technician-pricing-tier.dto';
+import { SetTechnicianKindDto } from './dto/set-technician-kind.dto';
 import { SetTrustBadgeDto } from './dto/set-trust-badge.dto';
 import { ListTechniciansQueryDto } from './dto/list-technicians-query.dto';
 import { ApproveTechnicianServiceDto } from './dto/review-technician-service.dto';
 import { ReviewDocumentDto } from './dto/review-document.dto';
 import { DocumentReviewStatus, TechnicianDocument, TechnicianDocumentType } from './entities/technician-document.entity';
 import { TechnicianLevelChangeType, TechnicianLevelHistory } from './entities/technician-level-history.entity';
-import { TechnicianAssistantLinkStatus, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import {
+  TechnicianAssistantLinkStatus,
+  TechnicianKind,
+  TechnicianProfile,
+  TechnicianVerificationStatus,
+} from './entities/technician-profile.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
 import { canTransitionVerification } from './technician-verification-state-machine';
 
@@ -468,6 +474,59 @@ export class AdminTechniciansService {
    * العلامة، وسحب العلامة **مبيمنعوش** من الشغل. أي ربط بين الاتنين هنا بيرجّعنا للمشكلة اللي
    * الـADR اتكتبت عشانها (العلامة بتتوزّع تلقائيًا على أي حد يخلّص أوراقه).
    */
+  /**
+   * تغيير دور الشخص — فني كامل ↔ مساعد (ADR-0050، docs/08 §94، طلب مالك مباشر).
+   *
+   * **الأثر المالي مقصود وفوري على الشغل الجديد بس**: بمجرد ما يبقى `assistant`، أي انضمام جديد
+   * ليه لطاقم بيتسجّل `member_type='assistant'` (نقطة الفرض في `resolveEffectiveMemberType`)،
+   * فبياخد نسبة المساعد. الحصص القديمة في `order_earning_shares` **ما بتتغيّرش** — هي snapshot
+   * لللي حصل فعلاً وقت التسوية (نفس فلسفة ADR-0040)، فالترقية مش بتعيد كتابة التاريخ.
+   */
+  async setTechnicianKind(
+    adminUserId: string,
+    technicianProfileId: string,
+    dto: SetTechnicianKindDto,
+    meta?: AuditActorMeta,
+  ): Promise<TechnicianWithUser> {
+    const profile = await this.findProfileOrThrow(technicianProfileId);
+    if (profile.technicianKind === dto.kind) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        dto.kind === TechnicianKind.ASSISTANT ? 'الشخص ده مسجّل مساعد بالفعل' : 'الشخص ده مسجّل فني بالفعل',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const previousKind = profile.technicianKind;
+    profile.technicianKind = dto.kind;
+    await this.technicianProfiles.save(profile);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'technician.kind_changed',
+      entityType: 'technician_profile',
+      entityId: profile.id,
+      oldValues: { technician_kind: previousKind },
+      newValues: { technician_kind: dto.kind },
+      meta,
+    });
+
+    const becameAssistant = dto.kind === TechnicianKind.ASSISTANT;
+    this.emitAdminAction(
+      profile.userId,
+      becameAssistant ? 'kind_set_assistant' : 'kind_set_technician',
+      becameAssistant ? 'حسابك بقى مساعد' : 'مبروك! بقيت فني كامل 🎉',
+      becameAssistant
+        ? 'دلوقتي هتنضم للشغلانات كمساعد مع فني، ومش هتستلم طلبات لوحدك.'
+        : 'دلوقتي تقدر تستلم طلبات لوحدك وتظهر للعملاء في قايمة الفنيين.',
+      profile.id,
+    );
+
+    const [withUser] = await this.attachUsers([profile]);
+    return withUser;
+  }
+
   async setTrustBadge(
     adminUserId: string,
     technicianProfileId: string,

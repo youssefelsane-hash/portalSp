@@ -11,6 +11,7 @@ import {
   OrderAssistantAssignedManuallyEvent,
 } from '../../common/events/order-assistant-assigned-manually.event';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
+import { resolveEffectiveMemberType } from './crew-member-type';
 import { CrewMemberType } from './dto/admin-crew-member.dto';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { PromoCodesService } from '../promotions/promo-codes.service';
@@ -830,6 +831,10 @@ export class AdminOrdersService {
   ): Promise<Order> {
     const order = await this.findOrThrow(orderId);
     const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId);
+    // ADR-0050 — حتى الأدمن ما يقدرش يضيف مساعد بنصيب عضو فريق كامل: الدور صفة على الشخص،
+    // والنسبة بتتبعه. لو الأدمن عايز يديه نصيب كامل، الطريق الصح إنه يرقّيه لفني في بروفايله.
+    const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+    const effectiveMemberType = resolveEffectiveMemberType(memberType, candidateProfile.technicianKind);
 
     const existingCount = await this.teamMembers.count({ where: { orderId } });
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
@@ -842,7 +847,14 @@ export class AdminOrdersService {
     // هنا بس بنحوّل خطأ الداتابيز الخام لنفس رسالة 409 الواضحة اللي الفحص العادي بيرجّعها.
     try {
       await this.teamMembers.save(
-        this.teamMembers.create({ orderId, technicianId, roleLabel, memberType, addedByTechnicianId: null, addedByAdminUserId: adminUserId }),
+        this.teamMembers.create({
+          orderId,
+          technicianId,
+          roleLabel,
+          memberType: effectiveMemberType,
+          addedByTechnicianId: null,
+          addedByAdminUserId: adminUserId,
+        }),
       );
     } catch (err) {
       if (this.isUniqueViolation(err)) {
