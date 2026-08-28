@@ -91,6 +91,9 @@ export interface ServiceDto {
   name_en: string | null;
   short_description_ar: string | null;
   full_description_ar: string | null;
+  // بانر الخدمة (docs/08 §83 جزء ج) — موجود في رد الباك-إند من زمان (ServiceResponseDto)، مش
+  // موصول هنا خالص قبل كده — الفجوة كانت في الـDTO نفسه مش في العرض.
+  icon_url: string | null;
   pricing_model: 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote' | 'formula';
   base_price_cents: number;
   inspection_fee_cents: number;

@@ -101,6 +101,24 @@ export default function TechnicianProfilePage({ params }: { params: Promise<{ id
         </section>
       )}
 
+      {profile.certificates.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 font-semibold">الشهادات</h2>
+          <ul className="space-y-1 text-sm">
+            {profile.certificates.map((cert) => (
+              <li key={cert.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
+                <span aria-hidden>🏅</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{cert.title}</p>
+                  {cert.issuer_name && <p className="text-xs text-muted">{cert.issuer_name}</p>}
+                </div>
+                {cert.issued_at && <span className="shrink-0 text-xs text-muted">{cert.issued_at}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {profile.recent_reviews.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">آخر التقييمات</h2>

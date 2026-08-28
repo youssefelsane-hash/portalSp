@@ -9959,3 +9959,25 @@ ADR-0018 §2. القرار ده يوثّق هنا بدل ما يتكتب ADR ج�
 
 **نطاق باقي (مش الدفعة دي)**: القايمة الأكبر من 13 قدرة غايبة من §82 لسه زي ما هي، غير متأثرة بالفحص
 ده (بيقفل فجوات "عرض"/"محتوى" مش فجوات "قدرة كاملة غايبة").
+
+### حالة التنفيذ — جزء ج (2026-08-28) — ✅ خلص ومتأكد منه حي
+
+التلاتة اتنفّذوا بالظبط زي الخطة: `ServiceDto.icon_url` مضاف + بانر 3:1 في `services/[id]/page.tsx`
++ صورة مصغّرة في صفوف `categories/[id]` و`search`. `TechnicianBookingListItemDto` بقى فيه كل حقول
+الباك-إند (`is_company`, `company_name`, `staff_count`, `branch_count`, `is_commercial_company`,
+`is_verified`, `pricing_tier`, `on_time_rate`, `availability_status`, `unavailable_reason_ar`,
+`available_again_at`) — عمدًا من غير `avg_arrival_minutes` (قرار جزء أ). كارتين جداد في
+`services/[id]/page.tsx`: `CompanyCard` (شريط علوي، بادجات `CompanyTag`، `TrustBadge`) و`IndividualCard`
+(avatar/fallback، بادج توثيق، شارة مستوى `TECHNICIAN_LEVEL_LABELS_AR`، تحذير تعارض جدولة) — نفس
+التمييز البصري اللي في `technician_marketplace_screen.dart` بتصميم كروت ويب. `TechnicianProfileDto`
+بقى فيه `certificates` وقسم "الشهادات" في `/technicians/[id]/page.tsx`.
+
+**اتأكد حي جزئيًا — بصراحة**: صور الخدمة (بانر + مصغّرة) والشهادات اتأكدوا حي بالكامل عبر Playwright
+ضد `apps/api`+`apps/customer-web` حقيقيين (خدمة اختبار بـ`icon_url` data-URI، شهادة معتمدة حقيقية
+على فني اختبار موجود — سكرين شوت + مطابقة نص يثبتوا الاتنين). **كارتي الشركة/الفني الفردي في اختيار
+الفني مش متأكد منهم حي** — الداتابيز المحلية دلوقتي مفيهاش أي `service_zones` بجيومتري حقيقي
+(`boundary` فاضي على كل الصفوف)، وبناء fixture كامل (شركة + موظفين + مناطق جغرافية حقيقية + مطابقة)
+تكلفته أكبر من قيمته لتغيير إضافي بحت (حقول DTO اتطابقت حرفيًا مع مصدر الباك-إند، JSX شرطي بسيط).
+اتعمله بدل كده: مراجعة كود دقيقة لمطابقة كل اسم حقل مع `technician-booking-list-response.dto.ts`
+مباشرة. `tsc`/`eslint`/`next build` كلهم نضاف. لو ظهرت مشكلة بصرية حقيقية في الكروت دي لاحقًا، سهل
+تصلح — بيانات فعلية بس ناقصة، مش منطق.

@@ -143,3 +143,27 @@ slide 1 وslide 3 كانوا شبه متطابقين بصريًا (نفس عائ
 اسم الفني، فاختفى الرابط على طلب معيّن له فني لسه مقبلش. اتصلح بفصل الشرط، مطابقة
 `order_detail_screen.dart`'s `technicianId != null` بالحرف. اتأكد حي عبر Playwright (سيرفرين
 حقيقيين + بيانات seed حقيقية) — الرابطين ظاهرين صح من `technician_assigned`.
+
+## صور الخدمات + بادجات الشركة في اختيار الفني + شهادات البروفايل (2026-08-28، طلب مالك، docs/08 §83 جزء ج)
+
+فحص شامل كشف إن غياب الصور والتمييز البصري مش مسألة عرض — الحقول نفسها كانت غايبة من الـDTOs هنا
+من الأساس رغم وجودها في رد الباك-إند ومستخدمة في `apps/customer-app`:
+
+- **`ServiceDto.icon_url`** (`lib/api-types.ts`) — بانر 3:1 في `services/[id]/page.tsx`، صورة
+  مصغّرة في صفوف `categories/[id]` و`search` (نفس الحقل اللي `ServiceCard` في Flutter بيعرضه
+  كبانر كامل العرض، كان مش موصول هنا خالص).
+- **`TechnicianBookingListItemDto`** (`lib/technicians.ts`) — بقى فيه كل حقول الباك-إند
+  (`is_company`, `company_name`, `staff_count`, `branch_count`, `is_commercial_company`,
+  `is_verified`, `pricing_tier`, `on_time_rate`, `availability_status`, `unavailable_reason_ar`)
+  اللي كانت غايبة من الـDTO خالص. كارتين جداد في `services/[id]/page.tsx`: `CompanyCard` (شريط
+  علوي ملوّن، بادجات إحصائية `CompanyTag`، بادج توثيق) و`IndividualCard` (avatar/fallback، بادج
+  توثيق، شارة مستوى، تحذير تعارض جدولة) — توازي بصري مع `technician_marketplace_screen.dart`'s
+  `_buildCompanyCard`/`_buildCard` بتصميم كروت مناسب للويب (مش نسخة موبايل حرفية).
+- **`TechnicianProfileDto.certificates`** (`lib/technicians.ts`) — قسم "الشهادات" جديد في
+  `/technicians/[id]/page.tsx` (عنوان، جهة مانحة، تاريخ). `portfolio_links` لسه مؤجّلة عمدًا
+  (docs/08 §82 — محتاجة تصميم embed فيديو منفصل، الشهادات مفيهاش فيديو فالفجوة دي بتتقفل لوحدها).
+- **اتأكد حي جزئيًا وبصراحة**: صور الخدمة والشهادات اتأكدوا حي بالكامل (Playwright ضد سيرفرين
+  حقيقيين، خدمة/شهادة اختبار حقيقية على Postgres). كارتي الشركة/الفرد **مش متأكد منهم حي** —
+  الداتابيز المحلية دلوقتي مفيهاش أي `service_zones` بجيومتري حقيقي (بناء fixture كامل بمناطق
+  جغرافية شغالة تكلفته أكبر من قيمته لتغيير DTO+JSX بحت)، اتعمله بدل كده مراجعة كود دقيقة لمطابقة
+  كل اسم حقل مع `technician-booking-list-response.dto.ts` مباشرة. تفاصيل كاملة في docs/08 §83.
