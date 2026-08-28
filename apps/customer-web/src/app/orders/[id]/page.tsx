@@ -410,10 +410,14 @@ function ChatSection({
 
   return (
     <section className="mt-6 rounded-xl border border-border bg-surface p-4">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-1 flex items-center gap-2">
         <h2 className="font-semibold">الشات</h2>
         {live && <span className="h-2 w-2 rounded-full bg-success" title="متصل الآن" />}
       </div>
+      {/* طلب مالك صريح (docs/08 §93) — نفس السطر الموجود في تطبيق الموبايل بالحرف. */}
+      <p className="mb-3 text-xs text-muted">
+        اشرح مشكلتك للفني وابعتله صور قبل الزيارة — كده هيعرف يجيب العدة المناسبة معاه.
+      </p>
       <div className="max-h-64 space-y-2 overflow-y-auto">
         {messages.length === 0 ? (
           <p className="text-sm text-muted">مفيش رسايل لسه</p>
