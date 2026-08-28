@@ -60,11 +60,23 @@ function monthLabel(month: string): string {
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long' });
 }
 
+/** مطابقة رصيد المحفظة مع كشف الشهر (docs/08 §95) — مطابقة لـTechnicianBalanceReconciliation في الباك-إند. */
+interface BalanceReconciliation {
+  month: string;
+  monthNetCents: number;
+  monthLedgerCents: number;
+  currentBalanceCents: number;
+  outsideMonthCents: number;
+  outsideMonthBreakdown: { transactionType: string; labelAr: string; amountCents: number }[];
+  monthMatchesLedger: boolean;
+}
+
 export function TechnicianEarningsStatement({ technicianId }: { technicianId: string }) {
   const { isLoading, authedFetch } = useAuth();
   const [months, setMonths] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [statement, setStatement] = useState<MonthlyStatement | null>(null);
+  const [reconciliation, setReconciliation] = useState<BalanceReconciliation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
@@ -76,6 +88,10 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
           setSelected(s.month);
         })
         .catch((err) => setError(err instanceof ApiError ? err.message : 'حصل خطأ في تحميل كشف المستحقات'));
+      // المطابقة مستقلة عن الكشف عمدًا: فشلها ما يمنعش عرض الكشف نفسه (نفس فلسفة باقي الأقسام).
+      authedFetch<BalanceReconciliation>(`/admin/technicians/${technicianId}/earnings/reconciliation${qs}`)
+        .then(setReconciliation)
+        .catch(() => setReconciliation(null));
     },
     [authedFetch, technicianId],
   );
@@ -154,6 +170,45 @@ export function TechnicianEarningsStatement({ technicianId }: { technicianId: st
                 {formatEgp(statement.totals.cashCollectedCents)}.
               </p>
             </div>
+
+            {/* مطابقة الرصيد (docs/08 §95، سؤال مالك مباشر): الرقم فوق بيخص **شغل الشهر ده بس**،
+                بينما "المديونية الحالية" في كارت المديونية بتخص **كل الزمن**. اختلافهم طبيعي، بس
+                كان بيبان كأنه خطأ حسابي. الجدول ده بيفكّك الفرق لمصادره من دفتر الحسابات نفسه. */}
+            {reconciliation && (
+              <div className="rounded-lg border p-4 text-sm">
+                <p className="font-medium">مطابقة مع رصيد المحفظة الحالي</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  الرقم اللي فوق بيخص شغل الشهر ده بس. رصيد المحفظة بيجمع كل الزمن — فأي فرق بينهم
+                  طبيعي، وده تفصيله بالكامل:
+                </p>
+                <div className="mt-3 space-y-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">صافي شغل الشهر ده</span>
+                    <span className="tabular-nums">{formatEgp(reconciliation.monthLedgerCents)}</span>
+                  </div>
+                  {reconciliation.outsideMonthBreakdown.map((row) => (
+                    <div key={row.transactionType} className="flex justify-between gap-2">
+                      <span className="text-muted-foreground">{row.labelAr}</span>
+                      <span className="tabular-nums">{formatEgp(row.amountCents)}</span>
+                    </div>
+                  ))}
+                  <div className="mt-2 flex justify-between gap-2 border-t pt-2 font-medium">
+                    <span>= رصيد المحفظة الحالي</span>
+                    <span className={`tabular-nums ${reconciliation.currentBalanceCents < 0 ? 'text-destructive' : ''}`}>
+                      {reconciliation.currentBalanceCents < 0 ? 'مديونية ' : ''}
+                      {formatEgp(Math.abs(reconciliation.currentBalanceCents))}
+                    </span>
+                  </div>
+                </div>
+                {!reconciliation.monthMatchesLedger && (
+                  <p className="mt-3 rounded bg-destructive/10 p-2 text-xs text-destructive">
+                    ⚠️ كشف الشهر ({formatEgp(reconciliation.monthNetCents)}) مش مطابق لحركات المحفظة
+                    لنفس الشهر ({formatEgp(reconciliation.monthLedgerCents)}) — ده خلل حقيقي محتاج
+                    مراجعة، مش فرق طبيعي.
+                  </p>
+                )}
+              </div>
+            )}
 
             {statement.jobs.length === 0 ? (
               <EmptyState title="مفيش شغل مقفول في الشهر ده" />
