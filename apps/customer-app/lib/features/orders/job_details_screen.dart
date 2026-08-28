@@ -21,6 +21,9 @@ class JobDetailsScreen extends StatefulWidget {
   final DateTime? requestedAt;
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — null يعني يوم محدد واحد بس.
   final DateTime? requestedAtRangeEnd;
+  // دقة الوقت (docs/08 §84 جزء ج) — مليانين لو الخدمة requiresPreciseSchedule/requiresStartTimeOnly.
+  final TimeOfDay? requestedPreciseTime;
+  final int? requestedDurationHours;
   // توحيد فلو "اعتماد" مع "فردي" (docs/08 §36+§38، طلب مالك صريح 2026-08-21 — اتصلحت بشكل مستقل
   // في سيشنين متوازيين) — افتراضي individual عشان الاستدعاء الوحيد الموجود قبل الإصلاح (خدمات
   // فردي formula) يفضل شغال بلا تعديل، وبتتمرر لـTechnicianSelectionScreen تحت.
@@ -32,6 +35,8 @@ class JobDetailsScreen extends StatefulWidget {
     this.bookingMode = BookingMode.individual,
     this.requestedAt,
     this.requestedAtRangeEnd,
+    this.requestedPreciseTime,
+    this.requestedDurationHours,
   });
 
   @override
@@ -123,6 +128,8 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           fieldValues: Map<String, dynamic>.from(_fieldValues),
           requestedAt: widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
+          requestedPreciseTime: widget.requestedPreciseTime,
+          requestedDurationHours: widget.requestedDurationHours,
         ),
       ),
     );

@@ -37,6 +37,9 @@ class TechnicianSelectionScreen extends StatefulWidget {
   // "مرن — اختار نطاق أيام" (docs/08 §32.3) — بتتمرر لـCreateOrderScreen بس (مش لقايمة الفنيين —
   // المعاينة هناك بتفترض يوم واحد، النطاق بيتحل فعليًا وقت إنشاء الطلب في الباك-إند).
   final DateTime? requestedAtRangeEnd;
+  // دقة الوقت (docs/08 §84 جزء ج) — بتتمرر لـCreateOrderScreen بس (نفس requestedAtRangeEnd فوق).
+  final TimeOfDay? requestedPreciseTime;
+  final int? requestedDurationHours;
   // توحيد فلو "اعتماد" مع "فردي" (docs/08 §38، طلب مالك صريح 2026-08-21) — الشاشة دي بقت
   // تُستخدم للوضعين بالحرف. individual (الافتراضي) = صفر تغيير عن السلوك الحالي. اعتماد الشركات
   // في القايمة الموحّدة (TechnicianMarketplaceScreen) مربوط بـteam بس — onManualSelect (إعادة
@@ -54,6 +57,8 @@ class TechnicianSelectionScreen extends StatefulWidget {
     this.fieldValues,
     this.requestedAt,
     this.requestedAtRangeEnd,
+    this.requestedPreciseTime,
+    this.requestedDurationHours,
   });
 
   @override
@@ -116,6 +121,8 @@ class _TechnicianSelectionScreenState extends State<TechnicianSelectionScreen> {
           // جدوليًا، effectiveRequestedAt بيحمل المعاد الجديد ده بدل widget.requestedAt الأصلي.
           requestedAt: effectiveRequestedAt ?? widget.requestedAt,
           requestedAtRangeEnd: widget.requestedAtRangeEnd,
+          requestedPreciseTime: widget.requestedPreciseTime,
+          requestedDurationHours: widget.requestedDurationHours,
         ),
       ),
     );

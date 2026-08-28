@@ -62,15 +62,23 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
   // بوكينج طوارئ بوضوح)، فسؤال "امتى؟" هنا مضلّل مش مفيد.
   DateTime? scheduledAt;
   DateTime? scheduledAtRangeEnd;
+  TimeOfDay? preciseTime;
+  int? durationHours;
   if (bookingMode != BookingMode.emergency) {
     final choice = await Navigator.of(context).push<ScheduleChoice>(
       MaterialPageRoute(
-        builder: (_) => ScheduleSelectionScreen(allowsDateRangeBooking: service.allowsDateRangeBooking),
+        builder: (_) => ScheduleSelectionScreen(
+          allowsDateRangeBooking: service.allowsDateRangeBooking,
+          requiresPreciseTime: service.requiresPreciseSchedule || service.requiresStartTimeOnly,
+          requiresDurationHours: service.requiresPreciseSchedule,
+        ),
       ),
     );
     if (choice == null || !context.mounted) return; // العميل رجع من غير ما يختار — نلغي الحجز كله
     scheduledAt = choice.scheduledAt;
     scheduledAtRangeEnd = choice.rangeEnd;
+    preciseTime = choice.preciseTime;
+    durationHours = choice.durationHours;
   }
 
   if (!context.mounted) return;
@@ -87,6 +95,8 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
               bookingMode: bookingMode,
               requestedAt: scheduledAt,
               requestedAtRangeEnd: scheduledAtRangeEnd,
+              requestedPreciseTime: preciseTime,
+              requestedDurationHours: durationHours,
             )
           : service.pricingModel == 'formula'
               ? JobDetailsScreen(
@@ -94,12 +104,16 @@ Future<void> navigateToServiceBooking(BuildContext context, CatalogService servi
                   bookingMode: bookingMode,
                   requestedAt: scheduledAt,
                   requestedAtRangeEnd: scheduledAtRangeEnd,
+                  requestedPreciseTime: preciseTime,
+                  requestedDurationHours: durationHours,
                 )
               : TechnicianSelectionScreen(
                   service: service,
                   bookingMode: bookingMode,
                   requestedAt: scheduledAt,
                   requestedAtRangeEnd: scheduledAtRangeEnd,
+                  requestedPreciseTime: preciseTime,
+                  requestedDurationHours: durationHours,
                 ),
     ),
   );

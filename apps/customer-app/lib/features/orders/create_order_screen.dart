@@ -48,6 +48,11 @@ class CreateOrderScreen extends StatefulWidget {
   // بيختار أقرب يوم فعليًا متاح جوّه [requestedAt, requestedAtRangeEnd] بدل requestedAt الحرفي.
   // بتتصفّر تلقائيًا لو العميل غيّر الموعد من هنا (نفس فلسفة _pickSchedule تحت).
   final DateTime? requestedAtRangeEnd;
+  // دقة الوقت (docs/08 §84 جزء ج) — مليانين مسبقًا لو العميل اختارهم أصلاً في
+  // ScheduleSelectionScreen (requiresPreciseSchedule/requiresStartTimeOnly). لسه قابلين للتعديل
+  // هنا (_pickPreciseTime/_durationHoursController)، نفس فلسفة requestedAt فوق بالحرف.
+  final TimeOfDay? requestedPreciseTime;
+  final int? requestedDurationHours;
 
   const CreateOrderScreen({
     super.key,
@@ -60,6 +65,8 @@ class CreateOrderScreen extends StatefulWidget {
     this.initialFieldValues,
     this.requestedAt,
     this.requestedAtRangeEnd,
+    this.requestedPreciseTime,
+    this.requestedDurationHours,
   });
 
   @override
@@ -199,6 +206,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     _selectedAddress = widget.initialAddress;
     _requestedAt = widget.requestedAt;
     _requestedAtRangeEnd = widget.requestedAtRangeEnd;
+    _preciseTime = widget.requestedPreciseTime;
+    if (widget.requestedDurationHours != null) {
+      _durationHoursController.text = widget.requestedDurationHours.toString();
+    }
     if (widget.initialFieldValues != null) _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
     if (_isFormulaPricing) {
@@ -478,13 +489,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   Future<void> _pickSchedule() async {
     final choice = await Navigator.of(context).push<ScheduleChoice>(
       MaterialPageRoute(
-        builder: (_) => ScheduleSelectionScreen(allowsDateRangeBooking: widget.service.allowsDateRangeBooking),
+        builder: (_) => ScheduleSelectionScreen(
+          allowsDateRangeBooking: widget.service.allowsDateRangeBooking,
+          requiresPreciseTime: widget.service.requiresPreciseSchedule || widget.service.requiresStartTimeOnly,
+          requiresDurationHours: widget.service.requiresPreciseSchedule,
+        ),
       ),
     );
     if (choice != null && mounted) {
       setState(() {
         _requestedAt = choice.scheduledAt;
         _requestedAtRangeEnd = choice.rangeEnd;
+        if (choice.preciseTime != null) _preciseTime = choice.preciseTime;
+        if (choice.durationHours != null) _durationHoursController.text = choice.durationHours.toString();
       });
     }
   }
