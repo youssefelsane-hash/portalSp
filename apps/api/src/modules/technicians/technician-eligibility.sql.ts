@@ -440,7 +440,31 @@ export function technicianServiceQualificationCondition(opts: {
    * `<alias>.id IS NOT NULL` زي ما كان بالظبط. لو مش موجود، الدالة بتبني `EXISTS` بنفسها.
    */
   directServiceAlias?: string;
+  /**
+   * ADR-0054 (docs/08 §103، قرار مالك) — هل الدور ده محتاج **موافقة إيجابية مسجّلة** على الخدمة؟
+   *
+   * `true` (الافتراضي) = سلوك الفني بالحرف: لازم اعتماد على الخدمة أو فئتها. الفني بيقود شغلانة
+   * ومسؤول عن جودتها، فالتحقق من صنعته شرط حقيقي.
+   *
+   * `false` = مسار المساعد: **مؤهّل لكل الخدمات النشطة افتراضيًا**، وقايمة الحجب لوحدها هي أداة
+   * التحكم. المساعد بيشتغل تحت إشراف فني قائد، فالحاجز الصح له مهارة عامة مش شهادة صنعة لكل
+   * خدمة — وفرض الاعتماد كان بيخلّي أي حد يتحوّل لمساعد يختفي من كل المسارات فورًا.
+   *
+   * **الحجب بيفضل مفروض في الحالتين** — ده اللي بيخلّي القرار قابل للتحكم أصلاً.
+   */
+  serviceApprovalRequired?: boolean;
 }): string {
+  // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
+  const notExcluded = `NOT EXISTS (
+          SELECT 1 FROM technician_excluded_services tes
+          WHERE tes.technician_id = ${opts.technicianIdExpr}
+            AND tes.service_id = ${opts.serviceIdExpr}
+        )`;
+
+  if (opts.serviceApprovalRequired === false) {
+    return notExcluded;
+  }
+
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
     : `EXISTS (
@@ -460,13 +484,8 @@ export function technicianServiceQualificationCondition(opts: {
               AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
           )
         )
-        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. قائمة حجب: غياب الصف = مسموح، فالشرط
-        -- ده مالوش أي أثر لحد ما الأدمن يحجب فعلاً.
-        AND NOT EXISTS (
-          SELECT 1 FROM technician_excluded_services tes
-          WHERE tes.technician_id = ${opts.technicianIdExpr}
-            AND tes.service_id = ${opts.serviceIdExpr}
-        )`;
+        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده.
+        AND ${notExcluded}`;
 }
 
 /**
