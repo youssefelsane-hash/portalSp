@@ -40,22 +40,39 @@ export class TechnicianServiceExclusionsService {
    *
    * `technician_services` المباشرة داخلة كمان (`UNION`): الفني ممكن يكون معتمد في خدمة بعينها
    * برّه فئاته، ولازم الأدمن يقدر يحجبها زي أي حاجة تانية.
+   *
+   * **ADR-0054 — المساعد استثناء مقصود**: بيتعرضله **كل الخدمات النشطة**، لأنه مؤهّل لكلها
+   * افتراضيًا (مش محتاج اعتماد صنعة). من غير الفرع ده الشاشة كانت بتفضل **فاضية تمامًا** لأي
+   * مساعد بلا اعتمادات — فالأدمن مش بس مش قادر يحجب، هو أصلاً مش شايف حاجة يحجبها. لازم الشاشة
+   * تشوف نفس المجموعة اللي المطابقة بتشوفها، وإلا الأدمن يحجب حاجة والمطابقة تبعتها.
    */
   async listForTechnician(technicianId: string): Promise<TechnicianServicePermissionRow[]> {
     return this.dataSource.query<TechnicianServicePermissionRow[]>(
       `
-      WITH qualified AS (
+      WITH kind AS (
+        SELECT technician_kind FROM technician_profiles WHERE id = $1
+      ),
+      qualified AS (
         SELECT s.id AS service_id, s.name_ar AS service_name_ar, sc.id AS category_id, sc.name_ar AS category_name_ar
         FROM technician_categories tc
         JOIN service_categories sc ON sc.id = tc.category_id
         JOIN services s ON s.category_id = sc.id AND s.deleted_at IS NULL AND s.is_active = true
         WHERE tc.technician_id = $1 AND tc.is_active = true AND tc.verification_status = 'approved'
+          AND (SELECT technician_kind FROM kind) <> 'assistant'
         UNION
         SELECT s.id, s.name_ar, sc.id, sc.name_ar
         FROM technician_services ts
         JOIN services s ON s.id = ts.service_id AND s.deleted_at IS NULL AND s.is_active = true
         JOIN service_categories sc ON sc.id = s.category_id
         WHERE ts.technician_id = $1 AND ts.is_active = true AND ts.verification_status = 'approved'
+          AND (SELECT technician_kind FROM kind) <> 'assistant'
+        UNION
+        -- المساعد: كل الخدمات النشطة، لأنه مؤهّل لكلها افتراضيًا (ADR-0054).
+        SELECT s.id, s.name_ar, sc.id, sc.name_ar
+        FROM services s
+        JOIN service_categories sc ON sc.id = s.category_id
+        WHERE s.deleted_at IS NULL AND s.is_active = true
+          AND (SELECT technician_kind FROM kind) = 'assistant'
       )
       SELECT q.service_id, q.service_name_ar, q.category_id, q.category_name_ar,
              (tes.id IS NOT NULL) AS is_excluded,
