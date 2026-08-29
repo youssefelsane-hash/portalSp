@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LEGAL_ENTITY_AR, LEGAL_ENTITY_EN, PLATFORM_NAME_AR, PLATFORM_NAME_EN } from '@/lib/legal-content';
+import { fetchLegalEntity } from '@/lib/legal-content';
 
 /**
  * فوتر الموقع (طلب مالك مباشر، docs/08 §99) — «السياسة والاستخدام اللي بيبقى تحت في آخر الموقع»
@@ -14,7 +14,8 @@ const LINKS = [
   { href: '/legal/account-deletion', label: 'حذف الحساب' },
 ];
 
-export function SiteFooter() {
+export async function SiteFooter() {
+  const entity = await fetchLegalEntity();
   const year = new Date().getFullYear();
   return (
     <footer className="mt-12 border-t bg-muted/30">
@@ -27,14 +28,30 @@ export function SiteFooter() {
           ))}
         </nav>
         <p className="text-sm text-muted-foreground">
-          منصة {PLATFORM_NAME_AR} (<span dir="ltr">{PLATFORM_NAME_EN}</span>) — تُدار بواسطة {LEGAL_ENTITY_AR} —{' '}
-          <span dir="ltr">{LEGAL_ENTITY_EN}</span>
+          منصة {entity.platform_name_ar} (<span dir="ltr">{entity.platform_name_en}</span>) — تُدار بواسطة{' '}
+          {entity.company_name_ar} — <span dir="ltr">{entity.company_name_en}</span>
         </p>
+        {/* السطور دي بتظهر بس لما تتملى من شاشة الأدمن — «ما تظهرش كسطر فاضي» بنص المالك. */}
+        {entity.legal_address && <p className="mt-1 text-sm text-muted-foreground">{entity.legal_address}</p>}
+        {(entity.support_email || entity.support_phone) && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            {entity.support_email && (
+              <a className="underline" href={`mailto:${entity.support_email}`} dir="ltr">
+                {entity.support_email}
+              </a>
+            )}
+            {entity.support_email && entity.support_phone && <span className="mx-2">·</span>}
+            {entity.support_phone && <span dir="ltr">{entity.support_phone}</span>}
+          </p>
+        )}
         {/* حقوق الطبع والنشر والملكية الفكرية — الاسم القانوني بالإنجليزي جنبها زي ما المالك طلب. */}
         <p className="mt-2 text-sm text-muted-foreground">
-          <span dir="ltr">© {year} {LEGAL_ENTITY_EN}</span> — جميع الحقوق محفوظة. أسماء وعلامات {PLATFORM_NAME_AR} (
-          <span dir="ltr">{PLATFORM_NAME_EN}</span>) وتصميمات المنصة ومحتواها مملوكة لـ {LEGAL_ENTITY_AR} —{' '}
-          <span dir="ltr">{LEGAL_ENTITY_EN}</span>.
+          <span dir="ltr">
+            © {year} {entity.company_name_en}
+          </span>{' '}
+          — جميع الحقوق محفوظة. أسماء وعلامات {entity.platform_name_ar} (
+          <span dir="ltr">{entity.platform_name_en}</span>) وتصميمات المنصة ومحتواها مملوكة لـ {entity.company_name_ar} —{' '}
+          <span dir="ltr">{entity.company_name_en}</span>.
         </p>
       </div>
     </footer>

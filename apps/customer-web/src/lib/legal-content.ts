@@ -18,14 +18,57 @@ export const PLATFORM_NAME_EN = 'OSTA';
 export const LEGAL_LAST_UPDATED_AR = 'أغسطس 2026';
 
 /**
- * بيانات التواصل الرسمية — **مطلوبة صراحة من Google Play** في صفحة السياسة وفي Store Listing.
- * القيم دي لازم تتملى بقيم حقيقية قبل أول رفع للمتجر (متتبَّعة في docs/23 §3).
+ * بيانات الجهة المشغّلة الحيّة — بتتقرا من `GET /legal-entity` (docs/08 §100).
+ *
+ * **مش متغيرات بيئة ولا ثوابت**: المالك بيدخّلها من شاشة الأدمن، فالصفحات لازم تسحبها من
+ * السيرفر عشان أي تعديل يظهر فورًا بلا إعادة نشر. أي قيمة لسه فاضية بترجع `null` والواجهة
+ * بتخفي السطر بالكامل — «لو أي بيانات لسه فاضية، ما تظهرش كسطر فاضي في الصفحة» (نص المالك).
  */
-export const LEGAL_CONTACT = {
-  supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? '',
-  supportPhone: process.env.NEXT_PUBLIC_SUPPORT_PHONE ?? '',
-  legalAddress: process.env.NEXT_PUBLIC_LEGAL_ADDRESS ?? '',
-} as const;
+export interface LegalEntityInfo {
+  platform_name_ar: string;
+  platform_name_en: string;
+  company_name_ar: string;
+  company_name_en: string;
+  legal_address: string | null;
+  support_email: string | null;
+  privacy_email: string | null;
+  support_phone: string | null;
+  website_url: string | null;
+  commercial_register: string | null;
+  tax_id: string | null;
+}
+
+/** القيم المعتمدة اللي بتُستخدم لو السيرفر مش متاح — الأسماء بس، مفيش أي بيانات تواصل مخترعة. */
+export const LEGAL_ENTITY_FALLBACK: LegalEntityInfo = {
+  platform_name_ar: PLATFORM_NAME_AR,
+  platform_name_en: PLATFORM_NAME_EN,
+  company_name_ar: LEGAL_ENTITY_AR,
+  company_name_en: LEGAL_ENTITY_EN,
+  legal_address: null,
+  support_email: null,
+  privacy_email: null,
+  support_phone: null,
+  website_url: null,
+  commercial_register: null,
+  tax_id: null,
+};
+
+/**
+ * بيتنادى من Server Components (الصفحات القانونية والفوتر). فشل الشبكة **ما ينفعش يكسر صفحة
+ * قانونية** — بيرجع الأسماء المعتمدة وبيخفي بيانات التواصل، وده أأمن من صفحة 500 على رابط
+ * Google Play بيفتحه.
+ */
+export async function fetchLegalEntity(): Promise<LegalEntityInfo> {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1';
+  try {
+    const res = await fetch(`${base}/legal-entity`, { next: { revalidate: 300 } });
+    if (!res.ok) return LEGAL_ENTITY_FALLBACK;
+    const envelope = (await res.json()) as { data?: LegalEntityInfo };
+    return envelope.data ?? LEGAL_ENTITY_FALLBACK;
+  } catch {
+    return LEGAL_ENTITY_FALLBACK;
+  }
+}
 
 export interface LegalSection {
   /** رقم البند زي ما هو في النص القانوني — بيتستخدم كـanchor ثابت للإحالة إليه. */

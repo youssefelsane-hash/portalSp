@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { LEGAL_CONTACT, LEGAL_ENTITY_AR, LEGAL_ENTITY_EN } from '@/lib/legal-content';
+import { fetchLegalEntity } from '@/lib/legal-content';
+import { LegalContactBlock } from '@/components/legal-contact-block';
 
 /**
  * صفحة حذف الحساب (docs/23 §P0-1) — **متطلَّب صريح من Google Play**: لازم يبقى فيه مسار حذف
@@ -40,13 +41,15 @@ const RETAINED_DATA = [
   },
 ];
 
-export default function AccountDeletionPage() {
+export default async function AccountDeletionPage() {
+  const entity = await fetchLegalEntity();
   return (
     <article className="mx-auto w-full max-w-3xl px-4 py-10">
       <header className="mb-8 border-b pb-6">
         <h1 className="text-2xl font-bold sm:text-3xl">حذف حسابك على أسطى</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          منصة أسطى (OSTA) — الجهة المشغّلة: {LEGAL_ENTITY_AR} — <span dir="ltr">{LEGAL_ENTITY_EN}</span>
+          منصة {entity.platform_name_ar} (<span dir="ltr">{entity.platform_name_en}</span>) — الجهة المشغّلة:{' '}
+          {entity.company_name_ar} — <span dir="ltr">{entity.company_name_en}</span>
         </p>
       </header>
 
@@ -104,29 +107,15 @@ export default function AccountDeletionPage() {
         <p className="leading-8 text-foreground/90">حذف الحساب نهائي — لا يمكن استرجاع الحساب أو سجلّ طلباتك بعده.</p>
       </section>
 
-      <section className="rounded-lg border bg-muted/30 p-5">
-        <h2 className="mb-2 text-lg font-bold">قنوات الدعم الرسمية</h2>
-        {LEGAL_CONTACT.supportEmail ? (
-          <p className="mb-1 text-sm">
-            البريد:{' '}
-            <a className="underline" href={`mailto:${LEGAL_CONTACT.supportEmail}`} dir="ltr">
-              {LEGAL_CONTACT.supportEmail}
-            </a>
-          </p>
-        ) : null}
-        {LEGAL_CONTACT.supportPhone ? (
-          <p className="text-sm">
-            الهاتف: <span dir="ltr">{LEGAL_CONTACT.supportPhone}</span>
-          </p>
-        ) : null}
-        <p className="mt-3 text-sm text-muted-foreground">
-          للمزيد عن كيفية تعاملنا مع بياناتك، راجع{' '}
-          <Link className="underline" href="/legal/privacy">
-            سياسة الخصوصية
-          </Link>
-          .
-        </p>
-      </section>
+      <LegalContactBlock entity={entity} title="قنوات الدعم الرسمية" />
+
+      <p className="mt-6 text-sm text-muted-foreground">
+        للمزيد عن كيفية تعاملنا مع بياناتك، راجع{' '}
+        <Link className="underline" href="/legal/privacy">
+          سياسة الخصوصية
+        </Link>
+        .
+      </p>
     </article>
   );
 }

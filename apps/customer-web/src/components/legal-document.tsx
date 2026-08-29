@@ -1,5 +1,6 @@
-import type { LegalDocument } from '@/lib/legal-content';
-import { LEGAL_CONTACT, LEGAL_ENTITY_AR, LEGAL_ENTITY_EN, LEGAL_LAST_UPDATED_AR } from '@/lib/legal-content';
+import type { LegalDocument, LegalEntityInfo } from '@/lib/legal-content';
+import { LEGAL_LAST_UPDATED_AR } from '@/lib/legal-content';
+import { LegalContactBlock } from './legal-contact-block';
 
 /**
  * عارض واحد لكل المستندات القانونية (docs/08 §99) — الشروط والخصوصية بيتعرضوا بنفس الشكل من نفس
@@ -8,7 +9,7 @@ import { LEGAL_CONTACT, LEGAL_ENTITY_AR, LEGAL_ENTITY_EN, LEGAL_LAST_UPDATED_AR 
  * كل بند له `id` ثابت مبني على رقمه — عشان ينفع نحيل عليه بلينك مباشر (`/legal/terms#section-6`)
  * من داخل التطبيقات أو من رد على شكوى، وده مطلوب عمليًا في أي مراجعة قانونية أو مراجعة متجر.
  */
-export function LegalDocumentView({ document }: { document: LegalDocument }) {
+export function LegalDocumentView({ document, entity }: { document: LegalDocument; entity: LegalEntityInfo }) {
   return (
     <article className="mx-auto w-full max-w-3xl px-4 py-10">
       <header className="mb-8 border-b pb-6">
@@ -17,7 +18,7 @@ export function LegalDocumentView({ document }: { document: LegalDocument }) {
           {document.titleEn}
         </p>
         <p className="mt-4 text-sm text-muted-foreground">
-          الجهة المشغّلة: {LEGAL_ENTITY_AR} — <span dir="ltr">{LEGAL_ENTITY_EN}</span>
+          الجهة المشغّلة: {entity.company_name_ar} — <span dir="ltr">{entity.company_name_en}</span>
         </p>
         <p className="mt-1 text-sm text-muted-foreground">آخر تحديث: {LEGAL_LAST_UPDATED_AR}</p>
       </header>
@@ -43,27 +44,7 @@ export function LegalDocumentView({ document }: { document: LegalDocument }) {
         ))}
       </div>
 
-      {/* بيانات التواصل مطلوبة صراحةً من Google Play داخل صفحة السياسة نفسها، مش في المتجر بس.
-          بتظهر بس لما تتملى فعلاً — سطر فاضي في مستند قانوني أسوأ من غيابه. */}
-      {(LEGAL_CONTACT.supportEmail || LEGAL_CONTACT.supportPhone || LEGAL_CONTACT.legalAddress) && (
-        <footer className="mt-10 rounded-lg border bg-muted/30 p-5 text-sm">
-          <h2 className="mb-2 font-bold">بيانات التواصل الرسمية</h2>
-          {LEGAL_CONTACT.supportEmail && (
-            <p className="mb-1">
-              البريد الرسمي:{' '}
-              <a className="underline" href={`mailto:${LEGAL_CONTACT.supportEmail}`} dir="ltr">
-                {LEGAL_CONTACT.supportEmail}
-              </a>
-            </p>
-          )}
-          {LEGAL_CONTACT.supportPhone && (
-            <p className="mb-1">
-              رقم الدعم: <span dir="ltr">{LEGAL_CONTACT.supportPhone}</span>
-            </p>
-          )}
-          {LEGAL_CONTACT.legalAddress && <p>العنوان القانوني: {LEGAL_CONTACT.legalAddress}</p>}
-        </footer>
-      )}
+      <LegalContactBlock entity={entity} />
     </article>
   );
 }

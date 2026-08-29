@@ -28,6 +28,46 @@ interface PaymentChannelStatus {
 // **مش محرك جديد**: المفاتيح دي نفسها اللي في جدول `settings`، وبتتحفظ بنفس الـendpoint بالظبط.
 // الجزء ده تنظيم عرض بس — بيجمّعها في مكان واحد بلغة مفهومة بدل ما تبقى مبعترة وسط عشرات
 // المفاتيح التقنية في قسم pricing العام.
+// بيانات الجهة المشغّلة (docs/08 §100، قرار مالك 2026-08-29) — ليها كارت مخصص فوق بدل ما تتلخبط
+// وسط عشرات مفاتيح الإعدادات الخام. المالك طلب «مكان واضح في الـAdmin يقدر يدخلها أو يغيرها
+// بسهولة»، والتحرير هنا بيعدّي على نفس مسار /admin/settings/:key (صلاحية settings.manage +
+// step-up MFA + تسجيل في audit_logs) — صفر بنية تحتية جديدة.
+const LEGAL_ENTITY_KEYS = [
+  'legal.platform_name_ar',
+  'legal.platform_name_en',
+  'legal.company_name_ar',
+  'legal.company_name_en',
+  'legal.legal_address',
+  'legal.support_email',
+  'legal.privacy_email',
+  'legal.support_phone',
+  'legal.website_url',
+  'legal.commercial_register',
+  'legal.tax_id',
+];
+
+const LEGAL_ENTITY_LABELS: Record<string, string> = {
+  'legal.platform_name_ar': 'اسم المنصة (عربي)',
+  'legal.platform_name_en': 'اسم المنصة (إنجليزي)',
+  'legal.company_name_ar': 'الاسم القانوني للشركة (عربي)',
+  'legal.company_name_en': 'الاسم القانوني للشركة (إنجليزي)',
+  'legal.legal_address': 'العنوان القانوني المسجَّل',
+  'legal.support_email': 'بريد الدعم الرسمي',
+  'legal.privacy_email': 'بريد طلبات الخصوصية',
+  'legal.support_phone': 'رقم التواصل الرسمي',
+  'legal.website_url': 'الموقع الرسمي',
+  'legal.commercial_register': 'رقم السجل التجاري',
+  'legal.tax_id': 'الرقم الضريبي',
+};
+
+// المفاتيح اللي Google Play بيطلبها صراحةً قبل أول رفع — الكارت بيعلّم الناقص منها بوضوح
+// بدل ما نكتشف إنها فاضية وقت المراجعة.
+const LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH = new Set([
+  'legal.legal_address',
+  'legal.support_email',
+  'legal.support_phone',
+]);
+
 const COMMISSION_BASE_KEYS = [
   'commission_base.include_level_premium',
   'commission_base.include_zone_surge',
@@ -188,7 +228,15 @@ export default function SettingsPage() {
   }
 
   // المفاتيح دي ليها كارت مخصص تحت — بنستبعدها من العرض العام عشان ما تتكررش.
-  const generalSettings = (settings ?? []).filter((s) => !COMMISSION_BASE_KEYS.includes(s.key));
+  const generalSettings = (settings ?? []).filter(
+    (s) => !COMMISSION_BASE_KEYS.includes(s.key) && !LEGAL_ENTITY_KEYS.includes(s.key),
+  );
+  const legalEntitySettings = LEGAL_ENTITY_KEYS.map((key) => (settings ?? []).find((s) => s.key === key)).filter(
+    (s): s is SettingResponseDto => s !== undefined,
+  );
+  const missingBeforeLaunch = legalEntitySettings.filter(
+    (s) => LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH.has(s.key) && String(s.value ?? '').replace(/"/g, '').trim() === '',
+  );
   const commissionBaseSettings = COMMISSION_BASE_KEYS.map((key) =>
     (settings ?? []).find((s) => s.key === key),
   ).filter((s): s is SettingResponseDto => s !== undefined);
@@ -214,6 +262,63 @@ export default function SettingsPage() {
                 </p>
               </div>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {legalEntitySettings.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">بيانات الجهة المشغّلة (تظهر في الصفحات القانونية والفوتر)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-sm text-muted-foreground">
+              البيانات دي بتتسحب تلقائيًا في <strong>شروط الاستخدام</strong> و<strong>سياسة الخصوصية</strong> و
+              <strong>صفحة حذف الحساب</strong> وفوتر الموقع. أي خانة سايباها فاضية <strong>مش هتظهر كسطر فاضي</strong> —
+              هتتخفي بالكامل لحد ما تتملى. وأي تعديل هنا بيتسجّل في سجل النشاط.
+            </p>
+            {missingBeforeLaunch.length > 0 && (
+              <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <p className="font-semibold">ناقص قبل الرفع على Google Play:</p>
+                <p className="mt-1">
+                  {missingBeforeLaunch.map((s) => LEGAL_ENTITY_LABELS[s.key] ?? s.key).join('، ')}
+                </p>
+              </div>
+            )}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>البيان</TableHead>
+                  <TableHead>الوصف</TableHead>
+                  <TableHead>القيمة</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {legalEntitySettings.map((setting) => (
+                  <TableRow key={setting.key}>
+                    <TableCell className="font-medium">
+                      {LEGAL_ENTITY_LABELS[setting.key] ?? setting.key}
+                      {LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH.has(setting.key) && (
+                        <span className="ms-1 text-xs text-amber-700">(مطلوب قبل الإطلاق)</span>
+                      )}
+                      <span className="block text-xs text-muted-foreground" dir="ltr">
+                        {setting.key}
+                      </span>
+                    </TableCell>
+                    <TableCell className="max-w-md whitespace-normal text-muted-foreground">
+                      {setting.description ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      <SettingValueEditor
+                        setting={setting}
+                        isSaving={savingKey === setting.key}
+                        onSave={(value) => handleSave(setting.key, value)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       )}
