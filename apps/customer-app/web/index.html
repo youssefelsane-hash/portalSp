@@ -41,7 +41,23 @@
     AndroidManifest.xml/AppDelegate.swift عمدًا (المالك جهّزه بعد التوضيح: قيود المفتاحين مختلفة
     بطبيعتها — Android/iOS بيتقيّدوا بـpackage name/bundle id، الويب بيتقيّد بـHTTP referrer).
   -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCmfNLFMj3OJoLqEosSEo1ugP1Ccqi4Y6k"></script>
+  <!-- بوابة P0-2 في docs/23 — مفتاح خرائط الويب كان مكتوب صراحةً هنا ومتتبَّع في git.
+       بيتحقن دلوقتي وقت النشر: استبدل __GOOGLE_MAPS_WEB_API_KEY__ بالمفتاح الحقيقي في خطوة
+       البناء/النشر. المفتاح لازم يكون مقيَّد بالدومينات المسموحة بس.
+       من غير استبدال، السكربت مش بيتحمّل خالص (بدل ما يحمّل بمفتاح غلط ويرمي أخطاء غامضة). -->
+  <script>
+    (function () {
+      var mapsKey = '__GOOGLE_MAPS_WEB_API_KEY__';
+      if (mapsKey.indexOf('__') === 0) {
+        console.warn('[Maps] مفتاح خرائط الويب مش متظبّط — الخرائط هتفضل معطّلة. راجع docs/23 بوابة P0-2.');
+        return;
+      }
+      var script = document.createElement('script');
+      script.src = 'https://maps.googleapis.com/maps/api/js?key=' + mapsKey;
+      script.async = true;
+      document.head.appendChild(script);
+    })();
+  </script>
 </head>
 <body>
   <!--

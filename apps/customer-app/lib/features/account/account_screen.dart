@@ -5,6 +5,7 @@ import '../../core/auth_repository.dart';
 import '../../core/biometric_auth_service.dart';
 import '../addresses/addresses_screen.dart';
 import '../favorites/favorites_screen.dart';
+import '../legal/legal_links_screen.dart';
 import '../loyalty/loyalty_repository.dart';
 import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
@@ -69,6 +70,45 @@ class _AccountScreenState extends State<AccountScreen> {
     if (!confirmed) return;
     await BiometricAuthService.setEnabled(true);
     if (mounted) setState(() => _biometricEnabled = true);
+  }
+
+  /// تأكيد حذف الحساب (بوابة P0-1 في docs/23، ADR-0053).
+  ///
+  /// خطوتين عمدًا: الأولى بتشرح إيه اللي هيتحذف وإيه اللي هيتحفظ لأسباب قانونية، والتانية
+  /// بتنفّذ. رفض الباك-إند (رصيد محفظة، أو طلب لسه شغال) بيتعرض بنصّه زي ما هو — الرسالة
+  /// هناك بتقول للمستخدم بالظبط إيه اللي يعمله قبل ما يعيد المحاولة.
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('حذف الحساب نهائيًا؟'),
+        content: const Text(
+          'هيتم حذف اسمك ورقمك وبريدك وعناوينك وصورك من النظام، ومش هتقدر ترجع للحساب ده تاني.\n\n'
+          'سجلات الطلبات والمعاملات المالية بتتحفظ لمدة يفرضها القانون، بس **من غير** بياناتك '
+          'الشخصية — مش هتُستخدم للتواصل معاك.\n\n'
+          'لو عندك رصيد في المحفظة أو طلب لسه شغال، لازم تخلّصهم الأول.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
+            child: const Text('احذف حسابي'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await context.read<AuthRepository>().deleteAccount();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   Future<void> _loadLoyaltyBalance() async {
@@ -290,6 +330,15 @@ class _AccountScreenState extends State<AccountScreen> {
             ],
             const Divider(height: 1),
             ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('الشروط والسياسات'),
+              subtitle: const Text('شروط الاستخدام وسياسة الخصوصية'),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LegalLinksScreen()),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
               leading: Icon(
                 Icons.logout,
                 color: Theme.of(context).colorScheme.error,
@@ -299,6 +348,21 @@ class _AccountScreenState extends State<AccountScreen> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
               onTap: () => context.read<AuthRepository>().logout(),
+            ),
+            const Divider(height: 1),
+            // بوابة P0-1 في docs/23 — Google Play بيطلب مسار حذف حساب **جوّه التطبيق**، مش
+            // رابط ويب بس. مفصول عن تسجيل الخروج بمسافة وبنبرة تحذير عشان محدش يدوسه بالغلط.
+            ListTile(
+              leading: Icon(
+                Icons.delete_forever_outlined,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                'حذف الحساب',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              subtitle: const Text('حذف نهائي لحسابك وبياناتك الشخصية'),
+              onTap: _confirmDeleteAccount,
             ),
           ],
         ),

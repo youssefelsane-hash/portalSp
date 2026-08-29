@@ -216,6 +216,21 @@ class AuthRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// حذف الحساب نهائيًا (بوابة P0-1 في docs/23، ADR-0053).
+  ///
+  /// Google Play بيطلب **مسار حذف جوّه التطبيق** مش رابط ويب بس. الباك-إند بيرفض الحذف لو فيه
+  /// رصيد محفظة أو طلب لسه شغال (بيرمي `ApiException` برسالة عربية واضحة يعرضها الكولر زي ما هي)،
+  /// ولو نجح بيمسح البيانات الشخصية فعليًا ويلغي كل الجلسات على كل الأجهزة.
+  ///
+  /// بننضّف الحالة المحلية بعد النجاح بس — لو الحذف اترفض، المستخدم لازم يفضل داخل بحسابه.
+  Future<void> deleteAccount() async {
+    await authedRequest('DELETE', '/auth/me');
+    await _secureStorage.delete(key: _refreshTokenKey);
+    _accessToken = null;
+    _user = null;
+    notifyListeners();
+  }
+
   Future<void> logout() async {
     final storedRefreshToken =
         await _secureStorage.read(key: _refreshTokenKey).timeout(const Duration(seconds: 5), onTimeout: () => null);

@@ -217,8 +217,18 @@ Future<void> _showActionableNotificationIfNeeded(RemoteMessage message) async {
     isCritical ? 'عروض الطوارئ' : 'عروض الطلبات',
     importance: isCritical ? Importance.max : Importance.high,
     priority: isCritical ? Priority.max : Priority.high,
-    category: AndroidNotificationCategory.call,
-    fullScreenIntent: isCritical,
+    // بوابة P0-4 في docs/23 — **اتشال `fullScreenIntent` و`category.call` عمدًا**.
+    //
+    // Google بيقصر `USE_FULL_SCREEN_INTENT` أساسًا على تطبيقات المكالمات والمنبهات، وتطبيق
+    // توزيع شغل مش منهم — الصلاحية دي سبب رفض متكرر في مراجعة المتجر، و`category.call`
+    // بيدّعي إن ده نداء مكالمة وهو مش كده، وده بالظبط اللي المراجعة بتضرب فيه.
+    //
+    // **الإلحاح ما ضاعش**: `Importance.max` + `Priority.max` بيطلّعوا الإشعار كـheads-up فوق
+    // أي شاشة، و`visibility: public` بيخلّي محتواه مقروء على شاشة القفل نفسها. الفرق الوحيد
+    // إن الشاشة مبتفتحش بالكامل قسرًا — وده تنازل مقبول مقابل إن التطبيق يعدّي المراجعة أصلاً.
+    category: AndroidNotificationCategory.event,
+    visibility: NotificationVisibility.public,
+    fullScreenIntent: false,
     actions: [
       if (actionLabels['accept'] is String) AndroidNotificationAction('accept', actionLabels['accept'] as String),
       if (actionLabels['reject'] is String) AndroidNotificationAction('reject', actionLabels['reject'] as String),
