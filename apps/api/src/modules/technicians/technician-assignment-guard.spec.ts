@@ -42,11 +42,12 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     label: string;
     orderStatus: OrderStatus;
     scheduledAt: Date | null;
+    durationHours?: number;
     assignedToTechnician?: boolean;
   }) {
     const [order] = await dataSource.query(
-      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8) RETURNING id`,
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at, duration_hours)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,10000,$8,$9) RETURNING id`,
       [
         nextOrderNumber(),
         ids.customerProfile,
@@ -56,6 +57,7 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
         ids.zone,
         opts.orderStatus,
         opts.scheduledAt,
+        opts.durationHours ?? null,
       ],
     );
     orderIds.push(order.id as string);
@@ -73,7 +75,9 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
       entities: [Order, TechnicianProfile],
     });
     await dataSource.initialize();
-    guard = new TechnicianAssignmentGuardService({ getNumber: jest.fn(async (_key: string, fallback: number) => fallback) } as never);
+    guard = new TechnicianAssignmentGuardService({
+      getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
+    } as never);
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
 
@@ -154,9 +158,20 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
   });
 
   it('طلب مجدول بعد أسبوع مايترفضش بسبب طلب نشط تاني النهاردة (البَقّة الأساسية)', async () => {
-    activeTodayOrderId = (await insertOrder({ label: 'active-today', orderStatus: OrderStatus.ACCEPTED, scheduledAt: null, assignedToTechnician: true })).id;
+    activeTodayOrderId = (
+      await insertOrder({
+        label: 'active-today',
+        orderStatus: OrderStatus.ACCEPTED,
+        scheduledAt: null,
+        assignedToTechnician: true,
+      })
+    ).id;
     const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const candidate = await insertOrder({ label: 'scheduled-week', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: weekFromNow });
+    const candidate = await insertOrder({
+      label: 'scheduled-week',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      scheduledAt: weekFromNow,
+    });
 
     await dataSource.manager.transaction(async (manager) => {
       const technician = await guard.lockTechnician(manager, ids.technicianProfile);
@@ -167,7 +182,11 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
   it('طلب مجدول بعد أسبوع مايترفضش لو الفني أوفلاين دلوقتي (isAvailable/isOnDuty=false)', async () => {
     await setTechnicianOnline(false);
     const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    const candidate = await insertOrder({ label: 'scheduled-offline', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: weekFromNow });
+    const candidate = await insertOrder({
+      label: 'scheduled-offline',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      scheduledAt: weekFromNow,
+    });
 
     try {
       await dataSource.manager.transaction(async (manager) => {
@@ -179,6 +198,35 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     }
   });
 
+  it('عضو الطاقم يترفض عند تداخل الساعات ويتقبل في موعد مجاور', async () => {
+    const start = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    start.setUTCHours(9, 0, 0, 0);
+    await insertOrder({
+      label: 'precise-existing',
+      orderStatus: OrderStatus.ACCEPTED,
+      scheduledAt: start,
+      durationHours: 2,
+      assignedToTechnician: true,
+    });
+    const overlapping = await insertOrder({
+      label: 'precise-overlap',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      scheduledAt: new Date(start.getTime() + 60 * 60 * 1000),
+      durationHours: 2,
+    });
+    const adjacent = await insertOrder({
+      label: 'precise-adjacent',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      scheduledAt: new Date(start.getTime() + 2 * 60 * 60 * 1000),
+      durationHours: 2,
+    });
+
+    await dataSource.manager.transaction(async (manager) => {
+      await expect(guard.isScheduleAvailable(manager, ids.technicianProfile, overlapping)).resolves.toBe(false);
+      await expect(guard.isScheduleAvailable(manager, ids.technicianProfile, adjacent)).resolves.toBe(true);
+    });
+  });
+
   // إصلاح بَقّة حقيقية (docs/08 §32، بلاغ مالك 2026-08-20): قبل الإصلاح، طلب ASAP كان بيترفض لمجرد
   // إن الفني عنده *أي* طلب accepted نشط تاني — حتى لو قصير ولسه ما بدأش، رغم إن نفس الفني ده كان
   // بيفضل مؤهّل تمامًا لطلب *مجدول* لنفس اليوم. النتيجة: العميل يدوس "في أقرب وقت ممكن" فيلاقي
@@ -187,7 +235,11 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
   it('ASAP بقى يتقبل رغم إن الفني عنده طلب accepted تاني النهاردة (قصير، لسه ما بدأش) — إصلاح البَقّة (docs/08 §32)', async () => {
     // الفني أونلاين دلوقتي، وعنده طلب "active-today" من الاختبار الأول لسه ACCEPTED (قصير، مش
     // شاغل يوم كامل، ولسه ما بدأش يتحرّك ليه — بالضبط زي المطلوب مايستبعدش تحته).
-    const candidate = await insertOrder({ label: 'asap-short-busy', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
+    const candidate = await insertOrder({
+      label: 'asap-short-busy',
+      orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+      scheduledAt: null,
+    });
 
     await dataSource.manager.transaction(async (manager) => {
       const technician = await guard.lockTechnician(manager, ids.technicianProfile);
@@ -200,7 +252,11 @@ describe('TechnicianAssignmentGuardService.assertEligible() — طلب مجدو�
     // تستبعد فني من طلب ASAP جديد (ازدواج حجز حقيقي: فني واحد ياخد شغلانتين فوريتين في نفس اللحظة).
     await dataSource.query(`UPDATE orders SET order_status = 'technician_on_way' WHERE id = $1`, [activeTodayOrderId]);
     try {
-      const candidate = await insertOrder({ label: 'asap-engaged', orderStatus: OrderStatus.SEARCHING_TECHNICIAN, scheduledAt: null });
+      const candidate = await insertOrder({
+        label: 'asap-engaged',
+        orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
+        scheduledAt: null,
+      });
 
       await dataSource.manager.transaction(async (manager) => {
         const technician = await guard.lockTechnician(manager, ids.technicianProfile);

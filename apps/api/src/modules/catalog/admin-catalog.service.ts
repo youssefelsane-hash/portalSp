@@ -34,15 +34,23 @@ import { BrandingFileValidationError, validateBrandingFile } from '../branding/b
 @Injectable()
 export class AdminCatalogService {
   constructor(
-    @InjectRepository(ServiceCategory) private readonly categories: Repository<ServiceCategory>,
+    @InjectRepository(ServiceCategory)
+    private readonly categories: Repository<ServiceCategory>,
     @InjectRepository(Service) private readonly services: Repository<Service>,
-    @InjectRepository(ServiceZonePricing) private readonly zonePricing: Repository<ServiceZonePricing>,
-    @InjectRepository(ServiceLevelPricing) private readonly levelPricing: Repository<ServiceLevelPricing>,
-    @InjectRepository(ServicePricingTierPricing) private readonly pricingTierPricing: Repository<ServicePricingTierPricing>,
-    @InjectRepository(ServiceAddon) private readonly addons: Repository<ServiceAddon>,
-    @InjectRepository(ServiceStandardData) private readonly standardData: Repository<ServiceStandardData>,
-    @InjectRepository(ServiceProductivityActual) private readonly productivityActuals: Repository<ServiceProductivityActual>,
-    @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
+    @InjectRepository(ServiceZonePricing)
+    private readonly zonePricing: Repository<ServiceZonePricing>,
+    @InjectRepository(ServiceLevelPricing)
+    private readonly levelPricing: Repository<ServiceLevelPricing>,
+    @InjectRepository(ServicePricingTierPricing)
+    private readonly pricingTierPricing: Repository<ServicePricingTierPricing>,
+    @InjectRepository(ServiceAddon)
+    private readonly addons: Repository<ServiceAddon>,
+    @InjectRepository(ServiceStandardData)
+    private readonly standardData: Repository<ServiceStandardData>,
+    @InjectRepository(ServiceProductivityActual)
+    private readonly productivityActuals: Repository<ServiceProductivityActual>,
+    @InjectRepository(TechnicianService)
+    private readonly technicianServices: Repository<TechnicianService>,
     private readonly techniciansService: TechniciansService,
     private readonly auditLog: AuditLogService,
     @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
@@ -66,7 +74,9 @@ export class AdminCatalogService {
     if (dto.parent_category_id) {
       await this.findCategoryOrThrow(dto.parent_category_id);
     }
-    const existing = await this.categories.findOne({ where: { slug: dto.slug } });
+    const existing = await this.categories.findOne({
+      where: { slug: dto.slug },
+    });
     if (existing) {
       throw new ApiException(ErrorCode.VAL_001, 'الـ slug ده مستخدم قبل كده', HttpStatus.CONFLICT);
     }
@@ -145,7 +155,10 @@ export class AdminCatalogService {
       entityType: 'service_category',
       entityId: category.id,
       oldValues: { slot, url: previousUrl },
-      newValues: { slot, url: slot === 'icon' ? saved.iconUrl : saved.coverImageUrl },
+      newValues: {
+        slot,
+        url: slot === 'icon' ? saved.iconUrl : saved.coverImageUrl,
+      },
       meta,
     });
     return saved;
@@ -156,12 +169,7 @@ export class AdminCatalogService {
    * `undefined` للخانة الفاضية، و`JSON.stringify` بيشيل المفتاح خالص، فالـPATCH ما بيغيّرش حاجة.
    * endpoint صريح أوضح من الاعتماد على إن الواجهة تبعت `null` صح.
    */
-  async clearCategoryMedia(
-    adminUserId: string,
-    id: string,
-    slot: 'icon' | 'cover',
-    meta?: AuditActorMeta,
-  ): Promise<ServiceCategory> {
+  async clearCategoryMedia(adminUserId: string, id: string, slot: 'icon' | 'cover', meta?: AuditActorMeta): Promise<ServiceCategory> {
     const category = await this.findCategoryOrThrow(id);
     const previousUrl = slot === 'icon' ? category.iconUrl : category.coverImageUrl;
     if (slot === 'icon') category.iconUrl = null;
@@ -181,14 +189,12 @@ export class AdminCatalogService {
     return saved;
   }
 
-  async updateCategory(
-    adminUserId: string,
-    id: string,
-    dto: UpdateServiceCategoryDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceCategory> {
+  async updateCategory(adminUserId: string, id: string, dto: UpdateServiceCategoryDto, meta?: AuditActorMeta): Promise<ServiceCategory> {
     const category = await this.findCategoryOrThrow(id);
-    const oldValues = { name_ar: category.nameAr, is_active: category.isActive };
+    const oldValues = {
+      name_ar: category.nameAr,
+      is_active: category.isActive,
+    };
 
     if (dto.parent_category_id !== undefined) {
       if (dto.parent_category_id === id) {
@@ -224,13 +230,11 @@ export class AdminCatalogService {
 
   async deleteCategory(adminUserId: string, id: string, meta?: AuditActorMeta): Promise<void> {
     const category = await this.findCategoryOrThrow(id);
-    const servicesUsingIt = await this.services.count({ where: { categoryId: id } });
+    const servicesUsingIt = await this.services.count({
+      where: { categoryId: id },
+    });
     if (servicesUsingIt > 0) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'مينفعش تمسح فئة فيها خدمات — عطّلها أو انقل الخدمات الأول',
-        HttpStatus.CONFLICT,
-      );
+      throw new ApiException(ErrorCode.VAL_001, 'مينفعش تمسح فئة فيها خدمات — عطّلها أو انقل الخدمات الأول', HttpStatus.CONFLICT);
     }
     await this.categories.softDelete(id);
 
@@ -263,12 +267,7 @@ export class AdminCatalogService {
     requiresHoursOnly: boolean;
     requiresStartAndEnd: boolean;
   }): void {
-    const activeCount = [
-      modes.requiresPreciseSchedule,
-      modes.requiresStartTimeOnly,
-      modes.requiresHoursOnly,
-      modes.requiresStartAndEnd,
-    ].filter(Boolean).length;
+    const activeCount = [modes.requiresPreciseSchedule, modes.requiresStartTimeOnly, modes.requiresHoursOnly, modes.requiresStartAndEnd].filter(Boolean).length;
     if (activeCount > 1) {
       throw new ApiException(
         ErrorCode.VAL_001,
@@ -312,6 +311,8 @@ export class AdminCatalogService {
       shortDescriptionAr: dto.short_description_ar ?? null,
       fullDescriptionAr: dto.full_description_ar ?? null,
       iconUrl: dto.icon_url ?? null,
+      featuredIconUrl: dto.featured_icon_url ?? null,
+      featuredNameAr: dto.featured_name_ar ?? null,
       pricingModel: dto.pricing_model,
       basePriceCents: dto.base_price_cents,
       inspectionFeeCents: dto.inspection_fee_cents ?? 0,
@@ -350,7 +351,11 @@ export class AdminCatalogService {
       action: 'service.created',
       entityType: 'service',
       entityId: service.id,
-      newValues: { name_ar: service.nameAr, slug: service.slug, base_price_cents: service.basePriceCents },
+      newValues: {
+        name_ar: service.nameAr,
+        slug: service.slug,
+        base_price_cents: service.basePriceCents,
+      },
       meta,
     });
     return service;
@@ -358,7 +363,10 @@ export class AdminCatalogService {
 
   async updateService(adminUserId: string, id: string, dto: UpdateServiceDto, meta?: AuditActorMeta): Promise<Service> {
     const service = await this.findServiceOrThrow(id);
-    const oldValues = { base_price_cents: service.basePriceCents, is_active: service.isActive };
+    const oldValues = {
+      base_price_cents: service.basePriceCents,
+      is_active: service.isActive,
+    };
 
     if (dto.category_id !== undefined) {
       await this.findCategoryOrThrow(dto.category_id);
@@ -370,6 +378,8 @@ export class AdminCatalogService {
     if (dto.short_description_ar !== undefined) service.shortDescriptionAr = dto.short_description_ar;
     if (dto.full_description_ar !== undefined) service.fullDescriptionAr = dto.full_description_ar;
     if (dto.icon_url !== undefined) service.iconUrl = dto.icon_url;
+    if (dto.featured_icon_url !== undefined) service.featuredIconUrl = dto.featured_icon_url;
+    if (dto.featured_name_ar !== undefined) service.featuredNameAr = dto.featured_name_ar;
     if (dto.pricing_model !== undefined) service.pricingModel = dto.pricing_model;
     if (dto.base_price_cents !== undefined) service.basePriceCents = dto.base_price_cents;
     if (dto.inspection_fee_cents !== undefined) service.inspectionFeeCents = dto.inspection_fee_cents;
@@ -424,7 +434,10 @@ export class AdminCatalogService {
       entityType: 'service',
       entityId: service.id,
       oldValues,
-      newValues: { base_price_cents: service.basePriceCents, is_active: service.isActive },
+      newValues: {
+        base_price_cents: service.basePriceCents,
+        is_active: service.isActive,
+      },
       meta,
     });
     return service;
@@ -448,7 +461,10 @@ export class AdminCatalogService {
   // ── تسعير حسب المنطقة ───────────────────────────────────────────────
 
   listZonePricing(serviceId: string): Promise<ServiceZonePricing[]> {
-    return this.zonePricing.find({ where: { serviceId }, order: { createdAt: 'DESC' } });
+    return this.zonePricing.find({
+      where: { serviceId },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   /** الصف الساري فعليًا دلوقتي (validFrom <= الآن < validUntil أو validUntil=NULL). */
@@ -469,12 +485,7 @@ export class AdminCatalogService {
   // <= الآن) بيعدّل الصف الساري حالياً في مكانه (upsert زي زمان). جدولة سعر مستقبلي (valid_from
   // في المستقبل) بتقفل الصف الساري الحالي عند نفس اللحظة (valid_until) وتفتح صف جديد منفصل —
   // الاتنين يتحفظوا كتاريخ، مش بيتكتب فوق بعضه.
-  async upsertZonePricing(
-    adminUserId: string,
-    serviceId: string,
-    dto: UpsertZonePricingDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceZonePricing> {
+  async upsertZonePricing(adminUserId: string, serviceId: string, dto: UpsertZonePricingDto, meta?: AuditActorMeta): Promise<ServiceZonePricing> {
     await this.findServiceOrThrow(serviceId);
     const now = new Date();
     const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
@@ -490,13 +501,23 @@ export class AdminCatalogService {
         current.validUntil = validFrom;
         await this.zonePricing.save(current);
       }
-      pricing = this.zonePricing.create({ serviceId, serviceZoneId: dto.service_zone_id, validFrom, validUntil: null });
+      pricing = this.zonePricing.create({
+        serviceId,
+        serviceZoneId: dto.service_zone_id,
+        validFrom,
+        validUntil: null,
+      });
       isNew = true;
     } else if (current) {
       pricing = current;
       isNew = false;
     } else {
-      pricing = this.zonePricing.create({ serviceId, serviceZoneId: dto.service_zone_id, validFrom, validUntil: null });
+      pricing = this.zonePricing.create({
+        serviceId,
+        serviceZoneId: dto.service_zone_id,
+        validFrom,
+        validUntil: null,
+      });
       isNew = true;
     }
 
@@ -574,15 +595,13 @@ export class AdminCatalogService {
   // الأدمن) وmatching.service.ts's findEligibleTechnicians() (التوزيع الفعلي).
 
   listEligibleTechnicians(serviceId: string): Promise<TechnicianService[]> {
-    return this.technicianServices.find({ where: { serviceId }, order: { createdAt: 'DESC' } });
+    return this.technicianServices.find({
+      where: { serviceId },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async assignTechnician(
-    adminUserId: string,
-    serviceId: string,
-    dto: AssignTechnicianServiceDto,
-    meta?: AuditActorMeta,
-  ): Promise<TechnicianService> {
+  async assignTechnician(adminUserId: string, serviceId: string, dto: AssignTechnicianServiceDto, meta?: AuditActorMeta): Promise<TechnicianService> {
     await this.findServiceOrThrow(serviceId);
     await this.techniciansService.findByProfileIdOrThrow(dto.technician_id);
 
@@ -611,8 +630,15 @@ export class AdminCatalogService {
         action: 'technician_service.assigned',
         entityType: 'service',
         entityId: serviceId,
-        oldValues: { technician_id: dto.technician_id, verification_status: previousStatus },
-        newValues: { technician_id: dto.technician_id, skill_level: existing.skillLevel, verification_status: existing.verificationStatus },
+        oldValues: {
+          technician_id: dto.technician_id,
+          verification_status: previousStatus,
+        },
+        newValues: {
+          technician_id: dto.technician_id,
+          skill_level: existing.skillLevel,
+          verification_status: existing.verificationStatus,
+        },
         meta,
       });
       return existing;
@@ -636,14 +662,20 @@ export class AdminCatalogService {
       action: 'technician_service.assigned',
       entityType: 'service',
       entityId: serviceId,
-      newValues: { technician_id: dto.technician_id, skill_level: assignment.skillLevel },
+      newValues: {
+        technician_id: dto.technician_id,
+        skill_level: assignment.skillLevel,
+      },
       meta,
     });
     return assignment;
   }
 
   async removeTechnician(adminUserId: string, serviceId: string, technicianId: string, meta?: AuditActorMeta): Promise<void> {
-    const result = await this.technicianServices.delete({ serviceId, technicianId });
+    const result = await this.technicianServices.delete({
+      serviceId,
+      technicianId,
+    });
     if (!result.affected) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مش متأهّل للخدمة دي أصلاً', HttpStatus.NOT_FOUND);
     }
@@ -662,15 +694,13 @@ export class AdminCatalogService {
   // ── تسعير حسب مستوى الفني ────────────────────────────────────────────
 
   listLevelPricing(serviceId: string): Promise<ServiceLevelPricing[]> {
-    return this.levelPricing.find({ where: { serviceId }, order: { technicianLevel: 'ASC' } });
+    return this.levelPricing.find({
+      where: { serviceId },
+      order: { technicianLevel: 'ASC' },
+    });
   }
 
-  async upsertLevelPricing(
-    adminUserId: string,
-    serviceId: string,
-    dto: UpsertLevelPricingDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceLevelPricing> {
+  async upsertLevelPricing(adminUserId: string, serviceId: string, dto: UpsertLevelPricingDto, meta?: AuditActorMeta): Promise<ServiceLevelPricing> {
     await this.findServiceOrThrow(serviceId);
 
     let pricing = await this.levelPricing.findOne({
@@ -678,7 +708,10 @@ export class AdminCatalogService {
     });
     const isNew = !pricing;
     if (!pricing) {
-      pricing = this.levelPricing.create({ serviceId, technicianLevel: dto.technician_level });
+      pricing = this.levelPricing.create({
+        serviceId,
+        technicianLevel: dto.technician_level,
+      });
     }
     pricing.priceMultiplier = String(dto.price_multiplier);
     pricing.isActive = true;
@@ -690,7 +723,10 @@ export class AdminCatalogService {
       action: isNew ? 'service_level_pricing.created' : 'service_level_pricing.updated',
       entityType: 'service_level_pricing',
       entityId: pricing.id,
-      newValues: { technician_level: pricing.technicianLevel, price_multiplier: pricing.priceMultiplier },
+      newValues: {
+        technician_level: pricing.technicianLevel,
+        price_multiplier: pricing.priceMultiplier,
+      },
       meta,
     });
     return pricing;
@@ -717,7 +753,10 @@ export class AdminCatalogService {
   // ── فئة تسعير الفني (docs/08 §36.24، ADR-0025) — منفصلة عن تسعير المستوى فوق ───────────
 
   listPricingTierPricing(serviceId: string): Promise<ServicePricingTierPricing[]> {
-    return this.pricingTierPricing.find({ where: { serviceId }, order: { pricingTier: 'ASC' } });
+    return this.pricingTierPricing.find({
+      where: { serviceId },
+      order: { pricingTier: 'ASC' },
+    });
   }
 
   async upsertPricingTierPricing(
@@ -733,7 +772,10 @@ export class AdminCatalogService {
     });
     const isNew = !pricing;
     if (!pricing) {
-      pricing = this.pricingTierPricing.create({ serviceId, pricingTier: dto.pricing_tier });
+      pricing = this.pricingTierPricing.create({
+        serviceId,
+        pricingTier: dto.pricing_tier,
+      });
     }
     pricing.priceMultiplier = String(dto.price_multiplier);
     pricing.isActive = true;
@@ -745,7 +787,10 @@ export class AdminCatalogService {
       action: isNew ? 'service_pricing_tier_pricing.created' : 'service_pricing_tier_pricing.updated',
       entityType: 'service_pricing_tier_pricing',
       entityId: pricing.id,
-      newValues: { pricing_tier: pricing.pricingTier, price_multiplier: pricing.priceMultiplier },
+      newValues: {
+        pricing_tier: pricing.pricingTier,
+        price_multiplier: pricing.priceMultiplier,
+      },
       meta,
     });
     return pricing;
@@ -772,15 +817,13 @@ export class AdminCatalogService {
   // ── الإضافات الاختيارية ──────────────────────────────────────────────
 
   listAddons(serviceId: string): Promise<ServiceAddon[]> {
-    return this.addons.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
+    return this.addons.find({
+      where: { serviceId },
+      order: { displayOrder: 'ASC' },
+    });
   }
 
-  async createAddon(
-    adminUserId: string,
-    serviceId: string,
-    dto: CreateServiceAddonDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceAddon> {
+  async createAddon(adminUserId: string, serviceId: string, dto: CreateServiceAddonDto, meta?: AuditActorMeta): Promise<ServiceAddon> {
     await this.findServiceOrThrow(serviceId);
 
     const addon = this.addons.create({
@@ -813,14 +856,13 @@ export class AdminCatalogService {
     return addon;
   }
 
-  async updateAddon(
-    adminUserId: string,
-    id: string,
-    dto: UpdateServiceAddonDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceAddon> {
+  async updateAddon(adminUserId: string, id: string, dto: UpdateServiceAddonDto, meta?: AuditActorMeta): Promise<ServiceAddon> {
     const addon = await this.findAddonOrThrow(id);
-    const oldValues = { name_ar: addon.nameAr, price_cents: addon.priceCents, is_active: addon.isActive };
+    const oldValues = {
+      name_ar: addon.nameAr,
+      price_cents: addon.priceCents,
+      is_active: addon.isActive,
+    };
 
     if (dto.name_ar !== undefined) addon.nameAr = dto.name_ar;
     if (dto.name_en !== undefined) addon.nameEn = dto.name_en;
@@ -837,7 +879,11 @@ export class AdminCatalogService {
       entityType: 'service_addon',
       entityId: addon.id,
       oldValues,
-      newValues: { name_ar: addon.nameAr, price_cents: addon.priceCents, is_active: addon.isActive },
+      newValues: {
+        name_ar: addon.nameAr,
+        price_cents: addon.priceCents,
+        is_active: addon.isActive,
+      },
       meta,
     });
     return addon;
@@ -861,15 +907,13 @@ export class AdminCatalogService {
   // ── البيانات القياسية ومحرك الإنتاجية (docs/06 §3.1-§3.6، docs/07 الجزء ج) ───────────
 
   listStandardData(serviceId: string): Promise<ServiceStandardData[]> {
-    return this.standardData.find({ where: { serviceId }, order: { displayOrder: 'ASC' } });
+    return this.standardData.find({
+      where: { serviceId },
+      order: { displayOrder: 'ASC' },
+    });
   }
 
-  async createStandardData(
-    adminUserId: string,
-    serviceId: string,
-    dto: CreateServiceStandardDataDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceStandardData> {
+  async createStandardData(adminUserId: string, serviceId: string, dto: CreateServiceStandardDataDto, meta?: AuditActorMeta): Promise<ServiceStandardData> {
     await this.findServiceOrThrow(serviceId);
 
     const row = this.standardData.create({
@@ -891,7 +935,10 @@ export class AdminCatalogService {
       action: 'service_standard_data.created',
       entityType: 'service_standard_data',
       entityId: row.id,
-      newValues: { execution_type_ar: row.executionTypeAr, productivity_per_day: row.productivityPerDay },
+      newValues: {
+        execution_type_ar: row.executionTypeAr,
+        productivity_per_day: row.productivityPerDay,
+      },
       meta,
     });
     return row;
@@ -905,14 +952,12 @@ export class AdminCatalogService {
     return row;
   }
 
-  async updateStandardData(
-    adminUserId: string,
-    id: string,
-    dto: UpdateServiceStandardDataDto,
-    meta?: AuditActorMeta,
-  ): Promise<ServiceStandardData> {
+  async updateStandardData(adminUserId: string, id: string, dto: UpdateServiceStandardDataDto, meta?: AuditActorMeta): Promise<ServiceStandardData> {
     const row = await this.findStandardDataOrThrow(id);
-    const oldValues = { productivity_per_day: row.productivityPerDay, is_active: row.isActive };
+    const oldValues = {
+      productivity_per_day: row.productivityPerDay,
+      is_active: row.isActive,
+    };
 
     if (dto.execution_type_ar !== undefined) row.executionTypeAr = dto.execution_type_ar;
     if (dto.unit_ar !== undefined) row.unitAr = dto.unit_ar;
@@ -932,7 +977,10 @@ export class AdminCatalogService {
       entityType: 'service_standard_data',
       entityId: row.id,
       oldValues,
-      newValues: { productivity_per_day: row.productivityPerDay, is_active: row.isActive },
+      newValues: {
+        productivity_per_day: row.productivityPerDay,
+        is_active: row.isActive,
+      },
       meta,
     });
     return row;

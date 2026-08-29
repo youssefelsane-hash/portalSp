@@ -32,7 +32,7 @@ class CategoryCard extends StatelessWidget {
               child: Text(
                 category.nameAr,
                 textAlign: TextAlign.center,
-                maxLines: 1,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleSmall,
               ),

@@ -47,6 +47,8 @@ export interface AdminServiceResponseDto {
   short_description_ar: string | null;
   full_description_ar: string | null;
   icon_url: string | null;
+  featured_icon_url: string | null;
+  featured_name_ar: string | null;
   pricing_model: PricingModel;
   base_price_cents: number;
   inspection_fee_cents: number;
@@ -90,6 +92,8 @@ export interface CreateServiceBody {
   short_description_ar?: string;
   full_description_ar?: string;
   icon_url?: string;
+  featured_icon_url?: string | null;
+  featured_name_ar?: string | null;
   pricing_model: PricingModel;
   base_price_cents: number;
   inspection_fee_cents?: number;

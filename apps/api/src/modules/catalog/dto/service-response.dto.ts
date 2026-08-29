@@ -41,6 +41,8 @@ export interface ServiceResponseDto {
   // Script 6 Part 1-2 — service.iconUrl موجود في الـschema/DTO الأدمن من زمان بس مش معروض
   // للعميل — كانت فجوة موثّقة صراحة، اتقفلت (كارت/صف الخدمة بقى يقدر يعرض صورة حقيقية).
   icon_url: string | null;
+  featured_icon_url: string | null;
+  featured_name_ar: string | null;
   pricing_model: string;
   base_price_cents: number;
   inspection_fee_cents: number;
@@ -74,6 +76,8 @@ export function toServiceResponseDto(service: Service): ServiceResponseDto {
     slug: service.slug,
     short_description_ar: service.shortDescriptionAr,
     icon_url: service.iconUrl,
+    featured_icon_url: service.featuredIconUrl,
+    featured_name_ar: service.featuredNameAr,
     pricing_model: service.pricingModel,
     base_price_cents: service.basePriceCents,
     inspection_fee_cents: service.inspectionFeeCents,

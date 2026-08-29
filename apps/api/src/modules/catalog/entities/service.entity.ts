@@ -33,7 +33,12 @@ export class Service {
   @Column({ type: 'varchar', length: 120, unique: true })
   slug: string;
 
-  @Column({ name: 'short_description_ar', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'short_description_ar',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   shortDescriptionAr: string | null;
 
   @Column({ name: 'full_description_ar', type: 'text', nullable: true })
@@ -42,7 +47,23 @@ export class Service {
   @Column({ name: 'icon_url', type: 'text', nullable: true })
   iconUrl: string | null;
 
-  @Column({ name: 'pricing_model', type: 'enum', enum: PricingModel, enumName: 'pricing_model' })
+  @Column({ name: 'featured_icon_url', type: 'text', nullable: true })
+  featuredIconUrl: string | null;
+
+  @Column({
+    name: 'featured_name_ar',
+    type: 'varchar',
+    length: 60,
+    nullable: true,
+  })
+  featuredNameAr: string | null;
+
+  @Column({
+    name: 'pricing_model',
+    type: 'enum',
+    enum: PricingModel,
+    enumName: 'pricing_model',
+  })
   pricingModel: PricingModel;
 
   @Column({ name: 'base_price_cents', type: 'integer' })
@@ -60,7 +81,11 @@ export class Service {
   @Column({ name: 'unit_name_ar', type: 'varchar', length: 40, nullable: true })
   unitNameAr: string | null;
 
-  @Column({ name: 'estimated_duration_minutes', type: 'smallint', nullable: true })
+  @Column({
+    name: 'estimated_duration_minutes',
+    type: 'smallint',
+    nullable: true,
+  })
   estimatedDurationMinutes: number | null;
 
   @Column({ name: 'warranty_days', type: 'smallint', default: 0 })
@@ -98,7 +123,13 @@ export class Service {
   @Column({ name: 'deposit_required', type: 'boolean', default: false })
   depositRequired: boolean;
 
-  @Column({ name: 'deposit_percentage', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  @Column({
+    name: 'deposit_percentage',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
   depositPercentage: string | null;
 
   // قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) — نفس نمط cash_allowed بالحرف. الافتراضي
@@ -117,13 +148,21 @@ export class Service {
   // سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) — نفس نمط cash_allowed
   // بالحرف. الافتراضي false عمدًا (سلوك جديد كليًا، صفر خدمة موجودة بتعرض مرشّحين متعارضين
   // النهاردة). صفر قراءة له في أي استعلام لسه (Slice B/C من ADR-0030).
-  @Column({ name: 'show_unavailable_providers', type: 'boolean', default: false })
+  @Column({
+    name: 'show_unavailable_providers',
+    type: 'boolean',
+    default: false,
+  })
   showUnavailableProviders: boolean;
 
   // دقة الوقت (ADR-0031 Slice B) — نفس نمط cash_allowed بالحرف. الافتراضي false (الجدولة تبقى
   // بمستوى اليوم، ADR-0018) — true يعني العميل لازم يحدد بداية + مدة بالساعات وقت الحجز، وفحص
   // التعارض بيبقى بدقة ساعة حقيقية (OrdersService.create()) بدل يوم بس.
-  @Column({ name: 'requires_precise_schedule', type: 'boolean', default: false })
+  @Column({
+    name: 'requires_precise_schedule',
+    type: 'boolean',
+    default: false,
+  })
   requiresPreciseSchedule: boolean;
 
   // 3 أوضاع توقيت جديدة (ADR-0032، migration 0172) — تبادلية مع requires_precise_schedule فوق
@@ -149,7 +188,13 @@ export class Service {
   })
   minTechnicianLevel: TechnicianLevel;
 
-  @Column({ name: 'commission_percentage', type: 'numeric', precision: 5, scale: 2, default: 15.0 })
+  @Column({
+    name: 'commission_percentage',
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    default: 15.0,
+  })
   commissionPercentage: string;
 
   @Column({ name: 'display_order', type: 'smallint', default: 0 })
@@ -168,7 +213,12 @@ export class Service {
 
   // Script 3 §7/§12 — مرادفات/عبارات عامية للبحث بلغة طبيعية (بديل بسيط عن AI classification،
   // migration 0129).
-  @Column({ name: 'search_keywords', type: 'text', array: true, default: () => "'{}'" })
+  @Column({
+    name: 'search_keywords',
+    type: 'text',
+    array: true,
+    default: () => "'{}'",
+  })
   searchKeywords: string[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

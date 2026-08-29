@@ -55,13 +55,7 @@ function MediaThumbnail({ url, label }: { url: string | null; label: string }) {
 // docs/08 §98 (بلاغ مالك: «الصورة بتتحط فقط أثناء إنشاء الفئة… ما بقاش فيه إمكانية إنك ترجع
 // تعدل»). السبب الحقيقي: الخانتين كانوا **روابط نصية بس** ومفيش أي مكان في المنصة يرفع صورة فئة،
 // فالأدمن عمليًا مقدرش يغيّرها بعد أول مرة. الرفع الفعلي + المسح هما اللي بيقفلوا الفجوة.
-function CategoryMediaManager({
-  category,
-  onChanged,
-}: {
-  category: AdminServiceCategoryResponseDto;
-  onChanged: () => void;
-}) {
+function CategoryMediaManager({ category, onChanged }: { category: AdminServiceCategoryResponseDto; onChanged: () => void }) {
   const { authedFetch } = useAuth();
   const [busySlot, setBusySlot] = useState<'icon' | 'cover' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,17 +88,30 @@ function CategoryMediaManager({
     }
   }
 
-  const slots: { slot: 'icon' | 'cover'; label: string; hint: string; url: string | null }[] = [
-    { slot: 'icon', label: 'الأيقونة الصغيرة', hint: 'بتظهر جنب اسم الفئة.', url: category.icon_url },
-    { slot: 'cover', label: 'صورة الغلاف', hint: 'بتظهر كصورة كبيرة في كارت الفئة.', url: category.cover_image_url },
+  const slots: {
+    slot: 'icon' | 'cover';
+    label: string;
+    hint: string;
+    url: string | null;
+  }[] = [
+    {
+      slot: 'icon',
+      label: 'الأيقونة الصغيرة',
+      hint: 'بتظهر جنب اسم الفئة.',
+      url: category.icon_url,
+    },
+    {
+      slot: 'cover',
+      label: 'صورة الغلاف',
+      hint: 'بتظهر كصورة كبيرة في كارت الفئة.',
+      url: category.cover_image_url,
+    },
   ];
 
   return (
     <div className="rounded-md border bg-muted/30 p-3">
       <p className="mb-1 text-sm font-semibold">صور الفئة</p>
-      <p className="mb-3 text-xs text-muted-foreground">
-        PNG / JPEG / WEBP بس (مفيش SVG)، لحد 5 ميجا. التغيير بيتحفظ فورًا وبيظهر في التطبيقات على طول.
-      </p>
+      <p className="mb-3 text-xs text-muted-foreground">PNG / JPEG / WEBP بس (مفيش SVG)، لحد 5 ميجا. التغيير بيتحفظ فورًا وبيظهر في التطبيقات على طول.</p>
       <div className="grid gap-3 md:grid-cols-2">
         {slots.map(({ slot, label, hint, url }) => (
           <div key={slot} className="flex flex-col gap-2 rounded-md border bg-background p-3">
@@ -197,7 +204,10 @@ export default function CatalogPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch('/admin/service-categories', { method: 'POST', body: JSON.stringify(body) });
+      await authedFetch('/admin/service-categories', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
       setShowNewCategory(false);
       loadCategories();
     } catch (err) {
@@ -230,7 +240,10 @@ export default function CatalogPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch(`/admin/service-categories/${categoryId}`, { method: 'PATCH', body: JSON.stringify(body) });
+      await authedFetch(`/admin/service-categories/${categoryId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
       setEditingCategoryId(null);
       loadCategories();
     } catch (err) {
@@ -273,6 +286,8 @@ export default function CatalogPage() {
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
       full_description_ar: (form.get('full_description_ar') as string) || undefined,
       icon_url: (form.get('icon_url') as string) || undefined,
+      featured_icon_url: (form.get('featured_icon_url') as string) || undefined,
+      featured_name_ar: (form.get('featured_name_ar') as string) || undefined,
       pricing_model: form.get('pricing_model') as PricingModel,
       base_price_cents: Math.round(Number(form.get('base_price')) * 100),
       inspection_fee_cents: inspectionFee ? Math.round(Number(inspectionFee) * 100) : undefined,
@@ -292,7 +307,10 @@ export default function CatalogPage() {
     setIsSaving(true);
     setError(null);
     try {
-      await authedFetch('/admin/services', { method: 'POST', body: JSON.stringify(body) });
+      await authedFetch('/admin/services', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
       setShowNewService(false);
       loadServices();
     } catch (err) {
@@ -371,8 +389,7 @@ export default function CatalogPage() {
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    معندكش رابط؟ احفظ الفئة الأول، وبعدين من «تعديل» ارفع الصورتين من جهازك مباشرة —
-                    وتقدر تغيّرهم أو تمسحهم في أي وقت بعد كده.
+                    معندكش رابط؟ احفظ الفئة الأول، وبعدين من «تعديل» ارفع الصورتين من جهازك مباشرة — وتقدر تغيّرهم أو تمسحهم في أي وقت بعد كده.
                   </p>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -433,15 +450,8 @@ export default function CatalogPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <button
-                            type="button"
-                            disabled={isSaving}
-                            onClick={() => toggleCategoryActive(category)}
-                            className="cursor-pointer"
-                          >
-                            <Badge variant={category.is_active ? 'secondary' : 'outline'}>
-                              {category.is_active ? 'نشطة' : 'معطّلة'}
-                            </Badge>
+                          <button type="button" disabled={isSaving} onClick={() => toggleCategoryActive(category)} className="cursor-pointer">
+                            <Badge variant={category.is_active ? 'secondary' : 'outline'}>{category.is_active ? 'نشطة' : 'معطّلة'}</Badge>
                           </button>
                         </TableCell>
                         <TableCell>
@@ -458,10 +468,7 @@ export default function CatalogPage() {
                       {editingCategoryId === category.id && (
                         <TableRow key={`${category.id}-edit`}>
                           <TableCell colSpan={5}>
-                            <form
-                              onSubmit={(e) => handleUpdateCategory(e, category.id)}
-                              className="flex flex-col gap-2 rounded-md border p-3"
-                            >
+                            <form onSubmit={(e) => handleUpdateCategory(e, category.id)} className="flex flex-col gap-2 rounded-md border p-3">
                               <div className="grid grid-cols-2 gap-2">
                                 <Input name="name_ar" defaultValue={category.name_ar} placeholder="الاسم بالعربي" required />
                                 <Input name="name_en" defaultValue={category.name_en} placeholder="الاسم بالإنجليزي" required />
@@ -551,12 +558,22 @@ export default function CatalogPage() {
                 <Input name="slug" placeholder="slug" required dir="ltr" />
                 <Input name="short_description_ar" placeholder="وصف مختصر (اختياري)" />
                 <Textarea name="full_description_ar" placeholder="وصف كامل (اختياري)" rows={2} />
-                <div className="flex flex-col gap-1 rounded-md border bg-muted/30 p-3">
-                  <Label htmlFor="new_service_icon">أيقونة الخدمة نفسها</Label>
-                  <Input id="new_service_icon" name="icon_url" placeholder="https://.../faucet-repair.png" dir="ltr" />
-                  <p className="text-xs text-muted-foreground">
-                    دي الأيقونة التي تظهر للخدمة في «الأكثر طلبًا»؛ أضف أيقونة لكل شغلانة داخلية، مش أيقونة القسم العام.
-                  </p>
+                <div className="grid gap-3 rounded-md border bg-muted/30 p-3 md:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="new_service_icon">صورة صفحة الخدمة</Label>
+                    <Input id="new_service_icon" name="icon_url" placeholder="https://.../service-banner.jpg" dir="ltr" />
+                    <p className="text-xs text-muted-foreground">صورة كبيرة تناسب تفاصيل الخدمة والكتالوج.</p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="new_service_featured_icon">شعار الأكثر طلبًا</Label>
+                    <Input id="new_service_featured_icon" name="featured_icon_url" placeholder="https://.../small-logo.png" dir="ltr" />
+                    <p className="text-xs text-muted-foreground">شعار صغير مستقل، ويفضل مربعًا أو بخلفية شفافة.</p>
+                  </div>
+                  <div className="flex flex-col gap-1 md:col-span-2">
+                    <Label htmlFor="new_service_featured_name">الاسم المختصر في الأكثر طلبًا</Label>
+                    <Input id="new_service_featured_name" name="featured_name_ar" maxLength={60} placeholder="مثال: تركيب سخان" />
+                    <p className="text-xs text-muted-foreground">اسم خاطف فقط؛ لو تركته فارغًا سيظهر اسم الخدمة الأساسي.</p>
+                  </div>
                 </div>
                 <Label htmlFor="service_pricing_model">نوع التسعير</Label>
                 <SelectNative id="service_pricing_model" name="pricing_model" required defaultValue="fixed">
@@ -654,7 +671,8 @@ export default function CatalogPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>الاسم</TableHead>
-                    <TableHead>أيقونة الخدمة</TableHead>
+                    <TableHead>صورة الخدمة</TableHead>
+                    <TableHead>الأكثر طلبًا</TableHead>
                     <TableHead>التسعير</TableHead>
                     <TableHead>السعر الأساسي</TableHead>
                     <TableHead>الحالة</TableHead>
@@ -671,20 +689,17 @@ export default function CatalogPage() {
                       <TableCell>
                         <MediaThumbnail url={service.icon_url} label={`أيقونة ${service.name_ar}`} />
                       </TableCell>
-                      <TableCell>{PRICING_MODEL_LABELS[service.pricing_model]}</TableCell>
                       <TableCell>
-                        {service.pricing_model === 'formula' ? 'يُحسب حسب التفاصيل' : formatEgp(service.base_price_cents)}
+                        <div className="flex flex-col gap-1">
+                          <MediaThumbnail url={service.featured_icon_url} label={`شعار ${service.featured_name_ar ?? service.name_ar}`} />
+                          <span className="text-xs text-muted-foreground">{service.featured_name_ar || service.name_ar}</span>
+                        </div>
                       </TableCell>
+                      <TableCell>{PRICING_MODEL_LABELS[service.pricing_model]}</TableCell>
+                      <TableCell>{service.pricing_model === 'formula' ? 'يُحسب حسب التفاصيل' : formatEgp(service.base_price_cents)}</TableCell>
                       <TableCell>
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => toggleServiceActive(service)}
-                          className="cursor-pointer"
-                        >
-                          <Badge variant={service.is_active ? 'secondary' : 'outline'}>
-                            {service.is_active ? 'نشطة' : 'معطّلة'}
-                          </Badge>
+                        <button type="button" disabled={isSaving} onClick={() => toggleServiceActive(service)} className="cursor-pointer">
+                          <Badge variant={service.is_active ? 'secondary' : 'outline'}>{service.is_active ? 'نشطة' : 'معطّلة'}</Badge>
                         </button>
                         {/* ADR-0046 — الخدمة ما بتتعلنش تلقائيًا إلا لو الأدمن علّمها هنا. */}
                         <button
@@ -694,9 +709,7 @@ export default function CatalogPage() {
                           className="mr-2 cursor-pointer"
                           title="السماح للمنصة تبعت إشعارات إعلانية عن الخدمة دي"
                         >
-                          <Badge variant={service.is_promotable ? 'secondary' : 'outline'}>
-                            {service.is_promotable ? 'قابلة للإعلان' : 'مش بتتعلن'}
-                          </Badge>
+                          <Badge variant={service.is_promotable ? 'secondary' : 'outline'}>{service.is_promotable ? 'قابلة للإعلان' : 'مش بتتعلن'}</Badge>
                         </button>
                       </TableCell>
                     </TableRow>
@@ -709,10 +722,9 @@ export default function CatalogPage() {
       </div>
 
       <p className="mt-6 text-sm text-muted-foreground">
-        دوس على شارة الحالة عشان تفعّل/تعطّل، وعلى شارة «قابلة للإعلان» عشان تسمح للمنصة تبعت
-        إشعارات إعلانية عن الخدمة دي (الحملات التسويقية). دوس على اسم الخدمة عشان تعدّل كل حقول الخدمة
-        التفصيلية (السعر الأساسي، الحد الأدنى/الأقصى، الضمان، أقل مستوى فني، ...) وتدير تسعير
-        المناطق، فئات تسعير الفني، تسعير المستويات، والإضافات الاختيارية.
+        دوس على شارة الحالة عشان تفعّل/تعطّل، وعلى شارة «قابلة للإعلان» عشان تسمح للمنصة تبعت إشعارات إعلانية عن الخدمة دي (الحملات التسويقية). دوس على اسم
+        الخدمة عشان تعدّل كل حقول الخدمة التفصيلية (السعر الأساسي، الحد الأدنى/الأقصى، الضمان، أقل مستوى فني، ...) وتدير تسعير المناطق، فئات تسعير الفني، تسعير
+        المستويات، والإضافات الاختيارية.
       </p>
     </AppShell>
   );

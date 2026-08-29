@@ -47,6 +47,15 @@ export class CreateServiceDto {
   @IsString()
   icon_url?: string;
 
+  @IsOptional()
+  @IsString()
+  featured_icon_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  featured_name_ar?: string | null;
+
   @IsEnum(PricingModel)
   pricing_model: PricingModel;
 

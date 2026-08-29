@@ -19,12 +19,16 @@ class FeaturedServiceItem extends StatelessWidget {
   final CatalogService service;
   final VoidCallback onTap;
 
-  const FeaturedServiceItem({super.key, required this.service, required this.onTap});
+  const FeaturedServiceItem({
+    super.key,
+    required this.service,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final iconUrl = service.iconUrl;
+    final iconUrl = service.featuredCardIconUrl;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -39,23 +43,24 @@ class FeaturedServiceItem extends StatelessWidget {
                   ? Image.network(
                       iconUrl,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => _FeaturedInitial(service: service),
+                      errorBuilder: (_, _, _) =>
+                          _FeaturedInitial(service: service),
                     )
                   : _FeaturedInitial(service: service),
             ),
             const SizedBox(height: _kFeaturedLabelGap),
             Flexible(
               child: Text(
-                service.nameAr,
+                service.featuredCardName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontSize: _kFeaturedLabelFontSize,
-                      height: _kFeaturedLabelLineHeight,
-                      fontWeight: FontWeight.w500,
-                      color: scheme.onSurface,
-                    ),
+                  fontSize: _kFeaturedLabelFontSize,
+                  height: _kFeaturedLabelLineHeight,
+                  fontWeight: FontWeight.w500,
+                  color: scheme.onSurface,
+                ),
               ),
             ),
           ],
@@ -80,7 +85,7 @@ class _FeaturedInitial extends StatelessWidget {
       ),
       child: Center(
         child: Text(
-          service.nameAr.characters.first,
+          service.featuredCardName.characters.first,
           style: TextStyle(
             color: scheme.primary,
             fontWeight: FontWeight.bold,

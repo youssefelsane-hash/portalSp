@@ -74,7 +74,11 @@ export interface CrewComposition {
 
 export type RecruitOutcome =
   | { status: 'added' }
-  | { status: 'offer_sent'; opportunityId: string; capacityTier: TechnicianCapacityTier };
+  | {
+      status: 'offer_sent';
+      opportunityId: string;
+      capacityTier: TechnicianCapacityTier;
+    };
 
 /**
  * علامة داخلية بس (docs/08 §35.19) — بَقّة حقيقية اتلقطت وقت كتابة اختبار التزامن: acceptCrewOpportunity()
@@ -156,7 +160,8 @@ export function computeCrewComposition(
 export class OrderTeamService {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
-    @InjectRepository(OrderTeamMember) private readonly teamMembers: Repository<OrderTeamMember>,
+    @InjectRepository(OrderTeamMember)
+    private readonly teamMembers: Repository<OrderTeamMember>,
     private readonly techniciansService: TechniciansService,
     private readonly assignmentGuard: TechnicianAssignmentGuardService,
     private readonly workOpportunities: TechnicianWorkOpportunitiesService,
@@ -166,7 +171,9 @@ export class OrderTeamService {
 
   private async findOwnedOrderOrThrow(userId: string, orderId: string): Promise<{ order: Order; leaderProfileId: string }> {
     const leaderProfile = await this.techniciansService.findByUserIdOrThrow(userId);
-    const order = await this.orders.findOne({ where: { id: orderId, technicianId: leaderProfile.id } });
+    const order = await this.orders.findOne({
+      where: { id: orderId, technicianId: leaderProfile.id },
+    });
     if (!order) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود أو مش بتاعك', HttpStatus.NOT_FOUND);
     }
@@ -177,11 +184,7 @@ export class OrderTeamService {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
 
     if (order.bookingMode !== BookingMode.TEAM) {
-      throw new ApiException(
-        ErrorCode.VAL_001,
-        'توزيع أعضاء الفريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)',
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new ApiException(ErrorCode.VAL_001, 'توزيع أعضاء الفريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
     }
     if (dto.technician_id === leaderProfileId) {
       throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
@@ -197,7 +200,9 @@ export class OrderTeamService {
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
       throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
     }
-    const alreadyAdded = await this.teamMembers.findOne({ where: { orderId, technicianId: dto.technician_id } });
+    const alreadyAdded = await this.teamMembers.findOne({
+      where: { orderId, technicianId: dto.technician_id },
+    });
     if (alreadyAdded) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
@@ -217,7 +222,9 @@ export class OrderTeamService {
 
   async removeMember(userId: string, orderId: string, memberId: string): Promise<void> {
     await this.findOwnedOrderOrThrow(userId, orderId);
-    const member = await this.teamMembers.findOne({ where: { id: memberId, orderId } });
+    const member = await this.teamMembers.findOne({
+      where: { id: memberId, orderId },
+    });
     if (!member) {
       throw new ApiException(ErrorCode.VAL_001, 'عضو الفريق ده غير موجود', HttpStatus.NOT_FOUND);
     }
@@ -286,14 +293,15 @@ export class OrderTeamService {
     const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
     // الشغلانة اللي مش فردية عمرها ما ياخد خانة اختيارية، فمفيش أي داعي نسأل الإعدادات أصلاً —
     // `getCrewComposition()` بتتنادى في مسارات متكررة (مسح التصعيد الدوري) فالنداء المتوفّر مقصود.
-    const optionalAssistantSlots = isSoloJob(order)
-      ? computeOptionalAssistantSlots(order, assistants, await this.optionalAssistantPolicy())
-      : 0;
+    const optionalAssistantSlots = isSoloJob(order) ? computeOptionalAssistantSlots(order, assistants, await this.optionalAssistantPolicy()) : 0;
     return computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants }, optionalAssistantSlots);
   }
 
   /** إعدادات المساعد الاختياري (ADR-0052) — قفل عام + حد أقصى، الاتنين قابلين للتعديل بلا كود. */
-  private async optionalAssistantPolicy(): Promise<{ enabled: boolean; maxPerOrder: number }> {
+  private async optionalAssistantPolicy(): Promise<{
+    enabled: boolean;
+    maxPerOrder: number;
+  }> {
     const [enabled, maxPerOrder] = await Promise.all([
       this.settingsService.getBoolean(OPTIONAL_ASSISTANT_ENABLED_SETTING, true),
       this.settingsService.getNumber(OPTIONAL_ASSISTANT_MAX_SETTING, OPTIONAL_ASSISTANT_MAX_FALLBACK),
@@ -385,18 +393,22 @@ export class OrderTeamService {
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
     const withCapacity = await Promise.all(
-      rows.map(async (row) => ({
-        ...row,
-        capacityTier: await classifyTechnicianCapacity(this.teamMembers.manager, {
-          technicianId: row.technicianId,
-          scheduledAt: order.scheduledAt,
-          excludeOrderId: orderId,
-          serviceDurationMinutes,
-          fullDayThresholdMinutes: fullDayJobMinutes,
-        }),
-      })),
+      rows.map(async (row): Promise<RecruitCandidateRow | null> => {
+        const scheduleAvailable = await this.assignmentGuard.isScheduleAvailable(this.teamMembers.manager, row.technicianId, order);
+        if (!scheduleAvailable) return null;
+        return {
+          ...row,
+          capacityTier: await classifyTechnicianCapacity(this.teamMembers.manager, {
+            technicianId: row.technicianId,
+            scheduledAt: order.scheduledAt,
+            excludeOrderId: orderId,
+            serviceDurationMinutes,
+            fullDayThresholdMinutes: fullDayJobMinutes,
+          }),
+        };
+      }),
     );
-    return withCapacity.filter((row) => row.capacityTier !== 'BLOCKED');
+    return withCapacity.filter((row): row is RecruitCandidateRow => row !== null && row.capacityTier !== 'BLOCKED');
   }
 
   /**
@@ -424,9 +436,7 @@ export class OrderTeamService {
     if (composition.optionalAssistantSlots > 0) return;
     throw new ApiException(
       ErrorCode.VAL_001,
-      isSoloJob(order)
-        ? 'الشغلانة دي بتسمح بمساعد اختياري واحد بس، وهو مضاف بالفعل'
-        : 'عدد المساعدين المطلوب مكتمل بالفعل',
+      isSoloJob(order) ? 'الشغلانة دي بتسمح بمساعد اختياري واحد بس، وهو مضاف بالفعل' : 'عدد المساعدين المطلوب مكتمل بالفعل',
       HttpStatus.BAD_REQUEST,
     );
   }
@@ -458,13 +468,16 @@ export class OrderTeamService {
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
       throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
     }
-    const alreadyAdded = await this.teamMembers.findOne({ where: { orderId, technicianId } });
+    const alreadyAdded = await this.teamMembers.findOne({
+      where: { orderId, technicianId },
+    });
     if (alreadyAdded) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
 
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
+    await this.assignmentGuard.assertScheduleAvailable(this.teamMembers.manager, technicianId, order);
     const tier = await classifyTechnicianCapacity(this.teamMembers.manager, {
       technicianId,
       scheduledAt: order.scheduledAt,
@@ -482,39 +495,34 @@ export class OrderTeamService {
     const label = roleLabel && roleLabel.trim().length > 0 ? roleLabel.trim() : memberType === 'assistant' ? 'مساعد' : 'عضو فريق';
 
     if (tier === 'LIGHT') {
-      const member = this.teamMembers.create({ orderId, technicianId, roleLabel: label, addedByTechnicianId: leaderProfileId, memberType });
+      const member = this.teamMembers.create({
+        orderId,
+        technicianId,
+        roleLabel: label,
+        addedByTechnicianId: leaderProfileId,
+        memberType,
+      });
       await this.teamMembers.save(member);
       this.events.emit(ORDER_CREW_CHANGED_EVENT, new OrderCrewChangedEvent(orderId, 'added', technicianId, null, 'technician'));
       return { status: 'added' };
     }
 
     // MEANINGFUL/HEAVY — فرصة اختيارية بدل تحميل صامت (docs/08 §35 بند 3).
-    const opportunity = await this.workOpportunities.offerIfNotExists(
-      this.teamMembers.manager,
-      orderId,
-      technicianId,
-      tier,
-      'crew_recruit',
-      role,
-    );
+    const opportunity = await this.workOpportunities.offerIfNotExists(this.teamMembers.manager, orderId, technicianId, tier, 'crew_recruit', role);
     // docs/08 §36.1 — إشعار حقيقي بدل ما الفني يعتمد على فتح/تحديث شاشة الطلبات المتاحة بنفسه
     // عشان يكتشف الفرصة. created:false يعني كانت موجودة بالفعل (idempotent re-check)، مفيش داعي
     // إشعار مكرر.
     if (opportunity.created) {
       this.events.emit(
         WORK_OPPORTUNITY_OFFERED_EVENT,
-        new WorkOpportunityOfferedEvent(
-          opportunity.id,
-          orderId,
-          order.orderNumber,
-          technicianId,
-          'crew_recruit',
-          tier,
-          order.scheduledAt,
-        ),
+        new WorkOpportunityOfferedEvent(opportunity.id, orderId, order.orderNumber, technicianId, 'crew_recruit', tier, order.scheduledAt),
       );
     }
-    return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };
+    return {
+      status: 'offer_sent',
+      opportunityId: opportunity.id,
+      capacityTier: tier,
+    };
   }
 
   /**
@@ -549,6 +557,7 @@ export class OrderTeamService {
         }
 
         const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
+        await this.assignmentGuard.assertScheduleAvailable(manager, lockedTechnician.id, order);
         await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
 
         const composition = await this.getCrewComposition(order.id, order);
@@ -569,7 +578,9 @@ export class OrderTeamService {
           );
         }
 
-        const alreadyAdded = await manager.findOne(OrderTeamMember, { where: { orderId: order.id, technicianId: profile.id } });
+        const alreadyAdded = await manager.findOne(OrderTeamMember, {
+          where: { orderId: order.id, technicianId: profile.id },
+        });
         if (alreadyAdded) {
           throw new CrewOpportunityDeclinedError(new ApiException(ErrorCode.VAL_001, 'أنت مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT));
         }

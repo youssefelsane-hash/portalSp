@@ -5,11 +5,7 @@ import { BookingMode, Order } from '../orders/entities/order.entity';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianKind, TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
-import {
-  classifyTechnicianCapacity,
-  technicianAvailabilityCondition,
-  technicianServiceQualificationCondition,
-} from './technician-eligibility.sql';
+import { classifyTechnicianCapacity, technicianAvailabilityCondition, technicianServiceQualificationCondition } from './technician-eligibility.sql';
 
 // نفس fallback matching.service.ts وtechnicians.service.ts — راجع ADR-0018 §2/§9.
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -34,6 +30,14 @@ export class TechnicianAssignmentGuardService {
   async assertEligible(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
     await this.assertCoreEligibility(manager, technician, order);
 
+    await this.assertScheduleAvailable(manager, technician.id, order);
+  }
+
+  /**
+   * فحص الجدول فقط، منفصل عن أهلية قيادة الطلب. الفصل ضروري لأن عضو الطاقم قد يكون مساعدًا
+   * (لا يحق له قيادة الطلب) لكنه يظل محتاجًا لنفس حماية عدم تداخل المواعيد.
+   */
+  async isScheduleAvailable(manager: EntityManager, technicianId: string, order: Order): Promise<boolean> {
     // ADR-0017 بند 4-5 / ADR-0018 §9 — نفس مصدر التوافر المشترك مع matching.service.ts
     // (findEligibleTechnicians) وtechnicians.service.ts (listForServiceBooking)، بدل نسخة مستقلة
     // تالتة ممكن تنجرف عن الاتنين التانيين (زي ما حصل بالظبط قبل كده — راجع ADR-0017 السياق).
@@ -41,10 +45,7 @@ export class TechnicianAssignmentGuardService {
     // technicians.service.ts (تصفح العميل، طوارئ = false دايمًا) لازم نحسب isEmergency من نوع
     // الطلب الفعلي نفسه.
     const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
-    const fullDayJobMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const [{ available }] = await manager.query<{ available: boolean }[]>(
       `SELECT EXISTS (
          SELECT 1 FROM technician_profiles tp
@@ -59,13 +60,14 @@ export class TechnicianAssignmentGuardService {
            activeStatusesParam: '$5',
            engagedStatusesParam: '$6',
            isEmergencyParam: '$7',
-           serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)",
+           serviceDurationExpr:
+             'COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)',
            preciseDurationHoursExpr: '(SELECT o2.duration_hours FROM orders o2 WHERE o2.id = $3::uuid)',
            fullDayThresholdMinutesParam: '$8',
          })}
        ) AS available`,
       [
-        technician.id,
+        technicianId,
         order.serviceId,
         order.id,
         order.scheduledAt,
@@ -75,7 +77,11 @@ export class TechnicianAssignmentGuardService {
         fullDayJobMinutes,
       ],
     );
-    if (!available) {
+    return available;
+  }
+
+  async assertScheduleAvailable(manager: EntityManager, technicianId: string, order: Order): Promise<void> {
+    if (!(await this.isScheduleAvailable(manager, technicianId, order))) {
       throw new ApiException(ErrorCode.ORDR_003, 'الفني غير متاح في الوقت المطلوب لهذا الطلب (تعارض جدول أو طلب آخر نشط)', HttpStatus.CONFLICT);
     }
   }
@@ -91,23 +97,16 @@ export class TechnicianAssignmentGuardService {
   async assertEligibleForWorkOpportunity(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
     await this.assertCoreEligibility(manager, technician, order);
 
-    const fullDayJobMinutes = await this.settingsService.getNumber(
-      'matching.full_day_job_minutes',
-      FULL_DAY_JOB_MINUTES_FALLBACK,
-    );
-    const [svc] = await manager.query<{ estimated_duration_minutes: number | null }[]>(
-      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
-      [order.serviceId],
-    );
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const [svc] = await manager.query<{ estimated_duration_minutes: number | null }[]>(`SELECT estimated_duration_minutes FROM services WHERE id = $1`, [
+      order.serviceId,
+    ]);
     // docs/01B — مدة المرشّح الحقيقية: duration_hours (ADR-0031/0032) بتتقدم على دقائق الخدمة الثابتة
     const tier = await classifyTechnicianCapacity(manager, {
       technicianId: technician.id,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
-      serviceDurationMinutes:
-        order.durationHours != null && order.durationHours > 0
-          ? order.durationHours * 60
-          : svc?.estimated_duration_minutes ?? 60,
+      serviceDurationMinutes: order.durationHours != null && order.durationHours > 0 ? order.durationHours * 60 : (svc?.estimated_duration_minutes ?? 60),
       fullDayThresholdMinutes: fullDayJobMinutes,
     });
     if (tier === 'BLOCKED') {
@@ -124,11 +123,7 @@ export class TechnicianAssignmentGuardService {
     // الفرص — يعني حتى لو حد وصل لـid مساعد بأي طريقة تانية، التعيين بيترفض هنا. القاعدة دي
     // مالية كمان مش تشغيلية بس: القائد بياخد باقي قروش القسمة وبتتم عليه مقاصّة الكاش.
     if (technician.technicianKind === TechnicianKind.ASSISTANT) {
-      throw new ApiException(
-        ErrorCode.TECH_001,
-        'ده مساعد مش فني — المساعد بينضم لطاقم شغلانة بس، ما ياخدش طلب لوحده',
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new ApiException(ErrorCode.TECH_001, 'ده مساعد مش فني — المساعد بينضم لطاقم شغلانة بس، ما ياخدش طلب لوحده', HttpStatus.BAD_REQUEST);
     }
     // ADR-0017 بند 3 — is_available/is_on_duty اتشالوا من الأهلية بالكامل. الفني متاح افتراضيًا
     // (Opt-out) — مش محتاج يكون "أونلاين دلوقتي" عشان الأدمن يقدر يعيّنه لطلب مجدول (أو حتى فوري،

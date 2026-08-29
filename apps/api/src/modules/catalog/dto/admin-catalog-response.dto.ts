@@ -52,6 +52,8 @@ export interface AdminServiceResponseDto {
   short_description_ar: string | null;
   full_description_ar: string | null;
   icon_url: string | null;
+  featured_icon_url: string | null;
+  featured_name_ar: string | null;
   pricing_model: string;
   base_price_cents: number;
   inspection_fee_cents: number;
@@ -96,6 +98,8 @@ export function toAdminServiceResponseDto(service: Service): AdminServiceRespons
     short_description_ar: service.shortDescriptionAr,
     full_description_ar: service.fullDescriptionAr,
     icon_url: service.iconUrl,
+    featured_icon_url: service.featuredIconUrl,
+    featured_name_ar: service.featuredNameAr,
     pricing_model: service.pricingModel,
     base_price_cents: service.basePriceCents,
     inspection_fee_cents: service.inspectionFeeCents,
@@ -343,9 +347,7 @@ export interface ServiceProductivitySuggestionResponseDto {
   reviewed_by_user_id: string | null;
 }
 
-export function toServiceProductivitySuggestionResponseDto(
-  row: ServiceProductivitySuggestion,
-): ServiceProductivitySuggestionResponseDto {
+export function toServiceProductivitySuggestionResponseDto(row: ServiceProductivitySuggestion): ServiceProductivitySuggestionResponseDto {
   return {
     id: row.id,
     service_standard_data_id: row.serviceStandardDataId,
