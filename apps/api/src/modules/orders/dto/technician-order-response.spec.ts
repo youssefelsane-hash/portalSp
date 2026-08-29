@@ -81,12 +81,14 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
   it('جزء أونلاين + جزء كاش: الأونلاين واقعة بلا رقم، والكاش بالرقم كامل', () => {
     const dto = toTechnicianOrderResponseDto(fullOrder, {
       cashToCollectCents: 66_000,
+      cashCollectedCents: 0,
       myEarningCents: 90_000,
       hasOnlinePayment: true,
       fullyPaidOnline: false,
     });
 
     expect(dto.cash_to_collect_cents).toBe(66_000);
+    expect(dto.cash_collected_cents).toBe(0);
     expect(dto.my_earning_cents).toBe(90_000);
     expect(dto.has_online_payment).toBe(true);
     expect(dto.fully_paid_online).toBe(false);
@@ -97,6 +99,7 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
   it('كله كاش: الإجمالي بيبان (هو نفسه اللي هيحصّله)', () => {
     const dto = toTechnicianOrderResponseDto(fullOrder, {
       cashToCollectCents: 126_000,
+      cashCollectedCents: 0,
       myEarningCents: 90_000,
       hasOnlinePayment: false,
       fullyPaidOnline: false,
@@ -108,6 +111,7 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
   it('كله أونلاين: نصيبه هو بس، مفيش كاش ولا إجمالي', () => {
     const dto = toTechnicianOrderResponseDto(fullOrder, {
       cashToCollectCents: 0,
+      cashCollectedCents: 0,
       myEarningCents: 90_000,
       hasOnlinePayment: true,
       fullyPaidOnline: true,
@@ -122,6 +126,7 @@ describe('عقد الفني المالي (docs/08 §60.2)', () => {
     for (const hasOnlinePayment of [true, false]) {
       const dto = toTechnicianOrderResponseDto(fullOrder, {
         cashToCollectCents: 1,
+        cashCollectedCents: 0,
         myEarningCents: 1,
         hasOnlinePayment,
         fullyPaidOnline: false,

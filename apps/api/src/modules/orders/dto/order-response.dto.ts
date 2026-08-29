@@ -253,6 +253,8 @@ export interface TechnicianOrderResponseDto
   > {
   /** الكاش المطلوب تحصيله من العميل دلوقتي. بيفضل ظاهر دايمًا — الفني محتاجه. */
   cash_to_collect_cents: number;
+  /** الكاش الذي حصّله الفني بالفعل واتسجل في تسوية الطلب. */
+  cash_collected_cents: number;
   /** نصيب الفني من الطلب (بعد نسبة الشركة). ظاهر دايمًا، بلا شرح لتكوينه. */
   my_earning_cents: number;
   /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
@@ -271,6 +273,7 @@ export function toTechnicianOrderResponseDto(
   base: OrderResponseDto,
   money: {
     cashToCollectCents: number;
+    cashCollectedCents?: number;
     myEarningCents: number;
     hasOnlinePayment: boolean;
     fullyPaidOnline: boolean;
@@ -300,6 +303,7 @@ export function toTechnicianOrderResponseDto(
   return {
     ...visible,
     cash_to_collect_cents: money.cashToCollectCents,
+    cash_collected_cents: money.cashCollectedCents ?? 0,
     my_earning_cents: money.myEarningCents,
     // docs/08 §64.ب — «لسه ما اتحددش» غير «صفر». التطبيق بيكتب نص مختلف تمامًا للحالتين.
     earning_pending: money.earningPending ?? false,

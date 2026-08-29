@@ -654,11 +654,15 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                       ),
                     const SizedBox(height: 4),
                     Text(
-                      _order.cashToCollectCents > 0
-                          ? 'المطلوب تحصيله كاش: ${_formatEgp(_order.cashToCollectCents)}'
-                          : 'مش هتحصّل كاش من العميل',
+                      technicianCashStatusLabel(
+                        cashToCollectCents: _order.cashToCollectCents,
+                        cashCollectedCents: _order.cashCollectedCents,
+                        hasOnlinePayment: _order.hasOnlinePayment,
+                        fullyPaidOnline: _order.fullyPaidOnline,
+                        formatEgp: _formatEgp,
+                      ),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: _order.cashToCollectCents > 0 ? Colors.orange.shade800 : Colors.green,
+                            color: _order.cashToCollectCents > 0 ? Colors.orange.shade800 : Colors.green.shade700,
                             fontWeight: FontWeight.bold,
                           ),
                     ),

@@ -89,6 +89,8 @@ class Order {
   // القاعدة: الفني بيشوف الفلوس اللي بتعدّي من إيده وبس — الكاش اللي هيحصّله، ونصيبه هو.
   /** الكاش المطلوب تحصيله من العميل دلوقتي. */
   final int cashToCollectCents;
+  /** الكاش الذي تم تسجيل استلامه بالفعل لهذا الطلب. */
+  final int cashCollectedCents;
   /** نصيب الفني من الطلب (بعد نسبة الشركة) — بلا أي شرح لتكوينه. */
   final int myEarningCents;
   /** فيه جزء (أو الكل) اتدفع أونلاين — واقعة بلا رقم. */
@@ -134,6 +136,7 @@ class Order {
     required this.problemDescription,
     this.customerInputsLine = '',
     required this.cashToCollectCents,
+    this.cashCollectedCents = 0,
     required this.myEarningCents,
     required this.hasOnlinePayment,
     required this.fullyPaidOnline,
@@ -160,6 +163,7 @@ class Order {
         problemDescription: json['problem_description'] as String?,
         customerInputsLine: _formatCustomerInputs(json['customer_inputs']),
         cashToCollectCents: json['cash_to_collect_cents'] as int? ?? 0,
+        cashCollectedCents: json['cash_collected_cents'] as int? ?? 0,
         myEarningCents: json['my_earning_cents'] as int? ?? 0,
         hasOnlinePayment: json['has_online_payment'] as bool? ?? false,
         fullyPaidOnline: json['fully_paid_online'] as bool? ?? false,
@@ -253,4 +257,23 @@ String technicianEarningLabel({
   if (earningPending) return 'نصيبك: هيتحدد بعد تسعير الشغلانة';
   final amount = formatEgp(myEarningCents);
   return isCrewShare ? 'نصيبك من الطاقم: $amount' : 'نصيبك: $amount';
+}
+
+/// يفرّق بين مبلغ ما زال مطلوبًا، وكاش تم تحصيله بالفعل، وطلب لا يحتاج كاش أصلًا.
+String technicianCashStatusLabel({
+  required int cashToCollectCents,
+  required int cashCollectedCents,
+  required bool hasOnlinePayment,
+  required bool fullyPaidOnline,
+  required String Function(int) formatEgp,
+}) {
+  if (cashToCollectCents > 0) {
+    return 'المطلوب تحصيله كاش: ${formatEgp(cashToCollectCents)}';
+  }
+  if (cashCollectedCents > 0) {
+    return 'تم تحصيل الكاش وتسجيله في التسوية: ${formatEgp(cashCollectedCents)}';
+  }
+  if (fullyPaidOnline) return 'مش مطلوب كاش — الطلب مدفوع أونلاين بالكامل';
+  if (hasOnlinePayment) return 'مش مطلوب كاش إضافي من العميل';
+  return 'لا يوجد مبلغ كاش مطلوب من العميل';
 }

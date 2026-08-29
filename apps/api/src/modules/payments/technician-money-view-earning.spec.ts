@@ -34,7 +34,12 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
 
   function service(
     participants: CrewParticipant[],
-    collection: { totalAmountCents?: number; onlinePaidAmountCents?: number; amountDueToTechnicianCents?: number } = {},
+    collection: {
+      totalAmountCents?: number;
+      directPaidAmountCents?: number;
+      onlinePaidAmountCents?: number;
+      amountDueToTechnicianCents?: number;
+    } = {},
   ): PaymentsService {
     const svc = Object.create(PaymentsService.prototype) as PaymentsService;
     Object.assign(svc, {
@@ -52,7 +57,7 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
         totalAmountCents: collection.totalAmountCents ?? 100000,
         amountDueToTechnicianCents: collection.amountDueToTechnicianCents ?? 100000,
         paidAmountCents: 0,
-        directPaidAmountCents: 0,
+        directPaidAmountCents: collection.directPaidAmountCents ?? 0,
         onlinePaidAmountCents: collection.onlinePaidAmountCents ?? 0,
         refundedAmountCents: 0,
         financedOrderAmountCents: 0,
@@ -101,6 +106,27 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     expect(memberView.myEarningCents).toBe(Math.floor((80000 * 1) / 2.6));
   });
 
+  it('عضو الطاقم لا يرى الكاش الذي حصّله قائد الطلب', async () => {
+    const participants: CrewParticipant[] = [
+      { technicianId: LEADER, participantRole: 'leader', technicianLevel: 'team_leader', shareWeight: 1.6 },
+      { technicianId: MEMBER, participantRole: 'team_member', technicianLevel: 'new', shareWeight: 1 },
+    ];
+    const svc = service(participants, {
+      directPaidAmountCents: 100000,
+      amountDueToTechnicianCents: 0,
+    });
+
+    const leaderView = await svc.getTechnicianMoneyView(order({ bookingMode: BookingMode.TEAM }));
+    const memberView = await svc.getTechnicianMoneyView(
+      order({ bookingMode: BookingMode.TEAM }),
+      undefined,
+      MEMBER,
+    );
+
+    expect(leaderView.cashCollectedCents).toBe(100000);
+    expect(memberView.cashCollectedCents).toBe(0);
+  });
+
   it('القائد كمان بياخد حصّته هو مش الوعاء — نفس اللي هينزل محفظته وقت التسوية', async () => {
     const participants: CrewParticipant[] = [
       { technicianId: LEADER, participantRole: 'leader', technicianLevel: 'team_leader', shareWeight: 1.6 },
@@ -129,6 +155,7 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     expect(view.hasOnlinePayment).toBe(true);
     expect(view.fullyPaidOnline).toBe(false);
     expect(view.cashToCollectCents).toBe(0);
+    expect(view.cashCollectedCents).toBe(0);
   });
 
   it('طلب مدفوع إلكترونيًا بالكامل وحده يحمل علامة "أونلاين بالكامل"', async () => {

@@ -16,6 +16,7 @@ void main() {
       'problem_description': null,
       // ملحوظة: مفيش total_amount_cents — الباك-إند بيشيله لما يكون فيه دفع أونلاين.
       'cash_to_collect_cents': 527000,
+      'cash_collected_cents': 0,
       'my_earning_cents': 450000,
       'has_online_payment': true,
       'fully_paid_online': false,
@@ -24,6 +25,7 @@ void main() {
     });
 
     expect(order.cashToCollectCents, 527000);
+    expect(order.cashCollectedCents, 0);
     expect(order.myEarningCents, 450000);
     expect(order.hasOnlinePayment, isTrue);
     expect(order.fullyPaidOnline, isFalse);
@@ -38,6 +40,7 @@ void main() {
       'problem_description': null,
       'total_amount_cents': 620000,
       'cash_to_collect_cents': 620000,
+      'cash_collected_cents': 0,
       'my_earning_cents': 500000,
       'has_online_payment': false,
       'fully_paid_online': false,
@@ -57,6 +60,7 @@ void main() {
       'order_status': 'work_completed',
       'problem_description': null,
       'cash_to_collect_cents': 0,
+      'cash_collected_cents': 0,
       'my_earning_cents': 500000,
       'has_online_payment': true,
       'fully_paid_online': true,
@@ -68,6 +72,34 @@ void main() {
     expect(order.fullyPaidOnline, isTrue);
     expect(order.myEarningCents, 500000);
     expect(order.totalAmountCents, isNull);
+  });
+
+  test('بعد تحصيل كاش طلب مختلط: يفضل الأونلاين ظاهرًا والكاش يظهر كمُحصّل لا كمطلوب', () {
+    final order = Order.fromJson({
+      'id': 'order-mixed-collected',
+      'order_number': 'ORD-MIXED-COLLECTED',
+      'order_status': 'completed',
+      'problem_description': null,
+      'cash_to_collect_cents': 0,
+      'cash_collected_cents': 20000,
+      'my_earning_cents': 96000,
+      'has_online_payment': true,
+      'fully_paid_online': false,
+      'payment_status': 'paid',
+      'booking_mode': 'individual',
+    });
+
+    expect(order.cashCollectedCents, 20000);
+    expect(
+      technicianCashStatusLabel(
+        cashToCollectCents: order.cashToCollectCents,
+        cashCollectedCents: order.cashCollectedCents,
+        hasOnlinePayment: order.hasOnlinePayment,
+        fullyPaidOnline: order.fullyPaidOnline,
+        formatEgp: (cents) => '${cents ~/ 100} ج.م.',
+      ),
+      'تم تحصيل الكاش وتسجيله في التسوية: 200 ج.م.',
+    );
   });
 
   test('رد قديم من سيرفر ما اتحدّثش: القيم بتقع على صفر بأمان بدل ما ترمي', () {

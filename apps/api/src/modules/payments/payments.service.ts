@@ -61,6 +61,8 @@ import { splitCrewEarnings } from './crew-earning-split';
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
 export interface TechnicianMoneyView {
   cashToCollectCents: number;
+  /** صافي الكاش الذي سجّله الفني كمُحصّل بالفعل لهذا الطلب. */
+  cashCollectedCents: number;
   myEarningCents: number;
   hasOnlinePayment: boolean;
   fullyPaidOnline: boolean;
@@ -257,10 +259,18 @@ export class PaymentsService {
         }
       }
     }
+    // عضو الطاقم يشوف حصته فقط، وليس الكاش الذي مرّ في يد قائد الطلب.
+    const cashCollectedCents =
+      viewerId === order.technicianId
+        ? Math.max(0, breakdown.directPaidAmountCents - breakdown.onlinePaidAmountCents)
+        : 0;
 
     return {
       // اللي هيستلمه كاش من العميل — لازم يبان بالرقم، هو محتاجه عشان يعرف ياخد كام.
       cashToCollectCents: breakdown.amountDueToTechnicianCents,
+      // الفرق بين كل الدفعات المباشرة والدفعات غير الكاش = صافي الكاش المسجل بعد أي استرداد.
+      // لازم يخرج كحقيقة مستقلة، لأن صفر "المتبقي" بعد التحصيل لا يعني "لم يستلم كاش".
+      cashCollectedCents,
       // نصيبه هو — لازم يبان برضه، بلا أي شرح لتكوينه.
       myEarningCents,
       // واقعة بلا رقم.

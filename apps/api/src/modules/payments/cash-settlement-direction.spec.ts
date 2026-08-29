@@ -333,6 +333,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     expect(moneyView.hasOnlinePayment).toBe(false);
     expect(moneyView.fullyPaidOnline).toBe(false);
     expect(moneyView.cashToCollectCents).toBe(0);
+    expect(moneyView.cashCollectedCents).toBe(100000);
 
     // الفني ماسك الـ1000ج كاملة، فمفروض رصيده ينزل بـ200ج (العمولة) — مش يزيد بـ800ج
     const after = await techWalletBalance();
@@ -609,6 +610,7 @@ describe('PaymentsService.settleAndComplete() — اتجاه التسوية ال
     expect(moneyView.hasOnlinePayment).toBe(true);
     expect(moneyView.fullyPaidOnline).toBe(false);
     expect(moneyView.cashToCollectCents).toBe(0);
+    expect(moneyView.cashCollectedCents).toBe(20000);
 
     // المنصة ماسكة 100000 (كارت)، الفني ماسك 20000 (كاش دلتا). نصيب الفني العادل 96000 —
     // المنصة تدفعله الفرق بس (96000-20000=76000)، مش الـ96000 كاملة (كان ده هيبقى فلوس مضاعفة).
