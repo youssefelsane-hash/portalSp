@@ -21,6 +21,7 @@ import '../progression/progression_screen.dart';
 import '../referrals/referral_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../skills/skills_screen.dart';
+import '../legal/legal_links_screen.dart';
 import '../support/complaints_screen.dart';
 import '../support/support_contact_screen.dart';
 import 'models.dart';
@@ -1467,6 +1468,12 @@ class _TechnicianDrawer extends StatelessWidget {
                 builder: (_) => const ComplaintsScreen(),
               ),
               const Divider(height: 1),
+              _DrawerItem(
+                icon: Icons.description_outlined,
+                label: 'الشروط والسياسات',
+                builder: (_) => const LegalLinksScreen(),
+              ),
+              const Divider(height: 1),
               ListTile(
                 leading: Icon(
                   Icons.logout,
@@ -1481,12 +1488,64 @@ class _TechnicianDrawer extends StatelessWidget {
                   context.read<AuthRepository>().logout();
                 },
               ),
+              const Divider(height: 1),
+              // بوابة P0-1 في docs/23 — مسار حذف الحساب لازم يكون **جوّه التطبيق** كمان، مش
+              // رابط ويب بس. مفصول عن تسجيل الخروج عشان محدش يدوسه بالغلط.
+              ListTile(
+                leading: Icon(
+                  Icons.delete_forever_outlined,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  'حذف الحساب',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                subtitle: const Text('حذف نهائي لحسابك وبياناتك الشخصية'),
+                onTap: () => _confirmDeleteAccount(context),
+              ),
               const SizedBox(height: 8),
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+/// تأكيد حذف الحساب (بوابة P0-1 في docs/23، ADR-0053).
+///
+/// الباك-إند بيرفض الحذف لو فيه رصيد محفظة أو طلب لسه شغال، وبيرجّع رسالة عربية بتقول للفني
+/// بالظبط إيه اللي يعمله — بنعرضها زي ما هي بدل ما نخترع رسالة عامة أقل فايدة.
+Future<void> _confirmDeleteAccount(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('حذف الحساب نهائيًا؟'),
+      content: const Text(
+        'هيتم حذف اسمك ورقمك وبريدك ومستندات هويتك من النظام، ومش هتقدر ترجع للحساب ده تاني.\n\n'
+        'سجلات الطلبات ومستحقاتك المالية بتتحفظ لمدة يفرضها القانون، بس من غير بياناتك الشخصية.\n\n'
+        'لو عندك رصيد في المحفظة أو طلب لسه شغال، لازم تخلّصهم الأول.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('إلغاء'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          style: TextButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
+          child: const Text('احذف حسابي'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+
+  try {
+    await context.read<AuthRepository>().deleteAccount();
+  } on ApiException catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
   }
 }
 

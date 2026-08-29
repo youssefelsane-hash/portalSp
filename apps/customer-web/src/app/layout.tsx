@@ -4,6 +4,7 @@ import { Tajawal } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { SiteHeader } from '@/components/site-header';
+import { SiteFooter } from '@/components/site-footer';
 
 // §8 — Arabic-first، مش English UI بترقّع RTL بعدين. Tajawal خط عربي عصري مقروء، مدعوم Google
 // Fonts (يشتغل تحت CSP الافتراضي للـArtifacts، ومفيش قيد مشابه هنا لأن ده Next.js عادي، بس
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <AuthProvider>
           <SiteHeader />
           <main className="flex-1">{children}</main>
+          <SiteFooter />
         </AuthProvider>
       </body>
     </html>

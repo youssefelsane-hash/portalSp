@@ -3,10 +3,14 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <!-- عرض إشعارات push actionable (docs/08 §17.16) — POST_NOTIFICATIONS إجباري على Android 13+
          وإلا مفيش إشعار هيظهر خالص، بغض النظر عن FCM. VIBRATE لاهتزاز قناة عروض الطوارئ.
-         USE_FULL_SCREEN_INTENT لعرض عرض الطوارئ فوق قفل الشاشة زي مكالمة واردة. -->
+
+         USE_FULL_SCREEN_INTENT **اتشالت عمدًا** (بوابة P0-4 في docs/23): Google بيقصرها أساسًا
+         على تطبيقات المكالمات والمنبهات، وتطبيق توزيع شغل مش منهم — وجودها سبب رفض متكرر في
+         مراجعة المتجر. البديل المطبَّق: إشعار heads-up بأولوية قصوى وvisibility=public، بيبان
+         فوق شاشة القفل بمحتواه من غير ما يفتح الشاشة قسرًا. لو الأعمال قررت بعدين إنها محتاجة
+         الشاشة الكاملة فعلاً، لازم declaration مبرَّر مع الرفع + تعامل صريح مع رفض الصلاحية. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <!-- الدخول بالبصمة (docs/08 §17.22) — local_auth محتاجها عشان يفتح BiometricPrompt. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <application

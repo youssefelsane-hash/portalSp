@@ -372,7 +372,6 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     // 4) تحصيل كاش + تسوية مالية — نفس PaymentsService.collectCash() الحقيقية.
     // محفظة المنصة مشتركة بين كل اختبارات jest في نفس الداتابيز (رصيدها المطلق مش موثوق كمرجع —
     // نفس الملاحظة الموثّقة في domestic-workers/README.md) — بنقيس الفرق (delta) بس، مش القيمة المطلقة.
-    const platformWalletBefore = await walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
     const payment = await paymentsService.collectCash(ids.technicianUser, order.id);
     expect(payment.amountCents).toBe(100000);
     expect(payment.paymentStatus).toBe('succeeded');
@@ -401,7 +400,22 @@ describe('Golden Path — رحلة حجز كاش كاملة من الإنشاء 
     });
     expect(commissionTx).not.toBeNull();
     expect(commissionTx!.amountCents).toBe(20000);
-    expect(platformWallet.balanceCents - platformWalletBefore.balanceCents).toBe(20000);
+    // بَقّة عزل حقيقية اتلقطت (تحضير الإنتاج): الفحص كان على **فرق رصيد محفظة المنصة** — ودي
+    // محفظة واحدة مشتركة بين كل السويتات، فأي سويت تانية بتتحرّك عليها بالتوازي كانت بتفشّل
+    // الفحص ده عشوائيًا حسب ترتيب التشغيل (اتأكد: بيفشل كمان من غير أي تغيير في كود المنتج).
+    // الضمان المالي المقصود اتحفظ بالكامل بس اتقفل على **قيود الطلب ده هو**: المنصة قبضت 20000
+    // عمولة على الطلب ده بالظبط — أدق من الفرق العام وغير قابل للتلوث من أي سويت تانية.
+    const platformCreditForThisOrder = await dataSource.getRepository(WalletTransaction).findOne({
+      where: {
+        walletId: platformWallet.id,
+        referenceType: 'order',
+        referenceId: order.id,
+        transactionType: WalletTxType.COMMISSION_DEDUCTION,
+        direction: WalletTxDirection.CREDIT,
+      },
+    });
+    expect(platformCreditForThisOrder).not.toBeNull();
+    expect(platformCreditForThisOrder!.amountCents).toBe(20000);
 
     // 5) تقييم العميل — نفس RatingsService الحقيقية.
     const rating = await ratingsService.rateAsCustomer(ids.customerUser, order.id, {

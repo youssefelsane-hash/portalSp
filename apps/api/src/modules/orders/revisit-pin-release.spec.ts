@@ -133,6 +133,23 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
     if (!dataSource?.isInitialized) return;
     try {
       if (orderIds.length) {
+        // بَقّة عزل حقيقية اتلقطت: حذف صفوف الدفتر بس كان بيسيب `wallets.balance_cents` متغيّرة —
+        // محفظة المنصة مشتركة بين كل السويتات، فالسويتات اللي بتتأكد من **فرق** رصيدها (زي
+        // golden-path-cash-booking) كانت بتفشل عشوائيًا حسب ترتيب التشغيل المتوازي. التنظيف لازم
+        // يرجّع الرصيد زي ما كان، مش يمسح القيود وبس.
+        await q(
+          `UPDATE wallets w
+              SET balance_cents = w.balance_cents - COALESCE(net.delta, 0)
+             FROM (
+               SELECT wt.wallet_id,
+                      SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END) AS delta
+                 FROM wallet_transactions wt
+                WHERE wt.reference_type = 'order' AND wt.reference_id = ANY($1::uuid[])
+                GROUP BY wt.wallet_id
+             ) net
+            WHERE w.id = net.wallet_id`,
+          [orderIds],
+        );
         await q(`DELETE FROM wallet_transactions WHERE reference_type = 'order' AND reference_id = ANY($1::uuid[])`, [orderIds]);
         await q(`DELETE FROM order_assignments WHERE order_id = ANY($1::uuid[])`, [orderIds]);
         await q(`DELETE FROM order_earning_shares WHERE order_id = ANY($1::uuid[])`, [orderIds]);
