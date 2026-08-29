@@ -2,6 +2,24 @@
 
 import { Fragment, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
+import {
+  BadgeDollarSign,
+  CalendarCheck2,
+  CalendarClock,
+  CalendarDays,
+  CalendarRange,
+  Camera,
+  Clock3,
+  CreditCard,
+  Eye,
+  Hourglass,
+  Repeat2,
+  Siren,
+  UserRound,
+  UsersRound,
+  WalletCards,
+  type LucideIcon,
+} from 'lucide-react';
 import type {
   AdminServiceResponseDto,
   AdminServiceZoneResponseDto,
@@ -38,6 +56,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatEgp } from '@/lib/format';
+import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 import { PricingBuilder } from './pricing-builder';
 
 const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
@@ -63,6 +82,39 @@ const PRICING_TIER_LABELS: Record<TechnicianPricingTier, string> = {
   senior: 'كبير',
   premium: 'مميّز',
 };
+
+function SchedulingModeChoice({
+  active,
+  title,
+  description,
+  icon: Icon,
+  onSelect,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className={`flex min-h-32 items-start gap-3 rounded-xl border p-4 text-start transition hover:-translate-y-0.5 hover:shadow-md ${
+        active ? 'border-primary bg-primary/[0.06] shadow-md ring-1 ring-primary/15' : 'border-border/80 bg-background/85'
+      }`}
+    >
+      <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+        <Icon className="size-4" aria-hidden="true" />
+      </span>
+      <span>
+        <span className="block text-sm font-semibold text-foreground">{title}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
+      </span>
+    </button>
+  );
+}
 
 export default function ServiceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -607,34 +659,39 @@ export default function ServiceDetailPage() {
 
             <Separator />
 
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">التسعير</h3>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="svc_pricing_model">نوع التسعير</Label>
-                <SelectNative
-                  id="svc_pricing_model"
-                  name="pricing_model"
-                  defaultValue={service.pricing_model}
-                  className="max-w-xs"
-                  onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
-                >
-                  {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </SelectNative>
-                {pricingModelLive === 'formula' && (
-                  <p className="text-sm text-muted-foreground">السعر الأساسي تحت مش مستخدم — السعر بيتحسب بالكامل من محرك التسعير الديناميكي.</p>
-                )}
-                {pricingModelLive === 'hourly' && (
-                  <p className="text-sm text-muted-foreground">
-                    السعر الأساسي تحت هو <strong>سعر الساعة الواحدة</strong> — بيتضرب تلقائيًا في عدد الساعات اللي العميل بيختارها وقت الحجز (مش سعر إجمالي
-                    ثابت).
+            <CatalogConfigSection
+              title="التسعير والدفع"
+              description="السعر الأساسي وحدوده وسياسة تحصيل المبلغ من العميل في مكان واحد."
+              icon={BadgeDollarSign}
+              tone="amber"
+            >
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.8fr)]">
+                <div className="rounded-xl border border-amber-200/70 bg-background/85 p-4">
+                  <Label htmlFor="svc_pricing_model">طريقة حساب السعر</Label>
+                  <SelectNative
+                    id="svc_pricing_model"
+                    name="pricing_model"
+                    defaultValue={service.pricing_model}
+                    className="mt-2"
+                    onChange={(e) => setPricingModelLive(e.target.value as PricingModel)}
+                  >
+                    {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </SelectNative>
+                  <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                    {pricingModelLive === 'formula'
+                      ? 'السعر يُحسب من الحقول والقواعد الموجودة في محرك التسعير الديناميكي بالأسفل.'
+                      : pricingModelLive === 'hourly'
+                        ? 'السعر الأساسي هو سعر الساعة الواحدة ويُضرب في عدد الساعات المختارة.'
+                        : pricingModelLive === 'inspection_then_quote'
+                          ? 'يُحصّل رسم الكشف أولًا، ثم يُرسل السعر النهائي للعميل بعد المعاينة.'
+                          : 'السعر الأساسي هو نقطة البداية، ويمكن تخصيصه حسب المنطقة أو فئة الفني.'}
                   </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                </div>
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-amber-200/70 bg-background/85 p-4 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="flex flex-col gap-1">
                   {/* كانت فجوة موثّقة صراحة: مفيش طريقة تعدّل السعر الأساسي بعد إنشاء الخدمة من
                       غير SQL مباشر — العنصر الوحيد المفروض الأدمن يتحكم فيه من غير كود. */}
@@ -698,133 +755,163 @@ export default function ServiceDetailPage() {
                   />
                 </div>
               </div>
-              <div className="flex flex-wrap gap-4 text-sm">
-                {/* محرك الحجز الموحّد — قدرة دفع أولى (ADR-0026، docs/08 §42 Phase A.1) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="cash_allowed" defaultChecked={service.cash_allowed} />
-                  يسمح بالدفع كاش (لو اتلغى، لازم كارت/InstaPay مقدّم)
-                </label>
-                {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="deposit_required" defaultChecked={service.deposit_required} />
-                  محتاجة إيداع مقدّم (النسبة % فوق، والباقي يتحصّل بعد الشغل)
-                </label>
               </div>
-            </div>
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">سياسة الدفع</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <CatalogToggle
+                    name="cash_allowed"
+                    title="السماح بالدفع كاش"
+                    description="عند إيقافه يجب على العميل الدفع إلكترونيًا أو عبر InstaPay قبل التنفيذ."
+                    icon={WalletCards}
+                    defaultChecked={service.cash_allowed}
+                  />
+                  <CatalogToggle
+                    name="deposit_required"
+                    title="طلب إيداع مقدم"
+                    description="يُحصّل الإيداع بالنسبة المحددة أعلاه، والباقي بعد إتمام الشغل."
+                    icon={CreditCard}
+                    defaultChecked={service.deposit_required}
+                  />
+                </div>
+              </div>
+            </CatalogConfigSection>
 
             <Separator />
 
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">الحجز والجدولة</h3>
-              <div className="flex flex-wrap gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_scheduling" defaultChecked={service.allows_scheduling} />
-                  يسمح بالحجز المجدول
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_emergency" defaultChecked={service.allows_emergency} />
-                  يسمح بطلب طارئ
-                </label>
-                {/* هيكل الحجز الجديد — صُنّاع (docs/06 §1) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_individual" defaultChecked={service.allows_individual} />
-                  يسمح بوضع &quot;شغلانة سريعة&quot; (فرد)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_team" defaultChecked={service.allows_team} />
-                  يسمح بوضع &quot;اعتماد&quot; (فريق/شركة)
-                </label>
-                {/* قدرة "نطاق أيام مرن" (ADR-0028، docs/08 §42 Phase A.2) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_date_range_booking" defaultChecked={service.allows_date_range_booking} />
-                  يسمح بحجز &quot;نطاق أيام مرن&quot; (لو اتلغى، العميل لازم يحدد يوم واحد بس)
-                </label>
-                {/* قدرة "الحجز المتكرر" (migration 0176) — لو مفعّلة، العميل يقدر يختار أسبوعي/
-                    شهري وقت الحجز، وكل موعد بيتولّد طلب عادي كامل بنفس مسار الحجز العادي. */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="allows_recurring_booking" defaultChecked={service.allows_recurring_booking} />
-                  يسمح بالحجز المتكرر (أسبوعي/شهري — كل موعد بيولّد طلب عادي كامل بسعر اللحظة)
-                </label>
-                {/* سياسة إظهار المرشّحين المتعارضين جدوليًا (ADR-0030، docs/08 §42) */}
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="show_unavailable_providers" defaultChecked={service.show_unavailable_providers} />
-                  يظهر الفنيين المتعارضين جدوليًا بحالة &quot;مش متاح للفترة دي&quot; بدل الإخفاء الكامل
-                </label>
-              </div>
+            <CatalogConfigSection
+              title="الحجز والجدولة"
+              description="حدد أين تظهر الخدمة، من ينفذها، ومدى المرونة المتاحة للعميل عند اختيار الموعد."
+              icon={CalendarClock}
+              tone="blue"
+            >
+              <div className="space-y-5">
+                <div>
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">توفر الخدمة</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CatalogToggle
+                      name="allows_scheduling"
+                      title="حجز مجدول"
+                      description="العميل يختار موعدًا مسبقًا بدل الطلب الفوري فقط."
+                      icon={CalendarCheck2}
+                      defaultChecked={service.allows_scheduling}
+                    />
+                    <CatalogToggle
+                      name="allows_emergency"
+                      title="طلب طارئ"
+                      description="يتيح طلب وصول عاجل ويطبق سياسة الطوارئ الخاصة بالخدمة."
+                      icon={Siren}
+                      defaultChecked={service.allows_emergency}
+                    />
+                  </div>
+                </div>
 
-              {/* أوضاع توقيت الخدمة (ADR-0032، طلب مالك صريح 2026-08-22) — تبادلية: وضع واحد بس
-                  فعّال لكل خدمة، اختيار واحد بيلغي الباقي أوتوماتيك. requires_precise_schedule
-                  (ADR-0031 Slice B) جزء من نفس المجموعة دلوقتي، صفر تغيير على معناها/سلوكها. */}
-              <div className="flex flex-col gap-2 rounded-md border p-3">
-                <p className="text-sm font-medium">أوضاع توقيت الخدمة (وضع واحد بس ممكن يتفعّل)</p>
-                <p className="text-xs text-muted-foreground">
-                  لو الخدمة بتتحجز بيوم كامل عادي من غير تفاصيل وقت إضافية (زي معظم الصيانة العادية) — سيب الأربعة دول كلهم فاضيين. اختار وضع بس لو الخدمة
-                  محتاجة تفاصيل وقت زيادة:
-                </p>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_precise_schedule"
-                    checked={schedulingMode === 'precise'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'precise' : 'none')}
-                  />
-                  <span>
-                    دقة وقت (بداية + مدة بالساعات مع بعض)
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      مثال: جليسة أطفال بالساعة، تنظيف بالساعة — العميل بيحدد امتى هيبدأ وقد إيه هيستمر مع بعض.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_start_time_only"
-                    checked={schedulingMode === 'start_only'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'start_only' : 'none')}
-                  />
-                  <span>
-                    وقت بداية بس (من غير مدة)
-                    <br />
-                    <span className="text-xs text-muted-foreground">مثال: عقد شهري بيتحدد امتى يبدأ بس، من غير تحديد مدة أو نهاية وقت الحجز.</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_hours_only"
-                    checked={schedulingMode === 'hours_only'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'hours_only' : 'none')}
-                  />
-                  <span>
-                    عدد ساعات بس (من غير وقت بداية محدد)
-                    <br />
-                    <span className="text-xs text-muted-foreground">
-                      مثال: &quot;قد إيه محتاج تنظيف؟&quot; — العميل بيحدد عدد الساعات بس، من غير ميعاد وصول دقيق.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="requires_start_and_end"
-                    checked={schedulingMode === 'start_and_end'}
-                    onChange={(e) => setSchedulingMode(e.target.checked ? 'start_and_end' : 'none')}
-                  />
-                  <span>
-                    تاريخ ووقت بداية + تاريخ ووقت نهاية
-                    <br />
-                    <span className="text-xs text-muted-foreground">مثال: تنظيف شهري/إقامة بمدة محددة — العميل بيحدد بداية العقد ونهايته بالظبط.</span>
-                  </span>
-                </label>
+                <div>
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">طريقة التنفيذ</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <CatalogToggle
+                      name="allows_individual"
+                      title="شغلانة سريعة"
+                      description="فني واحد ينفذ الطلب، مع إمكانية إضافة مساعد اختياري عند الحاجة."
+                      icon={UserRound}
+                      defaultChecked={service.allows_individual}
+                    />
+                    <CatalogToggle
+                      name="allows_team"
+                      title="اعتماد فريق أو شركة"
+                      description="للأعمال الكبيرة التي تحتاج قائدًا وفنيين أو شركة تنفيذ."
+                      icon={UsersRound}
+                      defaultChecked={service.allows_team}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">مرونة الحجز والعرض</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <CatalogToggle
+                      name="allows_date_range_booking"
+                      title="نطاق أيام مرن"
+                      description="العميل يحدد فترة أيام مناسبة بدل يوم واحد ثابت."
+                      icon={CalendarRange}
+                      defaultChecked={service.allows_date_range_booking}
+                    />
+                    <CatalogToggle
+                      name="allows_recurring_booking"
+                      title="حجز متكرر"
+                      description="أسبوعي أو شهري، وكل موعد يولّد طلبًا مستقلًا بسعر وقته."
+                      icon={Repeat2}
+                      defaultChecked={service.allows_recurring_booking}
+                    />
+                    <CatalogToggle
+                      name="show_unavailable_providers"
+                      title="إظهار غير المتاحين"
+                      description="يعرض الفني المتعارض مع توضيح حالته بدل إخفائه بالكامل."
+                      icon={Eye}
+                      defaultChecked={service.show_unavailable_providers}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-blue-200/70 bg-background/85 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold">دقة الموعد المطلوبة</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">اختيار واحد فقط. الوضع الافتراضي مناسب لمعظم خدمات الصيانة اليومية.</p>
+                  </div>
+                  {schedulingMode === 'precise' && <input type="hidden" name="requires_precise_schedule" value="on" />}
+                  {schedulingMode === 'start_only' && <input type="hidden" name="requires_start_time_only" value="on" />}
+                  {schedulingMode === 'hours_only' && <input type="hidden" name="requires_hours_only" value="on" />}
+                  {schedulingMode === 'start_and_end' && <input type="hidden" name="requires_start_and_end" value="on" />}
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'none'}
+                      title="يوم كامل"
+                      description="موعد باليوم فقط، من غير ساعة أو مدة إضافية."
+                      icon={CalendarDays}
+                      onSelect={() => setSchedulingMode('none')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'precise'}
+                      title="بداية + مدة"
+                      description="وقت بداية محدد وعدد ساعات، مثل التنظيف بالساعة."
+                      icon={Clock3}
+                      onSelect={() => setSchedulingMode('precise')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'start_only'}
+                      title="وقت بداية فقط"
+                      description="بداية محددة من غير مدة أو وقت نهاية."
+                      icon={CalendarClock}
+                      onSelect={() => setSchedulingMode('start_only')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'hours_only'}
+                      title="عدد ساعات فقط"
+                      description="مدة مطلوبة من غير تحديد ساعة وصول دقيقة."
+                      icon={Hourglass}
+                      onSelect={() => setSchedulingMode('hours_only')}
+                    />
+                    <SchedulingModeChoice
+                      active={schedulingMode === 'start_and_end'}
+                      title="بداية ونهاية"
+                      description="تاريخ ووقت بداية ونهاية، مناسب للعقود والإقامات."
+                      icon={CalendarRange}
+                      onSelect={() => setSchedulingMode('start_and_end')}
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            </CatalogConfigSection>
 
             <Separator />
 
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold text-muted-foreground">التنفيذ والتصنيف</h3>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <CatalogConfigSection
+              title="التنفيذ والتصنيف"
+              description="بيانات الضمان والمدة ومستوى الفني، بالإضافة إلى متطلبات توثيق الشغل."
+              icon={Camera}
+              tone="green"
+            >
+              <div className="grid grid-cols-1 gap-3 rounded-xl border border-emerald-200/70 bg-background/85 p-4 sm:grid-cols-2 xl:grid-cols-5">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_warranty">أيام الضمان</Label>
                   <Input id="svc_warranty" name="warranty_days" type="number" min="0" defaultValue={service.warranty_days} required />
@@ -852,11 +939,16 @@ export default function ServiceDetailPage() {
                   <Input id="svc_launch_phase" name="launch_phase" type="number" min="1" defaultValue={service.launch_phase} />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="requires_photos" defaultChecked={service.requires_photos} />
-                محتاجة صور قبل/بعد
-              </label>
-            </div>
+              <div className="mt-4 max-w-xl">
+                <CatalogToggle
+                  name="requires_photos"
+                  title="توثيق بالصور قبل وبعد"
+                  description="يطلب من الفني رفع صور الحالة قبل التنفيذ وبعده لإتمام الطلب."
+                  icon={Camera}
+                  defaultChecked={service.requires_photos}
+                />
+              </div>
+            </CatalogConfigSection>
 
             <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
               حفظ تفاصيل الخدمة

@@ -68,11 +68,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final _scrollController = ScrollController();
   final _repository = CatalogRepository();
   final _homepageContentRepository = HomepageContentRepository();
   final _supportContactRepository = SupportContactRepository();
   final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
+
   /// خدمات نهائية مثل «تصليح حنفية»، مرتبة بعدد الطلبات الفعلي لا حسب القسم العام.
   List<CatalogService>? _mostRequested;
   String? _error;
@@ -129,6 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _slideTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -220,9 +223,15 @@ class _HomeScreenState extends State<HomeScreen> {
           // 96 مقصودة كسقف مش أكتر: على شاشة 360dp بيفضل ~170dp للعنوان بعد أيقونتين الأكشن —
           // العنوان (اللي هو أهم عنصر في الرأس بقرار §75-ب) بيفضل مقروء بدل ما يتقصّ.
           leadingWidth: 96,
-          leading: _brandingLogo != null && !_brandingLogo!.isDefault && _brandingLogo!.url.isNotEmpty
+          leading:
+              _brandingLogo != null &&
+                  !_brandingLogo!.isDefault &&
+                  _brandingLogo!.url.isNotEmpty
               ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                   child: Image.network(
                     _resolveHeroImageUrl(_brandingLogo!.url),
                     fit: BoxFit.contain,
@@ -236,29 +245,29 @@ class _HomeScreenState extends State<HomeScreen> {
             // الجرس بيتخفي للزائر (docs/08 §77-B1): `unreadCount()` بينادي endpoint محمي،
             // ومفيش حساب أصلاً يبقى ليه إشعارات. عرضه بصفر دايمًا كان هيبقى كذب صغير.
             if (context.watch<AuthRepository>().isAuthenticated)
-            Builder(
-              builder: (context) => FutureBuilder<int>(
-                future: NotificationsRepository(
-                  context.read<AuthRepository>(),
-                ).unreadCount(),
-                builder: (context, snapshot) {
-                  final unread = snapshot.data ?? 0;
-                  return IconButton(
-                    icon: Badge(
-                      isLabelVisible: unread > 0,
-                      label: Text('$unread'),
-                      child: const Icon(Icons.notifications_outlined),
-                    ),
-                    tooltip: 'الإشعارات',
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen(),
+              Builder(
+                builder: (context) => FutureBuilder<int>(
+                  future: NotificationsRepository(
+                    context.read<AuthRepository>(),
+                  ).unreadCount(),
+                  builder: (context, snapshot) {
+                    final unread = snapshot.data ?? 0;
+                    return IconButton(
+                      icon: Badge(
+                        isLabelVisible: unread > 0,
+                        label: Text('$unread'),
+                        child: const Icon(Icons.notifications_outlined),
                       ),
-                    ),
-                  );
-                },
+                      tooltip: 'الإشعارات',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: 'الدعم',
@@ -271,6 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
         body: RefreshIndicator(
           onRefresh: _load,
           child: ListView(
+            controller: _scrollController,
             padding: EdgeInsets.zero,
             children: [
               HomeHero(
@@ -282,6 +292,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 activeIndex: _activeSlide,
                 content: _searchContent,
                 trustMessage: _trustMessage,
+                scrollController: _scrollController,
                 onSearch: _openSearch,
               ),
               Padding(
@@ -307,14 +318,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           scrollDirection: Axis.horizontal,
                           itemCount: featured.length,
                           separatorBuilder: (_, _) => const SizedBox(width: 14),
-                          itemBuilder: (context, index) =>
-                              FeaturedServiceItem(
-                                service: featured[index],
-                                onTap: () => navigateToServiceBooking(
-                                  context,
-                                  featured[index],
-                                ),
-                              ),
+                          itemBuilder: (context, index) => FeaturedServiceItem(
+                            service: featured[index],
+                            onTap: () => navigateToServiceBooking(
+                              context,
+                              featured[index],
+                            ),
+                          ),
                         ),
                       ),
                       // كانت 24 — بلاغ مالك: «فيه مسافة كبيرة بين آخر كلمة موجودة وكل الفئات».
@@ -326,7 +336,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () async {
                         if (!await ensureSignedIn(
                           context,
-                          reason: 'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
+                          reason:
+                              'مشروعك بيتحفظ على حسابك عشان تتابع مراحله وعروض أسعاره.',
                           headline: 'ابدأ مشروعك',
                         )) {
                           return;
@@ -388,7 +399,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           const columns = 3;
                           const spacing = 12.0;
                           final tileWidth =
-                              (constraints.maxWidth - spacing * (columns - 1)) / columns;
+                              (constraints.maxWidth - spacing * (columns - 1)) /
+                              columns;
                           // الارتفاع المحجوز للاسم بيتحسب من مقياس خط المستخدم الفعلي —
                           // رقم ثابت هنا كان بيعمل overflow مع تكبير الخط (اتلقط بالاختبار).
                           final labelHeight = categoryTileLabelHeight(context);
@@ -397,11 +409,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             physics: const NeverScrollableScrollPhysics(),
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: columns,
-                              mainAxisSpacing: 16,
-                              crossAxisSpacing: spacing,
-                              childAspectRatio: tileWidth / (tileWidth + labelHeight),
-                            ),
+                                  crossAxisCount: columns,
+                                  mainAxisSpacing: 16,
+                                  crossAxisSpacing: spacing,
+                                  childAspectRatio:
+                                      tileWidth / (tileWidth + labelHeight),
+                                ),
                             itemCount: _categories!.length,
                             itemBuilder: (context, index) {
                               final category = _categories![index];

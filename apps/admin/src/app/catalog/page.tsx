@@ -9,7 +9,9 @@ import type {
   CreateServiceBody,
   PricingModel,
   TechnicianLevel,
+  UpdateServiceCategoryBody,
 } from '@baytak/shared-types';
+import { CalendarClock, Camera, Siren, UserRound, UsersRound } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { AppShell } from '@/components/app-shell';
@@ -25,6 +27,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { LEVEL_LABELS } from '@/lib/technician-labels';
 import { formatEgp } from '@/lib/format';
+import { CatalogConfigSection, CatalogToggle } from '@/components/catalog-config-section';
 
 const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   fixed: 'ثابت',
@@ -225,9 +228,10 @@ export default function CatalogPage() {
     const parentCategoryId = form.get('parent_category_id') as string;
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
-    const body = {
+    const body: UpdateServiceCategoryBody = {
       name_ar: form.get('name_ar') as string,
       name_en: form.get('name_en') as string,
+      slug: form.get('slug') as string,
       description_ar: (form.get('description_ar') as string) || undefined,
       // الصور **مش** هنا عمدًا (docs/08 §98): بتتحفظ لحظيًا من CategoryMediaManager. لو فضلت في
       // الـPATCH ده، أي حفظ للاسم كان هيبعت الروابط القديمة اللي في الفورم ويدوس على صورة
@@ -468,12 +472,34 @@ export default function CatalogPage() {
                       {editingCategoryId === category.id && (
                         <TableRow key={`${category.id}-edit`}>
                           <TableCell colSpan={5}>
-                            <form onSubmit={(e) => handleUpdateCategory(e, category.id)} className="flex flex-col gap-2 rounded-md border p-3">
-                              <div className="grid grid-cols-2 gap-2">
-                                <Input name="name_ar" defaultValue={category.name_ar} placeholder="الاسم بالعربي" required />
-                                <Input name="name_en" defaultValue={category.name_en} placeholder="الاسم بالإنجليزي" required />
+                            <form
+                              onSubmit={(e) => handleUpdateCategory(e, category.id)}
+                              className="flex flex-col gap-5 rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.045] via-background to-background p-4 shadow-sm"
+                            >
+                              <div>
+                                <h3 className="font-semibold">تعديل فئة «{category.name_ar}»</h3>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  الاسم والترتيب يتحفظوا من الزر بالأسفل، والصور يمكن استبدالها في أي وقت من قسم الوسائط.
+                                </p>
                               </div>
-                              <Textarea name="description_ar" defaultValue={category.description_ar ?? ''} placeholder="الوصف" rows={2} />
+                              <div className="grid gap-3 md:grid-cols-3">
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`category-name-ar-${category.id}`}>الاسم بالعربي</Label>
+                                  <Input id={`category-name-ar-${category.id}`} name="name_ar" defaultValue={category.name_ar} required />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`category-name-en-${category.id}`}>الاسم بالإنجليزي</Label>
+                                  <Input id={`category-name-en-${category.id}`} name="name_en" defaultValue={category.name_en} dir="ltr" required />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <Label htmlFor={`category-slug-${category.id}`}>الرابط المختصر (Slug)</Label>
+                                  <Input id={`category-slug-${category.id}`} name="slug" defaultValue={category.slug} dir="ltr" required />
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <Label htmlFor={`category-description-${category.id}`}>وصف الفئة</Label>
+                                <Textarea id={`category-description-${category.id}`} name="description_ar" defaultValue={category.description_ar ?? ''} rows={2} />
+                              </div>
                               {/* الصور بتتحفظ لحظيًا بنفسها (رفع/مسح مستقل عن زرار "حفظ التعديلات")
                                   — الرفع عملية ملف مش حقل نصي، فمينفعش يستنى submit الفورم. */}
                               <CategoryMediaManager category={category} onChanged={loadCategories} />
@@ -504,9 +530,14 @@ export default function CatalogPage() {
                                 <input type="checkbox" name="is_featured" defaultChecked={category.is_featured} />
                                 فئة مميّزة (Featured)
                               </label>
-                              <Button type="submit" size="sm" disabled={isSaving} className="w-fit">
-                                حفظ التعديلات
-                              </Button>
+                              <div className="flex flex-wrap gap-2">
+                                <Button type="submit" size="sm" disabled={isSaving}>
+                                  حفظ تعديلات الفئة
+                                </Button>
+                                <Button type="button" size="sm" variant="ghost" onClick={() => setEditingCategoryId(null)}>
+                                  إلغاء
+                                </Button>
+                              </div>
                             </form>
                           </TableCell>
                         </TableRow>
@@ -634,28 +665,42 @@ export default function CatalogPage() {
                   <Label htmlFor="new_svc_phase">مرحلة الإطلاق</Label>
                   <Input id="new_svc_phase" name="launch_phase" type="number" min={1} className="max-w-[8rem]" dir="ltr" />
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="requires_photos" />
-                    محتاجة صور قبل/بعد
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="allows_scheduling" defaultChecked />
-                    بتسمح بجدولة
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="allows_emergency" />
-                    بتسمح بطوارئ
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="allows_individual" defaultChecked />
-                    وضع أفراد
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" name="allows_team" />
-                    وضع اعتماد (فريق/شركة)
-                  </label>
-                </div>
+                <CatalogConfigSection
+                  title="إعدادات الحجز عند الإنشاء"
+                  description="حدد طرق تقديم الخدمة الآن، ويمكن تعديل كل اختيار لاحقًا من صفحة تفاصيل الخدمة."
+                  icon={CalendarClock}
+                  tone="blue"
+                >
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <CatalogToggle
+                      name="requires_photos"
+                      title="صور قبل وبعد"
+                      description="يطلب من الفني توثيق حالة الشغل بالصور."
+                      icon={Camera}
+                    />
+                    <CatalogToggle
+                      name="allows_scheduling"
+                      title="حجز مجدول"
+                      description="يسمح للعميل باختيار موعد مسبق للخدمة."
+                      icon={CalendarClock}
+                      defaultChecked
+                    />
+                    <CatalogToggle name="allows_emergency" title="طلب طارئ" description="يظهر وضع الوصول العاجل لهذه الخدمة." icon={Siren} />
+                    <CatalogToggle
+                      name="allows_individual"
+                      title="شغلانة سريعة"
+                      description="تنفيذ فردي لفني واحد، مع مساعد اختياري عند الحاجة."
+                      icon={UserRound}
+                      defaultChecked
+                    />
+                    <CatalogToggle
+                      name="allows_team"
+                      title="اعتماد فريق أو شركة"
+                      description="للأعمال الكبيرة التي تحتاج أكثر من فرد."
+                      icon={UsersRound}
+                    />
+                  </div>
+                </CatalogConfigSection>
                 <Button type="submit" size="sm" disabled={isSaving}>
                   حفظ الخدمة
                 </Button>

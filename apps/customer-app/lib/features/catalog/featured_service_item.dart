@@ -40,11 +40,14 @@ class FeaturedServiceItem extends StatelessWidget {
             SizedBox.square(
               dimension: _kFeaturedIconSize,
               child: iconUrl != null && iconUrl.isNotEmpty
-                  ? Image.network(
-                      iconUrl,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) =>
-                          _FeaturedInitial(service: service),
+                  ? ClipOval(
+                      clipBehavior: Clip.antiAlias,
+                      child: Image.network(
+                        iconUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) =>
+                            _FeaturedInitial(service: service),
+                      ),
                     )
                   : _FeaturedInitial(service: service),
             ),

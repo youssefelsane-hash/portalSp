@@ -406,7 +406,7 @@ void main() {
       ),
     );
 
-    testWidgets('مفيش دايرة/إطار ورا الأيقونة لما فيه icon_url', (
+    testWidgets('الأيقونة لها قص دائري ثابت من غير خلفية رمادية', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -429,6 +429,7 @@ void main() {
       // `CircleAvatar` كان بيرسم `surfaceContainerHighest` كخلفية دايرية — ده بالظبط
       // "الإطار الرمادي" اللي المالك شافه.
       expect(find.byType(CircleAvatar), findsNothing);
+      expect(find.byType(ClipOval), findsOneWidget);
     });
 
     testWidgets(
