@@ -12,10 +12,12 @@ class FloatingNotificationAlert extends StatefulWidget {
   const FloatingNotificationAlert({super.key});
 
   @override
-  State<FloatingNotificationAlert> createState() => _FloatingNotificationAlertState();
+  State<FloatingNotificationAlert> createState() =>
+      _FloatingNotificationAlertState();
 }
 
-class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> with WidgetsBindingObserver {
+class _FloatingNotificationAlertState extends State<FloatingNotificationAlert>
+    with WidgetsBindingObserver {
   static const _refreshInterval = Duration(seconds: 5);
 
   late final NotificationsRepository _repository;
@@ -42,7 +44,9 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
     _refreshing = true;
     try {
       final count = await _repository.unreadCount();
-      if (mounted && count != _unreadCount) setState(() => _unreadCount = count);
+      if (mounted && count != _unreadCount) {
+        setState(() => _unreadCount = count);
+      }
     } catch (_) {
       // Push remains the primary instant path; polling is a durable in-app fallback.
     } finally {
@@ -61,7 +65,8 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _startRefreshing();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       _timer?.cancel();
     }
   }
@@ -82,8 +87,8 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutBack,
         child: Semantics(
-        label: '$_unreadCount إشعارات غير مقروءة',
-        button: true,
+          label: '$_unreadCount إشعارات غير مقروءة',
+          button: true,
           // بلاغ مالك (2026-08-25): شاشة حمرا في التطبيقين بعد اللوجن على طول. السبب إن
           // `tooltip:` بيلف الزرار في `Tooltip`، و`Tooltip` **بيحتاج `Overlay` جدّ** —
           // والويدجت دي متركّبة في `MaterialApp.builder` جنب `child`، يعني **بره الـNavigator**
@@ -94,7 +99,10 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
           // الـ`tooltip` زيادة أصلاً هنا: `Semantics(label: ...)` فوق بيوفّر نفس المعنى لقارئ
           // الشاشة، وTooltip على الموبايل بيتطلب ضغطة مطوّلة نادرًا حد بيعملها على زرار عايم.
           child: FloatingActionButton.small(
-            heroTag: 'global-unread-notifications',
+            // الزر موجود خارج Navigator، لذلك لا يجب تسجيله كبطل انتقال عالمي. إبقاء Hero هنا
+            // كان يترك اعتمادًا على شجرة الانتقال عند فتح بعض الصفحات (منها ضماناتي)، وينتهي
+            // بتأكيد Flutter `_dependents.isEmpty` بدل فتح الصفحة.
+            heroTag: null,
             onPressed: _openNotifications,
             child: Badge(
               label: Text(_unreadCount > 99 ? '99+' : '$_unreadCount'),
@@ -107,30 +115,14 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert> w
   }
 }
 
-/// بيركّب [FloatingNotificationAlert] جوّه `Overlay` خاص بيها.
+/// غلاف خفيف للزر العائم المستخدم من `MaterialApp.builder`.
 ///
-/// **ليه ده موجود** (بلاغ مالك 2026-08-25، docs/08 §58 و§59): الويدجت دي بتتركّب من
-/// `MaterialApp.builder` جنب `child`، يعني **بره الـNavigator** بتاع التطبيق — فمفيش `Overlay`
-/// فوقها في الشجرة خالص. أي حاجة جوّاها بتحتاج Overlay (`Tooltip`، `SnackBar`، `DropdownMenu`،
-/// أي `Overlay.of(context)`) بترمي استثناء وقت البناء، وFlutter بيرسم `ErrorWidget` مكانها —
-/// مستطيل أحمر داكن (~94% عتامة) بيغطي الشاشة. ده كان بالظبط اللي حصل مع `tooltip:` على الزرار.
-///
-/// شيل الـ`tooltip` حلّ الحالة دي **وحدها**. الغلاف ده بيقفل **الفئة كلها**: أي ويدجت تتضاف هنا
-/// بعدين وتحتاج Overlay هتلاقي واحد جاهز بدل ما ترجّع الشاشة الحمرا تاني.
-///
-/// `alwaysSizeToContent: true` عشان الـOverlay ياخد مقاس الزرار نفسه بدل ما يطلب قيود محدودة
-/// (إحنا جوّه `PositionedDirectional` بإزاحتين بس، يعني القيود غير محدودة) — كده الشكل والمكان
-/// ما بيتغيروش ولا بكسل. و`Clip.none` عشان الـovershoot بتاع أنيميشن الدخول (easeOutBack)
-/// يفضل بيترسم زي ما هو من غير قص.
+/// لا نضيف `Overlay` أو `Hero` مستقلين هنا: الزر نفسه لا يحتاجهما، ووجود شجرة انتقال ثانية
+/// خارج الـNavigator كان يسبب اعتمادًا معلقًا عند فتح صفحات مثل «ضماناتي». أي واجهة مستقبلية
+/// تحتاج Overlay يجب فتحها عبر [rootNavigatorKey] مثل شاشة الإشعارات نفسها.
 class FloatingNotificationAlertHost extends StatelessWidget {
   const FloatingNotificationAlertHost({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Overlay.wrap(
-      alwaysSizeToContent: true,
-      clipBehavior: Clip.none,
-      child: const FloatingNotificationAlert(),
-    );
-  }
+  Widget build(BuildContext context) => const FloatingNotificationAlert();
 }
