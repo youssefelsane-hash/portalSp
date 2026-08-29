@@ -3,6 +3,12 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ESCALATABLE_STATUSES } from '../orders/crew-shortage-escalation.service';
 import { computeCrewComposition } from '../orders/order-team.service';
+import {
+  REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+  REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+  type RevisitPinExhaustionReason,
+} from '../orders/revisit-pin';
+import { SettingsService } from '../settings/settings.service';
 
 const EXCEPTION_LIST_LIMIT = 50;
 
@@ -52,10 +58,31 @@ export interface OverdueOrderExceptionItem {
   daysLate: number;
 }
 
+// ADR-0051 (docs/08 §96) — إعادة زيارة مثبّتة على الفني الأصلي والفني **خلاص مبقاش عنده الطلب**
+// (رفض/لغى بعد القبول/عدّت مهلة الرد). البند ده هو "الـrequest" اللي المالك طلبه بالحرف: بيعرض
+// رقم الطلب الأصلي وبيانات تواصل الفني، والأدمن هو اللي بيحرّر (POST /admin/orders/:id/release-revisit).
+export interface StalledRevisitExceptionItem {
+  orderId: string;
+  orderNumber: string;
+  /** الطلب الأصلي اللي إعادة الزيارة دي بتخصه — نقطة التتبّع الوحيدة للأدمن. */
+  originalOrderId: string | null;
+  originalOrderNumber: string | null;
+  technicianId: string;
+  technicianCode: string;
+  fullName: string;
+  phone: string | null;
+  pinnedAt: string;
+  deadlineAt: string;
+  reason: RevisitPinExhaustionReason;
+  /** نصيب الفني الفعلي من الطلب الأصلي — ده بالظبط اللي هيتخصم منه لو الأدمن حرّر. */
+  chargebackCents: number;
+}
+
 export interface AdminExceptionCenterResult {
   crewShortage: { items: CrewShortageExceptionItem[]; total: number };
   staleDispatch: { items: StaleDispatchExceptionItem[]; total: number };
   overdueOrders: { items: OverdueOrderExceptionItem[]; total: number };
+  stalledRevisits: { items: StalledRevisitExceptionItem[]; total: number };
 }
 
 interface RawOverdueOrderRow {
@@ -77,6 +104,22 @@ interface RawCrewShortageRow {
   required_assistants: number | null;
   technicians: string;
   assistants: string;
+  total_count: string;
+}
+
+interface RawStalledRevisitRow {
+  id: string;
+  order_number: string;
+  original_order_id: string | null;
+  original_order_number: string | null;
+  technician_id: string;
+  technician_code: string;
+  full_name: string;
+  phone: string | null;
+  revisit_pinned_at: string;
+  deadline_at: string;
+  reason: RevisitPinExhaustionReason;
+  chargeback_cents: string | null;
   total_count: string;
 }
 
@@ -113,7 +156,10 @@ interface RawStaleDispatchRow {
  */
 @Injectable()
 export class AdminExceptionCenterService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly settingsService: SettingsService,
+  ) {}
 
   async getExceptions(filters: ExceptionCenterFilters): Promise<AdminExceptionCenterResult> {
     const categoryId = filters.categoryId ?? null;
@@ -176,6 +222,9 @@ export class AdminExceptionCenterService {
       JOIN users u ON u.id = tp.user_id
       -- 'viewed' = وصل واتعرض بس ما اترد عليهوش (docs/08 §72) — استثناء زيّه بالظبط.
       WHERE oa.assignment_status IN ('sent', 'viewed') AND oa.expires_at < now()
+        -- إعادة زيارة مثبّتة عمرها ما تكون "توزيع متأخر": العرض مقصود إنه يفضل مفتوح لحد
+        -- ما مهلة الفني الأصلي تعدّي (ADR-0051)، وليها بندها الخاص تحت.
+        AND NOT (o.revisit_pinned_technician_id IS NOT NULL AND o.revisit_released_at IS NULL)
         AND ($1::uuid IS NULL OR s.category_id = $1)
         AND ($2::uuid IS NULL OR o.service_zone_id = $2)
       ORDER BY oa.expires_at ASC
@@ -227,7 +276,79 @@ export class AdminExceptionCenterService {
       daysLate: Math.max(1, Math.floor((now - new Date(r.scheduled_at).getTime()) / (24 * 60 * 60 * 1000))),
     }));
 
+    // ADR-0051 — "اتقفل" مشتقّة من مصادر الحقيقة الموجودة (رفض مسجّل في order_assignments، أو
+    // إلغاء بعد القبول في technician_order_cancellations، أو عدّت المهلة) — مفيش عمود حالة موازي
+    // ممكن يتعارض مع السجلات الفعلية. نفس منطق loadRevisitPinState() بالحرف، بس bulk.
+    const revisitWindowHours = await this.settingsService.getNumber(
+      REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+      REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+    );
+    const stalledRevisitRows = await this.dataSource.query<RawStalledRevisitRow[]>(
+      `
+      SELECT o.id, o.order_number,
+             parent.id AS original_order_id, parent.order_number AS original_order_number,
+             o.revisit_pinned_technician_id AS technician_id, tp.technician_code, u.full_name, u.phone_number AS phone,
+             o.revisit_pinned_at,
+             (o.revisit_pinned_at + make_interval(hours => $3::int)) AS deadline_at,
+             CASE WHEN refusal.refused THEN 'refused' ELSE 'no_response' END AS reason,
+             -- نصيبه الفعلي من الطلب الأصلي — order_earning_shares هو مصدر الحقيقة (نفس مصدر
+             -- كشف المستحقات)، وbackfill لـtechnician_earning_cents للطلبات الفردية القديمة
+             -- اللي اتقفلت قبل نظام الحصص.
+             COALESCE(
+               (SELECT oes.share_cents FROM order_earning_shares oes
+                 WHERE oes.order_id = parent.id AND oes.technician_id = o.revisit_pinned_technician_id
+                   AND oes.deleted_at IS NULL),
+               parent.technician_earning_cents,
+               0
+             ) AS chargeback_cents,
+             COUNT(*) OVER() AS total_count
+      FROM orders o
+      JOIN services s ON s.id = o.service_id
+      JOIN technician_profiles tp ON tp.id = o.revisit_pinned_technician_id
+      JOIN users u ON u.id = tp.user_id
+      LEFT JOIN orders parent ON parent.id = o.parent_order_id
+      CROSS JOIN LATERAL (
+        SELECT (
+          EXISTS (SELECT 1 FROM order_assignments oa
+                   WHERE oa.order_id = o.id AND oa.technician_id = o.revisit_pinned_technician_id
+                     AND oa.assignment_status = 'rejected')
+          OR EXISTS (SELECT 1 FROM technician_order_cancellations toc
+                      WHERE toc.order_id = o.id AND toc.technician_id = o.revisit_pinned_technician_id)
+        ) AS refused
+      ) refusal
+      WHERE o.deleted_at IS NULL
+        AND o.revisit_pinned_technician_id IS NOT NULL
+        AND o.revisit_released_at IS NULL
+        AND o.order_status = 'searching_technician'
+        AND (refusal.refused OR o.revisit_pinned_at + make_interval(hours => $3::int) <= now())
+        AND ($1::uuid IS NULL OR s.category_id = $1)
+        AND ($2::uuid IS NULL OR o.service_zone_id = $2)
+      ORDER BY o.revisit_pinned_at ASC
+      LIMIT $4
+      `,
+      [categoryId, zoneId, revisitWindowHours, EXCEPTION_LIST_LIMIT],
+    );
+
+    const stalledRevisitItems: StalledRevisitExceptionItem[] = stalledRevisitRows.map((r) => ({
+      orderId: r.id,
+      orderNumber: r.order_number,
+      originalOrderId: r.original_order_id,
+      originalOrderNumber: r.original_order_number,
+      technicianId: r.technician_id,
+      technicianCode: r.technician_code,
+      fullName: r.full_name,
+      phone: r.phone,
+      pinnedAt: r.revisit_pinned_at,
+      deadlineAt: r.deadline_at,
+      reason: r.reason,
+      chargebackCents: Number(r.chargeback_cents ?? 0),
+    }));
+
     return {
+      stalledRevisits: {
+        items: stalledRevisitItems,
+        total: stalledRevisitRows.length > 0 ? Number(stalledRevisitRows[0].total_count) : 0,
+      },
       overdueOrders: {
         items: overdueItems,
         total: overdueRows.length > 0 ? Number(overdueRows[0].total_count) : 0,

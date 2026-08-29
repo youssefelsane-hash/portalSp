@@ -174,7 +174,8 @@ describe('AdminOrdersService — تزامن (Script 4 Part Q)', () => {
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never, // pricingEngineService — مش متنادى في reassign/crew
       {} as never, // promoCodesService
-      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never, // settingsService (docs/08 §35)
+      { getNumber: jest.fn(async (_key: string, fallback: number) => fallback), getString: jest.fn(async (_k: string, fb: string) => fb) } as never, // settingsService (docs/08 §35),
+      {} as never, // walletsService (ADR-0051) — مش متنادى هنا
     );
   });
 

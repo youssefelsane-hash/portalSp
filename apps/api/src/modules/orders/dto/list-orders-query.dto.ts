@@ -1,6 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
-import { OrderStatus } from '../entities/order.entity';
+import { OrderStatus, OrderType } from '../entities/order.entity';
 
 export class ListOrdersQueryDto {
   @IsOptional()
@@ -26,6 +26,12 @@ export class ListOrdersQueryDto {
   @IsOptional()
   @IsIn(['true', 'false'])
   recurring?: 'true' | 'false';
+
+  // فلتر نوع الطلب (ADR-0051، docs/08 §96) — الأدمن مكانش عنده أي طريقة يفصل إعادات الزيارة عن
+  // باقي الطلبات، وهي بالظبط النوع اللي محتاج متابعة (مجاني، مربوط بفني بعينه، وراه أثر مالي).
+  @IsOptional()
+  @IsEnum(OrderType)
+  order_type?: OrderType;
 
   @IsOptional()
   @IsDateString()

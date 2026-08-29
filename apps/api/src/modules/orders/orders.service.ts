@@ -793,6 +793,11 @@ export class OrdersService {
           : scheduleSlot
             ? scheduleSlot.technicianId
             : (dto.requested_technician_id ?? null),
+        // ADR-0051 (docs/08 §96) — إعادة الزيارة مسؤولية مش تفضيل: الفني اللي شغله رجع عليه هو
+        // اللي يصلّحه. requestedTechnicianId فوق تفضيل بيتجاهَل بأمان لو مش متاح؛ العمود ده
+        // التزام حصري بلا fallback. بيتحط بس لو الطلب الأصلي كان له فني فعلاً.
+        revisitPinnedTechnicianId: originalOrder?.technicianId ?? null,
+        revisitPinnedAt: originalOrder?.technicianId ? now : null,
         parentOrderId: originalOrder ? originalOrder.id : null,
         buildingId: building ? building.id : null,
         warrantyPlanId: optionalWarranty?.id ?? null,

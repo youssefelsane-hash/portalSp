@@ -199,6 +199,7 @@ describe('CrewShortageEscalationService — تصعيد نقص الطاقم قب�
       { findEvaluationForOrder: async () => null } as never, // pricingEngineService
       {} as never, // promoCodesService
       settingsServiceStub,
+      {} as never, // walletsService (ADR-0051) — مش متنادى هنا
     );
   });
 

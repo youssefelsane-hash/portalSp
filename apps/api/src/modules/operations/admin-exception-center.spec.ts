@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
+import { SettingsService } from '../settings/settings.service';
+
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
 
 // اختبار حي — مركز الاستثناءات/التنبيهات (docs/08 §36.9). نقص طاقم مصعّد ومفتوح + توزيع متأخر،
 // الاتنين ضد Postgres حقيقي، بلا أي بيانات استثناء مصطنعة.
@@ -32,7 +35,7 @@ describe('AdminExceptionCenterService.getExceptions() (docs/08 §36.9)', () => {
   }
 
   function service() {
-    return new AdminExceptionCenterService(dataSource);
+    return new AdminExceptionCenterService(dataSource, settingsServiceStub);
   }
 
   async function insertTechnician(label: string) {

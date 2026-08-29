@@ -211,6 +211,7 @@ describe('AdminOrdersService — إدارة طاقم الطلب (crew editing)',
       // settingsService حقيقي جزئيًا — validateCrewCandidateOrThrow (docs/08 §35) بينادي
       // getNumber() فعليًا لحساب classifyTechnicianCapacity().
       { getNumber: async (_key: string, fallback: number) => fallback } as never,
+      {} as never, // walletsService (ADR-0051) — مش متنادى هنا
     );
 
     // docs/08 §35.16 (كارت رؤية طاقم الطلب) — listForOrder() بس، مش محتاجة assignmentGuard/

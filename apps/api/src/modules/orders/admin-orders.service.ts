@@ -30,6 +30,16 @@ import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderTimelineEventRow } from './dto/order-timeline-event-response.dto';
 import { TechnicianOrderCancellation } from './entities/technician-order-cancellation.entity';
 import { canTransition } from './order-state-machine';
+import {
+  REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+  REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+  loadRevisitPinState,
+} from './revisit-pin';
+import type { RevisitReleaseReason } from './entities/order.entity';
+import { ORDER_REMATCH_REQUESTED_EVENT, OrderRematchRequestedEvent } from '../../common/events/order-rematch-requested.event';
+import { WalletsService } from '../payments/wallets.service';
+import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
+import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -100,6 +110,7 @@ export class AdminOrdersService {
     private readonly pricingEngineService: PricingEngineService,
     private readonly promoCodesService: PromoCodesService,
     private readonly settingsService: SettingsService,
+    private readonly walletsService: WalletsService,
   ) {}
 
   async list(
@@ -109,6 +120,7 @@ export class AdminOrdersService {
     const perPage = query.per_page ?? 20;
     const where: FindOptionsWhere<Order> = {};
     if (query.order_status) where.orderStatus = query.order_status;
+    if (query.order_type) where.orderType = query.order_type;
     // فلتر التكرار — IsNull/Not(IsNull) على recurring_template_id (العمود دايمًا زوجي مع
     // recurring_occurrence_at عبر CHECK constraint chk_orders_recurring_identity_pair).
     if (query.recurring === 'true') where.recurringTemplateId = Not(IsNull());
@@ -517,6 +529,129 @@ export class AdminOrdersService {
       false,
     );
     return formatEligibleTechniciansForAdmin(result);
+  }
+
+  /**
+   * ADR-0051 (docs/08 §96) — تحرير إعادة زيارة مثبّتة للتوزيع العام + الخصم على الفني الأصلي.
+   *
+   * **الحارس الحاسم (نص المالك بالحرف): «لازم يكون الفني الطلب مش عنده… طالما الطلب عنده موجود،
+   * خلاص مش هناخد أي action»** — الشرط ده مشتقّ من مصادر الحقيقة الفعلية (`order_assignments`
+   * المرفوضة، `technician_order_cancellations`، أو عدّت مهلة الرد)، مش من عمود حالة يدوي ممكن
+   * يتلغبط. لو الفني لسه شايل الطلب فعلاً، الطلب بيترفض بوضوح ومفيش أي خصم.
+   *
+   * **الخصم = نصيبه الفعلي من الطلب الأصلي**، مقروء من `order_earning_shares` (نفس مصدر الحقيقة
+   * بتاع كشف المستحقات والمحفظة) — مش إجمالي الطلب (ده عقوبة مخترعة، الفني ما خدش الإجمالي أصلاً)
+   * ومش مبلغ يدوي من الأدمن. الشركة بتتحمّل تكلفة إعادة الزيارة الجديدة، والفني بيرجّع اللي خده.
+   *
+   * `revisit_released_at` هو الحارس ضد التكرار: التحرير (والخصم معاه) مستحيل يحصل مرتين.
+   */
+  async releaseRevisit(
+    adminUserId: string,
+    orderId: string,
+    meta?: AuditActorMeta,
+  ): Promise<{ order: Order; reason: RevisitReleaseReason; chargebackCents: number }> {
+    const windowHours = await this.settingsService.getNumber(
+      REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+      REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+    );
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const order = await manager
+        .createQueryBuilder(Order, 'o')
+        .setLock('pessimistic_write')
+        .where('o.id = :orderId', { orderId })
+        .getOne();
+      if (!order) {
+        throw new ApiException(ErrorCode.ORDR_001, 'الطلب مش موجود', HttpStatus.NOT_FOUND);
+      }
+      if (order.revisitPinnedTechnicianId === null) {
+        throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش إعادة زيارة مثبّتة على فني', HttpStatus.CONFLICT);
+      }
+      if (order.revisitReleasedAt !== null) {
+        throw new ApiException(ErrorCode.VAL_001, 'إعادة الزيارة دي اتحررت قبل كده', HttpStatus.CONFLICT);
+      }
+
+      const pinState = await loadRevisitPinState(manager, order, windowHours);
+      if (!pinState.exhausted) {
+        throw new ApiException(
+          ErrorCode.ORDR_003,
+          'الفني الأصلي لسه الطلب عنده — مينفعش تحرير ولا خصم قبل ما يرفض/يلغي أو تعدي مهلة الرد',
+          HttpStatus.CONFLICT,
+        );
+      }
+      const reason: RevisitReleaseReason = pinState.reason === 'refused' ? 'refused' : 'no_response';
+      const technicianId = pinState.technicianId!;
+
+      // نصيبه الفعلي من الطلب الأصلي — order_earning_shares أولاً (الطلبات الطاقمية والفردية
+      // الحديثة)، وbackfill لـtechnician_earning_cents للطلبات القديمة اللي اتقفلت قبل نظام الحصص.
+      const [share] = await manager.query<Array<{ chargeback_cents: string | null }>>(
+        `SELECT COALESCE(
+                  (SELECT oes.share_cents FROM order_earning_shares oes
+                    WHERE oes.order_id = parent.id AND oes.technician_id = $2 AND oes.deleted_at IS NULL),
+                  parent.technician_earning_cents,
+                  0
+                ) AS chargeback_cents
+           FROM orders parent WHERE parent.id = $1`,
+        [order.parentOrderId, technicianId],
+      );
+      const chargebackCents = Math.max(0, Number(share?.chargeback_cents ?? 0));
+
+      const now = new Date();
+      order.revisitReleasedAt = now;
+      order.revisitReleaseReason = reason;
+      // التفضيل الناعم بيتشال كمان — لولا كده، أول جولة بعد التحرير كانت هتحاول نفس الفني تاني.
+      order.requestedTechnicianId = null;
+      await manager.save(order);
+
+      if (chargebackCents > 0) {
+        const technician = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+        const technicianWallet = await this.walletsService.getOrCreateWallet(
+          technician.userId,
+          WalletOwnerType.TECHNICIAN,
+          manager,
+        );
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
+        await this.walletsService.doubleEntry(
+          {
+            fromWalletId: technicianWallet.id,
+            toWalletId: platformWallet.id,
+            amountCents: chargebackCents,
+            transactionType: WalletTxType.PENALTY,
+            // المرجع هو **الطلب الأصلي** مش إعادة الزيارة — الفلوس اللي بترجع هي فلوس الشغلانة
+            // الأصلية، فالقيد لازم يبان في كشف الطلب ده هو.
+            referenceType: 'order',
+            referenceId: order.parentOrderId ?? order.id,
+            descriptionAr: `استرداد أرباح طلب ${order.orderNumber} — إعادة زيارة تحت الضمان اتحرّرت لفني تاني`,
+            performedByUserId: adminUserId,
+            // خصم بيعمله النظام على أرباح اتصرفت خلاص — الرصيد ممكن يبقى سالب (دَين على الفني)،
+            // زي عمولة الكاش بالظبط. TechnicianDebtService بيتابع الدَين ده من نفس الدفتر.
+            allowNegativeBalance: true,
+          },
+          manager,
+        );
+      }
+
+      await this.auditLog.record(
+        {
+          actorUserId: adminUserId,
+          actorRole: 'admin',
+          action: 'order.revisit_released',
+          entityType: 'order',
+          entityId: order.id,
+          oldValues: { revisit_pinned_technician_id: technicianId, revisit_released_at: null },
+          newValues: { revisit_released_at: now.toISOString(), revisit_release_reason: reason, chargeback_cents: chargebackCents },
+          meta,
+        },
+        manager,
+      );
+
+      return { order, reason, chargebackCents };
+    });
+
+    // التوزيع العادي بيبتدي بعد ما الـtransaction تثبت — الطلب بقى بلا تثبيت فبيمشي في المسار
+    // العادي بالظبط (نفس فلوس الطلب الأصلي، الشركة متحمّلة التكلفة).
+    this.events.emit(ORDER_REMATCH_REQUESTED_EVENT, new OrderRematchRequestedEvent(result.order.id));
+    return result;
   }
 
   async reassign(

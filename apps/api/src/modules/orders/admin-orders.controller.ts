@@ -392,6 +392,25 @@ export class AdminOrdersController {
     return toOrderResponseDto(await this.ordersService.resolveFailedVisit(admin.sub, id, dto, audit));
   }
 
+  // تحرير إعادة زيارة مثبّتة على الفني الأصلي (ADR-0051، docs/08 §96) — قرار مالي (خصم أرباح
+  // اتصرفت من محفظة فني)، نفس مستوى حساسية orders.resolve_failed_visit بالحرف.
+  @Post(':id/release-revisit')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('orders.release_revisit')
+  @RequireStepUp()
+  async releaseRevisit(
+    @CurrentUser() admin: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuditContext() audit: AuditMeta,
+  ) {
+    const result = await this.adminOrdersService.releaseRevisit(admin.sub, id, audit);
+    return {
+      order: toOrderResponseDto(result.order),
+      release_reason: result.reason,
+      chargeback_cents: result.chargebackCents,
+    };
+  }
+
   // نزاع تسليم كاش (docs/08 §22 بند 13-14) — قرار مالي محتمل (confirm_received)، نفس مستوى حساسية
   // orders.resolve_failed_visit بالحرف (permission مخصوصة + step-up MFA، migration 0108).
   @Post(':id/resolve-cash-dispute')
