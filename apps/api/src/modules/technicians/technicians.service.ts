@@ -27,7 +27,6 @@ import { SettingsService } from '../settings/settings.service';
 import {
   describeTechnicianCapacity,
   technicianAvailabilityCondition,
-  technicianKindCondition,
   technicianScheduleConflictCondition,
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
@@ -446,9 +445,8 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        -- ADR-0050 — العميل بيختار **فني ياخد الشغلانة**، فالمساعدين مستبعدين من القايمة دي
-        -- بالكامل (مش مؤهّلين يشتغلوا لوحدهم أصلاً).
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0055 (تصحيح مالك) — المساعد بيظهر في القايمة والترتيب زي الفني بالظبط. حجب
+        -- الأدمن للخدمات (ADR-0054) هو اللي بيحدد مين يظهر على أي خدمة، مش نوع الدور.
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
         -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
         -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
@@ -733,9 +731,7 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        -- ADR-0050 — نفس فلترة قايمة الاختيار الأساسية: القسم ده بيعرض "مؤهّل بس مشغول جدوليًا"،
-        -- فلو المساعدين دخلوا هنا كانوا هيتسرّبوا للعميل من الباب التاني.
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0055 — نفس قاعدة القايمة الأساسية: مفيش استبعاد على أساس الدور.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
@@ -849,8 +845,7 @@ export class TechniciansService {
         JOIN services svc ON svc.id = $1
         CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
         WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-          -- ADR-0050 — "فيه حد متاح اليوم ده؟" لازم تعني فني قادر ياخد الشغلانة، مش مساعد.
-          AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+          -- ADR-0055 — "فيه حد متاح اليوم ده؟" بتشمل المساعدين كمان، لأنهم بياخدوا شغل فعلاً.
           AND ${technicianServiceQualificationCondition({
             technicianIdExpr: 'tp.id',
             serviceIdExpr: 'svc.id',
