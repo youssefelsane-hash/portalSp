@@ -32,6 +32,27 @@ void main() {
     expect(order.totalAmountCents, isNull);
   });
 
+  test('عربون أونلاين والباقي كاش: انتظار الدفع يظل يعرض فعل حصّلت الكاش', () {
+    final order = Order.fromJson({
+      'id': 'order-deposit-cash',
+      'order_number': 'ORD-DEPOSIT-CASH',
+      'order_status': 'awaiting_payment',
+      'problem_description': null,
+      'cash_to_collect_cents': 85000,
+      'cash_collected_cents': 0,
+      'my_earning_cents': 80000,
+      'has_online_payment': true,
+      'fully_paid_online': false,
+      'payment_status': 'partially_paid',
+      'booking_mode': 'individual',
+    });
+
+    expect(order.cashToCollectCents, greaterThan(0));
+    expect(order.hasOnlinePayment, isTrue);
+    expect(order.fullyPaidOnline, isFalse);
+    expect(nextTechnicianAction[order.orderStatus], 'collect_cash');
+  });
+
   test('كله كاش: الإجمالي بيرجع من الـAPI وبيساوي الكاش المطلوب تحصيله', () {
     final order = Order.fromJson({
       'id': 'order-2',

@@ -208,6 +208,9 @@ const Map<String, String?> nextTechnicianAction = {
   'technician_arrived': 'start',
   'in_progress': 'complete',
   'work_completed': 'collect_cash',
+  // الطلب المختلط (عربون/جزء أونلاين + باقي كاش) ينتقل إلى انتظار الدفع بعد انتهاء الشغل.
+  // السيرفر يسمح بتحصيل الكاش في الحالتين، فلا نخفي زر التحصيل بينما نظهر «لم أستلم الكاش».
+  'awaiting_payment': 'collect_cash',
 };
 
 // مطابق لـ apps/api/src/modules/orders/dto/order-item-response.dto.ts
