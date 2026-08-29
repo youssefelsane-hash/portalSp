@@ -3,11 +3,62 @@ import '../../core/auth_repository.dart';
 
 class WalletBalance {
   final int balanceCents;
+  final int pendingBalanceCents;
+  final int reservedBalanceCents;
+  final String currencyCode;
+  final bool isFrozen;
 
-  WalletBalance({required this.balanceCents});
+  WalletBalance({
+    required this.balanceCents,
+    required this.pendingBalanceCents,
+    required this.reservedBalanceCents,
+    required this.currencyCode,
+    required this.isFrozen,
+  });
 
-  factory WalletBalance.fromJson(Map<String, dynamic> json) =>
-      WalletBalance(balanceCents: json['balance_cents'] as int);
+  factory WalletBalance.fromJson(Map<String, dynamic> json) => WalletBalance(
+    balanceCents: (json['balance_cents'] as num).toInt(),
+    pendingBalanceCents: (json['pending_balance_cents'] as num).toInt(),
+    reservedBalanceCents: (json['reserved_balance_cents'] as num).toInt(),
+    currencyCode: json['currency_code'] as String,
+    isFrozen: json['is_frozen'] as bool,
+  );
+}
+
+class WalletTransactionItem {
+  final String id;
+  final String direction;
+  final String transactionType;
+  final int amountCents;
+  final int balanceAfterCents;
+  final String? descriptionAr;
+  final bool isReversed;
+  final DateTime createdAt;
+
+  WalletTransactionItem({
+    required this.id,
+    required this.direction,
+    required this.transactionType,
+    required this.amountCents,
+    required this.balanceAfterCents,
+    required this.descriptionAr,
+    required this.isReversed,
+    required this.createdAt,
+  });
+
+  bool get isCredit => direction == 'credit';
+
+  factory WalletTransactionItem.fromJson(Map<String, dynamic> json) =>
+      WalletTransactionItem(
+        id: json['id'] as String,
+        direction: json['direction'] as String,
+        transactionType: json['transaction_type'] as String,
+        amountCents: (json['amount_cents'] as num).toInt(),
+        balanceAfterCents: (json['balance_after_cents'] as num).toInt(),
+        descriptionAr: json['description_ar'] as String?,
+        isReversed: json['is_reversed'] as bool,
+        createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+      );
 }
 
 class PaymentsRepository {
@@ -18,6 +69,11 @@ class PaymentsRepository {
   Future<WalletBalance> fetchWallet() async {
     final data = await auth.authedRequest('GET', '/wallet');
     return WalletBalance.fromJson(data!);
+  }
+
+  Future<List<WalletTransactionItem>> fetchWalletTransactions() async {
+    final items = await auth.authedRequestList('/wallet/transactions');
+    return items.map(WalletTransactionItem.fromJson).toList();
   }
 
   // كل عملية دفع لازم Idempotency-Key حقيقي — مش UUID package (تجنّب اعتماد جديد لسطر واحد)،
@@ -43,7 +99,10 @@ class PaymentsRepository {
     return '${DateTime.now().microsecondsSinceEpoch}-${random.nextInt(0x7FFFFFFF)}';
   }
 
-  Future<Map<String, dynamic>> payWithWallet(String orderId, String idempotencyKey) async {
+  Future<Map<String, dynamic>> payWithWallet(
+    String orderId,
+    String idempotencyKey,
+  ) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/pay-with-wallet',
@@ -65,7 +124,10 @@ class PaymentsRepository {
 
   // بيرجّع كود مرجعي فوري + تاريخ انتهاء — العميل بياخد الكود ويدفعه كاش في أقرب منفذ فوري.
   // مفيش WebView هنا خالص، القفل النهائي بردو عبر webhook مش رد الـ endpoint ده.
-  Future<FawryReference> payWithFawryReference(String orderId, String idempotencyKey) async {
+  Future<FawryReference> payWithFawryReference(
+    String orderId,
+    String idempotencyKey,
+  ) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/pay-with-fawry-reference',
@@ -77,7 +139,10 @@ class PaymentsRepository {
   // InstaPay — تعليمات تحويل بالعربي + كود مرجعي، مفيش webhook خالص (ADR-0013 §7): موظف Finance
   // بيأكّد الاستلام يدويًا عبر POST /admin/payments/:id/confirm-instapay. مفيش تاريخ انتهاء
   // (بعكس Fawry) — الكود العميل لازم يذكره وقت التحويل عشان الموظف يقدر يربطه بالدفعة الصح.
-  Future<InstaPayReference> payWithInstaPay(String orderId, String idempotencyKey) async {
+  Future<InstaPayReference> payWithInstaPay(
+    String orderId,
+    String idempotencyKey,
+  ) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/pay-with-instapay',
@@ -90,7 +155,10 @@ class PaymentsRepository {
   // للدفعة (ده لسه شغل موظف Finance عبر confirm-instapay). كانت فجوة حقيقية: الزرار في الشاشة
   // كان بيعمل polling محلي بس من غير ما ينادي أي endpoint يسجّل إن العميل ادّعى التحويل خالص.
   Future<void> confirmInstaPayTransfer(String orderId) async {
-    await auth.authedRequest('POST', '/orders/$orderId/confirm-instapay-transfer');
+    await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/confirm-instapay-transfer',
+    );
   }
 }
 
@@ -102,9 +170,14 @@ class InstaPayReference {
   /// `null` يعني مفيش واحدة مضبوطة، والشاشة بتعرض التعليمات النصية بس زي ما كانت.
   final String? qrImageUrl;
 
-  InstaPayReference({required this.referenceCode, required this.instructionsAr, this.qrImageUrl});
+  InstaPayReference({
+    required this.referenceCode,
+    required this.instructionsAr,
+    this.qrImageUrl,
+  });
 
-  factory InstaPayReference.fromJson(Map<String, dynamic> json) => InstaPayReference(
+  factory InstaPayReference.fromJson(Map<String, dynamic> json) =>
+      InstaPayReference(
         referenceCode: json['reference_code'] as String,
         instructionsAr: json['instructions_ar'] as String,
         qrImageUrl: json['qr_image_url'] as String?,
@@ -118,7 +191,7 @@ class FawryReference {
   FawryReference({required this.referenceNumber, required this.expiresAt});
 
   factory FawryReference.fromJson(Map<String, dynamic> json) => FawryReference(
-        referenceNumber: json['reference_number'] as String,
-        expiresAt: DateTime.parse(json['expires_at'] as String),
-      );
+    referenceNumber: json['reference_number'] as String,
+    expiresAt: DateTime.parse(json['expires_at'] as String),
+  );
 }

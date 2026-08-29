@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { fetchCategories } from '@/lib/catalog';
+import { fetchCategories, fetchMostRequestedServices } from '@/lib/catalog';
 import { fetchHeroBackground, fetchHomepageContent, fetchSupportContact } from '@/lib/settings';
-import { HomepageTipDto, ServiceCategoryDto, SupportContactDto } from '@/lib/api-types';
+import { HomepageTipDto, ServiceCategoryDto, ServiceDto, SupportContactDto } from '@/lib/api-types';
 
 // Script 3 §2/§3/§5 — أول شاشة، بتقود بوصف المشكلة مش بسؤال تشغيلي (فرد/فريق) — مطابقة تمامًا
 // لـHomeScreen في customer-app (apps/customer-app/lib/features/catalog/home_screen.dart)، نفس
@@ -55,6 +55,7 @@ const TIP_FALLBACK_BACKGROUNDS = [
 export default function HomePage() {
   const router = useRouter();
   const [categories, setCategories] = useState<ServiceCategoryDto[] | null>(null);
+  const [mostRequested, setMostRequested] = useState<ServiceDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeSlide, setActiveSlide] = useState(0);
@@ -69,6 +70,9 @@ export default function HomePage() {
     fetchCategories()
       .then(setCategories)
       .catch(() => setError('تعذّر تحميل الفئات — حاول تاني'));
+    fetchMostRequestedServices()
+      .then(setMostRequested)
+      .catch(() => {});
     // رسالة الثقة/الضمان ونصايح مفيدة ودعم العملاء — نص/بيانات إدارية بتتغيّر، صفر تأثير على باقي
     // الصفحة لو الجلب فشل (بيسيبوا فاضيين، الأقسام المعتمدة عليهم بتختفي بهدوء تحت).
     fetchHomepageContent()
@@ -98,7 +102,7 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [heroBackgroundUrl, heroImages.length]);
 
-  const featured = categories?.filter((c) => c.is_featured) ?? [];
+  const featured = mostRequested;
   const effectiveHeroImages = heroImages.length > 0 ? heroImages : heroBackgroundUrl ? [heroBackgroundUrl] : [];
 
   function submitSearch(e: React.FormEvent) {
@@ -196,21 +200,21 @@ export default function HomePage() {
           <div className="mt-10">
             <h2 className="mb-4 text-lg font-semibold">الأكثر طلبًا</h2>
             <div className="flex flex-wrap gap-x-6 gap-y-4">
-              {featured.map((c) => (
+              {featured.map((service) => (
                 <Link
-                  key={c.id}
-                  href={`/categories/${c.id}`}
+                  key={service.id}
+                  href={`/services/${service.id}`}
                   className="group flex w-20 flex-col items-center gap-2 text-center"
                 >
                   <span className="flex h-14 w-14 items-center justify-center rounded-full bg-surface-variant transition-colors group-hover:bg-primary/10">
-                    {c.icon_url ? (
+                    {service.icon_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.icon_url} alt="" className="h-8 w-8 object-contain" />
+                      <img src={service.icon_url} alt="" className="h-8 w-8 object-contain" />
                     ) : (
-                      <span className="text-lg font-semibold text-primary">{c.name_ar.charAt(0)}</span>
+                      <span className="text-lg font-semibold text-primary">{service.name_ar.charAt(0)}</span>
                     )}
                   </span>
-                  <span className="text-xs font-medium leading-tight text-foreground group-hover:text-primary">{c.name_ar}</span>
+                  <span className="text-xs font-medium leading-tight text-foreground group-hover:text-primary">{service.name_ar}</span>
                 </Link>
               ))}
             </div>

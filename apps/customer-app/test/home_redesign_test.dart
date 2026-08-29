@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:customer_app/design/app_theme.dart';
 import 'package:customer_app/features/catalog/category_tile.dart';
-import 'package:customer_app/features/catalog/featured_category_item.dart';
+import 'package:customer_app/features/catalog/featured_service_item.dart';
 import 'package:customer_app/features/catalog/home_hero.dart';
 import 'package:customer_app/features/catalog/homepage_content_repository.dart';
 import 'package:customer_app/features/catalog/models.dart';
@@ -22,6 +22,30 @@ ServiceCategory _category(String name, {String? image}) => ServiceCategory.fromJ
       'cover_image_url': image,
       'is_featured': false,
       'display_order': 0,
+    });
+
+CatalogService _service(String name, {String? image}) => CatalogService.fromJson({
+      'id': 'svc-$name',
+      'category_id': 'cat-plumbing',
+      'name_ar': name,
+      'short_description_ar': null,
+      'icon_url': image,
+      'pricing_model': 'fixed',
+      'base_price_cents': 10000,
+      'inspection_fee_cents': 0,
+      'unit_name_ar': null,
+      'warranty_days': 0,
+      'allows_scheduling': true,
+      'allows_emergency': false,
+      'allows_individual': true,
+      'allows_team': false,
+      'allows_date_range_booking': true,
+      'allows_recurring_booking': false,
+      'cash_allowed': true,
+      'requires_precise_schedule': false,
+      'requires_start_time_only': false,
+      'requires_hours_only': false,
+      'requires_start_and_end': false,
     });
 
 void main() {
@@ -265,8 +289,8 @@ void main() {
   // docs/08 §76-د — «اللوجو اللي جوّاه الأكثر طلبًا حواليه إطار رمادي… أنا عايز اللوجو بس
   // وفي الصفحة طاير». الصف بيتحط في `SizedBox` بارتفاع محسوب، فهو نفس فئة بَقّة الـoverflow
   // اللي في اللوحة فوق — لازم يتقاس بنفس الطريقة.
-  group('FeaturedCategoryItem — الأكثر طلبًا', () {
-    Widget row(BuildContext Function()? capture, {double textScale = 1, String name = 'سباكة'}) =>
+  group('FeaturedServiceItem — الأكثر طلبًا', () {
+    Widget row(BuildContext Function()? capture, {double textScale = 1, String name = 'تصليح حنفية'}) =>
         MaterialApp(
           theme: AppTheme.light(),
           home: MediaQuery(
@@ -280,7 +304,7 @@ void main() {
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       children: [
-                        FeaturedCategoryItem(category: _category(name), onTap: () {}),
+                        FeaturedServiceItem(service: _service(name), onTap: () {}),
                       ],
                     ),
                   ),
@@ -296,8 +320,8 @@ void main() {
         home: Directionality(
           textDirection: TextDirection.rtl,
           child: Scaffold(
-            body: FeaturedCategoryItem(
-              category: _category('سباكة', image: 'https://example.test/i.png'),
+            body: FeaturedServiceItem(
+              service: _service('تصليح حنفية', image: 'https://example.test/i.png'),
               onTap: () {},
             ),
           ),
@@ -314,15 +338,15 @@ void main() {
         home: Directionality(
           textDirection: TextDirection.rtl,
           child: Scaffold(
-            body: FeaturedCategoryItem(category: _category('نجارة'), onTap: () {}),
+            body: FeaturedServiceItem(service: _service('تنظيف سجاد'), onTap: () {}),
           ),
         ),
       ));
-      expect(find.text('ن'), findsOneWidget);
+      expect(find.text('ت'), findsOneWidget);
     });
 
     testWidgets('الارتفاع المحجوز بيكبر مع خط النظام — مفيش overflow', (tester) async {
-      await tester.pumpWidget(row(null, textScale: 1.6, name: 'خدمات منزلية'));
+      await tester.pumpWidget(row(null, textScale: 1.6, name: 'تركيب خلاط مطبخ'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });

@@ -11,6 +11,7 @@ import {
 import { ORDER_CREATED_EVENT, OrderCreatedEvent } from '../../common/events/order-created.event';
 import { ORDER_STATUS_CHANGED_EVENT, OrderStatusChangedEvent } from '../../common/events/order-status-changed.event';
 import { PAYMENT_INSTAPAY_REJECTED_EVENT, PaymentInstaPayRejectedEvent } from '../../common/events/payment-instapay-rejected.event';
+import { REFUND_RESOLVED_EVENT, RefundResolvedEvent } from '../../common/events/refund-resolved.event';
 import { InstaPayPendingPaymentResponseDto } from './dto/payments-response.dto';
 import { PAYMENT_INSTAPAY_CONFIRMED_EVENT, PaymentInstaPayConfirmedEvent } from '../../common/events/payment-instapay-confirmed.event';
 import {
@@ -146,6 +147,26 @@ export class PaymentsService {
       'code' in err &&
       (err as { code: unknown }).code === '23505'
     );
+  }
+
+  private emitRefundResolved(refund: Refund, order: Order): void {
+    if (refund.refundStatus !== RefundStatus.COMPLETED && refund.refundStatus !== RefundStatus.REJECTED) return;
+    const method: RefundResolvedEvent['method'] =
+      refund.refundMethod === RefundMethod.ORIGINAL_METHOD
+        ? 'original_method'
+        : refund.refundMethod === RefundMethod.WALLET_CREDIT
+          ? 'wallet_credit'
+          : 'cash';
+
+    this.events.emit(REFUND_RESOLVED_EVENT, {
+      refundId: refund.id,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      customerProfileId: order.customerId,
+      amountCents: refund.amountCents,
+      status: refund.refundStatus === RefundStatus.COMPLETED ? 'completed' : 'rejected',
+      method,
+    } satisfies RefundResolvedEvent);
   }
 
   /**
@@ -2595,7 +2616,7 @@ export class PaymentsService {
       return { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund };
     });
 
-    const { payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
+    const { order, payment, clearsRemainingPayment, amountCents, goesThroughGateway, provider, refund } = prepared;
 
     // المرحلة (ب) — برّه أي DB transaction تمامًا. صف الـrefund اتسجّل بالفعل PROCESSING فوق
     // قبل النداء ده، فحتى لو الـprocess وقع دلوقتي بعد نجاح فعلي عند البوابة، فحص existingRefund
@@ -2790,6 +2811,7 @@ export class PaymentsService {
       await recordRefundAudit();
       return lockedRefund;
     });
+    this.emitRefundResolved(finalRefund, order);
     return finalRefund;
   }
 
@@ -2971,6 +2993,7 @@ export class PaymentsService {
       return refund;
     });
 
+    this.emitRefundResolved(finalRefund, order);
     return finalRefund;
   }
 

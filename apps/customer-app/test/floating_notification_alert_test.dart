@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:customer_app/core/auth_repository.dart';
+import 'package:customer_app/core/deep_link_router.dart';
 import 'package:customer_app/features/notifications/floating_notification_alert.dart';
 import 'package:customer_app/features/shell/customer_shell.dart';
 import 'package:customer_app/features/warranty/warranties_screen.dart';
@@ -31,6 +32,38 @@ class _SignedInAuth extends AuthRepository {
     Map<String, String>? extraHeaders,
   }) async {
     if (path == '/notifications/unread-count') return {'unread_count': 3};
+    return <String, dynamic>{};
+  }
+}
+
+class _WarrantyClaimAuth extends _SignedInAuth {
+  String? submittedDescription;
+
+  @override
+  Future<List<Map<String, dynamic>>> authedRequestList(String path) async => [
+        {
+          'id': 'warranty-1',
+          'order_number': 'ORD-WARRANTY-1',
+          'name_ar': 'ضمان التنفيذ',
+          'expires_at': '2035-12-31T00:00:00.000Z',
+          'claims_used': 0,
+          'max_claims': 2,
+          'active_claim_id': null,
+          'claim_status': null,
+        },
+      ];
+
+  @override
+  Future<Map<String, dynamic>?> authedRequest(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? extraHeaders,
+  }) async {
+    if (path == '/notifications/unread-count') return {'unread_count': 3};
+    if (method == 'POST' && path == '/me/warranties/warranty-1/claims') {
+      submittedDescription = body?['defect_description'] as String?;
+    }
     return <String, dynamic>{};
   }
 }
@@ -235,5 +268,60 @@ void main() {
     expect(find.byType(ErrorWidget), findsNothing);
     expect(find.byType(WarrantiesScreen), findsOneWidget);
     expect(find.text('لا توجد ضمانات مرتبطة بطلباتك حتى الآن'), findsOneWidget);
+  });
+
+  testWidgets('إرسال مطالبة ضمان يغلق الحوار بلا شاشة Flutter حمراء', (tester) async {
+    final auth = _WarrantyClaimAuth();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthRepository>.value(
+        value: auth,
+        child: MaterialApp(
+          builder: (context, child) => Stack(
+            children: [
+              child ?? const SizedBox.shrink(),
+              const PositionedDirectional(
+                end: 16,
+                bottom: 88,
+                child: FloatingNotificationAlertHost(),
+              ),
+            ],
+          ),
+          home: const WarrantiesScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('فتح مطالبة'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'ظهر شرخ جديد في نفس مكان الإصلاح');
+    await tester.tap(find.text('إرسال'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(auth.submittedDescription, 'ظهر شرخ جديد في نفس مكان الإصلاح');
+    expect(tester.takeException(), isNull);
+    expect(find.byType(ErrorWidget), findsNothing);
+    expect(find.text('تم فتح المطالبة ومراجعتها بدأت'), findsOneWidget);
+  });
+
+  testWidgets('الضغط على إشعار تحديث الضمان يفتح شاشة ضماناتي', (tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthRepository>.value(
+        value: _WarrantyClaimAuth(),
+        child: MaterialApp(
+          navigatorKey: rootNavigatorKey,
+          home: const Scaffold(body: Text('الرئيسية')),
+        ),
+      ),
+    );
+
+    handleDeepLink('/warranties');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(WarrantiesScreen), findsOneWidget);
+    expect(find.text('ضماناتي'), findsOneWidget);
   });
 }

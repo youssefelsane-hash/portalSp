@@ -497,8 +497,26 @@ export default function ServiceDetailPage() {
                   <Input id="svc_name_en" name="name_en" defaultValue={service.name_en ?? ''} dir="ltr" />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="svc_icon_url">رابط الأيقونة</Label>
-                  <Input id="svc_icon_url" name="icon_url" defaultValue={service.icon_url ?? ''} dir="ltr" />
+                  <Label htmlFor="svc_icon_url">رابط أيقونة الخدمة</Label>
+                  <Input
+                    id="svc_icon_url"
+                    name="icon_url"
+                    defaultValue={service.icon_url ?? ''}
+                    placeholder="https://.../service-icon.png"
+                    dir="ltr"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    تظهر هذه الأيقونة للخدمة نفسها في «الأكثر طلبًا» ونتائج الكتالوج، ويمكن تغيير الرابط في أي وقت.
+                  </p>
+                  {service.icon_url ? (
+                    <div className="mt-2 flex items-center gap-3 rounded-md border bg-muted/30 p-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={service.icon_url} alt={`أيقونة ${service.name_ar}`} className="h-14 w-14 rounded-xl border bg-white object-contain p-1" />
+                      <span className="text-sm text-muted-foreground">معاينة الأيقونة الحالية</span>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-amber-700">لا توجد أيقونة لهذه الخدمة حاليًا.</p>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-1">

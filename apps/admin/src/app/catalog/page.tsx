@@ -36,6 +36,22 @@ const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   formula: 'معادلة ديناميكية',
 };
 
+function MediaThumbnail({ url, label }: { url: string | null; label: string }) {
+  if (!url) {
+    return <span className="text-xs text-muted-foreground">غير مضاف</span>;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      {/* روابط الوسائط يديرها الأدمن وقد تكون من أي CDN، لذلك next/image غير مناسب هنا. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={label} className="h-10 w-10 rounded-lg border bg-white object-contain p-1" />
+      <span className="max-w-24 truncate text-xs text-muted-foreground" dir="ltr" title={url}>
+        الرابط محفوظ
+      </span>
+    </div>
+  );
+}
+
 export default function CatalogPage() {
   const { isLoading, authedFetch } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
@@ -251,10 +267,21 @@ export default function CatalogPage() {
                 <Input name="name_en" placeholder="الاسم بالإنجليزي" required />
                 <Input name="slug" placeholder="slug (مثال: plumbing)" required dir="ltr" />
                 <Textarea name="description_ar" placeholder="وصف الفئة (اختياري)" rows={2} />
-                <Input name="icon_url" placeholder="رابط الأيقونة (اختياري)" dir="ltr" />
-                {/* Script 6 Part 1-2 — صورة غلاف الكارت (تعرض في التطبيق بنسبة عرض 4:3، مختلفة
-                    عن الأيقونة الصغيرة icon_url). */}
-                <Input name="cover_image_url" placeholder="رابط صورة الغلاف (اختياري — بتظهر في كارت الفئة بالتطبيق)" dir="ltr" />
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="mb-3 text-sm font-semibold">وسائط الفئة</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="new_cat_icon">رابط الأيقونة الصغيرة</Label>
+                      <Input id="new_cat_icon" name="icon_url" placeholder="https://.../icon.png" dir="ltr" />
+                      <p className="text-xs text-muted-foreground">تظهر بجوار اسم الفئة.</p>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="new_cat_cover">رابط صورة غلاف الفئة</Label>
+                      <Input id="new_cat_cover" name="cover_image_url" placeholder="https://.../cover.jpg" dir="ltr" />
+                      <p className="text-xs text-muted-foreground">تظهر كصورة كبيرة في كارت الفئة.</p>
+                    </div>
+                  </div>
+                </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="new_cat_parent">فئة أب (اختياري — لعمل فئة فرعية)</Label>
                   <SelectNative id="new_cat_parent" name="parent_category_id" defaultValue="">
@@ -295,6 +322,7 @@ export default function CatalogPage() {
                   <TableRow>
                     <TableHead>الاسم</TableHead>
                     <TableHead>Slug</TableHead>
+                    <TableHead>الوسائط</TableHead>
                     <TableHead>الحالة</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
@@ -305,6 +333,12 @@ export default function CatalogPage() {
                       <TableRow>
                         <TableCell>{category.name_ar}</TableCell>
                         <TableCell dir="ltr">{category.slug}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-3">
+                            <MediaThumbnail url={category.icon_url} label={`أيقونة ${category.name_ar}`} />
+                            <MediaThumbnail url={category.cover_image_url} label={`غلاف ${category.name_ar}`} />
+                          </div>
+                        </TableCell>
                         <TableCell>
                           <button
                             type="button"
@@ -330,7 +364,7 @@ export default function CatalogPage() {
                       </TableRow>
                       {editingCategoryId === category.id && (
                         <TableRow key={`${category.id}-edit`}>
-                          <TableCell colSpan={4}>
+                          <TableCell colSpan={5}>
                             <form
                               onSubmit={(e) => handleUpdateCategory(e, category.id)}
                               className="flex flex-col gap-2 rounded-md border p-3"
@@ -340,13 +374,19 @@ export default function CatalogPage() {
                                 <Input name="name_en" defaultValue={category.name_en} placeholder="الاسم بالإنجليزي" required />
                               </div>
                               <Textarea name="description_ar" defaultValue={category.description_ar ?? ''} placeholder="الوصف" rows={2} />
-                              <Input name="icon_url" defaultValue={category.icon_url ?? ''} placeholder="رابط الأيقونة" dir="ltr" />
-                              <Input
-                                name="cover_image_url"
-                                defaultValue={category.cover_image_url ?? ''}
-                                placeholder="رابط صورة الغلاف (بتظهر في كارت الفئة بالتطبيق)"
-                                dir="ltr"
-                              />
+                              <div className="rounded-md border bg-muted/30 p-3">
+                                <p className="mb-3 text-sm font-semibold">وسائط الفئة</p>
+                                <div className="grid gap-3 md:grid-cols-2">
+                                  <div className="flex flex-col gap-1">
+                                    <Label>رابط الأيقونة الصغيرة</Label>
+                                    <Input name="icon_url" defaultValue={category.icon_url ?? ''} placeholder="https://.../icon.png" dir="ltr" />
+                                  </div>
+                                  <div className="flex flex-col gap-1">
+                                    <Label>رابط صورة الغلاف</Label>
+                                    <Input name="cover_image_url" defaultValue={category.cover_image_url ?? ''} placeholder="https://.../cover.jpg" dir="ltr" />
+                                  </div>
+                                </div>
+                              </div>
                               <div className="flex flex-col gap-1">
                                 <Label>فئة أب</Label>
                                 <SelectNative name="parent_category_id" defaultValue={category.parent_category_id ?? ''}>
@@ -428,7 +468,13 @@ export default function CatalogPage() {
                 <Input name="slug" placeholder="slug" required dir="ltr" />
                 <Input name="short_description_ar" placeholder="وصف مختصر (اختياري)" />
                 <Textarea name="full_description_ar" placeholder="وصف كامل (اختياري)" rows={2} />
-                <Input name="icon_url" placeholder="رابط الأيقونة (اختياري)" dir="ltr" />
+                <div className="flex flex-col gap-1 rounded-md border bg-muted/30 p-3">
+                  <Label htmlFor="new_service_icon">أيقونة الخدمة نفسها</Label>
+                  <Input id="new_service_icon" name="icon_url" placeholder="https://.../faucet-repair.png" dir="ltr" />
+                  <p className="text-xs text-muted-foreground">
+                    دي الأيقونة التي تظهر للخدمة في «الأكثر طلبًا»؛ أضف أيقونة لكل شغلانة داخلية، مش أيقونة القسم العام.
+                  </p>
+                </div>
                 <Label htmlFor="service_pricing_model">نوع التسعير</Label>
                 <SelectNative id="service_pricing_model" name="pricing_model" required defaultValue="fixed">
                   {Object.entries(PRICING_MODEL_LABELS).map(([value, label]) => (
@@ -525,6 +571,7 @@ export default function CatalogPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>الاسم</TableHead>
+                    <TableHead>أيقونة الخدمة</TableHead>
                     <TableHead>التسعير</TableHead>
                     <TableHead>السعر الأساسي</TableHead>
                     <TableHead>الحالة</TableHead>
@@ -537,6 +584,9 @@ export default function CatalogPage() {
                         <Link href={`/catalog/services/${service.id}`} className="hover:underline">
                           {service.name_ar}
                         </Link>
+                      </TableCell>
+                      <TableCell>
+                        <MediaThumbnail url={service.icon_url} label={`أيقونة ${service.name_ar}`} />
                       </TableCell>
                       <TableCell>{PRICING_MODEL_LABELS[service.pricing_model]}</TableCell>
                       <TableCell>

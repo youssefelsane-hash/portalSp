@@ -192,8 +192,20 @@ export class MatchingExplainabilityService {
       { key: 'category_eligible', passed: row.category_eligible, labelAr: 'مؤهّل لفئة/خدمة الطلب' },
       { key: 'zone_eligible', passed: row.zone_eligible, labelAr: 'مفعّل في نطاق خدمة الطلب' },
       { key: 'has_location', passed: row.has_location, labelAr: 'عنده موقع GPS مسجّل حاليًا' },
-      { key: 'not_already_offered', passed: row.not_already_offered, labelAr: 'ماتعرضش عليه الطلب ده قبل كده' },
-      { key: 'matches_requested_technician', passed: row.matches_requested_technician, labelAr: 'يطابق الفني المطلوب (إعادة حجز، لو مطلوب)' },
+      {
+        key: 'not_already_offered',
+        passed: row.not_already_offered,
+        labelAr: row.not_already_offered
+          ? 'لم تُرسل نفس الفرصة لهذا الفني من قبل'
+          : 'سبق إرسال نفس الطلب لهذا الفني؛ لن نكرر الإشعار، ويمكن تجربة فني آخر',
+      },
+      {
+        key: 'matches_requested_technician',
+        passed: row.matches_requested_technician,
+        labelAr: row.matches_requested_technician
+          ? 'يطابق الفني المحدد للطلب، أو الطلب مفتوح لأي فني'
+          : 'الطلب مقيّد بفني آخر؛ أزل اختيار الفني المحدد لتشغيل المطابقة على الجميع',
+      },
       { key: 'matches_preferred_company', passed: row.matches_preferred_company, labelAr: 'يطابق الشركة/الفريق المطلوب (اعتماد، لو مطلوب)' },
       { key: 'availability_ok', passed: row.availability_ok, labelAr: 'متاح وقت الطلب (بلا تعارض جدول/حظر يوم)' },
       { key: 'decision_limit_ok', passed: row.decision_limit_ok, labelAr: 'حد قرار مستوى الفني يكفي قيمة الطلب' },

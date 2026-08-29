@@ -50,6 +50,14 @@ export class CatalogController {
     return services.map(toServiceResponseDto);
   }
 
+  /** الخدمات القابلة للحجز الأكثر طلبًا، بدل تجميع الطلبات تحت اسم القسم العام. */
+  @Public()
+  @Get('services/most-requested')
+  async listMostRequestedServices() {
+    const services = await this.catalogService.findMostRequestedServices();
+    return services.map(toServiceResponseDto);
+  }
+
   // Script 3 §7/§12 — لازم تتسجّل قبل services/:id (وإلا "search" هتتفسّر كـid وترفض بـUUID
   // parse error). بحث بلغة طبيعية بسيطة (aliases/substring) — راجع catalogService.searchServices().
   @Public()

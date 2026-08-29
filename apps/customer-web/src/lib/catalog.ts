@@ -8,6 +8,8 @@ export const fetchCategories = () => apiFetchList<ServiceCategoryDto>('/service-
 export const fetchServices = (categoryId?: string) =>
   apiFetchList<ServiceDto>(`/services${categoryId ? `?category_id=${categoryId}` : ''}`);
 
+export const fetchMostRequestedServices = () => apiFetchList<ServiceDto>('/services/most-requested');
+
 export const fetchService = (id: string) => apiFetch<ServiceDto>(`/services/${id}`, null);
 
 export const searchServices = (q: string) => {

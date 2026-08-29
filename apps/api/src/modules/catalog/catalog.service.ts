@@ -192,6 +192,53 @@ export class CatalogService {
     return ids.map((id) => byId.get(id)).filter((c): c is ServiceCategory => c !== undefined);
   }
 
+  /**
+   * الخدمات النهائية الأكثر طلبًا، لا أقسامها العامة. الصفحة الرئيسية تستخدم هذه القائمة
+   * لعرض «تصليح حنفية» مثلًا بدل «سباكة»، ثم تفتح مسار حجز الخدمة مباشرة.
+   */
+  async findMostRequestedServices(limit = 8): Promise<Service[]> {
+    const windowDays = await this.settingsService.getNumber('catalog.most_requested_window_days', 90);
+    const safeWindow = Math.max(7, Math.min(365, Math.floor(windowDays)));
+
+    const rows = await this.services.manager.query<{ service_id: string }[]>(
+      `SELECT s.id AS service_id, COUNT(*) AS orders_count
+         FROM orders o
+         JOIN services s ON s.id = o.service_id
+         JOIN service_categories sc ON sc.id = s.category_id
+        WHERE o.created_at >= now() - ($1 || ' days')::interval
+          AND o.deleted_at IS NULL
+          AND o.order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician',
+                                     'cancelled_by_system', 'expired', 'draft')
+          AND s.is_active = true AND s.deleted_at IS NULL
+          AND sc.is_active = true AND sc.deleted_at IS NULL
+        GROUP BY s.id
+        ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
+        LIMIT $2`,
+      [safeWindow, limit],
+    );
+
+    const rankedIds = rows.map((row) => row.service_id);
+    const ids = rankedIds.length > 0
+      ? rankedIds
+      : (
+          await this.services.manager.query<{ service_id: string }[]>(
+            `SELECT s.id AS service_id
+               FROM services s
+               JOIN service_categories sc ON sc.id = s.category_id
+              WHERE s.is_active = true AND s.deleted_at IS NULL
+                AND sc.is_active = true AND sc.deleted_at IS NULL
+              ORDER BY sc.display_order ASC, s.display_order ASC, s.created_at ASC
+              LIMIT $1`,
+            [limit],
+          )
+        ).map((row) => row.service_id);
+
+    if (ids.length === 0) return [];
+    const services = await this.services.find({ where: { id: In(ids), isActive: true } });
+    const byId = new Map(services.map((service) => [service.id, service]));
+    return ids.map((id) => byId.get(id)).filter((service): service is Service => service !== undefined);
+  }
+
   findServices(categoryId?: string, bookingMode?: BookingModeFilter): Promise<Service[]> {
     const bookingModeFilter =
       bookingMode === 'individual'

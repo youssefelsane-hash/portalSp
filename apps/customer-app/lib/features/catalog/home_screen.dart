@@ -16,12 +16,13 @@ import '../support/support_contact_screen.dart';
 import 'catalog_repository.dart';
 import 'categories_screen.dart';
 import 'category_tile.dart';
-import 'featured_category_item.dart';
+import 'featured_service_item.dart';
 import 'home_hero.dart';
 import 'home_header.dart';
 import 'branding_repository.dart';
 import 'homepage_content_repository.dart';
 import 'models.dart';
+import 'catalog_navigation.dart';
 import 'search_results_screen.dart';
 import 'services_screen.dart';
 import '../projects/create_project_screen.dart';
@@ -72,9 +73,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final _supportContactRepository = SupportContactRepository();
   final _brandingRepository = BrandingRepository();
   List<ServiceCategory>? _categories;
-  /// «الأكثر طلبًا» من السيرفر (docs/08 §77-E2) — مستقل عن `_categories` لأن ترتيبه بالعدّ
-  /// مش بـ`display_order`، والسيرفر هو اللي بيحسبه.
-  List<ServiceCategory>? _mostRequested;
+  /// خدمات نهائية مثل «تصليح حنفية»، مرتبة بعدد الطلبات الفعلي لا حسب القسم العام.
+  List<CatalogService>? _mostRequested;
   String? _error;
   String _trustMessage = '';
   // معلومات الضمان الحقيقية من السيرفر (docs/08 §75-ج) — `null` لحد ما توصل، والشريط
@@ -142,7 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // «الأكثر طلبًا» مستقل عن الشبكة الأساسية (docs/08 §77-E2): فشله ما يمنعش عرض الكتالوج،
     // ونجاحه ما يستناش الفئات. لو فشل، القسم بيختفي بهدوء بدل ما يعرض ترتيب مش حقيقي.
     try {
-      final mostRequested = await _repository.fetchMostRequestedCategories();
+      final mostRequested = await _repository.fetchMostRequestedServices();
       if (mounted) setState(() => _mostRequested = mostRequested);
     } catch (_) {
       // بهدوء — القسم تسويقي، مش وظيفي.
@@ -197,7 +197,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // «الأكثر طلبًا» بقى بيجي من السيرفر محسوبًا من عدد الطلبات الحقيقي (docs/08 §77-E2)
     // بدل فلترة محلية بـ`isFeatured`. الفرق مش تقني: العنوان كان بيقول «الأكثر طلبًا»
     // والمصدر «اللي الأدمن اختاره» — نفس فئة البَقّة اللي اتصلحت أكتر من مرة في §75/§76.
-    final featured = _mostRequested ?? const <ServiceCategory>[];
+    final featured = _mostRequested ?? const <CatalogService>[];
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -308,14 +308,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           itemCount: featured.length,
                           separatorBuilder: (_, _) => const SizedBox(width: 14),
                           itemBuilder: (context, index) =>
-                              FeaturedCategoryItem(
-                                category: featured[index],
-                                onTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ServicesScreen(
-                                      category: featured[index],
-                                    ),
-                                  ),
+                              FeaturedServiceItem(
+                                service: featured[index],
+                                onTap: () => navigateToServiceBooking(
+                                  context,
+                                  featured[index],
                                 ),
                               ),
                         ),

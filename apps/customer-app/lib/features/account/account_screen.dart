@@ -9,6 +9,8 @@ import '../loyalty/loyalty_repository.dart';
 import '../loyalty/loyalty_screen.dart';
 import '../orders/orders_screen.dart';
 import '../payment_methods/payment_methods_screen.dart';
+import '../payments/payments_repository.dart';
+import '../payments/wallet_screen.dart';
 import '../recurring/recurring_orders_screen.dart';
 import '../projects/my_projects_screen.dart';
 import '../warranty/warranties_screen.dart';
@@ -29,6 +31,7 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   int? _loyaltyBalance;
+  WalletBalance? _walletBalance;
   bool _biometricAvailable = false;
   bool _biometricEnabled = false;
 
@@ -36,6 +39,7 @@ class _AccountScreenState extends State<AccountScreen> {
   void initState() {
     super.initState();
     _loadLoyaltyBalance();
+    _loadWalletBalance();
     _loadBiometricState();
   }
 
@@ -59,7 +63,9 @@ class _AccountScreenState extends State<AccountScreen> {
       if (mounted) setState(() => _biometricEnabled = false);
       return;
     }
-    final confirmed = await BiometricAuthService.authenticate(reason: 'أكّد بصمتك عشان تفعّل الدخول بالبصمة');
+    final confirmed = await BiometricAuthService.authenticate(
+      reason: 'أكّد بصمتك عشان تفعّل الدخول بالبصمة',
+    );
     if (!confirmed) return;
     await BiometricAuthService.setEnabled(true);
     if (mounted) setState(() => _biometricEnabled = true);
@@ -67,11 +73,31 @@ class _AccountScreenState extends State<AccountScreen> {
 
   Future<void> _loadLoyaltyBalance() async {
     try {
-      final balance = await LoyaltyRepository(context.read<AuthRepository>()).fetchBalance();
+      final balance = await LoyaltyRepository(
+        context.read<AuthRepository>(),
+      ).fetchBalance();
       if (mounted) setState(() => _loyaltyBalance = balance);
     } on ApiException {
       // فشل جلب الرصيد مش لازم يمنع باقي الشاشة من الظهور
     }
+  }
+
+  Future<void> _loadWalletBalance() async {
+    try {
+      final wallet = await PaymentsRepository(
+        context.read<AuthRepository>(),
+      ).fetchWallet();
+      if (mounted) setState(() => _walletBalance = wallet);
+    } on ApiException {
+      // المحفظة لها شاشة مستقلة برسالة إعادة محاولة؛ تعطل الملخص لا يعطل صفحة الحساب.
+    }
+  }
+
+  Future<void> _openWallet() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const WalletScreen()));
+    if (mounted) await _loadWalletBalance();
   }
 
   @override
@@ -88,14 +114,23 @@ class _AccountScreenState extends State<AccountScreen> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  const CircleAvatar(radius: 28, child: Icon(Icons.person, size: 28)),
+                  const CircleAvatar(
+                    radius: 28,
+                    child: Icon(Icons.person, size: 28),
+                  ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(user?.fullName ?? '', style: Theme.of(context).textTheme.titleLarge),
-                        Text(user?.phoneNumber ?? '', style: Theme.of(context).textTheme.bodyMedium),
+                        Text(
+                          user?.fullName ?? '',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        Text(
+                          user?.phoneNumber ?? '',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
                       ],
                     ),
                   ),
@@ -103,49 +138,109 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
             ),
             const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(18),
+                onTap: _openWallet,
+                child: Ink(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(
+                          context,
+                        ).colorScheme.onPrimary,
+                        child: const Icon(Icons.account_balance_wallet_rounded),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'محفظتي',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            Text(
+                              _walletBalance == null
+                                  ? 'اعرض رصيدك والاسترجاعات'
+                                  : '${formatWalletAmount(_walletBalance!.balanceCents)} متاح للطلبات',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_left),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             ListTile(
               leading: const Icon(Icons.receipt_long_outlined),
               title: const Text('طلباتي'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OrdersScreen())),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const OrdersScreen())),
             ),
             ListTile(
               leading: const Icon(Icons.location_on_outlined),
               title: const Text('عناويني'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddressesScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AddressesScreen()),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.favorite_border),
               title: const Text('المفضّلة'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FavoritesScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FavoritesScreen()),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.credit_card_outlined),
               title: const Text('وسائل الدفع المحفوظة'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaymentMethodsScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PaymentMethodsScreen()),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.stars_outlined),
               title: const Text('نقاط الولاء'),
-              subtitle: _loyaltyBalance != null ? Text('$_loyaltyBalance نقطة') : null,
+              subtitle: _loyaltyBalance != null
+                  ? Text('$_loyaltyBalance نقطة')
+                  : null,
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoyaltyScreen())),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const LoyaltyScreen())),
             ),
             ListTile(
               leading: const Icon(Icons.home_work_outlined),
               title: const Text('مشاريعي'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyProjectsScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MyProjectsScreen()),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.repeat),
               title: const Text('الحجوزات المتكررة'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () =>
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const RecurringOrdersScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const RecurringOrdersScreen(),
+                ),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.verified_user_outlined),
@@ -159,35 +254,50 @@ class _AccountScreenState extends State<AccountScreen> {
               leading: const Icon(Icons.card_giftcard_outlined),
               title: const Text('رشّح صحابك'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReferralsScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ReferralsScreen()),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.qr_code_scanner_outlined),
               title: const Text('عندك كود ترشيح فني؟'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () =>
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TechnicianReferralScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const TechnicianReferralScreen(),
+                ),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.report_problem_outlined),
               title: const Text('شكاويّي'),
               trailing: const Icon(Icons.chevron_left),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ComplaintsScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ComplaintsScreen()),
+              ),
             ),
             if (_biometricAvailable) ...[
               const Divider(height: 1),
               SwitchListTile(
                 secondary: const Icon(Icons.fingerprint),
                 title: const Text('الدخول بالبصمة'),
-                subtitle: const Text('افتح أسطى ببصمتك بدل ما تستنى كود التحقق كل مرة'),
+                subtitle: const Text(
+                  'افتح أسطى ببصمتك بدل ما تستنى كود التحقق كل مرة',
+                ),
                 value: _biometricEnabled,
                 onChanged: _toggleBiometric,
               ),
             ],
             const Divider(height: 1),
             ListTile(
-              leading: Icon(Icons.logout, color: Theme.of(context).colorScheme.error),
-              title: Text('تسجيل الخروج', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              leading: Icon(
+                Icons.logout,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                'تسجيل الخروج',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
               onTap: () => context.read<AuthRepository>().logout(),
             ),
           ],

@@ -143,6 +143,15 @@ describe('Warranty claims — ownership and concurrency (PostgreSQL)', () => {
       { status: 'under_review' },
     );
     expect(reviewed.status).toBe('under_review');
+    expect(events.emit).toHaveBeenLastCalledWith(
+      'warranty_claim.changed',
+      expect.objectContaining({
+        action: 'reviewed',
+        claimId: claim.id,
+        customerProfileId: customerId,
+        status: 'under_review',
+      }),
+    );
   });
 
   // docs/08 §73 بند 3 المؤجّل (اتفعّل) — شاشة تفاصيل الطلب في الأدمن بتحتاج تعرض مطالبات الضمان

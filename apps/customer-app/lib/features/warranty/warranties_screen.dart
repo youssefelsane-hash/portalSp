@@ -69,7 +69,7 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
   }
 
   Future<void> _openClaim(Map<String, dynamic> warranty) async {
-    final controller = TextEditingController();
+    String draft = '';
     String? validationError;
     final description = await showDialog<String>(
       context: context,
@@ -77,11 +77,11 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('فتح مطالبة ضمان'),
           content: TextField(
-            controller: controller,
             minLines: 3,
             maxLines: 6,
             maxLength: 1000,
-            onChanged: (_) {
+            onChanged: (value) {
+              draft = value;
               if (validationError != null) {
                 setDialogState(() => validationError = null);
               }
@@ -99,7 +99,7 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
             ),
             FilledButton(
               onPressed: () {
-                final value = controller.text.trim();
+                final value = draft.trim();
                 final error = validateWarrantyClaimDescription(value);
                 if (error != null) {
                   setDialogState(() => validationError = error);
@@ -113,7 +113,6 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
         ),
       ),
     );
-    controller.dispose();
     if (description == null || !mounted) return;
     try {
       await WarrantyRepository(
