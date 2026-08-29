@@ -9,7 +9,7 @@ import { levelPremiumServiceStub } from '../pricing/level-premium.testing';
 // بياخد الطلب ده؟" لازم يعتمد على نفس شروط MatchingService.findEligibleTechnicians() الحقيقية
 // بالحرف، صفر خوارزمية تشخيصية موازية. كل فني هنا مصمّم يفشل check واحد بالظبط عشان نتأكد إن
 // كل check بيتحسب صح ومستقل عن الباقي.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('MatchingExplainabilityService — تفسير مطابقة (docs/08 §35.7)', () => {
   let dataSource: DataSource;

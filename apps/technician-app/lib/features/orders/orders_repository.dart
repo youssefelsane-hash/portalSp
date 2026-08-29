@@ -191,10 +191,16 @@ class OrdersRepository {
 
   // طاقم الطلب (docs/08 §5) — كانت فجوة موثّقة صراحة (Script 7 Phase 13/14): الباك-إند عنده
   // GET .../team-members جاهزة ومؤمّنة بالفعل (ownership check ضد IDOR) بس التطبيق ما كانش
-  // بيستخدمها خالص. بس لطلبات booking_mode='team'.
+  // بيستخدمها خالص. طلبات 'team'، وكمان الشغلانة الفردية اللي فيها مساعد اختياري (ADR-0052).
   Future<List<TeamMember>> fetchTeamMembers(String orderId) async {
     final items = await authRepository.authedRequestList('/technician/orders/$orderId/team-members');
     return items.map(TeamMember.fromJson).toList();
+  }
+
+  // شيل عضو من طاقم الطلب — القائد بس (فحص الملكية في الباك-إند). ADR-0052: ده اللي بيخلي
+  // المساعد الاختياري **اختياري فعلاً** — الفني يقدر يتراجع، مش قرار نهائي بضغطة واحدة.
+  Future<void> removeTeamMember(String orderId, String memberId) async {
+    await authRepository.authedRequest('DELETE', '/technician/orders/$orderId/team-members/$memberId');
   }
 
   // تجنيد فريق (docs/08 §31/§35، طلب مالك صريح 2026-08-20) — القائد بيدوّر على مرشّحين من

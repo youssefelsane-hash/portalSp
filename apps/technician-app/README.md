@@ -460,3 +460,20 @@ KYC أضعف من الفني العادي). اتلغى بالكامل: `features
 للحوار بتقل والمحتوى الثابت الطول بيفيض — "BOTTOM OVERFLOWED BY 26 PIXELS" ظاهر بوضوح في لقطة
 الشاشة اللي بعتها المالك. الإصلاح: لف الـ`Column` في `SingleChildScrollView`. صفر تغيير على
 المحتوى/المنطق نفسه.
+
+## المساعد الاختياري في الشغلانة الفردية (ADR-0052، docs/08 §97)
+
+كارت `_OptionalAssistantCard` في `order_execution_screen.dart` — **مقصود إنه مش شبه**
+`_CrewStatusCard`: ده كارت هادي (`surfaceContainerHighest`، نبرة "لو حابب")، والتاني إنذار أحمر
+لنقص إجباري لازم يتسد. خلطهم كان هيحوّل اختيار لضغط على الفني.
+
+فخّان اتلقطوا وقت التنفيذ (نفس البَقّة الموثّقة فوق عن اختفاء كارت الطاقم بعد أول فعل):
+
+1. `crew_status` بتتحسب في `getOne()` بس، و`widget.initialOrder` بيجي من فعل تنفيذي — فلازم
+   `_refreshTeamInfoIfApplicable()` تنادي السيرفر للشغلانة الفردية كمان، مش لطلبات `team` بس.
+2. قرار **الجلب** لازم يبقى مشتق محليًا (`_isSoloJob`، مرآة `isSoloJob()` في الباك-إند) — لو
+   اعتمد على `crewStatus` كان هيفضل `null` للأبد (بيضة ودجاجة). قرار **العرض** بيفضل على
+   الباك-إند (`optionalAssistantSlots` / `optionalAssistantsAdded`).
+
+`Order.requiredAssistants` اتضاف للنموذج عشان (2) — الباك-إند كان بيرجّعه أصلاً في
+`order-response.dto.ts` بس التطبيق مكانش بيقراه.

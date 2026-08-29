@@ -4,7 +4,7 @@ import { SettingsService } from '../settings/settings.service';
 import { OrderStatus } from '../orders/entities/order.entity';
 import { AdminWorkloadForecastService } from './admin-workload-forecast.service';
 
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 // اختبار حي — عرض الحمل القريب 7 أيام (docs/08 §36.4). كل يوم بيتحقّق ضد Postgres حقيقي بنفس
 // أولوية classifyTechnicianCapacity() بالحرف (BLOCKED > HEAVY > MEANINGFUL > LIGHT)، بس bulk

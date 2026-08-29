@@ -28,7 +28,7 @@ import { BookingMode, Order } from './entities/order.entity';
 import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderMediaService } from './order-media.service';
-import { CrewRole, OrderTeamService } from './order-team.service';
+import { CrewRole, OrderTeamService, isSoloJob } from './order-team.service';
 import { OrdersService } from './orders.service';
 import { TechniciansService } from '../technicians/technicians.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -96,7 +96,16 @@ export class TechnicianOrderExecutionController {
   private async toDtoWithTeamInfo(order: Order, viewerProfileId: string) {
     const base = await this.toDto(order, viewerProfileId);
     if (order.bookingMode !== BookingMode.TEAM) {
-      return base;
+      // ADR-0052 (docs/08 §97) — الشغلانة الفردية بقت ليها `crew_status` كمان، بس عشان حقل
+      // `optionalAssistantSlots` (خانة المساعد الاختياري). حقول النقص فيها أصفار دايمًا هنا،
+      // فكارت "الطاقم مش مكتمل" الأحمر ما بيظهرش — الاختياري عمره ما يكون نقص.
+      if (order.technicianId !== viewerProfileId || !isSoloJob(order)) {
+        return base;
+      }
+      const soloCrewStatus = await this.orderTeamService.getCrewComposition(order.id, order);
+      return soloCrewStatus.optionalAssistantSlots > 0 || soloCrewStatus.optionalAssistantsAdded > 0
+        ? { ...base, crew_status: soloCrewStatus }
+        : base;
     }
     if (order.technicianId === viewerProfileId) {
       // docs/08 §35، ADR-0021 §1 — crew_status موحّد (فني/مساعد منفصلين) بدل team_shortage/
@@ -119,7 +128,9 @@ export class TechnicianOrderExecutionController {
    * ييجي وبعدين بيختفي». الاستعلام الزيادة بيتعمل **بس لطلبات الفريق** (نفس تحفّظ الأداء الأصلي).
    */
   private async toDtoAfterAction(order: Order, userId: string) {
-    if (order.bookingMode !== BookingMode.TEAM) {
+    // ADR-0052 — الشغلانة الفردية بقت محتاجة نفس المعاملة (خانة المساعد الاختياري لازم تفضل
+    // ظاهرة بعد كل فعل، نفس البَقّة الموصوفة فوق بالظبط)، فالتحفّظ بقى "فريق **أو** فردية".
+    if (order.bookingMode !== BookingMode.TEAM && !isSoloJob(order)) {
       return this.toDto(order);
     }
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);

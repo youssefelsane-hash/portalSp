@@ -52,6 +52,94 @@ function MediaThumbnail({ url, label }: { url: string | null; label: string }) {
   );
 }
 
+// docs/08 §98 (بلاغ مالك: «الصورة بتتحط فقط أثناء إنشاء الفئة… ما بقاش فيه إمكانية إنك ترجع
+// تعدل»). السبب الحقيقي: الخانتين كانوا **روابط نصية بس** ومفيش أي مكان في المنصة يرفع صورة فئة،
+// فالأدمن عمليًا مقدرش يغيّرها بعد أول مرة. الرفع الفعلي + المسح هما اللي بيقفلوا الفجوة.
+function CategoryMediaManager({
+  category,
+  onChanged,
+}: {
+  category: AdminServiceCategoryResponseDto;
+  onChanged: () => void;
+}) {
+  const { authedFetch } = useAuth();
+  const [busySlot, setBusySlot] = useState<'icon' | 'cover' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function upload(slot: 'icon' | 'cover', file: File) {
+    setBusySlot(slot);
+    setError(null);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      await authedFetch(`/admin/service-categories/${category.id}/media/${slot}`, { method: 'POST', body });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'مقدرناش نرفع الصورة، حاول تاني');
+    } finally {
+      setBusySlot(null);
+    }
+  }
+
+  async function clear(slot: 'icon' | 'cover') {
+    setBusySlot(slot);
+    setError(null);
+    try {
+      await authedFetch(`/admin/service-categories/${category.id}/media/${slot}`, { method: 'DELETE' });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'مقدرناش نمسح الصورة، حاول تاني');
+    } finally {
+      setBusySlot(null);
+    }
+  }
+
+  const slots: { slot: 'icon' | 'cover'; label: string; hint: string; url: string | null }[] = [
+    { slot: 'icon', label: 'الأيقونة الصغيرة', hint: 'بتظهر جنب اسم الفئة.', url: category.icon_url },
+    { slot: 'cover', label: 'صورة الغلاف', hint: 'بتظهر كصورة كبيرة في كارت الفئة.', url: category.cover_image_url },
+  ];
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3">
+      <p className="mb-1 text-sm font-semibold">صور الفئة</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        PNG / JPEG / WEBP بس (مفيش SVG)، لحد 5 ميجا. التغيير بيتحفظ فورًا وبيظهر في التطبيقات على طول.
+      </p>
+      <div className="grid gap-3 md:grid-cols-2">
+        {slots.map(({ slot, label, hint, url }) => (
+          <div key={slot} className="flex flex-col gap-2 rounded-md border bg-background p-3">
+            <Label>{label}</Label>
+            <MediaThumbnail url={url} label={`${label} ${category.name_ar}`} />
+            <p className="text-xs text-muted-foreground">{hint}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={busySlot !== null}
+                className="max-w-56"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  // بنفضّي الخانة بعد الرفع عشان اختيار **نفس** الملف تاني (بعد فشل مثلاً) يشغّل
+                  // onChange تاني — من غير كده المتصفح بيعتبرها "مفيش تغيير" ومايناديش.
+                  e.target.value = '';
+                  if (file) void upload(slot, file);
+                }}
+              />
+              {url && (
+                <Button type="button" size="sm" variant="ghost" disabled={busySlot !== null} onClick={() => void clear(slot)}>
+                  مسح
+                </Button>
+              )}
+              {busySlot === slot && <span className="text-xs text-muted-foreground">جاري الحفظ…</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 export default function CatalogPage() {
   const { isLoading, authedFetch } = useAuth();
   const [categories, setCategories] = useState<AdminServiceCategoryResponseDto[] | null>(null);
@@ -131,8 +219,9 @@ export default function CatalogPage() {
       name_ar: form.get('name_ar') as string,
       name_en: form.get('name_en') as string,
       description_ar: (form.get('description_ar') as string) || undefined,
-      icon_url: (form.get('icon_url') as string) || undefined,
-      cover_image_url: (form.get('cover_image_url') as string) || undefined,
+      // الصور **مش** هنا عمدًا (docs/08 §98): بتتحفظ لحظيًا من CategoryMediaManager. لو فضلت في
+      // الـPATCH ده، أي حفظ للاسم كان هيبعت الروابط القديمة اللي في الفورم ويدوس على صورة
+      // اتغيّرت لسه من فوق — بَقّة "الصورة رجعت زي ما كانت" الكلاسيكية.
       parent_category_id: parentCategoryId || undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
@@ -281,6 +370,10 @@ export default function CatalogPage() {
                       <p className="text-xs text-muted-foreground">تظهر كصورة كبيرة في كارت الفئة.</p>
                     </div>
                   </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    معندكش رابط؟ احفظ الفئة الأول، وبعدين من «تعديل» ارفع الصورتين من جهازك مباشرة —
+                    وتقدر تغيّرهم أو تمسحهم في أي وقت بعد كده.
+                  </p>
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="new_cat_parent">فئة أب (اختياري — لعمل فئة فرعية)</Label>
@@ -374,19 +467,9 @@ export default function CatalogPage() {
                                 <Input name="name_en" defaultValue={category.name_en} placeholder="الاسم بالإنجليزي" required />
                               </div>
                               <Textarea name="description_ar" defaultValue={category.description_ar ?? ''} placeholder="الوصف" rows={2} />
-                              <div className="rounded-md border bg-muted/30 p-3">
-                                <p className="mb-3 text-sm font-semibold">وسائط الفئة</p>
-                                <div className="grid gap-3 md:grid-cols-2">
-                                  <div className="flex flex-col gap-1">
-                                    <Label>رابط الأيقونة الصغيرة</Label>
-                                    <Input name="icon_url" defaultValue={category.icon_url ?? ''} placeholder="https://.../icon.png" dir="ltr" />
-                                  </div>
-                                  <div className="flex flex-col gap-1">
-                                    <Label>رابط صورة الغلاف</Label>
-                                    <Input name="cover_image_url" defaultValue={category.cover_image_url ?? ''} placeholder="https://.../cover.jpg" dir="ltr" />
-                                  </div>
-                                </div>
-                              </div>
+                              {/* الصور بتتحفظ لحظيًا بنفسها (رفع/مسح مستقل عن زرار "حفظ التعديلات")
+                                  — الرفع عملية ملف مش حقل نصي، فمينفعش يستنى submit الفورم. */}
+                              <CategoryMediaManager category={category} onChanged={loadCategories} />
                               <div className="flex flex-col gap-1">
                                 <Label>فئة أب</Label>
                                 <SelectNative name="parent_category_id" defaultValue={category.parent_category_id ?? ''}>

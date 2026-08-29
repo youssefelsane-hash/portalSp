@@ -23,6 +23,11 @@ import { BookingMode, Order } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
+
+// ADR-0052 (docs/08 §97) — «مساعد واحد فقط» بنص المالك، بس كإعداد مش رقم مكتوب في الكود.
+export const OPTIONAL_ASSISTANT_ENABLED_SETTING = 'crew.optional_assistant_enabled';
+export const OPTIONAL_ASSISTANT_MAX_SETTING = 'crew.optional_assistant_max_per_order';
+export const OPTIONAL_ASSISTANT_MAX_FALLBACK = 1;
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 export type CrewRole = 'technician' | 'assistant';
@@ -59,6 +64,12 @@ export interface CrewComposition {
   missingTechnicians: number;
   missingAssistants: number;
   crewComplete: boolean;
+  // ADR-0052 (docs/08 §97) — المساعد الاختياري للشغلانة الفردية. **منفصل تمامًا عن حقول النقص
+  // فوق عن قصد**: الاختياري عمره ما يبقى "نقص" (مفيش تصعيد، مفيش كارت أحمر، مفيش بند استثناءات).
+  /** عدد المساعدين الاختياريين المضافين فعلاً. */
+  optionalAssistantsAdded: number;
+  /** كام مساعد اختياري لسه مسموح يضيفه دلوقتي — صفر لطلبات الفريق ولأي طلب مش فردي. */
+  optionalAssistantSlots: number;
 }
 
 export type RecruitOutcome =
@@ -85,10 +96,30 @@ class CrewOpportunityDeclinedError extends Error {
  * وبتحسب فني/مساعد كواحد — بَقّة حقيقية اتلقطت في مراجعة §35.0 (راجع ADR-0021 للسياق الكامل).
  * الـ+1 في assignedTechnicians بيمثّل قائد الطلب نفسه (مش صف في order_team_members).
  */
+/**
+ * ADR-0052 (docs/08 §97) — "شغلانة فردية" = محتاجة شخص واحد بس. الأهلية **مشتقّة** من متطلبات
+ * الطلب نفسها، مش عمود جديد: عمود منفصل كان هيبقى مصدر حقيقة تاني لنفس السؤال لازم يتزامن يدويًا
+ * مع `required_technicians`، وأول ما يختلفوا الاتنين يبقوا غلط.
+ */
+export function isSoloJob(order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'>): boolean {
+  return (order.requiredTechnicians ?? 1) <= 1 && (order.requiredAssistants ?? 0) === 0;
+}
+
+/** كام خانة مساعد اختياري لسه مفتوحة. صفر لأي طلب مش فردي، أو لو الميزة متقفلة من الإعدادات. */
+export function computeOptionalAssistantSlots(
+  order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'>,
+  assistantsAdded: number,
+  opts: { enabled: boolean; maxPerOrder: number },
+): number {
+  if (!opts.enabled || !isSoloJob(order)) return 0;
+  return Math.max(0, Math.floor(opts.maxPerOrder) - assistantsAdded);
+}
+
 export function computeCrewComposition(
   requiredTechnicians: number | null,
   requiredAssistants: number | null,
   counts: { technicians: number; assistants: number },
+  optionalAssistantSlots = 0,
 ): CrewComposition {
   const reqTechnicians = requiredTechnicians ?? 1;
   const reqAssistants = requiredAssistants ?? 0;
@@ -104,6 +135,8 @@ export function computeCrewComposition(
     missingTechnicians,
     missingAssistants,
     crewComplete: missingTechnicians === 0 && missingAssistants === 0,
+    optionalAssistantsAdded: assignedAssistants,
+    optionalAssistantSlots,
   };
 }
 
@@ -251,7 +284,21 @@ export class OrderTeamService {
     );
     const technicians = Number(rows.find((r) => r.member_type === 'team_member')?.count ?? 0);
     const assistants = Number(rows.find((r) => r.member_type === 'assistant')?.count ?? 0);
-    return computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants });
+    // الشغلانة اللي مش فردية عمرها ما ياخد خانة اختيارية، فمفيش أي داعي نسأل الإعدادات أصلاً —
+    // `getCrewComposition()` بتتنادى في مسارات متكررة (مسح التصعيد الدوري) فالنداء المتوفّر مقصود.
+    const optionalAssistantSlots = isSoloJob(order)
+      ? computeOptionalAssistantSlots(order, assistants, await this.optionalAssistantPolicy())
+      : 0;
+    return computeCrewComposition(order.requiredTechnicians, order.requiredAssistants, { technicians, assistants }, optionalAssistantSlots);
+  }
+
+  /** إعدادات المساعد الاختياري (ADR-0052) — قفل عام + حد أقصى، الاتنين قابلين للتعديل بلا كود. */
+  private async optionalAssistantPolicy(): Promise<{ enabled: boolean; maxPerOrder: number }> {
+    const [enabled, maxPerOrder] = await Promise.all([
+      this.settingsService.getBoolean(OPTIONAL_ASSISTANT_ENABLED_SETTING, true),
+      this.settingsService.getNumber(OPTIONAL_ASSISTANT_MAX_SETTING, OPTIONAL_ASSISTANT_MAX_FALLBACK),
+    ]);
+    return { enabled, maxPerOrder };
   }
 
   private async getServiceDurationMinutes(order: Order): Promise<number> {
@@ -288,16 +335,7 @@ export class OrderTeamService {
    */
   async listRecruitCandidates(userId: string, orderId: string, role: CrewRole): Promise<RecruitCandidateRow[]> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
-    if (order.bookingMode !== BookingMode.TEAM) {
-      throw new ApiException(ErrorCode.VAL_001, 'تجنيد فريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
-    }
-    const composition = await this.getCrewComposition(orderId, order);
-    if (role === 'technician' && composition.missingTechnicians <= 0) {
-      throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
-    }
-    if (role === 'assistant' && composition.missingAssistants <= 0) {
-      throw new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
-    }
+    await this.assertCrewSlotOpen(orderId, order, role);
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const leaderRank = TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel];
@@ -362,6 +400,38 @@ export class OrderTeamService {
   }
 
   /**
+   * الحارس الوحيد لسؤال "فيه خانة مفتوحة للدور ده دلوقتي؟" — مشترك بين قايمة المرشّحين والتجنيد
+   * الفعلي عشان الاتنين مايفترقوش أبدًا (القايمة تقول "فيه" والتجنيد يقول "مفيش" أو العكس).
+   *
+   * **ضم فني** لسه محصور في طلبات "اعتماد" (فريق) بالحرف زي ما كان — الشغلانة الفردية مش محتاجة
+   * فني تاني بالتعريف، وفتحها كانت هتخلي أي فني يقسّم أرباح أي شغلانة مع فني تاني بلا سقف.
+   *
+   * **ضم مساعد** بقى ليه مسارين (ADR-0052، docs/08 §97): نقص إجباري في طلب فريق زي ما كان، أو
+   * خانة **اختيارية** في شغلانة فردية — «لو هو مش عايز يضيف مساعد خلاص مش مهم» بنص المالك.
+   */
+  private async assertCrewSlotOpen(orderId: string, order: Order, role: CrewRole): Promise<void> {
+    const composition = await this.getCrewComposition(orderId, order);
+    if (role === 'technician') {
+      if (order.bookingMode !== BookingMode.TEAM) {
+        throw new ApiException(ErrorCode.VAL_001, 'ضم فني متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
+      }
+      if (composition.missingTechnicians <= 0) {
+        throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
+      }
+      return;
+    }
+    if (composition.missingAssistants > 0) return;
+    if (composition.optionalAssistantSlots > 0) return;
+    throw new ApiException(
+      ErrorCode.VAL_001,
+      isSoloJob(order)
+        ? 'الشغلانة دي بتسمح بمساعد اختياري واحد بس، وهو مضاف بالفعل'
+        : 'عدد المساعدين المطلوب مكتمل بالفعل',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  /**
    * تجنيد (docs/08 §31/§35، ADR-0021 §2) — بلا موافقة من المُضاف (زي addMember() بالظبط). بيعيد
    * التحقق الكامل تاني وقت الإضافة الفعلية (القايمة اللي المستخدم شافها ممكن تبقى قديمة). القدرة
    * الاستيعابية بتحدد الأثر: LIGHT = إضافة فورية، MEANINGFUL/HEAVY = فرصة اختيارية (technician_
@@ -370,20 +440,10 @@ export class OrderTeamService {
    */
   async recruitMember(userId: string, orderId: string, technicianId: string, role: CrewRole, roleLabel?: string): Promise<RecruitOutcome> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
-    if (order.bookingMode !== BookingMode.TEAM) {
-      throw new ApiException(ErrorCode.VAL_001, 'تجنيد فريق متاح بس للطلبات اللي حجزها "اعتماد" (فريق)', HttpStatus.BAD_REQUEST);
-    }
     if (technicianId === leaderProfileId) {
       throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
     }
-
-    const composition = await this.getCrewComposition(orderId, order);
-    if (role === 'technician' && composition.missingTechnicians <= 0) {
-      throw new ApiException(ErrorCode.VAL_001, 'عدد الفنيين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
-    }
-    if (role === 'assistant' && composition.missingAssistants <= 0) {
-      throw new ApiException(ErrorCode.VAL_001, 'عدد المساعدين المطلوب مكتمل بالفعل', HttpStatus.BAD_REQUEST);
-    }
+    await this.assertCrewSlotOpen(orderId, order, role);
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);

@@ -8,7 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 
 // اختبار حي ضد Postgres حقيقي — مركز عمليات فئة (docs/08 §35.9، ADR-0021 §5). كل فني هنا مصمّم
 // يمثّل حالة غنية واحدة على الأقل بالظبط، عشان نتأكد إن كل عمود بيتحسب صح ومستقل عن الباقي.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('AdminTechnicianCategoryOpsService — مركز عمليات فئة (docs/08 §35.9)', () => {
   let dataSource: DataSource;

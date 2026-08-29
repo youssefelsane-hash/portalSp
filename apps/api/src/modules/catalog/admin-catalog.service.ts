@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
@@ -26,6 +26,10 @@ import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { Service } from './entities/service.entity';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from './entities/technician-service.entity';
+import { randomUUID } from 'node:crypto';
+import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
+import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
+import { BrandingFileValidationError, validateBrandingFile } from '../branding/branding-file-validator';
 
 @Injectable()
 export class AdminCatalogService {
@@ -41,6 +45,7 @@ export class AdminCatalogService {
     @InjectRepository(TechnicianService) private readonly technicianServices: Repository<TechnicianService>,
     private readonly techniciansService: TechniciansService,
     private readonly auditLog: AuditLogService,
+    @Inject(STORAGE_SERVICE) private readonly storage: StorageService,
   ) {}
 
   // ── الفئات ───────────────────────────────────────────────────────────
@@ -90,6 +95,90 @@ export class AdminCatalogService {
       meta,
     });
     return category;
+  }
+
+  /**
+   * رفع صورة فئة (docs/08 §98، بلاغ مالك: «الصورة بتتحط فقط أثناء إنشاء الفئة… ما بقاش فيه
+   * إمكانية إنك ترجع تعدل»).
+   *
+   * السبب الحقيقي للبلاغ: الحقول كانت **روابط نصية بس** — مفيش أي مكان في المنصة يرفع صورة فئة
+   * ويطلّع رابط، فالأدمن عمليًا مقدرش يغيّرها بعد ما يتحطّ الرابط الأولاني. الرفع الفعلي هو اللي
+   * بيقفل الفجوة، مش مجرد شاشة تعديل.
+   *
+   * **إعادة استخدام `validateBrandingFile()` بالحرف** (ADR-0014): MIME معلَن + magic bytes حقيقية
+   * + تطابقهم + حجم + أبعاد، ومفيش SVG خالص (وعاء تنفيذ سكربت). صورة فئة بتتعرض لكل عملاء المنصة
+   * زي البراندنج بالظبط، فمفيش سبب لمعايير أضعف — ولا لنسخة تانية من نفس المنطق.
+   */
+  async uploadCategoryMedia(
+    adminUserId: string,
+    id: string,
+    slot: 'icon' | 'cover',
+    file: { buffer: Buffer; mimetype: string; size: number },
+    meta?: AuditActorMeta,
+  ): Promise<ServiceCategory> {
+    const category = await this.findCategoryOrThrow(id);
+    try {
+      validateBrandingFile(file.buffer, file.mimetype, file.size);
+    } catch (err) {
+      if (err instanceof BrandingFileValidationError) {
+        throw new ApiException(ErrorCode.VAL_001, err.message, HttpStatus.BAD_REQUEST);
+      }
+      throw err;
+    }
+
+    const extension = file.mimetype === 'image/png' ? 'png' : file.mimetype === 'image/webp' ? 'webp' : 'jpg';
+    const key = `service-categories/${id}/${slot}/${randomUUID()}.${extension}`;
+    const previousUrl = slot === 'icon' ? category.iconUrl : category.coverImageUrl;
+
+    // `fileUrl` جاي من `storage.save()` نفسها — نفس اللي كل مسارات الرفع التانية بتخزّنه، فمفيش
+    // نداء `getUrl()` زيادة ولا احتمال إن الاتنين يختلفوا.
+    const saved = await uploadWithOrphanCleanup(this.storage, key, file.buffer, file.mimetype, async (fileUrl) => {
+      if (slot === 'icon') category.iconUrl = fileUrl;
+      else category.coverImageUrl = fileUrl;
+      return this.categories.save(category);
+    });
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_category.media_uploaded',
+      entityType: 'service_category',
+      entityId: category.id,
+      oldValues: { slot, url: previousUrl },
+      newValues: { slot, url: slot === 'icon' ? saved.iconUrl : saved.coverImageUrl },
+      meta,
+    });
+    return saved;
+  }
+
+  /**
+   * مسح صورة فئة (docs/08 §98) — كانت **مستحيلة** حتى مع شاشة التعديل الموجودة: الواجهة بتبعت
+   * `undefined` للخانة الفاضية، و`JSON.stringify` بيشيل المفتاح خالص، فالـPATCH ما بيغيّرش حاجة.
+   * endpoint صريح أوضح من الاعتماد على إن الواجهة تبعت `null` صح.
+   */
+  async clearCategoryMedia(
+    adminUserId: string,
+    id: string,
+    slot: 'icon' | 'cover',
+    meta?: AuditActorMeta,
+  ): Promise<ServiceCategory> {
+    const category = await this.findCategoryOrThrow(id);
+    const previousUrl = slot === 'icon' ? category.iconUrl : category.coverImageUrl;
+    if (slot === 'icon') category.iconUrl = null;
+    else category.coverImageUrl = null;
+    const saved = await this.categories.save(category);
+
+    await this.auditLog.record({
+      actorUserId: adminUserId,
+      actorRole: 'admin',
+      action: 'service_category.media_cleared',
+      entityType: 'service_category',
+      entityId: category.id,
+      oldValues: { slot, url: previousUrl },
+      newValues: { slot, url: null },
+      meta,
+    });
+    return saved;
   }
 
   async updateCategory(

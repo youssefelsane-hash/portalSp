@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { AdminExceptionCenterService } from './admin-exception-center.service';
 import { SettingsService } from '../settings/settings.service';
 
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 // اختبار حي — مركز الاستثناءات/التنبيهات (docs/08 §36.9). نقص طاقم مصعّد ومفتوح + توزيع متأخر،
 // الاتنين ضد Postgres حقيقي، بلا أي بيانات استثناء مصطنعة.

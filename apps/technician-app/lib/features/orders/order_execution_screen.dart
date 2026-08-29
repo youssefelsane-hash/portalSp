@@ -90,7 +90,10 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   // طاقم الطلب — بس لطلبات "اعتماد" (booking_mode='team'). فشل التحميل (مشكلة شبكة عابرة)
   // مايمنعش بقية الشاشة تشتغل، نفس فلسفة _loadMedia() فوق بالحرف.
   Future<void> _loadTeamMembersIfApplicable() async {
-    if (_order.bookingMode != 'team') return;
+    // ADR-0052 (docs/08 §97) — الشغلانة الفردية ممكن يكون فيها مساعد اختياري مضاف، فلازم تحمّل
+    // الطاقم كمان عشان القائد يشوفه ويقدر يشيله. الشرط هنا **مشتق محليًا** (`_isSoloJob`) مش من
+    // `crewStatus` — وقت أول تحميل الطلب ممكن يكون جاي من فعل تنفيذي بلا crew_status لسه.
+    if (_order.bookingMode != 'team' && !_isSoloJob) return;
     try {
       final members = await _repository.fetchTeamMembers(_order.id);
       if (mounted) setState(() => _teamMembers = members);
@@ -108,7 +111,9 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   // أو الفني يرجع من RecruitTeamScreen. نجيب تفاصيل الطلب الكاملة صراحة هنا (نفس _refreshFromServer،
   // بتنادي getOne()) عشان الكارت يظهر فورًا من أول فتح للشاشة، مهما كان مصدر initialOrder.
   Future<void> _refreshTeamInfoIfApplicable() async {
-    if (_order.bookingMode != 'team') return;
+    // ADR-0052 — نفس البَقّة بالظبط بتنطبق على خانة المساعد الاختياري: `crew_status` بتتحسب في
+    // getOne() بس، فالشغلانة الفردية محتاجة نفس النداء الصريح ده وإلا الخانة ما تظهرش من أول فتح.
+    if (_order.bookingMode != 'team' && !_isSoloJob) return;
     await _refreshFromServer();
   }
 
@@ -287,6 +292,31 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
   // تجنيد فريق (docs/08 §31/§35، طلب مالك صريح 2026-08-20) — بعد الرجوع من شاشة المرشّحين،
   // نحدّث الطلب (crew_status) وقايمة الفريق مع بعض عشان الكارت يعكس أي تجنيد حصل فورًا، مش
   // يفضل عارض الأرقام القديمة لحد ما الشاشة تتقفل وتترجع تتفتح.
+  /// شغلانة فردية — مشتق محليًا بنفس قاعدة `isSoloJob()` في الباك-إند بالحرف. بيتستخدم **بس**
+  /// لتقرير إننا نجيب التفاصيل الكاملة؛ قرار العرض نفسه بيفضل على الباك-إند (تحت).
+  bool get _isSoloJob => (_order.requiredTechnicians ?? 1) <= 1 && (_order.requiredAssistants ?? 0) == 0;
+
+  /// ADR-0052 — الشغلانة الفردية اللي القائد يقدر يضم فيها مساعد اختياري (أو ضم واحد بالفعل).
+  /// الباك-إند هو اللي بيقرر (crew_status.optionalAssistant*) — التطبيق مابيحسبش الأهلية بنفسه.
+  bool get _hasOptionalAssistantSlot {
+    final crew = _order.crewStatus;
+    if (crew == null) return false;
+    return crew.optionalAssistantSlots > 0 || crew.optionalAssistantsAdded > 0;
+  }
+
+  /// ADR-0052 — شيل المساعد الاختياري. القائد يقدر يتراجع قبل ما الشغل يخلص، فالخانة بترجع
+  /// تفتح تاني (الباك-إند بيعيد حساب crew_status من صفوف الطاقم الفعلية).
+  Future<void> _removeOptionalAssistant(String memberId) async {
+    if (mounted) setState(() => _error = null);
+    try {
+      await _repository.removeTeamMember(_order.id, memberId);
+      await _refreshFromServer();
+      await _loadTeamMembersIfApplicable();
+    } catch (e) {
+      if (mounted) setState(() => _error = 'مقدرناش نشيل المساعد: $e');
+    }
+  }
+
   Future<void> _openRecruitTeam(String role) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => RecruitTeamScreen(orderId: _order.id, role: role)),
@@ -680,6 +710,19 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                 ),
               ),
             ),
+            // ADR-0052 (docs/08 §97، طلب مالك) — «لو الشغلانة عدد أفرادها واحد… أحيانًا الصنايعي
+            // بيحب ياخد معاه مساعد… لو هو مش عايز يضيف مساعد خلاص مش مهم». كارت **هادي** عمدًا
+            // (surfaceContainerHighest مش errorContainer) — ده اختيار مش نقص، فمينفعش يبان
+            // كإنذار زي كارت "الطاقم مش مكتمل".
+            if (_order.bookingMode != 'team' && _hasOptionalAssistantSlot) ...[
+              const SizedBox(height: 12),
+              _OptionalAssistantCard(
+                crewStatus: _order.crewStatus!,
+                members: _teamMembers,
+                onAddAssistant: () => _openRecruitTeam('assistant'),
+                onRemove: _removeOptionalAssistant,
+              ),
+            ],
             if (_order.bookingMode == 'team') ...[
               const SizedBox(height: 12),
               _TeamRosterCard(members: _teamMembers, requiredTechnicians: _order.requiredTechnicians),
@@ -1116,6 +1159,82 @@ class _TeamRosterCard extends StatelessWidget {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ADR-0052 (docs/08 §97، طلب مالك) — المساعد الاختياري للشغلانة الفردية.
+//
+// **مقصود إنه مش شبه `_CrewStatusCard` تحت**: ده كارت هادي (لون سطح عادي، نبرة "لو حابب")،
+// والتاني إنذار أحمر لنقص إجباري لازم يتسد. خلطهم كان هيحوّل اختيار لضغط على الفني — بالظبط
+// اللي المالك قال إنه مش عايزه («ده بيبقى إجباري… يكون عنده بس أوبشن اختياري»).
+class _OptionalAssistantCard extends StatelessWidget {
+  const _OptionalAssistantCard({
+    required this.crewStatus,
+    required this.members,
+    required this.onAddAssistant,
+    required this.onRemove,
+  });
+
+  final CrewStatus crewStatus;
+  final List<TeamMember>? members;
+  final VoidCallback onAddAssistant;
+  final Future<void> Function(String memberId) onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final assistants = (members ?? const <TeamMember>[]).where((m) => m.memberType == 'assistant').toList();
+    return Card(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.handyman_outlined, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 8),
+                Text('مساعد (اختياري)', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (assistants.isEmpty)
+              Text(
+                'الشغلانة دي تقدر تخلّصها لوحدك عادي. لو حابب حد يساعدك فيها، تقدر تضم مساعد '
+                'وهياخد نسبته من قيمة الشغلانة.',
+                style: theme.textTheme.bodySmall,
+              )
+            else
+              ...assistants.map(
+                (m) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: CircleAvatar(
+                    backgroundImage: m.avatarUrl != null ? NetworkImage(m.avatarUrl!) : null,
+                    child: m.avatarUrl == null ? const Icon(Icons.person_outline) : null,
+                  ),
+                  title: Text(m.fullName),
+                  subtitle: Text(m.roleLabel),
+                  trailing: IconButton(
+                    tooltip: 'شيل المساعد',
+                    icon: const Icon(Icons.person_remove_outlined),
+                    onPressed: () => onRemove(m.id),
+                  ),
+                ),
+              ),
+            if (crewStatus.optionalAssistantSlots > 0) ...[
+              const SizedBox(height: 4),
+              TextButton.icon(
+                onPressed: onAddAssistant,
+                icon: const Icon(Icons.person_add_alt_outlined),
+                label: const Text('ضم مساعد'),
+              ),
+            ],
           ],
         ),
       ),

@@ -6,7 +6,7 @@ import { AdminOperationsOverviewService } from './admin-operations-overview.serv
 
 // نفس افتراض full_day_job_minutes الحقيقي في migration 0153 — settingsServiceStub بيرجّعه دايمًا
 // (نفس نمط crew-shortage-escalation.spec.ts).
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 // اختبار حي — نظرة عامة تشغيلية (docs/08 §36.2). كل رقم بيتحقّق ضد Postgres حقيقي: طلبات محتاجة
 // توزيع، نقص طاقم مفتوح، توزيع القدرة الاستيعابية اليوم (LIGHT/MEANINGFUL/HEAVY/BLOCKED)، وأونلاين

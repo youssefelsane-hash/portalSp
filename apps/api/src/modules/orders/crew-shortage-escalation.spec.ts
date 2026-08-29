@@ -20,7 +20,7 @@ import { ORDER_CREW_SHORTAGE_ESCALATED_EVENT, OrderCrewShortageEscalatedEvent } 
 // اختبار حي ضد Postgres حقيقي — تصعيد نقص طاقم قبل الموعد (docs/08 §35.5، ADR-0021). عتبة
 // التصعيد ثابتة 24 ساعة هنا (settingsServiceStub بيرجّع fallback دايمًا)، نفس الافتراضي الحقيقي
 // في migration 0156.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('CrewShortageEscalationService — تصعيد نقص الطاقم قبل الموعد (docs/08 §35.5)', () => {
   let dataSource: DataSource;
