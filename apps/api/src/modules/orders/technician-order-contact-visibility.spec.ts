@@ -63,7 +63,21 @@ describe('TechnicianOrderExecutionController customer contact visibility', () =>
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      // ADR-0052 — الكولر بقى بينادي getCrewComposition للشغلانة الفردية كمان (خانة المساعد
+      // الاختياري)، مش لطلبات الفريق بس. الاختبار ده مالوش علاقة بالطاقم فبيرجّع تكوين فاضي.
+      {
+        getCrewComposition: jest.fn().mockResolvedValue({
+          requiredTechnicians: 1,
+          requiredAssistants: 0,
+          assignedTechnicians: 1,
+          assignedAssistants: 0,
+          missingTechnicians: 0,
+          missingAssistants: 0,
+          crewComplete: true,
+          optionalAssistantsAdded: 0,
+          optionalAssistantSlots: 0,
+        }),
+      } as never,
       {
         findByIdOrThrow: jest.fn().mockResolvedValue({
           streetName: 'شارع الاختبار',

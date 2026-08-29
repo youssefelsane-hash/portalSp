@@ -31,6 +31,12 @@ import { TechnicianWorkOpportunitiesService } from '../technicians/technician-wo
 import { AssignmentStatus, OrderAssignment } from './entities/order-assignment.entity';
 import { MATCHING_ROUNDS_QUEUE, ROUND_EXPIRED_JOB, RoundExpiredJobData, roundExpiredJobId } from './matching-rounds.queue';
 import { LevelPremiumService } from '../pricing/level-premium.service';
+import {
+  isRevisitPinActive,
+  loadRevisitPinState,
+  REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK,
+  REVISIT_RESPONSE_WINDOW_HOURS_SETTING,
+} from '../orders/revisit-pin';
 
 // القيم دي مطابقة لإعدادات matching.* الافتراضية في infra/migrations/0011_system.sql (§11.2 في القاموس)
 // — دلوقتي fallback بس لـ SettingsService.getNumber، مش المصدر الحقيقي (نفس نمط payouts، راجع
@@ -127,6 +133,13 @@ export interface AvailableOrderRow {
    */
   booking_mode: string;
   scheduled_at: Date | null;
+  /**
+   * ADR-0051 (docs/08 §96، طلب مالك: «لازم يكون ظاهر على الطلب من برا، الطلب ده إعادة زيارة»).
+   * كان مش بيتختار خالص، فالفني كان بيشوف إعادة الزيارة كطلب عادي بلا أي تمييز.
+   */
+  order_type: string;
+  /** رقم الطلب الأصلي اللي إعادة الزيارة دي بتخصه — null لأي طلب عادي. */
+  original_order_number: string | null;
 }
 
 @Injectable()
@@ -559,7 +572,9 @@ export class MatchingService {
     if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN) {
       return { dispatched: 0 };
     }
-    if (this.isEmergencyOrder(order) || (await this.isNearTermOrder(order.scheduledAt))) {
+    // ADR-0051 — إعادة زيارة مثبّتة مبتعدّيش على التأكيد التلقائي أبدًا: التأكيد التلقائي
+    // بيعيّن فني بالقوة، والتثبيت الصح **عرض حصري** الفني يقبله بنفسه مش تعيين قسري.
+    if (this.isEmergencyOrder(order) || isRevisitPinActive(order) || (await this.isNearTermOrder(order.scheduledAt))) {
       return this.dispatchNextRound(orderId);
     }
     return this.autoConfirmScheduledOrder(orderId);
@@ -598,6 +613,11 @@ export class MatchingService {
     if (minutes.length === 0) return RESPONSE_TIMEOUT_SECONDS_FALLBACK;
     const index = Math.min(Math.max(round, 1), minutes.length) - 1;
     return minutes[index] * 60;
+  }
+
+  /** مهلة رد الفني الأصلي على إعادة زيارة مثبّتة (ADR-0051) — إعداد، مش رقم مكتوب في الكود. */
+  private revisitResponseWindowHours(): Promise<number> {
+    return this.settingsService.getNumber(REVISIT_RESPONSE_WINDOW_HOURS_SETTING, REVISIT_RESPONSE_WINDOW_HOURS_FALLBACK);
   }
 
   async dispatchNextRound(orderId: string): Promise<{ dispatched: number }> {
@@ -676,17 +696,52 @@ export class MatchingService {
       } else {
         batchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
       }
+      // ADR-0051 (docs/08 §96) — إعادة زيارة مثبّتة: عرض **حصري** على الفني الأصلي، مفيش أي
+      // fallback ولا جولات تانية. لو مش مؤهّل/مشغول دلوقتي، الطلب بيستناه طول المهلة بدل ما
+      // يروح لفني تاني ياخد شغلانة إصلاح مش ذنبه فيها. أول ما المهلة تعدّي أو يرفض، بيظهر عند
+      // الأدمن كبند محتاج تصرّف — التحرير قرار أدمن (وراه خصم مالي)، مش تلقائي.
+      // لو اتملت، دي القايمة الوحيدة المسموح بيها — كل fallbacks التوزيع العادي تحت بتتخطى.
+      let pinnedOnlyCandidates: EligibleTechnicianRow[] | null = null;
+      if (isRevisitPinActive(order)) {
+        const pinState = await loadRevisitPinState(manager, order, await this.revisitResponseWindowHours());
+        if (pinState.exhausted) {
+          return { kind: 'noop' as const };
+        }
+        // العرض القائم بيفضل صالح طول المهلة حتى بعد expires_at (ADR-0018 §5 — expires_at بقى
+        // "امتى نوسّع البث" مش "العرض باظ")، فمفيش إعادة عرض على نفس الفني كل دورة استرداد.
+        const alreadyOffered = await manager.count(OrderAssignment, {
+          where: { orderId, technicianId: pinState.technicianId! },
+        });
+        if (alreadyOffered > 0) {
+          return { kind: 'noop' as const };
+        }
+        const pinnedCandidates = await this.findEligibleTechnicians(
+          order,
+          1,
+          pinState.technicianId,
+          isEmergency,
+          null,
+          // مشغول بطلب تاني دلوقتي مش سبب لتحويل إعادة الزيارة لحد تاني — عنده المهلة كلها يرد.
+          true,
+        );
+        if (pinnedCandidates.length === 0) {
+          return { kind: 'noop' as const };
+        }
+        pinnedOnlyCandidates = pinnedCandidates;
+      }
+
       // "إعادة الحجز": أول جولة بس بتحاول تعرض على الفني المطلوب حصرياً. لو مش متاح دلوقتي
       // (مشغول/مش أونلاين/إلخ)، نرجع فوراً للتوزيع العادي لنفس الجولة — التفضيل بيتجاهَل بأمان،
       // الطلب مش بيتلغي بسبب إن فني واحد بالذات مش متاح.
       let candidates =
-        nextRound === 1 && order.requestedTechnicianId
+        pinnedOnlyCandidates ??
+        (nextRound === 1 && order.requestedTechnicianId
           ? await this.findEligibleTechnicians(order, batchSize, order.requestedTechnicianId, isEmergency)
-          : [];
+          : []);
       // "اعتماد" بشركة محدّدة (docs/06 §1.5، docs/07 الجزء أ — كانت فجوة موثّقة صراحة، اتقفلت):
       // أول جولة بس بتحاول تعرض حصريًا على فنيي الشركة المطلوبة. لو محدش مؤهّل متاح فيها، بيرجع
       // فوراً للتوزيع العادي — نفس فلسفة "إعادة الحجز" بالحرف، تفضيل مش ضمان.
-      if (candidates.length === 0 && nextRound === 1 && order.requestedTechnicianCompanyId) {
+      if (!pinnedOnlyCandidates && candidates.length === 0 && nextRound === 1 && order.requestedTechnicianCompanyId) {
         candidates = await this.findEligibleTechnicians(
           order,
           batchSize,
@@ -695,7 +750,7 @@ export class MatchingService {
           order.requestedTechnicianCompanyId,
         );
       }
-      if (candidates.length === 0) {
+      if (!pinnedOnlyCandidates && candidates.length === 0) {
         candidates = await this.findEligibleTechnicians(order, batchSize, null, isEmergency);
       }
       // ADR-0017 بند 10 — Fallback توسيع النطاق: لو نضبت قايمة الفنيين "المثاليين" (مؤهلين
@@ -703,7 +758,7 @@ export class MatchingService {
       // الخدمة/المنطقة لكن مشغولين حاليًا بطلب تاني — أفضل من طلب عالق بلا أي محاولة، وأفضل من
       // بث عشوائي لفني مش متخصص. مقصورة على طلبات ASAP (الاستبعاد بتاعها هو "مشغول دلوقتي" —
       // الطلبات المجدولة أصلاً بتتعارض بس مع تداخل زمني حقيقي، توسيعها هيسمح بحجز مزدوج فعلي).
-      if (candidates.length === 0 && !order.scheduledAt && !isEmergency) {
+      if (!pinnedOnlyCandidates && candidates.length === 0 && !order.scheduledAt && !isEmergency) {
         const broadenAfterRound = await this.settingsService.getNumber(
           'matching.broaden_to_busy_after_round',
           BROADEN_TO_BUSY_AFTER_ROUND_FALLBACK,
@@ -1186,11 +1241,12 @@ export class MatchingService {
       `
       SELECT oa.id AS assignment_id, o.id AS order_id, o.order_number, s.name_ar AS service_name_ar,
              o.problem_description, a.street_name, a.landmark, oa.distance_km, oa.expires_at,
-             o.booking_mode, o.scheduled_at
+             o.booking_mode, o.scheduled_at, o.order_type, parent.order_number AS original_order_number
       FROM order_assignments oa
       JOIN orders o ON o.id = oa.order_id
       JOIN services s ON s.id = o.service_id
       JOIN addresses a ON a.id = o.address_id
+      LEFT JOIN orders parent ON parent.id = o.parent_order_id
       -- 'viewed' لازم تفضل في القايمة: العرض بيتعلّم viewed تحت بمجرد ما الجهاز يسحبه (docs/08
       -- §72)، فلو الفلتر 'sent' بس القايمة كانت هتفضى من أول سحب والفني ما يشوفش شغله خالص.
       WHERE oa.technician_id = $1 AND oa.assignment_status IN ('sent', 'viewed')
@@ -1363,6 +1419,13 @@ export class MatchingService {
         ORDER_OFFER_RESOLVED_EVENT,
         new OrderOfferResolvedEvent(assignment.id, orderId, order.orderNumber, profile.id, 'rejected'),
       );
+    }
+
+    // ADR-0051 — رفض الفني الأصلي لإعادة زيارة مثبّتة **ما بيعيدش البث تلقائيًا** (بعكس أي
+    // رفض عادي): الطلب بيفضل مربوط بيه وبيظهر عند الأدمن كبند محتاج تصرّف، لأن التحرير وراه
+    // خصم مالي على فني حقيقي فمينفعش يتاخد تلقائيًا.
+    if (order && isRevisitPinActive(order)) {
+      return;
     }
 
     const remaining = await this.assignments.count({

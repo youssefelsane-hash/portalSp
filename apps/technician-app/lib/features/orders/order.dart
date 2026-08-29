@@ -33,6 +33,12 @@ class CrewStatus {
   final int missingAssistants;
   final bool crewComplete;
 
+  /// ADR-0052 (docs/08 §97) — خانة المساعد الاختياري للشغلانة الفردية. **منفصلة تمامًا** عن
+  /// حقول النقص فوق: الاختياري عمره ما يبقى "نقص"، فمالوش أي علاقة بكارت "الطاقم مش مكتمل".
+  /// افتراضي صفر عشان أي نسخة API أقدم مش بتبعتهم تفضل شغّالة زي ما هي.
+  final int optionalAssistantsAdded;
+  final int optionalAssistantSlots;
+
   CrewStatus({
     required this.requiredTechnicians,
     required this.requiredAssistants,
@@ -41,6 +47,8 @@ class CrewStatus {
     required this.missingTechnicians,
     required this.missingAssistants,
     required this.crewComplete,
+    this.optionalAssistantsAdded = 0,
+    this.optionalAssistantSlots = 0,
   });
 
   factory CrewStatus.fromJson(Map<String, dynamic> json) => CrewStatus(
@@ -51,6 +59,8 @@ class CrewStatus {
         missingTechnicians: json['missingTechnicians'] as int,
         missingAssistants: json['missingAssistants'] as int,
         crewComplete: json['crewComplete'] as bool,
+        optionalAssistantsAdded: (json['optionalAssistantsAdded'] as int?) ?? 0,
+        optionalAssistantSlots: (json['optionalAssistantSlots'] as int?) ?? 0,
       );
 }
 
@@ -111,6 +121,9 @@ class Order {
   // الفني هنا رغم إن الشاشة محتاجاها لعرض "طاقم الطلب".
   final String bookingMode;
   final int? requiredTechnicians;
+  // ADR-0052 (docs/08 §97) — محتاجينه عشان الشاشة تعرف **من غير نداء زيادة** إن دي شغلانة فردية
+  // (فرد واحد + صفر مساعدين مطلوبين) فتجيب تفاصيلها الكاملة وتعرض خانة المساعد الاختياري.
+  final int? requiredAssistants;
   // "الشغل المؤكّد قدامي" (docs/08 §165) — null يعني ASAP (اتقبل كطلب فوري، مش مجدول لتاريخ لاحق).
   final String? scheduledAt;
   // تكوين الطاقم (docs/08 §35، ADR-0021 §1) — موجود بس لقائد الطلب على booking_mode='team'
@@ -146,6 +159,7 @@ class Order {
     required this.paymentStatus,
     required this.bookingMode,
     this.requiredTechnicians,
+    this.requiredAssistants,
     this.address,
     this.scheduledAt,
     this.crewStatus,
@@ -173,6 +187,7 @@ class Order {
         paymentStatus: json['payment_status'] as String,
         bookingMode: json['booking_mode'] as String? ?? 'individual',
         requiredTechnicians: json['required_technicians'] as int?,
+        requiredAssistants: json['required_assistants'] as int?,
         address: json['address'] != null
             ? OrderAddress.fromJson(json['address'] as Map<String, dynamic>)
             : null,

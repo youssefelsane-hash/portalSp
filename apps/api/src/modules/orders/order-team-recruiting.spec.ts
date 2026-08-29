@@ -26,7 +26,7 @@ import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 // classifyTechnicianCapacity() الحقيقيين — الفني "unavailableProfile" هنا بقى ممثّل بحظر يوم صريح
 // (technician_schedule_slots) بدل is_available=false، عشان يعكس الأهلية الحقيقية. (2)
 // getShortageForOrder() بقت getCrewComposition() — فني/مساعد منفصلين.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 describe('OrderTeamService — تجنيد فريق ذاتي من الفني القائد (docs/08 §31/§35)', () => {
   let dataSource: DataSource;

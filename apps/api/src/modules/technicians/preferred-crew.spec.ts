@@ -14,7 +14,7 @@ import { PreferredCrewService } from './preferred-crew.service';
 // اختبار حي ضد Postgres حقيقي — الفريق المفضّل (docs/08 §36.16، ADR-0022). شبكة تفضيل نظير-لنظير
 // دائمة، اتجاه واحد بس (owner→member)، صفر موافقة أدمن — منفصلة تمامًا عن order_team_members/
 // technician_companies/assistant_link_status.
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 // حدث invite()/accept() (docs/08 §36.19) — real emitter بسيط كفاية هنا، صفر أثر جانبي حقيقي
 // (مفيش مستمع مسجّل في اختبار وحدة الخدمة ده، الاستماع الفعلي في notifications module).
 const eventsStub = new EventEmitter2();

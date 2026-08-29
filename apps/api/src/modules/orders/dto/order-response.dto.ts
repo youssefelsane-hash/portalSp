@@ -73,6 +73,13 @@ export interface OrderResponseDto {
   warranty_expires_at: string | null;
   /** موجود بس لو الطلب "إعادة زيارة" (order_type=revisit) — بيشاور على الطلب الأصلي (عمود parent_order_id داخليًا). */
   original_order_id: string | null;
+
+  // ADR-0051 (docs/08 §96) — حالة تثبيت إعادة الزيارة على الفني الأصلي. الأدمن محتاج يشوف إن
+  // الطلب إعادة زيارة **ورايح لمين** بالظبط، وهل اتحرّر للتوزيع العام ولا لسه.
+  revisit_pinned_technician_id: string | null;
+  revisit_pinned_at: string | null;
+  revisit_released_at: string | null;
+  revisit_release_reason: string | null;
   /** موجود بس لو الطلب استخدم كود عمارة (docs/08 §13). */
   building_id: string | null;
   /** موجود بس لو الطلب اتولّد تلقائيًا من خطة حجز متكرر (migration 0124) — بيشاور على الخطة
@@ -188,6 +195,10 @@ export function toOrderResponseDto(
     created_at: order.createdAt.toISOString(),
     warranty_expires_at: order.warrantyExpiresAt ? order.warrantyExpiresAt.toISOString() : null,
     original_order_id: order.parentOrderId,
+    revisit_pinned_technician_id: order.revisitPinnedTechnicianId,
+    revisit_pinned_at: order.revisitPinnedAt ? order.revisitPinnedAt.toISOString() : null,
+    revisit_released_at: order.revisitReleasedAt ? order.revisitReleasedAt.toISOString() : null,
+    revisit_release_reason: order.revisitReleaseReason,
     building_id: order.buildingId,
     recurring_template_id: order.recurringTemplateId,
     recurring_occurrence_at: order.recurringOccurrenceAt ? order.recurringOccurrenceAt.toISOString() : null,

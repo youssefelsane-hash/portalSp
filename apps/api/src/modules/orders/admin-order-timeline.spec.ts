@@ -132,7 +132,8 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
       { record: async () => undefined } as unknown as AuditLogService,
       {} as never, // pricingEngineService
       {} as never, // promoCodesService
-      {} as never, // settingsService (docs/08 §35) — مش متنادى (الاختبار ده بيمتحن getTimeline() بس)
+      {} as never, // settingsService (docs/08 §35) — مش متنادى (الاختبار ده بيمتحن getTimeline() بس),
+      {} as never, // walletsService (ADR-0051) — مش متنادى هنا
     );
   });
 

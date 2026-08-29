@@ -4,7 +4,7 @@ import { SettingsService } from '../settings/settings.service';
 import { OrderStatus } from '../orders/entities/order.entity';
 import { AdminCoverageIntelligenceService } from './admin-coverage-intelligence.service';
 
-const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback } as unknown as SettingsService;
+const settingsServiceStub = { getNumber: async (_key: string, fallback: number) => fallback, getBoolean: async (_key: string, fallback: boolean) => fallback } as unknown as SettingsService;
 
 // اختبار حي — ذكاء تغطية القوى العاملة (docs/08 §36.10). كل صف بيتحقّق ضد Postgres حقيقي —
 // عرض (تصنيف قدرة حقيقي) وطلب (dispatch pending حقيقي) لكل زوج (منطقة، فئة).

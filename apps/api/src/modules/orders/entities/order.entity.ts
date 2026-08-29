@@ -30,6 +30,9 @@ export enum OrderStatus {
   AWAITING_TECHNICIAN_RESELECTION = 'awaiting_technician_reselection',
 }
 
+// ADR-0051 — أسباب تحرير إعادة زيارة مثبّتة (مطابقة لـchk_orders_revisit_release_reason).
+export type RevisitReleaseReason = 'refused' | 'no_response' | 'admin';
+
 export enum OrderType {
   STANDARD = 'standard',
   EMERGENCY = 'emergency',
@@ -320,6 +323,21 @@ export class Order {
   // الـ API/DTOs بره الكلاس ده "original_order_id" (أوضح دلالياً للعميل).
   @Column({ name: 'parent_order_id', type: 'uuid', nullable: true })
   parentOrderId: string | null;
+
+  // ADR-0051 — تثبيت صارم لإعادة الزيارة على الفني الأصلي. مقصود إنه عمود منفصل عن
+  // requestedTechnicianId: ده التزام (مفيش fallback، مفيش بث لحد تاني)، وده تفضيل بيتجاهَل بأمان.
+  @Column({ name: 'revisit_pinned_technician_id', type: 'uuid', nullable: true })
+  revisitPinnedTechnicianId: string | null;
+
+  @Column({ name: 'revisit_pinned_at', type: 'timestamptz', nullable: true })
+  revisitPinnedAt: Date | null;
+
+  // حارس الخصم — طالما اتملى، التحرير (وخصم الفني معاه) حصل خلاص ومستحيل يتكرر.
+  @Column({ name: 'revisit_released_at', type: 'timestamptz', nullable: true })
+  revisitReleasedAt: Date | null;
+
+  @Column({ name: 'revisit_release_reason', type: 'varchar', length: 24, nullable: true })
+  revisitReleaseReason: RevisitReleaseReason | null;
 
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
