@@ -2601,22 +2601,31 @@ export class OrdersService {
   // معناها فعليًا شغال دلوقتي أو ASAP، مش "مؤكّد ومستني يوم مستقبلي".
   /**
    * تضييق تاني (docs/08 §56 بند 4، بلاغ مالك 2026-08-25): "الشغل الحالي" لازم يكون **الشغلانة
-   * اللي شغّالة فعلاً** بس، واحدة. الفلتر القديم (`scheduledAt <= now`) كان بيعتبر أي طلب
+   * اللي شغّالة فعلاً** بس. الفلتر القديم (`scheduledAt <= now`) كان بيعتبر أي طلب
    * `accepted` معاده وصل "نشط" — يعني لو الفني عنده شغل النهاردة مقبول وشغل متأخر من إمبارح،
    * `findOne` كان بيرجّع واحد منهم بالعشوائي (`updatedAt DESC`) والتاني **بيختفي من الشاشة
    * تمامًا** (مش في `upcoming` كمان لأنها كانت `MoreThan(now)`). دلوقتي "حالي" = الفني متحرّك
    * فعليًا (`ENGAGED_TECHNICIAN_ORDER_STATUSES`، نفس تعريف "منشغل جسديًا" اللي محرك الأهلية
    * بيستخدمه بالحرف) أو طلب ASAP (بالتعريف دلوقتي حالاً). الباقي بيتوزّع على "قدامك"/"متأخر".
    */
-  async findActiveForTechnician(userId: string): Promise<Order | null> {
+  async findActiveOrdersForTechnician(userId: string): Promise<Order[]> {
     const profile = await this.techniciansService.findByUserIdOrThrow(userId);
-    return this.orders.findOne({
+    return this.orders.find({
       where: [
         { technicianId: profile.id, orderStatus: In(ACTIVE_TECHNICIAN_ORDER_STATUSES), scheduledAt: IsNull() },
         { technicianId: profile.id, orderStatus: In(ENGAGED_TECHNICIAN_ORDER_STATUSES) },
       ],
       order: { updatedAt: 'DESC' },
     });
+  }
+
+  /**
+   * توافق خلفي للنسخ القديمة من تطبيق الفني: المسار القديم بيرجّع طلب واحد فقط. المصدر الحقيقي
+   * بقى القائمة فوق، عشان الطلبات المتزامنة ما تختفيش من النسخ الجديدة.
+   */
+  async findActiveForTechnician(userId: string): Promise<Order | null> {
+    const orders = await this.findActiveOrdersForTechnician(userId);
+    return orders[0] ?? null;
   }
 
   /**
@@ -2660,7 +2669,9 @@ export class OrdersService {
     return this.orders
       .createQueryBuilder('o')
       .where('o.technician_id = :technicianId', { technicianId: profile.id })
-      .andWhere('o.order_status IN (:...statuses)', { statuses: ACTIVE_TECHNICIAN_ORDER_STATUSES })
+      // بمجرد ما الفني يبدأ التحرك، الطلب ينتقل لقسم "الشغل الحالي" حتى لو كان مجدولًا؛ إبقاؤه
+      // هنا كان يعرض نفس الطلب مرتين. القادم المؤكد هو المقبول الذي لم يبدأ تنفيذه فقط.
+      .andWhere('o.order_status = :status', { status: OrderStatus.ACCEPTED })
       .andWhere('o.scheduled_at IS NOT NULL')
       .andWhere(`${OrdersService.CAIRO_DAY_EXPR} >= ${OrdersService.CAIRO_TODAY_EXPR}`)
       .orderBy('o.scheduled_at', 'ASC')

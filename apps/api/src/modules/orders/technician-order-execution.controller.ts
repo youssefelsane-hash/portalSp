@@ -126,6 +126,14 @@ export class TechnicianOrderExecutionController {
     return this.toDtoWithTeamInfo(order, profile.id);
   }
 
+  // النسخة الجمعية هي المصدر الجديد لشاشة الفني. المسار القديم `active` باقٍ كما هو للتوافق مع
+  // أي نسخة تطبيق منشورة ما زالت تتوقع object/null بدل array.
+  @Get('active-orders')
+  async listActive(@CurrentUser() user: JwtPayload) {
+    const orders = await this.ordersService.findActiveOrdersForTechnician(user.sub);
+    return Promise.all(orders.map((order) => this.toDtoAfterAction(order, user.sub)));
+  }
+
   // مسار حرفي (`active`) لازم يتسجّل قبل `:id` — وإلا NestJS هيحاول يفسّرها كـ UUID ويرفضها
   // (ParseUUIDPipe) قبل ما توصل هنا خالص. كانت فجوة موثّقة صراحة في apps/technician-app/README.md:
   // مفيش endpoint يرجّع "الطلب النشط الحالي" من غير ما التطبيق يعرف الـ id مقدماً — يعني لو

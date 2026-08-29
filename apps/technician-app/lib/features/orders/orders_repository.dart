@@ -60,6 +60,15 @@ class OrdersRepository {
     return data == null ? null : Order.fromJson(data);
   }
 
+  // المصدر الجديد للشاشة الرئيسية: النظام يسمح بأكثر من شغل جارٍ في بعض السيناريوهات
+  // (مثل طلب طوارئ بجانب طلب قائم)، لذلك لازم نعرضهم كلهم بدل اختيار واحد وإخفاء الباقي.
+  Future<List<Order>> fetchActiveOrders() async {
+    final items = await authRepository.authedRequestList(
+      '/technician/orders/active-orders',
+    );
+    return items.map(Order.fromJson).toList();
+  }
+
   // "الشغل المؤكّد قدامي" (docs/08 §165) — طلبات مجدولة مستقبلية اتأكّدت تلقائيًا (بلا قرار
   // قبول/رفض من الفني — الفرق الجوهري بين طلب مجدول بعيد وطلب قريب في fetchAvailable() فوق).
   Future<List<Order>> fetchUpcomingConfirmed() async {
