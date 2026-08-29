@@ -32,6 +32,7 @@ import { NotificationRoutingService } from '../notifications/notification-routin
 import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { Wallet, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
+import { ACTIVE_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 export interface TokenPair {
   access_token: string;
@@ -588,8 +589,120 @@ export class AuthService {
         HttpStatus.CONFLICT,
       );
     }
+
+    // ADR-0053 — حارس تاني: مينفعش حد ينسحب في نص شغلانة شغالة. الطرف التاني (فني أو عميل)
+    // بيبقى واقف في نص عملية مالية مفتوحة، والطلب بيتحوّل لسجل بلا صاحب.
+    const [{ active_count: activeCount }] = await this.users.manager.query<Array<{ active_count: string }>>(
+      `SELECT COUNT(*)::text AS active_count
+         FROM orders o
+         LEFT JOIN customer_profiles cp ON cp.id = o.customer_id
+         LEFT JOIN technician_profiles tp ON tp.id = o.technician_id
+        WHERE o.deleted_at IS NULL
+          AND o.order_status = ANY($2::order_status[])
+          AND (cp.user_id = $1 OR tp.user_id = $1)`,
+      [userId, ACTIVE_TECHNICIAN_ORDER_STATUSES],
+    );
+    if (Number(activeCount) > 0) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مينفعش تحذف حسابك وعندك طلب لسه شغال — استنى الطلب يخلص الأول، أو كلّم الدعم',
+        HttpStatus.CONFLICT,
+      );
+    }
+
     await this.revokeAllUserTokens(userId, 'account_deletion');
-    await this.users.update(userId, { isActive: false });
-    await this.users.softDelete(userId);
+    await this.anonymizeUserData(userId);
+  }
+
+  /**
+   * ADR-0053 (بوابة P0-1 في docs/23) — الحذف الحقيقي: إخفاء هوية فعلي، مش تعطيل صامت.
+   *
+   * **ليه مش `DELETE` صريح؟** `users.id` مرجوع إليه من عشرات الجداول، فيها سجلات مالية بتخص
+   * **أطراف تانية** (`orders`/`payments`/`wallet_transactions`)، ودفتر `wallet_transactions`
+   * نفسه ممنوع عليه `UPDATE`/`DELETE` على مستوى الداتابيز. حذف الصف كان هيكسر حسابات ناس تانية
+   * أو يمسح تاريخ مالي القانون بيفرض حفظه. الحل: الشخص يختفي، والدفتر يفضل متماسك بهوية مفصولة.
+   *
+   * كله في transaction واحدة — مفيش حساب نُصّه منضَّف لو أي خطوة فشلت.
+   */
+  private async anonymizeUserData(userId: string): Promise<void> {
+    await this.users.manager.transaction(async (manager) => {
+      // خطوة واحدة عمدًا: الفهارس الفريدة على users **جزئية** (WHERE deleted_at IS NULL). لو
+      // phone_number اتحط 'DELETED' قبل ما deleted_at يتسجّل، الصف بيفضل داخل الفهرس فتاني
+      // حساب يتحذف بيصطدم بالأول. الجملة الواحدة بتقفل النافذة دي تمامًا.
+      await manager.query(
+        `UPDATE users
+            SET full_name = 'مستخدم محذوف',
+                phone_number = 'DELETED',
+                email = NULL,
+                avatar_url = NULL,
+                avatar_storage_key = NULL,
+                password_hash = NULL,
+                last_login_ip = NULL,
+                referral_code = NULL,
+                metadata = '{}'::jsonb,
+                is_active = false,
+                deleted_at = now(),
+                updated_at = now()
+          WHERE id = $1 AND deleted_at IS NULL`,
+        [userId],
+      );
+
+      // العناوين: النص كله بيتنضّف، والإحداثيات **بتتخشّن** مش بتتشال (location عمود NOT NULL،
+      // والطلبات القديمة محتاجة تفضل مربوطة بمنطقة للتقارير). خانتين عشريتين ≈ 1.1 كم — النقطة
+      // بقت تقول "حي" مش "بيت"، وده الفرق اللي بيهم. الاحتفاظ بدقة المتر كان هيخلي كل الباقي
+      // بلا معنى: إحداثيات منزل بدقة متر هي بيانات شخصية مهما شِلنا أسماء.
+      await manager.query(
+        `UPDATE addresses
+            SET street_name = 'عنوان محذوف',
+                label = NULL,
+                building_number = NULL,
+                floor_number = NULL,
+                apartment_number = NULL,
+                landmark = NULL,
+                contact_name = NULL,
+                contact_phone = NULL,
+                delivery_notes = NULL,
+                location = ST_SetSRID(
+                  ST_MakePoint(
+                    ROUND(ST_X(location::geometry)::numeric, 2)::double precision,
+                    ROUND(ST_Y(location::geometry)::numeric, 2)::double precision
+                  ), 4326)::geography,
+                updated_at = now()
+          WHERE user_id = $1`,
+        [userId],
+      );
+
+      // أجهزة الإشعارات: حذف فعلي. مفيش أي سبب مالي أو قانوني للاحتفاظ بـFCM token لحد انسحب،
+      // والاحتفاظ بيه معناه إشعارات ممكن توصله بعد الحذف.
+      await manager.query(`DELETE FROM user_devices WHERE user_id = $1`, [userId]);
+
+      await manager.query(
+        `UPDATE payment_methods pm
+            SET is_revoked = true,
+                revoked_at = COALESCE(pm.revoked_at, now()),
+                provider_token = '',
+                masked_pan = NULL,
+                card_brand = NULL,
+                updated_at = now()
+           FROM customer_profiles cp
+          WHERE cp.id = pm.customer_id AND cp.user_id = $1`,
+        [userId],
+      );
+
+      // أخطر بيان شخصي في النظام — الرقم القومي المشفَّر، ومعاه المستندات المرفوعة.
+      await manager.query(
+        `UPDATE technician_profiles
+            SET national_id_encrypted = NULL, updated_at = now()
+          WHERE user_id = $1`,
+        [userId],
+      );
+      await manager.query(
+        `UPDATE technician_documents td
+            SET file_url = '', deleted_at = COALESCE(td.deleted_at, now()), updated_at = now()
+           FROM technician_profiles tp
+          WHERE tp.id = td.technician_id AND tp.user_id = $1`,
+        [userId],
+      );
+    });
   }
 }
