@@ -9,17 +9,33 @@ import { fetchLogo } from '@/lib/settings';
 // هبوط. رابط واحد لكل نقطة دخول رئيسية (طلباتي/حسابي)، بلا قوائم متداخلة (§53: "Do not make
 // customer navigate through 6 settings menus").
 export function SiteHeader() {
-  const { isAuthenticated, user, logout, isLoading } = useAuth();
+  const { isAuthenticated, user, logout, isLoading, authedFetch } = useAuth();
   // اللوجو الحقيقي (docs/08 §84 جزء أ) — كان نص "أسطى" ثابت بس، صفر صورة لوجو خالص. لو الأدمن رفع
   // لوجو حقيقي (is_default=false) بيتعرض كصورة، وإلا نص الاسم زي ما كان (نفس فلسفة fallback
   // الـhero الموجودة أصلاً في الصفحة الرئيسية).
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  // عدّاد الإشعارات غير المقروءة (docs/08 §101) — التطبيق بيعرضه والويب مكانش، فمستخدم الويب
+  // مكانش يعرف أصلاً إن فيه إشعارات مستنياه. فشل الجلب بيتجاهَل بصمت — الهيدر لازم يفضل شغال.
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     fetchLogo()
       .then((asset) => setLogoUrl(asset.is_default ? null : asset.url))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    authedFetch<{ unread_count: number }>('/notifications/unread-count')
+      .then((result) => {
+        if (!cancelled) setUnreadCount(result.unread_count ?? 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, authedFetch]);
 
   return (
     <header className="border-b border-border bg-surface sticky top-0 z-40">
@@ -37,6 +53,14 @@ export function SiteHeader() {
             <>
               <Link href="/orders" className="hover:text-primary">
                 طلباتي
+              </Link>
+              <Link href="/account/notifications" className="relative hover:text-primary">
+                الإشعارات
+                {unreadCount > 0 && (
+                  <span className="absolute -top-2 -start-3 rounded-full bg-danger px-1.5 text-xs text-primary-foreground">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </Link>
               <Link href="/account" className="hover:text-primary">
                 {user?.full_name ?? 'حسابي'}
