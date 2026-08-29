@@ -27,9 +27,8 @@ export interface TechnicianStatementJob {
   participantRole: 'leader' | 'team_member' | 'assistant';
   /**
    * لو الطلب اتسترد (كليًا أو جزئيًا)، الجزء اللي اتخصم فعليًا من محفظة الفني رجوعًا للمنصة
-   * (نفس معادلة `refundOrder()` بالحرف — `payments.service.ts`) — بيبان صراحةً هنا عشان الكشف
-   * يطابق المحفظة تمامًا، مش يفاجئ الفني برقم مختلف. **بيتطبّق على القائد بس** لأن الاسترداد
-   * الفعلي بيتعكس من محفظة القائد وحده (نفس سلوك المحفظة الحقيقي، مش قرار جديد هنا).
+   * من قيود `wallet_transactions` نفسها. بيبان صراحةً عشان الكشف يطابق المحفظة تمامًا، سواء كان
+   * الفني قائدًا أو عضو فريق أو مساعدًا.
    */
   refundReversalCents: number;
   /** نصيب الفني قبل مقاصة الكاش والاستردادات. */
@@ -223,6 +222,7 @@ export class TechnicianEarningsService {
         technician_earning_cents: number;
         participant_role: 'leader' | 'team_member' | 'assistant';
         my_share_cents: number;
+        refund_reversal_cents: string;
         total_refunded_cents: string;
         cash_collected_cents: string;
         additional_work_cents: string;
@@ -234,6 +234,16 @@ export class TechnicianEarningsService {
               o.platform_commission_cents, o.technician_earning_cents,
               COALESCE(oes.participant_role, 'leader') AS participant_role,
               COALESCE(oes.share_cents, CASE WHEN o.technician_id = $1 THEN o.technician_earning_cents ELSE 0 END) AS my_share_cents,
+              COALESCE((
+                SELECT SUM(wt.amount_cents)
+                FROM refunds r
+                JOIN wallet_transactions wt
+                  ON wt.reference_type = 'refund' AND wt.reference_id = r.id
+                 AND wt.transaction_type = 'refund' AND wt.direction = 'debit'
+                JOIN wallets refund_wallet ON refund_wallet.id = wt.wallet_id
+                JOIN technician_profiles refund_tech ON refund_tech.user_id = refund_wallet.owner_user_id
+                WHERE r.order_id = o.id AND r.refund_status = 'completed' AND refund_tech.id = $1
+              ), 0)::text AS refund_reversal_cents,
               COALESCE((
                 SELECT SUM(r.amount_cents) FROM refunds r
                 WHERE r.order_id = o.id AND r.refund_status = 'completed'
@@ -267,16 +277,19 @@ export class TechnicianEarningsService {
       const additionalWorkCents = Number(row.additional_work_cents);
       const levelPremiumCents = Number(row.level_premium_cents);
       const myShareCents = Number(row.my_share_cents);
+      const actualRefundReversalCents = Number(row.refund_reversal_cents);
       const totalRefundedCents = Number(row.total_refunded_cents);
       const cashCollectedCents = Number(row.cash_collected_cents);
       const totalAmountCents = Number(row.total_amount_cents);
-      const technicianEarningCents = Number(row.technician_earning_cents);
-      // نفس معادلة `refundOrder()` بالحرف (`payments.service.ts:2578-2580`) — بتتطبّق بس لو
-      // القائد، لأن ده اللي فعليًا بيتعكس من محفظته وقت الاسترداد. عضو الطاقم محفظته ما بتتلمسش.
+      // الطلبات القديمة وبعض fixtures سبقت ربط عكس الاسترداد بقيود كل فرد. نفضّل دفتر
+      // المحفظة دائمًا؛ ولو مفيش قيد تاريخي خالص، نستخدم معادلة القائد القديمة فقط حتى لا يختفي
+      // دين معروف من كشف قديم. أعضاء الطاقم لا يُخترع لهم خصم بلا قيد فعلي.
       const refundReversalCents =
-        row.participant_role === 'leader' && totalRefundedCents > 0 && totalAmountCents > 0
-          ? Math.round((technicianEarningCents * totalRefundedCents) / totalAmountCents)
-          : 0;
+        actualRefundReversalCents > 0
+          ? actualRefundReversalCents
+          : row.participant_role === 'leader' && totalRefundedCents > 0 && totalAmountCents > 0
+            ? Math.round((Number(row.technician_earning_cents) * totalRefundedCents) / totalAmountCents)
+            : 0;
       return {
         orderId: row.order_id,
         orderNumber: row.order_number,
@@ -357,6 +370,11 @@ export class TechnicianEarningsService {
          WHERE (oes.technician_id IS NOT NULL OR (oes.id IS NULL AND o.technician_id = (SELECT technician_id FROM tech)))
            AND o.closed_at IS NOT NULL AND o.deleted_at IS NULL
            AND to_char((o.closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') = $2
+       ),
+       month_refunds AS (
+         SELECT r.id FROM refunds r
+         JOIN month_orders mo ON mo.id = r.order_id
+         WHERE r.refund_status = 'completed'
        )
        SELECT
          (SELECT balance_cents FROM w)::text AS current_balance_cents,
@@ -364,8 +382,11 @@ export class TechnicianEarningsService {
            SELECT SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END)
            FROM wallet_transactions wt
            WHERE wt.wallet_id = (SELECT id FROM w)
-             AND wt.reference_type = 'order'
-             AND wt.reference_id IN (SELECT id FROM month_orders)
+             AND (
+               (wt.reference_type = 'order' AND wt.reference_id IN (SELECT id FROM month_orders))
+               OR
+               (wt.reference_type = 'refund' AND wt.reference_id IN (SELECT id FROM month_refunds))
+             )
          ), 0)::text AS month_ledger_cents`,
       [technicianProfileId, month],
     );
@@ -385,6 +406,11 @@ export class TechnicianEarningsService {
          WHERE (oes.technician_id IS NOT NULL OR (oes.id IS NULL AND o.technician_id = (SELECT technician_id FROM tech)))
            AND o.closed_at IS NOT NULL AND o.deleted_at IS NULL
            AND to_char((o.closed_at AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM') = $2
+       ),
+       month_refunds AS (
+         SELECT r.id FROM refunds r
+         JOIN month_orders mo ON mo.id = r.order_id
+         WHERE r.refund_status = 'completed'
        )
        SELECT wt.transaction_type,
               SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END)::text AS amount_cents
@@ -393,7 +419,11 @@ export class TechnicianEarningsService {
          -- IS NOT TRUE مش NOT (...): أغلب الحركات اللي بندوّر عليها هنا (تسوية، سداد مديونية،
          -- مكافأة) عمود reference_type بتاعها NULL، و NOT (NULL = 'order' AND ...) بيتقيّم لـNULL
          -- في SQL فالصف بيتشال من النتيجة بصمت. البَقّة دي اتلقطت باختبار حي.
-         AND (wt.reference_type = 'order' AND wt.reference_id IN (SELECT id FROM month_orders)) IS NOT TRUE
+         AND (
+           (wt.reference_type = 'order' AND wt.reference_id IN (SELECT id FROM month_orders))
+           OR
+           (wt.reference_type = 'refund' AND wt.reference_id IN (SELECT id FROM month_refunds))
+         ) IS NOT TRUE
        GROUP BY wt.transaction_type
        HAVING SUM(CASE WHEN wt.direction = 'credit' THEN wt.amount_cents ELSE -wt.amount_cents END) <> 0
        ORDER BY 2 DESC`,

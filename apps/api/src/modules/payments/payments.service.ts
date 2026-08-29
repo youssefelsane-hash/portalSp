@@ -58,6 +58,7 @@ import {
 import { CrewEarningsService } from './crew-earnings.service';
 import { splitOrderRevenue } from '../pricing/commission-base';
 import { splitCrewEarnings } from './crew-earning-split';
+import { allocateCrewRefundReversal } from './crew-refund-allocation';
 
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
 export interface TechnicianMoneyView {
@@ -2688,33 +2689,62 @@ export class PaymentsService {
         return lockedRefund;
       }
 
-      // عكس أرباح الفني يُوزَّع على إجمالي الطلب، لا على الدفعـة المحددة: دفعة العمل الإضافي
-      // قد تكون أصغر من قيمة الطلب، والقسمة على payment.amountCents كانت تعكس أرباح الطلب كله
-      // عند استرداد تلك الدفعة وحدها.
-      const technicianReversalCents = Math.round(
-        (lockedOrder.technicianEarningCents * amountCents) / lockedOrder.totalAmountCents,
-      );
-      if (technicianReversalCents > 0 && lockedOrder.technicianId) {
-        const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(lockedOrder.technicianId);
-        const technicianWallet = await this.walletsService.getOrCreateWallet(
-          technicianProfile.userId,
-          WalletOwnerType.TECHNICIAN,
-        );
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+      // الاسترداد بيتحمّله كل شخص أخذ نصيبًا من الطلب، مش قائد الطلب وحده. الحسبة مبنية على
+      // `order_earning_shares` نفسها (مصدر حقيقة التسوية)، وعلى إجمالي الاستردادات المكتملة قبل
+      // الصف الحالي. استخدام الإجمالي التراكمي يمنع انحراف التقريب مع عدة استردادات جزئية؛ عند
+      // اكتمال استرداد الطلب يكون مجموع ما رجع من كل فرد مساويًا لنصيبه الأصلي لآخر قرش.
+      if (lockedOrder.technicianEarningCents > 0 && lockedOrder.technicianId && lockedOrder.totalAmountCents > 0) {
+        const previousRefundRows = await manager.find(Refund, {
+          where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
+          select: ['amountCents'],
+        });
+        const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
+        const recordedShares = await this.crewEarningsService.listForOrder(manager, lockedOrder.id);
+        const sourceShares =
+          recordedShares.length > 0
+            ? recordedShares.map((share) => ({
+                technicianId: share.technicianId,
+                participantRole: share.participantRole,
+                shareCents: share.shareCents,
+              }))
+            : [
+                {
+                  technicianId: lockedOrder.technicianId,
+                  participantRole: 'leader' as const,
+                  shareCents: lockedOrder.technicianEarningCents,
+                },
+              ];
+        const reversals = allocateCrewRefundReversal({
+          grossPoolCents: lockedOrder.technicianEarningCents,
+          orderTotalCents: lockedOrder.totalAmountCents,
+          previouslyRefundedCents,
+          currentRefundCents: amountCents,
+          shares: sourceShares,
+        });
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
-        await this.walletsService.doubleEntry(
-          {
-            fromWalletId: technicianWallet.id,
-            toWalletId: platformWallet.id,
-            amountCents: technicianReversalCents,
-            transactionType: WalletTxType.REFUND,
-            referenceType: 'refund',
-            referenceId: lockedRefund.id,
-            descriptionAr: `استرجاع أرباح طلب ${lockedOrder.orderNumber}`,
-            allowNegativeBalance: true, // ممكن الفني يكون صرف الفلوس دي بالفعل — الدين ده هيتسوّى في الصرف الجاي
-          },
-          manager,
-        );
+        for (const reversal of reversals) {
+          if (reversal.reversalCents <= 0) continue;
+          const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(reversal.technicianId);
+          const technicianWallet = await this.walletsService.getOrCreateWallet(
+            technicianProfile.userId,
+            WalletOwnerType.TECHNICIAN,
+            manager,
+          );
+          await this.walletsService.doubleEntry(
+            {
+              fromWalletId: technicianWallet.id,
+              toWalletId: platformWallet.id,
+              amountCents: reversal.reversalCents,
+              transactionType: WalletTxType.REFUND,
+              referenceType: 'refund',
+              referenceId: lockedRefund.id,
+              descriptionAr: `عكس نصيبك من استرجاع طلب ${lockedOrder.orderNumber}`,
+              allowNegativeBalance: true, // ممكن يكون صرف نصيبه؛ الدين يتسوّى من الحركة التالية.
+            },
+            manager,
+          );
+        }
       }
 
       // wallet credit فعلي للعميل بس لو مفيش استرداد حقيقي حصل عند البوابة (WALLET_CREDIT fallback).
@@ -2725,8 +2755,9 @@ export class PaymentsService {
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
           WalletOwnerType.CUSTOMER,
+          manager,
         );
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
         await this.walletsService.doubleEntry(
           {
@@ -2960,8 +2991,9 @@ export class PaymentsService {
         const customerWallet = await this.walletsService.getOrCreateWallet(
           customerProfile.userId,
           WalletOwnerType.CUSTOMER,
+          manager,
         );
-        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID);
+        const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
         await this.walletsService.doubleEntry(
           {

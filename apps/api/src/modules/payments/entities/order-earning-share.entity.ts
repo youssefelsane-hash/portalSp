@@ -28,6 +28,18 @@ export class OrderEarningShare {
   @Column({ name: 'share_cents', type: 'integer' })
   shareCents: number;
 
+  @Column({ name: 'calculation_method', type: 'varchar', length: 30, default: 'weighted_pool' })
+  calculationMethod: 'weighted_pool' | 'assistant_level_wage';
+
+  @Column({ name: 'assistant_base_wage_cents', type: 'integer', nullable: true })
+  assistantBaseWageCents: number | null;
+
+  @Column({ name: 'assistant_level_multiplier', type: 'numeric', precision: 5, scale: 2, nullable: true })
+  assistantLevelMultiplier: string | null;
+
+  @Column({ name: 'assistant_target_cents', type: 'integer', nullable: true })
+  assistantTargetCents: number | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

@@ -61,6 +61,7 @@ export interface DurationEstimate {
 
 export interface DurationEstimateWithInternalCost extends DurationEstimate {
   internal_labor_cost_cents: number;
+  assistant_daily_wage_cents: number | null;
 }
 
 @Injectable()
@@ -545,6 +546,7 @@ export class CatalogService {
       assigned_technicians: technicians,
       assigned_assistants: assistants,
       internal_labor_cost_cents: internalLaborCostCents,
+      assistant_daily_wage_cents: row.assistantDailyWageCents,
     };
   }
 }

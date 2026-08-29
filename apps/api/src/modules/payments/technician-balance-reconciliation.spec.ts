@@ -107,6 +107,7 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
     try {
       await q(`DELETE FROM wallet_transactions WHERE wallet_id = $1`, [ids.walletId]);
       await q(`DELETE FROM wallets WHERE id = $1`, [ids.walletId]);
+      await q(`DELETE FROM refunds WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1)`, [ids.techProfile]);
       await q(`DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE technician_id = $1)`, [ids.techProfile]);
       await q(`DELETE FROM orders WHERE technician_id = $1`, [ids.techProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = $1`, [ids.techProfile]);
@@ -167,9 +168,9 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
        VALUES ($1,$2,$3,$4,$5,$6,'completed','paid','cash',100000,0,100000,85000,15000,15,0,0,$7,$7) RETURNING id`,
       [`REC${runId}`.slice(0, 24), ids.customerProfile, ids.techProfile, ids.service, ids.address, ids.zone, `${MONTH}-10T09:00:00Z`],
     );
-    await q(
+    const [payment] = await q(
       `INSERT INTO payments (payment_number, order_id, customer_id, amount_cents, payment_method, payment_status, idempotency_key, completed_at)
-       VALUES ($1,$2,$3,100000,'cash','succeeded',$4,now())`,
+       VALUES ($1,$2,$3,100000,'cash','succeeded',$4,now()) RETURNING id`,
       [`PREC${runId}`.slice(0, 24), order.id, ids.customerProfile, `rec-${runId}`.slice(0, 80)],
     );
     // حركة المحفظة المقابلة: خصم 1,500 (عمولة الكاش) — مربوطة بالطلب ده.
@@ -195,5 +196,32 @@ describe('TechnicianEarningsService.getBalanceReconciliation() — تفسير ا
     ]);
     // الضمانة النهائية: صافي الشهر + اللي برّه الشهر = الرصيد الحالي بالظبط.
     expect(rec.monthLedgerCents + rec.outsideMonthCents).toBe(rec.currentBalanceCents);
+
+    // استرداد 100 ج.م من الطلب يعكس 85 ج.م من مستحق الفني. حركة المحفظة مرجعها refund.id،
+    // وليست order.id؛ دي كانت الفجوة التي أظهرت إنذارًا كاذبًا في شاشة المالك.
+    const [refund] = await q(
+      `INSERT INTO refunds
+         (refund_number,payment_id,order_id,amount_cents,refund_type,refund_method,refund_status,
+          requested_by_user_id,requested_at,completed_at)
+       VALUES ($1,$2,$3,10000,'partial','wallet_credit','completed',$4,now(),now()) RETURNING id`,
+      [`RREC${runId}`.slice(0, 24), payment.id, order.id, ids.customerUser],
+    );
+    await addWalletTx({
+      direction: 'debit',
+      type: 'refund',
+      amountCents: 8500,
+      referenceType: 'refund',
+      referenceId: refund.id,
+      label: 'refund',
+    });
+
+    const afterRefund = await service.getBalanceReconciliation(ids.techProfile, MONTH);
+    expect(afterRefund.monthNetCents).toBe(-23500);
+    expect(afterRefund.monthLedgerCents).toBe(-23500);
+    expect(afterRefund.monthMatchesLedger).toBe(true);
+    expect(afterRefund.outsideMonthBreakdown).toEqual([
+      { transactionType: 'adjustment', labelAr: 'تسويات وسدادات مديونية', amountCents: 10000 },
+    ]);
+    expect(afterRefund.monthLedgerCents + afterRefund.outsideMonthCents).toBe(afterRefund.currentBalanceCents);
   });
 });

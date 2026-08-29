@@ -10,7 +10,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import { TechniciansService } from '../technicians/technicians.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
 import { User } from '../auth/entities/user.entity';
-import { Order } from './entities/order.entity';
+import { Order, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderTeamService, computeOptionalAssistantSlots, isSoloJob } from './order-team.service';
 
@@ -204,6 +204,14 @@ describe('ADR-0052 — مساعد اختياري واحد للشغلانة ال�
     expect(computeOptionalAssistantSlots(team, 0, { enabled: true, maxPerOrder: 1 })).toBe(0);
     // القفل العام بيلغي الخانة تمامًا.
     expect(computeOptionalAssistantSlots(solo, 0, { enabled: false, maxPerOrder: 1 })).toBe(0);
+    // طلب الضمان مجاني؛ لا يجوز تحويل الخانة الاختيارية إلى شغل بلا أجر لمساعد آخر.
+    expect(
+      computeOptionalAssistantSlots(
+        { ...solo, orderType: OrderType.REVISIT },
+        0,
+        { enabled: true, maxPerOrder: 1 },
+      ),
+    ).toBe(0);
   });
 
   it('الطاقم "مكتمل" والنقص صفر — الاختياري عمره ما يتحسب نقص (مفيش تصعيد ولا كارت أحمر)', async () => {

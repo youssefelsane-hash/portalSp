@@ -22,7 +22,7 @@ export class TechnicianKpiController {
   @Get()
   async getMySummary(@CurrentUser() user: JwtPayload) {
     const profile = await this.techniciansService.findByUserIdOrThrow(user.sub);
-    const { latest, history } = await this.kpiService.getTechnicianSummary(profile.id);
+    const { latest, history } = await this.kpiService.getTechnicianSummary(profile.id, true);
     const exposeNotes = await this.settings.getBoolean('kpi.expose_approval_notes_to_technician', false);
     return {
       latest: latest ? toTechnicianKpiSnapshotResponseDto(latest, { includeApprovalNotes: exposeNotes }) : null,

@@ -1509,7 +1509,7 @@ export default function OrderDetailPage() {
                         <TableRow>
                           <TableHead>الفرد</TableHead>
                           <TableHead>الدور</TableHead>
-                          <TableHead>المستوى / الوزن</TableHead>
+                          <TableHead>المستوى / طريقة الحساب</TableHead>
                           <TableHead>المستحق</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1523,8 +1523,20 @@ export default function OrderDetailPage() {
                             </TableCell>
                             <TableCell>{EARNING_SHARE_ROLE_LABELS[share.participant_role]}</TableCell>
                             <TableCell>
-                              {(LEVEL_LABELS as Record<string, string>)[share.technician_level] ?? share.technician_level} ·{' '}
-                              {Number(share.share_weight).toLocaleString('ar-EG')}
+                              <p>
+                                {(LEVEL_LABELS as Record<string, string>)[share.technician_level] ?? share.technician_level}
+                              </p>
+                              {share.calculation_method === 'assistant_level_wage' ? (
+                                <p className="text-xs text-muted-foreground">
+                                  أساس {formatEgp(share.assistant_base_wage_cents ?? 0)} ×{' '}
+                                  {Number(share.assistant_level_multiplier ?? 1).toLocaleString('ar-EG')} ={' '}
+                                  {formatEgp(share.assistant_target_cents ?? share.share_cents)}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  توزيع بالوزن {Number(share.share_weight).toLocaleString('ar-EG')}
+                                </p>
+                              )}
                             </TableCell>
                             <TableCell className="font-semibold">{formatEgp(share.share_cents)}</TableCell>
                           </TableRow>

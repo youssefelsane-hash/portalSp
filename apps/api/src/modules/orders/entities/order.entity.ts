@@ -210,6 +210,9 @@ export class Order {
   @Column({ name: 'estimated_duration_days', type: 'smallint', nullable: true })
   estimatedDurationDays: number | null;
 
+  @Column({ name: 'assistant_daily_wage_cents_snapshot', type: 'integer', nullable: true })
+  assistantDailyWageCentsSnapshot: number | null;
+
   // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — نفس فلسفة snapshot فوق:
   // الوحدات المطلوبة وقت الحجز (requested_units بتاعة CreateOrderDto)، مخزّنة هنا عشان تُستخدم
   // كـactual_units وقت التقاط observation تلقائي عند إكمال الطلب فعليًا.

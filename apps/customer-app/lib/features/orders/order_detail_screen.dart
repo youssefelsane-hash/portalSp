@@ -512,7 +512,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           title: const Text('طلب إعادة زيارة (ضمان)'),
-          content: const Text('هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل، لو نفس المشكلة رجعت تاني.'),
+          content: const Text(
+            'هيتبعت طلب مجاني بالكامل لنفس الفني اللي نفّذ الشغل. الفني هيتواصل معاك، '
+            'والزيارة هتكون خلال 3 أيام إلى أسبوع علشان يتنسق الموعد بشكل مناسب.',
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('تراجع')),
             FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('تأكيد الطلب')),
@@ -537,7 +540,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: revisitOrder.id)),
         );
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('اتبعت طلب إعادة الزيارة بنجاح ✅')));
+            .showSnackBar(const SnackBar(content: Text('اتبعت إعادة الزيارة — الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع')));
       }
     } on ApiException catch (err) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
@@ -809,7 +812,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                               if (order.originalOrderId != null) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'إعادة زيارة لطلب سابق — مجانية بالكامل',
+                                  'إعادة زيارة لطلب سابق — مجانية بالكامل. الفني هيتواصل معاك والزيارة خلال 3 أيام إلى أسبوع.',
                                   style: TextStyle(color: Theme.of(context).colorScheme.primary),
                                 ),
                               ],

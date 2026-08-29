@@ -18,6 +18,12 @@ export class UpdateTechnicianLevelConfigDto {
   @Max(1000)
   order_priority_weight?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0.1)
+  @Max(3)
+  assistant_earning_multiplier?: number;
+
   // null صريح = بلا حد (الفني يقبل أي قيمة طلب لوحده)، undefined = مفيش تعديل
   @IsOptional()
   @IsInt()

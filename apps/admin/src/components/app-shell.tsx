@@ -92,7 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
         permission: 'technicians.approve',
       },
       { href: '/technician-companies', label: 'شركات/فرق الفنيين', icon: Building2 },
-      { href: '/technician-levels', label: 'سياسة مستويات الفنيين', icon: Star },
+      { href: '/technician-levels', label: 'مستويات الفنيين والمساعدين', icon: Star },
       { href: '/technician-referrals', label: 'ترشيح QR الفني', icon: QrCode },
       { href: '/technician-kpi', label: 'KPI الشهري', icon: BarChart3 },
       { href: '/technician-progression', label: 'المسار الوظيفي', icon: RouteIcon },

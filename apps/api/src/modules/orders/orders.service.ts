@@ -69,6 +69,7 @@ import { CancellationRecoveryAction, TechnicianOrderCancellation } from './entit
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, CUSTOMER_CANCELLABLE_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES, canTransition } from './order-state-machine';
 import { computeDispatchDeferredUntil } from './deferred-dispatch.util';
 import { canAcceptSameDay, isSameDayUrgent, resolveBookingMode } from './booking-mode-resolver';
+import { defaultRevisitScheduledAt } from './revisit-schedule';
 import { PromoCodesService } from '../promotions/promo-codes.service';
 
 const CANCELLATION_FREE_WINDOW_FALLBACK_MINUTES = 5;
@@ -746,6 +747,9 @@ export class OrdersService {
       >("SELECT next_human_readable_number('ORD')");
 
       const now = new Date();
+      // طلب الضمان بيتعرض على الفني الأصلي فورًا من خلال revisit pin، لكن التنفيذ نفسه مش
+      // طوارئ لحظية. السيرفر هو مصدر الحقيقة للموعد حتى لو عميل قديم ما بعتش scheduled_at.
+      const revisitScheduledAt = originalOrder ? defaultRevisitScheduledAt(now) : null;
       const order = manager.create(Order, {
         orderNumber,
         customerId: customerProfile.id,
@@ -775,11 +779,13 @@ export class OrdersService {
         // (تاريخ/وقت السلوت نفسه اللي الفني أعلن عنه، UTC مباشرة زي باقي أوقات المشروع).
         // resolvedScheduledAtIso = dto.scheduled_at الحر، أو أقرب يوم متاح فعليًا داخل النطاق
         // المرن لو dto.scheduled_at_range_end اتبعت (docs/08 §32.3).
-        scheduledAt: scheduleSlot
-          ? new Date(`${scheduleSlot.slotDate}T${scheduleSlot.startTime}Z`)
-          : resolvedScheduledAtIso
-            ? new Date(resolvedScheduledAtIso)
-            : null,
+        scheduledAt: revisitScheduledAt
+          ? revisitScheduledAt
+          : scheduleSlot
+            ? new Date(`${scheduleSlot.slotDate}T${scheduleSlot.startTime}Z`)
+            : resolvedScheduledAtIso
+              ? new Date(resolvedScheduledAtIso)
+              : null,
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true (اتفحصت فوق).
         scheduledEndAt: service.requiresStartAndEnd && dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
         projectId: dto.project_id ?? null,
@@ -822,9 +828,10 @@ export class OrdersService {
         createdByAdminUserId: callCenterContext?.adminUserId ?? null,
         // محرك الإنتاجية (docs/06 §3.3-§3.6) — راجع تعليق durationEstimate فوق.
         standardDataId: durationEstimate ? dto.standard_data_id! : null,
-        requiredTechnicians: durationEstimate?.assigned_technicians ?? formulaCrewTechnicians,
-        requiredAssistants: durationEstimate?.assigned_assistants ?? formulaCrewAssistants,
+        requiredTechnicians: originalOrder ? 1 : (durationEstimate?.assigned_technicians ?? formulaCrewTechnicians),
+        requiredAssistants: originalOrder ? 0 : (durationEstimate?.assigned_assistants ?? formulaCrewAssistants),
         estimatedDurationDays: durationEstimate?.estimated_days ?? formulaDurationDays,
+        assistantDailyWageCentsSnapshot: originalOrder ? null : (durationEstimate?.assistant_daily_wage_cents ?? null),
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
         pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,

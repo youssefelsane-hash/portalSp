@@ -36,6 +36,7 @@ export default function TechnicianKpiPage() {
     if (statusFilter) params.set('status', statusFilter);
     authedFetchPaginated<TechnicianKpiSnapshotResponseDto>(`/admin/technician-kpi?${params.toString()}`)
       .then((res) => {
+        setError(null);
         setSnapshots(res.items);
         setTotal(res.meta.total ?? res.items.length);
       })

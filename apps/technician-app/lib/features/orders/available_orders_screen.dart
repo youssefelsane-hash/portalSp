@@ -7,7 +7,6 @@ import '../../design/app_theme.dart';
 import '../../design/empty_state.dart';
 import '../../design/loading_list.dart';
 import '../academy/academy_screen.dart';
-import '../assistant_offers/assistant_offers_screen.dart';
 import '../earnings/wallet_screen.dart';
 import '../internal_chat/internal_chat_list_screen.dart';
 import '../company/company_screen.dart';
@@ -511,7 +510,8 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
                 onRefresh: _load,
                 // الخطأ بقى **شريط فوق** مش بديل للشاشة (docs/08 §64.أ) — الشغل اللي حمّل بنجاح
                 // لازم يفضل باين وقابل للتنفيذ حتى لو قايمة واحدة فشلت.
-                child: (_orders == null ||
+                child:
+                    (_orders == null ||
                         _upcomingOrders == null ||
                         _activeOrders == null)
                     ? const Padding(
@@ -542,8 +542,12 @@ class _AvailableOrdersScreenState extends State<AvailableOrdersScreen> {
     final crewOpportunities = _crewOpportunities ?? const <CrewOpportunity>[];
     // ADR-0048 §4 — نفس المصدر (`order_assignments`)، نوعين مختلفين. التقسيم هنا مش في الباك-إند
     // عمدًا: الاتنين بيتقبلوا/يترفضوا بنفس الـendpoint بالظبط، الفرق عرضي بحت.
-    final emergencyPending = pending.where((order) => order.isEmergency).toList(growable: false);
-    final scheduledPending = pending.where((order) => !order.isEmergency).toList(growable: false);
+    final emergencyPending = pending
+        .where((order) => order.isEmergency)
+        .toList(growable: false);
+    final scheduledPending = pending
+        .where((order) => !order.isEmergency)
+        .toList(growable: false);
 
     if (!hasActive &&
         pending.isEmpty &&
@@ -1391,13 +1395,6 @@ class _TechnicianDrawer extends StatelessWidget {
                 label: 'جدول مواعيدي',
                 builder: (_) => const ScheduleScreen(),
               ),
-              // مطابقة المساعد التلقائية (ADR-0007) — فرص مساعدة على طلبات فنيين تانيين
-              // (بث تنافسي، أول قبول صحيح ياخدها)، منفصلة عن قايمة "طلباتي المتاحة".
-              _DrawerItem(
-                icon: Icons.handshake_outlined,
-                label: 'فرص المساعدة',
-                builder: (_) => const AssistantOffersScreen(),
-              ),
               _DrawerItem(
                 icon: Icons.video_library_outlined,
                 label: 'معرض أعمالي',
@@ -1488,64 +1485,12 @@ class _TechnicianDrawer extends StatelessWidget {
                   context.read<AuthRepository>().logout();
                 },
               ),
-              const Divider(height: 1),
-              // بوابة P0-1 في docs/23 — مسار حذف الحساب لازم يكون **جوّه التطبيق** كمان، مش
-              // رابط ويب بس. مفصول عن تسجيل الخروج عشان محدش يدوسه بالغلط.
-              ListTile(
-                leading: Icon(
-                  Icons.delete_forever_outlined,
-                  color: Theme.of(context).colorScheme.error,
-                ),
-                title: Text(
-                  'حذف الحساب',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-                subtitle: const Text('حذف نهائي لحسابك وبياناتك الشخصية'),
-                onTap: () => _confirmDeleteAccount(context),
-              ),
               const SizedBox(height: 8),
             ],
           ),
         ),
       ),
     );
-  }
-}
-
-/// تأكيد حذف الحساب (بوابة P0-1 في docs/23، ADR-0053).
-///
-/// الباك-إند بيرفض الحذف لو فيه رصيد محفظة أو طلب لسه شغال، وبيرجّع رسالة عربية بتقول للفني
-/// بالظبط إيه اللي يعمله — بنعرضها زي ما هي بدل ما نخترع رسالة عامة أقل فايدة.
-Future<void> _confirmDeleteAccount(BuildContext context) async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('حذف الحساب نهائيًا؟'),
-      content: const Text(
-        'هيتم حذف اسمك ورقمك وبريدك ومستندات هويتك من النظام، ومش هتقدر ترجع للحساب ده تاني.\n\n'
-        'سجلات الطلبات ومستحقاتك المالية بتتحفظ لمدة يفرضها القانون، بس من غير بياناتك الشخصية.\n\n'
-        'لو عندك رصيد في المحفظة أو طلب لسه شغال، لازم تخلّصهم الأول.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('إلغاء'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(true),
-          style: TextButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
-          child: const Text('احذف حسابي'),
-        ),
-      ],
-    ),
-  );
-  if (confirmed != true || !context.mounted) return;
-
-  try {
-    await context.read<AuthRepository>().deleteAccount();
-  } on ApiException catch (e) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
   }
 }
 
@@ -1622,7 +1567,11 @@ class _NearTermRequestCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.event_note_outlined, size: 16, color: context.infoColor),
+                Icon(
+                  Icons.event_note_outlined,
+                  size: 16,
+                  color: context.infoColor,
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
@@ -1630,30 +1579,46 @@ class _NearTermRequestCard extends StatelessWidget {
                     scheduledAt != null
                         ? 'شغل ${formatScheduledDayAr(scheduledAt)} — محتاج موافقتك'
                         : 'شغل قريب — محتاج موافقتك',
-                    style: TextStyle(fontSize: 12, color: context.infoColor, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.infoColor,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(order.serviceNameAr, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              order.serviceNameAr,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
-            Text('${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}'),
+            Text(
+              '${order.streetName}${order.landmark != null ? ' — ${order.landmark}' : ''}',
+            ),
             Text('على بعد ${order.distanceKm.toStringAsFixed(1)} كم'),
-            if (order.problemDescription != null) Text(order.problemDescription!),
+            if (order.problemDescription != null)
+              Text(order.problemDescription!),
             const SizedBox(height: 6),
             Text(
               'بنسألك بدل ما نعيّنه عليك تلقائي لأن معاده قريب — لازم تكون عارف وموافق.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 8),
             Row(
               children: [
-                FilledButton(onPressed: busy ? null : onAccept, child: const Text('قبول')),
+                FilledButton(
+                  onPressed: busy ? null : onAccept,
+                  child: const Text('قبول'),
+                ),
                 const SizedBox(width: 8),
-                OutlinedButton(onPressed: busy ? null : onReject, child: const Text('رفض')),
+                OutlinedButton(
+                  onPressed: busy ? null : onReject,
+                  child: const Text('رفض'),
+                ),
               ],
             ),
           ],

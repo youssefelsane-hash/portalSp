@@ -21,6 +21,57 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
+interface PricingFieldOption {
+  value: string;
+  label_ar: string;
+}
+
+interface PricingField {
+  id: string;
+  field_key: string;
+  label_ar: string;
+  field_type:
+    | 'number'
+    | 'dropdown'
+    | 'multi_select'
+    | 'checkbox'
+    | 'slider'
+    | 'area'
+    | 'length'
+    | 'volume'
+    | 'date'
+    | 'time'
+    | 'location'
+    | 'image_upload'
+    | 'video_upload'
+    | 'voice_note';
+  is_required: boolean;
+  display_order: number;
+  unit_ar: string | null;
+  options: PricingFieldOption[] | null;
+  min_value: number | null;
+  max_value: number | null;
+  default_value: string | null;
+  is_active: boolean;
+}
+
+function initialFieldValue(field: PricingField): unknown {
+  if (field.field_type === 'checkbox') return field.default_value === 'true';
+  if (field.field_type === 'multi_select') {
+    if (!field.default_value) return [];
+    try {
+      const parsed = JSON.parse(field.default_value);
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  if (['number', 'slider', 'area', 'length', 'volume'].includes(field.field_type)) {
+    return field.default_value === null || field.default_value === '' ? '' : Number(field.default_value);
+  }
+  return field.default_value ?? '';
+}
+
 // Call Center — إنشاء طلب نيابة عن عميل (Script 4 §33-37). كانت فجوة موثّقة صراحة: order_source_channel
 // عنده قيمة 'call_center' من زمان بس orders.service.ts كان بيحط CUSTOMER_APP دايمًا — مفيش مسار
 // حقيقي أصلاً. الصفحة دي بتستخدم نفس محرك التسعير/الجدولة الحقيقي (POST /admin/orders/for-customer
@@ -45,7 +96,10 @@ export default function CreateOrderForCustomerPage() {
 
   const [problemDescription, setProblemDescription] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
-  const [fieldValuesJson, setFieldValuesJson] = useState('{}');
+  const [pricingFields, setPricingFields] = useState<PricingField[]>([]);
+  const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [fieldsError, setFieldsError] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -89,6 +143,8 @@ export default function CreateOrderForCustomerPage() {
   async function selectCategory(categoryId: string) {
     setSelectedCategoryId(categoryId);
     setSelectedService(null);
+    setPricingFields([]);
+    setFieldValues({});
     setServices(null);
     try {
       const result = await authedFetch<AdminServiceResponseDto[]>(`/admin/services?category_id=${categoryId}`);
@@ -96,6 +152,31 @@ export default function CreateOrderForCustomerPage() {
     } catch {
       setServices([]);
     }
+  }
+
+  async function selectService(serviceId: string) {
+    const service = services?.find((item) => item.id === serviceId) ?? null;
+    setSelectedService(service);
+    setPricingFields([]);
+    setFieldValues({});
+    setFieldsError(null);
+    if (!service || service.pricing_model !== 'formula') return;
+
+    setFieldsLoading(true);
+    try {
+      const result = await authedFetch<PricingField[]>(`/admin/services/${service.id}/pricing-fields`);
+      const activeFields = result.filter((field) => field.is_active).sort((a, b) => a.display_order - b.display_order);
+      setPricingFields(activeFields);
+      setFieldValues(Object.fromEntries(activeFields.map((field) => [field.field_key, initialFieldValue(field)])));
+    } catch (err) {
+      setFieldsError(err instanceof ApiError ? err.message : 'تعذّر تحميل أسئلة الخدمة');
+    } finally {
+      setFieldsLoading(false);
+    }
+  }
+
+  function setFieldValue(key: string, value: unknown) {
+    setFieldValues((current) => ({ ...current, [key]: value }));
   }
 
   function resetForNewOrder() {
@@ -107,7 +188,9 @@ export default function CreateOrderForCustomerPage() {
     setSelectedService(null);
     setProblemDescription('');
     setScheduledAt('');
-    setFieldValuesJson('{}');
+    setPricingFields([]);
+    setFieldValues({});
+    setFieldsError(null);
     setCreatedOrder(null);
     setCustomers(null);
     setPhoneQuery('');
@@ -119,15 +202,21 @@ export default function CreateOrderForCustomerPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      let fieldValues: Record<string, unknown> | undefined;
+      let submittedFieldValues: Record<string, unknown> | undefined;
       if (selectedService.pricing_model === 'formula') {
-        try {
-          fieldValues = JSON.parse(fieldValuesJson || '{}');
-        } catch {
-          setSubmitError('صيغة field_values JSON غلط — راجعها');
+        const missing = pricingFields.find((field) => {
+          if (!field.is_required) return false;
+          const value = fieldValues[field.field_key];
+          if (field.field_type === 'checkbox') return value === null || value === undefined;
+          if (Array.isArray(value)) return value.length === 0;
+          return value === null || value === undefined || value === '';
+        });
+        if (missing) {
+          setSubmitError(`جاوب على «${missing.label_ar}» الأول`);
           setSubmitting(false);
           return;
         }
+        submittedFieldValues = fieldValues;
       }
       const order = await authedFetch<CreateOrderForCustomerResponseDto>('/admin/orders/for-customer', {
         method: 'POST',
@@ -137,7 +226,7 @@ export default function CreateOrderForCustomerPage() {
           service_id: selectedService.id,
           problem_description: problemDescription || undefined,
           scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
-          field_values: fieldValues,
+          field_values: submittedFieldValues,
         }),
       });
       setCreatedOrder(order);
@@ -303,7 +392,7 @@ export default function CreateOrderForCustomerPage() {
                       <select
                         className="mt-1 w-full rounded-md border bg-background p-2"
                         value={selectedService?.id ?? ''}
-                        onChange={(e) => setSelectedService(services.find((s) => s.id === e.target.value) ?? null)}
+                        onChange={(e) => void selectService(e.target.value)}
                       >
                         <option value="">اختار خدمة</option>
                         {services.map((s) => (
@@ -313,18 +402,24 @@ export default function CreateOrderForCustomerPage() {
                     </div>
                   )}
                   {selectedService?.pricing_model === 'formula' && (
-                    <div>
-                      <Label>field_values (JSON) — نفس أسئلة الخدمة في تطبيق العميل</Label>
-                      <Textarea
-                        className="mt-1 font-mono"
-                        dir="ltr"
-                        rows={4}
-                        value={fieldValuesJson}
-                        onChange={(e) => setFieldValuesJson(e.target.value)}
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        الخدمة دي تسعيرها ديناميكي (formula) — اسأل العميل نفس أسئلة الحجز العادي واملأها هنا كـJSON.
-                      </p>
+                    <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
+                      <div>
+                        <p className="font-medium">أسئلة تسعير الخدمة</p>
+                        <p className="text-xs text-muted-foreground">اسأل العميل الأسئلة بالترتيب وسجّل إجاباته كما قالها.</p>
+                      </div>
+                      {fieldsLoading && <p className="text-sm text-muted-foreground">جاري تحميل الأسئلة…</p>}
+                      {fieldsError && <p className="text-sm text-destructive">{fieldsError}</p>}
+                      {!fieldsLoading && !fieldsError && pricingFields.length === 0 && (
+                        <p className="text-sm text-muted-foreground">الخدمة دي مفيش لها أسئلة إضافية مفعّلة.</p>
+                      )}
+                      {pricingFields.map((field) => (
+                        <DynamicPricingField
+                          key={field.id}
+                          field={field}
+                          value={fieldValues[field.field_key]}
+                          onChange={(value) => setFieldValue(field.field_key, value)}
+                        />
+                      ))}
                     </div>
                   )}
                 </CardContent>
@@ -355,5 +450,132 @@ export default function CreateOrderForCustomerPage() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+function DynamicPricingField({
+  field,
+  value,
+  onChange,
+}: {
+  field: PricingField;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const label = `${field.label_ar}${field.is_required ? ' *' : ' (اختياري)'}`;
+  const numericTypes = ['number', 'area', 'length', 'volume'];
+
+  if (field.field_type === 'checkbox') {
+    return (
+      <label className="flex cursor-pointer items-center gap-3 rounded-lg border bg-background p-3">
+        <input type="checkbox" checked={value === true} onChange={(event) => onChange(event.target.checked)} />
+        <span className="text-sm font-medium">{label}</span>
+      </label>
+    );
+  }
+
+  if (field.field_type === 'dropdown') {
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={`pricing-${field.id}`}>{label}</Label>
+        <select
+          id={`pricing-${field.id}`}
+          className="w-full rounded-md border bg-background p-2"
+          value={String(value ?? '')}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">اختار إجابة</option>
+          {(field.options ?? []).map((option) => (
+            <option key={option.value} value={option.value}>{option.label_ar}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  if (field.field_type === 'multi_select') {
+    const selected = Array.isArray(value) ? value.map(String) : [];
+    return (
+      <fieldset className="space-y-2 rounded-lg border bg-background p-3">
+        <legend className="px-1 text-sm font-medium">{label}</legend>
+        {(field.options ?? []).map((option) => (
+          <label key={option.value} className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={selected.includes(option.value)}
+              onChange={(event) =>
+                onChange(
+                  event.target.checked
+                    ? [...selected, option.value]
+                    : selected.filter((item) => item !== option.value),
+                )
+              }
+            />
+            {option.label_ar}
+          </label>
+        ))}
+      </fieldset>
+    );
+  }
+
+  if (field.field_type === 'slider') {
+    const min = field.min_value ?? 0;
+    const max = field.max_value ?? 100;
+    const current = typeof value === 'number' && Number.isFinite(value) ? value : min;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor={`pricing-${field.id}`}>{label}</Label>
+          <span className="font-semibold">{current}{field.unit_ar ? ` ${field.unit_ar}` : ''}</span>
+        </div>
+        <input
+          id={`pricing-${field.id}`}
+          type="range"
+          min={min}
+          max={max}
+          value={current}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="w-full accent-primary"
+        />
+      </div>
+    );
+  }
+
+  if (numericTypes.includes(field.field_type)) {
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={`pricing-${field.id}`}>{label}</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id={`pricing-${field.id}`}
+            type="number"
+            min={field.min_value ?? undefined}
+            max={field.max_value ?? undefined}
+            value={value === '' || value === undefined ? '' : String(value)}
+            onChange={(event) => onChange(event.target.value === '' ? '' : Number(event.target.value))}
+            dir="ltr"
+          />
+          {field.unit_ar && <span className="shrink-0 text-sm text-muted-foreground">{field.unit_ar}</span>}
+        </div>
+      </div>
+    );
+  }
+
+  const uploadLike = ['image_upload', 'video_upload', 'voice_note'].includes(field.field_type);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={`pricing-${field.id}`}>{label}</Label>
+      <Input
+        id={`pricing-${field.id}`}
+        type={field.field_type === 'date' ? 'date' : field.field_type === 'time' ? 'time' : 'text'}
+        value={String(value ?? '')}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={uploadLike ? 'رابط الملف لو العميل أرسله للدعم' : undefined}
+        dir={field.field_type === 'date' || field.field_type === 'time' || uploadLike ? 'ltr' : 'rtl'}
+      />
+      {uploadLike && (
+        <p className="text-xs text-muted-foreground">لو الملف مش متاح أثناء المكالمة، سيبه فاضي واطلب من العميل إرساله في الشات.</p>
+      )}
+    </div>
   );
 }

@@ -56,11 +56,30 @@ export default function TechnicianLevelsPage() {
     }
   }
 
+  async function handleAssistantSave(e: FormEvent, level: string) {
+    e.preventDefault();
+    const form = new FormData(e.target as HTMLFormElement);
+    const body: UpdateTechnicianLevelConfigBody = {
+      assistant_earning_multiplier: Number(form.get('assistant_earning_multiplier')),
+    };
+    setIsSaving(true);
+    setError(null);
+    try {
+      await authedFetch(`/admin/technician-levels/${level}`, { method: 'PATCH', body: JSON.stringify(body) });
+      setEditingLevel(null);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'حصل خطأ، حاول تاني');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <AppShell>
       <PageHeader
-        title="سياسة مستويات الفنيين"
-        description="العمولة، أولوية الإرسال، حد قرار الفني في التسعير، وأهلية قيادة فريق — لكل مستوى، بدون أي تعديل كود."
+        title="سياسة مستويات الفنيين والمساعدين"
+        description="سياسة الفنيين كما هي، ومعها ترقية المساعد التي ترفع أجره الأساسي حسب مستواه مع سجل مالي واضح لكل طلب."
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
@@ -68,6 +87,74 @@ export default function TechnicianLevelsPage() {
 
       {configs && (
         <div className="space-y-4">
+          <Card className="overflow-hidden border-sky-200 bg-gradient-to-l from-sky-50 via-background to-amber-50">
+            <CardHeader>
+              <CardTitle>مستويات المساعدين</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 max-w-3xl text-sm leading-7 text-muted-foreground">
+                الأجر الأساسي يتحدد داخل بيانات الخدمة في الكاتالوج. وقت التسوية يحسب النظام أجر المساعد عن مدة
+                الطلب ثم يطبق معامل مستواه. التغيير يسري على الطلبات الجديدة فقط ولا يغيّر أي مستحق قديم.
+              </p>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {configs.map((config) => {
+                  const editKey = `assistant:${config.level}`;
+                  return (
+                    <div key={editKey} className="rounded-xl border bg-background/90 p-4 shadow-sm">
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">مساعد {config.display_name_ar}</p>
+                          <p className="text-xs text-muted-foreground">{config.level}</p>
+                        </div>
+                        {editingLevel !== editKey && (
+                          <Button size="sm" variant="outline" onClick={() => setEditingLevel(editKey)}>
+                            تعديل المعامل
+                          </Button>
+                        )}
+                      </div>
+                      {editingLevel === editKey ? (
+                        <form onSubmit={(e) => handleAssistantSave(e, config.level)} className="space-y-3">
+                          <div>
+                            <Label htmlFor={`assistant_multiplier_${config.level}`}>معامل أجر المساعد</Label>
+                            <Input
+                              id={`assistant_multiplier_${config.level}`}
+                              name="assistant_earning_multiplier"
+                              type="number"
+                              min={0.1}
+                              max={3}
+                              step="0.01"
+                              dir="ltr"
+                              defaultValue={config.assistant_earning_multiplier}
+                              required
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            مثال على أجر أساسي 1,000 ج.م: {formatEgp(Math.round(100000 * config.assistant_earning_multiplier))}
+                          </p>
+                          <div className="flex gap-2">
+                            <Button type="submit" size="sm" disabled={isSaving}>حفظ</Button>
+                            <Button type="button" size="sm" variant="ghost" onClick={() => setEditingLevel(null)} disabled={isSaving}>
+                              إلغاء
+                            </Button>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="flex items-end justify-between rounded-lg bg-muted/45 px-3 py-2">
+                          <span className="text-sm text-muted-foreground">أجر الخدمة الأساسي ×</span>
+                          <span className="text-2xl font-bold tabular-nums">{config.assistant_earning_multiplier}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="pt-2">
+            <h2 className="text-lg font-semibold">سياسة الفنيين</h2>
+            <p className="text-sm text-muted-foreground">العمولة والأولوية وحد القرار وأهلية قيادة الفريق بدون تغيير.</p>
+          </div>
           {configs.map((config) => (
             <Card key={config.level}>
               <CardHeader className="flex-row items-center justify-between">

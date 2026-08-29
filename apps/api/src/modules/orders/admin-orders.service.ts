@@ -24,7 +24,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
-import { BookingMode, Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
+import { BookingMode, Order, OrderPaymentStatus, OrderStatus, OrderType } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderTimelineEventRow } from './dto/order-timeline-event-response.dto';
@@ -274,13 +274,18 @@ export class AdminOrdersService {
       participant_role: string;
       technician_level: string;
       share_weight: string;
+      calculation_method: 'weighted_pool' | 'assistant_level_wage';
+      assistant_base_wage_cents: number | null;
+      assistant_level_multiplier: string | null;
+      assistant_target_cents: number | null;
       pool_cents: number;
       share_cents: number;
     }[]
   > {
     return this.teamMembers.manager.query(
       `SELECT oes.technician_id, u.full_name, oes.participant_role, oes.technician_level,
-              oes.share_weight, oes.pool_cents, oes.share_cents
+              oes.share_weight, oes.pool_cents, oes.share_cents, oes.calculation_method,
+              oes.assistant_base_wage_cents, oes.assistant_level_multiplier, oes.assistant_target_cents
          FROM order_earning_shares oes
          JOIN technician_profiles tp ON tp.id = oes.technician_id
          JOIN users u ON u.id = tp.user_id
@@ -829,6 +834,13 @@ export class AdminOrdersService {
     meta?: AuditActorMeta,
   ): Promise<Order> {
     const order = await this.findOrThrow(orderId);
+    if (order.orderType === OrderType.REVISIT) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
+        HttpStatus.CONFLICT,
+      );
+    }
     if (!order.requiredAssistants || order.requiredAssistants <= 0) {
       throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش محتاج مساعد أصلاً', HttpStatus.CONFLICT);
     }
@@ -970,6 +982,13 @@ export class AdminOrdersService {
     // والنسبة بتتبعه. لو الأدمن عايز يديه نصيب كامل، الطريق الصح إنه يرقّيه لفني في بروفايله.
     const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
     const effectiveMemberType = resolveEffectiveMemberType(memberType, candidateProfile.technicianKind);
+    if (order.orderType === OrderType.REVISIT && effectiveMemberType === ASSISTANT_MEMBER_TYPE) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'إعادة الزيارة المجانية لا تقبل مساعدًا بلا أجر — أنشئ دعمًا مدفوعًا مستقلًا لو مطلوب',
+        HttpStatus.CONFLICT,
+      );
+    }
 
     const existingCount = await this.teamMembers.count({ where: { orderId } });
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {

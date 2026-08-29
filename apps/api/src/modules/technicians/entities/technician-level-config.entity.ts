@@ -25,6 +25,10 @@ export class TechnicianLevelConfig {
   @Column({ name: 'crew_share_weight', type: 'numeric', precision: 5, scale: 2, default: 1 })
   crewShareWeight: string;
 
+  // يطبّق على المساعد فقط: أجر الخدمة الأساسي × المعامل. نظام الفنيين يظل على crewShareWeight.
+  @Column({ name: 'assistant_earning_multiplier', type: 'numeric', precision: 5, scale: 2, default: 1 })
+  assistantEarningMultiplier: string;
+
   @Column({ name: 'decision_limit_cents', type: 'integer', nullable: true })
   decisionLimitCents: number | null;
 

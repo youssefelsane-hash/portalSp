@@ -154,15 +154,42 @@ export class TechnicianKpiCalculationService {
       [technicianProfileId, start, end],
     );
 
+    // الدخل هنا هو نصيب الشخص المسجل في `order_earning_shares` ناقص عكس الاسترداد الذي خرج
+    // فعليًا من محفظته. الاعتماد على ORDER_EARNING credits وحدها كان يسقط شغل الكاش بالكامل
+    // (القائد ماسك مستحقه خارج المحفظة) ويسقط أعضاء الطاقم من رقم الطلب الأصلي.
     const [earningsRow] = await this.dataSource.query(
       `
-      SELECT COALESCE(SUM(wt.amount_cents), 0) AS technician_earnings_cents
-      FROM wallet_transactions wt
-      JOIN wallets w ON w.id = wt.wallet_id
-      WHERE w.owner_user_id = $1 AND wt.transaction_type = 'order_earning' AND wt.direction = 'credit'
-        AND wt.is_reversed = false AND wt.created_at >= $2 AND wt.created_at < $3
+      WITH month_orders AS (
+        SELECT o.id, o.technician_earning_cents,
+               COALESCE(oes.share_cents, CASE WHEN o.technician_id = $1 THEN o.technician_earning_cents ELSE 0 END) AS my_share_cents
+        FROM orders o
+        LEFT JOIN order_earning_shares oes
+          ON oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
+        WHERE (oes.technician_id = $1 OR (
+                 o.technician_id = $1 AND NOT EXISTS (
+                   SELECT 1 FROM order_earning_shares any_share
+                   WHERE any_share.order_id = o.id AND any_share.deleted_at IS NULL
+                 )
+               ))
+          AND o.order_status = 'completed' AND o.work_completed_at >= $3 AND o.work_completed_at < $4
+          AND o.deleted_at IS NULL
+      )
+      SELECT
+        GREATEST(0,
+          COALESCE((SELECT SUM(my_share_cents) FROM month_orders), 0)
+          - COALESCE((
+              SELECT SUM(wt.amount_cents)
+              FROM refunds r
+              JOIN month_orders mo ON mo.id = r.order_id
+              JOIN wallet_transactions wt
+                ON wt.reference_type = 'refund' AND wt.reference_id = r.id
+               AND wt.transaction_type = 'refund' AND wt.direction = 'debit'
+              JOIN wallets w ON w.id = wt.wallet_id
+              WHERE r.refund_status = 'completed' AND w.owner_user_id = $2
+            ), 0)
+        ) AS technician_earnings_cents
       `,
-      [technicianUserId, start, end],
+      [technicianProfileId, technicianUserId, start, end],
     );
 
     return {
@@ -190,15 +217,43 @@ export class TechnicianKpiCalculationService {
     const { start, end } = this.monthBounds(periodYear, periodMonth);
     const [row] = await this.dataSource.query(
       `
-      SELECT COALESCE(AVG(tech_totals.total), 0) AS avg_earnings
-      FROM (
-        SELECT w.owner_user_id, SUM(wt.amount_cents) AS total
-        FROM wallet_transactions wt
+      WITH month_orders AS (
+        SELECT o.id, o.technician_id, o.technician_earning_cents
+        FROM orders o
+        WHERE o.order_status = 'completed' AND o.work_completed_at >= $1 AND o.work_completed_at < $2
+          AND o.deleted_at IS NULL
+      ),
+      gross AS (
+        SELECT oes.technician_id, SUM(oes.share_cents)::bigint AS gross_cents
+        FROM month_orders mo
+        JOIN order_earning_shares oes ON oes.order_id = mo.id AND oes.deleted_at IS NULL
+        GROUP BY oes.technician_id
+        UNION ALL
+        SELECT mo.technician_id, SUM(mo.technician_earning_cents)::bigint
+        FROM month_orders mo
+        WHERE mo.technician_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM order_earning_shares oes WHERE oes.order_id = mo.id AND oes.deleted_at IS NULL
+          )
+        GROUP BY mo.technician_id
+      ),
+      gross_by_tech AS (
+        SELECT technician_id, SUM(gross_cents)::bigint AS gross_cents FROM gross GROUP BY technician_id
+      ),
+      reversals AS (
+        SELECT tp.id AS technician_id, SUM(wt.amount_cents)::bigint AS reversal_cents
+        FROM month_orders mo
+        JOIN refunds r ON r.order_id = mo.id AND r.refund_status = 'completed'
+        JOIN wallet_transactions wt
+          ON wt.reference_type = 'refund' AND wt.reference_id = r.id
+         AND wt.transaction_type = 'refund' AND wt.direction = 'debit'
         JOIN wallets w ON w.id = wt.wallet_id
-        WHERE wt.transaction_type = 'order_earning' AND wt.direction = 'credit' AND wt.is_reversed = false
-          AND wt.created_at >= $1 AND wt.created_at < $2
-        GROUP BY w.owner_user_id
-      ) tech_totals
+        JOIN technician_profiles tp ON tp.user_id = w.owner_user_id
+        GROUP BY tp.id
+      )
+      SELECT COALESCE(AVG(GREATEST(0, gross_by_tech.gross_cents - COALESCE(reversals.reversal_cents, 0))), 0) AS avg_earnings
+      FROM gross_by_tech
+      LEFT JOIN reversals ON reversals.technician_id = gross_by_tech.technician_id
       `,
       [start, end],
     );

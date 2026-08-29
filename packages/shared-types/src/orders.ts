@@ -273,6 +273,10 @@ export interface OrderEarningShareResponseDto {
   technician_level: string;
   /** الوزن الفعلي وقت التوزيع بعد تطبيق معامل الدور. */
   share_weight: string;
+  calculation_method: 'weighted_pool' | 'assistant_level_wage';
+  assistant_base_wage_cents: number | null;
+  assistant_level_multiplier: string | null;
+  assistant_target_cents: number | null;
   pool_cents: number;
   share_cents: number;
 }

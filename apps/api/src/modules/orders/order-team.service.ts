@@ -19,7 +19,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { resolveEffectiveMemberType } from './crew-member-type';
 import { OrderTeamMemberRow } from './dto/team-member-response.dto';
-import { BookingMode, Order } from './entities/order.entity';
+import { BookingMode, Order, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
@@ -111,11 +111,14 @@ export function isSoloJob(order: Pick<Order, 'requiredTechnicians' | 'requiredAs
 
 /** كام خانة مساعد اختياري لسه مفتوحة. صفر لأي طلب مش فردي، أو لو الميزة متقفلة من الإعدادات. */
 export function computeOptionalAssistantSlots(
-  order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'>,
+  order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'> & { orderType?: OrderType },
   assistantsAdded: number,
   opts: { enabled: boolean; maxPerOrder: number },
 ): number {
-  if (!opts.enabled || !isSoloJob(order)) return 0;
+  // إعادة الزيارة المجانية مسؤولية الفني الأصلي. إضافة مساعد هنا كانت تعني إلزام شخص بريء
+  // بشغل بصفر، لأن طلب الضمان نفسه ملوش وعاء أرباح. أي دعم إضافي لازم يبقى قرارًا مدفوعًا صريحًا
+  // من الإدارة، مش "مساعد اختياري" مخفيًا داخل طلب مجاني.
+  if (!opts.enabled || order.orderType === OrderType.REVISIT || !isSoloJob(order)) return 0;
   return Math.max(0, Math.floor(opts.maxPerOrder) - assistantsAdded);
 }
 
@@ -284,7 +287,10 @@ export class OrderTeamService {
    * من الفني القائد، الأدمن، وبوابة اكتمال الطاقم في OrdersService.start() — نفس الحساب بالظبط
    * في كل مكان.
    */
-  async getCrewComposition(orderId: string, order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'>): Promise<CrewComposition> {
+  async getCrewComposition(
+    orderId: string,
+    order: Pick<Order, 'requiredTechnicians' | 'requiredAssistants'> & { orderType?: OrderType },
+  ): Promise<CrewComposition> {
     const rows = await this.teamMembers.manager.query<{ member_type: string; count: string }[]>(
       `SELECT member_type, COUNT(*) AS count FROM order_team_members WHERE order_id = $1 GROUP BY member_type`,
       [orderId],
@@ -450,6 +456,13 @@ export class OrderTeamService {
    */
   async recruitMember(userId: string, orderId: string, technicianId: string, role: CrewRole, roleLabel?: string): Promise<RecruitOutcome> {
     const { order, leaderProfileId } = await this.findOwnedOrderOrThrow(userId, orderId);
+    if (role === 'assistant' && order.orderType === OrderType.REVISIT) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'إعادة الزيارة المجانية ما ينفعش يضاف لها مساعد بلا أجر — تواصل مع الإدارة لو محتاج دعم مدفوع',
+        HttpStatus.CONFLICT,
+      );
+    }
     if (technicianId === leaderProfileId) {
       throw new ApiException(ErrorCode.VAL_001, 'أنت أصلاً المسؤول عن الطلب ده', HttpStatus.BAD_REQUEST);
     }
