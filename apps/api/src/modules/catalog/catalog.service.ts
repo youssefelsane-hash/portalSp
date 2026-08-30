@@ -359,6 +359,25 @@ export class CatalogService {
           ? pricingQuantity
           : 1;
 
+    // docs/08 §108-G — بَقّة حقيقية اتكشفت: تسعير المناطق (service_zone_pricing) كان بيتحقق
+    // بس **جوّه** فرع الأسعار الثابتة/بالساعة/بالوحدة، بعد return مبكر لخدمات formula (السطر
+    // تحت). يعني أي خدمة formula (المحرك الديناميكي، §1 — أهم حاجة في المشروع) كانت زون
+    // برايسينج ليها **صفر تأثير خالص**، مهما اتظبطت من الأدمن — مش "نسب غلط" (زي البَقّة اللي
+    // 594346e صلحها جزئيًا جوّه الفرع القديم)، دي "معدومة التأثير" بالكامل. الاستعلام اتنقل
+    // هنا عشان يتقرا **مرة واحدة** ويتستخدم في الفرعين (formula وغيره)، بدل تكرار.
+    const now = new Date();
+    const zoneOverride = zoneId
+      ? await this.zonePricing
+          .createQueryBuilder('p')
+          .where('p.service_id = :serviceId', { serviceId })
+          .andWhere('p.service_zone_id = :zoneId', { zoneId })
+          .andWhere('p.is_active = true')
+          .andWhere('p.valid_from <= :now', { now })
+          .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
+          .orderBy('p.valid_from', 'DESC')
+          .getOne()
+      : null;
+
     // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — مسار مستقل بالكامل عن باقي نماذج
     // التسعير (مفيش تركيب مع zone override — المعادلة نفسها مسؤولة عن عوامل السعر اللي العميل
     // حددها في الفورم الديناميكي). كانت فجوة موثّقة صراحة: كان بيتفادى استدعاء PricingEngineService
@@ -374,9 +393,15 @@ export class CatalogService {
       const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
       const formulaLevelMultiplier =
         companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
-      // docs/01B — حدود min/max_price_cents بتتفرض على السعر النهائي بعد مضاعف المستوى وقبل
-      // رسوم الطوارئ (سياسة عمل على سعر الخدمة نفسه). كانت بتترجع للعرض بس بدون تطبيق.
-      let clampedTotalCents = Math.round(result.priceCents * formulaLevelMultiplier);
+      // docs/08 §108-G — تسعير المناطق بقى بيطبّق على خدمات formula كمان. وضع "override" (رقم
+      // مطلق) اتجاهل عمدًا هنا: رقم واحد ثابت مالوش معنى لخدمة سعرها بيتحدد من فورم ديناميكي
+      // بقيم متغيّرة — وضع "percentage" بس هو اللي منطقي (نسبة فوق ناتج المعادلة نفسه، أيًا كان).
+      const zoneMultiplier =
+        zoneOverride?.pricingMode === ZonePricingMode.PERCENTAGE ? 1 + Number(zoneOverride.modifierPercentage) / 100 : 1;
+      const zoneAdjustedBaseCents = Math.round(result.priceCents * zoneMultiplier);
+      // docs/01B — حدود min/max_price_cents بتتفرض على السعر النهائي بعد نسبة المنطقة ومضاعف
+      // المستوى وقبل رسوم الطوارئ (سياسة عمل على سعر الخدمة نفسه). كانت بتترجع للعرض بس بدون تطبيق.
+      let clampedTotalCents = Math.round(zoneAdjustedBaseCents * formulaLevelMultiplier);
       if (result.minPriceCents !== null && clampedTotalCents < result.minPriceCents) {
         clampedTotalCents = result.minPriceCents;
       }
@@ -390,8 +415,9 @@ export class CatalogService {
           ])
         : [0, null];
       return {
-        base_price_cents: result.priceCents,
-        inspection_fee_cents: service.inspectionFeeCents,
+        base_price_cents: zoneAdjustedBaseCents,
+        inspection_fee_cents:
+          zoneOverride?.pricingMode === ZonePricingMode.PERCENTAGE ? zoneOverride.inspectionFeeCents : service.inspectionFeeCents,
         surge_multiplier: 1,
         level_price_multiplier: formulaLevelMultiplier,
         estimated_total_cents: clampedTotalCents,
@@ -439,21 +465,13 @@ export class CatalogService {
         ])
       : [0, null];
 
-    if (zoneId) {
+    {
       // تاريخ سريان (docs/06 §3.10) — ممكن يكون فيه أكتر من صف لنفس (خدمة، منطقة) بمدى سريان
       // مختلف (تخطيط سعر مستقبلي)؛ الساري فعليًا هو الصف اللي validFrom <= الآن < validUntil
       // (أو validUntil=NULL). valid_from/valid_until كانت أعمدة خامدة من أول يوم (migration
-      // 0006) — أول استخدام حقيقي هنا.
-      const now = new Date();
-      const override = await this.zonePricing
-        .createQueryBuilder('p')
-        .where('p.service_id = :serviceId', { serviceId })
-        .andWhere('p.service_zone_id = :zoneId', { zoneId })
-        .andWhere('p.is_active = true')
-        .andWhere('p.valid_from <= :now', { now })
-        .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
-        .orderBy('p.valid_from', 'DESC')
-        .getOne();
+      // 0006) — أول استخدام حقيقي هنا. الاستعلام نفسه (docs/08 §108-G) بقى فوق الدالة، بيتقرا
+      // مرة واحدة ويتشارك مع فرع formula فوق.
+      const override = zoneOverride;
       if (override) {
         // docs/08 §36.22-23، ADR-0024 — percentage: نسبة مئوية فوق السعر الأساسي الحالي للخدمة،
         // بتتحدّث تلقائيًا مع أي تغيير في base_price_cents. override: رقم مطلق زي القديم بالحرف.
