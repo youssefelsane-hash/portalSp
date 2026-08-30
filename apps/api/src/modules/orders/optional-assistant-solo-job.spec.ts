@@ -75,6 +75,13 @@ describe('ADR-0052 — مساعد اختياري واحد للشغلانة ال�
        VALUES ($1,$2,'approved',true)`,
       [p.id, ids.category],
     );
+    // §105/ADR-0056 — ضم المساعد بقى مقيّد بمدينة الطلب كمان (technicianCityCoverageCondition).
+    // من غير نطاق فعلي في مدينة الطلب، أي مساعد مهما كان معتمدًا في التخصص بيترفض بـ«خارج مدينة
+    // الطلب» — فالفكسشر لازم يمثّل مساعد متسجّل صح، مش يتحايل على القاعدة.
+    await q(
+      `INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`,
+      [p.id, ids.zone],
+    );
     return { userId: u.id as string, profileId: p.id as string };
   }
 
@@ -182,6 +189,7 @@ describe('ADR-0052 — مساعد اختياري واحد للشغلانة ال�
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_categories WHERE technician_id = ANY($1)`, [profiles]);
+      await q(`DELETE FROM technician_zones WHERE technician_id = ANY($1)`, [profiles]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1)`, [profiles]);
       await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
       await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
