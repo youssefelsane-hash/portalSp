@@ -24,7 +24,6 @@ import {
   classifyTechnicianCapacity,
   technicianAvailabilityCondition,
   TechnicianCapacityTier,
-  technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -347,9 +346,8 @@ export class MatchingService {
           AND member.verification_status = 'approved'
           AND member.deleted_at IS NULL
           AND member.current_location IS NOT NULL
-          -- ADR-0050 — سعة الشركة بتقيس "كام حد يقدر ياخد الطلب ده لوحده"، فالمساعدين مش
-          -- بيتحسبوا فيها (مش مؤهّلين للقيادة أصلاً) — وإلا الشركة تاخد أفضلية مبنية على عدد وهمي.
-          AND ${technicianKindCondition({ technicianAlias: 'member', kind: 'technician' })}
+          -- ADR-0055 — المساعد بقى يقدر ياخد طلب فعلاً، فبيتعدّ في سعة الشركة زي أي عضو تاني.
+          -- (كان مستبعد تحت ADR-0050 على أساس إنه مش مؤهّل للقيادة — القاعدة دي اتلغت.)
           AND ${technicianServiceQualificationCondition({
             technicianIdExpr: 'member.id',
             serviceIdExpr: 's.id',
@@ -395,10 +393,9 @@ export class MatchingService {
           ) AS recent_effective_workload
       ) fairness ON true
       WHERE tp.verification_status = 'approved'
-        -- ADR-0050 — المساعد ما ياخدش طلب لوحده أبدًا. التوزيع التلقائي بيدّي قيادة طلب كاملة،
-        -- وده بالظبط اللي المساعد مش مؤهّل له (طلب مالك: "شخص ما عندوش الخبرة الكافية إنه يروح
-        -- يعمل شغل لوحده"). الفلترة هنا في مصدر المرشّحين نفسه، مش في العرض.
-        AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'technician' })}
+        -- ADR-0055 (تصحيح مالك) — **مفيش استبعاد على أساس الدور هنا**. المساعد ليه شغل خاص بيه
+        -- (نقل، شيل، تنزيل) بيعمله لوحده عادي، وحجب الأدمن للخدمات (ADR-0054) هو أداة التحكم
+        -- الوحيدة. الاستبعاد القديم كان بيمنع خدمات المساعدين من إنها تتوزّع أصلاً.
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (LEFT JOIN فوق) أو تأهيل
         -- بمستوى الفئة كلها (technician_categories).
         AND ${technicianServiceQualificationCondition({
