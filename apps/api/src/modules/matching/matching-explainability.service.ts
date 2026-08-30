@@ -78,6 +78,7 @@ interface EligibilityRow {
   matches_preferred_company: boolean;
   availability_ok: boolean;
   decision_limit_ok: boolean;
+  team_leader_ok: boolean;
   distance_km: string | null;
 }
 
@@ -158,6 +159,15 @@ export class MatchingExplainabilityService {
           WHERE dlc.level = tp.current_level
             AND (dlc.decision_limit_cents IS NULL OR dlc.decision_limit_cents >= $13::int)
         ) AS decision_limit_ok,
+        -- docs/08 §107 — الشرط ده كان **ناقص من قايمة الـchecks** رغم إنه مفروض فعليًا في
+        -- assertCoreEligibility() وفي listForServiceBooking(isTeamBooking=true). النتيجة كانت
+        -- تناقض حقيقي اتلقط حي: المفتّش بيقول «مؤهّل بالكامل» لشخص مستواه verified بينما
+        -- قايمة التعيين الإجباري مش بتعرضه أصلاً والتنفيذ هيرفضه بـ409. بيتفحص بس لما الطلب
+        -- طلب اعتماد فعلاً — أي وضع تاني بيعدّي true زي ما التنفيذ بيعمل بالظبط.
+        ($14::boolean IS NOT TRUE OR EXISTS (
+          SELECT 1 FROM technician_level_config tbc
+          WHERE tbc.level = tp.current_level AND tbc.eligible_for_team_booking = true
+        )) AS team_leader_ok,
         (ST_Distance(tp.current_location, a.location) / 1000.0)::text AS distance_km
       FROM technician_profiles tp
       LEFT JOIN technician_services ts ON ts.technician_id = tp.id AND ts.service_id = $1 AND ts.is_active = true
@@ -180,6 +190,7 @@ export class MatchingExplainabilityService {
         isEmergency,
         fullDayJobMinutes,
         order.totalAmountCents,
+        order.bookingMode === BookingMode.TEAM,
       ],
     );
 
@@ -209,6 +220,13 @@ export class MatchingExplainabilityService {
       { key: 'matches_preferred_company', passed: row.matches_preferred_company, labelAr: 'يطابق الشركة/الفريق المطلوب (اعتماد، لو مطلوب)' },
       { key: 'availability_ok', passed: row.availability_ok, labelAr: 'متاح وقت الطلب (بلا تعارض جدول/حظر يوم)' },
       { key: 'decision_limit_ok', passed: row.decision_limit_ok, labelAr: 'حد قرار مستوى الفني يكفي قيمة الطلب' },
+      {
+        key: 'team_leader_ok',
+        passed: row.team_leader_ok,
+        labelAr: row.team_leader_ok
+          ? 'مستواه مؤهّل لقيادة الطلب (طلب اعتماد)'
+          : 'مستوى الشخص ده مش مؤهّل يبقى قائد مهمة اعتماد — يقدر ينضم للطاقم كعضو، مش يقوده',
+      },
     ];
 
     const firstFailure = checks.find((c) => !c.passed);

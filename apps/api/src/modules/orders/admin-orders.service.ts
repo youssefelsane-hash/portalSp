@@ -538,7 +538,102 @@ export class AdminOrdersService {
       order.bookingMode === BookingMode.TEAM,
       false,
     );
-    return formatEligibleTechniciansForAdmin(result);
+    const formatted = formatEligibleTechniciansForAdmin(result);
+    return { ...formatted, items: await this.attachAdminRoleMetadata(formatted.items) };
+  }
+
+  /**
+   * بيلحق `technicianKind`/`currentLevel` بصفوف قايمة إدارية (docs/08 §107 — رمز الدور جنب
+   * الاسم: FN فني / HF مساعد).
+   *
+   * استعلام إضافي صغير عمدًا بدل إضافة العمود لـ`TechnicianBookingListItem` نفسه: النوع ده
+   * بيتقدّم كمان لتطبيق العميل (`listForServiceBooking` هو نفس مصدر شاشة اختيار الفني)، وإضافة
+   * الدور هناك كانت هتسرّب تصنيف داخلي للعميل — والمالك طلب صراحة إن الرمز ده «مايبانش لحد غير
+   * للأدمن». المسار ده إداري بحت، فالإثراء بيحصل هنا بس.
+   */
+  private async attachAdminRoleMetadata<T extends { technicianId: string }>(
+    items: T[],
+  ): Promise<(T & { technicianKind: 'technician' | 'assistant'; currentLevel: string | null })[]> {
+    if (items.length === 0) return [];
+    const rows = await this.dataSource.query<
+      { id: string; technician_kind: 'technician' | 'assistant'; current_level: string }[]
+    >(`SELECT id, technician_kind, current_level FROM technician_profiles WHERE id = ANY($1::uuid[])`, [
+      items.map((item) => item.technicianId),
+    ]);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return items.map((item) => ({
+      ...item,
+      // الافتراضي 'technician' لو الصف اختفى بين الاستعلامين — الرمز عرض بس، ما ينفعش يكسّر القايمة.
+      technicianKind: byId.get(item.technicianId)?.technician_kind ?? 'technician',
+      currentLevel: byId.get(item.technicianId)?.current_level ?? null,
+    }));
+  }
+
+  /**
+   * مرشّحو **مفتّش المطابقة** (docs/08 §107) — مصدر منفصل تمامًا عن قايمة التعيين الإجباري فوق.
+   *
+   * بلاغ المالك كان «المساعدين مش ظاهرين في خانة ليه/ليه لأ». التشخيص الحي أثبت إن السبب مش
+   * فلترة دور (مفيش أي شرط `technician_kind` في شجرة الأهلية أصلاً) لكنه عيب تصميمي أعمق:
+   * الخانة دي كانت بتتغذّى من `listEligibleTechniciansForReassign()` اللي بيرجّع **المؤهّلين
+   * فقط** — يعني سؤال «ليه ده مش مختار؟» مستحيل تسأله، لأن أي حد إجابته «لأ» بيتشال من نفس
+   * القايمة اللي المفروض تختاره منها. (اللي كان بيخفي مساعدي المالك تحديدًا هو شرط
+   * `eligible_for_team_booking` على طلبات الاعتماد — نفس الشرط بيخفي الفني الجديد بالظبط.)
+   *
+   * فالقايمة دي عمدًا **بلا أي بوابة أهلية**: كل معتمد في **مدينة** نطاق الطلب (نفس حد المدينة
+   * بتاع ADR-0056، عشان القايمة تفضل معقولة الحجم بدل كل فني في البلد)، فني كان أو مساعد،
+   * ومعاه `is_eligible_now` عشان الواجهة تفرّق بصريًا. التفسير نفسه
+   * (`explainTechnicianForOrder`) شغال أصلاً لأي صف في `technician_profiles` بغض النظر عن الدور
+   * أو الأهلية — هو اللي بيرجّع الـchecks اللي بتقول «ليه لأ» بالنص.
+   */
+  async listExplainCandidates(orderId: string) {
+    const order = await this.findOrThrow(orderId);
+    if (!order.serviceZoneId) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الطلب ده مالوش نطاق خدمة محدد — مفيش مطابقة ممكنة عليه أصلاً',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // المؤهّلون فعلاً دلوقتي — نفس مصدر التعيين الإجباري بالحرف، عشان العلامة اللي الواجهة
+    // بتعرضها تبقى متطابقة مع اللي الأدمن هيلاقيه في dropdown التعيين، مش تقدير موازي.
+    const eligible = await this.listEligibleTechniciansForReassign(orderId);
+    const eligibleIds = new Set(eligible.items.map((item) => item.technicianId));
+
+    const rows = await this.dataSource.query<
+      {
+        technician_id: string;
+        full_name: string;
+        technician_kind: 'technician' | 'assistant';
+        current_level: string;
+        has_location: boolean;
+      }[]
+    >(
+      `SELECT tp.id AS technician_id, u.full_name, tp.technician_kind, tp.current_level,
+              (tp.current_location IS NOT NULL) AS has_location
+       FROM technician_profiles tp
+       JOIN users u ON u.id = tp.user_id
+       WHERE tp.deleted_at IS NULL
+         AND tp.verification_status = 'approved'
+         AND ${technicianCityCoverageCondition({
+           technicianIdExpr: 'tp.id',
+           requestedServiceZoneIdExpr: '$1',
+         })}
+       ORDER BY tp.technician_kind ASC, u.full_name ASC
+       LIMIT 300`,
+      [order.serviceZoneId],
+    );
+
+    return {
+      items: rows.map((row) => ({
+        technicianId: row.technician_id,
+        fullName: row.full_name,
+        technicianKind: row.technician_kind,
+        currentLevel: row.current_level,
+        hasLocation: row.has_location,
+        isEligibleNow: eligibleIds.has(row.technician_id),
+      })),
+    };
   }
 
   /**

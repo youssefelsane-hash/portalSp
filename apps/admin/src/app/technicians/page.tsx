@@ -17,6 +17,7 @@ import { useDebouncedValue } from '@/lib/use-debounced-value';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { VERIFICATION_STATUS_LABELS, LEVEL_LABELS } from '@/lib/technician-labels';
+import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { useAdminLiveRefresh } from '@/lib/admin-realtime-context';
 
 const PER_PAGE = 20;
@@ -143,8 +144,10 @@ export default function TechniciansPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Link href={`/technicians/${tech.id}`} className="block">
-                      {tech.full_name}
+                    {/* docs/08 §107 — رمز الدور جنب الاسم (FN فني / HF مساعد)، شاشات الأدمن بس. */}
+                    <Link href={`/technicians/${tech.id}`} className="flex items-center gap-2">
+                      <TechnicianKindTag kind={tech.technician_kind} />
+                      <span>{tech.full_name}</span>
                     </Link>
                   </TableCell>
                   <TableCell>{LEVEL_LABELS[tech.current_level]}</TableCell>

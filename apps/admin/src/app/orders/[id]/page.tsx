@@ -115,7 +115,14 @@ import {
   REFUND_STATUS_LABELS,
 } from '@/lib/payments-labels';
 import { COMPLAINT_STATUS_LABELS, complaintStatusTone } from '@/lib/support-labels';
-import { CAPACITY_TIER_LABELS, LEVEL_LABELS, capacityTierBadgeClass } from '@/lib/technician-labels';
+import {
+  CAPACITY_TIER_LABELS,
+  LEVEL_LABELS,
+  capacityTierBadgeClass,
+  technicianKindOptionPrefix,
+  type TechnicianKindCode,
+} from '@/lib/technician-labels';
+import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { formatEgp } from '@/lib/format';
 
 export default function OrderDetailPage() {
@@ -142,7 +149,19 @@ export default function OrderDetailPage() {
   // منطق الأهلية الحقيقي لهذا الطلب بالذات (خدمة/منطقة/موعد)، بديل عن approvedTechnicians العامة
   // فوق (لسه مستخدمة زي ما هي لإضافة/استبدال عضو فريق ومساعد — نطاق مختلف).
   const [eligibleReassignTechnicians, setEligibleReassignTechnicians] = useState<
-    { technicianId: string; fullName: string }[] | null
+    { technicianId: string; fullName: string; technicianKind: TechnicianKindCode }[] | null
+  >(null);
+  // docs/08 §107 — مفتّش المطابقة له مصدر مرشّحين **منفصل** عن قايمة التعيين فوق. القايمة دي
+  // بتشمل غير المؤهّل عمدًا: سؤال «ليه ده مش مختار؟» مستحيل يتسأل لو اللي إجابته «لأ» متشال من
+  // القايمة اللي بتختار منها (وده اللي كان بيخفي المساعدين الجداد خالص — بلاغ المالك).
+  const [explainCandidates, setExplainCandidates] = useState<
+    {
+      technicianId: string;
+      fullName: string;
+      technicianKind: TechnicianKindCode;
+      currentLevel: string | null;
+      isEligibleNow: boolean;
+    }[] | null
   >(null);
   const [showAdjustPriceForm, setShowAdjustPriceForm] = useState(false);
   const [newTotalEgp, setNewTotalEgp] = useState('');
@@ -340,11 +359,36 @@ export default function OrderDetailPage() {
   }
 
   function loadEligibleReassignTechnicians() {
-    authedFetch<{ zoneId: string; items: { technicianId: string; fullName: string }[] }>(
-      `/admin/orders/${id}/eligible-technicians`,
-    )
+    authedFetch<{
+      zoneId: string;
+      items: { technicianId: string; fullName: string; technicianKind: TechnicianKindCode }[];
+    }>(`/admin/orders/${id}/eligible-technicians`)
       .then(({ items }) => setEligibleReassignTechnicians(items))
       .catch(() => setEligibleReassignTechnicians([]));
+  }
+
+  function loadExplainCandidates() {
+    authedFetch<{
+      items: {
+        technician_id: string;
+        full_name: string;
+        technician_kind: TechnicianKindCode;
+        current_level: string | null;
+        is_eligible_now: boolean;
+      }[];
+    }>(`/admin/orders/${id}/explain-candidates`)
+      .then(({ items }) =>
+        setExplainCandidates(
+          items.map((item) => ({
+            technicianId: item.technician_id,
+            fullName: item.full_name,
+            technicianKind: item.technician_kind,
+            currentLevel: item.current_level,
+            isEligibleNow: item.is_eligible_now,
+          })),
+        ),
+      )
+      .catch(() => setExplainCandidates([]));
   }
 
   async function handleReassign(e: FormEvent) {
@@ -888,27 +932,41 @@ export default function OrderDetailPage() {
           )}
 
           <div className="border-t pt-4">
-            <p className="mb-2 font-medium text-sm">ليه/ليه لأ فني محدد؟</p>
+            <p className="mb-1 font-medium text-sm">ليه/ليه لأ فني أو مساعد محدد؟</p>
+            {/* docs/08 §107 — القايمة دي عمدًا مش مفلترة بالأهلية: غير المؤهّل هو بالظبط اللي
+                الأدمن محتاج يعرف سبب استبعاده. الـchecks تحت بتقول السبب بالنص. */}
+            <p className="mb-2 text-xs text-muted-foreground">
+              القايمة بتشمل الفنيين والمساعدين المعتمدين في مدينة الطلب — حتى غير المؤهّلين، عشان تعرف سبب استبعاد كل واحد.
+            </p>
             <form onSubmit={handleExplainTechnician} className="flex flex-wrap items-end gap-2">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="explain_technician" className="text-xs text-muted-foreground">
-                  الفني
+                  الفني/المساعد
                 </Label>
                 <SelectNative
                   id="explain_technician"
                   value={explainTechnicianId}
                   onFocus={() => {
-                    if (!eligibleReassignTechnicians) loadEligibleReassignTechnicians();
+                    if (!explainCandidates) loadExplainCandidates();
                   }}
                   onChange={(e) => setExplainTechnicianId(e.target.value)}
-                  className="min-w-[220px]"
+                  className="min-w-[280px]"
                 >
-                  <option value="">اختار فني</option>
-                  {eligibleReassignTechnicians?.map((tech) => (
-                    <option key={tech.technicianId} value={tech.technicianId}>
-                      {tech.fullName}
-                    </option>
-                  ))}
+                  <option value="">اختار فني أو مساعد</option>
+                  {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
+                    const group = explainCandidates?.filter((c) => c.technicianKind === kind) ?? [];
+                    if (group.length === 0) return null;
+                    return (
+                      <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                        {group.map((candidate) => (
+                          <option key={candidate.technicianId} value={candidate.technicianId}>
+                            {technicianKindOptionPrefix(candidate.technicianKind)} {candidate.fullName}
+                            {candidate.isEligibleNow ? '' : ' — مش مؤهّل دلوقتي'}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
                 </SelectNative>
               </div>
               <Button type="submit" size="sm" disabled={!explainTechnicianId || explainLoading}>
@@ -918,6 +976,19 @@ export default function OrderDetailPage() {
             {explainError && <p className="mt-2 text-sm text-destructive">{explainError}</p>}
             {explanation && (
               <div className="mt-3 flex flex-col gap-2 text-sm">
+                {(() => {
+                  const subject = explainCandidates?.find((c) => c.technicianId === explanation.technician_id);
+                  if (!subject) return null;
+                  return (
+                    <p className="flex items-center gap-2 text-muted-foreground">
+                      <TechnicianKindTag kind={subject.technicianKind} />
+                      <span>{subject.fullName}</span>
+                      {subject.currentLevel && (
+                        <Badge variant="outline">{LEVEL_LABELS[subject.currentLevel as keyof typeof LEVEL_LABELS] ?? subject.currentLevel}</Badge>
+                      )}
+                    </p>
+                  );
+                })()}
                 <p className="font-medium">
                   <span className={explanation.eligible ? 'text-success' : 'text-destructive'}>
                     {explanation.eligible ? 'مؤهّل' : 'مش مؤهّل'}
@@ -1096,12 +1167,13 @@ export default function OrderDetailPage() {
               )}
               {showReassignForm && (
                 <form onSubmit={handleReassign} className="flex flex-col gap-2">
-                  <Label htmlFor="technician_id">الفني الجديد</Label>
+                  <Label htmlFor="technician_id">الفني/المساعد الجديد</Label>
                   {!eligibleReassignTechnicians ? (
-                    <p className="text-sm text-muted-foreground">جاري تحميل الفنيين المؤهلين لهذا الطلب…</p>
+                    <p className="text-sm text-muted-foreground">جاري تحميل المؤهلين لهذا الطلب…</p>
                   ) : eligibleReassignTechnicians.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      مفيش فنيين مؤهلين ومتاحين لخدمة/منطقة/موعد الطلب ده دلوقتي
+                      مفيش فنيين ولا مساعدين مؤهلين ومتاحين لخدمة/منطقة/موعد الطلب ده دلوقتي — استخدم مفتّش المطابقة فوق
+                      عشان تعرف سبب استبعاد كل واحد.
                     </p>
                   ) : (
                     <SelectNative
@@ -1111,13 +1183,24 @@ export default function OrderDetailPage() {
                       required
                     >
                       <option value="" disabled>
-                        اختار فني
+                        اختار فني أو مساعد
                       </option>
-                      {eligibleReassignTechnicians.map((tech) => (
-                        <option key={tech.technicianId} value={tech.technicianId}>
-                          {tech.fullName}
-                        </option>
-                      ))}
+                      {/* docs/08 §107 — القايمة دي بتفضل مقصورة على المؤهّلين فعلاً (مش تمييز
+                          ضد المساعد: نفس assertCoreEligibility() هيرفض أي حد غير مؤهّل بـ409
+                          وقت التنفيذ). الرمز جنب الاسم بيوضّح إن المساعد موجود فيها فعلاً. */}
+                      {(['technician', 'assistant'] as TechnicianKindCode[]).map((kind) => {
+                        const group = eligibleReassignTechnicians.filter((t) => t.technicianKind === kind);
+                        if (group.length === 0) return null;
+                        return (
+                          <optgroup key={kind} label={kind === 'technician' ? 'فنيين' : 'مساعدين'}>
+                            {group.map((tech) => (
+                              <option key={tech.technicianId} value={tech.technicianId}>
+                                {technicianKindOptionPrefix(tech.technicianKind)} {tech.fullName}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </SelectNative>
                   )}
                   <Button type="submit" size="sm" disabled={isSaving || !technicianId}>
