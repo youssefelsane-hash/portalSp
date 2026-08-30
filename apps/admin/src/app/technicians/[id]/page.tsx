@@ -25,6 +25,7 @@ import { TechnicianEarningsStatement } from '@/components/technician-earnings-st
 import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
 import { TechnicianInternalNotes } from '@/components/technician-internal-notes';
 import { PageHeader } from '@/components/page-header';
+import { TechnicianKindTag } from '@/components/technician-kind-tag';
 import { ProfileSummary } from '@/components/profile-summary';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
@@ -510,6 +511,8 @@ export default function TechnicianDetailPage() {
       <PageHeader
         title={
           <>
+            {/* docs/08 §107 — نفس رمز الدور المستخدم في قايمة الفنيين والقوائم المنسدلة. */}
+            <TechnicianKindTag kind={detail.technician_kind === 'assistant' ? 'assistant' : 'technician'} />
             {detail.full_name}
             <Badge variant="outline">{VERIFICATION_STATUS_LABELS[detail.verification_status]}</Badge>
           </>

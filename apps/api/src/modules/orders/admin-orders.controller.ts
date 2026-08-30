@@ -296,6 +296,24 @@ export class AdminOrdersController {
     return this.adminOrdersService.listEligibleTechniciansForReassign(id);
   }
 
+  // مرشّحو مفتّش المطابقة (docs/08 §107) — قراءة/تشخيص بس، أي أدمن، نفس بوابة
+  // matching-funnel/explain-technician اللي بيغذّيهم. **مش** نفس قايمة eligible-technicians
+  // فوق: دي بتشمل غير المؤهّل عمدًا، لأن ده بالظبط اللي المفتّش موجود يفسّره.
+  @Get(':id/explain-candidates')
+  async listExplainCandidates(@Param('id', ParseUUIDPipe) id: string) {
+    const { items } = await this.adminOrdersService.listExplainCandidates(id);
+    return {
+      items: items.map((item) => ({
+        technician_id: item.technicianId,
+        full_name: item.fullName,
+        technician_kind: item.technicianKind,
+        current_level: item.currentLevel,
+        has_location: item.hasLocation,
+        is_eligible_now: item.isEligibleNow,
+      })),
+    };
+  }
+
   // شفافية "ليه الطلب ده اتوزّع بالشكل ده" (docs/08 §34.4، ADR-0020 §W) — مين اتعرضله فرصة شغل
   // إضافي اختيارية، بأي تصنيف قدرة استيعابية وقتها، وقرر إيه. منفصل عن eligible-technicians فوق
   // (ده بيسأل "مين مؤهّل دلوقتي"، ده بيسأل "مين اتعرض عليه فعليًا وحصل إيه").
