@@ -72,9 +72,17 @@ class _ReferralsScreenState extends State<ReferralsScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      info.referralCode,
-                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4),
+                    // docs/08 §108-H — كود بخط 32px بلا Expanded/Flexible كان بيفيض لو الكود
+                    // طال (طول الكود مش مضمون ثابت من الباك-إند). FittedBox بيصغّر الخط لو
+                    // احتاج بدل ما يفيض، مع الحفاظ على letterSpacing البصري.
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          info.referralCode,
+                          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4),
+                        ),
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.copy),
@@ -100,8 +108,11 @@ class _ReferralsScreenState extends State<ReferralsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                // docs/08 §108-H — نصين جنب بعض بلا Expanded/Flexible ممكن يفيضوا لو الأرقام
+                // كبرت. Wrap بيلف لسطر تاني بدل ما يفيض أفقيًا.
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  runSpacing: 4,
                   children: [
                     Text('${info.completedReferralsCount} ترشيح مكتمل', style: const TextStyle(fontWeight: FontWeight.bold)),
                     Text('باقي ${info.referralsUntilNextReward} للمكافأة الجاية'),

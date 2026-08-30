@@ -776,11 +776,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                     Icon(Icons.diamond_outlined,
                                         size: 14, color: Theme.of(context).colorScheme.tertiary),
                                     const SizedBox(width: 4),
-                                    Text(
-                                      'منها ${_formatEgp(order.levelPremiumCents)} — فني Premium',
-                                      style: TextStyle(
-                                        color: Theme.of(context).colorScheme.tertiary,
-                                        fontWeight: FontWeight.w600,
+                                    // docs/08 §108-H — Text وحيدة في Row بلا Expanded كانت
+                                    // بتفيض أفقيًا على شاشة ضيقة/خط كبير بدل ما تلف لسطر تاني.
+                                    Expanded(
+                                      child: Text(
+                                        'منها ${_formatEgp(order.levelPremiumCents)} — فني Premium',
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.tertiary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -994,8 +998,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                           child: member.avatarUrl == null ? const Icon(Icons.person, size: 16) : null,
                                         ),
                                         const SizedBox(width: 8),
-                                        Expanded(child: Text(member.fullName)),
-                                        Text(member.roleLabel, style: Theme.of(context).textTheme.bodySmall),
+                                        Expanded(child: Text(member.fullName, overflow: TextOverflow.ellipsis)),
+                                        const SizedBox(width: 6),
+                                        // docs/08 §108-H — roleLabel نص حر من الأدمن (لحد 100 حرف،
+                                        // apps/admin's crew_role_label input) — مش تسمية قصيرة
+                                        // ثابتة. Flexible بيخليه ينكمش بـ"..." بدل ما يفيض.
+                                        Flexible(
+                                          child: Text(
+                                            member.roleLabel,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),

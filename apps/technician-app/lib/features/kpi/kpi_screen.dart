@@ -165,13 +165,18 @@ class _LatestCard extends StatelessWidget {
                   style: const TextStyle(color: Colors.orange),
                 ),
               ),
+            // docs/08 §108-H — تسمية+قيمة بلا Expanded/Flexible كانت ممكن تفيض لو التسمية
+            // (مفتاح مش موجود في الخريطة، أو نص حالة أطول) طالت على شاشة ضيقة.
             for (final entry in dimensions.entries)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(kpiDimensionLabelsAr[entry.key] ?? entry.key),
+                    Expanded(
+                      child: Text(kpiDimensionLabelsAr[entry.key] ?? entry.key, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
                     Text(
                       '${entry.value}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
@@ -181,11 +186,14 @@ class _LatestCard extends StatelessWidget {
               ),
             const Divider(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'الحالة: ${kpiStatusLabelsAr[snapshot.status] ?? snapshot.status}',
+                Expanded(
+                  child: Text(
+                    'الحالة: ${kpiStatusLabelsAr[snapshot.status] ?? snapshot.status}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   snapshot.approvedBonusCents != null
                       ? formatEgp(snapshot.approvedBonusCents!)

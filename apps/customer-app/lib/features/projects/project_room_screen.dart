@@ -672,10 +672,23 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(line['description_ar']?.toString() ?? ''),
+                    child: Text(
+                      line['description_ar']?.toString() ?? '',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
                   ),
-                  Text(
-                    '${line['quantity']} ${line['unit'] ?? ''} × ${_egp(((line['unit_price_cents'] as num?) ?? 0).toInt())}',
+                  const SizedBox(width: 6),
+                  // docs/08 §108-H — بَقّة overflow منهجية: الوصف كان الجانب المرن الوحيد، لكن
+                  // نص الكمية/الوحدة/السعر ده نص مُركّب (وحدة عربية طويلة + رقم كبير) وممكن
+                  // يفيض هو نفسه لو طال. Flexible (مش Text عادي) بيخليه ينكمش بـ"..." كحل أخير
+                  // بدل ما يفرض عرضه الكامل ويدفع الوصف لمساحة سالبة.
+                  Flexible(
+                    child: Text(
+                      '${line['quantity']} ${line['unit'] ?? ''} × ${_egp(((line['unit_price_cents'] as num?) ?? 0).toInt())}',
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                    ),
                   ),
                 ],
               ),

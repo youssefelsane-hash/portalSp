@@ -1186,15 +1186,21 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // docs/08 §108-H — تصليب وقائي: مكوّن مشترك مستخدم في أكتر من شاشة (~7 مرات)، بعض
+    // النداءات بتحط عدد ديناميكي جوّه التسمية (زي "الشغل الحالي (${count})"). Expanded هنا
+    // يضمن مفيش فيضان أفقي مهما طالت التسمية في أي نداء حالي أو مستقبلي.
     return Row(
       children: [
         Icon(icon, size: 18, color: color),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: color,
+        Expanded(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
           ),
         ),
       ],
