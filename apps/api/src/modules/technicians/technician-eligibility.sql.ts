@@ -424,7 +424,7 @@ export async function describeTechnicianCapacity(
  * بقى خطر حقيقي: تطبيقه على تمنية من تسعة معناه إن الفني المحجوب يفضل بيوصله الشغل من المسار
  * المنسي، **والأدمن شايف في الواجهة إنه محجوب** — تسريب صامت أسوأ من عدم بناء الميزة أصلاً.
  *
- * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض:
+ * الشرط بيتكوّن من جزئين لازم يتحققوا مع بعض، لنفس الشخص سواء شغال في الطلب كفني أو مساعد:
  *  1. **مؤهّل**: صف خدمة مباشر معتمد، أو اعتماد الفئة كلها.
  *  2. **مش محجوب**: مفيش صف في `technician_excluded_services` للفني/الخدمة دول.
  */
@@ -448,23 +448,6 @@ export function technicianServiceQualificationCondition(opts: {
             AND tes.service_id = ${opts.serviceIdExpr}
         )`;
 
-  /**
-   * ADR-0054/ADR-0055 — **المساعد مؤهّل لكل الخدمات افتراضيًا**، والحجب لوحده هو أداة التحكم.
-   *
-   * الشرط ده مكتوب هنا **جوّه الدالة المشتركة** عن قصد، مش كمعامل في كل نداء: الدالة دي بيناديها
-   * تسع مسارات (التوزيع، اختيار العميل، التوافر، حارس التعيين، شاشة "ليه وليه لأ"، مجمع
-   * المساعدين، ضم الطاقم...) — ولو كل واحد فيهم كان لازم يفتكر يبعت معامل، أول واحد ينساه بيرجّع
-   * المساعد لحالة الاختفاء من غير ما حد ياخد باله. القرار بيتاخد من **صف الشخص نفسه**، فالإجابة
-   * واحدة في كل مكان تلقائيًا.
-   *
-   * الفني لسه لازم اعتماد على الخدمة أو فئتها — هو بيقود شغلانة ومسؤول عن جودتها.
-   */
-  const isAssistant = `EXISTS (
-            SELECT 1 FROM technician_profiles kind_tp
-            WHERE kind_tp.id = ${opts.technicianIdExpr}
-              AND kind_tp.technician_kind = 'assistant'
-          )`;
-
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
     : `EXISTS (
@@ -476,8 +459,7 @@ export function technicianServiceQualificationCondition(opts: {
            )`;
 
   return `(
-          ${isAssistant}
-          OR ${directlyApproved}
+          ${directlyApproved}
           OR EXISTS (
             SELECT 1 FROM technician_categories tec_cat
             WHERE tec_cat.technician_id = ${opts.technicianIdExpr}
@@ -487,6 +469,34 @@ export function technicianServiceQualificationCondition(opts: {
         )
         -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
         AND ${notExcluded}`;
+}
+
+/**
+ * هل الشخص مخدوم له نفس **مدينة** نطاق الطلب؟
+ *
+ * المساعد يقدر يتحرك بين كل نطاقات المدينة الواحدة حتى لو الأدمن عيّن له نطاقًا واحدًا فقط،
+ * لكن لا يتسرّب من مدينة لمدينة (القاهرة لا تظهر لطلب الإسكندرية). المسافة تظل عامل ترتيب بعد
+ * هذا الحاجز، وليست بديلًا عنه. الدالة مشتركة بين العرض التلقائي، المساعد الشخصي، الضم اليدوي
+ * وحارس التنفيذ حتى لا تختلف القائمة عن قرار الحفظ الفعلي.
+ */
+export function technicianCityCoverageCondition(opts: {
+  technicianIdExpr: string;
+  requestedServiceZoneIdExpr: string;
+}): string {
+  return `EXISTS (
+          SELECT 1
+          FROM technician_zones city_tz
+          JOIN service_zones technician_zone ON technician_zone.id = city_tz.service_zone_id
+          JOIN service_zones requested_zone ON requested_zone.id = ${opts.requestedServiceZoneIdExpr}
+          WHERE city_tz.technician_id = ${opts.technicianIdExpr}
+            AND city_tz.is_active = true
+            AND city_tz.deleted_at IS NULL
+            AND technician_zone.is_active = true
+            AND technician_zone.deleted_at IS NULL
+            AND requested_zone.is_active = true
+            AND requested_zone.deleted_at IS NULL
+            AND technician_zone.city_id = requested_zone.city_id
+        )`;
 }
 
 /**

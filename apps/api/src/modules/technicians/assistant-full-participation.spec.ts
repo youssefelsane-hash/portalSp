@@ -156,7 +156,7 @@ describe('ADR-0055 — المساعد مشارك كامل (حارس التعيي
     await expect(guard.assertEligible(dataSource.manager, technician, order)).resolves.toBeUndefined();
   }, 20000);
 
-  it('حجب الخدمة عن المساعد بيمنع التعيين — أداة التحكم الوحيدة شغّالة فعلاً', async () => {
+  it('حجب الخدمة عن المساعد بيمنع التعيين — طبقة إضافية فوق اعتماد التخصص', async () => {
     await q(
       `INSERT INTO technician_excluded_services (technician_id,service_id,excluded_by_user_id,reason)
        VALUES ($1,$2,$3,'مش بيعرف يعملها')`,

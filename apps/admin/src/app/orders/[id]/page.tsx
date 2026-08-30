@@ -59,6 +59,14 @@ interface RescheduleOptionDto {
   available: boolean;
 }
 
+interface EligibleAssistantDto {
+  technician_id: string;
+  full_name: string;
+  technician_code: string;
+  current_level: string;
+  distance_km: string | null;
+}
+
 // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3): GET/POST /admin/orders/:id/notes.
 interface OrderInternalNoteResponseDto {
   id: string;
@@ -142,6 +150,7 @@ export default function OrderDetailPage() {
   const [teamMembers, setTeamMembers] = useState<TeamMemberResponseDto[]>([]);
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
   const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
+  const [eligibleAssistants, setEligibleAssistants] = useState<EligibleAssistantDto[] | null>(null);
   const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
   const [visitFeeEgp, setVisitFeeEgp] = useState('');
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
@@ -322,6 +331,12 @@ export default function OrderDetailPage() {
     authedFetchPaginated<AdminTechnicianResponseDto>('/admin/technicians?verification_status=approved&per_page=100')
       .then(({ items }) => setApprovedTechnicians(items))
       .catch(() => setApprovedTechnicians([]));
+  }
+
+  function loadEligibleAssistants() {
+    authedFetch<EligibleAssistantDto[]>(`/admin/orders/${id}/eligible-assistants`)
+      .then(setEligibleAssistants)
+      .catch(() => setEligibleAssistants([]));
   }
 
   function loadEligibleReassignTechnicians() {
@@ -1701,7 +1716,7 @@ export default function OrderDetailPage() {
                   className="w-fit"
                   onClick={() => {
                     setShowAssignAssistantForm((s) => !s);
-                    if (!approvedTechnicians) loadApprovedTechnicians();
+                    if (!eligibleAssistants) loadEligibleAssistants();
                   }}
                 >
                   عيّن مساعد يدويًا
@@ -1709,8 +1724,8 @@ export default function OrderDetailPage() {
                 {showAssignAssistantForm && (
                   <form onSubmit={handleAssignAssistant} className="flex flex-col gap-2">
                     <Label htmlFor="assistant_technician_id">الفني</Label>
-                    {!approvedTechnicians ? (
-                      <p className="text-sm text-muted-foreground">بيحمّل قايمة الفنيين…</p>
+                    {!eligibleAssistants ? (
+                      <p className="text-sm text-muted-foreground">بيحمّل المساعدين المؤهلين لنفس التخصص والمدينة…</p>
                     ) : (
                       <SelectNative
                         id="assistant_technician_id"
@@ -1721,9 +1736,10 @@ export default function OrderDetailPage() {
                         <option value="" disabled>
                           اختار فني
                         </option>
-                        {approvedTechnicians.map((tech) => (
-                          <option key={tech.id} value={tech.id}>
-                            {tech.full_name} ({tech.technician_code})
+                        {eligibleAssistants.map((assistant) => (
+                          <option key={assistant.technician_id} value={assistant.technician_id}>
+                            {assistant.full_name} ({assistant.technician_code})
+                            {assistant.distance_km !== null ? ` — ${Number(assistant.distance_km).toFixed(1)} كم` : ''}
                           </option>
                         ))}
                       </SelectNative>

@@ -3,17 +3,8 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { TechnicianServiceExclusionsService } from './technician-service-exclusions.service';
 import { technicianServiceQualificationCondition } from './technician-eligibility.sql';
 
-/**
- * ADR-0054 (docs/08 §103، طلب مالك) — «المساعد by default بيتقبل في كل، وأنا بس بدخل وبلغي
- * الطلب اللي هو ما بيعرفش يعمله».
- *
- * الاختبار حي على Postgres حقيقي عشان يغطّي **شرط الـSQL نفسه** مش دالة مساعدة — الشرط ده هو
- * اللي كل مسارات التوزيع بتناديه، فلو اتكسر مفيش حاجة تانية هتمسكه.
- *
- * الالتزام الأهم هنا: **الشاشة والمطابقة لازم يشوفوا نفس المجموعة**. لو افترقوا، الأدمن يحجب
- * حاجة والمطابقة تبعتها (أو العكس) — وده أسوأ من الفجوة الأصلية.
- */
-describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتراضيًا', () => {
+/** اختبار حي يثبت إن المساعد يمر بنفس دورة اعتماد التخصص، مع تطابق شاشة الأدمن والمطابقة. */
+describe('اعتماد تخصص المساعد — نفس جدار الفني بين الصنايع', () => {
   let dataSource: DataSource;
   let exclusions: TechnicianServiceExclusionsService;
   const runId = Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
@@ -112,13 +103,12 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
     ids.technicianUser = technician.userId;
     ids.technicianProfile = technician.profileId;
 
-    // الفني معتمد على الفئة الأولى بس — عشان نثبت إن سلوكه ما اتغيّرش.
+    // الدوران معتمدان على الفئة الأولى فقط؛ الدور لا يفتح فئات أخرى تلقائيًا.
     await q(
       `INSERT INTO technician_categories (technician_id, category_id, verification_status, is_active)
-       VALUES ($1,$2,'approved',true)`,
-      [ids.technicianProfile, ids.category],
+       VALUES ($1,$3,'approved',true),($2,$3,'approved',true)`,
+      [ids.technicianProfile, ids.assistantProfile, ids.category],
     );
-    // المساعد **بلا أي اعتماد خالص** — ده الحال الغالب اللي المالك بيشتكي منه.
   }, 30000);
 
   afterAll(async () => {
@@ -136,31 +126,40 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
     }
   }, 20000);
 
-  it('المساعد بلا أي اعتماد مؤهّل للخدمتين — حتى اللي في فئة مالوش فيها حاجة', async () => {
+  it('المساعد مؤهّل داخل فئته المعتمدة فقط، ولا يتسرّب لفئة أخرى', async () => {
     expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(true);
-    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(true);
+    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(false);
   }, 20000);
 
-  it('القاعدة مشتقّة من صف الشخص نفسه: نفس الفني لو بقى مساعد بيتأهّل فورًا، والعكس', async () => {
-    // ده جذر المشكلة الأصلية: الفني بلا اعتماد على الخدمة دي **مش** مؤهّل — وده صح ومقصود.
-    expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
+  it('المساعد بلا اعتماد لا يظهر لأي تخصص لحد موافقة الأدمن', async () => {
+    await q(`DELETE FROM technician_categories WHERE technician_id = $1`, [ids.assistantProfile]);
+    try {
+      expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(false);
+      expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(false);
+    } finally {
+      await q(
+        `INSERT INTO technician_categories (technician_id, category_id, verification_status, is_active)
+         VALUES ($1,$2,'approved',true)`,
+        [ids.assistantProfile, ids.category],
+      );
+    }
+  }, 20000);
 
-    // نفس الشخص بالظبط، الفرق الوحيد `technician_kind` — بيتأهّل فورًا بلا أي اعتماد جديد.
-    // الشرط بيتقرر من الصف نفسه مش من معامل بيتبعت في كل نداء، فمستحيل مسار ينسى يبعته.
+  it('تغيير نفس الشخص بين فني ومساعد لا يخلق له اعتمادًا وهميًا', async () => {
+    expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
     await q(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.technicianProfile]);
     try {
-      expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(true);
+      expect(await isQualified(ids.technicianProfile, ids.serviceA)).toBe(true);
+      expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
     } finally {
       await q(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.technicianProfile]);
     }
-    expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
   }, 20000);
 
-  it('الحجب لسه شغّال على المساعد — هو أداة التحكم الوحيدة دلوقتي', async () => {
+  it('الحجب الإضافي يظل شغالًا داخل تخصص المساعد المعتمد', async () => {
     await exclusions.exclude(ids.adminUser, ids.assistantProfile, ids.serviceA, 'مش بيعرف يعملها');
     expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(false);
-    // الخدمة التانية ما اتأثرتش — الحجب لكل خدمة على حدة.
-    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(true);
+    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(false);
 
     await exclusions.allow(ids.adminUser, ids.assistantProfile, ids.serviceA);
     expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(true);
@@ -171,11 +170,11 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
     expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
   }, 20000);
 
-  it('شاشة الأدمن بتعرض للمساعد كل الخدمات النشطة — مكانت بتفضل فاضية', async () => {
+  it('شاشة الأدمن بتعرض للمساعد خدمات تخصصه المعتمد فقط', async () => {
     const rows = await exclusions.listForTechnician(ids.assistantProfile);
     const serviceIds = rows.map((r) => r.service_id);
     expect(serviceIds).toContain(ids.serviceA);
-    expect(serviceIds).toContain(ids.serviceB);
+    expect(serviceIds).not.toContain(ids.serviceB);
   }, 20000);
 
   it('شاشة الأدمن للفني بتفضل محصورة في اعتماداته', async () => {
@@ -185,13 +184,12 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
     expect(serviceIds).not.toContain(ids.serviceB);
   }, 20000);
 
-  it('الشاشة والمطابقة بيشوفوا نفس المجموعة للمساعد — مفيش حاجة محجوبة بتوصله', async () => {
-    await exclusions.exclude(ids.adminUser, ids.assistantProfile, ids.serviceB, 'خارج قدرته');
+  it('الشاشة والمطابقة بيشوفوا نفس المجموعة للمساعد', async () => {
     const rows = await exclusions.listForTechnician(ids.assistantProfile);
     for (const row of rows) {
       const matchingSeesIt = await isQualified(ids.assistantProfile, row.service_id);
       expect(matchingSeesIt).toBe(!row.is_excluded);
     }
-    await exclusions.allow(ids.adminUser, ids.assistantProfile, ids.serviceB);
+    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(false);
   }, 20000);
 });

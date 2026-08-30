@@ -436,6 +436,12 @@ export class AdminOrdersController {
 
   // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية — ADR-0008 (يمتد ADR-0007 §7 اللي أجّل
   // الحل ده صراحة عن نطاقه الأول).
+  @Get(':id/eligible-assistants')
+  @RequirePermission('orders.assign_assistant')
+  async listEligibleAssistants(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminOrdersService.listEligibleAssistants(id);
+  }
+
   @Post(':id/assistants')
   @HttpCode(HttpStatus.OK)
   @RequirePermission('orders.assign_assistant')

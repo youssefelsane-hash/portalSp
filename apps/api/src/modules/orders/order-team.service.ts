@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { ORDER_CREW_CHANGED_EVENT, OrderCrewChangedEvent } from '../../common/events/order-crew-changed.event';
 import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
@@ -11,6 +11,7 @@ import { TechnicianAssignmentGuardService } from '../technicians/technician-assi
 import {
   TechnicianCapacityTier,
   classifyTechnicianCapacity,
+  technicianCityCoverageCondition,
   technicianKindCondition,
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
@@ -328,6 +329,62 @@ export class OrderTeamService {
   }
 
   /**
+   * حارس نطاق المرشح وقت التنفيذ، مش مجرد فلتر شاشة. الاعتماد مطلوب للدورين، وحد المدينة يضاف
+   * للمساعد فقط حسب سياسة التجنيد؛ كده نمنع نداء API مباشر من تجاوز القائمة المعروضة.
+   */
+  private async assertRecruitCandidateScope(
+    order: Order,
+    technicianId: string,
+    role: CrewRole,
+    manager: EntityManager = this.teamMembers.manager,
+  ): Promise<void> {
+    const params = role === 'assistant'
+      ? [technicianId, order.serviceId, order.serviceZoneId]
+      : [technicianId, order.serviceId];
+    const [scope] = await manager.query<{
+      active_profile: boolean;
+      correct_kind: boolean;
+      approved_specialty: boolean;
+      same_city: boolean;
+    }[]>(
+      `SELECT
+         (tp.verification_status = 'approved' AND tp.current_location IS NOT NULL) AS active_profile,
+         (${technicianKindCondition({ technicianAlias: 'tp', kind: role })}) AS correct_kind,
+         (${technicianServiceQualificationCondition({
+           technicianIdExpr: 'tp.id',
+           serviceIdExpr: 'svc.id',
+           categoryIdExpr: 'svc.category_id',
+         })}) AS approved_specialty,
+         (${role === 'assistant'
+           ? technicianCityCoverageCondition({
+               technicianIdExpr: 'tp.id',
+               requestedServiceZoneIdExpr: '$3',
+             })
+           : 'true'}) AS same_city
+       FROM technician_profiles tp
+       JOIN services svc ON svc.id = $2
+       WHERE tp.id = $1 AND tp.deleted_at IS NULL`,
+      params,
+    );
+    if (!scope?.active_profile) {
+      throw new ApiException(ErrorCode.TECH_001, 'الشخص غير معتمد أو مفيش موقع حالي له', HttpStatus.CONFLICT);
+    }
+    if (!scope?.correct_kind) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        role === 'assistant' ? 'الشخص ده مش مسجل حاليًا كمساعد' : 'الشخص ده مش مسجل حاليًا كفني',
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (!scope.approved_specialty) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
+    }
+    if (!scope.same_city) {
+      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
+    }
+  }
+
+  /**
    * مرشّحين للتجنيد الذاتي (docs/08 §31/§35، ADR-0021 §2) — نفس نمط TechniciansService
    * .listForServiceBooking() بالحرف (نفس الجداول/شرط الأهلية بالفئة، ADR-0018 §8)، لكن **بدون**
    * استبعاد الفنيين المثقلين (MEANINGFUL/HEAVY) من القايمة — بيترجعوا مع تصنيف قدرتهم
@@ -380,19 +437,33 @@ export class OrderTeamService {
         -- دلوقتي القايمة بتختلف فعليًا حسب الدور المطلوب — طلب مالك صريح: "أدوس إضافة فني، أقلي
         -- الفنيين... أدخل أضيف مساعدين، أقلي المساعدين بس اللي هم محطوط لهم إن هم مساعدين".
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: role })}
-        -- ADR-0054 — الدالة نفسها بتعفي المساعد من شرط الاعتماد (القرار من صف الشخص، مش من
-        -- معامل هنا) وبتفضل مفروضة عليه قايمة الحجب.
+        -- ADR-0056 — نفس شرط اعتماد التخصص مفروض على الفني والمساعد، والحجب الإداري طبقة إضافية.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
           directServiceAlias: 'ts',
         })}
+        ${role === 'assistant'
+          ? `AND ${technicianCityCoverageCondition({
+              technicianIdExpr: 'tp.id',
+              requestedServiceZoneIdExpr: 'o.service_zone_id',
+            })}`
+          : ''}
         AND NOT EXISTS (SELECT 1 FROM order_team_members otm WHERE otm.order_id = $1 AND otm.technician_id = tp.id)
         AND CASE tp.current_level
               WHEN 'new' THEN 0 WHEN 'verified' THEN 1 WHEN 'professional' THEN 2
               WHEN 'premium' THEN 3 WHEN 'team_leader' THEN 4 END <= $3
-      ORDER BY "isLeaderTeamMember" DESC, "isPreferredCrewMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC
+      ORDER BY ${
+        role === 'assistant'
+          ? `"distanceKm" ASC NULLS LAST,
+             CASE tp.current_level
+               WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
+               WHEN 'verified' THEN 1 ELSE 0
+             END DESC,
+             tp.average_rating DESC`
+          : '"isLeaderTeamMember" DESC, "isPreferredCrewMember" DESC, "distanceKm" ASC NULLS LAST, tp.average_rating DESC'
+      }
       LIMIT 30
       `,
       [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
@@ -472,6 +543,7 @@ export class OrderTeamService {
 
     const leaderProfile = await this.techniciansService.findByProfileIdOrThrow(leaderProfileId);
     const candidateProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+    await this.assertRecruitCandidateScope(order, technicianId, role);
     if (TECHNICIAN_LEVEL_RANK[candidateProfile.currentLevel] > TECHNICIAN_LEVEL_RANK[leaderProfile.currentLevel]) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده رتبته أعلى منك — مينفعش تجنّده', HttpStatus.FORBIDDEN);
     }
@@ -571,12 +643,18 @@ export class OrderTeamService {
           throw new ApiException(ErrorCode.VAL_001, 'الطلب ده مش متاح للتجنيد دلوقتي', HttpStatus.CONFLICT);
         }
 
+        const role = opportunity.crew_role;
         const lockedTechnician = await this.assignmentGuard.lockTechnician(manager, profile.id);
         await this.assignmentGuard.assertScheduleAvailable(manager, lockedTechnician.id, order);
-        await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
+        if (role === 'assistant') {
+          // المساعد نطاقه المدينة كلها، بينما حارس قيادة الطلب يقصد النطاق الدقيق. استخدام الحارس
+          // الخاص بالتجنيد هنا يحافظ على فرق السياسة من غير ما يرخّي مسار الفني القائد.
+          await this.assertRecruitCandidateScope(order, lockedTechnician.id, role, manager);
+        } else {
+          await this.assignmentGuard.assertEligibleForWorkOpportunity(manager, lockedTechnician, order);
+        }
 
         const composition = await this.getCrewComposition(order.id, order);
-        const role = opportunity.crew_role;
         // بَقّة حقيقية تانية اتلقطت وقت كتابة اختبار التزامن (docs/08 §35.19): تعليم الفرصة
         // declined هنا كان بيتعمل بـmarkDecided() *جوّه نفس المعاملة* اللي هترمي استثناء وترتد —
         // يعني التعليم نفسه كان بيتلغى مع الـrollback، والفرصة كانت تفضل offered للأبد رغم إن

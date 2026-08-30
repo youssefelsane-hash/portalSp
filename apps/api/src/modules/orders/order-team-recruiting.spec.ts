@@ -8,7 +8,12 @@ import { OrderTeamMember } from './entities/order-team-member.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { User } from '../auth/entities/user.entity';
 import { TechniciansService } from '../technicians/technicians.service';
-import { TechnicianProfile, TechnicianLevel, TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
+import {
+  TechnicianKind,
+  TechnicianProfile,
+  TechnicianLevel,
+  TechnicianVerificationStatus,
+} from '../technicians/entities/technician-profile.entity';
 import { TechnicianCompany } from '../technicians/entities/technician-company.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
@@ -45,6 +50,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     leaderProfile: '',
     leaderCompany: '',
     juniorProfile: '',
+    assistantProfile: '',
     seniorProfile: '',
     blockedProfile: '',
     teamMateProfile: '',
@@ -64,7 +70,12 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
 
   async function insertTechnician(
     label: string,
-    opts: { level: TechnicianLevel; hasLocation: boolean; companyId?: string | null },
+    opts: {
+      level: TechnicianLevel;
+      hasLocation: boolean;
+      companyId?: string | null;
+      kind?: TechnicianKind;
+    },
   ) {
     const [user] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
       nextPhone(),
@@ -73,16 +84,19 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     users.push(user.id);
     const [profile] = await q(
       `INSERT INTO technician_profiles
-         (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, verification_status, is_available, current_location, company_id)
-       VALUES ($1,$2,'x',3,$3,'approved',true, ${opts.hasLocation ? "ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography" : 'NULL'}, $4)
+         (user_id, technician_code, national_id_encrypted, years_of_experience, current_level, verification_status, is_available, current_location, company_id, technician_kind)
+       VALUES ($1,$2,'x',3,$3,'approved',true, ${opts.hasLocation ? "ST_SetSRID(ST_MakePoint(31.25, 30.05), 4326)::geography" : 'NULL'}, $4, $5)
        RETURNING id`,
-      [user.id, `TCREC${label}${runId}`.slice(0, 20), opts.level, opts.companyId ?? null],
+      [user.id, `TCREC${label}${runId}`.slice(0, 20), opts.level, opts.companyId ?? null, opts.kind ?? TechnicianKind.TECHNICIAN],
     );
     const profileId = profile.id as string;
     await q(
       `INSERT INTO technician_services (technician_id, service_id, verification_status, is_active) VALUES ($1,$2,'approved',true)`,
       [profileId, ids.service],
     );
+    if (opts.kind === TechnicianKind.ASSISTANT) {
+      await q(`INSERT INTO technician_zones (technician_id, service_zone_id, is_active) VALUES ($1,$2,true)`, [profileId, ids.zone]);
+    }
     return profileId;
   }
 
@@ -188,6 +202,11 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     ids.leaderUser = leaderUserRow.user_id;
 
     ids.juniorProfile = await insertTechnician('junior', { level: TechnicianLevel.NEW, hasLocation: true });
+    ids.assistantProfile = await insertTechnician('assistant', {
+      level: TechnicianLevel.NEW,
+      hasLocation: true,
+      kind: TechnicianKind.ASSISTANT,
+    });
     ids.seniorProfile = await insertTechnician('senior', { level: TechnicianLevel.PREMIUM, hasLocation: true });
     ids.blockedProfile = await insertTechnician('blocked', { level: TechnicianLevel.NEW, hasLocation: true });
     await blockToday(ids.blockedProfile);
@@ -273,11 +292,12 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_schedule_slots WHERE technician_id = $1`, [ids.blockedProfile]);
+      await q(`DELETE FROM technician_zones WHERE technician_id = $1`, [ids.assistantProfile]);
       await q(`DELETE FROM technician_services WHERE technician_id = ANY($1::uuid[])`, [
-        [ids.leaderProfile, ids.juniorProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
+        [ids.leaderProfile, ids.juniorProfile, ids.assistantProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
       ]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [
-        [ids.leaderProfile, ids.juniorProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
+        [ids.leaderProfile, ids.juniorProfile, ids.assistantProfile, ids.seniorProfile, ids.blockedProfile, ids.teamMateProfile, ids.wrongCategoryProfile],
       ]);
       await q(`DELETE FROM technician_companies WHERE id = $1`, [ids.leaderCompany]);
       if (users.length) await q(`DELETE FROM users WHERE id = ANY($1)`, [users]);
@@ -344,6 +364,16 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
     await expect(orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'technician')).rejects.toThrow();
   });
 
+  it('listRecruitCandidates — قائمة المساعدين لا تعرض الفنيين وتلتزم بالتخصص والمدينة', async () => {
+    const orderId = await insertOrder(`list-assistants-${runId}`, { requiredTechnicians: 1, requiredAssistants: 2 });
+    const candidates = await orderTeamService.listRecruitCandidates(ids.leaderUser, orderId, 'assistant');
+    const candidateIds = candidates.map((candidate) => candidate.technicianId);
+
+    expect(candidateIds).toContain(ids.assistantProfile);
+    expect(candidateIds).not.toContain(ids.juniorProfile);
+    expect(candidateIds).not.toContain(ids.leaderProfile);
+  });
+
   it('recruitMember — فني LIGHT بيتضاف فورًا، بلا فحص شركة خالص، ويطلق ORDER_CREW_CHANGED_EVENT بـaddedByType=technician', async () => {
     const orderId = await insertOrder(`recruit-ok-${runId}`, { requiredTechnicians: 3 });
     const handler = jest.fn();
@@ -374,7 +404,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
 
   it('recruitMember — دور "assistant" بيتخزن member_type=assistant، role_label الافتراضي "مساعد"', async () => {
     const orderId = await insertOrder(`recruit-assistant-${runId}`, { requiredTechnicians: 1, requiredAssistants: 2 });
-    const outcome = await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'assistant');
+    const outcome = await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.assistantProfile, 'assistant');
     expect(outcome).toEqual({ status: 'added' });
     const [row] = await q(`SELECT member_type, role_label FROM order_team_members WHERE order_id = $1`, [orderId]);
     expect(row.member_type).toBe('assistant');
@@ -476,7 +506,7 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
       crewComplete: false,
     });
 
-    await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.juniorProfile, 'assistant');
+    await orderTeamService.recruitMember(ids.leaderUser, orderId, ids.assistantProfile, 'assistant');
     const afterAssistant = await orderTeamService.getCrewComposition(orderId, order);
     expect(afterAssistant).toMatchObject({ assignedAssistants: 1, missingAssistants: 1, assignedTechnicians: 1, missingTechnicians: 2 });
   });

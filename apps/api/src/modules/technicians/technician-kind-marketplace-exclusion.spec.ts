@@ -10,9 +10,8 @@ import { TechniciansService } from './technicians.service';
 // اختبار حي ضد Postgres حقيقي — ADR-0055 / docs/08 §104 (تصحيح مالك مباشر).
 //
 // **القاعدة اتقلبت**: ADR-0050 كان بيستبعد المساعد من قايمة اختيار العميل على أساس إنه «معندهوش
-// الخبرة الكافية ياخد شغلانة لوحده». المالك صحّح الفهم — «المساعد» نوع شغل مختلف (نقل، شيل،
-// تنزيل) بيعمله لوحده عادي، مش مستوى مهارة أقل. فالاستبعاد على أساس الدور اتشال بالكامل،
-// و**حجب الأدمن للخدمة بقى أداة التحكم الوحيدة** (ADR-0054).
+// الخبرة الكافية ياخد شغلانة لوحده». المساعد يظل مشاركًا كاملًا، لكن أحدث قرار للمالك أعاد
+// جدار اعتماد التخصص: مشاركته لا تعني فتح السباكة والكهرباء والمحارة كلها تلقائيًا.
 //
 // الفني والمساعد في الاختبار ده متطابقين تمامًا ماعدا `technician_kind` — عشان أي فرق في النتيجة
 // يبقى سببه الدور بالظبط، مش أي حاجة تانية.
@@ -162,15 +161,12 @@ describe('TechniciansService.listForServiceBooking() — المساعد بيظه
     expect(technicianIds).toContain(ids.assistantId);
   });
 
-  // الحالة الأهم عمليًا: المساعد اللي **مالوش أي اعتماد صنعة خالص** — وده الحال الغالب، لأن
-  // المساعد بيتضاف كمساعد من الأساس ومابيعدّيش دورة اعتماد. ده اللي كان بيخلّيه يختفي، ولو
-  // الاختبار غطّى بس المساعد اللي عنده اعتمادات كان هيعدّي وهو مش شايف المشكلة الحقيقية.
-  it('المساعد بلا أي اعتماد صنعة بيظهر برضه — الحالة الغالبة اللي كانت بتخفيه', async () => {
+  it('المساعد بلا اعتماد صنعة لا يظهر لحد ما يقدم ويتقبل', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.assistantId]);
     try {
       const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId);
-      expect(items.map((i) => i.technicianId)).toContain(ids.assistantId);
+      expect(items.map((i) => i.technicianId)).not.toContain(ids.assistantId);
     } finally {
       await q(`INSERT INTO technician_services (technician_id,service_id,is_active) VALUES ($1,$2,true)`, [
         ids.assistantId,
@@ -194,7 +190,7 @@ describe('TechniciansService.listForServiceBooking() — المساعد بيظه
     }
   });
 
-  it('حجب الأدمن للخدمة هو أداة التحكم الوحيدة — بيشيل المساعد من القايمة، ورفعه بيرجّعه', async () => {
+  it('حجب الأدمن يظل طبقة إضافية فوق اعتماد التخصص', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [admin] = await q(
       `INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'admin') RETURNING id`,

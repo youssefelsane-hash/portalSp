@@ -19,7 +19,12 @@ import { ServicePricingEvaluation } from '../pricing/entities/service-pricing-ev
 import { TechnicianVerificationStatus } from '../technicians/entities/technician-profile.entity';
 import { TechnicianAssignmentGuardService } from '../technicians/technician-assignment-guard.service';
 import { TechnicianBookingListItem, TechniciansService } from '../technicians/technicians.service';
-import { TechnicianCapacityTier, classifyTechnicianCapacity } from '../technicians/technician-eligibility.sql';
+import {
+  TechnicianCapacityTier,
+  classifyTechnicianCapacity,
+  technicianCityCoverageCondition,
+  technicianServiceQualificationCondition,
+} from '../technicians/technician-eligibility.sql';
 import { SettingsService } from '../settings/settings.service';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
@@ -827,6 +832,56 @@ export class AdminOrdersService {
   // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية (ADR-0008، يمتد ADR-0007 §7 اللي أجّل
   // الحل ده صراحة). فعل نادر تشغيلي — بلا قفل pessimistic_write زي AssistantMatchingService.accept()
   // (راجع تبرير ADR-0008 §2: سباق بين أدمنين اتنين نادر ومقبول، مش مسار مالي حرج).
+  async listEligibleAssistants(orderId: string): Promise<
+    Array<{
+      technician_id: string;
+      full_name: string;
+      technician_code: string;
+      current_level: string;
+      distance_km: string | null;
+    }>
+  > {
+    const order = await this.findOrThrow(orderId);
+    if (!order.serviceZoneId) return [];
+    return this.dataSource.query(
+      `SELECT tp.id AS technician_id, u.full_name, tp.technician_code,
+              tp.current_level, ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
+       FROM technician_profiles tp
+       JOIN users u ON u.id = tp.user_id
+       JOIN services svc ON svc.id = $2
+       JOIN addresses a ON a.id = $4
+       LEFT JOIN technician_services ts
+         ON ts.technician_id = tp.id AND ts.service_id = svc.id
+        AND ts.is_active = true AND ts.verification_status = 'approved'
+       WHERE tp.technician_kind = 'assistant'
+         AND tp.verification_status = 'approved'
+         AND tp.deleted_at IS NULL
+         AND tp.current_location IS NOT NULL
+         AND tp.id <> COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
+         AND ${technicianServiceQualificationCondition({
+           technicianIdExpr: 'tp.id',
+           serviceIdExpr: 'svc.id',
+           categoryIdExpr: 'svc.category_id',
+           directServiceAlias: 'ts',
+         })}
+         AND ${technicianCityCoverageCondition({
+           technicianIdExpr: 'tp.id',
+           requestedServiceZoneIdExpr: '$1',
+         })}
+         AND NOT EXISTS (
+           SELECT 1 FROM order_team_members otm
+           WHERE otm.order_id = $5 AND otm.technician_id = tp.id
+         )
+       ORDER BY distance_km ASC NULLS LAST,
+                CASE tp.current_level
+                  WHEN 'team_leader' THEN 4 WHEN 'premium' THEN 3 WHEN 'professional' THEN 2
+                  WHEN 'verified' THEN 1 ELSE 0
+                END DESC,
+                tp.average_rating DESC`,
+      [order.serviceZoneId, order.serviceId, order.technicianId, order.addressId, order.id],
+    );
+  }
+
   async assignAssistant(
     adminUserId: string,
     orderId: string,
@@ -856,6 +911,36 @@ export class AdminOrdersService {
     }
     if (order.technicianId === technician.id) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده هو قائد الطلب بالفعل، مينفعش يبقى مساعد كمان', HttpStatus.CONFLICT);
+    }
+    const [scope] = await this.dataSource.query<{
+      correct_kind: boolean;
+      approved_specialty: boolean;
+      same_city: boolean;
+    }[]>(
+      `SELECT
+         (tp.technician_kind = 'assistant') AS correct_kind,
+         (${technicianServiceQualificationCondition({
+           technicianIdExpr: 'tp.id',
+           serviceIdExpr: 'svc.id',
+           categoryIdExpr: 'svc.category_id',
+         })}) AS approved_specialty,
+         (${technicianCityCoverageCondition({
+           technicianIdExpr: 'tp.id',
+           requestedServiceZoneIdExpr: '$3',
+         })}) AS same_city
+       FROM technician_profiles tp
+       JOIN services svc ON svc.id = $2
+       WHERE tp.id = $1 AND tp.deleted_at IS NULL`,
+      [technician.id, order.serviceId, order.serviceZoneId],
+    );
+    if (!scope?.correct_kind) {
+      throw new ApiException(ErrorCode.VAL_001, 'الشخص ده مش مسجل حاليًا كمساعد', HttpStatus.CONFLICT);
+    }
+    if (!scope.approved_specialty) {
+      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده مش معتمد في تخصص الخدمة دي', HttpStatus.CONFLICT);
+    }
+    if (!scope.same_city) {
+      throw new ApiException(ErrorCode.VAL_001, 'المساعد ده خارج مدينة الطلب', HttpStatus.CONFLICT);
     }
     const alreadyAssistant = await this.teamMembers.findOne({
       where: { orderId, technicianId: technician.id, memberType: ASSISTANT_MEMBER_TYPE },

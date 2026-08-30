@@ -445,8 +445,8 @@ export class TechniciansService {
         AND company.is_active = true AND company.deleted_at IS NULL
       CROSS JOIN (SELECT location FROM addresses WHERE id = $3) a
       WHERE tp.verification_status = 'approved' AND tp.deleted_at IS NULL
-        -- ADR-0055 (تصحيح مالك) — المساعد بيظهر في القايمة والترتيب زي الفني بالظبط. حجب
-        -- الأدمن للخدمات (ADR-0054) هو اللي بيحدد مين يظهر على أي خدمة، مش نوع الدور.
+        -- ADR-0055/0056 — المساعد بيظهر في القايمة والترتيب كمشارك كامل، لكن داخل خدماته أو
+        -- فئاته المعتمدة فقط. الحجب الإداري يظل طبقة إضافية ولا يحل محل اعتماد التخصص.
         -- ADR-0018 §8 — التأهيل الأساسي: technician_services المباشر (فوق) أو تأهيل بمستوى
         -- الفئة كلها (سباكة/كهرباء/...، technician_categories) — نفس القاعدة اللي matching
         -- .service.ts وassistant-matching.service.ts وtechnician-assignment-guard.service.ts
