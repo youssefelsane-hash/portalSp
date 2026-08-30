@@ -59,6 +59,9 @@ import { TechnicianProfile } from './entities/technician-profile.entity';
 import { TechnicianScheduleSlot } from './entities/technician-schedule-slot.entity';
 import { TechnicianZone } from './entities/technician-zone.entity';
 import { TechnicianEarningsModule } from '../payments/technician-earnings.module';
+import { AdminTechnicianInternalNotesController } from './admin-technician-internal-notes.controller';
+import { TechnicianInternalNote } from './entities/technician-internal-note.entity';
+import { TechnicianInternalNotesService } from './technician-internal-notes.service';
 
 @Module({
   imports: [
@@ -82,6 +85,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
       Service,
       ServiceCategory,
       User,
+      TechnicianInternalNote,
     ]),
     AuditModule,
     GeoModule,
@@ -98,6 +102,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     PublicTechnicianCompaniesController,
     AdminTechnicianCompaniesController,
     AdminTechnicianLevelsController,
+    AdminTechnicianInternalNotesController,
   ],
   providers: [
     TechniciansService,
@@ -122,6 +127,7 @@ import { TechnicianEarningsModule } from '../payments/technician-earnings.module
     ScheduleSlotReleaseListener,
     PreferredCrewService,
     TechnicianServiceExclusionsService,
+    TechnicianInternalNotesService,
     storageServiceProvider,
   ],
   exports: [

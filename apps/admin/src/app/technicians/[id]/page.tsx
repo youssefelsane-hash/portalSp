@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { BadgeCheck, BriefcaseBusiness, Star, WalletCards } from 'lucide-react';
 import type {
   AdminServiceCategoryResponseDto,
   AdminServiceZoneResponseDto,
@@ -22,7 +23,9 @@ import { AppShell, useAdminBack } from '@/components/app-shell';
 import { NationalIdCard } from '@/components/technician-national-id-card';
 import { TechnicianEarningsStatement } from '@/components/technician-earnings-statement';
 import { TechnicianDebtPanel } from '@/components/technician-debt-panel';
+import { TechnicianInternalNotes } from '@/components/technician-internal-notes';
 import { PageHeader } from '@/components/page-header';
+import { ProfileSummary } from '@/components/profile-summary';
 import { EmptyState } from '@/components/empty-state';
 import { PromptDialog } from '@/components/prompt-dialog';
 import { WalletAdjustmentForm } from '@/components/wallet-adjustment-form';
@@ -511,6 +514,7 @@ export default function TechnicianDetailPage() {
             <Badge variant="outline">{VERIFICATION_STATUS_LABELS[detail.verification_status]}</Badge>
           </>
         }
+        description={`كود ${detail.technician_code} · ${detail.technician_kind === 'assistant' ? 'مساعد' : 'فني'} · ${LEVEL_LABELS[detail.current_level]}`}
         actions={
           <Button variant="outline" onClick={goBack}>
             رجوع للقايمة
@@ -519,6 +523,39 @@ export default function TechnicianDetailPage() {
       />
 
       {error && <p className="mb-4 text-destructive">{error}</p>}
+
+      <ProfileSummary
+        items={[
+          {
+            label: 'الحالة التشغيلية',
+            value: detail.online ? 'متصل' : 'غير متصل',
+            hint: detail.has_current_location ? 'الموقع مسجّل وجاهز للتوزيع' : 'محتاج تحديث موقع GPS',
+            icon: BadgeCheck,
+            tone: detail.online && detail.has_current_location ? 'success' : 'warning',
+          },
+          {
+            label: 'متوسط التقييم',
+            value: detail.total_ratings_count ? detail.average_rating.toFixed(2) : '—',
+            hint: `${detail.total_ratings_count} تقييم`,
+            icon: Star,
+            tone: 'warning',
+          },
+          {
+            label: 'الشغل المكتمل',
+            value: detail.completed_orders_count,
+            hint: `${detail.cancelled_orders_count} طلب ملغي`,
+            icon: BriefcaseBusiness,
+            tone: 'primary',
+          },
+          {
+            label: 'رصيد المحفظة',
+            value: wallet ? formatEgp(wallet.wallet.balance_cents) : '…',
+            hint: wallet ? `محجوز للصرف ${formatEgp(wallet.wallet.reserved_balance_cents)}` : 'جاري تحميل الرصيد',
+            icon: WalletCards,
+            tone: wallet && wallet.wallet.balance_cents < 0 ? 'warning' : 'neutral',
+          },
+        ]}
+      />
 
       {/* الهوية الدائمة (ADR-0045، docs/08 §77-E1) — فوق كل حاجة عمدًا: ده الحقل اللي بيمنع
           فني متوقف يرجع بحساب جديد برقم موبايل تاني، والاعتماد نفسه ممنوع من غيره. */}
@@ -529,6 +566,10 @@ export default function TechnicianDetailPage() {
           canManage={hasPermission('technicians.manage')}
           onChanged={load}
         />
+      </div>
+
+      <div className="mb-6">
+        <TechnicianInternalNotes technicianId={id} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -1289,15 +1330,11 @@ export default function TechnicianDetailPage() {
             <CardTitle>الشغلانات المسموح بيها</CardTitle>
           </CardHeader>
           <CardContent>
-            {/* ADR-0054 — المساعد مؤهّل لكل الخدمات النشطة افتراضيًا (مش محتاج اعتماد صنعة،
-                لأنه بيشتغل تحت إشراف فني قائد)، فالنص لازم يقول الحقيقة المختلفة لكل دور بدل
-                نص واحد بيوصف حالة الفني بس. */}
             <p className="mb-4 text-sm text-muted-foreground">
               {detail.technician_kind === 'assistant' ? (
                 <>
-                  المساعد بياخد <strong>كل</strong> الشغلانات النشطة افتراضيًا — مش محتاج اعتماد
-                  تخصص لأنه بيشتغل تحت إشراف الفني المسؤول. لو فيه شغلانة معيّنة مش بيعرف يعملها،
-                  احجبها من هنا وهي مش هتوصله تاني.
+                  المساعد بياخد شغلانات <strong>تخصصاته المعتمدة فقط</strong> وبيشتغل فيها تحت
+                  إشراف الفني المسؤول. لو فيه شغلانة معيّنة داخل تخصصه مش مناسبة له، احجبها من هنا.
                 </>
               ) : (
                 <>
@@ -1313,7 +1350,7 @@ export default function TechnicianDetailPage() {
               <EmptyState
                 title={
                   detail.technician_kind === 'assistant'
-                    ? 'مفيش شغلانات نشطة في الكتالوج'
+                    ? 'مفيش شغلانات — اعتمد تخصص للمساعد الأول'
                     : 'مفيش شغلانات — اعتمد تخصص للفني الأول'
                 }
               />

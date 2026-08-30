@@ -73,44 +73,47 @@ export default function TechniciansPage() {
 
   return (
     <AppShell>
-      <PageHeader title="الفنيين" />
+      <PageHeader
+        title="الفنيين"
+        description="بحث ومراجعة حالة الاعتماد والتخصصات والأداء التشغيلي لكل فني"
+        actions={<Badge variant="outline">{total} فني</Badge>}
+      />
 
-      <div className="mb-4 max-w-md">
-        <Label htmlFor="technician_search" className="text-sm text-muted-foreground">
-          بحث
-        </Label>
-        <Input
-          id="technician_search"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-          placeholder="اسم، رقم موبايل، كود فني، أو رقم قومي"
-          className="mt-1"
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
+      <div className="mb-5 rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
+        <div className="max-w-xl">
+          <Label htmlFor="technician_search" className="text-sm font-medium">ابحث عن فني</Label>
+          <Input
+            id="technician_search"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="اسم، رقم موبايل، كود فني، أو رقم قومي"
+            className="mt-2"
+          />
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
           {/* الرقم القومي بيتبحث عنه **بمطابقة كاملة بس** — مش جزئية. السبب مش اختيار واجهة:
               القيمة متخزّنة مشفّرة، والبحث بيمر على blind index (HMAC) اللي بطبيعته بيطابق
               القيمة كاملة أو لأ. توضيح ده هنا بيمنع الموظف يفتكر إن البحث بايظ. */}
-          الرقم القومي لازم يتكتب كامل (14 رقم) عشان يطابق؛ باقي الحقول بتقبل جزء من النص.
-        </p>
-      </div>
-
-      <div className="mb-4 flex gap-2">
-        {STATUS_FILTERS.map((filter) => (
-          <Button
-            key={filter.value}
-            size="sm"
-            variant={statusFilter === filter.value ? 'default' : 'outline'}
-            onClick={() => {
-              setStatusFilter(filter.value);
-              setPage(1);
-            }}
-          >
-            {filter.label}
-          </Button>
-        ))}
+            الرقم القومي لازم يتكتب كامل (14 رقم)؛ باقي الحقول تقبل جزءًا من النص.
+          </p>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+          {STATUS_FILTERS.map((filter) => (
+            <Button
+              key={filter.value}
+              size="sm"
+              variant={statusFilter === filter.value ? 'default' : 'outline'}
+              onClick={() => {
+                setStatusFilter(filter.value);
+                setPage(1);
+              }}
+            >
+              {filter.label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {error && <p className="text-destructive">{error}</p>}

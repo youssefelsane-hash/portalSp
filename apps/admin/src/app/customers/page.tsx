@@ -71,28 +71,36 @@ export default function CustomersPage() {
 
   return (
     <AppShell>
-      <PageHeader title="العملاء" />
+      <PageHeader
+        title="العملاء"
+        description="ملفات العملاء، حالة الحساب، الإنفاق والمحفظة وسجل الطلبات"
+        actions={<Badge variant="outline">{total} عميل</Badge>}
+      />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        {BLOCKED_FILTERS.map((filter) => (
-          <Button
-            key={filter.value}
-            size="sm"
-            variant={blockedFilter === filter.value ? 'default' : 'outline'}
-            onClick={() => {
-              setBlockedFilter(filter.value);
-            }}
-          >
-            {filter.label}
-          </Button>
-        ))}
-        <Input
-          placeholder="بحث برقم الموبايل"
-          value={phoneSearchInput}
-          onChange={(e) => setPhoneSearchInput(e.target.value)}
-          className="max-w-xs"
-          dir="ltr"
-        />
+      <div className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
+        <div className="min-w-64 flex-1">
+          <label htmlFor="customer_phone_search" className="mb-2 block text-sm font-medium">بحث برقم الموبايل</label>
+          <Input
+            id="customer_phone_search"
+            placeholder="مثال: +2010…"
+            value={phoneSearchInput}
+            onChange={(e) => setPhoneSearchInput(e.target.value)}
+            className="max-w-md"
+            dir="ltr"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {BLOCKED_FILTERS.map((filter) => (
+            <Button
+              key={filter.value}
+              size="sm"
+              variant={blockedFilter === filter.value ? 'default' : 'outline'}
+              onClick={() => setBlockedFilter(filter.value)}
+            >
+              {filter.label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {error && <p className="text-destructive">{error}</p>}

@@ -274,6 +274,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ...group,
     items: group.items.filter((item) => !item.permission || hasPermission(item.permission)),
   })).filter((group) => group.items.length > 0);
+  const activeNavigation = visibleGroups
+    .flatMap((group) => group.items.map((item) => ({ group: group.label, item })))
+    .sort((a, b) => b.item.href.length - a.item.href.length)
+    .find(({ item }) => item.href === '/' ? pathname === '/' : pathname.startsWith(item.href));
 
   // نسخة متداخلة (صفحة لسه بتلفّ محتواها بـ<AppShell>) — الشِل الحقيقي متركّب في الـlayout فوق،
   // فبنعدّي المحتوى زي ما هو بدل ما نرسم شريط جانبي تاني.
@@ -284,19 +288,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <AppShellMountedContext.Provider value={true}>
     <AdminBackContext.Provider value={goBack}>
-    <div className="flex h-screen overflow-hidden">
-      <aside className="flex w-64 shrink-0 flex-col border-s bg-muted/30">
-        <div className="flex items-center gap-2 px-4 py-4">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+    <div className="flex h-screen overflow-hidden bg-background">
+      <aside className="flex w-72 shrink-0 flex-col border-s border-border/70 bg-card/85 shadow-[-18px_0_45px_-38px_oklch(0.2_0.05_255_/_55%)] backdrop-blur-xl">
+        <div className="flex items-center gap-3 border-b border-border/60 px-4 py-4">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-info text-base font-bold text-primary-foreground shadow-md shadow-primary/20">
             ص
           </div>
-          <span className="font-semibold">أسطى — إدارة</span>
+          <div>
+            <span className="block font-semibold">أسطى</span>
+            <span className="block text-[11px] text-muted-foreground">لوحة الإدارة والعمليات</span>
+          </div>
         </div>
-        <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2 pb-4">
+        <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 py-4">
           {visibleGroups.map((group) => (
             <div key={group.label || 'root'}>
               {group.label && (
-                <div className="px-3 pb-1 text-xs font-medium text-muted-foreground">{group.label}</div>
+                <div className="px-3 pb-1.5 text-[11px] font-semibold text-muted-foreground/80">{group.label}</div>
               )}
               <div className="flex flex-col gap-0.5">
                 {group.items.map((item) => {
@@ -307,11 +314,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       key={item.href}
                       href={item.href}
                       className={cn(
-                        'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-foreground/80 hover:bg-accent hover:text-accent-foreground',
-                        isActive && 'bg-accent text-accent-foreground font-medium',
+                        'group flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-foreground/75 transition-all hover:bg-accent/70 hover:text-accent-foreground',
+                        isActive && 'bg-primary text-primary-foreground font-medium shadow-sm shadow-primary/20 hover:bg-primary hover:text-primary-foreground',
                       )}
                     >
-                      <Icon className="size-4 shrink-0" />
+                      <Icon className={cn('size-4 shrink-0 transition-transform group-hover:scale-105', isActive && 'text-primary-foreground')} />
                       <span className="truncate">{item.label}</span>
                     </Link>
                   );
@@ -322,14 +329,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
         {/* placeholder للوجو/قواعد الاستخدام الحقيقية — docs/06-vision-brief-sanaa.md §0،
             لسه هتتبعت من صاحب المشروع. مفيش نص/لوجو مُخترَع هنا عمدًا. */}
-        <div className="border-t px-4 py-3 text-xs text-muted-foreground">
+        <div className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground">
           <div>© الصانع جروب</div>
           <div className="mt-1 text-muted-foreground/60">قواعد الاستخدام (قريبًا)</div>
         </div>
       </aside>
       <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b bg-background/80 px-6 py-3 backdrop-blur">
-          <div />
+        <header className="flex min-h-16 items-center justify-between border-b border-border/60 bg-card/75 px-6 py-3 backdrop-blur-xl">
+          <div>
+            {activeNavigation?.group && <p className="text-[11px] text-muted-foreground">{activeNavigation.group}</p>}
+            <p className="text-sm font-semibold">{activeNavigation?.item.label ?? 'لوحة الإدارة'}</p>
+          </div>
           <div className="flex items-center gap-3">
             {user && (
               <div className="flex items-center gap-2">
@@ -347,7 +357,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         {/* حاوية الـscroll الحقيقية — لازم تكون هنا مش على المستند، وإلا الشريط الجانبي
             بيتحرّك مع المحتوى وبيضيع مكانه (نفس الشكوى في §63.ب4). */}
-        <main ref={mainRef} className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main ref={mainRef} className="relative flex-1 overflow-y-auto p-5 sm:p-6 lg:p-8">
+          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+        </main>
       </div>
     </div>
     </AdminBackContext.Provider>

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
+import '../../design/adaptive_text_action.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -66,9 +67,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await context.read<AuthRepository>().requestOtp(
-            _phoneController.text.trim(),
-            purpose: _isRegisterMode ? 'register' : 'login',
-          );
+        _phoneController.text.trim(),
+        purpose: _isRegisterMode ? 'register' : 'login',
+      );
       if (!mounted) return;
       // الكود القديم بقى ملغي فعليًا على السيرفر — لازم الخانة تتفضّى، وإلا الفني هيضغط «دخول»
       // على كود ميت ويحرق محاولة من الخمسة بلا داعي.
@@ -76,7 +77,9 @@ class _LoginScreenState extends State<LoginScreen> {
       _startResendCooldown();
       _otpFocusNode.requestFocus();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي')),
+        const SnackBar(
+          content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي'),
+        ),
       );
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
@@ -97,9 +100,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await context.read<AuthRepository>().requestOtp(
-            _phoneController.text.trim(),
-            purpose: _isRegisterMode ? 'register' : 'login',
-          );
+        _phoneController.text.trim(),
+        purpose: _isRegisterMode ? 'register' : 'login',
+      );
       setState(() => _otpSent = true);
       _startResendCooldown();
     } on ApiException catch (err) {
@@ -125,7 +128,10 @@ class _LoginScreenState extends State<LoginScreen> {
           userType: 'technician',
         );
       } else {
-        await auth.verifyOtp(_phoneController.text.trim(), _otpController.text.trim());
+        await auth.verifyOtp(
+          _phoneController.text.trim(),
+          _otpController.text.trim(),
+        );
       }
     } on ApiException catch (err) {
       // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
@@ -185,87 +191,126 @@ class _LoginScreenState extends State<LoginScreen> {
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('أسطى', style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
-                  const SizedBox(height: 8),
-                  Text(
-                    _otpSent
-                        ? 'اتبعت كود لـ ${_phoneController.text}'
-                        : (_isRegisterMode ? 'اعمل حساب فني جديد' : 'ادخل رقم موبايلك عشان تكمل'),
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 24),
-                  if (!_otpSent) ...[
-                    if (_isRegisterMode) ...[
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'أسطى',
+                      style: Theme.of(context).textTheme.headlineMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _otpSent
+                          ? 'اتبعت كود لـ ${_phoneController.text}'
+                          : (_isRegisterMode
+                                ? 'اعمل حساب فني جديد'
+                                : 'ادخل رقم موبايلك عشان تكمل'),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 24),
+                    if (!_otpSent) ...[
+                      if (_isRegisterMode) ...[
+                        TextField(
+                          controller: _fullNameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'الاسم الكامل',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       TextField(
-                        controller: _fullNameController,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'الاسم الكامل'),
+                        controller: _phoneController,
+                        keyboardType: TextInputType.phone,
+                        textDirection: TextDirection.ltr,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم الموبايل',
+                          hintText: '+201001234567',
+                        ),
                       ),
-                      const SizedBox(height: 12),
-                    ],
-                    TextField(
-                      controller: _phoneController,
-                      keyboardType: TextInputType.phone,
-                      textDirection: TextDirection.ltr,
-                      decoration: const InputDecoration(labelText: 'رقم الموبايل', hintText: '+201001234567'),
-                    ),
-                  ] else ...[
-                    TextField(
-                      controller: _otpController,
-                      focusNode: _otpFocusNode,
-                      keyboardType: TextInputType.number,
-                      textDirection: TextDirection.ltr,
-                      maxLength: 6,
-                      decoration: const InputDecoration(labelText: 'كود التحقق (6 أرقام)'),
-                    ),
-                    TextButton(
-                      key: const ValueKey('otp-resend'),
-                      onPressed: (_isSubmitting || _resendSeconds > 0) ? null : _resendOtp,
-                      child: Text(
-                        _resendSeconds > 0
+                    ] else ...[
+                      TextField(
+                        controller: _otpController,
+                        focusNode: _otpFocusNode,
+                        keyboardType: TextInputType.number,
+                        textDirection: TextDirection.ltr,
+                        maxLength: 6,
+                        decoration: const InputDecoration(
+                          labelText: 'كود التحقق (6 أرقام)',
+                        ),
+                      ),
+                      AdaptiveTextAction(
+                        key: const ValueKey('otp-resend'),
+                        onPressed: (_isSubmitting || _resendSeconds > 0)
+                            ? null
+                            : _resendOtp,
+                        icon: Icons.refresh_rounded,
+                        label: _resendSeconds > 0
                             ? 'تقدر تطلب كود جديد بعد $_resendSeconds ثانية'
                             : 'ما وصلكش الكود؟ ابعته تاني',
                       ),
+                      AdaptiveTextAction(
+                        onPressed: _isSubmitting ? null : _backToPhoneStep,
+                        icon: Icons.edit_outlined,
+                        label: 'رقم موبايل غلط؟ رجّع خطوة',
+                      ),
+                    ],
+                    if (_error != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                    if (_suggestRegister) ...[
+                      const SizedBox(height: 4),
+                      AdaptiveTextAction(
+                        onPressed: _isSubmitting ? null : _switchToRegister,
+                        label: 'سجّل حساب فني جديد بنفس الرقم',
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _isSubmitting
+                          ? null
+                          : (_otpSent ? _verifyOtp : _requestOtp),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              _otpSent
+                                  ? (_isRegisterMode ? 'إنشاء الحساب' : 'دخول')
+                                  : 'ابعت كود التحقق',
+                            ),
                     ),
-                    TextButton(
-                      onPressed: _isSubmitting ? null : _backToPhoneStep,
-                      child: const Text('رقم موبايل غلط؟ رجّع خطوة'),
-                    ),
+                    if (!_otpSent) ...[
+                      const SizedBox(height: 12),
+                      AdaptiveTextAction(
+                        onPressed: _isSubmitting ? null : _toggleMode,
+                        label: _isRegisterMode
+                            ? 'عندك حساب؟ سجّل دخول'
+                            : 'فني جديد؟ سجّل حساب',
+                      ),
+                    ],
                   ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                  ],
-                  if (_suggestRegister) ...[
-                    const SizedBox(height: 4),
-                    TextButton(
-                      onPressed: _isSubmitting ? null : _switchToRegister,
-                      child: const Text('سجّل حساب فني جديد بنفس الرقم'),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _isSubmitting ? null : (_otpSent ? _verifyOtp : _requestOtp),
-                    child: Text(
-                      _isSubmitting
-                          ? 'جاري التحميل…'
-                          : (_otpSent ? (_isRegisterMode ? 'إنشاء الحساب' : 'دخول') : 'ابعت كود التحقق'),
-                    ),
-                  ),
-                  if (!_otpSent) ...[
-                    const SizedBox(height: 12),
-                    TextButton(
-                      onPressed: _isSubmitting ? null : _toggleMode,
-                      child: Text(_isRegisterMode ? 'عندك حساب؟ سجّل دخول' : 'فني جديد؟ سجّل حساب'),
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
           ),
