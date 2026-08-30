@@ -94,7 +94,13 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                // شيل الفوكس من حقل الوصف قبل الإقفال — تفادي Flutter assertion
+                // '_dependents.isEmpty' (شاشة حمرا) لو المستخدم لسه واقف في الحقل.
+                // راجع docs/08 §108-C وrating_dialog.dart لنفس الإصلاح.
+                FocusScope.of(context).unfocus();
+                Navigator.pop(context);
+              },
               child: const Text('إلغاء'),
             ),
             FilledButton(
@@ -105,6 +111,7 @@ class _WarrantiesScreenState extends State<WarrantiesScreen> {
                   setDialogState(() => validationError = error);
                   return;
                 }
+                FocusScope.of(context).unfocus();
                 Navigator.pop(context, value);
               },
               child: const Text('إرسال'),

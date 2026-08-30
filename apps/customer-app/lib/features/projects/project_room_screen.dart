@@ -499,11 +499,19 @@ class _ProjectRoomScreenState extends State<ProjectRoomScreen>
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+              onPressed: () {
+                // راجع docs/08 §108-C — شيل الفوكس من حقل الملاحظات قبل الإقفال
+                // عشان نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا).
+                FocusScope.of(dialogContext).unfocus();
+                Navigator.of(dialogContext).pop(false);
+              },
               child: const Text('رجوع'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+              onPressed: () {
+                FocusScope.of(dialogContext).unfocus();
+                Navigator.of(dialogContext).pop(true);
+              },
               child: const Text('إرسال'),
             ),
           ],

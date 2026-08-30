@@ -250,22 +250,33 @@ Future<RatingResult?> showRatingDialog(
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () {
+                // لازم نشيل الفوكس من حقل التعليق الأول — لو المستخدم كان لسه واقف
+                // فيه (شريط تحديد النص/الكيبورد لسه شغال)، إقفال الـdialog فورًا
+                // بيكسر فرضية Flutter الداخلية إن كل InheritedWidget dependents
+                // اتشالت قبل ما الشجرة تتفكك (assertion: '_dependents.isEmpty')
+                // وده اللي كان بيطلع شاشة حمرا ويعلّق الطلب. راجع docs/08 §108-C.
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop();
+              },
               child: const Text('إلغاء'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(
-                RatingResult(
-                  overallRating: overall,
-                  punctualityRating: punctuality,
-                  qualityRating: quality,
-                  professionalismRating: professionalism,
-                  priceFairnessRating: priceFairness,
-                  cleanlinessRating: cleanliness,
-                  comment: controller.text.trim(),
-                  afterPhotoMediaIds: selectedPhotoIds.toList(),
-                ),
-              ),
+              onPressed: () {
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop(
+                  RatingResult(
+                    overallRating: overall,
+                    punctualityRating: punctuality,
+                    qualityRating: quality,
+                    professionalismRating: professionalism,
+                    priceFairnessRating: priceFairness,
+                    cleanlinessRating: cleanliness,
+                    comment: controller.text.trim(),
+                    afterPhotoMediaIds: selectedPhotoIds.toList(),
+                  ),
+                );
+              },
               child: const Text('إرسال'),
             ),
           ],

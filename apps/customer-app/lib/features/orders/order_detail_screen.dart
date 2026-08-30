@@ -438,13 +438,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
+                onPressed: () {
+                  // راجع docs/08 §108-C — شيل الفوكس من حقل النص الحر قبل الإقفال
+                  // عشان نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا).
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.of(dialogContext).pop();
+                },
                 child: const Text('تراجع'),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(
-                  _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
-                ),
+                onPressed: () {
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.of(dialogContext).pop(
+                    _CancelChoice(reasonId: selectedReasonId, freeText: freeTextController.text),
+                  );
+                },
                 child: const Text('تأكيد الإلغاء'),
               ),
             ],

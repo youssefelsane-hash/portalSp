@@ -227,7 +227,12 @@ class _CreateTemplateSheetState extends State<_CreateTemplateSheet> {
         startsAt: _startsAt!.toIso8601String(),
         problemDescription: _descriptionController.text.trim(),
       );
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) {
+        // راجع docs/08 §108-C — شيل الفوكس من حقل الوصف قبل الإقفال عشان نتجنب
+        // Flutter assertion '_dependents.isEmpty' (شاشة حمرا).
+        FocusScope.of(context).unfocus();
+        Navigator.of(context).pop(true);
+      }
     } on ApiException catch (err) {
       if (mounted) setState(() => _error = err.message);
     } finally {

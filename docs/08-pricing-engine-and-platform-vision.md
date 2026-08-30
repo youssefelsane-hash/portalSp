@@ -11536,10 +11536,42 @@ arrived، order_in_progress، إلخ) كان بيعمل صفين متطابقي�
 - عربون مدفوع أونلاين بس (والباقي كاش) → **القائد فقط** (أو الشخص الوحيد لو مفيش طاقم) يشوف
   «المطلوب تحصيله من العميل» + نصيبه هو. أي عضو تاني في الطاقم يشوف نصيبه بس، مهما كان.
 
-## C — شاشة حمرا (كراش Flutter حقيقي) في واجهة الطاقم وقت الإرسال — الطلب بيعلّق
+## C — شاشة حمرا (كراش Flutter حقيقي) في واجهة الطاقم وقت الإرسال — الطلب بيعلّق — ✅ خلص (2026-08-30)
 
 خطأ حقيقي من اللقطة: `'_dependents.isEmpty': is not true` (framework assertion، مش استثناء
 تطبيقي عادي). لازم تشخيص وإصلاح جذري، مش try/catch بيغطي العرض.
+
+**السبب الجذري (مؤكّد بالمقارنة مع GitHub issues حقيقية لنفس الـassertion في flutter/flutter —
+#124265, #45839, #33254، وغيرهم)**: كل `showDialog`/`showModalBottomSheet` فيه `TextField` مع
+زرار (`FilledButton`/`TextButton`) بينادي `Navigator.pop(...)` **مباشرة** وهو لسه ماسك الفوكس —
+لو المستخدم لسه واقف في الحقل (كيبورد شغال/شريط تحديد النص ظاهر) وضغط الزرار فورًا، الـdialog
+بيتقفل و شجرة الـwidgets بتتفكك قبل ما `EditableText`'s overlay entry (شريط التحديد/الـmagnifier)
+يشيل نفسه من `_dependents` بتاعة الـInheritedElement اللي هو معتمد عليها (Theme/Localizations) —
+فالـassertion `_dependents.isEmpty` بتفشل وقت `unmount()`، والـdialog بيقفل في نص العملية فيفضل
+الطلب معلّق (التقييم/الإلغاء/البلاغ لم يتبعت فعليًا للباك-إند).
+
+**واقعة "واجهة الطقيم" (بلاغ المالك)**: أقرب تطابق حرفي هو **`showRatingDialog()`**
+(`apps/customer-app/lib/features/ratings/rating_dialog.dart` وnظيرتها
+`apps/technician-app/lib/features/ratings/rating_dialog.dart`) — زرار "إرسال" بيقفل بعد ما
+المستخدم يكتب تعليق في `TextField`، بالظبط نفس النمط.
+
+**الإصلاح (منهجي، مش رقعة على شاشة واحدة، زي ما طلب المالك صراحة)**: `FocusScope.of(context).
+unfocus()` قبل أي `Navigator.pop(...)` في أي dialog فيه `TextField`/`TextFormField` — Sweep كامل
+عبر التطبيقين شمل: rating_dialog.dart (كلا التطبيقين)، warranties_screen.dart's claim dialog،
+order_detail_screen.dart's cancel dialog، project_room_screen.dart's milestone-reject dialog،
+schedule_selection_screen.dart's `_confirm()`، recurring_orders_screen.dart's `_submit()`،
+company_screen.dart's `_editBranch` dialog، وorder_execution_screen.dart (technician-app) —
+أكبر تجمّع، 5 dialogs مختلفة: `_RescheduleRequestDialog`, `_CancelOrderDialog`,
+`_ReportFailedVisitDialog`, `_CashNotReceivedDialog`, `_ContinueAnotherDayDialog`,
+`_ProposeQuoteDialog`. اتفحصت كل الـdialogs في التطبيقين (بحث شامل عن `showDialog`+
+`TextField`/`TextFormField`)، ومفيش حالة اتسابت غير اللي مفيهاش `TextField` أصلاً (زي
+delete-account confirm) أو اللي الـTextField بيتشال من الشجرة بـrebuild طبيعي قبل الـpop
+النهائي (خطوة تأكيد تانية بدون TextField) — دي مش عرضة للبَقّة أصلاً.
+
+**فجوة موثّقة صراحة**: مفيش Flutter SDK في بيئة التنفيذ الحالية (مختلفة عن البيئة الموصوفة في
+CLAUDE.md اللي فيها `/opt/flutter/bin`) — الإصلاح اتراجع يدويًا سطر بسطر للتأكد من توازن الأقواس
+وصحة الصياغة، لكن `flutter analyze`/`flutter test` الحقيقيين لم يشتغلوا في السيشن دي. لازم أي
+سيشن جاية عندها Flutter SDK فعلي تشغّل `flutter analyze` على الملفات دي للتأكيد النهائي.
 
 ## D — شاشة بيضا في «حدد موقعي» (كانت شغالة، بقت فاضية)
 

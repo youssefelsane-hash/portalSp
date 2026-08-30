@@ -996,10 +996,19 @@ class _RescheduleRequestDialogState extends State<_RescheduleRequestDialog> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+          TextButton(
+            onPressed: () {
+              // راجع docs/08 §108-C — شيل الفوكس من حقل السبب قبل الإقفال عشان
+              // نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا).
+              FocusScope.of(context).unfocus();
+              Navigator.of(context).pop();
+            },
+            child: const Text('تراجع'),
+          ),
           FilledButton(
             onPressed: () {
               if (!_formKey.currentState!.validate()) return;
+              FocusScope.of(context).unfocus();
               Navigator.of(context).pop(_RescheduleRequestDraft(slot: _slot!, reason: _reasonController.text.trim()));
             },
             child: const Text('إرسال للعميل'),
@@ -1417,6 +1426,9 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
         unitPriceCents: (priceEgp * 100).round(),
       ));
     }
+    // راجع docs/08 §108-C — شيل الفوكس من أي حقل مفتوح قبل الإقفال عشان نتجنب
+    // Flutter assertion '_dependents.isEmpty' (شاشة حمرا + الطلب بيعلّق).
+    FocusScope.of(context).unfocus();
     Navigator.of(context).pop(result);
   }
 
@@ -1494,7 +1506,13 @@ class _ProposeQuoteDialogState extends State<_ProposeQuoteDialog> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
+          TextButton(
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              Navigator.of(context).pop();
+            },
+            child: const Text('إلغاء'),
+          ),
           FilledButton(onPressed: _submit, child: const Text('ابعت العرض')),
         ],
       ),
@@ -1577,7 +1595,15 @@ class _CancelOrderDialogState extends State<_CancelOrderDialog> {
                 ),
               ]
             : [
-                TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+                TextButton(
+                  onPressed: () {
+                    // راجع docs/08 §108-C — شيل الفوكس من حقل التوضيح النصي قبل
+                    // الإقفال عشان نتجنب Flutter assertion '_dependents.isEmpty'.
+                    FocusScope.of(context).unfocus();
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('تراجع'),
+                ),
                 FilledButton(onPressed: _goToConfirm, child: const Text('التالي')),
               ],
       ),
@@ -1682,6 +1708,9 @@ class _ReportFailedVisitDialogState extends State<_ReportFailedVisitDialog> {
       setState(() => _validationError = 'اكتب توضيح مختصر (10 حروف على الأقل) عشان الإدارة تفهم الموقف');
       return;
     }
+    // راجع docs/08 §108-C — شيل الفوكس من حقل التوضيح قبل الإقفال عشان نتجنب
+    // Flutter assertion '_dependents.isEmpty' (شاشة حمرا + الطلب بيعلّق).
+    FocusScope.of(context).unfocus();
     Navigator.of(context).pop(_FailedVisitResult(reason: _reason, description: _descriptionController.text.trim()));
   }
 
@@ -1727,7 +1756,13 @@ class _ReportFailedVisitDialogState extends State<_ReportFailedVisitDialog> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+          TextButton(
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              Navigator.of(context).pop();
+            },
+            child: const Text('تراجع'),
+          ),
           FilledButton(
             onPressed: _submit,
             style: FilledButton.styleFrom(backgroundColor: Colors.orange),
@@ -1823,7 +1858,15 @@ class _CashNotReceivedDialogState extends State<_CashNotReceivedDialog> {
                 ),
               ]
             : [
-                TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('تراجع')),
+                TextButton(
+                  onPressed: () {
+                    // راجع docs/08 §108-C — شيل الفوكس من حقل التوضيح قبل
+                    // الإقفال عشان نتجنب Flutter assertion '_dependents.isEmpty'.
+                    FocusScope.of(context).unfocus();
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('تراجع'),
+                ),
                 FilledButton(onPressed: _goToConfirm, child: const Text('التالي')),
               ],
       ),
@@ -1887,6 +1930,9 @@ class _ContinueAnotherDayDialogState extends State<_ContinueAnotherDayDialog> {
       setState(() => _error = 'اختار اليوم اللي هترجع فيه');
       return;
     }
+    // راجع docs/08 §108-C — شيل الفوكس من حقل السبب قبل الإقفال عشان نتجنب
+    // Flutter assertion '_dependents.isEmpty' (شاشة حمرا + الطلب بيعلّق).
+    FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
       _ContinueAnotherDayDraft(reason, _date!.toLocal().toIso8601String().split('T').first),
     );
@@ -1937,7 +1983,13 @@ class _ContinueAnotherDayDialogState extends State<_ContinueAnotherDayDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('إلغاء')),
+        TextButton(
+          onPressed: () {
+            FocusScope.of(context).unfocus();
+            Navigator.of(context).pop();
+          },
+          child: const Text('إلغاء'),
+        ),
         FilledButton(onPressed: _submit, child: const Text('تأكيد')),
       ],
     );
