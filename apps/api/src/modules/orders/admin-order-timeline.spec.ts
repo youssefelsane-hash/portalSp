@@ -134,6 +134,7 @@ describe('AdminOrdersService.getTimeline() — Timeline موحّد', () => {
       {} as never, // promoCodesService
       {} as never, // settingsService (docs/08 §35) — مش متنادى (الاختبار ده بيمتحن getTimeline() بس),
       {} as never, // walletsService (ADR-0051) — مش متنادى هنا
+      {} as never, // workOpportunities (ADR-0057) — مش متنادى هنا
     );
   });
 

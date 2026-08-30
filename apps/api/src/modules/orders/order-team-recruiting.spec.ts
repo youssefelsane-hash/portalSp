@@ -542,6 +542,13 @@ describe('OrderTeamService — تجنيد فريق ذاتي من الفني ال
 
     const leaderAssigned = await ordersService.listTeamAssignedForTechnician(ids.leaderUser);
     expect(leaderAssigned.map((o) => o.id)).not.toContain(orderId); // القائد ده technician_id مش عضو فريق
+
+    // ADR-0057 (تعميق) — الطلب ده بقى `accepted` عمدًا فوق، وjuniorProfile عضو طاقم فيه. من غير
+    // تنضيف، ده بقى التزام "نشط فعليًا" حقيقي على juniorProfile نفس اليوم (classifyTechnicianCapacity
+    // بقى بيشوف عضوية الطاقم زي القيادة بالضبط)، فبيسرّب تعارض جدولة وهمي على أي اختبار تاني في
+    // الملف ده بيفترض juniorProfile "فاضي" — بالظبط زي `OrdersService.start()` تحت.
+    await q(`DELETE FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [orderId, ids.juniorProfile]);
+    await q(`UPDATE orders SET order_status = 'technician_assigned' WHERE id = $1`, [orderId]);
   });
 
   it('OrdersService.start() — بوابة اكتمال الطاقم: يرفض بدء الشغل لو الطاقم ناقص، ينجح لما يكتمل (docs/08 §35 بند 4)', async () => {

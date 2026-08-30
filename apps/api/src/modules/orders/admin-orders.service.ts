@@ -26,6 +26,9 @@ import {
   technicianServiceQualificationCondition,
 } from '../technicians/technician-eligibility.sql';
 import { SettingsService } from '../settings/settings.service';
+import { toOrderResponseDto } from './dto/order-response.dto';
+import { TechnicianWorkOpportunitiesService } from '../technicians/technician-work-opportunities.service';
+import { WORK_OPPORTUNITY_OFFERED_EVENT, WorkOpportunityOfferedEvent } from '../../common/events/work-opportunity-offered.event';
 import { AssignmentStatus, OrderAssignment } from '../matching/entities/order-assignment.entity';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { MAX_TEAM_MEMBERS_PER_ORDER, computeCrewComposition } from './order-team.service';
@@ -87,6 +90,22 @@ export function formatEligibleTechniciansForAdmin(result: {
   };
 }
 
+/**
+ * ADR-0057 — نتيجة تعيين طاقم إداري بقت discriminated union بدل `Order` مباشرة: القدرة
+ * الاستيعابية MEANINGFUL/HEAVY بقت بتتحول لفرصة تحتاج قبول الشخص نفسه بدل إضافة فورية.
+ */
+export type CrewAssignOutcome =
+  | { status: 'assigned'; order: Order }
+  | { status: 'offer_sent'; opportunityId: string; capacityTier: TechnicianCapacityTier };
+
+/** شكل رد API لـ`CrewAssignOutcome` — `order` جزء فقط لو `status='assigned'` (نفس نمط toOrderResponseDto). */
+export function toCrewAssignResponseDto(outcome: CrewAssignOutcome) {
+  if (outcome.status === 'assigned') {
+    return { status: 'assigned' as const, order: toOrderResponseDto(outcome.order) };
+  }
+  return { status: 'offer_sent' as const, opportunity_id: outcome.opportunityId, capacity_tier: outcome.capacityTier };
+}
+
 /** ملخّص طاقم طلب واحد لصفحة القايمة (docs/08 §63.ب5). */
 export interface OrderCrewSummary {
   leaderTechnicianId: string | null;
@@ -116,6 +135,7 @@ export class AdminOrdersService {
     private readonly promoCodesService: PromoCodesService,
     private readonly settingsService: SettingsService,
     private readonly walletsService: WalletsService,
+    private readonly workOpportunities: TechnicianWorkOpportunitiesService,
   ) {}
 
   async list(
@@ -927,6 +947,11 @@ export class AdminOrdersService {
   // تعيين مساعد يدوي بعد تصعيد مطابقة المساعد التلقائية (ADR-0008، يمتد ADR-0007 §7 اللي أجّل
   // الحل ده صراحة). فعل نادر تشغيلي — بلا قفل pessimistic_write زي AssistantMatchingService.accept()
   // (راجع تبرير ADR-0008 §2: سباق بين أدمنين اتنين نادر ومقبول، مش مسار مالي حرج).
+  /**
+   * ADR-0057 — كانت القايمة دي بلا أي فحص سكدول/قدرة استيعابية خالص، حتى لفني حاظر اليوم ده
+   * بنفسه (BLOCKED). دلوقتي بترجّع `capacity_tier` لكل مرشّح وتستبعد BLOCKED وأي حد عنده تعارض
+   * زمني فعلي — نفس منطق `OrderTeamService.listRecruitCandidates()` بالحرف.
+   */
   async listEligibleAssistants(orderId: string): Promise<
     Array<{
       technician_id: string;
@@ -934,11 +959,14 @@ export class AdminOrdersService {
       technician_code: string;
       current_level: string;
       distance_km: string | null;
+      capacity_tier: TechnicianCapacityTier;
     }>
   > {
     const order = await this.findOrThrow(orderId);
     if (!order.serviceZoneId) return [];
-    return this.dataSource.query(
+    const rows = await this.dataSource.query<
+      { technician_id: string; full_name: string; technician_code: string; current_level: string; distance_km: string | null }[]
+    >(
       `SELECT tp.id AS technician_id, u.full_name, tp.technician_code,
               tp.current_level, ST_Distance(tp.current_location, a.location) / 1000.0 AS distance_km
        FROM technician_profiles tp
@@ -975,6 +1003,30 @@ export class AdminOrdersService {
                 tp.average_rating DESC`,
       [order.serviceZoneId, order.serviceId, order.technicianId, order.addressId, order.id],
     );
+
+    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
+      `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
+      [order.serviceId],
+    );
+    const serviceDurationMinutes = service?.estimated_duration_minutes ?? 60;
+    const withCapacity = await Promise.all(
+      rows.map(async (row) => {
+        const scheduleAvailable = await this.assignmentGuard.isScheduleAvailable(this.dataSource.manager, row.technician_id, order);
+        if (!scheduleAvailable) return null;
+        const capacity_tier = await classifyTechnicianCapacity(this.dataSource, {
+          technicianId: row.technician_id,
+          scheduledAt: order.scheduledAt,
+          excludeOrderId: order.id,
+          serviceDurationMinutes,
+          fullDayThresholdMinutes: fullDayJobMinutes,
+        });
+        return { ...row, capacity_tier };
+      }),
+    );
+    return withCapacity.filter(
+      (row): row is (typeof rows)[number] & { capacity_tier: TechnicianCapacityTier } => row !== null && row.capacity_tier !== 'BLOCKED',
+    );
   }
 
   async assignAssistant(
@@ -982,7 +1034,7 @@ export class AdminOrdersService {
     orderId: string,
     technicianProfileId: string,
     meta?: AuditActorMeta,
-  ): Promise<Order> {
+  ): Promise<CrewAssignOutcome> {
     const order = await this.findOrThrow(orderId);
     if (order.orderType === OrderType.REVISIT) {
       throw new ApiException(
@@ -1044,9 +1096,12 @@ export class AdminOrdersService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده معيّن كمساعد على الطلب ده بالفعل', HttpStatus.CONFLICT);
     }
 
-    // docs/08 §35، ADR-0021 §5 — نفس فحص BLOCKED الحقيقي المستخدم في validateCrewCandidateOrThrow
-    // (قاعدة صلبة غير قابلة للتجاوز حتى إداريًا)، مسجّل هنا مباشرة (مش عبر الدالة المشتركة) لأن
-    // فحوصات assignAssistant الأخرى (عدد الأماكن، شغل "مساعد" تحديدًا) مختلفة عن addCrewMember.
+    // ADR-0057 — كان هنا فحص BLOCKED بس، بحجة إن "التعيين الإداري قرار واعٍ". المالك صحّح ده
+    // صراحة: نفس قاعدة `recruitMember()` بالحرف لازم تتطبق هنا — تعارض زمني صريح = رفض قاطع،
+    // MEANINGFUL/HEAVY = فرصة تحتاج قبول الشخص نفسه (مش تحميل صامت حتى لو الفاعل أدمن)، BLOCKED
+    // = رفض تمامًا. صفر استثناء لكون الفاعل أدمن.
+    await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
+
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
       `SELECT estimated_duration_minutes FROM services WHERE id = $1`,
@@ -1061,6 +1116,10 @@ export class AdminOrdersService {
     });
     if (capacityTier === 'BLOCKED') {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتعيّن حتى بتعيين إداري', HttpStatus.CONFLICT);
+    }
+
+    if (capacityTier !== 'LIGHT') {
+      return this.offerCrewOpportunityInsteadOfSilentLoad(orderId, order, technician.id, capacityTier, 'assistant');
     }
 
     await this.teamMembers.save(
@@ -1092,7 +1151,30 @@ export class AdminOrdersService {
       meta,
     });
 
-    return order;
+    return { status: 'assigned', order };
+  }
+
+  /**
+   * ADR-0057 — نقطة مشتركة لتحويل تعيين إداري لفرصة تحتاج قبول، بدل تحميل صامت، لما القدرة
+   * الاستيعابية MEANINGFUL/HEAVY. نفس آلية `OrderTeamService.recruitMember()` بالحرف
+   * (`technician_work_opportunities`, context=`crew_recruit`) — نقطة قبول واحدة
+   * (`acceptCrewOpportunity`) بغض النظر مين عرض الفرصة، قائد أو أدمن.
+   */
+  private async offerCrewOpportunityInsteadOfSilentLoad(
+    orderId: string,
+    order: Order,
+    technicianId: string,
+    tier: TechnicianCapacityTier,
+    role: 'technician' | 'assistant',
+  ): Promise<CrewAssignOutcome> {
+    const opportunity = await this.workOpportunities.offerIfNotExists(this.dataSource.manager, orderId, technicianId, tier, 'crew_recruit', role);
+    if (opportunity.created) {
+      this.events.emit(
+        WORK_OPPORTUNITY_OFFERED_EVENT,
+        new WorkOpportunityOfferedEvent(opportunity.id, orderId, order.orderNumber, technicianId, 'crew_recruit', tier, order.scheduledAt),
+      );
+    }
+    return { status: 'offer_sent', opportunityId: opportunity.id, capacityTier: tier };
   }
 
   // ── إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) ────────────────────────
@@ -1102,11 +1184,9 @@ export class AdminOrdersService {
   // زي orders.assign_assistant، مش قرار super_admin بس.
 
   /**
-   * docs/08 §35، ADR-0021 §5 — بَقّة حقيقية اتصلحت: كانت بتفحص اعتماد/عضوية بس، صفر وعي بـ
-   * classifyTechnicianCapacity() (نفس الفحص اللي §35.1 صلّحه لمسار القائد الذاتي). BLOCKED
-   * (حظر يوم صريح من الفني نفسه) قاعدة حقيقية غير قابلة للتجاوز حتى من الأدمن ("hard business
-   * restriction" — طلب المالك صراحة). MEANINGFUL/HEAVY مش استبعاد — الأدمن بيقرر بوعي كامل،
-   * بس التصنيف بيتسجّل في الـaudit (شفافية، مش تحميل صامت).
+   * ADR-0057 — كانت BLOCKED بس المرفوضة، وMEANINGFUL/HEAVY بتعدّي بحجة "الأدمن بيقرر بوعي".
+   * المالك صحّح الاستثناء ده صراحة: نفس قاعدة `recruitMember()` بالحرف، صفر فرق لكون الفاعل
+   * أدمن. `assertScheduleAvailable` هنا حارس صارم زيه بالظبط في المسار الذاتي.
    */
   private async validateCrewCandidateOrThrow(order: Order, technicianProfileId: string): Promise<TechnicianCapacityTier> {
     if (order.bookingMode !== BookingMode.TEAM) {
@@ -1123,6 +1203,8 @@ export class AdminOrdersService {
     if (alreadyMember) {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
+
+    await this.assignmentGuard.assertScheduleAvailable(this.dataSource.manager, technician.id, order);
 
     const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
     const [service] = await this.dataSource.query<{ estimated_duration_minutes: number | null }[]>(
@@ -1155,7 +1237,7 @@ export class AdminOrdersService {
     roleLabel: string,
     memberType: CrewMemberType = 'team_member',
     meta?: AuditActorMeta,
-  ): Promise<Order> {
+  ): Promise<CrewAssignOutcome> {
     const order = await this.findOrThrow(orderId);
     const capacityTier = await this.validateCrewCandidateOrThrow(order, technicianId);
     // ADR-0050 — حتى الأدمن ما يقدرش يضيف مساعد بنصيب عضو فريق كامل: الدور صفة على الشخص،
@@ -1173,6 +1255,18 @@ export class AdminOrdersService {
     const existingCount = await this.teamMembers.count({ where: { orderId } });
     if (existingCount >= MAX_TEAM_MEMBERS_PER_ORDER) {
       throw new ApiException(ErrorCode.VAL_001, `أقصى عدد أعضاء فريق للطلب هو ${MAX_TEAM_MEMBERS_PER_ORDER}`, HttpStatus.BAD_REQUEST);
+    }
+
+    // ADR-0057 — زي assignAssistant بالحرف: LIGHT بس هو اللي بيتضاف فورًا، MEANINGFUL/HEAVY
+    // بتتحول لفرصة تحتاج قبول الشخص نفسه.
+    if (capacityTier !== 'LIGHT') {
+      return this.offerCrewOpportunityInsteadOfSilentLoad(
+        orderId,
+        order,
+        technicianId,
+        capacityTier,
+        effectiveMemberType === ASSISTANT_MEMBER_TYPE ? 'assistant' : 'technician',
+      );
     }
 
     // Script 4 Part Q — سباق حقيقي ممكن: أدمنين اتنين بيضيفوا نفس الفني لنفس الطلب بالتوازي
@@ -1207,7 +1301,7 @@ export class AdminOrdersService {
       newValues: { technician_id: technicianId, role_label: roleLabel, member_type: memberType, capacity_tier: capacityTier },
       meta,
     });
-    return order;
+    return { status: 'assigned', order };
   }
 
   /** إزالة عضو طاقم — سبب إلزامي (Script 4 §38-41: "require appropriate state, reason, authorization"). */

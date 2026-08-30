@@ -162,6 +162,7 @@ describe('AdminOrdersService — مرشّحو مفتّش المطابقة مقا
       {} as never,
       settingsStub as never,
       {} as never,
+      {} as never, // workOpportunities (ADR-0057) — مش متنادى هنا
     );
   });
 

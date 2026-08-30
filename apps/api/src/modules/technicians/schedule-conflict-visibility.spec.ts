@@ -184,8 +184,13 @@ describe('TechniciansService.listForServiceBooking() — سياسة إظهار �
     expect(free?.availabilityStatus).toBe('available');
     expect(busy).toBeDefined();
     expect(busy?.availabilityStatus).toBe('schedule_conflicted');
-    expect(busy?.unavailableReasonAr).toBeTruthy();
+    // docs/08 §108 بند I1 — الرسالة للعميل لازم تكون واضحة وعامة، مش نص تشخيصي إداري
+    // (`describeTechnicianCapacity`'s reasonAr — "مؤهّل للتأكيد التلقائي"/رقم طلب حد تاني/إلخ).
+    expect(busy?.unavailableReasonAr).toBe('الفني ده مش متاح في الوقت ده');
+    // docs/08 §108 بند I2 — الاقتراح لازم يكون يوم بعد اليوم المطلوب، عمرها ما تكون نفس اليوم
+    // اللي العميل بيحاول يحجزه أصلًا (كان بيحصل، بلاغ مالك مباشر).
     expect(busy?.availableAgainAt).not.toBeNull();
+    expect(busy?.availableAgainAt).not.toBe(targetDate.toISOString().slice(0, 10));
     // المتاح لازم يفضل قبل المتعارض في القايمة.
     expect(items.indexOf(free!)).toBeLessThan(items.indexOf(busy!));
   });

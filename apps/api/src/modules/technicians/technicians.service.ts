@@ -776,7 +776,13 @@ export class TechniciansService {
           date: dateOnly,
           fullDayThresholdMinutes: fullDayJobMinutes,
         });
-        const searchFrom = capacity.occupiedTo ? new Date(`${capacity.occupiedTo}T00:00:00Z`) : scheduledAt;
+        // بَقّة حقيقية اتلقطت (بلاغ مالك، docs/08 §108 بند I2): الاقتراح كان أحيانًا بيرجّع
+        // **نفس اليوم** اللي العميل بيحاول يحجزه أصلًا — عديم الفايدة تمامًا («جرّب يوم كذا»
+        // وهو نفسه اليوم المرفوض). السبب: `occupiedTo` (لو موجود) ممكن يرجع قبل `scheduledAt`
+        // نفسه — أرضية `Math.max` هنا تضمن إن البحث عن اليوم البديل يبدأ من **الأحدث بين
+        // الاتنين** دايمًا، بغض النظر عن أي انحراف توقيت.
+        const occupiedToDate = capacity.occupiedTo ? new Date(`${capacity.occupiedTo}T00:00:00Z`) : null;
+        const searchFrom = occupiedToDate && occupiedToDate.getTime() > scheduledAt.getTime() ? occupiedToDate : scheduledAt;
         const nextAvailable = await this.findNextAvailableDateForTechnician(
           row.technician_id,
           serviceId,
@@ -784,6 +790,9 @@ export class TechniciansService {
           addressId,
           new Date(searchFrom.getTime() + 24 * 60 * 60 * 1000),
         );
+        // شبكة أمان أخيرة — لو رغم كل ده الاقتراح طلع بنفس تاريخ اليوم المطلوب (نفس التنسيق
+        // المستخدم فوق في `dateOnly`)، بلاش نعرضه: مفيش اقتراح أوضح من عدم عرض اقتراح غلط.
+        const safeNextAvailable = nextAvailable === dateOnly ? null : nextAvailable;
         return {
           technicianId: row.technician_id,
           fullName: row.full_name,
@@ -806,8 +815,13 @@ export class TechniciansService {
           companyName: row.company_name,
           isCommercialCompany: Boolean(row.commercial_registration_number?.trim()),
           availabilityStatus: 'schedule_conflicted',
-          unavailableReasonAr: capacity.reasonAr,
-          availableAgainAt: nextAvailable,
+          // docs/08 §108 بند I1 — `capacity.reasonAr` (`describeTechnicianCapacity`) نص إداري
+          // بالتصميم (docs comment بتاعه صريح: "جاهز للعرض المباشر في شاشة الأدمن") — مصطلحات
+          // زي "مؤهّل للتأكيد التلقائي" أو "لسه مؤهّل لفرصة اختيارية" أو رقم طلب حد تاني كانت
+          // بتوصل للعميل حرفيًا. العميل مش محتاج يعرف السبب التقني، محتاج بس يعرف إن الفني ده
+          // مش هيقدر ياخد الطلب دلوقتي — نفس رسالة واحدة بسيطة لكل الحالات.
+          unavailableReasonAr: 'الفني ده مش متاح في الوقت ده',
+          availableAgainAt: safeNextAvailable,
         };
       }),
     );

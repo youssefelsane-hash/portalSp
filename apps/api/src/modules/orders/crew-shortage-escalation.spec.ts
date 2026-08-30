@@ -200,6 +200,7 @@ describe('CrewShortageEscalationService — تصعيد نقص الطاقم قب�
       {} as never, // promoCodesService
       settingsServiceStub,
       {} as never, // walletsService (ADR-0051) — مش متنادى هنا
+      {} as never, // workOpportunities (ADR-0057) — مش متنادى هنا
     );
   });
 
