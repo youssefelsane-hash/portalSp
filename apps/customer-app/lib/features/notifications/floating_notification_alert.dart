@@ -8,6 +8,34 @@ import '../../core/deep_link_router.dart';
 import 'notifications_repository.dart';
 import 'notifications_screen.dart';
 
+// راصد بيتابع أي popup route (dialog/bottom sheet/menu/date-time picker) ظاهر فوق الشجرة
+// (docs/08 §108-E) — بلاغ مالك: الزرار العايم للإشعارات بيتغطى/بيغطي زرار "موافق" في بعض
+// الـdialogs الصغيرة، لأنه متركّب في MaterialApp.builder فوق الـNavigator كله بالكامل (نفس
+// السبب اللي وراء ملاحظات الـOverlay تحت — الزرار ده برّه شجرة أي route). لازم يتسجّل في
+// `navigatorObservers` بتاعة MaterialApp عشان يشتغل.
+final ValueNotifier<int> _notificationAlertPopupDepth = ValueNotifier(0);
+
+class NotificationAlertPopupObserver extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) _notificationAlertPopupDepth.value++;
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute && _notificationAlertPopupDepth.value > 0) {
+      _notificationAlertPopupDepth.value--;
+    }
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute && _notificationAlertPopupDepth.value > 0) {
+      _notificationAlertPopupDepth.value--;
+    }
+  }
+}
+
 class FloatingNotificationAlert extends StatefulWidget {
   const FloatingNotificationAlert({super.key});
 
@@ -80,8 +108,21 @@ class _FloatingNotificationAlertState extends State<FloatingNotificationAlert>
 
   @override
   Widget build(BuildContext context) {
-    return IgnorePointer(
-      ignoring: _unreadCount == 0,
+    return ValueListenableBuilder<int>(
+      valueListenable: _notificationAlertPopupDepth,
+      builder: (context, popupDepth, child) {
+        // docs/08 §108-E — لو فيه dialog/bottom-sheet ظاهر، الزرار العايم بيختفي مؤقتًا بدل
+        // ما يتغطى فوقه أو يغطّي زرار "موافق"/"تأكيد" بتاعه (بلاغ مالك مباشر بلقطة شاشة).
+        final hiddenByPopup = popupDepth > 0;
+        return IgnorePointer(
+          ignoring: _unreadCount == 0 || hiddenByPopup,
+          child: AnimatedOpacity(
+            opacity: hiddenByPopup ? 0 : 1,
+            duration: const Duration(milliseconds: 150),
+            child: child,
+          ),
+        );
+      },
       child: AnimatedScale(
         scale: _unreadCount > 0 ? 1 : 0,
         duration: const Duration(milliseconds: 220),

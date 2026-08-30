@@ -11595,7 +11595,33 @@ CLAUDE.md اللي فيها `/opt/flutter/bin`) — الإصلاح اتراجع 
 و`ios/Flutter/Local.xcconfig` بالمفاتيح الجداد محليًا/في الـCI (ومفتاح الويب في خطوة الـdeploy
 لو `customer-app` web مستخدم). لحد ما ده يحصل، الخريطة هتفضل فاضية عمدًا — وده السلوك الصحيح.
 
-## E — أيقونة الإشعارات بتغطي زرار OK + صوت إشعار حقيقي وقت الـproduction
+## E — أيقونة الإشعارات بتغطي زرار OK + صوت إشعار حقيقي وقت الـproduction — ✅ خلص (2026-08-30)
+
+**الشق الأول — الأيقونة بتغطي زرار OK**: السبب الجذري: `FloatingNotificationAlertHost` متركّب
+في `MaterialApp.builder` **فوق الـNavigator كله** (`PositionedDirectional(end: 16, bottom: 88)`
+في `main.dart`، نفس السبب اللي وراء ملاحظات الـOverlay القديمة في الملف) — يعني بيترسم فوق أي
+dialog/bottom-sheet مفتوح، وفي بعض الأحجام بيقع بالظبط فوق زرار "موافق"/"تأكيد" بتاعه. الإصلاح
+(كلا التطبيقين، نفس النمط بالحرف): `NotificationAlertPopupObserver` (`NavigatorObserver` جديد)
+بيتابع أي `PopupRoute` (dialog/bottom-sheet/menu/date-time-picker) مفتوح، والزرار العايم
+بيختفي بهدوء (`AnimatedOpacity` + `IgnorePointer`) طول ما فيه واحد مفتوح، بدل ما يتغطى فوقه أو
+يمنع الضغط عليه. مسجّل في `navigatorObservers` على مستوى `MaterialApp` في `main.dart` للتطبيقين.
+
+**الشق التاني — صوت الإشعار في الإنتاج**: بَقّة حقيقية اتكشفت في `fcm-push-dispatcher.
+service.ts`: الإشعارات العادية (غير actionable) كانت بتتبعت بـ`android.notification.channelId:
+input.priorityTier` — بس قيم `NotificationPriorityTier` (`scheduled_job`, `informational`)
+مش قنوات موجودة فعليًا على أي جهاز (كل تطبيق بيعمل create لقنواته بأسمائه هو، والـdispatcher
+عام لكل التطبيقات ومعندوش فكرة مين المستلم). Android بيرفض عرض إشعار قناته مش موجودة على
+الجهاز بدل ما يرجع لقناة افتراضية — يعني الإشعار كان بيختفي **بالكامل** (مش بس من غير صوت) لأي
+نوع إشعار عادي بـpriorityTier غير critical_offer/action_required. الإصلاح: شيل الـchannelId
+الخاطئ، وأضيف `com.google.firebase.messaging.default_notification_channel_id` في
+`AndroidManifest.xml` للتطبيقين (`order_updates` للعميل، `general_updates` للفني) — قناة
+مضمون وجودها وصوتها مفعّل، Firebase بيستخدمها تلقائيًا لأي رسالة من غير channel_id صريح. تست
+حي: 14 suite/66 test في `apps/api/src/modules/notifications/` عدّت كاملة بعد التعديل.
+
+**فجوة موثّقة صراحة**: مفيش جهاز/emulator حقيقي في بيئة التنفيذ (نفس القيد المذكور في README
+كل موديول Flutter) — التحقق النهائي من ظهور الصوت فعليًا على هاردوير حقيقي محتاج جهاز حقيقي،
+مش ممكن هنا. الإصلاح مبني على سلوك Android/FCM الموثّق رسميًا (قناة غير موجودة = إشعار مرفوض)،
+مش تخمين.
 
 ## F — حقل الـdynamic pricing («هل مطلوب عزل الأرضية؟») بيظهر «؟» في تأكيد إعادة طلب الضمان
 
