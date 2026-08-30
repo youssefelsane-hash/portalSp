@@ -440,19 +440,6 @@ export function technicianServiceQualificationCondition(opts: {
    * `<alias>.id IS NOT NULL` زي ما كان بالظبط. لو مش موجود، الدالة بتبني `EXISTS` بنفسها.
    */
   directServiceAlias?: string;
-  /**
-   * ADR-0054 (docs/08 §103، قرار مالك) — هل الدور ده محتاج **موافقة إيجابية مسجّلة** على الخدمة؟
-   *
-   * `true` (الافتراضي) = سلوك الفني بالحرف: لازم اعتماد على الخدمة أو فئتها. الفني بيقود شغلانة
-   * ومسؤول عن جودتها، فالتحقق من صنعته شرط حقيقي.
-   *
-   * `false` = مسار المساعد: **مؤهّل لكل الخدمات النشطة افتراضيًا**، وقايمة الحجب لوحدها هي أداة
-   * التحكم. المساعد بيشتغل تحت إشراف فني قائد، فالحاجز الصح له مهارة عامة مش شهادة صنعة لكل
-   * خدمة — وفرض الاعتماد كان بيخلّي أي حد يتحوّل لمساعد يختفي من كل المسارات فورًا.
-   *
-   * **الحجب بيفضل مفروض في الحالتين** — ده اللي بيخلّي القرار قابل للتحكم أصلاً.
-   */
-  serviceApprovalRequired?: boolean;
 }): string {
   // قايمة الحجب مشتركة بين الدورين — غياب الصف = مسموح، فمالهاش أي أثر لحد ما الأدمن يحجب فعلاً.
   const notExcluded = `NOT EXISTS (
@@ -461,9 +448,22 @@ export function technicianServiceQualificationCondition(opts: {
             AND tes.service_id = ${opts.serviceIdExpr}
         )`;
 
-  if (opts.serviceApprovalRequired === false) {
-    return notExcluded;
-  }
+  /**
+   * ADR-0054/ADR-0055 — **المساعد مؤهّل لكل الخدمات افتراضيًا**، والحجب لوحده هو أداة التحكم.
+   *
+   * الشرط ده مكتوب هنا **جوّه الدالة المشتركة** عن قصد، مش كمعامل في كل نداء: الدالة دي بيناديها
+   * تسع مسارات (التوزيع، اختيار العميل، التوافر، حارس التعيين، شاشة "ليه وليه لأ"، مجمع
+   * المساعدين، ضم الطاقم...) — ولو كل واحد فيهم كان لازم يفتكر يبعت معامل، أول واحد ينساه بيرجّع
+   * المساعد لحالة الاختفاء من غير ما حد ياخد باله. القرار بيتاخد من **صف الشخص نفسه**، فالإجابة
+   * واحدة في كل مكان تلقائيًا.
+   *
+   * الفني لسه لازم اعتماد على الخدمة أو فئتها — هو بيقود شغلانة ومسؤول عن جودتها.
+   */
+  const isAssistant = `EXISTS (
+            SELECT 1 FROM technician_profiles kind_tp
+            WHERE kind_tp.id = ${opts.technicianIdExpr}
+              AND kind_tp.technician_kind = 'assistant'
+          )`;
 
   const directlyApproved = opts.directServiceAlias
     ? `${opts.directServiceAlias}.id IS NOT NULL`
@@ -476,7 +476,8 @@ export function technicianServiceQualificationCondition(opts: {
            )`;
 
   return `(
-          ${directlyApproved}
+          ${isAssistant}
+          OR ${directlyApproved}
           OR EXISTS (
             SELECT 1 FROM technician_categories tec_cat
             WHERE tec_cat.technician_id = ${opts.technicianIdExpr}
@@ -484,7 +485,7 @@ export function technicianServiceQualificationCondition(opts: {
               AND tec_cat.is_active = true AND tec_cat.verification_status = 'approved'
           )
         )
-        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده.
+        -- ADR-0049 — حجب الأدمن لخدمة بعينها عن الفني ده. مفروض على الدورين.
         AND ${notExcluded}`;
 }
 
