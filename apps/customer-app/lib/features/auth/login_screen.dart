@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -51,8 +53,15 @@ class _LoginScreenState extends State<LoginScreen> {
   // نعرضله اقتراح مباشر يحوّله لمود التسجيل بنفس الرقم من غير ما يكتبه تاني.
   bool _suggestRegister = false;
 
+  /// §106 — «ابعت الكود تاني» بعدّاد تنازلي. قبل كده خطوة الكود مكانش فيها إعادة إرسال خالص:
+  /// أي كود بايظ/منتهي (والسيرفر بيلغي القديم أول ما يتصدر جديد) كان بيحوّل الشاشة لطريق
+  /// مسدود، والمخرج الوحيد «رقم الموبايل غلط؟ رجّع خطوة» — رسالة محدش هيدوس عليها والرقم صح.
+  int _resendSeconds = 0;
+  Timer? _resendTimer;
+
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _phoneController.dispose();
     _otpController.dispose();
     _fullNameController.dispose();
@@ -60,6 +69,48 @@ class _LoginScreenState extends State<LoginScreen> {
     _technicianReferralCodeController.dispose();
     _otpFocusNode.dispose();
     super.dispose();
+  }
+
+  /// مهلة بين طلبين — الباك-إند نفسه بيقفل عند ٥ طلبات/دقيقة (`@Throttle` على
+  /// `POST /auth/otp/request`)، فالعدّاد هنا بيمنع المستخدم يوصل للحظر أصلاً بدل ما يتفاجئ بيه.
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendSeconds = 30);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _resendSeconds -= 1);
+      if (_resendSeconds <= 0) timer.cancel();
+    });
+  }
+
+  Future<void> _resendOtp() async {
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+      _suggestRegister = false;
+    });
+    try {
+      await context.read<AuthRepository>().requestOtp(
+            _phoneController.text.trim(),
+            purpose: _isRegisterMode ? 'register' : 'login',
+          );
+      if (!mounted) return;
+      // الكود القديم بقى ملغي فعليًا على السيرفر — لازم الخانة تتفضّى، وإلا المستخدم هيضغط
+      // «دخول» على كود ميت ويحرق محاولة من الخمسة بلا داعي.
+      _otpController.clear();
+      _startResendCooldown();
+      _otpFocusNode.requestFocus();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('بعتنالك كود جديد — الكود القديم بقى لاغي')),
+      );
+    } on ApiException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   Future<void> _requestOtp() async {
@@ -78,6 +129,7 @@ class _LoginScreenState extends State<LoginScreen> {
             purpose: _isRegisterMode ? 'register' : 'login',
           );
       setState(() => _otpSent = true);
+      _startResendCooldown();
       // بعد ما الإطار اللي بيبني حقل الكود يخلص — قبل كده الحقل لسه مش موجود في الشجرة.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _otpFocusNode.requestFocus();
@@ -113,17 +165,33 @@ class _LoginScreenState extends State<LoginScreen> {
     } on ApiException catch (err) {
       // "الرقم ده مش مسجل، سجّل حساب جديد الأول" — نفس رسالة auth.service.ts's login() بالحرف.
       final suggestRegister = !_isRegisterMode && err.statusCode == 404;
+      // الخانة بتتفضّى وتاخد التركيز تاني — الكود اللي اترفض مش هينفع تاني مهما اتبعت، وسيبانه
+      // مكتوب بيخلي `onChanged` (اللي بيبعت أوتوماتيك عند ٦ أرقام) عاجز يشتغل لحد ما المستخدم
+      // يمسح بنفسه، ودي كانت أسرع طريقة يستهلك بيها محاولاته الخمسة.
+      _otpController.clear();
       setState(() {
         _error = err.message;
         _suggestRegister = suggestRegister;
       });
+      if (!suggestRegister) _otpFocusNode.requestFocus();
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  void _switchToRegister() {
+  /// الرجوع لخطوة الرقم بيوقف العدّاد — تايمر دوري بيعمل rebuild كل ثانية لخطوة مش ظاهرة أصلاً.
+  void _backToPhoneStep() {
+    _resendTimer?.cancel();
     setState(() {
+      _otpSent = false;
+      _resendSeconds = 0;
+    });
+  }
+
+  void _switchToRegister() {
+    _resendTimer?.cancel();
+    setState(() {
+      _resendSeconds = 0;
       _isRegisterMode = true;
       _otpSent = false;
       _otpController.clear();
@@ -133,7 +201,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _toggleMode() {
+    _resendTimer?.cancel();
     setState(() {
+      _resendSeconds = 0;
       _isRegisterMode = !_isRegisterMode;
       _otpSent = false;
       _otpController.clear();
@@ -257,7 +327,17 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       TextButton.icon(
-                        onPressed: _isSubmitting ? null : () => setState(() => _otpSent = false),
+                        key: const ValueKey('otp-resend'),
+                        onPressed: (_isSubmitting || _resendSeconds > 0) ? null : _resendOtp,
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: Text(
+                          _resendSeconds > 0
+                              ? 'تقدر تطلب كود جديد بعد $_resendSeconds ثانية'
+                              : 'ما وصلكش الكود؟ ابعته تاني',
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _isSubmitting ? null : _backToPhoneStep,
                         icon: const Icon(Icons.edit_outlined, size: 18),
                         label: const Text('رقم الموبايل غلط؟ رجّع خطوة'),
                       ),

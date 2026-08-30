@@ -75,6 +75,7 @@ function createFakeDataSource(
   const manager = {
     createQueryBuilder: (entity: unknown) => {
       let whereParams: Record<string, unknown> = {};
+      let rowLimit: number | null = null;
       const qb = {
         setLock: () => qb,
         where: (_cond: string, params: Record<string, unknown>) => {
@@ -86,6 +87,26 @@ function createFakeDataSource(
           return qb;
         },
         orderBy: () => qb,
+        // §106 — matchesSupersededCode() بيستعلم عن آخر الأكواد الملغية عشان يفرّق بين «كود
+        // غلط» و«كود اتلغى بواحد أحدث». الفيك بيقلّد نفس ترتيب TypeORM (الأحدث الأول) —
+        // `rows` مرتّبة بترتيب الإدخال فالعكس بيدّي الأحدث في الأول.
+        limit: (count: number) => {
+          rowLimit = count;
+          return qb;
+        },
+        getMany: async () => {
+          if (entity !== OtpCode) return [];
+          return otpCodes.rows
+            .filter(
+              (otp) =>
+                otp.phoneNumber === whereParams.phoneNumber &&
+                otp.purpose === whereParams.purpose &&
+                otp.id !== whereParams.excludeOtpId,
+            )
+            .slice()
+            .reverse()
+            .slice(0, rowLimit ?? undefined);
+        },
         getOne: async () => {
           if (entity === RefreshToken) {
             return refreshTokens.rows.find((r) => r.tokenHash === whereParams.tokenHash) ?? null;
