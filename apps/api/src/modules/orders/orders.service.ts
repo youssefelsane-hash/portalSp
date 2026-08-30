@@ -309,6 +309,30 @@ export class OrdersService {
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
+    // إعادة الزيارة تحت الضمان (docs/08 §7/§108-F) — بَقّة حقيقية اتلقطت: شاشة إعادة الزيارة
+    // (order_detail_screen.dart's _requestRevisit) بتبعت original_order_id بس بلا أي field_values
+    // — العميل مش بيعيد تحديد نطاق الشغل، هو بس بيطلب إصلاح نفس الشغل اللي اتعمل. من غيرها،
+    // catalogService.estimate() تحت كان بيرفض بـ`الحقل "<اسم الحقل، غالبًا سؤال منتهي بـ؟>"
+    // مطلوب` — لحقل العميل مش شايفه أصلاً في شاشة إعادة الزيارة، رغم إن السعر الناتج كله هيتشال
+    // فورًا تحت (estimatedPriceCents: originalOrder ? 0 : ...، إعادة الزيارة مجانية بالكامل).
+    // الحل: نورّث القيم الخام من تقييم التسعير الحقيقي المرتبط بالطلب الأصلي
+    // (service_pricing_evaluations، findEvaluationForOrder — نفس المصدر اللي docs/08 §35
+    // بيستخدمه للأدمن)، مش من customerInputs (snapshot عرض بالعربي بس، مش قيم خام قابلة لإعادة
+    // التقييم).
+    // مقصور على formula عمدًا — أي موديل تسعير تاني (fixed/hourly/...) مفيهوش
+    // service_pricing_evaluations أصلاً ولا بيطلب field_values في validateAndNormalizeFieldValues()،
+    // فاستعلام إضافي هنا كان هيبقى صفر فايدة على أغلب الخدمات.
+    if (
+      service.pricingModel === PricingModel.FORMULA &&
+      dto.original_order_id &&
+      (!dto.field_values || Object.keys(dto.field_values).length === 0)
+    ) {
+      const evaluation = await this.pricingEngineService.findEvaluationForOrder(dto.original_order_id);
+      if (evaluation) {
+        dto.field_values = evaluation.fieldValues as Record<string, string | number | boolean>;
+      }
+    }
+
     // **وضع الحجز بقى مشتق مش مختار (ADR-0048، docs/08 §85)** — `dto.booking_mode` متجاهَل تمامًا
     // هنا. الاشتقاق نفسه محتاج حاجتين لسه مش جاهزين في النقطة دي: اليوم النهائي (بعد حل النطاق
     // المرن/السلوت) وعدد العمال المطلوب (ناتج التسعير) — فبيتم على مرحلتين تحت:
