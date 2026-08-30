@@ -115,7 +115,7 @@ export class TechnicianKpiCalculationService {
       SELECT
         AVG(r.overall_rating)::numeric(4,2) AS average_rating,
         COUNT(*) AS ratings_count,
-        COUNT(*) FILTER (WHERE r.overall_rating <= $4) AS negative_ratings_count,
+        COUNT(*) FILTER (WHERE r.overall_rating::numeric <= $4::numeric) AS negative_ratings_count,
         AVG(r.cleanliness_rating)::numeric(4,2) AS average_cleanliness_rating
       FROM ratings r
       JOIN technician_profiles tp ON tp.user_id = r.rated_user_id
