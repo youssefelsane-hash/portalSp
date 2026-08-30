@@ -50,6 +50,8 @@ export interface MfaRequiredResponse {
 export type LoginResult = TokenPair | MfaRequiredResponse;
 
 const OTP_CODE_LENGTH = 6;
+// §106 — كام كود ملغي بنراجعه عشان نقول للمستخدم «ده كود قديم» بدل «كود غلط».
+const SUPERSEDED_OTP_LOOKBACK = 3;
 const BCRYPT_SALT_ROUNDS = 10;
 const MFA_PENDING_TOKEN_TTL_MS = 5 * 60_000; // 5 دقايق — نفس مهلة تحدي WebAuthn (ADR-0011 §3)
 
@@ -121,8 +123,17 @@ export class AuthService {
     // الخام) بدل deny-list — أي قيمة NODE_ENV مستقبلية غير متوقعة بتقع في الجانب الآمن (مقنّع)
     // تلقائيًا بدل العكس.
     if (!isProductionLikeEnv(this.config.get<string>('nodeEnv'))) {
+      // §106 — البلاغ كان «الكود بيظهر في الترمينال بس بيترفض». السبب إن اللوج stream مالوش
+      // ذاكرة: بيطبع كل كود اتصدر في حياة العملية، والسيرفر بيقبل **آخر** صف غير مستهلك بس
+      // (`requestOtp` بيلغي اللي قبله فوق). فالسطر لازم يقول بنفسه إنه بيلغي اللي فاته وصالح
+      // لحد إمتى، بدل ما المطوّر يخمّن أنهي سطر لسه حي.
+      //
+      // الكود لازم يفضل **آخر توكن في السطر بعد `→`** — كل سكريبتات الاختبار الحي في المشروع
+      // (`apps/*/test_live/*.dart`) وauth.service.spec.ts بتستخرجه بـ`split('→').last`، فأي
+      // إضافة بتتحط قبل السهم مش بعده.
+      const validUntil = new Date(Date.now() + expiryMinutes * 60_000).toISOString().slice(11, 19);
       // eslint-disable-next-line no-console
-      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) → ${code}`);
+      console.log(`[OTP] ${dto.phone_number} (${dto.purpose}) [صالح لحد ${validUntil} UTC — بيلغي أي كود أقدم لنفس الرقم/الغرض] → ${code}`);
     } else {
       const masked = dto.phone_number.length > 7 ? `${dto.phone_number.slice(0, 5)}***${dto.phone_number.slice(-2)}` : '***';
       this.logger.log(`[OTP] كود جديد اتصدر لـ ${masked} (${dto.purpose})`);
@@ -179,8 +190,15 @@ export class AuthService {
       .orderBy('otp.createdAt', 'DESC')
       .getOne();
 
+    // §106 — الرسالة كانت واحدة مبهمة لكل الأسباب («غير صحيح أو منتهي»)، فالمستخدم مكانش
+    // بيعرف هو يعيد الكتابة ولا يطلب كود جديد. الفصل هنا **مش** تسريب معلومة جديدة: كل
+    // الفروع دي بتتكلم عن رقم طلب كود بنفسه فعلاً، ومفيش فيها أي إشارة لوجود حساب من عدمه.
     if (!otp || otp.expiresAt.getTime() < Date.now()) {
-      return new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح أو منتهي', HttpStatus.BAD_REQUEST);
+      return new ApiException(
+        ErrorCode.AUTH_003,
+        'مفيش كود تحقق صالح للرقم ده (انتهت صلاحيته أو اتلغى بكود أحدث) — اضغط «ابعت الكود تاني»',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     if (otp.attemptsCount >= otp.maxAttempts) {
@@ -195,13 +213,65 @@ export class AuthService {
     if (!isMatch) {
       otp.attemptsCount += 1;
       await manager.save(otp);
-      return new ApiException(ErrorCode.AUTH_003, 'كود التحقق غير صحيح', HttpStatus.BAD_REQUEST);
+
+      // §106 — ده جوهر بلاغ المالك. لما يضغط «ابعت كود» تاني، `requestOtp()` بيلغي الكود
+      // الأقدم، لكن سطره بيفضل مكتوب في الترمينال (وفي SMS المستخدم الحقيقي) بلا أي علامة إنه
+      // مات. فلو دخّل الكود الأقدم، رسالة «الكود غلط» تبقى صحيحة تقنيًا لكنها مضلّلة تمامًا —
+      // هو شايف الكود قدامه بعينه. لو الأرقام مطابقة لكود **اتلغى فعلاً**، بنقول له كده صراحة.
+      // مش تسريب: مفيش معلومة هنا غير عن كود اتبعت للرقم ده هو نفسه، ورصيد المحاولات اتخصم
+      // فوق زي أي محاولة غلط فعادي مفيش أي توسيع في مساحة التخمين.
+      if (await this.matchesSupersededCode(manager, phoneNumber, purpose, code, otp.id)) {
+        return new ApiException(
+          ErrorCode.AUTH_003,
+          'الكود ده اتلغى لما طلبت كود جديد — استخدم آخر كود وصلك',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // عدد المحاولات الفاضلة بيتعرض عمدًا — ده رصيد محاولات صاحب الكود نفسه، مش معلومة عن
+      // حساب حد تاني، ومن غيره المستخدم بيتفاجئ بالحظر (AUTH_004) بلا أي إنذار.
+      const remaining = Math.max(otp.maxAttempts - otp.attemptsCount, 0);
+      return new ApiException(
+        ErrorCode.AUTH_003,
+        remaining > 0
+          ? `كود التحقق غلط — فاضلك ${remaining} محاولة`
+          : 'كود التحقق غلط واستهلكت كل المحاولات — اطلب كود جديد',
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     otp.isUsed = true;
     otp.usedAt = new Date();
     await manager.save(otp);
     return otp;
+  }
+
+  /**
+   * هل الأرقام دي بتطابق كود اتصدر للرقم/الغرض ده قبل كده واتلغى؟ (§106 — بس لتحسين الرسالة.)
+   *
+   * محدود بآخر `SUPERSEDED_OTP_LOOKBACK` صف عشان الفحص ده مايبقاش أثقل من التحقق نفسه: كل صف
+   * = عملية `bcrypt.compare` كاملة، وبيتنادى على مسار الفشل بس. الأحدث الأول لأنه الأرجح.
+   */
+  private async matchesSupersededCode(
+    manager: EntityManager,
+    phoneNumber: string,
+    purpose: OtpPurpose,
+    code: string,
+    excludeOtpId: string,
+  ): Promise<boolean> {
+    const superseded = await manager
+      .createQueryBuilder(OtpCode, 'otp')
+      .where('otp.phoneNumber = :phoneNumber', { phoneNumber })
+      .andWhere('otp.purpose = :purpose', { purpose })
+      .andWhere('otp.id != :excludeOtpId', { excludeOtpId })
+      .orderBy('otp.createdAt', 'DESC')
+      .limit(SUPERSEDED_OTP_LOOKBACK)
+      .getMany();
+
+    for (const candidate of superseded) {
+      if (await bcrypt.compare(code, candidate.codeHash)) return true;
+    }
+    return false;
   }
 
   // ── تسجيل / دخول ─────────────────────────────────────────────────────

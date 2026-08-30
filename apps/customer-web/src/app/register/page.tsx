@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { OtpResendButton } from '@/components/otp-resend-button';
 
 type Step = 'phone' | 'code';
 
@@ -101,6 +102,18 @@ function RegisterForm() {
             className="w-full rounded-lg bg-primary py-3 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >
             {busy ? 'جاري الإنشاء...' : 'إنشاء الحساب'}
+          </button>
+          <OtpResendButton
+            disabled={busy}
+            onResend={async () => {
+              await requestOtp(phone, 'register');
+              // الكود القديم بقى ملغي على السيرفر — تفضية الخانة بتمنع إرسال كود ميت وحرق محاولة.
+              setCode('');
+              setError(null);
+            }}
+          />
+          <button type="button" onClick={() => setStep('phone')} className="w-full text-sm text-muted hover:text-primary">
+            غيّر الرقم
           </button>
         </form>
       )}

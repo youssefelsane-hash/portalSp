@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
+import { OtpResendButton } from '@/components/otp-resend-button';
 
 type Step = 'phone' | 'code';
 
@@ -106,6 +107,16 @@ export default function LoginPage() {
           >
             {busy ? 'جاري التحقق...' : 'دخول'}
           </button>
+          <OtpResendButton
+            disabled={busy}
+            onResend={async () => {
+              await requestOtp(phone, 'login');
+              // الكود القديم بقى ملغي على السيرفر — تفضية الخانة بتمنع إرسال كود ميت وحرق محاولة.
+              setCode('');
+              setError(null);
+              setNotRegistered(false);
+            }}
+          />
           <button type="button" onClick={() => setStep('phone')} className="w-full text-sm text-muted hover:text-primary">
             غيّر الرقم
           </button>
