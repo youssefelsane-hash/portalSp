@@ -380,14 +380,13 @@ export class OrderTeamService {
         -- دلوقتي القايمة بتختلف فعليًا حسب الدور المطلوب — طلب مالك صريح: "أدوس إضافة فني، أقلي
         -- الفنيين... أدخل أضيف مساعدين، أقلي المساعدين بس اللي هم محطوط لهم إن هم مساعدين".
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: role })}
-        -- ADR-0054 — الاعتماد على الصنعة مطلوب من الفني بس. المساعد بيشتغل تحت إشراف القائد،
-        -- فمؤهّل لكل الخدمات افتراضيًا وقايمة حجب الأدمن لوحدها هي اللي بتحكم.
+        -- ADR-0054 — الدالة نفسها بتعفي المساعد من شرط الاعتماد (القرار من صف الشخص، مش من
+        -- معامل هنا) وبتفضل مفروضة عليه قايمة الحجب.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 'svc.id',
           categoryIdExpr: 'svc.category_id',
           directServiceAlias: 'ts',
-          serviceApprovalRequired: role !== 'assistant',
         })}
         AND NOT EXISTS (SELECT 1 FROM order_team_members otm WHERE otm.order_id = $1 AND otm.technician_id = tp.id)
         AND CASE tp.current_level

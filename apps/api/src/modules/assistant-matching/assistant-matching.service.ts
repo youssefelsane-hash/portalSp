@@ -181,15 +181,13 @@ export class AssistantMatchingService {
         -- ADR-0050 — الاتجاه العكسي: مجمع المساعدين بيضم المساعدين بس. قبل كده كان بيبث لأي فني
         -- مؤهّل، فالفنيين الكاملين كانوا بياخدوا عروض مساعدة بنسبة أقل من نصيبهم العادي.
         AND ${technicianKindCondition({ technicianAlias: 'tp', kind: 'assistant' })}
-        -- ADR-0054 — المساعد مؤهّل لكل الخدمات افتراضيًا؛ قايمة حجب الأدمن لوحدها هي اللي
-        -- بتحكم. قبل كده كان لازم اعتماد صنعة مسجّل، فأي حد بيتحوّل لمساعد كان بيختفي من
-        -- المجمع ده فورًا لأنه غالبًا مالوش اعتمادات أصلاً.
+        -- ADR-0054 — الدالة بتعفي المساعد من شرط الاعتماد تلقائيًا وبتفضل مفروضة عليه قايمة
+        -- الحجب. قبل كده كان لازم اعتماد صنعة مسجّل، فأي حد بيتحوّل لمساعد كان بيختفي فورًا.
         AND ${technicianServiceQualificationCondition({
           technicianIdExpr: 'tp.id',
           serviceIdExpr: 's.id',
           categoryIdExpr: 's.category_id',
           directServiceAlias: 'ts',
-          serviceApprovalRequired: false,
         })}
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL

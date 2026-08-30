@@ -162,6 +162,38 @@ describe('TechniciansService.listForServiceBooking() — المساعد بيظه
     expect(technicianIds).toContain(ids.assistantId);
   });
 
+  // الحالة الأهم عمليًا: المساعد اللي **مالوش أي اعتماد صنعة خالص** — وده الحال الغالب، لأن
+  // المساعد بيتضاف كمساعد من الأساس ومابيعدّيش دورة اعتماد. ده اللي كان بيخلّيه يختفي، ولو
+  // الاختبار غطّى بس المساعد اللي عنده اعتمادات كان هيعدّي وهو مش شايف المشكلة الحقيقية.
+  it('المساعد بلا أي اعتماد صنعة بيظهر برضه — الحالة الغالبة اللي كانت بتخفيه', async () => {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.assistantId]);
+    try {
+      const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId);
+      expect(items.map((i) => i.technicianId)).toContain(ids.assistantId);
+    } finally {
+      await q(`INSERT INTO technician_services (technician_id,service_id,is_active) VALUES ($1,$2,true)`, [
+        ids.assistantId,
+        ids.serviceId,
+      ]);
+    }
+  });
+
+  // والعكس بيثبت إن القاعدة مش "الكل مؤهّل": الفني بلا اعتماد بيختفي فعلاً.
+  it('الفني بلا اعتماد صنعة بيختفي — الشرط لسه مفروض عليه', async () => {
+    const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+    await q(`DELETE FROM technician_services WHERE technician_id = $1`, [ids.technicianId]);
+    try {
+      const { items } = await service.listForServiceBooking(ids.serviceId, ids.addressId);
+      expect(items.map((i) => i.technicianId)).not.toContain(ids.technicianId);
+    } finally {
+      await q(`INSERT INTO technician_services (technician_id,service_id,is_active) VALUES ($1,$2,true)`, [
+        ids.technicianId,
+        ids.serviceId,
+      ]);
+    }
+  });
+
   it('حجب الأدمن للخدمة هو أداة التحكم الوحيدة — بيشيل المساعد من القايمة، ورفعه بيرجّعه', async () => {
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
     const [admin] = await q(

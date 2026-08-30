@@ -33,12 +33,11 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
   const q = <T = any>(sql: string, params?: unknown[]): Promise<T[]> => dataSource.query(sql, params);
 
   /** بينفّذ شرط الأهلية الحقيقي على فني/خدمة بعينهم — نفس النص اللي المطابقة بتحقنه بالحرف. */
-  async function isQualified(technicianId: string, serviceId: string, serviceApprovalRequired: boolean) {
+  async function isQualified(technicianId: string, serviceId: string) {
     const condition = technicianServiceQualificationCondition({
       technicianIdExpr: 'tp.id',
       serviceIdExpr: 's.id',
       categoryIdExpr: 's.category_id',
-      serviceApprovalRequired,
     });
     const [row] = await q<{ ok: boolean }>(
       `SELECT (${condition}) AS ok
@@ -138,28 +137,38 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
   }, 20000);
 
   it('المساعد بلا أي اعتماد مؤهّل للخدمتين — حتى اللي في فئة مالوش فيها حاجة', async () => {
-    expect(await isQualified(ids.assistantProfile, ids.serviceA, false)).toBe(true);
-    expect(await isQualified(ids.assistantProfile, ids.serviceB, false)).toBe(true);
+    expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(true);
+    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(true);
   }, 20000);
 
-  it('نفس المساعد بالشرط القديم (اعتماد مطلوب) مكانش مؤهّل لأي حاجة — ده كان جذر المشكلة', async () => {
-    expect(await isQualified(ids.assistantProfile, ids.serviceA, true)).toBe(false);
-    expect(await isQualified(ids.assistantProfile, ids.serviceB, true)).toBe(false);
+  it('القاعدة مشتقّة من صف الشخص نفسه: نفس الفني لو بقى مساعد بيتأهّل فورًا، والعكس', async () => {
+    // ده جذر المشكلة الأصلية: الفني بلا اعتماد على الخدمة دي **مش** مؤهّل — وده صح ومقصود.
+    expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
+
+    // نفس الشخص بالظبط، الفرق الوحيد `technician_kind` — بيتأهّل فورًا بلا أي اعتماد جديد.
+    // الشرط بيتقرر من الصف نفسه مش من معامل بيتبعت في كل نداء، فمستحيل مسار ينسى يبعته.
+    await q(`UPDATE technician_profiles SET technician_kind = 'assistant' WHERE id = $1`, [ids.technicianProfile]);
+    try {
+      expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(true);
+    } finally {
+      await q(`UPDATE technician_profiles SET technician_kind = 'technician' WHERE id = $1`, [ids.technicianProfile]);
+    }
+    expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
   }, 20000);
 
   it('الحجب لسه شغّال على المساعد — هو أداة التحكم الوحيدة دلوقتي', async () => {
     await exclusions.exclude(ids.adminUser, ids.assistantProfile, ids.serviceA, 'مش بيعرف يعملها');
-    expect(await isQualified(ids.assistantProfile, ids.serviceA, false)).toBe(false);
+    expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(false);
     // الخدمة التانية ما اتأثرتش — الحجب لكل خدمة على حدة.
-    expect(await isQualified(ids.assistantProfile, ids.serviceB, false)).toBe(true);
+    expect(await isQualified(ids.assistantProfile, ids.serviceB)).toBe(true);
 
     await exclusions.allow(ids.adminUser, ids.assistantProfile, ids.serviceA);
-    expect(await isQualified(ids.assistantProfile, ids.serviceA, false)).toBe(true);
+    expect(await isQualified(ids.assistantProfile, ids.serviceA)).toBe(true);
   }, 20000);
 
   it('سلوك الفني ما اتغيّرش بالحرف — معتمد على فئته بس، ومحجوب عن اللي برّاها', async () => {
-    expect(await isQualified(ids.technicianProfile, ids.serviceA, true)).toBe(true);
-    expect(await isQualified(ids.technicianProfile, ids.serviceB, true)).toBe(false);
+    expect(await isQualified(ids.technicianProfile, ids.serviceA)).toBe(true);
+    expect(await isQualified(ids.technicianProfile, ids.serviceB)).toBe(false);
   }, 20000);
 
   it('شاشة الأدمن بتعرض للمساعد كل الخدمات النشطة — مكانت بتفضل فاضية', async () => {
@@ -180,7 +189,7 @@ describe('ADR-0054 — المساعد مؤهّل لكل الخدمات افتر�
     await exclusions.exclude(ids.adminUser, ids.assistantProfile, ids.serviceB, 'خارج قدرته');
     const rows = await exclusions.listForTechnician(ids.assistantProfile);
     for (const row of rows) {
-      const matchingSeesIt = await isQualified(ids.assistantProfile, row.service_id, false);
+      const matchingSeesIt = await isQualified(ids.assistantProfile, row.service_id);
       expect(matchingSeesIt).toBe(!row.is_excluded);
     }
     await exclusions.allow(ids.adminUser, ids.assistantProfile, ids.serviceB);
