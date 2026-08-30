@@ -1,1 +1,5 @@
 #include "Generated.xcconfig"
+// بوابة P0-2 في docs/23 — مفتاح خرائط Google بيتقرا من هنا (`GOOGLE_MAPS_API_KEY`)، غير
+// متتبَّع في git. انسخ Local.xcconfig.example لـLocal.xcconfig وحط فيه المفتاح الحقيقي.
+// `?` يخلي الـinclude اختياري عشان البناء ميفشلش لو الملف مش موجود (الخرائط بس هتفضل معطّلة).
+#include? "Local.xcconfig"

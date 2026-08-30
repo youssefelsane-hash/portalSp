@@ -11573,7 +11573,27 @@ CLAUDE.md اللي فيها `/opt/flutter/bin`) — الإصلاح اتراجع 
 وصحة الصياغة، لكن `flutter analyze`/`flutter test` الحقيقيين لم يشتغلوا في السيشن دي. لازم أي
 سيشن جاية عندها Flutter SDK فعلي تشغّل `flutter analyze` على الملفات دي للتأكيد النهائي.
 
-## D — شاشة بيضا في «حدد موقعي» (كانت شغالة، بقت فاضية)
+## D — شاشة بيضا في «حدد موقعي» (كانت شغالة، بقت فاضية) — ✅ اتشخّصت + الكود اتظبط (2026-08-30)
+
+**مش بَقّة كود جديدة — نتيجة مباشرة ومقصودة لإصلاح أمني اتعمل بالأمس (P0-2، docs/23،
+2026-08-29)**: المفتاح القديم بتاع Google Maps كان مكتوب صراحةً في `AndroidManifest.xml`/
+`AppDelegate.swift`/`web/index.html` ومتتبَّع في git (تسريب أمني). الإصلاح شالهم بالكامل وخلّى
+كل منصة تقرا مفتاحها من ملف **غير متتبَّع في git** — غيابه = خريطة معطّلة بهدوء بدل مفتاح مسرّب
+شغّال. Android كان عنده مسار جاهز (`android/maps.properties` + `.example` كقالب)، لكن **iOS
+مكنش عنده أي مسار فعلي لحقن مفتاح local خالص** (`Debug.xcconfig`/`Release.xcconfig` كانوا
+`#include "Generated.xcconfig"` بس، من غير أي include لملف local) — فجوة حقيقية اتقفلت دلوقتي:
+
+- أضيف `ios/Flutter/Local.xcconfig.example` (قالب) + `#include? "Local.xcconfig"` في
+  `Debug.xcconfig`/`Release.xcconfig` (اختياري، مايكسرش البناء لو غايب) + `Local.xcconfig`
+  اتضاف لـ`.gitignore` — نفس فلسفة `maps.properties` بالحرف.
+- `docs/03-external-integrations.md` §5 كانت **قديمة** (لسه بتوصف تعديل `AndroidManifest.xml`
+  يدويًا — الطريقة القديمة قبل P0-2) — اتحدّثت بالكامل لتطابق الآلية الحالية للمنصات التلاتة
+  (Android/iOS/Web)، بما فيها ترتيب أرجح الأسباب لو الخريطة ظهرت فاضية.
+
+**اللي لسه مطلوب من المالك (مش كود، ومفيش وصول له من هنا)**: تدوير مفتاحي Android/iOS القديمين
+من Google Cloud Console (كانوا متسرّبين في تاريخ git فعلاً)، وملء `android/maps.properties`
+و`ios/Flutter/Local.xcconfig` بالمفاتيح الجداد محليًا/في الـCI (ومفتاح الويب في خطوة الـdeploy
+لو `customer-app` web مستخدم). لحد ما ده يحصل، الخريطة هتفضل فاضية عمدًا — وده السلوك الصحيح.
 
 ## E — أيقونة الإشعارات بتغطي زرار OK + صوت إشعار حقيقي وقت الـproduction
 

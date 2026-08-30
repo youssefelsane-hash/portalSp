@@ -358,25 +358,39 @@ SMTP_FROM_EMAIL=<بريد المرسل، لازم يكون verified عند أغ�
 3. من **APIs & Services → Credentials → Create Credentials → API Key**: هتاخد المفتاح. **مهم
    أمنياً**: قيّده (Restrict key) بـ Android package name / iOS bundle id بتاعك، وبالـ APIs
    اللي فعّلتها بس فوق — مفتاح من غير قيود ممكن يتستخدم من أي حد لقاه.
+4. **المفاتيح القديمة اللي كانت مكتوبة صراحةً في الكود اتسرّبت في تاريخ git بالفعل (بوابة P0-2 في
+   `docs/23`، اتقفلت 2026-08-29) — لازم تتدوّر (Rotate) من Google Cloud Console الأول، إخفاؤها من
+   الكود الحالي مايلغيش إنها ظهرت في نسخ قديمة من التاريخ.** المفتاح الجديد هو اللي تحطه تحت.
 
-### مكان القيمة
+### مكان القيمة — 3 مفاتيح منفصلة (Android / iOS / Web)، كل واحد في ملف **غير متتبَّع في git**
 
-**مفتاحين منفصلين مستحسن** (واحد Android مقيّد بالـ package name، واحد iOS مقيّد بالـ bundle
-id) — أو نفس المفتاح لو مقيّد صح بالاتنين:
+من بعد بوابة P0-2 (docs/23)، مفيش أي مفتاح مكتوب صراحةً في ملفات متتبَّعة — كل منصة بتقرا
+مفتاحها من ملف local خارج git، وغيابه = **الخريطة بتفضل معطّلة بهدوء (فاضية/رمادية) بدل ما
+تشحن مفتاح مسرّب أو تكسر التطبيق**. لو الخريطة ظهرت فاضية فجأة بعد ما كانت شغالة، السبب الأرجح
+هو بالظبط ده — حد عمل build جديد من غير ما ينسخ المفتاح للملف الـlocal بتاعه.
 
-- `apps/customer-app/android/app/src/main/AndroidManifest.xml` — داخل `<application>`:
-  ```xml
-  <meta-data
-      android:name="com.google.android.geo.API_KEY"
-      android:value="YOUR_GOOGLE_MAPS_API_KEY" />
+- **Android**: `apps/customer-app/android/maps.properties` (انسخه من
+  `apps/customer-app/android/maps.properties.example` كقالب):
   ```
-  استبدل `YOUR_GOOGLE_MAPS_API_KEY` بالمفتاح الحقيقي.
-
-- `apps/customer-app/ios/Runner/AppDelegate.swift`:
-  ```swift
-  GMSServices.provideAPIKey("YOUR_GOOGLE_MAPS_API_KEY")
+  googleMapsApiKey=YOUR_ANDROID_KEY
   ```
-  استبدل `YOUR_GOOGLE_MAPS_API_KEY` بالمفتاح الحقيقي.
+  بيتقرا في `android/app/build.gradle.kts` ويتحقن في `AndroidManifest.xml` عبر
+  `manifestPlaceholders["googleMapsApiKey"]` — مفيش تعديل يدوي في الـManifest نفسه.
+
+- **iOS**: `apps/customer-app/ios/Flutter/Local.xcconfig` (انسخه من
+  `apps/customer-app/ios/Flutter/Local.xcconfig.example` كقالب):
+  ```
+  GOOGLE_MAPS_API_KEY = YOUR_IOS_KEY
+  ```
+  `Debug.xcconfig`/`Release.xcconfig` بيعملهم `#include? "Local.xcconfig"` (اختياري — البناء
+  مايفشلش لو الملف مش موجود)، والقيمة بتوصل لـ`Info.plist`'s `GoogleMapsApiKey` عبر
+  `$(GOOGLE_MAPS_API_KEY)`، و`AppDelegate.swift` بيقراها من هناك وقت الإقلاع.
+
+- **Web**: مفتاح تالت منفصل (مقيّد بالدومينات المسموحة، مش package/bundle id) — بيتحقن وقت
+  الـdeploy، مش ملف local: استبدل `__GOOGLE_MAPS_WEB_API_KEY__` في
+  `apps/customer-app/web/index.html` بالمفتاح الحقيقي في خطوة البناء/النشر (مثلاً `sed` في
+  CI قبل `flutter build web`). من غير الاستبدال، سكربت الخريطة مش بيتحمّل خالص عمدًا (بدل ما
+  يحمّل بمفتاح placeholder غلط ويرمي أخطاء غامضة في الـconsole).
 
 ### apps/customer-app — نسخة الويب (Flutter Web) — كانت فجوة حقيقية، اتقفلت (2026-08-19)
 
@@ -406,9 +420,15 @@ Android/iOS بس — لازم **Maps JavaScript API** تتفعّل ليه هي �
 ### التأكد إنها اشتغلت
 
 بعد ملء المفتاح، شغّل `apps/customer-app` على جهاز/إيموليتور حقيقي (**البيئة دي مفيهاش واحد —
-فجوة موثّقة قديمة، مش جديدة**)، افتح شاشة "تتبّع الفني لحظياً" لطلب نشط — المفروض تشوف خريطة
-حقيقية بتايلز، مش شاشة رمادية فاضية أو رسالة خطأ. لو الخريطة رمادية/فاضية غالباً المفتاح مش صحيح
-أو الـ API مش مفعّلة في Google Cloud Console.
+فجوة موثّقة قديمة، مش جديدة**)، افتح شاشة "تتبّع الفني لحظياً" لطلب نشط أو شاشة "حدد موقعك على
+الخريطة" (`address_map_picker_screen.dart`) — المفروض تشوف خريطة حقيقية بتايلز، مش شاشة
+بيضا/رمادية فاضية (بس فيها الـpin) أو رسالة خطأ. لو الخريطة فاضية، بالترتيب الأرجح:
+
+1. **ملف المفتاح الـlocal مش موجود أصلاً على الجهاز/الـCI اللي عمل الـbuild**
+   (`android/maps.properties` أو `ios/Flutter/Local.xcconfig` — دول غير متتبَّعين في git عمدًا،
+   بوابة P0-2 في `docs/23`، فأي build جديد من جهاز/CI ماعملش نسخ الملف هيشحن بمفتاح فاضي بصمت).
+2. المفتاح نفسه غلط أو اتلغى/اتقيّد بخطأ من Google Cloud Console.
+3. الـ API (Maps SDK for Android/iOS) مش مفعّلة على المشروع في Google Cloud Console.
 
 ---
 
