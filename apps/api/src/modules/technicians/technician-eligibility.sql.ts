@@ -1,6 +1,31 @@
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
 
 /**
+ * ADR-0057 (تعميق) — بلاغ مالك حقيقي: «مساعد اتضاف في نفس اليوم لتلات شغلانات كبار، والسيستم
+ * ما جابش إن هو شغول». التشخيص الحي كشف السبب الجذري: كل استعلامات التعارض/القدرة الاستيعابية
+ * تحت كانت بتفحص `orders.technician_id = X` بس — يعني **التزام الشخص كقائد طلب**. الشخص لما
+ * يكون عضو طاقم (مساعد أو فني إضافي، `order_team_members`) على طلب حد تاني، التزامه ده **غير
+ * مرئي تمامًا** لكل محرك الجدولة/القدرة الاستيعابية، لأنه مش `orders.technician_id` أصلاً. ده
+ * كان بيخلي أي مساعد (اللي بطبيعته دايمًا عضو طاقم مش قائد) شفاف تمامًا لفحص التعارض — بالظبط
+ * سيناريو المالك.
+ *
+ * الدالة دي بترجّع FROM-source بديل لـ`orders X`: كل الطلبات اللي الشخص ملتزم بيها فعليًا، سواء
+ * قائد (`orders.technician_id`) أو عضو طاقم (`order_team_members.technician_id`)، بـUNION (مش
+ * UNION ALL — لو ظهر نفس الطلب من المصدرين بالغلط، صف واحد بس مايتضاعفش التأثير). العمود
+ * `${alias}.id`/`.deleted_at`/`.order_status`/... كلهم بيفضلوا شغالين زي ما هما لأن `SELECT
+ * ${alias}.*` بترجع كل أعمدة `orders` الحقيقية بلا استثناء.
+ */
+function technicianCommittedOrdersSource(technicianIdExpr: string, alias: string): string {
+  return `(
+        SELECT ${alias}.* FROM orders ${alias} WHERE ${alias}.technician_id = ${technicianIdExpr}
+        UNION
+        SELECT ${alias}.* FROM orders ${alias}
+        JOIN order_team_members ${alias}_otm ON ${alias}_otm.order_id = ${alias}.id
+        WHERE ${alias}_otm.technician_id = ${technicianIdExpr}
+      ) ${alias}`;
+}
+
+/**
  * شرط SQL موحّد لتوافر الفني وقت طلب معيّن — المصدر الوحيد المستخدم حرفيًا في الأماكن الثلاثة
  * اللي بتسأل نفس السؤال ("الفني ده يقدر ياخد الطلب ده فعليًا؟"): matching.service.ts (التوزيع
  * الفعلي)، technicians.service.ts (قايمة اختيار العميل اليدوي)، وtechnician-assignment-guard
@@ -140,8 +165,8 @@ function activeOrderConflictExistsExpr(opts: {
       (
         ${isEmergencyParam}::boolean IS TRUE
         AND EXISTS (
-          SELECT 1 FROM orders bo
-          WHERE bo.technician_id = ${technicianIdExpr} AND bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
+          SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'bo')}
+          WHERE bo.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
             AND bo.order_status = ANY(${engagedStatusesParam}::order_status[]) AND bo.deleted_at IS NULL
         )
       )
@@ -153,9 +178,9 @@ function activeOrderConflictExistsExpr(opts: {
       (
         ${isEmergencyParam}::boolean IS NOT TRUE
         AND EXISTS (
-          SELECT 1 FROM orders co
+          SELECT 1 FROM ${technicianCommittedOrdersSource(technicianIdExpr, 'co')}
           JOIN services cs ON cs.id = co.service_id
-          WHERE co.technician_id = ${technicianIdExpr} AND co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
+          WHERE co.id IS DISTINCT FROM ${excludeOrderIdParam}::uuid
             AND co.order_status = ANY(${activeStatusesParam}::order_status[]) AND co.deleted_at IS NULL
             AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date
                 = (COALESCE(${scheduledAtParam}::timestamptz, now()) AT TIME ZONE 'Africa/Cairo')::date
@@ -278,9 +303,9 @@ export async function classifyTechnicianCapacity(
       LIMIT 1
     ),
     heavy AS (
-      SELECT 1 FROM orders co
+      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'co')}
       JOIN services cs ON cs.id = co.service_id, target
-      WHERE co.technician_id = $1 AND co.id IS DISTINCT FROM $3::uuid
+      WHERE co.id IS DISTINCT FROM $3::uuid
         AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
         AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
         AND (
@@ -295,8 +320,8 @@ export async function classifyTechnicianCapacity(
       LIMIT 1
     ),
     meaningful AS (
-      SELECT 1 FROM orders co, target
-      WHERE co.technician_id = $1 AND co.id IS DISTINCT FROM $3::uuid
+      SELECT 1 FROM ${technicianCommittedOrdersSource('$1', 'co')}, target
+      WHERE co.id IS DISTINCT FROM $3::uuid
         AND co.order_status = ANY($6::order_status[]) AND co.deleted_at IS NULL
         AND (COALESCE(co.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = target.target_date
       LIMIT 1
@@ -375,8 +400,8 @@ export async function describeTechnicianCapacity(
   >(
     `SELECT o.order_number, o.estimated_duration_days, o.order_status,
             TO_CHAR((COALESCE(o.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo'), 'YYYY-MM-DD') AS scheduled_at_date
-     FROM orders o
-     WHERE o.technician_id = $1 AND o.deleted_at IS NULL
+     FROM ${technicianCommittedOrdersSource('$1', 'o')}
+     WHERE o.deleted_at IS NULL
        AND o.order_status = ANY($3::order_status[])
        AND (COALESCE(o.scheduled_at, now()) AT TIME ZONE 'Africa/Cairo')::date = $2::date
      ORDER BY COALESCE(o.estimated_duration_days, 0) DESC

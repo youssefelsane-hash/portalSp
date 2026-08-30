@@ -110,7 +110,16 @@ export class FcmPushDispatcher {
       data: baseData,
       android: {
         priority: androidPriority,
-        notification: input.soundKey ? { sound: input.soundKey, channelId: input.priorityTier } : undefined,
+        // docs/08 §108-E — بَقّة حقيقية اتكشفت: كنا بنبعت `channelId: input.priorityTier`
+        // (زي 'scheduled_job'/'informational')، بس القنوات دي **مش موجودة على أي جهاز خالص**
+        // — كل تطبيق بيعمل create لقنواته بأسمائه هو (`order_updates` في customer-app بس،
+        // `critical_offer`/`action_required`/`general_updates` في technician-app)، والـdispatcher
+        // ده عام لكل التطبيقات ومفيش عنده فكرة مين المستلم. Android بيرفض يعرض أي إشعار
+        // channel_id بتاعه مش موجود على الجهاز (بدل ما يرجع لقناة افتراضية) — يعني الإشعار
+        // كان بيختفي بصمت كليةً (مش بس من غير صوت) لأي priorityTier غير critical_offer/
+        // action_required. الحل: نسيب channel_id فاضي عمدًا ونعتمد على
+        // `com.google.firebase.messaging.default_notification_channel_id` في AndroidManifest.xml
+        // بتاع كل تطبيق (قناة عامة بصوت مفعّل مضمون وجودها) بدل ما نخمّن قناة ممكن تكون مش موجودة.
       },
       apns: {
         headers: { 'apns-priority': apnsPriority },

@@ -155,18 +155,28 @@ Future<RatingResult?> showTechnicianRatingDialog(BuildContext context) async {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () {
+                // نفس فكرة customer-app's rating_dialog.dart — راجع التعليق هناك
+                // (docs/08 §108-C): لازم نشيل الفوكس من حقل التعليق قبل الإقفال
+                // عشان نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا +
+                // الطلب بيعلّق).
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop();
+              },
               child: const Text('إلغاء'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(
-                RatingResult(
-                  overallRating: overall,
-                  punctualityRating: punctuality,
-                  professionalismRating: professionalism,
-                  comment: controller.text.trim(),
-                ),
-              ),
+              onPressed: () {
+                FocusScope.of(context).unfocus();
+                Navigator.of(context).pop(
+                  RatingResult(
+                    overallRating: overall,
+                    punctualityRating: punctuality,
+                    professionalismRating: professionalism,
+                    comment: controller.text.trim(),
+                  ),
+                );
+              },
               child: const Text('إرسال'),
             ),
           ],

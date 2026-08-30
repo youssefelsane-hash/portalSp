@@ -1,1 +1,3 @@
 #include "Generated.xcconfig"
+// بوابة P0-2 في docs/23 — راجع تعليق Debug.xcconfig لنفس السبب.
+#include? "Local.xcconfig"

@@ -111,20 +111,25 @@ class _WalletScreenState extends State<WalletScreen> {
                                   ),
                                 ],
                                 const SizedBox(height: 16),
+                                // docs/08 §108-H — عمودين بلا Expanded ممكن يفيضوا أفقيًا لو
+                                // المبلغ المتراكم كبر (فني قديم بأرباح كتيرة على مدار وقت طويل).
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                                   children: [
-                                    Column(
-                                      children: [
-                                        Text('إجمالي الأرباح'),
-                                        Text(_formatEgp(wallet.totalEarnedCents)),
-                                      ],
+                                    Expanded(
+                                      child: Column(
+                                        children: [
+                                          const Text('إجمالي الأرباح'),
+                                          Text(_formatEgp(wallet.totalEarnedCents), overflow: TextOverflow.ellipsis),
+                                        ],
+                                      ),
                                     ),
-                                    Column(
-                                      children: [
-                                        const Text('إجمالي المسحوب'),
-                                        Text(_formatEgp(wallet.totalWithdrawnCents)),
-                                      ],
+                                    Expanded(
+                                      child: Column(
+                                        children: [
+                                          const Text('إجمالي المسحوب'),
+                                          Text(_formatEgp(wallet.totalWithdrawnCents), overflow: TextOverflow.ellipsis),
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ),

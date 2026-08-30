@@ -245,30 +245,41 @@ class _TechnicianProfileScreenState extends State<TechnicianProfileScreen> {
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(16),
+                          // docs/08 §108-H — 4 أعمدة بلا Expanded كانت بتفيض أفقيًا على شاشة
+                          // ضيقة (320-360dp) خصوصًا مع تسميات طويلة زي "الالتزام بالمواعيد".
+                          // Expanded بيقسّم المساحة بالتساوي ويسيب النص جوّه كل عمود يلف لسطرين
+                          // بدل ما يفيض.
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              _StatColumn(
-                                icon: Icons.star,
-                                label: 'التقييم',
-                                value: profile.totalRatingsCount > 0
-                                    ? '${profile.averageRating.toStringAsFixed(1)} (${profile.totalRatingsCount})'
-                                    : 'لسه من غير تقييم',
+                              Expanded(
+                                child: _StatColumn(
+                                  icon: Icons.star,
+                                  label: 'التقييم',
+                                  value: profile.totalRatingsCount > 0
+                                      ? '${profile.averageRating.toStringAsFixed(1)} (${profile.totalRatingsCount})'
+                                      : 'لسه من غير تقييم',
+                                ),
                               ),
-                              _StatColumn(
-                                icon: Icons.check_circle_outline,
-                                label: 'طلبات مكتملة',
-                                value: '${profile.completedOrdersCount}',
+                              Expanded(
+                                child: _StatColumn(
+                                  icon: Icons.check_circle_outline,
+                                  label: 'طلبات مكتملة',
+                                  value: '${profile.completedOrdersCount}',
+                                ),
                               ),
-                              _StatColumn(
-                                icon: Icons.event_available_outlined,
-                                label: 'الالتزام بالمواعيد',
-                                value: profile.onTimeRate != null ? '${profile.onTimeRate}%' : '—',
+                              Expanded(
+                                child: _StatColumn(
+                                  icon: Icons.event_available_outlined,
+                                  label: 'الالتزام بالمواعيد',
+                                  value: profile.onTimeRate != null ? '${profile.onTimeRate}%' : '—',
+                                ),
                               ),
-                              _StatColumn(
-                                icon: Icons.cancel_outlined,
-                                label: 'معدل الإلغاء',
-                                value: profile.cancellationRate != null ? '${profile.cancellationRate}%' : '—',
+                              Expanded(
+                                child: _StatColumn(
+                                  icon: Icons.cancel_outlined,
+                                  label: 'معدل الإلغاء',
+                                  value: profile.cancellationRate != null ? '${profile.cancellationRate}%' : '—',
+                                ),
                               ),
                             ],
                           ),
@@ -449,11 +460,22 @@ class _StatColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
         const SizedBox(height: 4),
-        Text(value, style: Theme.of(context).textTheme.titleSmall),
-        Text(label, style: Theme.of(context).textTheme.labelSmall, textAlign: TextAlign.center),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.titleSmall,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+        ),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }

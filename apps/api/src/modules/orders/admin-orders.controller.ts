@@ -7,7 +7,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { UserType } from '../auth/entities/user.entity';
 import { JwtPayload } from '../auth/types/authenticated-request';
-import { AdminOrdersService } from './admin-orders.service';
+import { AdminOrdersService, toCrewAssignResponseDto } from './admin-orders.service';
 import { AdjustOrderPriceDto } from './dto/adjust-order-price.dto';
 import { AdminCancelOrderDto } from './dto/admin-cancel-order.dto';
 import { AdminRescheduleOrderDto } from './dto/admin-reschedule-order.dto';
@@ -469,9 +469,9 @@ export class AdminOrdersController {
     @Body() dto: AssignAssistantDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(
-      await this.adminOrdersService.assignAssistant(admin.sub, id, dto.technician_id, audit),
-    );
+    // ADR-0057 — الرد بقى discriminated union: `status: 'assigned'` (زي زمان) أو
+    // `status: 'offer_sent'` (المساعد عنده تعارض جدولة، اتبعتله طلب يحتاج قبوله بنفسه).
+    return toCrewAssignResponseDto(await this.adminOrdersService.assignAssistant(admin.sub, id, dto.technician_id, audit));
   }
 
   // إدارة طاقم الطلب من الأدمن (Script 4 §22-29، §38-41) — كانت فجوة موثّقة صراحة:
@@ -486,7 +486,7 @@ export class AdminOrdersController {
     @Body() dto: AddCrewMemberDto,
     @AuditContext() audit: AuditMeta,
   ) {
-    return toOrderResponseDto(
+    return toCrewAssignResponseDto(
       await this.adminOrdersService.addCrewMember(admin.sub, id, dto.technician_id, dto.role_label, dto.member_type, audit),
     );
   }

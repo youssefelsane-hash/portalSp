@@ -273,7 +273,12 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                           ),
                         ),
                       const SizedBox(height: 4),
-                      Row(
+                      // docs/08 §108-H — بَقّة overflow منهجية: Row عادي من غير Expanded/Flexible
+                      // جنب Wrap مستخدمة لنفس نوع المحتوى فوق وتحت بالظبط. رقم الطلبات المكتملة
+                      // ممكن يكبر (فني قديم بآلاف الطلبات) ويفيض على شاشة ضيقة — Wrap بيلف
+                      // لسطر جديد بدل ما يفيض، بلا أي تعديل حسابي محتاج.
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           if (t.totalRatingsCount > 0) ...[
                             const Icon(Icons.star, size: 14, color: Colors.amber),
@@ -468,13 +473,18 @@ class _TechnicianMarketplaceScreenState extends State<TechnicianMarketplaceScree
                     // docs/08 §65.2 — «سعر الشركة من غير فرق مستوى» كانت تعليمات داخلية بتشرح
                     // لينا إحنا ليه الشركة مالهاش مضاعف مستوى (§62.2)، مش معلومة تخصّ العميل.
                     // العميل بيشوف السعر وخلاص.
-                    if (c.finalPriceCents != null)
-                      Text(
-                        '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                      )
-                    else
-                      const SizedBox.shrink(),
+                    // docs/08 §108-H — Flexible هنا (مش مجرد Text) لأن السعر ممكن يطول (مبلغ
+                    // كبير)، والزرار جنبه لازم يفضل زرار كامل قابل للمس مش يتقصّ هو.
+                    Flexible(
+                      child: c.finalPriceCents != null
+                          ? Text(
+                              '${(c.finalPriceCents! / 100).toStringAsFixed(0)} ج.م.',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    const SizedBox(width: 8),
                     FilledButton(
                       onPressed: () => _select(c.id, true),
                       child: const Text('اختار الشركة'),

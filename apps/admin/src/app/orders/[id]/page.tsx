@@ -15,6 +15,7 @@ import type {
   OrderTimelineEventResponseDto,
   RemoveCrewMemberResponseDto,
   TeamMemberResponseDto,
+  TechnicianCapacityTier,
   TechnicianEligibilityExplanationDto,
 } from '@baytak/shared-types';
 import { useAuth } from '@/lib/auth-context';
@@ -65,6 +66,17 @@ interface EligibleAssistantDto {
   technician_code: string;
   current_level: string;
   distance_km: string | null;
+  // docs/08 §108-A — كانت غايبة عن الواجهة رغم إن الباك-إند بيرجّعها من زمان (ADR-0057):
+  // بدونها الأدمن معندوش أي مؤشر قبل الاختيار إن الفني ده مشغول وهيتحوّل لعرض/فرصة بدل إضافة
+  // فورية.
+  capacity_tier: TechnicianCapacityTier;
+}
+
+// docs/08 §108-A — شكل رد assignAssistant/addCrewMember بعد ADR-0057: مش الطلب كامل زي الأول،
+// بقى discriminated union يوضّح هل الإضافة كانت فورية ولا اتحوّلت لفرصة تحتاج قبول الفني.
+interface CrewAssignResponseDto {
+  status: 'assigned' | 'offer_sent';
+  capacity_tier?: TechnicianCapacityTier;
 }
 
 // ملاحظات داخلية لمركز الاتصال (docs/08 §73 بند 3): GET/POST /admin/orders/:id/notes.
@@ -170,6 +182,10 @@ export default function OrderDetailPage() {
   const [showAssignAssistantForm, setShowAssignAssistantForm] = useState(false);
   const [assistantTechnicianId, setAssistantTechnicianId] = useState('');
   const [eligibleAssistants, setEligibleAssistants] = useState<EligibleAssistantDto[] | null>(null);
+  // docs/08 §108-A — بعد ADR-0057، الإضافة ممكن تتحوّل لعرض/فرصة بدل إضافة فورية لو الفني مشغول
+  // (نفس منطق التجنيد الذاتي في apps/technician-app بالحرف). الأدمن كان بياخد نفس رسالة النجاح
+  // في الحالتين، بلا أي تمييز إن الفني اتضاف فعلاً ولا لسه مستني يقبل عرض.
+  const [crewAssignOutcome, setCrewAssignOutcome] = useState<{ message: string; isOffer: boolean } | null>(null);
   const [showCancelWithFeeForm, setShowCancelWithFeeForm] = useState(false);
   const [visitFeeEgp, setVisitFeeEgp] = useState('');
   const [failedVisitNotes, setFailedVisitNotes] = useState('');
@@ -641,11 +657,22 @@ export default function OrderDetailPage() {
     if (!assistantTechnicianId) return;
     setIsSaving(true);
     setError(null);
+    setCrewAssignOutcome(null);
     try {
-      await authedFetch(`/admin/orders/${id}/assistants`, {
+      const outcome = await authedFetch<CrewAssignResponseDto>(`/admin/orders/${id}/assistants`, {
         method: 'POST',
         body: JSON.stringify({ technician_id: assistantTechnicianId }),
       });
+      // docs/08 §108-A — نفس رسالة apps/technician-app's RecruitTeamScreen بالحرف: الأدمن لازم
+      // يعرف هل الإضافة فورية ولا اتحوّلت لعرض مستني قبول الفني، مش يفترض النجاح الصامت.
+      setCrewAssignOutcome(
+        outcome.status === 'offer_sent'
+          ? {
+              isOffer: true,
+              message: `عنده شغل النهاردة — اتبعتله فرصة اختيارية بدل إضافة فورية، مستني رده (${CAPACITY_TIER_LABELS[outcome.capacity_tier ?? 'MEANINGFUL']})`,
+            }
+          : { isOffer: false, message: 'اتضاف المساعد فورًا لطاقم الطلب' },
+      );
       setShowAssignAssistantForm(false);
       setAssistantTechnicianId('');
       load();
@@ -663,11 +690,20 @@ export default function OrderDetailPage() {
     if (!crewTechnicianId || !crewRoleLabel) return;
     setIsSaving(true);
     setError(null);
+    setCrewAssignOutcome(null);
     try {
-      await authedFetch(`/admin/orders/${id}/team-members`, {
+      const outcome = await authedFetch<CrewAssignResponseDto>(`/admin/orders/${id}/team-members`, {
         method: 'POST',
         body: JSON.stringify({ technician_id: crewTechnicianId, role_label: crewRoleLabel, member_type: crewMemberType }),
       });
+      setCrewAssignOutcome(
+        outcome.status === 'offer_sent'
+          ? {
+              isOffer: true,
+              message: `عنده شغل النهاردة — اتبعتله فرصة اختيارية بدل إضافة فورية، مستني رده (${CAPACITY_TIER_LABELS[outcome.capacity_tier ?? 'MEANINGFUL']})`,
+            }
+          : { isOffer: false, message: 'اتضاف الفني فورًا لطاقم الطلب' },
+      );
       setShowAddCrewForm(false);
       setCrewTechnicianId('');
       setCrewRoleLabel('');
@@ -1759,6 +1795,19 @@ export default function OrderDetailPage() {
           </CardContent>
         </Card>
 
+        {/* docs/08 §108-A — نتيجة آخر تعيين مساعد/عضو طاقم: فورًا ولا فرصة مستنية قبول. */}
+        {crewAssignOutcome && (
+          <div
+            className={
+              crewAssignOutcome.isOffer
+                ? 'rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning'
+                : 'rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success'
+            }
+          >
+            {crewAssignOutcome.message}
+          </div>
+        )}
+
         {/* تعيين مساعد يدوي بعد التصعيد (ADR-0008) — بيظهر بس لو الطلب أصلاً محتاج مساعدين. */}
         {!!order.required_assistants && order.required_assistants > 0 && (
           <Card>
@@ -1823,6 +1872,9 @@ export default function OrderDetailPage() {
                           <option key={assistant.technician_id} value={assistant.technician_id}>
                             {assistant.full_name} ({assistant.technician_code})
                             {assistant.distance_km !== null ? ` — ${Number(assistant.distance_km).toFixed(1)} كم` : ''}
+                            {/* docs/08 §108-A — <option> HTML مالوش أيقونات، فالتمييز نصي: أي فني
+                                مش LIGHT بيوضّح إنه هيتحوّل لعرض بدل إضافة فورية قبل ما الأدمن يختاره. */}
+                            {assistant.capacity_tier !== 'LIGHT' ? ` — ${CAPACITY_TIER_LABELS[assistant.capacity_tier]} (هيتبعتله عرض)` : ''}
                           </option>
                         ))}
                       </SelectNative>

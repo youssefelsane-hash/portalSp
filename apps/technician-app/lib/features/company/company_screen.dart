@@ -158,8 +158,22 @@ class _CompanyScreenState extends State<CompanyScreen> {
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('إلغاء')),
-              FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('حفظ')),
+              TextButton(
+                onPressed: () {
+                  // راجع docs/08 §108-C — شيل الفوكس من حقلي الاسم/العنوان قبل
+                  // الإقفال عشان نتجنب Flutter assertion '_dependents.isEmpty'.
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.of(dialogContext).pop(false);
+                },
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.of(dialogContext).pop(true);
+                },
+                child: const Text('حفظ'),
+              ),
             ],
           ),
         ),

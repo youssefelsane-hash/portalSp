@@ -32,6 +32,10 @@ class BaytakTechnicianApp extends StatelessWidget {
         title: 'أسطى — الفني',
         debugShowCheckedModeBanner: false,
         navigatorKey: rootNavigatorKey,
+        // docs/08 §108-E — بيخلي الزرار العايم للإشعارات يختفي مؤقتًا لما أي dialog/bottom-sheet
+        // يفتح، بدل ما يتغطى فوقها أو يغطّي زرار "موافق" بتاعتها. راجع
+        // NotificationAlertPopupObserver في floating_notification_alert.dart.
+        navigatorObservers: [NotificationAlertPopupObserver()],
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),
         locale: const Locale('ar', 'EG'),

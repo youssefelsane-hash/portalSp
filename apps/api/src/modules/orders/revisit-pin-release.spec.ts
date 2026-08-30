@@ -125,6 +125,7 @@ describe('ADR-0051 — تحرير إعادة الزيارة المثبّتة و�
       {} as never, // promoCodesService
       settingsStub,
       walletsService,
+      {} as never, // workOpportunities (ADR-0057) — مش متنادى في releaseRevisit
     );
     exceptionCenter = new AdminExceptionCenterService(dataSource, settingsStub);
   }, 30000);

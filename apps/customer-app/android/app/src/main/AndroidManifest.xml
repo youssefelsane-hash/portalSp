@@ -40,6 +40,14 @@
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${googleMapsApiKey}" />
+        <!-- docs/08 §108-E — بَقّة حقيقية: من غير القناة الافتراضية دي، أي إشعار FCM يوصل والتطبيق
+             في الخلفية/مقفول بلا channel_id صريح (أو بـchannel_id مش موجود على الجهاز) كان ممكن
+             ميتعرضش خالص بدل ما يظهر بلا صوت بس — Android بيرفض إشعار قناته مش موجودة، مايرجعش
+             لقناة افتراضية تلقائيًا من غير الإعلان الصريح ده. لازم تطابق القناة المتعرّفة فعليًا
+             في push_notification_service.dart (`order_updates`). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="order_updates" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

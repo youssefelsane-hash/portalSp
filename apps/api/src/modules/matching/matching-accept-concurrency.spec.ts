@@ -133,6 +133,7 @@ describe('MatchingService.accept() — قبول مزدوج متزامن (regress
       {} as never,
       {} as never, // settingsService (docs/08 §35),
       {} as never, // walletsService (ADR-0051) — مش متنادى هنا
+      {} as never, // workOpportunities (ADR-0057) — مش متنادى هنا
     );
 
     const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);

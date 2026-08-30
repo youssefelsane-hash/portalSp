@@ -242,6 +242,10 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
 
   void _confirm() {
     if (!_canConfirm) return;
+    // راجع docs/08 §108-C — شيل الفوكس من حقل عدد الساعات قبل الإقفال عشان
+    // نتجنب Flutter assertion '_dependents.isEmpty' (شاشة حمرا) لو المستخدم
+    // لسه واقف في الحقل.
+    FocusScope.of(context).unfocus();
     Navigator.of(context).pop(
       ScheduleChoice(
         _selectedDate!,

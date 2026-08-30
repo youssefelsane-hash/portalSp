@@ -976,11 +976,31 @@ export default function ServiceDetailPage() {
                 ))}
               </SelectNative>
               <Label htmlFor="zp_mode">طريقة التسعير</Label>
-              <SelectNative id="zp_mode" name="pricing_mode" value={zpMode} onChange={(e) => setZpMode(e.target.value as 'override' | 'percentage')}>
-                <option value="override">رقم مطلق (يستبدل السعر الأساسي بالكامل)</option>
+              {/* docs/08 §108-G — عمدًا من غير `disabled`: عنصر <select disabled> ما بيتبعتش
+                  في FormData خالص، فكان هيرجّع 'override' الافتراضي وقت الحفظ (`form.get(...)
+                  || 'override'` في handleUpsertZonePricing) — عكس المقصود بالظبط. إخفاء
+                  الاختيار التاني كفاية إن القيمة المُرسلة تبقى 'percentage' دايمًا هنا. */}
+              <SelectNative
+                id="zp_mode"
+                name="pricing_mode"
+                value={pricingModelLive === 'formula' ? 'percentage' : zpMode}
+                onChange={(e) => setZpMode(e.target.value as 'override' | 'percentage')}
+              >
+                {pricingModelLive !== 'formula' && (
+                  <option value="override">رقم مطلق (يستبدل السعر الأساسي بالكامل)</option>
+                )}
                 <option value="percentage">نسبة مئوية فوق السعر الأساسي (بتتحدّث تلقائيًا معاه)</option>
               </SelectNative>
-              {zpMode === 'override' ? (
+              {pricingModelLive === 'formula' && (
+                // docs/08 §108-G — رقم مطلق (override) مالوش معنى لخدمة formula (سعرها بيتحدد من
+                // فورم ديناميكي بقيم متغيّرة، مش رقم ثابت). النسبة المئوية بس هي اللي بتتطبّق —
+                // فوق **ناتج المعادلة نفسه**، مش فوق "السعر الأساسي" (مالوش استخدام حقيقي في formula).
+                <p className="text-xs text-muted-foreground">
+                  الخدمة دي معادلة ديناميكية — النسبة المئوية بس بتتطبّق (فوق ناتج المعادلة نفسه لكل حجز)،
+                  "رقم مطلق" مش متاح لها.
+                </p>
+              )}
+              {zpMode === 'override' && pricingModelLive !== 'formula' ? (
                 <>
                   <Label htmlFor="zp_price">السعر (جنيه)</Label>
                   <Input id="zp_price" name="price" type="number" min="0" step="0.01" required />

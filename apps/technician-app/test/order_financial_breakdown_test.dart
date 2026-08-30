@@ -53,13 +53,16 @@ void main() {
     expect(nextTechnicianAction[order.orderStatus], 'collect_cash');
   });
 
-  test('كله كاش: الإجمالي بيرجع من الـAPI وبيساوي الكاش المطلوب تحصيله', () {
+  // docs/08 §108-B — رجريشن على قصد: الباك-إند كان بيستثني الكاش الكامل ويرجّع total_amount_cents
+  // ("هو نفسه اللي هيحصّله"). المالك ألغى الاستثناء ده صراحةً: الإجمالي مش بيترجع خالص من الـAPI
+  // لأي فني بعد كده، حتى لو الطلب كاش بالكامل — cash_to_collect_cents كافي لوحده للقائد/الوحيد.
+  test('كله كاش: الإجمالي مش بيترجع من الـAPI خالص، cash_to_collect_cents هو المصدر الوحيد', () {
     final order = Order.fromJson({
       'id': 'order-2',
       'order_number': 'ORD-CASH',
       'order_status': 'work_completed',
       'problem_description': null,
-      'total_amount_cents': 620000,
+      // ملحوظة: مفيش total_amount_cents في الرد — دلوقتي ممنوع دايمًا، مش استثناء الكاش الكامل.
       'cash_to_collect_cents': 620000,
       'cash_collected_cents': 0,
       'my_earning_cents': 500000,
@@ -69,9 +72,42 @@ void main() {
       'booking_mode': 'individual',
     });
 
-    expect(order.totalAmountCents, 620000);
+    expect(order.totalAmountCents, isNull);
     expect(order.cashToCollectCents, 620000);
     expect(order.hasOnlinePayment, isFalse);
+  });
+
+  // docs/08 §108-B — عضو الطاقم (مش القائد) بياخد cash_to_collect_cents=0 من الباك-إند دايمًا،
+  // حتى لو الطلب كاش بالكامل وفيه فلوس حقيقية مستنية تحصيل من القائد. النص لازم يتكلم عن دوره
+  // هو ("مفيش عليك تحصّله")، مش يدّعي إن الطلب نفسه مجاني (كان بيوقع في نفس كذبة docs/08 §64.ب
+  // بس بالعكس لو سبناها على النص الافتراضي).
+  test('عضو الطاقم على طلب كاش بالكامل: نص واضح إن التحصيل مش شغله، مش "مفيش كاش مطلوب"', () {
+    final order = Order.fromJson({
+      'id': 'order-crew-member-cash',
+      'order_number': 'ORD-CREW-CASH',
+      'order_status': 'work_completed',
+      'problem_description': null,
+      'cash_to_collect_cents': 0,
+      'cash_collected_cents': 0,
+      'my_earning_cents': 40000,
+      'has_online_payment': false,
+      'fully_paid_online': false,
+      'is_crew_share': true,
+      'payment_status': 'unpaid',
+      'booking_mode': 'team',
+    });
+
+    expect(
+      technicianCashStatusLabel(
+        cashToCollectCents: order.cashToCollectCents,
+        cashCollectedCents: order.cashCollectedCents,
+        hasOnlinePayment: order.hasOnlinePayment,
+        fullyPaidOnline: order.fullyPaidOnline,
+        isCrewShare: order.isCrewShare,
+        formatEgp: (cents) => '${cents ~/ 100} ج.م.',
+      ),
+      'مفيش كاش عليك تحصّله من العميل — ده بيتحصّل عن طريق قائد الفريق',
+    );
   });
 
   test('كله أونلاين (تقسيط معتمد مثلاً): مفيش كاش، ونصيبه بس هو اللي بيبان', () {
@@ -117,6 +153,7 @@ void main() {
         cashCollectedCents: order.cashCollectedCents,
         hasOnlinePayment: order.hasOnlinePayment,
         fullyPaidOnline: order.fullyPaidOnline,
+        isCrewShare: order.isCrewShare,
         formatEgp: (cents) => '${cents ~/ 100} ج.م.',
       ),
       'تم تحصيل الكاش وتسجيله في التسوية: 200 ج.م.',

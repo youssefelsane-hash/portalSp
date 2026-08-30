@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditLogService } from '../audit/audit-log.service';
 import { OrdersService } from './orders.service';
-import { Order } from './entities/order.entity';
+import { Order, OrderType } from './entities/order.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { Payment } from '../payments/entities/payment.entity';
@@ -468,5 +468,41 @@ describe('Full-chain integration — Price Engine outputs → Order snapshot (Po
     expect(created.totalAmountCents).toBe(150000);
     // 3) الطلب محتفظ بالشركة المطلوبة — الـmatching بيقرا منها (matching.service.ts).
     expect(created.requestedTechnicianCompanyId).toBe(company.id);
+  });
+
+  /**
+   * docs/08 §108 بند F — بلاغ مالك حقيقي: طلب إعادة زيارة (ضمان) لخدمة formula كان بيترفض
+   * بـ`الحقل "<اسم الحقل>" مطلوب` — شاشة إعادة الزيارة في التطبيق مش بتعرض/تجمع field_values
+   * أصلاً (العميل مش بيعيد تحديد نطاق الشغل، بيطلب بس يصلّحوا نفس الشغل). الإصلاح: OrdersService
+   * .create() بيورّث field_values من تقييم التسعير الحقيقي المرتبط بالطلب الأصلي
+   * (service_pricing_evaluations، نفس اللي linkEvaluationToOrder() سجّلها وقت إنشاء الطلب
+   * الأصلي) لو الطلب الجديد original_order_id ومفيش field_values مبعوتة.
+   */
+  it('إعادة الزيارة لخدمة formula بلا field_values — بترث المساحة من الطلب الأصلي بدل ما ترفض (docs/08 §108-F)', async () => {
+    const original = await ordersService.create(ids.customerUser, {
+      service_id: ids.serviceFormula,
+      address_id: ids.address,
+      field_values: { area: 100 },
+    } as never);
+    expect(original.totalAmountCents).toBe(50000); // area=100 → 100×500
+
+    // محاكاة اكتمال الطلب + ضمان لسه سارٍ (بديل واقعي أخف من دورة التنفيذ الكاملة — نفس نمط
+    // order-revisit-chain.spec.ts's createCompletedOrder()).
+    const warrantyExpiresAt = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
+    await q(`UPDATE orders SET order_status = 'completed', warranty_expires_at = $2 WHERE id = $1`, [original.id, warrantyExpiresAt]);
+
+    // الطلب الجديد بلا field_values خالص — بالظبط زي شاشة إعادة الزيارة في التطبيق.
+    const revisit = await ordersService.create(ids.customerUser, {
+      service_id: ids.serviceFormula,
+      address_id: ids.address,
+      original_order_id: original.id,
+    } as never);
+
+    expect(revisit.orderType).toBe(OrderType.REVISIT);
+    expect(revisit.parentOrderId).toBe(original.id);
+    // مجانية بالكامل — الطاقم متوارث برضه من نفس المعادلة (المساحة اتورّثت فعليًا: ceil(100/40)=3)
+    // لكن السعر بيتصفّر دايمًا لإعادة الزيارة (docs/08 §96).
+    expect(revisit.totalAmountCents).toBe(0);
+    expect(revisit.requiredTechnicians).toBe(1); // إعادة الزيارة: فني واحد بس (originalOrder ? 1 : ...)
   });
 });

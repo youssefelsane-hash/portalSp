@@ -282,14 +282,17 @@ export class PaymentsService {
       }
     }
     // عضو الطاقم يشوف حصته فقط، وليس الكاش الذي مرّ في يد قائد الطلب.
-    const cashCollectedCents =
-      viewerId === order.technicianId
-        ? Math.max(0, breakdown.directPaidAmountCents - breakdown.onlinePaidAmountCents)
-        : 0;
+    const viewerIsLeaderOrSolo = viewerId === order.technicianId;
+    const cashCollectedCents = viewerIsLeaderOrSolo
+      ? Math.max(0, breakdown.directPaidAmountCents - breakdown.onlinePaidAmountCents)
+      : 0;
 
     return {
-      // اللي هيستلمه كاش من العميل — لازم يبان بالرقم، هو محتاجه عشان يعرف ياخد كام.
-      cashToCollectCents: breakdown.amountDueToTechnicianCents,
+      // docs/08 §108-B — قاعدة صارمة جديدة (بلاغ مالك صريح): بس القائد (أو الفني الوحيد لو
+      // مفيش طاقم) يشوف المبلغ المطلوب تحصيله من العميل — هو اللي فعليًا بيحصّله. أي عضو تاني
+      // في الطاقم يشوف نصيبه بس، مهما كانت طريقة الدفع؛ إظهار الرقم ده له كان بيسرّب صورة عن
+      // إجمالي الطلب من غير أي داعي فعلي (هو مش هيحصّل حاجة أصلاً).
+      cashToCollectCents: viewerIsLeaderOrSolo ? breakdown.amountDueToTechnicianCents : 0,
       // الفرق بين كل الدفعات المباشرة والدفعات غير الكاش = صافي الكاش المسجل بعد أي استرداد.
       // لازم يخرج كحقيقة مستقلة، لأن صفر "المتبقي" بعد التحصيل لا يعني "لم يستلم كاش".
       cashCollectedCents,

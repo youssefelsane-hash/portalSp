@@ -827,11 +827,18 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       color: color,
       fontSize: bold ? 16 : 14,
     );
+    // docs/08 §108-H — بَقّة overflow منهجية: التسمية أحيانًا نص طويل (زي شرح فرق سعر الفني
+    // المميّز) وكانت من غير Expanded/Flexible خالص، فبتفيض لو المساحة ضاقت (شاشة صغيرة أو خط
+    // كبير). الرقم بيفضل زي ما هو (تقصيره مضلل لسعر)، والتسمية بس هي اللي بتنكمش بـ"...".
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label, style: style), Text(value, style: style)],
+        children: [
+          Expanded(child: Text(label, style: style, overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 8),
+          Text(value, style: style),
+        ],
       ),
     );
   }

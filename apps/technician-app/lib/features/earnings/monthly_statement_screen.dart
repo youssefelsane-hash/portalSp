@@ -290,17 +290,24 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
     bool highlight = false,
     bool error = false,
   }) {
+    // docs/08 §108-H — بَقّة overflow منهجية: التسمية أحيانًا نص طويل (زي "عمولة الشركة (٪X)"
+    // أو "+ Y (الشركة تحمّلت الفرق)") وكانت من غير Expanded/Flexible خالص، فبتفيض على شاشة
+    // صغيرة أو خط كبير. الرقم بيفضل زي ما هو (تقصيره مضلل لمبلغ مالي)، والتسمية بس بتنكمش بـ"...".
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+          Expanded(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           Text(
             value,
             style: TextStyle(

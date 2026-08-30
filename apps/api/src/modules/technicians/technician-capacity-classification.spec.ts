@@ -231,3 +231,199 @@ describe('classifyTechnicianCapacity — تصنيف القدرة الاستيع�
     expect(description.occupiedTo).toBe(today);
   });
 });
+
+// ADR-0057 (تعميق) — بَقّة حقيقية اتلقطت حي: classifyTechnicianCapacity()/describeTechnicianCapacity()
+// كانا بيفحصوا `orders.technician_id = X` بس ("الشخص قائد الطلب") — التزام الشخص كـ**عضو طاقم**
+// (`order_team_members`، حالة المساعد الطبيعية دايمًا) كان غير مرئي تمامًا. النتيجة: مساعد
+// مشغول فعليًا بشغلانتين في نفس اليوم (كعضو طاقم) كان بيصنَّف LIGHT — بالظبط بلاغ المالك
+// («مساعد اتضاف لتلات شغلانات كبار، والسيستم ما جابش إن هو شغول»).
+describe('classifyTechnicianCapacity — عضوية الطاقم لازم تتحسب زي قيادة الطلب بالظبط (ADR-0057)', () => {
+  jest.setTimeout(30_000);
+
+  let dataSource: DataSource;
+  const runId = Date.now().toString(36);
+  const ids = {
+    city: '', zone: '', category: '', service: '',
+    leader: '', leaderUser: '', member: '', memberUser: '',
+    customer: '', customerUser: '', address: '',
+  };
+  const orderIds: string[] = [];
+  const FULL_DAY_MINUTES = 360;
+
+  const q = (sql: string, params?: unknown[]) => dataSource.query(sql, params);
+
+  beforeAll(async () => {
+    dataSource = new DataSource({
+      type: 'postgres',
+      url: process.env.DATABASE_URL ?? 'postgres://baytak:baytak@localhost:5432/baytak',
+    });
+    await dataSource.initialize();
+
+    const [country] = await q(`SELECT id FROM countries WHERE iso_code = 'EG' LIMIT 1`);
+    if (!country) throw new Error('The fixture requires the seeded EG country');
+    const [city] = await q(`INSERT INTO cities (country_id, name_ar, name_en, slug, is_active) VALUES ($1,$2,$3,$4,true) RETURNING id`, [
+      country.id,
+      `مدينة عضوية ${runId}`,
+      `Membership City ${runId}`,
+      `member-city-${runId}`,
+    ]);
+    ids.city = city.id;
+    const [zone] = await q(`INSERT INTO service_zones (city_id, name_ar, name_en) VALUES ($1,$2,$3) RETURNING id`, [
+      city.id,
+      `نطاق عضوية ${runId}`,
+      `Membership Zone ${runId}`,
+    ]);
+    ids.zone = zone.id;
+    const [category] = await q(`INSERT INTO service_categories (name_ar, name_en, slug) VALUES ($1,$2,$3) RETURNING id`, [
+      `فئة عضوية ${runId}`,
+      `Membership Category ${runId}`,
+      `member-category-${runId}`,
+    ]);
+    ids.category = category.id;
+    const [service] = await q(
+      `INSERT INTO services (category_id, name_ar, slug, pricing_model, base_price_cents, estimated_duration_minutes)
+       VALUES ($1,$2,$3,'fixed',10000,60) RETURNING id`,
+      [category.id, `خدمة عضوية ${runId}`, `member-service-${runId}`],
+    );
+    ids.service = service.id;
+
+    const [leaderUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
+      `+203${runId}`.slice(0, 14),
+      `قائد عضوية ${runId}`,
+    ]);
+    ids.leaderUser = leaderUser.id;
+    const [leader] = await q(
+      `INSERT INTO technician_profiles (user_id, technician_code, verification_status, current_location)
+       VALUES ($1,$2,'approved', ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
+      [leaderUser.id, `MEMLD${runId}`.slice(0, 20)],
+    );
+    ids.leader = leader.id;
+
+    const [memberUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'technician') RETURNING id`, [
+      `+204${runId}`.slice(0, 14),
+      `مساعد عضوية ${runId}`,
+    ]);
+    ids.memberUser = memberUser.id;
+    const [member] = await q(
+      `INSERT INTO technician_profiles (user_id, technician_code, verification_status, technician_kind, current_location)
+       VALUES ($1,$2,'approved','assistant', ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
+      [memberUser.id, `MEMAS${runId}`.slice(0, 20)],
+    );
+    ids.member = member.id;
+
+    const [customerUser] = await q(`INSERT INTO users (phone_number, full_name, user_type) VALUES ($1,$2,'customer') RETURNING id`, [
+      `+205${runId}`.slice(0, 14),
+      `عميل عضوية ${runId}`,
+    ]);
+    ids.customerUser = customerUser.id;
+    const [customerProfile] = await q(`INSERT INTO customer_profiles (user_id) VALUES ($1) RETURNING id`, [customerUser.id]);
+    ids.customer = customerProfile.id;
+    const [address] = await q(
+      `INSERT INTO addresses (user_id, street_name, location) VALUES ($1,$2, ST_SetSRID(ST_MakePoint(31.25,30.05),4326)::geography) RETURNING id`,
+      [customerUser.id, `شارع عضوية ${runId}`],
+    );
+    ids.address = address.id;
+  });
+
+  afterAll(async () => {
+    if (!dataSource?.isInitialized) return;
+    try {
+      await q(`DELETE FROM order_team_members WHERE order_id = ANY($1::uuid[])`, [orderIds]);
+      await q(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [orderIds]);
+      await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [[ids.leader, ids.member]]);
+      await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
+      await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customer]);
+      await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [[ids.leaderUser, ids.memberUser, ids.customerUser]]);
+      await q(`DELETE FROM services WHERE id = $1`, [ids.service]);
+      await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);
+      await q(`DELETE FROM service_zones WHERE id = $1`, [ids.zone]);
+      await q(`DELETE FROM cities WHERE id = $1`, [ids.city]);
+    } finally {
+      await dataSource.destroy();
+    }
+  });
+
+  it('LIGHT قبل أي التزام — الأساس اللي هنقيس عليه', async () => {
+    const tier = await classifyTechnicianCapacity(dataSource, {
+      technicianId: ids.member,
+      scheduledAt: null,
+      excludeOrderId: null,
+      serviceDurationMinutes: 60,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(tier).toBe('LIGHT');
+  });
+
+  it('MEANINGFUL/HEAVY — عضو طاقم (مساعد) على طلب حد تاني نفس اليوم، بالظبط زي القائد', async () => {
+    // طلب طوله ساعة بس (مش شاغل يوم كامل) — عشان نتأكد الالتزام اتحسب أصلاً كـ"عضو"، مش قائد.
+    const [order] = await q(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'accepted',10000, now()) RETURNING id`,
+      [`MEMB-1-${runId}`.slice(0, 24), ids.customer, ids.leader, ids.service, ids.address, ids.zone],
+    );
+    orderIds.push(order.id as string);
+    // العضو (مساعد) بيتضاف كعضو طاقم — مش orders.technician_id، ده بالظبط شكل التزام المساعد
+    // الطبيعي في الإنتاج.
+    await q(`INSERT INTO order_team_members (order_id, technician_id, role_label, added_by_technician_id, member_type) VALUES ($1,$2,$3,$4,$5)`, [
+      order.id,
+      ids.member,
+      'مساعد',
+      ids.leader,
+      'assistant',
+    ]);
+
+    const tier = await classifyTechnicianCapacity(dataSource, {
+      technicianId: ids.member,
+      scheduledAt: null,
+      excludeOrderId: null,
+      serviceDurationMinutes: 60,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(['MEANINGFUL', 'HEAVY']).toContain(tier);
+
+    // نفس الالتزام بالظبط لازم يُحسب لو الشخص هو القائد بدل ما يكون عضو — إثبات إن قاعدة
+    // "التزام حقيقي" واحدة موحّدة، مش قاعدتين مختلفتين للدورين.
+    await q(`DELETE FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [order.id, ids.member]);
+    await q(`UPDATE orders SET technician_id = $1 WHERE id = $2`, [ids.member, order.id]);
+    const tierAsLeader = await classifyTechnicianCapacity(dataSource, {
+      technicianId: ids.member,
+      scheduledAt: null,
+      excludeOrderId: null,
+      serviceDurationMinutes: 60,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(tierAsLeader).toBe(tier);
+
+    // رجّع الحالة زي ما كانت — الاختبار ده بيسيب الطلب موجود لحد afterAll، وباقي الاختبارات
+    // في الملف بتفترض ids.member نضيف من أي التزام لسه ما بيتحققش صراحة.
+    await q(`UPDATE orders SET technician_id = $1 WHERE id = $2`, [ids.leader, order.id]);
+  });
+
+  it('عضو طاقم على طلب اتلغى/اتشال مايتحسبش خالص — مصدر الحقيقة هو الصف الحالي بس', async () => {
+    const [order] = await q(
+      `INSERT INTO orders (order_number, customer_id, technician_id, service_id, address_id, service_zone_id, order_status, total_amount_cents, scheduled_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'accepted',10000, now()) RETURNING id`,
+      [`MEMB-2-${runId}`.slice(0, 24), ids.customer, ids.leader, ids.service, ids.address, ids.zone],
+    );
+    orderIds.push(order.id as string);
+    await q(`INSERT INTO order_team_members (order_id, technician_id, role_label, added_by_technician_id, member_type) VALUES ($1,$2,$3,$4,$5)`, [
+      order.id,
+      ids.member,
+      'مساعد',
+      ids.leader,
+      'assistant',
+    ]);
+    // الأدمن/القائد أزال العضو ده من الطاقم — الصف بيتحذف فعليًا (order_team_members مفيهوش
+    // soft-delete)، فمفروض الالتزام يختفي معاه فورًا.
+    await q(`DELETE FROM order_team_members WHERE order_id = $1 AND technician_id = $2`, [order.id, ids.member]);
+
+    const tier = await classifyTechnicianCapacity(dataSource, {
+      technicianId: ids.member,
+      scheduledAt: null,
+      excludeOrderId: null,
+      serviceDurationMinutes: 60,
+      fullDayThresholdMinutes: FULL_DAY_MINUTES,
+    });
+    expect(tier).toBe('LIGHT');
+  });
+});
