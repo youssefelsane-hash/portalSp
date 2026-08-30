@@ -538,9 +538,16 @@ export class AdminCatalogService {
       pricing.pricingMode = ZonePricingMode.PERCENTAGE;
       pricing.modifierPercentage = String(dto.modifier_percentage);
       pricing.priceCents = null;
+      // منع تركيب معامل legacy مخفي فوق النسبة. estimate() كمان يتجاهله للصفوف القديمة، لكن
+      // تصفيره هنا يحافظ على وضوح البيانات لأي تقرير أو تكامل يقرأ الصف مباشرة.
+      pricing.surgeMultiplier = '1';
     }
     if (dto.inspection_fee_cents !== undefined) pricing.inspectionFeeCents = dto.inspection_fee_cents;
-    if (dto.surge_multiplier !== undefined) pricing.surgeMultiplier = String(dto.surge_multiplier);
+    // `surge_multiplier` legacy خاص بوضع السعر الثابت فقط. تجاهله في وضع النسبة يمنع عميل API
+    // قديم من إعادة تركيب معامل ثانٍ فوق النسبة بعد تصفيره أعلاه.
+    if (mode === ZonePricingMode.OVERRIDE && dto.surge_multiplier !== undefined) {
+      pricing.surgeMultiplier = String(dto.surge_multiplier);
+    }
     await this.zonePricing.save(pricing);
 
     await this.auditLog.record({

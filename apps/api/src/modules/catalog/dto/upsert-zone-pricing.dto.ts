@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsUUID, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsUUID, Max, Min } from 'class-validator';
 import { ZonePricingMode } from '../entities/service-zone-pricing.entity';
 
 export class UpsertZonePricingDto {
@@ -19,6 +19,8 @@ export class UpsertZonePricingDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(-100)
+  @Max(1000)
   modifier_percentage?: number;
 
   @IsOptional()

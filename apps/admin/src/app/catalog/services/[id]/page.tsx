@@ -988,7 +988,7 @@ export default function ServiceDetailPage() {
               ) : (
                 <>
                   <Label htmlFor="zp_modifier">النسبة المئوية (مثال: 15 لزيادة 15%, -10 لتخفيض 10%)</Label>
-                  <Input id="zp_modifier" name="modifier_percentage" type="number" step="0.01" required />
+                  <Input id="zp_modifier" name="modifier_percentage" type="number" min="-100" max="1000" step="0.01" required />
                 </>
               )}
               <Label htmlFor="zp_valid_from">تاريخ السريان (فاضي = فوري)</Label>

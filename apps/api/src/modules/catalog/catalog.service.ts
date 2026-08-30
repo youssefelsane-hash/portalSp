@@ -462,7 +462,10 @@ export class CatalogService {
             ? Math.round(service.basePriceCents * (1 + Number(override.modifierPercentage) / 100))
             : override.priceCents!;
         const effectiveBaseCents = Math.round(overrideUnitCents * quantityMultiplier);
-        const surge = Number(override.surgeMultiplier);
+        // وضع النسبة هو نفسه تعديل المنطقة؛ ضرب `surge_multiplier` القديم فوقه كان تعديلًا
+        // ثانيًا مخفيًا. مثال واقعي: +70% مع surge=0.60 كان يحوّل 150 إلى 153 فقط. في وضع
+        // percentage النسبة هي المصدر الوحيد، أما surge يظل متاحًا للـoverride القديم فقط.
+        const surge = override.pricingMode === ZonePricingMode.PERCENTAGE ? 1 : Number(override.surgeMultiplier);
         const estimatedTotalCents = Math.round(effectiveBaseCents * surge * levelMultiplier);
         return {
           base_price_cents: effectiveBaseCents,

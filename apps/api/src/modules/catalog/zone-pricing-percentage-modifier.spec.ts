@@ -67,8 +67,8 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
     );
     ids.percentageService = percentageService.id;
     await q(
-      `INSERT INTO service_zone_pricing (service_id, service_zone_id, pricing_mode, modifier_percentage)
-       VALUES ($1,$2,'percentage',15)`,
+      `INSERT INTO service_zone_pricing (service_id, service_zone_id, pricing_mode, modifier_percentage, surge_multiplier)
+       VALUES ($1,$2,'percentage',15,0.60)`,
       [ids.percentageService, ids.zone],
     );
 
@@ -116,5 +116,26 @@ describe('CatalogService.estimate() — تسعير المنطقة override/perce
   it('من غير zoneId خالص — السعر الأساسي العادي بلا أي تعديل (مفيش تسعير منطقة يتفحص أصلاً)', async () => {
     const estimate = await service.estimate(ids.percentageService);
     expect(estimate.base_price_cents).toBe(20000);
+  });
+
+  it.each([
+    [20, 18000],
+    [-20, 12000],
+    [70, 25500],
+    [130, 34500],
+  ])('percentage — إدخال %s يعني النسبة نفسها حتى لو الصف فيه surge قديم مخفي', async (modifier, expected) => {
+    await q(
+      `UPDATE services SET base_price_cents = 15000 WHERE id = $1`,
+      [ids.percentageService],
+    );
+    await q(
+      `UPDATE service_zone_pricing SET modifier_percentage = $2, surge_multiplier = 0.60
+       WHERE service_id = $1 AND pricing_mode = 'percentage'`,
+      [ids.percentageService, modifier],
+    );
+    const estimate = await service.estimate(ids.percentageService, ids.zone);
+    expect(estimate.base_price_cents).toBe(expected);
+    expect(estimate.estimated_total_cents).toBe(expected);
+    expect(estimate.surge_multiplier).toBe(1);
   });
 });
