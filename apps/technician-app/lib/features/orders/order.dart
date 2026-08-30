@@ -278,11 +278,19 @@ String technicianEarningLabel({
 }
 
 /// يفرّق بين مبلغ ما زال مطلوبًا، وكاش تم تحصيله بالفعل، وطلب لا يحتاج كاش أصلًا.
+///
+/// docs/08 §108-B — قاعدة صارمة جديدة: عضو الطاقم (مش القائد) بيوصله `cashToCollectCents=0`
+/// **دايمًا** (الباك-إند بيصفّرها له عمدًا، حتى لو فيه كاش حقيقي مطلوب من العميل هيحصّله
+/// القائد) — مش شغله يحصّل حاجة. من غير `isCrewShare` هنا كنا هنوقع في نفس الكذبة القديمة
+/// (docs/08 §64.ب) بس بشكل عكسي: "لا يوجد مبلغ كاش مطلوب من العميل" كانت هتبقى كدبة لعضو
+/// الطاقم (فيه فعلاً فلوس مطلوبة، بس مش هو اللي هيحصّلها). النص لعضو الطاقم بيتكلم عن **دوره
+/// هو** مش عن حالة الطلب المطلقة.
 String technicianCashStatusLabel({
   required int cashToCollectCents,
   required int cashCollectedCents,
   required bool hasOnlinePayment,
   required bool fullyPaidOnline,
+  required bool isCrewShare,
   required String Function(int) formatEgp,
 }) {
   if (cashToCollectCents > 0) {
@@ -293,5 +301,6 @@ String technicianCashStatusLabel({
   }
   if (fullyPaidOnline) return 'مش مطلوب كاش — الطلب مدفوع أونلاين بالكامل';
   if (hasOnlinePayment) return 'مش مطلوب كاش إضافي من العميل';
+  if (isCrewShare) return 'مفيش كاش عليك تحصّله من العميل — ده بيتحصّل عن طريق قائد الفريق';
   return 'لا يوجد مبلغ كاش مطلوب من العميل';
 }

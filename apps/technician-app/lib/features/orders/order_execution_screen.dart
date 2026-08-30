@@ -664,12 +664,12 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    // docs/08 §60.2 (طلب مالك صريح) — الفني بيشوف الفلوس اللي بتعدّي من إيده
-                    // وبس: الكاش اللي هيحصّله، ونصيبه هو. أي حاجة اتدفعت أونلاين بتبان كواقعة
-                    // من غير رقم، ومفيش تفصيل لتكوين السعر ولا نصيب الشركة — دي مش شغله.
-                    // الأرقام دي **مش بترجع من الـAPI أصلاً** (الفلترة في الباك-إند).
+                    // docs/08 §60.2 + §108-B (طلبات مالك صريحة) — الفني بيشوف الفلوس اللي بتعدّي
+                    // من إيده وبس: الكاش اللي هيحصّله (لو هو القائد/الوحيد)، ونصيبه هو. أي حاجة
+                    // اتدفعت أونلاين بتبان كواقعة من غير رقم، ومفيش تفصيل لتكوين السعر ولا نصيب
+                    // الشركة — دي مش شغله. `totalAmountCents` **مش بيترجع من الـAPI أصلاً** لأي
+                    // فني (مش حتى استثناء وقت الكاش الكامل زي زمان) — الفلترة في الباك-إند.
                     if (_order.totalAmountCents != null)
-                      // مفيش دفع أونلاين خالص، فالإجمالي = اللي هيحصّله بالظبط.
                       Text('إجمالي الطلب: ${_formatEgp(_order.totalAmountCents!)}'),
                     if (_order.hasOnlinePayment)
                       Row(
@@ -689,6 +689,7 @@ class _OrderExecutionScreenState extends State<OrderExecutionScreen> {
                         cashCollectedCents: _order.cashCollectedCents,
                         hasOnlinePayment: _order.hasOnlinePayment,
                         fullyPaidOnline: _order.fullyPaidOnline,
+                        isCrewShare: _order.isCrewShare,
                         formatEgp: _formatEgp,
                       ),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(

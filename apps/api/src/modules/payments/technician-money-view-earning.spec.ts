@@ -145,6 +145,31 @@ describe('صورة فلوس الفني — «نصيبك» (docs/08 §64.ب)', ()
     expect(leaderView.myEarningCents + memberView.myEarningCents).toBe(80000);
   });
 
+  // docs/08 §108-B — بلاغ مالك صريح، قاعدة صارمة: بس القائد (أو الفني الوحيد لو مفيش طاقم) يشوف
+  // المبلغ المطلوب تحصيله من العميل؛ أي عضو تاني بيشوف نصيبه بس، حتى لو فيه فلوس حقيقية مستنية
+  // تحصيل (عربون أونلاين + باقي كاش هنا). قبل الإصلاح ده، عضو الطاقم كان بيشوف نفس رقم القائد.
+  it('عضو الطاقم لا يرى المبلغ المطلوب تحصيله من العميل — القائد بس (§108-B)', async () => {
+    const participants: CrewParticipant[] = [
+      { technicianId: LEADER, participantRole: 'leader', technicianLevel: 'team_leader', shareWeight: 1.6 },
+      { technicianId: MEMBER, participantRole: 'team_member', technicianLevel: 'new', shareWeight: 1 },
+    ];
+    const svc = service(participants, {
+      totalAmountCents: 100000,
+      onlinePaidAmountCents: 15000, // عربون أونلاين
+      amountDueToTechnicianCents: 85000, // الباقي كاش، لسه ما اتحصّلش
+    });
+
+    const leaderView = await svc.getTechnicianMoneyView(order({ bookingMode: BookingMode.TEAM }));
+    const memberView = await svc.getTechnicianMoneyView(
+      order({ bookingMode: BookingMode.TEAM }),
+      undefined,
+      MEMBER,
+    );
+
+    expect(leaderView.cashToCollectCents).toBe(85000);
+    expect(memberView.cashToCollectCents).toBe(0);
+  });
+
   it('إيداع أونلاين + باقي كاش: بعد تحصيل الكاش يظل الطلب مختلطًا ولا يتحول إلى "أونلاين بالكامل"', async () => {
     const view = await service([], {
       totalAmountCents: 100000,
