@@ -641,6 +641,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
             رسوم المعاينة {formatEgp(service.inspection_fee_cents)} — السعر النهائي بعد ما الفني يشوف الشغل
           </p>
         )}
+        {technicianChoiceMode === 'auto' && service.pricing_model !== 'inspection_then_quote' && (
+          <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-6 text-foreground">
+            <p className="font-medium text-primary">السعر الحالي قبل اختيار الفني</p>
+            <p className="text-muted">
+              قد يزيد الإجمالي حسب مستوى الفني اللي ترشحه المطابقة، وساعتها فرق المستوى هيظهر لك كبند مستقل وواضح.
+            </p>
+          </div>
+        )}
       </section>
 
       {error && <p className="mt-4 text-sm text-danger">{error}</p>}
