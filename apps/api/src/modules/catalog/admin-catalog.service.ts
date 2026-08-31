@@ -286,6 +286,20 @@ export class AdminCatalogService {
     return service;
   }
 
+  private assertQuantityConfiguration(config: {
+    min: number | null;
+    max: number | null;
+    step: number | null;
+  }): void {
+    if (config.min !== null && config.max !== null && config.max < config.min) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'أكبر كمية لازم تكون أكبر من أو تساوي أقل كمية',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   async createService(adminUserId: string, dto: CreateServiceDto, meta?: AuditActorMeta): Promise<Service> {
     await this.findCategoryOrThrow(dto.category_id);
     const existing = await this.services.findOne({ where: { slug: dto.slug } });
@@ -302,6 +316,11 @@ export class AdminCatalogService {
       requiresStartTimeOnly: dto.requires_start_time_only ?? false,
       requiresHoursOnly: dto.requires_hours_only ?? false,
       requiresStartAndEnd: dto.requires_start_and_end ?? false,
+    });
+    this.assertQuantityConfiguration({
+      min: dto.quantity_min ?? null,
+      max: dto.quantity_max ?? null,
+      step: dto.quantity_step ?? null,
     });
 
     const service = this.services.create({
@@ -320,6 +339,10 @@ export class AdminCatalogService {
       minPriceCents: dto.min_price_cents ?? null,
       maxPriceCents: dto.max_price_cents ?? null,
       unitNameAr: dto.unit_name_ar ?? null,
+      quantityMin: dto.quantity_min == null ? null : String(dto.quantity_min),
+      quantityMax: dto.quantity_max == null ? null : String(dto.quantity_max),
+      quantityStep: dto.quantity_step == null ? null : String(dto.quantity_step),
+      quantityPrecision: dto.quantity_precision ?? 2,
       estimatedDurationMinutes: dto.estimated_duration_minutes ?? null,
       warrantyDays: dto.warranty_days ?? 0,
       requiresPhotos: dto.requires_photos ?? false,
@@ -386,6 +409,10 @@ export class AdminCatalogService {
     if (dto.min_price_cents !== undefined) service.minPriceCents = dto.min_price_cents;
     if (dto.max_price_cents !== undefined) service.maxPriceCents = dto.max_price_cents;
     if (dto.unit_name_ar !== undefined) service.unitNameAr = dto.unit_name_ar;
+    if (dto.quantity_min !== undefined) service.quantityMin = dto.quantity_min === null ? null : String(dto.quantity_min);
+    if (dto.quantity_max !== undefined) service.quantityMax = dto.quantity_max === null ? null : String(dto.quantity_max);
+    if (dto.quantity_step !== undefined) service.quantityStep = dto.quantity_step === null ? null : String(dto.quantity_step);
+    if (dto.quantity_precision !== undefined) service.quantityPrecision = dto.quantity_precision;
     if (dto.estimated_duration_minutes !== undefined) service.estimatedDurationMinutes = dto.estimated_duration_minutes;
     if (dto.warranty_days !== undefined) service.warrantyDays = dto.warranty_days;
     if (dto.requires_photos !== undefined) service.requiresPhotos = dto.requires_photos;
@@ -418,6 +445,11 @@ export class AdminCatalogService {
       requiresStartTimeOnly: service.requiresStartTimeOnly,
       requiresHoursOnly: service.requiresHoursOnly,
       requiresStartAndEnd: service.requiresStartAndEnd,
+    });
+    this.assertQuantityConfiguration({
+      min: service.quantityMin === null ? null : Number(service.quantityMin),
+      max: service.quantityMax === null ? null : Number(service.quantityMax),
+      step: service.quantityStep === null ? null : Number(service.quantityStep),
     });
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;

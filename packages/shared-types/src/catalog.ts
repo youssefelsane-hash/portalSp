@@ -2,7 +2,7 @@
 import type { TechnicianLevel, TechnicianPricingTier } from './technicians';
 
 // 'formula' — محرك التسعير الديناميكي (docs/08 §1، ADR-0001)، راجع pricing.ts لباقي أنواعه.
-export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'inspection_then_quote' | 'formula';
+export type PricingModel = 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote' | 'formula';
 
 export interface AdminServiceCategoryResponseDto {
   id: string;
@@ -55,6 +55,10 @@ export interface AdminServiceResponseDto {
   min_price_cents: number | null;
   max_price_cents: number | null;
   unit_name_ar: string | null;
+  quantity_min: number | null;
+  quantity_max: number | null;
+  quantity_step: number | null;
+  quantity_precision: number;
   estimated_duration_minutes: number | null;
   warranty_days: number;
   requires_photos: boolean;
@@ -100,6 +104,10 @@ export interface CreateServiceBody {
   min_price_cents?: number;
   max_price_cents?: number;
   unit_name_ar?: string;
+  quantity_min?: number | null;
+  quantity_max?: number | null;
+  quantity_step?: number | null;
+  quantity_precision?: number;
   estimated_duration_minutes?: number;
   warranty_days?: number;
   requires_photos?: boolean;

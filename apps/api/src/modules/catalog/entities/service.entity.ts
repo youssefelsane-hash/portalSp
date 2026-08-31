@@ -86,6 +86,18 @@ export class Service {
   @Column({ name: 'unit_name_ar', type: 'varchar', length: 40, nullable: true })
   unitNameAr: string | null;
 
+  @Column({ name: 'quantity_min', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  quantityMin: string | null;
+
+  @Column({ name: 'quantity_max', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  quantityMax: string | null;
+
+  @Column({ name: 'quantity_step', type: 'numeric', precision: 10, scale: 2, nullable: true })
+  quantityStep: string | null;
+
+  @Column({ name: 'quantity_precision', type: 'smallint', default: 2 })
+  quantityPrecision: number;
+
   @Column({
     name: 'estimated_duration_minutes',
     type: 'smallint',

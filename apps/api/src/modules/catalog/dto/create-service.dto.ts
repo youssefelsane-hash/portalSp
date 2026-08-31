@@ -84,6 +84,27 @@ export class CreateServiceDto {
   unit_name_ar?: string;
 
   @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity_min?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity_max?: number | null;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  quantity_step?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2)
+  quantity_precision?: number;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   estimated_duration_minutes?: number;

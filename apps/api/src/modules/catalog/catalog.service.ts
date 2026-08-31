@@ -381,6 +381,10 @@ export class CatalogService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    if (pricingContext.quantity !== null &&
+        (service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY)) {
+      this.assertQuantityConstraints(service, pricingContext.quantity);
+    }
 
     // docs/08 §108-G — بَقّة حقيقية اتكشفت: تسعير المناطق (service_zone_pricing) كان بيتحقق
     // بس **جوّه** فرع الأسعار الثابتة/بالساعة/بالوحدة، بعد return مبكر لخدمات formula (السطر
@@ -479,6 +483,39 @@ export class CatalogService {
       required_assistants: result.requiredAssistants,
       suitable_for_emergency: result.suitableForEmergency,
     };
+  }
+
+  private assertQuantityConstraints(service: Service, quantity: number): void {
+    const min = service.quantityMin === null ? null : Number(service.quantityMin);
+    const max = service.quantityMax === null ? null : Number(service.quantityMax);
+    const step = service.quantityStep === null ? null : Number(service.quantityStep);
+    if (min !== null && quantity < min) {
+      throw new ApiException(ErrorCode.VAL_001, `أقل كمية للخدمة هي ${min}`, HttpStatus.BAD_REQUEST);
+    }
+    if (max !== null && quantity > max) {
+      throw new ApiException(ErrorCode.VAL_001, `أكبر كمية للخدمة هي ${max}`, HttpStatus.BAD_REQUEST);
+    }
+
+    const precisionScale = 10 ** service.quantityPrecision;
+    if (Math.abs(quantity * precisionScale - Math.round(quantity * precisionScale)) > 1e-7) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        service.quantityPrecision === 0
+          ? 'الكمية لازم تكون رقمًا صحيحًا بدون كسور'
+          : `الكمية تسمح بحد أقصى ${service.quantityPrecision} رقم بعد العلامة`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (step !== null) {
+      const offset = (quantity - (min ?? 0)) / step;
+      if (Math.abs(offset - Math.round(offset)) > 1e-7) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `الكمية لازم تزيد بخطوات ${step}${min === null ? '' : ` بداية من ${min}`}`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
   }
 
   // محرك الإنتاجية (docs/06 §3.3-§3.6، docs/07 الجزء ج) — المدة = المساحة/الوحدات المطلوبة ÷
