@@ -7,6 +7,7 @@ import 'core/compromised_device_screen.dart';
 import 'core/deep_link_router.dart';
 import 'core/device_security.dart';
 import 'design/app_theme.dart';
+import 'design/desktop_app_frame.dart';
 import 'features/auth/biometric_unlock_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/onboarding/location_capture.dart';
@@ -43,12 +44,16 @@ class BaytakTechnicianApp extends StatelessWidget {
           final auth = context.watch<AuthRepository>();
           return Stack(
             children: [
-              child ?? const SizedBox.shrink(),
+              DesktopAppFrame(child: child ?? const SizedBox.shrink()),
               if (auth.isAuthenticated && !auth.biometricUnlockPending)
                 // الغلاف Host مش تفصيلة — هو اللي بيوفّر `Overlay` للويدجت دي، لأن مكانها هنا
                 // (جنب `child` جوّه `MaterialApp.builder`) **بره الـNavigator** فمفيش Overlay
                 // فوقها. راجع FloatingNotificationAlertHost وdocs/08 §59.
-                const PositionedDirectional(end: 16, bottom: 88, child: FloatingNotificationAlertHost()),
+                const PositionedDirectional(
+                  end: 16,
+                  bottom: 88,
+                  child: FloatingNotificationAlertHost(),
+                ),
             ],
           );
         },
@@ -69,11 +74,15 @@ class _DeviceSecurityGate extends StatelessWidget {
       future: DeviceSecurityService().check(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         final result = snapshot.data!;
         if (result.isCompromised) {
-          return CompromisedDeviceScreen(reasonAr: result.reasonAr ?? 'الجهاز ده مش آمن.');
+          return CompromisedDeviceScreen(
+            reasonAr: result.reasonAr ?? 'الجهاز ده مش آمن.',
+          );
         }
         return const _AuthGate();
       },
@@ -126,7 +135,8 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _syncPresence();
-    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       _disconnectPresence();
     }
   }
@@ -149,7 +159,9 @@ class _AuthGateState extends State<_AuthGate> with WidgetsBindingObserver {
   void _attemptLocationCapture(AuthRepository auth) {
     if (_capturingLocation) return;
     _capturingLocation = true;
-    captureLocationSilently(OnboardingRepository(auth)).whenComplete(() => _capturingLocation = false);
+    captureLocationSilently(
+      OnboardingRepository(auth),
+    ).whenComplete(() => _capturingLocation = false);
   }
 
   void _disconnectPresence() {
@@ -209,8 +221,11 @@ class _VerificationGateState extends State<_VerificationGate> {
 
   Future<void> _check() async {
     try {
-      final me = await OnboardingRepository(context.read<AuthRepository>()).fetchMe();
-      if (mounted) setState(() => _needsOnboarding = me.verificationStatus != 'approved');
+      final me = await OnboardingRepository(
+        context.read<AuthRepository>(),
+      ).fetchMe();
+      if (mounted)
+        setState(() => _needsOnboarding = me.verificationStatus != 'approved');
     } on ApiException {
       // فشل آمن — راجع تعليق الكلاس فوق.
     } finally {
@@ -223,6 +238,8 @@ class _VerificationGateState extends State<_VerificationGate> {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return _needsOnboarding ? const OnboardingScreen() : const AvailableOrdersScreen();
+    return _needsOnboarding
+        ? const OnboardingScreen()
+        : const AvailableOrdersScreen();
   }
 }

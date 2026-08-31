@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
@@ -27,18 +28,29 @@ class BiometricAuthService {
   static const _secureStorage = FlutterSecureStorage();
   static final LocalAuthentication _localAuth = LocalAuthentication();
 
+  static bool get _supportsAppBiometrics =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
   static Future<bool> isEnabled() async {
+    if (!_supportsAppBiometrics) return false;
     final value = await _secureStorage.read(key: _enabledKey);
     return value == 'true';
   }
 
   static Future<void> setEnabled(bool enabled) async {
-    await _secureStorage.write(key: _enabledKey, value: enabled ? 'true' : 'false');
+    if (!_supportsAppBiometrics) return;
+    await _secureStorage.write(
+      key: _enabledKey,
+      value: enabled ? 'true' : 'false',
+    );
   }
 
   /// الجهاز نفسه فيه هاردوير بصمة/Face ID **ومسجّل عليه بصمة/وجه بالفعل** — لو رجعت false،
   /// مينفعش نعرض خيار "فعّل الدخول بالبصمة" أصلاً (زر معطّل بلا معنى).
   static Future<bool> isAvailable() async {
+    if (!_supportsAppBiometrics) return false;
     try {
       final supported = await _localAuth.isDeviceSupported();
       if (!supported) return false;
@@ -54,10 +66,14 @@ class BiometricAuthService {
   /// بيرجّع true بس لو المستخدم أثبت هويته فعليًا بالبصمة/Face ID (مش fallback لباسورد الجهاز
   /// العادي — `biometricOnly: true` — عشان "بصمة" في المتطلب الأصلي تفضل معناها بصمة/وجه حقيقي).
   static Future<bool> authenticate({required String reason}) async {
+    if (!_supportsAppBiometrics) return false;
     try {
       return await _localAuth.authenticate(
         localizedReason: reason,
-        options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
       );
     } on PlatformException {
       // أي فشل تقني (مفيش هاردوير، البصمة اتلغت من إعدادات الجهاز بعد التفعيل، قفل مؤقت بعد

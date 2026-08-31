@@ -14,6 +14,7 @@
 | `data-breach.md` | تسرب بيانات | ⬜ لسه هيتكتب |
 | `deploy-failure.md` | فشل نشر / rollback | ⬜ لسه هيتكتب |
 | `earnings-v2-cutover.md` | تفعيل/إيقاف محرك المستحقات V2 ومطابقة الأموال | ✅ جاهز |
+| `flutter-desktop-local.md` | تشغيل تطبيقَي العميل والفني كبرامج macOS محلية | ✅ جاهز |
 
 ## شكل كل runbook (ثابت)
 

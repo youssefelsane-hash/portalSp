@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:safe_device/safe_device.dart';
 
 class DeviceSecurityResult {
@@ -12,19 +13,28 @@ class DeviceSecurityResult {
 // طلب — SafeDevice بيعمل native calls مش رخيصة تتكرر باستمرار.
 class DeviceSecurityService {
   Future<DeviceSecurityResult> check() async {
+    // safe_device is a mobile root/jailbreak detector. A native desktop build is neither an
+    // emulator nor a rooted phone, so it must not be rejected while testing on a laptop.
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      return const DeviceSecurityResult(isCompromised: false);
+    }
     try {
       final isRealDevice = await SafeDevice.isRealDevice;
       if (!isRealDevice) {
         return const DeviceSecurityResult(
           isCompromised: true,
-          reasonAr: 'التطبيق ده بيتعامل مع بيانات مالية حساسة، ومش بيشتغل على أجهزة محاكاة (إيموليتور).',
+          reasonAr:
+              'التطبيق ده بيتعامل مع بيانات مالية حساسة، ومش بيشتغل على أجهزة محاكاة (إيموليتور).',
         );
       }
       final isJailBroken = await SafeDevice.isJailBroken;
       if (isJailBroken) {
         return const DeviceSecurityResult(
           isCompromised: true,
-          reasonAr: 'التطبيق ده بيتعامل مع بيانات مالية حساسة، ومش بيشتغل على أجهزة معمول لها Root أو Jailbreak.',
+          reasonAr:
+              'التطبيق ده بيتعامل مع بيانات مالية حساسة، ومش بيشتغل على أجهزة معمول لها Root أو Jailbreak.',
         );
       }
       return const DeviceSecurityResult(isCompromised: false);
