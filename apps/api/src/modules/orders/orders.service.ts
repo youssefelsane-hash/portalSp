@@ -543,7 +543,12 @@ export class OrdersService {
     //
     // **السلوت المحجوز بيلغي الاستعجال** حتى لو في نفس اليوم: فني بعينه التزم بوقت محدد، وده
     // تعيين مؤكّد مش بث طوارئ. تحويله لطوارئ كان هيلغي التزامه ويبثّه لناس تانية.
-    const urgent = !scheduleSlot && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
+    // A recurring occurrence was commercially scheduled when the customer created the
+    // plan. Materialising it on the visit day must not turn it into a new same-day
+    // emergency or add an emergency fee merely because a worker ran late.
+    const urgent = !recurringIdentity
+      && !scheduleSlot
+      && isSameDayUrgent({ scheduledAt: resolvedScheduledAtIso ? new Date(resolvedScheduledAtIso) : null });
     if (urgent && !canAcceptSameDay(service)) {
       // الأدمن قافل نفس اليوم على الخدمة دي (`allows_emergency = false`). الرفض أوضح من تسجيل
       // الطلب عادي: العميل اختار النهارده وهو متوقّع حد يجي النهارده (ADR-0048 §3).

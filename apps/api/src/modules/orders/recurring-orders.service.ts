@@ -28,6 +28,7 @@ import { OrdersService } from './orders.service';
 const SWEEP_INTERVAL_MS = 60_000;
 const SWEEP_BATCH_SIZE = 25;
 const CLAIM_LEASE_MS = 5 * 60_000;
+const MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK = 96;
 
 // docs/08 §19 بند 20 — عدد محاولات إعادة توليد نفس الموعد (كل محاولة = دورة sweep، فحوالي 3
 // دقايق إجمالاً) قبل ما نستسلم ونعتبره "dead letter" — كافي لفشل مؤقت (DB/شبكة) يتعافى لوحده،
@@ -343,11 +344,32 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async materializeDueOccurrences(limit: number, templateIds?: string[]): Promise<void> {
+    const [{ lead_hours: rawLeadHours } = { lead_hours: MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK }] =
+      await this.templates.manager.query<{ lead_hours: number }[]>(
+        `SELECT COALESCE(
+           (SELECT CASE
+              WHEN jsonb_typeof(value) = 'number' THEN (value #>> '{}')::numeric
+              WHEN jsonb_typeof(value) = 'string'
+                AND (value #>> '{}') ~ '^[0-9]+([.][0-9]+)?$'
+                THEN (value #>> '{}')::numeric
+              ELSE NULL
+            END
+            FROM settings
+            WHERE key = 'recurring.materialization_lead_time_hours'),
+           $1::numeric
+         )::float AS lead_hours`,
+        [MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK],
+      );
+    const parsedLeadHours = Number(rawLeadHours);
+    const leadHours = Number.isFinite(parsedLeadHours)
+      ? Math.max(0, Math.min(24 * 365, parsedLeadHours))
+      : MATERIALIZATION_LEAD_TIME_HOURS_FALLBACK;
     await this.templates.manager.query(
       `WITH due AS (
          SELECT id, next_run_at
          FROM recurring_order_templates
-         WHERE is_active = true AND deleted_at IS NULL AND next_run_at <= now()
+         WHERE is_active = true AND deleted_at IS NULL
+           AND next_run_at <= now() + ($3::double precision * interval '1 hour')
            AND ($2::uuid[] IS NULL OR id = ANY($2))
          ORDER BY next_run_at, id
          LIMIT $1
@@ -356,7 +378,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
        INSERT INTO recurring_order_occurrences (template_id, scheduled_for)
        SELECT id, next_run_at FROM due
        ON CONFLICT (template_id, scheduled_for) DO NOTHING`,
-      [limit, templateIds ?? null],
+      [limit, templateIds ?? null, leadHours],
     );
   }
 
@@ -480,6 +502,9 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requested_technician_id: template.requestedTechnicianId ?? undefined,
       requested_technician_company_id: template.requestedTechnicianCompanyId ?? undefined,
       problem_description: template.problemDescription ?? undefined,
+      // occurrence.scheduledFor هو الموعد التجاري الحقيقي، مش metadata فقط. بدونه كان الطلب
+      // المتكرر يتحول إلى ASAP ويأخذ رسوم/مطابقة نفس اليوم بالخطأ.
+      scheduled_at: occurrence.scheduledFor.toISOString(),
       // مدخلات التسعير/التوقيت المحفوظة مع القالب (migration 0176) — **مدخلات مش سعر**: القيمة
       // الفعلية بيتحسبها محرك التسعير الحي جوّه OrdersService.create() وقت التوليد بالظبط، فتغيير
       // أسعار/قواعد الخدمة بيأثر على الطلبات الجديدة بس، والطلبات المتولّدة فعلاً بتحتفظ بـsnapshot
