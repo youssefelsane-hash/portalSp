@@ -236,6 +236,20 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
     const stillOne = await q(`SELECT * FROM technician_work_opportunities WHERE order_id = $1`, [orderId]);
     expect(stillOne).toHaveLength(1);
 
+    // بعد انتهاء النافذة الحصرية، العرض الأول يظل offered وصالحًا، لكن النظام يوسّع الاختيارات
+    // لفني ثانٍ بدل ما يوقف الطلب للأبد أو يعيّن الثاني بالقوة.
+    await q(`UPDATE technician_work_opportunities SET offered_at = now() - interval '3 hours' WHERE id = $1`, [opportunities[0].id]);
+    await matchingService.autoConfirmScheduledOrder(orderId);
+    const expanded = await q(
+      `SELECT technician_id, status FROM technician_work_opportunities WHERE order_id = $1 ORDER BY offered_at`,
+      [orderId],
+    ) as Array<{ technician_id: string; status: string }>;
+    expect(expanded).toHaveLength(2);
+    expect(expanded.map((row) => row.technician_id)).toEqual(
+      expect.arrayContaining([ids.meaningfulTechProfile, ids.lightTechProfile]),
+    );
+    expect(expanded.every((row) => row.status === 'offered')).toBe(true);
+
     // قبول الفرصة — الطلب يتأكد فعليًا، والفرصة تتحول accepted.
     const accepted = await matchingService.acceptWorkOpportunity(ids.meaningfulTechUser, opportunities[0].id);
     expect(accepted.orderStatus).toBe(OrderStatus.ACCEPTED);
@@ -243,6 +257,11 @@ describe('MatchingService — طلبات شغل إضافي اختيارية (doc
 
     const [decided] = await q(`SELECT status FROM technician_work_opportunities WHERE id = $1`, [opportunities[0].id]);
     expect(decided.status).toBe('accepted');
+    const [parallel] = await q(
+      `SELECT status FROM technician_work_opportunities WHERE order_id = $1 AND technician_id = $2`,
+      [orderId, ids.lightTechProfile],
+    );
+    expect(parallel.status).toBe('closed');
   });
 
   // بَقّة حقيقية اتلقطت (docs/08 §36.1، بلاغ مالك 2026-08-20): إنشاء صف technician_work_opportunities

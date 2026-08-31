@@ -85,11 +85,34 @@ export class TechnicianWorkOpportunitiesService {
     return { ...race, created: false };
   }
 
-  /** هل فيه عرض `offered` حي لأي فني على الطلب ده؟ — نفس فكرة `liveAssignments` في dispatchNextRound(). */
-  async hasLiveOfferForOrder(orderId: string): Promise<boolean> {
-    const rows = await this.dataSource.query<{ exists: boolean }[]>(
+  /**
+   * هل العرض الأول ما زال داخل نافذته الحصرية؟ العرض الأقدم يظل صالحًا للفني ولا يُغلق، لكن بعد
+   * النافذة لا يمنع النظام من توسيع الاختيارات لفني آخر.
+   */
+  async hasExclusiveOfferForOrder(orderId: string, exclusiveSeconds: number, manager?: EntityManager): Promise<boolean> {
+    const executor = manager ?? this.dataSource;
+    const rows = await executor.query<{ exists: boolean }[]>(
       `SELECT EXISTS (
-         SELECT 1 FROM technician_work_opportunities WHERE order_id = $1 AND status = 'offered' AND deleted_at IS NULL
+         SELECT 1
+         FROM technician_work_opportunities
+         WHERE order_id = $1
+           AND status = 'offered'
+           AND context = 'assignment'
+           AND deleted_at IS NULL
+           AND offered_at > now() - make_interval(secs => $2::double precision)
+       ) AS exists`,
+      [orderId, Math.max(0, Math.floor(exclusiveSeconds))],
+    );
+    return rows[0].exists;
+  }
+
+  async hasOpenOfferForOrder(orderId: string, manager?: EntityManager): Promise<boolean> {
+    const executor = manager ?? this.dataSource;
+    const rows = await executor.query<{ exists: boolean }[]>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM technician_work_opportunities
+         WHERE order_id = $1 AND status = 'offered' AND context = 'assignment' AND deleted_at IS NULL
        ) AS exists`,
       [orderId],
     );

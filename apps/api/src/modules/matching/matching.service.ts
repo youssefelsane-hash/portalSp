@@ -95,6 +95,7 @@ const RELIABILITY_MIN_RATINGS_COUNT_FALLBACK = 3;
 // (10 نقاط)، فالشركة لا تتخطى الجودة/الحمل؛ تكسر التقارب المنطقي لما طاقمها قادر ينفذ الطلب.
 const COMPANY_LARGE_JOB_MIN_CREW_FALLBACK = 4;
 const COMPANY_LARGE_JOB_BOOST_FALLBACK = 3;
+const WORK_OPPORTUNITY_EXCLUSIVE_SECONDS_FALLBACK = 7_200;
 
 export interface EligibleTechnicianRow {
   technician_id: string;
@@ -413,6 +414,12 @@ export class MatchingService {
         AND tp.current_location IS NOT NULL
         AND tp.deleted_at IS NULL
         AND tp.id NOT IN (SELECT technician_id FROM order_assignments WHERE order_id = $4)
+        -- العرض الأول يظل صالحًا بعد انتهاء حصريته، لكن التوسّع لازم يختار شخصًا جديدًا فعلًا.
+        AND tp.id NOT IN (
+          SELECT technician_id
+          FROM technician_work_opportunities
+          WHERE order_id = $4 AND context = 'assignment' AND deleted_at IS NULL
+        )
         AND ($7::uuid IS NULL OR tp.id = $7)
         AND ($9::uuid IS NULL OR tp.company_id = $9)
         -- بَقّة حقيقية اتلقطت وقت تحقيق §36.1 (docs/08، تعميق تسجيل موبايل حقيقي): الاستعلام ده
@@ -1015,12 +1022,10 @@ export class MatchingService {
   }
 
   async autoConfirmScheduledOrder(orderId: string): Promise<{ dispatched: number }> {
-    // فرصة اختيارية حية موجودة بالفعل لنفس الطلب — منستنى قرار الفني، مش نعرض تاني/نأكّد تلقائي
-    // (نفس فكرة liveAssignments في dispatchNextRound). لو الفني يرفض، الـcaller (endpoint الرفض)
-    // بينادي dispatchOrAutoConfirm تاني بنفسه، فمفيش داعي sweep يعيد المحاولة هنا كل دقيقة.
-    if (await this.workOpportunities.hasLiveOfferForOrder(orderId)) {
-      return { dispatched: 0 };
-    }
+    const opportunityExclusiveSeconds = Math.max(0, Math.floor(await this.settingsService.getNumber(
+      'matching.work_opportunity_exclusive_seconds',
+      WORK_OPPORTUNITY_EXCLUSIVE_SECONDS_FALLBACK,
+    )));
 
     const result = await this.dataSource.transaction(async (manager) => {
       const order = await manager
@@ -1031,6 +1036,12 @@ export class MatchingService {
       if (!order || order.orderStatus !== OrderStatus.SEARCHING_TECHNICIAN || !order.serviceZoneId) {
         return { kind: 'noop' as const };
       }
+
+      // الفحص تحت قفل الطلب يمنع نداءين متزامنين من إنشاء عرضين خلال النافذة الحصرية.
+      if (await this.workOpportunities.hasExclusiveOfferForOrder(orderId, opportunityExclusiveSeconds, manager)) {
+        return { kind: 'noop' as const };
+      }
+      const isOpportunityExpansion = await this.workOpportunities.hasOpenOfferForOrder(orderId, manager);
 
       const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
       const candidateBatchSize = await this.settingsService.getNumber('matching.batch_size', BATCH_SIZE_FALLBACK);
@@ -1086,6 +1097,17 @@ export class MatchingService {
       }
 
       if (lightPick) {
+        // بعد انتهاء حصرية العرض الأول لا نعيّن فنيًا ثانيًا بالقوة ونغلق العرض الأصلي. بدلًا من
+        // ذلك نوسّع الاختيارات بعرض متوازٍ؛ أول فني يقبل يحسم الطلب ذريًا ويغلق باقي العروض.
+        if (isOpportunityExpansion) {
+          const opportunity = await this.workOpportunities.offerIfNotExists(
+            manager,
+            order.id,
+            lightPick.technicianId,
+            'LIGHT',
+          );
+          return { kind: 'offered' as const, order, technicianId: lightPick.technicianId, opportunity };
+        }
         const technicianId = lightPick.technicianId;
         // دفاع عمق ضد سباق نادر (ADR-0017 بند 5 — نفس نمط accept() الموجود بالحرف): قفل صف الفني
         // نفسه وإعادة فحص الأهلية تحت القفل مباشرة قبل الكتابة.

@@ -420,6 +420,9 @@ promo_code_id               UUID          FK NULL
 
 -- الأوقات (تسلسل دورة الحياة)
 placed_at                   TIMESTAMPTZ   NULL
+next_matching_attempt_at    TIMESTAMPTZ   NULL                -- الدور التالي في recovery العادل
+last_matching_attempt_at    TIMESTAMPTZ   NULL
+matching_attempt_count      INTEGER       DEFAULT 0 CHECK >= 0 -- backoff متدرج، يُصفّر عند دخول البحث
 assigned_at                 TIMESTAMPTZ   NULL
 accepted_at                 TIMESTAMPTZ   NULL
 technician_departed_at      TIMESTAMPTZ   NULL

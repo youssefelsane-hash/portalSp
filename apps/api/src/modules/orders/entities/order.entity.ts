@@ -293,6 +293,15 @@ export class Order {
   @Column({ name: 'placed_at', type: 'timestamptz', nullable: true })
   placedAt: Date | null;
 
+  @Column({ name: 'next_matching_attempt_at', type: 'timestamptz', nullable: true })
+  nextMatchingAttemptAt: Date | null;
+
+  @Column({ name: 'last_matching_attempt_at', type: 'timestamptz', nullable: true })
+  lastMatchingAttemptAt: Date | null;
+
+  @Column({ name: 'matching_attempt_count', type: 'integer', default: 0 })
+  matchingAttemptCount: number;
+
   @Column({ name: 'assigned_at', type: 'timestamptz', nullable: true })
   assignedAt: Date | null;
 
