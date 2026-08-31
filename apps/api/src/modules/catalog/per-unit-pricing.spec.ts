@@ -6,6 +6,7 @@ import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
 import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { ServiceZonePricing } from './entities/service-zone-pricing.entity';
 
@@ -65,7 +66,7 @@ describe('CatalogService.estimate() - per-unit quantity', () => {
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       {} as never,
-      {} as never,
+      new PricingEngineService({} as never, {} as never, {} as never),
       dataSource.getRepository(ServicePricingTierPricing),
     );
   });

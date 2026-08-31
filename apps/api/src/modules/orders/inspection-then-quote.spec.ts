@@ -27,6 +27,7 @@ import { CustomerProfile } from '../customers/entities/customer-profile.entity';
 import { LoyaltyService } from '../promotions/loyalty.service';
 import { LoyaltyTransaction } from '../promotions/entities/loyalty-transaction.entity';
 import { SettingsService } from '../settings/settings.service';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
@@ -197,7 +198,7 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       settingsService,
-      {} as never,
+      new PricingEngineService({} as never, {} as never, {} as never),
       {} as never,
     );
     const techniciansService = new TechniciansService(

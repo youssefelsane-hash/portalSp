@@ -907,7 +907,10 @@ export class OrdersService {
         assistantDailyWageCentsSnapshot: originalOrder ? null : (durationEstimate?.assistant_daily_wage_cents ?? null),
         // محرك الإنتاجية الذاتي التعلّم (docs/06 §3.9، migration 0077) — راجع تعليق العمود.
         requestedUnits: durationEstimate ? String(dto.requested_units) : null,
-        pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,
+        pricingQuantity:
+          service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
+            ? String(dto.pricing_quantity)
+            : null,
         idempotencyKey: idempotencyKey ?? null,
       });
       await manager.save(order);
@@ -1548,11 +1551,12 @@ export class OrdersService {
   }
 
   private assertPricingQuantity(pricingModel: PricingModel, quantity?: number): void {
-    if (pricingModel === PricingModel.PER_UNIT && quantity == null) {
-      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    const quantityBased = pricingModel === PricingModel.PER_UNIT || pricingModel === PricingModel.MONTHLY;
+    if (quantityBased && quantity == null) {
+      throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد عدد الوحدات المطلوبة لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
-    if (pricingModel !== PricingModel.PER_UNIT && quantity != null) {
-      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
+    if (!quantityBased && quantity != null) {
+      throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدات', HttpStatus.BAD_REQUEST);
     }
   }
 

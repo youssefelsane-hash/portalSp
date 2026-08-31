@@ -163,10 +163,10 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'وضع الحجز ده مش متاح لهذه الخدمة', HttpStatus.BAD_REQUEST);
     }
 
-    if (service.pricingModel === PricingModel.PER_UNIT && dto.pricing_quantity == null) {
+    if ((service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY) && dto.pricing_quantity == null) {
       throw new ApiException(ErrorCode.VAL_001, 'لازم تحدد الكمية المطلوبة لخدمة محسوبة بالوحدة', HttpStatus.BAD_REQUEST);
     }
-    if (service.pricingModel !== PricingModel.PER_UNIT && dto.pricing_quantity != null) {
+    if (service.pricingModel !== PricingModel.PER_UNIT && service.pricingModel !== PricingModel.MONTHLY && dto.pricing_quantity != null) {
       throw new ApiException(ErrorCode.VAL_001, 'كمية التسعير متاحة فقط للخدمات المحسوبة بالوحدة', HttpStatus.BAD_REQUEST);
     }
 
@@ -221,7 +221,10 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       requestedTechnicianCompanyId: dto.requested_technician_company_id ?? null,
       frequency: dto.frequency,
       fieldValues: dto.field_values ?? null,
-      pricingQuantity: service.pricingModel === PricingModel.PER_UNIT ? String(dto.pricing_quantity) : null,
+      pricingQuantity:
+        service.pricingModel === PricingModel.PER_UNIT || service.pricingModel === PricingModel.MONTHLY
+          ? String(dto.pricing_quantity)
+          : null,
       durationHours: dto.duration_hours ?? null,
       scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
       problemDescription: dto.problem_description ?? null,

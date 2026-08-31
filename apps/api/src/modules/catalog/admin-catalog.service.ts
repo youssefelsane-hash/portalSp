@@ -23,7 +23,7 @@ import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { ServiceProductivityActual } from './entities/service-productivity-actual.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
-import { Service } from './entities/service.entity';
+import { PricingModel, Service } from './entities/service.entity';
 import { ServiceZonePricing, ZonePricingMode } from './entities/service-zone-pricing.entity';
 import { TechnicianService, TechnicianServiceVerificationStatus } from './entities/technician-service.entity';
 import { randomUUID } from 'node:crypto';
@@ -484,7 +484,7 @@ export class AdminCatalogService {
   // في المستقبل) بتقفل الصف الساري الحالي عند نفس اللحظة (valid_until) وتفتح صف جديد منفصل —
   // الاتنين يتحفظوا كتاريخ، مش بيتكتب فوق بعضه.
   async upsertZonePricing(adminUserId: string, serviceId: string, dto: UpsertZonePricingDto, meta?: AuditActorMeta): Promise<ServiceZonePricing> {
-    await this.findServiceOrThrow(serviceId);
+    const service = await this.findServiceOrThrow(serviceId);
     const now = new Date();
     const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
     const isFutureScheduling = validFrom.getTime() > now.getTime();
@@ -522,6 +522,16 @@ export class AdminCatalogService {
     // docs/08 §36.22-23، ADR-0024 — بالظبط واحد من price_cents/modifier_percentage مطلوب حسب
     // الوضع (نفس فرض الداتابيز، بس هنا برسالة عربية واضحة للأدمن قبل ما يوصل لخطأ constraint خام).
     const mode = dto.pricing_mode ?? ZonePricingMode.OVERRIDE;
+    if (
+      mode === ZonePricingMode.OVERRIDE &&
+      (service.pricingModel === PricingModel.FORMULA || service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE)
+    ) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الاستبدال المطلق غير واضح لهذا النوع من التسعير — استخدم تعديلًا بالنسبة المئوية',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     if (mode === ZonePricingMode.OVERRIDE) {
       if (dto.price_cents === undefined) {
         throw new ApiException(ErrorCode.VAL_001, 'وضع الاستبدال الثابت محتاج price_cents', HttpStatus.BAD_REQUEST);

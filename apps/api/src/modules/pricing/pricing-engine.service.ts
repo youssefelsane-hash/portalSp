@@ -18,6 +18,8 @@ import {
 } from './pricing-formula.types';
 import { PricingContext, pricingContextFormulaValues } from './pricing-context';
 
+export type PricingPresetKind = 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote';
+
 // نقطة الدخول الوحيدة لحساب سعر خدمة pricing_model=formula — راجع docs/08 §1.5 وADR-0001.
 // catalog.service.ts's estimate() بينادي عليها بس لو الخدمة formula، باقي أنواع التسعير
 // (fixed/hourly/per_unit/inspection_then_quote) بتفضل شغالة بالمسار القديم زي ما هو بالظبط.
@@ -28,6 +30,48 @@ export class PricingEngineService {
     private readonly fieldsService: PricingFieldsService,
     private readonly rulesService: PricingRulesService,
   ) {}
+
+  evaluatePreset(
+    preset: PricingPresetKind,
+    basePriceCents: number,
+    context: PricingContext,
+    minPriceCents: number | null,
+    maxPriceCents: number | null,
+  ): PricingEvaluationResult & { evaluationId: null } {
+    const systemValues = pricingContextFormulaValues(context);
+    const quantityNode: FormulaNode = { type: 'field_ref', field_key: 'quantity' };
+    const durationNode: FormulaNode = { type: 'field_ref', field_key: 'duration_hours' };
+    const rateNode: FormulaNode = { type: 'literal', value: basePriceCents };
+
+    let priceNode: FormulaNode;
+    switch (preset) {
+      case 'fixed':
+        priceNode = rateNode;
+        break;
+      case 'hourly':
+        priceNode = { type: 'multiply', operands: [durationNode, rateNode] };
+        break;
+      case 'per_unit':
+      case 'monthly':
+        priceNode = { type: 'multiply', operands: [quantityNode, rateNode] };
+        break;
+      case 'inspection_then_quote':
+        priceNode = { type: 'literal', value: 0 };
+        break;
+    }
+
+    const payload: FinalPriceFormulaPayload = {
+      price_cents: priceNode,
+      ...(minPriceCents !== null ? { min_price_cents: { type: 'literal' as const, value: minPriceCents } } : {}),
+      ...(maxPriceCents !== null ? { max_price_cents: { type: 'literal' as const, value: maxPriceCents } } : {}),
+    };
+    const formulaContext: FormulaEvaluationContext = {
+      fieldValues: systemValues,
+      constants: new Map(),
+      lookupTables: new Map(),
+    };
+    return { ...this.computeResult(payload, formulaContext), evaluationId: null };
+  }
 
   async evaluate(
     serviceId: string,

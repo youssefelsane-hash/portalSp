@@ -8,6 +8,8 @@ import { ServiceLevelPricing } from './entities/service-level-pricing.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { ApiException } from '../../common/exceptions/api.exception';
 
 /**
  * ADR-0031 Slice H — CatalogService.estimate() كانت فجوة موثّقة صراحة: PricingModel.HOURLY
@@ -60,7 +62,7 @@ describe('CatalogService.estimate() — ضرب سعر الساعة في duration
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       {} as never,
-      {} as never,
+      new PricingEngineService({} as never, {} as never, {} as never),
       dataSource.getRepository(ServicePricingTierPricing),
     );
   });
@@ -75,10 +77,8 @@ describe('CatalogService.estimate() — ضرب سعر الساعة في duration
     }
   }, 15000);
 
-  it('من غير duration_hours: سعر الساعة بيترجع زي ما هو (سلوك قديم بالحرف، صفر كسر)', async () => {
-    const estimate = await service.estimate(ids.hourlyService);
-    expect(estimate.base_price_cents).toBe(8000);
-    expect(estimate.estimated_total_cents).toBe(8000);
+  it('من غير duration_hours: يرفض بدل fallback صامت إلى ساعة واحدة', async () => {
+    await expect(service.estimate(ids.hourlyService)).rejects.toBeInstanceOf(ApiException);
   });
 
   it('بـduration_hours=3: السعر الأساسي بيتضاعف في عدد الساعات قبل أي مضاعف تاني', async () => {
