@@ -49,6 +49,7 @@ import { WalletsService } from '../payments/wallets.service';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
 import { EarningsPolicyService } from '../payments/earnings-policy.service';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -138,6 +139,7 @@ export class AdminOrdersService {
     private readonly walletsService: WalletsService,
     private readonly workOpportunities: TechnicianWorkOpportunitiesService,
     @Optional() private readonly earningsPolicyService?: EarningsPolicyService,
+    @Optional() private readonly orderFinancials: OrderFinancialFinalizationService = new OrderFinancialFinalizationService(),
   ) {}
 
   async list(
@@ -984,9 +986,11 @@ export class AdminOrdersService {
         throw new ApiException(ErrorCode.VAL_001, 'السعر الجديد نفس السعر الحالي', HttpStatus.CONFLICT);
       }
 
-      const previousTotal = order.totalAmountCents;
-      order.totalAmountCents = newTotalAmountCents;
-      await manager.save(order);
+      const financialChange = await this.orderFinancials.replaceUncommittedPrice(
+        manager,
+        order,
+        newTotalAmountCents,
+      );
       await this.auditLog.record(
         {
           actorUserId: adminUserId,
@@ -994,8 +998,15 @@ export class AdminOrdersService {
           action: 'order.price_adjusted_by_admin',
           entityType: 'order',
           entityId: order.id,
-          oldValues: { total_amount_cents: previousTotal },
-          newValues: { total_amount_cents: newTotalAmountCents, reason },
+          oldValues: {
+            total_amount_cents: financialChange.previousTotalCents,
+            commissionable_base_cents: financialChange.previousCommissionableBaseCents,
+          },
+          newValues: {
+            total_amount_cents: financialChange.newTotalCents,
+            commissionable_base_cents: financialChange.newCommissionableBaseCents,
+            reason,
+          },
           meta,
         },
         manager,
