@@ -45,6 +45,11 @@ export class PreviewOrderDto {
   @IsDateString()
   scheduled_at?: string;
 
+  /** نفس CreateOrderDto.scheduled_end_at لضمان أن المعاينة تحسب مدة البداية/النهاية من السيرفر. */
+  @IsOptional()
+  @IsDateString()
+  scheduled_end_at?: string;
+
   @IsOptional()
   @IsObject()
   field_values?: Record<string, string | number | boolean>;

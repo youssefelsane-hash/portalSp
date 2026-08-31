@@ -16,6 +16,7 @@ import {
   LookupTableRulePayload,
   PricingEvaluationResult,
 } from './pricing-formula.types';
+import { PricingContext, pricingContextFormulaValues } from './pricing-context';
 
 // نقطة الدخول الوحيدة لحساب سعر خدمة pricing_model=formula — راجع docs/08 §1.5 وADR-0001.
 // catalog.service.ts's estimate() بينادي عليها بس لو الخدمة formula، باقي أنواع التسعير
@@ -32,8 +33,9 @@ export class PricingEngineService {
     serviceId: string,
     rawFieldValues: Record<string, string | number | boolean>,
     orderId?: string,
+    pricingContext?: PricingContext,
   ): Promise<PricingEvaluationResult & { evaluationId: string | null }> {
-    const { fieldValues, context, finalPricePayload } = await this.prepareEvaluation(serviceId, rawFieldValues);
+    const { fieldValues, context, finalPricePayload } = await this.prepareEvaluation(serviceId, rawFieldValues, pricingContext);
     if (!finalPricePayload) {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي مفيهاش معادلة تسعير سارية دلوقتي', HttpStatus.CONFLICT);
     }
@@ -122,6 +124,7 @@ export class PricingEngineService {
   private async prepareEvaluation(
     serviceId: string,
     rawFieldValues: Record<string, string | number | boolean>,
+    pricingContext?: PricingContext,
   ): Promise<{
     fieldValues: Record<string, string | number | boolean>;
     context: FormulaEvaluationContext;
@@ -129,7 +132,10 @@ export class PricingEngineService {
   }> {
     const fields = await this.fieldsService.listForService(serviceId);
     const activeFields = fields.filter((f) => f.isActive);
-    const fieldValues = this.validateAndNormalizeFieldValues(activeFields, rawFieldValues);
+    const fieldValues = {
+      ...this.validateAndNormalizeFieldValues(activeFields, rawFieldValues),
+      ...(pricingContext ? pricingContextFormulaValues(pricingContext) : {}),
+    };
 
     const rules = await this.rulesService.listCurrentRulesForService(serviceId);
     const constants = new Map<string, ConstantRulePayload>();
@@ -150,6 +156,9 @@ export class PricingEngineService {
   }
 
   private computeResult(finalPricePayload: FinalPriceFormulaPayload, context: FormulaEvaluationContext): PricingEvaluationResult {
+    const MAX_DB_INTEGER = 2_147_483_647;
+    const MAX_CREW_SIZE = 1_000;
+    const MAX_ESTIMATED_DURATION_DAYS = 3_660;
     const priceCents = Math.round(evaluateFormulaNode(finalPricePayload.price_cents, context));
 
     // Script 2 Part H (finding #44) — حراسة أخيرة على السعر النهائي قبل ما يوصل لأي مكان بيحدد
@@ -158,7 +167,7 @@ export class PricingEngineService {
     // رقم قريب من صفر) ممكن نظريًا ينتج Infinity أو سعر سالب من غير ما يمر بـfield_ref خالص —
     // بدل ما نسيب Postgres يرمي "invalid input syntax for type integer" خام لو القيمة NaN وقت
     // الإدراج (orders.total_amount_cents integer)، بنرفض هنا برسالة واضحة.
-    if (!Number.isFinite(priceCents) || priceCents < 0) {
+    if (!Number.isSafeInteger(priceCents) || priceCents < 0 || priceCents > MAX_DB_INTEGER) {
       throw new ApiException(
         ErrorCode.VAL_001,
         'معادلة التسعير أنتجت سعرًا غير صالح لهذه المدخلات — راجع بيانات الخدمة',
@@ -166,19 +175,58 @@ export class PricingEngineService {
       );
     }
 
-    const evalOptional = (node: FormulaNode | undefined): number | null =>
-      node !== undefined ? evaluateFormulaNode(node, context) : null;
+    const evalOptional = (node: FormulaNode | undefined, label: string): number | null => {
+      if (node === undefined) return null;
+      const value = evaluateFormulaNode(node, context);
+      if (!Number.isFinite(value)) {
+        throw new ApiException(ErrorCode.VAL_001, `${label} الناتج من معادلة التسعير غير صالح`, HttpStatus.UNPROCESSABLE_ENTITY);
+      }
+      return value;
+    };
 
-    const requiresAssistantRaw = evalOptional(finalPricePayload.requires_assistant);
-    const suitableForEmergencyRaw = evalOptional(finalPricePayload.suitable_for_emergency);
+    const moneyOutput = (node: FormulaNode | undefined, label: string): number | null => {
+      const value = evalOptional(node, label);
+      if (value === null) return null;
+      const rounded = Math.round(value);
+      if (rounded < 0 || rounded > MAX_DB_INTEGER) {
+        throw new ApiException(ErrorCode.VAL_001, `${label} لازم يكون مبلغًا صالحًا وغير سالب`, HttpStatus.UNPROCESSABLE_ENTITY);
+      }
+      return rounded;
+    };
+
+    const crewOutput = (node: FormulaNode | undefined, label: string, minimum: number): number | null => {
+      const value = evalOptional(node, label);
+      if (value === null) return null;
+      if (!Number.isSafeInteger(value) || value < minimum || value > MAX_CREW_SIZE) {
+        throw new ApiException(ErrorCode.VAL_001, `${label} لازم يكون عددًا صحيحًا صالحًا`, HttpStatus.UNPROCESSABLE_ENTITY);
+      }
+      return value;
+    };
+
+    const minPriceCents = moneyOutput(finalPricePayload.min_price_cents, 'الحد الأدنى للسعر');
+    const maxPriceCents = moneyOutput(finalPricePayload.max_price_cents, 'الحد الأقصى للسعر');
+    if (minPriceCents !== null && maxPriceCents !== null && minPriceCents > maxPriceCents) {
+      throw new ApiException(ErrorCode.VAL_001, 'الحد الأدنى للسعر أكبر من الحد الأقصى', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const estimatedDurationDays = evalOptional(finalPricePayload.estimated_duration_days, 'المدة المتوقعة');
+    if (
+      estimatedDurationDays !== null &&
+      (!Number.isFinite(estimatedDurationDays) || estimatedDurationDays <= 0 || estimatedDurationDays > MAX_ESTIMATED_DURATION_DAYS)
+    ) {
+      throw new ApiException(ErrorCode.VAL_001, 'المدة المتوقعة الناتجة من المعادلة غير صالحة', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const requiresAssistantRaw = evalOptional(finalPricePayload.requires_assistant, 'حالة احتياج مساعد');
+    const suitableForEmergencyRaw = evalOptional(finalPricePayload.suitable_for_emergency, 'ملاءمة الطوارئ');
 
     return {
       priceCents,
-      minPriceCents: evalOptional(finalPricePayload.min_price_cents),
-      maxPriceCents: evalOptional(finalPricePayload.max_price_cents),
-      estimatedDurationDays: evalOptional(finalPricePayload.estimated_duration_days),
-      requiredTechnicians: evalOptional(finalPricePayload.required_technicians),
-      requiredAssistants: evalOptional(finalPricePayload.required_assistants),
+      minPriceCents,
+      maxPriceCents,
+      estimatedDurationDays,
+      requiredTechnicians: crewOutput(finalPricePayload.required_technicians, 'عدد الفنيين', 1),
+      requiredAssistants: crewOutput(finalPricePayload.required_assistants, 'عدد المساعدين', 0),
       requiresAssistant: requiresAssistantRaw !== null ? requiresAssistantRaw !== 0 : null,
       suitableForEmergency: suitableForEmergencyRaw !== null ? suitableForEmergencyRaw !== 0 : null,
     };

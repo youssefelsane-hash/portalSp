@@ -31,6 +31,7 @@ import { TechnicianCompany } from '../technicians/entities/technician-company.en
 import { TechnicianScheduleService } from '../technicians/technician-schedule.service';
 import { TechnicianScheduleSlot, TechnicianScheduleSlotStatus } from '../technicians/entities/technician-schedule-slot.entity';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { buildPricingContext } from '../pricing/pricing-context';
 import { CommissionBaseService } from '../pricing/commission-base.service';
 import { computeCommissionableBase } from '../pricing/commission-base';
 import { CancellationReasonsService } from './cancellation-reasons.service';
@@ -561,6 +562,19 @@ export class OrdersService {
     // مصدر مستقل (technician_profiles.pricing_tier) عشان الفصل الكامل عن currentLevel التشغيلي.
     const knownTechnicianPricingTier = scheduleSlotTechnicianProfile?.pricingTier ?? requestedTechnicianProfile?.pricingTier;
 
+    const pricingContext = buildPricingContext({
+      quantity: dto.pricing_quantity,
+      durationHours: dto.duration_hours,
+      scheduledAt: resolvedScheduledAtIso,
+      scheduledEndAt: dto.scheduled_end_at,
+      serviceFieldValues: dto.field_values,
+      zoneId: zone.id,
+      isEmergency: urgent,
+      technicianLevel: knownTechnicianLevel,
+      addonIds: dto.addon_ids,
+      recurringMetadata: dto.repeat_frequency ? { frequency: dto.repeat_frequency } : undefined,
+    });
+
     const estimate = await this.catalogService.estimate(
       service.id,
       zone.id,
@@ -570,11 +584,12 @@ export class OrdersService {
       urgent,
       dto.field_values,
       knownTechnicianPricingTier,
-      dto.duration_hours,
+      pricingContext.durationHours ?? undefined,
       dto.pricing_quantity,
       // ADR-0042 — حجز شركة بيتسعّر بمعاملها هي بدل مضاعف المستوى (اللي بيبقى غير معروف أصلاً
       // في حجز الشركة). نفس القيمة اللي العميل شافها في المقارنة قبل ما يختار.
       requestedCompany ? Number(requestedCompany.priceMultiplier) : undefined,
+      pricingContext,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);
@@ -1264,6 +1279,18 @@ export class OrdersService {
       ? await this.technicianCompaniesService.findActiveCompanyOrThrow(dto.requested_technician_company_id)
       : null;
 
+    const pricingContext = buildPricingContext({
+      quantity: dto.pricing_quantity,
+      durationHours: dto.duration_hours,
+      scheduledAt: dto.scheduled_at,
+      scheduledEndAt: dto.scheduled_end_at,
+      serviceFieldValues: dto.field_values,
+      zoneId: zone.id,
+      isEmergency: urgent,
+      technicianLevel: previewTechnicianLevel,
+      addonIds: dto.addon_ids,
+    });
+
     const estimate = await this.catalogService.estimate(
       service.id,
       zone.id,
@@ -1271,9 +1298,10 @@ export class OrdersService {
       urgent,
       dto.field_values,
       previewTechnicianPricingTier,
-      dto.duration_hours,
+      pricingContext.durationHours ?? undefined,
       dto.pricing_quantity,
       previewCompany ? Number(previewCompany.priceMultiplier) : undefined,
+      pricingContext,
     );
     const addons = await this.catalogService.findAddonsByIds(service.id, dto.addon_ids ?? []);
     const addonsTotalCents = addons.reduce((sum, addon) => sum + addon.priceCents, 0);

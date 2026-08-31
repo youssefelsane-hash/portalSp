@@ -13,6 +13,7 @@ import {
   loadActiveFormulaPayloads,
 } from './pricing-references.util';
 import { validateFinalPriceFormulaPayload } from './formula-evaluator';
+import { PRICING_CONTEXT_FIELD_KEYS } from './pricing-context';
 
 const FINAL_PRICE_RULE_KEY = 'final_price';
 
@@ -89,7 +90,7 @@ export class PricingRulesService {
     for (const ref of refs) {
       switch (ref.kind) {
         case 'field':
-          if (!activeFieldKeys.has(ref.key)) {
+          if (!activeFieldKeys.has(ref.key) && !PRICING_CONTEXT_FIELD_KEYS.has(ref.key)) {
             throw new ApiException(
               ErrorCode.VAL_001,
               `${ref.path}: الحقل "${ref.key}" مش من ضمن حقول الخدمة النشطة — عدّل المرجع أو فعّل الحقل`,

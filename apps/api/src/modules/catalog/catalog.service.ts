@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
 import { PricingEngineService } from '../pricing/pricing-engine.service';
+import { buildPricingContext, PricingContext } from '../pricing/pricing-context';
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
@@ -350,14 +351,34 @@ export class CatalogService {
     // حجز الشركة مالوش مستوى فني أصلاً (§62.2)، فالخانة دي فاضية والمعامل بياخدها. تركيب
     // الاتنين كان هيبقى تحصيل مزدوج على نفس المعنى. append-only زي كل الباراميترات فوق.
     companyPriceMultiplier?: number,
+    pricingContextInput?: PricingContext,
   ): Promise<PriceEstimate> {
     const service = await this.findServiceOrThrow(serviceId);
+    const pricingContext = pricingContextInput ?? buildPricingContext({
+      quantity: pricingQuantity,
+      durationHours,
+      serviceFieldValues: fieldValues,
+      zoneId,
+      isEmergency,
+      technicianLevel,
+    });
     const quantityMultiplier =
-      service.pricingModel === PricingModel.HOURLY && durationHours
-        ? durationHours
-        : service.pricingModel === PricingModel.PER_UNIT && pricingQuantity
-          ? pricingQuantity
+      service.pricingModel === PricingModel.HOURLY && pricingContext.durationHours !== null
+        ? pricingContext.durationHours
+        : service.pricingModel === PricingModel.PER_UNIT && pricingContext.quantity !== null
+          ? pricingContext.quantity
           : 1;
+
+    if (service.pricingModel === PricingModel.HOURLY && pricingContext.durationHours === null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الخدمة دي محسوبة بالساعة — لازم تحدد المدة أو وقت البداية والنهاية',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (service.pricingModel === PricingModel.PER_UNIT && pricingContext.quantity === null) {
+      throw new ApiException(ErrorCode.VAL_001, 'الخدمة دي محسوبة بالوحدة — لازم تحدد الكمية', HttpStatus.BAD_REQUEST);
+    }
 
     // docs/08 §108-G — بَقّة حقيقية اتكشفت: تسعير المناطق (service_zone_pricing) كان بيتحقق
     // بس **جوّه** فرع الأسعار الثابتة/بالساعة/بالوحدة، بعد return مبكر لخدمات formula (السطر
@@ -390,7 +411,7 @@ export class CatalogService {
     // المستخدم في باقي الفروع تحت، والمضاعف بيتطبّق على ناتج المعادلة (result.priceCents) بعد
     // حسابها — مش جزء من المعادلة نفسها (الفني مش من مدخلات الفورم اللي العميل بيملاها).
     if (service.pricingModel === PricingModel.FORMULA) {
-      const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {});
+      const result = await this.pricingEngineService.evaluate(serviceId, fieldValues ?? {}, undefined, pricingContext);
       const formulaLevelMultiplier =
         companyPriceMultiplier ?? (await this.resolveLevelPriceMultiplier(serviceId, technicianLevel, technicianPricingTier));
       // docs/08 §108-G — تسعير المناطق بقى بيطبّق على خدمات formula كمان. وضع "override" (رقم
