@@ -24,6 +24,7 @@ const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   fixed: 'ثابت',
   hourly: 'بالساعة',
   per_unit: 'بالوحدة',
+  monthly: 'شهري',
   inspection_then_quote: 'كشف ثم عرض سعر',
   formula: 'معادلة ديناميكية',
 };

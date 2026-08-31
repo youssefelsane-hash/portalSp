@@ -85,6 +85,10 @@ class CatalogService {
   final int basePriceCents;
   final int inspectionFeeCents;
   final String? unitNameAr;
+  final double? quantityMin;
+  final double? quantityMax;
+  final double? quantityStep;
+  final int quantityPrecision;
   final int warrantyDays;
   final bool allowsScheduling;
   final bool allowsEmergency;
@@ -126,6 +130,10 @@ class CatalogService {
     required this.basePriceCents,
     required this.inspectionFeeCents,
     this.unitNameAr,
+    this.quantityMin,
+    this.quantityMax,
+    this.quantityStep,
+    this.quantityPrecision = 2,
     this.warrantyDays = 0,
     required this.allowsScheduling,
     required this.allowsEmergency,
@@ -152,6 +160,10 @@ class CatalogService {
     basePriceCents: json['base_price_cents'] as int,
     inspectionFeeCents: json['inspection_fee_cents'] as int,
     unitNameAr: json['unit_name_ar'] as String?,
+    quantityMin: (json['quantity_min'] as num?)?.toDouble(),
+    quantityMax: (json['quantity_max'] as num?)?.toDouble(),
+    quantityStep: (json['quantity_step'] as num?)?.toDouble(),
+    quantityPrecision: json['quantity_precision'] as int? ?? 2,
     warrantyDays: json['warranty_days'] as int? ?? 0,
     allowsScheduling: json['allows_scheduling'] as bool,
     allowsEmergency: json['allows_emergency'] as bool,

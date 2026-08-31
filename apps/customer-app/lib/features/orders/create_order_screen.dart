@@ -139,7 +139,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // شاشة تدخل بيها القيم اللازمة لحساب سعر خدمات pricing_model=formula، فالعميل مكانش يقدر
   // يحجز الخدمات دي أصلاً من التطبيق (كان المسار الوحيد اختبار مباشر بـ curl). اتقفلت.
   bool get _isFormulaPricing => widget.service.pricingModel == 'formula';
-  bool get _isPerUnitPricing => widget.service.pricingModel == 'per_unit';
+  bool get _isQuantityPricing =>
+      widget.service.pricingModel == 'per_unit' ||
+      widget.service.pricingModel == 'monthly';
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
@@ -454,7 +456,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     final pricingQuantity = num.tryParse(
       _pricingQuantityController.text.trim(),
     );
-    if (_isPerUnitPricing &&
+    if (_isQuantityPricing &&
         (pricingQuantity == null || pricingQuantity <= 0)) {
       return;
     }
@@ -479,7 +481,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         promoCode: promoCode,
         buildingCode: buildingCode,
         warrantyPlanId: _selectedWarrantyPlanId,
-        pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
+        pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
         durationHours: widget.service.pricingModel == 'hourly'
             ? durationHours
             : null,
@@ -673,7 +675,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           promoCode: asBuilding ? null : code,
           buildingCode: asBuilding ? code : null,
           warrantyPlanId: _selectedWarrantyPlanId,
-          pricingQuantity: _isPerUnitPricing
+          pricingQuantity: _isQuantityPricing
               ? num.tryParse(_pricingQuantityController.text.trim())
               : null,
           durationHours: widget.service.pricingModel == 'hourly'
@@ -804,7 +806,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     final pricingQuantity = num.tryParse(
       _pricingQuantityController.text.trim(),
     );
-    if (_isPerUnitPricing &&
+    if (_isQuantityPricing &&
         (pricingQuantity == null || pricingQuantity <= 0)) {
       _failValidation(
         'حدد عدد ${widget.service.unitNameAr ?? 'الوحدات'} المطلوبة',
@@ -896,7 +898,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         fieldValues: _isFormulaPricing ? _fieldValues : null,
         standardDataId: _selectedStandardData?.id,
         requestedUnits: num.tryParse(_requestedUnitsController.text.trim()),
-        pricingQuantity: _isPerUnitPricing ? pricingQuantity : null,
+        pricingQuantity: _isQuantityPricing ? pricingQuantity : null,
         paymentMethod: _selectedPaymentMethod == 'installment'
             ? null
             : _selectedPaymentMethod,
@@ -1429,7 +1431,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ],
               ],
             ],
-            if (_isPerUnitPricing) ...[
+            if (_isQuantityPricing) ...[
               const SizedBox(height: 16),
               Text(
                 'الكمية المطلوبة',
@@ -1439,13 +1441,25 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               const SizedBox(height: 8),
               TextField(
                 controller: _pricingQuantityController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+                keyboardType: TextInputType.numberWithOptions(
+                  decimal: widget.service.quantityPrecision > 0,
                 ),
                 onChanged: _onPricingQuantityChanged,
                 decoration: InputDecoration(
                   labelText: 'عدد ${widget.service.unitNameAr ?? 'الوحدات'}',
-                  helperText: 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب',
+                  helperText:
+                      [
+                        if (widget.service.quantityMin != null)
+                          'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}',
+                        if (widget.service.quantityMax != null)
+                          'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}',
+                        if (widget.service.quantityStep != null)
+                          'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}',
+                        if (widget.service.quantityPrecision == 0)
+                          'أرقام صحيحة فقط',
+                      ].isEmpty
+                      ? 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
+                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. السعر يتحدث تلقائيًا.',
                   border: const OutlineInputBorder(),
                 ),
               ),

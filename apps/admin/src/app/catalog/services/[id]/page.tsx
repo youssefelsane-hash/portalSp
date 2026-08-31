@@ -63,6 +63,7 @@ const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   fixed: 'ثابت',
   hourly: 'بالساعة',
   per_unit: 'بالوحدة',
+  monthly: 'شهري (عدد وحدات شهرية)',
   inspection_then_quote: 'كشف ثم عرض سعر',
   formula: 'معادلة ديناميكية',
 };
@@ -492,6 +493,9 @@ export default function ServiceDetailPage() {
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
     const minTechnicianLevel = form.get('min_technician_level') as string;
+    const quantityMin = form.get('quantity_min') as string;
+    const quantityMax = form.get('quantity_max') as string;
+    const quantityStep = form.get('quantity_step') as string;
     const body: UpdateServiceBody = {
       name_en: (form.get('name_en') as string) || undefined,
       short_description_ar: (form.get('short_description_ar') as string) || undefined,
@@ -505,6 +509,10 @@ export default function ServiceDetailPage() {
       base_price_cents: basePrice ? Math.round(Number(basePrice) * 100) : undefined,
       inspection_fee_cents: inspectionFee ? Math.round(Number(inspectionFee) * 100) : undefined,
       unit_name_ar: (form.get('unit_name_ar') as string) || undefined,
+      quantity_min: quantityMin ? Number(quantityMin) : null,
+      quantity_max: quantityMax ? Number(quantityMax) : null,
+      quantity_step: quantityStep ? Number(quantityStep) : null,
+      quantity_precision: Number(form.get('quantity_precision')),
       min_price_cents: minPrice ? Math.round(Number(minPrice) * 100) : undefined,
       max_price_cents: maxPrice ? Math.round(Number(maxPrice) * 100) : undefined,
       warranty_days: Number(form.get('warranty_days')),
@@ -725,6 +733,26 @@ export default function ServiceDetailPage() {
                 <div className="flex flex-col gap-1">
                   <Label htmlFor="svc_unit">اسم الوحدة</Label>
                   <Input id="svc_unit" name="unit_name_ar" defaultValue={service.unit_name_ar ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_min">أقل كمية</Label>
+                  <Input id="svc_quantity_min" name="quantity_min" type="number" min="0.01" step="0.01" defaultValue={service.quantity_min ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_max">أكبر كمية</Label>
+                  <Input id="svc_quantity_max" name="quantity_max" type="number" min="0.01" step="0.01" defaultValue={service.quantity_max ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_step">خطوة الزيادة</Label>
+                  <Input id="svc_quantity_step" name="quantity_step" type="number" min="0.01" step="0.01" defaultValue={service.quantity_step ?? ''} />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="svc_quantity_precision">دقة الكمية</Label>
+                  <SelectNative id="svc_quantity_precision" name="quantity_precision" defaultValue={String(service.quantity_precision)}>
+                    <option value="0">بدون كسور (قطع صحيحة)</option>
+                    <option value="1">رقم واحد بعد العلامة</option>
+                    <option value="2">رقمان بعد العلامة</option>
+                  </SelectNative>
                 </div>
                 <div className="flex flex-col gap-1">
                   <Label>سياسة مستحقات الخدمة</Label>

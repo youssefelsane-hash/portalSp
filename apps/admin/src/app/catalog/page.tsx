@@ -33,6 +33,7 @@ const PRICING_MODEL_LABELS: Record<PricingModel, string> = {
   fixed: 'ثابت',
   hourly: 'بالساعة',
   per_unit: 'بالوحدة',
+  monthly: 'شهري (عدد وحدات شهرية)',
   inspection_then_quote: 'كشف ثم عرض سعر',
   // محرك التسعير الديناميكي (docs/08 §1) — بعد الاختيار، إدارة الحقول/القواعد من صفحة تفاصيل
   // الخدمة (قسم "محرك التسعير الديناميكي").
@@ -281,6 +282,9 @@ export default function CatalogPage() {
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
     const minTechnicianLevel = form.get('min_technician_level') as string;
+    const quantityMin = form.get('quantity_min') as string;
+    const quantityMax = form.get('quantity_max') as string;
+    const quantityStep = form.get('quantity_step') as string;
     const body: CreateServiceBody = {
       category_id: form.get('category_id') as string,
       name_ar: form.get('name_ar') as string,
@@ -295,6 +299,10 @@ export default function CatalogPage() {
       base_price_cents: Math.round(Number(form.get('base_price')) * 100),
       inspection_fee_cents: inspectionFee ? Math.round(Number(inspectionFee) * 100) : undefined,
       unit_name_ar: (form.get('unit_name_ar') as string) || undefined,
+      quantity_min: quantityMin ? Number(quantityMin) : undefined,
+      quantity_max: quantityMax ? Number(quantityMax) : undefined,
+      quantity_step: quantityStep ? Number(quantityStep) : undefined,
+      quantity_precision: Number(form.get('quantity_precision')),
       estimated_duration_minutes: estimatedDuration ? Number(estimatedDuration) : undefined,
       warranty_days: Number(form.get('warranty_days')) || undefined,
       requires_photos: form.get('requires_photos') === 'on',
@@ -630,6 +638,31 @@ export default function CatalogPage() {
                   <div className="flex flex-col gap-1">
                     <Label htmlFor="new_svc_duration">المدة المتوقعة (دقيقة)</Label>
                     <Input id="new_svc_duration" name="estimated_duration_minutes" type="number" min={1} dir="ltr" />
+                  </div>
+                </div>
+                <div className="rounded-xl border bg-muted/30 p-3">
+                  <p className="mb-3 text-sm font-medium">ضوابط الكمية للخدمات بالوحدة أو بالشهر</p>
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="new_svc_quantity_min">أقل كمية</Label>
+                      <Input id="new_svc_quantity_min" name="quantity_min" type="number" min="0.01" step="0.01" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="new_svc_quantity_max">أكبر كمية</Label>
+                      <Input id="new_svc_quantity_max" name="quantity_max" type="number" min="0.01" step="0.01" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="new_svc_quantity_step">خطوة الزيادة</Label>
+                      <Input id="new_svc_quantity_step" name="quantity_step" type="number" min="0.01" step="0.01" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="new_svc_quantity_precision">الأرقام بعد العلامة</Label>
+                      <SelectNative id="new_svc_quantity_precision" name="quantity_precision" defaultValue="2">
+                        <option value="0">بدون كسور</option>
+                        <option value="1">رقم واحد</option>
+                        <option value="2">رقمان</option>
+                      </SelectNative>
+                    </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
