@@ -13,6 +13,7 @@ import { TechniciansService } from '../technicians/technicians.service';
 import { Order, OrderPaymentStatus, OrderStatus } from './entities/order.entity';
 import { OrderChangeSource, OrderStatusHistory } from './entities/order-status-history.entity';
 import { canTransition } from './order-state-machine';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 
 // معاينة-ثم-سعر (ADR-0044، docs/08 §73 بند 1) — وضع حجز لخدمات سعرها مش معروف مقدمًا
 // (service.pricing_model=inspection_then_quote): العميل بيدفع رسم المعاينة بس وقت الحجز
@@ -31,6 +32,7 @@ export class InspectionQuoteService {
     private readonly catalogService: CatalogService,
     private readonly paymentsService: PaymentsService,
     private readonly events: EventEmitter2,
+    private readonly orderFinancials: OrderFinancialFinalizationService,
   ) {}
 
   // الفني بيحدد السعر بعد ما وصل وعاين المكان فعليًا (TECHNICIAN_ARRIVED بس — نفس شرط
@@ -120,10 +122,11 @@ export class InspectionQuoteService {
       const quotedAmountCents = order.estimatedPriceCents ?? 0;
       const previousStatus = order.orderStatus;
 
-      order.totalAmountCents += quotedAmountCents;
-      if (order.commissionableBaseCents !== null) {
-        order.commissionableBaseCents += quotedAmountCents;
-      }
+      await this.orderFinancials.increasePrice(manager, order, {
+        amountCents: quotedAmountCents,
+        source: 'inspection_quote',
+        includeInCommissionableBase: true,
+      });
       order.orderStatus = OrderStatus.IN_PROGRESS;
       await manager.save(order);
 

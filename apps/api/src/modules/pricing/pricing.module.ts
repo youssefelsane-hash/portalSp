@@ -15,6 +15,7 @@ import { PricingEngineService } from './pricing-engine.service';
 import { PricingFieldsService } from './pricing-fields.service';
 import { PricingRulesService } from './pricing-rules.service';
 import { PricingRuleTestsService } from './pricing-rule-tests.service';
+import { OrderFinancialFinalizationService } from './order-financial-finalization.service';
 
 // محرك التسعير الديناميكي (docs/08 §1، ADR-0001) — موديول مستقل عمدًا (راجع §14 في docs/08):
 // catalog/orders بينادوا على PricingEngineService المصدّرة هنا، مش بيحسبوا هم عشان OrdersService
@@ -29,7 +30,22 @@ import { PricingRuleTestsService } from './pricing-rule-tests.service';
     forwardRef(() => CatalogModule),
   ],
   controllers: [PricingController, AdminPricingController],
-  providers: [PricingFieldsService, PricingRulesService, PricingEngineService, PricingRuleTestsService, CommissionBaseService, LevelPremiumService],
-  exports: [PricingEngineService, PricingFieldsService, PricingRulesService, CommissionBaseService, LevelPremiumService],
+  providers: [
+    PricingFieldsService,
+    PricingRulesService,
+    PricingEngineService,
+    PricingRuleTestsService,
+    CommissionBaseService,
+    OrderFinancialFinalizationService,
+    LevelPremiumService,
+  ],
+  exports: [
+    PricingEngineService,
+    PricingFieldsService,
+    PricingRulesService,
+    CommissionBaseService,
+    OrderFinancialFinalizationService,
+    LevelPremiumService,
+  ],
 })
 export class PricingModule {}

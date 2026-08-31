@@ -5,6 +5,7 @@ import { Order } from '../orders/entities/order.entity';
 import { TechnicianProfile } from '../technicians/entities/technician-profile.entity';
 import { SettingsService } from '../settings/settings.service';
 import { CommissionBaseService } from './commission-base.service';
+import { OrderFinancialFinalizationService } from './order-financial-finalization.service';
 
 /** الفرق بيتضاف للطلب كسطر "فني مميّز" (طلب المالك)، ولا الشركة بتتحمّله. */
 export const AUTO_MATCH_LEVEL_PREMIUM_SETTING = 'pricing.auto_match_level_premium';
@@ -18,6 +19,7 @@ export class LevelPremiumService {
     private readonly catalogService: CatalogService,
     private readonly settingsService: SettingsService,
     private readonly commissionBaseService: CommissionBaseService,
+    private readonly orderFinancials: OrderFinancialFinalizationService,
   ) {}
 
   /**
@@ -68,20 +70,18 @@ export class LevelPremiumService {
     if (premiumCents <= 0) return 0;
 
     order.levelPremiumCents = premiumCents;
-    order.totalAmountCents += premiumCents;
 
     // ADR-0037 — الفرق ده من نصيب الفني (مستواه هو اللي كسبه)، فبيكبّر وعاء العمولة كمان.
     // `null` = طلب قبل migration 0192، بيفضل null (السلوك القديم وقت التسوية).
-    if (order.commissionableBaseCents !== null) {
-      const basePolicy = await this.commissionBaseService.getPolicy();
-      if (basePolicy.includeLevelPremium) {
-        order.commissionableBaseCents += premiumCents;
-      }
-    }
-
-    await manager.save(order);
+    const basePolicy = await this.commissionBaseService.getPolicy();
+    const financialResult = await this.orderFinancials.increasePrice(manager, order, {
+      amountCents: premiumCents,
+      source: 'level_premium',
+      includeInCommissionableBase: basePolicy.includeLevelPremium,
+    });
     this.logger.log(
-      `فرق فني مميّز على الطلب ${order.orderNumber}: ${premiumCents} قرش (مضاعف ${multiplier})`,
+      `فرق فني مميّز على الطلب ${order.orderNumber}: ${premiumCents} قرش (مضاعف ${multiplier})` +
+        (financialResult.requiresSupplementalCollection ? ' — تحصيل إضافي بعد الدفعة الأصلية' : ''),
     );
     return premiumCents;
   }

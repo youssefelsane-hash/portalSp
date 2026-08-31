@@ -2,6 +2,7 @@ import { EntityManager } from 'typeorm';
 import { LevelPremiumService } from './level-premium.service';
 import { Order } from '../orders/entities/order.entity';
 import { DEFAULT_COMMISSION_BASE_POLICY } from './commission-base';
+import { OrderFinancialFinalizationService } from './order-financial-finalization.service';
 
 // docs/08 §60.3 — بلاغ المالك بالحرف: «لو حد عمل اختيار تلقائي، السعر بيجيله أوتوماتيك أقل حاجة
 // … من غير التضخم بتاع كل شخص على حدة، فده كده ما ينفعش».
@@ -35,6 +36,7 @@ function makeService(opts: {
     { resolveLevelPriceMultiplier: async () => opts.multiplier } as never,
     { getString: async (_k: string, fallback: string) => opts.policy ?? fallback } as never,
     { getPolicy: async () => ({ ...DEFAULT_COMMISSION_BASE_POLICY, ...opts.basePolicy }) } as never,
+    new OrderFinancialFinalizationService(),
   );
   return { service, manager, saved };
 }

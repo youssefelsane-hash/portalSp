@@ -32,6 +32,7 @@ import { Setting } from '../settings/entities/setting.entity';
 import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 
 // اختبار حي ضد Postgres حقيقي — معاينة-ثم-سعر كوضع حجز (ADR-0044، docs/08 §73 بند 1).
 // بيغطي: (1) CatalogService.estimate() فرع inspection_then_quote — رسم معاينة بس وقت الحجز.
@@ -250,7 +251,15 @@ describe('InspectionQuoteService — معاينة-ثم-سعر (ADR-0044)', () =>
       crewEarningsServiceStub(),
     );
 
-    inspectionQuoteService = new InspectionQuoteService(dataSource, customerProfilesService, techniciansService, catalogService, paymentsService, events);
+    inspectionQuoteService = new InspectionQuoteService(
+      dataSource,
+      customerProfilesService,
+      techniciansService,
+      catalogService,
+      paymentsService,
+      events,
+      new OrderFinancialFinalizationService(),
+    );
   });
 
   afterAll(async () => {

@@ -32,6 +32,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { RedisCacheService } from '../../common/cache/redis-cache.service';
 import { commissionBaseServiceStub } from '../pricing/commission-base.testing';
 import { crewEarningsServiceStub } from '../payments/crew-earnings.testing';
+import { OrderFinancialFinalizationService } from '../pricing/order-financial-finalization.service';
 
 // اختبار حي ضد Postgres حقيقي — تحصيل شغل إضافي معتمد إلكترونيًا بوسيلة دفع محفوظة (docs/08 §21).
 // بيغطي الثوابت المالية الحرجة: موافقة العميل = obligation واحد بس (§12)، مفيش وسيلة دفع محفوظة =
@@ -234,6 +235,7 @@ describe('OrderItemsService.approve() × تحصيل شغل إضافي إلكتر
       paymentsService,
       events,
       commissionBaseServiceStub(),
+      new OrderFinancialFinalizationService(),
     );
   });
 
