@@ -1577,7 +1577,11 @@ export class OrdersService {
 
   async reschedule(userId: string, orderId: string, dto: RescheduleOrderDto): Promise<Order> {
     const order = await this.findOneOwnedOrThrow(userId, orderId);
-    return this.rescheduleCore(order, { newSlotId: dto.new_slot_id, newScheduledAt: dto.new_scheduled_at }, {
+    return this.rescheduleCore(order, {
+      newSlotId: dto.new_slot_id,
+      newScheduledAt: dto.new_scheduled_at,
+      newScheduledEndAt: dto.new_scheduled_end_at,
+    }, {
       userId,
       role: 'customer',
       changeSource: OrderChangeSource.CUSTOMER,
@@ -1819,7 +1823,7 @@ export class OrdersService {
   async rescheduleByAdmin(
     adminUserId: string,
     orderId: string,
-    target: { newSlotId?: string; newScheduledAt?: string },
+    target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
     reason: string,
     meta?: AuditActorMeta,
   ): Promise<Order> {
@@ -1840,8 +1844,15 @@ export class OrdersService {
       action: 'order.rescheduled_by_admin',
       entityType: 'order',
       entityId: orderId,
-      oldValues: { scheduled_at: previousScheduledAt?.toISOString() ?? null },
-      newValues: { scheduled_at: updated.scheduledAt?.toISOString() ?? null, reason },
+      oldValues: {
+        scheduled_at: previousScheduledAt?.toISOString() ?? null,
+        scheduled_end_at: order.scheduledEndAt?.toISOString() ?? null,
+      },
+      newValues: {
+        scheduled_at: updated.scheduledAt?.toISOString() ?? null,
+        scheduled_end_at: updated.scheduledEndAt?.toISOString() ?? null,
+        reason,
+      },
       meta,
     });
     return updated;
@@ -1937,7 +1948,7 @@ export class OrdersService {
    */
   private async rescheduleCore(
     order: Order,
-    target: { newSlotId?: string; newScheduledAt?: string },
+    target: { newSlotId?: string; newScheduledAt?: string; newScheduledEndAt?: string },
     actor: { userId: string; role: string; changeSource: OrderChangeSource; reasonSuffix?: string },
   ): Promise<Order> {
     const orderId = order.id;
@@ -1945,6 +1956,13 @@ export class OrdersService {
       throw new ApiException(
         ErrorCode.VAL_001,
         'لازم تبعت الموعد الجديد (new_scheduled_at) أو سلوت محدد (new_slot_id) — واحد بس مش الاتنين',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (target.newScheduledEndAt != null && target.newScheduledAt == null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'الموعد النهائي الجديد يتطلب إرسال موعد البداية الجديد معه',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -1978,7 +1996,7 @@ export class OrdersService {
 
     const previousScheduledAt = order.scheduledAt;
     const customer = actor.role === 'admin' ? await this.customerProfiles.findByProfileIdOrThrow(order.customerId) : null;
-    await this.dataSource.transaction(async (manager) => {
+    const updatedOrder = await this.dataSource.transaction(async (manager) => {
       // كل مسارات إعادة الجدولة تمسك قفل الطلب أولاً ثم السلوت، لمنع deadlock مع موافقة
       // العميل على اقتراح الفني التي تستخدم نفس الترتيب.
       const fresh = await manager
@@ -1988,8 +2006,16 @@ export class OrdersService {
         .getOne();
       if (!fresh) throw new ApiException(ErrorCode.VAL_001, 'الطلب غير موجود', HttpStatus.NOT_FOUND);
       this.assertReschedulable(fresh);
+      const interval = this.resolveRescheduledInterval(fresh, newScheduledAt, target.newScheduledEndAt);
 
       if (newSlot) {
+        if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
+            HttpStatus.CONFLICT,
+          );
+        }
         const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
         if (!booked) {
           throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
@@ -2010,6 +2036,15 @@ export class OrdersService {
             HttpStatus.CONFLICT,
           );
         }
+        if (interval.durationMinutes != null) {
+          await this.assertNoRescheduleIntervalConflict(
+            manager,
+            fresh.technicianId!,
+            newScheduledAt,
+            interval.scheduledEndAt ?? new Date(newScheduledAt.getTime() + interval.durationMinutes * 60_000),
+            orderId,
+          );
+        }
         await manager
           .createQueryBuilder()
           .update(TechnicianScheduleSlot)
@@ -2019,6 +2054,11 @@ export class OrdersService {
       }
 
       fresh.scheduledAt = newScheduledAt;
+      fresh.scheduledEndAt = interval.scheduledEndAt;
+      fresh.durationMinutes = interval.durationMinutes;
+      fresh.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+        ? interval.durationMinutes / 60
+        : null;
       await manager.save(fresh);
       await manager.save(
         manager.create(OrderStatusHistory, {
@@ -2048,16 +2088,16 @@ export class OrdersService {
           deepLink: `/orders/${orderId}`,
         });
       }
+      return fresh;
     });
 
-    order.scheduledAt = newScheduledAt;
     this.events.emit(
       ORDER_RESCHEDULED_EVENT,
       new OrderRescheduledEvent(
-        order.id,
-        order.orderNumber,
-        order.technicianId!,
-        order.customerId,
+        updatedOrder.id,
+        updatedOrder.orderNumber,
+        updatedOrder.technicianId!,
+        updatedOrder.customerId,
         previousScheduledAt,
         newScheduledAt,
         actor.role === 'admin' ? 'admin' : 'customer',
@@ -2065,7 +2105,7 @@ export class OrdersService {
         customer !== null,
       ),
     );
-    return order;
+    return updatedOrder;
   }
 
   private assertReschedulable(order: Order): void {
@@ -2083,6 +2123,76 @@ export class OrdersService {
 
   private slotStart(slot: TechnicianScheduleSlot): Date {
     return new Date(`${slot.slotDate}T${slot.startTime}Z`);
+  }
+
+  private slotEnd(slot: TechnicianScheduleSlot): Date {
+    return new Date(`${slot.slotDate}T${slot.endTime}Z`);
+  }
+
+  private resolveRescheduledInterval(
+    order: Order,
+    newScheduledAt: Date,
+    explicitEndIso?: string,
+  ): { scheduledEndAt: Date | null; durationMinutes: number | null } {
+    if (explicitEndIso != null && order.scheduledEndAt == null) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'تحديد نهاية جديدة متاح فقط للطلبات التي لها بداية ونهاية أصلًا',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    let scheduledEndAt: Date | null = null;
+    if (explicitEndIso != null) {
+      scheduledEndAt = new Date(explicitEndIso);
+      if (Number.isNaN(scheduledEndAt.getTime())) {
+        throw new ApiException(ErrorCode.VAL_001, 'الموعد النهائي الجديد مش تاريخ صالح', HttpStatus.BAD_REQUEST);
+      }
+    } else if (order.scheduledAt && order.scheduledEndAt) {
+      const previousDurationMs = order.scheduledEndAt.getTime() - order.scheduledAt.getTime();
+      scheduledEndAt = new Date(newScheduledAt.getTime() + previousDurationMs);
+    }
+
+    const durationMinutes = scheduledEndAt
+      ? (scheduledEndAt.getTime() - newScheduledAt.getTime()) / 60_000
+      : (order.durationMinutes ?? (order.durationHours == null ? null : Number(order.durationHours) * 60));
+    if (durationMinutes != null && (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes > 525_600)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'مدة الموعد الجديد لازم تكون عدد دقائق صحيحًا وموجبًا وفي حدود سنة',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return { scheduledEndAt, durationMinutes };
+  }
+
+  private async assertNoRescheduleIntervalConflict(
+    manager: EntityManager,
+    technicianId: string,
+    startsAt: Date,
+    endsAt: Date,
+    excludedOrderId: string,
+  ): Promise<void> {
+    const [conflict] = await manager.query<{ order_number: string }[]>(
+      `SELECT order_number FROM orders
+       WHERE technician_id = $1 AND id <> $4
+         AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
+         AND scheduled_at IS NOT NULL
+         AND scheduled_at < $3
+         AND COALESCE(
+               scheduled_end_at,
+               scheduled_at + (COALESCE(duration_minutes, duration_hours * 60) || ' minutes')::interval
+             ) > $2
+       LIMIT 1`,
+      [technicianId, startsAt, endsAt, excludedOrderId],
+    );
+    if (conflict) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        `الفني ده عنده طلب آخر (${conflict.order_number}) متعارض مع الفترة الجديدة`,
+        HttpStatus.CONFLICT,
+      );
+    }
   }
 
   private async rescheduleLockedOrder(
@@ -2124,11 +2234,24 @@ export class OrdersService {
 
     const previousScheduledAt = order.scheduledAt;
     const newScheduledAt = this.slotStart(newSlot);
+    const interval = this.resolveRescheduledInterval(order, newScheduledAt);
+    if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+      throw new ApiException(
+        ErrorCode.VAL_001,
+        'السلوت المقترح أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
+        HttpStatus.CONFLICT,
+      );
+    }
     const booked = await this.scheduleService.rescheduleSlot(order.id, newSlot.id, manager);
     if (!booked) {
       throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
     }
     order.scheduledAt = newScheduledAt;
+    order.scheduledEndAt = interval.scheduledEndAt;
+    order.durationMinutes = interval.durationMinutes;
+    order.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+      ? interval.durationMinutes / 60
+      : null;
     await manager.save(order);
     await manager.save(
       manager.create(OrderStatusHistory, {
@@ -3048,15 +3171,28 @@ export class OrdersService {
       }
       const previousStatus = order.orderStatus;
       const previousScheduledAt = order.scheduledAt;
-      const newScheduledAt = new Date(`${newSlot.slotDate}T${newSlot.startTime}Z`);
+      const newScheduledAt = this.slotStart(newSlot);
       await this.dataSource.transaction(async (manager) => {
         const fresh = await this.lockDisputedOrderForUpdate(manager, orderId, order.orderNumber);
+        const interval = this.resolveRescheduledInterval(fresh, newScheduledAt);
+        if (interval.scheduledEndAt && interval.scheduledEndAt > this.slotEnd(newSlot)) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            'السلوت الجديد أقصر من مدة الطلب — اختار سلوت يغطي وقت الشغل كاملًا',
+            HttpStatus.CONFLICT,
+          );
+        }
         const booked = await this.scheduleService.rescheduleSlot(orderId, newSlot.id, manager);
         if (!booked) {
           throw new ApiException(ErrorCode.VAL_001, 'السلوت ده اتحجز من حد تاني لسه، اختار سلوت تاني', HttpStatus.CONFLICT);
         }
         fresh.orderStatus = OrderStatus.ACCEPTED;
         fresh.scheduledAt = newScheduledAt;
+        fresh.scheduledEndAt = interval.scheduledEndAt;
+        fresh.durationMinutes = interval.durationMinutes;
+        fresh.durationHours = interval.durationMinutes != null && interval.durationMinutes % 60 === 0
+          ? interval.durationMinutes / 60
+          : null;
         await manager.save(fresh);
         await manager.save(
           manager.create(OrderStatusHistory, {

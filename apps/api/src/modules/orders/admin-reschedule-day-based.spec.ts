@@ -239,6 +239,43 @@ describe('OrdersService — إعادة الجدولة باليوم (ADR-0034)', 
     ]);
   });
 
+  it('إعادة الجدولة تحرك الفترة كاملة وتحافظ على السعر، أو تعتمد نهاية جديدة صريحة', async () => {
+    const originalStart = new Date(dayFromNow(3).getTime() + 10 * 60 * 60_000);
+    const originalEnd = new Date(originalStart.getTime() + 8 * 60 * 60_000);
+    const orderId = await insertOrder(`interval-${runId}`, originalStart);
+    await q(
+      `UPDATE orders
+       SET scheduled_end_at=$2, duration_minutes=480, duration_hours=8
+       WHERE id=$1`,
+      [orderId, originalEnd],
+    );
+
+    const movedStart = new Date(dayFromNow(5).getTime() + 12 * 60 * 60_000);
+    const moved = await ordersService.rescheduleByAdmin(
+      ids.adminUser,
+      orderId,
+      { newScheduledAt: movedStart.toISOString() },
+      'تحريك الفترة كاملة',
+    );
+    expect(moved.scheduledAt).toEqual(movedStart);
+    expect(moved.scheduledEndAt).toEqual(new Date(movedStart.getTime() + 8 * 60 * 60_000));
+    expect(moved.durationMinutes).toBe(480);
+    expect(moved.totalAmountCents).toBe(30000);
+
+    const explicitStart = new Date(dayFromNow(6).getTime() + 12 * 60 * 60_000);
+    const explicitEnd = new Date(explicitStart.getTime() + 6 * 60 * 60_000);
+    const resized = await ordersService.rescheduleByAdmin(
+      ids.adminUser,
+      orderId,
+      { newScheduledAt: explicitStart.toISOString(), newScheduledEndAt: explicitEnd.toISOString() },
+      'اعتماد فترة جديدة',
+    );
+    expect(resized.scheduledEndAt).toEqual(explicitEnd);
+    expect(resized.durationMinutes).toBe(360);
+    expect(resized.durationHours).toBe(6);
+    expect(resized.totalAmountCents).toBe(30000);
+  });
+
   it('يوم فيه استثناء blocked صريح من الفني بيترفض — نفس محرك التوافر الموحّد، بلا فحص منفصل', async () => {
     const orderId = await insertOrder(`blk-${runId}`, dayFromNow(3));
     const target = dayFromNow(6);

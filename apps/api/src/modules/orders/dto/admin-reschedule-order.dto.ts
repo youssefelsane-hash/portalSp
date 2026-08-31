@@ -12,6 +12,10 @@ export class AdminRescheduleOrderDto {
   @IsDateString()
   new_scheduled_at?: string;
 
+  @IsOptional()
+  @IsDateString()
+  new_scheduled_end_at?: string;
+
   @IsString()
   @MinLength(5)
   @MaxLength(500)

@@ -11,4 +11,8 @@ export class RescheduleOrderDto {
   @IsOptional()
   @IsDateString()
   new_scheduled_at?: string;
+
+  @IsOptional()
+  @IsDateString()
+  new_scheduled_end_at?: string;
 }

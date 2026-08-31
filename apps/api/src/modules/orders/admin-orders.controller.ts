@@ -363,7 +363,11 @@ export class AdminOrdersController {
       await this.ordersService.rescheduleByAdmin(
         admin.sub,
         id,
-        { newSlotId: dto.new_slot_id, newScheduledAt: dto.new_scheduled_at },
+        {
+          newSlotId: dto.new_slot_id,
+          newScheduledAt: dto.new_scheduled_at,
+          newScheduledEndAt: dto.new_scheduled_end_at,
+        },
         dto.reason,
         audit,
       ),
