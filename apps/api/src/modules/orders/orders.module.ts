@@ -29,6 +29,7 @@ import { OrderItemsService } from './order-items.service';
 import { InspectionQuoteService } from './inspection-quote.service';
 import { OrderInternalNotesService } from './order-internal-notes.service';
 import { OrderMediaService } from './order-media.service';
+import { PricingFieldImagesService } from './pricing-field-images.service';
 import { OrderTeamService } from './order-team.service';
 import { OrderTrackingGateway } from './order-tracking.gateway';
 import { RecurringOrdersService } from './recurring-orders.service';
@@ -87,6 +88,7 @@ import { RealtimeSecurityModule } from '../../common/websocket/realtime-security
     InspectionQuoteService,
     OrderInternalNotesService,
     OrderMediaService,
+    PricingFieldImagesService,
     OrderTeamService,
     OrderTrackingGateway,
     RecurringOrdersService,

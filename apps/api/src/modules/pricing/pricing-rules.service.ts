@@ -80,6 +80,7 @@ export class PricingRulesService {
     // الحقول النشطة للخدمة (machine keys)
     const activeFields = await this.fields.find({ where: { serviceId, isActive: true } });
     const activeFieldKeys = new Set(activeFields.map((f) => f.fieldKey));
+    const imageFieldKeys = new Set(activeFields.filter((f) => f.fieldType === 'image_upload').map((f) => f.fieldKey));
 
     // الثوابت/جداول البحث السارية للخدمة
     const currentRules = await this.listCurrentRulesForService(serviceId);
@@ -95,6 +96,13 @@ export class PricingRulesService {
             throw new ApiException(
               ErrorCode.VAL_001,
               `${ref.path}: الحقل "${ref.key}" مش من ضمن حقول الخدمة النشطة — عدّل المرجع أو فعّل الحقل`,
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          if (imageFieldKeys.has(ref.key)) {
+            throw new ApiException(
+              ErrorCode.VAL_001,
+              `${ref.path}: حقل الصور "${ref.key}" لا يمكن استخدامه داخل الحسابات`,
               HttpStatus.BAD_REQUEST,
             );
           }
@@ -128,6 +136,13 @@ export class PricingRulesService {
               `${ref.path}: جدول البحث "${ref.extraKey}" مربوط بحقل "${ref.key}" مش من ضمن حقول الخدمة النشطة${
                 table && table.field_key !== ref.key ? ' — والربط المحفوظ في الجدول نفسه مختلف عنه' : ''
               }`,
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          if (imageFieldKeys.has(ref.key)) {
+            throw new ApiException(
+              ErrorCode.VAL_001,
+              `${ref.path}: حقل الصور "${ref.key}" لا يمكن ربطه بجدول تسعير`,
               HttpStatus.BAD_REQUEST,
             );
           }

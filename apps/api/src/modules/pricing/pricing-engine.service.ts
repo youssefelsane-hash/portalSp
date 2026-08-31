@@ -325,6 +325,8 @@ export class PricingEngineService {
     const normalized: Record<string, string | number | boolean> = {};
 
     for (const field of fields) {
+      // الصور تتحقق من الملكية والعدد وقت Preview/Create، وممنوع تدخل حساب السعر.
+      if (field.fieldType === PricingFieldType.IMAGE_UPLOAD) continue;
       let value = rawValues[field.fieldKey];
       // بَقّة حقيقية اتلقطت واتصلحت (Script 7 Phase 3): النسخة الأولى كانت بتـ`continue` فورًا
       // بمجرد ما تحسب القيمة الافتراضية، يعني default_value غير صالح (رقم بره min/max، أو قيمة

@@ -40,6 +40,9 @@ export class OrderMedia {
   @Column({ name: 'file_size_bytes', type: 'integer', nullable: true })
   fileSizeBytes: number | null;
 
+  @Column({ name: 'pricing_field_upload_id', type: 'uuid', nullable: true })
+  pricingFieldUploadId: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   caption: string | null;
 

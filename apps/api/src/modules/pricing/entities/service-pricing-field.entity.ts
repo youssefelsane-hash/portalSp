@@ -58,6 +58,12 @@ export class ServicePricingField {
   @Column({ name: 'max_value', type: 'numeric', precision: 12, scale: 2, nullable: true })
   maxValue: string | null;
 
+  @Column({ name: 'min_files', type: 'smallint', nullable: true })
+  minFiles: number | null;
+
+  @Column({ name: 'max_files', type: 'smallint', nullable: true })
+  maxFiles: number | null;
+
   // قيمة افتراضية اختيارية (Script 6 Part 3/4) — نص خام بيتفسّر حسب field_type وقت الاستخدام.
   // لحقول CHECKBOX بلا default_value صريح هنا، الافتراض الضمني false — راجع
   // PricingEngineService.validateAndNormalizeFieldValues().

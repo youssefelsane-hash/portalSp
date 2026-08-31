@@ -59,7 +59,7 @@ import {
   OrderStatus,
   OrderType,
 } from './entities/order.entity';
-import { PricingFieldOption } from '../pricing/entities/service-pricing-field.entity';
+import { PricingFieldOption, PricingFieldType } from '../pricing/entities/service-pricing-field.entity';
 import { RecurringOrderFrequency, RecurringOrderTemplate } from './entities/recurring-order-template.entity';
 import { nextOccurrence } from './recurring-schedule.util';
 import { OrderItem, OrderItemType } from './entities/order-item.entity';
@@ -248,9 +248,16 @@ export class OrdersService {
     if (entries.length === 0) return null;
     try {
       const fields = await manager.query<
-        { field_key: string; label_ar: string; unit_ar: string | null; options: PricingFieldOption[] | null; display_order: number }[]
+        {
+          field_key: string;
+          field_type: string;
+          label_ar: string;
+          unit_ar: string | null;
+          options: PricingFieldOption[] | null;
+          display_order: number;
+        }[]
       >(
-        `SELECT field_key, label_ar, unit_ar, options, display_order
+        `SELECT field_key, field_type, label_ar, unit_ar, options, display_order
            FROM service_pricing_fields
           WHERE service_id = $1 AND deleted_at IS NULL`,
         [serviceId],
@@ -262,7 +269,16 @@ export class OrdersService {
           // قيمة dropdown/multi_select بتيجي كـkey مش نص — بنحلّها للتسمية العربية اللي العميل
           // شافها فعلًا، وإلا الأدمن هيقرا كود زي `type_b` ومش هيفهم منه حاجة.
           const option = field?.options?.find((o) => o.value === String(rawValue));
-          const value = option ? option.label_ar : typeof rawValue === 'boolean' ? (rawValue ? 'نعم' : 'لأ') : String(rawValue);
+          const value =
+            field?.field_type === PricingFieldType.IMAGE_UPLOAD
+              ? `${this.parsePricingFieldImageIds(rawValue).length} صورة مرفوعة`
+              : option
+                ? option.label_ar
+                : typeof rawValue === 'boolean'
+                  ? rawValue
+                    ? 'نعم'
+                    : 'لأ'
+                  : String(rawValue);
           return {
             key,
             // حقل اتمسح من الخدمة بعد كده (أو مفيش صف ليه أصلاً) بيتعرض بمفتاحه بدل ما يختفي.
@@ -278,6 +294,130 @@ export class OrdersService {
     } catch (err) {
       this.logger.warn(`فشل تسجيل مدخلات العميل للطلب (خدمة ${serviceId}) — الطلب بيكمل عادي: ${String(err)}`);
       return null;
+    }
+  }
+
+  private parsePricingFieldImageIds(value: unknown): string[] {
+    if (typeof value !== 'string') return [];
+    return [...new Set(value.split(',').map((id) => id.trim()).filter(Boolean))];
+  }
+
+  private async validatePricingFieldImages(
+    manager: EntityManager,
+    customerId: string,
+    customerUserId: string,
+    serviceId: string,
+    fieldValues: Record<string, string | number | boolean> | undefined,
+    orderId?: string,
+  ): Promise<void> {
+    const fields = await manager.query<
+      {
+        id: string;
+        field_key: string;
+        label_ar: string;
+        is_required: boolean;
+        min_files: number;
+        max_files: number;
+      }[]
+    >(
+      `SELECT id, field_key, label_ar, is_required, min_files, max_files
+         FROM service_pricing_fields
+        WHERE service_id = $1
+          AND field_type = 'image_upload'
+          AND is_active = true
+          AND deleted_at IS NULL
+        ORDER BY display_order, created_at`,
+      [serviceId],
+    );
+
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    for (const field of fields) {
+      const ids = this.parsePricingFieldImageIds(fieldValues?.[field.field_key]);
+      const minimum = Number(field.min_files ?? (field.is_required ? 1 : 0));
+      const maximum = Number(field.max_files ?? 5);
+      if (ids.length < minimum) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `حقل "${field.label_ar}" محتاج ${minimum} صورة على الأقل`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (ids.length > maximum) {
+        throw new ApiException(
+          ErrorCode.VAL_001,
+          `حقل "${field.label_ar}" يسمح بحد أقصى ${maximum} صور`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (ids.length === 0) continue;
+      if (ids.some((id) => !uuidPattern.test(id))) {
+        throw new ApiException(ErrorCode.VAL_001, `صور حقل "${field.label_ar}" غير صالحة`, HttpStatus.BAD_REQUEST);
+      }
+
+      const uploads = await manager.query<
+        {
+          id: string;
+          customer_id: string;
+          service_id: string;
+          field_id: string;
+          storage_key: string;
+          file_url: string;
+          file_size_bytes: number;
+          expires_at: Date;
+          claimed_order_id: string | null;
+        }[]
+      >(
+        `SELECT id, customer_id, service_id, field_id, storage_key, file_url,
+                file_size_bytes, expires_at, claimed_order_id
+           FROM pricing_field_uploads
+          WHERE id = ANY($1::uuid[])
+          ${orderId ? 'FOR UPDATE' : ''}`,
+        [ids],
+      );
+      const byId = new Map(uploads.map((upload) => [upload.id, upload]));
+      for (const id of ids) {
+        const upload = byId.get(id);
+        if (
+          !upload ||
+          upload.customer_id !== customerId ||
+          upload.service_id !== serviceId ||
+          upload.field_id !== field.id
+        ) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            `إحدى صور حقل "${field.label_ar}" لا تخص حسابك أو هذه الخدمة`,
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        if (!upload.claimed_order_id && new Date(upload.expires_at).getTime() <= Date.now()) {
+          throw new ApiException(
+            ErrorCode.VAL_001,
+            `إحدى صور حقل "${field.label_ar}" انتهت صلاحيتها — ارفعها مرة ثانية`,
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+      }
+
+      if (!orderId) continue;
+      for (const id of ids) {
+        const upload = byId.get(id)!;
+        await manager.query(
+          `INSERT INTO order_media
+             (order_id, uploaded_by_user_id, media_type, file_url, storage_key,
+              file_size_bytes, caption, pricing_field_upload_id)
+           VALUES ($1, $2, 'problem_photo', $3, $4, $5, $6, $7)
+           ON CONFLICT (order_id, pricing_field_upload_id)
+             WHERE pricing_field_upload_id IS NOT NULL DO NOTHING`,
+          [orderId, customerUserId, upload.file_url, upload.storage_key, upload.file_size_bytes, field.label_ar, id],
+        );
+        await manager.query(
+          `UPDATE pricing_field_uploads
+              SET claimed_order_id = COALESCE(claimed_order_id, $2),
+                  claimed_at = COALESCE(claimed_at, now())
+            WHERE id = $1`,
+          [id, orderId],
+        );
+      }
     }
   }
 
@@ -930,6 +1070,11 @@ export class OrdersService {
       });
       await manager.save(order);
 
+      // إعادة الزيارة ترث صور الطلب الأصلي ولا تطلب رفعًا جديدًا من العميل.
+      if (!originalOrder) {
+        await this.validatePricingFieldImages(manager, customerProfile.id, userId, service.id, dto.field_values, order.id);
+      }
+
       // حجز السلوت ذرّي جوّه نفس الـtransaction بتاعة إنشاء الطلب — لو حد تاني حجزه في نفس
       // اللحظة (سباق حقيقي بين طلبين)، الطلب كله بيترول باك مش يتعمل بلا سلوت فعلي بيشاور عليه.
       if (scheduleSlot) {
@@ -1261,6 +1406,13 @@ export class OrdersService {
     const customerProfile = await this.customerProfiles.findByUserIdOrThrow(userId);
     const address = await this.addressesService.findOwnedOrThrow(userId, dto.address_id);
     const service = await this.catalogService.findServiceOrThrow(dto.service_id);
+    await this.validatePricingFieldImages(
+      this.dataSource.manager,
+      customerProfile.id,
+      userId,
+      service.id,
+      dto.field_values,
+    );
     const optionalWarranty = await this.resolveOptionalWarranty(dto.warranty_plan_id, service.id);
     this.assertPricingQuantity(service.pricingModel, dto.pricing_quantity);
 
