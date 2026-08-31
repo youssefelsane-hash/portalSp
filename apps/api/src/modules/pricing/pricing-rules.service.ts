@@ -14,6 +14,7 @@ import {
 } from './pricing-references.util';
 import { validateFinalPriceFormulaPayload } from './formula-evaluator';
 import { PRICING_CONTEXT_FIELD_KEYS } from './pricing-context';
+import { connectPricingTimeline, findPricingTimelineNeighbors, lockPricingTimeline } from './pricing-timeline';
 
 const FINAL_PRICE_RULE_KEY = 'final_price';
 
@@ -209,28 +210,45 @@ export class PricingRulesService {
     const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
     const isFutureScheduling = validFrom.getTime() > now.getTime();
 
-    const current = await this.findCurrentRule(serviceId, dto.rule_type, dto.rule_key);
+    const { rule, isNew } = await this.rules.manager.transaction(async (manager) => {
+      await lockPricingTimeline(manager, `pricing-rule:${serviceId}:${dto.rule_type}:${dto.rule_key}`);
+      const repository = manager.getRepository(ServicePricingRule);
+      const timeline = await repository
+        .createQueryBuilder('r')
+        .where('r.service_id = :serviceId', { serviceId })
+        .andWhere('r.rule_type = :ruleType', { ruleType: dto.rule_type })
+        .andWhere('r.rule_key = :ruleKey', { ruleKey: dto.rule_key })
+        .andWhere('r.is_active = true')
+        .andWhere('r.deleted_at IS NULL')
+        .orderBy('r.valid_from', 'ASC')
+        .getMany();
+      const current = [...timeline]
+        .reverse()
+        .find((entry) => entry.validFrom <= now && (!entry.validUntil || entry.validUntil > now)) ?? null;
 
-    let rule: ServicePricingRule;
-    let isNew: boolean;
-    if (isFutureScheduling) {
-      if (current) {
-        current.validUntil = validFrom;
-        await this.rules.save(current);
+      let nextRule: ServicePricingRule;
+      let created = false;
+      if (!isFutureScheduling && current) {
+        nextRule = current;
+      } else {
+        const neighbors = findPricingTimelineNeighbors(timeline, validFrom);
+        const validUntil = connectPricingTimeline(neighbors, validFrom);
+        if (neighbors.predecessor) await repository.save(neighbors.predecessor);
+        nextRule = neighbors.exact ?? repository.create({
+          serviceId,
+          ruleType: dto.rule_type,
+          ruleKey: dto.rule_key,
+          validFrom,
+          validUntil,
+        });
+        nextRule.validUntil = validUntil;
+        created = neighbors.exact === null;
       }
-      rule = this.rules.create({ serviceId, ruleType: dto.rule_type, ruleKey: dto.rule_key, validFrom, validUntil: null });
-      isNew = true;
-    } else if (current) {
-      rule = current;
-      isNew = false;
-    } else {
-      rule = this.rules.create({ serviceId, ruleType: dto.rule_type, ruleKey: dto.rule_key, validFrom, validUntil: null });
-      isNew = true;
-    }
 
-    rule.payload = dto.payload;
-    if (dto.display_order !== undefined) rule.displayOrder = dto.display_order;
-    await this.rules.save(rule);
+      nextRule.payload = dto.payload;
+      if (dto.display_order !== undefined) nextRule.displayOrder = dto.display_order;
+      return { rule: await repository.save(nextRule), isNew: created };
+    });
 
     await this.auditLog.record({
       actorUserId: adminUserId,

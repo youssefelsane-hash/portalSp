@@ -30,6 +30,7 @@ import { randomUUID } from 'node:crypto';
 import { STORAGE_SERVICE, StorageService } from '../../common/storage/storage.service';
 import { uploadWithOrphanCleanup } from '../../common/storage/upload-with-orphan-cleanup.util';
 import { BrandingFileValidationError, validateBrandingFile } from '../branding/branding-file-validator';
+import { connectPricingTimeline, findPricingTimelineNeighbors, lockPricingTimeline } from '../pricing/pricing-timeline';
 
 @Injectable()
 export class AdminCatalogService {
@@ -465,20 +466,6 @@ export class AdminCatalogService {
     });
   }
 
-  /** الصف الساري فعليًا دلوقتي (validFrom <= الآن < validUntil أو validUntil=NULL). */
-  private findCurrentZonePricing(serviceId: string, serviceZoneId: string): Promise<ServiceZonePricing | null> {
-    const now = new Date();
-    return this.zonePricing
-      .createQueryBuilder('p')
-      .where('p.service_id = :serviceId', { serviceId })
-      .andWhere('p.service_zone_id = :serviceZoneId', { serviceZoneId })
-      .andWhere('p.is_active = true')
-      .andWhere('p.valid_from <= :now', { now })
-      .andWhere('(p.valid_until IS NULL OR p.valid_until > :now)', { now })
-      .orderBy('p.valid_from', 'DESC')
-      .getOne();
-  }
-
   // تاريخ سريان (docs/06 §3.10، docs/07 الجزء د) — تعديل بأثر فوري (valid_from غير مبعوت أو
   // <= الآن) بيعدّل الصف الساري حالياً في مكانه (upsert زي زمان). جدولة سعر مستقبلي (valid_from
   // في المستقبل) بتقفل الصف الساري الحالي عند نفس اللحظة (valid_until) وتفتح صف جديد منفصل —
@@ -488,36 +475,6 @@ export class AdminCatalogService {
     const now = new Date();
     const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
     const isFutureScheduling = validFrom.getTime() > now.getTime();
-
-    const current = await this.findCurrentZonePricing(serviceId, dto.service_zone_id);
-
-    let pricing: ServiceZonePricing;
-    let isNew: boolean;
-    if (isFutureScheduling) {
-      // جدولة سعر مستقبلي — الصف الحالي (لو موجود) بيتقفل عند لحظة السريان الجديدة، مش بيتلمس تاني.
-      if (current) {
-        current.validUntil = validFrom;
-        await this.zonePricing.save(current);
-      }
-      pricing = this.zonePricing.create({
-        serviceId,
-        serviceZoneId: dto.service_zone_id,
-        validFrom,
-        validUntil: null,
-      });
-      isNew = true;
-    } else if (current) {
-      pricing = current;
-      isNew = false;
-    } else {
-      pricing = this.zonePricing.create({
-        serviceId,
-        serviceZoneId: dto.service_zone_id,
-        validFrom,
-        validUntil: null,
-      });
-      isNew = true;
-    }
 
     // docs/08 §36.22-23، ADR-0024 — بالظبط واحد من price_cents/modifier_percentage مطلوب حسب
     // الوضع (نفس فرض الداتابيز، بس هنا برسالة عربية واضحة للأدمن قبل ما يوصل لخطأ constraint خام).
@@ -532,31 +489,62 @@ export class AdminCatalogService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (mode === ZonePricingMode.OVERRIDE) {
-      if (dto.price_cents === undefined) {
-        throw new ApiException(ErrorCode.VAL_001, 'وضع الاستبدال الثابت محتاج price_cents', HttpStatus.BAD_REQUEST);
-      }
-      pricing.pricingMode = ZonePricingMode.OVERRIDE;
-      pricing.priceCents = dto.price_cents;
-      pricing.modifierPercentage = null;
-    } else {
-      if (dto.modifier_percentage === undefined) {
-        throw new ApiException(ErrorCode.VAL_001, 'وضع المُعدِّل النسبي محتاج modifier_percentage', HttpStatus.BAD_REQUEST);
-      }
-      pricing.pricingMode = ZonePricingMode.PERCENTAGE;
-      pricing.modifierPercentage = String(dto.modifier_percentage);
-      pricing.priceCents = null;
-      // منع تركيب معامل legacy مخفي فوق النسبة. estimate() كمان يتجاهله للصفوف القديمة، لكن
-      // تصفيره هنا يحافظ على وضوح البيانات لأي تقرير أو تكامل يقرأ الصف مباشرة.
-      pricing.surgeMultiplier = '1';
+    if (mode === ZonePricingMode.OVERRIDE && dto.price_cents === undefined) {
+      throw new ApiException(ErrorCode.VAL_001, 'وضع الاستبدال الثابت محتاج price_cents', HttpStatus.BAD_REQUEST);
     }
-    if (dto.inspection_fee_cents !== undefined) pricing.inspectionFeeCents = dto.inspection_fee_cents;
-    // `surge_multiplier` legacy خاص بوضع السعر الثابت فقط. تجاهله في وضع النسبة يمنع عميل API
-    // قديم من إعادة تركيب معامل ثانٍ فوق النسبة بعد تصفيره أعلاه.
-    if (mode === ZonePricingMode.OVERRIDE && dto.surge_multiplier !== undefined) {
-      pricing.surgeMultiplier = String(dto.surge_multiplier);
+    if (mode === ZonePricingMode.PERCENTAGE && dto.modifier_percentage === undefined) {
+      throw new ApiException(ErrorCode.VAL_001, 'وضع المُعدِّل النسبي محتاج modifier_percentage', HttpStatus.BAD_REQUEST);
     }
-    await this.zonePricing.save(pricing);
+
+    const { pricing, isNew } = await this.zonePricing.manager.transaction(async (manager) => {
+      await lockPricingTimeline(manager, `zone-pricing:${serviceId}:${dto.service_zone_id}`);
+      const repository = manager.getRepository(ServiceZonePricing);
+      const timeline = await repository
+        .createQueryBuilder('p')
+        .where('p.service_id = :serviceId', { serviceId })
+        .andWhere('p.service_zone_id = :serviceZoneId', { serviceZoneId: dto.service_zone_id })
+        .andWhere('p.is_active = true')
+        .orderBy('p.valid_from', 'ASC')
+        .getMany();
+      const current = [...timeline]
+        .reverse()
+        .find((entry) => entry.validFrom <= now && (!entry.validUntil || entry.validUntil > now)) ?? null;
+
+      let nextPricing: ServiceZonePricing;
+      let created = false;
+      if (!isFutureScheduling && current) {
+        nextPricing = current;
+      } else {
+        const neighbors = findPricingTimelineNeighbors(timeline, validFrom);
+        const validUntil = connectPricingTimeline(neighbors, validFrom);
+        if (neighbors.predecessor) await repository.save(neighbors.predecessor);
+        nextPricing = neighbors.exact ?? repository.create({
+          serviceId,
+          serviceZoneId: dto.service_zone_id,
+          validFrom,
+          validUntil,
+        });
+        nextPricing.validUntil = validUntil;
+        created = neighbors.exact === null;
+      }
+
+      if (mode === ZonePricingMode.OVERRIDE) {
+        nextPricing.pricingMode = ZonePricingMode.OVERRIDE;
+        nextPricing.priceCents = dto.price_cents!;
+        nextPricing.modifierPercentage = null;
+      } else {
+        nextPricing.pricingMode = ZonePricingMode.PERCENTAGE;
+        nextPricing.modifierPercentage = String(dto.modifier_percentage);
+        nextPricing.priceCents = null;
+        // A percentage row must not retain a hidden legacy multiplier.
+        nextPricing.surgeMultiplier = '1';
+      }
+      if (dto.inspection_fee_cents !== undefined) nextPricing.inspectionFeeCents = dto.inspection_fee_cents;
+      if (mode === ZonePricingMode.OVERRIDE && dto.surge_multiplier !== undefined) {
+        nextPricing.surgeMultiplier = String(dto.surge_multiplier);
+      }
+      return { pricing: await repository.save(nextPricing), isNew: created };
+    });
 
     await this.auditLog.record({
       actorUserId: adminUserId,
