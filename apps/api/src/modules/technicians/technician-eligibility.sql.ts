@@ -191,10 +191,10 @@ function activeOrderConflictExistsExpr(opts: {
                 ${scheduledAtParam}::timestamptz IS NOT NULL
                 AND (${preciseDurationHoursExpr}) IS NOT NULL
                 AND co.scheduled_at IS NOT NULL
-                AND co.duration_hours IS NOT NULL
+                AND COALESCE(co.duration_minutes, co.duration_hours * 60) IS NOT NULL
                 AND co.scheduled_at < ${scheduledAtParam}::timestamptz
                     + ((${preciseDurationHoursExpr}) || ' hours')::interval
-                AND co.scheduled_at + (co.duration_hours || ' hours')::interval
+                AND co.scheduled_at + (COALESCE(co.duration_minutes, co.duration_hours * 60) || ' minutes')::interval
                     > ${scheduledAtParam}::timestamptz
               )
               OR
@@ -204,7 +204,7 @@ function activeOrderConflictExistsExpr(opts: {
                 AND co.order_status = ANY(${engagedStatusesParam}::order_status[])
               )
               OR COALESCE(co.estimated_duration_days, 0) >= 1
-              OR COALESCE(co.duration_hours, 0) * 60 >= ${fullDayThresholdMinutesParam}::int
+              OR COALESCE(co.duration_minutes, co.duration_hours * 60, 0) >= ${fullDayThresholdMinutesParam}::int
               OR COALESCE(cs.estimated_duration_minutes, 60) >= ${fullDayThresholdMinutesParam}::int
               OR ${serviceDurationExpr} >= ${fullDayThresholdMinutesParam}::int
             )

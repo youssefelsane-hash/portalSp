@@ -35,6 +35,8 @@ export interface OrderResponseDto {
   scheduled_at: string | null;
   // وضع "بداية+نهاية" (ADR-0032) — null دايمًا لأي خدمة تانية غير requiresStartAndEnd.
   scheduled_end_at: string | null;
+  /** المصدر الدقيق لمدة الحجز؛ duration_hours القديم مشتق/متوافق فقط. */
+  duration_minutes: number | null;
   estimated_price_cents: number | null;
   inspection_fee_cents: number;
   /** رسوم الطوارئ الإضافية الصريحة (docs/08 §8) — 0 لأي طلب مش طوارئ. */
@@ -171,6 +173,7 @@ export function toOrderResponseDto(
     customer_inputs: order.customerInputs ?? null,
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     scheduled_end_at: order.scheduledEndAt ? order.scheduledEndAt.toISOString() : null,
+    duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),
     estimated_price_cents: order.estimatedPriceCents,
     inspection_fee_cents: order.inspectionFeeCents,
     surge_amount_cents: order.surgeAmountCents,

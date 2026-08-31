@@ -15,6 +15,7 @@ import { AddressesService } from '../customers/addresses.service';
 import { CustomerProfilesService } from '../customers/customer-profiles.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { PricingModel } from '../catalog/entities/service.entity';
+import { buildPricingContext } from '../pricing/pricing-context';
 import { TechniciansService } from '../technicians/technicians.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateRecurringTemplateDto } from './dto/create-recurring-template.dto';
@@ -212,6 +213,16 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ApiException(ErrorCode.VAL_001, 'أول موعد تنفيذ لازم يكون في المستقبل', HttpStatus.BAD_REQUEST);
     }
 
+    const pricingContext = buildPricingContext({
+      quantity: dto.pricing_quantity,
+      durationHours: dto.duration_hours,
+      scheduledAt: startsAt,
+      scheduledEndAt: dto.scheduled_end_at,
+      serviceFieldValues: dto.field_values,
+      bookingMode: dto.booking_mode,
+      recurringMetadata: { frequency: dto.frequency },
+    });
+
     const template = this.templates.create({
       customerId: customerProfile.id,
       serviceId: dto.service_id,
@@ -226,6 +237,7 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
           ? String(dto.pricing_quantity)
           : null,
       durationHours: dto.duration_hours ?? null,
+      durationMinutes: pricingContext.durationMinutes,
       scheduledEndAt: dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
       problemDescription: dto.problem_description ?? null,
       paymentMethod: dto.payment_method ?? null,
@@ -474,8 +486,14 @@ export class RecurringOrdersService implements OnModuleInit, OnModuleDestroy {
       // سعرها العادي زي أي طلب.
       field_values: template.fieldValues ?? undefined,
       pricing_quantity: template.pricingQuantity == null ? undefined : Number(template.pricingQuantity),
-      duration_hours: template.durationHours ?? undefined,
-      scheduled_end_at: template.scheduledEndAt ? template.scheduledEndAt.toISOString() : undefined,
+      duration_hours:
+        template.durationMinutes == null
+          ? (template.durationHours ?? undefined)
+          : template.durationMinutes / 60,
+      scheduled_end_at:
+        template.scheduledEndAt && template.durationMinutes != null
+          ? new Date(occurrence.scheduledFor.getTime() + template.durationMinutes * 60_000).toISOString()
+          : undefined,
       // دفع قبل التوزيع (docs/08 §19 بند 6) — كانت فجوة حقيقية: صفر payment_method هنا خالص،
       // فكل طلب متولّد من قالب متكرر كان non-prepaid دايمًا مهما كان تفضيل العميل وقت إنشاء
       // القالب. لو الطلب المتولّد بقى PENDING_PAYMENT، sweepPendingPayment() (docs/08 §19 بند

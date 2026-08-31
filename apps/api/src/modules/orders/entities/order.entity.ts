@@ -195,6 +195,10 @@ export class Order {
   @Column({ name: 'duration_hours', type: 'smallint', nullable: true })
   durationHours: number | null;
 
+  /** المصدر الدقيق للمدة. duration_hours باقٍ مؤقتًا للتوافق مع الطلبات والعملاء القدماء. */
+  @Column({ name: 'duration_minutes', type: 'integer', nullable: true })
+  durationMinutes: number | null;
+
   // محرك الإنتاجية (docs/06 §3.3-§3.6) — قرار عمل من المالك: القيم دي snapshot وقت الحجز من
   // CatalogService.estimateDuration()، مش مربوطة ديناميكياً بـservice_standard_data بعد كده
   // (لو الأدمن غيّر الإعداد بعدين، الطلب القديم يفضل موضّح بالقيم اللي اتحسبت بيها وقتها).

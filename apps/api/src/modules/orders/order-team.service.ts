@@ -318,6 +318,9 @@ export class OrderTeamService {
 
   private async getServiceDurationMinutes(order: Order): Promise<number> {
     // docs/01B — مدة الطلب الحقيقية (ADR-0031/0032) بتتقدم على دقائق الخدمة الثابتة
+    if (order.durationMinutes != null && order.durationMinutes > 0) {
+      return order.durationMinutes;
+    }
     if (order.durationHours != null && order.durationHours > 0) {
       return order.durationHours * 60;
     }

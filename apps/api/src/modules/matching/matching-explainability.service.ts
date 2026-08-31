@@ -146,7 +146,7 @@ export class MatchingExplainabilityService {
             activeStatusesParam: '$6',
             engagedStatusesParam: '$10',
             isEmergencyParam: '$11',
-            serviceDurationExpr: "COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
+            serviceDurationExpr: "COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $4::uuid), COALESCE(s.estimated_duration_minutes, 60), 60)",
             fullDayThresholdMinutesParam: '$12',
           })}
         ) AS availability_ok,

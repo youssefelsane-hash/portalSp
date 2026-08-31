@@ -61,8 +61,8 @@ export class TechnicianAssignmentGuardService {
            engagedStatusesParam: '$6',
            isEmergencyParam: '$7',
            serviceDurationExpr:
-             'COALESCE((SELECT o2.duration_hours * 60 FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)',
-           preciseDurationHoursExpr: '(SELECT o2.duration_hours FROM orders o2 WHERE o2.id = $3::uuid)',
+             'COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)',
+           preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $3::uuid)',
            fullDayThresholdMinutesParam: '$8',
          })}
        ) AS available`,
@@ -106,7 +106,12 @@ export class TechnicianAssignmentGuardService {
       technicianId: technician.id,
       scheduledAt: order.scheduledAt,
       excludeOrderId: order.id,
-      serviceDurationMinutes: order.durationHours != null && order.durationHours > 0 ? order.durationHours * 60 : (svc?.estimated_duration_minutes ?? 60),
+      serviceDurationMinutes:
+        order.durationMinutes != null && order.durationMinutes > 0
+          ? order.durationMinutes
+          : order.durationHours != null && order.durationHours > 0
+            ? order.durationHours * 60
+            : (svc?.estimated_duration_minutes ?? 60),
       fullDayThresholdMinutes: fullDayJobMinutes,
     });
     if (tier === 'BLOCKED') {

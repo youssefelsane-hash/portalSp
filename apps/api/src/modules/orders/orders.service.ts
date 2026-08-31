@@ -494,7 +494,11 @@ export class OrdersService {
     // ساعي إضافي وقت التوزيع التلقائي نفسه مؤجّل عمدًا (فجوة موثّقة، مش سهو).
     const preciseScheduleTechnicianId = scheduleSlot?.technicianId ?? requestedTechnicianProfile?.id ?? null;
     if (service.requiresPreciseSchedule && preciseScheduleTechnicianId && dto.scheduled_at && dto.duration_hours) {
-      await this.assertNoPreciseScheduleConflict(preciseScheduleTechnicianId, new Date(dto.scheduled_at), dto.duration_hours);
+      await this.assertNoPreciseScheduleConflict(
+        preciseScheduleTechnicianId,
+        new Date(dto.scheduled_at),
+        dto.duration_hours * 60,
+      );
     }
 
     // "مرن — اختار نطاق أيام" (docs/08 §32.3، طلب مالك صريح 2026-08-20) — بندوّر يوم بيوم داخل
@@ -839,7 +843,13 @@ export class OrdersService {
         orderStatus: OrderStatus.SEARCHING_TECHNICIAN,
         // دقة الوقت (ADR-0031 Slice B) + وضع "عدد ساعات بس" (ADR-0032) — الاتنين بيسجّلوا
         // duration_hours، اتفحصت فوق إنها موجودة/ممنوعة حسب الوضع الفعّال للخدمة.
-        durationHours: service.requiresPreciseSchedule || service.requiresHoursOnly ? (dto.duration_hours ?? null) : null,
+        durationMinutes: pricingContext.durationMinutes,
+        durationHours:
+          (service.requiresPreciseSchedule || service.requiresHoursOnly) &&
+          pricingContext.durationHours !== null &&
+          Number.isInteger(pricingContext.durationHours)
+            ? pricingContext.durationHours
+            : null,
         problemDescription: dto.problem_description ?? null,
         customerNotes: dto.customer_notes ?? null,
         // docs/08 §71 (طلب مالك) — إجابات الفورم الديناميكي كانت بتتخزن في
@@ -1529,15 +1539,15 @@ export class OrdersService {
    * القديمة (اتلغت مع بنية الشغالة المنفصلة، ADR-0031) بس معمّمة على `orders.technician_id` لأي
    * فني عادي بدل جدول حجوزات منفصل. مقصورة على `orders` بس — الفني هنا فني عادي، مفيش جدول تاني.
    */
-  private async assertNoPreciseScheduleConflict(technicianId: string, startsAt: Date, durationHours: number): Promise<void> {
-    const endsAt = new Date(startsAt.getTime() + durationHours * 3_600_000);
+  private async assertNoPreciseScheduleConflict(technicianId: string, startsAt: Date, durationMinutes: number): Promise<void> {
+    const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
     const [conflict] = await this.dataSource.query<{ order_number: string }[]>(
       `SELECT order_number FROM orders
        WHERE technician_id = $1
          AND order_status NOT IN ('cancelled_by_customer', 'cancelled_by_technician', 'cancelled_by_system', 'expired', 'completed', 'refunded')
-         AND scheduled_at IS NOT NULL AND duration_hours IS NOT NULL
+         AND scheduled_at IS NOT NULL AND COALESCE(duration_minutes, duration_hours * 60) IS NOT NULL
          AND scheduled_at < $3
-         AND (scheduled_at + (duration_hours || ' hours')::interval) > $2
+         AND (scheduled_at + (COALESCE(duration_minutes, duration_hours * 60) || ' minutes')::interval) > $2
        LIMIT 1`,
       [technicianId, startsAt, endsAt],
     );
