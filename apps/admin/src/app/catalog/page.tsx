@@ -278,7 +278,6 @@ export default function CatalogPage() {
     const form = new FormData(e.target as HTMLFormElement);
     const inspectionFee = form.get('inspection_fee') as string;
     const estimatedDuration = form.get('estimated_duration_minutes') as string;
-    const commission = form.get('commission_percentage') as string;
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
     const minTechnicianLevel = form.get('min_technician_level') as string;
@@ -304,7 +303,6 @@ export default function CatalogPage() {
       allows_individual: form.get('allows_individual') === 'on',
       allows_team: form.get('allows_team') === 'on',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
-      commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
     };
@@ -639,9 +637,8 @@ export default function CatalogPage() {
                     <Label htmlFor="new_svc_warranty">أيام الضمان</Label>
                     <Input id="new_svc_warranty" name="warranty_days" type="number" min={0} defaultValue={0} dir="ltr" />
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <Label htmlFor="new_svc_commission">نسبة عمولة المنصة %</Label>
-                    <Input id="new_svc_commission" name="commission_percentage" type="number" min={0} max={100} step="0.01" dir="ltr" />
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                    عمولة المنصة الثابتة تتحدد بعد إنشاء الخدمة من مركز سياسة المستحقات.
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">

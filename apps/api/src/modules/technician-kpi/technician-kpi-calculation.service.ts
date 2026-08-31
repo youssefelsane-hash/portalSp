@@ -59,6 +59,12 @@ export class TechnicianKpiCalculationService {
       SELECT DISTINCT technician_id FROM (
         SELECT technician_id FROM orders WHERE technician_id IS NOT NULL AND work_completed_at >= $1 AND work_completed_at < $2 AND deleted_at IS NULL
         UNION
+        SELECT oes.technician_id
+          FROM order_earning_shares oes
+          JOIN orders o ON o.id = oes.order_id
+         WHERE o.work_completed_at >= $1 AND o.work_completed_at < $2
+           AND o.order_status = 'completed' AND o.deleted_at IS NULL AND oes.deleted_at IS NULL
+        UNION
         SELECT technician_id FROM order_assignments WHERE sent_at >= $1 AND sent_at < $2
       ) t
       `,
@@ -78,28 +84,59 @@ export class TechnicianKpiCalculationService {
 
     const [ordersRow] = await this.dataSource.query(
       `
+      WITH participation AS (
+        SELECT o.id, o.order_status,
+               o.platform_commission_cents - COALESCE((
+                 SELECT SUM(rsr.reversal_cents)
+                   FROM refund_settlement_reversals rsr
+                  WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+               ), 0) AS net_platform_commission_cents,
+               o.technician_earning_cents,
+               o.total_amount_cents, COALESCE(oes.share_cents, o.technician_earning_cents) AS my_share_cents
+          FROM orders o
+          LEFT JOIN order_earning_shares oes
+            ON oes.order_id = o.id AND oes.technician_id = $1 AND oes.deleted_at IS NULL
+         WHERE o.work_completed_at >= $2 AND o.work_completed_at < $3 AND o.deleted_at IS NULL
+           AND (oes.technician_id = $1 OR (
+             o.technician_id = $1 AND NOT EXISTS (
+               SELECT 1 FROM order_earning_shares any_share
+                WHERE any_share.order_id = o.id AND any_share.deleted_at IS NULL
+             )
+           ))
+      )
       SELECT
         COUNT(*) FILTER (WHERE order_status = 'completed') AS completed_orders_count,
-        COALESCE(SUM(platform_commission_cents) FILTER (WHERE order_status = 'completed'), 0) AS platform_revenue_cents,
-        COALESCE(SUM(total_amount_cents) FILTER (WHERE order_status = 'completed'), 0) AS order_value_cents
-      FROM orders
-      WHERE technician_id = $1 AND work_completed_at >= $2 AND work_completed_at < $3 AND deleted_at IS NULL
+        COALESCE(SUM(CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
+          THEN ROUND(net_platform_commission_cents::numeric * my_share_cents / technician_earning_cents)
+          ELSE 0 END), 0) AS platform_revenue_cents,
+        COALESCE(SUM(CASE WHEN order_status = 'completed' AND technician_earning_cents > 0
+          THEN ROUND(total_amount_cents::numeric * my_share_cents / technician_earning_cents)
+          ELSE 0 END), 0) AS order_value_cents
+      FROM participation
       `,
       [technicianProfileId, start, end],
     );
 
     const [assignmentsRow] = await this.dataSource.query(
       `
+      WITH assignment_activity AS (
+        SELECT order_id, assignment_status::text AS assignment_status
+          FROM order_assignments
+         WHERE technician_id = $1 AND sent_at >= $2 AND sent_at < $3
+      ), crew_activity AS (
+        SELECT oes.order_id, 'accepted'::text AS assignment_status
+          FROM order_earning_shares oes
+          JOIN orders o ON o.id = oes.order_id
+         WHERE oes.technician_id = $1 AND oes.deleted_at IS NULL
+           AND o.work_completed_at >= $2 AND o.work_completed_at < $3
+           AND NOT EXISTS (SELECT 1 FROM assignment_activity aa WHERE aa.order_id = oes.order_id)
+      ), activity AS (
+        SELECT * FROM assignment_activity UNION ALL SELECT * FROM crew_activity
+      )
       SELECT
-        -- ADR-0018 §5 — بعد التصحيح، عرض اتحل لصالح فني تاني (سبق قبله) بيتحول لـ'cancelled'
-        -- بدل ما يستنى TIMEOUT (التايم آوت بقى مش بيتسجّل خالص لعروض حية — راجع
-        -- matching-round-expiry.processor.ts). 'timeout' متسيّبة في القايمة لتوافق بيانات
-        -- تاريخية قبل التصحيح، 'cancelled' اتضافت عشان "اتعرض عليه بس فني تاني سبقه" يفضل
-        -- محسوب في معدّل الاستجابة زي ما كان قبل كده بالظبط (مفيش تراجع في دقة الـKPI).
         COUNT(*) FILTER (WHERE assignment_status IN ('accepted', 'rejected', 'timeout', 'cancelled')) AS offered_orders_count,
         COUNT(*) FILTER (WHERE assignment_status = 'accepted') AS accepted_orders_count
-      FROM order_assignments
-      WHERE technician_id = $1 AND sent_at >= $2 AND sent_at < $3
+      FROM activity
       `,
       [technicianProfileId, start, end],
     );

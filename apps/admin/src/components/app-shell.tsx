@@ -18,6 +18,7 @@ import {
   CalendarClock,
   ClipboardCheck,
   ClipboardList,
+  Coins,
   DollarSign,
   GraduationCap,
   Home,
@@ -115,6 +116,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'المالية',
     items: [
+      { href: '/earnings-policy', label: 'سياسة المستحقات', icon: Coins, permission: 'earnings_policy.view' },
       { href: '/projects', label: 'المشروعات', icon: Building2, permission: 'projects.view' },
       { href: '/warranty-plans', label: 'خطط الضمان', icon: ShieldCheck, permission: 'warranty.manage' },
       { href: '/warranty-claims', label: 'مطالبات الضمان', icon: ShieldCheck, permission: 'warranty.view' },

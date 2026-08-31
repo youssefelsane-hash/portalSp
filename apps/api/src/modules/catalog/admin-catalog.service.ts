@@ -338,7 +338,6 @@ export class AdminCatalogService {
       requiresHoursOnly: dto.requires_hours_only ?? false,
       requiresStartAndEnd: dto.requires_start_and_end ?? false,
       minTechnicianLevel: dto.min_technician_level,
-      commissionPercentage: dto.commission_percentage !== undefined ? String(dto.commission_percentage) : undefined,
       displayOrder: dto.display_order ?? 0,
       launchPhase: dto.launch_phase ?? 1,
       searchKeywords: dto.search_keywords ?? [],
@@ -420,7 +419,6 @@ export class AdminCatalogService {
       requiresStartAndEnd: service.requiresStartAndEnd,
     });
     if (dto.min_technician_level !== undefined) service.minTechnicianLevel = dto.min_technician_level;
-    if (dto.commission_percentage !== undefined) service.commissionPercentage = String(dto.commission_percentage);
     if (dto.display_order !== undefined) service.displayOrder = dto.display_order;
     if (dto.launch_phase !== undefined) service.launchPhase = dto.launch_phase;
     if (dto.search_keywords !== undefined) service.searchKeywords = dto.search_keywords;

@@ -4,6 +4,7 @@ import { Order } from '../orders/entities/order.entity';
 import { SettingsService } from '../settings/settings.service';
 import { CrewParticipant, CrewShare, splitCrewEarnings } from './crew-earning-split';
 import { OrderEarningShare } from './entities/order-earning-share.entity';
+import { EarningsCalculationResult } from './earnings-calculator';
 
 /**
  * حصص الطاقم من مستحقات الشغلانة (ADR-0040، docs/08 §63.أ3).
@@ -172,6 +173,78 @@ export class CrewEarningsService {
       );
     }
     return shares;
+  }
+
+  /** Writes the complete immutable V2 explanation used by settlement, preview, audit, and refund. */
+  async recordV2Shares(
+    manager: EntityManager,
+    order: Order,
+    calculation: EarningsCalculationResult,
+  ): Promise<CrewShare[]> {
+    const existing = await this.listForOrder(manager, order.id);
+    if (existing.length > 0) return this.toCrewShares(existing);
+
+    for (const share of calculation.participantShares) {
+      const participantRole: CrewShare['participantRole'] = share.isLeader
+        ? 'leader'
+        : share.earningRole === 'assistant'
+          ? 'assistant'
+          : 'team_member';
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(OrderEarningShare)
+        .values({
+          orderId: order.id,
+          technicianId: share.technicianId,
+          participantRole,
+          technicianLevel: share.technicianLevel,
+          shareWeight: (share.levelWeightBps / 10_000).toFixed(2),
+          poolCents: calculation.workerPoolCents,
+          shareCents: share.shareCents,
+          calculationMethod: share.calculationMethod,
+          assistantBaseWageCents: null,
+          assistantLevelMultiplier: null,
+          assistantTargetCents: null,
+          settlementPolicyVersion: 2,
+          calculationAlgorithmVersion: calculation.calculationAlgorithmVersion,
+          technicianKindSnapshot: share.technicianKindSnapshot,
+          earningRole: share.earningRole,
+          levelWeightBpsSnapshot: share.levelWeightBps,
+          assistantRatioBpsSnapshot: share.assistantRatioBps,
+          serviceSkillSnapshot: share.serviceSkill,
+          serviceSkillFactorBpsSnapshot: share.serviceSkillFactorBps,
+          individualAdjustmentBpsSnapshot: share.individualAdjustmentBps ?? 0,
+          orderAdjustmentBpsSnapshot: share.orderAdjustmentBps ?? 0,
+          effectiveWeightUnits: share.effectiveWeightUnits,
+        })
+        .orIgnore()
+        .execute();
+    }
+
+    return calculation.participantShares.map((share) => ({
+      technicianId: share.technicianId,
+      participantRole: share.isLeader ? 'leader' : share.earningRole === 'assistant' ? 'assistant' : 'team_member',
+      technicianLevel: share.technicianLevel,
+      shareWeight: share.levelWeightBps / 10_000,
+      shareCents: share.shareCents,
+      calculationMethod: 'earnings_policy_v2',
+    }));
+  }
+
+  private toCrewShares(rows: OrderEarningShare[]): CrewShare[] {
+    return rows.map((row) => ({
+      technicianId: row.technicianId,
+      participantRole: row.participantRole,
+      technicianLevel: row.technicianLevel,
+      shareWeight: Number(row.shareWeight),
+      assistantBaseWageCents: row.assistantBaseWageCents,
+      assistantLevelMultiplier:
+        row.assistantLevelMultiplier !== null ? Number(row.assistantLevelMultiplier) : null,
+      assistantTargetCents: row.assistantTargetCents,
+      calculationMethod: row.calculationMethod,
+      shareCents: row.shareCents,
+    }));
   }
 
   /** حصص طلب واحد — للعرض عند الأدمن وفي تطبيق الفني. */

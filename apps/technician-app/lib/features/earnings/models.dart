@@ -109,24 +109,13 @@ class StatementJob {
   final String orderNumber;
   final String? serviceNameAr;
   final String closedAt;
-  final int originalPriceCents;
-  final int additionalWorkCents;
-  final int levelPremiumCents;
-  final int customerDiscountCents;
-  final int customerPaidCents;
-  final int commissionableBaseCents;
-  final double commissionRatePercentage;
-  final int platformCommissionCents;
-
-  /// **دايمًا صفر** — بيتعرض صراحةً عشان الفني يشوف بعينه إن الكوبون ما اتخصمش منه.
-  final int discountBorneByTechnicianCents;
 
   /// دورك في الشغلانة دي — 'leader' لطلب فردي أو لو إنت قائد الفريق، أو 'team_member'/'assistant'
   /// لو كنت عضو مساند بس (§90.1).
   final String participantRole;
 
-  /// لو الطلب اتسترد، الجزء اللي اتخصم فعليًا من محفظتك رجوعًا للمنصة (§90.1) — صفر يعني مفيش
-  /// استرداد أو إنك مش قائد الشغلانة (الاسترداد بيتعكس من محفظة القائد بس).
+  /// لو الطلب اتسترد، الجزء اللي اتخصم فعليًا من حصتك رجوعًا للمنصة (§90.1). كل فرد بيتحمل
+  /// عكس حصته الأصلية فقط، سواء كان قائدًا أو عضو فريق أو مساعدًا.
   final int refundReversalCents;
   final int grossTechnicianEarningCents;
   final int cashCollectedCents;
@@ -137,15 +126,6 @@ class StatementJob {
     required this.orderNumber,
     required this.serviceNameAr,
     required this.closedAt,
-    required this.originalPriceCents,
-    required this.additionalWorkCents,
-    required this.levelPremiumCents,
-    required this.customerDiscountCents,
-    required this.customerPaidCents,
-    required this.commissionableBaseCents,
-    required this.commissionRatePercentage,
-    required this.platformCommissionCents,
-    required this.discountBorneByTechnicianCents,
     required this.participantRole,
     required this.refundReversalCents,
     required this.grossTechnicianEarningCents,
@@ -158,17 +138,6 @@ class StatementJob {
     orderNumber: json['orderNumber'] as String,
     serviceNameAr: json['serviceNameAr'] as String?,
     closedAt: json['closedAt'] as String,
-    originalPriceCents: json['originalPriceCents'] as int? ?? 0,
-    additionalWorkCents: json['additionalWorkCents'] as int? ?? 0,
-    levelPremiumCents: json['levelPremiumCents'] as int? ?? 0,
-    customerDiscountCents: json['customerDiscountCents'] as int? ?? 0,
-    customerPaidCents: json['customerPaidCents'] as int? ?? 0,
-    commissionableBaseCents: json['commissionableBaseCents'] as int? ?? 0,
-    commissionRatePercentage:
-        (json['commissionRatePercentage'] as num?)?.toDouble() ?? 0,
-    platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
-    discountBorneByTechnicianCents:
-        json['discountBorneByTechnicianCents'] as int? ?? 0,
     participantRole: json['participantRole'] as String? ?? 'leader',
     refundReversalCents: json['refundReversalCents'] as int? ?? 0,
     grossTechnicianEarningCents:
@@ -179,26 +148,12 @@ class StatementJob {
 }
 
 class StatementTotals {
-  final int originalPriceCents;
-  final int additionalWorkCents;
-  final int levelPremiumCents;
-  final int customerDiscountCents;
-  final int customerPaidCents;
-  final int platformCommissionCents;
-  final int discountBorneByTechnicianCents;
   final int refundReversalCents;
   final int grossTechnicianEarningCents;
   final int cashCollectedCents;
   final int netTechnicianDueCents;
 
   StatementTotals({
-    required this.originalPriceCents,
-    required this.additionalWorkCents,
-    required this.levelPremiumCents,
-    required this.customerDiscountCents,
-    required this.customerPaidCents,
-    required this.platformCommissionCents,
-    required this.discountBorneByTechnicianCents,
     required this.refundReversalCents,
     required this.grossTechnicianEarningCents,
     required this.cashCollectedCents,
@@ -207,14 +162,6 @@ class StatementTotals {
 
   factory StatementTotals.fromJson(Map<String, dynamic> json) =>
       StatementTotals(
-        originalPriceCents: json['originalPriceCents'] as int? ?? 0,
-        additionalWorkCents: json['additionalWorkCents'] as int? ?? 0,
-        levelPremiumCents: json['levelPremiumCents'] as int? ?? 0,
-        customerDiscountCents: json['customerDiscountCents'] as int? ?? 0,
-        customerPaidCents: json['customerPaidCents'] as int? ?? 0,
-        platformCommissionCents: json['platformCommissionCents'] as int? ?? 0,
-        discountBorneByTechnicianCents:
-            json['discountBorneByTechnicianCents'] as int? ?? 0,
         refundReversalCents: json['refundReversalCents'] as int? ?? 0,
         grossTechnicianEarningCents:
             json['grossTechnicianEarningCents'] as int? ?? 0,

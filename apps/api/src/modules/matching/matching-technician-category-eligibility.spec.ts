@@ -168,7 +168,11 @@ describe('MatchingService.findEligibleTechnicians() — أهلية بمستوى 
       await q(`DELETE FROM addresses WHERE id = $1`, [ids.address]);
       await q(`DELETE FROM customer_profiles WHERE id = $1`, [ids.customerProfile]);
       await q(`DELETE FROM technician_profiles WHERE id = ANY($1::uuid[])`, [technicianIds]);
+      if (technicianUserIds.length) {
+        await q(`DELETE FROM notifications WHERE user_id = ANY($1::uuid[])`, [technicianUserIds]);
+      }
       if (technicianUserIds.length) await q(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [technicianUserIds]);
+      await q(`DELETE FROM notifications WHERE user_id = $1`, [ids.customerUser]);
       await q(`DELETE FROM users WHERE id = $1`, [ids.customerUser]);
       await q(`DELETE FROM services WHERE id = ANY($1::uuid[])`, [[ids.serviceA, ids.serviceB]]);
       await q(`DELETE FROM service_categories WHERE id = $1`, [ids.category]);

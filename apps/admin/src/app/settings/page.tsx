@@ -68,7 +68,7 @@ const LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH = new Set([
   'legal.support_phone',
 ]);
 
-const COMMISSION_BASE_KEYS = [
+const LEGACY_EARNINGS_KEYS = [
   'commission_base.include_level_premium',
   'commission_base.include_zone_surge',
   'commission_base.include_emergency_surcharge',
@@ -78,10 +78,13 @@ const COMMISSION_BASE_KEYS = [
   'commission_base.include_warranty',
   'commission_base.include_installment_interest',
   'commission_base.discount_reduces_technician_share',
-  'pricing.auto_match_level_premium',
+  'commission.individual_adjustment_percentage',
+  'commission.team_adjustment_percentage',
+  'commission.emergency_adjustment_percentage',
+  'crew.assistant_share_ratio',
 ];
 
-const COMMISSION_BASE_LABELS: Record<string, string> = {
+const LEGACY_EARNINGS_LABELS: Record<string, string> = {
   'commission_base.include_level_premium': 'مضاعف مستوى الفني',
   'commission_base.include_zone_surge': 'مضاعف المنطقة / التضخم',
   'commission_base.include_emergency_surcharge': 'رسوم الطوارئ',
@@ -91,8 +94,13 @@ const COMMISSION_BASE_LABELS: Record<string, string> = {
   'commission_base.include_warranty': 'الضمان الاختياري',
   'commission_base.include_installment_interest': 'فوائد / رسوم التقسيط',
   'commission_base.discount_reduces_technician_share': 'الخصم يتخصم من نصيب الفني',
-  'pricing.auto_match_level_premium': 'فرق الفني المميّز في الاختيار التلقائي',
+  'commission.individual_adjustment_percentage': 'فرق عمولة الطلب الفردي',
+  'commission.team_adjustment_percentage': 'فرق عمولة طلب الفريق',
+  'commission.emergency_adjustment_percentage': 'فرق عمولة طلب الطوارئ',
+  'crew.assistant_share_ratio': 'نسبة حصة المساعد القديمة',
 };
+
+const CENTRAL_EARNINGS_KEYS = ['earnings.v2_cutover_enabled', 'earnings.v2_shadow_enabled'];
 
 const PAYMENT_CHANNEL_LABELS: Record<string, string> = {
   cash: 'الدفع بعد الخدمة (كاش)',
@@ -229,7 +237,10 @@ export default function SettingsPage() {
 
   // المفاتيح دي ليها كارت مخصص تحت — بنستبعدها من العرض العام عشان ما تتكررش.
   const generalSettings = (settings ?? []).filter(
-    (s) => !COMMISSION_BASE_KEYS.includes(s.key) && !LEGAL_ENTITY_KEYS.includes(s.key),
+    (s) =>
+      !LEGACY_EARNINGS_KEYS.includes(s.key) &&
+      !CENTRAL_EARNINGS_KEYS.includes(s.key) &&
+      !LEGAL_ENTITY_KEYS.includes(s.key),
   );
   const legalEntitySettings = LEGAL_ENTITY_KEYS.map((key) => (settings ?? []).find((s) => s.key === key)).filter(
     (s): s is SettingResponseDto => s !== undefined,
@@ -237,9 +248,10 @@ export default function SettingsPage() {
   const missingBeforeLaunch = legalEntitySettings.filter(
     (s) => LEGAL_ENTITY_REQUIRED_BEFORE_LAUNCH.has(s.key) && String(s.value ?? '').replace(/"/g, '').trim() === '',
   );
-  const commissionBaseSettings = COMMISSION_BASE_KEYS.map((key) =>
+  const legacyEarningsSettings = LEGACY_EARNINGS_KEYS.map((key) =>
     (settings ?? []).find((s) => s.key === key),
   ).filter((s): s is SettingResponseDto => s !== undefined);
+  const earningsV2Enabled = (settings ?? []).find((s) => s.key === 'earnings.v2_cutover_enabled')?.value === true;
   const groups = Array.from(new Set(generalSettings.map((s) => s.group_name))).sort();
 
   return (
@@ -323,18 +335,21 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      {commissionBaseSettings.length > 0 && (
+      {legacyEarningsSettings.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle className="text-base">تقسيم الإيراد: إيه اللي الفني بياخد منه نصيب؟</CardTitle>
+            <CardTitle className="text-base">إعدادات تسوية V1 القديمة</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="mb-4 text-sm text-muted-foreground">
-              نسبة عمولة الشركة بتتطبّق على <strong>وعاء العمولة</strong> بس — مش على إجمالي الطلب.
-              أي مكوّن مطفي هنا بيروح للشركة <strong>100%</strong> والفني مالوش فيه نصيب. سعر الشغل
-              الأساسي دايمًا داخل الوعاء (هو تعريف &quot;الشغل&quot; نفسه) فمفيش مفتاح ليه.
+              الإعدادات دي موجودة فقط لتشغيل الطلبات القديمة قبل الانتقال. الطلبات V2 تستخدم العمولة
+              الثابتة والأوزان من صفحة <strong>سياسة الأرباح</strong> ولا تقرأ أي قيمة من هنا.
             </p>
-            <Table>
+            {earningsV2Enabled ? (
+              <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+                محرك V2 مفعّل؛ إعدادات V1 متوقفة للقراءة التاريخية فقط ولا يمكن تعديلها.
+              </div>
+            ) : <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>المكوّن</TableHead>
@@ -343,10 +358,10 @@ export default function SettingsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {commissionBaseSettings.map((setting) => (
+                {legacyEarningsSettings.map((setting) => (
                   <TableRow key={setting.key}>
                     <TableCell className="font-medium">
-                      {COMMISSION_BASE_LABELS[setting.key] ?? setting.key}
+                      {LEGACY_EARNINGS_LABELS[setting.key] ?? setting.key}
                       <span className="block text-xs text-muted-foreground" dir="ltr">
                         {setting.key}
                       </span>
@@ -364,7 +379,7 @@ export default function SettingsPage() {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+            </Table>}
           </CardContent>
         </Card>
       )}

@@ -31,7 +31,7 @@ String _monthLabel(String month) {
 /// «مستحقاتي» — كشف الشهر (docs/08 §61.1، ADR-0038).
 ///
 /// كل الحساب بيتم في الباك-إند؛ الشاشة دي عرض بحت. ولا الفني ولا الأدمن بيحسب أي حاجة يدوي،
-/// والرقم اللي بيشوفه الفني هنا هو **نفس** الرقم اللي بيشوفه الأدمن (نفس الـservice بالحرف).
+/// والـAPI العام بيرجع للعامل حصته وحركة محفظته فقط؛ تفاصيل الطلب والمنصة تفضل للأدمن.
 class MonthlyStatementScreen extends StatefulWidget {
   const MonthlyStatementScreen({super.key, required this.auth});
 
@@ -179,9 +179,16 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'نصيبك ${_egp(statement.totals.grossTechnicianEarningCents)} · كاش استلمته ${_egp(statement.totals.cashCollectedCents)}',
+              'إجمالي نصيبك ${_egp(statement.totals.grossTechnicianEarningCents)} · كاش استلمته ${_egp(statement.totals.cashCollectedCents)}',
               style: TextStyle(fontSize: 12, color: foreground),
             ),
+            if (statement.totals.refundReversalCents > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                'استردادات اتخصمت من حصتك ${_egp(statement.totals.refundReversalCents)}',
+                style: TextStyle(fontSize: 12, color: foreground),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(
               'من ${statement.monthStart} لـ ${statement.monthEnd}',
@@ -190,22 +197,6 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
                 color: foreground.withValues(alpha: 0.75),
               ),
             ),
-            if (statement.totals.customerDiscountCents > 0) ...[
-              const SizedBox(height: 10),
-              // طلب مالك صريح: الفني لازم يشوف بعينه إن الكوبونات ما اتخصمتش منه.
-              Row(
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: foreground),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'فيه خصومات على العملاء بقيمة ${_egp(statement.totals.customerDiscountCents)} — الشركة تحمّلتها بالكامل، ومستحقاتك مش متأثرة بيها.',
-                      style: TextStyle(fontSize: 12, color: foreground),
-                    ),
-                  ),
-                ],
-              ),
-            ],
           ],
         ),
       ),
@@ -230,40 +221,13 @@ class _MonthlyStatementScreenState extends State<MonthlyStatementScreen> {
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         children: [
-          // شغلانة طاقم: السطور الجاية (السعر الأصلي، العمولة...) بتوصف الطلب كله مش نصيبك بس —
-          // ده السياق اللي بيوضّح تكوين نصيبك، مش رقم مفروض يتجمع عليه (§90.1).
-          _row('السعر الأصلي للخدمة', _egp(job.originalPriceCents)),
-          if (job.additionalWorkCents > 0)
-            _row('زيادات أثناء الشغل', _egp(job.additionalWorkCents)),
-          if (job.levelPremiumCents > 0)
-            _row('فرق مستواك (فني مميّز)', _egp(job.levelPremiumCents)),
-          if (job.customerDiscountCents > 0) ...[
-            _row('خصم العميل', '− ${_egp(job.customerDiscountCents)}'),
-            _row('اللي العميل دفعه', _egp(job.customerPaidCents)),
-            // السطر ده مقصود يفضل ظاهر حتى وهو صفر — هو الإجابة على السؤال "الكوبون خصم مني؟".
-            _row(
-              'خصم محمّل عليك',
-              _egp(job.discountBorneByTechnicianCents),
-              highlight: true,
-            ),
-          ],
-          const Divider(),
-          // كان بيتحسب بطرح صافي مستحقك من الوعاء — غلط لشغلانات الطاقم (نصيبك مش الوعاء كله)
-          // ولكوبونات المنصة المموّلة بالكامل (تظهر عمولة موجبة رغم إن المنصة فعليًا دافعة فرق،
-          // platformCommissionCents سالبة في الحالة دي) — استخدام الحقل الجاهز من الباك-إند أدق.
-          _row(
-            'عمولة الشركة (${job.commissionRatePercentage.toStringAsFixed(0)}%)',
-            job.platformCommissionCents >= 0
-                ? '− ${_egp(job.platformCommissionCents)}'
-                : '+ ${_egp(job.platformCommissionCents.abs())} (الشركة تحمّلت الفرق)',
-          ),
+          _row('نصيبك من الشغل', _egp(job.grossTechnicianEarningCents)),
           if (job.refundReversalCents > 0)
             _row(
               'اتخصم بسبب استرداد للعميل',
               '− ${_egp(job.refundReversalCents)}',
               highlight: true,
             ),
-          _row('نصيبك من الشغل', _egp(job.grossTechnicianEarningCents)),
           if (job.cashCollectedCents > 0)
             _row(
               'كاش استلمته من العميل',

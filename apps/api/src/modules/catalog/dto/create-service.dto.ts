@@ -184,12 +184,6 @@ export class CreateServiceDto {
   min_technician_level?: TechnicianLevel;
 
   @IsOptional()
-  @IsNumber()
-  @IsPositive()
-  @Max(100)
-  commission_percentage?: number;
-
-  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(32767)

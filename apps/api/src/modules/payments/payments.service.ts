@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, EntityManager, In, MoreThan, Repository } from 'typeorm';
@@ -59,6 +59,9 @@ import { CrewEarningsService } from './crew-earnings.service';
 import { splitOrderRevenue } from '../pricing/commission-base';
 import { splitCrewEarnings } from './crew-earning-split';
 import { allocateCrewRefundReversal } from './crew-refund-allocation';
+import { EarningsPolicyService } from './earnings-policy.service';
+import { calculateEarningsV2, EarningsCalculationResult } from './earnings-calculator';
+import { allocateSettlementRefundReversal } from './settlement-refund-allocation';
 
 /** docs/08 §60.2 — الحقول المالية الوحيدة المسموح بخروجها لمسارات الفني. */
 export interface TechnicianMoneyView {
@@ -138,6 +141,7 @@ export class PaymentsService {
     // بتبني PaymentsService بـpositional args ما تتكسرش.
     @InjectRepository(Installment) private readonly installments: Repository<Installment>,
     private readonly crewEarningsService: CrewEarningsService,
+    @Optional() private readonly earningsPolicyService?: EarningsPolicyService,
   ) {}
 
   /** نفس isIdempotencyKeyViolation في orders.service — 23505 raw → استرجاع بدل 500. */
@@ -170,13 +174,50 @@ export class PaymentsService {
     } satisfies RefundResolvedEvent);
   }
 
+  private async reverseParticipantRefund(
+    manager: EntityManager,
+    technicianId: string,
+    reversalCents: number,
+    platformWalletId: string,
+    refundId: string,
+    orderNumber: string,
+  ): Promise<void> {
+    const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(technicianId);
+    const technicianWallet = await this.walletsService.getOrCreateWallet(
+      technicianProfile.userId,
+      WalletOwnerType.TECHNICIAN,
+      manager,
+    );
+    await this.walletsService.doubleEntry(
+      {
+        fromWalletId: technicianWallet.id,
+        toWalletId: platformWalletId,
+        amountCents: reversalCents,
+        transactionType: WalletTxType.REFUND,
+        referenceType: 'refund',
+        referenceId: refundId,
+        descriptionAr: `عكس نصيبك من استرجاع طلب ${orderNumber}`,
+        allowNegativeBalance: true,
+      },
+      manager,
+    );
+  }
+
   /**
    * عمولة المنصة = عمولة الخدمة الأساسية + فرق مستوى الفني (سالب عادةً — مستوى أعلى يعني عمولة
    * منصة أقل، حافز جودة حقيقي). المجموع محدود بين 0 و100% دفاعياً حتى لو إعدادات المستوى غلط.
    */
   private async computeSettlement(
     order: Order,
-  ): Promise<{ platformCommissionCents: number; technicianEarningCents: number; commissionRateApplied: number; warrantyDays: number }> {
+    manager: EntityManager = this.dataSource.manager,
+    lockOrder = false,
+  ): Promise<{
+    platformCommissionCents: number;
+    technicianEarningCents: number;
+    commissionRateApplied: number | null;
+    warrantyDays: number;
+    v2Calculation: EarningsCalculationResult | null;
+  }> {
     // نفس بَقّة §64.أ بالظبط بس في مسار الفلوس: لو الخدمة اتوقفت (is_active=false) أو اتحذفت
     // بعد ما الطلب اتعمل، findServiceOrThrow() كانت هترمي 404 فالتسوية نفسها تفشل — يعني الفني
     // ما ياخدش فلوسه والطلب ما يقفلش، بسبب تغيير في الكتالوج ملوش أي علاقة بالطلب ده. نسبة
@@ -186,6 +227,26 @@ export class PaymentsService {
     if (!service) {
       throw new ApiException(ErrorCode.VAL_001, 'الخدمة غير موجودة', HttpStatus.NOT_FOUND);
     }
+
+    if (order.settlementPolicyVersion === 2) {
+      if (!this.earningsPolicyService) {
+        throw new Error('EarningsPolicyService is required to settle a V2 order');
+      }
+      const calculation = await this.earningsPolicyService.calculateOrder(
+        order.id,
+        order.totalAmountCents,
+        manager,
+        lockOrder,
+      );
+      return {
+        platformCommissionCents: calculation.platformCommissionCents,
+        technicianEarningCents: calculation.workerPoolCents,
+        commissionRateApplied: null,
+        warrantyDays: service.warrantyDays,
+        v2Calculation: calculation,
+      };
+    }
+
     let commissionRateApplied = Number(service.commissionPercentage);
 
     if (order.technicianId) {
@@ -220,7 +281,70 @@ export class PaymentsService {
       commissionableBaseCents,
       commissionRatePercentage: commissionRateApplied,
     });
-    return { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays: service.warrantyDays };
+    await this.recordV2ShadowComparison(
+      manager,
+      order,
+      service.platformCommissionCents,
+      platformCommissionCents,
+      technicianEarningCents,
+    );
+    return {
+      platformCommissionCents,
+      technicianEarningCents,
+      commissionRateApplied,
+      warrantyDays: service.warrantyDays,
+      v2Calculation: null,
+    };
+  }
+
+  private async recordV2ShadowComparison(
+    manager: EntityManager,
+    order: Order,
+    configuredFixedCommissionCents: number | null,
+    legacyPlatformCents: number,
+    legacyWorkerPoolCents: number,
+  ): Promise<void> {
+    if (
+      !this.earningsPolicyService ||
+      !order.technicianId ||
+      configuredFixedCommissionCents == null ||
+      configuredFixedCommissionCents > order.totalAmountCents ||
+      !(await this.settingsService.getBoolean('earnings.v2_shadow_enabled', true))
+    ) {
+      return;
+    }
+    try {
+      const participants = await this.earningsPolicyService.resolveParticipants(order.id, manager);
+      const comparison = calculateEarningsV2(order.totalAmountCents, configuredFixedCommissionCents, participants);
+      await manager.query(
+        `INSERT INTO earnings_shadow_comparisons
+          (order_id, legacy_platform_cents, legacy_worker_pool_cents, v2_platform_cents,
+           v2_worker_pool_cents, v2_participant_shares, absolute_delta_cents)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
+         ON CONFLICT (order_id) DO NOTHING`,
+        [
+          order.id,
+          legacyPlatformCents,
+          legacyWorkerPoolCents,
+          comparison.platformCommissionCents,
+          comparison.workerPoolCents,
+          JSON.stringify(
+            comparison.participantShares.map((share) => ({
+              technician_id: share.technicianId,
+              earning_role: share.earningRole,
+              share_cents: share.shareCents,
+            })),
+          ),
+          Math.abs(comparison.platformCommissionCents - legacyPlatformCents),
+        ],
+      );
+    } catch (error) {
+      // Shadow mode must never block a valid V1 payment. Missing policy data remains visible as
+      // readiness debt and in logs, while the historical settlement completes unchanged.
+      this.logger.warn(
+        `V2 shadow comparison skipped for ${order.orderNumber}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**
@@ -271,13 +395,22 @@ export class PaymentsService {
     const viewerId = viewerTechnicianProfileId ?? order.technicianId;
     if (viewerId && order.technicianId && poolCents > 0) {
       const em = manager ?? this.dataSource.manager;
-      const participants = await this.crewEarningsService.resolveParticipants(em, order);
-      if (participants.length > 1) {
-        const shares = splitCrewEarnings(poolCents, participants);
-        const mine = shares.find((share) => share.technicianId === viewerId);
+      if (order.settlementPolicyVersion === 2 && this.earningsPolicyService) {
+        const calculation = await this.earningsPolicyService.calculateOrder(order.id, order.totalAmountCents, em);
+        const mine = calculation.participantShares.find((share) => share.technicianId === viewerId);
         if (mine) {
           myEarningCents = mine.shareCents;
-          isCrewShare = true;
+          isCrewShare = calculation.participantShares.length > 1;
+        }
+      } else {
+        const participants = await this.crewEarningsService.resolveParticipants(em, order);
+        if (participants.length > 1) {
+          const shares = splitCrewEarnings(poolCents, participants);
+          const mine = shares.find((share) => share.technicianId === viewerId);
+          if (mine) {
+            myEarningCents = mine.shareCents;
+            isCrewShare = true;
+          }
         }
       }
     }
@@ -535,8 +668,8 @@ export class PaymentsService {
     changedByUserId: string,
     changedByRole: 'customer' | 'technician' | 'system',
   ): Promise<Order> {
-    const { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays } =
-      await this.computeSettlement(order);
+    const { platformCommissionCents, technicianEarningCents, commissionRateApplied, warrantyDays, v2Calculation } =
+      await this.computeSettlement(order, manager, true);
 
     if (!canTransition(order.orderStatus, OrderStatus.COMPLETED)) {
       throw new ApiException(ErrorCode.ORDR_003, 'انتقال حالة غير مسموح', HttpStatus.CONFLICT);
@@ -548,7 +681,11 @@ export class PaymentsService {
     order.paymentMethod = paymentMethod;
     order.platformCommissionCents = platformCommissionCents;
     order.technicianEarningCents = technicianEarningCents;
-    order.commissionRateApplied = String(commissionRateApplied);
+    order.commissionRateApplied = commissionRateApplied === null ? null : String(commissionRateApplied);
+    if (v2Calculation) {
+      order.workerPoolCents = v2Calculation.workerPoolCents;
+      order.calculationAlgorithmVersion = v2Calculation.calculationAlgorithmVersion;
+    }
     order.paidAt = now;
     order.orderStatus = OrderStatus.COMPLETED;
     order.closedAt = now;
@@ -698,7 +835,9 @@ export class PaymentsService {
       //
       // الكاش بيمسكه القائد (هو اللي بيستلم من العميل)، فالمقاصّة مع الكاش بتفضل **على حصته هو
       // بس**؛ الأعضاء بياخدوا تحويل مباشر من المنصة لأنهم مش ماسكين حاجة.
-      const crewShares = await this.crewEarningsService.recordShares(manager, order, technicianEarningCents);
+      const crewShares = v2Calculation
+        ? await this.crewEarningsService.recordV2Shares(manager, order, v2Calculation)
+        : await this.crewEarningsService.recordShares(manager, order, technicianEarningCents);
       const leaderShareCents =
         crewShares.find((s) => s.participantRole === 'leader')?.shareCents ?? technicianEarningCents;
       const netMovementCents = leaderShareCents - cashHeldByTechnicianCents;
@@ -2696,57 +2835,98 @@ export class PaymentsService {
       // `order_earning_shares` نفسها (مصدر حقيقة التسوية)، وعلى إجمالي الاستردادات المكتملة قبل
       // الصف الحالي. استخدام الإجمالي التراكمي يمنع انحراف التقريب مع عدة استردادات جزئية؛ عند
       // اكتمال استرداد الطلب يكون مجموع ما رجع من كل فرد مساويًا لنصيبه الأصلي لآخر قرش.
-      if (lockedOrder.technicianEarningCents > 0 && lockedOrder.technicianId && lockedOrder.totalAmountCents > 0) {
+      if (
+        lockedOrder.totalAmountCents > 0 &&
+        (lockedOrder.settlementPolicyVersion === 2 ||
+          (lockedOrder.technicianEarningCents > 0 && lockedOrder.technicianId))
+      ) {
         const previousRefundRows = await manager.find(Refund, {
           where: { orderId: lockedOrder.id, refundStatus: RefundStatus.COMPLETED },
           select: ['amountCents'],
         });
         const previouslyRefundedCents = previousRefundRows.reduce((sum, row) => sum + row.amountCents, 0);
         const recordedShares = await this.crewEarningsService.listForOrder(manager, lockedOrder.id);
-        const sourceShares =
-          recordedShares.length > 0
-            ? recordedShares.map((share) => ({
-                technicianId: share.technicianId,
-                participantRole: share.participantRole,
-                shareCents: share.shareCents,
-              }))
-            : [
-                {
-                  technicianId: lockedOrder.technicianId,
-                  participantRole: 'leader' as const,
-                  shareCents: lockedOrder.technicianEarningCents,
-                },
-              ];
-        const reversals = allocateCrewRefundReversal({
-          grossPoolCents: lockedOrder.technicianEarningCents,
-          orderTotalCents: lockedOrder.totalAmountCents,
-          previouslyRefundedCents,
-          currentRefundCents: amountCents,
-          shares: sourceShares,
-        });
         const platformWallet = await this.walletsService.findByUserIdOrThrow(PLATFORM_SYSTEM_USER_ID, manager);
 
-        for (const reversal of reversals) {
-          if (reversal.reversalCents <= 0) continue;
-          const technicianProfile = await this.techniciansService.findByProfileIdOrThrow(reversal.technicianId);
-          const technicianWallet = await this.walletsService.getOrCreateWallet(
-            technicianProfile.userId,
-            WalletOwnerType.TECHNICIAN,
-            manager,
-          );
-          await this.walletsService.doubleEntry(
-            {
-              fromWalletId: technicianWallet.id,
-              toWalletId: platformWallet.id,
-              amountCents: reversal.reversalCents,
-              transactionType: WalletTxType.REFUND,
-              referenceType: 'refund',
-              referenceId: lockedRefund.id,
-              descriptionAr: `عكس نصيبك من استرجاع طلب ${lockedOrder.orderNumber}`,
-              allowNegativeBalance: true, // ممكن يكون صرف نصيبه؛ الدين يتسوّى من الحركة التالية.
-            },
-            manager,
-          );
+        if (lockedOrder.settlementPolicyVersion === 2) {
+          const reversals = allocateSettlementRefundReversal({
+            orderTotalCents: lockedOrder.totalAmountCents,
+            previouslyRefundedCents,
+            currentRefundCents: amountCents,
+            buckets: [
+              {
+                bucketType: 'platform',
+                technicianId: null,
+                originalCents: lockedOrder.platformCommissionCents,
+              },
+              ...recordedShares.map((share) => ({
+                bucketType: 'participant' as const,
+                technicianId: share.technicianId,
+                originalCents: share.shareCents,
+              })),
+            ],
+          });
+
+          for (const reversal of reversals) {
+            await manager.query(
+              `INSERT INTO refund_settlement_reversals
+                 (refund_id, order_id, bucket_type, technician_id, original_bucket_cents, reversal_cents)
+               VALUES ($1,$2,$3,$4,$5,$6)
+               ON CONFLICT DO NOTHING`,
+              [
+                lockedRefund.id,
+                lockedOrder.id,
+                reversal.bucketType,
+                reversal.technicianId,
+                reversal.originalCents,
+                reversal.reversalCents,
+              ],
+            );
+            if (reversal.bucketType !== 'participant' || !reversal.technicianId || reversal.reversalCents <= 0) {
+              continue;
+            }
+            await this.reverseParticipantRefund(
+              manager,
+              reversal.technicianId,
+              reversal.reversalCents,
+              platformWallet.id,
+              lockedRefund.id,
+              lockedOrder.orderNumber,
+            );
+          }
+        } else {
+          const sourceShares =
+            recordedShares.length > 0
+              ? recordedShares.map((share) => ({
+                  technicianId: share.technicianId,
+                  participantRole: share.participantRole,
+                  shareCents: share.shareCents,
+                }))
+              : [
+                  {
+                    technicianId: lockedOrder.technicianId!,
+                    participantRole: 'leader' as const,
+                    shareCents: lockedOrder.technicianEarningCents,
+                  },
+                ];
+          const reversals = allocateCrewRefundReversal({
+            grossPoolCents: lockedOrder.technicianEarningCents,
+            orderTotalCents: lockedOrder.totalAmountCents,
+            previouslyRefundedCents,
+            currentRefundCents: amountCents,
+            shares: sourceShares,
+          });
+          for (const reversal of reversals) {
+            if (reversal.reversalCents <= 0) continue;
+            await this.reverseParticipantRefund(
+              manager,
+              reversal.technicianId,
+              reversal.reversalCents,
+              platformWallet.id,
+              lockedRefund.id,
+              lockedOrder.orderNumber,
+            );
+          }
         }
       }
 

@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Between, DataSource, FindOptionsWhere, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Not, Repository } from 'typeorm';
@@ -48,6 +48,7 @@ import { ORDER_REMATCH_REQUESTED_EVENT, OrderRematchRequestedEvent } from '../..
 import { WalletsService } from '../payments/wallets.service';
 import { WalletTxType } from '../payments/entities/wallet-transaction.entity';
 import { PLATFORM_SYSTEM_USER_ID, WalletOwnerType } from '../payments/entities/wallet.entity';
+import { EarningsPolicyService } from '../payments/earnings-policy.service';
 
 const ASSISTANT_MEMBER_TYPE = 'assistant';
 const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
@@ -136,6 +137,7 @@ export class AdminOrdersService {
     private readonly settingsService: SettingsService,
     private readonly walletsService: WalletsService,
     private readonly workOpportunities: TechnicianWorkOpportunitiesService,
+    @Optional() private readonly earningsPolicyService?: EarningsPolicyService,
   ) {}
 
   async list(
@@ -299,18 +301,36 @@ export class AdminOrdersService {
       participant_role: string;
       technician_level: string;
       share_weight: string;
-      calculation_method: 'weighted_pool' | 'assistant_level_wage';
+      calculation_method: 'weighted_pool' | 'assistant_level_wage' | 'earnings_policy_v2' | 'manual_override';
       assistant_base_wage_cents: number | null;
       assistant_level_multiplier: string | null;
       assistant_target_cents: number | null;
       pool_cents: number;
       share_cents: number;
+      settlement_policy_version: 1 | 2;
+      calculation_algorithm_version: string | null;
+      technician_kind_snapshot: 'technician' | 'assistant' | null;
+      earning_role: 'technician' | 'assistant' | null;
+      level_weight_bps_snapshot: number | null;
+      assistant_ratio_bps_snapshot: number | null;
+      service_skill_snapshot: string | null;
+      service_skill_factor_bps_snapshot: number | null;
+      individual_adjustment_bps_snapshot: number | null;
+      order_adjustment_bps_snapshot: number | null;
+      effective_weight_units: string | null;
+      is_preview: boolean;
     }[]
   > {
-    return this.teamMembers.manager.query(
+    const settled = await this.teamMembers.manager.query(
       `SELECT oes.technician_id, u.full_name, oes.participant_role, oes.technician_level,
               oes.share_weight, oes.pool_cents, oes.share_cents, oes.calculation_method,
-              oes.assistant_base_wage_cents, oes.assistant_level_multiplier, oes.assistant_target_cents
+              oes.assistant_base_wage_cents, oes.assistant_level_multiplier, oes.assistant_target_cents,
+              oes.settlement_policy_version, oes.calculation_algorithm_version,
+              oes.technician_kind_snapshot, oes.earning_role,
+              oes.level_weight_bps_snapshot, oes.assistant_ratio_bps_snapshot,
+              oes.service_skill_snapshot, oes.service_skill_factor_bps_snapshot,
+              oes.individual_adjustment_bps_snapshot, oes.order_adjustment_bps_snapshot,
+              oes.effective_weight_units, false AS is_preview
          FROM order_earning_shares oes
          JOIN technician_profiles tp ON tp.id = oes.technician_id
          JOIN users u ON u.id = tp.user_id
@@ -318,6 +338,46 @@ export class AdminOrdersService {
         ORDER BY oes.share_cents DESC`,
       [orderId],
     );
+    if (settled.length > 0) return settled;
+
+    const order = await this.findOrThrow(orderId);
+    if (order.settlementPolicyVersion !== 2 || !order.technicianId) return [];
+    if (!this.earningsPolicyService) throw new Error('EarningsPolicyService is required for a V2 admin preview');
+
+    const calculation = await this.earningsPolicyService.calculateOrder(order.id, order.totalAmountCents);
+    const ids = calculation.participantShares.map((share) => share.technicianId);
+    const names: Array<{ technician_id: string; full_name: string }> = await this.dataSource.query(
+      `SELECT tp.id AS technician_id, u.full_name
+         FROM technician_profiles tp JOIN users u ON u.id = tp.user_id
+        WHERE tp.id = ANY($1::uuid[])`,
+      [ids],
+    );
+    const namesById = new Map(names.map((row) => [row.technician_id, row.full_name]));
+    return calculation.participantShares.map((share) => ({
+      technician_id: share.technicianId,
+      full_name: namesById.get(share.technicianId) ?? share.technicianId,
+      participant_role: share.isLeader ? 'leader' : share.earningRole === 'assistant' ? 'assistant' : 'team_member',
+      technician_level: share.technicianLevel,
+      share_weight: (share.levelWeightBps / 10_000).toFixed(2),
+      calculation_method: 'earnings_policy_v2' as const,
+      assistant_base_wage_cents: null,
+      assistant_level_multiplier: null,
+      assistant_target_cents: null,
+      pool_cents: calculation.workerPoolCents,
+      share_cents: share.shareCents,
+      settlement_policy_version: 2 as const,
+      calculation_algorithm_version: calculation.calculationAlgorithmVersion,
+      technician_kind_snapshot: share.technicianKindSnapshot,
+      earning_role: share.earningRole,
+      level_weight_bps_snapshot: share.levelWeightBps,
+      assistant_ratio_bps_snapshot: share.assistantRatioBps,
+      service_skill_snapshot: share.serviceSkill,
+      service_skill_factor_bps_snapshot: share.serviceSkillFactorBps,
+      individual_adjustment_bps_snapshot: share.individualAdjustmentBps ?? 0,
+      order_adjustment_bps_snapshot: share.orderAdjustmentBps ?? 0,
+      effective_weight_units: share.effectiveWeightUnits,
+      is_preview: true,
+    }));
   }
 
   private async findOrThrow(orderId: string): Promise<Order> {

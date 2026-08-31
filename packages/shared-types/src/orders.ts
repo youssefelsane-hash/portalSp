@@ -273,12 +273,24 @@ export interface OrderEarningShareResponseDto {
   technician_level: string;
   /** الوزن الفعلي وقت التوزيع بعد تطبيق معامل الدور. */
   share_weight: string;
-  calculation_method: 'weighted_pool' | 'assistant_level_wage';
+  calculation_method: 'weighted_pool' | 'assistant_level_wage' | 'earnings_policy_v2' | 'manual_override';
   assistant_base_wage_cents: number | null;
   assistant_level_multiplier: string | null;
   assistant_target_cents: number | null;
   pool_cents: number;
   share_cents: number;
+  settlement_policy_version: 1 | 2;
+  calculation_algorithm_version: string | null;
+  technician_kind_snapshot: 'technician' | 'assistant' | null;
+  earning_role: 'technician' | 'assistant' | null;
+  level_weight_bps_snapshot: number | null;
+  assistant_ratio_bps_snapshot: number | null;
+  service_skill_snapshot: string | null;
+  service_skill_factor_bps_snapshot: number | null;
+  individual_adjustment_bps_snapshot: number | null;
+  order_adjustment_bps_snapshot: number | null;
+  effective_weight_units: string | null;
+  is_preview: boolean;
 }
 
 // مطابق لـ apps/api/src/modules/orders/dto/assign-assistant.dto.ts (ADR-0008)

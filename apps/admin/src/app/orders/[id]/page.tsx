@@ -1609,8 +1609,14 @@ export default function OrderDetailPage() {
                 <div className="rounded-md border">
                   <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2">
                     <div>
-                      <p className="font-medium">توزيع مستحقات أفراد الطاقم</p>
-                      <p className="text-xs text-muted-foreground">بيانات داخلية للأدمن فقط</p>
+                      <p className="font-medium">
+                        {earningShares?.[0]?.is_preview ? 'معاينة توزيع المستحقات' : 'توزيع مستحقات أفراد الطاقم'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {earningShares?.[0]?.is_preview
+                          ? 'تقدير حي من نفس محرك التسوية، وقد يتغير قبل الإقفال'
+                          : 'Snapshot نهائي غير قابل للتغيير - بيانات داخلية للأدمن فقط'}
+                      </p>
                     </div>
                     {!!earningShares?.length && (
                       <div className="text-end">
@@ -1634,7 +1640,7 @@ export default function OrderDetailPage() {
                   )}
                   {!earningSharesError && earningShares?.length === 0 && (
                     <p className="p-3 text-muted-foreground">
-                      لم يتم إنشاء توزيع للطاقم حتى الآن. يظهر التوزيع بعد اعتماد مستحقات الشغل.
+                      لا يمكن إنشاء معاينة حتى يتم تعيين قائد للطلب.
                     </p>
                   )}
                   {!!earningShares?.length && (
@@ -1660,7 +1666,26 @@ export default function OrderDetailPage() {
                               <p>
                                 {(LEVEL_LABELS as Record<string, string>)[share.technician_level] ?? share.technician_level}
                               </p>
-                              {share.calculation_method === 'assistant_level_wage' ? (
+                              {share.calculation_method === 'earnings_policy_v2' ? (
+                                <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                                  <p>
+                                    V2 · {share.earning_role === 'assistant' ? 'مساعد' : 'فني'} · مهارة{' '}
+                                    {share.service_skill_snapshot ?? 'قياسية'}
+                                  </p>
+                                  <p>
+                                    وزن المستوى {((share.level_weight_bps_snapshot ?? 10000) / 10000).toFixed(2)}
+                                    {share.earning_role === 'assistant' &&
+                                      ` × نسبة مساعد ${((share.assistant_ratio_bps_snapshot ?? 10000) / 100).toFixed(2)}%`}
+                                    {' × '}مهارة {((share.service_skill_factor_bps_snapshot ?? 10000) / 10000).toFixed(2)}
+                                  </p>
+                                  {(share.individual_adjustment_bps_snapshot !== 0 || share.order_adjustment_bps_snapshot !== 0) && (
+                                    <p>
+                                      تعديل فردي {((share.individual_adjustment_bps_snapshot ?? 0) / 100).toFixed(2)}% · طلب{' '}
+                                      {((share.order_adjustment_bps_snapshot ?? 0) / 100).toFixed(2)}%
+                                    </p>
+                                  )}
+                                </div>
+                              ) : share.calculation_method === 'assistant_level_wage' ? (
                                 <p className="text-xs text-muted-foreground">
                                   أساس {formatEgp(share.assistant_base_wage_cents ?? 0)} ×{' '}
                                   {Number(share.assistant_level_multiplier ?? 1).toLocaleString('ar-EG')} ={' '}

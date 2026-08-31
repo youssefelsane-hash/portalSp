@@ -24,7 +24,7 @@ export interface CrewParticipant {
 
 export interface CrewShare extends CrewParticipant {
   shareCents: number;
-  calculationMethod: 'weighted_pool' | 'assistant_level_wage';
+  calculationMethod: 'weighted_pool' | 'assistant_level_wage' | 'earnings_policy_v2' | 'manual_override';
 }
 
 /**

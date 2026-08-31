@@ -52,6 +52,9 @@ import { OrderEarningShare } from './entities/order-earning-share.entity';
 import { TechnicianDebtService } from './technician-debt.service';
 import { TechnicianDebtSettlement } from './entities/technician-debt-settlement.entity';
 import { AdminTechnicianDebtController } from './admin-technician-debt.controller';
+import { EarningsPolicyService } from './earnings-policy.service';
+import { AdminEarningsPolicyController } from './admin-earnings-policy.controller';
+import { AdminEarningsPolicyService } from './admin-earnings-policy.service';
 
 @Module({
   imports: [
@@ -83,6 +86,7 @@ import { AdminTechnicianDebtController } from './admin-technician-debt.controlle
     PromotionsModule,
   ],
   controllers: [
+    AdminEarningsPolicyController,
     AdminTechnicianDebtController,
     WalletController,
     PaymentsController,
@@ -94,7 +98,9 @@ import { AdminTechnicianDebtController } from './admin-technician-debt.controlle
     WebhooksController,
   ],
   providers: [
+    AdminEarningsPolicyService,
     TechnicianDebtService,
+    EarningsPolicyService,
     CrewEarningsService,
     WalletsService,
     PaymentsService,
@@ -124,6 +130,11 @@ import { AdminTechnicianDebtController } from './admin-technician-debt.controlle
   ],
   exports: [
     TechnicianDebtService,
-    CrewEarningsService,WalletsService, PaymentsService, PayoutsService],
+    EarningsPolicyService,
+    CrewEarningsService,
+    WalletsService,
+    PaymentsService,
+    PayoutsService,
+  ],
 })
 export class PaymentsModule {}

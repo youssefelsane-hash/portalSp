@@ -488,7 +488,6 @@ export default function ServiceDetailPage() {
     const maxPrice = form.get('max_price') as string;
     const basePrice = form.get('base_price') as string;
     const inspectionFee = form.get('inspection_fee') as string;
-    const commission = form.get('commission_percentage') as string;
     const depositPercentage = form.get('deposit_percentage') as string;
     const displayOrder = form.get('display_order') as string;
     const launchPhase = form.get('launch_phase') as string;
@@ -526,7 +525,6 @@ export default function ServiceDetailPage() {
       requires_hours_only: form.get('requires_hours_only') === 'on',
       requires_start_and_end: form.get('requires_start_and_end') === 'on',
       min_technician_level: (minTechnicianLevel as TechnicianLevel) || undefined,
-      commission_percentage: commission ? Number(commission) : undefined,
       display_order: displayOrder ? Number(displayOrder) : undefined,
       launch_phase: launchPhase ? Number(launchPhase) : undefined,
       search_keywords: (form.get('search_keywords') as string)
@@ -729,16 +727,10 @@ export default function ServiceDetailPage() {
                   <Input id="svc_unit" name="unit_name_ar" defaultValue={service.unit_name_ar ?? ''} />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="svc_commission">نسبة عمولة المنصة %</Label>
-                  <Input
-                    id="svc_commission"
-                    name="commission_percentage"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    defaultValue={service.commission_percentage}
-                  />
+                  <Label>سياسة مستحقات الخدمة</Label>
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                    عمولة V2 مبلغ ثابت وتُدار من مركز سياسة المستحقات فقط. نسبة V1 القديمة محفوظة للطلبات التاريخية.
+                  </div>
                 </div>
                 <div className="flex flex-col gap-1">
                   {/* سياسة إيداع (ADR-0027، docs/08 §42 Phase A.3) — نسبة الإيداع من الإجمالي،
@@ -997,7 +989,7 @@ export default function ServiceDetailPage() {
                 // فوق **ناتج المعادلة نفسه**، مش فوق "السعر الأساسي" (مالوش استخدام حقيقي في formula).
                 <p className="text-xs text-muted-foreground">
                   الخدمة دي معادلة ديناميكية — النسبة المئوية بس بتتطبّق (فوق ناتج المعادلة نفسه لكل حجز)،
-                  "رقم مطلق" مش متاح لها.
+                  &quot;رقم مطلق&quot; مش متاح لها.
                 </p>
               )}
               {zpMode === 'override' && pricingModelLive !== 'formula' ? (

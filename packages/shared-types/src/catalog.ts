@@ -118,7 +118,6 @@ export interface CreateServiceBody {
   requires_hours_only?: boolean;
   requires_start_and_end?: boolean;
   min_technician_level?: string;
-  commission_percentage?: number;
   display_order?: number;
   launch_phase?: number;
   search_keywords?: string[];

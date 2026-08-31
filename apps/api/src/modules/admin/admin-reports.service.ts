@@ -171,8 +171,20 @@ export class AdminReportsService {
       this.orders
         .createQueryBuilder('o')
         .select('COALESCE(SUM(o.total_amount_cents), 0)', 'revenue')
-        .addSelect('COALESCE(SUM(o.platform_commission_cents), 0)', 'commission')
-        .where('o.payment_status = :paid', { paid: OrderPaymentStatus.PAID })
+        .addSelect(
+          `COALESCE(SUM(o.platform_commission_cents - COALESCE((
+            SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+            WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+          ), 0)), 0)`,
+          'commission',
+        )
+        .where('o.payment_status IN (:...settledStatuses)', {
+          settledStatuses: [
+            OrderPaymentStatus.PAID,
+            OrderPaymentStatus.PARTIALLY_REFUNDED,
+            OrderPaymentStatus.REFUNDED,
+          ],
+        })
         .andWhere('o.paid_at >= :startOfToday', { startOfToday })
         .getRawOne<{ revenue: string; commission: string }>(),
       this.users.count(),
@@ -240,10 +252,15 @@ export class AdminReportsService {
          ), finance_totals AS (
            SELECT (paid_at AT TIME ZONE 'Africa/Cairo')::date AS day,
                   COALESCE(SUM(total_amount_cents), 0) AS revenue_cents,
-                  COALESCE(SUM(platform_commission_cents), 0) AS platform_commission_cents
-           FROM orders
-           WHERE deleted_at IS NULL AND payment_status = 'paid' AND paid_at IS NOT NULL
-             AND paid_at >= ((now() AT TIME ZONE 'Africa/Cairo')::date - 6)::timestamp AT TIME ZONE 'Africa/Cairo'
+                  COALESCE(SUM(o.platform_commission_cents - COALESCE((
+                    SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                    WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+                  ), 0)), 0) AS platform_commission_cents
+           FROM orders o
+           WHERE o.deleted_at IS NULL
+             AND o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+             AND o.paid_at IS NOT NULL
+             AND o.paid_at >= ((now() AT TIME ZONE 'Africa/Cairo')::date - 6)::timestamp AT TIME ZONE 'Africa/Cairo'
            GROUP BY 1
          )
          SELECT to_char(days.day, 'YYYY-MM-DD') AS date,
@@ -307,13 +324,20 @@ export class AdminReportsService {
     const rows = await this.dataSource.query<
       { period_start: Date; orders_count: string; total_amount_cents: string; platform_commission_cents: string; technician_earnings_cents: string }[]
     >(
-      `SELECT date_trunc($3, paid_at) AS period_start,
+      `SELECT date_trunc($3, o.paid_at) AS period_start,
               COUNT(*) AS orders_count,
-              COALESCE(SUM(total_amount_cents), 0) AS total_amount_cents,
-              COALESCE(SUM(platform_commission_cents), 0) AS platform_commission_cents,
-              COALESCE(SUM(technician_earning_cents), 0) AS technician_earnings_cents
-       FROM orders
-       WHERE payment_status = 'paid' AND paid_at BETWEEN $1 AND $2
+              COALESCE(SUM(o.total_amount_cents), 0) AS total_amount_cents,
+              COALESCE(SUM(o.platform_commission_cents - COALESCE((
+                SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+              ), 0)), 0) AS platform_commission_cents,
+              COALESCE(SUM(o.technician_earning_cents - COALESCE((
+                SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                WHERE rsr.order_id = o.id AND rsr.bucket_type = 'participant'
+              ), 0)), 0) AS technician_earnings_cents
+       FROM orders o
+       WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+         AND o.paid_at BETWEEN $1 AND $2
        GROUP BY period_start
        ORDER BY period_start ASC`,
       [query.from, query.to, query.group_by ?? 'day'],
@@ -432,8 +456,15 @@ export class AdminReportsService {
               sz.surge_multiplier,
               COUNT(o.id) AS orders_count,
               COUNT(o.id) FILTER (WHERE o.order_status = 'completed') AS completed_orders_count,
-              COALESCE(SUM(o.total_amount_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS revenue_cents,
-              COALESCE(SUM(o.platform_commission_cents) FILTER (WHERE o.payment_status = 'paid'), 0) AS platform_commission_cents,
+              COALESCE(SUM(o.total_amount_cents) FILTER (
+                WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+              ), 0) AS revenue_cents,
+              COALESCE(SUM(o.platform_commission_cents - COALESCE((
+                SELECT SUM(rsr.reversal_cents) FROM refund_settlement_reversals rsr
+                WHERE rsr.order_id = o.id AND rsr.bucket_type = 'platform'
+              ), 0)) FILTER (
+                WHERE o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+              ), 0) AS platform_commission_cents,
               (SELECT COUNT(*) FROM technician_zones tz
                  JOIN technician_profiles tp ON tp.id = tz.technician_id
                 WHERE tz.service_zone_id = sz.id AND tz.is_active = true AND tz.deleted_at IS NULL

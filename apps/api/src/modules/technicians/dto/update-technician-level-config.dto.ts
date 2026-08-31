@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class UpdateTechnicianLevelConfigDto {
   @IsOptional()
@@ -7,22 +7,10 @@ export class UpdateTechnicianLevelConfigDto {
   display_name_ar?: string;
 
   @IsOptional()
-  @IsNumber()
-  @Min(-100)
-  @Max(100)
-  commission_adjustment_percentage?: number;
-
-  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1000)
   order_priority_weight?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0.1)
-  @Max(3)
-  assistant_earning_multiplier?: number;
 
   // null صريح = بلا حد (الفني يقبل أي قيمة طلب لوحده)، undefined = مفيش تعديل
   @IsOptional()

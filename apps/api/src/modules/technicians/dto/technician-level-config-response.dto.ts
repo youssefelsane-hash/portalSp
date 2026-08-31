@@ -7,6 +7,8 @@ export interface TechnicianLevelConfigResponseDto {
   order_priority_weight: number;
   crew_share_weight: number;
   assistant_earning_multiplier: number;
+  earning_weight_bps: number;
+  assistant_ratio_bps: number;
   decision_limit_cents: number | null;
   can_lead_team: boolean;
   eligible_for_team_booking: boolean;
@@ -21,6 +23,8 @@ export function toTechnicianLevelConfigResponseDto(config: TechnicianLevelConfig
     order_priority_weight: config.orderPriorityWeight,
     crew_share_weight: Number(config.crewShareWeight),
     assistant_earning_multiplier: Number(config.assistantEarningMultiplier),
+    earning_weight_bps: config.earningWeightBps,
+    assistant_ratio_bps: config.assistantRatioBps,
     decision_limit_cents: config.decisionLimitCents,
     can_lead_team: config.canLeadTeam,
     eligible_for_team_booking: config.eligibleForTeamBooking,

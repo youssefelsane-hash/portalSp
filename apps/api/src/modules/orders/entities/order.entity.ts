@@ -270,6 +270,21 @@ export class Order {
   @Column({ name: 'commissionable_base_cents', type: 'integer', nullable: true })
   commissionableBaseCents: number | null;
 
+  /** Explicit immutable settlement policy for this order. Existing orders remain V1. */
+  @Column({ name: 'settlement_policy_version', type: 'smallint', default: 1 })
+  settlementPolicyVersion: 1 | 2;
+
+  /** Fixed V2 service commission captured when the order is created. */
+  @Column({ name: 'platform_commission_cents_snapshot', type: 'integer', nullable: true })
+  platformCommissionCentsSnapshot: number | null;
+
+  /** Final V2 pool distributed across every order participant. */
+  @Column({ name: 'worker_pool_cents', type: 'integer', nullable: true })
+  workerPoolCents: number | null;
+
+  @Column({ name: 'calculation_algorithm_version', type: 'varchar', length: 40, nullable: true })
+  calculationAlgorithmVersion: string | null;
+
   /** فرق سعر "الفني المميّز" (docs/08 §60.3، migration 0193) — بيتضاف بعد ما المطابقة التلقائية
    * تعيّن فني مستواه بيزوّد السعر. 0 لو الفني كان معروف وقت الحجز (الفرق داخل السعر أصلاً). */
   @Column({ name: 'level_premium_cents', type: 'integer', default: 0 })

@@ -194,7 +194,9 @@ export default function DashboardPage() {
   }, [authedFetch]);
 
   useEffect(() => {
-    if (!isLoading) void load();
+    if (isLoading) return;
+    const timeoutId = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [isLoading, load]);
   useAdminLiveRefresh(['orders', 'technicians', 'payments'], load);
 

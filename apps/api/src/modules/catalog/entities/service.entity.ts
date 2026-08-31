@@ -69,6 +69,10 @@ export class Service {
   @Column({ name: 'base_price_cents', type: 'integer' })
   basePriceCents: number;
 
+  /** V2 fixed platform commission in piasters. NULL means this service is not cutover-ready. */
+  @Column({ name: 'platform_commission_cents', type: 'integer', nullable: true })
+  platformCommissionCents: number | null;
+
   @Column({ name: 'inspection_fee_cents', type: 'integer', default: 0 })
   inspectionFeeCents: number;
 
@@ -195,6 +199,7 @@ export class Service {
     scale: 2,
     default: 15.0,
   })
+  /** V1 historical settlement input. New financial policy is platformCommissionCents only. */
   commissionPercentage: string;
 
   @Column({ name: 'display_order', type: 'smallint', default: 0 })

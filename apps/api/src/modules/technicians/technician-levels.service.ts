@@ -7,8 +7,8 @@ import { UpdateTechnicianLevelConfigDto } from './dto/update-technician-level-co
 import { TechnicianLevelConfig } from './entities/technician-level-config.entity';
 import { TechnicianLevel } from './entities/technician-profile.entity';
 
-// المصدر الحقيقي الوحيد لسياسة كل مستوى فني — عمولة، أولوية إرسال، حد قرار، وأهلية قيادة فريق.
-// أي موديول محتاج القيم دي (payments, matching, technicians) بيقرا من هنا مباشرة، مفيش ثوابت مكتوبة في الكود.
+// إعدادات التشغيل والترقي فقط. السياسة المالية تُدار حصرياً من AdminEarningsPolicyService؛
+// أعمدة V1 هنا تظل للقراءة التاريخية ولا يمكن تعديلها من هذا المسار.
 @Injectable()
 export class TechnicianLevelsService {
   constructor(
@@ -38,20 +38,14 @@ export class TechnicianLevelsService {
     const config = await this.getOrThrow(level);
     const oldValues = {
       display_name_ar: config.displayNameAr,
-      commission_adjustment_percentage: Number(config.commissionAdjustmentPercentage),
       order_priority_weight: config.orderPriorityWeight,
-      assistant_earning_multiplier: Number(config.assistantEarningMultiplier),
       decision_limit_cents: config.decisionLimitCents,
       can_lead_team: config.canLeadTeam,
       eligible_for_team_booking: config.eligibleForTeamBooking,
     };
 
     if (dto.display_name_ar !== undefined) config.displayNameAr = dto.display_name_ar;
-    if (dto.commission_adjustment_percentage !== undefined) config.commissionAdjustmentPercentage = String(dto.commission_adjustment_percentage);
     if (dto.order_priority_weight !== undefined) config.orderPriorityWeight = dto.order_priority_weight;
-    if (dto.assistant_earning_multiplier !== undefined) {
-      config.assistantEarningMultiplier = String(dto.assistant_earning_multiplier);
-    }
     if (dto.decision_limit_cents !== undefined) config.decisionLimitCents = dto.decision_limit_cents;
     if (dto.can_lead_team !== undefined) config.canLeadTeam = dto.can_lead_team;
     if (dto.eligible_for_team_booking !== undefined) config.eligibleForTeamBooking = dto.eligible_for_team_booking;
@@ -66,9 +60,7 @@ export class TechnicianLevelsService {
       oldValues,
       newValues: {
         display_name_ar: config.displayNameAr,
-        commission_adjustment_percentage: Number(config.commissionAdjustmentPercentage),
         order_priority_weight: config.orderPriorityWeight,
-        assistant_earning_multiplier: Number(config.assistantEarningMultiplier),
         decision_limit_cents: config.decisionLimitCents,
         can_lead_team: config.canLeadTeam,
         eligible_for_team_booking: config.eligibleForTeamBooking,

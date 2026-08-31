@@ -35,7 +35,8 @@ export function TechnicianInternalNotes({ technicianId }: { technicianId: string
   }, [authedFetch, technicianId]);
 
   useEffect(() => {
-    void load();
+    const timeoutId = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [load]);
 
   async function submit(event: FormEvent) {
