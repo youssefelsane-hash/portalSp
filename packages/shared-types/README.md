@@ -14,7 +14,7 @@
 
 ### البَقّة الحقيقية اللي حصلت (2026-09-01)
 
-بعد `git pull` لشريحة §88-د، صفحة `/catalog` في لوحة الأدمن وقعت بـ
+بعد `git pull` لشريحة §109-د، صفحة `/catalog` في لوحة الأدمن وقعت بـ
 `TypeError: Cannot read properties of undefined (reading 'fixed')` عند
 `PRICING_MODEL_LABELS[service.pricing_model]`. السبب مكانش في الكود: `dist/pricing.js`
 المحلية كانت متبنية قبل ما الـexport ده يتضاف، فـ`PRICING_MODEL_LABELS` نفسها كانت `undefined`.
