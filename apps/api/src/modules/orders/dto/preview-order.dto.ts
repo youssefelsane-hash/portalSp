@@ -50,6 +50,17 @@ export class PreviewOrderDto {
   @IsDateString()
   scheduled_end_at?: string;
 
+  /** ADR-0050 §4 — نفس `CreateOrderDto.period_start/period_end` بالحرف: المعاينة لازم تحسب
+   * عدد شهور الفوترة بنفس الطريقة اللي الحجز الحقيقي هيحسبها، وإلا العميل بيشوف رقم وبيتحاسب
+   * بغيره. */
+  @IsOptional()
+  @IsDateString()
+  period_start?: string;
+
+  @IsOptional()
+  @IsDateString()
+  period_end?: string;
+
   @IsOptional()
   @IsObject()
   field_values?: Record<string, string | number | boolean>;

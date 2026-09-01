@@ -150,6 +150,14 @@ export class Order {
   @Column({ name: 'scheduled_end_at', type: 'timestamptz', nullable: true })
   scheduledEndAt: Date | null;
 
+  // ADR-0050 §4 (migration 0240) — فترة التعاقد (اشتراك/إيجار) اللي السعر اتحسب منها. **مش**
+  // موعد الزيارة فوق: اشتراك 3 شهور ممكن يتنفّذ بزيارة واحدة ساعتين.
+  @Column({ name: 'pricing_period_start', type: 'timestamptz', nullable: true })
+  pricingPeriodStart: Date | null;
+
+  @Column({ name: 'pricing_period_end', type: 'timestamptz', nullable: true })
+  pricingPeriodEnd: Date | null;
+
   // تصعيد نقص الطاقم (docs/08 §35.5، migration 0156) — علامة "اتصعّد للأدمن مرة" (لمنع التكرار)،
   // مش تذكير متكرر. راجع CrewShortageEscalationService للتفاصيل الكاملة.
   @Column({ name: 'crew_shortage_escalated_at', type: 'timestamptz', nullable: true })

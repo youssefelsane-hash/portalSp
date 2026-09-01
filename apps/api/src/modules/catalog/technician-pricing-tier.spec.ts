@@ -8,6 +8,7 @@ import { ServiceStandardData } from './entities/service-standard-data.entity';
 import { ServicePricingTierPricing } from './entities/service-pricing-tier-pricing.entity';
 import { Service } from './entities/service.entity';
 import { CatalogService } from './catalog.service';
+import { PricingEngineService } from '../pricing/pricing-engine.service';
 import { TechnicianLevel, TechnicianPricingTier } from '../technicians/entities/technician-profile.entity';
 
 // فئة تسعير الفني (docs/08 §36.24، ADR-0025) — اختبار حي ضد Postgres حقيقي. تسعير-الفئة لازم
@@ -87,7 +88,7 @@ describe('CatalogService.estimate() — فئة تسعير الفني (docs/08 §
       dataSource.getRepository(ServiceAddon),
       dataSource.getRepository(ServiceStandardData),
       {} as never,
-      {} as never,
+      new PricingEngineService({} as never, {} as never, {} as never),
       dataSource.getRepository(ServicePricingTierPricing),
     );
   });

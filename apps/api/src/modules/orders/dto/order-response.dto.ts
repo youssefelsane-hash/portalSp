@@ -35,6 +35,9 @@ export interface OrderResponseDto {
   scheduled_at: string | null;
   // وضع "بداية+نهاية" (ADR-0032) — null دايمًا لأي خدمة تانية غير requiresStartAndEnd.
   scheduled_end_at: string | null;
+  /** ADR-0050 §4 — فترة التعاقد اللي السعر اتحسب منها (اشتراك/إيجار)، مش موعد الزيارة. */
+  pricing_period_start: string | null;
+  pricing_period_end: string | null;
   /** المصدر الدقيق لمدة الحجز؛ duration_hours القديم مشتق/متوافق فقط. */
   duration_minutes: number | null;
   estimated_price_cents: number | null;
@@ -175,6 +178,8 @@ export function toOrderResponseDto(
     customer_inputs: order.customerInputs ?? null,
     scheduled_at: order.scheduledAt ? order.scheduledAt.toISOString() : null,
     scheduled_end_at: order.scheduledEndAt ? order.scheduledEndAt.toISOString() : null,
+    pricing_period_start: order.pricingPeriodStart ? order.pricingPeriodStart.toISOString() : null,
+    pricing_period_end: order.pricingPeriodEnd ? order.pricingPeriodEnd.toISOString() : null,
     duration_minutes: order.durationMinutes ?? (order.durationHours == null ? null : order.durationHours * 60),
     estimated_price_cents: order.estimatedPriceCents,
     initial_quote_source: order.initialQuoteSource,

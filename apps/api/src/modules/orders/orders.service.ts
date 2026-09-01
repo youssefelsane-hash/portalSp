@@ -778,6 +778,8 @@ export class OrdersService {
       durationHours: dto.duration_hours,
       scheduledAt: resolvedScheduledAtIso,
       scheduledEndAt: dto.scheduled_end_at,
+      periodStart: dto.period_start,
+      periodEnd: dto.period_end,
       serviceFieldValues: dto.field_values,
       zoneId: zone.id,
       isEmergency: urgent,
@@ -1107,6 +1109,9 @@ export class OrdersService {
               : null,
         // وضع "بداية+نهاية" (ADR-0032) — بس لخدمات requiresStartAndEnd=true (اتفحصت فوق).
         scheduledEndAt: service.requiresStartAndEnd && dto.scheduled_end_at ? new Date(dto.scheduled_end_at) : null,
+        // ADR-0050 §4 — بتتحفظ زي ما وصلت من السياق (اللي فحصها بالفعل)، مش من الـdto الخام.
+        pricingPeriodStart: pricingContext.periodStart,
+        pricingPeriodEnd: pricingContext.periodEnd,
         projectId: dto.project_id ?? null,
         milestoneId: dto.milestone_id ?? null,
         recurringTemplateId: recurringIdentity?.templateId ?? null,
@@ -1550,6 +1555,8 @@ export class OrdersService {
       durationHours: dto.duration_hours,
       scheduledAt: dto.scheduled_at,
       scheduledEndAt: dto.scheduled_end_at,
+      periodStart: dto.period_start,
+      periodEnd: dto.period_end,
       serviceFieldValues: dto.field_values,
       zoneId: zone.id,
       isEmergency: urgent,

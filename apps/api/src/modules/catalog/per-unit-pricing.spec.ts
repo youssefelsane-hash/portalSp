@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { CatalogService } from './catalog.service';
+import { buildPricingContext } from '../pricing/pricing-context';
 import { PricingModel, Service } from './entities/service.entity';
 import { ServiceAddon } from './entities/service-addon.entity';
 import { ServiceCategory } from './entities/service-category.entity';
@@ -136,7 +137,11 @@ describe('CatalogService.estimate() - per-unit quantity', () => {
     expect(estimate.base_price_cents).toBe(7500);
   });
 
-  it('multiplies the monthly rate by the visible number of months', async () => {
+  // ADR-0050 §4 — **السلوك ده اتغيّر عمدًا، والاختبار القديم كان بيثبّت البَقّة المبلّغة نفسها.**
+  // قبل كده `monthly` كان اسم تاني لـ`per_unit` بالحرف: العميل بيكتب عدد الشهور برقم يدوي
+  // (`pricing_quantity`)، والسعر = الرقم × التعريفة. بلاغ المالك كان بالظبط إن اختيار تاريخ بداية
+  // ونهاية مابيحسبش الفرق بينهم. دلوقتي الفترة هي المصدر، وعدد الشهور مشتق منها.
+  it('يحسب شهور الفوترة من فرق تاريخ البداية والنهاية', async () => {
     const estimate = await catalog.estimate(
       ids.monthlyService,
       undefined,
@@ -145,10 +150,34 @@ describe('CatalogService.estimate() - per-unit quantity', () => {
       undefined,
       undefined,
       undefined,
-      3,
+      undefined,
+      undefined,
+      buildPricingContext({ periodStart: '2026-01-01', periodEnd: '2026-04-01' }),
     );
     expect(estimate.base_price_cents).toBe(750000);
     expect(estimate.estimated_total_cents).toBe(750000);
+  });
+
+  it('أي جزء من شهر بيتحسب شهر كامل (سياسة الفوترة، مش كسور)', async () => {
+    const estimate = await catalog.estimate(
+      ids.monthlyService,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      buildPricingContext({ periodStart: '2026-01-01', periodEnd: '2026-03-15' }),
+    );
+    expect(estimate.base_price_cents).toBe(750000);
+  });
+
+  it('شهري من غير فترة بيترفض برسالة بتطلب التاريخين', async () => {
+    await expect(
+      catalog.estimate(ids.monthlyService, undefined, undefined, false, undefined, undefined, undefined, 3),
+    ).rejects.toThrow(/تاريخ بداية وتاريخ نهاية/);
   });
 
   it('rejects a fraction for a service configured as whole pieces', async () => {

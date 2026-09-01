@@ -2,6 +2,8 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiException, ErrorCode } from '../../common/exceptions/api.exception';
+import { PricingModel } from '../catalog/entities/service.entity';
+import { pricingMethod } from './pricing-methods';
 import { evaluateFormulaNode, FormulaEvaluationContext, validateFinalPriceFormulaPayload } from './formula-evaluator';
 import { describeFormulaPayload, evaluateFormulaNodeWithTrace } from './formula-evaluator';
 import { PricingFieldsService } from './pricing-fields.service';
@@ -23,7 +25,8 @@ import {
   pricingContextGeoPoints,
 } from './pricing-context';
 
-export type PricingPresetKind = 'fixed' | 'hourly' | 'per_unit' | 'monthly' | 'inspection_then_quote';
+/** كل قيم `PricingModel` ما عدا `formula` — الطرق الجاهزة اللي `evaluatePreset()` بتخدمها. */
+export type PricingPresetKind = Exclude<PricingModel, PricingModel.FORMULA>;
 
 // معاينة الأدمن (`evaluateDraft`) بتيجي بلا سياق طلب — حقول التاريخ/الموقع في الفورم لازم تفضل
 // شغالة فيها، وده بيديها نفس الاشتقاق بمصادر نظام فاضية.
@@ -58,6 +61,12 @@ export class PricingEngineService {
     private readonly rulesService: PricingRulesService,
   ) {}
 
+  /**
+   * حساب سعر لطريقة جاهزة (مش معادلة) — **lookup في سجل واحد، مش `switch` هنا** (ADR-0050 §1).
+   *
+   * الشجرة اللي السجل بيرجّعها بتتنفّذ في نفس `evaluateFormulaNode()` اللي المعادلة الديناميكية
+   * بتتنفّذ فيه بالحرف. مفيش مسار حساب تاني في المشروع.
+   */
   evaluatePreset(
     preset: PricingPresetKind,
     basePriceCents: number,
@@ -66,26 +75,7 @@ export class PricingEngineService {
     maxPriceCents: number | null,
   ): PricingEvaluationResult & { evaluationId: null } {
     const systemValues = pricingContextFormulaValues(context);
-    const quantityNode: FormulaNode = { type: 'field_ref', field_key: 'quantity' };
-    const durationNode: FormulaNode = { type: 'field_ref', field_key: 'duration_hours' };
-    const rateNode: FormulaNode = { type: 'literal', value: basePriceCents };
-
-    let priceNode: FormulaNode;
-    switch (preset) {
-      case 'fixed':
-        priceNode = rateNode;
-        break;
-      case 'hourly':
-        priceNode = { type: 'multiply', operands: [durationNode, rateNode] };
-        break;
-      case 'per_unit':
-      case 'monthly':
-        priceNode = { type: 'multiply', operands: [quantityNode, rateNode] };
-        break;
-      case 'inspection_then_quote':
-        priceNode = { type: 'literal', value: 0 };
-        break;
-    }
+    const priceNode = pricingMethod(preset).buildPrice({ type: 'literal', value: basePriceCents });
 
     const payload: FinalPriceFormulaPayload = {
       price_cents: priceNode,

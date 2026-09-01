@@ -65,6 +65,8 @@ const fullOrder: OrderResponseDto = {
   duration_minutes: null,
   initial_quote_source: null,
   initial_quote_note: null,
+  pricing_period_start: null,
+  pricing_period_end: null,
 };
 
 const FORBIDDEN_FIELDS = [

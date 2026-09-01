@@ -158,6 +158,19 @@ export class CreateOrderDto {
   @IsDateString()
   scheduled_end_at?: string;
 
+  // ADR-0050 §4 — **فترة التعاقد** (اشتراك/إيجار)، مش موعد الزيارة. لخدمة `pricing_model=monthly`
+  // دول مصدر السعر نفسه: عدد شهور الفوترة = `ceil(months_between(start, end))`.
+  //
+  // **منفصلين عن `scheduled_at/scheduled_end_at` عمدًا**: دول امتى الفني بيروح، ودول مدى
+  // الاتفاق. اشتراك 3 شهور ممكن يتنفّذ بزيارة واحدة ساعتين — خلطهم كان هيسعّر الساعتين.
+  @IsOptional()
+  @IsDateString()
+  period_start?: string;
+
+  @IsOptional()
+  @IsDateString()
+  period_end?: string;
+
   // "كرّر الحجز ده" (migration 0176) — لو اتبعت، الطلب الحالي بيتعمل بالمسار العادي الكامل
   // زي زمان، **وزي عليه** قالب متكرر بيتإنشاء بنفس الـtransaction (ذرّي) أول موعد له بعد الموعد
   // المحجوز مباشرة (أسبوعي = +7 أيام بنفس التوقيت، شهري = نفس اليوم/التوقيت الشهر الجاي مع

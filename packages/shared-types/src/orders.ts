@@ -182,6 +182,9 @@ export interface RecurringTemplateResponseDto {
   field_values: Record<string, string | number | boolean> | null;
   duration_hours: number | null;
   scheduled_end_at: string | null;
+  /** ADR-0050 §4 — فترة التعاقد اللي السعر اتحسب منها (اشتراك/إيجار)، مش موعد الزيارة. */
+  pricing_period_start: string | null;
+  pricing_period_end: string | null;
   next_run_at: string;
   last_generated_order_id: string | null;
   is_active: boolean;
