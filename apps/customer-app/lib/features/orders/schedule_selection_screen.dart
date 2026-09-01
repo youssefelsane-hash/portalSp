@@ -73,10 +73,6 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
   // مايصحّش يمنع العميل من اختيار موعد.
   int? _nearTermHours;
 
-  /// نسبة رسوم الاستعجال (ADR-0048) — بتيجي من نفس الإعداد اللي التسعير بيقرا منه، عشان الرقم
-  /// اللي العميل بيشوفه في التنبيه يبقى هو الرقم اللي هيتحاسب بيه فعلاً.
-  int? _emergencySurchargePercentage;
-
   // حالة محلية بس للخدمات اللي محتاجة وقت دقيق (docs/08 §84 جزء ج) — الحجوزات العادية لسه بتاخد
   // اليوم وتقفل الشاشة فورًا زي ما كانت دايمًا، صفر state إضافية ليها.
   DateTime? _selectedDate;
@@ -103,10 +99,7 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     try {
       final data = await apiRequest('GET', '/booking-policy');
       if (!mounted) return;
-      setState(() {
-        _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt();
-        _emergencySurchargePercentage = (data?['emergency_surcharge_percentage'] as num?)?.toInt();
-      });
+      setState(() => _nearTermHours = (data?['near_term_request_hours'] as num?)?.toInt());
     } catch (error) {
       debugPrint('فشل تحميل سياسة المواعيد: $error');
     }
@@ -128,35 +121,28 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
     return widget.allowsSameDay ? now : now.add(const Duration(days: 1));
   }
 
-  /// **التنبيه الأحمر (طلب مالك صريح، docs/08 §85)**: «لو اختار الموعد ده النهاردة، أوتوماتيك
-  /// السيستم بيبعت له رسالة بالأحمر إن طالما اخترت النهاردة فمعناها كأنك طوارئ عشان يجيلك
-  /// الشخص بسرعة، وفي الحالة دي بتتحسب عليه رسوم الطوارئ».
+  /// إخطار بسيط لما العميل يختار النهارده (docs/08 §87، تهذيب بطلب مالك صريح).
   ///
-  /// **ده إخطار مش سؤال عن وضع الحجز.** العميل مابيختارش "طوارئ ولا عادي" — هو بيختار يوم،
-  /// والنتيجة بتتشرح له بصراحة مع فرصة يرجع يغيّر اليوم لو الرسوم مش مناسبة له.
+  /// **النسخة الأولى كانت تحذير أحمر بنسبة الرسوم — واتشالت بالكامل.** بلاغ المالك: «الكلام
+  /// زيادة شوية، وما يوضحش النسبة اللي بناخدها بالظبط… بشياكة كده وببساطة ومن غير ما تبقى
+  /// ملحوظة، عشان الناس تبتدي ما تخافش من الرسالة دي… بلاش الرسالة الحمراء اللي هي تخض دي، هو
+  /// مش تحذير».
+  ///
+  /// تلات قرارات مقصودة في النسخة دي:
+  ///  - **مفيش نسبة**. الرقم الدقيق بيتعرض في تفصيل السعر قبل التأكيد (اللي هو مكانه الصح)؛
+  ///    هنا بيخوّف بلا فايدة لأن العميل لسه مش شايف الإجمالي أصلاً.
+  ///  - **مفيش لون خطر ولا أيقونة تحذير**. ده مش تحذير، ده توضيح لنتيجة اختياره.
+  ///  - **سطر واحد**. أي كلام زيادة بيقرا كإنه اعتذار عن الرسوم.
   Future<bool> _confirmSameDayUrgency(BuildContext context) async {
-    final percentage = _emergencySurchargePercentage;
-    final scheme = Theme.of(context).colorScheme;
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
-          icon: Icon(Icons.bolt, color: scheme.error, size: 32),
-          title: Text(
-            'طلب النهارده = خدمة مستعجلة',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: scheme.error, fontWeight: FontWeight.bold),
-          ),
+          title: const Text('طلب النهارده'),
           content: Text(
-            percentage != null && percentage > 0
-                ? 'طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — '
-                    'وبيتحسب عليه رسوم استعجال $percentage% فوق سعر الخدمة.\n\n'
-                    'لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر يفضل عادي.'
-                : 'طالما اخترت النهارده، الطلب بيتعامل كخدمة مستعجلة عشان الفني يوصلك بسرعة — '
-                    'وبيتحسب عليه رسوم استعجال فوق سعر الخدمة.\n\n'
-                    'لو مش مستعجل، اختار بكرة أو أي يوم بعده والسعر يفضل عادي.',
-            textAlign: TextAlign.center,
+            'طلب النهارده بيتنفّذ كخدمة مستعجلة، وعليه رسوم إضافية.',
+            style: Theme.of(dialogContext).textTheme.bodyMedium,
           ),
           actions: [
             TextButton(
@@ -164,7 +150,6 @@ class _ScheduleSelectionScreenState extends State<ScheduleSelectionScreen> {
               child: const Text('أختار يوم تاني'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: scheme.error),
               onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('تمام، كمّل'),
             ),
@@ -405,20 +390,12 @@ class _BookingTimingNotice extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.bolt_outlined, size: 20, color: scheme.primary),
+          Icon(Icons.info_outline, size: 18, color: scheme.onSurfaceVariant),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('محتاج الخدمة بسرعة؟', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                Text(
-                  'لو الموعد عاجل، اختار خدمة طوارئ. المواعيد العادية خلال الـ$nearTermHours ساعة الجاية '
-                  'بتحتاج تأكيد الفني الأول، أما المواعيد بعد كده فمش محتاجة انتظار موافقة إضافية.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
+            child: Text(
+              'الطلبات خلال الـ$nearTermHours ساعة الجاية بتحتاج موافقة الفني الأول.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ],
