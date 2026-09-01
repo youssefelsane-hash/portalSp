@@ -908,6 +908,17 @@ export class OrdersService {
       );
     }
 
+    // ADR-0050 §6 (طلب مالك صريح: «يتحط فلتر للعميل أو مكان يرفع فيه الصور بتاعت الحاجة
+    // البايظة، والمفروض إحنا نرد عليه بالسعر») — خدمات «كشف ثم عرض سعر» بتنزل بلا سعر، بس
+    // ممكن يبقى ليها فورم أسئلة يساعد الإدارة/الفني يسعّروا.
+    //
+    // **الحقول دي مكانش عليها أي تحقق قبل كده**: `validateAndNormalizeFieldValues` بتتنادى
+    // جوّه `pricingEngineService.evaluate()` اللي مابتشتغل غير لخدمات `formula`. النتيجة إن
+    // حقل إجباري ممكن يوصل فاضي وقيمة برّه الخيارات تعدّي، والإدارة تسعّر على بيانات ناقصة.
+    if (service.pricingModel === PricingModel.INSPECTION_THEN_QUOTE) {
+      await this.pricingEngineService.validateFieldValuesOnly(service.id, dto.field_values ?? {});
+    }
+
     const remoteQuoteRequested = dto.request_remote_quote === true;
     if (remoteQuoteRequested) {
       if (service.pricingModel !== PricingModel.INSPECTION_THEN_QUOTE) {

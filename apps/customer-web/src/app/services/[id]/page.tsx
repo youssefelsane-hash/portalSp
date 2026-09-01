@@ -123,7 +123,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   }, [id]);
 
   useEffect(() => {
-    if (service?.pricing_model === 'formula') {
+    // ADR-0050 §6 — الفورم الديناميكي مابقاش حكر على `formula`: خدمة «كشف ثم عرض سعر» بتنزل
+    // بلا سعر ومحتاجة نفس «الفلتر» عشان الإدارة تقدر تسعّر (طلب مالك صريح).
+    if (service?.pricing_model === 'formula' || service?.pricing_model === 'inspection_then_quote') {
       fetchPricingFields(id).then(setPricingFields);
     }
   }, [id, service]);
@@ -173,6 +175,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     const periodBased = service.pricing_model === 'monthly';
     const parsedQuantity = Number(pricingQuantity);
     if (quantityBased && (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEstimate(null);
       return;
     }
@@ -185,7 +188,6 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       setEstimate(null);
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEstimating(true);
     estimatePrice(id, {
       bookingMode,
@@ -258,7 +260,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           repeat_frequency: requestRemoteQuote ? undefined : repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: requestRemoteQuote ? undefined : promoCode || undefined,
-          field_values: service.pricing_model === 'formula' ? fieldValues : undefined,
+          field_values: showsDynamicForm ? fieldValues : undefined,
           payment_method: !requestRemoteQuote && paymentMethod === 'card' ? 'card' : undefined,
         },
         orderIdempotencyKey,
@@ -315,6 +317,9 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const isQuantityPricing = service.pricing_model === 'per_unit';
   // ADR-0050 §4 — الشهري بقى فترة بتاريخين، مش كمية.
   const isPeriodPricing = service.pricing_model === 'monthly';
+  // ADR-0050 §6 — «فلتر» أسئلة للعميل على خدمة بلا سعر برضه، مش بس على المعادلة الديناميكية.
+  const showsDynamicForm =
+    service.pricing_model === 'formula' || service.pricing_model === 'inspection_then_quote';
   const quantityUnit = service.unit_name_ar || 'الوحدات';
   const parsedPricingQuantity = Number(pricingQuantity);
   const periodValid = !isPeriodPricing || (Boolean(periodStart) && Boolean(periodEnd) && periodEnd > periodStart);
@@ -329,7 +334,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     return months < 1 ? 1 : months;
   })();
   const pricingFieldsValid =
-    service.pricing_model !== 'formula' ||
+    !showsDynamicForm ||
     (pricingFields ?? []).every((field) => {
       const value = fieldValues[field.field_key];
       if (field.field_type === 'image_upload') {
@@ -466,7 +471,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
         </section>
       )}
 
-      {service.pricing_model === 'formula' && pricingFields && pricingFields.length > 0 && (
+      {showsDynamicForm && pricingFields && pricingFields.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-3 font-semibold">تفاصيل الشغل</h2>
           <div className="space-y-4">

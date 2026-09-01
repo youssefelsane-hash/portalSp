@@ -142,6 +142,15 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // يحجز الخدمات دي أصلاً من التطبيق (كان المسار الوحيد اختبار مباشر بـ curl). اتقفلت.
   bool get _isFormulaPricing => widget.service.pricingModel == 'formula';
 
+  /// ADR-0050 §6 — الفورم الديناميكي مابقاش حكر على خدمات `formula`.
+  ///
+  /// طلب مالك صريح: «في شغلانات معينة هتنزل من غير أصلًا ما يتحط لها أسعار… هينزل بس إن هو
+  /// يتحط فلتر للعميل أو مكان يرفع فيه الصور بتاعت الحاجة البايظة، والمفروض إحنا نرد عليه
+  /// بالسعر». يعني خدمة «كشف ثم عرض سعر» محتاجة نفس الفورم — بس **إجاباته مابتسعّرش حاجة**،
+  /// هي بيانات للإدارة/الفني عشان يقدروا يحطوا السعر.
+  bool get _showsDynamicForm =>
+      _isFormulaPricing || widget.service.pricingModel == 'inspection_then_quote';
+
   /// ADR-0050 §4 — `monthly` **مابقاش** كمية. العميل بيختار فترة بتاريخين، وعدد شهور الفوترة
   /// بيتحسب في الباك-إند من الفرق بينهم بالتقويم. النسخة القديمة كانت بتخلي العميل يكتب عدد
   /// الشهور برقم يدوي — وده كان بالظبط بلاغ المالك («مش بيجيب الـdifference بينهم»).
@@ -275,7 +284,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (widget.initialFieldValues != null)
       _fieldValues.addAll(widget.initialFieldValues!);
     _loadAddons();
-    if (_isFormulaPricing) {
+    if (_showsDynamicForm) {
       _loadPricingFields();
     } else {
       _loadStandardData();
@@ -543,7 +552,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     String? buildingCode,
   }) async {
     if (_selectedAddress == null) return;
-    if (_isFormulaPricing && !_pricingFieldsComplete) return;
+    if (_showsDynamicForm && !_pricingFieldsComplete) return;
     final pricingQuantity = num.tryParse(
       _pricingQuantityController.text.trim(),
     );
@@ -568,7 +577,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         bookingMode: widget.bookingMode,
         requestedTechnicianId: widget.requestedTechnicianId,
         scheduleSlotId: widget.scheduleSlotId,
-        fieldValues: _isFormulaPricing ? _fieldValues : null,
+        fieldValues: _showsDynamicForm ? _fieldValues : null,
         addonIds: _selectedAddonIds.toList(),
         promoCode: promoCode,
         buildingCode: buildingCode,
@@ -746,7 +755,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       setState(() => _codeError = 'اختار عنوان الأول');
       return;
     }
-    if (_isFormulaPricing && !_pricingFieldsComplete) {
+    if (_showsDynamicForm && !_pricingFieldsComplete) {
       setState(() => _codeError = 'كمّل بيانات السعر الأول');
       return;
     }
@@ -764,7 +773,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           bookingMode: widget.bookingMode,
           requestedTechnicianId: widget.requestedTechnicianId,
           scheduleSlotId: widget.scheduleSlotId,
-          fieldValues: _isFormulaPricing ? _fieldValues : null,
+          fieldValues: _showsDynamicForm ? _fieldValues : null,
           addonIds: _selectedAddonIds.toList(),
           promoCode: asBuilding ? null : code,
           buildingCode: asBuilding ? code : null,
@@ -883,7 +892,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       _failValidation('اختار عنوان الأول', _addressSectionKey);
       return;
     }
-    if (_isFormulaPricing) {
+    if (_showsDynamicForm) {
       if (_hasUnsupportedRequiredField) {
         setState(
           () => _error =
@@ -998,7 +1007,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         buildingCode: _requestRemoteQuote ? '' : _buildingCodeToSend,
         addonIds: _requestRemoteQuote ? const [] : _selectedAddonIds.toList(),
         requestedTechnicianCompanyId: widget.requestedTechnicianCompanyId,
-        fieldValues: _isFormulaPricing ? _fieldValues : null,
+        fieldValues: _showsDynamicForm ? _fieldValues : null,
         problemImageIds: _problemImages.map((item) => item.id).toList(),
         requestRemoteQuote: _requestRemoteQuote,
         standardDataId: _selectedStandardData?.id,
@@ -1109,7 +1118,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         'اختار عنوان الأول عشان نعرضلك السعر الحقيقي (السعر بيختلف حسب المنطقة)',
       );
     }
-    if (_isFormulaPricing && !_pricingFieldsComplete) {
+    if (_showsDynamicForm && !_pricingFieldsComplete) {
       return const Text('كمّل بيانات السعر تحت عشان نحسبلك السعر');
     }
     if (_previewLoading && _pricePreview == null) {
@@ -1616,7 +1625,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
               ),
             ],
-            if (_isFormulaPricing)
+            if (_showsDynamicForm)
               ..._buildPricingFieldsSection()
             else
               ..._buildStandardDataSection(),

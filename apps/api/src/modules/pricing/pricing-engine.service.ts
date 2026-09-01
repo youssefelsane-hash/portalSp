@@ -185,6 +185,25 @@ export class PricingEngineService {
     return this.computeResult(payload, context);
   }
 
+  /**
+   * تحقق من قيم الفورم **بلا أي تسعير** (ADR-0050 §6، طلب مالك صريح).
+   *
+   * خدمات «كشف ثم عرض سعر» بتنزل **بلا سعر خالص**، والعميل بيملا «فلتر» (نوع الجهاز، العطل،
+   * صور الحاجة البايظة) عشان الإدارة/الفني يقدروا يسعّروا. الحقول دي بتتخزّن في
+   * `orders.customer_inputs` وبتتعرض للأدمن — بس **قبل الملف ده مكانش فيه أي تحقق عليها**:
+   * `validateAndNormalizeFieldValues` كانت جوّه `evaluate()` اللي مابتتنادى غير لخدمات
+   * `formula`. النتيجة كانت إن حقل إجباري ممكن يوصل فاضي، وقيمة برّه الخيارات تعدّي.
+   *
+   * الدالة دي **نفس التحقق بالحرف** (نفس الدالة الخاصة)، بس بترجّع القيم بدل ما تحسب سعر.
+   */
+  async validateFieldValuesOnly(
+    serviceId: string,
+    rawFieldValues: Record<string, string | number | boolean>,
+  ): Promise<Record<string, string | number | boolean>> {
+    const fields = await this.fieldsService.listForService(serviceId);
+    return this.validateAndNormalizeFieldValues(fields.filter((field) => field.isActive), rawFieldValues);
+  }
+
   private async prepareEvaluation(
     serviceId: string,
     rawFieldValues: Record<string, string | number | boolean>,
