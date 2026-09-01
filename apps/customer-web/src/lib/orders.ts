@@ -30,6 +30,31 @@ export interface CreateOrderBody {
   accepted_policy_version_ids?: string[];
 }
 
+export interface PricingFieldImageUploadDto {
+  id: string;
+  field_id: string;
+  file_url: string;
+  mime_type: string;
+  file_size_bytes: number;
+  expires_at: string;
+}
+
+export const uploadPricingFieldImage = (
+  authedFetch: AuthedFetch,
+  serviceId: string,
+  fieldId: string,
+  file: File,
+) => {
+  const body = new FormData();
+  body.set('service_id', serviceId);
+  body.set('field_id', fieldId);
+  body.set('file', file);
+  return authedFetch<PricingFieldImageUploadDto>('/orders/pricing-field-images', {
+    method: 'POST',
+    body,
+  });
+};
+
 export interface OrderAddressResponseDto {
   street_name: string;
   landmark: string | null;

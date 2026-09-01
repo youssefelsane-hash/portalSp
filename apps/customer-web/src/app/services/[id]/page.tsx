@@ -8,7 +8,7 @@ import { ServiceDto, PricingFieldDto, PriceEstimateDto } from '@/lib/api-types';
 import { fetchCities, fetchAreas, CityDto, AreaDto } from '@/lib/geo-addresses';
 import { listAddresses, createAddress, AddressDto } from '@/lib/addresses';
 import { fetchPaymentChannels, payWithCard, PaymentChannelDto as PaymentChannel } from '@/lib/payments';
-import { createOrder, formatEgp } from '@/lib/orders';
+import { createOrder, formatEgp, uploadPricingFieldImage } from '@/lib/orders';
 import { fetchApplicablePolicies } from '@/lib/installments';
 import type { ApplicablePaymentPolicyDto } from '@baytak/shared-types';
 import { fetchTechniciansForService, TechnicianBookingListItemDto, TECHNICIAN_LEVEL_LABELS_AR } from '@/lib/technicians';
@@ -138,9 +138,14 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (!service || service.pricing_model !== 'formula') return;
-    const requiredFilled = (pricingFields ?? [])
-      .filter((f) => f.is_required)
-      .every((f) => debouncedFieldValues[f.field_key] !== undefined && debouncedFieldValues[f.field_key] !== '');
+    const requiredFilled = (pricingFields ?? []).every((field) => {
+      const value = debouncedFieldValues[field.field_key];
+      if (field.field_type === 'image_upload') {
+        const count = typeof value === 'string' ? value.split(',').filter(Boolean).length : 0;
+        return count >= (field.min_files ?? (field.is_required ? 1 : 0));
+      }
+      return !field.is_required || (value !== undefined && value !== '');
+    });
     // فلاج تحميل معياري لـfetch effect (نمط React الرسمي لمزامنة نتيجة API مع تغيّر dependencies) —
     // مش derived state بديل عن useMemo، فعلاً استدعاء شبكة async.
     if (!requiredFilled) {
@@ -295,6 +300,20 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   const quantityUnit = service.unit_name_ar || (service.pricing_model === 'monthly' ? 'الشهور' : 'الوحدات');
   const parsedPricingQuantity = Number(pricingQuantity);
   const quantityValid = !isQuantityPricing || (Number.isFinite(parsedPricingQuantity) && parsedPricingQuantity > 0);
+  const pricingFieldsValid =
+    service.pricing_model !== 'formula' ||
+    (pricingFields ?? []).every((field) => {
+      const value = fieldValues[field.field_key];
+      if (field.field_type === 'image_upload') {
+        const count = typeof value === 'string' ? value.split(',').filter(Boolean).length : 0;
+        return count >= (field.min_files ?? (field.is_required ? 1 : 0));
+      }
+      return !field.is_required || (value !== undefined && value !== '');
+    });
+  const priceReady =
+    service.pricing_model === 'inspection_then_quote' ||
+    (technicianChoiceMode === 'manual' && !!technicians?.find((t) => t.id === selectedTechnicianId)?.final_price_cents) ||
+    estimate !== null;
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
   const canSubmit =
     !!selectedAddressId &&
@@ -303,6 +322,8 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
     (!needsPreciseTime || !!preciseTime) &&
     (!needsPreciseTime || !service.requires_precise_schedule || !!durationHours) &&
     quantityValid &&
+    pricingFieldsValid &&
+    priceReady &&
     (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
     allRequiredAccepted &&
     !submitting &&
@@ -422,6 +443,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                   field={field}
                   value={fieldValues[field.field_key]}
                   onChange={(v) => setFieldValues((prev) => ({ ...prev, [field.field_key]: v }))}
+                  onUpload={(file) => uploadPricingFieldImage(authedFetch, service.id, field.id, file)}
                 />
               ))}
           </div>
@@ -720,12 +742,84 @@ function DynamicPricingField({
   field,
   value,
   onChange,
+  onUpload,
 }: {
   field: PricingFieldDto;
   value: string | number | boolean | undefined;
   onChange: (value: string | number | boolean) => void;
+  onUpload: (file: File) => Promise<{ id: string; file_url: string }>;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
   const label = `${field.label_ar}${field.is_required ? ' *' : ''}${field.unit_ar ? ` (${field.unit_ar})` : ''}`;
+
+  if (field.field_type === 'image_upload') {
+    const ids = typeof value === 'string' ? value.split(',').filter(Boolean) : [];
+    const minimum = field.min_files ?? (field.is_required ? 1 : 0);
+    const maximum = field.max_files ?? 5;
+    return (
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <p className="font-medium">{label}</p>
+        <p className={`mt-1 text-sm ${ids.length >= minimum ? 'text-muted' : 'text-danger'}`}>
+          {minimum > 0 ? `ارفع من ${minimum} إلى ${maximum} صور` : `حتى ${maximum} صور`} ({ids.length}/{maximum})
+        </p>
+        {ids.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {ids.map((id, index) => (
+              <div key={id} className="relative h-20 w-20 overflow-hidden rounded-xl bg-surface-variant">
+                {previews[id] ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- معاينة محلية قبل إنشاء الطلب
+                  <img src={previews[id]} alt={`صورة ${index + 1}`} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full items-center justify-center text-xs text-muted">صورة {index + 1}</span>
+                )}
+                <button
+                  type="button"
+                  aria-label="حذف الصورة"
+                  onClick={() => onChange(ids.filter((candidate) => candidate !== id).join(','))}
+                  className="absolute end-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-sm text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className={`mt-3 inline-flex cursor-pointer items-center rounded-lg border px-4 py-2 text-sm ${uploading || ids.length >= maximum ? 'pointer-events-none opacity-50' : 'hover:border-primary'}`}>
+          {uploading ? 'جاري رفع الصور...' : 'اختار صور'}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="sr-only"
+            disabled={uploading || ids.length >= maximum}
+            onChange={async (event) => {
+              const files = Array.from(event.target.files ?? []).slice(0, maximum - ids.length);
+              if (files.length === 0) return;
+              setUploading(true);
+              setUploadError(null);
+              const nextIds = [...ids];
+              try {
+                for (const file of files) {
+                  const uploaded = await onUpload(file);
+                  nextIds.push(uploaded.id);
+                  setPreviews((current) => ({ ...current, [uploaded.id]: URL.createObjectURL(file) }));
+                  onChange(nextIds.join(','));
+                }
+              } catch (error) {
+                setUploadError(error instanceof Error ? error.message : 'رفع الصورة فشل، حاول مرة ثانية');
+              } finally {
+                setUploading(false);
+                event.target.value = '';
+              }
+            }}
+          />
+        </label>
+        {uploadError && <p className="mt-2 text-sm text-danger">{uploadError}</p>}
+      </div>
+    );
+  }
 
   if (field.field_type === 'dropdown' && field.options) {
     return (

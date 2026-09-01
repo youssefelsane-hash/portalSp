@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/api_exception.dart';
+import '../../core/auth_repository.dart';
 import '../addresses/addresses_screen.dart';
 import '../addresses/models.dart';
 import '../catalog/catalog_repository.dart';
@@ -7,6 +9,7 @@ import '../catalog/models.dart';
 import '../catalog/pricing_field_widgets.dart';
 import '../support/support_contact_screen.dart';
 import '../technicians/technician_selection_screen.dart';
+import 'orders_repository.dart';
 
 // P0-10 (2026-08-13، مراجعة أمان/جودة شاملة) — كانت فجوة حقيقية موثّقة: لخدمات pricing_model=
 // formula، رحلة الحجز كانت "اختار فني → دخّل تفاصيل الشغل" (services_screen.dart كان بيودّي على
@@ -68,14 +71,17 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   Future<void> _loadPricingFields() async {
     setState(() => _loadingPricingFields = true);
     try {
-      final fields = await _catalogRepository.fetchPricingFields(widget.service.id);
+      final fields = await _catalogRepository.fetchPricingFields(
+        widget.service.id,
+      );
       if (mounted) {
         setState(() {
           _pricingFields = fields;
           // بَقّة حقيقية اتلقطت (مراجعة مالك مباشرة، نفس الإصلاح في create_order_screen.dart) —
           // راجع التعليق الكامل هناك.
           for (final field in fields) {
-            if (field.fieldType == 'checkbox' && !_fieldValues.containsKey(field.fieldKey)) {
+            if (field.fieldType == 'checkbox' &&
+                !_fieldValues.containsKey(field.fieldKey)) {
               _fieldValues[field.fieldKey] = false;
             }
           }
@@ -90,7 +96,9 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
 
   Future<void> _pickAddress() async {
     final address = await Navigator.of(context).push<Address>(
-      MaterialPageRoute(builder: (_) => const AddressesScreen(selectionMode: true)),
+      MaterialPageRoute(
+        builder: (_) => const AddressesScreen(selectionMode: true),
+      ),
     );
     if (address == null) {
       // العميل رجع من غير ما يختار عنوان — مفيش داعي نفضل في شاشة فاضية، نرجعه للخلف.
@@ -102,11 +110,20 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
 
   // نفس فحص CreateOrderScreen._pricingFieldsComplete بالحرف (PricingEngineService.evaluate()
   // في الباك-إند بيرفض واضح لو حقل مطلوب ناقص — هنا عشان نعرف إمتى نسمح بمتابعة القايمة).
-  bool get _pricingFieldsComplete => _pricingFields
-      .where((f) => f.isRequired && f.isSupported)
-      .every((f) => _fieldValues[f.fieldKey] != null && _fieldValues[f.fieldKey] != '');
+  bool get _pricingFieldsComplete =>
+      _pricingFields.where((f) => f.isSupported).every((f) {
+        final value = _fieldValues[f.fieldKey];
+        if (f.fieldType == 'image_upload') {
+          final count = value is String
+              ? value.split(',').where((id) => id.trim().isNotEmpty).length
+              : 0;
+          return count >= (f.minFiles ?? (f.isRequired ? 1 : 0));
+        }
+        return !f.isRequired || (value != null && value != '');
+      });
 
-  bool get _hasUnsupportedRequiredField => _pricingFields.any((f) => f.isRequired && !f.isSupported);
+  bool get _hasUnsupportedRequiredField =>
+      _pricingFields.any((f) => f.isRequired && !f.isSupported);
 
   void _onFieldValueChanged(String fieldKey, dynamic value) {
     setState(() {
@@ -137,7 +154,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canContinue = _selectedAddress != null && _pricingFieldsComplete && !_hasUnsupportedRequiredField;
+    final canContinue =
+        _selectedAddress != null &&
+        _pricingFieldsComplete &&
+        !_hasUnsupportedRequiredField;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -159,7 +179,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                       ),
                       TextButton.icon(
                         onPressed: _pickAddress,
-                        icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+                        icon: const Icon(
+                          Icons.edit_location_alt_outlined,
+                          size: 18,
+                        ),
                         label: const Text('تغيير العنوان'),
                       ),
                     ],
@@ -173,16 +196,40 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                   if (_loadingPricingFields)
                     const Center(child: CircularProgressIndicator())
                   else if (_pricingFieldsError != null)
-                    Text(_pricingFieldsError!, style: const TextStyle(color: Colors.red))
+                    Text(
+                      _pricingFieldsError!,
+                      style: const TextStyle(color: Colors.red),
+                    )
                   else
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: (List.of(_pricingFields)..sort((a, b) => a.fieldKey.compareTo(b.fieldKey)))
-                              .map((field) => buildPricingFieldWidget(context, field, _fieldValues, _onFieldValueChanged))
-                              .toList(),
+                          children:
+                              (List.of(_pricingFields)..sort(
+                                    (a, b) => a.fieldKey.compareTo(b.fieldKey),
+                                  ))
+                                  .map(
+                                    (field) => buildPricingFieldWidget(
+                                      context,
+                                      field,
+                                      _fieldValues,
+                                      _onFieldValueChanged,
+                                      onUploadImage:
+                                          (pricingField, image) async =>
+                                              OrdersRepository(
+                                                context.read<AuthRepository>(),
+                                              ).uploadPricingFieldImage(
+                                                serviceId: widget.service.id,
+                                                fieldId: pricingField.id,
+                                                fileBytes: await image
+                                                    .readAsBytes(),
+                                                filename: image.name,
+                                              ),
+                                    ),
+                                  )
+                                  .toList(),
                         ),
                       ),
                     ),
@@ -204,7 +251,9 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
                       onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const SupportContactScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const SupportContactScreen(),
+                        ),
                       ),
                       icon: const Icon(Icons.support_agent_outlined),
                       label: const Text('كلّمنا نكمّل الحجز يدويًا'),

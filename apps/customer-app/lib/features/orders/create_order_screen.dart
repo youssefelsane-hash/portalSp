@@ -419,12 +419,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   // كل حقول formula المطلوبة والمدعومة (راجع PricingField.isSupported) لازم تتملى قبل ما نقدر
   // نحسب سعر حقيقي — نفس التحقق اللي PricingEngineService.evaluate() بيعمله في الباك-إند بالظبط،
   // بس هنا عشان نقرر إمتى نستدعي evaluate-price بدل ما نبعت طلبات ناقصة تترفض كل مرة.
-  bool get _pricingFieldsComplete => _pricingFields
-      .where((f) => f.isRequired && f.isSupported)
-      .every(
-        (f) =>
-            _fieldValues[f.fieldKey] != null && _fieldValues[f.fieldKey] != '',
-      );
+  bool get _pricingFieldsComplete =>
+      _pricingFields.where((f) => f.isSupported).every((f) {
+        final value = _fieldValues[f.fieldKey];
+        if (f.fieldType == 'image_upload') {
+          final count = value is String
+              ? value.split(',').where((id) => id.trim().isNotEmpty).length
+              : 0;
+          return count >= (f.minFiles ?? (f.isRequired ? 1 : 0));
+        }
+        return !f.isRequired || (value != null && value != '');
+      });
 
   bool get _hasUnsupportedRequiredField =>
       _pricingFields.any((f) => f.isRequired && !f.isSupported);
@@ -1285,6 +1290,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
         field,
         _fieldValues,
         _onFieldValueChanged,
+        onUploadImage: (pricingField, image) async =>
+            _repository.uploadPricingFieldImage(
+              serviceId: widget.service.id,
+              fieldId: pricingField.id,
+              fileBytes: await image.readAsBytes(),
+              filename: image.name,
+            ),
       );
 
   @override

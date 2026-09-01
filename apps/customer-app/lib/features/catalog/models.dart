@@ -219,7 +219,6 @@ class CatalogService {
 // الفورم بيمنع الإرسال ويوضّح السبب بدل ما يبعت قيمة ناقصة تترفض بخطأ عام من الباك-إند.
 const Set<String> unsupportedPricingFieldTypes = {
   'location',
-  'image_upload',
   'video_upload',
   'voice_note',
 };
@@ -247,6 +246,8 @@ class PricingField {
   final List<PricingFieldOption>? options;
   final num? minValue;
   final num? maxValue;
+  final int? minFiles;
+  final int? maxFiles;
 
   PricingField({
     required this.id,
@@ -258,6 +259,8 @@ class PricingField {
     required this.options,
     required this.minValue,
     required this.maxValue,
+    required this.minFiles,
+    required this.maxFiles,
   });
 
   bool get isSupported => !unsupportedPricingFieldTypes.contains(fieldType);
@@ -274,6 +277,8 @@ class PricingField {
         .toList(),
     minValue: json['min_value'] as num?,
     maxValue: json['max_value'] as num?,
+    minFiles: json['min_files'] as int?,
+    maxFiles: json['max_files'] as int?,
   );
 }
 

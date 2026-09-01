@@ -58,7 +58,7 @@ const FIELD_TYPE_LABELS: Record<PricingFieldType, string> = {
   date: 'تاريخ',
   time: 'وقت',
   location: 'موقع (مش مدعوم في التطبيقات لسه)',
-  image_upload: 'رفع صورة (مش مدعوم في التطبيقات لسه)',
+  image_upload: 'رفع صور',
   video_upload: 'رفع فيديو (مش مدعوم في التطبيقات لسه)',
   voice_note: 'ملاحظة صوتية (مش مدعومة في التطبيقات لسه)',
 };
@@ -70,7 +70,7 @@ const FIELD_TYPES_WITH_RANGE: PricingFieldType[] = ['number', 'area', 'length', 
 // كانت فجوة موثّقة صراحة (مراجعة تقنية 2026-08-13): لو الأدمن يحطّها إجبارية، العميل بيوصل لحقل
 // محتاج تفاصيل مش قادر يدخلها خالص، فمينفعش يكمّل الحجز أبدًا. الحل الأبسط للنسخة دي: نمنع
 // الحفظ من الأساس بدل ما نستنى العميل يتفاجأ.
-const UNSUPPORTED_FIELD_TYPES: PricingFieldType[] = ['location', 'image_upload', 'video_upload', 'voice_note'];
+const UNSUPPORTED_FIELD_TYPES: PricingFieldType[] = ['location', 'video_upload', 'voice_note'];
 
 const DEFAULT_FORMULA_PAYLOAD: FinalPriceFormulaPayload = {
   price_cents: { type: 'literal', value: 0 },
@@ -221,6 +221,8 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
       unit_ar: field.unit_ar ?? undefined,
       min_value: field.min_value ?? undefined,
       max_value: field.max_value ?? undefined,
+      min_files: field.min_files ?? undefined,
+      max_files: field.max_files ?? undefined,
     });
     setFieldOptionsText((field.options ?? []).map((o) => `${o.value}=${o.label_ar}`).join('\n'));
   }
@@ -630,11 +632,46 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                     </div>
                   </>
                 )}
+                {fieldForm.field_type === 'image_upload' && (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="pf_min_files">أقل عدد صور</Label>
+                      <Input
+                        id="pf_min_files"
+                        type="number"
+                        min={fieldForm.is_required ? 1 : 0}
+                        max={10}
+                        value={fieldForm.min_files ?? (fieldForm.is_required ? 1 : 0)}
+                        onChange={(e) => setFieldForm((f) => ({ ...f, min_files: Number(e.target.value) }))}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="pf_max_files">أقصى عدد صور</Label>
+                      <Input
+                        id="pf_max_files"
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={fieldForm.max_files ?? 5}
+                        onChange={(e) => setFieldForm((f) => ({ ...f, max_files: Number(e.target.value) }))}
+                      />
+                    </div>
+                  </>
+                )}
                 <label className="col-span-2 flex items-center gap-2 text-sm sm:col-span-1">
                   <input
                     type="checkbox"
                     checked={fieldForm.is_required ?? false}
-                    onChange={(e) => setFieldForm((f) => ({ ...f, is_required: e.target.checked }))}
+                    onChange={(e) =>
+                      setFieldForm((f) => ({
+                        ...f,
+                        is_required: e.target.checked,
+                        min_files:
+                          f.field_type === 'image_upload' && e.target.checked && (f.min_files ?? 0) < 1
+                            ? 1
+                            : f.min_files,
+                      }))
+                    }
                   />
                   حقل إجباري
                 </label>
@@ -682,7 +719,14 @@ export function PricingBuilder({ serviceId }: { serviceId: string }) {
                       <TableCell>
                         {field.label_ar} <span className="text-muted-foreground" dir="ltr">({field.field_key})</span>
                       </TableCell>
-                      <TableCell>{FIELD_TYPE_LABELS[field.field_type]}</TableCell>
+                      <TableCell>
+                        {FIELD_TYPE_LABELS[field.field_type]}
+                        {field.field_type === 'image_upload' && (
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {field.min_files ?? 0}–{field.max_files ?? 5} صور
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>{field.is_required ? 'إجباري' : 'اختياري'}</TableCell>
                       <TableCell dir="ltr">{field.display_order}</TableCell>
                       <TableCell>

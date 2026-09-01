@@ -1,4 +1,5 @@
 import '../../core/api_client.dart' as api_client;
+import '../../core/api_exception.dart';
 import '../../core/auth_repository.dart';
 import '../catalog/models.dart';
 import 'models.dart';
@@ -11,11 +12,13 @@ class PaymentChannelAvailability {
   final String? unavailableReason;
 
   PaymentChannelAvailability.fromJson(Map<String, dynamic> json)
-      : method = json['method'] as String,
-        enabled = json['is_enabled'] as bool? ?? true,
-        configured = json['is_configured'] as bool? ?? (json['is_available'] as bool? ?? false),
-        available = json['is_available'] as bool? ?? false,
-        unavailableReason = json['unavailable_reason'] as String?;
+    : method = json['method'] as String,
+      enabled = json['is_enabled'] as bool? ?? true,
+      configured =
+          json['is_configured'] as bool? ??
+          (json['is_available'] as bool? ?? false),
+      available = json['is_available'] as bool? ?? false,
+      unavailableReason = json['unavailable_reason'] as String?;
 }
 
 class OptionalWarrantyPlan {
@@ -27,12 +30,12 @@ class OptionalWarrantyPlan {
   final String? termsAr;
 
   OptionalWarrantyPlan.fromJson(Map<String, dynamic> json)
-      : id = json['id'] as String,
-        nameAr = json['name_ar'] as String,
-        pricingModel = json['pricing_model'] as String,
-        priceValue = (json['price_value'] as num).toDouble(),
-        coverageMonths = json['coverage_months'] as int,
-        termsAr = json['terms_ar'] as String?;
+    : id = json['id'] as String,
+      nameAr = json['name_ar'] as String,
+      pricingModel = json['pricing_model'] as String,
+      priceValue = (json['price_value'] as num).toDouble(),
+      coverageMonths = json['coverage_months'] as int,
+      termsAr = json['terms_ar'] as String?;
 }
 
 class OrdersRepository {
@@ -42,7 +45,9 @@ class OrdersRepository {
 
   // عامة تماماً (@Public() في الباك-إند) — مفيش داعي توكن، نفس نمط الكتالوج.
   Future<List<CancellationReason>> listCancellationReasons() async {
-    final items = await api_client.apiRequestList('/cancellation-reasons?applies_to=customer');
+    final items = await api_client.apiRequestList(
+      '/cancellation-reasons?applies_to=customer',
+    );
     return items.map(CancellationReason.fromJson).toList();
   }
 
@@ -64,14 +69,43 @@ class OrdersRepository {
     return items.map(PaymentChannelAvailability.fromJson).toList();
   }
 
-  Future<List<OptionalWarrantyPlan>> fetchOptionalWarranties(String serviceId) async {
-    final items = await auth.authedRequestList('/services/$serviceId/warranty-plans');
+  Future<List<OptionalWarrantyPlan>> fetchOptionalWarranties(
+    String serviceId,
+  ) async {
+    final items = await auth.authedRequestList(
+      '/services/$serviceId/warranty-plans',
+    );
     return items.map(OptionalWarrantyPlan.fromJson).toList();
   }
 
   Future<bool> hasInstallmentPlans(String serviceId) async {
-    final items = await auth.authedRequestList('/installment-plans?service_id=$serviceId');
+    final items = await auth.authedRequestList(
+      '/installment-plans?service_id=$serviceId',
+    );
     return items.isNotEmpty;
+  }
+
+  Future<String> uploadPricingFieldImage({
+    required String serviceId,
+    required String fieldId,
+    required List<int> fileBytes,
+    required String filename,
+  }) async {
+    final data = await auth.authedUpload(
+      '/orders/pricing-field-images',
+      fileBytes: fileBytes,
+      filename: filename,
+      fields: {'service_id': serviceId, 'field_id': fieldId},
+    );
+    final id = data?['id'] as String?;
+    if (id == null || id.isEmpty) {
+      throw ApiException(
+        code: 'UPLOAD_FAILED',
+        message: 'الصورة اترفعت لكن مرجعها ماوصلش — حاول مرة ثانية',
+        statusCode: 500,
+      );
+    }
+    return id;
   }
 
   Future<Order> create({
@@ -137,34 +171,40 @@ class OrdersRepository {
       '/orders',
       extraHeaders: {'Idempotency-Key': idempotencyKey},
       body: {
-      'service_id': serviceId,
-      'address_id': addressId,
-      if (standardDataId != null) 'standard_data_id': standardDataId,
-      if (requestedUnits != null) 'requested_units': requestedUnits,
-      if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
-      if (paymentMethod != null) 'payment_method': paymentMethod,
-      if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
-      // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
-      'booking_mode': bookingMode.apiValue,
-      if (problemDescription != null && problemDescription.isNotEmpty)
-        'problem_description': problemDescription,
-      if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
-      if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
-      if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
-      // "إعادة الحجز" — تفضيل بس، الباك-إند بيكمّل بالتوزيع العادي لو الفني مش متاح
-      // (تفاصيل في apps/api/src/modules/matching/README.md).
-      if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
-      // "اعتماد" — تفضيل شركة/فريق بعينه، متاح بس مع bookingMode=team (الباك-إند بيرفض غير كده).
-      if (requestedTechnicianCompanyId != null) 'requested_technician_company_id': requestedTechnicianCompanyId,
-      if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
-      if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
-      if (scheduledAt != null) 'scheduled_at': scheduledAt,
-      if (scheduledAtRangeEnd != null) 'scheduled_at_range_end': scheduledAtRangeEnd,
-      if (durationHours != null) 'duration_hours': durationHours,
-      if (scheduledEndAt != null) 'scheduled_end_at': scheduledEndAt,
-      if (repeatFrequency != null) 'repeat_frequency': repeatFrequency,
-      if (originalOrderId != null) 'original_order_id': originalOrderId,
-    });
+        'service_id': serviceId,
+        'address_id': addressId,
+        if (standardDataId != null) 'standard_data_id': standardDataId,
+        if (requestedUnits != null) 'requested_units': requestedUnits,
+        if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
+        if (paymentMethod != null) 'payment_method': paymentMethod,
+        if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
+        // هيكل الحجز الجديد (docs/06 §1) — الوضع اللي العميل اختاره من BookingModeScreen.
+        'booking_mode': bookingMode.apiValue,
+        if (problemDescription != null && problemDescription.isNotEmpty)
+          'problem_description': problemDescription,
+        if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+        if (buildingCode != null && buildingCode.isNotEmpty)
+          'building_code': buildingCode,
+        if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
+        // "إعادة الحجز" — تفضيل بس، الباك-إند بيكمّل بالتوزيع العادي لو الفني مش متاح
+        // (تفاصيل في apps/api/src/modules/matching/README.md).
+        if (requestedTechnicianId != null)
+          'requested_technician_id': requestedTechnicianId,
+        // "اعتماد" — تفضيل شركة/فريق بعينه، متاح بس مع bookingMode=team (الباك-إند بيرفض غير كده).
+        if (requestedTechnicianCompanyId != null)
+          'requested_technician_company_id': requestedTechnicianCompanyId,
+        if (fieldValues != null && fieldValues.isNotEmpty)
+          'field_values': fieldValues,
+        if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
+        if (scheduledAt != null) 'scheduled_at': scheduledAt,
+        if (scheduledAtRangeEnd != null)
+          'scheduled_at_range_end': scheduledAtRangeEnd,
+        if (durationHours != null) 'duration_hours': durationHours,
+        if (scheduledEndAt != null) 'scheduled_end_at': scheduledEndAt,
+        if (repeatFrequency != null) 'repeat_frequency': repeatFrequency,
+        if (originalOrderId != null) 'original_order_id': originalOrderId,
+      },
+    );
     return Order.fromJson(data!);
   }
 
@@ -192,26 +232,34 @@ class OrdersRepository {
     int? durationHours,
     DateTime? scheduledAt,
   }) async {
-    final data = await auth.authedRequest('POST', '/orders/preview', body: {
-      'service_id': serviceId,
-      'address_id': addressId,
-      // **متجاهَل في السيرفر (ADR-0048)** — الوضع بقى مشتق. لسه بيتبعت عشان نسخ سيرفر أقدم
-      // ما تتكسرش، ومش بيأثر على السعر خالص.
-      'booking_mode': bookingMode.apiValue,
-      // **ضروري للسعر الصح (ADR-0048)**: اليوم هو اللي بيحدد رسوم الاستعجال. من غيره السيرفر
-      // بيقرا "مفيش تاريخ" = دلوقتي = مستعجل، فحجز الأسبوع الجاي كان هيتعرض عليه رسوم طوارئ
-      // في المعاينة وهو مش مستعجل أصلاً.
-      if (scheduledAt != null) 'scheduled_at': scheduledAt.toUtc().toIso8601String(),
-      if (fieldValues != null && fieldValues.isNotEmpty) 'field_values': fieldValues,
-      if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
-      if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
-      if (buildingCode != null && buildingCode.isNotEmpty) 'building_code': buildingCode,
-      if (requestedTechnicianId != null) 'requested_technician_id': requestedTechnicianId,
-      if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
-      if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
-      if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
-      if (durationHours != null) 'duration_hours': durationHours,
-    });
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/preview',
+      body: {
+        'service_id': serviceId,
+        'address_id': addressId,
+        // **متجاهَل في السيرفر (ADR-0048)** — الوضع بقى مشتق. لسه بيتبعت عشان نسخ سيرفر أقدم
+        // ما تتكسرش، ومش بيأثر على السعر خالص.
+        'booking_mode': bookingMode.apiValue,
+        // **ضروري للسعر الصح (ADR-0048)**: اليوم هو اللي بيحدد رسوم الاستعجال. من غيره السيرفر
+        // بيقرا "مفيش تاريخ" = دلوقتي = مستعجل، فحجز الأسبوع الجاي كان هيتعرض عليه رسوم طوارئ
+        // في المعاينة وهو مش مستعجل أصلاً.
+        if (scheduledAt != null)
+          'scheduled_at': scheduledAt.toUtc().toIso8601String(),
+        if (fieldValues != null && fieldValues.isNotEmpty)
+          'field_values': fieldValues,
+        if (addonIds != null && addonIds.isNotEmpty) 'addon_ids': addonIds,
+        if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+        if (buildingCode != null && buildingCode.isNotEmpty)
+          'building_code': buildingCode,
+        if (requestedTechnicianId != null)
+          'requested_technician_id': requestedTechnicianId,
+        if (scheduleSlotId != null) 'schedule_slot_id': scheduleSlotId,
+        if (warrantyPlanId != null) 'warranty_plan_id': warrantyPlanId,
+        if (pricingQuantity != null) 'pricing_quantity': pricingQuantity,
+        if (durationHours != null) 'duration_hours': durationHours,
+      },
+    );
     return OrderPricePreview.fromJson(data!);
   }
 
@@ -229,8 +277,12 @@ class OrdersRepository {
     return items.map(TeamMember.fromJson).toList();
   }
 
-  Future<List<RescheduleDateOption>> listRescheduleOptions(String orderId) async {
-    final items = await auth.authedRequestList('/orders/$orderId/reschedule-options');
+  Future<List<RescheduleDateOption>> listRescheduleOptions(
+    String orderId,
+  ) async {
+    final items = await auth.authedRequestList(
+      '/orders/$orderId/reschedule-options',
+    );
     return items.map(RescheduleDateOption.fromJson).toList();
   }
 
@@ -245,16 +297,30 @@ class OrdersRepository {
     return Order.fromJson(data!);
   }
 
-  Future<List<OrderRescheduleRequest>> listRescheduleRequests(String orderId) async {
-    final items = await auth.authedRequestList('/orders/$orderId/reschedule-requests');
+  Future<List<OrderRescheduleRequest>> listRescheduleRequests(
+    String orderId,
+  ) async {
+    final items = await auth.authedRequestList(
+      '/orders/$orderId/reschedule-requests',
+    );
     return items.map(OrderRescheduleRequest.fromJson).toList();
   }
 
-  Future<({OrderRescheduleRequest request, Order order})> decideRescheduleRequest(String orderId, String requestId, bool approve) async {
+  Future<({OrderRescheduleRequest request, Order order})>
+  decideRescheduleRequest(
+    String orderId,
+    String requestId,
+    bool approve,
+  ) async {
     final action = approve ? 'approve' : 'reject';
-    final data = await auth.authedRequest('POST', '/orders/$orderId/reschedule-requests/$requestId/$action');
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/reschedule-requests/$requestId/$action',
+    );
     return (
-      request: OrderRescheduleRequest.fromJson(data!['request'] as Map<String, dynamic>),
+      request: OrderRescheduleRequest.fromJson(
+        data!['request'] as Map<String, dynamic>,
+      ),
       order: Order.fromJson(data['order'] as Map<String, dynamic>),
     );
   }
@@ -262,14 +328,22 @@ class OrdersRepository {
   // تسليم كاش بتأكيد الطرفين (docs/08 §22 بند 13-14) — تأكيد العميل بس، مايسوّيش الطلب لوحده
   // (الفني/الأدمن لسه محتاجين يأكدوا الاستلام الفعلي عبر collectCash/adminConfirmCashReceived).
   Future<Order> confirmCashHandover(String orderId) async {
-    final data = await auth.authedRequest('POST', '/orders/$orderId/confirm-cash-handover');
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/confirm-cash-handover',
+    );
     return Order.fromJson(data!);
   }
 
-  Future<Order> cancel(String orderId, {String? reason, String? cancellationReasonId}) async {
+  Future<Order> cancel(
+    String orderId, {
+    String? reason,
+    String? cancellationReasonId,
+  }) async {
     final body = <String, dynamic>{
       if (reason != null && reason.isNotEmpty) 'reason': reason,
-      if (cancellationReasonId != null) 'cancellation_reason_id': cancellationReasonId,
+      if (cancellationReasonId != null)
+        'cancellation_reason_id': cancellationReasonId,
     };
     final data = await auth.authedRequest(
       'POST',
@@ -281,11 +355,16 @@ class OrdersRepository {
 
   // سياسة إلغاء الفني (docs/10) — بتتنادى على طلب awaiting_technician_reselection بس. لو
   // requestedTechnicianId اتبعت، أول جولة مطابقة هتحاول تعرض عليه حصريًا (نفس "إعادة الحجز").
-  Future<Order> requestRematch(String orderId, {String? requestedTechnicianId}) async {
+  Future<Order> requestRematch(
+    String orderId, {
+    String? requestedTechnicianId,
+  }) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/request-rematch',
-      body: requestedTechnicianId != null ? {'requested_technician_id': requestedTechnicianId} : null,
+      body: requestedTechnicianId != null
+          ? {'requested_technician_id': requestedTechnicianId}
+          : null,
     );
     return Order.fromJson(data!);
   }
@@ -300,7 +379,10 @@ class OrdersRepository {
   // paymentChoice بس ليه معنى لو الطلب مدفوع مسبقًا إلكترونيًا (order.paymentStatus == 'paid') —
   // 'electronic' (افتراضي) بيطلق تحصيل فوري بوسيلة الدفع المحفوظة، 'cash' بيسيب المبلغ يتجمّع
   // ويتحصّل كاش وقت الاكتمال (docs/08 §22 بند 8). للطلبات الكاش العادية القيمة دي متجاهلة تمامًا.
-  Future<Order> approveQuote(String orderId, {String paymentChoice = 'electronic'}) async {
+  Future<Order> approveQuote(
+    String orderId, {
+    String paymentChoice = 'electronic',
+  }) async {
     final data = await auth.authedRequest(
       'POST',
       '/orders/$orderId/quote-items/approve',
@@ -311,7 +393,10 @@ class OrdersRepository {
   }
 
   Future<Order> declineQuote(String orderId) async {
-    final data = await auth.authedRequest('POST', '/orders/$orderId/quote-items/decline');
+    final data = await auth.authedRequest(
+      'POST',
+      '/orders/$orderId/quote-items/decline',
+    );
     return Order.fromJson(data!);
   }
 }

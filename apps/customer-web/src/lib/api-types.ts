@@ -144,6 +144,8 @@ export interface PricingFieldDto {
   options: PricingFieldOptionDto[] | null;
   min_value: number | null;
   max_value: number | null;
+  min_files: number | null;
+  max_files: number | null;
 }
 
 export interface PriceEstimateDto {
