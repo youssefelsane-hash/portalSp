@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npm --prefix ../../packages/shared-types run build",
     "dev": "next dev -p 3001",
+    "prebuild": "npm --prefix ../../packages/shared-types run build",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint",
+    "pretypecheck": "npm --prefix ../../packages/shared-types run build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

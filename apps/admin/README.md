@@ -273,7 +273,7 @@ cp .env.example .env.local   # لو مش موجود
 npm run dev                  # بيشتغل على :3001 (مش :3000 عشان apps/api واخده)
 ```
 
-`@baytak/shared-types` (`packages/shared-types`) لازم يتبني (`npm run build` هناك) بعد أي تعديل فيه قبل ما `apps/admin` يشوف الأنواع الجديدة — مفيش watch mode تلقائي دلوقتي (فجوة صغيرة، محتاجة إما TypeScript project references أو سكريبت watch لما نلاحظ الاحتكاك ده بيبطّئنا فعلاً).
+`@baytak/shared-types` (`packages/shared-types`) بيتبني **تلقائيًا** دلوقتي قبل `dev`/`build`/`typecheck` عبر هوكات `predev`/`prebuild`/`pretypecheck` في `package.json` — فمستحيل تشتغل على `dist` قديمة. الفجوة دي مكانتش «صغيرة» زي ما كانت متوصّفة هنا قبل كده: هي اللي كسرت `/catalog` فعليًا في 2026-09-01 (`TypeError: Cannot read properties of undefined (reading 'fixed')`) لأن الحزمة بتصدّر **قيم وقت-تشغيل** (`PRICING_MODEL_LABELS`, `PRICING_METHODS`, `FORMULA_LIMITS`) مش أنواع بس، و`dist/` مستبعدة من Git. تفاصيل كاملة في `packages/shared-types/README.md`. لو بتعدّل في الحزمة والـdev server شغال بالفعل: `npm run build:watch` هناك في تيرمينال تاني (watch mode بقى موجود).
 
 ## روابط مستندات/شهادات الفني وصور الطلب (آخر إصلاح 2026-08-25)
 

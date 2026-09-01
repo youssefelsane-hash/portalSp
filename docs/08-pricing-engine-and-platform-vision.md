@@ -11887,3 +11887,52 @@ route presets through formula engine` (f69dc4c على main) خلّى `evaluatePr
 السقف 12 ساعة **إعداد** (`matching.daily_capacity_minutes`) مش رقم مدفون — يتغيّر من مركز
 الإعدادات بلا أي كود. والفني اللي عنده 9 ساعات مايتقفلش بالكامل: لسه بياخد شغل ≤ 3 ساعات، وده
 أدق من «مايوصلوش شغل تاني» وفي صالحه.
+
+---
+
+# §90 — بَقّة `/catalog` بعد §88-د: قيم وقت-تشغيل في حزمة مبنيّة يدويًا — ✅ خلص (2026-09-01)
+
+**بلاغ المالك**: لقطة شاشة لـ`localhost:3001/catalog` بتقع بـ
+`Runtime TypeError: Cannot read properties of undefined (reading 'fixed')`،
+الـstack: `eval → Array.map → CatalogPage`.
+
+## السبب الجذري — مش في الكود، في **شكل توزيع الحزمة**
+
+شريحة §88-د شالت ثلاث خرايط تسميات متكررة (وكانت اتفرّقت عن بعضها فعلاً) من صفحات الأدمن
+واستبدلتها باستيراد واحد من `@baytak/shared-types`. الكود صح، و`npx tsc --noEmit` عدّى نضيف.
+بس:
+
+- `packages/shared-types` بيصدّر **قيم حقيقية وقت التشغيل** مش أنواع بس — `PRICING_METHODS`,
+  `PRICING_MODEL_LABELS`, `FORMULA_LIMITS`, `BRANDING_ASSET_LABELS_AR`, `isMfaRequiredResponse`.
+- `main` بيشاور على `dist/`، و`dist/` مستبعدة من Git.
+- مفيش أي حاجة كانت بتبني الحزمة تلقائيًا. الملاحظة دي كانت مكتوبة في `CLAUDE.md` وفي
+  `apps/admin/README.md` كـ«فجوة صغيرة».
+
+فبعد `git pull`، `dist/pricing.js` المحلية كانت لسه النسخة القديمة اللي مافيهاش
+`PRICING_MODEL_LABELS` خالص → الاستيراد بيرجّع `undefined` → `undefined['fixed']` وقعت.
+Next dev مابيعملش typecheck، فمافيش أي إنذار قبل المتصفح.
+
+**الدليل القاطع على التشخيص**: في نفس اللحظة بالظبط، `FORMULA_LIMITS` (export أقدم من **نفس**
+الحزمة ونفس الملف) كان شغال عادي في `pricing-builder.tsx`. الفرق الوحيد بينهم إن واحد كان موجود
+في الـ`dist` المبنيّة والتاني لأ.
+
+## الإصلاح — بنيوي، مش «ابنيها تاني»
+
+| التغيير | الأثر |
+|---|---|
+| `predev`/`prebuild`/`pretypecheck` في `apps/admin` و`apps/customer-web` | مستحيل يشتغل dev server أو build على `dist` قديمة |
+| `prepare` في `packages/shared-types` | أي `npm install` من الجذر بيبني الحزمة |
+| `build:watch` جديد في `packages/shared-types` | الفجوة الأصلية («مفيش watch mode») اتقفلت |
+| `@baytak/shared-types` اتضافت كـdependency معلنة في `apps/customer-web` | كانت بتستهلكها فعلاً عبر symlink الجذر من غير ما تعلنها |
+
+## تأكيد حي (مش تخمين)
+
+`npm run build` كامل في `apps/admin` (بيشغّل الهوك الجديد) عدّى، والـclient chunk المولّد فيه
+النصوص العربية للتسميات فعلاً (`grep "شهري (بفترة تاريخين)" .next/static/chunks/`) — يعني القيمة
+بتوصل للمتصفح، مش بس بتترجم.
+
+## الدرس (نفس درس §88 و§89 من زاوية تالتة)
+
+المرتين اللي فاتوا كان الخلل «نفس المعرفة متكررة في أماكن كتير فبتفرّق». المرة دي المعرفة اتوحّدت
+صح — بس **حدود الاعتماد** (build boundary) فضلت يدوية وغير موثوقة. توحيد المعرفة في حزمة مشتركة
+بيبقى ناقص لو الحزمة نفسها محتاجة خطوة يدوية عشان تبقى صح.
