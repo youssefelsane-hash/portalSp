@@ -19,6 +19,7 @@ export interface CreateOrderBody {
   // دقة الوقت (ADR-0031 Slice B) — service.requires_precise_schedule=true بس، مطابق لـ
   // create_order_screen.dart's _onDurationHoursChanged بالحرف.
   duration_hours?: number;
+  pricing_quantity?: number;
   promo_code?: string;
   field_values?: Record<string, string | number | boolean>;
   payment_method?: 'card' | 'instapay';

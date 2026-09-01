@@ -77,6 +77,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // ومربوطة بنفس خطوة اليوم مباشرة (مش سؤال منفصل لاحقًا زي ما كان الحال في الموبايل قبل كده).
   const [preciseTime, setPreciseTime] = useState('');
   const [durationHours, setDurationHours] = useState('');
+  const [pricingQuantity, setPricingQuantity] = useState('');
   // "كرّر الحجز ده" (migration 0176) — undefined = مرة واحدة.
   const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'monthly' | 'yearly' | undefined>(undefined);
   // شروط الدفع بعد الخدمة (migration 0177) — إجبارية من الباك-إند: الطلب بيرفض لو مفيش قبول
@@ -156,13 +157,28 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (!service || service.pricing_model === 'formula') return;
+    const quantityBased = service.pricing_model === 'per_unit' || service.pricing_model === 'monthly';
+    const parsedQuantity = Number(pricingQuantity);
+    if (quantityBased && (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0)) {
+      setEstimate(null);
+      return;
+    }
+    const parsedDuration = Number(durationHours);
+    if (service.pricing_model === 'hourly' && (!Number.isFinite(parsedDuration) || parsedDuration <= 0)) {
+      setEstimate(null);
+      return;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEstimating(true);
-    estimatePrice(id, { bookingMode })
+    estimatePrice(id, {
+      bookingMode,
+      pricingQuantity: quantityBased ? parsedQuantity : undefined,
+      durationHours: service.pricing_model === 'hourly' ? parsedDuration : undefined,
+    })
       .then(setEstimate)
       .catch(() => setEstimate(null))
       .finally(() => setEstimating(false));
-  }, [id, service, bookingMode]);
+  }, [id, service, bookingMode, pricingQuantity, durationHours]);
 
   useEffect(() => {
     if (technicianChoiceMode !== 'manual' || !selectedAddressId) {
@@ -214,6 +230,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
           scheduled_at_range_end:
             scheduleDayMode === 'flexible' ? computeScheduledAt(scheduledDateRangeEnd) : undefined,
           duration_hours: service.requires_precise_schedule && durationHours ? Number(durationHours) : undefined,
+          pricing_quantity:
+            service.pricing_model === 'per_unit' || service.pricing_model === 'monthly'
+              ? Number(pricingQuantity)
+              : undefined,
           repeat_frequency: repeatFrequency,
           accepted_policy_version_ids: [...acceptedPolicyVersions],
           promo_code: promoCode || undefined,
@@ -271,6 +291,10 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
   // **الميعاد بقى الخطوة الأولى دايمًا (ADR-0048)** — قبل كده كان بيتخطى لو العميل اختار
   // "طوارئ"؛ الاختيار ده اتشال، والاستعجال نفسه بقى **نتيجة** اختيار النهارده.
   const needsSchedule = service.allows_scheduling;
+  const isQuantityPricing = service.pricing_model === 'per_unit' || service.pricing_model === 'monthly';
+  const quantityUnit = service.unit_name_ar || (service.pricing_model === 'monthly' ? 'الشهور' : 'الوحدات');
+  const parsedPricingQuantity = Number(pricingQuantity);
+  const quantityValid = !isQuantityPricing || (Number.isFinite(parsedPricingQuantity) && parsedPricingQuantity > 0);
   const needsPreciseTime = needsSchedule && scheduleDayMode === 'specific' && (service.requires_precise_schedule || service.requires_start_time_only);
   const canSubmit =
     !!selectedAddressId &&
@@ -278,6 +302,7 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
       (scheduleDayMode === 'specific' ? !!scheduledDate : !!scheduledDate && !!scheduledDateRangeEnd)) &&
     (!needsPreciseTime || !!preciseTime) &&
     (!needsPreciseTime || !service.requires_precise_schedule || !!durationHours) &&
+    quantityValid &&
     (technicianChoiceMode === 'auto' || !!selectedTechnicianId) &&
     allRequiredAccepted &&
     !submitting &&
@@ -400,6 +425,33 @@ export default function ServiceBookingPage({ params }: { params: Promise<{ id: s
                 />
               ))}
           </div>
+        </section>
+      )}
+
+      {isQuantityPricing && (
+        <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+          <h2 className="font-semibold">
+            {service.pricing_model === 'monthly' ? 'مدة الاشتراك بالشهور' : 'الكمية المطلوبة'}
+          </h2>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-sm text-muted">عدد {quantityUnit}</span>
+            <input
+              type="number"
+              inputMode={service.quantity_precision > 0 ? 'decimal' : 'numeric'}
+              min={service.quantity_min ?? 1}
+              max={service.quantity_max ?? undefined}
+              step={service.quantity_step ?? (service.quantity_precision > 0 ? 10 ** -service.quantity_precision : 1)}
+              value={pricingQuantity}
+              onChange={(e) => setPricingQuantity(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface px-4 py-3 outline-none focus:border-primary"
+              placeholder={service.pricing_model === 'monthly' ? 'مثال: 3 شهور' : undefined}
+            />
+          </label>
+          <p className="mt-2 text-sm text-muted">
+            {service.pricing_model === 'monthly'
+              ? 'الإجمالي = السعر الشهري × عدد الشهور، ويظهر لك قبل تأكيد الطلب.'
+              : 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب.'}
+          </p>
         </section>
       )}
 

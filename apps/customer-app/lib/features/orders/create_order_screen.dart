@@ -142,6 +142,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   bool get _isQuantityPricing =>
       widget.service.pricingModel == 'per_unit' ||
       widget.service.pricingModel == 'monthly';
+  String get _quantityUnitLabel =>
+      widget.service.unitNameAr ??
+      (widget.service.pricingModel == 'monthly' ? 'الشهور' : 'الوحدات');
   List<PricingField> _pricingFields = [];
   bool _loadingPricingFields = false;
   String? _pricingFieldsError;
@@ -808,10 +811,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     );
     if (_isQuantityPricing &&
         (pricingQuantity == null || pricingQuantity <= 0)) {
-      _failValidation(
-        'حدد عدد ${widget.service.unitNameAr ?? 'الوحدات'} المطلوبة',
-        _unitsSectionKey,
-      );
+      _failValidation('حدد عدد $_quantityUnitLabel المطلوبة', _unitsSectionKey);
       return;
     }
     // لازم نعرض السعر الحقيقي الكامل قبل ما نسمح بالتأكيد لأي نموذج تسعير — مفيش تأكيد "أعمى"
@@ -1434,7 +1434,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             if (_isQuantityPricing) ...[
               const SizedBox(height: 16),
               Text(
-                'الكمية المطلوبة',
+                widget.service.pricingModel == 'monthly'
+                    ? 'مدة الاشتراك بالشهور'
+                    : 'الكمية المطلوبة',
                 key: _unitsSectionKey,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
@@ -1446,7 +1448,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 ),
                 onChanged: _onPricingQuantityChanged,
                 decoration: InputDecoration(
-                  labelText: 'عدد ${widget.service.unitNameAr ?? 'الوحدات'}',
+                  labelText: 'عدد $_quantityUnitLabel',
                   helperText:
                       [
                         if (widget.service.quantityMin != null)
@@ -1458,8 +1460,10 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         if (widget.service.quantityPrecision == 0)
                           'أرقام صحيحة فقط',
                       ].isEmpty
-                      ? 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
-                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. السعر يتحدث تلقائيًا.',
+                      ? widget.service.pricingModel == 'monthly'
+                            ? 'السعر الشهري × عدد الشهور، ويتحدث قبل تأكيد الطلب'
+                            : 'السعر يتحدث تلقائيًا حسب الكمية قبل تأكيد الطلب'
+                      : '${[if (widget.service.quantityMin != null) 'من ${widget.service.quantityMin!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityMax != null) 'حتى ${widget.service.quantityMax!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityStep != null) 'بخطوات ${widget.service.quantityStep!.toStringAsFixed(widget.service.quantityPrecision)}', if (widget.service.quantityPrecision == 0) 'أرقام صحيحة فقط'].join('، ')}. ${widget.service.pricingModel == 'monthly' ? 'السعر الشهري × عدد الشهور' : 'السعر يتحدث تلقائيًا'}.',
                   border: const OutlineInputBorder(),
                 ),
               ),

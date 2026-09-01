@@ -84,6 +84,7 @@ export class CatalogController {
       query.field_values,
       query.pricing_tier,
       query.duration_hours,
+      query.pricing_quantity,
     );
   }
 
