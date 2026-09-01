@@ -31,6 +31,8 @@ import {
   technicianServiceQualificationCondition,
 } from './technician-eligibility.sql';
 import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } from '../orders/order-state-machine';
+import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
+import { cairoDayString, cairoMidnight } from '../pricing/pricing-temporal';
 
 export interface TechnicianBookingListItem {
   technicianId: string;
@@ -383,7 +385,7 @@ export class TechniciansService {
 
     const bayesianMinSamples = await this.settingsService.getNumber('ranking.bayesian_min_samples', 5);
     const bayesianPriorMean = await this.settingsService.getNumber('ranking.bayesian_prior_mean', 4.0);
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
 
     interface TechnicianRow {
       technician_id: string;
@@ -482,7 +484,7 @@ export class TechniciansService {
           engagedStatusesParam: '$9',
           isEmergencyParam: '$10',
           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
-          fullDayThresholdMinutesParam: '$11',
+          dailyCapacityMinutesParam: '$11',
         })}
       ORDER BY recommendation_score DESC NULLS LAST, distance_km ASC NULLS LAST, COALESCE(ts.completed_count, 0) DESC
       LIMIT 50
@@ -498,7 +500,7 @@ export class TechniciansService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         false,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
         isTeamBooking,
       ],
     );
@@ -544,7 +546,7 @@ export class TechniciansService {
             scheduledAt,
             individualItems.map((i) => i.technicianId),
             isTeamBooking,
-            fullDayJobMinutes,
+            dailyCapacityMinutes,
           )
         : [];
 
@@ -615,7 +617,7 @@ export class TechniciansService {
           engagedStatusesParam: '$6',
           isEmergencyParam: '$7',
           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
-          fullDayThresholdMinutesParam: '$8',
+          dailyCapacityMinutesParam: '$8',
         })}
       GROUP BY tc.id, tc.name
       LIMIT 20
@@ -628,7 +630,7 @@ export class TechniciansService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         false,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
       ],
     );
 
@@ -695,7 +697,7 @@ export class TechniciansService {
     scheduledAt: Date,
     excludeTechnicianIds: string[],
     isTeamBooking: boolean,
-    fullDayJobMinutes: number,
+    dailyCapacityMinutes: number,
   ): Promise<TechnicianBookingListItem[]> {
     interface ConflictedRow {
       technician_id: string;
@@ -749,7 +751,7 @@ export class TechniciansService {
           engagedStatusesParam: '$6',
           isEmergencyParam: '$7',
           serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
-          fullDayThresholdMinutesParam: '$8',
+          dailyCapacityMinutesParam: '$8',
         })}
       ORDER BY average_rating DESC, distance_km ASC NULLS LAST
       LIMIT 10
@@ -762,33 +764,39 @@ export class TechniciansService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         false,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
         excludeTechnicianIds,
         isTeamBooking,
       ],
     );
 
-    const dateOnly = scheduledAt.toISOString().slice(0, 10);
+    // نفس بَقّة يوم UTC اللي في `findNextAvailableDateForTechnician` (ADR-0059 §6): اليوم ده
+    // بيتبعت لـ`describeTechnicianCapacity` كـ«اليوم المطلوب»، فقراءته بتوقيت UTC كانت بتسأل
+    // عن **يوم تاني** خالص في أول/آخر ساعات اليوم المصري.
+    const dateOnly = cairoDayString(scheduledAt);
     return Promise.all(
       rows.map(async (row): Promise<TechnicianBookingListItem> => {
         const capacity = await describeTechnicianCapacity(this.technicianProfiles.manager, {
           technicianId: row.technician_id,
           date: dateOnly,
-          fullDayThresholdMinutes: fullDayJobMinutes,
+          dailyCapacityMinutes: dailyCapacityMinutes,
         });
         // بَقّة حقيقية اتلقطت (بلاغ مالك، docs/08 §108 بند I2): الاقتراح كان أحيانًا بيرجّع
         // **نفس اليوم** اللي العميل بيحاول يحجزه أصلًا — عديم الفايدة تمامًا («جرّب يوم كذا»
         // وهو نفسه اليوم المرفوض). السبب: `occupiedTo` (لو موجود) ممكن يرجع قبل `scheduledAt`
         // نفسه — أرضية `Math.max` هنا تضمن إن البحث عن اليوم البديل يبدأ من **الأحدث بين
         // الاتنين** دايمًا، بغض النظر عن أي انحراف توقيت.
-        const occupiedToDate = capacity.occupiedTo ? new Date(`${capacity.occupiedTo}T00:00:00Z`) : null;
-        const searchFrom = occupiedToDate && occupiedToDate.getTime() > scheduledAt.getTime() ? occupiedToDate : scheduledAt;
+        // البحث بيبدأ من **اليوم المصري اللي بعد** آخر يوم مشغول (أو بعد اليوم المطلوب لو
+        // مفيش مدى مشغول معروف) — بالأيام التقويمية المصرية، مش بجمع 24 ساعة على طابع زمني.
+        const occupiedToDay = capacity.occupiedTo;
+        const requestedDay = cairoDayString(scheduledAt);
+        const lastBusyDay = occupiedToDay && occupiedToDay > requestedDay ? occupiedToDay : requestedDay;
         const nextAvailable = await this.findNextAvailableDateForTechnician(
           row.technician_id,
           serviceId,
           zoneId,
           addressId,
-          new Date(searchFrom.getTime() + 24 * 60 * 60 * 1000),
+          new Date(cairoMidnight(lastBusyDay).getTime() + 24 * 60 * 60 * 1000),
         );
         // شبكة أمان أخيرة — لو رغم كل ده الاقتراح طلع بنفس تاريخ اليوم المطلوب (نفس التنسيق
         // المستخدم فوق في `dateOnly`)، بلاش نعرضه: مفيش اقتراح أوضح من عدم عرض اقتراح غلط.
@@ -847,7 +855,7 @@ export class TechniciansService {
     technicianId?: string,
     excludeOrderId?: string,
   ): Promise<boolean> {
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', 360);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [{ exists }] = await this.technicianProfiles.manager.query<{ exists: boolean }[]>(
       `
       SELECT EXISTS (
@@ -876,7 +884,7 @@ export class TechniciansService {
             engagedStatusesParam: '$6',
             isEmergencyParam: '$7',
             serviceDurationExpr: '(SELECT COALESCE(estimated_duration_minutes, 60) FROM services WHERE id = $1)',
-            fullDayThresholdMinutesParam: '$8',
+            dailyCapacityMinutesParam: '$8',
           })}
       ) AS exists
       `,
@@ -888,7 +896,7 @@ export class TechniciansService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         false,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
         technicianId ?? null,
         excludeOrderId ?? null,
       ],
@@ -908,13 +916,29 @@ export class TechniciansService {
     zoneId: string,
     addressId: string,
     fromDate: Date,
-    maxDays = 14,
+    maxDays = 30,
   ): Promise<string | null> {
+    // **بَقّة حقيقية اتصلحت (ADR-0059 §6، بلاغ مالك: «الاقتراح ده مش شغال بكفاءة، هو أصلًا
+    // بيجيبنا في اليوم بتاع النهاردة»)**: النسخة القديمة كانت بتبني اليوم المرشّح بجمع 24 ساعة
+    // على `fromDate` وتقراه بـ`toISOString().slice(0, 10)` — **يوم UTC**. منتصف الليل بتوقيت
+    // القاهرة = 21:00 أو 22:00 UTC اليوم اللي قبله، فالنتيجة كانت بترجّع **نفس اليوم المصري**
+    // اللي العميل رافضه أصلاً، والحارس اللي بعدها (`nextAvailable === dateOnly`) يبلعها فيختفي
+    // الزرار. دلوقتي التقويم كله بتوقيت القاهرة عبر نفس دوال ADR-0050 اللي التسعير بيستخدمها.
+    const startDay = cairoDayString(fromDate);
     for (let offset = 0; offset <= maxDays; offset += 1) {
-      const candidateDay = new Date(fromDate.getTime() + offset * 24 * 60 * 60 * 1000);
+      const candidateDay = new Date(cairoMidnight(startDay).getTime() + offset * 24 * 60 * 60 * 1000);
+      const candidateDayString = cairoDayString(candidateDay);
       // eslint-disable-next-line no-await-in-loop -- تسلسلي عمدًا: أول يوم متاح يوقف الحلقة فورًا.
-      const eligible = await this.hasEligibleTechnicianForDate(serviceId, zoneId, addressId, candidateDay, technicianId);
-      if (eligible) return candidateDay.toISOString().slice(0, 10);
+      const eligible = await this.hasEligibleTechnicianForDate(
+        serviceId,
+        zoneId,
+        addressId,
+        // منتصف الليل المصري لليوم المرشّح — مش «نفس ساعة الحجز بعد N يوم»، اللي كان ممكن
+        // يزحلق اليوم عند تغيير التوقيت الصيفي.
+        cairoMidnight(candidateDayString),
+        technicianId,
+      );
+      if (eligible) return candidateDayString;
     }
     return null;
   }

@@ -22,6 +22,7 @@ import { resolveEffectiveMemberType } from './crew-member-type';
 import { OrderTeamMemberRow } from './dto/team-member-response.dto';
 import { BookingMode, Order, OrderType } from './entities/order.entity';
 import { OrderTeamMember } from './entities/order-team-member.entity';
+import { resolveDailyCapacityMinutes } from '../technicians/technician-day-capacity.sql';
 
 export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
 
@@ -29,7 +30,6 @@ export const MAX_TEAM_MEMBERS_PER_ORDER = 15;
 export const OPTIONAL_ASSISTANT_ENABLED_SETTING = 'crew.optional_assistant_enabled';
 export const OPTIONAL_ASSISTANT_MAX_SETTING = 'crew.optional_assistant_max_per_order';
 export const OPTIONAL_ASSISTANT_MAX_FALLBACK = 1;
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 export type CrewRole = 'technician' | 'assistant';
 
@@ -472,7 +472,7 @@ export class OrderTeamService {
       [orderId, leaderProfileId, leaderRank, leaderProfile.companyId],
     );
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
     const withCapacity = await Promise.all(
       rows.map(async (row): Promise<RecruitCandidateRow | null> => {
@@ -485,7 +485,7 @@ export class OrderTeamService {
             scheduledAt: order.scheduledAt,
             excludeOrderId: orderId,
             serviceDurationMinutes,
-            fullDayThresholdMinutes: fullDayJobMinutes,
+            dailyCapacityMinutes: dailyCapacityMinutes,
           }),
         };
       }),
@@ -565,7 +565,7 @@ export class OrderTeamService {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده مضاف بالفعل لفريق الطلب ده', HttpStatus.CONFLICT);
     }
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const serviceDurationMinutes = await this.getServiceDurationMinutes(order);
     await this.assignmentGuard.assertScheduleAvailable(this.teamMembers.manager, technicianId, order);
     const tier = await classifyTechnicianCapacity(this.teamMembers.manager, {
@@ -573,7 +573,7 @@ export class OrderTeamService {
       scheduledAt: order.scheduledAt,
       excludeOrderId: orderId,
       serviceDurationMinutes,
-      fullDayThresholdMinutes: fullDayJobMinutes,
+      dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (tier === 'BLOCKED') {
       throw new ApiException(ErrorCode.VAL_001, 'الفني ده حظر اليوم ده بنفسه — مينفعش يتجنّد', HttpStatus.CONFLICT);

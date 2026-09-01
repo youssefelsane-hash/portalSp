@@ -6,9 +6,9 @@ import { ACTIVE_TECHNICIAN_ORDER_STATUSES, ENGAGED_TECHNICIAN_ORDER_STATUSES } f
 import { SettingsService } from '../settings/settings.service';
 import { TechnicianProfile, TechnicianVerificationStatus } from './entities/technician-profile.entity';
 import { classifyTechnicianCapacity, technicianAvailabilityCondition, technicianServiceQualificationCondition } from './technician-eligibility.sql';
+import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 
 // نفس fallback matching.service.ts وtechnicians.service.ts — راجع ADR-0018 §2/§9.
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 
 /** Shared assignment eligibility used by technician acceptance and admin reassignment. */
 @Injectable()
@@ -45,7 +45,7 @@ export class TechnicianAssignmentGuardService {
     // technicians.service.ts (تصفح العميل، طوارئ = false دايمًا) لازم نحسب isEmergency من نوع
     // الطلب الفعلي نفسه.
     const isEmergency = order.bookingMode === BookingMode.EMERGENCY;
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [{ available }] = await manager.query<{ available: boolean }[]>(
       `SELECT EXISTS (
          SELECT 1 FROM technician_profiles tp
@@ -62,8 +62,11 @@ export class TechnicianAssignmentGuardService {
            isEmergencyParam: '$7',
            serviceDurationExpr:
              'COALESCE((SELECT COALESCE(o2.duration_minutes, o2.duration_hours * 60) FROM orders o2 WHERE o2.id = $3::uuid), COALESCE((SELECT estimated_duration_minutes FROM services WHERE id = $2), 60), 60)',
+           // ADR-0059 — الطلب المرشّح هنا معروف بـ$3، فمداه بيتقرا منه مباشرة.
+           candidateSpanDaysExpr:
+             'GREATEST(COALESCE(CEIL((SELECT o3.estimated_duration_days FROM orders o3 WHERE o3.id = $3::uuid))::int, 1), 1)',
            preciseDurationHoursExpr: '(SELECT COALESCE(o2.duration_minutes / 60.0, o2.duration_hours) FROM orders o2 WHERE o2.id = $3::uuid)',
-           fullDayThresholdMinutesParam: '$8',
+           dailyCapacityMinutesParam: '$8',
          })}
        ) AS available`,
       [
@@ -74,7 +77,7 @@ export class TechnicianAssignmentGuardService {
         ACTIVE_TECHNICIAN_ORDER_STATUSES,
         ENGAGED_TECHNICIAN_ORDER_STATUSES,
         isEmergency,
-        fullDayJobMinutes,
+        dailyCapacityMinutes,
       ],
     );
     return available;
@@ -97,7 +100,7 @@ export class TechnicianAssignmentGuardService {
   async assertEligibleForWorkOpportunity(manager: EntityManager, technician: TechnicianProfile, order: Order): Promise<void> {
     await this.assertCoreEligibility(manager, technician, order);
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
     const [svc] = await manager.query<{ estimated_duration_minutes: number | null }[]>(`SELECT estimated_duration_minutes FROM services WHERE id = $1`, [
       order.serviceId,
     ]);
@@ -112,7 +115,7 @@ export class TechnicianAssignmentGuardService {
           : order.durationHours != null && order.durationHours > 0
             ? order.durationHours * 60
             : (svc?.estimated_duration_minutes ?? 60),
-      fullDayThresholdMinutes: fullDayJobMinutes,
+      dailyCapacityMinutes: dailyCapacityMinutes,
     });
     if (tier === 'BLOCKED') {
       throw new ApiException(ErrorCode.ORDR_003, 'الفني حظر اليوم ده بنفسه — مينفعش يقبل الفرصة دي', HttpStatus.CONFLICT);

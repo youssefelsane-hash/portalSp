@@ -1207,9 +1207,19 @@ function IndividualCard({
           </span>
         </div>
         {conflicted && (
-          <p className="mt-1 text-xs text-danger">
-            مش متاح للفترة دي{t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
-          </p>
+          <>
+            <p className="mt-1 text-xs text-danger">
+              مش متاح للفترة دي{t.unavailable_reason_ar ? ` — ${t.unavailable_reason_ar}` : ''}
+            </p>
+            {/* ADR-0059 §6 — الاقتراح بقى تاريخ حقيقي (أقرب يوم فاضي فعلاً بتقويم القاهرة).
+                الكارت هنا مكانش بيعرضه خالص رغم إن الـAPI بترجّعه من زمان — تطبيق العميل بس
+                هو اللي كان بيستخدمه. */}
+            <p className="mt-0.5 text-xs text-muted">
+              {t.available_again_at
+                ? `الفني متاح من ${new Date(t.available_again_at).toLocaleDateString('ar-EG', { day: 'numeric', month: 'numeric' })}`
+                : 'الفني ده مش متاح خلال الشهر الجاي'}
+            </p>
+          </>
         )}
         <p className="mt-1 text-sm text-muted">
           {t.total_ratings_count > 0 ? `⭐ ${t.average_rating.toFixed(1)} (${t.total_ratings_count})` : 'فني جديد'}

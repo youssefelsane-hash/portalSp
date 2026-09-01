@@ -9,8 +9,8 @@ import {
 } from './technician-eligibility.sql';
 import { TechnicianActivityService } from './technician-activity.service';
 import { TechnicianLevel, TechnicianVerificationStatus } from './entities/technician-profile.entity';
+import { resolveDailyCapacityMinutes } from './technician-day-capacity.sql';
 
-const FULL_DAY_JOB_MINUTES_FALLBACK = 360;
 const GENERIC_SERVICE_DURATION_MINUTES = 60;
 
 export interface CategoryOpsFilters {
@@ -196,7 +196,7 @@ export class AdminTechnicianCategoryOpsService {
     const crewLeaderById = new Map(crewLeaderRows.map((r) => [r.technician_id, Number(r.crew_leader_shortage_count)]));
     const crewOfferById = new Map(crewOfferRows.map((r) => [r.technician_id, Number(r.crew_recruit_open_offers_count)]));
 
-    const fullDayJobMinutes = await this.settingsService.getNumber('matching.full_day_job_minutes', FULL_DAY_JOB_MINUTES_FALLBACK);
+    const dailyCapacityMinutes = await resolveDailyCapacityMinutes(this.settingsService);
 
     // تصنيف القدرة "النهاردة" لكل فني في الصفحة — محدود بحجم الصفحة (bounded)، مش سكان لمجمّع كامل.
     const capacityTiers = await Promise.all(
@@ -206,7 +206,7 @@ export class AdminTechnicianCategoryOpsService {
           scheduledAt: null,
           excludeOrderId: null,
           serviceDurationMinutes: GENERIC_SERVICE_DURATION_MINUTES,
-          fullDayThresholdMinutes: fullDayJobMinutes,
+          dailyCapacityMinutes: dailyCapacityMinutes,
         }),
       ),
     );

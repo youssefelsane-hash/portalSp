@@ -160,7 +160,7 @@ class _TechnicianMarketplaceScreenState
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'بتشوف الفنيين المتاحين في ${_formatDateTime(_effectiveRequestedAt!)}',
+                          'بتشوف الفنيين المتاحين يوم ${_formatDay(_effectiveRequestedAt!)}',
                         ),
                       ),
                       TextButton(
@@ -402,21 +402,24 @@ class _TechnicianMarketplaceScreenState
                       onPressed: () => _select(t.id, false),
                       child: const Text('اختار'),
                     )
+                  // ADR-0059 §6 — الاقتراح بقى تاريخ حقيقي (أقرب يوم الفني فاضي فيه فعلاً)،
+                  // فالزرار بيقول اليوم صراحةً بدل «جرّب» مبهمة. النص اللي المالك طلبه بالحرف:
+                  // «اكتب الفني متاح من يوم كذا».
                   else if (t.availableAgainAt != null)
                     FilledButton.tonal(
                       onPressed: () => _tryNextAvailable(t.availableAgainAt!),
-                      child: Text(
-                        'جرّب ${_formatDateTime(t.availableAgainAt!)}',
-                      ),
+                      child: Text('احجز ${_formatDay(t.availableAgainAt!)}'),
                     ),
                 ],
               ),
-              if (conflicted && t.availableAgainAt == null)
-                const Padding(
-                  padding: EdgeInsets.only(top: 4),
+              if (conflicted)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    'معاد التوافر الجاي مش معروف دلوقتي',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                    t.availableAgainAt != null
+                        ? 'الفني متاح من ${_formatDay(t.availableAgainAt!)}'
+                        : 'الفني ده مش متاح خلال الشهر الجاي',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
             ],
@@ -426,9 +429,11 @@ class _TechnicianMarketplaceScreenState
     );
   }
 
-  String _formatDateTime(DateTime dt) {
+  /// اليوم بس بلا ساعة — التوافر بقى بيتحسب باليوم التقويمي (ADR-0059)، وعرض ساعة جنبه كان
+  /// بيوحي بدقة مش موجودة أصلاً.
+  String _formatDay(DateTime dt) {
     final local = dt.toLocal();
-    return '${local.day}/${local.month} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    return '${local.day}/${local.month}';
   }
 
   String _countLabel(List<TechnicianBookingListItem> items) {
